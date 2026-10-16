@@ -10,7 +10,7 @@ CheckBox {
     font.pixelSize: 15
     spacing: 10
     // No celular, o texto comprido quebra a linha em vez de passar da tela.
-    Layout.fillWidth: Tema.estreito
+    Layout.fillWidth: Tema.fino
 
     indicator: Rectangle {
         implicitWidth: 22

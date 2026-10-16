@@ -38,7 +38,7 @@ ColumnLayout {
     // Título e botões lado a lado; na tela estreita, os botões vão para
     // baixo do título e quebram linha.
     GridLayout {
-        columns: Tema.estreito ? 1 : 2
+        columns: Tema.fino ? 1 : 2
         columnSpacing: 16
         rowSpacing: 10
         Layout.fillWidth: true
@@ -47,7 +47,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Titulo {
                 text: cabecalho.titulo
-                font.pixelSize: Tema.estreito ? 34 : 44
+                font.pixelSize: Tema.baixo ? 30 : Tema.estreito ? 34 : 44
                 Layout.fillWidth: true
             }
             Nota {
@@ -61,9 +61,9 @@ ColumnLayout {
             id: linhaAcoes
             spacing: 10
             visible: children.length > 0
-            Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignBottom | Qt.AlignRight
-            Layout.fillWidth: Tema.estreito
-            Layout.preferredWidth: Tema.estreito ? -1 : implicitLargura
+            Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignBottom | Qt.AlignRight
+            Layout.fillWidth: Tema.fino
+            Layout.preferredWidth: Tema.fino ? -1 : implicitLargura
             // Flow não calcula a própria largura: soma a dos botões.
             readonly property real implicitLargura: {
                 let t = 0

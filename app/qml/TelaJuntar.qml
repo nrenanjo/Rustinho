@@ -58,26 +58,27 @@ FocusScope {
 
             ColumnLayout {
                 spacing: 0
+                Layout.fillWidth: true
                 Titulo {
                     text: "Juntar este caixa"
-                    font.pixelSize: 56
+                    font.pixelSize: Tema.estreito ? 42 : 56
                     Layout.fillWidth: true
                 }
                 Nota {
-                    text: "Este computador vai receber tudo do outro caixa: usuários, peças, clientes e estoque. Os dois precisam estar no mesmo Wi-Fi, com o Rustinho aberto."
+                    text: "Este " + Tema.aparelho + " vai receber tudo do outro caixa: usuários, peças, clientes e estoque. Os dois precisam estar no mesmo Wi-Fi, com o Rustinho aberto."
                     font.pixelSize: 17
                     Layout.fillWidth: true
                 }
             }
 
             Faixa {
-                titulo: "Este computador"
+                titulo: "Este " + Tema.aparelho
                 color: Tema.pergaminho
                 Layout.fillWidth: true
                 Campo {
                     id: caixa
-                    rotulo: "Nome deste computador"
-                    texto: "Caixa 2"
+                    rotulo: "Nome deste " + Tema.aparelho
+                    texto: Tema.celular ? "Celular 1" : "Caixa 2"
                     maximo: 30
                     Layout.fillWidth: true
                     onConfirmado: senha.focar()
@@ -108,7 +109,7 @@ FocusScope {
                 Layout.fillWidth: true
                 Nota {
                     text: !tela.sync || tela.sync.pares.length === 0
-                          ? "Ainda não encontrei nenhum. Confira se o outro caixa está com a sincronização ligada e a mesma senha. Endereço deste computador: " + (tela.sync ? tela.sync.meuEndereco : "")
+                          ? "Ainda não encontrei nenhum. Confira se o outro caixa está com a sincronização ligada e a mesma senha. Endereço deste " + Tema.aparelho + ": " + (tela.sync ? tela.sync.meuEndereco : "")
                           : "Recebendo os dados…"
                     Layout.fillWidth: true
                 }

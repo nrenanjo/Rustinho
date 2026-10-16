@@ -43,7 +43,11 @@ QtObject {
     // só, que rola como um feed.
     property real largura: 1280
     property real altura: 760
-    readonly property bool estreito: largura < 760
+    // Celular em pé (estreito) ou deitado (baixo): telas em uma coluna, com pílulas.
+    readonly property bool baixo: altura < 560
+    readonly property bool estreito: largura < 760 || (baixo && largura < 1100)
+    // Só a largura: em pé é fino; deitado não (linhas de campos cabem lado a lado).
+    readonly property bool fino: largura < 760
     readonly property bool celular: Qt.platform.os === "android" || Qt.platform.os === "ios"
 
     // ---- Medidas ----
@@ -53,6 +57,8 @@ QtObject {
     readonly property int espaco: 16
     // Altura mínima de um botão ou campo para o dedo.
     readonly property int toque: celular ? 44 : 40
+    // "computador" no PC, "aparelho" no celular (nos textos).
+    readonly property string aparelho: celular ? "aparelho" : "computador"
 
     // ---- Fontes (dentro do programa, não precisam estar instaladas) ----
     readonly property string caminho: "qrc:/qt/qml/rustinho/fontes/"

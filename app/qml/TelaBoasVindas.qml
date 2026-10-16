@@ -47,19 +47,20 @@ FocusScope {
 
             ColumnLayout {
                 spacing: 0
+                Layout.fillWidth: true
                 Titulo {
                     text: "Rustinho"
-                    font.pixelSize: 76
+                    font.pixelSize: Tema.estreito ? 60 : 76
                     font.weight: Font.Bold
                     font.italic: true
                 }
                 Nota {
-                    text: "Bem-vindo. Vamos preparar este computador para a loja."
+                    text: "Bem-vindo. Vamos preparar este " + Tema.aparelho + " para a loja."
                     font.pixelSize: 18
                     Layout.fillWidth: true
                 }
                 Botao {
-                    text: "Já uso o Rustinho em outro caixa da loja: juntar este computador"
+                    text: Tema.estreito ? "Já uso o Rustinho na loja: juntar" : "Já uso o Rustinho em outro caixa da loja: juntar este " + Tema.aparelho
                     tipo: "discreto"
                     icone: "direita"
                     Layout.leftMargin: -10
@@ -83,8 +84,8 @@ FocusScope {
                 }
                 Campo {
                     id: caixa
-                    rotulo: "Nome deste computador"
-                    texto: "Caixa 1"
+                    rotulo: "Nome deste " + Tema.aparelho
+                    texto: Tema.celular ? "Celular 1" : "Caixa 1"
                     maximo: 30
                     Layout.fillWidth: true
                     onConfirmado: nome.focar()

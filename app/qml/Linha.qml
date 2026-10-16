@@ -10,7 +10,7 @@ GridLayout {
     property real spacing: 12
     // Quantas colunas na tela estreita (1 = um embaixo do outro).
     property int colunasEstreito: 1
-    readonly property bool dobrar: Tema.estreito
+    readonly property bool dobrar: Tema.fino
 
     columns: dobrar ? colunasEstreito : 999
     columnSpacing: spacing

@@ -51,8 +51,8 @@ FocusScope {
         janela.abrir("TelaPecas", { buscaInicial: texto })
     }
 
-    readonly property int colunas: Tema.estreito ? 1 : width >= 1100 ? 4 : 3
-    readonly property int colunasMaisUsados: Tema.estreito ? 2 : colunas
+    readonly property int colunas: Tema.fino ? 1 : Tema.estreito ? 2 : width >= 1100 ? 4 : 3
+    readonly property int colunasMaisUsados: Tema.fino ? 2 : colunas
 
     Flickable {
         anchors.fill: parent
@@ -68,7 +68,7 @@ FocusScope {
             spacing: 14
 
             GridLayout {
-                columns: Tema.estreito ? 1 : 2
+                columns: Tema.fino ? 1 : 2
                 columnSpacing: 16
                 rowSpacing: 6
                 Layout.fillWidth: true
@@ -77,8 +77,8 @@ FocusScope {
                     Layout.fillWidth: true
                     Titulo {
                         text: tela.saudacao() + ", " + (tela.janela && tela.janela.estado.usuario ? tela.janela.estado.usuario.nome : "")
-                        font.pixelSize: Tema.estreito ? 36 : 50
-                        wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                        font.pixelSize: Tema.fino ? 36 : Tema.baixo ? 38 : 50
+                        wrapMode: Tema.fino ? Text.WordWrap : Text.NoWrap
                         Layout.fillWidth: true
                     }
                     Nota {
@@ -89,17 +89,17 @@ FocusScope {
                 }
                 ColumnLayout {
                     spacing: 2
-                    Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignTop
+                    Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignTop
                     Rotulo {
                         text: tela.janela ? [tela.janela.estado.loja, tela.janela.estado.caixa].filter(x => !!x).join(" · ") : ""
-                        Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignRight
+                        Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignRight
                     }
                     Botao {
                         tipo: "discreto"
                         icone: "sair"
                         text: "Trocar usuário"
-                        Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignRight
-                        Layout.leftMargin: Tema.estreito ? -10 : 0
+                        Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignRight
+                        Layout.leftMargin: Tema.fino ? -10 : 0
                         onClicked: tela.janela.trocarUsuario()
                     }
                 }
