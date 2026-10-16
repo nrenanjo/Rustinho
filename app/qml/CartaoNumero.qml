@@ -14,18 +14,20 @@ Rectangle {
     property color corNota: Tema.apagado
     // A nota vai embaixo do número (para notas compridas).
     property bool notaEmbaixo: false
+    // No celular (cartões estreitos), a nota sempre vai embaixo.
+    readonly property bool _embaixo: notaEmbaixo || Tema.estreito
     // Valor escondido enquanto o olho estiver fechado.
     property bool sensivel: false
 
     radius: Tema.raio
     color: cor
-    implicitHeight: 72
+    implicitHeight: Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72
     Layout.fillWidth: true
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 14
+        anchors.leftMargin: Tema.estreito ? 14 : 18
+        anchors.rightMargin: Tema.estreito ? 10 : 14
         anchors.topMargin: 10
         anchors.bottomMargin: 10
         spacing: 0
@@ -35,7 +37,7 @@ Rectangle {
             Rotulo { text: cartao.rotulo }
             Item { Layout.fillWidth: true }
             Text {
-                visible: !cartao.notaEmbaixo
+                visible: !cartao._embaixo
                 text: cartao.nota
                 color: cartao.corNota
                 font.family: Tema.serifa
@@ -50,12 +52,13 @@ Rectangle {
             color: cartao.corValor
             font.family: Tema.titulo
             font.weight: Font.Bold
-            font.pixelSize: 28
-            elide: Text.ElideRight
+            font.pixelSize: Tema.estreito ? 24 : 28
+            fontSizeMode: Text.HorizontalFit
+            minimumPixelSize: 16
             Layout.fillWidth: true
         }
         Text {
-            visible: cartao.notaEmbaixo && cartao.nota !== ""
+            visible: cartao._embaixo && cartao.nota !== ""
             text: cartao.nota
             color: cartao.corNota
             font.family: Tema.serifa

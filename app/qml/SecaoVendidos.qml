@@ -110,9 +110,9 @@ FocusScope {
                 color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    spacing: 14
+                    anchors.leftMargin: Tema.estreito ? 10 : 16
+                    anchors.rightMargin: Tema.estreito ? 12 : 16
+                    spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.v.posicao
                         color: Tema.dourado
@@ -120,7 +120,7 @@ FocusScope {
                         font.weight: Font.Bold
                         font.pixelSize: 24
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 38
+                        Layout.preferredWidth: Tema.estreito ? 24 : 38
                     }
                     ColumnLayout {
                         spacing: 3
@@ -156,6 +156,7 @@ FocusScope {
                         corTexto: linha.v.curva === "A" ? Tema.verdeEscuro : Tema.tintaSuave
                     }
                     ColumnLayout {
+                        visible: !Tema.estreito
                         spacing: 0
                         Layout.preferredWidth: 130
                         Text {
@@ -176,7 +177,7 @@ FocusScope {
                     }
                     ColumnLayout {
                         spacing: 0
-                        Layout.preferredWidth: 140
+                        Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + linha.v.total
                             color: Tema.tinta
@@ -194,6 +195,7 @@ FocusScope {
                         }
                     }
                     Item {
+                        visible: !Tema.estreito
                         Layout.preferredWidth: 96
                         implicitHeight: 26
                         Chip {

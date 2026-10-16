@@ -196,7 +196,7 @@ FocusScope {
                         }
                     }
                     Botao {
-                        visible: sobreVale.hovered
+                        visible: (sobreVale.hovered || Tema.celular)
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
@@ -204,7 +204,7 @@ FocusScope {
                         onClicked: tela.imprimir("vale", lv.modelData.id)
                     }
                     Botao {
-                        visible: sobreVale.hovered
+                        visible: (sobreVale.hovered || Tema.celular)
                         text: "Usar no Vender"
                         tipo: "secundario"
                         implicitHeight: 36
@@ -290,7 +290,7 @@ FocusScope {
                         }
                     }
                     Botao {
-                        visible: sobreFeita.hovered
+                        visible: (sobreFeita.hovered || Tema.celular)
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
@@ -298,7 +298,7 @@ FocusScope {
                         onClicked: tela.imprimir("devolucao", lf.modelData.id)
                     }
                     Botao {
-                        visible: sobreFeita.hovered && !lf.modelData.cancelada
+                        visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada
                         text: "Desfazer"
                         tipo: "discreto"
                         implicitHeight: 36

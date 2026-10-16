@@ -6,6 +6,7 @@ import rustinho
 // Fluxo de caixa: o que entrou e saiu, dia a dia, e o que vem pela frente.
 FocusScope {
     id: secao
+    property string parte: "aconteceu"
     readonly property var janela: ApplicationWindow.window
     property var fluxo: null
     property string periodo: "mes"
@@ -50,22 +51,28 @@ FocusScope {
                 onEscolhido: id => secao.usar(id)
             }
             Item { Layout.fillWidth: true }
-            Campo {
-                id: de
-                dica: "de"
-                maximo: 10
-                Layout.preferredWidth: 140
-                onConfirmado: { secao.periodo = ""; secao.carregar() }
+            // Datas: juntas numa linha também no celular.
+            RowLayout {
+                spacing: 8
+                Campo {
+                    id: de
+                    dica: "de"
+                    maximo: 10
+                    Layout.preferredWidth: Tema.estreito ? -1 : 140
+                    Layout.fillWidth: Tema.estreito
+                    onConfirmado: { secao.periodo = ""; secao.carregar() }
+                }
+                Text { text: "a"; color: Tema.tintaSuave; font.family: Tema.serifa; font.italic: true; font.pixelSize: 15 }
+                Campo {
+                    id: ate
+                    dica: "até"
+                    maximo: 10
+                    Layout.preferredWidth: Tema.estreito ? -1 : 140
+                    Layout.fillWidth: Tema.estreito
+                    onConfirmado: { secao.periodo = ""; secao.carregar() }
+                }
+                Botao { text: "Ver"; tipo: "secundario"; onClicked: { secao.periodo = ""; secao.carregar() } }
             }
-            Text { text: "a"; color: Tema.tintaSuave; font.family: Tema.serifa; font.italic: true; font.pixelSize: 15 }
-            Campo {
-                id: ate
-                dica: "até"
-                maximo: 10
-                Layout.preferredWidth: 140
-                onConfirmado: { secao.periodo = ""; secao.carregar() }
-            }
-            Botao { text: "Ver"; tipo: "secundario"; onClicked: { secao.periodo = ""; secao.carregar() } }
         }
         TextoErro { text: secao.erro }
 
@@ -85,6 +92,14 @@ FocusScope {
             CartaoNumero { rotulo: "Nas contas hoje"; sensivel: true; valor: secao.fluxo ? secao.fluxo.saldoHoje : ""; cor: Tema.azul }
         }
 
+        // Celular: uma parte de cada vez, escolhida nas pílulas.
+        Pilulas {
+            visible: Tema.estreito && (true)
+            modelo: [{ id: "aconteceu", nome: "O que aconteceu" }, { id: "frente", nome: "Pela frente" }]
+            atual: secao.parte
+            onEscolhido: id => secao.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -92,10 +107,11 @@ FocusScope {
 
             // O que aconteceu
             ColumnLayout {
+                visible: !Tema.estreito || secao.parte === "aconteceu"
                 spacing: 8
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.preferredWidth: 1
+                Layout.preferredWidth: Tema.estreito ? -1 : 1
                 Rotulo { text: "O que aconteceu"; Layout.topMargin: 2 }
                 ListView {
                     id: realizado
@@ -130,9 +146,10 @@ FocusScope {
 
             // O que vem pela frente
             Rectangle {
+                visible: !Tema.estreito || secao.parte === "frente"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                Layout.preferredWidth: 1
+                Layout.preferredWidth: Tema.estreito ? -1 : 1
                 radius: Tema.raio
                 color: Qt.rgba(1, 1, 1, 0.28)
                 ColumnLayout {

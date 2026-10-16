@@ -6,6 +6,7 @@ import rustinho
 // Contas da loja: o Caixa geral (cofre) e os bancos, com o extrato de cada um.
 FocusScope {
     id: secao
+    property string parte: "contas"
     readonly property var janela: ApplicationWindow.window
     property var contas: []
     property string contaId: "caixa-geral"
@@ -33,6 +34,8 @@ FocusScope {
     function abrir(id) {
         contaId = id
         carregarExtrato()
+        if (Tema.estreito)
+            parte = "extrato"
     }
     function novaConta() {
         cadastro.abrirCom(null)
@@ -41,15 +44,28 @@ FocusScope {
         return Qt.formatDate(new Date(), "dd/MM/yyyy")
     }
 
+    // Celular: uma parte de cada vez, escolhida nas pílulas.
+    Pilulas {
+        id: pilulasContas
+        visible: Tema.estreito
+        width: parent.width
+        modelo: [{ id: "contas", nome: "Contas" }, { id: "extrato", nome: "Extrato" }]
+        atual: secao.parte
+        onEscolhido: id => secao.parte = id
+    }
+
     RowLayout {
         anchors.fill: parent
+        anchors.topMargin: pilulasContas.visible ? pilulasContas.height + 10 : 0
         spacing: 18
 
         // As contas
         ColumnLayout {
+            visible: !Tema.estreito || secao.parte === "contas"
             spacing: 8
-            Layout.preferredWidth: 360
-            Layout.maximumWidth: 400
+            Layout.preferredWidth: Tema.estreito ? -1 : 360
+            Layout.fillWidth: Tema.estreito
+            Layout.maximumWidth: Tema.estreito ? Number.POSITIVE_INFINITY : 400
             Layout.fillHeight: true
             ListView {
                 id: lista
@@ -132,6 +148,7 @@ FocusScope {
 
         // O extrato
         Rectangle {
+            visible: !Tema.estreito || secao.parte === "extrato"
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: Tema.raio

@@ -142,7 +142,7 @@ FocusScope {
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
                         }
                         Text {
-                            text: ["cód. " + linha.p.codigo, linha.p.local ? "local " + linha.p.local : "", linha.p.ultimaVenda, linha.p.ultimaCompra]
+                            text: [Tema.estreito ? linha.p.ha : "", "cód. " + linha.p.codigo, linha.p.local ? "local " + linha.p.local : "", linha.p.ultimaVenda, linha.p.ultimaCompra]
                                   .filter(x => !!x).join("  ·  ")
                             color: Tema.tintaSuave
                             font.family: Tema.serifa
@@ -153,13 +153,14 @@ FocusScope {
                         }
                     }
                     Chip {
+                        visible: !Tema.estreito
                         texto: linha.p.ha
                         color: Qt.rgba(1, 1, 1, 0.5)
                         corTexto: Tema.tintaSuave
                     }
                     ColumnLayout {
                         spacing: 0
-                        Layout.preferredWidth: 130
+                        Layout.preferredWidth: Tema.estreito ? -1 : 130
                         Text {
                             text: "R$ " + Tema.valor(linha.p.valor)
                             color: Tema.tinta

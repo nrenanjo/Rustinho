@@ -42,7 +42,7 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
             spacing: 12
             Layout.fillWidth: true
             Pilulas {
@@ -52,10 +52,13 @@ FocusScope {
                 onEscolhido: id => secao.usar(id)
             }
             Item { Layout.fillWidth: true }
-            Campo { id: de; dica: "de"; maximo: 10; Layout.preferredWidth: 140; onConfirmado: { secao.periodo = ""; secao.carregar() } }
-            Text { text: "a"; color: Tema.tintaSuave; font.family: Tema.serifa; font.italic: true; font.pixelSize: 15 }
-            Campo { id: ate; dica: "até"; maximo: 10; Layout.preferredWidth: 140; onConfirmado: { secao.periodo = ""; secao.carregar() } }
-            Botao { text: "Ver"; tipo: "secundario"; onClicked: { secao.periodo = ""; secao.carregar() } }
+            RowLayout {
+                spacing: 8
+                Campo { id: de; dica: "de"; maximo: 10; Layout.preferredWidth: Tema.estreito ? -1 : 140; Layout.fillWidth: Tema.estreito; onConfirmado: { secao.periodo = ""; secao.carregar() } }
+                Text { text: "a"; color: Tema.tintaSuave; font.family: Tema.serifa; font.italic: true; font.pixelSize: 15 }
+                Campo { id: ate; dica: "até"; maximo: 10; Layout.preferredWidth: Tema.estreito ? -1 : 140; Layout.fillWidth: Tema.estreito; onConfirmado: { secao.periodo = ""; secao.carregar() } }
+                Botao { text: "Ver"; tipo: "secundario"; onClicked: { secao.periodo = ""; secao.carregar() } }
+            }
         }
         TextoErro { text: secao.erro }
 
@@ -78,9 +81,9 @@ FocusScope {
                 color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 20
+                    anchors.leftMargin: Tema.estreito ? 14 : 20
                     anchors.rightMargin: 14
-                    spacing: 16
+                    spacing: Tema.estreito ? 10 : 16
                     ColumnLayout {
                         spacing: 0
                         Layout.fillWidth: true
@@ -103,6 +106,7 @@ FocusScope {
                         }
                     }
                     ColumnLayout {
+                        visible: !Tema.estreito
                         spacing: 0
                         Layout.preferredWidth: 150
                         Text {
@@ -128,14 +132,15 @@ FocusScope {
                         font.weight: Font.Bold
                         font.pixelSize: 19
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 130
+                        Layout.preferredWidth: Tema.estreito ? -1 : 130
                     }
                     Item {
-                        Layout.preferredWidth: 190
+                        Layout.preferredWidth: Tema.estreito ? 76 : 190
                         implicitHeight: 36
                         Chip {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
+                            visible: !Tema.estreito && texto !== ""
                             texto: linha.modelData.jaFechado ? "Fechada " + linha.modelData.jaFechado : ""
                             color: Tema.verde
                         }

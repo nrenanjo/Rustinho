@@ -24,10 +24,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(CxxQt)
 
+# O qmake do Qt for Android (não o do computador), para o cxx-qt achar os
+# cabeçalhos e as bibliotecas certas.
+if(NOT DEFINED RUSTINHO_QMAKE)
+    set(RUSTINHO_QMAKE "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}/qmake")
+endif()
 cxx_qt_import_crate(
     MANIFEST_PATH rust/Cargo.toml
     CRATES rustinho_android
     QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick
+    QMAKE "${RUSTINHO_QMAKE}"
 )
 cxx_qt_import_qml_module(rustinho_qml
     URI "rustinho"

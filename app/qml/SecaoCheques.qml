@@ -103,7 +103,8 @@ FocusScope {
                 required property int index
                 readonly property var ch: modelData
                 width: lista.width
-                implicitHeight: 64
+                // Celular: os botões vão para uma linha embaixo.
+                implicitHeight: Tema.estreito ? 62 + (acoesCh.width > 0 ? acoesCh.height + 10 : 0) : 64
                 radius: Tema.raio
                 color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 readonly property string chip: ch.situacao !== "carteira" ? ch.nomeSituacao
@@ -114,12 +115,17 @@ FocusScope {
                                                  : ch.podeDepositar || ch.situacao === "depositado" ? Tema.verde : Tema.papel
                 HoverHandler { id: sobreLinha }
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 18
+                    id: conteudoCh
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: Tema.estreito ? 62 : 64
+                    anchors.leftMargin: Tema.estreito ? 14 : 18
                     anchors.rightMargin: 12
-                    spacing: 14
+                    spacing: Tema.estreito ? 10 : 14
                     opacity: linha.ch.situacao === "carteira" ? 1 : 0.75
                     ColumnLayout {
+                        visible: !Tema.estreito
                         spacing: 0
                         Layout.preferredWidth: 96
                         Text {
@@ -149,7 +155,8 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: [linha.ch.banco, linha.ch.cliente && linha.ch.cliente !== linha.ch.emitente ? "cliente " + linha.ch.cliente : "",
+                            text: [Tema.estreito ? "bom para " + linha.ch.bomPara : "", Tema.estreito ? linha.chip : "",
+                                   linha.ch.banco, linha.ch.cliente && linha.ch.cliente !== linha.ch.emitente ? "cliente " + linha.ch.cliente : "",
                                    linha.ch.conta ? "em " + linha.ch.conta : "", linha.ch.situacaoEm, linha.ch.observacoes].filter(x => !!x).join("  ·  ")
                             visible: text !== ""
                             color: Tema.tintaSuave
@@ -161,6 +168,7 @@ FocusScope {
                         }
                     }
                     Chip {
+                        visible: !Tema.estreito
                         texto: linha.chip
                         color: linha.corChip
                         corTexto: linha.ch.situacao === "devolvido" || linha.ch.atrasado ? Tema.vermelho : Tema.tinta
@@ -172,12 +180,22 @@ FocusScope {
                         font.weight: Font.Bold
                         font.pixelSize: 17
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 110
+                        Layout.preferredWidth: Tema.estreito ? -1 : 110
                     }
-                    Row {
-                        spacing: 4
+                    Item {
+                        visible: !Tema.estreito
                         Layout.preferredWidth: 300
-                        layoutDirection: Qt.RightToLeft
+                        implicitHeight: 36
+                    }
+                }
+                // Botões: no computador, à direita; no celular, embaixo.
+                Row {
+                    id: acoesCh
+                    spacing: 4
+                    opacity: conteudoCh.opacity
+                    layoutDirection: Tema.estreito ? Qt.LeftToRight : Qt.RightToLeft
+                    x: Tema.estreito ? 14 : linha.width - 12 - width
+                    y: Tema.estreito ? 62 : (64 - height) / 2
                         Botao {
                             visible: linha.ch.situacao === "carteira"
                             text: "Depositar"
@@ -186,14 +204,14 @@ FocusScope {
                             onClicked: deposito.abrirCom(linha.ch)
                         }
                         Botao {
-                            visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && sobreLinha.hovered
+                            visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && (sobreLinha.hovered || Tema.celular)
                             text: "Devolvido"
                             tipo: "discreto"
                             implicitHeight: 36
                             onClicked: devolucao.abrirCom(linha.ch)
                         }
                         Botao {
-                            visible: linha.ch.situacao === "carteira" && sobreLinha.hovered
+                            visible: linha.ch.situacao === "carteira" && (sobreLinha.hovered || Tema.celular)
                             text: "Repassar"
                             tipo: "discreto"
                             implicitHeight: 36
@@ -202,7 +220,7 @@ FocusScope {
                                                         m => Api.chamar("cheque_repassar", { id: linha.ch.id, motivo: m }), "Para quem", "principal")
                         }
                         Botao {
-                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && sobreLinha.hovered
+                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular)
                             text: "Desfazer"
                             tipo: "discreto"
                             implicitHeight: 36
@@ -214,7 +232,6 @@ FocusScope {
                                                             secao.carregar()
                                                         })
                         }
-                    }
                 }
             }
             ColumnLayout {

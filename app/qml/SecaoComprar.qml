@@ -246,7 +246,7 @@ FocusScope {
                     }
                 }
                 Botao {
-                    visible: sobreE.hovered
+                    visible: (sobreE.hovered || Tema.celular)
                     text: "Já pedi"
                     icone: "check"
                     tipo: "discreto"

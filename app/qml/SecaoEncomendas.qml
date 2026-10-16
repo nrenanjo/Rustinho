@@ -125,17 +125,22 @@ FocusScope {
                 readonly property var e: modelData
                 readonly property bool aberta: e.situacao !== "entregue" && e.situacao !== "cancelada"
                 width: lista.width
-                implicitHeight: 66
+                implicitHeight: Tema.estreito ? 66 + (acoesEnc.width > 0 ? acoesEnc.height + 10 : 0) : 66
                 radius: Tema.raio
                 color: e.situacao === "chegou" ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 HoverHandler { id: sobre }
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 18
+                    id: conteudoEnc
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 66
+                    anchors.leftMargin: Tema.estreito ? 14 : 18
                     anchors.rightMargin: 12
-                    spacing: 14
+                    spacing: Tema.estreito ? 10 : 14
                     opacity: linha.aberta ? 1 : 0.7
                     Item {
+                        visible: !Tema.estreito
                         Layout.preferredWidth: 100
                         implicitHeight: 26
                         Chip {
@@ -158,7 +163,8 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: ["Nº " + linha.e.numero + " · " + linha.e.cliente, linha.e.telefone, linha.e.desde,
+                            text: [Tema.estreito ? linha.e.nomeSituacao : "", Tema.estreito && linha.aberta ? linha.e.nomePagamento : "",
+                                   "Nº " + linha.e.numero + " · " + linha.e.cliente, linha.e.telefone, linha.e.desde,
                                    linha.e.avisado ? "avisado " + linha.e.avisadoEm : "",
                                    linha.e.situacao === "cancelada" ? linha.e.motivo : linha.e.observacoes]
                                   .filter(x => !!x).join("  ·  ")
@@ -171,90 +177,99 @@ FocusScope {
                         }
                     }
                     Chip {
-                        visible: linha.aberta
+                        visible: linha.aberta && !Tema.estreito
                         texto: linha.e.nomePagamento
                         color: linha.e.pagamento === "pago" ? Tema.verde : linha.e.pagamento === "falta" ? Tema.rosa : Tema.papel
                         corTexto: linha.e.pagamento === "pago" ? Tema.verdeEscuro : linha.e.pagamento === "falta" ? Tema.vermelho : Tema.tintaSuave
                     }
-                    Row {
-                        spacing: 4
+                    Item {
+                        visible: !Tema.estreito
                         Layout.preferredWidth: 330
-                        layoutDirection: Qt.RightToLeft
-                        // Próximo passo (sempre à vista)
-                        Botao {
-                            visible: linha.e.situacao === "aberta"
-                            text: "Já pedi"
-                            tipo: "secundario"
-                            implicitHeight: 36
-                            onClicked: secao.acao("encomenda_pedir", { id: linha.e.id }, "")
-                        }
-                        Botao {
-                            visible: linha.e.situacao === "pedida"
-                            text: "Chegou"
-                            tipo: "secundario"
-                            implicitHeight: 36
-                            onClicked: secao.janela.confirmar("A peça chegou?",
-                                "Quando a nota da compra é lançada pelo XML, o Rustinho marca sozinho. Marque aqui se chegou sem nota.",
-                                "Chegou", () => secao.acao("encomenda_chegou", { id: linha.e.id }, ""))
-                        }
-                        Botao {
-                            visible: linha.e.situacao === "chegou" && linha.e.podeVender
-                            text: "Vender"
-                            tipo: "secundario"
-                            implicitHeight: 36
-                            onClicked: secao.janela.abrir("TelaVender", { encomendaId: linha.e.id })
-                        }
-                        Botao {
-                            visible: linha.e.situacao === "chegou" && linha.e.podeEntregar
-                            text: "Entregar"
-                            tipo: "secundario"
-                            implicitHeight: 36
-                            onClicked: secao.janela.confirmar("Entregar ao cliente?",
-                                linha.e.pagamento === "falta" ? linha.e.nomePagamento + " no Receber. Receba antes ou depois, pelo Receber." : "A encomenda nº " + linha.e.numero + " sai da lista.",
-                                "Entregar", () => secao.acao("encomenda_entregar", { id: linha.e.id }, "Encomenda entregue."))
-                        }
-                        Botao {
-                            visible: linha.e.situacao === "chegou" && linha.e.temWhatsapp
-                            text: linha.e.avisado ? "Avisar de novo" : "Avisar"
-                            icone: "mensagem"
-                            tipo: linha.e.avisado ? "discreto" : "principal"
-                            implicitHeight: 36
-                            onClicked: secao.avisar(linha.e)
-                        }
-                        // O resto, só com o mouse em cima
-                        Botao {
-                            visible: linha.aberta && linha.e.pagamento === "falta" && sobre.hovered
-                            text: "Receber"
-                            tipo: "discreto"
-                            implicitHeight: 36
-                            onClicked: secao.janela.abrir("TelaReceber", { clienteInicial: linha.e.clienteId })
-                        }
-                        Botao {
-                            visible: linha.e.situacao === "pedida" && sobre.hovered
-                            text: "Não pedi"
-                            tipo: "discreto"
-                            implicitHeight: 36
-                            onClicked: secao.acao("encomenda_pedir", { id: linha.e.id, desfazer: true }, "")
-                        }
-                        Botao {
-                            visible: linha.aberta && linha.e.situacao !== "chegou" && linha.e.temWhatsapp && sobre.hovered
-                            icone: "mensagem"
-                            tipo: "discreto"
-                            implicitHeight: 36
-                            implicitWidth: 40
-                            leftPadding: 0
-                            rightPadding: 0
-                            onClicked: secao.avisar(linha.e)
-                        }
-                        Botao {
-                            visible: linha.aberta && sobre.hovered
-                            text: "Cancelar"
-                            tipo: "discreto"
-                            implicitHeight: 36
-                            onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + "?",
-                                                        linha.e.descricao + " · " + linha.e.cliente, "Cancelar encomenda",
-                                                        m => Api.chamar("encomenda_cancelar", { id: linha.e.id, motivo: m }))
-                        }
+                        implicitHeight: 36
+                    }
+                }
+                // Botões: no computador, à direita; no celular, embaixo.
+                Row {
+                    spacing: 4
+                    id: acoesEnc
+                    opacity: conteudoEnc.opacity
+                    layoutDirection: Tema.estreito ? Qt.LeftToRight : Qt.RightToLeft
+                    x: Tema.estreito ? 14 : linha.width - 12 - width
+                    y: Tema.estreito ? 66 : (66 - height) / 2
+                    // Próximo passo (sempre à vista)
+                    Botao {
+                        visible: linha.e.situacao === "aberta"
+                        text: "Já pedi"
+                        tipo: "secundario"
+                        implicitHeight: 36
+                        onClicked: secao.acao("encomenda_pedir", { id: linha.e.id }, "")
+                    }
+                    Botao {
+                        visible: linha.e.situacao === "pedida"
+                        text: "Chegou"
+                        tipo: "secundario"
+                        implicitHeight: 36
+                        onClicked: secao.janela.confirmar("A peça chegou?",
+                            "Quando a nota da compra é lançada pelo XML, o Rustinho marca sozinho. Marque aqui se chegou sem nota.",
+                            "Chegou", () => secao.acao("encomenda_chegou", { id: linha.e.id }, ""))
+                    }
+                    Botao {
+                        visible: linha.e.situacao === "chegou" && linha.e.podeVender
+                        text: "Vender"
+                        tipo: "secundario"
+                        implicitHeight: 36
+                        onClicked: secao.janela.abrir("TelaVender", { encomendaId: linha.e.id })
+                    }
+                    Botao {
+                        visible: linha.e.situacao === "chegou" && linha.e.podeEntregar
+                        text: "Entregar"
+                        tipo: "secundario"
+                        implicitHeight: 36
+                        onClicked: secao.janela.confirmar("Entregar ao cliente?",
+                            linha.e.pagamento === "falta" ? linha.e.nomePagamento + " no Receber. Receba antes ou depois, pelo Receber." : "A encomenda nº " + linha.e.numero + " sai da lista.",
+                            "Entregar", () => secao.acao("encomenda_entregar", { id: linha.e.id }, "Encomenda entregue."))
+                    }
+                    Botao {
+                        visible: linha.e.situacao === "chegou" && linha.e.temWhatsapp
+                        text: linha.e.avisado ? "Avisar de novo" : "Avisar"
+                        icone: "mensagem"
+                        tipo: linha.e.avisado ? "discreto" : "principal"
+                        implicitHeight: 36
+                        onClicked: secao.avisar(linha.e)
+                    }
+                    // O resto, só com o mouse em cima
+                    Botao {
+                        visible: linha.aberta && linha.e.pagamento === "falta" && (sobre.hovered || Tema.celular)
+                        text: "Receber"
+                        tipo: "discreto"
+                        implicitHeight: 36
+                        onClicked: secao.janela.abrir("TelaReceber", { clienteInicial: linha.e.clienteId })
+                    }
+                    Botao {
+                        visible: linha.e.situacao === "pedida" && (sobre.hovered || Tema.celular)
+                        text: "Não pedi"
+                        tipo: "discreto"
+                        implicitHeight: 36
+                        onClicked: secao.acao("encomenda_pedir", { id: linha.e.id, desfazer: true }, "")
+                    }
+                    Botao {
+                        visible: linha.aberta && linha.e.situacao !== "chegou" && linha.e.temWhatsapp && (sobre.hovered || Tema.celular)
+                        icone: "mensagem"
+                        tipo: "discreto"
+                        implicitHeight: 36
+                        implicitWidth: 40
+                        leftPadding: 0
+                        rightPadding: 0
+                        onClicked: secao.avisar(linha.e)
+                    }
+                    Botao {
+                        visible: linha.aberta && (sobre.hovered || Tema.celular)
+                        text: "Cancelar"
+                        tipo: "discreto"
+                        implicitHeight: 36
+                        onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + "?",
+                                                    linha.e.descricao + " · " + linha.e.cliente, "Cancelar encomenda",
+                                                    m => Api.chamar("encomenda_cancelar", { id: linha.e.id, motivo: m }))
                     }
                 }
             }
