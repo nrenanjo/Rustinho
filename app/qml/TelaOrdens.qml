@@ -217,7 +217,7 @@ FocusScope {
                 }
                 Nota {
                     visible: busca.texto === ""
-                    text: "Nova OS (F2): digite a placa, o que o cliente reclamou e vá pondo as peças e a mão de obra. "
+                    text: (Tema.celular ? "Nova OS" : "Nova OS (F2)") + ": digite a placa, o que o cliente reclamou e vá pondo as peças e a mão de obra. "
                           + "As peças só saem do estoque quando o carro é entregue."
                     horizontalAlignment: Text.AlignHCenter
                     Layout.fillWidth: true

@@ -476,14 +476,14 @@ FocusScope {
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                                 Titulo {
-                                    text: tela.caixaAberto ? "Passe o leitor ou busque a peça" : "O caixa está fechado"
+                                    text: !tela.caixaAberto ? "O caixa está fechado" : Tema.celular ? "Busque a peça ou use a câmera" : "Passe o leitor ou busque a peça"
                                     font.pixelSize: 30
                                     horizontalAlignment: Text.AlignHCenter
                                     Layout.fillWidth: true
                                 }
                                 Nota {
                                     text: tela.caixaAberto
-                                          ? "A busca mostra o estoque e o preço de cada peça. Enter põe no carrinho; F2 recebe."
+                                          ? (Tema.celular ? "A busca mostra o estoque e o preço de cada peça. Toque na peça para pôr no carrinho." : "A busca mostra o estoque e o preço de cada peça. Enter põe no carrinho; F2 recebe.")
                                           : "Abra o caixa com o troco que está na gaveta para começar a vender. Dá para montar um orçamento mesmo com o caixa fechado."
                                     font.pixelSize: 16
                                     horizontalAlignment: Text.AlignHCenter

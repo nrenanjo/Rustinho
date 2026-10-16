@@ -174,6 +174,7 @@ FocusScope {
                 Campo {
                     id: busca
                     icone: "busca"
+                    camera: true
                     altura: 50
                     tamanhoFonte: 17
                     dica: Tema.estreito ? "Código ou nome da peça" : "Passe o leitor na peça ou digite o nome e Enter"
@@ -269,7 +270,7 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Nota {
-                            text: "Passe o leitor no código de barras da peça (cada passada é mais uma etiqueta) ou digite o nome e Enter. "
+                            text: (Tema.celular ? "Digite o código ou o nome da peça, ou use a câmera (cada leitura é mais uma etiqueta). " : "Passe o leitor no código de barras da peça (cada passada é mais uma etiqueta) ou digite o nome e Enter. ")
                                   + "Na compra lançada e no cadastro da peça também tem o botão Etiquetas."
                             horizontalAlignment: Text.AlignHCenter
                             Layout.fillWidth: true

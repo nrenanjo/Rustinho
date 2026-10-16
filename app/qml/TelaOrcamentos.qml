@@ -52,7 +52,7 @@ FocusScope {
 
         Cabecalho {
             titulo: "Orçamentos"
-            subtitulo: "Monte o orçamento na tela Vender e escolha “Orçamento” (F6)"
+            subtitulo: "Monte o orçamento na tela Vender e escolha “Orçamento”" + (Tema.celular ? "" : " (F6)")
             Layout.fillWidth: true
             onVoltar: tela.janela.voltar()
             Botao {
