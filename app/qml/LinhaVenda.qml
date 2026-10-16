@@ -1,0 +1,101 @@
+import QtQuick
+import QtQuick.Layouts
+import rustinho
+
+// Uma venda ou orçamento na lista.
+Rectangle {
+    id: linha
+    property var item: ({})
+    property int indice: 0
+    property bool atual: false
+
+    signal abrir()
+
+    readonly property bool par: (indice + 1) % 2 === 0
+    readonly property color corBase: par ? Tema.azul : Tema.pergaminho
+    readonly property color corTexto: atual ? Tema.claro : Tema.tinta
+    readonly property color corSuave: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.78) : Tema.tintaSuave
+    readonly property bool orcamento: item.tipo === "orcamento"
+    readonly property bool apagada: ["cancelada", "cancelado"].includes(item.situacao)
+
+    radius: Tema.raio
+    color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    implicitHeight: 62
+
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: 18
+        anchors.rightMargin: 20
+        spacing: 16
+        opacity: linha.apagada ? 0.55 : 1
+
+        Text {
+            text: linha.item.numero
+            color: linha.atual ? Tema.claro : Tema.dourado
+            font.family: Tema.titulo
+            font.weight: Font.Bold
+            font.pixelSize: 26
+            Layout.preferredWidth: 54
+        }
+        Text {
+            text: Qt.formatDateTime(new Date(linha.item.criadoEm), "dd/MM HH:mm")
+            color: linha.corSuave
+            font.family: Tema.texto
+            font.pixelSize: 14
+            Layout.preferredWidth: 90
+        }
+        ColumnLayout {
+            spacing: 0
+            Layout.fillWidth: true
+            Text {
+                text: linha.item.cliente || (linha.orcamento ? "Sem cliente" : "Consumidor")
+                color: linha.corTexto
+                font.family: Tema.titulo
+                font.weight: Font.Bold
+                font.pixelSize: 20
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Text {
+                text: [linha.item.itens + (linha.item.itens === 1 ? " item" : " itens"), linha.item.caixa, linha.item.vendedor,
+                       linha.orcamento ? "válido até " + linha.item.validade : linha.item.formas].filter(x => !!x).join("  ·  ")
+                color: linha.corSuave
+                font.family: Tema.serifa
+                font.italic: true
+                font.pixelSize: 13
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+        }
+        Rectangle {
+            visible: linha.apagada || linha.orcamento
+            radius: height / 2
+            color: linha.atual ? Qt.rgba(1, 1, 1, 0.12) : linha.apagada ? Qt.rgba(0.16, 0.15, 0.13, 0.08)
+                   : linha.item.situacao === "vendido" ? Tema.verde : linha.item.vencido ? Tema.rosa : Qt.rgba(1, 1, 1, 0.5)
+            implicitWidth: chip.implicitWidth + 18
+            implicitHeight: chip.implicitHeight + 6
+            Text {
+                id: chip
+                anchors.centerIn: parent
+                text: linha.apagada ? (linha.orcamento ? "Cancelado" : "Cancelada")
+                      : linha.item.situacao === "vendido" ? "Vendido" : linha.item.vencido ? "Vencido" : "Em aberto"
+                color: linha.atual ? Tema.claro : linha.item.vencido ? Tema.vermelho : Tema.tintaSuave
+                font.family: Tema.texto
+                font.weight: Font.DemiBold
+                font.pixelSize: 12
+            }
+        }
+        Text {
+            text: "R$ " + linha.item.total
+            color: linha.corTexto
+            font.family: Tema.texto
+            font.weight: Font.Bold
+            font.pixelSize: 18
+            horizontalAlignment: Text.AlignRight
+            Layout.preferredWidth: 120
+        }
+    }
+
+    HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
+    TapHandler { onTapped: linha.abrir() }
+}

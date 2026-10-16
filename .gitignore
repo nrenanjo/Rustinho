@@ -1,0 +1,10 @@
+/target
+/rustinho
+/rustinho.exe
+/app/.qmlls.ini
+/exemplos
+/nucleo/examples
+/dist
+/saida
+/AppDir
+*.AppImage

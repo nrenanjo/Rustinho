@@ -1,0 +1,31 @@
+//! Rustinho: abre a janela principal.
+// No Windows, sem a janela preta do console atrás.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+//!
+//! As regras e o banco de dados ficam no núcleo (pasta `nucleo`). Aqui só
+//! se cria a aplicação Qt e se carrega a tela principal (qml/Main.qml).
+
+mod ponte;
+
+use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+
+fn main() {
+    let mut app = QGuiApplication::new();
+    if let Some(mut app) = app.as_mut() {
+        app.as_mut().set_application_name(&QString::from("rustinho"));
+        app.as_mut().set_application_display_name(&QString::from("Rustinho"));
+        app.as_mut().set_organization_name(&QString::from("rustinho"));
+    }
+    ponte::qobject::rustinho_preparar_janela();
+
+    let mut engine = QQmlApplicationEngine::new();
+    if let Some(mut engine) = engine.as_mut() {
+        // Necessário no Qt 6.4 (nas versões novas já é o padrão).
+        engine.as_mut().add_import_path(&QString::from("qrc:/qt/qml"));
+        engine.load(&QUrl::from("qrc:/qt/qml/rustinho/qml/Main.qml"));
+    }
+
+    if let Some(app) = app.as_mut() {
+        app.exec();
+    }
+}
