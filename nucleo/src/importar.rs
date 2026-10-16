@@ -315,8 +315,7 @@ fn ficha_do_item(conn: &Connection, it: &ItemXml) -> Resultado<produtos::Produto
     if !it.gtin.is_empty() && gtin::gtin_valido(&it.gtin) && peca_por_barras(conn, &it.gtin)?.is_none() {
         f.codigo_barras = it.gtin.clone();
     }
-    let unidade = it.unidade.trim().to_uppercase();
-    f.unidade = if !unidade.is_empty() && unidade.chars().count() <= 6 && !unidade.contains(' ') { unidade } else { "UN".into() };
+    f.unidade = crate::unidades::de_fora(&it.unidade);
     if it.ncm.len() == 8 && it.ncm.chars().all(|c| c.is_ascii_digit()) {
         f.ncm = it.ncm.clone();
     }

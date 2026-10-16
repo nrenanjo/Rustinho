@@ -19,7 +19,8 @@ pub fn saldo(conn: &Connection, produto_id: &str) -> Resultado<i64> {
     )?)
 }
 
-/// Lança um movimento de estoque (positivo entra, negativo sai).
+/// Lança um movimento de estoque (positivo entra, negativo sai). Serviço não
+/// tem estoque: para ele, não lança nada.
 pub fn lancar(
     conn: &Connection,
     dispositivo: &str,
@@ -31,7 +32,8 @@ pub fn lancar(
 ) -> Resultado<()> {
     conn.execute(
         "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+          WHERE NOT EXISTS (SELECT 1 FROM produto WHERE id = ?2 AND tipo = 'servico')",
         params![
             tempo::novo_id(),
             produto_id,
@@ -68,6 +70,12 @@ pub fn ajustar(
     }
     if texto::tamanho(&motivo) > 120 {
         return Err(Erro::campo("motivo", "Use no máximo 120 letras."));
+    }
+    let servico: bool = conn
+        .query_row("SELECT tipo = 'servico' FROM produto WHERE id = ?1", [produto_id], |l| l.get(0))
+        .unwrap_or(false);
+    if servico {
+        return Err(Erro::validacao("Serviço não tem estoque."));
     }
     let atual = saldo(conn, produto_id)?;
     let diferenca = contado - atual;

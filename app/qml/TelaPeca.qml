@@ -16,6 +16,11 @@ FocusScope {
     property bool carregando: true
     property bool mostrarOutros: false
     readonly property bool nova: !ficha || ficha.id === ""
+    property string tipo: "produto"
+    readonly property bool servico: tipo === "servico"
+    readonly property bool temGrade: !!ficha && !!ficha.gradeItens && ficha.gradeItens.length > 0
+    // Parte do fiscal à mostra (pílulas): icms, pis, ipi, combustivel, servico.
+    property string blocoFiscal: "icms"
 
     ListModel { id: aplicacoes }
     ListModel { id: equivalentes }
@@ -46,6 +51,14 @@ FocusScope {
         marca.texto = f.marca
         unidade.texto = f.unidade
         categoria.texto = f.categoria
+        tipo = f.tipo || "produto"
+        blocoFiscal = tipo === "servico" ? "servico" : "icms"
+        variacao.texto = f.variacao
+        precoAberto.checked = f.precoAberto
+        emOferta.checked = f.ofertaPreco !== ""
+        ofertaPreco.texto = f.ofertaPreco
+        ofertaAte.texto = f.ofertaAte
+        preencherFiscal(f.fiscal || {})
         ativo.checked = f.ativo
         campoCusto.texto = f.custo
         precos = f.precos
@@ -59,7 +72,6 @@ FocusScope {
         csosn.indice = Math.max(0, (sugestoes.csosns || []).findIndex(c => c.valor === f.csosn))
         monofasico.checked = f.monofasico
         tributacao = f.tributacao
-        lubrificante.checked = f.anpCodigo !== "" || f.anpDescricao !== ""
         anpCodigo.texto = f.anpCodigo
         anpDescricao.texto = f.anpDescricao
         peso.texto = f.peso
@@ -112,8 +124,14 @@ FocusScope {
             origem: Math.max(0, origem.indice),
             csosn: tela.csosnEscolhido(),
             monofasico: monofasico.checked,
-            anpCodigo: lubrificante.checked ? anpCodigo.texto : "",
-            anpDescricao: lubrificante.checked ? anpDescricao.texto : "",
+            anpCodigo: anpCodigo.texto,
+            anpDescricao: anpDescricao.texto,
+            tipo: tela.tipo,
+            variacao: variacao.texto,
+            precoAberto: precoAberto.checked,
+            ofertaPreco: emOferta.checked ? ofertaPreco.texto : "",
+            ofertaAte: emOferta.checked ? ofertaAte.texto : "",
+            fiscal: coletarFiscal(),
             peso: peso.texto,
             descontoMaximo: descontoMaximo.texto,
             comissao: comissao.texto,
@@ -121,6 +139,81 @@ FocusScope {
             aplicacoes: listaAplicacoes,
             equivalentes: listaEquivalentes
         }
+    }
+
+    // Campos do fiscal da nota: [campo, chave, bloco, lista?]. "marcar" = caixa
+    // de marcar; "uf" = lista dos estados; outra lista = CSTs.
+    function camposFiscais() {
+        return [
+            [ipiCst, "ipiCst", "ipi", "cstIpi"], [ipiAliquota, "ipiAliquota", "ipi"], [ipiValor, "ipiValor", "ipi"],
+            [ipiEnquadramento, "ipiEnquadramento", "ipi"], [ipiSelo, "ipiSelo", "ipi"], [ipiSeloQuantidade, "ipiSeloQuantidade", "ipi"],
+            [pisCst, "pisCst", "pis", "cstPis"], [pisAliquota, "pisAliquota", "pis"], [pisValor, "pisValor", "pis"],
+            [cofinsCst, "cofinsCst", "pis", "cstPis"], [cofinsAliquota, "cofinsAliquota", "pis"], [cofinsValor, "cofinsValor", "pis"],
+            [naturezaReceita, "naturezaReceita", "pis"],
+            [glp, "glp", "combustivel"], [gnNacional, "gnNacional", "combustivel"], [gnImportado, "gnImportado", "combustivel"],
+            [valorPartida, "valorPartida", "combustivel"], [codif, "codif", "combustivel"], [temperatura, "temperatura", "combustivel"],
+            [importado, "importado", "combustivel", "marcar"], [ufOrigem, "ufOrigem", "combustivel", "uf"],
+            [percentualOrigem, "percentualOrigem", "combustivel"], [cide, "cide", "combustivel"], [biodiesel, "biodiesel", "combustivel"],
+            [servicoCodigo, "servicoCodigo", "servico"], [cnae, "cnae", "servico"], [nbs, "nbs", "servico"],
+            [codigoMunicipio, "codigoMunicipio", "servico"], [issAliquota, "issAliquota", "servico"],
+            [issExigibilidade, "issExigibilidade", "servico", "exigibilidades"], [incentivoFiscal, "incentivoFiscal", "servico", "marcar"],
+            [servicoDescricao, "servicoDescricao", "servico"]
+        ]
+    }
+    function ufsComVazio() {
+        return [""].concat(sugestoes.ufs || [])
+    }
+    function preencherFiscal(fi) {
+        for (const [c, k, , lista] of camposFiscais()) {
+            if (lista === "marcar")
+                c.checked = !!fi[k]
+            else if (lista === "uf")
+                c.indice = Math.max(0, ufsComVazio().indexOf(fi[k] || ""))
+            else if (lista)
+                c.indice = Math.max(0, (sugestoes[lista] || []).findIndex(x => x.valor === (fi[k] || (lista === "exigibilidades" ? "1" : ""))))
+            else
+                c.texto = fi[k] || ""
+        }
+    }
+    function coletarFiscal() {
+        const fi = {}
+        for (const [c, k, , lista] of camposFiscais()) {
+            if (lista === "marcar")
+                fi[k] = c.checked
+            else if (lista === "uf")
+                fi[k] = ufsComVazio()[Math.max(0, c.indice)] || ""
+            else if (lista) {
+                const l = sugestoes[lista] || []
+                fi[k] = c.indice >= 0 && c.indice < l.length ? l[c.indice].valor : ""
+            } else
+                fi[k] = c.texto
+        }
+        return fi
+    }
+
+    // Mais um tamanho ou cor (copia este produto).
+    function criarVariacao() {
+        varAtual.erro = ""
+        varNova.erro = ""
+        const r = Api.chamar("produto_variacao_criar", { id: ficha.id, atual: varAtual.texto, nova: varNova.texto })
+        if (!r.ok) {
+            (r.campo === "atual" ? varAtual : varNova).erro = r.erro
+            return
+        }
+        painelVariacao.close()
+        janela.avisar("“" + r.dados.variacao + "” criado com código " + r.dados.codigo + ". Estoque começa em zero.", "ok")
+        produtoId = ficha.id
+        carregar()
+    }
+    function abrirOutro(id) {
+        if (id === ficha.id)
+            return
+        if (alterado) {
+            janela.avisar("Salve as alterações antes de trocar de tamanho ou cor.", "info")
+            return
+        }
+        produtoId = id
+        carregar()
     }
 
     function salvar() {
@@ -133,7 +226,7 @@ FocusScope {
                 sugestoes = s.dados
             preencher(r.dados)
             produtoId = r.dados.id
-            janela.avisar(eraNova ? "Peça cadastrada." : "Alterações salvas.", "ok")
+            janela.avisar(eraNova ? (servico ? "Serviço cadastrado." : "Peça cadastrada.") : "Alterações salvas.", "ok")
         } else {
             mostrarErro(r.campo, r.erro)
         }
@@ -142,8 +235,11 @@ FocusScope {
     function limparErros() {
         for (const c of [nome, codigo, codigoBarras, codigoOriginal, marca, unidade, categoria, campoCusto,
                          estoqueInicial, estoqueMinimo, local, ncm, cest, anpCodigo, anpDescricao,
-                         peso, descontoMaximo, comissao])
+                         peso, descontoMaximo, comissao, variacao, ofertaPreco, ofertaAte])
             c.erro = ""
+        for (const [c, , , lista] of camposFiscais())
+            if (lista !== "marcar")
+                c.erro = ""
         observacoes.erro = ""
         origem.erro = ""
         csosn.erro = ""
@@ -159,9 +255,21 @@ FocusScope {
             marca: marca, unidade: unidade, categoria: categoria, custo: campoCusto,
             estoqueInicial: estoqueInicial, estoqueMinimo: estoqueMinimo, local: local,
             ncm: ncm, cest: cest, anpCodigo: anpCodigo, anpDescricao: anpDescricao, origem: origem, csosn: csosn,
-            peso: peso, descontoMaximo: descontoMaximo, comissao: comissao, observacoes: observacoes
+            peso: peso, descontoMaximo: descontoMaximo, comissao: comissao, observacoes: observacoes,
+            variacao: variacao, ofertaPreco: ofertaPreco, ofertaAte: ofertaAte
         }
         let alvo = campo ? campos[campo] : null
+        if (campo && campo.startsWith("fiscal.")) {
+            const achado = camposFiscais().find(x => "fiscal." + x[1] === campo)
+            if (achado) {
+                blocoFiscal = achado[2]
+                alvo = achado[0]
+            }
+        }
+        if (campo === "anpCodigo" || campo === "anpDescricao")
+            blocoFiscal = "combustivel"
+        if (campo === "ncm" || campo === "cest" || campo === "origem" || campo === "csosn")
+            blocoFiscal = "icms"
         if (!alvo && campo) {
             const p = campo.match(/^(preco|lucro)(\d)$/)
             const a = campo.match(/^aplicacoes\.(\d+)\.(\w+)$/)
@@ -291,7 +399,7 @@ FocusScope {
         Cabecalho {
             sensivel: true
             textoVoltar: "Peças"
-            titulo: tela.nova ? "Nova peça" : tela.ficha.nome
+            titulo: tela.nova ? (tela.servico ? "Novo serviço" : "Nova peça") : tela.ficha.nome
             subtitulo: {
                 if (!tela.ficha)
                     return ""
@@ -359,14 +467,26 @@ FocusScope {
                     Layout.alignment: Qt.AlignTop
 
                     Faixa {
-                        titulo: "Peça"
+                        titulo: tela.servico ? "Serviço" : "Peça"
                         color: Tema.pergaminho
                         Layout.fillWidth: true
 
+                        Pilulas {
+                            pequenas: true
+                            modelo: [{ id: "produto", nome: "Produto" }, { id: "servico", nome: "Serviço (sem estoque)" }]
+                            atual: tela.tipo
+                            onEscolhido: (id) => {
+                                if (id === tela.tipo)
+                                    return
+                                tela.tipo = id
+                                tela.blocoFiscal = id === "servico" ? "servico" : "icms"
+                                tela.marcarAlterado()
+                            }
+                        }
                         Campo {
                             id: nome
-                            rotulo: "Nome da peça"
-                            dica: "Ex.: Rolamento roda traseira"
+                            rotulo: tela.servico ? "Nome do serviço" : "Nome da peça"
+                            dica: tela.servico ? "Ex.: Troca de óleo, instalação" : "Ex.: Rolamento roda traseira"
                             maximo: 120
                             tamanhoFonte: 18
                             altura: 44
@@ -385,6 +505,7 @@ FocusScope {
                             }
                             Campo {
                                 id: codigoBarras
+                                visible: !tela.servico
                                 rotulo: "Código de barras"
                                 dica: "Passe o leitor aqui"
                                 maximo: 14
@@ -393,6 +514,7 @@ FocusScope {
                             }
                             Campo {
                                 id: codigoOriginal
+                                visible: !tela.servico
                                 rotulo: "Código original / fabricante"
                                 maximo: 60
                                 Layout.fillWidth: true
@@ -404,6 +526,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Campo {
                                 id: marca
+                                visible: !tela.servico
                                 rotulo: "Marca"
                                 maximo: 60
                                 sugestoes: tela.sugestoes.marcas
@@ -416,8 +539,10 @@ FocusScope {
                                 maximo: 6
                                 maiusculas: true
                                 sugestoes: tela.sugestoes.unidades
-                                Layout.preferredWidth: 104
+                                acao: "baixo"
+                                Layout.preferredWidth: 120
                                 onEditado: tela.marcarAlterado()
+                                onAcionado: escolherUnidade.abrirCom(unidade.texto)
                             }
                             Campo {
                                 id: categoria
@@ -429,6 +554,74 @@ FocusScope {
                                 onEditado: tela.marcarAlterado()
                             }
                         }
+                        // Tamanhos e cores: cada um é um produto, com estoque próprio.
+                        Linha {
+                            visible: tela.temGrade
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Campo {
+                                id: variacao
+                                rotulo: "Tamanho ou cor deste"
+                                maximo: 30
+                                Layout.preferredWidth: 170
+                                onEditado: tela.marcarAlterado()
+                            }
+                            ColumnLayout {
+                                spacing: 5
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
+                                Rotulo { text: "Na grade (toque para abrir)" }
+                                Flow {
+                                    spacing: 6
+                                    Layout.fillWidth: true
+                                    Repeater {
+                                        model: tela.temGrade ? tela.ficha.gradeItens : []
+                                        delegate: Rectangle {
+                                            id: itemGrade
+                                            required property var modelData
+                                            readonly property bool este: modelData.id === tela.ficha.id
+                                            radius: height / 2
+                                            height: Tema.celular ? 42 : 36
+                                            width: textoGrade.implicitWidth + 28
+                                            color: este ? Tema.tinta : sobreGrade.hovered ? Qt.rgba(0.16, 0.15, 0.13, 0.07) : Tema.papel
+                                            Text {
+                                                id: textoGrade
+                                                anchors.centerIn: parent
+                                                text: "<b>" + (itemGrade.modelData.variacao || "—") + "</b>  " + itemGrade.modelData.estoque + " " + tela.ficha.unidade
+                                                textFormat: Text.StyledText
+                                                color: itemGrade.este ? Tema.claro : Tema.tinta
+                                                font.family: Tema.texto
+                                                font.pixelSize: 15
+                                            }
+                                            HoverHandler { id: sobreGrade; cursorShape: Qt.PointingHandCursor }
+                                            TapHandler { onTapped: tela.abrirOutro(itemGrade.modelData.id) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Botao {
+                            visible: !tela.nova && !tela.servico
+                            text: tela.temGrade ? "Mais um tamanho ou cor" : "Tem outros tamanhos ou cores?"
+                            icone: "mais"
+                            tipo: "discreto"
+                            Layout.leftMargin: -10
+                            onClicked: {
+                                if (tela.alterado) {
+                                    janela.avisar("Salve as alterações antes.", "info")
+                                    return
+                                }
+                                varAtual.texto = ""
+                                varNova.texto = ""
+                                varAtual.erro = ""
+                                varNova.erro = ""
+                                painelVariacao.open()
+                                if (tela.temGrade)
+                                    varNova.focarSempre()
+                                else
+                                    varAtual.focarSempre()
+                            }
+                        }
                         Marcar {
                             id: ativo
                             visible: !tela.nova
@@ -438,6 +631,7 @@ FocusScope {
                     }
 
                     Faixa {
+                        visible: !tela.servico
                         titulo: "Aplicações"
                         subtitulo: "em quais carros esta peça serve"
                         color: Tema.azul
@@ -485,6 +679,7 @@ FocusScope {
                     }
 
                     Faixa {
+                        visible: !tela.servico
                         titulo: "Equivalências"
                         subtitulo: "a mesma peça em outras marcas"
                         color: Tema.pergaminho
@@ -529,6 +724,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Campo {
                                 id: peso
+                                visible: !tela.servico
                                 rotulo: "Peso"
                                 sufixo: "kg"
                                 numerico: true
@@ -619,9 +815,58 @@ FocusScope {
                             Layout.leftMargin: -10
                             onClicked: tela.mostrarOutros = !tela.mostrarOutros
                         }
+                        Marcar {
+                            id: emOferta
+                            text: "Em oferta"
+                            onToggled: {
+                                tela.marcarAlterado()
+                                if (checked)
+                                    ofertaPreco.focarSempre()
+                            }
+                        }
+                        Linha {
+                            visible: emOferta.checked
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Campo {
+                                id: ofertaPreco
+                                sensivel: false
+                                rotulo: "Preço da oferta"
+                                prefixo: "R$"
+                                numerico: true
+                                maximo: 18
+                                Layout.fillWidth: true
+                                onEditado: tela.marcarAlterado()
+                                onSaiu: tela.formatarCampo(ofertaPreco, "dinheiro")
+                            }
+                            Campo {
+                                id: ofertaAte
+                                rotulo: "Até o dia"
+                                dica: "dd/mm/aaaa"
+                                maximo: 10
+                                numerico: true
+                                Layout.fillWidth: true
+                                onEditado: tela.marcarAlterado()
+                            }
+                        }
+                        Nota {
+                            visible: emOferta.checked
+                            text: tela.ficha && tela.ficha.ofertaPreco !== "" && !tela.ficha.ofertaValendo && !tela.alterado
+                                  ? "Esta oferta já venceu: a venda usa o preço normal."
+                                  : "Na venda, entra no lugar do preço “" + (tela.precos.length > 0 ? tela.precos[0].nome : "") + "”. Sem data, vale até desmarcar."
+                            color: tela.ficha && tela.ficha.ofertaPreco !== "" && !tela.ficha.ofertaValendo && !tela.alterado ? Tema.vermelho : Tema.tintaSuave
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
+                        Marcar {
+                            id: precoAberto
+                            text: "Preço digitado na hora da venda"
+                            onToggled: tela.marcarAlterado()
+                        }
                     }
 
                     Faixa {
+                        visible: !tela.servico
                         titulo: "Estoque"
                         color: Tema.azul
                         Layout.fillWidth: true
@@ -712,107 +957,275 @@ FocusScope {
 
                     Faixa {
                         titulo: "Fiscal"
+                        subtitulo: "para a nota"
                         color: Tema.pergaminho
                         Layout.fillWidth: true
 
-                        Linha {
+                        Pilulas {
+                            pequenas: true
+                            modelo: tela.servico
+                                    ? [{ id: "servico", nome: "ISS" }, { id: "pis", nome: "PIS/Cofins" }]
+                                    : [{ id: "icms", nome: "ICMS" }, { id: "pis", nome: "PIS/Cofins" }, { id: "ipi", nome: "IPI" },
+                                       { id: "combustivel", nome: "Combustível" }]
+                            atual: tela.blocoFiscal
+                            onEscolhido: (id) => tela.blocoFiscal = id
+                        }
+
+                        // ---------- ICMS ----------
+                        ColumnLayout {
+                            visible: tela.blocoFiscal === "icms"
                             spacing: 12
                             Layout.fillWidth: true
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                Campo {
+                                    id: ncm
+                                    rotulo: "NCM"
+                                    dica: "8 números"
+                                    maximo: 12
+                                    Layout.fillWidth: true
+                                    onEditado: tela.marcarAlterado()
+                                }
+                                Campo {
+                                    id: cest
+                                    rotulo: "CEST"
+                                    dica: "7 números"
+                                    maximo: 10
+                                    Layout.fillWidth: true
+                                    onEditado: {
+                                        tela.marcarAlterado()
+                                        esperaFiscal.restart()
+                                    }
+                                }
+                            }
+                            Selecao {
+                                id: origem
+                                rotulo: "Origem da mercadoria"
+                                modelo: tela.sugestoes.origens
+                                Layout.fillWidth: true
+                                onEscolhido: tela.marcarAlterado()
+                            }
+                            Selecao {
+                                id: csosn
+                                rotulo: "CSOSN na venda"
+                                modelo: (tela.sugestoes.csosns || []).map(c => c.texto)
+                                Layout.fillWidth: true
+                                onEscolhido: {
+                                    tela.marcarAlterado()
+                                    tela.atualizarTributacao()
+                                }
+                            }
+                            Rectangle {
+                                visible: !!tela.tributacao
+                                radius: Tema.raioCampo
+                                color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.rosa : Qt.rgba(1, 1, 1, 0.35)
+                                implicitHeight: textoFiscal.implicitHeight + 22
+                                Layout.fillWidth: true
+                                ColumnLayout {
+                                    id: textoFiscal
+                                    x: 12
+                                    y: 11
+                                    width: parent.width - 24
+                                    spacing: 4
+                                    Text {
+                                        text: tela.tributacao ? "Venda no estado: CSOSN " + tela.tributacao.csosn + " · CFOP " + tela.tributacao.cfop
+                                                                + (tela.tributacao.automatico ? "  (automático)" : "") : ""
+                                        color: Tema.tinta
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 15
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Nota {
+                                        text: tela.tributacao ? (tela.tributacao.alerta !== "" ? tela.tributacao.alerta : tela.tributacao.explicacao) : ""
+                                        color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.vermelho : Tema.tintaSuave
+                                        font.pixelSize: 14
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---------- PIS e Cofins ----------
+                        ColumnLayout {
+                            visible: tela.blocoFiscal === "pis"
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Marcar {
+                                id: monofasico
+                                text: "PIS/Cofins monofásico (a receita sai separada no Simples)"
+                                Layout.fillWidth: true
+                                onToggled: tela.marcarAlterado()
+                            }
+                            Selecao {
+                                id: pisCst
+                                rotulo: "CST do PIS"
+                                modelo: (tela.sugestoes.cstPis || []).map(c => c.texto)
+                                Layout.fillWidth: true
+                                onEscolhido: tela.marcarAlterado()
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: pisAliquota; rotulo: "PIS"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: pisValor; rotulo: "PIS por unidade"; prefixo: "R$"; tipoNumero: "dinheiro"; onEditado: tela.marcarAlterado() }
+                            }
+                            Selecao {
+                                id: cofinsCst
+                                rotulo: "CST da Cofins"
+                                modelo: (tela.sugestoes.cstPis || []).map(c => c.texto)
+                                Layout.fillWidth: true
+                                onEscolhido: tela.marcarAlterado()
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: cofinsAliquota; rotulo: "Cofins"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: cofinsValor; rotulo: "Cofins por unidade"; prefixo: "R$"; tipoNumero: "dinheiro"; onEditado: tela.marcarAlterado() }
+                            }
+                            CampoNumero { id: naturezaReceita; rotulo: "Natureza da receita"; dica: "3 números"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                        }
+
+                        // ---------- IPI ----------
+                        ColumnLayout {
+                            visible: tela.blocoFiscal === "ipi"
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Nota {
+                                text: "Só para quem fabrica ou importa. Loja de revenda normalmente deixa “Sem IPI”."
+                                font.pixelSize: 14
+                                Layout.fillWidth: true
+                            }
+                            Selecao {
+                                id: ipiCst
+                                rotulo: "CST do IPI"
+                                modelo: (tela.sugestoes.cstIpi || []).map(c => c.texto)
+                                Layout.fillWidth: true
+                                onEscolhido: tela.marcarAlterado()
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: ipiAliquota; rotulo: "IPI"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: ipiValor; rotulo: "Ou valor fixo"; prefixo: "R$"; tipoNumero: "dinheiro"; onEditado: tela.marcarAlterado() }
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: ipiEnquadramento; rotulo: "Enquadramento"; dica: "Ex.: 999"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: ipiSelo; rotulo: "Selo"; numerico: false; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: ipiSeloQuantidade; rotulo: "Qtde. de selos"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                            }
+                        }
+
+                        // ---------- Combustível e lubrificante ----------
+                        ColumnLayout {
+                            visible: tela.blocoFiscal === "combustivel"
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Nota {
+                                text: "Para óleo, lubrificante e combustível (a nota pede o código ANP)."
+                                font.pixelSize: 14
+                                Layout.fillWidth: true
+                            }
                             Campo {
-                                id: ncm
-                                rotulo: "NCM"
-                                dica: "8 números"
+                                id: anpCodigo
+                                rotulo: "Código ANP"
+                                dica: "9 números"
                                 maximo: 12
                                 Layout.fillWidth: true
                                 onEditado: tela.marcarAlterado()
                             }
                             Campo {
-                                id: cest
-                                rotulo: "CEST"
-                                dica: "7 números"
-                                maximo: 10
+                                id: anpDescricao
+                                rotulo: "Descrição conforme a ANP"
+                                maximo: 95
                                 Layout.fillWidth: true
-                                onEditado: {
-                                    tela.marcarAlterado()
-                                    esperaFiscal.restart()
-                                }
+                                onEditado: tela.marcarAlterado()
                             }
-                        }
-                        Selecao {
-                            id: origem
-                            rotulo: "Origem da mercadoria"
-                            modelo: tela.sugestoes.origens
-                            Layout.fillWidth: true
-                            onEscolhido: tela.marcarAlterado()
-                        }
-                        Marcar {
-                            id: lubrificante
-                            text: "Óleo, lubrificante ou combustível (pede código ANP)"
-                            Layout.fillWidth: true
-                            onToggled: tela.marcarAlterado()
-                        }
-                        Campo {
-                            id: anpCodigo
-                            visible: lubrificante.checked
-                            rotulo: "Código ANP"
-                            dica: "9 números"
-                            maximo: 12
-                            Layout.fillWidth: true
-                            onEditado: tela.marcarAlterado()
-                        }
-                        Campo {
-                            id: anpDescricao
-                            visible: lubrificante.checked
-                            rotulo: "Descrição conforme a ANP"
-                            maximo: 95
-                            Layout.fillWidth: true
-                            onEditado: tela.marcarAlterado()
-                        }
-                        Selecao {
-                            id: csosn
-                            rotulo: "CSOSN na venda"
-                            modelo: (tela.sugestoes.csosns || []).map(c => c.texto)
-                            Layout.fillWidth: true
-                            onEscolhido: {
-                                tela.marcarAlterado()
-                                tela.atualizarTributacao()
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: glp; rotulo: "GLP"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: gnNacional; rotulo: "Gás natural"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: gnImportado; rotulo: "GN importado"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
                             }
-                        }
-                        Rectangle {
-                            visible: !!tela.tributacao
-                            radius: Tema.raioCampo
-                            color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.rosa : Qt.rgba(1, 1, 1, 0.35)
-                            implicitHeight: textoFiscal.implicitHeight + 22
-                            Layout.fillWidth: true
-                            ColumnLayout {
-                                id: textoFiscal
-                                x: 12
-                                y: 11
-                                width: parent.width - 24
-                                spacing: 4
-                                Text {
-                                    text: tela.tributacao ? "Venda no estado: CSOSN " + tela.tributacao.csosn + " · CFOP " + tela.tributacao.cfop
-                                                            + (tela.tributacao.automatico ? "  (automático)" : "") : ""
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.weight: Font.DemiBold
-                                    font.pixelSize: 15
-                                    wrapMode: Text.WordWrap
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: valorPartida; rotulo: "Valor da partida"; prefixo: "R$"; tipoNumero: "dinheiro"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: codif; rotulo: "CODIF"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: temperatura; rotulo: "Qtde. temp. ambiente"; tipoNumero: "quantidade"; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: biodiesel; rotulo: "Mistura de biodiesel"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: cide; rotulo: "CIDE por unidade"; prefixo: "R$"; tipoNumero: "dinheiro"; onEditado: tela.marcarAlterado() }
+                                Item { Layout.fillWidth: true }
+                            }
+                            Rotulo { text: "Origem do combustível"; Layout.topMargin: 2 }
+                            Marcar {
+                                id: importado
+                                text: "Importado"
+                                onToggled: tela.marcarAlterado()
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                Selecao {
+                                    id: ufOrigem
+                                    rotulo: "Estado de origem"
+                                    modelo: tela.ufsComVazio().map(u => u === "" ? "—" : u)
                                     Layout.fillWidth: true
+                                    onEscolhido: tela.marcarAlterado()
                                 }
-                                Nota {
-                                    text: tela.tributacao ? (tela.tributacao.alerta !== "" ? tela.tributacao.alerta : tela.tributacao.explicacao) : ""
-                                    color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.vermelho : Tema.tintaSuave
-                                    font.pixelSize: 14
-                                    Layout.fillWidth: true
-                                }
+                                CampoNumero { id: percentualOrigem; rotulo: "Percentual originário"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
                             }
                         }
-                        Marcar {
-                            id: monofasico
-                            text: "PIS/Cofins monofásico (a receita sai separada no Simples)"
+
+                        // ---------- Serviço (ISS) ----------
+                        ColumnLayout {
+                            visible: tela.blocoFiscal === "servico"
+                            spacing: 12
                             Layout.fillWidth: true
-                            onToggled: tela.marcarAlterado()
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: servicoCodigo; rotulo: "Código do serviço"; dica: "Ex.: 14.01"; numerico: false; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: cnae; rotulo: "CNAE"; dica: "7 números"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: issAliquota; rotulo: "ISS"; sufixo: "%"; tipoNumero: "percentual"; onEditado: tela.marcarAlterado() }
+                            }
+                            Linha {
+                                spacing: 12
+                                Layout.fillWidth: true
+                                CampoNumero { id: codigoMunicipio; rotulo: "Código no município"; numerico: false; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                                CampoNumero { id: nbs; rotulo: "NBS"; dica: "9 números"; tipoNumero: ""; onEditado: tela.marcarAlterado() }
+                            }
+                            Selecao {
+                                id: issExigibilidade
+                                rotulo: "Exigibilidade do ISS"
+                                modelo: (tela.sugestoes.exigibilidades || []).map(c => c.texto)
+                                Layout.fillWidth: true
+                                onEscolhido: tela.marcarAlterado()
+                            }
+                            Marcar {
+                                id: incentivoFiscal
+                                text: "Incentivo fiscal"
+                                onToggled: tela.marcarAlterado()
+                            }
+                            AreaTexto {
+                                id: servicoDescricao
+                                rotulo: "Descrição do serviço (vai na nota)"
+                                Layout.fillWidth: true
+                                onEditado: tela.marcarAlterado()
+                            }
                         }
                     }
 
@@ -851,6 +1264,56 @@ FocusScope {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    EscolherUnidade {
+        id: escolherUnidade
+        onEscolhida: (sigla) => {
+            if (unidade.texto !== sigla) {
+                unidade.texto = sigla
+                tela.marcarAlterado()
+            }
+            unidade.erro = ""
+            const s = Api.chamar("produto_sugestoes")
+            if (s.ok)
+                tela.sugestoes = s.dados
+        }
+    }
+
+    Painel {
+        id: painelVariacao
+        contentItem: ColumnLayout {
+            spacing: 14
+            Titulo { text: "Tamanho ou cor"; font.pixelSize: 30 }
+            Nota {
+                text: "O novo copia tudo deste (preços, fiscal, carros), com código próprio e estoque zero. Cada tamanho ou cor tem o seu estoque."
+                font.pixelSize: 15
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: varAtual
+                visible: !tela.temGrade
+                rotulo: "Este produto é"
+                dica: "Ex.: P, 38, Azul M"
+                maximo: 30
+                Layout.fillWidth: true
+                onConfirmado: varNova.focarSempre()
+            }
+            Campo {
+                id: varNova
+                rotulo: "Novo tamanho ou cor"
+                dica: "Ex.: M, 40, Azul G"
+                maximo: 30
+                Layout.fillWidth: true
+                onConfirmado: tela.criarVariacao()
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                Botao { text: "Voltar"; tipo: "discreto"; onClicked: painelVariacao.close() }
+                Botao { text: "Criar"; icone: "mais"; onClicked: tela.criarVariacao() }
             }
         }
     }

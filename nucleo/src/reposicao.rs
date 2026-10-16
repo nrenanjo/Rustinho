@@ -188,7 +188,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
            LEFT JOIN vend ON vend.produto_id = p.id
            LEFT JOIN enc ON enc.produto_id = p.id
            LEFT JOIN est ON est.produto_id = p.id
-          WHERE p.ativo = 1 AND (COALESCE(vend.q, 0) > 0 OR p.estoque_minimo > 0)",
+          WHERE p.ativo = 1 AND p.tipo <> 'servico' AND (COALESCE(vend.q, 0) > 0 OR p.estoque_minimo > 0)",
     )?;
     struct Bruto {
         id: String,
@@ -601,7 +601,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
            JOIN est ON est.produto_id = p.id AND est.q > 0
            LEFT JOIN uv ON uv.produto_id = p.id
            LEFT JOIN ue ON ue.produto_id = p.id
-          WHERE p.ativo = 1 AND MAX(COALESCE(uv.u, ''), COALESCE(ue.u, ''), p.criado_em) < ?1",
+          WHERE p.ativo = 1 AND p.tipo <> 'servico' AND MAX(COALESCE(uv.u, ''), COALESCE(ue.u, ''), p.criado_em) < ?1",
     )?;
     let filtro = texto::normalizar(busca);
     let mut itens = Vec::new();

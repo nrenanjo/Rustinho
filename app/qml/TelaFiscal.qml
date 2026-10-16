@@ -154,7 +154,7 @@ FocusScope {
         spacing: 12
 
         Cabecalho {
-            titulo: "Conferência fiscal"
+            titulo: "Fiscal"
             subtitulo: !tela.dados ? "" : (tela.dados.uf ? "Loja em " + tela.dados.uf : "Estado da loja não informado")
                                          + " · regras válidas em " + tela.dados.data.split("-").reverse().join("/")
                                          + " · " + tela.dados.totalPecas + " peças ativas"
@@ -182,6 +182,42 @@ FocusScope {
                     spacing: 14
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
+
+                    Faixa {
+                        titulo: "Notas fiscais"
+                        subtitulo: "emitir pelo Rustinho"
+                        color: Tema.verde
+                        corTitulo: Tema.verdeEscuro
+                        Layout.fillWidth: true
+                        Flow {
+                            spacing: 8
+                            Layout.fillWidth: true
+                            Repeater {
+                                model: ["NF-e · modelo 55", "NFC-e · cupom, modelo 65", "NFS-e · serviço", "MDF-e · transporte"]
+                                delegate: Rectangle {
+                                    required property string modelData
+                                    radius: height / 2
+                                    color: Tema.papel
+                                    implicitWidth: textoNota.implicitWidth + 30
+                                    implicitHeight: textoNota.implicitHeight + 16
+                                    Text {
+                                        id: textoNota
+                                        anchors.centerIn: parent
+                                        text: "<b>" + parent.modelData + "</b>  · em breve"
+                                        textFormat: Text.StyledText
+                                        color: Tema.tinta
+                                        font.family: Tema.texto
+                                        font.pixelSize: 15
+                                    }
+                                }
+                            }
+                        }
+                        Nota {
+                            text: "Por enquanto, as notas continuam no sistema de hoje. O cadastro das peças já guarda o que a nota vai pedir (NCM, CEST, CSOSN, PIS/Cofins, IPI, ANP e ISS)."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
+                    }
 
                     Faixa {
                         visible: !!tela.dados && tela.dados.uf === ""

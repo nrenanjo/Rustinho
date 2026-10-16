@@ -41,6 +41,7 @@ pub mod reposicao;
 pub mod sync;
 pub mod tempo;
 pub mod texto;
+pub mod unidades;
 pub mod usuarios;
 pub mod vendas;
 

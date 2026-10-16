@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::{auditoria, config, estoque, fiscal, gtin, numeros, tempo, texto};
+use crate::{auditoria, config, estoque, fiscal, gtin, numeros, tempo, texto, unidades};
 
 /// Origem da mercadoria (tabela da NF-e), na ordem do código.
 pub const ORIGENS: &[&str] = &[
@@ -17,11 +17,6 @@ pub const ORIGENS: &[&str] = &[
     "6 · Estrangeira, importação direta, sem similar nacional",
     "7 · Estrangeira, comprada no Brasil, sem similar nacional",
     "8 · Nacional, mais de 70% importado",
-];
-
-/// Unidades mais comuns (a tela também aceita outras).
-pub const UNIDADES: &[&str] = &[
-    "UN", "PC", "JG", "KIT", "PAR", "CJ", "CX", "L", "ML", "KG", "G", "M", "FR", "GL", "RL",
 ];
 
 const MAX_PRECO: i64 = 10_000_000_000; // R$ 100 milhões
@@ -67,8 +62,28 @@ pub struct ProdutoFicha {
     pub observacoes: String,
     pub aplicacoes: Vec<AplicacaoFicha>,
     pub equivalentes: Vec<EquivalenteFicha>,
+    /// "produto" ou "servico" (serviço não tem estoque).
+    pub tipo: String,
+    /// Preço de oferta (troca o da primeira tabela) e até quando ("dd/mm/aaaa").
+    pub oferta_preco: String,
+    pub oferta_ate: String,
+    /// O preço é digitado na hora da venda.
+    pub preco_aberto: bool,
+    /// Tamanho ou cor deste produto ("P", "Azul M"). Vazio = sem grade.
+    pub variacao: String,
+    /// IPI, PIS/Cofins, combustível e serviço (para a nota).
+    pub fiscal: fiscal::FiscalPeca,
 
     // Só leitura (a tela não manda de volta).
+    /// Os outros tamanhos e cores deste produto (com ele mesmo).
+    #[serde(skip_deserializing)]
+    pub grade_itens: Vec<ItemGrade>,
+    /// A oferta vale hoje.
+    #[serde(skip_deserializing)]
+    pub oferta_valendo: bool,
+    /// A unidade vende quebrado (KG, LT, MT...).
+    #[serde(skip_deserializing)]
+    pub fracionada: bool,
     #[serde(skip_deserializing)]
     pub estoque: String,
     #[serde(skip_deserializing)]
@@ -89,6 +104,16 @@ pub struct ProdutoFicha {
     /// Fornecedores e códigos que eles usam para esta peça.
     #[serde(skip_deserializing)]
     pub fornecedores: Vec<CodigoFornecedor>,
+}
+
+/// Um tamanho ou cor da grade.
+#[derive(Debug, Default, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemGrade {
+    pub id: String,
+    pub variacao: String,
+    pub codigo: String,
+    pub estoque: String,
 }
 
 /// Código que um fornecedor usa para a peça.
@@ -162,6 +187,14 @@ struct Dados {
     observacoes: String,
     aplicacoes: Vec<Aplicacao>,
     equivalentes: Vec<Equivalente>,
+    tipo: String,
+    oferta_preco: Option<i64>,
+    /// "AAAA-MM-DD" ou vazio (sem prazo).
+    oferta_ate: String,
+    preco_aberto: bool,
+    variacao: String,
+    grade: String,
+    fiscal: fiscal::FiscalPeca,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -204,11 +237,13 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
     let codigo = texto_curto(&f.codigo, "codigo", "Código", 60)?;
     let marca = texto_curto(&f.marca, "marca", "Marca", 60)?;
 
-    let unidade = texto::limpar(&f.unidade).to_uppercase();
-    let unidade = if unidade.is_empty() { "UN".to_string() } else { unidade };
-    if texto::tamanho(&unidade) > 6 || unidade.contains(' ') {
-        return Err(Erro::campo("unidade", "A unidade tem no máximo 6 letras, sem espaço (ex.: UN, PC, JG)."));
+    let unidade = if f.unidade.trim().is_empty() { "UN".to_string() } else { unidades::conferir_sigla(&f.unidade)? };
+    let tipo = match f.tipo.trim() {
+        "" | "produto" => "produto",
+        "servico" => "servico",
+        _ => return Err(Erro::campo("tipo", "Escolha se é produto ou serviço.")),
     }
+    .to_string();
 
     let codigo_barras: String = f.codigo_barras.chars().filter(|c| !c.is_whitespace()).collect();
     if !codigo_barras.is_empty() {
@@ -260,8 +295,8 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
                 return Err(Erro::campo(&campo_preco, "Preço alto demais."));
             }
             Some(valor) => precos.push((tabela, valor, numeros::lucro_por_preco(custo, valor))),
-            None if tabela == 1 => {
-                return Err(Erro::campo("preco1", "Informe o preço de revenda."));
+            None if tabela == 1 && !f.preco_aberto => {
+                return Err(Erro::campo("preco1", "Informe o preço de revenda (ou marque \"preço na hora da venda\")."));
             }
             None => {}
         }
@@ -319,6 +354,22 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
     };
     let desconto_maximo = percentual(&f.desconto_maximo, "descontoMaximo")?;
     let comissao = percentual(&f.comissao, "comissao")?;
+
+    let oferta_preco = numeros::ler_dinheiro(&f.oferta_preco).map_err(|m| Erro::campo("ofertaPreco", m))?;
+    if let Some(v) = oferta_preco {
+        if v <= 0 {
+            return Err(Erro::campo("ofertaPreco", "O preço da oferta precisa ser maior que zero."));
+        }
+        if v > MAX_PRECO {
+            return Err(Erro::campo("ofertaPreco", "Preço alto demais."));
+        }
+    }
+    let oferta_ate = fiscal::ler_data(&f.oferta_ate).map_err(|m| Erro::campo("ofertaAte", m))?.unwrap_or_default();
+    if oferta_preco.is_none() && !oferta_ate.is_empty() {
+        return Err(Erro::campo("ofertaPreco", "Informe o preço da oferta."));
+    }
+    let variacao = texto_curto(&f.variacao, "variacao", "Tamanho ou cor", 30)?;
+    let fiscal_peca = f.fiscal.conferir()?;
 
     let ano_atual = tempo::ano_atual();
     let mut aplicacoes = Vec::new();
@@ -408,8 +459,15 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
             observacoes,
             aplicacoes,
             equivalentes,
+            tipo,
+            oferta_preco,
+            oferta_ate,
+            preco_aberto: f.preco_aberto,
+            variacao,
+            grade: String::new(),
+            fiscal: fiscal_peca,
         },
-        estoque_inicial,
+        if f.tipo == "servico" { 0 } else { estoque_inicial },
     ))
 }
 
@@ -434,6 +492,16 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     let antes = if novo { None } else { Some(carregar(conn, &ficha.id)?) };
     let (mut dados, estoque_inicial) = validar(ficha)?;
     let id = if novo { tempo::novo_id() } else { ficha.id.clone() };
+    if let Some(a) = &antes {
+        dados.grade = a.grade.clone();
+        if !a.grade.is_empty() && dados.variacao.is_empty() {
+            return Err(Erro::campo("variacao", "Diga o tamanho ou a cor deste produto."));
+        }
+        if a.tipo != "servico" && dados.tipo == "servico" && estoque::saldo(conn, &id)? != 0 {
+            return Err(Erro::campo("tipo", "Serviço não tem estoque. Zere o estoque antes de mudar para serviço."));
+        }
+    }
+    unidades::garantir(conn, &dados.unidade)?;
 
     if dados.codigo.is_empty() {
         if novo {
@@ -493,9 +561,10 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
             "INSERT INTO produto (id, codigo, nome, marca, unidade, codigo_barras, codigo_original, categoria,
                                   custo, estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao,
                                   peso_gramas, desconto_maximo, comissao, observacoes, ativo, busca, codigos,
-                                  criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, csosn, monofasico)
+                                  criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, csosn, monofasico,
+                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28)",
+                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)",
             params![
                 id,
                 dados.codigo,
@@ -525,6 +594,13 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dispositivo,
                 dados.csosn,
                 dados.monofasico,
+                dados.tipo,
+                dados.oferta_preco,
+                dados.oferta_ate,
+                dados.preco_aberto,
+                dados.variacao,
+                dados.grade,
+                dados.fiscal.para_json(),
             ],
         )?;
     } else {
@@ -534,7 +610,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                     ncm = ?12, cest = ?13, origem = ?14, anp_codigo = ?15, anp_descricao = ?16,
                     peso_gramas = ?17, desconto_maximo = ?18, comissao = ?19, observacoes = ?20, ativo = ?21,
                     busca = ?22, codigos = ?23, atualizado_em = ?24, atualizado_por = ?25, dispositivo = ?26,
-                    csosn = ?27, monofasico = ?28
+                    csosn = ?27, monofasico = ?28, tipo = ?29, oferta_preco = ?30, oferta_ate = ?31,
+                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35
               WHERE id = ?1",
             params![
                 id,
@@ -565,6 +642,13 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dispositivo,
                 dados.csosn,
                 dados.monofasico,
+                dados.tipo,
+                dados.oferta_preco,
+                dados.oferta_ate,
+                dados.preco_aberto,
+                dados.variacao,
+                dados.grade,
+                dados.fiscal.para_json(),
             ],
         )?;
         conn.execute("DELETE FROM produto_preco WHERE produto_id = ?1", [&id])?;
@@ -614,7 +698,8 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
         .query_row(
             "SELECT codigo, nome, marca, unidade, codigo_barras, codigo_original, categoria, ativo, custo,
                     estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao, peso_gramas,
-                    desconto_maximo, comissao, observacoes, csosn, monofasico
+                    desconto_maximo, comissao, observacoes, csosn, monofasico,
+                    tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal
                FROM produto WHERE id = ?1",
             [id],
             |l| {
@@ -641,6 +726,13 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
                     observacoes: l.get(19)?,
                     csosn: l.get(20)?,
                     monofasico: l.get(21)?,
+                    tipo: l.get(22)?,
+                    oferta_preco: l.get(23)?,
+                    oferta_ate: l.get(24)?,
+                    preco_aberto: l.get(25)?,
+                    variacao: l.get(26)?,
+                    grade: l.get(27)?,
+                    fiscal: fiscal::FiscalPeca::de_json(&l.get::<_, String>(28)?),
                     ..Default::default()
                 })
             },
@@ -695,6 +787,9 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
     )?;
     let saldo = estoque::saldo(conn, id)?;
+    let hoje = fiscal::hoje(conn)?;
+    let grade_itens = if d.grade.is_empty() { Vec::new() } else { itens_grade(conn, &d.grade)? };
+    let fracionada = unidades::fracionada(conn, &d.unidade)?;
     let tributacao = fiscal::tributacao(conn, &fiscal::uf_loja(conn)?, &d.cest, &d.csosn, &fiscal::hoje(conn)?)?;
     let mut consulta = conn.prepare_cached(
         "SELECT p.nome, f.codigo, f.fator FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
@@ -778,7 +873,90 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         historico: auditoria::historico(conn, "produto", id, 30)?,
         tributacao: Some(tributacao),
         fornecedores,
+        oferta_valendo: oferta_vale(d.oferta_preco, &d.oferta_ate, &hoje),
+        oferta_preco: d.oferta_preco.map(numeros::escrever_dinheiro).unwrap_or_default(),
+        oferta_ate: if d.oferta_ate.is_empty() { String::new() } else { fiscal::data_br(&d.oferta_ate) },
+        preco_aberto: d.preco_aberto,
+        tipo: d.tipo,
+        variacao: d.variacao,
+        fiscal: d.fiscal,
+        grade_itens,
+        fracionada,
     })
+}
+
+/// A oferta vale nesta data ("AAAA-MM-DD")?
+pub fn oferta_vale(preco: Option<i64>, ate: &str, hoje: &str) -> bool {
+    preco.is_some() && (ate.is_empty() || ate >= hoje)
+}
+
+/// Preço da primeira tabela já com a oferta (SQL, para a peça `p`).
+pub const SQL_PRECO_1: &str = "COALESCE(CASE WHEN p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime'))
+                                    THEN p.oferta_preco END,
+                               (SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = 1))";
+
+/// A oferta vale hoje (SQL, para a peça `p`).
+pub const SQL_EM_OFERTA: &str = "(p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime')))";
+
+fn itens_grade(conn: &Connection, grade: &str) -> Resultado<Vec<ItemGrade>> {
+    let mut c = conn.prepare_cached(
+        "SELECT id, variacao, codigo FROM produto WHERE grade = ?1 ORDER BY criado_em, rowid",
+    )?;
+    let lista: Vec<(String, String, String)> =
+        c.query_map([grade], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
+    lista
+        .into_iter()
+        .map(|(id, variacao, codigo)| {
+            Ok(ItemGrade { estoque: numeros::escrever_quantidade(estoque::saldo(conn, &id)?), id, variacao, codigo })
+        })
+        .collect()
+}
+
+/// Cria mais um tamanho ou cor a partir deste produto: copia tudo (preços,
+/// fiscal, carros) com código novo e estoque zero. `atual` = o tamanho ou cor
+/// deste, se ainda não tiver. Devolve o id do novo.
+pub fn criar_variacao(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, atual: &str, nova: &str) -> Resultado<String> {
+    let mut base = ficha(conn, id)?;
+    let nova = texto_curto(nova, "nova", "Tamanho ou cor", 30)?;
+    if nova.is_empty() {
+        return Err(Erro::campo("nova", "Diga o novo tamanho ou cor (ex.: M, Azul G)."));
+    }
+    if base.variacao.is_empty() {
+        let atual = texto_curto(atual, "atual", "Tamanho ou cor", 30)?;
+        if atual.is_empty() {
+            return Err(Erro::campo("atual", "Diga o tamanho ou a cor deste produto (ex.: P)."));
+        }
+        base.variacao = atual;
+        base.nome = format!("{} {}", base.nome, base.variacao).chars().take(120).collect();
+        salvar(conn, dispositivo, usuario_id, &base)?;
+    }
+    let grade: String = conn.query_row("SELECT grade FROM produto WHERE id = ?1", [id], |l| l.get(0))?;
+    let grade = if grade.is_empty() { id.to_string() } else { grade };
+    conn.execute("UPDATE produto SET grade = ?1 WHERE id = ?2 AND grade = ''", params![grade, id])?;
+    let repetida: bool = conn
+        .query_row(
+            "SELECT 1 FROM produto WHERE grade = ?1 AND normalizar(variacao) = normalizar(?2)",
+            params![grade, nova],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if repetida {
+        return Err(Erro::campo("nova", format!("Já existe \"{nova}\" neste produto.")));
+    }
+    // O nome sem o tamanho/cor deste, mais o novo.
+    let sufixo = format!(" {}", base.variacao);
+    let raiz = base.nome.strip_suffix(&sufixo).unwrap_or(&base.nome).to_string();
+    let mut novo = base;
+    novo.id = String::new();
+    novo.codigo = String::new();
+    novo.codigo_barras = String::new();
+    novo.estoque_inicial = String::new();
+    novo.nome = format!("{raiz} {nova}").chars().take(120).collect();
+    novo.variacao = nova;
+    let novo_id = salvar(conn, dispositivo, usuario_id, &novo)?;
+    conn.execute("UPDATE produto SET grade = ?1 WHERE id = ?2", params![grade, novo_id])?;
+    Ok(novo_id)
 }
 
 /// Ficha em branco para cadastrar uma peça nova.
@@ -795,6 +973,7 @@ pub fn ficha_nova(conn: &Connection) -> Resultado<ProdutoFicha> {
     Ok(ProdutoFicha {
         codigo: proximo_codigo(conn)?,
         unidade: "UN".into(),
+        tipo: "produto".into(),
         ativo: true,
         precos,
         estoque: "0".into(),
@@ -855,12 +1034,9 @@ pub fn sugestoes(conn: &Connection) -> Resultado<Sugestoes> {
         let linhas = consulta.query_map([], |l| l.get(0))?;
         Ok(linhas.collect::<Result<_, _>>()?)
     };
-    let mut unidades: Vec<String> = UNIDADES.iter().map(|u| u.to_string()).collect();
-    for u in valores("SELECT DISTINCT unidade FROM produto ORDER BY unidade")? {
-        if !unidades.contains(&u) {
-            unidades.push(u);
-        }
-    }
+    let unidades = valores(
+        "SELECT u.sigla FROM unidade u ORDER BY (SELECT COUNT(*) FROM produto p WHERE p.unidade = u.sigla) DESC, u.sigla",
+    )?;
     Ok(Sugestoes {
         marcas: valores(
             "SELECT marca FROM (SELECT marca FROM produto UNION ALL SELECT marca FROM produto_equivalente)
@@ -900,6 +1076,7 @@ fn texto_busca(d: &Dados) -> (String, String) {
         d.codigo_original.clone(),
         d.categoria.clone(),
         d.local.clone(),
+        d.variacao.clone(),
     ];
     for a in &d.aplicacoes {
         partes.push(a.montadora.clone());
@@ -979,6 +1156,16 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
     campo("Peso (kg)", quantidade(a.peso_gramas), quantidade(b.peso_gramas));
     campo("Desconto máximo (%)", pct(a.desconto_maximo), pct(b.desconto_maximo));
     campo("Comissão (%)", pct(a.comissao), pct(b.comissao));
+    let tipo = |t: &str| if t == "servico" { "serviço".to_string() } else { "produto".to_string() };
+    campo("Tipo", tipo(&a.tipo), tipo(&b.tipo));
+    let oferta = |d: &Dados| match d.oferta_preco {
+        Some(p) if d.oferta_ate.is_empty() => numeros::escrever_dinheiro(p),
+        Some(p) => format!("{} até {}", numeros::escrever_dinheiro(p), fiscal::data_br(&d.oferta_ate)),
+        None => String::new(),
+    };
+    campo("Oferta", oferta(a), oferta(b));
+    campo("Preço na hora da venda", mono(a.preco_aberto), mono(b.preco_aberto));
+    campo("Tamanho ou cor", a.variacao.clone(), b.variacao.clone());
     if a.observacoes != b.observacoes {
         v.push("Observações alteradas".into());
     }
@@ -999,6 +1186,7 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
     if a.ativo != b.ativo {
         v.push(if b.ativo { "Peça reativada".into() } else { "Peça desativada".into() });
     }
+    v.extend(a.fiscal.diferencas(&b.fiscal));
     // Se só o percentual mudou por causa do custo, o preço já aparece acima.
     v
 }

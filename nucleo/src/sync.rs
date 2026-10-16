@@ -45,6 +45,7 @@ pub const TABELAS: &[&str] = &[
     "usuario",
     "tabela_preco",
     "regra_st",
+    "unidade",
     "produto",
     "produto_preco",
     "produto_aplicacao",

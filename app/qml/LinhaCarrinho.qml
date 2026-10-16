@@ -69,7 +69,7 @@ Rectangle {
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                     TapHandler { onTapped: linha.abrirPeca() }
-                    HoverHandler { cursorShape: linha.item.servico ? Qt.ArrowCursor : Qt.PointingHandCursor }
+                    HoverHandler { cursorShape: linha.item.produtoId ? Qt.PointingHandCursor : Qt.ArrowCursor }
                 }
                 Flow {
                     spacing: 8
@@ -92,7 +92,7 @@ Rectangle {
                             id: textoEstoque
                             anchors.centerIn: parent
                             readonly property bool semNada: (linha.item.estoque || "0") === "0" || (linha.item.estoque || "").startsWith("-")
-                            text: linha.item.servico ? "serviço (mão de obra)"
+                            text: linha.item.servico ? (linha.item.produtoId ? "serviço" : "serviço (mão de obra)")
                                   : linha.item.faltaEstoque && semNada ? "sem estoque"
                                   : (linha.item.faltaEstoque ? "só " : "") + (linha.item.estoque || "0") + " " + (linha.item.unidade || "") + " no estoque"
                             color: linha.item.servico ? Tema.verdeEscuro : linha.item.faltaEstoque ? Tema.vermelho : Tema.tintaSuave

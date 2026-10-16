@@ -28,6 +28,10 @@ pub struct ProdutoResumo {
     /// Estoque no mínimo ou abaixo dele (ou zerado).
     pub estoque_baixo: bool,
     pub ativo: bool,
+    /// O preço é o da oferta.
+    pub oferta: bool,
+    /// Serviço (não tem estoque).
+    pub servico: bool,
     /// Resumo dos carros: "VW Gol G5 1.6 2009–2013 · Fiat Uno 1.0 · +2".
     pub aplicacoes: String,
     /// Achou pelo código exato (código, barras, original, similar ou do fornecedor).
@@ -71,18 +75,20 @@ pub fn buscar(conn: &Connection, texto_busca: &str, incluir_inativas: bool, limi
     let palavras: Vec<&str> = tokens.iter().filter(|t| como_ano(t).is_none()).copied().collect();
     let compacto = texto::compactar(texto_busca);
 
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT p.id, p.codigo, p.nome, p.marca, p.unidade, p.codigo_original, p.local, p.estoque_minimo, p.ativo,
-                (SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = 1),
+                {},
                 (SELECT COALESCE(SUM(quantidade), 0) FROM estoque_movimento WHERE produto_id = p.id),
                 CASE WHEN ?1 <> '' AND (instr(p.codigos, ' ' || ?1 || ' ') > 0
                                OR EXISTS (SELECT 1 FROM produto_fornecedor f
                                            WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)) THEN 0
                      WHEN ?2 <> '' AND p.busca LIKE ?2 || '%' THEN 1
                      ELSE 2 END AS ordem,
-                p.busca, p.codigo_barras
+                p.busca, p.codigo_barras, {}, p.tipo = 'servico'
            FROM produto p
           WHERE 1 = 1",
+        crate::produtos::SQL_PRECO_1,
+        crate::produtos::SQL_EM_OFERTA
     );
     let mut valores: Vec<Value> = vec![
         Value::Text(compacto.clone()),
@@ -143,6 +149,8 @@ pub fn buscar(conn: &Connection, texto_busca: &str, incluir_inativas: bool, limi
         let ordem: i64 = l.get(11)?;
         let busca: String = l.get(12)?;
         let codigo_barras: String = l.get(13)?;
+        let oferta: bool = l.get(14)?;
+        let servico: bool = l.get(15)?;
         Ok((
             ProdutoResumo {
                 id: l.get(0)?,
@@ -156,7 +164,9 @@ pub fn buscar(conn: &Connection, texto_busca: &str, incluir_inativas: bool, limi
                 preco: preco.map(numeros::escrever_dinheiro).unwrap_or_default(),
                 estoque: numeros::escrever_quantidade(saldo),
                 estoque_valor: saldo,
-                estoque_baixo: saldo <= 0 || saldo <= estoque_minimo,
+                estoque_baixo: !servico && (saldo <= 0 || saldo <= estoque_minimo),
+                oferta,
+                servico,
                 aplicacoes: String::new(),
                 codigo_exato: ordem == 0 && !compacto.is_empty(),
                 achou: String::new(),

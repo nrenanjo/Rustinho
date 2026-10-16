@@ -257,15 +257,24 @@ struct Peca {
     comissao: Option<i64>,
     preco: Option<i64>,
     estoque: i64,
+    servico: bool,
+    preco_aberto: bool,
+    fracionada: bool,
 }
 
 fn peca(conn: &Connection, id: &str, tabela: i64) -> Resultado<Option<Peca>> {
+    let sql = format!(
+        "SELECT codigo, nome, marca, unidade, custo, local, desconto_maximo, comissao,
+                CASE WHEN ?2 = 1 THEN {p1}
+                     ELSE COALESCE((SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = ?2), {p1}) END,
+                tipo = 'servico', preco_aberto,
+                COALESCE((SELECT fracionada FROM unidade WHERE sigla = p.unidade), 0)
+           FROM produto p WHERE id = ?1",
+        p1 = crate::produtos::SQL_PRECO_1
+    );
     let p = conn
         .query_row(
-            "SELECT codigo, nome, marca, unidade, custo, local, desconto_maximo, comissao,
-                    COALESCE((SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = ?2),
-                             (SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = 1))
-               FROM produto p WHERE id = ?1",
+            &sql,
             params![id, tabela],
             |l| {
                 Ok(Peca {
@@ -279,13 +288,16 @@ fn peca(conn: &Connection, id: &str, tabela: i64) -> Resultado<Option<Peca>> {
                     comissao: l.get(7)?,
                     preco: l.get(8)?,
                     estoque: 0,
+                    servico: l.get(9)?,
+                    preco_aberto: l.get(10)?,
+                    fracionada: l.get(11)?,
                 })
             },
         )
         .optional()?;
     Ok(match p {
         Some(mut p) => {
-            p.estoque = estoque::saldo(conn, id)?;
+            p.estoque = if p.servico { i64::MAX / 4 } else { estoque::saldo(conn, id)? };
             Some(p)
         }
         None => None,
@@ -302,8 +314,8 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     // Quanto de cada peça já está no carrinho (a mesma peça pode aparecer 2 vezes).
     let mut usado: Vec<(String, i64)> = Vec::new();
     for it in &e.itens {
-        let servico = it.produto_id.is_empty();
-        let p = if servico {
+        let avulso = it.produto_id.is_empty();
+        let p = if avulso {
             // Serviço: sem estoque nem custo; o preço é o digitado.
             Peca {
                 codigo: String::new(),
@@ -316,12 +328,16 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
                 comissao: None,
                 preco: None,
                 estoque: i64::MAX / 4,
+                servico: true,
+                preco_aberto: true,
+                fracionada: true,
             }
         } else {
             peca(conn, &it.produto_id, tabela)?.ok_or_else(|| Erro::NaoEncontrado("Peça".into()))?
         };
+        let servico = p.servico;
         let mut erro = String::new();
-        if servico && p.nome.is_empty() {
+        if avulso && p.nome.is_empty() {
             erro = "Diga qual foi o serviço.".into();
         }
         let quantidade = match numeros::ler_quantidade(&it.quantidade) {
@@ -335,7 +351,10 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
                 0
             }
         };
-        let preco_tabela = p.preco.unwrap_or(0);
+        if quantidade % 1000 != 0 && !p.fracionada && erro.is_empty() {
+            erro = format!("{} é vendido inteiro (sem vírgula).", p.unidade);
+        }
+        let preco_tabela = if p.preco_aberto { 0 } else { p.preco.unwrap_or(0) };
         let preco = match numeros::ler_dinheiro(&it.preco) {
             Ok(Some(v)) if v > 0 => v,
             Ok(Some(_)) => {
@@ -349,7 +368,13 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             }
         };
         if preco <= 0 && erro.is_empty() {
-            erro = if servico { "Digite o valor do serviço.".into() } else { "Esta peça não tem preço. Digite o preço.".into() };
+            erro = if servico {
+                "Digite o valor do serviço.".into()
+            } else if p.preco_aberto {
+                "Digite o preço desta peça.".into()
+            } else {
+                "Esta peça não tem preço. Digite o preço.".into()
+            };
         }
         let bruto = multiplicar(quantidade, preco);
         let desconto = match ler_desconto(&it.desconto, bruto) {
@@ -652,7 +677,7 @@ fn gravar_itens(conn: &Connection, venda_id: &str, c: &Calculo) -> Resultado<()>
                 tempo::novo_id(),
                 venda_id,
                 ordem as i64,
-                if it.servico { None } else { Some(&it.produto_id) },
+                if it.produto_id.is_empty() { None } else { Some(&it.produto_id) },
                 it.codigo,
                 it.descricao,
                 it.unidade,
@@ -1183,5 +1208,73 @@ mod testes {
         assert_eq!(ficha(c, &o).unwrap().situacao, "vendido");
         assert!(orcamento_para_venda(c, &o).is_err());
         assert_eq!(listar(c, "orcamento", "zé", "", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn servico_oferta_preco_aberto_e_unidade_inteira() {
+        let (b, u, p1, _) = base();
+        let c = &b.conn;
+        // Oferta vale para a primeira tabela; vencida, volta o preço normal.
+        let mut f = produtos::ficha(c, &p1).unwrap();
+        f.oferta_preco = "70".into();
+        produtos::salvar(c, &b.dispositivo, &u, &f).unwrap();
+        let e = VendaEntrada { itens: vec![item(&p1, "1")], tabela: 1, ..Default::default() };
+        assert_eq!(calcular(c, &e).unwrap().total, "70,00");
+        f.oferta_ate = "01/01/2020".into();
+        produtos::salvar(c, &b.dispositivo, &u, &f).unwrap();
+        assert_eq!(calcular(c, &e).unwrap().total, "80,00");
+        // UN não vende quebrado; KG vende.
+        let e = VendaEntrada { itens: vec![item(&p1, "1,5")], tabela: 1, ..Default::default() };
+        assert!(!calcular(c, &e).unwrap().itens[0].erro.is_empty());
+        let mut f = produtos::ficha(c, &p1).unwrap();
+        f.unidade = "KG".into();
+        produtos::salvar(c, &b.dispositivo, &u, &f).unwrap();
+        assert!(calcular(c, &e).unwrap().itens[0].erro.is_empty());
+
+        // Serviço cadastrado: sem estoque, preço digitado na hora.
+        let mut s = produtos::ficha_nova(c).unwrap();
+        s.nome = "Instalação".into();
+        s.tipo = "servico".into();
+        s.preco_aberto = true;
+        s.estoque_inicial = "3".into();
+        s.precos.iter_mut().for_each(|p| p.lucro = String::new());
+        let sid = produtos::salvar(c, &b.dispositivo, &u, &s).unwrap();
+        assert_eq!(estoque::saldo(c, &sid).unwrap(), 0);
+        let mut e = VendaEntrada { itens: vec![item(&sid, "1")], tabela: 1, ..Default::default() };
+        let r = calcular(c, &e).unwrap();
+        assert!(r.itens[0].servico && !r.itens[0].falta_estoque);
+        assert!(!r.itens[0].erro.is_empty(), "precisa digitar o preço");
+        e.itens[0].preco = "50".into();
+        assert!(calcular(c, &e).unwrap().itens[0].erro.is_empty());
+        estoque::lancar(c, &b.dispositivo, Some(&u), &sid, -1000, "venda", "x").unwrap();
+        assert_eq!(estoque::saldo(c, &sid).unwrap(), 0);
+        assert!(estoque::ajustar(c, &b.dispositivo, &u, &sid, "2", "contagem").is_err());
+        // Produto com estoque não vira serviço.
+        let mut f = produtos::ficha(c, &p1).unwrap();
+        f.tipo = "servico".into();
+        assert!(produtos::salvar(c, &b.dispositivo, &u, &f).is_err());
+    }
+
+    #[test]
+    fn tamanhos_e_cores() {
+        let (b, u, p1, _) = base();
+        let c = &b.conn;
+        assert!(produtos::criar_variacao(c, &b.dispositivo, &u, &p1, "", "M").is_err(), "falta o deste");
+        let m = produtos::criar_variacao(c, &b.dispositivo, &u, &p1, "P", "M").unwrap();
+        let g = produtos::criar_variacao(c, &b.dispositivo, &u, &m, "", "G").unwrap();
+        assert!(produtos::criar_variacao(c, &b.dispositivo, &u, &g, "", "m").is_err(), "repetido");
+        let fp = produtos::ficha(c, &p1).unwrap();
+        let fg = produtos::ficha(c, &g).unwrap();
+        assert_eq!(fp.nome, "Pastilha P");
+        assert_eq!(fg.nome, "Pastilha G");
+        assert_eq!(fg.precos[0].preco, fp.precos[0].preco);
+        assert_eq!(fg.estoque, "0");
+        assert_eq!(fp.estoque, "5");
+        let nomes: Vec<String> = fg.grade_itens.iter().map(|i| i.variacao.clone()).collect();
+        assert_eq!(nomes, ["P", "M", "G"]);
+        // Na grade, o tamanho/cor não pode ficar vazio.
+        let mut f = produtos::ficha(c, &m).unwrap();
+        f.variacao = String::new();
+        assert!(produtos::salvar(c, &b.dispositivo, &u, &f).is_err());
     }
 }

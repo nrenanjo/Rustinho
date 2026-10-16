@@ -16,7 +16,7 @@ use crate::banco::Banco;
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, codigo, devolucoes, etiquetas, importar, cheques, comissoes, compras, config, documento, encomendas, estoque, financeiro, fiscal, impressao, menu,
-    numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, sync, texto, usuarios, vendas,
+    numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho.
@@ -201,8 +201,26 @@ impl Servico {
             }
             "produto_sugestoes" => {
                 let mut v = json!(produtos::sugestoes(&self.banco.conn)?);
-                v["csosns"] = json!(fiscal::CSOSNS.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>());
+                let lista = |l: &[(&str, &str)]| json!(l.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>());
+                v["csosns"] = lista(fiscal::CSOSNS);
+                v["cstIpi"] = lista(fiscal::CST_IPI);
+                v["cstPis"] = lista(fiscal::CST_PIS);
+                v["exigibilidades"] = lista(fiscal::EXIGIBILIDADE_ISS);
+                v["ufs"] = json!(crate::documento::UFS);
                 Ok(v)
+            }
+            "unidades_listar" => Ok(json!(unidades::listar(&self.banco.conn)?)),
+            "unidade_salvar" => {
+                let d: UnidadeEntrada = ler(dados)?;
+                let sigla = unidades::salvar(&self.banco.conn, &d.sigla, &d.descricao, d.fracionada)?;
+                Ok(json!({ "sigla": sigla, "lista": unidades::listar(&self.banco.conn)? }))
+            }
+            "produto_variacao_criar" => {
+                let d: VariacaoEntrada = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let id = produtos::criar_variacao(&tx, &disp, &sessao.usuario_id, &d.id, &d.atual, &d.nova)?;
+                tx.commit()?;
+                Ok(json!(produtos::ficha(&self.banco.conn, &id)?))
             }
             "estoque_ajustar" => {
                 let d: AjusteEstoque = ler(dados)?;
@@ -1284,6 +1302,22 @@ struct BuscaProdutos {
     texto: String,
     inativas: bool,
     limite: Option<i64>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct UnidadeEntrada {
+    sigla: String,
+    descricao: String,
+    fracionada: bool,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct VariacaoEntrada {
+    id: String,
+    atual: String,
+    nova: String,
 }
 
 #[derive(Deserialize, Default)]

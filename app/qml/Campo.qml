@@ -30,12 +30,16 @@ ColumnLayout {
     // Celular: botão de câmera no fim do campo, para ler código de barras.
     property bool camera: false
     readonly property bool comCamera: camera && Tema.celular
+    // Botão com ícone no fim do campo (ex.: "baixo" para abrir uma lista).
+    property string acao: ""
+    readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
 
     signal editado()
     signal confirmado()
     signal saiu()
+    signal acionado()
 
     spacing: 5
     Layout.alignment: Qt.AlignTop
@@ -134,7 +138,7 @@ ColumnLayout {
         leftPadding: (campo.icone !== "" ? 48 : 12) + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
-                      + (campo.comCamera ? 44 : 0)
+                      + (campo.comBotao ? 44 : 0)
         selectByMouse: true
         // Celular: sem "texto previsto" (o teclado manda cada letra direto;
         // evita letras trocadas de lugar). Números quando o campo é de número.
@@ -159,7 +163,7 @@ ColumnLayout {
             anchors.verticalCenter: parent.verticalCenter
         }
         Rectangle {
-            visible: campo.comCamera
+            visible: campo.comBotao
             width: 40
             height: 40
             radius: 20
@@ -169,17 +173,29 @@ ColumnLayout {
             anchors.verticalCenter: parent.verticalCenter
             Icone {
                 anchors.centerIn: parent
-                nome: "camera"
+                nome: campo.comCamera ? "camera" : campo.acao
                 tamanho: 24
                 cor: Tema.tinta
             }
-            TapHandler {
+            // MouseArea (e não TapHandler): fica com o toque só para si, sem o
+            // campo de texto embaixo roubar o toque para abrir o teclado.
+            MouseArea {
                 id: toqueCamera
-                onTapped: ApplicationWindow.window.lerCodigo(codigo => {
-                    entrada.text = codigo
-                    campo.editado()
-                    campo.confirmado()
-                })
+                anchors.fill: parent
+                anchors.margins: -6
+                preventStealing: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (!campo.comCamera) {
+                        campo.acionado()
+                        return
+                    }
+                    ApplicationWindow.window.lerCodigo(codigo => {
+                        entrada.text = codigo
+                        campo.editado()
+                        campo.confirmado()
+                    })
+                }
             }
         }
         Rotulo {

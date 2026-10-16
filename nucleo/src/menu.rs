@@ -41,7 +41,7 @@ pub const FUNCOES: &[Funcao] = &[
     Funcao { id: "compras", titulo: "Compras", descricao: "Notas de entrada pelo XML", etapa: 2 },
     Funcao { id: "estoque", titulo: "Estoque", descricao: "O que comprar, encomendas e parados", etapa: 4 },
     Funcao { id: "fornecedores", titulo: "Fornecedores", descricao: "Distribuidoras e fábricas", etapa: 2 },
-    Funcao { id: "fiscal", titulo: "Conferência fiscal", descricao: "CSOSN, ST e NCM das peças", etapa: 2 },
+    Funcao { id: "fiscal", titulo: "Fiscal", descricao: "Notas fiscais, CSOSN, ST e NCM", etapa: 2 },
     Funcao { id: "financeiro", titulo: "Financeiro", descricao: "A pagar, cheques e fluxo de caixa", etapa: 4 },
     Funcao { id: "oficina", titulo: "Ordem de serviço", descricao: "Oficina: carro, peças e mão de obra", etapa: 4 },
     Funcao { id: "painel", titulo: "Painel", descricao: "Vendas do dia, do mês e do ano", etapa: 4 },

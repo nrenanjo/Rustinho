@@ -2,7 +2,7 @@
 # computador (app/), como biblioteca estática para o CMake do Qt for Android.
 [package]
 name = "rustinho_android"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 authors = ["Renan Galvão"]
 license = "MIT"

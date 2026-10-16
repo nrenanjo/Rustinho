@@ -75,8 +75,10 @@ sleep 4
 tecla KEYCODE_BACK
 foto 30-voltar 3
 guardar antes-da-camera
-# A câmera por último (no emulador, ela mostra uma sala de mentira).
-abrir "TelaVender --camera"
+# A câmera por último (no emulador, ela mostra uma sala de mentira):
+# um toque no botão da câmera, no fim do campo de busca da venda.
+abrir TelaVender
+adb shell input tap 985 414
 foto 15-camera 8
 adb shell pidof $PACOTE > fotos/pid.txt || echo "fechou" > fotos/pid.txt
 adb logcat -d > fotos/logcat.txt

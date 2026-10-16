@@ -31,7 +31,7 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
   6. O custo de cada peça já inclui frete, seguro, IPI e ICMS-ST, menos o desconto (o Simples Nacional não aproveita esses créditos).
   7. **Lançar no estoque** (F2): entra no estoque, o custo é atualizado e, se marcado, o preço de revenda segue o % de lucro de cada peça. Tudo fica no histórico da peça.
   8. A mesma nota não entra duas vezes. Uma compra lançada pode ser **estornada** (as peças saem do estoque).
-- **Conferência fiscal:**
+- **Conferência fiscal** (hoje, Fiscal):
   - Regras de substituição tributária por estado, começo do CEST e período, que o contador pode mudar.
   - Já vem com a regra de São Paulo: autopeças (CEST 01) e pneus (CEST 16) saíram da ST em **01/10/2026** (Portaria SRE 34/2026). Desde então, venda dentro do estado = **CSOSN 102 / CFOP 5102** (antes, 500 / 5405).
   - Lista as peças com CSOSN fixado que não combina com a regra (como as que vêm de outro sistema) e passa todas para **automático** com um clique.
@@ -90,6 +90,18 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 | Android | dentro do app (só ele vê) | dentro do app |
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
+
+### Novo na versão 0.9.1: cadastro para qualquer loja
+
+- **Câmera da venda:** o botão de câmera no fim da busca do Vender (e de Peças) voltou a abrir a câmera no celular.
+- **Unidade de medida:** o botão ao lado da unidade abre a lista pronta (UN, PC, JG, KIT, PAR, CX, PCT, KG, G, LT, ML, MT, CM, M2, M3...), sem repetidas. Dá para criar a sua ali mesmo (ex.: QD, Quadrado de 10x10). Ao importar XML, as repetidas se juntam sozinhas (PCS e PEC viram PC; KGL vira KG; L vira LT; M e MET viram MT).
+- **Venda por KG (ou litro, metro):** as unidades marcadas como "quebrado" aceitam vírgula na venda (`0,350*arame`). As outras vendem só inteiro: o Vender avisa se alguém digitar 1,5 de uma peça.
+- **Serviço:** no cadastro, a pílula **Serviço (sem estoque)**: mão de obra, instalação, frete... Entra na venda pela busca, como uma peça, mas não mexe no estoque nem aparece na reposição.
+- **Oferta:** em Preços, **Em oferta** com o preço e até quando (sem data, vale até desmarcar). Na venda, entra no lugar do preço da primeira tabela; vencida, volta o preço normal. A busca mostra "oferta" ao lado do preço.
+- **Preço na hora da venda:** para o que não tem preço fixo; o Vender pede o preço.
+- **Tamanhos e cores:** em produto já salvo, **Tem outros tamanhos ou cores?** cria o próximo (P, M, G; 38, 40; Azul, Preto) copiando tudo, com código próprio e estoque zero. Na ficha, as pílulas da grade mostram o estoque de cada um; toque para abrir.
+- **Fiscal para a nota, em pílulas:** ICMS (como antes), **PIS/Cofins** (as tabelas de CST completas, alíquota e natureza da receita), **IPI** (CST, alíquota ou valor fixo, enquadramento e selo) e **Combustível** (código ANP, GLP, gás natural, partida, CODIF, biodiesel, CIDE e origem). No serviço, **ISS** (código do serviço, CNAE, NBS, alíquota, exigibilidade e descrição).
+- **Fiscal (no Início):** mostra as notas que o Rustinho vai emitir (NF-e, NFC-e, NFS-e e MDF-e) como "em breve". Por enquanto, as notas continuam no sistema de hoje.
 
 ### Novo na versão 0.9.0: Rustinho no celular (Android)
 

@@ -460,7 +460,7 @@ FocusScope {
                                 onMudou: (campo, valor) => tela.mudarItem(index, campo, valor)
                                 onRemover: tela.removerItem(index)
                                 onSelecionar: tela.itemAtual = index
-                                onAbrirPeca: if (!modelData.servico) tela.janela.abrir("TelaPeca", { produtoId: modelData.produtoId })
+                                onAbrirPeca: if (modelData.produtoId) tela.janela.abrir("TelaPeca", { produtoId: modelData.produtoId })
                                 onEncomendar: tela.alternarEncomenda(index)
                             }
 
@@ -620,7 +620,7 @@ FocusScope {
                                         Text {
                                             id: txtEst
                                             anchors.centerIn: parent
-                                            text: modelData.estoque + " " + modelData.unidade
+                                            text: modelData.servico ? "serviço" : modelData.estoque + " " + modelData.unidade
                                             color: modelData.estoqueBaixo ? (atual ? "#F2B8AE" : Tema.vermelho) : (atual ? Tema.claro : Tema.tinta)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
@@ -628,7 +628,7 @@ FocusScope {
                                         }
                                     }
                                     Text {
-                                        text: modelData.preco ? "R$ " + modelData.preco : "—"
+                                        text: (modelData.oferta ? "oferta  " : "") + (modelData.preco ? "R$ " + modelData.preco : "—")
                                         color: atual ? Tema.claro : Tema.tinta
                                         font.family: Tema.texto
                                         font.weight: Font.Bold

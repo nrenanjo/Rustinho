@@ -2,7 +2,7 @@
 # (.github/workflows/android.yml) roda:
 #   qt-cmake -S android -B build-android && cmake --build build-android --target apk
 cmake_minimum_required(VERSION 3.24)
-project(Rustinho VERSION 0.9.0 LANGUAGES CXX)
+project(Rustinho VERSION 0.9.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

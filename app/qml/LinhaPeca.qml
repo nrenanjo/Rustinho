@@ -44,7 +44,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Text {
-                text: linha.item.preco ? "R$ " + linha.item.preco : "—"
+                text: (linha.item.oferta ? "oferta  " : "") + (linha.item.preco ? "R$ " + linha.item.preco : "—")
                 color: linha.corTexto
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -86,7 +86,7 @@ Rectangle {
                 Text {
                     id: estoqueC
                     anchors.centerIn: parent
-                    text: (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
+                    text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
                     color: linha.item.estoqueBaixo ? (linha.atual ? "#F2B8AE" : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
@@ -174,7 +174,7 @@ Rectangle {
                 Text {
                     id: estoque
                     anchors.centerIn: parent
-                    text: (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
+                    text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
                     color: linha.item.estoqueBaixo ? (linha.atual ? "#F2B8AE" : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
@@ -184,7 +184,7 @@ Rectangle {
         }
 
         Text {
-            text: linha.item.preco ? "R$ " + linha.item.preco : "—"
+            text: (linha.item.oferta ? "oferta  " : "") + (linha.item.preco ? "R$ " + linha.item.preco : "—")
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.Bold

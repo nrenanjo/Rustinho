@@ -876,12 +876,7 @@ fn cadastrar_peca(conn: &Connection, dispositivo: &str, usuario_id: &str, it: &I
     if barras_livre {
         f.codigo_barras = it.gtin.clone();
     }
-    let unidade = it.unidade.trim().to_uppercase();
-    f.unidade = if !unidade.is_empty() && unidade.len() <= 6 && !unidade.contains(' ') && it.fator == 1000 {
-        unidade
-    } else {
-        "UN".into()
-    };
+    f.unidade = if it.fator == 1000 { crate::unidades::de_fora(&it.unidade) } else { "UN".into() };
     if it.ncm.len() == 8 && it.ncm.chars().all(|c| c.is_ascii_digit()) {
         f.ncm = it.ncm.clone();
     }
