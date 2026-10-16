@@ -34,7 +34,7 @@ FocusScope {
         let deOutra = 0
         const erros = []
         for (const arquivo of arquivos) {
-            const r = Api.chamar("compra_importar", { caminho: arquivo.toString() })
+            const r = Api.chamar("compra_importar", { caminho: Api.caminho(arquivo.toString()) })
             if (r.ok) {
                 for (const c of r.dados.compras) {
                     novas.push(c)

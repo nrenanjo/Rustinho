@@ -121,7 +121,7 @@ begin
     Aviso.Font.Color := $003A4494;
     Aviso.Font.Style := [fsBold];
     Aviso.Caption := 'ATENÇÃO: apaga vendas, peças, clientes, caixa e os backups deste computador, para sempre. ' +
-      'Se quiser guardar, faça antes um backup (Configurações → Backup) e copie para um pen drive.';
+      'Se quiser guardar, faça antes um backup (em Configurações, Backup) e copie para um pen drive.';
 
     Continuar := TNewButton.Create(Janela);
     Continuar.Parent := Janela;

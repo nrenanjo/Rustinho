@@ -233,9 +233,9 @@ ColumnLayout {
                     color: Tema.tinta
                     font.family: Tema.titulo
                     font.weight: Font.Bold
-                    font.pixelSize: 28
+                    font.pixelSize: Tema.estreito ? 24 : 28
                     Layout.fillWidth: true
-                    elide: Text.ElideRight
+                    wrapMode: Text.WordWrap
                 }
                 Repeater {
                     model: !secao.b ? [] : [
@@ -339,8 +339,24 @@ ColumnLayout {
         }
     }
 
+    // ---------------- Google Drive (celular: quem manda é o computador) ----------------
+    Faixa {
+        visible: Tema.celular
+        titulo: "Google Drive"
+        subtitulo: "fica com os computadores da loja"
+        color: Tema.azul
+        corTitulo: Tema.azulEscuro
+        Layout.fillWidth: true
+        Nota {
+            text: "No celular, o backup fica guardado no próprio aparelho. Quem manda os backups para o Google Drive é um computador da loja: lá estão todos os dados, os do celular também."
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+    }
+
     // ---------------- Google Drive ----------------
     Faixa {
+        visible: !Tema.celular
         titulo: "Google Drive"
         subtitulo: !secao.b ? "" : secao.b.drive ? "conectado · pasta “Rustinho Backup”" : "cópia fora da loja, de graça"
         color: Tema.azul
@@ -441,7 +457,7 @@ ColumnLayout {
     // ---------------- Onde e quando ----------------
     Faixa {
         titulo: "Onde e quando"
-        subtitulo: "neste computador"
+        subtitulo: Tema.celular ? "neste aparelho" : "neste computador"
         color: Tema.pergaminho
         Layout.fillWidth: true
         Linha {
@@ -455,6 +471,7 @@ ColumnLayout {
             }
             Botao {
                 text: "Escolher…"
+                visible: !Tema.celular
                 tipo: "secundario"
                 Layout.alignment: Qt.AlignBottom
                 onClicked: {
@@ -464,6 +481,7 @@ ColumnLayout {
             }
             Botao {
                 text: "Abrir"
+                visible: !Tema.celular
                 tipo: "secundario"
                 Layout.alignment: Qt.AlignBottom
                 onClicked: Qt.openUrlExternally(Api.url(secao.b ? secao.b.pasta : ""))

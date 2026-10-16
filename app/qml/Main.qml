@@ -165,6 +165,20 @@ ApplicationWindow {
                 janela.voltar()
             evento.accepted = true
         }
+        // Android: o "voltar" do celular faz o mesmo que o Esc. Na primeira
+        // tela, deixa o Android fechar o app (o backup é feito antes).
+        Keys.onBackPressed: (evento) => {
+            const tela = pilha.currentItem
+            if (tela && typeof tela.aoEsc === "function")
+                tela.aoEsc()
+            else if (pilha.depth > 1)
+                janela.voltar()
+            else {
+                evento.accepted = false
+                return
+            }
+            evento.accepted = true
+        }
     }
 
     // F11: ir para a busca de peças de qualquer lugar.

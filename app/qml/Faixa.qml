@@ -37,8 +37,8 @@ Rectangle {
                 visible: faixa.subtitulo !== ""
                 text: faixa.subtitulo
                 font.pixelSize: 14
-                wrapMode: Text.NoWrap
-                elide: Text.ElideRight
+                wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                elide: Tema.estreito ? Text.ElideNone : Text.ElideRight
                 Layout.fillWidth: true
             }
         }

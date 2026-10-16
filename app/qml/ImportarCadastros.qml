@@ -32,7 +32,7 @@ Painel {
     }
 
     function ler(lista) {
-        arquivos = lista.map(u => u.toString())
+        arquivos = lista.map(u => Api.caminho(u.toString()))
         erro = ""
         previa = null
         trabalhando = true
@@ -135,6 +135,7 @@ Painel {
                 }
                 Botao {
                     text: "Escolher uma pasta"
+                    visible: !Tema.celular
                     tipo: "secundario"
                     enabled: !painel.trabalhando
                     onClicked: seletorPasta.open()

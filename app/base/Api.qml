@@ -21,6 +21,9 @@ QtObject {
 
     // Endereço "file://" → caminho do computador.
     function caminho(endereco) {
+        // Android: o arquivo vem como "content://..."; vira uma cópia local.
+        if (String(endereco).startsWith("content:"))
+            return Sistema.arquivoLocal(String(endereco))
         let c = decodeURIComponent(String(endereco || "").replace(/^file:\/\//, ""))
         if (/^\/[A-Za-z]:/.test(c))
             c = c.substring(1)
