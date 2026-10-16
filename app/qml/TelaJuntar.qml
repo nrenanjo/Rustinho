@@ -21,7 +21,7 @@ FocusScope {
         } else {
             const alvo = { caixa: caixa, senha: senha, enderecos: enderecos }[r.campo] || senha
             alvo.erro = r.erro
-            alvo.focar()
+            alvo.focarSempre()
         }
     }
 
@@ -145,5 +145,5 @@ FocusScope {
         }
     }
 
-    StackView.onActivated: senha.focar()
+    StackView.onActivated: senha.focarSempre()
 }

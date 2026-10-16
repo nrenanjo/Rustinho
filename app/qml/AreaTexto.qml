@@ -19,7 +19,8 @@ ColumnLayout {
     Layout.fillWidth: false
 
     function focar() {
-        entrada.forceActiveFocus()
+        if (!Tema.celular || Qt.inputMethod.visible)
+            entrada.forceActiveFocus()
     }
 
     Rotulo {

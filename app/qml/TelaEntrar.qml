@@ -21,7 +21,7 @@ FocusScope {
         escolhido = indice
         senha.erro = ""
         senha.texto = ""
-        senha.focar()
+        senha.focarSempre()
     }
 
     function entrar() {
@@ -32,7 +32,7 @@ FocusScope {
             janela.entrou()
         } else {
             senha.erro = r.erro
-            senha.focar()
+            senha.focarSempre()
         }
     }
 
@@ -146,7 +146,7 @@ FocusScope {
     Component.onCompleted: carregar()
     StackView.onActivated: {
         if (escolhido >= 0)
-            senha.focar()
+            senha.focarSempre()
     }
 
 }

@@ -118,6 +118,6 @@ FocusScope {
 
     StackView.onActivated: {
         buscar()
-        busca.entrada.forceActiveFocus()
+        busca.focarCursor()
     }
 }

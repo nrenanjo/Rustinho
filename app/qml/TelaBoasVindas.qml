@@ -26,7 +26,7 @@ FocusScope {
         const alvo = campos[r.campo]
         if (alvo) {
             alvo.erro = r.erro
-            alvo.focar()
+            alvo.focarSempre()
         } else {
             janela.avisar(r.erro, "erro")
         }
@@ -139,5 +139,5 @@ FocusScope {
         }
     }
 
-    StackView.onActivated: loja.focar()
+    StackView.onActivated: loja.focarSempre()
 }

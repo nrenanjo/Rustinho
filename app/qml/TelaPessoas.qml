@@ -192,7 +192,7 @@ FocusScope {
 
     StackView.onActivated: {
         buscar(true)
-        busca.entrada.forceActiveFocus()
+        busca.focarCursor()
     }
 
     ImportarCadastros {

@@ -42,9 +42,22 @@ ColumnLayout {
     // Por padrão não estica; quem usar decide (Layout.fillWidth: true).
     Layout.fillWidth: false
 
+    // No celular, trocar de tela não abre o teclado sozinho: o cursor só
+    // pula de campo se o teclado já estiver aberto (a pessoa está digitando).
+    function podeFocar() {
+        return !Tema.celular || Qt.inputMethod.visible
+    }
     function focar() {
+        if (podeFocar())
+            focarSempre()
+    }
+    function focarSempre() {
         entrada.forceActiveFocus()
         entrada.selectAll()
+    }
+    function focarCursor() {
+        if (podeFocar())
+            entrada.forceActiveFocus()
     }
 
     function semAcento(s) {
@@ -123,6 +136,11 @@ ColumnLayout {
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
                       + (campo.comCamera ? 44 : 0)
         selectByMouse: true
+        // Celular: sem "texto previsto" (o teclado manda cada letra direto;
+        // evita letras trocadas de lugar). Números quando o campo é de número.
+        inputMethodHints: Qt.ImhNoPredictiveText
+                          | (campo.numerico ? Qt.ImhPreferNumbers : Qt.ImhNone)
+                          | (campo.maiusculas ? Qt.ImhPreferUppercase : Qt.ImhNone)
 
         background: Rectangle {
             radius: Tema.raioCampo

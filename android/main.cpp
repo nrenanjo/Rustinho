@@ -15,14 +15,16 @@ int main(int argc, char* argv[])
     // Só para o teste automático (android/testar.sh): o adb deixa os
     // argumentos (ex.: "--abrir TelaVender") num arquivo da pasta do app.
     std::vector<std::string> extras;
-    {
-        const char* arquivo = "/storage/emulated/0/Android/data/io.github.nrenanjo.rustinho/files/argumentos.txt";
+    for (const char* arquivo : { "/storage/emulated/0/Android/data/io.github.nrenanjo.rustinho/files/argumentos.txt",
+                                 "/data/local/tmp/rustinho-argumentos.txt" }) {
         std::ifstream f(arquivo);
         std::string palavra;
         while (f >> palavra)
             extras.push_back(palavra);
-        if (!extras.empty())
+        if (!extras.empty()) {
             std::remove(arquivo);
+            break;
+        }
     }
     std::vector<char*> argumentos(argv, argv + argc);
     for (auto& e : extras)
@@ -34,6 +36,8 @@ int main(int argc, char* argv[])
     app.setApplicationName(QStringLiteral("rustinho"));
     app.setApplicationDisplayName(QStringLiteral("Rustinho"));
     app.setOrganizationName(QStringLiteral("rustinho"));
+    if (!extras.empty())
+        qInfo("Rustinho: argumentos de teste: %s", qPrintable(QCoreApplication::arguments().join(u' ')));
 
     // Banco, backups e impressões ficam na pasta privada do app.
     const QString dados = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
