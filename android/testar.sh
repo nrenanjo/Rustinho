@@ -3,6 +3,16 @@
 # abre algumas telas e tira fotos. Tudo de mentira (Loja Modelo, senha 1234).
 set -x
 mkdir -p fotos
+# Manda as fotos para o ramo "testes-android" (também no meio, caso o
+# emulador caia antes do fim).
+guardar() {
+    [ -n "$TOKEN_FOTOS" ] || return 0
+    rm -rf /tmp/r && mkdir -p /tmp/r && cp -r fotos /tmp/r/
+    (cd /tmp/r && git init -q -b testes-android && git config user.name montagem &&
+     git config user.email montagem@users.noreply.github.com && git add -A &&
+     git commit -qm "Fotos do teste ${GITHUB_SHA::7} ($1)" &&
+     git push -q -f "https://x-access-token:$TOKEN_FOTOS@github.com/$GITHUB_REPOSITORY.git" testes-android) || true
+}
 APK=$(ls saida/*.apk | head -1)
 adb install -r "$APK" 2>&1 | tee fotos/instalar.txt
 PACOTE=io.github.nrenanjo.rustinho
@@ -48,6 +58,8 @@ for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel
     foto "10-$t" 5
     adb shell input swipe 540 1700 540 700 500
     foto "11-$t-rolada" 3
+    adb logcat -d > fotos/logcat.txt
+    guardar "$t"
 done
 # A câmera (no emulador, ela mostra uma sala de mentira).
 abrir "TelaVender --camera"
@@ -70,4 +82,5 @@ adb logcat -d > fotos/logcat.txt
 grep -i "Rustinho:" fotos/logcat.txt >> fotos/diag.txt
 grep -E "$(adb shell pidof $PACOTE | tr -d '\r')|AndroidRuntime|DEBUG" fotos/logcat.txt | grep -i -E "qml|warn|error|fatal|crash|qt" | tail -150 > fotos/erros.txt
 ls -la fotos
+guardar fim
 exit 0
