@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia)
 
 if(NOT DEFINED RUSTINHO_VERSAO_CODIGO)
     math(EXPR RUSTINHO_VERSAO_CODIGO "${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
@@ -32,7 +32,7 @@ endif()
 cxx_qt_import_crate(
     MANIFEST_PATH rust/Cargo.toml
     CRATES rustinho_android
-    QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick
+    QT_MODULES Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::Multimedia
     QMAKE "${RUSTINHO_QMAKE}"
 )
 cxx_qt_import_qml_module(rustinho_qml
@@ -43,7 +43,7 @@ cxx_qt_import_qml_module(rustinho_qml
 qt_add_executable(Rustinho main.cpp)
 target_link_libraries(Rustinho PRIVATE
     rustinho_qml
-    Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2 Qt::Network
+    Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2 Qt::Network Qt::Multimedia
 )
 
 set_target_properties(Rustinho PROPERTIES
@@ -58,6 +58,7 @@ set_target_properties(Rustinho PROPERTIES
 # As telas ficam dentro do programa (qrc); diz ao Qt onde elas estão para
 # ele levar junto os módulos QML que usam (Controls, Layouts, Dialogs...).
 set_property(TARGET Rustinho APPEND PROPERTY QT_QML_ROOT_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/../app/qml" "${CMAKE_CURRENT_SOURCE_DIR}/../app/base")
+    "${CMAKE_CURRENT_SOURCE_DIR}/../app/qml" "${CMAKE_CURRENT_SOURCE_DIR}/../app/base"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../app/qml_android")
 
 qt_import_qml_plugins(Rustinho)

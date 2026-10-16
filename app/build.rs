@@ -26,6 +26,11 @@ fn main() {
     let mut qml: Vec<QmlFile> = arquivos("qml", &["qml"]).into_iter().map(QmlFile::from).collect();
     qml.push(QmlFile::from("base/Tema.qml").singleton(true));
     qml.push(QmlFile::from("base/Api.qml").singleton(true));
+    // Só no celular: a câmera como leitor de código de barras (QtMultimedia).
+    let android = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android");
+    if android {
+        qml.extend(arquivos("qml_android", &["qml"]).into_iter().map(QmlFile::from));
+    }
 
     let mut construtor = CxxQtBuilder::new_qml_module(QmlModule::new("rustinho").qml_files(qml))
         .qrc_resources(arquivos("fontes", &["ttf", "woff2"]))
@@ -44,6 +49,13 @@ fn main() {
     // No Windows, imprime direto na impressora padrão (QPrinter).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         construtor = construtor.qt_module("PrintSupport");
+    }
+    if android {
+        construtor = construtor.qt_module("Multimedia");
+        // O rcc do computador comprime com zstd, que o Qt for Android não lê.
+        if std::env::var_os("CXX_QT_AUTORCC_OPTIONS").is_none() {
+            std::env::set_var("CXX_QT_AUTORCC_OPTIONS", "--no-zstd");
+        }
     }
     construtor.build();
 

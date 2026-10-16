@@ -27,6 +27,9 @@ ColumnLayout {
     property real altura: 40
     property string icone: ""
     property string atalho: ""
+    // Celular: botão de câmera no fim do campo, para ler código de barras.
+    property bool camera: false
+    readonly property bool comCamera: camera && Tema.celular
     property var sugestoes: []
     property var filtradas: []
 
@@ -118,6 +121,7 @@ ColumnLayout {
         leftPadding: (campo.icone !== "" ? 48 : 12) + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
+                      + (campo.comCamera ? 44 : 0)
         selectByMouse: true
 
         background: Rectangle {
@@ -135,6 +139,30 @@ ColumnLayout {
             anchors.left: parent.left
             anchors.leftMargin: 15
             anchors.verticalCenter: parent.verticalCenter
+        }
+        Rectangle {
+            visible: campo.comCamera
+            width: 40
+            height: 40
+            radius: 20
+            color: toqueCamera.pressed ? Tema.verde : "transparent"
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            Icone {
+                anchors.centerIn: parent
+                nome: "camera"
+                tamanho: 24
+                cor: Tema.tinta
+            }
+            TapHandler {
+                id: toqueCamera
+                onTapped: ApplicationWindow.window.lerCodigo(codigo => {
+                    entrada.text = codigo
+                    campo.editado()
+                    campo.confirmado()
+                })
+            }
         }
         Rotulo {
             id: textoAtalho

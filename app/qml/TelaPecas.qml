@@ -118,6 +118,7 @@ FocusScope {
                 id: busca
                 icone: "busca"
                 atalho: "F11"
+                camera: true
                 altura: 54
                 tamanhoFonte: 18
                 dica: Tema.estreito ? "Código, nome ou carro" : "Qualquer código, nome, modelo, marca ou carro (ex.: 8PK1515, pastilha gol 2015)"

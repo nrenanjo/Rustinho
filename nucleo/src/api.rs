@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use crate::banco::Banco;
 use crate::erro::{Erro, Resultado};
 use crate::{
-    arquivos, auditoria, backup, busca, caixa, devolucoes, etiquetas, importar, cheques, comissoes, compras, config, documento, encomendas, estoque, financeiro, fiscal, impressao, menu,
+    arquivos, auditoria, backup, busca, caixa, codigo, devolucoes, etiquetas, importar, cheques, comissoes, compras, config, documento, encomendas, estoque, financeiro, fiscal, impressao, menu,
     numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, sync, texto, usuarios, vendas,
 };
 
@@ -117,6 +117,11 @@ impl Servico {
                 self.sync_ler()
             }
             "sync_ler" => self.sync_ler(),
+            // Câmera do celular como leitor de código de barras.
+            "codigo_ler_foto" => {
+                let d: Arquivo = ler(dados)?;
+                Ok(json!({ "codigo": codigo::ler_foto(&arquivos::caminho_local(&d.caminho))?.unwrap_or_default() }))
+            }
             // Backup automático e ao fechar: rodam mesmo sem ninguém conectado.
             "backup_automatico" => {
                 if let Some(c) = &self.banco.caminho {

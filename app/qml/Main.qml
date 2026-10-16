@@ -128,6 +128,19 @@ ApplicationWindow {
         aviso.mostrar(texto, tipo)
     }
 
+    // Celular: a câmera lê um código de barras e devolve o texto.
+    function lerCodigo(depois) {
+        if (leitorCodigo.item)
+            leitorCodigo.item.ler(depois)
+        else
+            avisar("A câmera não abriu neste aparelho.", "erro")
+    }
+    Loader {
+        id: leitorCodigo
+        active: Tema.celular
+        source: Tema.celular ? Qt.resolvedUrl("../qml_android/LeitorCamera.qml") : ""
+    }
+
     function confirmar(titulo, mensagem, textoBotao, funcao, tipo) {
         dialogo.perguntar(titulo, mensagem, textoBotao, funcao, tipo)
     }

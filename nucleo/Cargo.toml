@@ -18,3 +18,7 @@ unicode-normalization = "0.1.25"
 uuid = { version = "1.28.0", features = ["v7"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 rars = { version = "0.11", default-features = false }
+rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs"] }
+
+[dev-dependencies]
+rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs", "encoders"] }

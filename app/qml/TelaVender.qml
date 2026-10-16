@@ -407,6 +407,7 @@ FocusScope {
                     id: busca
                     icone: "busca"
                     atalho: "F11"
+                    camera: true
                     altura: 56
                     tamanhoFonte: 20
                     dica: Tema.estreito ? "Código, nome ou carro" : "Passe o leitor ou digite qualquer código, nome, modelo ou carro (3* antes = 3 unidades)"

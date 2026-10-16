@@ -14,6 +14,7 @@ Item {
     implicitHeight: tamanho
 
     readonly property var desenhos: ({
+        "camera": "M 3.5 8 L 7.5 8 L 9 5.5 L 15 5.5 L 16.5 8 L 20.5 8 L 20.5 18.5 L 3.5 18.5 Z M 15.5 13 A 3.5 3.5 0 1 1 8.5 13 A 3.5 3.5 0 1 1 15.5 13",
         "busca": "M 17 10.5 A 6.5 6.5 0 1 1 4 10.5 A 6.5 6.5 0 1 1 17 10.5 M 15.4 15.4 L 20 20",
         "voltar": "M 19 12 L 5 12 M 11 6 L 5 12 L 11 18",
         "mais": "M 12 5 L 12 19 M 5 12 L 19 12",

@@ -12,6 +12,7 @@ pub mod backup;
 pub mod banco;
 pub mod busca;
 pub mod caixa;
+pub mod codigo;
 pub mod cheques;
 pub mod comissoes;
 pub mod compras;

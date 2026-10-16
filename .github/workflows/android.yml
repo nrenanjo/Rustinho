@@ -33,7 +33,7 @@ jobs:
           (
             pip install --quiet aqtinstall &&
             aqt install-qt linux desktop "$QT_VERSAO" linux_gcc_64 -O "$RUNNER_TEMP/qt" &&
-            aqt install-qt linux android "$QT_VERSAO" android_arm64_v8a -O "$RUNNER_TEMP/qt" &&
+            aqt install-qt linux android "$QT_VERSAO" android_arm64_v8a -m qtmultimedia -O "$RUNNER_TEMP/qt" &&
             ls "$RUNNER_TEMP/qt/$QT_VERSAO"
           ) 2>&1 | tee -a registro.txt
       - name: NDK
