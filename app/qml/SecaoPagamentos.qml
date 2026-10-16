@@ -24,7 +24,8 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero {

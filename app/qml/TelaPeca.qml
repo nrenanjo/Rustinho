@@ -346,7 +346,7 @@ FocusScope {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            RowLayout {
+            Linha {
                 id: corpo
                 width: rolagem.width - 14
                 y: 6
@@ -373,7 +373,7 @@ FocusScope {
                             Layout.fillWidth: true
                             onEditado: tela.marcarAlterado()
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -399,7 +399,7 @@ FocusScope {
                                 onEditado: tela.marcarAlterado()
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -444,7 +444,7 @@ FocusScope {
                         Layout.fillWidth: true
 
                         RowLayout {
-                            visible: aplicacoes.count > 0
+                            visible: aplicacoes.count > 0 && !Tema.estreito
                             spacing: 10
                             Layout.fillWidth: true
                             Rotulo { text: "Montadora"; Layout.preferredWidth: 150 }
@@ -524,7 +524,7 @@ FocusScope {
                         color: Tema.azul
                         Layout.fillWidth: true
 
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -658,7 +658,7 @@ FocusScope {
                                 }
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -715,7 +715,7 @@ FocusScope {
                         color: Tema.pergaminho
                         Layout.fillWidth: true
 
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {

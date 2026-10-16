@@ -6,6 +6,7 @@ import rustinho
 // Uma compra: conferir os itens da nota e lançar no estoque.
 FocusScope {
     id: tela
+    property string parte: "itens"
     readonly property var janela: ApplicationWindow.window
     property string compraId: ""
     property var compra: null
@@ -170,6 +171,14 @@ FocusScope {
             }
         }
 
+        // Celular: uma parte de cada vez, escolhida nas pílulas.
+        Pilulas {
+            visible: Tema.estreito && (true)
+            modelo: [{ id: "itens", nome: "Itens" }, { id: "nota", nome: "Nota e custos" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -177,6 +186,7 @@ FocusScope {
 
             // Itens
             ListView {
+                visible: !Tema.estreito || tela.parte === "itens"
                 id: lista
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -233,7 +243,9 @@ FocusScope {
 
             // Resumo
             Flickable {
-                Layout.preferredWidth: 380
+                visible: !Tema.estreito || tela.parte === "nota"
+                Layout.preferredWidth: Tema.estreito ? -1 : 380
+                Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
                 clip: true
                 contentHeight: lado.implicitHeight + 20
@@ -259,6 +271,7 @@ FocusScope {
                             font.weight: Font.Bold
                             font.pixelSize: 26
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
                         }
                         Nota {
                             text: !tela.compra ? "" : [

@@ -104,7 +104,7 @@ FocusScope {
                     Layout.fillWidth: true
                     onConfirmado: senha.focar()
                 }
-                RowLayout {
+                Linha {
                     spacing: 14
                     Layout.fillWidth: true
                     Campo {

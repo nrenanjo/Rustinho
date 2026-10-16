@@ -8,4 +8,6 @@ Text {
     font.weight: Font.DemiBold
     font.pixelSize: 36
     elide: Text.ElideRight
+    // No celular, título comprido quebra a linha em vez de cortar.
+    wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
 }

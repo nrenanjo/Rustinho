@@ -107,7 +107,7 @@ Popup {
                 font.pixelSize: 16
             }
         }
-        RowLayout {
+        Linha {
             Layout.fillWidth: true
             Nota {
                 text: "↑ ↓ para escolher, Enter para confirmar"

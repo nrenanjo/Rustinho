@@ -100,8 +100,10 @@ ApplicationWindow {
         // Para testes: rustinho --abrir TelaPecas
         const args = Qt.application.arguments
         const i = args.indexOf("--abrir")
-        if (i >= 0 && i + 1 < args.length)
-            abrir(args[i + 1], {})
+        if (i >= 0 && i + 1 < args.length) {
+            const j = args.indexOf("--props")
+            abrir(args[i + 1], j >= 0 && j + 1 < args.length ? JSON.parse(args[j + 1]) : {})
+        }
     }
 
     function trocarUsuario() {

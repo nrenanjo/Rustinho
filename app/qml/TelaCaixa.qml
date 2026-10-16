@@ -7,6 +7,7 @@ import rustinho
 // Caixa deste computador: abrir, sangria, suprimento, fechar e as vendas.
 FocusScope {
     id: tela
+    property string parte: "resumo"
     readonly property var janela: ApplicationWindow.window
     property var estado: null
     property var vendas: []
@@ -79,6 +80,14 @@ FocusScope {
             }
         }
 
+        // Celular: resumo e vendas em pílulas (uma parte de cada vez).
+        Pilulas {
+            visible: Tema.estreito && tela.aberto
+            modelo: [{ id: "resumo", nome: "Resumo" }, { id: "vendas", nome: "Vendas (" + tela.vendas.length + ")" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -86,7 +95,9 @@ FocusScope {
 
             // ---------- Resumo ou abertura ----------
             Flickable {
-                Layout.preferredWidth: 400
+                visible: !Tema.estreito || tela.parte === "resumo" || !tela.aberto
+                Layout.fillWidth: Tema.estreito
+                Layout.preferredWidth: Tema.estreito ? -1 : 400
                 Layout.fillHeight: true
                 clip: true
                 contentHeight: lado.implicitHeight + 20
@@ -239,6 +250,7 @@ FocusScope {
 
             // ---------- Vendas deste caixa ----------
             ColumnLayout {
+                visible: !Tema.estreito || (tela.parte === "vendas" && tela.aberto)
                 spacing: 8
                 Layout.fillWidth: true
                 Layout.fillHeight: true

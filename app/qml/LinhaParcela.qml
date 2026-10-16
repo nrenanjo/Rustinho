@@ -21,9 +21,10 @@ Rectangle {
 
     radius: Tema.raioCampo
     color: (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
-    implicitHeight: 58
+    implicitHeight: Tema.estreito ? Math.max(58, conteudoParcela.implicitHeight + 16) : 58
 
     RowLayout {
+        id: conteudoParcela
         anchors.fill: parent
         anchors.leftMargin: 12
         anchors.rightMargin: 14
@@ -48,6 +49,8 @@ Rectangle {
                 font.weight: Font.DemiBold
                 font.pixelSize: 15
                 elide: Text.ElideRight
+                wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: 2
                 Layout.fillWidth: true
                 TapHandler {
                     enabled: !linha.item.manual
@@ -56,7 +59,7 @@ Rectangle {
                 HoverHandler { cursorShape: linha.item.manual ? Qt.ArrowCursor : Qt.PointingHandCursor }
             }
             Text {
-                text: ["vence " + linha.item.vencimento,
+                text: [Tema.estreito ? (linha.nomes[linha.item.situacao] || "") : "", "vence " + linha.item.vencimento,
                        linha.item.pago !== "0,00" ? "pago R$ " + linha.item.pago + " de R$ " + linha.item.valor : "",
                        linha.item.diasAtraso > 0 ? linha.item.diasAtraso + " dias de atraso" : ""].filter(x => !!x).join("  ·  ")
                 color: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
@@ -67,6 +70,7 @@ Rectangle {
             }
         }
         Rectangle {
+            visible: !Tema.estreito
             radius: height / 2
             color: linha.cores[linha.item.situacao] || Tema.papel
             implicitWidth: chip.implicitWidth + 18
@@ -83,7 +87,7 @@ Rectangle {
         }
         ColumnLayout {
             spacing: 0
-            Layout.preferredWidth: 110
+            Layout.preferredWidth: Tema.estreito ? 77 : 110
             Text {
                 text: "R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo)
                 color: Tema.tinta
@@ -102,7 +106,8 @@ Rectangle {
             }
         }
         Item {
-            Layout.preferredWidth: 64
+            visible: !Tema.estreito || (linha.item.manual && !linha.fechada && linha.item.pago === "0,00")
+            Layout.preferredWidth: Tema.estreito ? 50 : 64
             implicitHeight: 32
             Botao {
                 anchors.fill: parent

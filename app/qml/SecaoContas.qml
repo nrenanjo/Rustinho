@@ -142,7 +142,7 @@ FocusScope {
                 anchors.margins: 20
                 spacing: 12
 
-                RowLayout {
+                Linha {
                     spacing: 12
                     Layout.fillWidth: true
                     ColumnLayout {
@@ -311,7 +311,7 @@ FocusScope {
             spacing: 12
             Titulo { text: cadastro.id_ ? "Editar conta" : "Nova conta da loja"; font.pixelSize: 30; Layout.fillWidth: true }
             Campo { id: cNome; rotulo: "Nome"; dica: "Ex.: Sicoob, Banco do Brasil, Cofre"; maximo: 40; Layout.fillWidth: true }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Selecao { id: cTipo; rotulo: "Tipo"; modelo: ["Banco", "Dinheiro (cofre)"]; Layout.fillWidth: true }

@@ -75,7 +75,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 14
             Layout.fillWidth: true
             Pilulas {

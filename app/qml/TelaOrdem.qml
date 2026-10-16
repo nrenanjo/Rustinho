@@ -7,6 +7,7 @@ import rustinho
 // e a mão de obra. Orçamento → Em serviço → Pronta → Entregue (vira venda).
 FocusScope {
     id: tela
+    property string parte: "carro"
     readonly property var janela: ApplicationWindow.window
     property string osId: ""
     property var ficha: null
@@ -293,11 +294,12 @@ FocusScope {
             Layout.fillWidth: true
             radius: Tema.raio
             color: tela.situacao === "pronta" ? Tema.verde : tela.situacao === "cancelada" ? Tema.rosa : Tema.pergaminho
-            implicitHeight: 58
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 16
-                anchors.rightMargin: 10
+            implicitHeight: Tema.estreito ? caminhoOs.implicitHeight + 20 : 58
+            Linha {
+                id: caminhoOs
+                x: 16
+                width: parent.width - 26
+                anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
                 Etapas {
                     visible: tela.situacao !== "cancelada"
@@ -358,6 +360,14 @@ FocusScope {
 
         TextoErro { text: tela.erro; Layout.fillWidth: true }
 
+        // Celular: uma parte de cada vez, escolhida nas pílulas.
+        Pilulas {
+            visible: Tema.estreito && (true)
+            modelo: [{ id: "carro", nome: "Carro e cliente" }, { id: "pecas", nome: "Peças e serviços" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -365,7 +375,9 @@ FocusScope {
 
             // ---------- Carro, cliente e o problema ----------
             Flickable {
-                Layout.preferredWidth: 420
+                visible: !Tema.estreito || tela.parte === "carro"
+                Layout.preferredWidth: Tema.estreito ? -1 : 420
+                Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
                 contentHeight: lado.implicitHeight
                 clip: true
@@ -381,7 +393,7 @@ FocusScope {
                         titulo: "Carro e cliente"
                         color: Tema.pergaminho
                         Layout.fillWidth: true
-                        RowLayout {
+                        Linha {
                             spacing: 10
                             Layout.fillWidth: true
                             Campo {
@@ -487,7 +499,7 @@ FocusScope {
                         color: Tema.verde
                         corTitulo: Tema.verdeEscuro
                         Layout.fillWidth: true
-                        RowLayout {
+                        Linha {
                             spacing: 10
                             Layout.fillWidth: true
                             Selecao {
@@ -550,11 +562,12 @@ FocusScope {
 
             // ---------- Peças e serviços ----------
             ColumnLayout {
+                visible: !Tema.estreito || tela.parte === "pecas"
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                RowLayout {
+                Linha {
                     spacing: 10
                     Layout.fillWidth: true
                     Rotulo { text: "Peças e mão de obra"; Layout.fillWidth: true }

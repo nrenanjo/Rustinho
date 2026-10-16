@@ -23,12 +23,13 @@ Rectangle {
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 18
+        anchors.leftMargin: Tema.estreito ? 12 : 18
         anchors.rightMargin: 14
         spacing: 14
         opacity: linha.item.situacao === "cancelada" ? 0.55 : 1
 
         ColumnLayout {
+            visible: !Tema.estreito
             spacing: 0
             Layout.preferredWidth: 96
             Text {
@@ -60,10 +61,11 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Text {
-                text: [linha.item.fornecedor && linha.item.descricao.indexOf(linha.item.fornecedor) < 0 ? linha.item.fornecedor : "",
+                text: [Tema.estreito ? "vence " + (linha.item.vencimento || "") + (linha.item.diasAtraso > 0 ? " (" + linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " atrasada)" : "") : "",
+                       linha.item.fornecedor && linha.item.descricao.indexOf(linha.item.fornecedor) < 0 ? linha.item.fornecedor : "",
                        linha.item.categoria, linha.item.documento].filter(x => !!x).join("  ·  ")
                 visible: text !== ""
-                color: Tema.tintaSuave
+                color: Tema.estreito && linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 13
@@ -73,6 +75,7 @@ Rectangle {
         }
 
         Chip {
+            visible: !Tema.estreito && texto !== ""
             texto: linha.nomes[linha.item.situacao] || ""
             color: linha.cores[linha.item.situacao] || Tema.papel
             corTexto: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tinta
@@ -80,7 +83,7 @@ Rectangle {
 
         ColumnLayout {
             spacing: 0
-            Layout.preferredWidth: 120
+            Layout.preferredWidth: Tema.estreito ? -1 : 120
             Text {
                 text: "R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo)
                 color: Tema.tinta
@@ -100,7 +103,7 @@ Rectangle {
         }
 
         Item {
-            Layout.preferredWidth: 84
+            Layout.preferredWidth: Tema.estreito ? 64 : 84
             implicitHeight: 36
             Botao {
                 anchors.fill: parent

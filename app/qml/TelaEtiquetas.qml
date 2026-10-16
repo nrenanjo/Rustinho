@@ -8,6 +8,7 @@ import rustinho
 // etiqueta livre).
 FocusScope {
     id: tela
+    property string parte: "pecas"
     readonly property var janela: ApplicationWindow.window
     // Vindo da peça ou da compra.
     property string produtoId: ""
@@ -151,6 +152,14 @@ FocusScope {
             }
         }
 
+        // Celular: peças e folha em pílulas (uma parte de cada vez).
+        Pilulas {
+            visible: Tema.estreito
+            modelo: [{ id: "pecas", nome: "Peças (" + tela.itens.length + ")" }, { id: "folha", nome: "Folha e ajuste" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -158,6 +167,7 @@ FocusScope {
 
             // ---------- Peças ----------
             ColumnLayout {
+                visible: !Tema.estreito || tela.parte === "pecas"
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -166,7 +176,7 @@ FocusScope {
                     icone: "busca"
                     altura: 50
                     tamanhoFonte: 17
-                    dica: "Passe o leitor na peça ou digite o nome e Enter"
+                    dica: Tema.estreito ? "Código ou nome da peça" : "Passe o leitor na peça ou digite o nome e Enter"
                     Layout.fillWidth: true
                     onConfirmado: tela.confirmarBusca()
                 }
@@ -190,9 +200,9 @@ FocusScope {
                         color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 18
+                            anchors.leftMargin: Tema.estreito ? 12 : 18
                             anchors.rightMargin: 10
-                            spacing: 12
+                            spacing: Tema.estreito ? 8 : 12
                             ColumnLayout {
                                 spacing: 0
                                 Layout.fillWidth: true
@@ -226,7 +236,7 @@ FocusScope {
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 16
-                                Layout.preferredWidth: 100
+                                Layout.preferredWidth: Tema.estreito ? -1 : 100
                                 horizontalAlignment: Text.AlignRight
                             }
                             Campo {
@@ -234,7 +244,7 @@ FocusScope {
                                 maximo: 3
                                 sufixo: "etiq."
                                 texto: String(linha.modelData.quantidade)
-                                Layout.preferredWidth: 120
+                                Layout.preferredWidth: Tema.estreito ? 84 : 120
                                 Layout.alignment: Qt.AlignVCenter
                                 onEditado: tela.mudarQuantidade(linha.index, texto)
                             }
@@ -270,7 +280,9 @@ FocusScope {
 
             // ---------- Folha ----------
             Flickable {
-                Layout.preferredWidth: 420
+                visible: !Tema.estreito || tela.parte === "folha"
+                Layout.fillWidth: Tema.estreito
+                Layout.preferredWidth: Tema.estreito ? -1 : 420
                 Layout.fillHeight: true
                 contentHeight: lado.implicitHeight
                 clip: true

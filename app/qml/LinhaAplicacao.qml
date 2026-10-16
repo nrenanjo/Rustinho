@@ -3,8 +3,9 @@ import QtQuick.Layouts
 import rustinho
 
 // Um carro em que a peça serve: montadora, modelo, motor e anos.
-RowLayout {
+Linha {
     id: linha
+    colunasEstreito: 2
     required property int index
     required property string montadora
     required property string modelo
@@ -68,6 +69,7 @@ RowLayout {
         onEditado: linha.mudou("anoFim", texto)
     }
     Botao {
+        property bool manterLargura: true
         tipo: "discreto"
         icone: "lixeira"
         implicitWidth: 40

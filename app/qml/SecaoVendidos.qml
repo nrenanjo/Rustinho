@@ -36,7 +36,8 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero { rotulo: "Vendido"; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
@@ -57,7 +58,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 14
             Layout.fillWidth: true
             Campo {

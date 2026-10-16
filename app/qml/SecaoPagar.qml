@@ -58,7 +58,8 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero {
@@ -84,7 +85,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 14
             Layout.fillWidth: true
             Campo {
@@ -219,7 +220,7 @@ FocusScope {
                 Layout.fillWidth: true
                 onConfirmado: lValor.focar()
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Selecao {
@@ -271,7 +272,7 @@ FocusScope {
                     TapHandler { onTapped: parent.escolher() }
                 }
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Campo {
@@ -426,7 +427,7 @@ FocusScope {
                     }
                 }
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Campo {
@@ -455,7 +456,7 @@ FocusScope {
                     Layout.preferredWidth: 150
                 }
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Selecao {
@@ -605,7 +606,7 @@ FocusScope {
                     }
                 }
             }
-            RowLayout {
+            Linha {
                 Layout.topMargin: 8
                 spacing: 10
                 Layout.fillWidth: true
@@ -745,7 +746,7 @@ FocusScope {
                 model: categorias.itens
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
-                delegate: RowLayout {
+                delegate: Linha {
                     required property var modelData
                     width: listaCat.width - 12
                     spacing: 10
@@ -764,7 +765,7 @@ FocusScope {
                     }
                 }
             }
-            RowLayout {
+            Linha {
                 spacing: 10
                 Layout.fillWidth: true
                 Campo {

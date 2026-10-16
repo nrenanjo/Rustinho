@@ -106,6 +106,7 @@ FocusScope {
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
                         font.pixelSize: 14
+                        visible: !Tema.estreito
                         Layout.preferredWidth: 60
                     }
                     Text {
@@ -171,7 +172,7 @@ FocusScope {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            RowLayout {
+            Linha {
                 id: corpo
                 width: rolagem.width - 14
                 y: 6
@@ -213,6 +214,7 @@ FocusScope {
                             font.weight: Font.Bold
                             font.pixelSize: 28
                             Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
                         }
                         Nota {
                             text: "Em São Paulo, autopeças (CEST 01) e pneus (CEST 16) saíram da substituição tributária em 01/10/2026 "
@@ -302,7 +304,7 @@ FocusScope {
                                 }
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 10
                             Layout.fillWidth: true
                             Botao {

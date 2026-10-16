@@ -302,7 +302,7 @@ ColumnLayout {
                   : "Com senha, ninguém lê o backup se ele for copiado, e ele pode ir para o Google Drive. Sem senha, fica só neste computador."
             Layout.fillWidth: true
         }
-        RowLayout {
+        Linha {
             spacing: 12
             Layout.fillWidth: true
             Campo {
@@ -444,7 +444,7 @@ ColumnLayout {
         subtitulo: "neste computador"
         color: Tema.pergaminho
         Layout.fillWidth: true
-        RowLayout {
+        Linha {
             spacing: 12
             Layout.fillWidth: true
             Campo {
@@ -469,7 +469,7 @@ ColumnLayout {
                 onClicked: Qt.openUrlExternally(Api.url(secao.b ? secao.b.pasta : ""))
             }
         }
-        RowLayout {
+        Linha {
             spacing: 12
             Layout.fillWidth: true
             Campo {
@@ -548,7 +548,7 @@ ColumnLayout {
             radius: Tema.raio
             Layout.fillWidth: true
             implicitHeight: linhaSenha.implicitHeight + 28
-            RowLayout {
+            Linha {
                 id: linhaSenha
                 x: 16; y: 14
                 width: parent.width - 32

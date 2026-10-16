@@ -126,7 +126,7 @@ FocusScope {
                 }
             }
 
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Botao {

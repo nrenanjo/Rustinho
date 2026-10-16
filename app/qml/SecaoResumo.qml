@@ -36,7 +36,8 @@ FocusScope {
             width: rolagem.width - 14
             spacing: 14
 
-            RowLayout {
+            Linha {
+                colunasEstreito: 2
                 spacing: 12
                 Layout.fillWidth: true
                 CartaoNumero {
@@ -78,7 +79,7 @@ FocusScope {
                 }
             }
 
-            RowLayout {
+            Linha {
                 spacing: 14
                 Layout.fillWidth: true
 
@@ -98,7 +99,7 @@ FocusScope {
                         }
                     }
 
-                    RowLayout {
+                    Linha {
                         spacing: 14
                         Layout.fillWidth: true
                         Faixa {

@@ -20,13 +20,13 @@ Rectangle {
 
     radius: Tema.raio
     color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
-    implicitHeight: 62
+    implicitHeight: Tema.estreito ? 66 : 62
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 20
-        spacing: 16
+        anchors.leftMargin: Tema.estreito ? 12 : 18
+        anchors.rightMargin: Tema.estreito ? 12 : 20
+        spacing: Tema.estreito ? 10 : 16
         opacity: linha.apagada ? 0.55 : 1
 
         Text {
@@ -34,10 +34,11 @@ Rectangle {
             color: linha.atual ? Tema.claro : Tema.dourado
             font.family: Tema.titulo
             font.weight: Font.Bold
-            font.pixelSize: 26
-            Layout.preferredWidth: 54
+            font.pixelSize: Tema.estreito ? 22 : 26
+            Layout.preferredWidth: Tema.estreito ? -1 : 54
         }
         Text {
+            visible: !Tema.estreito
             text: Qt.formatDateTime(new Date(linha.item.criadoEm), "dd/MM HH:mm")
             color: linha.corSuave
             font.family: Tema.texto
@@ -57,7 +58,8 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Text {
-                text: [linha.item.itens + (linha.item.itens === 1 ? " item" : " itens"), linha.item.caixa, linha.item.vendedor,
+                text: [Tema.estreito ? Qt.formatDateTime(new Date(linha.item.criadoEm), "dd/MM HH:mm") : "",
+                       linha.item.itens + (linha.item.itens === 1 ? " item" : " itens"), linha.item.caixa, linha.item.vendedor,
                        linha.orcamento ? "válido até " + linha.item.validade : linha.item.formas].filter(x => !!x).join("  ·  ")
                 color: linha.corSuave
                 font.family: Tema.serifa
@@ -90,9 +92,9 @@ Rectangle {
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.Bold
-            font.pixelSize: 18
+            font.pixelSize: Tema.estreito ? 16 : 18
             horizontalAlignment: Text.AlignRight
-            Layout.preferredWidth: 120
+            Layout.preferredWidth: Tema.estreito ? -1 : 120
         }
     }
 

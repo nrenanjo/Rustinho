@@ -112,7 +112,9 @@ FocusScope {
         }
 
         // Números do crediário
-        RowLayout {
+        Linha {
+            visible: !Tema.estreito || !tela.conta
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             Repeater {
@@ -153,11 +155,13 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // Quem deve
+            // Quem deve (no celular, some quando um cliente é aberto)
             ColumnLayout {
+                visible: !Tema.estreito || !tela.conta
                 spacing: 10
-                Layout.preferredWidth: 400
-                Layout.maximumWidth: 460
+                Layout.preferredWidth: Tema.estreito ? -1 : 400
+                Layout.maximumWidth: Tema.estreito ? Number.POSITIVE_INFINITY : 460
+                Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
                 Campo {
                     id: busca
@@ -213,6 +217,7 @@ FocusScope {
 
             // A conta do cliente
             Rectangle {
+                visible: !Tema.estreito || !!tela.conta
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Tema.raio
@@ -239,10 +244,22 @@ FocusScope {
                 ColumnLayout {
                     visible: !!tela.conta
                     anchors.fill: parent
-                    anchors.margins: 20
+                    anchors.margins: Tema.estreito ? 12 : 20
                     spacing: 12
 
-                    RowLayout {
+                    Botao {
+                        visible: Tema.estreito
+                        tipo: "discreto"
+                        icone: "voltar"
+                        text: "Voltar à lista"
+                        Layout.leftMargin: -10
+                        onClicked: {
+                            tela.clienteId = ""
+                            tela.conta = null
+                        }
+                    }
+
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         ColumnLayout {
@@ -276,7 +293,8 @@ FocusScope {
                         }
                     }
 
-                    RowLayout {
+                    Linha {
+                        colunasEstreito: 2
                         spacing: 10
                         Layout.fillWidth: true
                         Marcar {
@@ -479,7 +497,7 @@ FocusScope {
                 font.pixelSize: 15
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Campo {
@@ -617,7 +635,7 @@ FocusScope {
                 font.pixelSize: 16
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 Layout.alignment: Qt.AlignRight
                 Layout.topMargin: 8
                 spacing: 10
@@ -757,7 +775,7 @@ FocusScope {
                 Layout.fillWidth: true
                 onConfirmado: valorDivida.focar()
             }
-            RowLayout {
+            Linha {
                 spacing: 12
                 Layout.fillWidth: true
                 Campo {

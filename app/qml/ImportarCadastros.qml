@@ -123,7 +123,7 @@ Painel {
                 Layout.fillWidth: true
             }
 
-            RowLayout {
+            Linha {
                 spacing: 10
                 Layout.fillWidth: true
                 Botao {
@@ -212,6 +212,7 @@ Painel {
                                     font.weight: Font.Bold
                                     font.pixelSize: 20
                                     Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
                                 }
                                 Text {
                                     text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, "novo", "novos") : "nada novo"

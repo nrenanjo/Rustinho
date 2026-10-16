@@ -8,6 +8,7 @@ import rustinho
 // como o valor volta ao cliente. Com vale-troca dá para trocar na hora.
 FocusScope {
     id: tela
+    property string parte: "pecas"
     readonly property var janela: ApplicationWindow.window
     property string vendaId: ""
     property var venda: null
@@ -142,6 +143,14 @@ FocusScope {
             }
         }
 
+        // Celular: uma parte de cada vez, escolhida nas pílulas.
+        Pilulas {
+            visible: Tema.estreito && (true)
+            modelo: [{ id: "pecas", nome: "Peças" }, { id: "como", nome: "Como devolver" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
@@ -149,6 +158,7 @@ FocusScope {
 
             // ---------- Peças da venda ----------
             ColumnLayout {
+                visible: !Tema.estreito || tela.parte === "pecas"
                 spacing: 8
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -252,7 +262,9 @@ FocusScope {
 
             // ---------- Valor e como devolver ----------
             Flickable {
-                Layout.preferredWidth: 430
+                visible: !Tema.estreito || tela.parte === "como"
+                Layout.preferredWidth: Tema.estreito ? -1 : 430
+                Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
                 contentHeight: lado.implicitHeight
                 clip: true
@@ -393,7 +405,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
 
-                    RowLayout {
+                    Linha {
                         spacing: 10
                         Layout.fillWidth: true
                         Botao {

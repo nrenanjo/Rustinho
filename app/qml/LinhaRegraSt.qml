@@ -39,7 +39,7 @@ Rectangle {
                 id: campoUf
                 rotulo: "UF"
                 modelo: linha.ufs
-                Layout.preferredWidth: 92
+                Layout.preferredWidth: Tema.estreito ? 64 : 92
                 onEscolhido: linha.mudou("uf", linha.ufs[indice])
             }
             Campo {
@@ -47,7 +47,7 @@ Rectangle {
                 rotulo: "CEST"
                 dica: "01"
                 maximo: 9
-                Layout.preferredWidth: 80
+                Layout.preferredWidth: Tema.estreito ? 56 : 80
                 onEditado: linha.mudou("cestInicio", texto)
             }
             Marcar {

@@ -23,9 +23,9 @@ Rectangle {
     RowLayout {
         id: conteudo
         anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 20
-        spacing: 18
+        anchors.leftMargin: Tema.estreito ? 14 : 18
+        anchors.rightMargin: Tema.estreito ? 14 : 20
+        spacing: Tema.estreito ? 10 : 18
         opacity: linha.item.ativo ? 1 : 0.6
 
         Text {
@@ -35,6 +35,7 @@ Rectangle {
             font.weight: Font.DemiBold
             font.pixelSize: 15
             elide: Text.ElideRight
+            visible: !Tema.estreito
             Layout.preferredWidth: 64
         }
 
@@ -46,13 +47,15 @@ Rectangle {
                 color: linha.corTexto
                 font.family: Tema.titulo
                 font.weight: Font.Bold
-                font.pixelSize: 22
+                font.pixelSize: Tema.estreito ? 20 : 22
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
             Text {
                 text: {
                     const partes = [linha.item.fantasia, linha.item.cidade, linha.item.veiculos]
+                    if (Tema.estreito)
+                        partes.unshift(linha.item.telefone)
                     if (linha.item.cliente && linha.item.fornecedor)
                         partes.push("cliente e fornecedor")
                     return partes.filter(x => !!x).join("  ·  ")
@@ -73,6 +76,7 @@ Rectangle {
             font.family: Tema.texto
             font.pixelSize: 15
             elide: Text.ElideRight
+            visible: !Tema.estreito
             Layout.preferredWidth: 190
         }
 
@@ -84,6 +88,7 @@ Rectangle {
             font.pixelSize: 15
             horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
+            visible: !Tema.estreito
             Layout.preferredWidth: 150
         }
     }

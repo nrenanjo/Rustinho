@@ -263,7 +263,7 @@ FocusScope {
                     titulo: "A loja e este computador"
                     color: Tema.pergaminho
                     Layout.fillWidth: true
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -281,7 +281,7 @@ FocusScope {
                             onEditado: tela.alterado = true
                         }
                     }
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -307,7 +307,7 @@ FocusScope {
                             Layout.alignment: Qt.AlignBottom
                         }
                     }
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -333,7 +333,7 @@ FocusScope {
                     titulo: "Minha senha"
                     color: Tema.azul
                     Layout.fillWidth: true
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -378,6 +378,7 @@ FocusScope {
                     Layout.fillWidth: true
 
                     RowLayout {
+                        visible: !Tema.estreito
                         spacing: 12
                         Layout.fillWidth: true
                         Rotulo { text: "Nº"; Layout.preferredWidth: 30 }
@@ -386,7 +387,7 @@ FocusScope {
                     }
                     Repeater {
                         id: tabelas
-                        delegate: RowLayout {
+                        delegate: Linha {
                             id: linhaTabela
                             required property var modelData
                             readonly property int numero: modelData.numero
@@ -446,7 +447,7 @@ FocusScope {
                     titulo: "Orçamento"
                     color: Tema.pergaminho
                     Layout.fillWidth: true
-                    RowLayout {
+                    Linha {
                         spacing: 16
                         Layout.fillWidth: true
                         Campo {
@@ -476,7 +477,7 @@ FocusScope {
                     subtitulo: "sugeridos na hora de receber; quem recebe pode mudar ou dar desconto"
                     color: Tema.azul
                     Layout.fillWidth: true
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -601,7 +602,7 @@ FocusScope {
                         text: "Trocar dados com os outros caixas"
                         Layout.fillWidth: true
                     }
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {

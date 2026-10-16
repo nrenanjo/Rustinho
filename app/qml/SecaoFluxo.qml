@@ -40,7 +40,7 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
             spacing: 12
             Layout.fillWidth: true
             Pilulas {
@@ -69,7 +69,8 @@ FocusScope {
         }
         TextoErro { text: secao.erro }
 
-        RowLayout {
+        Linha {
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero { rotulo: "Entrou"; sensivel: true; valor: secao.fluxo ? secao.fluxo.entradas : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }

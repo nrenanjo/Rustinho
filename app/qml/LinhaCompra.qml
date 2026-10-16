@@ -34,6 +34,7 @@ Rectangle {
             font.family: Tema.texto
             font.weight: Font.DemiBold
             font.pixelSize: 15
+            visible: !Tema.estreito
             Layout.preferredWidth: 96
         }
 
@@ -50,7 +51,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Text {
-                text: "NF " + (linha.item.numero || "—") + "  ·  " + linha.item.itens + (linha.item.itens === 1 ? " item" : " itens")
+                text: (Tema.estreito && linha.item.emissao ? linha.item.emissao + "  ·  " : "") + "NF " + (linha.item.numero || "—") + "  ·  " + linha.item.itens + (linha.item.itens === 1 ? " item" : " itens")
                 color: linha.corSuave
                 font.family: Tema.serifa
                 font.italic: true
@@ -61,7 +62,7 @@ Rectangle {
         }
 
         Item {
-            Layout.preferredWidth: 170
+            Layout.preferredWidth: Tema.estreito ? chip.width : 170
             implicitHeight: chip.height
             Rectangle {
                 id: chip
@@ -104,7 +105,7 @@ Rectangle {
             font.weight: Font.Bold
             font.pixelSize: 19
             horizontalAlignment: Text.AlignRight
-            Layout.preferredWidth: 140
+            Layout.preferredWidth: Tema.estreito ? -1 : 140
         }
     }
 

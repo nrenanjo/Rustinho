@@ -72,7 +72,7 @@ FocusScope {
             onVoltar: tela.janela.voltar()
         }
 
-        RowLayout {
+        Linha {
             spacing: 14
             Layout.fillWidth: true
             Pilulas {

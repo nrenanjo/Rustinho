@@ -7,6 +7,7 @@ import rustinho
 // Uma venda ou orçamento: itens, pagamentos, imprimir, cancelar, vender.
 FocusScope {
     id: tela
+    property string parte: "itens"
     readonly property var janela: ApplicationWindow.window
     property string vendaId: ""
     property var v: null
@@ -99,12 +100,21 @@ FocusScope {
             }
         }
 
+        // Celular: uma parte de cada vez, escolhida nas pílulas.
+        Pilulas {
+            visible: Tema.estreito && (true)
+            modelo: [{ id: "itens", nome: "Peças" }, { id: "total", nome: "Total e pagamento" }]
+            atual: tela.parte
+            onEscolhido: id => tela.parte = id
+        }
+
         RowLayout {
             spacing: 18
             Layout.fillWidth: true
             Layout.fillHeight: true
 
             ListView {
+                visible: !Tema.estreito || tela.parte === "itens"
                 id: lista
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -116,7 +126,7 @@ FocusScope {
                     required property var modelData
                     required property int index
                     width: lista.width
-                    height: 56
+                    height: Tema.estreito ? 62 : 56
                     radius: Tema.raio
                     color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                     RowLayout {
@@ -130,18 +140,34 @@ FocusScope {
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 14
+                            visible: !Tema.estreito
                             Layout.preferredWidth: 60
                         }
-                        Text {
-                            text: modelData.descricao
-                            color: Tema.tinta
-                            font.family: Tema.titulo
-                            font.weight: Font.Bold
-                            font.pixelSize: 20
-                            elide: Text.ElideRight
+                        ColumnLayout {
+                            spacing: 0
                             Layout.fillWidth: true
+                            Text {
+                                text: modelData.descricao
+                                color: Tema.tinta
+                                font.family: Tema.titulo
+                                font.weight: Font.Bold
+                                font.pixelSize: Tema.estreito ? 18 : 20
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                visible: Tema.estreito
+                                text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
+                                      + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
+                                color: Tema.tintaSuave
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
                         }
                         Text {
+                            visible: !Tema.estreito
                             text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
                                   + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
                             color: Tema.tintaSuave
@@ -155,18 +181,20 @@ FocusScope {
                             font.weight: Font.Bold
                             font.pixelSize: 17
                             horizontalAlignment: Text.AlignRight
-                            Layout.preferredWidth: 110
+                            Layout.preferredWidth: Tema.estreito ? -1 : 110
                         }
                     }
                 }
             }
 
             Faixa {
+                visible: !Tema.estreito || tela.parte === "total"
                 titulo: "Total"
                 color: Tema.verde
                 corTitulo: Tema.verdeEscuro
                 espacamento: 8
-                Layout.preferredWidth: 340
+                Layout.preferredWidth: Tema.estreito ? -1 : 340
+                Layout.fillWidth: Tema.estreito
                 Layout.alignment: Qt.AlignTop
                 Repeater {
                     model: !tela.v ? [] : [["Subtotal", "R$ " + tela.v.subtotal],

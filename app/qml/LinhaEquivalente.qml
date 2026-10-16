@@ -28,7 +28,7 @@ RowLayout {
         dica: "Marca (ex.: SKF)"
         maximo: 40
         sugestoes: linha.sugestoesMarca
-        Layout.preferredWidth: 220
+        Layout.preferredWidth: Tema.estreito ? 154 : 220
         onEditado: linha.mudou("marca", texto)
     }
     Campo {

@@ -34,11 +34,19 @@ Rectangle {
         width: parent.width - 28
         spacing: 2
 
-        RowLayout {
-            spacing: 12
+        // Computador: tudo numa linha. Celular: peça e total em cima;
+        // quantidade, preço, desconto e lixeira embaixo.
+        GridLayout {
+            readonly property bool e: Tema.estreito
+            columns: e ? 4 : 7
+            columnSpacing: e ? 8 : 12
+            rowSpacing: 6
             Layout.fillWidth: true
 
             Text {
+                visible: !parent.e
+                Layout.row: 0
+                Layout.column: 0
                 text: linha.indice + 1
                 color: Tema.dourado
                 font.family: Tema.titulo
@@ -49,6 +57,9 @@ Rectangle {
             ColumnLayout {
                 spacing: 0
                 Layout.fillWidth: true
+                Layout.row: 0
+                Layout.column: parent.e ? 0 : 1
+                Layout.columnSpan: parent.e ? 3 : 1
                 Text {
                     text: linha.item.descricao || ""
                     color: Tema.tinta
@@ -60,16 +71,17 @@ Rectangle {
                     TapHandler { onTapped: linha.abrirPeca() }
                     HoverHandler { cursorShape: linha.item.servico ? Qt.ArrowCursor : Qt.PointingHandCursor }
                 }
-                RowLayout {
+                Flow {
                     spacing: 8
+                    Layout.fillWidth: true
                     Text {
+                        width: Math.min(implicitWidth, Tema.estreito ? parent.width : 320)
                         text: [linha.item.codigo, linha.item.marca, linha.item.local ? "local " + linha.item.local : ""].filter(x => !!x).join("  ·  ")
                         color: Tema.tintaSuave
                         font.family: Tema.serifa
                         font.italic: true
                         font.pixelSize: 13
                         elide: Text.ElideRight
-                        Layout.maximumWidth: 320
                     }
                     Rectangle {
                         radius: height / 2
@@ -128,7 +140,9 @@ Rectangle {
                 maximo: 10
                 altura: 36
                 sufixo: linha.item.unidade || ""
-                Layout.preferredWidth: 96
+                Layout.preferredWidth: parent.e ? 78 : 96
+                Layout.row: parent.e ? 1 : 0
+                Layout.column: parent.e ? 0 : 2
                 onConfirmado: linha.mudou("quantidade", texto)
                 onSaiu: if (texto !== (linha.entrada.quantidade || "")) linha.mudou("quantidade", texto)
             }
@@ -139,7 +153,9 @@ Rectangle {
                 numerico: true
                 maximo: 14
                 altura: 36
-                Layout.preferredWidth: 118
+                Layout.preferredWidth: parent.e ? 104 : 118
+                Layout.row: parent.e ? 1 : 0
+                Layout.column: parent.e ? 1 : 3
                 onConfirmado: linha.mudou("preco", texto)
                 onSaiu: if (texto !== (linha.item.preco || "")) linha.mudou("preco", texto)
             }
@@ -150,7 +166,10 @@ Rectangle {
                 numerico: true
                 maximo: 10
                 altura: 36
-                Layout.preferredWidth: 92
+                Layout.preferredWidth: parent.e ? -1 : 92
+                Layout.fillWidth: parent.e
+                Layout.row: parent.e ? 1 : 0
+                Layout.column: parent.e ? 2 : 4
                 onConfirmado: linha.mudou("desconto", texto)
                 onSaiu: if (texto !== (linha.entrada.desconto || "")) linha.mudou("desconto", texto)
             }
@@ -159,9 +178,12 @@ Rectangle {
                 color: Tema.tinta
                 font.family: Tema.texto
                 font.weight: Font.Bold
-                font.pixelSize: 18
+                font.pixelSize: parent.e ? 16 : 18
                 horizontalAlignment: Text.AlignRight
-                Layout.preferredWidth: 116
+                Layout.preferredWidth: parent.e ? -1 : 116
+                Layout.alignment: parent.e ? Qt.AlignRight | Qt.AlignTop : Qt.AlignVCenter
+                Layout.row: 0
+                Layout.column: parent.e ? 3 : 5
             }
             Botao {
                 tipo: "discreto"
@@ -169,6 +191,8 @@ Rectangle {
                 implicitWidth: 36
                 leftPadding: 0
                 rightPadding: 0
+                Layout.row: parent.e ? 1 : 0
+                Layout.column: parent.e ? 3 : 6
                 onClicked: linha.remover()
             }
         }
@@ -179,7 +203,9 @@ Rectangle {
             font.family: Tema.texto
             font.weight: Font.DemiBold
             font.pixelSize: 13
-            Layout.leftMargin: 38
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            Layout.leftMargin: Tema.estreito ? 0 : 38
         }
     }
 }

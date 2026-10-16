@@ -7,6 +7,8 @@ import rustinho
 // Vender: leitor de código de barras ou busca, carrinho, cliente e receber.
 FocusScope {
     id: tela
+    // Celular: mostra a parte do cliente e total no lugar do carrinho.
+    property bool verLateral: false
     readonly property var janela: ApplicationWindow.window
     // Orçamento a carregar ao abrir (vindo da tela de orçamentos).
     property string orcamentoId: ""
@@ -228,6 +230,7 @@ FocusScope {
         campoCliente.texto = c.nome
         clientesAchados = []
         recalcular()
+
     }
 
     // ---------- Receber ----------
@@ -348,7 +351,7 @@ FocusScope {
                         text: tela.osCarregada ? "Entregar OS nº " + tela.osNumero
                               : tela.encomendaCarregada ? "Vender encomenda nº " + tela.encomendaNumero
                               : tela.orcamentoCarregado ? "Vender orçamento" : "Vender"
-                        font.pixelSize: 42
+                        font.pixelSize: Tema.estreito ? 32 : 42
                     }
                     Rectangle {
                         visible: !!tela.valeTroca
@@ -372,6 +375,7 @@ FocusScope {
                               ? tela.caixaEstado.caixa + " · aberto por " + tela.caixaEstado.resumo.sessao.abertoPor
                                 + " às " + Qt.formatTime(new Date(tela.caixaEstado.resumo.sessao.abertoEm), "HH:mm")
                               : tela.caixaEstado.caixa + " · caixa fechado"
+                        visible: !Tema.estreito
                         font.pixelSize: 16
                         Layout.alignment: Qt.AlignBaseline
                     }
@@ -394,6 +398,7 @@ FocusScope {
 
             // ---------- Busca e carrinho ----------
             ColumnLayout {
+                visible: !Tema.estreito || !tela.verLateral
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -404,7 +409,7 @@ FocusScope {
                     atalho: "F11"
                     altura: 56
                     tamanhoFonte: 20
-                    dica: "Passe o leitor ou digite qualquer código, nome, modelo ou carro (3* antes = 3 unidades)"
+                    dica: Tema.estreito ? "Código, nome ou carro" : "Passe o leitor ou digite qualquer código, nome, modelo ou carro (3* antes = 3 unidades)"
                     Layout.fillWidth: true
                     onEditado: espera.restart()
                     onConfirmado: tela.confirmarBusca()
@@ -420,7 +425,7 @@ FocusScope {
                         spacing: 6
 
                         RowLayout {
-                            visible: tela.carrinho.length > 0
+                            visible: tela.carrinho.length > 0 && !Tema.estreito
                             spacing: 12
                             Layout.fillWidth: true
                             Layout.leftMargin: 16
@@ -483,7 +488,7 @@ FocusScope {
                                     horizontalAlignment: Text.AlignHCenter
                                     Layout.fillWidth: true
                                 }
-                                RowLayout {
+                                Linha {
                                     visible: !!tela.caixaEstado && !tela.caixaAberto
                                     spacing: 10
                                     Layout.alignment: Qt.AlignHCenter
@@ -554,13 +559,14 @@ FocusScope {
                                     anchors.fill: parent
                                     anchors.leftMargin: 12
                                     anchors.rightMargin: 12
-                                    spacing: 14
+                                    spacing: Tema.estreito ? 8 : 14
                                     Text {
                                         text: modelData.codigo
                                         color: atual ? Tema.claro : Tema.tintaSuave
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
                                         font.pixelSize: 14
+                                        visible: !Tema.estreito
                                         Layout.preferredWidth: 64
                                     }
                                     ColumnLayout {
@@ -588,7 +594,7 @@ FocusScope {
                                             }
                                         }
                                         Text {
-                                            text: [modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
+                                            text: [Tema.estreito ? modelData.codigo : "", Tema.estreito ? modelData.local : "", modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
                                             color: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.75) : Tema.tintaSuave
                                             font.family: Tema.serifa
                                             font.italic: true
@@ -602,12 +608,13 @@ FocusScope {
                                         color: atual ? Tema.claro : Tema.tintaSuave
                                         font.family: Tema.texto
                                         font.pixelSize: 14
+                                        visible: !Tema.estreito
                                         Layout.preferredWidth: 60
                                     }
                                     Rectangle {
                                         radius: height / 2
                                         color: modelData.estoqueBaixo && !atual ? Tema.rosa : "transparent"
-                                        implicitWidth: Math.max(80, txtEst.implicitWidth + 16)
+                                        implicitWidth: Math.max(Tema.estreito ? 0 : 80, txtEst.implicitWidth + 16)
                                         implicitHeight: txtEst.implicitHeight + 6
                                         Text {
                                             id: txtEst
@@ -624,9 +631,9 @@ FocusScope {
                                         color: atual ? Tema.claro : Tema.tinta
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
-                                        font.pixelSize: 18
+                                        font.pixelSize: Tema.estreito ? 16 : 18
                                         horizontalAlignment: Text.AlignRight
-                                        Layout.preferredWidth: 110
+                                        Layout.preferredWidth: Tema.estreito ? -1 : 110
                                     }
                                 }
                                 HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
@@ -643,11 +650,23 @@ FocusScope {
             }
 
             // ---------- Cliente e total ----------
+            // No celular, fica numa "página" à parte (botão no rodapé).
             ColumnLayout {
+                visible: !Tema.estreito || tela.verLateral
                 spacing: 12
-                Layout.preferredWidth: 340
-                Layout.maximumWidth: 340
+                Layout.preferredWidth: Tema.estreito ? -1 : 340
+                Layout.maximumWidth: Tema.estreito ? Number.POSITIVE_INFINITY : 340
+                Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
+
+                Botao {
+                    visible: Tema.estreito
+                    tipo: "discreto"
+                    icone: "voltar"
+                    text: "Voltar ao carrinho"
+                    Layout.leftMargin: -10
+                    onClicked: tela.verLateral = false
+                }
 
                 Faixa {
                     titulo: "Cliente"
@@ -779,6 +798,52 @@ FocusScope {
                         Layout.fillWidth: true
                         onClicked: caixaOrcamento.abrirCom()
                     }
+                }
+            }
+        }
+        // Celular: total sempre à vista, com o botão de receber.
+        Rectangle {
+            visible: Tema.estreito && !tela.verLateral
+            color: Tema.verde
+            radius: Tema.raio
+            Layout.fillWidth: true
+            implicitHeight: rodapeLinha.implicitHeight + 20
+            RowLayout {
+                id: rodapeLinha
+                x: 12
+                width: parent.width - 24
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 10
+                ColumnLayout {
+                    spacing: 0
+                    Layout.fillWidth: true
+                    Text {
+                        text: "R$ " + (tela.calculo ? tela.calculo.total : "0,00")
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 26
+                        fontSizeMode: Text.HorizontalFit
+                        minimumPixelSize: 16
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: (tela.clienteId || campoCliente.texto ? campoCliente.texto : "Cliente e desconto") + "  ›"
+                        color: Tema.verdeEscuro
+                        font.family: Tema.texto
+                        font.weight: Font.DemiBold
+                        font.pixelSize: 14
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        TapHandler { onTapped: tela.verLateral = true }
+                    }
+                }
+                Botao {
+                    text: "Receber"
+                    icone: "check"
+                    implicitHeight: 48
+                    enabled: tela.carrinho.length > 0 && tela.caixaAberto
+                    onClicked: tela.abrirReceber()
                 }
             }
         }
@@ -921,7 +986,7 @@ FocusScope {
                 }
             }
             // Vale-troca (só quando há vale com saldo)
-            RowLayout {
+            Linha {
                 visible: tela.vales.length > 0
                 spacing: 12
                 Layout.fillWidth: true
@@ -950,7 +1015,7 @@ FocusScope {
             Repeater {
                 id: repFormas
                 model: tela.formas
-                delegate: RowLayout {
+                delegate: Linha {
                     required property var modelData
                     readonly property string forma: modelData.forma
                     property alias campo: valor
@@ -1005,7 +1070,7 @@ FocusScope {
                             }
                         }
                     }
-                    RowLayout {
+                    Linha {
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -1095,7 +1160,7 @@ FocusScope {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
                 Botao {
@@ -1162,7 +1227,7 @@ FocusScope {
                 font.pixelSize: 16
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 Layout.alignment: Qt.AlignRight
                 Layout.topMargin: 8
                 spacing: 10
@@ -1210,7 +1275,7 @@ FocusScope {
                       + "O orçamento não mexe no estoque; depois ele vira venda com um clique."
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 spacing: 10
                 Campo {
                     id: validade

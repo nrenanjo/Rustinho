@@ -9,6 +9,8 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property var usuarios: []
     property var editando: null      // usuário aberto à direita (null = novo)
+    // Celular: a lista e a ficha aparecem uma de cada vez.
+    property bool mostrarFicha: false
 
     function carregar() {
         const r = Api.chamar("usuarios_listar")
@@ -17,6 +19,7 @@ FocusScope {
     }
 
     function novo() {
+        mostrarFicha = true
         editando = null
         nome.texto = ""
         comissao.texto = ""
@@ -28,6 +31,7 @@ FocusScope {
     }
 
     function editar(u) {
+        mostrarFicha = true
         editando = u
         nome.texto = u.nome
         comissao.texto = u.comissao
@@ -62,6 +66,8 @@ FocusScope {
             const salvo = usuarios.find(u => u.id === r.dados.id)
             if (salvo)
                 editar(salvo)
+            if (Tema.estreito)
+                mostrarFicha = false
         } else {
             const campos = { nome: nome, senha: senha, senha2: senha2, comissao: comissao }
             const alvo = campos[r.campo]
@@ -86,13 +92,14 @@ FocusScope {
         onActivated: tela.salvar()
     }
 
-    RowLayout {
+    Linha {
         anchors.fill: parent
         anchors.margins: Tema.margem
         anchors.topMargin: Tema.margem - 12
         spacing: 22
 
         ColumnLayout {
+            visible: !Tema.estreito || !tela.mostrarFicha
             spacing: 14
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -172,11 +179,20 @@ FocusScope {
         }
 
         Faixa {
+            visible: !Tema.estreito || tela.mostrarFicha
             titulo: tela.editando ? "Alterar usuário" : "Novo usuário"
             color: Tema.pergaminho
             Layout.preferredWidth: 400
             Layout.alignment: Qt.AlignTop
-            Layout.topMargin: 92
+            Layout.topMargin: Tema.estreito ? 0 : 92
+            Botao {
+                visible: Tema.estreito
+                tipo: "discreto"
+                icone: "voltar"
+                text: "Voltar à lista"
+                Layout.leftMargin: -10
+                onClicked: tela.mostrarFicha = false
+            }
 
             Campo {
                 id: nome
@@ -224,7 +240,7 @@ FocusScope {
                 Layout.fillWidth: true
                 onConfirmado: tela.salvar()
             }
-            RowLayout {
+            Linha {
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 4
@@ -249,6 +265,7 @@ FocusScope {
     Component.onCompleted: {
         carregar()
         novo()
+        mostrarFicha = false
     }
-    StackView.onActivated: nome.focar()
+    StackView.onActivated: if (!Tema.estreito) nome.focar()
 }

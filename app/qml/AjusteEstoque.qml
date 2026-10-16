@@ -94,7 +94,7 @@ Popup {
                 }
             }
         }
-        RowLayout {
+        Linha {
             spacing: 10
             Layout.alignment: Qt.AlignRight
             Layout.topMargin: 6

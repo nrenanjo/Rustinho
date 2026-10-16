@@ -58,7 +58,8 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        RowLayout {
+        Linha {
+            colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero {
@@ -85,7 +86,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 14
             Layout.fillWidth: true
             Campo {
@@ -398,7 +399,7 @@ FocusScope {
                 erro: nova_.campoErro === "telefone" ? nova_.erro : ""
                 Layout.fillWidth: true
             }
-            RowLayout {
+            Linha {
                 spacing: 10
                 Layout.fillWidth: true
                 Campo {
@@ -418,7 +419,7 @@ FocusScope {
                     onClicked: escolher.abrirCom("", nPeca.texto)
                 }
             }
-            RowLayout {
+            Linha {
                 spacing: 10
                 Layout.fillWidth: true
                 Campo {

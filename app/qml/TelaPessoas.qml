@@ -102,7 +102,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 18
             Layout.fillWidth: true
             Campo {
@@ -124,7 +124,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: tela.itens.length > 0
+            visible: tela.itens.length > 0 && !Tema.estreito
             spacing: 18
             Layout.fillWidth: true
             Layout.leftMargin: 18

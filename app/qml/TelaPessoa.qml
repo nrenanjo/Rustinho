@@ -232,7 +232,7 @@ FocusScope {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            RowLayout {
+            Linha {
                 id: corpo
                 width: rolagem.width - 14
                 y: 6
@@ -248,7 +248,8 @@ FocusScope {
                         color: Tema.pergaminho
                         Layout.fillWidth: true
 
-                        RowLayout {
+                        Linha {
+                            colunasEstreito: 2
                             spacing: 22
                             Layout.fillWidth: true
                             ButtonGroup { id: grupoTipo }
@@ -276,7 +277,7 @@ FocusScope {
                                 onToggled: tela.marcarAlterado()
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -313,7 +314,7 @@ FocusScope {
                                 onEditado: tela.marcarAlterado()
                             }
                         }
-                        RowLayout {
+                        Linha {
                             visible: tela.juridica
                             spacing: 12
                             Layout.fillWidth: true
@@ -361,7 +362,7 @@ FocusScope {
                         color: Tema.azul
                         Layout.fillWidth: true
 
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -386,7 +387,7 @@ FocusScope {
                                 onEditado: tela.marcarAlterado()
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -404,7 +405,7 @@ FocusScope {
                                 onEditado: tela.marcarAlterado()
                             }
                         }
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -467,7 +468,7 @@ FocusScope {
                         corTitulo: Tema.verdeEscuro
                         Layout.fillWidth: true
 
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {
@@ -499,7 +500,7 @@ FocusScope {
                         titulo: "Crediário"
                         color: Tema.azul
                         Layout.fillWidth: true
-                        RowLayout {
+                        Linha {
                             spacing: 12
                             Layout.fillWidth: true
                             Campo {

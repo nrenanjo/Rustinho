@@ -120,7 +120,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             visible: tela.escolhido >= 0
             spacing: 14
             Layout.maximumWidth: 640

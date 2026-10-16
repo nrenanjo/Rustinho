@@ -22,8 +22,8 @@ Rectangle {
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 18
-        anchors.rightMargin: 18
+        anchors.leftMargin: Tema.estreito ? 12 : 18
+        anchors.rightMargin: Tema.estreito ? 12 : 18
         spacing: 12
 
         ColumnLayout {

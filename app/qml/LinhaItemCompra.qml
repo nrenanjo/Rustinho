@@ -44,8 +44,8 @@ Rectangle {
                 color: Tema.dourado
                 font.family: Tema.titulo
                 font.weight: Font.Bold
-                font.pixelSize: 30
-                Layout.preferredWidth: 30
+                font.pixelSize: Tema.estreito ? 24 : 30
+                Layout.preferredWidth: Tema.estreito ? 20 : 30
                 Layout.alignment: Qt.AlignTop
             }
             ColumnLayout {
@@ -56,8 +56,10 @@ Rectangle {
                     color: Tema.tinta
                     font.family: Tema.titulo
                     font.weight: Font.Bold
-                    font.pixelSize: 21
+                    font.pixelSize: Tema.estreito ? 18 : 21
                     elide: Text.ElideRight
+                    wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                    maximumLineCount: 2
                     Layout.fillWidth: true
                 }
                 Nota {
@@ -94,7 +96,7 @@ Rectangle {
         // A decisão
         Rectangle {
             Layout.fillWidth: true
-            Layout.leftMargin: 44
+            Layout.leftMargin: Tema.estreito ? 0 : 44
             radius: Tema.raioCampo
             color: Qt.rgba(1, 1, 1, 0.42)
             implicitHeight: decisao.implicitHeight + 20
@@ -183,11 +185,11 @@ Rectangle {
                 }
 
                 // Quantidade e custo
-                RowLayout {
+                Linha {
                     visible: !linha.ignorado && !linha.pendente
                     spacing: 12
                     Layout.fillWidth: true
-                    Layout.leftMargin: 30
+                    Layout.leftMargin: Tema.estreito ? 0 : 30
                     Text {
                         text: "Cada " + linha.item.unidade + " da nota tem"
                         color: Tema.tintaSuave
@@ -260,11 +262,11 @@ Rectangle {
                 Rectangle {
                     visible: linha.editavel && !!linha.peca && linha.peca.custoBaixou && linha.item.acao === "ligar"
                     Layout.fillWidth: true
-                    Layout.leftMargin: 30
+                    Layout.leftMargin: Tema.estreito ? 0 : 30
                     radius: Tema.raioCampo
                     color: Tema.verde
                     implicitHeight: perguntaPreco.implicitHeight + 16
-                    RowLayout {
+                    Linha {
                         id: perguntaPreco
                         x: 12
                         y: 8

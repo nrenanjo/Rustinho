@@ -57,7 +57,7 @@ Rectangle {
                 onEscolhido: id => painel.usarPrazo(id)
             }
         }
-        RowLayout {
+        Linha {
             spacing: 10
             Layout.fillWidth: true
             Campo {

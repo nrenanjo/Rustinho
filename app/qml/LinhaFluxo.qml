@@ -28,7 +28,7 @@ Rectangle {
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
-                Layout.preferredWidth: 82
+                Layout.preferredWidth: Tema.estreito ? 57 : 82
             }
             Text {
                 text: linha.dia.hoje ? "hoje" : linha.dia.diaSemana
@@ -69,7 +69,7 @@ Rectangle {
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
                 horizontalAlignment: Text.AlignRight
-                Layout.preferredWidth: 96
+                Layout.preferredWidth: Tema.estreito ? 67 : 96
             }
             Text {
                 text: linha.dia.saidas !== "0,00" ? "− " + Tema.valor(linha.dia.saidas) : ""
@@ -78,7 +78,7 @@ Rectangle {
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
                 horizontalAlignment: Text.AlignRight
-                Layout.preferredWidth: 96
+                Layout.preferredWidth: Tema.estreito ? 67 : 96
             }
             Text {
                 visible: linha.mostrarSaldo
@@ -88,7 +88,7 @@ Rectangle {
                 font.weight: Font.Bold
                 font.pixelSize: 14
                 horizontalAlignment: Text.AlignRight
-                Layout.preferredWidth: 104
+                Layout.preferredWidth: Tema.estreito ? 73 : 104
             }
         }
         Text {

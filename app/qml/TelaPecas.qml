@@ -111,7 +111,7 @@ FocusScope {
             }
         }
 
-        RowLayout {
+        Linha {
             spacing: 18
             Layout.fillWidth: true
             Campo {
@@ -120,7 +120,7 @@ FocusScope {
                 atalho: "F11"
                 altura: 54
                 tamanhoFonte: 18
-                dica: "Qualquer código, nome, modelo, marca ou carro (ex.: 8PK1515, pastilha gol 2015)"
+                dica: Tema.estreito ? "Código, nome ou carro" : "Qualquer código, nome, modelo, marca ou carro (ex.: 8PK1515, pastilha gol 2015)"
                 Layout.fillWidth: true
                 onEditado: espera.restart()
                 onConfirmado: tela.abrirPeca(lista.currentIndex)
@@ -133,7 +133,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: tela.itens.length > 0
+            visible: tela.itens.length > 0 && !Tema.estreito
             spacing: 18
             Layout.fillWidth: true
             Layout.leftMargin: 18

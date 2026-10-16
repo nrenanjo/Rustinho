@@ -27,7 +27,7 @@ RowLayout {
         dica: "Placa"
         maximo: 8
         maiusculas: true
-        Layout.preferredWidth: 130
+        Layout.preferredWidth: Tema.estreito ? 91 : 130
         onEditado: linha.mudou("placa", texto)
     }
     Campo {
