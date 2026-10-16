@@ -7,6 +7,8 @@ APK=$(ls saida/*.apk | head -1)
 adb install -r "$APK" 2>&1 | tee fotos/instalar.txt
 PACOTE=io.github.nrenanjo.rustinho
 ATIVIDADE=$PACOTE/org.qtproject.qt.android.bindings.QtActivity
+PASTA=/storage/emulated/0/Android/data/$PACOTE/files
+adb shell mkdir -p $PASTA
 adb shell pm grant $PACOTE android.permission.CAMERA || true
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 0
@@ -29,7 +31,8 @@ foto 03-inicio-rolado 3
 abrir() {
     adb shell am force-stop $PACOTE
     sleep 2
-    adb shell am start -n $ATIVIDADE -e applicationArguments "'--abrir $1'"
+    adb shell "echo '--abrir $1' > $PASTA/argumentos.txt"
+    adb shell am start -n $ATIVIDADE
     sleep 15
     texto "1234"; tecla KEYCODE_ENTER
 }
