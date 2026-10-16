@@ -37,7 +37,9 @@ fn main() {
     // Montagem do Android (android/rust): os cabeçalhos "rustinho/cpp/..."
     // ficam numa pasta à parte, porque lá o pacote tem outro nome.
     if std::path::Path::new("include").is_dir() {
-        construtor = construtor.include_dir("include");
+        let pasta = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("include");
+        // SAFETY: só acrescenta uma pasta de cabeçalhos ao compilador.
+        construtor = unsafe { construtor.cc_builder(move |cc| { cc.include(&pasta); }) };
     }
     // No Windows, imprime direto na impressora padrão (QPrinter).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

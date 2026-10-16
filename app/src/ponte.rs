@@ -18,6 +18,7 @@ pub mod qobject {
 
         include!("rustinho/cpp/janela.h");
         fn rustinho_preparar_janela();
+        fn rustinho_arquivo_local(endereco: &QString) -> QString;
     }
 
     extern "RustQt" {
@@ -35,6 +36,11 @@ pub mod qobject {
         /// Devolve JSON: {ok, caminho, impresso} ou {ok: false, erro}.
         #[qinvokable]
         fn imprimir(self: Pin<&mut Self>, tipo: &QString, id: &QString) -> QString;
+
+        /// Arquivo escolhido na tela → caminho que o núcleo consegue abrir.
+        /// No Android, o "content://" vira uma cópia na pasta do app.
+        #[qinvokable]
+        fn arquivo_local(self: &Self, endereco: &QString) -> QString;
     }
 }
 
@@ -59,6 +65,10 @@ impl qobject::Sistema {
                 format!("Não consegui abrir o banco de dados em {}. {e}", caminho.display())
             })
         })
+    }
+
+    pub fn arquivo_local(&self, endereco: &QString) -> QString {
+        qobject::rustinho_arquivo_local(endereco)
     }
 
     pub fn chamar(self: Pin<&mut Self>, comando: &QString, dados: &QString) -> QString {
