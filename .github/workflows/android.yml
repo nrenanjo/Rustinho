@@ -84,6 +84,10 @@ jobs:
           echo "QT_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/rustinho.jks" >> $GITHUB_ENV
           echo "QT_ANDROID_KEYSTORE_ALIAS=rustinho" >> $GITHUB_ENV
       - name: Compilar o APK
+        env:
+          # 32 bits: o compilador do C++ da ponte precisa saber que é ARMv7.
+          CFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
+          CXXFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
         run: |
           QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}"
           QT_HOST="$RUNNER_TEMP/qt/$QT_VERSAO/gcc_64"
