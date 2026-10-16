@@ -17,12 +17,27 @@ env:
 
 jobs:
   apk:
+    # Dois APKs: o de 64 bits (celulares mais novos) e o de 32 bits
+    # (celulares de entrada, como a linha "Go", que rodam o Android em 32 bits).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: "64bits"
+            qt: android_arm64_v8a
+            rust: aarch64-linux-android
+            sufixo: ""
+          - nome: "32bits"
+            qt: android_armv7
+            rust: armv7-linux-androideabi
+            sufixo: "-32bits"
+    name: apk (${{ matrix.nome }})
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: ${{ matrix.rust }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -33,7 +48,7 @@ jobs:
           (
             pip install --quiet aqtinstall &&
             aqt install-qt linux desktop "$QT_VERSAO" linux_gcc_64 -O "$RUNNER_TEMP/qt" &&
-            aqt install-qt linux android "$QT_VERSAO" android_arm64_v8a -m qtmultimedia -O "$RUNNER_TEMP/qt" &&
+            aqt install-qt linux android "$QT_VERSAO" ${{ matrix.qt }} -m qtmultimedia -O "$RUNNER_TEMP/qt" &&
             ls "$RUNNER_TEMP/qt/$QT_VERSAO"
           ) 2>&1 | tee -a registro.txt
       - name: NDK
@@ -69,7 +84,7 @@ jobs:
           echo "QT_ANDROID_KEYSTORE_ALIAS=rustinho" >> $GITHUB_ENV
       - name: Compilar o APK
         run: |
-          QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/android_arm64_v8a"
+          QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}"
           QT_HOST="$RUNNER_TEMP/qt/$QT_VERSAO/gcc_64"
           set -o pipefail
           (
@@ -104,11 +119,11 @@ jobs:
           APK=$(find build-android -name "*.apk" | grep -v unsigned | head -1)
           [ -z "$APK" ] && APK=$(find build-android -name "*.apk" | head -1)
           echo "APK: $APK"
-          cp "$APK" "saida/Rustinho-$VERSAO-Android.apk"
+          cp "$APK" "saida/Rustinho-$VERSAO-Android${{ matrix.sufixo }}.apk"
           ls -la saida
       - uses: actions/upload-artifact@v4
         with:
-          name: Rustinho-Android
+          name: Rustinho-Android${{ matrix.sufixo }}
           path: saida/*.apk
           retention-days: 30
       # A versão nova é publicada pela montagem do Windows e do Linux
@@ -126,7 +141,7 @@ jobs:
             echo "::notice title=APK pronto::Sem a versão $TAG em Releases; o APK ficou só nos artefatos."
             exit 0
           fi
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q 'Android\.apk$'; then
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q 'Android${{ matrix.sufixo }}\.apk$'; then
             echo "::notice title=APK pronto::A versão $TAG já tem APK; este ficou só nos artefatos."
             exit 0
           fi
@@ -137,6 +152,7 @@ jobs:
   # As fotos e o registro vão para o ramo "testes-android".
   testar:
     needs: apk
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
