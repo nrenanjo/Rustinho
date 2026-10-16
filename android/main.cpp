@@ -5,39 +5,17 @@
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlApplicationEngine>
 
-#include <cstdio>
-#include <fstream>
-#include <string>
-#include <vector>
+#include <QtCore/QJniObject>
+#include <QtCore/QStringList>
+#include <QtCore/qcoreapplication_platform.h>
+#include <QtQml/QQmlContext>
 
 int main(int argc, char* argv[])
 {
-    // Só para o teste automático (android/testar.sh): o adb deixa os
-    // argumentos (ex.: "--abrir TelaVender") num arquivo da pasta do app.
-    std::vector<std::string> extras;
-    for (const char* arquivo : { "/storage/emulated/0/Android/data/io.github.nrenanjo.rustinho/files/argumentos.txt",
-                                 "/data/local/tmp/rustinho-argumentos.txt" }) {
-        std::ifstream f(arquivo);
-        std::string palavra;
-        while (f >> palavra)
-            extras.push_back(palavra);
-        if (!extras.empty()) {
-            std::remove(arquivo);
-            break;
-        }
-    }
-    std::vector<char*> argumentos(argv, argv + argc);
-    for (auto& e : extras)
-        argumentos.push_back(e.data());
-    int quantos = static_cast<int>(argumentos.size());
-    argumentos.push_back(nullptr);
-
-    QGuiApplication app(quantos, argumentos.data());
+    QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("rustinho"));
     app.setApplicationDisplayName(QStringLiteral("Rustinho"));
     app.setOrganizationName(QStringLiteral("rustinho"));
-    if (!extras.empty())
-        qInfo("Rustinho: argumentos de teste: %s", qPrintable(QCoreApplication::arguments().join(u' ')));
 
     // Banco, backups e impressões ficam na pasta privada do app.
     const QString dados = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -45,6 +23,24 @@ int main(int argc, char* argv[])
     qputenv("RUSTINHO_DADOS", dados.toUtf8());
 
     QQmlApplicationEngine engine;
+
+    // Só para o teste automático (android/testar.sh): o APK final não aceita
+    // argumentos, então eles vêm num "extra" do Android:
+    //   am start -n .../QtActivity --es rustinho "--abrir TelaVender"
+    QStringList extras;
+    QJniObject atividade = QNativeInterface::QAndroidApplication::context();
+    if (atividade.isValid()) {
+        QJniObject intencao = atividade.callObjectMethod("getIntent", "()Landroid/content/Intent;");
+        if (intencao.isValid()) {
+            QJniObject texto = intencao.callObjectMethod("getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;",
+                                                         QJniObject::fromString(QStringLiteral("rustinho")).object<jstring>());
+            if (texto.isValid())
+                extras = texto.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        }
+    }
+    if (!extras.isEmpty())
+        qInfo("Rustinho: argumentos de teste: %s", qPrintable(extras.join(QLatin1Char(' '))));
+    engine.rootContext()->setContextProperty(QStringLiteral("argumentosExtras"), extras);
     engine.addImportPath(QStringLiteral("qrc:/qt/qml"));
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/rustinho/qml/Main.qml")));
     if (engine.rootObjects().isEmpty())

@@ -98,7 +98,8 @@ ApplicationWindow {
         atualizarEstado()
         trocarPara("TelaInicio")
         // Para testes: rustinho --abrir TelaPecas
-        const args = Qt.application.arguments
+        // (No Android, os do teste vêm em "argumentosExtras", de main.cpp.)
+        const args = Qt.application.arguments.concat(typeof argumentosExtras !== "undefined" ? argumentosExtras : [])
         const i = args.indexOf("--abrir")
         if (i >= 0 && i + 1 < args.length) {
             const j = args.indexOf("--props")
