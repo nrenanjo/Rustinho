@@ -14,7 +14,8 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
 |---|---|
 | Windows 10 e 11 (64 bits) | `Rustinho-…-Windows-instalador.exe` |
 | Linux (64 bits) | `Rustinho-…-Linux-x86_64.AppImage` |
-| Android 9 ou mais novo | `Rustinho-…-Android.apk` |
+| Android 9 ou mais novo (64 bits) | `Rustinho-…-Android.apk` |
+| Android 9 ou mais novo (32 bits, celulares de entrada) | `Rustinho-…-Android-32bits.apk` |
 
 **Windows:** abra o instalador e vá em Avançar até Concluir. Como o instalador não tem assinatura paga, o Windows pode mostrar "O Windows protegeu o computador": clique em **Mais informações → Executar assim mesmo**.
 
@@ -23,7 +24,7 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
     chmod +x Rustinho-*.AppImage
     ./Rustinho-*.AppImage
 
-**Android:** baixe o `.apk` no celular e toque nele. Na primeira vez o Android pede para **permitir instalar apps desta fonte** (do navegador ou do gerenciador de arquivos): permita e toque em Instalar. Para atualizar, instale o `.apk` novo por cima: os dados ficam.
+**Android:** baixe o `.apk` no celular (se aparecer "O app não foi instalado", use o de 32 bits) e toque nele. Na primeira vez o Android pede para **permitir instalar apps desta fonte** (do navegador ou do gerenciador de arquivos): permita e toque em Instalar. Para atualizar, instale o `.apk` novo por cima: os dados ficam.
 
 ## Primeira vez
 
