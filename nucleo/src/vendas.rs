@@ -100,6 +100,8 @@ pub struct ItemCalculado {
     pub local: String,
     /// Serviço (mão de obra): não tem estoque.
     pub servico: bool,
+    /// A unidade vende quebrado (KG, LT, MT...).
+    pub fracionada: bool,
     /// Problema neste item (desconto acima do máximo, quantidade inválida...).
     pub erro: String,
     #[serde(skip)]
@@ -423,6 +425,7 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             encomendar: !servico && it.encomendar && falta > 0,
             local: p.local,
             servico,
+            fracionada: p.fracionada,
             erro,
             v_quantidade: quantidade,
             v_preco: preco,

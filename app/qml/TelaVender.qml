@@ -206,6 +206,15 @@ FocusScope {
         }
     }
 
+    // "3 unidades"; com KG, metro ou unidades diferentes, conta os itens.
+    function textoQuantidade() {
+        const itens = calculo ? calculo.itens.filter(i => !i.servico) : []
+        const contaItens = itens.some(i => i.fracionada) || new Set(itens.map(i => i.unidade)).size > 1
+        if (contaItens)
+            return itens.length === 1 ? "1 item" : itens.length + " itens"
+        return calculo.quantidadeItens === "1" ? "1 unidade" : calculo.quantidadeItens + " unidades"
+    }
+
     function focarBusca() {
         busca.focar()
     }
@@ -736,10 +745,10 @@ FocusScope {
 
                     Repeater {
                         model: tela.calculo ? [
-                            [tela.calculo.quantidadeItens === "1" ? "1 unidade" : tela.calculo.quantidadeItens + " unidades", ""],
+                            [tela.textoQuantidade(), ""],
                             ["Subtotal", "R$ " + tela.calculo.subtotal],
                             ["Desconto nos itens", tela.calculo.descontoItens !== "0,00" ? "− R$ " + tela.calculo.descontoItens : ""]
-                        ].filter(l => l[0] && (l[1] !== "" || l[0].includes("unidade"))) : []
+                        ].filter((l, i) => l[0] && (l[1] !== "" || i === 0)) : []
                         delegate: RowLayout {
                             required property var modelData
                             Layout.fillWidth: true
