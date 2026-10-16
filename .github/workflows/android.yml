@@ -102,6 +102,12 @@ jobs:
         if: failure()
         run: |
           touch registro.txt
+          {
+            echo "--- pastas do Qt"; ls -la "$RUNNER_TEMP/qt/$QT_VERSAO/" || true
+            echo "--- bin"; ls -la "$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}/bin" | head -30 || true
+            echo "--- qt-cmake"; head -5 "$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}/bin/qt-cmake" || true
+          } > pastas.txt 2>&1
+          python3 -c "t=open('pastas.txt').read()[-6000:].replace('%','%25').replace('\n','%0A');print('::error title=pastas::'+t)"
           grep -n -i -E "error|erro|failed|fatal|undefined" registro.txt | tail -40 > erros.txt || true
           tail -80 registro.txt > fim.txt
           python3 - <<'PY'
