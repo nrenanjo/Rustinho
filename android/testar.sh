@@ -78,8 +78,10 @@ guardar antes-da-camera
 # A câmera por último (no emulador, ela mostra uma sala de mentira):
 # um toque no botão da câmera, no fim do campo de busca da venda.
 abrir TelaVender
+foto 14-vender-antes-da-camera 12
 adb shell input tap 985 414
-foto 15-camera 8
+foto 15-camera 12
+adb logcat -d | grep -i -E "camera|multimedia" | tail -40 > fotos/camera.txt
 adb shell pidof $PACOTE > fotos/pid.txt || echo "fechou" > fotos/pid.txt
 adb logcat -d > fotos/logcat.txt
 grep -i "Rustinho:" fotos/logcat.txt >> fotos/diag.txt
