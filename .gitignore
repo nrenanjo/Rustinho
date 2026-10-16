@@ -8,3 +8,4 @@ target/
 /saida
 /AppDir
 *.AppImage
+aqtinstall.log
