@@ -34,6 +34,11 @@ fn main() {
         // Impressão em PDF (QTextDocument + QPdfWriter, do QtGui).
         .cpp_file("cpp/pdf.cpp")
         .cpp_file("cpp/janela.cpp");
+    // Montagem do Android (android/rust): os cabeçalhos "rustinho/cpp/..."
+    // ficam numa pasta à parte, porque lá o pacote tem outro nome.
+    if std::path::Path::new("include").is_dir() {
+        construtor = construtor.include_dir("include");
+    }
     // No Windows, imprime direto na impressora padrão (QPrinter).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         construtor = construtor.qt_module("PrintSupport");

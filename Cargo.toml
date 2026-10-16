@@ -1,5 +1,7 @@
 [workspace]
 members = ["nucleo", "app"]
+# O Android é montado à parte (CMake + Qt for Android): veja android/.
+exclude = ["android/rust"]
 resolver = "2"
 
 [workspace.package]

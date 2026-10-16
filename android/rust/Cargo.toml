@@ -1,0 +1,30 @@
+# Parte em Rust do app de Android: a mesma ponte e as mesmas telas do
+# computador (app/), como biblioteca estática para o CMake do Qt for Android.
+[package]
+name = "rustinho_android"
+version = "0.9.0"
+edition = "2021"
+authors = ["Renan Galvão"]
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+rustinho-nucleo = { path = "../../nucleo" }
+cxx = "1.0.176"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+serde_json = "1.0.154"
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+winresource = "0.1"
+
+[profile.release]
+strip = true
+
+# Fora do workspace do computador.
+[workspace]
