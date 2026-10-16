@@ -61,9 +61,6 @@ for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel
     adb logcat -d > fotos/logcat.txt
     guardar "$t"
 done
-# A câmera (no emulador, ela mostra uma sala de mentira).
-abrir "TelaVender --camera"
-foto 15-camera 8
 # Deitado.
 abrir TelaVender
 adb shell settings put system user_rotation 1
@@ -77,6 +74,10 @@ sleep 4
 # Voltar do Android: volta ao Início.
 tecla KEYCODE_BACK
 foto 30-voltar 3
+guardar antes-da-camera
+# A câmera por último (no emulador, ela mostra uma sala de mentira).
+abrir "TelaVender --camera"
+foto 15-camera 8
 adb shell pidof $PACOTE > fotos/pid.txt || echo "fechou" > fotos/pid.txt
 adb logcat -d > fotos/logcat.txt
 grep -i "Rustinho:" fotos/logcat.txt >> fotos/diag.txt
