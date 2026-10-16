@@ -111,9 +111,8 @@ jobs:
           name: Rustinho-Android
           path: saida/*.apk
           retention-days: 30
-      - name: Publicar em Releases (versão nova ou já publicada)
-        run: |
-          echo "::notice title=APK pronto::$(ls saida)"
+      - name: APK pronto
+        run: echo "::notice title=APK pronto::$(ls saida)"
 
   # Abre o APK num Android de mentira (emulador) e tira fotos da tela.
   # As fotos e o registro vão para o ramo "testes-android".
@@ -138,8 +137,9 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
+          profile: pixel_6
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back emulated
           script: bash android/testar.sh
       - name: Guardar as fotos no ramo testes-android
         if: always()
