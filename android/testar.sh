@@ -18,7 +18,11 @@ texto() { adb shell input text "$1"; sleep 1; }
 adb shell am start -n $ATIVIDADE
 foto 01-primeira-vez 40
 # O primeiro campo (nome da loja) já vem com o cursor.
-texto "LojaModelo"; tecla KEYCODE_ENTER
+# Nome da loja e da pessoa pelo teclado da tela (toques nas teclas), como
+# uma pessoa digita: "Loja" e "Maria".
+for xy in "972 1872" "918 1717" "756 1872" "108 1872"; do adb shell input tap $xy; sleep 0.6; done
+foto 01a-loja-tocada 2
+tecla KEYCODE_ENTER
 tecla KEYCODE_ENTER
 # O nome pelo teclado da tela (toques nas teclas), como uma pessoa digita.
 for xy in "864 2027" "108 1872" "378 1717" "810 1717" "108 1872"; do adb shell input tap $xy; sleep 0.6; done
@@ -37,9 +41,13 @@ abrir() {
     sleep 15
     texto "1234"; tecla KEYCODE_ENTER
 }
-for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro; do
+for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro \
+         TelaPeca TelaPessoa TelaPessoas TelaReceber TelaOrcamentos TelaOrdens TelaOrdem TelaEstoque \
+         TelaEtiquetas TelaTrocas TelaUsuarios TelaFiscal; do
     abrir $t
     foto "10-$t" 5
+    adb shell input swipe 540 1700 540 700 500
+    foto "11-$t-rolada" 3
 done
 # A câmera (no emulador, ela mostra uma sala de mentira).
 abrir "TelaVender --camera"
