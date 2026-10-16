@@ -41,6 +41,9 @@ for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel
     abrir $t
     foto "10-$t" 5
 done
+# A câmera (no emulador, ela mostra uma sala de mentira).
+abrir "TelaVender --camera"
+foto 15-camera 8
 # Deitado.
 abrir TelaVender
 adb shell settings put system user_rotation 1

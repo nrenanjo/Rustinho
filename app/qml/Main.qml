@@ -104,6 +104,8 @@ ApplicationWindow {
             const j = args.indexOf("--props")
             abrir(args[i + 1], j >= 0 && j + 1 < args.length ? JSON.parse(args[j + 1]) : {})
         }
+        if (args.indexOf("--camera") >= 0)
+            Qt.callLater(() => lerCodigo(c => avisar("Código lido: " + c, "ok")))
     }
 
     function trocarUsuario() {

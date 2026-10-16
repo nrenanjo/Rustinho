@@ -38,30 +38,40 @@ Item {
         }
         onClosed: leitor.depois = null
 
-        CaptureSession {
-            camera: Camera {
-                id: camera
-                active: janelaCamera.opened && permissao.status === Qt.PermissionStatus.Granted
-                focusMode: Camera.FocusModeAuto
-            }
-            videoOutput: saida
-        }
-
-        VideoOutput {
-            id: saida
+        // A câmera só liga com a janela aberta (e com a permissão do Android).
+        Loader {
+            id: vista
             anchors.fill: parent
-            fillMode: VideoOutput.PreserveAspectCrop
+            active: janelaCamera.opened && permissao.status === Qt.PermissionStatus.Granted
+            sourceComponent: Item {
+                property alias saida: saida
+                property alias ligada: camera.active
+                CaptureSession {
+                    camera: Camera {
+                        id: camera
+                        active: true
+                        focusMode: Camera.FocusModeAuto
+                    }
+                    videoOutput: saida
+                }
+                VideoOutput {
+                    id: saida
+                    anchors.fill: parent
+                    fillMode: VideoOutput.PreserveAspectCrop
+                }
+            }
         }
 
         // A cada meio segundo, uma "foto" do que a câmera vê vai para o núcleo.
         Timer {
             interval: 450
             repeat: true
-            running: camera.active
+            running: !!vista.item && vista.item.ligada
             onTriggered: {
                 if (leitor.ocupado)
                     return
                 leitor.ocupado = true
+                const saida = vista.item.saida
                 const larg = Math.min(saida.width, 900)
                 const alt = Math.round(saida.height * larg / Math.max(1, saida.width))
                 const ok = saida.grabToImage(resultado => {
