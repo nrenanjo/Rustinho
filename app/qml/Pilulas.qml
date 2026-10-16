@@ -4,14 +4,26 @@ import rustinho
 
 // Escolha entre poucas opções, em pílulas arredondadas (sem abas nem linhas).
 // modelo: [{ id: "abertas", nome: "Em aberto" }, ...]
-Row {
+// Na tela estreita, as pílulas que não cabem passam para a linha de baixo.
+Flow {
     id: pilulas
+    // Dentro de um Layout, ocupa a largura toda (para poder quebrar a linha).
+    Layout.fillWidth: true
     property var modelo: []
     property string atual: ""
     property bool pequenas: false
     signal escolhido(string id)
 
     spacing: 6
+    // Fora de um Layout: largura do que couber na linha.
+    implicitWidth: _soma
+    implicitHeight: childrenRect.height
+    readonly property real _soma: {
+        let t = 0
+        for (let i = 0; i < children.length; i++)
+            t += children[i].width + (i > 0 ? spacing : 0)
+        return t
+    }
 
     Repeater {
         model: pilulas.modelo

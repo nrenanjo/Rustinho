@@ -51,7 +51,8 @@ FocusScope {
         janela.abrir("TelaPecas", { buscaInicial: texto })
     }
 
-    readonly property int colunas: width >= 1500 ? 4 : width >= 1100 ? 4 : 3
+    readonly property int colunas: Tema.estreito ? 1 : width >= 1100 ? 4 : 3
+    readonly property int colunasMaisUsados: Tema.estreito ? 2 : colunas
 
     Flickable {
         anchors.fill: parent
@@ -66,15 +67,18 @@ FocusScope {
             width: parent.width - 2 * Tema.margem
             spacing: 14
 
-            RowLayout {
-                spacing: 16
+            GridLayout {
+                columns: Tema.estreito ? 1 : 2
+                columnSpacing: 16
+                rowSpacing: 6
                 Layout.fillWidth: true
                 ColumnLayout {
                     spacing: 0
                     Layout.fillWidth: true
                     Titulo {
                         text: tela.saudacao() + ", " + (tela.janela && tela.janela.estado.usuario ? tela.janela.estado.usuario.nome : "")
-                        font.pixelSize: 50
+                        font.pixelSize: Tema.estreito ? 36 : 50
+                        wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
                         Layout.fillWidth: true
                     }
                     Nota {
@@ -85,16 +89,17 @@ FocusScope {
                 }
                 ColumnLayout {
                     spacing: 2
-                    Layout.alignment: Qt.AlignTop
+                    Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignTop
                     Rotulo {
                         text: tela.janela ? [tela.janela.estado.loja, tela.janela.estado.caixa].filter(x => !!x).join(" · ") : ""
-                        Layout.alignment: Qt.AlignRight
+                        Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignRight
                     }
                     Botao {
                         tipo: "discreto"
                         icone: "sair"
                         text: "Trocar usuário"
-                        Layout.alignment: Qt.AlignRight
+                        Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignRight
+                        Layout.leftMargin: Tema.estreito ? -10 : 0
                         onClicked: tela.janela.trocarUsuario()
                     }
                 }
@@ -137,7 +142,7 @@ FocusScope {
 
             Campo {
                 id: busca
-                dica: "Buscar peça: qualquer código, nome, modelo ou carro (ex.: óleo 5w30, 8PK1515)"
+                dica: Tema.estreito ? "Buscar peça: código, nome ou carro" : "Buscar peça: qualquer código, nome, modelo ou carro (ex.: óleo 5w30, 8PK1515)"
                 icone: "busca"
                 atalho: "F11"
                 tamanhoFonte: 19
@@ -150,9 +155,9 @@ FocusScope {
             Rotulo { text: "Mais usados"; Layout.topMargin: 14 }
 
             GridLayout {
-                columns: tela.colunas
-                columnSpacing: 14
-                rowSpacing: 14
+                columns: tela.colunasMaisUsados
+                columnSpacing: Tema.estreito ? 10 : 14
+                rowSpacing: Tema.estreito ? 10 : 14
                 Layout.fillWidth: true
                 Repeater {
                     model: tela.menu.maisUsados
@@ -161,7 +166,7 @@ FocusScope {
                         required property int index
                         item: modelData
                         indice: index
-                        grande: true
+                        grande: !Tema.estreito
                         Layout.fillWidth: true
                         Layout.preferredWidth: 100
                         onAbrir: tela.janela.abrirFuncao(modelData)
@@ -175,7 +180,7 @@ FocusScope {
             GridLayout {
                 columns: tela.colunas
                 columnSpacing: 12
-                rowSpacing: 12
+                rowSpacing: Tema.estreito ? 10 : 12
                 Layout.fillWidth: true
                 Repeater {
                     model: tela.menu.todos

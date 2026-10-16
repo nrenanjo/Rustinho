@@ -82,9 +82,11 @@ Rectangle {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: 6
-        visible: sobre.hovered || cartao.item.fixo === true
+        // No celular não tem "passar o mouse": o alfinete aparece só nas
+        // fixadas, e segurar o dedo no cartão fixa ou solta.
+        visible: (sobre.hovered && !Tema.celular) || cartao.item.fixo === true
         opacity: cartao.item.fixo ? 1 : 0.55
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered && !Tema.celular
         ToolTip.delay: 500
         ToolTip.text: cartao.item.fixo ? "Soltar de Mais usados" : "Fixar em Mais usados"
         onClicked: cartao.fixar()
@@ -103,5 +105,8 @@ Rectangle {
         id: sobre
         cursorShape: cartao.item.disponivel ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
-    TapHandler { onTapped: cartao.abrir() }
+    TapHandler {
+        onTapped: cartao.abrir()
+        onLongPressed: cartao.fixar()
+    }
 }

@@ -158,7 +158,7 @@ FocusScope {
         property var achados: []
         property var previa: []
         property string erro: ""
-        width: 620
+        width: Math.min(620, Tema.largura - 24)
 
         function abrirCom() {
             erro = ""
@@ -336,7 +336,7 @@ FocusScope {
         property string erro: ""
         // ids na mesma ordem da Selecao "De onde sai"
         property var origens: []
-        width: 700
+        width: Math.min(700, Tema.largura - 24)
 
         function abrirCom(c) {
             conta = c
@@ -501,7 +501,7 @@ FocusScope {
         id: ficha
         property string contaId: ""
         property var dados: null
-        width: 660
+        width: Math.min(660, Tema.largura - 24)
 
         function abrirCom(id) {
             contaId = id
@@ -649,7 +649,7 @@ FocusScope {
         id: correcao
         property string contaId: ""
         property string erro: ""
-        width: 600
+        width: Math.min(600, Tema.largura - 24)
         function abrirCom(p) {
             contaId = p.id
             erro = ""
@@ -706,7 +706,7 @@ FocusScope {
         id: categorias
         property var itens: []
         property string erro: ""
-        width: 560
+        width: Math.min(560, Tema.largura - 24)
         function abrirCom() {
             erro = ""
             nova.texto = ""

@@ -243,7 +243,7 @@ FocusScope {
         property var cheque: null
         property string erro: ""
         readonly property var bancos: secao.contas
-        width: 500
+        width: Math.min(500, Tema.largura - 24)
         function abrirCom(c) {
             cheque = c
             erro = ""
@@ -287,7 +287,7 @@ FocusScope {
         id: devolucao
         property var cheque: null
         property string erro: ""
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         function abrirCom(c) {
             cheque = c
             erro = ""

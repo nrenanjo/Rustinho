@@ -285,7 +285,7 @@ FocusScope {
         id: cadastro
         property string id_: ""
         property string erro: ""
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         function abrirCom(c) {
             id_ = c ? c.id : ""
             erro = ""
@@ -347,7 +347,7 @@ FocusScope {
         property string tipo: "entrada"
         property string erro: ""
         readonly property var cats: secao.categorias.filter(c => c.tipo === (tipo === "entrada" ? "receita" : "despesa"))
-        width: 560
+        width: Math.min(560, Tema.largura - 24)
         function abrirCom(t) {
             tipo = t
             erro = ""
@@ -412,7 +412,7 @@ FocusScope {
         id: transferencia
         property string erro: ""
         readonly property var outras: secao.contas.filter(c => c.ativo && c.id !== secao.contaId)
-        width: 560
+        width: Math.min(560, Tema.largura - 24)
         function abrirCom() {
             erro = ""
             tValor.texto = ""
@@ -463,7 +463,7 @@ FocusScope {
     Painel {
         id: conferencia
         property string erro: ""
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         function abrirCom() {
             erro = ""
             real.texto = ""

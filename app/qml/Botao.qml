@@ -45,7 +45,7 @@ Button {
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
-                visible: botao.atalho !== ""
+                visible: botao.atalho !== "" && !Tema.celular && !Tema.estreito
                 text: botao.atalho
                 font.family: Tema.texto
                 font.pixelSize: 12

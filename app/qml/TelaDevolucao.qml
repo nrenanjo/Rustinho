@@ -426,7 +426,7 @@ FocusScope {
     Painel {
         id: pronto
         cor: Tema.verde
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         contentItem: ColumnLayout {
             spacing: 12
             Titulo { text: "Devolução feita"; font.pixelSize: 34; Layout.fillWidth: true }

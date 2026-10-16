@@ -219,7 +219,7 @@ FocusScope {
         id: fechamento
         property var vendedor: null
         property string erro: ""
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         function abrirCom(v) {
             vendedor = v
             erro = ""

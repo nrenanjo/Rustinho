@@ -117,7 +117,7 @@ ColumnLayout {
         maximumLength: campo.maximo
         leftPadding: (campo.icone !== "" ? 48 : 12) + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
-                      + (campo.atalho !== "" ? textoAtalho.implicitWidth + 16 : 0)
+                      + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
         selectByMouse: true
 
         background: Rectangle {
@@ -138,7 +138,7 @@ ColumnLayout {
         }
         Rotulo {
             id: textoAtalho
-            visible: campo.atalho !== ""
+            visible: campo.atalho !== "" && !Tema.celular && !Tema.estreito
             text: campo.atalho
             anchors.right: parent.right
             anchors.rightMargin: 16

@@ -38,11 +38,21 @@ QtObject {
         return oculto && t ? "••" : (t || "")
     }
 
+    // ---- Tamanho da janela (a janela principal atualiza) ----
+    // Estreito = celular em pé ou janela pequena: as telas viram uma coluna
+    // só, que rola como um feed.
+    property real largura: 1280
+    property real altura: 760
+    readonly property bool estreito: largura < 760
+    readonly property bool celular: Qt.platform.os === "android" || Qt.platform.os === "ios"
+
     // ---- Medidas ----
     readonly property real raio: 11                 // cantos das faixas (3 mm no livro)
     readonly property real raioCampo: 7
-    readonly property int margem: 32
+    readonly property int margem: estreito ? 14 : 32
     readonly property int espaco: 16
+    // Altura mínima de um botão ou campo para o dedo.
+    readonly property int toque: celular ? 44 : 40
 
     // ---- Fontes (dentro do programa, não precisam estar instaladas) ----
     readonly property string caminho: "qrc:/qt/qml/rustinho/fontes/"

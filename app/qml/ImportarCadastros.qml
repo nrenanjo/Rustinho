@@ -11,7 +11,7 @@ import rustinho
 Painel {
     id: painel
     readonly property var janela: ApplicationWindow.window
-    width: 640
+    width: Math.min(640, Tema.largura - 24)
     property var arquivos: []
     property var previa: null
     property string erro: ""

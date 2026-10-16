@@ -8,9 +8,11 @@ ApplicationWindow {
     id: janela
     width: 1280
     height: 760
-    minimumWidth: 1024
-    minimumHeight: 640
+    minimumWidth: 340
+    minimumHeight: 480
     visible: true
+    onWidthChanged: Tema.largura = width
+    onHeightChanged: Tema.altura = height
     // O Qt acrescenta " — Rustinho" sozinho (nome do programa).
     title: estado.loja || ""
     color: Tema.fundo
@@ -95,6 +97,11 @@ ApplicationWindow {
         Tema.oculto = true
         atualizarEstado()
         trocarPara("TelaInicio")
+        // Para testes: rustinho --abrir TelaPecas
+        const args = Qt.application.arguments
+        const i = args.indexOf("--abrir")
+        if (i >= 0 && i + 1 < args.length)
+            abrir(args[i + 1], {})
     }
 
     function trocarUsuario() {

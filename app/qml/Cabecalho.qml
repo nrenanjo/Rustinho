@@ -35,28 +35,46 @@ ColumnLayout {
         Olho { visible: cabecalho.sensivel }
     }
 
-    RowLayout {
-        spacing: 16
+    // Título e botões lado a lado; na tela estreita, os botões vão para
+    // baixo do título e quebram linha.
+    GridLayout {
+        columns: Tema.estreito ? 1 : 2
+        columnSpacing: 16
+        rowSpacing: 10
         Layout.fillWidth: true
         ColumnLayout {
             spacing: 0
             Layout.fillWidth: true
             Titulo {
                 text: cabecalho.titulo
-                font.pixelSize: 44
+                font.pixelSize: Tema.estreito ? 34 : 44
                 Layout.fillWidth: true
             }
             Nota {
                 text: cabecalho.subtitulo
                 visible: text !== ""
-                font.pixelSize: 16
+                font.pixelSize: Tema.estreito ? 15 : 16
                 Layout.fillWidth: true
             }
         }
-        RowLayout {
+        Flow {
             id: linhaAcoes
             spacing: 10
-            Layout.alignment: Qt.AlignBottom
+            visible: children.length > 0
+            Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignBottom | Qt.AlignRight
+            Layout.fillWidth: Tema.estreito
+            Layout.preferredWidth: Tema.estreito ? -1 : implicitLargura
+            // Flow não calcula a própria largura: soma a dos botões.
+            readonly property real implicitLargura: {
+                let t = 0
+                let n = 0
+                for (let i = 0; i < children.length; i++)
+                    if (children[i].visible) {
+                        t += children[i].width
+                        n++
+                    }
+                return t + Math.max(0, n - 1) * spacing
+            }
         }
     }
 }

@@ -793,8 +793,8 @@ FocusScope {
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
-        width: 660
-        padding: 30
+        width: Math.min(660, Tema.largura - 24)
+        padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
         T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
@@ -1122,7 +1122,7 @@ FocusScope {
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
-        width: 520
+        width: Math.min(520, Tema.largura - 24)
         padding: 32
         closePolicy: Popup.CloseOnEscape
         T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
@@ -1189,8 +1189,8 @@ FocusScope {
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
-        width: 520
-        padding: 30
+        width: Math.min(520, Tema.largura - 24)
+        padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
         T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }

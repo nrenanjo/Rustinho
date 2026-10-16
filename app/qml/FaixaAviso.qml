@@ -22,12 +22,23 @@ Item {
     Rectangle {
         id: faixa
         width: raiz.width
-        height: 58
+        height: Tema.estreito ? Math.max(58, empilhado.implicitHeight + 24) : 58
         radius: Tema.raio
         color: raiz.temAtraso ? Tema.rosa : Tema.verde
         opacity: 1 - Math.min(Math.abs(x) / (raiz.width * 0.6), 0.85)
 
+        readonly property string detalhe: {
+            const partes = []
+            if (raiz.aviso.texto)
+                partes.push(raiz.aviso.texto)
+            if (raiz.aviso.atraso)
+                partes.push("<font color='" + Tema.vermelho + "'>" + raiz.aviso.atraso + "</font>")
+            return partes.join("  ·  ")
+        }
+
+        // Computador: tudo numa linha.
         RowLayout {
+            visible: !Tema.estreito
             anchors.fill: parent
             anchors.leftMargin: 22
             anchors.rightMargin: 22
@@ -42,14 +53,7 @@ Item {
             }
             Text {
                 textFormat: Text.StyledText
-                text: {
-                    const partes = []
-                    if (raiz.aviso.texto)
-                        partes.push(raiz.aviso.texto)
-                    if (raiz.aviso.atraso)
-                        partes.push("<font color='" + Tema.vermelho + "'>" + raiz.aviso.atraso + "</font>")
-                    return partes.join("  ·  ")
-                }
+                text: faixa.detalhe
                 color: Tema.tinta
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -64,6 +68,33 @@ Item {
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 13
+            }
+        }
+
+        // Celular: título em cima, o resto embaixo, quebrando a linha.
+        ColumnLayout {
+            id: empilhado
+            visible: Tema.estreito
+            x: 18
+            width: parent.width - 36
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 2
+            Text {
+                text: raiz.aviso.titulo || ""
+                color: Tema.tinta
+                font.family: Tema.titulo
+                font.weight: Font.Bold
+                font.pixelSize: 22
+            }
+            Text {
+                textFormat: Text.StyledText
+                text: faixa.detalhe
+                color: Tema.tinta
+                font.family: Tema.texto
+                font.weight: Font.DemiBold
+                font.pixelSize: 15
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
         }
 

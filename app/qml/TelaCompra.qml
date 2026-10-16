@@ -434,8 +434,8 @@ FocusScope {
         modal: true
         focus: true
         anchors.centerIn: parent
-        width: 480
-        padding: 30
+        width: Math.min(480, Tema.largura - 24)
+        padding: Tema.estreito ? 18 : 30
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14

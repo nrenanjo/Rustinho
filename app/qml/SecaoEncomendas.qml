@@ -282,7 +282,7 @@ FocusScope {
     // ---------- Nova encomenda (paga quando chegar) ----------
     Painel {
         id: nova_
-        width: 600
+        width: Math.min(600, Tema.largura - 24)
         property string clienteId: ""
         property var achados: []
         property string produtoId: ""

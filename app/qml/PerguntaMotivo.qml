@@ -14,7 +14,7 @@ Painel {
     property var acao: null
     property string erro: ""
     signal feito()
-    width: 500
+    width: Math.min(500, Tema.largura - 24)
 
     function perguntar(titulo, mensagem, textoBotao, acao, rotulo, tipoBotao) {
         motivo.titulo = titulo
