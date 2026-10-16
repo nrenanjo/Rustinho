@@ -27,26 +27,15 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Qt do computador (ferramentas)
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSAO }}
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          dir: ${{ runner.temp }}/qt
-          cache: true
-          cache-key-prefix: qt-host
-      - name: Qt for Android
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSAO }}
-          host: linux
-          target: android
-          arch: android_arm64_v8a
-          dir: ${{ runner.temp }}/qt
-          cache: true
-          cache-key-prefix: qt-android
+      - name: Qt (computador e Android)
+        run: |
+          set -o pipefail
+          (
+            pip install --quiet aqtinstall &&
+            aqt install-qt linux desktop "$QT_VERSAO" linux_gcc_64 -O "$RUNNER_TEMP/qt" &&
+            aqt install-qt linux android "$QT_VERSAO" android_arm64_v8a -O "$RUNNER_TEMP/qt" &&
+            ls "$RUNNER_TEMP/qt/$QT_VERSAO"
+          ) 2>&1 | tee -a registro.txt
       - name: NDK
         run: |
           NDK_VER=26.1.10909125
@@ -54,7 +43,7 @@ jobs:
             yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VER" "platforms;android-34" "build-tools;34.0.0" > /dev/null
           fi
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VER" >> $GITHUB_ENV
-          sudo apt-get update && sudo apt-get install -y ninja-build > /dev/null
+          sudo apt-get install -y ninja-build > /dev/null 2>&1 || true
       - name: Versão
         run: |
           V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -80,8 +69,8 @@ jobs:
           echo "QT_ANDROID_KEYSTORE_ALIAS=rustinho" >> $GITHUB_ENV
       - name: Compilar o APK
         run: |
-          QT_ANDROID=$(ls -d "$RUNNER_TEMP"/qt/Qt/$QT_VERSAO/android_arm64_v8a)
-          QT_HOST=$(ls -d "$RUNNER_TEMP"/qt/Qt/$QT_VERSAO/gcc_64)
+          QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/android_arm64_v8a"
+          QT_HOST="$RUNNER_TEMP/qt/$QT_VERSAO/gcc_64"
           set -o pipefail
           (
             "$QT_ANDROID/bin/qt-cmake" -S android -B build-android -G Ninja \
@@ -92,12 +81,13 @@ jobs:
               -DQT_ANDROID_SIGN_APK=ON \
               -DRUSTINHO_VERSAO_CODIGO=$CODIGO &&
             cmake --build build-android --target apk
-          ) 2>&1 | tee registro.txt
+          ) 2>&1 | tee -a registro.txt
       - name: Mostrar o erro
         if: failure()
         run: |
+          touch registro.txt
           grep -n -i -E "error|erro|failed|fatal|undefined" registro.txt | tail -40 > erros.txt || true
-          tail -60 registro.txt > fim.txt
+          tail -80 registro.txt > fim.txt
           python3 - <<'PY'
           import re
           def anotar(titulo, arquivo):
