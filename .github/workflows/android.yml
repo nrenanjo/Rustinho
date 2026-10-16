@@ -114,3 +114,47 @@ jobs:
       - name: Publicar em Releases (versão nova ou já publicada)
         run: |
           echo "::notice title=APK pronto::$(ls saida)"
+
+  # Abre o APK num Android de mentira (emulador) e tira fotos da tela.
+  # As fotos e o registro vão para o ramo "testes-android".
+  testar:
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Rustinho-Android
+          path: saida
+      - name: Liberar o KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulador
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back emulated
+          script: bash android/testar.sh
+      - name: Guardar as fotos no ramo testes-android
+        if: always()
+        run: |
+          mkdir -p /tmp/r && cp -r fotos /tmp/r/ 2>/dev/null || true
+          cd /tmp/r && git init -q -b testes-android
+          git config user.name "montagem" && git config user.email "montagem@users.noreply.github.com"
+          git add -A && git commit -qm "Fotos do teste ${GITHUB_SHA::7}" || exit 0
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" testes-android
+      - name: Avisos do registro
+        if: always()
+        run: |
+          [ -f fotos/erros.txt ] || exit 0
+          python3 - <<'PY'
+          t = open("fotos/erros.txt", errors="replace").read()[-6000:] or "nenhum"
+          t = t.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+          print(f"::warning title=registro do app::{t}")
+          PY
