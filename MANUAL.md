@@ -87,8 +87,20 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 |---|---|---|
 | Windows | `%LOCALAPPDATA%\Rustinho\rustinho.db` | `%LOCALAPPDATA%\Rustinho\backups` |
 | Linux | `~/.local/share/rustinho/rustinho.db` | `~/.local/share/rustinho/backups` |
+| Android | dentro do app (só ele vê) | dentro do app |
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
+
+### Novo na versão 0.9.0: Rustinho no celular (Android)
+
+- **App de Android** (Android 9 ou mais novo, celulares de 64 bits): faz tudo o que o computador faz, com as mesmas cores e pílulas. As telas viram uma coluna só, que se rola como um feed; onde o computador mostra duas partes lado a lado (ex.: Caixa, Compra, Ordem de serviço), o celular mostra pílulas para trocar de parte.
+- **Deitado também:** é só virar o celular. Com a tela deitada, os campos ficam lado a lado.
+- **Câmera como leitor:** no Vender e em Peças, o botão de câmera no fim da busca lê o código de barras da embalagem ou da etiqueta (EAN, Code 128, Code 39 e QR).
+- **Voltar do celular** faz o mesmo que o Esc: volta uma tela. Na primeira tela, fecha o app (o backup é feito antes).
+- **Junto com os caixas:** na primeira vez, escolha "Já uso o Rustinho na loja: juntar" e use a senha da rede da loja; o celular precisa estar no mesmo Wi-Fi.
+- **Backup:** fica no próprio aparelho. O Google Drive fica com os computadores da loja (lá estão todos os dados, os do celular também).
+- **XML, zip e rar:** escolha o arquivo pelo seletor do Android (Downloads, WhatsApp, Drive...). No celular não tem "escolher uma pasta".
+- **Telas menores no computador:** a janela do Rustinho também se ajeita quando fica estreita.
 
 ### Novo na versão 0.8.0: Windows, AppImage, zip e rar
 
@@ -219,7 +231,6 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 
 ## Próximas etapas
 
-- App para Android (o Rustinho no celular, rolando como um feed, também na horizontal)
 - Notas fiscais: NF-e e NFS-e
 - Boletos e conciliação bancária
 - Garantias e kits de serviço (ex.: revisão com as peças certas)

@@ -111,8 +111,27 @@ jobs:
           name: Rustinho-Android
           path: saida/*.apk
           retention-days: 30
-      - name: APK pronto
-        run: echo "::notice title=APK pronto::$(ls saida)"
+      # A versão nova é publicada pela montagem do Windows e do Linux
+      # (montar.yml); aqui o APK entra nela, uma vez só.
+      - name: Publicar em Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v$VERSAO"
+          for i in $(seq 1 50); do
+            gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 && break
+            sleep 60
+          done
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::notice title=APK pronto::Sem a versão $TAG em Releases; o APK ficou só nos artefatos."
+            exit 0
+          fi
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -q 'Android\.apk$'; then
+            echo "::notice title=APK pronto::A versão $TAG já tem APK; este ficou só nos artefatos."
+            exit 0
+          fi
+          gh release upload "$TAG" saida/*.apk -R "$GITHUB_REPOSITORY"
+          echo "::notice title=APK publicado::$(ls saida) em $TAG"
 
   # Abre o APK num Android de mentira (emulador) e tira fotos da tela.
   # As fotos e o registro vão para o ramo "testes-android".

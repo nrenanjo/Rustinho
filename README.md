@@ -14,6 +14,7 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
 |---|---|
 | Windows 10 e 11 (64 bits) | `Rustinho-…-Windows-instalador.exe` |
 | Linux (64 bits) | `Rustinho-…-Linux-x86_64.AppImage` |
+| Android 9 ou mais novo | `Rustinho-…-Android.apk` |
 
 **Windows:** abra o instalador e vá em Avançar até Concluir. Como o instalador não tem assinatura paga, o Windows pode mostrar "O Windows protegeu o computador": clique em **Mais informações → Executar assim mesmo**.
 
@@ -21,6 +22,8 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
 
     chmod +x Rustinho-*.AppImage
     ./Rustinho-*.AppImage
+
+**Android:** baixe o `.apk` no celular e toque nele. Na primeira vez o Android pede para **permitir instalar apps desta fonte** (do navegador ou do gerenciador de arquivos): permita e toque em Instalar. Para atualizar, instale o `.apk` novo por cima: os dados ficam.
 
 ## Primeira vez
 
@@ -38,13 +41,16 @@ Precisa de Rust (stable) e Qt 6 (qtbase e qtdeclarative).
     ./compilar.sh      # Linux: mostra o que falta instalar, compila e deixa ./rustinho
     cargo test -p rustinho-nucleo
 
-A cada envio para a `main`, o GitHub monta o instalador do Windows e o AppImage sozinho (`.github/workflows/montar.yml`). Uma etiqueta `vX.Y.Z` publica os dois em Releases.
+A cada envio para a `main`, o GitHub monta o instalador do Windows, o AppImage (`.github/workflows/montar.yml`) e o APK do Android (`.github/workflows/android.yml`, Qt for Android + CMake). Quando a versão do `Cargo.toml` é nova, os três vão para Releases.
+
+O APK é assinado com a chave pública de `android/assinatura/` (veja o `LEIA.md` de lá para usar uma chave sua).
 
 ## Organização
 
 - `nucleo/`: regras da loja e banco de dados (SQLite), sem interface. Tudo testável com `cargo test`.
 - `app/`: as telas (`qml/`), a ponte com o núcleo (`src/`), impressão em PDF (`cpp/`) e as fontes (`fontes/`, licença OFL).
 - `instalador/`: instalador do Windows (Inno Setup), ícone e atalho do Linux.
+- `android/`: o app de Android (as mesmas telas e o mesmo núcleo), `app/qml_android/` tem o leitor pela câmera.
 
 ## Licença
 

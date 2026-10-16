@@ -156,5 +156,7 @@ jobs:
 
             **Linux:** baixe o `.AppImage`, dê permissão de execução (`chmod +x`) e abra.
 
+            **Android 9 ou mais novo:** baixe o `Rustinho-${{ steps.versao.outputs.versao }}-Android.apk` no celular e toque nele. Permita "instalar apps desta fonte" quando o Android pedir. (O APK chega alguns minutos depois dos outros.)
+
             O que mudou: veja o [Manual](https://github.com/${{ github.repository }}/blob/main/MANUAL.md).
           files: saida/*
