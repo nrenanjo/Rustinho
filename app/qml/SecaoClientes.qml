@@ -61,9 +61,9 @@ FocusScope {
                 color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 16
+                    anchors.leftMargin: Tema.estreito ? 10 : 16
                     anchors.rightMargin: 16
-                    spacing: 14
+                    spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.c.posicao
                         color: Tema.dourado
@@ -71,7 +71,7 @@ FocusScope {
                         font.weight: Font.Bold
                         font.pixelSize: 24
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 38
+                        Layout.preferredWidth: Tema.estreito ? 24 : 38
                     }
                     ColumnLayout {
                         spacing: 3
@@ -100,11 +100,13 @@ FocusScope {
                         }
                     }
                     Chip {
+                        visible: !Tema.estreito && texto !== ""
                         texto: linha.c.deve ? "deve R$ " + Tema.valor(linha.c.deve) : ""
                         color: linha.c.vencido ? Tema.rosa : Qt.rgba(1, 1, 1, 0.5)
                         corTexto: linha.c.vencido ? Tema.vermelho : Tema.tintaSuave
                     }
                     ColumnLayout {
+                        visible: !Tema.estreito
                         spacing: 0
                         Layout.preferredWidth: 150
                         Text {
@@ -125,7 +127,7 @@ FocusScope {
                     }
                     ColumnLayout {
                         spacing: 0
-                        Layout.preferredWidth: 140
+                        Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + Tema.valor(linha.c.total)
                             color: Tema.tinta

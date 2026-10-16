@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Layouts
 import rustinho
 
 // Caixa de marcar.
@@ -8,6 +9,8 @@ CheckBox {
     font.family: Tema.texto
     font.pixelSize: 15
     spacing: 10
+    // No celular, o texto comprido quebra a linha em vez de passar da tela.
+    Layout.fillWidth: Tema.estreito
 
     indicator: Rectangle {
         implicitWidth: 22

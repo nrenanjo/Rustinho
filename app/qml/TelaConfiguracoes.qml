@@ -393,6 +393,7 @@ FocusScope {
                             readonly property int numero: modelData.numero
                             readonly property string nomeTexto: nomeTabela.texto
                             readonly property string lucroTexto: lucroTabela.texto
+                            colunasEstreito: 3
                             spacing: 12
                             Layout.fillWidth: true
 
@@ -407,6 +408,7 @@ FocusScope {
                             }
 
                             Text {
+                                property bool manterLargura: true
                                 text: linhaTabela.numero
                                 color: Tema.dourado
                                 font.family: Tema.titulo

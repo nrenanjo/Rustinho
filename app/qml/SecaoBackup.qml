@@ -220,7 +220,7 @@ ColumnLayout {
         readonly property bool comErro: !!secao.b && secao.b.situacao.erro !== ""
         color: comErro ? Tema.rosa : Tema.verde
         Layout.fillWidth: true
-        RowLayout {
+        Linha {
             spacing: 18
             Layout.fillWidth: true
             ColumnLayout {

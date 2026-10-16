@@ -124,17 +124,17 @@ FocusScope {
                 TapHandler { onTapped: tela.janela.abrir("TelaOrdem", { osId: linha.o.id }) }
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 18
-                    spacing: 14
+                    anchors.leftMargin: Tema.estreito ? 10 : 16
+                    anchors.rightMargin: Tema.estreito ? 12 : 18
+                    spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.o.numero
                         color: Tema.dourado
                         font.family: Tema.titulo
                         font.weight: Font.Bold
-                        font.pixelSize: 26
+                        font.pixelSize: Tema.estreito ? 22 : 26
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 44
+                        Layout.preferredWidth: Tema.estreito ? 22 : 44
                     }
                     Rectangle {
                         visible: linha.o.placa !== ""
@@ -168,7 +168,9 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: [linha.o.defeito, linha.o.mecanico ? "mecânico " + linha.o.mecanico : "", "aberta " + linha.o.quando].filter(x => !!x).join("  ·  ")
+                            text: [Tema.estreito ? linha.o.nomeSituacao : "",
+                                   Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao) ? "previsão " + linha.o.previsao : "",
+                                   linha.o.defeito, linha.o.mecanico ? "mecânico " + linha.o.mecanico : "", "aberta " + linha.o.quando].filter(x => !!x).join("  ·  ")
                             color: Tema.tintaSuave
                             font.family: Tema.serifa
                             font.italic: true
@@ -178,7 +180,7 @@ FocusScope {
                         }
                     }
                     Text {
-                        visible: linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao)
+                        visible: !Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao)
                         text: "previsão " + linha.o.previsao
                         color: linha.o.atrasada ? Tema.vermelho : Tema.tintaSuave
                         font.family: Tema.texto
@@ -186,6 +188,7 @@ FocusScope {
                         font.pixelSize: 13
                     }
                     Chip {
+                        visible: !Tema.estreito
                         texto: linha.o.nomeSituacao
                         color: linha.cor[0]
                         corTexto: linha.cor[1]
@@ -195,9 +198,9 @@ FocusScope {
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold
-                        font.pixelSize: 17
+                        font.pixelSize: Tema.estreito ? 15 : 17
                         horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: 120
+                        Layout.preferredWidth: Tema.estreito ? -1 : 120
                     }
                 }
             }
