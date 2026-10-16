@@ -20,7 +20,10 @@ foto 01-primeira-vez 40
 # O primeiro campo (nome da loja) já vem com o cursor.
 texto "LojaModelo"; tecla KEYCODE_ENTER
 tecla KEYCODE_ENTER
-texto "Maria"; tecla KEYCODE_ENTER
+# O nome pelo teclado da tela (toques nas teclas), como uma pessoa digita.
+for xy in "864 2027" "108 1872" "378 1717" "810 1717" "108 1872"; do adb shell input tap $xy; sleep 0.6; done
+foto 01b-nome-tocado 2
+tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 foto 02-inicio 6
