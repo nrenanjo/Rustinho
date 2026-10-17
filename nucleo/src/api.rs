@@ -89,7 +89,7 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "comissao_fechar"
         | "comissao_reabrir" => "financeiro",
         // A própria pílula Gerente: sempre só o gerente.
-        "gerente_ler" | "gerente_salvar" => "gerente",
+        "gerente_ler" | "gerente_salvar" | "conflitos_listar" | "conflito_resolver" => "gerente",
         _ => return None,
     })
 }
@@ -122,6 +122,7 @@ pub const SO_LEITURA: &[&str] = &[
     "preco_calcular",
     "permissao",
     "gerente_ler",
+    "conflitos_listar",
     "menu",
     "produtos_buscar",
     "produto_novo",
@@ -518,6 +519,24 @@ impl Servico {
                 Ok(Value::Null)
             }
             "gerente_ler" => self.gerente_ler(),
+            // Conflitos entre caixas (pílula Gerente).
+            "conflitos_listar" => Ok(json!(sync::conflitos(&self.banco.conn)?)),
+            "conflito_resolver" => {
+                let d: Resolver = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                sync::resolver_conflito(&tx, d.id, d.usar, &sessao.usuario_id)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "conflito.resolver",
+                    "sync_conflito",
+                    &d.id.to_string(),
+                    &[if d.usar { "Voltou a versão que tinha perdido".into() } else { "Ficou como está".into() }],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::conflitos(&self.banco.conn)?))
+            }
             // Só nos testes: defeito de propósito em pontos diferentes (C-15).
             #[cfg(test)]
             "__teste_panico" => {
@@ -1737,6 +1756,13 @@ impl Servico {
 #[derive(Deserialize)]
 struct Acao {
     acao: String,
+}
+
+#[derive(Deserialize)]
+struct Resolver {
+    id: i64,
+    #[serde(default)]
+    usar: bool,
 }
 
 #[derive(Deserialize)]

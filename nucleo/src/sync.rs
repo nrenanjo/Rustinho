@@ -692,9 +692,51 @@ pub struct Conflito {
     pub resolvido: String,
 }
 
+/// Nome do campo para a tela.
+fn nome_do_campo(campo: &str) -> String {
+    let n = match campo {
+        "nome" => "Nome",
+        "preco" => "Preço",
+        "custo" => "Custo",
+        "lucro" => "Lucro",
+        "codigo" => "Código",
+        "codigo_barras" => "Código de barras",
+        "codigo_original" => "Código original",
+        "marca" => "Marca",
+        "unidade" => "Unidade",
+        "local" => "Local",
+        "ativo" => "Ativo",
+        "estoque_minimo" => "Estoque mínimo",
+        "desconto_maximo" => "Desconto máximo",
+        "observacoes" => "Observações",
+        "telefone" => "Telefone",
+        "email" => "E-mail",
+        "documento" => "CPF/CNPJ",
+        "limite_credito" => "Limite de crédito",
+        "gerente" => "Gerente",
+        "senha_hash" => "Senha",
+        "valor" => "Valor",
+        "situacao" => "Situação",
+        "(apagado)" => "Apagado",
+        outro => return outro.replace('_', " "),
+    };
+    n.into()
+}
+
+/// Colunas em centavos.
+const DINHEIRO: &[&str] = &["preco", "custo", "valor", "total", "subtotal", "desconto", "limite_credito", "saldo_inicial", "oferta_preco"];
+
 fn valor_curto(v: Option<&Value>, campo: &str) -> String {
     if campo == "senha_hash" {
         return "(senha)".into();
+    }
+    if let (true, Some(n)) = (DINHEIRO.contains(&campo), v.and_then(|x| x.as_i64())) {
+        return format!("R$ {}", crate::numeros::escrever_dinheiro(n));
+    }
+    if campo == "lucro" || campo == "desconto_maximo" {
+        if let Some(n) = v.and_then(|x| x.as_i64()) {
+            return format!("{}%", crate::numeros::escrever_percentual(n));
+        }
     }
     match v {
         None | Some(Value::Null) => "—".into(),
@@ -781,6 +823,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 for campo in diferencas(atual.as_deref(), dados_perdeu.as_deref()) {
                     k.campos.push(json!({
                         "campo": campo,
+                        "nome": nome_do_campo(&campo),
                         "ficou": if atual.is_none() { "(apagado)".into() } else { valor_curto(a.get(&campo), &campo) },
                         "perdeu": if dados_perdeu.is_none() { "(apagado)".into() } else { valor_curto(p.get(&campo), &campo) },
                     }));

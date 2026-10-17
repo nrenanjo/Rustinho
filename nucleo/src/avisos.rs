@@ -172,6 +172,22 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         });
     }
 
+    // Troca de dados entre caixas: conflitos esperando o gerente.
+    let conflitos = crate::sync::conflitos_abertos(conn)?;
+    if conflitos > 0 && !escondido(conn, "conflitos", &hoje)? {
+        avisos.push(Aviso {
+            id: "conflitos".into(),
+            dia: hoje.clone(),
+            titulo: "Caixas".into(),
+            texto: format!(
+                "{} entre caixas para o gerente ver",
+                plural(conflitos, "diferença", "diferenças")
+            ),
+            atraso: String::new(),
+            funcao: "configuracoes".into(),
+        });
+    }
+
     // Backup: falhou agora, ou está há 2 dias sem cópia (no computador ou no Drive).
     let b = backup::situacao(conn)?;
     let dias_desde = |quando: &str| -> Resultado<i64> {

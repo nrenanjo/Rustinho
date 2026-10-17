@@ -18,6 +18,7 @@ FocusScope {
     property bool verBackup: false
     property bool verGerente: false
     property var gerente: null       // pílula Gerente: { acoes, usuarios }
+    property var conflitos: []       // pílula Gerente: diferenças entre caixas
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
     Component.onDestruction: Api.chamar("gerente_encerrar")
 
@@ -79,6 +80,19 @@ FocusScope {
     function carregarGerente() {
         const r = Api.chamar("gerente_ler")
         gerente = r.ok ? r.dados : null
+        const k = Api.chamar("conflitos_listar")
+        conflitos = k.ok ? k.dados : []
+    }
+
+    // Conflito entre caixas: usar a versão que perdeu, ou deixar como está.
+    function resolverConflito(c, usar) {
+        const r = Api.chamar("conflito_resolver", { id: c.id, usar: usar })
+        if (r.ok) {
+            conflitos = r.dados
+            janela.avisar(usar ? "Voltou a versão que tinha perdido. Ela vai para os outros caixas." : "Ficou como está.", "ok")
+        } else {
+            janela.avisar(r.erro, "erro")
+        }
     }
 
     function salvarGerente() {
@@ -808,6 +822,90 @@ FocusScope {
                         onClicked: {
                             tela.secao = "loja"
                             atual.focar()
+                        }
+                    }
+                }
+
+                Faixa {
+                    visible: tela.secao === "gerente"
+                    titulo: "Diferenças entre caixas"
+                    subtitulo: tela.conflitos.filter(c => !c.resolvido).length > 0
+                               ? tela.conflitos.filter(c => !c.resolvido).length + " para ver"
+                               : "nenhuma para ver"
+                    color: tela.conflitos.some(c => !c.resolvido) ? Tema.rosa : Tema.pergaminho
+                    Layout.fillWidth: true
+                    Nota {
+                        text: "Quando dois caixas mexem na mesma coisa sem rede, fica a alteração mais nova e a outra aparece aqui. Escolha a que vale."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.conflitos
+                        delegate: Rectangle {
+                            required property var modelData
+                            color: modelData.resolvido ? "transparent" : Tema.papel
+                            radius: Tema.raioCampo
+                            Layout.fillWidth: true
+                            implicitHeight: colunaConflito.implicitHeight + 24
+                            ColumnLayout {
+                                id: colunaConflito
+                                x: 14; y: 12
+                                width: parent.width - 28
+                                spacing: 6
+                                Text {
+                                    text: modelData.oQue + " · " + modelData.quando + (modelData.caixa ? " · " + modelData.caixa : "")
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: modelData.texto
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Repeater {
+                                    model: modelData.campos
+                                    delegate: Text {
+                                        required property var modelData
+                                        text: modelData.nome + ": ficou " + modelData.ficou + " · o outro caixa tinha " + modelData.perdeu
+                                        color: Tema.tintaSuave
+                                        font.family: Tema.texto
+                                        font.pixelSize: 14
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                                Text {
+                                    visible: !!modelData.resolvido
+                                    text: "Resolvido: " + modelData.resolvido
+                                    color: Tema.verdeEscuro
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    Layout.fillWidth: true
+                                }
+                                Linha {
+                                    visible: !modelData.resolvido
+                                    spacing: 12
+                                    Layout.fillWidth: true
+                                    Botao {
+                                        visible: modelData.podeUsar
+                                        text: "Usar a do outro caixa"
+                                        tipo: "secundario"
+                                        onClicked: tela.resolverConflito(modelData, true)
+                                    }
+                                    Botao {
+                                        text: modelData.podeUsar ? "Deixar como está" : "Entendi"
+                                        tipo: "secundario"
+                                        onClicked: tela.resolverConflito(modelData, false)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
