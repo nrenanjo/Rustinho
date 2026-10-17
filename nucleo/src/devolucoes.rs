@@ -18,12 +18,8 @@ use serde::{Deserialize, Serialize};
 use crate::erro::{Erro, Resultado};
 use crate::{auditoria, caixa, estoque, numeros, tempo, texto};
 
-pub const DESTINOS: &[(&str, &str)] = &[
-    ("vale", "Vale-troca"),
-    ("dinheiro", "Dinheiro"),
-    ("pix", "Pix ou cartão"),
-    ("crediario", "Abater do crediário"),
-];
+pub const DESTINOS: &[(&str, &str)] =
+    &[("vale", "Vale-troca"), ("dinheiro", "Dinheiro"), ("pix", "Pix ou cartão"), ("crediario", "Abater do crediário")];
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -143,7 +139,11 @@ fn itens_da_venda(conn: &Connection, venda_id: &str) -> Resultado<Vec<ItemVenda>
         let dq: i64 = l.get(8)?;
         // O que o cliente pagou pelo item: o total dele menos a parte do
         // desconto da venda inteira.
-        let liquido = if soma_itens > 0 { crate::numeros::saturar((total as i128 * total_venda as i128 + soma_itens as i128 / 2) / soma_itens as i128) } else { 0 };
+        let liquido = if soma_itens > 0 {
+            crate::numeros::saturar((total as i128 * total_venda as i128 + soma_itens as i128 / 2) / soma_itens as i128)
+        } else {
+            0
+        };
         let unidade: String = l.get(4)?;
         Ok(ItemVenda {
             venda_item_id: l.get(0)?,
@@ -153,7 +153,11 @@ fn itens_da_venda(conn: &Connection, venda_id: &str) -> Resultado<Vec<ItemVenda>
             vendido: numeros::escrever_quantidade(q),
             devolvido: if dq > 0 { numeros::escrever_quantidade(dq) } else { String::new() },
             pode: numeros::escrever_quantidade((q - dq).max(0)),
-            valor_unitario: dinheiro(if q > 0 { crate::numeros::saturar((liquido as i128 * 1000 + q as i128 / 2) / q as i128) } else { 0 }),
+            valor_unitario: dinheiro(if q > 0 {
+                crate::numeros::saturar((liquido as i128 * 1000 + q as i128 / 2) / q as i128)
+            } else {
+                0
+            }),
             unidade,
             v_quantidade: q,
             v_total: total,
@@ -292,7 +296,12 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             c.erro = if pode <= 0 {
                 format!("{}: já foi devolvido todo.", v.descricao)
             } else {
-                format!("{}: dá para devolver no máximo {} {}.", v.descricao, numeros::escrever_quantidade(pode), v.unidade)
+                format!(
+                    "{}: dá para devolver no máximo {} {}.",
+                    v.descricao,
+                    numeros::escrever_quantidade(pode),
+                    v.unidade
+                )
             };
             c.campo = format!("itens.{n}");
             return Ok(c);
@@ -303,8 +312,12 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             (v.v_liquido - v.v_devolvido_valor, v.v_total - v.v_devolvido_item)
         } else {
             (
-                crate::numeros::saturar((v.v_liquido as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128),
-                crate::numeros::saturar((v.v_total as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128),
+                crate::numeros::saturar(
+                    (v.v_liquido as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128,
+                ),
+                crate::numeros::saturar(
+                    (v.v_total as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128,
+                ),
             )
         };
         c.linhas.push(Linha {
@@ -518,16 +531,42 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
         )?;
         if !l.produto_id.is_empty() {
             if l.defeito {
-                auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.defeito", "produto", &l.produto_id,
-                    &[format!("Voltou com defeito ({} {}), não entrou no estoque · {referencia}", numeros::escrever_quantidade(l.quantidade), l.unidade)])?;
+                auditoria::registrar(
+                    conn,
+                    dispositivo,
+                    Some(usuario_id),
+                    "produto.defeito",
+                    "produto",
+                    &l.produto_id,
+                    &[format!(
+                        "Voltou com defeito ({} {}), não entrou no estoque · {referencia}",
+                        numeros::escrever_quantidade(l.quantidade),
+                        l.unidade
+                    )],
+                )?;
             } else {
-                estoque::lancar(conn, dispositivo, Some(usuario_id), &l.produto_id, l.quantidade, "devolucao", &referencia)?;
+                estoque::lancar(
+                    conn,
+                    dispositivo,
+                    Some(usuario_id),
+                    &l.produto_id,
+                    l.quantidade,
+                    "devolucao",
+                    &referencia,
+                )?;
             }
         }
     }
     let como: Vec<String> = c.partes.iter().map(|p| format!("{} R$ {}", p.nome, p.valor)).collect();
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.devolucao", "venda", &e.venda_id,
-        &[format!("Devolução nº {numero}: R$ {} · {} · {motivo}", c.valor, como.join(" + "))])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "venda.devolucao",
+        "venda",
+        &e.venda_id,
+        &[format!("Devolução nº {numero}: R$ {} · {} · {motivo}", c.valor, como.join(" + "))],
+    )?;
     Ok(id)
 }
 
@@ -552,9 +591,13 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     let agora = tempo::agora();
     if let Some(vale) = &d.1 {
         let (valor, saldo): (i64, i64) =
-            conn.query_row("SELECT valor, saldo FROM vale_saldo WHERE id = ?1", [vale], |l| Ok((l.get(0)?, l.get(1)?)))?;
+            conn.query_row("SELECT valor, saldo FROM vale_saldo WHERE id = ?1", [vale], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })?;
         if saldo < valor {
-            return Err(Erro::validacao("O vale-troca desta devolução já foi usado numa compra. Cancele aquela venda antes."));
+            return Err(Erro::validacao(
+                "O vale-troca desta devolução já foi usado numa compra. Cancele aquela venda antes.",
+            ));
         }
         conn.execute(
             "UPDATE vale SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
@@ -574,15 +617,33 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         .query_map([id], |l| Ok((l.get(0)?, l.get(1)?)))?
         .collect::<Result<_, _>>()?;
     for (pid, q) in itens {
-        estoque::lancar(conn, dispositivo, Some(usuario_id), &pid, -q, "devolucao_desfeita",
-            &format!("Devolução nº {} desfeita · venda {venda_numero} · {venda_caixa} · {motivo}", d.4))?;
+        estoque::lancar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            &pid,
+            -q,
+            "devolucao_desfeita",
+            &format!("Devolução nº {} desfeita · venda {venda_numero} · {venda_caixa} · {motivo}", d.4),
+        )?;
     }
     conn.execute(
         "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
         params![id, agora, usuario_id, motivo],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.devolucao_desfeita", "venda", &d.3,
-        &[format!("Devolução nº {} desfeita · {motivo}{}", d.4, if d.5 > 0 { " (o dinheiro volta a contar na gaveta)" } else { "" })])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "venda.devolucao_desfeita",
+        "venda",
+        &d.3,
+        &[format!(
+            "Devolução nº {} desfeita · {motivo}{}",
+            d.4,
+            if d.5 > 0 { " (o dinheiro volta a contar na gaveta)" } else { "" }
+        )],
+    )?;
     Ok(())
 }
 
@@ -607,9 +668,29 @@ fn listar_onde(conn: &Connection, filtro: &str, valor: &str, limite: i64) -> Res
     let linhas: Vec<_> = c
         .query_map([valor], |l| {
             Ok((
-                (l.get::<_, String>(0)?, l.get::<_, i64>(1)?, l.get::<_, String>(2)?, l.get::<_, String>(3)?, l.get::<_, i64>(4)?, l.get::<_, String>(5)?),
-                (l.get::<_, String>(6)?, l.get::<_, i64>(7)?, l.get::<_, i64>(8)?, l.get::<_, i64>(9)?, l.get::<_, i64>(10)?, l.get::<_, i64>(11)?),
-                (l.get::<_, String>(12)?, l.get::<_, String>(13)?, l.get::<_, String>(14)?, l.get::<_, String>(15)?, l.get::<_, bool>(16)?),
+                (
+                    l.get::<_, String>(0)?,
+                    l.get::<_, i64>(1)?,
+                    l.get::<_, String>(2)?,
+                    l.get::<_, String>(3)?,
+                    l.get::<_, i64>(4)?,
+                    l.get::<_, String>(5)?,
+                ),
+                (
+                    l.get::<_, String>(6)?,
+                    l.get::<_, i64>(7)?,
+                    l.get::<_, i64>(8)?,
+                    l.get::<_, i64>(9)?,
+                    l.get::<_, i64>(10)?,
+                    l.get::<_, i64>(11)?,
+                ),
+                (
+                    l.get::<_, String>(12)?,
+                    l.get::<_, String>(13)?,
+                    l.get::<_, String>(14)?,
+                    l.get::<_, String>(15)?,
+                    l.get::<_, bool>(16)?,
+                ),
                 (l.get::<_, Option<String>>(17)?, l.get::<_, i64>(18)?, l.get::<_, bool>(19)?),
             ))
         })?
@@ -699,7 +780,18 @@ pub fn vales_abertos(conn: &Connection, cliente_id: &str) -> Resultado<Vec<Vale>
     #[allow(clippy::type_complexity)]
     let linhas: Vec<(String, i64, String, String, String, i64, i64, String, i64, i64)> = c
         .query_map([cliente_id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?, l.get(8)?, l.get(9)?))
+            Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+                l.get(6)?,
+                l.get(7)?,
+                l.get(8)?,
+                l.get(9)?,
+            ))
         })?
         .collect::<Result<_, _>>()?;
     let mut lista = Vec::new();
@@ -759,7 +851,9 @@ pub fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> 
 /// A venda tem devolução que vale (não desfeita)?
 pub fn tem_devolucao(conn: &Connection, venda_id: &str) -> Resultado<bool> {
     Ok(conn
-        .query_row("SELECT 1 FROM devolucao WHERE venda_id = ?1 AND cancelado_em IS NULL LIMIT 1", [venda_id], |_| Ok(()))
+        .query_row("SELECT 1 FROM devolucao WHERE venda_id = ?1 AND cancelado_em IS NULL LIMIT 1", [venda_id], |_| {
+            Ok(())
+        })
         .optional()?
         .is_some())
 }
@@ -808,7 +902,7 @@ mod testes {
         caixa::abrir(c, d, &u, "Caixa 1", "100").unwrap();
         let filtro = peca(&b, &u, "Filtro", "10"); // preço 20
         let vela = peca(&b, &u, "Vela", "5"); // preço 10
-        // 2 filtros + 4 velas = 80, com 10% de desconto na venda = 72, em dinheiro.
+                                              // 2 filtros + 4 velas = 80, com 10% de desconto na venda = 72, em dinheiro.
         let e = VendaEntrada {
             itens: vec![item(&filtro, "2"), item(&vela, "4")],
             tabela: 1,
@@ -879,7 +973,7 @@ mod testes {
         f.nome = "Maria".into();
         let cliente = pessoas::salvar(c, d, &u, &f).unwrap();
         let filtro = peca(&b, &u, "Filtro", "10"); // 20
-        // 3 filtros = 60: 20 de entrada e 40 no crediário.
+                                                   // 3 filtros = 60: 20 de entrada e 40 no crediário.
         let e = VendaEntrada {
             itens: vec![item(&filtro, "3")],
             tabela: 1,

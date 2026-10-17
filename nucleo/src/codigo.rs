@@ -87,7 +87,8 @@ pub fn ler_imagem(largura: u32, altura: u32, cinza: Vec<u8>) -> Option<String> {
 
 /// Lê o arquivo da foto e apaga em seguida.
 pub fn ler_foto(caminho: &Path) -> Resultado<Option<String>> {
-    let dados = std::fs::read(caminho).map_err(|e| Erro::validacao(format!("Não consegui ler a foto da câmera: {e}")))?;
+    let dados =
+        std::fs::read(caminho).map_err(|e| Erro::validacao(format!("Não consegui ler a foto da câmera: {e}")))?;
     let _ = std::fs::remove_file(caminho);
     let (l, a, cinza) = ler_pnm(&dados)?;
     Ok(ler_imagem(l, a, cinza))

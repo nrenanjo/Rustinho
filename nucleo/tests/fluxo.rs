@@ -21,10 +21,7 @@ fn ok(s: &mut Servico, comando: &str, dados: Value) -> Value {
 fn erro(s: &mut Servico, comando: &str, dados: Value) -> (String, String) {
     let r = chamar(s, comando, dados);
     assert_eq!(r["ok"], false, "{comando} deveria falhar: {r}");
-    (
-        r["erro"].as_str().unwrap_or_default().to_string(),
-        r["campo"].as_str().unwrap_or_default().to_string(),
-    )
+    (r["erro"].as_str().unwrap_or_default().to_string(), r["campo"].as_str().unwrap_or_default().to_string())
 }
 
 fn rolamento() -> Value {
@@ -63,12 +60,7 @@ fn pastilha() -> Value {
 }
 
 fn nomes(lista: &Value) -> Vec<String> {
-    lista["itens"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| i["nome"].as_str().unwrap().to_string())
-        .collect()
+    lista["itens"].as_array().unwrap().iter().map(|i| i["nome"].as_str().unwrap().to_string()).collect()
 }
 
 #[test]
@@ -205,11 +197,7 @@ fn fluxo_completo() {
         erro(&mut s, "estoque_ajustar", json!({ "produtoId": rol_id, "quantidade": "3", "motivo": "" })).1,
         "motivo"
     );
-    let ficha = ok(
-        &mut s,
-        "estoque_ajustar",
-        json!({ "produtoId": rol_id, "quantidade": "3", "motivo": "Contagem" }),
-    );
+    let ficha = ok(&mut s, "estoque_ajustar", json!({ "produtoId": rol_id, "quantidade": "3", "motivo": "Contagem" }));
     assert_eq!(ficha["estoque"], "3");
     assert_eq!(ficha["historico"][0]["descricao"], "ajustou o estoque");
 
@@ -254,11 +242,8 @@ fn fluxo_completo() {
     assert_eq!(nova["precos"][1]["lucro"], "80");
 
     // Usuários e entrada.
-    let luigi = ok(
-        &mut s,
-        "usuario_salvar",
-        json!({ "nome": "Luigi", "senha": "4321", "senha2": "4321", "ativo": true }),
-    );
+    let luigi =
+        ok(&mut s, "usuario_salvar", json!({ "nome": "Luigi", "senha": "4321", "senha2": "4321", "ativo": true }));
     let luigi_id = luigi["id"].as_str().unwrap().to_string();
     let lista = ok(&mut s, "usuarios_listar", json!({}));
     assert_eq!(lista.as_array().unwrap().len(), 2);
@@ -280,10 +265,7 @@ fn fluxo_completo() {
     assert_eq!(estado["usuario"]["nome"], "Maria");
 
     // Trocar a própria senha.
-    assert_eq!(
-        erro(&mut s, "senha_trocar", json!({ "atual": "0000", "nova": "abcd", "nova2": "abcd" })).1,
-        "atual"
-    );
+    assert_eq!(erro(&mut s, "senha_trocar", json!({ "atual": "0000", "nova": "abcd", "nova2": "abcd" })).1, "atual");
     ok(&mut s, "senha_trocar", json!({ "atual": "1234", "nova": "abcd", "nova2": "abcd" }));
     ok(&mut s, "sair", json!({}));
     erro(&mut s, "entrar", json!({ "id": maria_id, "senha": "1234" }));
@@ -373,13 +355,10 @@ fn gerente_e_caixa() {
     ok(&mut s, "sair", json!({}));
 
     // A gerente libera o ajuste de estoque para todos.
-    let maria = ok(&mut s, "usuarios_entrada", json!({}))
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|u| u["nome"] == "Maria")
-        .unwrap()["id"]
-        .clone();
+    let maria =
+        ok(&mut s, "usuarios_entrada", json!({})).as_array().unwrap().iter().find(|u| u["nome"] == "Maria").unwrap()
+            ["id"]
+            .clone();
     ok(&mut s, "entrar", json!({ "id": maria, "senha": "1234" }));
     let g = ok(&mut s, "gerente_salvar", json!({ "acoes": { "ajustar_estoque": false } }));
     let ajustar = g["acoes"].as_array().unwrap().iter().find(|a| a["id"] == "ajustar_estoque").unwrap().clone();
@@ -422,17 +401,27 @@ fn venda_confere_cliente_orcamento_e_limites() {
     ok(&mut s, "caixa_abrir", json!({ "fundo": "0" }));
     let item = json!([{ "produtoId": peca["id"], "quantidade": "1", "preco": "", "desconto": "" }]);
     // Cliente que não existe.
-    let venda = json!({ "itens": item, "clienteId": "nao-existe", "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
+    let venda =
+        json!({ "itens": item, "clienteId": "nao-existe", "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
     assert_eq!(erro(&mut s, "venda_concluir", venda).1, "cliente");
     // Quantidade e preço absurdos viram erro, não conta errada.
-    let calc = ok(&mut s, "venda_calcular", json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "9999999999999", "preco": "", "desconto": "" }] }));
+    let calc = ok(
+        &mut s,
+        "venda_calcular",
+        json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "9999999999999", "preco": "", "desconto": "" }] }),
+    );
     assert!(calc["itens"][0]["erro"].as_str().unwrap().contains("grande demais"), "{calc}");
-    let calc = ok(&mut s, "venda_calcular", json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "1", "preco": "9999999999999", "desconto": "" }] }));
+    let calc = ok(
+        &mut s,
+        "venda_calcular",
+        json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "1", "preco": "9999999999999", "desconto": "" }] }),
+    );
     assert!(calc["itens"][0]["erro"].as_str().unwrap().contains("grande demais"), "{calc}");
     // Orçamento vendido duas vezes: a segunda não entra.
     let orc = ok(&mut s, "orcamento_salvar", json!({ "itens": item }));
     let orc_id = orc["id"].as_str().unwrap_or_else(|| orc.as_str().unwrap()).to_string();
-    let venda = json!({ "itens": item, "orcamentoId": orc_id, "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
+    let venda =
+        json!({ "itens": item, "orcamentoId": orc_id, "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
     ok(&mut s, "venda_concluir", venda.clone());
     let (msg, _) = erro(&mut s, "venda_concluir", venda);
     assert!(msg.contains("orçamento"), "{msg}");

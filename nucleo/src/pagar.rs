@@ -104,10 +104,7 @@ fn categoria_valida(conn: &Connection, id: &str) -> Resultado<Option<String>> {
     if id.is_empty() {
         return Ok(None);
     }
-    let existe = conn
-        .query_row("SELECT 1 FROM categoria WHERE id = ?1", [id], |_| Ok(()))
-        .optional()?
-        .is_some();
+    let existe = conn.query_row("SELECT 1 FROM categoria WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some();
     if !existe {
         return Err(Erro::campo("categoriaId", "Categoria não encontrada."));
     }
@@ -118,10 +115,7 @@ fn fornecedor_valido(conn: &Connection, id: &str) -> Resultado<Option<String>> {
     if id.is_empty() {
         return Ok(None);
     }
-    let existe = conn
-        .query_row("SELECT 1 FROM pessoa WHERE id = ?1", [id], |_| Ok(()))
-        .optional()?
-        .is_some();
+    let existe = conn.query_row("SELECT 1 FROM pessoa WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some();
     if !existe {
         return Err(Erro::campo("fornecedorId", "Fornecedor não encontrado."));
     }
@@ -230,11 +224,10 @@ pub fn duplicatas_da_compra(conn: &Connection, compra_id: &str) -> Resultado<Vec
 /// Ao lançar a compra: as duplicatas da nota viram contas a pagar.
 /// Devolve quantas parcelas foram lançadas.
 pub fn criar_da_compra(conn: &Connection, dispositivo: &str, usuario_id: &str, compra_id: &str) -> Resultado<usize> {
-    let (fornecedor_id, numero, gerar): (Option<String>, String, bool) = conn.query_row(
-        "SELECT fornecedor_id, numero, gerar_pagar FROM compra WHERE id = ?1",
-        [compra_id],
-        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
-    )?;
+    let (fornecedor_id, numero, gerar): (Option<String>, String, bool) =
+        conn.query_row("SELECT fornecedor_id, numero, gerar_pagar FROM compra WHERE id = ?1", [compra_id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+        })?;
     if !gerar {
         return Ok(0);
     }
@@ -251,10 +244,9 @@ pub fn criar_da_compra(conn: &Connection, dispositivo: &str, usuario_id: &str, c
         return Ok(0);
     }
     let nome: String = match &fornecedor_id {
-        Some(f) => conn
-            .query_row("SELECT nome FROM pessoa WHERE id = ?1", [f], |l| l.get(0))
-            .optional()?
-            .unwrap_or_default(),
+        Some(f) => {
+            conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [f], |l| l.get(0)).optional()?.unwrap_or_default()
+        }
         None => String::new(),
     };
     let descricao: String = format!("NF {numero} · {nome}").chars().take(80).collect();
@@ -306,11 +298,9 @@ pub fn cancelar_da_compra(conn: &Connection, usuario_id: &str, compra_id: &str) 
 /// Tira uma parcela (lançada errada, paga por fora...). Sem pagamento.
 pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
     let (pago, cancelada, descricao): (i64, Option<String>, String) = conn
-        .query_row(
-            "SELECT pago, cancelado_em, descricao FROM conta_pagar_saldo WHERE id = ?1",
-            [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
-        )
+        .query_row("SELECT pago, cancelado_em, descricao FROM conta_pagar_saldo WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+        })
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Conta".into()))?;
     if cancelada.is_some() {
@@ -327,7 +317,15 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         "UPDATE conta_pagar SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
         params![id, tempo::agora(), usuario_id, motivo],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "pagar.cancelar", "conta_pagar", id, &[format!("{descricao} · {motivo}")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "pagar.cancelar",
+        "conta_pagar",
+        id,
+        &[format!("{descricao} · {motivo}")],
+    )?;
     Ok(())
 }
 
@@ -392,7 +390,11 @@ pub fn alterar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Alter
         detalhes.push(format!("Descrição: {antes_desc} → {descricao}"));
     }
     if antes_valor != valor {
-        detalhes.push(format!("Valor: {} → {}", numeros::escrever_dinheiro(antes_valor), numeros::escrever_dinheiro(valor)));
+        detalhes.push(format!(
+            "Valor: {} → {}",
+            numeros::escrever_dinheiro(antes_valor),
+            numeros::escrever_dinheiro(valor)
+        ));
     }
     if antes_venc != vencimento {
         detalhes.push(format!("Vencimento: {} → {}", fiscal::data_br(&antes_venc), fiscal::data_br(&vencimento)));
@@ -466,8 +468,22 @@ fn ler_linhas(conn: &Connection, sql: &str, valores: &[&dyn rusqlite::ToSql]) ->
     })?;
     let mut lista = Vec::new();
     for linha in linhas {
-        let (id, descricao, fornecedor, fornecedor_id, categoria, categoria_id, documento, compra_id, parcela, vencimento, valor, pago, cancelada, observacoes) =
-            linha?;
+        let (
+            id,
+            descricao,
+            fornecedor,
+            fornecedor_id,
+            categoria,
+            categoria_id,
+            documento,
+            compra_id,
+            parcela,
+            vencimento,
+            valor,
+            pago,
+            cancelada,
+            observacoes,
+        ) = linha?;
         let saldo = (valor - pago).max(0);
         let situacao = if cancelada {
             "cancelada"
@@ -673,7 +689,10 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
     let hoje = fiscal::hoje(conn)?;
     let data = ler_data_ou(conn, &e.data, "data", None)?;
     if e.forma != "cheque" && data > hoje {
-        return Err(Erro::campo("data", "A data do pagamento não pode ser depois de hoje (só no cheque, o “bom para”)."));
+        return Err(Erro::campo(
+            "data",
+            "A data do pagamento não pode ser depois de hoje (só no cheque, o “bom para”).",
+        ));
     }
     let cheque_numero: String = texto::limpar(&e.cheque_numero).chars().take(20).collect();
     if e.forma == "cheque" && cheque_numero.is_empty() {
@@ -705,9 +724,8 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
         })?;
         (None, Some(s.id), Some(mov))
     } else {
-        let ativa: Option<bool> = conn
-            .query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [&e.origem], |l| l.get(0))
-            .optional()?;
+        let ativa: Option<bool> =
+            conn.query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [&e.origem], |l| l.get(0)).optional()?;
         match ativa {
             Some(true) => (Some(e.origem.clone()), None, None),
             Some(false) => return Err(Erro::campo("origem", "Esta conta da loja está desativada.")),
@@ -752,7 +770,15 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
 /// gaveta, o dinheiro volta para ela (caixa ainda aberto) ou para o Caixa
 /// geral (caixa já fechado).
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
-    let (conta_id, valor, juros, desconto, sessao, estornado, descricao): (String, i64, i64, i64, Option<String>, Option<String>, String) = conn
+    let (conta_id, valor, juros, desconto, sessao, estornado, descricao): (
+        String,
+        i64,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        String,
+    ) = conn
         .query_row(
             "SELECT g.conta_pagar_id, g.valor, g.juros, g.desconto, g.sessao_id, g.estornado_em, c.descricao
                FROM pagamento g JOIN conta_pagar c ON c.id = g.conta_pagar_id WHERE g.id = ?1",

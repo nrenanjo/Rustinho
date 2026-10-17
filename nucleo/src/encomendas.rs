@@ -100,7 +100,10 @@ fn inserir(
         "encomenda.criar",
         "encomenda",
         &id,
-        &[format!("Encomenda {numero}: {} × {descricao} para {cliente_nome}", numeros::escrever_quantidade(quantidade))],
+        &[format!(
+            "Encomenda {numero}: {} × {descricao} para {cliente_nome}",
+            numeros::escrever_quantidade(quantidade)
+        )],
     )?;
     Ok(id)
 }
@@ -151,9 +154,7 @@ pub fn criar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Encomen
     if texto::tamanho(&descricao) > 160 {
         return Err(Erro::campo("peca", "Use no máximo 160 letras."));
     }
-    let quantidade = numeros::ler_quantidade(&e.quantidade)
-        .map_err(|m| Erro::campo("quantidade", m))?
-        .unwrap_or(1000);
+    let quantidade = numeros::ler_quantidade(&e.quantidade).map_err(|m| Erro::campo("quantidade", m))?.unwrap_or(1000);
     if quantidade <= 0 {
         return Err(Erro::campo("quantidade", "Quantidade precisa ser maior que zero."));
     }
@@ -161,7 +162,19 @@ pub fn criar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Encomen
     if texto::tamanho(&obs) > 300 {
         return Err(Erro::campo("observacoes", "Use no máximo 300 letras."));
     }
-    inserir(conn, dispositivo, usuario_id, cliente_id, &cliente_nome, &telefone, produto_id, &descricao, quantidade, None, &obs)
+    inserir(
+        conn,
+        dispositivo,
+        usuario_id,
+        cliente_id,
+        &cliente_nome,
+        &telefone,
+        produto_id,
+        &descricao,
+        quantidade,
+        None,
+        &obs,
+    )
 }
 
 /// Encomendas que nascem de uma venda (pagas na hora ou com sinal).
@@ -180,7 +193,19 @@ pub fn criar_da_venda(
     let nome: String = conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [cliente_id], |l| l.get(0))?;
     let telefone = telefone_do_cliente(conn, cliente_id)?;
     for (pid, descricao, q) in itens {
-        inserir(conn, dispositivo, usuario_id, Some(cliente_id), &nome, &telefone, Some(pid), descricao, *q, Some(venda_id), "")?;
+        inserir(
+            conn,
+            dispositivo,
+            usuario_id,
+            Some(cliente_id),
+            &nome,
+            &telefone,
+            Some(pid),
+            descricao,
+            *q,
+            Some(venda_id),
+            "",
+        )?;
     }
     Ok(())
 }
@@ -194,19 +219,15 @@ struct Atual {
 }
 
 fn atual(conn: &Connection, id: &str) -> Resultado<Atual> {
-    conn.query_row(
-        "SELECT numero, situacao, produto_id, venda_id, descricao FROM encomenda WHERE id = ?1",
-        [id],
-        |l| {
-            Ok(Atual {
-                numero: l.get(0)?,
-                situacao: l.get(1)?,
-                produto_id: l.get(2)?,
-                venda_id: l.get(3)?,
-                descricao: l.get(4)?,
-            })
-        },
-    )
+    conn.query_row("SELECT numero, situacao, produto_id, venda_id, descricao FROM encomenda WHERE id = ?1", [id], |l| {
+        Ok(Atual {
+            numero: l.get(0)?,
+            situacao: l.get(1)?,
+            produto_id: l.get(2)?,
+            venda_id: l.get(3)?,
+            descricao: l.get(4)?,
+        })
+    })
     .optional()?
     .ok_or_else(|| Erro::NaoEncontrado("Encomenda".into()))
 }
@@ -243,7 +264,15 @@ pub fn pedir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, d
         return Err(Erro::validacao("Esta encomenda já foi pedida."));
     }
     mudar(conn, id, "pedida", Some("pedida_em"))?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "encomenda.pedir", "encomenda", id, &[format!("Encomenda {}", a.numero)])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "encomenda.pedir",
+        "encomenda",
+        id,
+        &[format!("Encomenda {}", a.numero)],
+    )?;
     Ok(())
 }
 
@@ -257,15 +286,25 @@ pub fn chegou(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         "UPDATE encomenda SET situacao = 'chegou', situacao_antes = ?2, chegou_em = ?3, atualizado_em = ?3 WHERE id = ?1",
         params![id, a.situacao, tempo::agora()],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "encomenda.chegou", "encomenda", id, &[format!("Encomenda {}", a.numero)])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "encomenda.chegou",
+        "encomenda",
+        id,
+        &[format!("Encomenda {}", a.numero)],
+    )?;
     Ok(())
 }
 
 /// A compra lançada trouxe peças encomendadas: as mais antigas primeiro,
 /// enquanto a quantidade da nota der. Devolve quantas chegaram.
 pub fn chegou_na_compra(conn: &Connection, compra_id: &str, pecas: &[(String, i64)]) -> Resultado<i64> {
-    let fornecedor: Option<String> =
-        conn.query_row("SELECT fornecedor_id FROM compra WHERE id = ?1", [compra_id], |l| l.get(0)).optional()?.flatten();
+    let fornecedor: Option<String> = conn
+        .query_row("SELECT fornecedor_id FROM compra WHERE id = ?1", [compra_id], |l| l.get(0))
+        .optional()?
+        .flatten();
     let mut chegaram = 0;
     let agora = tempo::agora();
     for (pid, recebido) in pecas {
@@ -448,7 +487,9 @@ pub fn whatsapp(conn: &Connection, id: &str) -> Resultado<String> {
         n => format!("Olá, {n}!"),
     };
     let mensagem = if situacao == "chegou" {
-        format!("{ola} Aqui é da {loja}. A peça que você encomendou chegou: {descricao}. Pode vir buscar quando quiser.")
+        format!(
+            "{ola} Aqui é da {loja}. A peça que você encomendou chegou: {descricao}. Pode vir buscar quando quiser."
+        )
     } else {
         format!("{ola} Aqui é da {loja}, sobre a sua encomenda nº {numero}: {descricao}.")
     };
@@ -594,7 +635,11 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
                 criado_em: fiscal::data_br(&criado),
                 chegou_em: {
                     let c: String = l.get(12)?;
-                    if c.is_empty() { c } else { fiscal::data_br(&c) }
+                    if c.is_empty() {
+                        c
+                    } else {
+                        fiscal::data_br(&c)
+                    }
                 },
                 avisado: l.get(13)?,
                 avisado_em: l.get(14)?,
@@ -719,7 +764,12 @@ mod testes {
 
         // Venda com sinal: 50 em dinheiro e o resto no crediário.
         let mut e = VendaEntrada {
-            itens: vec![ItemEntrada { produto_id: rol.clone(), quantidade: "2".into(), encomendar: true, ..Default::default() }],
+            itens: vec![ItemEntrada {
+                produto_id: rol.clone(),
+                quantidade: "2".into(),
+                encomendar: true,
+                ..Default::default()
+            }],
             tabela: 1,
             pagamentos: vec![
                 PagamentoEntrada { forma: "dinheiro".into(), valor: "50".into(), ..Default::default() },
@@ -789,7 +839,12 @@ mod testes {
             c,
             d,
             &u,
-            &EncomendaEntrada { cliente_id: ana.clone(), produto_id: pas.clone(), quantidade: "1".into(), ..Default::default() },
+            &EncomendaEntrada {
+                cliente_id: ana.clone(),
+                produto_id: pas.clone(),
+                quantidade: "1".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert!(entregar(c, d, &u, &id2).is_err(), "sem pagar não entrega");
@@ -813,7 +868,12 @@ mod testes {
 
         // Encomenda paga na venda só cancela junto com a venda.
         let e3 = VendaEntrada {
-            itens: vec![ItemEntrada { produto_id: pas.clone(), quantidade: "1".into(), encomendar: true, ..Default::default() }],
+            itens: vec![ItemEntrada {
+                produto_id: pas.clone(),
+                quantidade: "1".into(),
+                encomendar: true,
+                ..Default::default()
+            }],
             tabela: 1,
             cliente_id: ana.clone(),
             pagamentos: vec![PagamentoEntrada { forma: "pix".into(), valor: "100".into(), ..Default::default() }],

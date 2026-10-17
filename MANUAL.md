@@ -91,6 +91,20 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
 
+### Novo na versão 0.9.11: gerente, modo escuro e mais segurança
+
+- **Modo escuro:** no topo da tela inicial, a pílula pequena do **sol** (fundo cinza de sempre) e da **lua** (fundo preto, bom para tela AMOLED). Vale só para o aparelho onde foi escolhido. Impressão e PDF continuam em folha branca.
+- **Gerente e caixa:** quem configurou a loja é o gerente; os outros usuários são caixa. Só o gerente cancela venda, estorna, ajusta estoque, faz backup e restaura, mexe nas configurações da loja, nos usuários e no Financeiro. Quando o caixa precisa de uma dessas, o gerente digita a senha dele na hora ("Senha do gerente"), sem trocar de usuário.
+- **Pílula Gerente** (em Configurações, só para o gerente): quem é gerente e, com marcas de sim/não, o que fica só para o gerente. A loja sempre fica com pelo menos um gerente. O caixa vê nas Configurações só o que é do aparelho (nome do caixa, impressora e a própria senha).
+- **Senhas erradas:** depois de 5 erros seguidos, o Rustinho espera 30 segundos, mesmo que fechem e abram o programa.
+- **Android de 32 bits e celulares com vídeo PowerVR** (como o Moto e6i): as telas são desenhadas pela CPU, porque a placa de vídeo deles trocava as cores e sumia com as letras. A câmera do leitor mostra a imagem em preto e branco, o que basta para o código de barras.
+- **Assinatura do APK:** o APK agora tem a chave só da loja. **Quem tem a 0.9.1 ou anterior no celular precisa desinstalar o Rustinho antes de instalar a 0.9.11** (uma vez só; os dados do celular se perdem, então faça o backup antes se precisar).
+- **Troca de dados entre caixas:** a chave da rede é tirada da senha com Argon2id (mais difícil de adivinhar). **Todos os caixas precisam estar na 0.9.11** para conversar. Um caixa com o relógio errado aparece com aviso em "Caixas da loja". O registro de alterações apaga sozinho as versões velhas de cada registro. Enquanto um backup é restaurado, a troca de dados espera.
+- **Backup:** a senha do backup não fica mais guardada no banco, só a chave tirada dela. As cópias são criptografadas em pedaços, sem precisar caber inteiras na memória. Backups antigos continuam abrindo com a senha.
+- **Compras pelo XML:** só entra NF-e autorizada pela SEFAZ, de venda do fornecedor para a loja (nada de nota de devolução, complementar ou de outro CNPJ, quando o CNPJ da loja está preenchido). Pacotes .zip e .rar têm limite total de 512 MB descompactados.
+- **Venda:** não vende duas vezes o mesmo orçamento, confere se o cliente ainda existe e recusa quantidades e preços absurdos. "1.2.3,45" não é mais aceito como número.
+- **Registro de falhas:** erros internos ficam em `registro/rustinho.log`, na pasta dos dados, sem nada do que foi digitado (para achar defeitos depois).
+
 ### Novo na versão 0.9.1: cadastro para qualquer loja
 
 - **Câmera da venda:** o botão de câmera no fim da busca do Vender (e de Peças) voltou a abrir a câmera no celular.

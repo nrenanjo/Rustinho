@@ -9,3 +9,4 @@ target/
 /AppDir
 *.AppImage
 aqtinstall.log
+*.jks

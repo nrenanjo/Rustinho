@@ -34,16 +34,7 @@ pub fn lancar(
         "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
           WHERE NOT EXISTS (SELECT 1 FROM produto WHERE id = ?2 AND tipo = 'servico')",
-        params![
-            tempo::novo_id(),
-            produto_id,
-            quantidade,
-            tipo,
-            motivo,
-            usuario_id,
-            dispositivo,
-            tempo::agora()
-        ],
+        params![tempo::novo_id(), produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, tempo::agora()],
     )?;
     Ok(())
 }

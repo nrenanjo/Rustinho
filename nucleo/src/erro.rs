@@ -6,10 +6,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum Erro {
     /// Problema no que foi digitado. `campo` diz qual campo destacar na tela.
-    Validacao {
-        campo: Option<String>,
-        mensagem: String,
-    },
+    Validacao { campo: Option<String>, mensagem: String },
     /// O comando precisa de alguém conectado (tela de entrada).
     SemSessao,
     /// Registro procurado não existe.
@@ -26,18 +23,12 @@ pub type Resultado<T> = Result<T, Erro>;
 impl Erro {
     /// Erro de validação ligado a um campo da tela.
     pub fn campo(campo: &str, mensagem: impl Into<String>) -> Self {
-        Erro::Validacao {
-            campo: Some(campo.to_string()),
-            mensagem: mensagem.into(),
-        }
+        Erro::Validacao { campo: Some(campo.to_string()), mensagem: mensagem.into() }
     }
 
     /// Erro de validação sem campo específico.
     pub fn validacao(mensagem: impl Into<String>) -> Self {
-        Erro::Validacao {
-            campo: None,
-            mensagem: mensagem.into(),
-        }
+        Erro::Validacao { campo: None, mensagem: mensagem.into() }
     }
 
     /// Nome do campo com problema, se houver.

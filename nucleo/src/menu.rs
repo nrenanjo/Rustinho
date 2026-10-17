@@ -74,7 +74,8 @@ pub struct Menu {
 
 /// Monta o menu do usuário, com as mais usadas primeiro.
 pub fn menu(conn: &Connection, usuario_id: &str) -> Resultado<Menu> {
-    let mut consulta = conn.prepare_cached("SELECT item, usos, fixo, ultimo_uso FROM menu_uso WHERE usuario_id = ?1")?;
+    let mut consulta =
+        conn.prepare_cached("SELECT item, usos, fixo, ultimo_uso FROM menu_uso WHERE usuario_id = ?1")?;
     let uso: Vec<(String, i64, bool, Option<String>)> = consulta
         .query_map([usuario_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
         .collect::<Result<_, _>>()?;
@@ -96,12 +97,8 @@ pub fn menu(conn: &Connection, usuario_id: &str) -> Resultado<Menu> {
         })
         .collect();
 
-    let ultimo_uso = |id: &str| -> String {
-        uso.iter()
-            .find(|(item, ..)| item == id)
-            .and_then(|x| x.3.clone())
-            .unwrap_or_default()
-    };
+    let ultimo_uso =
+        |id: &str| -> String { uso.iter().find(|(item, ..)| item == id).and_then(|x| x.3.clone()).unwrap_or_default() };
 
     // 1º as fixadas (na ordem do menu); 2º as mais abertas; 3º as primeiras do menu.
     let mut mais_usados: Vec<ItemMenu> = todos.iter().filter(|i| i.fixo).cloned().collect();

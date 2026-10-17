@@ -13,13 +13,7 @@ pub fn normalizar(texto: &str) -> String {
         .nfkd()
         .filter(|c| !is_combining_mark(*c))
         .flat_map(char::to_lowercase)
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, '.' | '-' | '/') {
-                c
-            } else {
-                ' '
-            }
-        })
+        .map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '/') { c } else { ' ' })
         .collect();
     sem_acento
         .split_whitespace()

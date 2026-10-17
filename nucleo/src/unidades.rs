@@ -138,7 +138,16 @@ mod testes {
 
     #[test]
     fn junta_repetidas() {
-        for (de, para) in [("PCS", "PC"), ("pec", "PC"), ("KGL", "KG"), ("L", "LT"), ("MET", "MT"), ("M", "MT"), ("KT", "KIT"), ("QD", "QD")] {
+        for (de, para) in [
+            ("PCS", "PC"),
+            ("pec", "PC"),
+            ("KGL", "KG"),
+            ("L", "LT"),
+            ("MET", "MT"),
+            ("M", "MT"),
+            ("KT", "KIT"),
+            ("QD", "QD"),
+        ] {
             assert_eq!(normalizar(de), para);
         }
     }

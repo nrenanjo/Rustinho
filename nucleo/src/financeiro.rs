@@ -57,9 +57,8 @@ pub fn contas(conn: &Connection, inativas: bool) -> Resultado<Vec<ContaLoja>> {
         "SELECT id, nome, tipo, saldo_inicial, ativo FROM conta_loja {} ORDER BY ativo DESC, ordem, nome COLLATE NOCASE",
         if inativas { "" } else { "WHERE ativo = 1" }
     ))?;
-    let linhas: Vec<(String, String, String, i64, bool)> = c
-        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?
-        .collect::<Result<_, _>>()?;
+    let linhas: Vec<(String, String, String, i64, bool)> =
+        c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?.collect::<Result<_, _>>()?;
     let mut lista = Vec::new();
     for (id, nome, tipo, inicial, ativo) in linhas {
         let s = saldo(conn, &id, &hoje)?;
@@ -173,7 +172,8 @@ pub fn categorias(conn: &Connection, inativas: bool) -> Resultado<Vec<Categoria>
         "SELECT id, nome, tipo, ativo FROM categoria {} ORDER BY tipo, ativo DESC, ordem, nome COLLATE NOCASE",
         if inativas { "" } else { "WHERE ativo = 1" }
     ))?;
-    let linhas = c.query_map([], |l| Ok(Categoria { id: l.get(0)?, nome: l.get(1)?, tipo: l.get(2)?, ativo: l.get(3)? }))?;
+    let linhas =
+        c.query_map([], |l| Ok(Categoria { id: l.get(0)?, nome: l.get(1)?, tipo: l.get(2)?, ativo: l.get(3)? }))?;
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
@@ -256,7 +256,12 @@ fn ler_data_ate_hoje(conn: &Connection, texto: &str) -> Resultado<String> {
 }
 
 /// Entrada ou saída avulsa (tarifa do banco, rendimento, dinheiro do dono...).
-pub fn lancar_movimento(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &MovimentoEntrada) -> Resultado<String> {
+pub fn lancar_movimento(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    e: &MovimentoEntrada,
+) -> Resultado<String> {
     let nome_conta = conta_ativa(conn, &e.conta_id, "contaId")?;
     let sinal = match e.tipo.as_str() {
         "entrada" => 1,
@@ -322,10 +327,7 @@ pub fn transferir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Tr
     let extra = texto::limpar(&e.descricao);
     let grupo = tempo::novo_id();
     let agora = tempo::agora();
-    for (conta, sinal, texto_mov) in [
-        (&e.de, -1, format!("Para {nome_para}")),
-        (&e.para, 1, format!("De {nome_de}")),
-    ] {
+    for (conta, sinal, texto_mov) in [(&e.de, -1, format!("Para {nome_para}")), (&e.para, 1, format!("De {nome_de}"))] {
         let descricao = if extra.is_empty() { texto_mov } else { format!("{texto_mov} · {extra}") };
         conn.execute(
             "INSERT INTO movimento_conta (id, conta_id, data, valor, tipo, descricao, grupo, usuario_id, criado_em, dispositivo)
@@ -347,7 +349,13 @@ pub fn transferir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Tr
 
 /// Confere o saldo com o extrato do banco (ou o dinheiro do cofre): a
 /// diferença vira um ajuste.
-pub fn conferir(conn: &Connection, dispositivo: &str, usuario_id: &str, conta_id: &str, saldo_real: &str) -> Resultado<i64> {
+pub fn conferir(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    conta_id: &str,
+    saldo_real: &str,
+) -> Resultado<i64> {
     let nome = conta_ativa(conn, conta_id, "contaId")?;
     let real = numeros::ler_dinheiro(saldo_real)
         .map_err(|m| Erro::campo("saldo", m))?
@@ -384,7 +392,13 @@ pub fn conferir(conn: &Connection, dispositivo: &str, usuario_id: &str, conta_id
 }
 
 /// Desfaz um movimento avulso, transferência (as duas pontas) ou ajuste.
-pub fn estornar_movimento(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+pub fn estornar_movimento(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    motivo: &str,
+) -> Resultado<()> {
     let (tipo, grupo, estornado, descricao, conta): (String, Option<String>, Option<String>, String, String) = conn
         .query_row(
             "SELECT tipo, grupo, estornado_em, descricao, conta_id FROM movimento_conta WHERE id = ?1",
@@ -398,7 +412,9 @@ pub fn estornar_movimento(conn: &Connection, dispositivo: &str, usuario_id: &str
     }
     match tipo.as_str() {
         "entrada" | "saida" | "transferencia" | "ajuste" => {}
-        "sangria" | "suprimento" => return Err(Erro::validacao("Este movimento veio de uma sangria ou suprimento do caixa.")),
+        "sangria" | "suprimento" => {
+            return Err(Erro::validacao("Este movimento veio de uma sangria ou suprimento do caixa."))
+        }
         _ => return Err(Erro::validacao("Este movimento é de um cheque; desfaça na lista de cheques.")),
     }
     let motivo = texto::limpar(motivo);
@@ -416,7 +432,15 @@ pub fn estornar_movimento(conn: &Connection, dispositivo: &str, usuario_id: &str
             params![id, agora, usuario_id, motivo],
         )?,
     };
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "financeiro.estornar", "conta_loja", &conta, &[format!("{descricao} · {motivo}")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "financeiro.estornar",
+        "conta_loja",
+        &conta,
+        &[format!("{descricao} · {motivo}")],
+    )?;
     Ok(())
 }
 
@@ -459,7 +483,8 @@ pub fn extrato(conn: &Connection, conta_id: &str, limite: i64) -> Resultado<Extr
         .find(|c| c.id == conta_id)
         .ok_or_else(|| Erro::NaoEncontrado("Conta".into()))?;
     let hoje = fiscal::hoje(conn)?;
-    let inicial: i64 = conn.query_row("SELECT saldo_inicial FROM conta_loja WHERE id = ?1", [conta_id], |l| l.get(0))?;
+    let inicial: i64 =
+        conn.query_row("SELECT saldo_inicial FROM conta_loja WHERE id = ?1", [conta_id], |l| l.get(0))?;
     let mut c = conn.prepare(
         "SELECT * FROM (
             SELECT m.id, 'movimento', m.tipo, m.data, m.descricao, COALESCE(g.nome, ''), m.valor,
@@ -512,7 +537,9 @@ pub fn extrato(conn: &Connection, conta_id: &str, limite: i64) -> Resultado<Extr
             (_, t) => t.to_string(),
         };
         linhas.push(LinhaExtrato {
-            estornavel: !estornado && origem == "movimento" && matches!(tipo.as_str(), "entrada" | "saida" | "transferencia" | "ajuste"),
+            estornavel: !estornado
+                && origem == "movimento"
+                && matches!(tipo.as_str(), "entrada" | "saida" | "transferencia" | "ajuste"),
             id,
             futuro: data > hoje,
             data: fiscal::data_br(&data),
@@ -809,10 +836,7 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
 
 /// [("Vendas", 2), ("Aluguel", 1)] → "Vendas (2)", "Aluguel".
 fn resumir(itens: &[(String, usize)]) -> Vec<String> {
-    itens
-        .iter()
-        .map(|(t, n)| if *n > 1 { format!("{t} ({n})") } else { t.clone() })
-        .collect()
+    itens.iter().map(|(t, n)| if *n > 1 { format!("{t} ({n})") } else { t.clone() }).collect()
 }
 
 #[cfg(test)]
@@ -841,7 +865,13 @@ mod testes {
             c,
             d,
             &u,
-            &ContaEntrada { nome: "Sicoob".into(), tipo: "banco".into(), saldo_inicial: "1.000".into(), ativo: true, ..Default::default() },
+            &ContaEntrada {
+                nome: "Sicoob".into(),
+                tipo: "banco".into(),
+                saldo_inicial: "1.000".into(),
+                ativo: true,
+                ..Default::default()
+            },
         )
         .unwrap();
         let mut f = produtos::ficha_nova(c).unwrap();
@@ -865,18 +895,31 @@ mod testes {
         let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
         assert_eq!(saldo_de(&l, &l.banco), "1.000,00");
         // nome repetido não
-        assert!(salvar_conta(c, d, u, &ContaEntrada { nome: "sicoob".into(), tipo: "banco".into(), ..Default::default() }).is_err());
+        assert!(salvar_conta(
+            c,
+            d,
+            u,
+            &ContaEntrada { nome: "sicoob".into(), tipo: "banco".into(), ..Default::default() }
+        )
+        .is_err());
 
         // aluguel em 1x vencendo hoje
         assert_eq!(
-            pagar::lancar(c, d, u, &LancamentoEntrada { valor: "1500".into(), ..Default::default() }).unwrap_err().nome_do_campo(),
+            pagar::lancar(c, d, u, &LancamentoEntrada { valor: "1500".into(), ..Default::default() })
+                .unwrap_err()
+                .nome_do_campo(),
             Some("descricao")
         );
         let ids = pagar::lancar(
             c,
             d,
             u,
-            &LancamentoEntrada { descricao: "Aluguel de outubro".into(), categoria_id: "cat-aluguel".into(), valor: "1.500".into(), ..Default::default() },
+            &LancamentoEntrada {
+                descricao: "Aluguel de outubro".into(),
+                categoria_id: "cat-aluguel".into(),
+                valor: "1.500".into(),
+                ..Default::default()
+            },
         )
         .unwrap();
         let conta = &ids[0];
@@ -912,7 +955,10 @@ mod testes {
         // da gaveta: vira sangria; não tira mais do que tem
         caixa::abrir(c, d, u, "Caixa 1", "100").unwrap();
         let s = caixa::sessao_aberta(c, d).unwrap().unwrap();
-        assert_eq!(pagar::pagar(c, d, u, &pg("500", "", "dinheiro", "gaveta")).unwrap_err().nome_do_campo(), Some("valor"));
+        assert_eq!(
+            pagar::pagar(c, d, u, &pg("500", "", "dinheiro", "gaveta")).unwrap_err().nome_do_campo(),
+            Some("valor")
+        );
         assert_eq!(pagar::pagar(c, d, u, &pg("50", "", "pix", "gaveta")).unwrap_err().nome_do_campo(), Some("origem"));
         let gav = pagar::pagar(c, d, u, &pg("60", "", "dinheiro", "gaveta")).unwrap();
         let r = caixa::resumo(c, &s.id).unwrap();
@@ -940,7 +986,18 @@ mod testes {
         caixa::movimentar_com_conta(c, d, u, "sangria", "40", "Levar ao cofre", Some("caixa-geral")).unwrap();
         assert_eq!(saldo_de(&l, "caixa-geral"), "40,00");
         // transferência e conferência
-        transferir(c, d, u, &TransferenciaEntrada { de: "caixa-geral".into(), para: l.banco.clone(), valor: "40".into(), ..Default::default() }).unwrap();
+        transferir(
+            c,
+            d,
+            u,
+            &TransferenciaEntrada {
+                de: "caixa-geral".into(),
+                para: l.banco.clone(),
+                valor: "40".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!((saldo_de(&l, "caixa-geral").as_str(), saldo_de(&l, &l.banco).as_str()), ("0,00", "540,00"));
         assert_eq!(conferir(c, d, u, &l.banco, "530").unwrap(), -1000);
         assert_eq!(saldo_de(&l, &l.banco), "530,00");
@@ -1000,7 +1057,10 @@ mod testes {
         assert_eq!((p.em_carteira.as_str(), p.bons_ate_hoje.as_str(), p.quantos_em_carteira), ("300,00", "100,00", 3));
         assert!(p.cheques[0].pode_depositar && !p.cheques[1].pode_depositar);
         assert_eq!(p.cheques[0].emitente, "Oficina do Zé");
-        assert_eq!(crate::avisos::do_dia(c).unwrap().iter().find(|a| a.id == "cheques").unwrap().texto, "1 cheque bom para depositar · R$ 100,00");
+        assert_eq!(
+            crate::avisos::do_dia(c).unwrap().iter().find(|a| a.id == "cheques").unwrap().texto,
+            "1 cheque bom para depositar · R$ 100,00"
+        );
         // cheque não é dinheiro na gaveta
         let s = caixa::sessao_aberta(c, d).unwrap().unwrap();
         assert_eq!(caixa::resumo(c, &s.id).unwrap().esperado, "0,00");

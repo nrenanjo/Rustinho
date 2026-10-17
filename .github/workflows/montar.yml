@@ -10,8 +10,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Só ler, de fábrica; a publicação pede para gravar.
 permissions:
-  contents: write
+  contents: read
 
 env:
   QT_VERSAO: "6.8.3"
@@ -24,6 +25,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatação
+        run: cargo fmt --all --check
+      - name: Clippy (avisos do compilador viram erro)
+        run: cargo clippy -p rustinho-nucleo --all-targets -- -D warnings
       - name: Testes do núcleo
         run: cargo test -p rustinho-nucleo
 
@@ -101,8 +108,10 @@ jobs:
           cp target/release/rustinho AppDir/usr/bin/
           curl -sSL -o rclone.zip "https://github.com/rclone/rclone/releases/download/$RCLONE_VERSAO/rclone-$RCLONE_VERSAO-linux-amd64.zip"
           unzip -q -j rclone.zip '*/rclone' -d AppDir/usr/bin/
-          curl -sSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -sSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          # Versões fixas (não a "continuous", que muda sozinha).
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          sha256sum linuxdeploy linuxdeploy-plugin-qt
           chmod +x linuxdeploy linuxdeploy-plugin-qt
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base"
@@ -123,6 +132,8 @@ jobs:
   publicar:
     needs: [windows, linux]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -156,7 +167,8 @@ jobs:
 
             **Linux:** baixe o `.AppImage`, dê permissão de execução (`chmod +x`) e abra.
 
-            **Android 9 ou mais novo:** baixe o `Rustinho-${{ steps.versao.outputs.versao }}-Android.apk` no celular e toque nele. Permita "instalar apps desta fonte" quando o Android pedir. (O APK chega alguns minutos depois dos outros.)
+            **Android 9 ou mais novo:** baixe no celular o `Rustinho-${{ steps.versao.outputs.versao }}-Android.apk` (celulares de 64 bits) ou o `-Android-32bits.apk` (celulares de entrada, que não aceitam o de 64) e toque nele. Permita "instalar apps desta fonte" quando o Android pedir. (Os APKs chegam alguns minutos depois dos outros.)
+            Desde a 0.9.11 o APK tem a assinatura própria da loja: quem tem uma versão anterior precisa desinstalar o Rustinho antes de instalar esta (uma vez só).
 
             O que mudou: veja o [Manual](https://github.com/${{ github.repository }}/blob/main/MANUAL.md).
           files: saida/*

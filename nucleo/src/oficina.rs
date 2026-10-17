@@ -264,7 +264,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
     let cliente_id = if e.cliente_id.is_empty() { None } else { Some(e.cliente_id.clone()) };
     let mut cliente_nome = texto::limpar(&e.cliente_nome);
     if let Some(id) = &cliente_id {
-        let nome: Option<String> = conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [id], |l| l.get(0)).optional()?;
+        let nome: Option<String> =
+            conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [id], |l| l.get(0)).optional()?;
         cliente_nome = nome.ok_or_else(|| Erro::NaoEncontrado("Cliente".into()))?;
     }
     if cliente_nome.is_empty() {
@@ -313,7 +314,15 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
                 usuario_id
             ],
         )?;
-        auditoria::registrar(conn, dispositivo, Some(usuario_id), "os.criar", "ordem_servico", &id, &[format!("OS {numero} aberta")])?;
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "os.criar",
+            "ordem_servico",
+            &id,
+            &[format!("OS {numero} aberta")],
+        )?;
     } else {
         let (situacao, _) = situacao_de(conn, &id)?;
         if situacao == "entregue" || situacao == "cancelada" {
@@ -366,7 +375,11 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
     if let Some(cid) = &cliente_id {
         if !placa.is_empty() {
             let tem: bool = conn
-                .query_row("SELECT 1 FROM pessoa_veiculo WHERE pessoa_id = ?1 AND placa = ?2", params![cid, placa], |_| Ok(()))
+                .query_row(
+                    "SELECT 1 FROM pessoa_veiculo WHERE pessoa_id = ?1 AND placa = ?2",
+                    params![cid, placa],
+                    |_| Ok(()),
+                )
                 .optional()?
                 .is_some();
             if !tem {
@@ -393,7 +406,11 @@ pub fn mudar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, n
         ("orcamento", "aprovada") | ("aprovada", "pronta") | ("aprovada", "orcamento") | ("pronta", "aprovada")
     );
     if !pode {
-        return Err(Erro::validacao(format!("Não dá para passar de “{}” para “{}”.", nome_situacao(&atual), nome_situacao(nova))));
+        return Err(Erro::validacao(format!(
+            "Não dá para passar de “{}” para “{}”.",
+            nome_situacao(&atual),
+            nome_situacao(nova)
+        )));
     }
     let agora = tempo::agora();
     let coluna = match nova {
@@ -405,8 +422,15 @@ pub fn mudar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, n
         &format!("UPDATE ordem_servico SET situacao = ?2, {coluna} = ?3, atualizado_em = ?3 WHERE id = ?1"),
         params![id, nova, agora],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "os.situacao", "ordem_servico", id,
-        &[format!("OS {numero}: {} → {}", nome_situacao(&atual), nome_situacao(nova))])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "os.situacao",
+        "ordem_servico",
+        id,
+        &[format!("OS {numero}: {} → {}", nome_situacao(&atual), nome_situacao(nova))],
+    )?;
     Ok(())
 }
 
@@ -426,8 +450,15 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         "UPDATE ordem_servico SET situacao = 'cancelada', cancelada_em = ?2, motivo_cancelamento = ?3, atualizado_em = ?2 WHERE id = ?1",
         params![id, tempo::agora(), motivo],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "os.cancelar", "ordem_servico", id,
-        &[format!("OS {numero} cancelada · {motivo}")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "os.cancelar",
+        "ordem_servico",
+        id,
+        &[format!("OS {numero} cancelada · {motivo}")],
+    )?;
     Ok(())
 }
 
@@ -511,7 +542,9 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<Ficha> {
     let quando = |iso: &Option<String>| -> Resultado<String> {
         Ok(match iso {
             Some(i) => conn
-                .query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [i], |l| l.get::<_, Option<String>>(0))?
+                .query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [i], |l| {
+                    l.get::<_, Option<String>>(0)
+                })?
                 .unwrap_or_default(),
             None => String::new(),
         })
@@ -526,7 +559,11 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<Ficha> {
         cliente_id: a.3.unwrap_or_default(),
         cliente: a.4,
         telefone: a.5,
-        historico: if a.6.is_empty() { vec![] } else { listar_onde(conn, "o.placa = ?1 AND o.id <> ?2", &a.6, id, 20)? },
+        historico: if a.6.is_empty() {
+            vec![]
+        } else {
+            listar_onde(conn, "o.placa = ?1 AND o.id <> ?2", &a.6, id, 20)?
+        },
         placa: a.6,
         veiculo: a.7,
         km: b.0,
@@ -711,7 +748,13 @@ pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
 }
 
 /// A venda da OS foi concluída: OS entregue.
-pub fn entregue_na_venda(conn: &Connection, dispositivo: &str, usuario_id: &str, os_id: &str, venda_id: &str) -> Resultado<()> {
+pub fn entregue_na_venda(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    os_id: &str,
+    venda_id: &str,
+) -> Resultado<()> {
     let (atual, numero) = situacao_de(conn, os_id)?;
     if atual == "entregue" || atual == "cancelada" {
         return Err(Erro::validacao("Esta OS já foi entregue ou cancelada."));
@@ -721,8 +764,15 @@ pub fn entregue_na_venda(conn: &Connection, dispositivo: &str, usuario_id: &str,
         "UPDATE ordem_servico SET situacao = 'entregue', venda_id = ?2, entregue_em = ?3, atualizado_em = ?3 WHERE id = ?1",
         params![os_id, venda_id, agora],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "os.entregar", "ordem_servico", os_id,
-        &[format!("OS {numero} entregue")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "os.entregar",
+        "ordem_servico",
+        os_id,
+        &[format!("OS {numero} entregue")],
+    )?;
     Ok(())
 }
 
@@ -797,8 +847,18 @@ mod testes {
             km: "85000".into(),
             defeito: "Barulho ao frear".into(),
             itens: vec![
-                ItemEntradaOs { tipo: "peca".into(), produto_id: pastilha.clone(), quantidade: "1".into(), ..Default::default() },
-                ItemEntradaOs { tipo: "servico".into(), descricao: "Troca de pastilhas".into(), preco: "60".into(), ..Default::default() },
+                ItemEntradaOs {
+                    tipo: "peca".into(),
+                    produto_id: pastilha.clone(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                },
+                ItemEntradaOs {
+                    tipo: "servico".into(),
+                    descricao: "Troca de pastilhas".into(),
+                    preco: "60".into(),
+                    ..Default::default()
+                },
             ],
             desconto: "10".into(),
             ..Default::default()
@@ -810,7 +870,10 @@ mod testes {
 
         let id = salvar(c, d, &u, &e).unwrap();
         let o = ficha(c, &id).unwrap();
-        assert_eq!((o.situacao.as_str(), o.calculo.pecas.as_str(), o.calculo.servicos.as_str()), ("orcamento", "80,00", "60,00"));
+        assert_eq!(
+            (o.situacao.as_str(), o.calculo.pecas.as_str(), o.calculo.servicos.as_str()),
+            ("orcamento", "80,00", "60,00")
+        );
         assert_eq!(o.calculo.total, "130,00");
         assert_eq!(o.placa, "ABC1D23");
         // O carro foi para o cadastro do cliente e a placa acha o cliente.

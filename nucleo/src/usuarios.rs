@@ -86,16 +86,10 @@ pub fn alterar(conn: &Connection, id: &str, nome: &str, ativo: bool, nova_senha:
     let atual = buscar(conn, id)?;
     let nome = validar_nome(conn, nome, Some(id))?;
     if atual.ativo && !ativo {
-        let outros_ativos: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND id <> ?1",
-            [id],
-            |l| l.get(0),
-        )?;
+        let outros_ativos: i64 =
+            conn.query_row("SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND id <> ?1", [id], |l| l.get(0))?;
         if outros_ativos == 0 {
-            return Err(Erro::campo(
-                "ativo",
-                "Este é o único usuário ativo. Crie outro antes de desativar este.",
-            ));
+            return Err(Erro::campo("ativo", "Este é o único usuário ativo. Crie outro antes de desativar este."));
         }
         if atual.gerente && gerentes_ativos_alem(conn, id)? == 0 {
             return Err(Erro::campo(
@@ -111,10 +105,7 @@ pub fn alterar(conn: &Connection, id: &str, nome: &str, ativo: bool, nova_senha:
     )?;
     if let Some(senha) = nova_senha {
         validar_senha(senha)?;
-        conn.execute(
-            "UPDATE usuario SET senha_hash = ?2 WHERE id = ?1",
-            params![id, gerar_hash(senha)?],
-        )?;
+        conn.execute("UPDATE usuario SET senha_hash = ?2 WHERE id = ?1", params![id, gerar_hash(senha)?])?;
     }
     buscar(conn, id)
 }
@@ -131,16 +122,20 @@ pub fn definir_comissao(conn: &Connection, id: &str, texto_pct: &str) -> Resulta
     if antes == novo {
         return Ok(None);
     }
-    conn.execute("UPDATE usuario SET comissao = ?2, atualizado_em = ?3 WHERE id = ?1", params![id, novo, tempo::agora()])?;
-    let t = |v: Option<i64>| v.map(|p| format!("{}%", crate::numeros::escrever_percentual(p))).unwrap_or_else(|| "—".into());
+    conn.execute(
+        "UPDATE usuario SET comissao = ?2, atualizado_em = ?3 WHERE id = ?1",
+        params![id, novo, tempo::agora()],
+    )?;
+    let t = |v: Option<i64>| {
+        v.map(|p| format!("{}%", crate::numeros::escrever_percentual(p))).unwrap_or_else(|| "—".into())
+    };
     Ok(Some((t(antes), t(novo))))
 }
 
 /// Confere a senha de um usuário. Devolve o usuário se estiver certa.
 pub fn conferir_senha(conn: &Connection, id: &str, senha: &str) -> Resultado<Usuario> {
-    let hash: Option<String> = conn
-        .query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [id], |l| l.get(0))
-        .optional()?;
+    let hash: Option<String> =
+        conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [id], |l| l.get(0)).optional()?;
     let hash = hash.ok_or_else(|| Erro::NaoEncontrado("Usuário".into()))?;
     let usuario = buscar(conn, id)?;
     if !usuario.ativo {
@@ -155,20 +150,14 @@ pub fn conferir_senha(conn: &Connection, id: &str, senha: &str) -> Resultado<Usu
 
 /// Anota a hora do último acesso.
 pub fn registrar_acesso(conn: &Connection, id: &str) -> Resultado<()> {
-    conn.execute(
-        "UPDATE usuario SET ultimo_acesso = ?2 WHERE id = ?1",
-        params![id, tempo::agora()],
-    )?;
+    conn.execute("UPDATE usuario SET ultimo_acesso = ?2 WHERE id = ?1", params![id, tempo::agora()])?;
     Ok(())
 }
 
 /// Quantos gerentes ativos existem além deste usuário.
 fn gerentes_ativos_alem(conn: &Connection, id: &str) -> Resultado<i64> {
-    Ok(conn.query_row(
-        "SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND gerente = 1 AND id <> ?1",
-        [id],
-        |l| l.get(0),
-    )?)
+    Ok(conn
+        .query_row("SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND gerente = 1 AND id <> ?1", [id], |l| l.get(0))?)
 }
 
 /// Faz (ou deixa de fazer) o usuário gerente. Sempre sobra pelo menos um.
@@ -233,10 +222,7 @@ pub fn resolver_nomes_repetidos(conn: &Connection) -> Resultado<usize> {
 }
 
 fn segundos_agora() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
 /// Quantas senhas erradas seguidas e há quantos segundos foi a última.
@@ -286,10 +272,7 @@ fn validar_nome(conn: &Connection, nome: &str, id_atual: Option<&str>) -> Result
 
 fn validar_senha(senha: &str) -> Resultado<()> {
     if senha.chars().count() < SENHA_MINIMA {
-        return Err(Erro::campo(
-            "senha",
-            format!("A senha precisa ter pelo menos {SENHA_MINIMA} caracteres."),
-        ));
+        return Err(Erro::campo("senha", format!("A senha precisa ter pelo menos {SENHA_MINIMA} caracteres.")));
     }
     if senha.len() > 128 {
         return Err(Erro::campo("senha", "Senha comprida demais."));

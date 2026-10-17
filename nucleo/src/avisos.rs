@@ -93,16 +93,19 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         let (titulo, texto) = if p_qtd > 0 {
             (
                 "Hoje".to_string(),
-                format!(
-                    "{} a pagar · R$ {}",
-                    plural(p_qtd, "conta", "contas"),
-                    numeros::escrever_dinheiro(p_valor)
-                ),
+                format!("{} a pagar · R$ {}", plural(p_qtd, "conta", "contas"), numeros::escrever_dinheiro(p_valor)),
             )
         } else {
             ("A pagar".to_string(), String::new())
         };
-        avisos.push(Aviso { id: "pagar".into(), dia: hoje.clone(), titulo, texto, atraso, funcao: "financeiro".into() });
+        avisos.push(Aviso {
+            id: "pagar".into(),
+            dia: hoje.clone(),
+            titulo,
+            texto,
+            atraso,
+            funcao: "financeiro".into(),
+        });
     }
 
     // Cheques para depositar
@@ -127,10 +130,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     if (chegaram > 0 || a_pedir > 0) && !escondido(conn, "encomendas", &hoje)? {
         let mut partes = Vec::new();
         if chegaram > 0 {
-            partes.push(format!(
-                "{} · avise o cliente",
-                plural(chegaram, "chegou", "chegaram")
-            ));
+            partes.push(format!("{} · avise o cliente", plural(chegaram, "chegou", "chegaram")));
         }
         if a_pedir > 0 {
             partes.push(format!("{} para pedir", plural(a_pedir, "encomenda", "encomendas")));
@@ -175,10 +175,11 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     // Backup: falhou agora, ou está há 2 dias sem cópia (no computador ou no Drive).
     let b = backup::situacao(conn)?;
     let dias_desde = |quando: &str| -> Resultado<i64> {
-        Ok(conn.query_row("SELECT CAST(julianday('now') - julianday(?1) AS INTEGER)", [quando], |l| {
-            l.get::<_, Option<i64>>(0)
-        })?
-        .unwrap_or(0))
+        Ok(conn
+            .query_row("SELECT CAST(julianday('now') - julianday(?1) AS INTEGER)", [quando], |l| {
+                l.get::<_, Option<i64>>(0)
+            })?
+            .unwrap_or(0))
     };
     let referencia = if b.ultimo.is_empty() { &b.desde } else { &b.ultimo };
     let sem_backup = if referencia.is_empty() { 0 } else { dias_desde(referencia)? };
@@ -190,7 +191,14 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         } else {
             (format!("Sem backup há {sem_backup} dias"), String::new())
         };
-        avisos.push(Aviso { id: "backup".into(), dia: hoje.clone(), titulo: "Backup".into(), texto, atraso, funcao: "configuracoes".into() });
+        avisos.push(Aviso {
+            id: "backup".into(),
+            dia: hoje.clone(),
+            titulo: "Backup".into(),
+            texto,
+            atraso,
+            funcao: "configuracoes".into(),
+        });
     }
     if config::ligado(conn, "backup_nuvem")? {
         let referencia = if b.nuvem_ultimo.is_empty() { &b.nuvem_desde } else { &b.nuvem_ultimo };
@@ -235,13 +243,18 @@ mod testes {
         let ze = pessoas::salvar(c, d, &u, &cli).unwrap();
         let hoje = fiscal::hoje(c).unwrap();
         let (a, m, dd) = (&hoje[0..4], &hoje[5..7], &hoje[8..10]);
-        receber::lancar(c, d, &u, &LancamentoEntrada {
-            cliente_id: ze.clone(),
-            descricao: "Caderno".into(),
-            valor: "341,89".into(),
-            parcelas: 1,
-            primeiro_vencimento: format!("{dd}/{m}/{a}"),
-        })
+        receber::lancar(
+            c,
+            d,
+            &u,
+            &LancamentoEntrada {
+                cliente_id: ze.clone(),
+                descricao: "Caderno".into(),
+                valor: "341,89".into(),
+                parcelas: 1,
+                primeiro_vencimento: format!("{dd}/{m}/{a}"),
+            },
+        )
         .unwrap();
         let v = do_dia(c).unwrap();
         assert_eq!(v.len(), 1);

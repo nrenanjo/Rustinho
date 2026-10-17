@@ -67,7 +67,12 @@ fn como_ano(token: &str) -> Option<i64> {
 }
 
 /// Busca peças. Com o texto vazio, mostra as alteradas por último.
-pub fn buscar(conn: &Connection, texto_busca: &str, incluir_inativas: bool, limite: i64) -> Resultado<Vec<ProdutoResumo>> {
+pub fn buscar(
+    conn: &Connection,
+    texto_busca: &str,
+    incluir_inativas: bool,
+    limite: i64,
+) -> Resultado<Vec<ProdutoResumo>> {
     let limite = limite.clamp(1, 1000) as usize;
     let normalizado = texto::normalizar(texto_busca);
     let tokens: Vec<&str> = normalizado.split(' ').filter(|t| !t.is_empty()).take(10).collect();
@@ -90,10 +95,8 @@ pub fn buscar(conn: &Connection, texto_busca: &str, incluir_inativas: bool, limi
         crate::produtos::SQL_PRECO_1,
         crate::produtos::SQL_EM_OFERTA
     );
-    let mut valores: Vec<Value> = vec![
-        Value::Text(compacto.clone()),
-        Value::Text(tokens.first().map(|t| t.to_string()).unwrap_or_default()),
-    ];
+    let mut valores: Vec<Value> =
+        vec![Value::Text(compacto.clone()), Value::Text(tokens.first().map(|t| t.to_string()).unwrap_or_default())];
 
     if !incluir_inativas {
         sql.push_str(" AND p.ativo = 1");
@@ -236,10 +239,7 @@ fn serve_no_ano(busca: &str, carros: &[Carro], palavras: &[&str], token: &str, a
     }
     // Carros que combinam com alguma palavra da busca; se nenhum combina
     // (ex.: "pastilha 2016"), vale qualquer carro da peça.
-    let combinam: Vec<&Carro> = carros
-        .iter()
-        .filter(|c| palavras.iter().any(|p| c.texto.contains(p)))
-        .collect();
+    let combinam: Vec<&Carro> = carros.iter().filter(|c| palavras.iter().any(|p| c.texto.contains(p))).collect();
     let considerar: Vec<&Carro> = if combinam.is_empty() { carros.iter().collect() } else { combinam };
     considerar.iter().any(|c| c.serve_no_ano(ano))
 }
@@ -292,11 +292,8 @@ fn resumo(carros: &[Carro]) -> String {
 
 /// Quantas peças existem.
 pub fn total(conn: &Connection, incluir_inativas: bool) -> Resultado<i64> {
-    let sql = if incluir_inativas {
-        "SELECT COUNT(*) FROM produto"
-    } else {
-        "SELECT COUNT(*) FROM produto WHERE ativo = 1"
-    };
+    let sql =
+        if incluir_inativas { "SELECT COUNT(*) FROM produto" } else { "SELECT COUNT(*) FROM produto WHERE ativo = 1" };
     Ok(conn.query_row(sql, [], |l| l.get(0))?)
 }
 

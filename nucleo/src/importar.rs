@@ -109,7 +109,12 @@ fn cnpj_loja(conn: &Connection) -> Resultado<String> {
     Ok(cnpj)
 }
 
-fn guardar_mais_nova<K: Ord + std::hash::Hash + Eq, V>(mapa: &mut HashMap<K, (V, String)>, chave: K, valor: V, emissao: &str) {
+fn guardar_mais_nova<K: Ord + std::hash::Hash + Eq, V>(
+    mapa: &mut HashMap<K, (V, String)>,
+    chave: K,
+    valor: V,
+    emissao: &str,
+) {
     match mapa.get(&chave) {
         Some((_, e)) if e.as_str() >= emissao => {}
         _ => {
@@ -188,24 +193,18 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
 // ---------------------------------------------------------------------------
 
 fn pessoa_existe(conn: &Connection, doc: &str) -> Resultado<Option<String>> {
-    Ok(conn
-        .query_row("SELECT id FROM pessoa WHERE documento = ?1", [doc], |l| l.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT id FROM pessoa WHERE documento = ?1", [doc], |l| l.get(0)).optional()?)
 }
 
 fn peca_por_codigo(conn: &Connection, codigo: &str) -> Resultado<Option<String>> {
-    Ok(conn
-        .query_row("SELECT id FROM produto WHERE codigo = ?1", [codigo], |l| l.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT id FROM produto WHERE codigo = ?1", [codigo], |l| l.get(0)).optional()?)
 }
 
 fn peca_por_barras(conn: &Connection, gtin_: &str) -> Resultado<Option<String>> {
     if gtin_.is_empty() || !gtin::gtin_valido(gtin_) {
         return Ok(None);
     }
-    Ok(conn
-        .query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [gtin_], |l| l.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [gtin_], |l| l.get(0)).optional()?)
 }
 
 fn peca_por_fornecedor(conn: &Connection, fornecedor_doc: &str, codigo: &str) -> Resultado<Option<String>> {
@@ -352,7 +351,14 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
         lista.sort_by(|a, b| a.0.cmp(b.0));
         for (doc, (pessoa, _)) in lista {
             if pessoa_existe(conn, doc)?.is_none() {
-                pessoas::garantir_pela_nota(conn, dispositivo, usuario_id, pessoa, true, "Cadastrado pelo XML de uma nota da loja")?;
+                pessoas::garantir_pela_nota(
+                    conn,
+                    dispositivo,
+                    usuario_id,
+                    pessoa,
+                    true,
+                    "Cadastrado pelo XML de uma nota da loja",
+                )?;
                 r.clientes += 1;
             }
         }
@@ -369,8 +375,14 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 ids_fornecedor.insert(doc.clone(), id);
             }
             None if e.fornecedores || e.pecas_fornecedor => {
-                let (id, _) =
-                    pessoas::garantir_pela_nota(conn, dispositivo, usuario_id, pessoa, false, "Cadastrado pelo XML de uma nota de compra")?;
+                let (id, _) = pessoas::garantir_pela_nota(
+                    conn,
+                    dispositivo,
+                    usuario_id,
+                    pessoa,
+                    false,
+                    "Cadastrado pelo XML de uma nota de compra",
+                )?;
                 ids_fornecedor.insert(doc.clone(), id);
                 r.fornecedores += 1;
             }
@@ -397,8 +409,15 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 }
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
-            auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.importar", "produto", &id,
-                &["Cadastrada pelo XML de uma nota da loja".into()])?;
+            auditoria::registrar(
+                conn,
+                dispositivo,
+                Some(usuario_id),
+                "produto.importar",
+                "produto",
+                &id,
+                &["Cadastrada pelo XML de uma nota da loja".into()],
+            )?;
             r.pecas += 1;
         }
     }
@@ -428,8 +447,15 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
             ligar_fornecedor(conn, fornecedor_id, codigo, &id)?;
-            auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.importar", "produto", &id,
-                &["Cadastrada pelo XML de uma nota de compra".into()])?;
+            auditoria::registrar(
+                conn,
+                dispositivo,
+                Some(usuario_id),
+                "produto.importar",
+                "produto",
+                &id,
+                &["Cadastrada pelo XML de uma nota de compra".into()],
+            )?;
             r.pecas += 1;
         }
     } else {
@@ -452,7 +478,12 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
 
 /// Salva a peça; se o código de barras ou o código já existirem (corrida
 /// com outra peça da mesma importação), tenta sem eles.
-fn salvar_peca(conn: &Connection, dispositivo: &str, usuario_id: &str, mut f: produtos::ProdutoFicha) -> Resultado<String> {
+fn salvar_peca(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    mut f: produtos::ProdutoFicha,
+) -> Resultado<String> {
     match produtos::salvar(conn, dispositivo, usuario_id, &f) {
         Ok(id) => Ok(id),
         Err(Erro::Validacao { campo: Some(c), .. }) if c == "codigoBarras" || c == "codigo" => {
@@ -502,7 +533,13 @@ mod testes {
         assert_eq!(p.pecas_fornecedor_novas, 3);
         assert_eq!(p.exemplos_clientes, vec!["JOAO DA SILVA".to_string()]);
 
-        let e = Entrada { arquivos: arquivos.clone(), clientes: true, fornecedores: true, pecas_loja: true, pecas_fornecedor: true };
+        let e = Entrada {
+            arquivos: arquivos.clone(),
+            clientes: true,
+            fornecedores: true,
+            pecas_loja: true,
+            pecas_fornecedor: true,
+        };
         let r = importar(c, d, &u, &e).unwrap();
         assert_eq!((r.clientes, r.fornecedores, r.pecas), (1, 1, 4));
 
@@ -527,7 +564,10 @@ mod testes {
 
         // De novo: nada para cadastrar.
         let p = previa(c, &arquivos).unwrap();
-        assert_eq!((p.clientes_novos, p.fornecedores_novos, p.pecas_loja_novas, p.pecas_fornecedor_novas), (0, 0, 0, 0));
+        assert_eq!(
+            (p.clientes_novos, p.fornecedores_novos, p.pecas_loja_novas, p.pecas_fornecedor_novas),
+            (0, 0, 0, 0)
+        );
         assert_eq!(p.pecas_ja, 4);
         let r = importar(c, d, &u, &e).unwrap();
         assert_eq!((r.clientes, r.fornecedores, r.pecas), (0, 0, 0));

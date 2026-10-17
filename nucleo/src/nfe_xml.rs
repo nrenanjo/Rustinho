@@ -81,10 +81,7 @@ fn descendente<'a, 'i>(no: Node<'a, 'i>, nome: &str) -> Option<Node<'a, 'i>> {
 }
 
 fn texto(no: Option<Node>, nome: &str) -> String {
-    no.and_then(|n| filho(n, nome))
-        .and_then(|n| n.text())
-        .map(|t| t.trim().to_string())
-        .unwrap_or_default()
+    no.and_then(|n| filho(n, nome)).and_then(|n| n.text()).map(|t| t.trim().to_string()).unwrap_or_default()
 }
 
 /// "123.4567" → valor inteiro com `casas` casas decimais (arredondado).
@@ -103,7 +100,8 @@ fn decimal(texto: &str, casas: u32) -> Result<i64, String> {
         return Err(format!("número inválido no XML: {texto}"));
     }
     let base = 10_i64.pow(casas);
-    let inteira: i64 = if inteira.is_empty() { 0 } else { inteira.parse().map_err(|_| format!("número grande demais: {texto}"))? };
+    let inteira: i64 =
+        if inteira.is_empty() { 0 } else { inteira.parse().map_err(|_| format!("número grande demais: {texto}"))? };
     let mut f: String = fracao.chars().take(casas as usize + 1).collect();
     while f.len() < casas as usize + 1 {
         f.push('0');
@@ -136,7 +134,11 @@ fn pessoa_do_grupo(grupo: Option<Node>, endereco: &str) -> Emitente {
     let ender = grupo.and_then(|e| filho(e, endereco));
     let doc = {
         let c = texto(grupo, "CNPJ");
-        if c.is_empty() { texto(grupo, "CPF") } else { c }
+        if c.is_empty() {
+            texto(grupo, "CPF")
+        } else {
+            c
+        }
     };
     Emitente {
         documento: doc,
@@ -197,16 +199,22 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         let icms = imposto.and_then(|i| filho(i, "ICMS")).and_then(|i| i.children().find(|n| n.is_element()));
         let cst_icms = {
             let c = texto(icms, "CSOSN");
-            if c.is_empty() { texto(icms, "CST") } else { c }
+            if c.is_empty() {
+                texto(icms, "CST")
+            } else {
+                c
+            }
         };
         let icms_st = dinheiro(icms, "vICMSST")? + dinheiro(icms, "vFCPST")?;
-        let ipi = imposto
-            .and_then(|i| filho(i, "IPI"))
-            .and_then(|i| filho(i, "IPITrib"));
+        let ipi = imposto.and_then(|i| filho(i, "IPI")).and_then(|i| filho(i, "IPITrib"));
         let pis = imposto.and_then(|i| filho(i, "PIS")).and_then(|i| i.children().find(|n| n.is_element()));
         let gtin = {
             let g = texto(prod, "cEAN");
-            if g.chars().all(|c| c.is_ascii_digit()) { g } else { String::new() }
+            if g.chars().all(|c| c.is_ascii_digit()) {
+                g
+            } else {
+                String::new()
+            }
         };
         let cfop = texto(prod, "CFOP");
         let item = ItemXml {

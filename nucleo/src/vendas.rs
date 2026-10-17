@@ -282,27 +282,23 @@ fn peca(conn: &Connection, id: &str, tabela: i64) -> Resultado<Option<Peca>> {
         p1 = crate::produtos::SQL_PRECO_1
     );
     let p = conn
-        .query_row(
-            &sql,
-            params![id, tabela],
-            |l| {
-                Ok(Peca {
-                    codigo: l.get(0)?,
-                    nome: l.get(1)?,
-                    marca: l.get(2)?,
-                    unidade: l.get(3)?,
-                    custo: l.get(4)?,
-                    local: l.get(5)?,
-                    desconto_maximo: l.get(6)?,
-                    comissao: l.get(7)?,
-                    preco: l.get(8)?,
-                    estoque: 0,
-                    servico: l.get(9)?,
-                    preco_aberto: l.get(10)?,
-                    fracionada: l.get(11)?,
-                })
-            },
-        )
+        .query_row(&sql, params![id, tabela], |l| {
+            Ok(Peca {
+                codigo: l.get(0)?,
+                nome: l.get(1)?,
+                marca: l.get(2)?,
+                unidade: l.get(3)?,
+                custo: l.get(4)?,
+                local: l.get(5)?,
+                desconto_maximo: l.get(6)?,
+                comissao: l.get(7)?,
+                preco: l.get(8)?,
+                estoque: 0,
+                servico: l.get(9)?,
+                preco_aberto: l.get(10)?,
+                fracionada: l.get(11)?,
+            })
+        })
         .optional()?;
     Ok(match p {
         Some(mut p) => {
@@ -543,14 +539,15 @@ fn conferir_itens(c: &Calculo) -> Resultado<()> {
 
 /// Grava a venda (e o que foi pago) e tira as peças do estoque.
 pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &VendaEntrada) -> Resultado<String> {
-    let sessao = caixa::sessao_aberta(conn, dispositivo)?
-        .ok_or_else(|| Erro::validacao("Abra o caixa antes de vender."))?;
+    let sessao =
+        caixa::sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("Abra o caixa antes de vender."))?;
     let c = calcular(conn, e)?;
     conferir_itens(&c)?;
     // Pagamentos
     let mut pagamentos: Vec<(String, i64, Option<String>)> = Vec::new();
     for (i, p) in e.pagamentos.iter().enumerate() {
-        let valor = numeros::ler_dinheiro(&p.valor).map_err(|m| Erro::campo(&format!("pagamentos.{i}"), m))?.unwrap_or(0);
+        let valor =
+            numeros::ler_dinheiro(&p.valor).map_err(|m| Erro::campo(&format!("pagamentos.{i}"), m))?.unwrap_or(0);
         if valor == 0 {
             continue;
         }
@@ -566,7 +563,8 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
             if p.vale_id.is_empty() {
                 return Err(Erro::campo(&format!("pagamentos.{i}"), "Escolha qual vale-troca o cliente está usando."));
             }
-            let usado: i64 = pagamentos.iter().filter(|x| x.2.as_deref() == Some(p.vale_id.as_str())).map(|x| x.1).sum();
+            let usado: i64 =
+                pagamentos.iter().filter(|x| x.2.as_deref() == Some(p.vale_id.as_str())).map(|x| x.1).sum();
             let saldo = crate::devolucoes::saldo_vale(conn, &p.vale_id)?;
             if usado + valor > saldo {
                 return Err(Erro::campo(
@@ -676,7 +674,9 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
         )?;
         // Já vendido (aqui ou em outro caixa) ou cancelado: a venda não entra.
         if n != 1 {
-            return Err(Erro::validacao("Este orçamento já foi vendido ou não está mais aberto. Abra o orçamento de novo."));
+            return Err(Erro::validacao(
+                "Este orçamento já foi vendido ou não está mais aberto. Abra o orçamento de novo.",
+            ));
         }
     }
     let pedir: Vec<(String, String, i64)> = c
@@ -728,10 +728,8 @@ fn gravar_itens(conn: &Connection, venda_id: &str, c: &Calculo) -> Resultado<()>
 /// O cliente escolhido ainda existe? (Pode ter sido apagado em outro caixa.)
 fn conferir_cliente(conn: &Connection, cliente_id: &Option<String>) -> Resultado<()> {
     if let Some(id) = cliente_id {
-        let existe: bool = conn
-            .query_row("SELECT 1 FROM pessoa WHERE id = ?1", [id], |_| Ok(true))
-            .optional()?
-            .unwrap_or(false);
+        let existe: bool =
+            conn.query_row("SELECT 1 FROM pessoa WHERE id = ?1", [id], |_| Ok(true)).optional()?.unwrap_or(false);
         if !existe {
             return Err(Erro::campo("cliente", "Esse cliente não existe mais. Escolha o cliente de novo."));
         }
@@ -739,11 +737,18 @@ fn conferir_cliente(conn: &Connection, cliente_id: &Option<String>) -> Resultado
     Ok(())
 }
 
-pub fn salvar_orcamento(conn: &Connection, dispositivo: &str, usuario_id: &str, caixa_nome: &str, e: &VendaEntrada) -> Resultado<String> {
+pub fn salvar_orcamento(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    caixa_nome: &str,
+    e: &VendaEntrada,
+) -> Resultado<String> {
     let c = calcular(conn, e)?;
     conferir_itens(&c)?;
     let dias = if e.validade_dias <= 0 { config::validade_orcamento(conn)? } else { e.validade_dias.min(365) };
-    let validade: String = conn.query_row("SELECT date('now', 'localtime', ?1)", [format!("+{dias} days")], |l| l.get(0))?;
+    let validade: String =
+        conn.query_row("SELECT date('now', 'localtime', ?1)", [format!("+{dias} days")], |l| l.get(0))?;
     let id = tempo::novo_id();
     let numero = proximo_numero(conn, dispositivo, "orcamento")?;
     let cliente_id = if e.cliente_id.is_empty() { None } else { Some(e.cliente_id.clone()) };
@@ -817,7 +822,15 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
             params![id, tempo::agora(), usuario_id, motivo],
         )?;
-        auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.cancelar", "venda", id, &[format!("Motivo: {motivo}")])?;
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "venda.cancelar",
+            "venda",
+            id,
+            &[format!("Motivo: {motivo}")],
+        )?;
     } else {
         if situacao != "aberto" {
             return Err(Erro::validacao("Só dá para cancelar um orçamento em aberto."));
@@ -888,7 +901,26 @@ pub struct PagamentoFicha {
 
 pub fn ficha(conn: &Connection, id: &str) -> Resultado<VendaFicha> {
     #[allow(clippy::type_complexity)]
-    let v: (String, i64, String, String, Option<String>, String, String, String, i64, i64, i64, i64, i64, Option<String>, String, String, Option<String>, String) = conn
+    let v: (
+        String,
+        i64,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        String,
+    ) = conn
         .query_row(
             "SELECT v.tipo, v.numero, v.caixa_nome, v.situacao, v.cliente_id, v.cliente_nome, v.cliente_documento,
                     COALESCE(u.nome, ''), v.tabela, v.subtotal, v.desconto, v.total, v.troco, v.validade,
@@ -897,8 +929,23 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<VendaFicha> {
             [id],
             |l| {
                 Ok((
-                    l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?, l.get(8)?,
-                    l.get(9)?, l.get(10)?, l.get(11)?, l.get(12)?, l.get(13)?, l.get(14)?, l.get(15)?, l.get(16)?,
+                    l.get(0)?,
+                    l.get(1)?,
+                    l.get(2)?,
+                    l.get(3)?,
+                    l.get(4)?,
+                    l.get(5)?,
+                    l.get(6)?,
+                    l.get(7)?,
+                    l.get(8)?,
+                    l.get(9)?,
+                    l.get(10)?,
+                    l.get(11)?,
+                    l.get(12)?,
+                    l.get(13)?,
+                    l.get(14)?,
+                    l.get(15)?,
+                    l.get(16)?,
                     l.get(17)?,
                 ))
             },
@@ -989,7 +1036,15 @@ pub fn cheques_da(conn: &Connection, coluna: &str, id: &str) -> Resultado<Vec<St
 
 /// O orçamento no formato do carrinho, para virar venda.
 pub fn orcamento_para_venda(conn: &Connection, id: &str) -> Resultado<VendaEntrada> {
-    let (tipo, situacao, cliente_id, cliente_nome, tabela, desconto, observacoes): (String, String, Option<String>, String, i64, i64, String) = conn
+    let (tipo, situacao, cliente_id, cliente_nome, tabela, desconto, observacoes): (
+        String,
+        String,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        String,
+    ) = conn
         .query_row(
             "SELECT tipo, situacao, cliente_id, cliente_nome, tabela,
                     desconto - (SELECT COALESCE(SUM(desconto), 0) FROM venda_item WHERE venda_id = v.id), observacoes
@@ -1234,7 +1289,14 @@ mod testes {
         let (b, u, p1, _) = base();
         let c = &b.conn;
         let e = VendaEntrada {
-            itens: vec![ItemEntrada { descricao: String::new(), produto_id: p1.clone(), quantidade: "2".into(), preco: "78".into(), desconto: String::new(), encomendar: false }],
+            itens: vec![ItemEntrada {
+                descricao: String::new(),
+                produto_id: p1.clone(),
+                quantidade: "2".into(),
+                preco: "78".into(),
+                desconto: String::new(),
+                encomendar: false,
+            }],
             tabela: 1,
             cliente_nome: "Oficina do Zé".into(),
             desconto: "6".into(),
@@ -1249,7 +1311,8 @@ mod testes {
         let mut venda = orcamento_para_venda(c, &o).unwrap();
         assert_eq!(venda.desconto, "6,00");
         caixa::abrir(c, &b.dispositivo, &u, "Caixa 1", "0").unwrap();
-        venda.pagamentos = vec![PagamentoEntrada { forma: "credito".into(), valor: "150".into(), ..Default::default() }];
+        venda.pagamentos =
+            vec![PagamentoEntrada { forma: "credito".into(), valor: "150".into(), ..Default::default() }];
         concluir(c, &b.dispositivo, &u, &venda).unwrap();
         assert_eq!(ficha(c, &o).unwrap().situacao, "vendido");
         assert!(orcamento_para_venda(c, &o).is_err());

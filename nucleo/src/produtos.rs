@@ -296,21 +296,22 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
             }
             Some(valor) => precos.push((tabela, valor, numeros::lucro_por_preco(custo, valor))),
             None if tabela == 1 && !f.preco_aberto => {
-                return Err(Erro::campo("preco1", "Informe o preço de revenda (ou marque \"preço na hora da venda\")."));
+                return Err(Erro::campo(
+                    "preco1",
+                    "Informe o preço de revenda (ou marque \"preço na hora da venda\").",
+                ));
             }
             None => {}
         }
     }
 
-    let estoque_inicial = numeros::ler_quantidade(&f.estoque_inicial)
-        .map_err(|m| Erro::campo("estoqueInicial", m))?
-        .unwrap_or(0);
+    let estoque_inicial =
+        numeros::ler_quantidade(&f.estoque_inicial).map_err(|m| Erro::campo("estoqueInicial", m))?.unwrap_or(0);
     if estoque_inicial < 0 {
         return Err(Erro::campo("estoqueInicial", "O estoque inicial não pode ser negativo."));
     }
-    let estoque_minimo = numeros::ler_quantidade(&f.estoque_minimo)
-        .map_err(|m| Erro::campo("estoqueMinimo", m))?
-        .unwrap_or(0);
+    let estoque_minimo =
+        numeros::ler_quantidade(&f.estoque_minimo).map_err(|m| Erro::campo("estoqueMinimo", m))?.unwrap_or(0);
     if estoque_minimo < 0 {
         return Err(Erro::campo("estoqueMinimo", "O estoque mínimo não pode ser negativo."));
     }
@@ -398,14 +399,7 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
                 return Err(Erro::campo(&campo("anoFim"), "O ano final é anterior ao inicial."));
             }
         }
-        aplicacoes.push(Aplicacao {
-            montadora,
-            modelo,
-            motor,
-            ano_inicio,
-            ano_fim,
-            observacao,
-        });
+        aplicacoes.push(Aplicacao { montadora, modelo, motor, ano_inicio, ano_fim, observacao });
     }
     if aplicacoes.len() > MAX_LINHAS {
         return Err(Erro::validacao(format!("Use no máximo {MAX_LINHAS} aplicações por peça.")));
@@ -422,7 +416,8 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
             return Err(Erro::campo(&format!("equivalentes.{i}.codigo"), "Informe o código da peça equivalente."));
         }
         let repetido = equivalentes.iter().any(|e| {
-            texto::normalizar(&e.marca) == texto::normalizar(&marca) && texto::compactar(&e.codigo) == texto::compactar(&codigo)
+            texto::normalizar(&e.marca) == texto::normalizar(&marca)
+                && texto::compactar(&e.codigo) == texto::compactar(&codigo)
         });
         if !repetido {
             equivalentes.push(Equivalente { marca, codigo });
@@ -511,11 +506,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         }
     }
     let mesmo_codigo: Option<String> = conn
-        .query_row(
-            "SELECT nome FROM produto WHERE codigo = ?1 AND id <> ?2",
-            params![dados.codigo, id],
-            |l| l.get(0),
-        )
+        .query_row("SELECT nome FROM produto WHERE codigo = ?1 AND id <> ?2", params![dados.codigo, id], |l| l.get(0))
         .optional()?;
     if let Some(outro) = mesmo_codigo {
         return Err(Erro::campo("codigo", format!("O código {} já é da peça \"{outro}\".", dados.codigo)));
@@ -740,12 +731,9 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Peça".into()))?;
 
-    let mut consulta = conn.prepare_cached(
-        "SELECT tabela, preco, lucro FROM produto_preco WHERE produto_id = ?1 ORDER BY tabela",
-    )?;
-    d.precos = consulta
-        .query_map([id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
-        .collect::<Result<_, _>>()?;
+    let mut consulta =
+        conn.prepare_cached("SELECT tabela, preco, lucro FROM produto_preco WHERE produto_id = ?1 ORDER BY tabela")?;
+    d.precos = consulta.query_map([id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
 
     let mut consulta = conn.prepare_cached(
         "SELECT montadora, modelo, motor, ano_inicio, ano_fim, observacao
@@ -764,9 +752,8 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
         })?
         .collect::<Result<_, _>>()?;
 
-    let mut consulta = conn.prepare_cached(
-        "SELECT marca, codigo FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem",
-    )?;
+    let mut consulta =
+        conn.prepare_cached("SELECT marca, codigo FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem")?;
     d.equivalentes = consulta
         .query_map([id], |l| Ok(Equivalente { marca: l.get(0)?, codigo: l.get(1)? }))?
         .collect::<Result<_, _>>()?;
@@ -812,10 +799,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
             PrecoFicha {
                 tabela: t.numero,
                 nome: t.nome.clone(),
-                lucro: p
-                    .and_then(|p| p.2)
-                    .map(numeros::escrever_percentual)
-                    .unwrap_or_default(),
+                lucro: p.and_then(|p| p.2).map(numeros::escrever_percentual).unwrap_or_default(),
                 preco: p.map(|p| numeros::escrever_dinheiro(p.1)).unwrap_or_default(),
             }
         })
@@ -834,7 +818,11 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         custo: if d.custo > 0 { numeros::escrever_dinheiro(d.custo) } else { String::new() },
         precos,
         estoque_inicial: String::new(),
-        estoque_minimo: if d.estoque_minimo > 0 { numeros::escrever_quantidade(d.estoque_minimo) } else { String::new() },
+        estoque_minimo: if d.estoque_minimo > 0 {
+            numeros::escrever_quantidade(d.estoque_minimo)
+        } else {
+            String::new()
+        },
         local: d.local,
         ncm: d.ncm,
         cest: d.cest,
@@ -891,17 +879,18 @@ pub fn oferta_vale(preco: Option<i64>, ate: &str, hoje: &str) -> bool {
 }
 
 /// Preço da primeira tabela já com a oferta (SQL, para a peça `p`).
-pub const SQL_PRECO_1: &str = "COALESCE(CASE WHEN p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime'))
+pub const SQL_PRECO_1: &str =
+    "COALESCE(CASE WHEN p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime'))
                                     THEN p.oferta_preco END,
                                (SELECT preco FROM produto_preco WHERE produto_id = p.id AND tabela = 1))";
 
 /// A oferta vale hoje (SQL, para a peça `p`).
-pub const SQL_EM_OFERTA: &str = "(p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime')))";
+pub const SQL_EM_OFERTA: &str =
+    "(p.oferta_preco IS NOT NULL AND (p.oferta_ate = '' OR p.oferta_ate >= date('now', 'localtime')))";
 
 fn itens_grade(conn: &Connection, grade: &str) -> Resultado<Vec<ItemGrade>> {
-    let mut c = conn.prepare_cached(
-        "SELECT id, variacao, codigo FROM produto WHERE grade = ?1 ORDER BY criado_em, rowid",
-    )?;
+    let mut c =
+        conn.prepare_cached("SELECT id, variacao, codigo FROM produto WHERE grade = ?1 ORDER BY criado_em, rowid")?;
     let lista: Vec<(String, String, String)> =
         c.query_map([grade], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
     lista
@@ -915,7 +904,14 @@ fn itens_grade(conn: &Connection, grade: &str) -> Resultado<Vec<ItemGrade>> {
 /// Cria mais um tamanho ou cor a partir deste produto: copia tudo (preços,
 /// fiscal, carros) com código novo e estoque zero. `atual` = o tamanho ou cor
 /// deste, se ainda não tiver. Devolve o id do novo.
-pub fn criar_variacao(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, atual: &str, nova: &str) -> Resultado<String> {
+pub fn criar_variacao(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    atual: &str,
+    nova: &str,
+) -> Resultado<String> {
     let mut base = ficha(conn, id)?;
     let nova = texto_curto(nova, "nova", "Tamanho ou cor", 30)?;
     if nova.is_empty() {
@@ -963,12 +959,7 @@ pub fn criar_variacao(conn: &Connection, dispositivo: &str, usuario_id: &str, id
 pub fn ficha_nova(conn: &Connection) -> Resultado<ProdutoFicha> {
     let precos = config::tabelas_preco(conn)?
         .into_iter()
-        .map(|t| PrecoFicha {
-            tabela: t.numero,
-            nome: t.nome,
-            lucro: t.lucro_padrao,
-            preco: String::new(),
-        })
+        .map(|t| PrecoFicha { tabela: t.numero, nome: t.nome, lucro: t.lucro_padrao, preco: String::new() })
         .collect();
     Ok(ProdutoFicha {
         codigo: proximo_codigo(conn)?,
@@ -1092,9 +1083,8 @@ fn texto_busca(d: &Dados) -> (String, String) {
         partes.push(q.codigo.clone());
     }
     let mut codigos: Vec<String> = Vec::new();
-    for c in [&d.codigo, &d.codigo_barras, &d.codigo_original]
-        .into_iter()
-        .chain(d.equivalentes.iter().map(|q| &q.codigo))
+    for c in
+        [&d.codigo, &d.codigo_barras, &d.codigo_original].into_iter().chain(d.equivalentes.iter().map(|q| &q.codigo))
     {
         let compacto = texto::compactar(c);
         if !compacto.is_empty() && !codigos.contains(&compacto) {
@@ -1134,11 +1124,7 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
     campo("Custo", dinheiro(a.custo), dinheiro(b.custo));
     for t in tabelas {
         let preco = |d: &Dados| {
-            d.precos
-                .iter()
-                .find(|p| p.0 == t.numero)
-                .map(|p| numeros::escrever_dinheiro(p.1))
-                .unwrap_or_default()
+            d.precos.iter().find(|p| p.0 == t.numero).map(|p| numeros::escrever_dinheiro(p.1)).unwrap_or_default()
         };
         campo(&nome_tabela(tabelas, t.numero), preco(a), preco(b));
     }

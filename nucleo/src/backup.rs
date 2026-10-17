@@ -136,7 +136,7 @@ fn hex(b: &[u8]) -> String {
 }
 
 fn de_hex(t: &str) -> Option<Vec<u8>> {
-    if t.len() % 2 != 0 {
+    if !t.len().is_multiple_of(2) {
         return None;
     }
     (0..t.len()).step_by(2).map(|i| u8::from_str_radix(t.get(i..i + 2)?, 16).ok()).collect()
@@ -168,10 +168,7 @@ pub fn migrar_senha_antiga(conn: &Connection) -> Resultado<()> {
 
 /// Pasta padrão: `backups` ao lado do banco.
 pub fn pasta_padrao(caminho_db: Option<&Path>) -> PathBuf {
-    caminho_db
-        .and_then(|c| c.parent())
-        .map(|p| p.join("backups"))
-        .unwrap_or_else(|| PathBuf::from("backups"))
+    caminho_db.and_then(|c| c.parent()).map(|p| p.join("backups")).unwrap_or_else(|| PathBuf::from("backups"))
 }
 
 pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajustes> {
@@ -183,16 +180,8 @@ pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajuste
         .and_then(|d| d.parse().ok())
         .filter(|d| (1..=365).contains(d))
         .unwrap_or(DIAS_PADRAO);
-    let hora = config::ler(conn, "backup_hora")?
-        .filter(|h| hora_valida(h))
-        .unwrap_or_else(|| HORA_PADRAO.to_string());
-    Ok(Ajustes {
-        pasta,
-        dias,
-        hora,
-        nuvem: config::ligado(conn, "backup_nuvem")?,
-        chave: chave_da_loja(conn)?,
-    })
+    let hora = config::ler(conn, "backup_hora")?.filter(|h| hora_valida(h)).unwrap_or_else(|| HORA_PADRAO.to_string());
+    Ok(Ajustes { pasta, dias, hora, nuvem: config::ligado(conn, "backup_nuvem")?, chave: chave_da_loja(conn)? })
 }
 
 fn hora_valida(h: &str) -> bool {
@@ -536,9 +525,14 @@ fn desembrulhar(arquivo: &Path, destino: &mut impl Write, senha: &str, da_loja: 
                 }
                 let m = if n == tamanho { ler_cheio(&mut f, &mut proximo).map_err(ler_falha)? } else { 0 };
                 let ultimo = m == 0;
-                let claro = cifra
-                    .decrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n])
-                    .map_err(|_| if numero == 0 { senha_errada() } else { Erro::validacao("O backup está estragado.") })?;
+                let claro =
+                    cifra.decrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n]).map_err(|_| {
+                        if numero == 0 {
+                            senha_errada()
+                        } else {
+                            Erro::validacao("O backup está estragado.")
+                        }
+                    })?;
                 destino.write_all(&claro).map_err(gravar_falha)?;
                 if ultimo {
                     return Ok(());
@@ -570,7 +564,8 @@ impl Temporaria {
     fn nova(perto_de: &Path) -> Resultado<Temporaria> {
         let base = if perto_de.is_dir() { perto_de.to_path_buf() } else { std::env::temp_dir() };
         let p = base.join(format!(".rustinho-tmp-{}", tempo::novo_id()));
-        std::fs::create_dir_all(&p).map_err(|e| Erro::validacao(format!("Não deu para usar a pasta {}: {e}", base.display())))?;
+        std::fs::create_dir_all(&p)
+            .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta {}: {e}", base.display())))?;
         Ok(Temporaria(p))
     }
 }
@@ -671,9 +666,8 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     let caminho_zip = tmp.0.join("backup.zip");
     let arquivo_zip = std::fs::File::create(&caminho_zip).map_err(|e| erro_pasta(&a.pasta, e))?;
     let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(arquivo_zip));
-    let opcoes = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .large_file(true);
+    let opcoes =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).large_file(true);
     let erro_zip = |e: zip::result::ZipError| Erro::Interno(format!("falha ao comprimir: {e}"));
     zip.start_file("info.json", opcoes).map_err(erro_zip)?;
     zip.write_all(serde_json::to_string_pretty(&info)?.as_bytes()).map_err(|e| erro_pasta(&a.pasta, e))?;
@@ -731,12 +725,14 @@ fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
 fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria) -> Resultado<(PathBuf, Info)> {
     let caminho_zip = tmp.0.join("aberto.zip");
     {
-        let saida = std::fs::File::create(&caminho_zip).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+        let saida = std::fs::File::create(&caminho_zip)
+            .map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
         let mut escrita = std::io::BufWriter::new(saida);
         desembrulhar(arquivo, &mut escrita, senha, da_loja)?;
         escrita.flush().map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
     }
-    let arquivo_zip = std::fs::File::open(&caminho_zip).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+    let arquivo_zip =
+        std::fs::File::open(&caminho_zip).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
     let mut zip = zip::ZipArchive::new(std::io::BufReader::new(arquivo_zip))
         .map_err(|_| Erro::validacao("O backup está estragado (o zip não abre)."))?;
     let mut info = Info::default();
@@ -748,11 +744,15 @@ fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria)
     let db = tmp.0.join("restaurar.db");
     {
         let mut f = zip.by_name("rustinho.db").map_err(|_| Erro::validacao("O backup não tem o banco de dados."))?;
-        let mut saida = std::fs::File::create(&db).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
-        std::io::copy(&mut f, &mut saida).map_err(|_| Erro::validacao("O backup está estragado (falha ao descomprimir)."))?;
+        let mut saida =
+            std::fs::File::create(&db).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+        std::io::copy(&mut f, &mut saida)
+            .map_err(|_| Erro::validacao("O backup está estragado (falha ao descomprimir)."))?;
     }
     let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let ok: String = c.query_row("PRAGMA quick_check", [], |l| l.get(0)).map_err(|_| Erro::validacao("O banco dentro do backup está estragado."))?;
+    let ok: String = c
+        .query_row("PRAGMA quick_check", [], |l| l.get(0))
+        .map_err(|_| Erro::validacao("O banco dentro do backup está estragado."))?;
     if ok != "ok" {
         return Err(Erro::validacao("O banco dentro do backup está estragado."));
     }
@@ -869,7 +869,8 @@ pub fn automatico(caminho_db: PathBuf) {
 
 /// "Fazer backup agora": cópia no computador e envio para o Drive.
 pub fn agora(caminho_db: PathBuf) -> Resultado<()> {
-    let vez = Vez::pegar("Fazendo o backup…").ok_or_else(|| Erro::validacao("Já tem um backup em andamento. Espere terminar."))?;
+    let vez = Vez::pegar("Fazendo o backup…")
+        .ok_or_else(|| Erro::validacao("Já tem um backup em andamento. Espere terminar."))?;
     std::thread::spawn(move || {
         let _vez = vez;
         let Ok(conn) = abrir_conexao(&caminho_db) else { return };
@@ -899,7 +900,8 @@ pub fn ao_fechar(caminho_db: &Path) -> Resultado<bool> {
     let conn = abrir_conexao(caminho_db)?;
     let s = situacao(&conn)?;
     let recente: bool = !s.ultimo.is_empty()
-        && conn.query_row("SELECT ?1 > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 minutes')", [&s.ultimo], |l| l.get(0))?;
+        && conn
+            .query_row("SELECT ?1 > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 minutes')", [&s.ultimo], |l| l.get(0))?;
     if recente {
         return Ok(false);
     }
@@ -943,10 +945,7 @@ fn comando_rclone() -> Command {
 /// Onde ficam as cópias na nuvem ("rustinho-drive:Rustinho Backup").
 /// `RUSTINHO_REMOTO` troca (testes).
 fn base_nuvem() -> String {
-    std::env::var("RUSTINHO_REMOTO")
-        .ok()
-        .filter(|p| !p.is_empty())
-        .unwrap_or_else(|| format!("{REMOTO}:{PASTA_NUVEM}"))
+    std::env::var("RUSTINHO_REMOTO").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| format!("{REMOTO}:{PASTA_NUVEM}"))
 }
 
 /// Roda o rclone esperando no máximo `limite`. Devolve a saída.
@@ -994,7 +993,10 @@ fn rclone(args: &[&str], limite: Duration) -> Resultado<String> {
 
 fn explicar_rclone(erro: &str) -> String {
     let e = erro.to_lowercase();
-    if e.contains("didn't find section") || e.contains("not found in config") || (e.contains("couldn't find") && e.contains("remote")) {
+    if e.contains("didn't find section")
+        || e.contains("not found in config")
+        || (e.contains("couldn't find") && e.contains("remote"))
+    {
         "O Google Drive não está conectado neste computador.".into()
     } else if e.contains("token") && (e.contains("expired") || e.contains("invalid") || e.contains("revoked")) {
         "A conexão com o Google Drive venceu. Clique em \"Conectar ao Google Drive\" de novo.".into()
@@ -1018,12 +1020,7 @@ fn falta_rclone() -> &'static str {
 
 /// O rclone está instalado?
 pub fn rclone_instalado() -> bool {
-    comando_rclone()
-        .arg("version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    comando_rclone().arg("version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
 }
 
 /// O Google Drive já foi conectado neste computador?
@@ -1076,7 +1073,8 @@ pub fn desligar_drive(conn: &Connection) -> Resultado<()> {
 }
 
 fn nomes_na_nuvem() -> Resultado<Vec<(String, i64)>> {
-    match rclone(&["lsf", "--files-only", "--format", "ps", "--separator", "|", &base_nuvem()], Duration::from_secs(60)) {
+    match rclone(&["lsf", "--files-only", "--format", "ps", "--separator", "|", &base_nuvem()], Duration::from_secs(60))
+    {
         Ok(s) => Ok(s
             .lines()
             .filter_map(|l| {
@@ -1106,7 +1104,10 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         let la = nomes_na_nuvem()?;
         if !la.iter().any(|(n, _)| *n == c.nome) {
             dizer("Enviando para o Google Drive…");
-            rclone(&["copyto", "--retries", "3", &c.caminho, &format!("{}/{}", base_nuvem(), c.nome)], Duration::from_secs(1800))?;
+            rclone(
+                &["copyto", "--retries", "3", &c.caminho, &format!("{}/{}", base_nuvem(), c.nome)],
+                Duration::from_secs(1800),
+            )?;
         }
         let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
         let mut nomes: Vec<String> = la.into_iter().map(|x| x.0).collect();
@@ -1158,8 +1159,15 @@ pub fn listar_nuvem() -> Resultado<Vec<Copia>> {
 /// Volta o banco para o que está no backup. `arquivo` é o caminho no
 /// computador ou, com `nuvem`, o nome do arquivo no Google Drive.
 /// Antes, guarda uma cópia do que existe agora (`caminho_db`, se houver).
-pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str, nuvem: bool, senha: &str) -> Resultado<Info> {
-    let _vez = Vez::pegar("Restaurando…").ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
+pub fn restaurar(
+    conn: &mut Connection,
+    caminho_db: Option<&Path>,
+    arquivo: &str,
+    nuvem: bool,
+    senha: &str,
+) -> Resultado<Info> {
+    let _vez = Vez::pegar("Restaurando…")
+        .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
     // A troca de dados com os outros caixas espera a restauração terminar.
     let _pausa = sync::pausar();
     let a = ajustes(conn, caminho_db)?;
@@ -1171,7 +1179,10 @@ pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str
         }
         dizer("Baixando do Google Drive…");
         let destino = tmp.0.join(arquivo);
-        rclone(&["copyto", &format!("{}/{arquivo}", base_nuvem()), &destino.display().to_string()], Duration::from_secs(1800))?;
+        rclone(
+            &["copyto", &format!("{}/{arquivo}", base_nuvem()), &destino.display().to_string()],
+            Duration::from_secs(1800),
+        )?;
         destino
     } else {
         PathBuf::from(arquivo)
@@ -1230,13 +1241,13 @@ pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str
     // Recebe tudo de novo dos outros caixas (fica com o mais novo de cada registro).
     tx.execute("DELETE FROM sync_par", [])?;
     for (d, n, e) in &pares {
-        tx.execute("INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES (?1, ?2, ?3, 0)", params![d, n, e])?;
+        tx.execute(
+            "INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES (?1, ?2, ?3, 0)",
+            params![d, n, e],
+        )?;
     }
     // A numeração das alterações deste caixa continua de onde estava.
-    tx.execute(
-        "UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'alteracao'",
-        [seq],
-    )?;
+    tx.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'alteracao'", [seq])?;
     tx.execute(
         "INSERT INTO sqlite_sequence (name, seq) SELECT 'alteracao', ?1 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'alteracao')",
         [seq],
@@ -1249,7 +1260,8 @@ pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str
 pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> Resultado<Value> {
     let a = ajustes(conn, caminho_db)?;
     let s = situacao(conn)?;
-    let (rclone_ok, drive) = if com_drive { (rclone_instalado(), a.nuvem && drive_conectado()) } else { (false, false) };
+    let (rclone_ok, drive) =
+        if com_drive { (rclone_instalado(), a.nuvem && drive_conectado()) } else { (false, false) };
     Ok(json!({
         "pasta": a.pasta.display().to_string(),
         "pastaPadrao": pasta_padrao(caminho_db).display().to_string(),
@@ -1284,7 +1296,10 @@ mod testes {
     #[test]
     fn nomes() {
         let b = ler_nome("rustinho-20261015-183005-caixa1.rbk").unwrap();
-        assert_eq!((b.dia.as_str(), b.hora.as_str(), b.caixa.as_str(), b.antes), ("20261015", "183005", "caixa1", false));
+        assert_eq!(
+            (b.dia.as_str(), b.hora.as_str(), b.caixa.as_str(), b.antes),
+            ("20261015", "183005", "caixa1", false)
+        );
         assert!(ler_nome("rustinho-20261015-183005-caixa1-antes.rbk").unwrap().antes);
         assert!(ler_nome("rustinho-2026101-183005-caixa1.rbk").is_none());
         assert!(ler_nome("foto.rbk").is_none());
@@ -1396,7 +1411,8 @@ mod testes {
         // Depois do backup: nome da loja muda e este caixa ganha outro nome.
         config::gravar(&b.conn, "loja_nome", "Nome Errado").unwrap();
         config::gravar(&b.conn, "caixa_nome", "Caixa 3").unwrap();
-        let seq_antes: i64 = b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
+        let seq_antes: i64 =
+            b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
 
         // Senha errada: não muda nada.
         assert!(restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "errada").is_err());
@@ -1408,9 +1424,11 @@ mod testes {
         // O que é deste computador ficou.
         assert_eq!(config::nome_caixa(&b.conn).unwrap(), "Caixa 3");
         assert_eq!(config::ler(&b.conn, "dispositivo_id").unwrap().unwrap(), b.dispositivo);
-        let cursor: i64 = b.conn.query_row("SELECT cursor FROM sync_par WHERE dispositivo = 'outro'", [], |l| l.get(0)).unwrap();
+        let cursor: i64 =
+            b.conn.query_row("SELECT cursor FROM sync_par WHERE dispositivo = 'outro'", [], |l| l.get(0)).unwrap();
         assert_eq!(cursor, 0);
-        let seq_depois: i64 = b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
+        let seq_depois: i64 =
+            b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
         assert!(seq_depois >= seq_antes);
         // E uma cópia de antes de restaurar foi guardada.
         let lista = listar(&ajustes(&b.conn, Some(&caminho)).unwrap().pasta);
@@ -1448,11 +1466,26 @@ mod testes {
             senha: s.into(),
             senha2: s2.into(),
         };
-        assert_eq!(salvar_ajustes(&b.conn, None, &e("rel", "30", "18:00", "", "")).unwrap_err().nome_do_campo(), Some("pasta"));
-        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "0", "18:00", "", "")).unwrap_err().nome_do_campo(), Some("dias"));
-        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "25:00", "", "")).unwrap_err().nome_do_campo(), Some("hora"));
-        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abc", "abc")).unwrap_err().nome_do_campo(), Some("senha"));
-        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abcdef", "abcdeg")).unwrap_err().nome_do_campo(), Some("senha2"));
+        assert_eq!(
+            salvar_ajustes(&b.conn, None, &e("rel", "30", "18:00", "", "")).unwrap_err().nome_do_campo(),
+            Some("pasta")
+        );
+        assert_eq!(
+            salvar_ajustes(&b.conn, None, &e("", "0", "18:00", "", "")).unwrap_err().nome_do_campo(),
+            Some("dias")
+        );
+        assert_eq!(
+            salvar_ajustes(&b.conn, None, &e("", "30", "25:00", "", "")).unwrap_err().nome_do_campo(),
+            Some("hora")
+        );
+        assert_eq!(
+            salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abc", "abc")).unwrap_err().nome_do_campo(),
+            Some("senha")
+        );
+        assert_eq!(
+            salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abcdef", "abcdeg")).unwrap_err().nome_do_campo(),
+            Some("senha2")
+        );
         salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "9:30", "abcdef", "abcdef")).unwrap();
         let a = ajustes(&b.conn, None).unwrap();
         assert_eq!((a.dias, a.hora.as_str()), (15, "09:30"));

@@ -40,10 +40,7 @@ pub fn salvar_dias(conn: &Connection, dispositivo: &str, usuario_id: &str, qual:
         "parado" => ("estoque_dias_parado", 30, 730, "diasParado"),
         _ => return Err(Erro::Interno(format!("dias desconhecidos: {qual}"))),
     };
-    let n: i64 = dias
-        .trim()
-        .parse()
-        .map_err(|_| Erro::campo(campo, "Digite o número de dias."))?;
+    let n: i64 = dias.trim().parse().map_err(|_| Erro::campo(campo, "Digite o número de dias."))?;
     if !(min..=max).contains(&n) {
         return Err(Erro::campo(campo, format!("Use de {min} a {max} dias.")));
     }
@@ -84,7 +81,13 @@ fn fornecedores(conn: &Connection) -> Resultado<HashMap<String, (String, String,
     )?;
     let mut mapa = HashMap::new();
     let linhas = c.query_map([], |l| {
-        Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?, l.get::<_, String>(3)?, l.get::<_, String>(4)?))
+        Ok((
+            l.get::<_, String>(0)?,
+            l.get::<_, String>(1)?,
+            l.get::<_, String>(2)?,
+            l.get::<_, String>(3)?,
+            l.get::<_, String>(4)?,
+        ))
     })?;
     for linha in linhas {
         let (pid, fid, fantasia, nome, codigo) = linha?;
@@ -285,7 +288,13 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
         };
         itens.push((
             rank,
-            if rank == 0 { -(b.vendido as f64) } else if rank == 1 { restam } else { 0.0 },
+            if rank == 0 {
+                -(b.vendido as f64)
+            } else if rank == 1 {
+                restam
+            } else {
+                0.0
+            },
             ItemCompra {
                 produto_id: b.id,
                 codigo: b.codigo,
@@ -345,7 +354,9 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     for linha in linhas {
         let (id, numero, cliente, pid, codigo, descricao, q, unidade, criado) = linha?;
         let (_, fornecedor, codigo_fornecedor) = forn.get(&pid).cloned().unwrap_or_default();
-        if !filtro.is_empty() && !texto::normalizar(&format!("{codigo} {descricao} {cliente} {fornecedor}")).contains(&filtro) {
+        if !filtro.is_empty()
+            && !texto::normalizar(&format!("{codigo} {descricao} {cliente} {fornecedor}")).contains(&filtro)
+        {
             continue;
         }
         let d = crate::receber::dias_entre(&criado, &hoje);
@@ -506,7 +517,10 @@ pub fn mais_vendidos(conn: &Connection, dias: i64, ordem: &str, busca: &str) -> 
             total: numeros::escrever_dinheiro(l.total),
             lucro: numeros::escrever_dinheiro(lucro),
             margem: if l.total > 0 && l.custo > 0 {
-                format!("{}%", numeros::escrever_percentual(numeros::saturar((lucro as i128 * 10_000) / l.total as i128)))
+                format!(
+                    "{}%",
+                    numeros::escrever_percentual(numeros::saturar((lucro as i128 * 10_000) / l.total as i128))
+                )
             } else {
                 String::new()
             },
@@ -640,7 +654,11 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
             local,
             estoque: numeros::escrever_quantidade(q),
             valor: numeros::escrever_dinheiro(valor),
-            ultima_venda: if uv.is_empty() { "Nunca vendeu".into() } else { format!("Última venda em {}", fiscal::data_br(&uv)) },
+            ultima_venda: if uv.is_empty() {
+                "Nunca vendeu".into()
+            } else {
+                format!("Última venda em {}", fiscal::data_br(&uv))
+            },
             ha: format!("parada há {ha} dias"),
             ultima_compra: if ue.is_empty() { String::new() } else { format!("entrou em {}", fiscal::data_br(&ue)) },
             v_valor: valor,
@@ -795,7 +813,8 @@ mod testes {
         // Farol sem vender: só fica "parado" depois de 180 dias.
         assert!(parados(c, "").unwrap().itens.is_empty());
         c.execute("UPDATE produto SET criado_em = '2025-01-10T12:00:00Z' WHERE id = ?1", [&farol]).unwrap();
-        c.execute("UPDATE estoque_movimento SET criado_em = '2025-01-10T12:00:00Z' WHERE produto_id = ?1", [&farol]).unwrap();
+        c.execute("UPDATE estoque_movimento SET criado_em = '2025-01-10T12:00:00Z' WHERE produto_id = ?1", [&farol])
+            .unwrap();
         let p = parados(c, "").unwrap();
         assert_eq!(p.itens.len(), 1);
         assert_eq!((p.valor.as_str(), p.itens[0].ultima_venda.as_str()), ("400,00", "Nunca vendeu"));

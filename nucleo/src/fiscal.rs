@@ -286,7 +286,8 @@ pub fn salvar_regras(conn: &Connection, dispositivo: &str, usuario_id: &str, lis
         if cest.is_empty() || cest.len() > 7 {
             return Err(Erro::campo(&campo("cestInicio"), "Digite o começo do CEST (ex.: 01 para autopeças)."));
         }
-        let de = ler_data(&r.vigente_de).map_err(|m| Erro::campo(&campo("vigenteDe"), m))?
+        let de = ler_data(&r.vigente_de)
+            .map_err(|m| Erro::campo(&campo("vigenteDe"), m))?
             .ok_or_else(|| Erro::campo(&campo("vigenteDe"), "Digite a data de início."))?;
         let ate = ler_data(&r.vigente_ate).map_err(|m| Erro::campo(&campo("vigenteAte"), m))?;
         if let Some(a) = &ate {
@@ -579,7 +580,12 @@ impl FiscalPeca {
             ipi_valor: reais(&self.ipi_valor, "fiscal.ipiValor")?,
             ipi_enquadramento: numeros_ate(&self.ipi_enquadramento, "fiscal.ipiEnquadramento", "Enquadramento", 3)?,
             ipi_selo: curto(&self.ipi_selo, "fiscal.ipiSelo", "Selo", 60)?,
-            ipi_selo_quantidade: numeros_ate(&self.ipi_selo_quantidade, "fiscal.ipiSeloQuantidade", "Quantidade de selos", 12)?,
+            ipi_selo_quantidade: numeros_ate(
+                &self.ipi_selo_quantidade,
+                "fiscal.ipiSeloQuantidade",
+                "Quantidade de selos",
+                12,
+            )?,
             pis_cst: escolha(&self.pis_cst, CST_PIS, "fiscal.pisCst", "CST do PIS")?,
             pis_aliquota: pct(&self.pis_aliquota, "fiscal.pisAliquota")?,
             pis_valor: reais(&self.pis_valor, "fiscal.pisValor")?,
@@ -693,11 +699,24 @@ mod testes {
         // regra sobreposta é recusada
         let mut lista = regras(&b.conn).unwrap();
         assert_eq!(lista.len(), 4);
-        lista.push(RegraSt { uf: "SP".into(), cest_inicio: "01".into(), vigente_de: "15/10/2026".into(), com_st: true, ..Default::default() });
+        lista.push(RegraSt {
+            uf: "SP".into(),
+            cest_inicio: "01".into(),
+            vigente_de: "15/10/2026".into(),
+            com_st: true,
+            ..Default::default()
+        });
         assert!(salvar_regras(&b.conn, &b.dispositivo, &u.id, &lista).is_err());
         // regra mais específica (01.003) vence a geral
         lista.pop();
-        lista.push(RegraSt { uf: "SP".into(), cest_inicio: "01.003".into(), vigente_de: "01/10/2026".into(), com_st: true, descricao: "Exceção de teste".into(), ..Default::default() });
+        lista.push(RegraSt {
+            uf: "SP".into(),
+            cest_inicio: "01.003".into(),
+            vigente_de: "01/10/2026".into(),
+            com_st: true,
+            descricao: "Exceção de teste".into(),
+            ..Default::default()
+        });
         salvar_regras(&b.conn, &b.dispositivo, &u.id, &lista).unwrap();
         assert_eq!(tributacao(&b.conn, "SP", "0100300", "", "2026-10-13").unwrap().csosn, "500");
         assert_eq!(tributacao(&b.conn, "SP", "0100100", "", "2026-10-13").unwrap().csosn, "102");

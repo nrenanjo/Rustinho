@@ -104,12 +104,7 @@ fn dividir_arredondando(numerador: i128, divisor: i128) -> i128 {
 /// `casas` casas decimais. Aceita vírgula ou ponto como separador decimal
 /// ("85,50" ou "85.50") e ponto como separador de milhar ("1.234,56").
 fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
-    let limpo: String = texto
-        .replace("R$", "")
-        .replace('%', "")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let limpo: String = texto.replace("R$", "").replace('%', "").chars().filter(|c| !c.is_whitespace()).collect();
     if limpo.is_empty() {
         return Ok(None);
     }

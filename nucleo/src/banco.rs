@@ -40,9 +40,8 @@ impl Banco {
     /// Abre (ou cria) o banco no arquivo indicado.
     pub fn abrir(caminho: &Path) -> Resultado<Banco> {
         if let Some(pasta) = caminho.parent() {
-            std::fs::create_dir_all(pasta).map_err(|e| {
-                Erro::Interno(format!("não foi possível criar a pasta {}: {e}", pasta.display()))
-            })?;
+            std::fs::create_dir_all(pasta)
+                .map_err(|e| Erro::Interno(format!("não foi possível criar a pasta {}: {e}", pasta.display())))?;
         }
         let conn = Connection::open(caminho)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -63,11 +62,7 @@ impl Banco {
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
         crate::backup::migrar_senha_antiga(&conn)?;
-        Ok(Banco {
-            conn,
-            dispositivo,
-            caminho,
-        })
+        Ok(Banco { conn, dispositivo, caminho })
     }
 }
 
@@ -106,17 +101,13 @@ pub(crate) fn migrar(conn: &mut Connection) -> Resultado<()> {
 
 /// Lê (ou cria na primeira vez) o identificador deste computador.
 fn garantir_dispositivo(conn: &Connection) -> Resultado<String> {
-    let atual: Option<String> = conn
-        .query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |l| l.get(0))
-        .optional()?;
+    let atual: Option<String> =
+        conn.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |l| l.get(0)).optional()?;
     if let Some(id) = atual {
         return Ok(id);
     }
     let id = tempo::novo_id();
-    conn.execute(
-        "INSERT INTO config (chave, valor) VALUES ('dispositivo_id', ?1)",
-        [&id],
-    )?;
+    conn.execute("INSERT INTO config (chave, valor) VALUES ('dispositivo_id', ?1)", [&id])?;
     Ok(id)
 }
 
@@ -151,10 +142,7 @@ mod testes {
         let versao: i64 = banco.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
         assert_eq!(versao as usize, MIGRACOES.len());
         assert_eq!(banco.dispositivo.len(), 36);
-        let tabelas: i64 = banco
-            .conn
-            .query_row("SELECT COUNT(*) FROM tabela_preco", [], |l| l.get(0))
-            .unwrap();
+        let tabelas: i64 = banco.conn.query_row("SELECT COUNT(*) FROM tabela_preco", [], |l| l.get(0)).unwrap();
         assert_eq!(tabelas, 5);
     }
 

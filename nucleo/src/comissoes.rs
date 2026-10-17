@@ -63,7 +63,13 @@ fn periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(String, String)
 }
 
 /// (vendas, vendido, comissão) de um vendedor no período.
-fn calcular(conn: &Connection, usuario_id: &str, padrao: Option<i64>, de: &str, ate: &str) -> Resultado<(i64, i64, i64)> {
+fn calcular(
+    conn: &Connection,
+    usuario_id: &str,
+    padrao: Option<i64>,
+    de: &str,
+    ate: &str,
+) -> Resultado<(i64, i64, i64)> {
     let mut c = conn.prepare_cached(
         "SELECT v.id, v.subtotal, v.total, i.total, i.comissao,
                 COALESCE((SELECT SUM(di.valor_item) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -124,9 +130,8 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
                                         AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2)
           ORDER BY u.nome COLLATE NOCASE",
     )?;
-    let usuarios: Vec<(String, String, Option<i64>)> = c
-        .query_map(params![de, ate], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
-        .collect::<Result<_, _>>()?;
+    let usuarios: Vec<(String, String, Option<i64>)> =
+        c.query_map(params![de, ate], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
     let mut vendedores = Vec::new();
     let mut total = 0;
     for (id, nome, padrao) in usuarios {
@@ -186,7 +191,15 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
 
 /// Fecha a comissão do período: vira uma conta a pagar (vence `vencimento`,
 /// vazio = hoje). Devolve o id da conta.
-pub fn fechar(conn: &Connection, dispositivo: &str, usuario_id: &str, vendedor_id: &str, de: &str, ate: &str, vencimento: &str) -> Resultado<String> {
+pub fn fechar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    vendedor_id: &str,
+    de: &str,
+    ate: &str,
+    vencimento: &str,
+) -> Resultado<String> {
     let (de, ate) = periodo(conn, de, ate)?;
     let (nome, padrao): (String, Option<i64>) = conn
         .query_row("SELECT nome, comissao FROM usuario WHERE id = ?1", [vendedor_id], |l| Ok((l.get(0)?, l.get(1)?)))
@@ -242,20 +255,26 @@ pub fn fechar(conn: &Connection, dispositivo: &str, usuario_id: &str, vendedor_i
 /// Desfaz um fechamento (a conta a pagar sai, se não foi paga).
 pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
     let (conta, cancelado): (Option<String>, Option<String>) = conn
-        .query_row("SELECT conta_pagar_id, cancelado_em FROM comissao_fechamento WHERE id = ?1", [id], |l| Ok((l.get(0)?, l.get(1)?)))
+        .query_row("SELECT conta_pagar_id, cancelado_em FROM comissao_fechamento WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Fechamento".into()))?;
     if cancelado.is_some() {
         return Err(Erro::validacao("Este fechamento já foi desfeito."));
     }
     if let Some(c) = conta {
-        let cancelada: Option<String> = conn.query_row("SELECT cancelado_em FROM conta_pagar WHERE id = ?1", [&c], |l| l.get(0))?;
+        let cancelada: Option<String> =
+            conn.query_row("SELECT cancelado_em FROM conta_pagar WHERE id = ?1", [&c], |l| l.get(0))?;
         if cancelada.is_none() {
-            pagar::cancelar(conn, dispositivo, usuario_id, &c, "Fechamento de comissão desfeito")
-                .map_err(|e| match e {
-                    Erro::Validacao { .. } => Erro::validacao("A comissão já foi paga. Estorne o pagamento no A pagar antes."),
+            pagar::cancelar(conn, dispositivo, usuario_id, &c, "Fechamento de comissão desfeito").map_err(
+                |e| match e {
+                    Erro::Validacao { .. } => {
+                        Erro::validacao("A comissão já foi paga. Estorne o pagamento no A pagar antes.")
+                    }
                     outro => outro,
-                })?;
+                },
+            )?;
         }
     }
     conn.execute("UPDATE comissao_fechamento SET cancelado_em = ?2 WHERE id = ?1", params![id, tempo::agora()])?;

@@ -133,8 +133,11 @@ pub fn texto_do_xml(bytes: &[u8]) -> String {
         Ok(t) => t.to_string(),
         Err(_) => {
             let t: String = bytes.iter().map(|&b| b as char).collect();
-            t.replacen("encoding=\"ISO-8859-1\"", "encoding=\"UTF-8\"", 1)
-                .replacen("encoding=\"iso-8859-1\"", "encoding=\"UTF-8\"", 1)
+            t.replacen("encoding=\"ISO-8859-1\"", "encoding=\"UTF-8\"", 1).replacen(
+                "encoding=\"iso-8859-1\"",
+                "encoding=\"UTF-8\"",
+                1,
+            )
         }
     }
 }
@@ -162,10 +165,7 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
             return Err(Erro::validacao(format!("Não achei {}.", p.display())));
         }
         if p.is_file() && !aceito(&nome_curto(&p)) {
-            return Err(Erro::validacao(format!(
-                "{} não é XML, ZIP nem RAR.",
-                nome_curto(&p)
-            )));
+            return Err(Erro::validacao(format!("{} não é XML, ZIP nem RAR.", nome_curto(&p))));
         }
         juntar(&p, &mut lista, 0);
     }
@@ -200,7 +200,13 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
     Ok(saida)
 }
 
-fn de_zip<R: Read + std::io::Seek>(pacote: &str, leitor: R, saida: &mut Vec<Xml>, entrar_em_zip: bool, orc: &mut Orcamento) {
+fn de_zip<R: Read + std::io::Seek>(
+    pacote: &str,
+    leitor: R,
+    saida: &mut Vec<Xml>,
+    entrar_em_zip: bool,
+    orc: &mut Orcamento,
+) {
     let Ok(mut zip) = zip::ZipArchive::new(leitor) else {
         saida.push(ruim(pacote.into(), "o .zip está estragado ou não é zip"));
         return;
@@ -361,7 +367,11 @@ mod testes {
             z.finish().unwrap().into_inner()
         };
         let dentro = fazer_zip(&[("c.xml", b"<c/>")]);
-        std::fs::write(pasta.join("sub/pacote.zip"), fazer_zip(&[("a.xml", b"<a/>"), ("leia.txt", b"x"), ("outro.zip", &dentro)])).unwrap();
+        std::fs::write(
+            pasta.join("sub/pacote.zip"),
+            fazer_zip(&[("a.xml", b"<a/>"), ("leia.txt", b"x"), ("outro.zip", &dentro)]),
+        )
+        .unwrap();
         std::fs::write(pasta.join("b.xml"), b"<b/>").unwrap();
         std::fs::write(pasta.join("foto.jpg"), b"x").unwrap();
         let l = xmls(&[pasta.display().to_string()]).unwrap();

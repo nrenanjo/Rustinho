@@ -21,10 +21,10 @@
 //! - Um caixa com o relógio errado ganharia sempre; a diferença de relógio
 //!   aparece como aviso na tela dos caixas da loja.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::thread;
@@ -143,10 +143,8 @@ fn colunas(conn: &Connection, tabela: &str) -> Resultado<(Vec<String>, Vec<Strin
 }
 
 fn expressoes(tabela: &str, todas: &[String], chave: &[String], prefixo: &str) -> (String, String) {
-    let chave = format!(
-        "json_array({})",
-        chave.iter().map(|c| format!("{prefixo}.\"{c}\"")).collect::<Vec<_>>().join(", ")
-    );
+    let chave =
+        format!("json_array({})", chave.iter().map(|c| format!("{prefixo}.\"{c}\"")).collect::<Vec<_>>().join(", "));
     let dados = format!(
         "json_object({})",
         todas.iter().map(|c| format!("'{c}', {prefixo}.\"{c}\"")).collect::<Vec<_>>().join(", ")
@@ -172,7 +170,9 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
         let quando = "WHEN (SELECT aplicando FROM sync_estado WHERE id = 1) = 0";
         let disp = "(SELECT valor FROM config WHERE chave = 'dispositivo_id')";
         let mut sql = String::new();
-        for (sufixo, evento, prefixo, operacao) in [("i", "INSERT", "NEW", "gravar"), ("u", "UPDATE", "NEW", "gravar"), ("d", "DELETE", "OLD", "apagar")] {
+        for (sufixo, evento, prefixo, operacao) in
+            [("i", "INSERT", "NEW", "gravar"), ("u", "UPDATE", "NEW", "gravar"), ("d", "DELETE", "OLD", "apagar")]
+        {
             let (k, d) = expressoes(tabela, &todas, &chave, prefixo);
             let dados = if operacao == "apagar" { "NULL".to_string() } else { d };
             let extra = if *tabela == "config" { filtro_config(prefixo) } else { String::new() };
@@ -202,7 +202,8 @@ pub fn registrar_existentes(conn: &Connection) -> Resultado<()> {
         for tabela in TABELAS {
             let (todas, chave) = colunas(conn, tabela)?;
             let (k, d) = expressoes(tabela, &todas, &chave, "t");
-            let filtro = if *tabela == "config" { format!(" WHERE 1 = 1{}", filtro_config("t")) } else { String::new() };
+            let filtro =
+                if *tabela == "config" { format!(" WHERE 1 = 1{}", filtro_config("t")) } else { String::new() };
             conn.execute(
                 &format!(
                     "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
@@ -321,7 +322,8 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         if !TABELAS.contains(&a.tabela.as_str()) || a.dispositivo == meu {
             continue;
         }
-        let ja: bool = tx.query_row("SELECT 1 FROM alteracao WHERE id = ?1", [&a.id], |_| Ok(true)).optional()?.unwrap_or(false);
+        let ja: bool =
+            tx.query_row("SELECT 1 FROM alteracao WHERE id = ?1", [&a.id], |_| Ok(true)).optional()?.unwrap_or(false);
         if ja {
             continue;
         }
@@ -348,10 +350,7 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![a.tabela, a.chave, u, a.id, a.dispositivo, tempo::agora()],
                     )?;
-                    tx.execute(
-                        "DELETE FROM sync_conflito WHERE id <= (SELECT MAX(id) - 500 FROM sync_conflito)",
-                        [],
-                    )?;
+                    tx.execute("DELETE FROM sync_conflito WHERE id <= (SELECT MAX(id) - 500 FROM sync_conflito)", [])?;
                 }
                 continue;
             }
@@ -366,7 +365,12 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
             continue;
         }
         if a.operacao == "apagar" {
-            let onde = chave.iter().enumerate().map(|(i, c)| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+            let onde = chave
+                .iter()
+                .enumerate()
+                .map(|(i, c)| format!("\"{c}\" = ?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(" AND ");
             tx.execute(
                 &format!("DELETE FROM \"{}\" WHERE {onde}", a.tabela),
                 params_from_iter(valores_chave.iter().map(para_sql)),
@@ -416,8 +420,11 @@ struct Chaves {
     propria: [u8; 32],
 }
 
-fn cache() -> &'static Mutex<HashMap<([u8; 32], [u8; 16]), [u8; 32]>> {
-    static CACHE: std::sync::OnceLock<Mutex<HashMap<([u8; 32], [u8; 16]), [u8; 32]>>> = std::sync::OnceLock::new();
+/// (resumo da senha, sal) → chave.
+type CacheChaves = Mutex<HashMap<([u8; 32], [u8; 16]), [u8; 32]>>;
+
+fn cache() -> &'static CacheChaves {
+    static CACHE: std::sync::OnceLock<CacheChaves> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -440,21 +447,22 @@ fn derivar(senha: &str, sal: &[u8; 16]) -> Resultado<[u8; 32]> {
 
 impl Chaves {
     fn de(conn: &Connection, senha: &str) -> Resultado<Chaves> {
-        let sal = match config::ler(conn, "sync_sal")?.and_then(|t| de_hex(&t)).and_then(|v| <[u8; 16]>::try_from(v).ok()) {
-            Some(s) => s,
-            None => {
-                let mut s = [0u8; 16];
-                getrandom::fill(&mut s).map_err(|e| Erro::Interno(format!("sem números aleatórios: {e}")))?;
-                config::gravar(conn, "sync_sal", &s.iter().map(|b| format!("{b:02x}")).collect::<String>())?;
-                s
-            }
-        };
+        let sal =
+            match config::ler(conn, "sync_sal")?.and_then(|t| de_hex(&t)).and_then(|v| <[u8; 16]>::try_from(v).ok()) {
+                Some(s) => s,
+                None => {
+                    let mut s = [0u8; 16];
+                    getrandom::fill(&mut s).map_err(|e| Erro::Interno(format!("sem números aleatórios: {e}")))?;
+                    config::gravar(conn, "sync_sal", &s.iter().map(|b| format!("{b:02x}")).collect::<String>())?;
+                    s
+                }
+            };
         Ok(Chaves { senha: senha.to_string(), sal, propria: derivar(senha, &sal)? })
     }
 }
 
 fn de_hex(t: &str) -> Option<Vec<u8>> {
-    if t.len() % 2 != 0 {
+    if !t.len().is_multiple_of(2) {
         return None;
     }
     (0..t.len()).step_by(2).map(|i| u8::from_str_radix(t.get(i..i + 2)?, 16).ok()).collect()
@@ -462,15 +470,14 @@ fn de_hex(t: &str) -> Option<Vec<u8>> {
 
 /// Mensagem: "RST2", sal de quem mandou (16), nonce (12), texto cifrado.
 fn cifrar(chaves: &Chaves, dados: &[u8]) -> Resultado<Vec<u8>> {
-    let cifra = ChaCha20Poly1305::new_from_slice(&chaves.propria).map_err(|_| Erro::Interno("chave inválida".into()))?;
+    let cifra =
+        ChaCha20Poly1305::new_from_slice(&chaves.propria).map_err(|_| Erro::Interno("chave inválida".into()))?;
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).map_err(|e| Erro::Interno(format!("sem números aleatórios: {e}")))?;
     let mut saida = MAGICA.to_vec();
     saida.extend(chaves.sal);
     saida.extend(nonce);
-    let corpo = cifra
-        .encrypt(&nonce.into(), dados)
-        .map_err(|_| Erro::Interno("falha ao criptografar".into()))?;
+    let corpo = cifra.encrypt(&nonce.into(), dados).map_err(|_| Erro::Interno("falha ao criptografar".into()))?;
     saida.extend(corpo);
     Ok(saida)
 }
@@ -482,13 +489,12 @@ fn decifrar(chaves: &Chaves, dados: &[u8]) -> Result<Vec<u8>, &'static str> {
     }
     let mut sal = [0u8; 16];
     sal.copy_from_slice(&dados[4..20]);
-    let chave = if sal == chaves.sal { chaves.propria } else { derivar(&chaves.senha, &sal).map_err(|_| "chave inválida")? };
+    let chave =
+        if sal == chaves.sal { chaves.propria } else { derivar(&chaves.senha, &sal).map_err(|_| "chave inválida")? };
     let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| "chave inválida")?;
     let mut nonce = [0u8; 12];
     nonce.copy_from_slice(&dados[20..32]);
-    cifra
-        .decrypt(&nonce.into(), &dados[32..])
-        .map_err(|_| "A senha da rede não confere com a deste caixa.")
+    cifra.decrypt(&nonce.into(), &dados[32..]).map_err(|_| "A senha da rede não confere com a deste caixa.")
 }
 
 fn enviar(fluxo: &mut TcpStream, chaves: &Chaves, v: &Value) -> Resultado<()> {
@@ -512,10 +518,7 @@ fn receber(fluxo: &mut TcpStream, chaves: &Chaves, limite: usize) -> Resultado<V
 }
 
 fn agora_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 fn rede(e: std::io::Error) -> Erro {
@@ -555,7 +558,10 @@ pub fn ajustes(conn: &Connection) -> Resultado<Ajustes> {
 pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &str) -> Resultado<()> {
     let senha = senha.trim();
     if ligado && senha.chars().count() < 8 {
-        return Err(Erro::campo("senha", "A senha da rede precisa ter pelo menos 8 caracteres. Use a mesma em todos os caixas."));
+        return Err(Erro::campo(
+            "senha",
+            "A senha da rede precisa ter pelo menos 8 caracteres. Use a mesma em todos os caixas.",
+        ));
     }
     for e in enderecos.split([',', ' ', ';', '\n']).filter(|e| !e.trim().is_empty()) {
         let e = e.trim();
@@ -813,7 +819,12 @@ impl Motor {
                                 let d = v["dispositivo"].as_str().unwrap_or_default();
                                 let porta = v["porta"].as_u64().unwrap_or(PORTA_TCP as u64);
                                 if !d.is_empty() && d != a.dispositivo {
-                                    let _ = registrar_par(&conn, d, v["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()));
+                                    let _ = registrar_par(
+                                        &conn,
+                                        d,
+                                        v["nome"].as_str().unwrap_or(""),
+                                        &format!("{}:{porta}", origem.ip()),
+                                    );
                                 }
                             }
                         }
@@ -972,12 +983,20 @@ mod testes {
         let b = Banco::em_memoria().unwrap();
         let k1 = Chaves::de(&b.conn, "senha-da-loja").unwrap();
         // Outro caixa: mesmo senha, outro sal.
-        let k2 = Chaves { senha: "senha-da-loja".into(), sal: [9u8; 16], propria: derivar("senha-da-loja", &[9u8; 16]).unwrap() };
+        let k2 = Chaves {
+            senha: "senha-da-loja".into(),
+            sal: [9u8; 16],
+            propria: derivar("senha-da-loja", &[9u8; 16]).unwrap(),
+        };
         assert_ne!(k1.propria, k2.propria);
         let m = cifrar(&k2, b"ola").unwrap();
         assert_eq!(decifrar(&k1, &m).unwrap(), b"ola");
         // Senha errada.
-        let k3 = Chaves { senha: "outra-senha".into(), sal: [9u8; 16], propria: derivar("outra-senha", &[9u8; 16]).unwrap() };
+        let k3 = Chaves {
+            senha: "outra-senha".into(),
+            sal: [9u8; 16],
+            propria: derivar("outra-senha", &[9u8; 16]).unwrap(),
+        };
         assert!(decifrar(&k3, &m).unwrap_err().contains("senha"));
         // Versão antiga (sem "RST2").
         assert!(decifrar(&k1, &[0u8; 80]).unwrap_err().contains("versão"));
@@ -993,15 +1012,19 @@ mod testes {
         for nome in ["Maria A", "Maria B", "Maria C"] {
             usuarios::alterar(&b.conn, &u.id, nome, true, None).unwrap();
         }
-        let antes: i64 = b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
+        let antes: i64 =
+            b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
         assert!(antes >= 4);
         assert!(compactar(&b.conn).unwrap() >= 3);
-        let depois: i64 = b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
+        let depois: i64 =
+            b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
         assert_eq!(depois, 1);
         // Uma alteração mais velha de outro caixa chega depois: não vale e fica anotada.
         let (id_ultima, chave_u, dados): (String, String, String) = b
             .conn
-            .query_row("SELECT id, chave, dados FROM alteracao WHERE tabela = 'usuario'", [], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))
+            .query_row("SELECT id, chave, dados FROM alteracao WHERE tabela = 'usuario'", [], |l| {
+                Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+            })
             .unwrap();
         let velha = Alteracao {
             seq: 1,

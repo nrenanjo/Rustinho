@@ -9,9 +9,7 @@ use crate::{documento, texto};
 
 /// Lê uma configuração.
 pub fn ler(conn: &Connection, chave: &str) -> Resultado<Option<String>> {
-    Ok(conn
-        .query_row("SELECT valor FROM config WHERE chave = ?1", [chave], |l| l.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT valor FROM config WHERE chave = ?1", [chave], |l| l.get(0)).optional()?)
 }
 
 /// Grava (ou troca) uma configuração.

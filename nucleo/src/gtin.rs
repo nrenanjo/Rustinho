@@ -9,12 +9,7 @@ pub fn gtin_valido(codigo: &str) -> bool {
     }
     let (corpo, verificador) = digitos.split_at(digitos.len() - 1);
     // Da direita para a esquerda, pesos 3, 1, 3, 1...
-    let soma: u32 = corpo
-        .iter()
-        .rev()
-        .enumerate()
-        .map(|(i, d)| if i % 2 == 0 { d * 3 } else { *d })
-        .sum();
+    let soma: u32 = corpo.iter().rev().enumerate().map(|(i, d)| if i % 2 == 0 { d * 3 } else { *d }).sum();
     (10 - soma % 10) % 10 == verificador[0]
 }
 

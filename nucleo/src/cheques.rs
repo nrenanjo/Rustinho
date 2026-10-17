@@ -62,9 +62,7 @@ pub fn previa(conn: &Connection, valor: i64, e: &ChequesEntrada) -> Resultado<Ve
         return Ok(vec![]);
     }
     let hoje = fiscal::hoje(conn)?;
-    let primeiro = fiscal::ler_data(&e.primeiro_bom_para)
-        .map_err(|m| Erro::campo("chequeBomPara", m))?
-        .unwrap_or(hoje);
+    let primeiro = fiscal::ler_data(&e.primeiro_bom_para).map_err(|m| Erro::campo("chequeBomPara", m))?.unwrap_or(hoje);
     let inicio = ler_iso(&primeiro)?;
     let numero: String = texto::limpar(&e.numero).chars().filter(|c| !c.is_whitespace()).take(20).collect();
     Ok(receber::parcelar(inicio, inicio.day(), valor, n)
@@ -261,7 +259,21 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
     })?;
     let mut cheques = Vec::new();
     for linha in linhas {
-        let (id, cliente, cliente_id, emitente, banco, numero, valor, bom_para, situacao, conta, situacao_em, observacoes, venda_id) = linha?;
+        let (
+            id,
+            cliente,
+            cliente_id,
+            emitente,
+            banco,
+            numero,
+            valor,
+            bom_para,
+            situacao,
+            conta,
+            situacao_em,
+            observacoes,
+            venda_id,
+        ) = linha?;
         let dias = dias_entre(&hoje, &bom_para);
         let quando = if situacao_em.is_empty() { String::new() } else { fiscal::data_local_br(conn, &situacao_em)? };
         cheques.push(Cheque {
@@ -307,19 +319,15 @@ struct Dados {
 }
 
 fn dados(conn: &Connection, id: &str) -> Resultado<Dados> {
-    conn.query_row(
-        "SELECT numero, valor, situacao, cliente_id, conta_loja_id FROM cheque WHERE id = ?1",
-        [id],
-        |l| {
-            Ok(Dados {
-                numero: l.get(0)?,
-                valor: l.get(1)?,
-                situacao: l.get(2)?,
-                cliente_id: l.get(3)?,
-                conta_loja_id: l.get(4)?,
-            })
-        },
-    )
+    conn.query_row("SELECT numero, valor, situacao, cliente_id, conta_loja_id FROM cheque WHERE id = ?1", [id], |l| {
+        Ok(Dados {
+            numero: l.get(0)?,
+            valor: l.get(1)?,
+            situacao: l.get(2)?,
+            cliente_id: l.get(3)?,
+            conta_loja_id: l.get(4)?,
+        })
+    })
     .optional()?
     .ok_or_else(|| Erro::NaoEncontrado("Cheque".into()))
 }
@@ -354,7 +362,14 @@ fn movimento(
     Ok(())
 }
 
-fn mudar(conn: &Connection, usuario_id: &str, id: &str, situacao: &str, conta: Option<&str>, observacoes: Option<&str>) -> Resultado<()> {
+fn mudar(
+    conn: &Connection,
+    usuario_id: &str,
+    id: &str,
+    situacao: &str,
+    conta: Option<&str>,
+    observacoes: Option<&str>,
+) -> Resultado<()> {
     conn.execute(
         "UPDATE cheque SET situacao = ?2, situacao_em = ?3, situacao_por = ?4, conta_loja_id = ?5,
                 observacoes = COALESCE(?6, observacoes) WHERE id = ?1",
@@ -369,13 +384,31 @@ pub fn depositar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &st
     if d.situacao != "carteira" {
         return Err(Erro::validacao("Só dá para depositar cheque em carteira."));
     }
-    let ativa: Option<bool> = conn.query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [conta], |l| l.get(0)).optional()?;
+    let ativa: Option<bool> =
+        conn.query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [conta], |l| l.get(0)).optional()?;
     if ativa != Some(true) {
         return Err(Erro::campo("conta", "Escolha em qual conta depositou."));
     }
-    movimento(conn, dispositivo, usuario_id, conta, d.valor, "deposito_cheque", &format!("Depósito do cheque nº {}", d.numero), id)?;
+    movimento(
+        conn,
+        dispositivo,
+        usuario_id,
+        conta,
+        d.valor,
+        "deposito_cheque",
+        &format!("Depósito do cheque nº {}", d.numero),
+        id,
+    )?;
     mudar(conn, usuario_id, id, "depositado", Some(conta), None)?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "cheque.depositar", "cheque", id, &[format!("Cheque nº {} · R$ {}", d.numero, numeros::escrever_dinheiro(d.valor))])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "cheque.depositar",
+        "cheque",
+        id,
+        &[format!("Cheque nº {} · R$ {}", d.numero, numeros::escrever_dinheiro(d.valor))],
+    )?;
     Ok(())
 }
 
@@ -390,13 +423,28 @@ pub fn repassar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         return Err(Erro::campo("motivo", "Diga para quem foi o cheque."));
     }
     mudar(conn, usuario_id, id, "repassado", None, Some(&format!("Repassado para {para_quem}")))?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "cheque.repassar", "cheque", id, &[format!("Cheque nº {} para {para_quem}", d.numero)])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "cheque.repassar",
+        "cheque",
+        id,
+        &[format!("Cheque nº {} para {para_quem}", d.numero)],
+    )?;
     Ok(())
 }
 
 /// O banco devolveu o cheque. Se tinha sido depositado, o valor sai da
 /// conta. Se `divida`, vira dívida do cliente no Receber (vence hoje).
-pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str, divida: bool) -> Resultado<()> {
+pub fn devolver(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    motivo: &str,
+    divida: bool,
+) -> Resultado<()> {
     let d = dados(conn, id)?;
     if d.situacao != "carteira" && d.situacao != "depositado" {
         return Err(Erro::validacao("Este cheque não está em carteira nem depositado."));
@@ -407,7 +455,16 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     }
     if d.situacao == "depositado" {
         if let Some(conta) = &d.conta_loja_id {
-            movimento(conn, dispositivo, usuario_id, conta, -d.valor, "cheque_devolvido", &format!("Cheque nº {} devolvido · {motivo}", d.numero), id)?;
+            movimento(
+                conn,
+                dispositivo,
+                usuario_id,
+                conta,
+                -d.valor,
+                "cheque_devolvido",
+                &format!("Cheque nº {} devolvido · {motivo}", d.numero),
+                id,
+            )?;
         }
     }
     if divida {
@@ -429,7 +486,15 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         )?;
     }
     mudar(conn, usuario_id, id, "devolvido", d.conta_loja_id.as_deref(), Some(&format!("Devolvido: {motivo}")))?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "cheque.devolver", "cheque", id, &[format!("Cheque nº {} · {motivo}", d.numero)])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "cheque.devolver",
+        "cheque",
+        id,
+        &[format!("Cheque nº {} · {motivo}", d.numero)],
+    )?;
     Ok(())
 }
 
@@ -452,7 +517,15 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
           WHERE id = ?1",
         params![id, tempo::agora(), usuario_id],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "cheque.desfazer", "cheque", id, &[format!("Cheque nº {} voltou para a carteira", d.numero)])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "cheque.desfazer",
+        "cheque",
+        id,
+        &[format!("Cheque nº {} voltou para a carteira", d.numero)],
+    )?;
     Ok(())
 }
 

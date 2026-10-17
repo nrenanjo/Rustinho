@@ -74,7 +74,13 @@ pub struct ParcelaPrevia {
 
 /// Divide o valor em parcelas mensais. O 1º vencimento: o digitado; senão o
 /// dia do convênio do cliente; senão daqui a 30 dias.
-pub fn previa(conn: &Connection, cliente_id: &str, valor: i64, parcelas: i64, primeiro: &str) -> Resultado<Vec<ParcelaPrevia>> {
+pub fn previa(
+    conn: &Connection,
+    cliente_id: &str,
+    valor: i64,
+    parcelas: i64,
+    primeiro: &str,
+) -> Resultado<Vec<ParcelaPrevia>> {
     let n = if parcelas <= 0 { 1 } else { parcelas };
     if n > MAX_PARCELAS {
         return Err(Erro::campo("parcelas", format!("Use no máximo {MAX_PARCELAS} parcelas.")));
@@ -131,9 +137,7 @@ pub(crate) fn parcelar(inicio: Date, dia: u8, valor: i64, n: i64) -> Vec<(String
     let n = n.max(1);
     let base = valor / n;
     let resto = valor - base * n;
-    (0..n)
-        .map(|i| (iso(mais_meses(inicio, i, dia)), base + if i == 0 { resto } else { 0 }))
-        .collect()
+    (0..n).map(|i| (iso(mais_meses(inicio, i, dia)), base + if i == 0 { resto } else { 0 })).collect()
 }
 
 fn gravar_parcelas(
@@ -153,7 +157,19 @@ fn gravar_parcelas(
             "INSERT INTO conta_receber (id, cliente_id, venda_id, parcela, parcelas, descricao, valor, vencimento,
                                         criado_em, criado_por, dispositivo)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![id, cliente_id, venda_id, p.numero, lista.len() as i64, descricao, p.v_valor, p.v_vencimento, agora, usuario_id, dispositivo],
+            params![
+                id,
+                cliente_id,
+                venda_id,
+                p.numero,
+                lista.len() as i64,
+                descricao,
+                p.v_valor,
+                p.v_vencimento,
+                agora,
+                usuario_id,
+                dispositivo
+            ],
         )?;
         ids.push(id);
     }
@@ -259,10 +275,7 @@ pub fn avisos_venda(conn: &Connection, cliente_id: &str, valor: i64) -> Resultad
     }
     if let Some(limite) = s.v_limite {
         if s.v_em_aberto + valor > limite {
-            avisos.push(format!(
-                "Passa do limite de crédito (limite R$ {}, já deve R$ {}).",
-                s.limite, s.em_aberto
-            ));
+            avisos.push(format!("Passa do limite de crédito (limite R$ {}, já deve R$ {}).", s.limite, s.em_aberto));
         }
     }
     Ok(avisos)
@@ -284,9 +297,8 @@ pub struct Taxas {
 }
 
 fn taxas(conn: &Connection) -> Resultado<Taxas> {
-    let ler = |chave: &str| -> Resultado<i64> {
-        Ok(config::ler(conn, chave)?.and_then(|v| v.parse().ok()).unwrap_or(0))
-    };
+    let ler =
+        |chave: &str| -> Resultado<i64> { Ok(config::ler(conn, chave)?.and_then(|v| v.parse().ok()).unwrap_or(0)) };
     Ok(Taxas {
         multa: ler("crediario_multa")?,
         juros_mes: ler("crediario_juros")?,
@@ -381,8 +393,8 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Lancam
 
 /// Cancela uma parcela lançada à mão (as de venda saem cancelando a venda).
 pub fn cancelar_conta(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
-    let (cliente_id, venda_id, pago, cancelada, descricao): (String, Option<String>, i64, Option<String>, String) = conn
-        .query_row(
+    let (cliente_id, venda_id, pago, cancelada, descricao): (String, Option<String>, i64, Option<String>, String) =
+        conn.query_row(
             "SELECT cliente_id, venda_id, pago, cancelado_em, descricao FROM conta_receber_saldo WHERE id = ?1",
             [id],
             |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
@@ -406,7 +418,15 @@ pub fn cancelar_conta(conn: &Connection, dispositivo: &str, usuario_id: &str, id
         "UPDATE conta_receber SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
         params![id, tempo::agora(), usuario_id, motivo],
     )?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "receber.cancelar", "pessoa", &cliente_id, &[format!("{descricao} · {motivo}")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "receber.cancelar",
+        "pessoa",
+        &cliente_id,
+        &[format!("{descricao} · {motivo}")],
+    )?;
     Ok(())
 }
 
@@ -617,11 +637,8 @@ pub fn cliente(conn: &Connection, cliente_id: &str, todas: bool) -> Resultado<Cl
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Cliente".into()))?;
-    let filtro = if todas {
-        "c.cliente_id = ?1"
-    } else {
-        "c.cliente_id = ?1 AND c.cancelado_em IS NULL AND c.valor > c.pago"
-    };
+    let filtro =
+        if todas { "c.cliente_id = ?1" } else { "c.cliente_id = ?1 AND c.cancelado_em IS NULL AND c.valor > c.pago" };
     let mut parcelas = ler_parcelas(conn, filtro, cliente_id)?;
     // Nas "todas": em aberto primeiro, depois as pagas e canceladas (mais novas antes).
     if todas {
@@ -661,10 +678,11 @@ pub fn cliente(conn: &Connection, cliente_id: &str, todas: bool) -> Resultado<Cl
         .collect::<Result<Vec<_>, _>>()?;
     let mut recebimentos = recebimentos;
     for r in &mut recebimentos {
-        r.quando = conn.query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [&r.quando], |l| {
-            l.get::<_, Option<String>>(0)
-        })?
-        .unwrap_or_default();
+        r.quando = conn
+            .query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [&r.quando], |l| {
+                l.get::<_, Option<String>>(0)
+            })?
+            .unwrap_or_default();
     }
     Ok(ClienteConta {
         cliente_id: cliente_id.to_string(),
@@ -740,7 +758,8 @@ pub struct ReceberCalculo {
 }
 
 pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalculo> {
-    let abertas = ler_parcelas(conn, "c.cliente_id = ?1 AND c.cancelado_em IS NULL AND c.valor > c.pago", &e.cliente_id)?;
+    let abertas =
+        ler_parcelas(conn, "c.cliente_id = ?1 AND c.cancelado_em IS NULL AND c.valor > c.pago", &e.cliente_id)?;
     let escolhidas: Vec<&Parcela> = if e.contas.is_empty() {
         abertas.iter().collect()
     } else {
@@ -796,7 +815,14 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
     };
     // Paga primeiro os juros; o resto (mais o desconto) abate as parcelas.
     if recebido > 0 && recebido < juros && falha.is_none() {
-        falhou(&mut falha, "valor", format!("O valor não cobre os juros (R$ {}). Diminua os juros ou receba mais.", numeros::escrever_dinheiro(juros)));
+        falhou(
+            &mut falha,
+            "valor",
+            format!(
+                "O valor não cobre os juros (R$ {}). Diminua os juros ou receba mais.",
+                numeros::escrever_dinheiro(juros)
+            ),
+        );
     }
     let principal = (recebido - juros + desconto).clamp(0, saldo);
     let troco = (recebido - total).max(0);
@@ -821,7 +847,8 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
     if saldo == 0 && falha.is_none() {
         falhou(&mut falha, "contas", "Escolha pelo menos uma parcela em aberto.".into());
     }
-    let cheques = crate::vendas::calcular_cheques(conn, if e.forma == "cheque" { recebido.min(total) } else { 0 }, &e.cheques)?;
+    let cheques =
+        crate::vendas::calcular_cheques(conn, if e.forma == "cheque" { recebido.min(total) } else { 0 }, &e.cheques)?;
     let (campo, erro) = falha.map(|(c, m)| (c.to_string(), m)).unwrap_or_default();
     Ok(ReceberCalculo {
         cheques,
@@ -845,8 +872,8 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
 
 /// Lança o recebimento no caixa aberto deste computador.
 pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &ReceberEntrada) -> Resultado<String> {
-    let sessao = caixa::sessao_aberta(conn, dispositivo)?
-        .ok_or_else(|| Erro::validacao("Abra o caixa antes de receber."))?;
+    let sessao =
+        caixa::sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("Abra o caixa antes de receber."))?;
     match caixa::FORMAS.iter().find(|f| f.0 == e.forma) {
         None => return Err(Erro::campo("forma", "Escolha como o cliente pagou.")),
         Some((f, ..)) if *f == "crediario" => return Err(Erro::campo("forma", "Crediário não paga crediário.")),
@@ -898,7 +925,16 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
         )?;
     }
     if e.forma == "cheque" {
-        crate::cheques::criar(conn, dispositivo, usuario_id, Some(&e.cliente_id), None, Some(&id), c.v_recebido, &e.cheques)?;
+        crate::cheques::criar(
+            conn,
+            dispositivo,
+            usuario_id,
+            Some(&e.cliente_id),
+            None,
+            Some(&id),
+            c.v_recebido,
+            &e.cheques,
+        )?;
     }
     auditoria::registrar(
         conn,
@@ -907,7 +943,11 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
         "receber.receber",
         "pessoa",
         &e.cliente_id,
-        &[format!("Recebimento {numero} · {} · R$ {}", sessao.caixa_nome, numeros::escrever_dinheiro(c.v_recebido - c.v_troco))],
+        &[format!(
+            "Recebimento {numero} · {} · R$ {}",
+            sessao.caixa_nome,
+            numeros::escrever_dinheiro(c.v_recebido - c.v_troco)
+        )],
     )?;
     Ok(id)
 }
@@ -915,11 +955,9 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
 /// Desfaz um recebimento: as parcelas voltam a ficar em aberto.
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
     let (cliente_id, numero, caixa_nome, estornado): (String, i64, String, Option<String>) = conn
-        .query_row(
-            "SELECT cliente_id, numero, caixa_nome, estornado_em FROM recebimento WHERE id = ?1",
-            [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
-        )
+        .query_row("SELECT cliente_id, numero, caixa_nome, estornado_em FROM recebimento WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Recebimento".into()))?;
     if estornado.is_some() {
@@ -1100,7 +1138,12 @@ mod testes {
         assert_eq!(calc.crediario.parcelas[0].valor, "100,00");
 
         // paga 150 em dinheiro: quita a 1ª e abate 50 da 2ª
-        let r = ReceberEntrada { cliente_id: zé.clone(), valor: "150".into(), forma: "dinheiro".into(), ..Default::default() };
+        let r = ReceberEntrada {
+            cliente_id: zé.clone(),
+            valor: "150".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        };
         let calc = calcular(c, &r).unwrap();
         assert_eq!((calc.abates.len(), calc.continua_devendo.as_str()), (2, "50,00"));
         let rec = receber(c, d, &u, &r).unwrap();
@@ -1118,7 +1161,8 @@ mod testes {
         assert_eq!((res.esperado.as_str(), res.recebimentos), ("200,00", 1));
 
         // pago a mais em Pix não (troco só em dinheiro)
-        let r2 = ReceberEntrada { cliente_id: zé.clone(), valor: "60".into(), forma: "pix".into(), ..Default::default() };
+        let r2 =
+            ReceberEntrada { cliente_id: zé.clone(), valor: "60".into(), forma: "pix".into(), ..Default::default() };
         assert!(receber(c, d, &u, &r2).is_err());
         // estorno: volta a dever 200
         assert!(estornar(c, d, &u, &rec, "").is_err());
@@ -1131,22 +1175,36 @@ mod testes {
 
         // dívida antiga lançada à mão, vencida, com juros
         salvar_taxas(c, "2", "1", "").unwrap();
-        let ids = lancar(c, d, &u, &LancamentoEntrada {
-            cliente_id: zé.clone(),
-            descricao: "Caderno de setembro".into(),
-            valor: "100".into(),
-            parcelas: 1,
-            primeiro_vencimento: String::new(),
-        })
+        let ids = lancar(
+            c,
+            d,
+            &u,
+            &LancamentoEntrada {
+                cliente_id: zé.clone(),
+                descricao: "Caderno de setembro".into(),
+                valor: "100".into(),
+                parcelas: 1,
+                primeiro_vencimento: String::new(),
+            },
+        )
         .unwrap();
-        c.execute("UPDATE conta_receber SET vencimento = date('now', 'localtime', '-15 days') WHERE id = ?1", [&ids[0]]).unwrap();
+        c.execute(
+            "UPDATE conta_receber SET vencimento = date('now', 'localtime', '-15 days') WHERE id = ?1",
+            [&ids[0]],
+        )
+        .unwrap();
         let conta = cliente(c, &zé, false).unwrap();
         assert_eq!((conta.parcelas[0].situacao.as_str(), conta.parcelas[0].juros.as_str()), ("vencida", "2,50"));
         let p = painel(c, "").unwrap();
         assert_eq!((p.vencido.as_str(), p.clientes.len()), ("100,00", 1));
         assert_eq!(painel(c, "ze").unwrap().clientes.len(), 1);
         // recebe tudo com os juros sugeridos e 2,50 de desconto
-        let r3 = ReceberEntrada { cliente_id: zé.clone(), desconto: "2,50".into(), forma: "debito".into(), ..Default::default() };
+        let r3 = ReceberEntrada {
+            cliente_id: zé.clone(),
+            desconto: "2,50".into(),
+            forma: "debito".into(),
+            ..Default::default()
+        };
         let calc = calcular(c, &r3).unwrap();
         assert_eq!((calc.total.as_str(), calc.continua_devendo.as_str()), ("100,00", "0,00"));
         let rec3 = receber(c, d, &u, &r3).unwrap();

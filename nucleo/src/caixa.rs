@@ -65,7 +65,13 @@ fn ler_sessao(l: &rusqlite::Row) -> rusqlite::Result<Sessao> {
 }
 
 /// Abre o caixa com o dinheiro que já está na gaveta (troco).
-pub fn abrir(conn: &Connection, dispositivo: &str, usuario_id: &str, caixa_nome: &str, valor_inicial: &str) -> Resultado<String> {
+pub fn abrir(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    caixa_nome: &str,
+    valor_inicial: &str,
+) -> Resultado<String> {
     if sessao_aberta(conn, dispositivo)?.is_some() {
         return Err(Erro::validacao("O caixa deste computador já está aberto."));
     }
@@ -92,7 +98,14 @@ pub fn abrir(conn: &Connection, dispositivo: &str, usuario_id: &str, caixa_nome:
 }
 
 /// Sangria (tira dinheiro da gaveta) ou suprimento (põe).
-pub fn movimentar(conn: &Connection, dispositivo: &str, usuario_id: &str, tipo: &str, valor: &str, motivo: &str) -> Resultado<()> {
+pub fn movimentar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    tipo: &str,
+    valor: &str,
+    motivo: &str,
+) -> Resultado<()> {
     movimentar_com_conta(conn, dispositivo, usuario_id, tipo, valor, motivo, None).map(|_| ())
 }
 
@@ -125,15 +138,17 @@ pub fn movimentar_com_conta(
         if valor > r.esperado_dinheiro {
             return Err(Erro::campo(
                 "valor",
-                format!("Pelo sistema, só há {} em dinheiro na gaveta.", numeros::escrever_dinheiro(r.esperado_dinheiro)),
+                format!(
+                    "Pelo sistema, só há {} em dinheiro na gaveta.",
+                    numeros::escrever_dinheiro(r.esperado_dinheiro)
+                ),
             ));
         }
     }
     let conta_loja = conta_loja.filter(|c| !c.is_empty());
     if let Some(c) = conta_loja {
-        let ativa: Option<bool> = conn
-            .query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [c], |l| l.get(0))
-            .optional()?;
+        let ativa: Option<bool> =
+            conn.query_row("SELECT ativo FROM conta_loja WHERE id = ?1", [c], |l| l.get(0)).optional()?;
         if ativa != Some(true) {
             return Err(Erro::campo("conta", "Conta da loja não encontrada."));
         }
@@ -170,7 +185,11 @@ pub fn movimentar_com_conta(
         &format!("caixa.{tipo}"),
         "caixa",
         &sessao.id,
-        &[format!("{}: {} · {motivo}", if tipo == "sangria" { "Sangria" } else { "Suprimento" }, numeros::escrever_dinheiro(valor))],
+        &[format!(
+            "{}: {} · {motivo}",
+            if tipo == "sangria" { "Sangria" } else { "Suprimento" },
+            numeros::escrever_dinheiro(valor)
+        )],
     )?;
     Ok(id)
 }
@@ -254,7 +273,8 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         "SELECT p.forma, SUM(p.valor) FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
           WHERE v.sessao_id = ?1 AND v.tipo = 'venda' AND v.situacao = 'concluida' GROUP BY p.forma",
     )?;
-    let somas: Vec<(String, i64)> = c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    let somas: Vec<(String, i64)> =
+        c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
     let mut por_forma = Vec::new();
     for (forma, nome, _) in FORMAS {
         if let Some((_, v)) = somas.iter().find(|s| s.0 == *forma) {
@@ -330,7 +350,13 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
 }
 
 /// Fecha o caixa com o dinheiro contado na gaveta. Devolve o id da sessão.
-pub fn fechar(conn: &Connection, dispositivo: &str, usuario_id: &str, contado: &str, observacoes: &str) -> Resultado<String> {
+pub fn fechar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    contado: &str,
+    observacoes: &str,
+) -> Resultado<String> {
     let sessao = sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("O caixa já está fechado."))?;
     let contado = numeros::ler_dinheiro(contado)
         .map_err(|m| Erro::campo("contado", m))?

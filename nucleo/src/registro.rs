@@ -50,7 +50,8 @@ pub fn anotar(texto: &str) {
     let arquivo = pasta.join("rustinho.log");
     if std::fs::metadata(&arquivo).map(|m| m.len() > TAMANHO_MAXIMO).unwrap_or(false) {
         for n in (1..ANTIGOS).rev() {
-            let _ = std::fs::rename(pasta.join(format!("rustinho.log.{n}")), pasta.join(format!("rustinho.log.{}", n + 1)));
+            let _ =
+                std::fs::rename(pasta.join(format!("rustinho.log.{n}")), pasta.join(format!("rustinho.log.{}", n + 1)));
         }
         let _ = std::fs::rename(&arquivo, pasta.join("rustinho.log.1"));
     }

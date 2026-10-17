@@ -37,7 +37,9 @@ pub fn aviso_cnpj(conn: &Connection, destinatario: &str) -> Resultado<String> {
         return Ok(String::new());
     }
     if loja_cnpj.is_empty() {
-        return Ok("Preencha o CNPJ da loja em Configurações para o Rustinho conferir se a nota é mesmo da loja.".into());
+        return Ok(
+            "Preencha o CNPJ da loja em Configurações para o Rustinho conferir se a nota é mesmo da loja.".into()
+        );
     }
     if destinatario == loja_cnpj {
         return Ok(String::new());
@@ -56,9 +58,7 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
         ));
     }
     if nota.tipo == "0" {
-        return Err(Erro::validacao(
-            "Esta é uma nota de entrada, não uma venda do fornecedor para a loja.",
-        ));
+        return Err(Erro::validacao("Esta é uma nota de entrada, não uma venda do fornecedor para a loja."));
     }
     match nota.finalidade.as_str() {
         "" | "1" => {}
@@ -175,13 +175,11 @@ pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
         let n = pesos.len() as i64;
         return (0..n).map(|i| total / n + if i < total % n { 1 } else { 0 }).collect();
     }
-    let mut partes: Vec<i64> = pesos.iter().map(|p| crate::numeros::saturar(total as i128 * *p as i128 / soma as i128)).collect();
+    let mut partes: Vec<i64> =
+        pesos.iter().map(|p| crate::numeros::saturar(total as i128 * *p as i128 / soma as i128)).collect();
     let mut sobra = total - partes.iter().sum::<i64>();
-    let mut restos: Vec<(usize, i128)> = pesos
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (i, (total as i128 * *p as i128) % soma as i128))
-        .collect();
+    let mut restos: Vec<(usize, i128)> =
+        pesos.iter().enumerate().map(|(i, p)| (i, (total as i128 * *p as i128) % soma as i128)).collect();
     restos.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     for (i, _) in restos {
         if sobra <= 0 {
@@ -195,7 +193,11 @@ pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
 
 /// Tenta achar a peça do item: código do fornecedor → código de barras →
 /// código original/equivalente. Devolve (ação, peça, como achou, fator).
-fn ligar_sozinho(conn: &Connection, fornecedor_id: &str, item: &ItemXml) -> Resultado<(String, Option<String>, String, i64)> {
+fn ligar_sozinho(
+    conn: &Connection,
+    fornecedor_id: &str,
+    item: &ItemXml,
+) -> Resultado<(String, Option<String>, String, i64)> {
     let compacto = texto::compactar(&item.codigo);
     if !compacto.is_empty() {
         let r: Option<(String, i64)> = conn
@@ -211,9 +213,8 @@ fn ligar_sozinho(conn: &Connection, fornecedor_id: &str, item: &ItemXml) -> Resu
         }
     }
     if !item.gtin.is_empty() {
-        let r: Option<String> = conn
-            .query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [&item.gtin], |l| l.get(0))
-            .optional()?;
+        let r: Option<String> =
+            conn.query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [&item.gtin], |l| l.get(0)).optional()?;
         if let Some(pid) = r {
             return Ok(("ligar".into(), Some(pid), "barras".into(), 1000));
         }
@@ -405,10 +406,7 @@ fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> 
 
 /// Frete pago à parte dividido entre os itens que entram no estoque.
 fn frete_extra_por_item(itens: &[ItemBanco], frete_extra: i64) -> Vec<i64> {
-    let pesos: Vec<i64> = itens
-        .iter()
-        .map(|i| if i.acao == "ignorar" { 0 } else { i.valor_produtos.max(0) })
-        .collect();
+    let pesos: Vec<i64> = itens.iter().map(|i| if i.acao == "ignorar" { 0 } else { i.valor_produtos.max(0) }).collect();
     if frete_extra == 0 || pesos.iter().all(|p| *p == 0) {
         return vec![0; itens.len()];
     }
@@ -452,7 +450,29 @@ fn cabecalho(conn: &Connection, id: &str) -> Resultado<Cabecalho> {
 /// Ficha completa da compra.
 pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
     #[allow(clippy::type_complexity)]
-    let c: (String, String, String, String, String, String, String, String, i64, i64, i64, i64, i64, i64, i64, i64, i64, String, String, Option<String>, String) = conn
+    let c: (
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        String,
+        String,
+        Option<String>,
+        String,
+    ) = conn
         .query_row(
             "SELECT c.situacao, COALESCE(c.fornecedor_id, ''), COALESCE(p.nome, ''), COALESCE(p.documento, ''),
                     COALESCE(p.municipio || CASE WHEN p.uf <> '' THEN ' · ' || p.uf ELSE '' END, ''),
@@ -463,15 +483,55 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
             [id],
             |l| {
                 Ok((
-                    l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?,
-                    l.get(8)?, l.get(9)?, l.get(10)?, l.get(11)?, l.get(12)?, l.get(13)?, l.get(14)?, l.get(15)?,
-                    l.get(16)?, l.get(17)?, l.get(18)?, l.get(19)?, l.get(20)?,
+                    l.get(0)?,
+                    l.get(1)?,
+                    l.get(2)?,
+                    l.get(3)?,
+                    l.get(4)?,
+                    l.get(5)?,
+                    l.get(6)?,
+                    l.get(7)?,
+                    l.get(8)?,
+                    l.get(9)?,
+                    l.get(10)?,
+                    l.get(11)?,
+                    l.get(12)?,
+                    l.get(13)?,
+                    l.get(14)?,
+                    l.get(15)?,
+                    l.get(16)?,
+                    l.get(17)?,
+                    l.get(18)?,
+                    l.get(19)?,
+                    l.get(20)?,
                 ))
             },
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Compra".into()))?;
-    let (situacao, fornecedor_id, fornecedor, fdoc, cidade, chave, numero, serie, tprod, frete, ipi, st, desc, outras, total, frete_extra, atualizar, emissao, natureza, lancada_em, destinatario) = c;
+    let (
+        situacao,
+        fornecedor_id,
+        fornecedor,
+        fdoc,
+        cidade,
+        chave,
+        numero,
+        serie,
+        tprod,
+        frete,
+        ipi,
+        st,
+        desc,
+        outras,
+        total,
+        frete_extra,
+        atualizar,
+        emissao,
+        natureza,
+        lancada_em,
+        destinatario,
+    ) = c;
     let atualizar_precos = atualizar != 0;
     let (observacoes, lancada_por): (String, String) = conn.query_row(
         "SELECT c.observacoes, COALESCE(u.nome, '') FROM compra c LEFT JOIN usuario u ON u.id = c.lancada_por WHERE c.id = ?1",
@@ -558,11 +618,15 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         duplicatas: crate::pagar::duplicatas_da_compra(conn, id)?
             .iter()
             .map(|d| {
-                [d.numero.clone(), format!("vence {}", fiscal::data_br(&d.vencimento)), format!("R$ {}", numeros::escrever_dinheiro(d.valor))]
-                    .into_iter()
-                    .filter(|x| !x.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" · ")
+                [
+                    d.numero.clone(),
+                    format!("vence {}", fiscal::data_br(&d.vencimento)),
+                    format!("R$ {}", numeros::escrever_dinheiro(d.valor)),
+                ]
+                .into_iter()
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ")
             })
             .collect(),
         gerar_pagar: conn.query_row("SELECT gerar_pagar FROM compra WHERE id = ?1", [id], |l| l.get(0))?,
@@ -582,19 +646,15 @@ fn peca_ligada(
     baixar_preco: bool,
 ) -> Resultado<Option<PecaLigada>> {
     let p: Option<(String, String, String, String, i64)> = conn
-        .query_row(
-            "SELECT codigo, nome, marca, unidade, custo FROM produto WHERE id = ?1",
-            [produto_id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
-        )
+        .query_row("SELECT codigo, nome, marca, unidade, custo FROM produto WHERE id = ?1", [produto_id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
+        })
         .optional()?;
     let Some((codigo, nome, marca, unidade, custo)) = p else { return Ok(None) };
     let preco: Option<(i64, Option<i64>)> = conn
-        .query_row(
-            "SELECT preco, lucro FROM produto_preco WHERE produto_id = ?1 AND tabela = 1",
-            [produto_id],
-            |l| Ok((l.get(0)?, l.get(1)?)),
-        )
+        .query_row("SELECT preco, lucro FROM produto_preco WHERE produto_id = ?1 AND tabela = 1", [produto_id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
         .optional()?;
     let preco_atual = preco.map(|p| p.0).unwrap_or(0);
     let custo_baixou = custo > 0 && custo_novo > 0 && custo_novo < custo;
@@ -686,7 +746,10 @@ pub fn atualizar(conn: &Connection, e: &CompraEntrada) -> Resultado<()> {
             .map_err(|m| Erro::campo(&format!("itens.{i}.fator"), m))?
             .unwrap_or(1000);
         if fator <= 0 || fator > 10_000_000 {
-            return Err(Erro::campo(&format!("itens.{i}.fator"), "Quantas peças vêm em cada unidade da nota? (1 ou mais)"));
+            return Err(Erro::campo(
+                &format!("itens.{i}.fator"),
+                "Quantas peças vêm em cada unidade da nota? (1 ou mais)",
+            ));
         }
         let produto_id = if acao == "ligar" {
             if it.produto_id.is_empty() {
@@ -757,7 +820,8 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
     let extras = frete_extra_por_item(&itens, cab.frete_extra);
     let motivo = format!("Compra NF {} · {}", cab.numero, fornecedor);
     let tabelas = config::tabelas_preco(conn)?;
-    let mut resumo = Lancamento { pecas_novas: 0, itens_estoque: 0, precos_atualizados: 0, parcelas_pagar: 0, encomendas: 0 };
+    let mut resumo =
+        Lancamento { pecas_novas: 0, itens_estoque: 0, precos_atualizados: 0, parcelas_pagar: 0, encomendas: 0 };
     let mut entraram: Vec<(String, i64)> = Vec::new();
 
     for (i, it) in itens.iter().enumerate() {
@@ -774,8 +838,16 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             pid
         } else {
             let pid = it.produto_id.clone().ok_or_else(|| Erro::Interno("item ligado sem peça".into()))?;
-            let (d, mudou_preco) =
-                atualizar_custo(conn, dispositivo, usuario_id, &pid, custo, cab.atualizar_precos, it.baixar_preco, &tabelas)?;
+            let (d, mudou_preco) = atualizar_custo(
+                conn,
+                dispositivo,
+                usuario_id,
+                &pid,
+                custo,
+                cab.atualizar_precos,
+                it.baixar_preco,
+                &tabelas,
+            )?;
             if mudou_preco {
                 resumo.precos_atualizados += 1;
             }
@@ -899,7 +971,13 @@ fn atualizar_custo(
 }
 
 /// Cadastra uma peça nova com os dados do item da nota.
-fn cadastrar_peca(conn: &Connection, dispositivo: &str, usuario_id: &str, it: &ItemBanco, custo: i64) -> Resultado<String> {
+fn cadastrar_peca(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    it: &ItemBanco,
+    custo: i64,
+) -> Resultado<String> {
     let mut f = produtos::ficha_nova(conn)?;
     f.nome = texto::limpar(&it.descricao).chars().take(120).collect();
     let barras_livre = !it.gtin.is_empty()
@@ -974,7 +1052,15 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         }
     }
     conn.execute("UPDATE compra SET situacao = 'estornada' WHERE id = ?1", [id])?;
-    auditoria::registrar(conn, dispositivo, Some(usuario_id), "compra.estornar", "compra", id, &[format!("Motivo: {motivo}")])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "compra.estornar",
+        "compra",
+        id,
+        &[format!("Motivo: {motivo}")],
+    )?;
     Ok(())
 }
 
@@ -1131,9 +1217,27 @@ mod testes {
                 observacoes: String::new(),
                 gerar_pagar: true,
                 itens: vec![
-                    ItemEntrada { id: f.itens[0].id.clone(), acao: "ligar".into(), produto_id: rolamento.clone(), fator: "1".into(), baixar_preco: false },
-                    ItemEntrada { id: f.itens[1].id.clone(), acao: "ligar".into(), produto_id: pastilha.clone(), fator: "2".into(), baixar_preco: false },
-                    ItemEntrada { id: f.itens[2].id.clone(), acao: "nova".into(), produto_id: String::new(), fator: "1".into(), baixar_preco: false },
+                    ItemEntrada {
+                        id: f.itens[0].id.clone(),
+                        acao: "ligar".into(),
+                        produto_id: rolamento.clone(),
+                        fator: "1".into(),
+                        baixar_preco: false,
+                    },
+                    ItemEntrada {
+                        id: f.itens[1].id.clone(),
+                        acao: "ligar".into(),
+                        produto_id: pastilha.clone(),
+                        fator: "2".into(),
+                        baixar_preco: false,
+                    },
+                    ItemEntrada {
+                        id: f.itens[2].id.clone(),
+                        acao: "nova".into(),
+                        produto_id: String::new(),
+                        fator: "1".into(),
+                        baixar_preco: false,
+                    },
                 ],
             },
         )
@@ -1169,7 +1273,10 @@ mod testes {
             },
         )
         .unwrap();
-        assert!(estornar(c, &b.dispositivo, &u, &id, "Nota devolvida").unwrap_err().to_string().contains("parcela paga"));
+        assert!(estornar(c, &b.dispositivo, &u, &id, "Nota devolvida")
+            .unwrap_err()
+            .to_string()
+            .contains("parcela paga"));
         crate::pagar::estornar(c, &b.dispositivo, &u, &pago, "engano").unwrap();
         assert_eq!(estoque::saldo(c, &rolamento).unwrap(), 10_000);
         assert_eq!(estoque::saldo(c, &pastilha).unwrap(), 8_000);

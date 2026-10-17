@@ -124,7 +124,13 @@ fn validar(f: &PessoaFicha) -> Resultado<Dados> {
     let tipo = match doc.len() {
         11 => "F".to_string(),
         14 => "J".to_string(),
-        _ => if f.tipo == "J" { "J".into() } else { "F".into() },
+        _ => {
+            if f.tipo == "J" {
+                "J".into()
+            } else {
+                "F".into()
+            }
+        }
     };
     if !doc.is_empty() {
         let ok = match doc.len() {
@@ -151,7 +157,11 @@ fn validar(f: &PessoaFicha) -> Resultado<Dados> {
     let indicador_ie = if !ie.is_empty() {
         1
     } else if [1, 2, 9].contains(&f.indicador_ie) {
-        if f.indicador_ie == 1 { 9 } else { f.indicador_ie }
+        if f.indicador_ie == 1 {
+            9
+        } else {
+            f.indicador_ie
+        }
     } else {
         9
     };
@@ -296,11 +306,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
     }
     if !dados.documento.is_empty() {
         let mesmo_doc: Option<String> = conn
-            .query_row(
-                "SELECT nome FROM pessoa WHERE documento = ?1 AND id <> ?2",
-                params![dados.documento, id],
-                |l| l.get(0),
-            )
+            .query_row("SELECT nome FROM pessoa WHERE documento = ?1 AND id <> ?2", params![dados.documento, id], |l| {
+                l.get(0)
+            })
             .optional()?;
         if let Some(outro) = mesmo_doc {
             return Err(Erro::campo("documento", format!("Este documento já está cadastrado em \"{outro}\".")));
@@ -329,7 +337,15 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
     Ok(id)
 }
 
-fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, codigo: &str, d: &Dados, novo: bool) -> Resultado<()> {
+fn gravar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    codigo: &str,
+    d: &Dados,
+    novo: bool,
+) -> Resultado<()> {
     let agora = tempo::agora();
     let busca = texto_busca(codigo, d);
     if novo {
@@ -341,9 +357,34 @@ fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, codi
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                      ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?26, ?27, ?28)",
             params![
-                id, codigo, d.cliente, d.fornecedor, d.tipo, d.nome, d.fantasia, d.documento, d.ie, d.indicador_ie,
-                d.telefone, d.celular, d.email, d.cep, d.logradouro, d.numero, d.complemento, d.bairro, d.municipio,
-                d.municipio_ibge, d.uf, d.limite_credito, d.observacoes, d.ativo, busca, agora, usuario_id, dispositivo
+                id,
+                codigo,
+                d.cliente,
+                d.fornecedor,
+                d.tipo,
+                d.nome,
+                d.fantasia,
+                d.documento,
+                d.ie,
+                d.indicador_ie,
+                d.telefone,
+                d.celular,
+                d.email,
+                d.cep,
+                d.logradouro,
+                d.numero,
+                d.complemento,
+                d.bairro,
+                d.municipio,
+                d.municipio_ibge,
+                d.uf,
+                d.limite_credito,
+                d.observacoes,
+                d.ativo,
+                busca,
+                agora,
+                usuario_id,
+                dispositivo
             ],
         )?;
     } else {
@@ -355,9 +396,34 @@ fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, codi
                     busca = ?25, atualizado_em = ?26, atualizado_por = ?27, dispositivo = ?28
               WHERE id = ?1",
             params![
-                id, codigo, d.cliente, d.fornecedor, d.tipo, d.nome, d.fantasia, d.documento, d.ie, d.indicador_ie,
-                d.telefone, d.celular, d.email, d.cep, d.logradouro, d.numero, d.complemento, d.bairro, d.municipio,
-                d.municipio_ibge, d.uf, d.limite_credito, d.observacoes, d.ativo, busca, agora, usuario_id, dispositivo
+                id,
+                codigo,
+                d.cliente,
+                d.fornecedor,
+                d.tipo,
+                d.nome,
+                d.fantasia,
+                d.documento,
+                d.ie,
+                d.indicador_ie,
+                d.telefone,
+                d.celular,
+                d.email,
+                d.cep,
+                d.logradouro,
+                d.numero,
+                d.complemento,
+                d.bairro,
+                d.municipio,
+                d.municipio_ibge,
+                d.uf,
+                d.limite_credito,
+                d.observacoes,
+                d.ativo,
+                busca,
+                agora,
+                usuario_id,
+                dispositivo
             ],
         )?;
         conn.execute("DELETE FROM pessoa_veiculo WHERE pessoa_id = ?1", [id])?;
@@ -431,11 +497,10 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<PessoaFicha> {
         [id],
         |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
     )?;
-    let compras: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM compra WHERE fornecedor_id = ?1 AND situacao = 'lancada'",
-        [id],
-        |l| l.get(0),
-    )?;
+    let compras: i64 =
+        conn.query_row("SELECT COUNT(*) FROM compra WHERE fornecedor_id = ?1 AND situacao = 'lancada'", [id], |l| {
+            l.get(0)
+        })?;
     Ok(PessoaFicha {
         id: id.to_string(),
         codigo,
@@ -491,7 +556,13 @@ pub fn ficha_nova(conn: &Connection, papel: &str) -> Resultado<PessoaFicha> {
 
 /// Busca por nome, fantasia, código, CPF/CNPJ, telefone, cidade ou placa.
 /// `papel`: "cliente", "fornecedor" ou "" (todos).
-pub fn buscar(conn: &Connection, texto_busca: &str, papel: &str, inativos: bool, limite: i64) -> Resultado<Vec<PessoaResumo>> {
+pub fn buscar(
+    conn: &Connection,
+    texto_busca: &str,
+    papel: &str,
+    inativos: bool,
+    limite: i64,
+) -> Resultado<Vec<PessoaResumo>> {
     let limite = limite.clamp(1, 1000);
     let normalizado = texto::normalizar(texto_busca);
     let tokens: Vec<String> = normalizado
@@ -501,7 +572,11 @@ pub fn buscar(conn: &Connection, texto_busca: &str, papel: &str, inativos: bool,
         .map(|t| {
             // CPF/CNPJ/telefone com pontuação: compara só os números e letras
             let limpo = documento::limpar(t).to_lowercase();
-            if limpo.len() >= 4 && limpo.chars().any(|c| c.is_ascii_digit()) { limpo } else { t.to_string() }
+            if limpo.len() >= 4 && limpo.chars().any(|c| c.is_ascii_digit()) {
+                limpo
+            } else {
+                t.to_string()
+            }
         })
         .collect();
     let mut sql = String::from(
@@ -588,7 +663,12 @@ pub struct Emitente {
 /// Acha o fornecedor pelo CNPJ/CPF ou cadastra com os dados da nota.
 /// Se já existe só como cliente, passa a ser fornecedor também.
 /// Devolve (id, foi_criado).
-pub fn garantir_fornecedor(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Emitente) -> Resultado<(String, bool)> {
+pub fn garantir_fornecedor(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    e: &Emitente,
+) -> Resultado<(String, bool)> {
     garantir_pela_nota(conn, dispositivo, usuario_id, e, false, "Cadastrado pela nota de compra")
 }
 
@@ -613,11 +693,27 @@ pub fn garantir_pela_nota(
         if let Some((id, eh_cliente, eh_fornecedor)) = achou {
             if cliente && !eh_cliente {
                 conn.execute("UPDATE pessoa SET cliente = 1 WHERE id = ?1", [&id])?;
-                auditoria::registrar(conn, dispositivo, Some(usuario_id), "pessoa.alterar", "pessoa", &id, &["Passou a ser cliente".into()])?;
+                auditoria::registrar(
+                    conn,
+                    dispositivo,
+                    Some(usuario_id),
+                    "pessoa.alterar",
+                    "pessoa",
+                    &id,
+                    &["Passou a ser cliente".into()],
+                )?;
             }
             if !cliente && !eh_fornecedor {
                 conn.execute("UPDATE pessoa SET fornecedor = 1 WHERE id = ?1", [&id])?;
-                auditoria::registrar(conn, dispositivo, Some(usuario_id), "pessoa.alterar", "pessoa", &id, &["Passou a ser fornecedor".into()])?;
+                auditoria::registrar(
+                    conn,
+                    dispositivo,
+                    Some(usuario_id),
+                    "pessoa.alterar",
+                    "pessoa",
+                    &id,
+                    &["Passou a ser fornecedor".into()],
+                )?;
             }
             return Ok((id, false));
         }
@@ -787,7 +883,12 @@ mod testes {
     #[test]
     fn fornecedor_da_nota() {
         let (b, u) = base();
-        let e = Emitente { documento: "11222333000181".into(), nome: "Distribuidora Teste Ltda".into(), uf: "SP".into(), ..Default::default() };
+        let e = Emitente {
+            documento: "11222333000181".into(),
+            nome: "Distribuidora Teste Ltda".into(),
+            uf: "SP".into(),
+            ..Default::default()
+        };
         let (id, criado) = garantir_fornecedor(&b.conn, &b.dispositivo, &u, &e).unwrap();
         assert!(criado);
         let (id2, criado2) = garantir_fornecedor(&b.conn, &b.dispositivo, &u, &e).unwrap();

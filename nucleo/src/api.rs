@@ -14,8 +14,9 @@ use serde_json::{json, Value};
 use crate::banco::Banco;
 use crate::erro::{Erro, Resultado};
 use crate::{
-    arquivos, auditoria, backup, busca, caixa, codigo, devolucoes, etiquetas, importar, cheques, comissoes, compras, config, documento, encomendas, estoque, financeiro, fiscal, impressao, menu,
-    numeros, oficina, pagar, painel, pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
+    arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento,
+    encomendas, estoque, etiquetas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar, painel,
+    pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho.
@@ -45,18 +46,48 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
 fn acao_do_comando(comando: &str) -> Option<&'static str> {
     Some(match comando {
         "venda_cancelar" => "cancelar_venda",
-        "compra_estornar" | "recebimento_estornar" | "pagamento_estornar" | "movimento_estornar" | "devolucao_desfazer"
-        | "cheque_desfazer" | "conta_cancelar" => "estornar",
+        "compra_estornar"
+        | "recebimento_estornar"
+        | "pagamento_estornar"
+        | "movimento_estornar"
+        | "devolucao_desfazer"
+        | "cheque_desfazer"
+        | "conta_cancelar" => "estornar",
         "estoque_ajustar" => "ajustar_estoque",
-        "backup_ler" | "backup_salvar" | "backup_agora" | "backup_conectar_drive" | "backup_desligar_drive"
-        | "backup_nuvem_lista" | "backup_conferir" | "backup_restaurar" => "backup",
+        "backup_ler"
+        | "backup_salvar"
+        | "backup_agora"
+        | "backup_conectar_drive"
+        | "backup_desligar_drive"
+        | "backup_nuvem_lista"
+        | "backup_conferir"
+        | "backup_restaurar" => "backup",
         "config_salvar" | "sync_salvar" | "fiscal_regras_salvar" | "importar_cadastros" => "configuracoes",
         "usuario_salvar" => "usuarios",
-        "financeiro_resumo" | "pagar_painel" | "pagar_ficha" | "pagar_previa" | "pagar_lancar" | "pagar_alterar"
-        | "pagar_cancelar" | "pagar_pagar" | "pagar_formas" | "conta_loja_salvar" | "conta_loja_extrato"
-        | "movimento_lancar" | "transferir" | "conta_loja_conferir" | "categorias" | "categoria_salvar" | "fluxo_caixa"
-        | "cheques_painel" | "cheque_depositar" | "cheque_repassar" | "cheque_devolver" | "comissoes"
-        | "comissao_fechar" | "comissao_reabrir" => "financeiro",
+        "financeiro_resumo"
+        | "pagar_painel"
+        | "pagar_ficha"
+        | "pagar_previa"
+        | "pagar_lancar"
+        | "pagar_alterar"
+        | "pagar_cancelar"
+        | "pagar_pagar"
+        | "pagar_formas"
+        | "conta_loja_salvar"
+        | "conta_loja_extrato"
+        | "movimento_lancar"
+        | "transferir"
+        | "conta_loja_conferir"
+        | "categorias"
+        | "categoria_salvar"
+        | "fluxo_caixa"
+        | "cheques_painel"
+        | "cheque_depositar"
+        | "cheque_repassar"
+        | "cheque_devolver"
+        | "comissoes"
+        | "comissao_fechar"
+        | "comissao_reabrir" => "financeiro",
         // A própria pílula Gerente: sempre só o gerente.
         "gerente_ler" | "gerente_salvar" => "gerente",
         _ => return None,
@@ -105,23 +136,14 @@ impl Servico {
     }
 
     fn com_banco(banco: Banco) -> Servico {
-        Servico {
-            banco,
-            sessao: None,
-            liberacao: None,
-            _motor: None,
-        }
+        Servico { banco, sessao: None, liberacao: None, _motor: None }
     }
 
     /// Executa um comando. Nunca entra em pânico: qualquer problema vira uma
     /// resposta de erro em JSON.
     pub fn chamar(&mut self, comando: &str, dados: &str) -> String {
         let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let dados: Value = if dados.trim().is_empty() {
-                json!({})
-            } else {
-                serde_json::from_str(dados)?
-            };
+            let dados: Value = if dados.trim().is_empty() { json!({}) } else { serde_json::from_str(dados)? };
             self.executar(comando, dados)
         }));
         let resposta = match resultado {
@@ -152,15 +174,14 @@ impl Servico {
             "configurar_inicio" => self.configurar_inicio(ler(dados)?),
             "usuarios_entrada" => {
                 let lista = usuarios::listar(&self.banco.conn, true)?;
-                Ok(json!(lista
-                    .into_iter()
-                    .map(|u| json!({ "id": u.id, "nome": u.nome }))
-                    .collect::<Vec<_>>()))
+                Ok(json!(lista.into_iter().map(|u| json!({ "id": u.id, "nome": u.nome })).collect::<Vec<_>>()))
             }
             "entrar" => self.entrar(ler(dados)?),
             "sync_juntar" => {
                 if usuarios::quantidade(&self.banco.conn)? > 0 {
-                    return Err(Erro::validacao("Este caixa já tem usuários. Use Configurações para ligar a sincronização."));
+                    return Err(Erro::validacao(
+                        "Este caixa já tem usuários. Use Configurações para ligar a sincronização.",
+                    ));
                 }
                 let d: Juntar = ler(dados)?;
                 let caixa = texto::limpar(&d.caixa);
@@ -328,7 +349,15 @@ impl Servico {
                 }
                 config::gravar(&tx, "gerente_livres", &livres.join(","))?;
                 if !detalhes.is_empty() {
-                    auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "gerente.salvar", "config", "gerente", &detalhes)?;
+                    auditoria::registrar(
+                        &tx,
+                        &disp,
+                        Some(&sessao.usuario_id),
+                        "gerente.salvar",
+                        "config",
+                        "gerente",
+                        &detalhes,
+                    )?;
                 }
                 tx.commit()?;
                 self.atualizar_sessao()?;
@@ -376,7 +405,9 @@ impl Servico {
             }
             "produto_sugestoes" => {
                 let mut v = json!(produtos::sugestoes(&self.banco.conn)?);
-                let lista = |l: &[(&str, &str)]| json!(l.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>());
+                let lista = |l: &[(&str, &str)]| {
+                    json!(l.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>())
+                };
                 v["csosns"] = lista(fiscal::CSOSNS);
                 v["cstIpi"] = lista(fiscal::CST_IPI);
                 v["cstPis"] = lista(fiscal::CST_PIS);
@@ -493,7 +524,11 @@ impl Servico {
                         }
                         // Dentro de um pacote, eventos (cancelamento, carta de
                         // correção) e outros XMLs que não são nota são pulados.
-                        Err(e) if pacote && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"].iter().any(|t| e.to_string().contains(t)) => {}
+                        Err(e)
+                            if pacote
+                                && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"]
+                                    .iter()
+                                    .any(|t| e.to_string().contains(t)) => {}
                         Err(e) => erros.push(format!("{}: {e}", x.nome)),
                     }
                 }
@@ -543,7 +578,9 @@ impl Servico {
                 let tx = self.banco.conn.transaction()?;
                 let n = fiscal::usar_automatico(&tx, &disp, &sessao.usuario_id, &d.ids)?;
                 tx.commit()?;
-                Ok(json!({ "alteradas": n, "conferencia": fiscal::conferir(&self.banco.conn, &fiscal::hoje(&self.banco.conn)?)? }))
+                Ok(
+                    json!({ "alteradas": n, "conferencia": fiscal::conferir(&self.banco.conn, &fiscal::hoje(&self.banco.conn)?)? }),
+                )
             }
             "fiscal_regras_salvar" => {
                 let d: Regras = ler(dados)?;
@@ -555,7 +592,13 @@ impl Servico {
             "fiscal_tributacao" => {
                 let d: Tributacao = ler(dados)?;
                 let uf = fiscal::uf_loja(&self.banco.conn)?;
-                Ok(json!(fiscal::tributacao(&self.banco.conn, &uf, &d.cest, &d.csosn, &fiscal::hoje(&self.banco.conn)?)?))
+                Ok(json!(fiscal::tributacao(
+                    &self.banco.conn,
+                    &uf,
+                    &d.cest,
+                    &d.csosn,
+                    &fiscal::hoje(&self.banco.conn)?
+                )?))
             }
 
             // Vendas e orçamentos
@@ -725,7 +768,15 @@ impl Servico {
             "caixa_movimentar" => {
                 let d: Valor = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
-                caixa::movimentar_com_conta(&tx, &disp, &sessao.usuario_id, &d.tipo, &d.valor, &d.motivo, Some(&d.conta))?;
+                caixa::movimentar_com_conta(
+                    &tx,
+                    &disp,
+                    &sessao.usuario_id,
+                    &d.tipo,
+                    &d.valor,
+                    &d.motivo,
+                    Some(&d.conta),
+                )?;
                 tx.commit()?;
                 Ok(Value::Null)
             }
@@ -1117,7 +1168,10 @@ impl Servico {
                     }
                     "orcamento" => {
                         let v = vendas::ficha(conn, &d.id)?;
-                        (impressao::orcamento(conn, &d.id)?, format!("orcamento-{}-{}", v.numero, texto::compactar(&v.caixa)))
+                        (
+                            impressao::orcamento(conn, &d.id)?,
+                            format!("orcamento-{}-{}", v.numero, texto::compactar(&v.caixa)),
+                        )
                     }
                     "caixa" => (impressao::caixa(conn, &d.id)?, format!("caixa-{}", &d.id[..8.min(d.id.len())])),
                     "recibo" => {
@@ -1128,21 +1182,29 @@ impl Servico {
                         impressao::extrato(conn, &d.id)?,
                         format!("extrato-{}", texto::compactar(&pessoas::ficha(conn, &d.id)?.nome)),
                     ),
-                    "lista_compra" => (impressao::lista_compra(conn)?, format!("lista-de-compra-{}", fiscal::hoje(conn)?)),
+                    "lista_compra" => {
+                        (impressao::lista_compra(conn)?, format!("lista-de-compra-{}", fiscal::hoje(conn)?))
+                    }
                     "os" => {
-                        let n: (i64, String) =
-                            conn.query_row("SELECT numero, caixa_nome FROM ordem_servico WHERE id = ?1", [&d.id], |l| Ok((l.get(0)?, l.get(1)?)))?;
+                        let n: (i64, String) = conn.query_row(
+                            "SELECT numero, caixa_nome FROM ordem_servico WHERE id = ?1",
+                            [&d.id],
+                            |l| Ok((l.get(0)?, l.get(1)?)),
+                        )?;
                         (impressao::ordem_servico(conn, &d.id)?, format!("os-{}-{}", n.0, texto::compactar(&n.1)))
                     }
                     "devolucao" => {
-                        let n: (i64, String) = conn.query_row("SELECT numero, caixa_nome FROM devolucao WHERE id = ?1", [&d.id], |l| {
-                            Ok((l.get(0)?, l.get(1)?))
-                        })?;
+                        let n: (i64, String) =
+                            conn.query_row("SELECT numero, caixa_nome FROM devolucao WHERE id = ?1", [&d.id], |l| {
+                                Ok((l.get(0)?, l.get(1)?))
+                            })?;
                         (impressao::devolucao(conn, &d.id)?, format!("devolucao-{}-{}", n.0, texto::compactar(&n.1)))
                     }
                     "vale" => {
                         let n: (i64, String) =
-                            conn.query_row("SELECT numero, caixa_nome FROM vale WHERE id = ?1", [&d.id], |l| Ok((l.get(0)?, l.get(1)?)))?;
+                            conn.query_row("SELECT numero, caixa_nome FROM vale WHERE id = ?1", [&d.id], |l| {
+                                Ok((l.get(0)?, l.get(1)?))
+                            })?;
                         (impressao::vale(conn, &d.id)?, format!("vale-troca-{}-{}", n.0, texto::compactar(&n.1)))
                     }
                     _ => return Err(Erro::Interno("impresso desconhecido".into())),
@@ -1190,7 +1252,15 @@ impl Servico {
                 let d: Restaurar = ler(dados)?;
                 let caminho = self.banco.caminho.clone();
                 let info = backup::restaurar(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, d.nuvem, &d.senha)?;
-                auditoria::registrar(&self.banco.conn, &disp, Some(&sessao.usuario_id), "backup.restaurar", "config", &info.quando, &[])?;
+                auditoria::registrar(
+                    &self.banco.conn,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "backup.restaurar",
+                    "config",
+                    &info.quando,
+                    &[],
+                )?;
                 // Os usuários podem ser outros agora: entra de novo.
                 self.sessao = None;
                 Ok(json!(info))
@@ -1211,10 +1281,7 @@ impl Servico {
     }
 
     fn caminho_banco(&self) -> Resultado<std::path::PathBuf> {
-        self.banco
-            .caminho
-            .clone()
-            .ok_or_else(|| Erro::validacao("Backup só funciona com o banco num arquivo."))
+        self.banco.caminho.clone().ok_or_else(|| Erro::validacao("Backup só funciona com o banco num arquivo."))
     }
 
     fn sync_ler(&self) -> Resultado<Value> {
@@ -1271,11 +1338,7 @@ impl Servico {
         usuarios::registrar_acesso(&tx, &u.id)?;
         tx.commit()?;
         self.liberacao = None;
-        self.sessao = Some(Sessao {
-            usuario_id: u.id,
-            nome: u.nome,
-            gerente: true,
-        });
+        self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: true });
         self.estado()
     }
 
@@ -1310,11 +1373,7 @@ impl Servico {
                     &[],
                 )?;
                 self.liberacao = None;
-                self.sessao = Some(Sessao {
-                    usuario_id: u.id,
-                    nome: u.nome,
-                    gerente: u.gerente,
-                });
+                self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: u.gerente });
                 self.estado()
             }
             Err(e) => {
@@ -1357,7 +1416,10 @@ impl Servico {
         // mesmo com "Usuários" liberado para todos.
         let mexe_em_gerente = d.gerente == Some(true)
             || (!d.id.is_empty() && d.id != sessao.usuario_id && usuarios::buscar(&self.banco.conn, &d.id)?.gerente);
-        if mexe_em_gerente && !sessao.gerente && self.liberacao.as_ref().map(|l| Instant::now() >= l.ate).unwrap_or(true) {
+        if mexe_em_gerente
+            && !sessao.gerente
+            && self.liberacao.as_ref().map(|l| Instant::now() >= l.ate).unwrap_or(true)
+        {
             return Err(Erro::campo("gerente", "Só o gerente pode mexer na conta de um gerente."));
         }
         let tem_senha = !d.senha.is_empty() || !d.senha2.is_empty();
@@ -1400,7 +1462,15 @@ impl Servico {
             }
             let u = usuarios::buscar(&tx, &u.id)?;
             if !detalhes.is_empty() {
-                auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "usuario.alterar", "usuario", &u.id, &detalhes)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "usuario.alterar",
+                    "usuario",
+                    &u.id,
+                    &detalhes,
+                )?;
             }
             u
         };
@@ -1519,10 +1589,9 @@ fn ler<T: DeserializeOwned>(dados: Value) -> Resultado<T> {
 /// Troca o nome do campo de um erro (ex.: "senha" → "nova").
 fn renomear_campo(de: &'static str, para: &'static str) -> impl Fn(Erro) -> Erro {
     move |e| match e {
-        Erro::Validacao { campo: Some(c), mensagem } if c == de => Erro::Validacao {
-            campo: Some(para.to_string()),
-            mensagem,
-        },
+        Erro::Validacao { campo: Some(c), mensagem } if c == de => {
+            Erro::Validacao { campo: Some(para.to_string()), mensagem }
+        }
         outro => outro,
     }
 }

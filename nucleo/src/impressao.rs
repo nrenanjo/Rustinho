@@ -48,7 +48,8 @@ const ESTILO: &str = "<style>
 </style>";
 
 fn data_hora(conn: &Connection, iso: &str) -> Resultado<String> {
-    Ok(conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', ?1, 'localtime')", [iso], |l| l.get::<_, Option<String>>(0))?
+    Ok(conn
+        .query_row("SELECT strftime('%d/%m/%Y às %H:%M', ?1, 'localtime')", [iso], |l| l.get::<_, Option<String>>(0))?
         .unwrap_or_default())
 }
 
@@ -69,7 +70,8 @@ fn tabela_itens(conn: &Connection, itens: &[vendas::ItemFicha], com_local: bool)
         locais.push(local_de(&it.produto_id)?);
     }
     let mostrar_local = locais.iter().any(|l| !l.is_empty());
-    let mut h = String::from("<table class=\"itens\" width=\"100%\" cellspacing=\"0\"><tr><th>CÓDIGO</th><th>DESCRIÇÃO</th>");
+    let mut h =
+        String::from("<table class=\"itens\" width=\"100%\" cellspacing=\"0\"><tr><th>CÓDIGO</th><th>DESCRIÇÃO</th>");
     if mostrar_local {
         h.push_str("<th>LOCAL</th>");
     }
@@ -163,7 +165,9 @@ pub fn venda(conn: &Connection, id: &str) -> Resultado<String> {
         ));
     }
     h.push_str(&rodape(conn, "rodape_venda")?);
-    h.push_str("<p class=\"nota\" style=\"margin-top:18pt\">Comprovante de venda. Não é documento fiscal.</p></body></html>");
+    h.push_str(
+        "<p class=\"nota\" style=\"margin-top:18pt\">Comprovante de venda. Não é documento fiscal.</p></body></html>",
+    );
     Ok(h)
 }
 
@@ -220,7 +224,9 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<String> {
             if p.resta == "0,00" { "quitada".to_string() } else { p.resta.clone() }
         ));
     }
-    h.push_str("</table><table width=\"100%\" style=\"margin-top:8pt\"><tr><td width=\"55%\"></td><td><table width=\"100%\">");
+    h.push_str(
+        "</table><table width=\"100%\" style=\"margin-top:8pt\"><tr><td width=\"55%\"></td><td><table width=\"100%\">",
+    );
     if r.juros != "0,00" {
         h.push_str(&format!("<tr><td>Juros e multa</td><td class=\"num\">R$ {}</td></tr>", r.juros));
     }
@@ -369,14 +375,14 @@ pub fn caixa(conn: &Connection, sessao_id: &str) -> Resultado<String> {
 
 /// Lista de compra (sugestão), separada por fornecedor.
 pub fn lista_compra(conn: &Connection) -> Resultado<String> {
-    let quando = conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', 'now', 'localtime')", [], |l| l.get::<_, String>(0))?;
+    let quando =
+        conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', 'now', 'localtime')", [], |l| l.get::<_, String>(0))?;
     Ok(format!(
         "<html><head>{ESTILO}</head><body>{}{}<p class=\"nota\" style=\"margin-top:14pt\">Feita em {quando}. Confira o estoque antes de pedir.</p></body></html>",
         cabecalho_loja(conn)?,
         crate::reposicao::lista_compra_html(conn)?
     ))
 }
-
 
 fn caixa_vale(conn: &Connection, vale_id: &str) -> Resultado<String> {
     let v: (i64, String, String, i64, i64, String) = conn.query_row(
@@ -386,7 +392,11 @@ fn caixa_vale(conn: &Connection, vale_id: &str) -> Resultado<String> {
     )?;
     let quando = data_hora(conn, &v.5)?;
     let saldo = if v.4 != v.3 {
-        format!("<p style=\"margin:2pt 0\">Valor original R$ {} · <b>ainda tem R$ {}</b></p>", numeros::escrever_dinheiro(v.3), numeros::escrever_dinheiro(v.4))
+        format!(
+            "<p style=\"margin:2pt 0\">Valor original R$ {} · <b>ainda tem R$ {}</b></p>",
+            numeros::escrever_dinheiro(v.3),
+            numeros::escrever_dinheiro(v.4)
+        )
     } else {
         String::new()
     };
@@ -421,7 +431,9 @@ pub fn devolucao(conn: &Connection, id: &str) -> Resultado<String> {
         },
     )?;
     let (venda_numero, venda_caixa, venda_quando): (i64, String, String) =
-        conn.query_row("SELECT numero, caixa_nome, criado_em FROM venda WHERE id = ?1", [&d.13], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?;
+        conn.query_row("SELECT numero, caixa_nome, criado_em FROM venda WHERE id = ?1", [&d.13], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+        })?;
     let mut h = format!("<html><head>{ESTILO}</head><body>{}", cabecalho_loja(conn)?);
     h.push_str(&format!(
         "<h1>Devolução {}{}</h1><p>{} · {} · atendido por {}</p>
@@ -464,7 +476,8 @@ pub fn devolucao(conn: &Connection, id: &str) -> Resultado<String> {
         "<tr><td class=\"total\">Devolvido</td><td class=\"num total\">R$ {}</td></tr>",
         numeros::escrever_dinheiro(d.5)
     ));
-    for (nome, v) in [("Abateu do crediário", d.9), ("Vale-troca", d.8), ("Em dinheiro", d.6), ("Pix ou cartão", d.7)] {
+    for (nome, v) in [("Abateu do crediário", d.9), ("Vale-troca", d.8), ("Em dinheiro", d.6), ("Pix ou cartão", d.7)]
+    {
         if v > 0 {
             h.push_str(&format!("<tr><td>{nome}</td><td class=\"num\">R$ {}</td></tr>", numeros::escrever_dinheiro(v)));
         }

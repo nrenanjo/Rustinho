@@ -61,9 +61,8 @@ impl qobject::Sistema {
         let estado = self.rust_mut().get_mut();
         estado.servico.get_or_insert_with(|| {
             let caminho = rustinho_nucleo::caminho_padrao();
-            Servico::abrir(&caminho).map_err(|e| {
-                format!("Não consegui abrir o banco de dados em {}. {e}", caminho.display())
-            })
+            Servico::abrir(&caminho)
+                .map_err(|e| format!("Não consegui abrir o banco de dados em {}. {e}", caminho.display()))
         })
     }
 
@@ -113,11 +112,7 @@ impl qobject::Sistema {
                     qobject::rustinho_imprimir_html(&QString::from(dados["html"].as_str().unwrap_or_default()))
                 }
             } else {
-                std::process::Command::new("lp")
-                    .arg(caminho)
-                    .output()
-                    .map(|s| s.status.success())
-                    .unwrap_or(false)
+                std::process::Command::new("lp").arg(caminho).output().map(|s| s.status.success()).unwrap_or(false)
             }
         };
         if !impresso {

@@ -15,7 +15,17 @@ use crate::{caixa, devolucoes, fiscal, numeros, receber, tempo};
 
 const MESES: [&str; 12] = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const MESES_NOME: [&str; 12] = [
-    "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro",
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
     "dezembro",
 ];
 
@@ -286,7 +296,13 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
             let (t, n) = por_mes_mapa.get(&format!("{:04}-{:02}", a, *m as u8)).copied().unwrap_or((0, 0));
             Barra {
                 rotulo: MESES[*m as usize - 1].to_string(),
-                dica: format!("{} de {} · {} {}", MESES_NOME[*m as usize - 1], a, n, if n == 1 { "venda" } else { "vendas" }),
+                dica: format!(
+                    "{} de {} · {} {}",
+                    MESES_NOME[*m as usize - 1],
+                    a,
+                    n,
+                    if n == 1 { "venda" } else { "vendas" }
+                ),
                 valor: numeros::escrever_dinheiro(t),
                 parte: proporcao(t, maior_mes),
                 destaque: *a == ano && *m == mes,
@@ -365,9 +381,8 @@ fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linh
             AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2
           GROUP BY p.forma",
     )?;
-    let mut somas: Vec<(String, i64, i64)> = c
-        .query_map(params![de, ate, desde], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
-        .collect::<Result<_, _>>()?;
+    let mut somas: Vec<(String, i64, i64)> =
+        c.query_map(params![de, ate, desde], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
     // O dinheiro recebido inclui o troco: tira para ficar o que entrou.
     let troco: i64 = conn.query_row(
         "SELECT COALESCE(SUM(troco), 0) FROM venda
@@ -515,9 +530,7 @@ pub fn clientes(conn: &Connection, dias: i64) -> Resultado<Clientes> {
           LIMIT 200",
     )?;
     let linhas: Vec<(String, String, String, i64, i64, String)> = c
-        .query_map(params![de, ate, desde], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?))
-        })?
+        .query_map(params![de, ate, desde], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)))?
         .collect::<Result<_, _>>()?;
     let (total_com, n_com, clientes_n): (i64, i64, i64) = conn.query_row(
         "SELECT COALESCE(SUM(total), 0), COUNT(*), COUNT(DISTINCT cliente_id) FROM venda
@@ -641,13 +654,7 @@ pub fn fornecedores(conn: &Connection, dias: i64) -> Resultado<Fornecedores> {
             parte: proporcao(t, maior),
         });
     }
-    Ok(Fornecedores {
-        dias,
-        total: numeros::escrever_dinheiro(total),
-        notas,
-        fornecedores: n,
-        itens,
-    })
+    Ok(Fornecedores { dias, total: numeros::escrever_dinheiro(total), notas, fornecedores: n, itens })
 }
 
 // ---------------------------------------------------------------------------

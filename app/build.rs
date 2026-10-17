@@ -9,12 +9,7 @@ fn arquivos(pasta: &str, extensoes: &[&str]) -> Vec<String> {
         .unwrap_or_else(|e| panic!("não achei a pasta {pasta}: {e}"))
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| {
-            p.extension()
-                .and_then(|x| x.to_str())
-                .map(|x| extensoes.contains(&x))
-                .unwrap_or(false)
-        })
+        .filter(|p| p.extension().and_then(|x| x.to_str()).map(|x| extensoes.contains(&x)).unwrap_or(false))
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .collect();
     lista.sort();
@@ -44,7 +39,11 @@ fn main() {
     if std::path::Path::new("include").is_dir() {
         let pasta = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("include");
         // SAFETY: só acrescenta uma pasta de cabeçalhos ao compilador.
-        construtor = unsafe { construtor.cc_builder(move |cc| { cc.include(&pasta); }) };
+        construtor = unsafe {
+            construtor.cc_builder(move |cc| {
+                cc.include(&pasta);
+            })
+        };
     }
     // No Windows, imprime direto na impressora padrão (QPrinter).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

@@ -44,7 +44,7 @@ Precisa de Rust (stable) e Qt 6 (qtbase e qtdeclarative).
 
 A cada envio para a `main`, o GitHub monta o instalador do Windows, o AppImage (`.github/workflows/montar.yml`) e o APK do Android (`.github/workflows/android.yml`, Qt for Android + CMake). Quando a versão do `Cargo.toml` é nova, os três vão para Releases.
 
-O APK é assinado com a chave pública de `android/assinatura/` (veja o `LEIA.md` de lá para usar uma chave sua).
+O APK publicado é assinado com a chave da loja, guardada nos segredos do GitHub (veja `android/assinatura/LEIA.md`). Sem ela, a montagem faz só um APK de teste, que não vai para Releases.
 
 ## Organização
 
