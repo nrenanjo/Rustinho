@@ -185,6 +185,20 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         });
     }
 
+    // R-05: registros que apontam para algo apagado (ou que não chegou em
+    // 24 h). Não some sozinho: o gerente precisa olhar.
+    let quebradas: i64 = config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse().ok()).unwrap_or(0);
+    if quebradas > 0 && !escondido(conn, "referencias", &hoje)? {
+        avisos.push(Aviso {
+            id: "referencias".into(),
+            dia: hoje.clone(),
+            titulo: "Caixas".into(),
+            texto: format!("{} entre caixas", plural(quebradas, "registro incompleto", "registros incompletos")),
+            atraso: "apontam para algo apagado ou que não chegou".into(),
+            funcao: "configuracoes".into(),
+        });
+    }
+
     // Backup: falhou agora, ou está há 2 dias sem cópia (no computador ou no Drive).
     let b = backup::situacao(conn)?;
     let dias_desde = |quando: &str| -> Resultado<i64> {

@@ -101,6 +101,11 @@ pub fn somar(valores: impl IntoIterator<Item = i64>) -> Option<i64> {
     Some(total as i64)
 }
 
+/// Como [`somar`], já com o erro de "grande demais" (para usar com `?`).
+pub fn soma(valores: impl IntoIterator<Item = i64>) -> crate::erro::Resultado<i64> {
+    somar(valores).ok_or_else(grande_demais)
+}
+
 /// Erro de soma grande demais, para usar com [`somar`].
 pub fn grande_demais() -> crate::erro::Erro {
     crate::erro::Erro::validacao("O valor ficou grande demais. Confira as quantidades e os preços.")

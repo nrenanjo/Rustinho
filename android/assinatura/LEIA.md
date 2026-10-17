@@ -14,8 +14,9 @@ No GitHub do projeto: **Settings → Secrets and variables → Actions → New r
 - `ANDROID_CHAVE_BASE64`: o texto do arquivo `ANDROID_CHAVE_BASE64.txt` (a chave em base64)
 - `ANDROID_CHAVE_SENHA`: a senha da chave
 
-Depois de cadastrar, guarde também a **impressão digital** do certificado (não é segredo), para
-a montagem nunca publicar um APK de outra chave. Ela aparece com:
+Depois de cadastrar, guarde também a **impressão digital** do certificado (não é segredo). Ela
+é **obrigatória para publicar**: sem ela, a montagem não põe nenhum APK em Releases (eles ficam
+só nos artefatos). Assim um APK de outra chave nunca é publicado. Ela aparece com:
 
     keytool -list -v -keystore rustinho-loja.jks -alias rustinho | grep SHA256
 

@@ -158,7 +158,9 @@ pub fn etiqueta(conn: &Connection, produto_id: &str) -> Resultado<Etiqueta> {
 pub fn montar(conn: &Connection, p: &Pedido) -> Resultado<Value> {
     let m = modelo(&p.modelo);
     let por_folha = m.colunas * m.linhas;
-    let total: i64 = p.itens.iter().map(|i| i.quantidade.max(0)).sum();
+    // Cada quantidade é limitada antes de somar: número enorme vindo da
+    // tela vira "passou do máximo", nunca uma conta que estoura (R-10).
+    let total = numeros::soma(p.itens.iter().map(|i| i.quantidade.clamp(0, 5_001)))?;
     if total == 0 {
         return Err(Erro::validacao("Escolha as peças e quantas etiquetas de cada."));
     }
@@ -297,6 +299,17 @@ pub fn code128(texto: &str) -> Option<String> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// R-10: quantidade absurda vinda da tela não estoura a soma.
+    #[test]
+    fn quantidade_enorme_nao_estoura() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let it = Item { produto_id: "x".into(), quantidade: i64::MAX };
+        let p = Pedido { itens: vec![it.clone(), it], modelo: "a4".into(), inicio: 1, ..Default::default() };
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| montar(&b.conn, &p)))
+            .expect("não pode dar pânico");
+        assert!(r.unwrap_err().to_string().contains("5.000"));
+    }
 
     #[test]
     fn simbolos_do_code128_tem_11_modulos() {

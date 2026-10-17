@@ -619,7 +619,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<Ficha> {
                 valor: numeros::escrever_dinheiro(valor),
                 juros: numeros::escrever_dinheiro(juros),
                 desconto: numeros::escrever_dinheiro(desconto),
-                total: numeros::escrever_dinheiro(valor + juros - desconto),
+                total: numeros::escrever_dinheiro(numeros::somar([valor, juros, -desconto]).unwrap_or(0)),
                 cheque_numero: l.get(7)?,
                 usuario: l.get(8)?,
                 estornado: l.get(9)?,
@@ -683,7 +683,7 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
     }
     let juros = ler_valor(&e.juros, "juros", false)?;
     let desconto = ler_valor(&e.desconto, "desconto", false)?;
-    if desconto > valor + juros {
+    if desconto > numeros::soma([valor, juros])? {
         return Err(Erro::campo("desconto", "O desconto é maior que o pagamento."));
     }
     let hoje = fiscal::hoje(conn)?;
@@ -698,7 +698,7 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
     if e.forma == "cheque" && cheque_numero.is_empty() {
         return Err(Erro::campo("chequeNumero", "Digite o número do cheque."));
     }
-    let total = valor + juros - desconto;
+    let total = numeros::soma([valor, juros, -desconto])?;
     let id = tempo::novo_id();
     let (conta_loja, sessao, movimento): (Option<String>, Option<String>, Option<String>) = if e.origem == "gaveta" {
         if e.forma != "dinheiro" {
@@ -794,7 +794,7 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     if motivo.is_empty() {
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
-    let total = valor + juros - desconto;
+    let total = numeros::soma([valor, juros, -desconto])?;
     if let Some(sessao_id) = sessao {
         let aberta = caixa::sessao_aberta(conn, dispositivo)?.filter(|s| s.id == sessao_id);
         if aberta.is_some() {

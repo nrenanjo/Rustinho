@@ -192,8 +192,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # Impressão digital (SHA-256) do certificado da loja, guardada em
-          # Settings → Secrets and variables → Actions → Variables. Opcional:
-          # com ela, um APK de outra chave nunca é publicado.
+          # Settings → Secrets and variables → Actions → Variables.
+          # Obrigatória para publicar: sem ela, uma troca sem querer do
+          # segredo da chave publicaria um APK que não atualiza o instalado.
           ESPERADA: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
         run: |
           set -eu
@@ -203,6 +204,10 @@ jobs:
           ASSINADOR=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)apksigner
           impressao() { "$ASSINADOR" verify --print-certs "$1" | grep -m1 "SHA-256 digest" | awk '{print $NF}' | tr 'a-f' 'A-F'; }
           ESPERADA=$(echo "${ESPERADA:-}" | tr -d ': ' | tr 'a-f' 'A-F')
+          if [ -z "$ESPERADA" ]; then
+            echo "::error title=APK não publicado::Falta a variável ANDROID_CHAVE_IMPRESSAO (impressão digital do certificado da loja). Veja android/assinatura/LEIA.md."
+            exit 1
+          fi
           if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
             for i in $(seq 1 50); do
               gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 && break
@@ -223,7 +228,7 @@ jobs:
               echo "::error title=APK não publicado::$NOME foi assinado só para teste. Cadastre os segredos ANDROID_CHAVE_BASE64 e ANDROID_CHAVE_SENHA no GitHub (veja android/assinatura/LEIA.md) e rode de novo."
               exit 1
             fi
-            if [ "$CERT" = "$ANTIGA" ] || { [ -n "$ESPERADA" ] && [ "$CERT" != "$ESPERADA" ]; }; then
+            if [ "$CERT" = "$ANTIGA" ] || [ "$CERT" != "$ESPERADA" ]; then
               echo "::error title=APK não publicado::$NOME tem o certificado $CERT, que não é o da loja."
               exit 1
             fi

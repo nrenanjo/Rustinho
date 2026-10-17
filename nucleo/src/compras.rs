@@ -110,7 +110,7 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
     let (fornecedor_id, _) = pessoas::garantir_fornecedor(conn, dispositivo, usuario_id, &nota.emitente)?;
     let id = tempo::novo_id();
     let NotaXml { itens, .. } = nota.clone();
-    let itens = ratear_do_cabecalho(&nota, itens);
+    let itens = ratear_do_cabecalho(&nota, itens)?;
 
     conn.execute(
         "INSERT INTO compra (id, fornecedor_id, chave, numero, serie, emissao, natureza, total_produtos, frete, seguro,
@@ -152,27 +152,29 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
 
 /// Se a nota trouxe frete/seguro/desconto/outras só no total, divide entre
 /// os itens pelo valor de cada um.
-fn ratear_do_cabecalho(nota: &NotaXml, mut itens: Vec<ItemXml>) -> Vec<ItemXml> {
+fn ratear_do_cabecalho(nota: &NotaXml, mut itens: Vec<ItemXml>) -> Resultado<Vec<ItemXml>> {
     let pesos: Vec<i64> = itens.iter().map(|i| i.valor_produtos.max(0)).collect();
-    let mut aplicar = |total: i64, pegar: fn(&mut ItemXml) -> &mut i64| {
-        let soma: i64 = itens.iter_mut().map(|i| *pegar(i)).sum();
+    let mut aplicar = |total: i64, pegar: fn(&mut ItemXml) -> &mut i64| -> Resultado<()> {
+        let soma = numeros::soma(itens.iter_mut().map(|i| *pegar(i)))?;
         if soma == 0 && total > 0 {
             for (i, parte) in ratear(total, &pesos).into_iter().enumerate() {
                 *pegar(&mut itens[i]) = parte;
             }
         }
+        Ok(())
     };
-    aplicar(nota.frete, |i| &mut i.frete);
-    aplicar(nota.seguro, |i| &mut i.seguro);
-    aplicar(nota.desconto, |i| &mut i.desconto);
-    aplicar(nota.outras, |i| &mut i.outras);
-    itens
+    aplicar(nota.frete, |i| &mut i.frete)?;
+    aplicar(nota.seguro, |i| &mut i.seguro)?;
+    aplicar(nota.desconto, |i| &mut i.desconto)?;
+    aplicar(nota.outras, |i| &mut i.outras)?;
+    Ok(itens)
 }
 
 /// Divide `total` em partes proporcionais aos pesos, sem perder centavos
 /// (as sobras vão para os maiores restos).
 pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
-    let soma: i64 = pesos.iter().sum();
+    // Somas em i128: nenhuma quantidade de itens "dá a volta" (R-10).
+    let soma: i128 = pesos.iter().map(|p| *p as i128).sum();
     if pesos.is_empty() {
         return vec![];
     }
@@ -182,10 +184,10 @@ pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
         return (0..n).map(|i| total / n + if i < total % n { 1 } else { 0 }).collect();
     }
     let mut partes: Vec<i64> =
-        pesos.iter().map(|p| crate::numeros::saturar(total as i128 * *p as i128 / soma as i128)).collect();
-    let mut sobra = total - partes.iter().sum::<i64>();
+        pesos.iter().map(|p| crate::numeros::saturar(total as i128 * *p as i128 / soma)).collect();
+    let mut sobra = total as i128 - partes.iter().map(|p| *p as i128).sum::<i128>();
     let mut restos: Vec<(usize, i128)> =
-        pesos.iter().enumerate().map(|(i, p)| (i, (total as i128 * *p as i128) % soma as i128)).collect();
+        pesos.iter().enumerate().map(|(i, p)| (i, (total as i128 * *p as i128) % soma)).collect();
     restos.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     for (i, _) in restos {
         if sobra <= 0 {
@@ -363,8 +365,16 @@ struct ItemBanco {
 
 impl ItemBanco {
     /// Valor que a loja pagou pelo item, sem o frete pago à parte.
-    fn custo_nota(&self) -> i64 {
-        self.valor_produtos - self.desconto + self.frete + self.seguro + self.outras + self.ipi + self.icms_st
+    fn custo_nota(&self) -> Resultado<i64> {
+        numeros::soma([
+            self.valor_produtos,
+            -self.desconto,
+            self.frete,
+            self.seguro,
+            self.outras,
+            self.ipi,
+            self.icms_st,
+        ])
     }
     /// Quantidade de peças (milésimos).
     fn pecas(&self) -> i64 {
@@ -550,7 +560,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
     let mut lista = Vec::new();
     let (mut pendentes, mut novas, mut ignorados, mut custo_total) = (0, 0, 0, 0_i64);
     for (i, it) in itens.iter().enumerate() {
-        let custo_item = it.custo_nota() + extras[i];
+        let custo_item = numeros::soma([it.custo_nota()?, extras[i]])?;
         if it.acao != "ignorar" {
             custo_total = numeros::somar([custo_total, custo_item]).ok_or_else(numeros::grande_demais)?;
         }
@@ -835,7 +845,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             continue;
         }
         let pecas = it.pecas();
-        let custo = custo_unitario(it.custo_nota() + extras[i], pecas);
+        let custo = custo_unitario(numeros::soma([it.custo_nota()?, extras[i]])?, pecas);
         let mut detalhes = Vec::new();
         let produto_id = if it.acao == "nova" {
             resumo.pecas_novas += 1;
@@ -1131,6 +1141,15 @@ mod testes {
     use super::*;
     use crate::banco::Banco;
     use crate::usuarios;
+
+    /// R-10: pesos enormes no rateio não estouram e não perdem centavo.
+    #[test]
+    fn rateio_com_pesos_enormes() {
+        let partes = ratear(4000, &[i64::MAX, i64::MAX, 1]);
+        assert_eq!(partes.iter().sum::<i64>(), 4000);
+        let partes = ratear(numeros::SOMA_MAXIMA, &vec![i64::MAX / 2; 1000]);
+        assert_eq!(partes.iter().map(|p| *p as i128).sum::<i128>(), numeros::SOMA_MAXIMA as i128);
+    }
 
     #[test]
     fn so_entra_nota_autorizada_de_compra_para_a_loja() {

@@ -207,11 +207,12 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             falhou(campo, format!("{}: {erro}", if descricao.is_empty() { "Serviço" } else { &descricao }));
         }
         // A mesma peça duas vezes conta junto para o estoque.
-        let ja: i64 = itens
-            .iter()
-            .filter(|x: &&ItemOs| x.tipo == "peca" && x.produto_id == it.produto_id)
-            .map(|x| x.v_quantidade)
-            .sum();
+        let ja = numeros::soma(
+            itens
+                .iter()
+                .filter(|x: &&ItemOs| x.tipo == "peca" && x.produto_id == it.produto_id)
+                .map(|x| x.v_quantidade),
+        )?;
         itens.push(ItemOs {
             tipo: if peca { "peca".into() } else { "servico".into() },
             produto_id: if peca { it.produto_id.clone() } else { String::new() },

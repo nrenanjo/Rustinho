@@ -97,21 +97,43 @@ pub fn caminho_local(t: &str) -> PathBuf {
 }
 
 fn decodificar_url(t: &str) -> String {
+    // Só bytes (nunca fatia o texto): um "%" seguido de letras com acento ou
+    // de pouca coisa fica como está, sem derrubar o programa.
+    fn hexa(b: u8) -> Option<u8> {
+        (b as char).to_digit(16).map(|v| v as u8)
+    }
     let bytes = t.as_bytes();
     let mut saida = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&t[i + 1..i + 3], 16) {
-                saida.push(v);
-                i += 3;
-                continue;
+        if bytes[i] == b'%' {
+            if let Some([a, b]) = bytes.get(i + 1..i + 3).and_then(|p| <[u8; 2]>::try_from(p).ok()) {
+                if let (Some(a), Some(b)) = (hexa(a), hexa(b)) {
+                    saida.push(a * 16 + b);
+                    i += 3;
+                    continue;
+                }
             }
         }
         saida.push(bytes[i]);
         i += 1;
     }
     String::from_utf8_lossy(&saida).into_owned()
+}
+
+/// Deixa a pasta ou o arquivo só para o usuário do computador (Linux,
+/// macOS, Android): o banco, os backups e o registro têm dados da loja e
+/// dos clientes. No Windows, a pasta do usuário já é só dele. Se o lugar não
+/// aceitar (pen drive FAT, por exemplo), segue sem mudar.
+pub fn so_do_usuario(caminho: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let modo = if caminho.is_dir() { 0o700 } else { 0o600 };
+        let _ = std::fs::set_permissions(caminho, std::fs::Permissions::from_mode(modo));
+    }
+    #[cfg(not(unix))]
+    let _ = caminho;
 }
 
 /// Extensões aceitas onde se pede XML.
@@ -128,22 +150,44 @@ fn nome_curto(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32) {
-    if lista.len() >= MAX_ARQUIVOS {
-        return;
+/// Junta os arquivos aceitos, sem guardar a pasta inteira na memória (R-03):
+/// uma pasta só entra até o limite, e o total de itens olhados (pastas,
+/// fotos, qualquer coisa) também tem teto. Devolve false se cortou.
+fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32, olhar: &mut usize) -> bool {
+    if lista.len() >= MAX_ARQUIVOS || *olhar == 0 {
+        return false;
     }
+    *olhar -= 1;
     if caminho.is_dir() {
         if profundidade > 6 {
-            return;
+            return true;
         }
-        let Ok(dir) = std::fs::read_dir(caminho) else { return };
-        let mut filhos: Vec<PathBuf> = dir.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+        let Ok(dir) = std::fs::read_dir(caminho) else { return true };
+        let mut filhos = Vec::new();
+        let mut inteiro = true;
+        for e in dir.filter_map(|e| e.ok()) {
+            if *olhar == 0 || filhos.len() >= MAX_ARQUIVOS {
+                inteiro = false;
+                break;
+            }
+            let p = e.path();
+            // Só guarda o que interessa: subpastas e XML/ZIP/RAR.
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) || aceito(&nome_curto(&p)) {
+                filhos.push(p);
+            } else {
+                *olhar -= 1;
+            }
+        }
         filhos.sort();
         for f in filhos {
-            juntar(&f, lista, profundidade + 1);
+            inteiro &= juntar(&f, lista, profundidade + 1, olhar);
         }
-    } else if aceito(&nome_curto(caminho)) {
-        lista.push(caminho.to_path_buf());
+        inteiro
+    } else {
+        if aceito(&nome_curto(caminho)) {
+            lista.push(caminho.to_path_buf());
+        }
+        true
     }
 }
 
@@ -179,7 +223,12 @@ fn ruim(nome: String, erro: &str) -> Xml {
 /// Todos os XMLs dos arquivos e pastas escolhidos, abrindo .zip e .rar
 /// (inclusive .zip dentro de .zip, um nível).
 pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
+    xmls_com(entradas, Orcamento::novo(), MAX_MEMBROS)
+}
+
+fn xmls_com(entradas: &[String], mut orc: Orcamento, mut olhar: usize) -> Resultado<Vec<Xml>> {
     let mut lista = Vec::new();
+    let mut inteiro = true;
     for e in entradas {
         let p = caminho_local(e);
         if !p.exists() {
@@ -188,10 +237,15 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
         if p.is_file() && !aceito(&nome_curto(&p)) {
             return Err(Erro::validacao(format!("{} não é XML, ZIP nem RAR.", nome_curto(&p))));
         }
-        juntar(&p, &mut lista, 0);
+        inteiro &= juntar(&p, &mut lista, 0, &mut olhar);
     }
     let mut saida = Vec::new();
-    let mut orc = Orcamento::novo();
+    if !inteiro {
+        saida.push(ruim(
+            "pasta".into(),
+            &format!("arquivos demais; só os primeiros {} foram olhados. Escolha menos arquivos", lista.len()),
+        ));
+    }
     for p in lista {
         let nome = nome_curto(&p);
         let Ok(meta) = std::fs::metadata(&p) else { continue };
@@ -201,8 +255,16 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
                     saida.push(ruim(nome, "grande demais para ser uma nota"));
                     continue;
                 }
-                match std::fs::read(&p) {
-                    Ok(b) => saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() }),
+                // R-03: XML solto também conta no limite total.
+                if !orc.gastar(meta.len()) {
+                    saida.push(ruim(nome, &passou_do_total()));
+                    break;
+                }
+                // Lê no máximo o limite (o arquivo pode crescer depois de olhado).
+                let lido = std::fs::File::open(&p).map(|mut f| ler_ate(&mut f, MAX_TAMANHO));
+                match lido {
+                    Ok(Some(b)) => saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() }),
+                    Ok(None) => saida.push(ruim(nome, "grande demais para ser uma nota")),
                     Err(e) => saida.push(ruim(nome, &format!("não abriu ({e})"))),
                 }
             }
@@ -219,6 +281,10 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
         }
     }
     Ok(saida)
+}
+
+fn passou_do_total() -> String {
+    format!("os arquivos escolhidos passam de {} MB; escolha menos arquivos", MAX_TOTAL / (1024 * 1024))
 }
 
 fn de_zip<R: Read + std::io::Seek>(
@@ -263,13 +329,7 @@ fn de_zip<R: Read + std::io::Seek>(
             continue;
         };
         if !orc.gastar(b.len() as u64) {
-            saida.push(ruim(
-                pacote.into(),
-                &format!(
-                    "os pacotes descompactados passam de {} MB; escolha menos arquivos",
-                    MAX_TOTAL / (1024 * 1024)
-                ),
-            ));
+            saida.push(ruim(pacote.into(), &passou_do_total()));
             return;
         }
         if baixo.ends_with(".xml") {
@@ -315,13 +375,7 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>, orc: &mut Orcament
             continue;
         }
         if !orc.gastar(tamanho) {
-            saida.push(ruim(
-                pacote.into(),
-                &format!(
-                    "os pacotes descompactados passam de {} MB; escolha menos arquivos",
-                    MAX_TOTAL / (1024 * 1024)
-                ),
-            ));
+            saida.push(ruim(pacote.into(), &passou_do_total()));
             return;
         }
         let mut opcoes = rars::ArchiveReadOptions::new();
@@ -447,6 +501,41 @@ mod testes {
             }
         }
         saida
+    }
+
+    /// R-03 e item 5 da auditoria: endereço malformado não derruba.
+    #[test]
+    fn endereco_malformado() {
+        for t in ["%", "%2", "%G1", "%é", "a%ã", "%%", "x%2€", "file:///%E9%"] {
+            let r = std::panic::catch_unwind(|| caminho_local(t));
+            assert!(r.is_ok(), "{t}");
+        }
+        assert_eq!(caminho_local("a%2Fb%20c"), PathBuf::from("a/b c"));
+        assert_eq!(caminho_local("%C3%A9"), PathBuf::from("é"));
+    }
+
+    /// R-03: XMLs soltos contam no limite total, e pasta enorme para cedo.
+    #[test]
+    fn limite_para_xml_solto_e_pasta() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-limite-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(pasta.join("sub")).unwrap();
+        for i in 0..10 {
+            std::fs::write(pasta.join(format!("n{i:02}.xml")), b"<nota>0123456789</nota>").unwrap();
+            std::fs::write(pasta.join(format!("foto{i}.jpg")), b"x").unwrap();
+        }
+        let todos = || vec![pasta.display().to_string()];
+        // Sem aperto: os 10.
+        let l = xmls_com(&todos(), Orcamento { bytes: 10_000, membros: 100 }, 1000).unwrap();
+        assert_eq!(l.iter().filter(|x| x.erro.is_empty()).count(), 10);
+        // Limite total de bytes: 23 bytes cada; cabem 4 em 100.
+        let l = xmls_com(&todos(), Orcamento { bytes: 100, membros: 100 }, 1000).unwrap();
+        assert_eq!(l.iter().filter(|x| x.erro.is_empty()).count(), 4);
+        assert!(l.last().unwrap().erro.contains("escolha menos"), "{l:?}");
+        // Itens olhados: para cedo e avisa, sem ler tudo.
+        let l = xmls_com(&todos(), Orcamento { bytes: 10_000, membros: 100 }, 8).unwrap();
+        assert!(l[0].erro.contains("arquivos demais"), "{l:?}");
+        assert!(l.iter().filter(|x| x.erro.is_empty()).count() < 10);
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     include!("arquivos_teste_rar.rs");

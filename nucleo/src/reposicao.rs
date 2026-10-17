@@ -327,7 +327,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let acabou = itens.iter().filter(|i| i.0 == 0).count() as i64;
     let acabando = itens.iter().filter(|i| i.0 == 1).count() as i64;
     let abaixo_minimo = itens.iter().filter(|i| i.0 == 2).count() as i64;
-    let total: i64 = itens.iter().map(|i| i.2.v_custo_total).sum();
+    let total = numeros::soma(itens.iter().map(|i| i.2.v_custo_total))?;
 
     // Encomendas que falta pedir
     let mut c = conn.prepare(
@@ -483,8 +483,8 @@ pub fn mais_vendidos(conn: &Connection, dias: i64, ordem: &str, busca: &str) -> 
             })
         })?
         .collect::<Result<_, _>>()?;
-    let soma: i64 = linhas.iter().map(|l| l.total).sum();
-    let lucro_total: i64 = linhas.iter().map(|l| l.total - l.custo).sum();
+    let soma = numeros::soma(linhas.iter().map(|l| l.total))?;
+    let lucro_total = numeros::soma(linhas.iter().map(|l| l.total - l.custo))?;
     let maior = linhas.iter().map(|l| l.total).max().unwrap_or(0).max(1);
     let mut acumulado = 0i64;
     let mut curvas = (0, 0, 0);
@@ -665,7 +665,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
         });
     }
     itens.sort_by(|a, b| b.v_valor.cmp(&a.v_valor).then_with(|| a.nome.cmp(&b.nome)));
-    let total: i64 = itens.iter().map(|i| i.v_valor).sum();
+    let total = numeros::soma(itens.iter().map(|i| i.v_valor))?;
     Ok(Parados {
         dias,
         quantidade: itens.len() as i64,

@@ -121,7 +121,8 @@ Painel {
             Titulo { text: "Trazer cadastros pelo XML"; font.pixelSize: 32; Layout.fillWidth: true }
             Nota {
                 text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
-                      + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. O que já está cadastrado não muda."
+                      + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. O que já está cadastrado não muda. "
+                      + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
                 font.pixelSize: 14
                 Layout.fillWidth: true
             }

@@ -339,6 +339,105 @@ pub fn pendencias(conn: &Connection) -> Resultado<usize> {
     Ok(n)
 }
 
+/// R-05: referências que não batem, separadas em dois tipos.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Referencias {
+    /// Apontam para algo que ainda não chegou de outro caixa (normal no
+    /// meio de uma troca; resolve sozinho quando o resto chegar).
+    pub esperando: usize,
+    /// Apontam para algo que foi apagado (aqui ou em outro caixa). Não
+    /// resolve sozinho; nada é apagado para esconder: o gerente decide.
+    pub quebradas: usize,
+}
+
+/// Confere cada referência quebrada e diz se ela espera dados ou se o que
+/// ela aponta foi apagado (o log de alterações diz).
+pub fn conferir_referencias(conn: &Connection) -> Resultado<Referencias> {
+    let mut c = conn.prepare("PRAGMA foreign_key_check")?;
+    let violacoes: Vec<(String, Option<i64>, String, i64)> =
+        c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?.collect::<Result<_, _>>()?;
+    let mut r = Referencias::default();
+    for (tabela, linha, pai, fk) in violacoes {
+        let mut colunas = Vec::new();
+        {
+            let mut q = conn.prepare(&format!("PRAGMA foreign_key_list(\"{}\")", tabela.replace('"', "")))?;
+            let lista = q.query_map([], |l| Ok((l.get::<_, i64>(0)?, l.get::<_, i64>(1)?, l.get::<_, String>(3)?)))?;
+            for item in lista {
+                let (id, seq, de) = item?;
+                if id == fk {
+                    colunas.push((seq, de));
+                }
+            }
+        }
+        colunas.sort();
+        let apagado = match (linha, colunas.is_empty()) {
+            (Some(linha), false) => {
+                let lista = colunas.iter().map(|(_, c)| format!("\"{}\"", c.replace('"', ""))).collect::<Vec<_>>();
+                let chave: Option<String> = conn
+                    .query_row(
+                        &format!(
+                            "SELECT json_array({}) FROM \"{}\" WHERE rowid = ?1",
+                            lista.join(", "),
+                            tabela.replace('"', "")
+                        ),
+                        [linha],
+                        |l| l.get(0),
+                    )
+                    .optional()?;
+                match chave {
+                    Some(chave) => conn
+                        .query_row(
+                            "SELECT operacao FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
+                            params![pai, chave],
+                            |l| l.get::<_, String>(0),
+                        )
+                        .optional()?
+                        .is_some_and(|op| op == "apagar"),
+                    None => false,
+                }
+            }
+            _ => false,
+        };
+        if apagado {
+            r.quebradas += 1;
+        } else {
+            r.esperando += 1;
+        }
+    }
+    Ok(r)
+}
+
+/// Quanto tempo uma referência pode esperar dados antes de virar problema.
+const ESPERA_MAXIMA_HORAS: i64 = 24;
+
+/// Grava o resultado da conferência para a tela. O que espera há mais de
+/// `ESPERA_MAXIMA_HORAS` também passa a contar como problema (os dados não
+/// vão mais chegar sozinhos: o outro caixa foi reinstalado, por exemplo).
+pub fn registrar_referencias(conn: &Connection) -> Resultado<Referencias> {
+    let mut r = conferir_referencias(conn)?;
+    let desde = config::ler(conn, "sync_pendencias_desde")?.unwrap_or_default();
+    if r.esperando == 0 {
+        if !desde.is_empty() {
+            config::gravar(conn, "sync_pendencias_desde", "")?;
+        }
+    } else if desde.is_empty() {
+        config::gravar(conn, "sync_pendencias_desde", &tempo::agora())?;
+    } else {
+        let horas: i64 = conn
+            .query_row("SELECT CAST((julianday('now') - julianday(?1)) * 24 AS INTEGER)", [&desde], |l| {
+                l.get::<_, Option<i64>>(0)
+            })?
+            .unwrap_or(0);
+        if horas >= ESPERA_MAXIMA_HORAS {
+            r.quebradas += r.esperando;
+            r.esperando = 0;
+        }
+    }
+    config::gravar(conn, "sync_pendencias", &r.esperando.to_string())?;
+    config::gravar(conn, "sync_quebradas", &r.quebradas.to_string())?;
+    Ok(r)
+}
+
 /// Apaga do log as versões velhas de cada registro (fica a mais nova, que é
 /// a que vale). Devolve quantas apagou. Pode rodar a qualquer hora: quem
 /// pedir depois recebe só a versão que vale.
@@ -1030,6 +1129,61 @@ fn cifrar(chaves: &Chaves, dados: &[u8]) -> Resultado<Vec<u8>> {
     Ok(saida)
 }
 
+/// R-09: um pacote com um sal nunca visto obriga a uma conta cara (Argon2)
+/// antes de saber se a senha confere. Para ninguém na rede ocupar o caixa
+/// mandando sais aleatórios, só `SAIS_NOVOS_POR_MINUTO` contas dessas por
+/// minuto (somando UDP e TCP); os sais que já deram certo ficam guardados e
+/// não gastam nada. A conta do próprio sal não entra aqui.
+const SAIS_NOVOS_POR_MINUTO: u32 = 10;
+const SAIS_GUARDADOS: usize = 64;
+
+struct Porteiro {
+    inicio: Instant,
+    usados: u32,
+}
+
+impl Porteiro {
+    /// Pode fazer mais uma conta agora?
+    fn permitir(&mut self, agora: Instant) -> bool {
+        if agora.duration_since(self.inicio) >= Duration::from_secs(60) {
+            self.inicio = agora;
+            self.usados = 0;
+        }
+        if self.usados >= SAIS_NOVOS_POR_MINUTO {
+            return false;
+        }
+        self.usados += 1;
+        true
+    }
+}
+
+/// Pode fazer mais uma conta cara agora? No programa, um limite só para
+/// todas as tarefas; nos testes, um por tarefa (os testes rodam juntos e um
+/// não pode gastar o limite do outro).
+fn pode_contar() -> bool {
+    #[cfg(not(test))]
+    {
+        static P: std::sync::OnceLock<Mutex<Porteiro>> = std::sync::OnceLock::new();
+        P.get_or_init(|| Mutex::new(Porteiro { inicio: Instant::now(), usados: 0 }))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .permitir(Instant::now())
+    }
+    #[cfg(test)]
+    {
+        thread_local! {
+            static P: std::cell::RefCell<Porteiro> = std::cell::RefCell::new(Porteiro { inicio: Instant::now(), usados: 0 });
+        }
+        P.with(|p| p.borrow_mut().permitir(Instant::now()))
+    }
+}
+
+/// Chaves dos outros caixas que já conferiram (sal e senha certos).
+fn conhecidos() -> &'static CacheChaves {
+    static C: std::sync::OnceLock<CacheChaves> = std::sync::OnceLock::new();
+    C.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Erro quando o outro caixa fala outra versão (ou a senha não confere).
 fn decifrar(chaves: &Chaves, dados: &[u8]) -> Result<Vec<u8>, &'static str> {
     if dados.len() < 4 + 16 + 12 + 16 || &dados[..4] != MAGICA {
@@ -1037,12 +1191,38 @@ fn decifrar(chaves: &Chaves, dados: &[u8]) -> Result<Vec<u8>, &'static str> {
     }
     let mut sal = [0u8; 16];
     sal.copy_from_slice(&dados[4..20]);
-    let chave =
-        if sal == chaves.sal { chaves.propria } else { derivar(&chaves.senha, &sal).map_err(|_| "chave inválida")? };
-    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| "chave inválida")?;
     let mut nonce = [0u8; 12];
     nonce.copy_from_slice(&dados[20..32]);
-    cifra.decrypt(&nonce.into(), &dados[32..]).map_err(|_| "A senha da rede não confere com a deste caixa.")
+    let abrir = |chave: &[u8; 32]| -> Option<Vec<u8>> {
+        let cifra = ChaCha20Poly1305::new_from_slice(chave).ok()?;
+        cifra.decrypt(&nonce.into(), &dados[32..]).ok()
+    };
+    let senha_errada = "A senha da rede não confere com a deste caixa.";
+    if sal == chaves.sal {
+        return abrir(&chaves.propria).ok_or(senha_errada);
+    }
+    let id: [u8; 32] = Sha256::digest(chaves.senha.as_bytes()).into();
+    let guardada = conhecidos().lock().unwrap_or_else(|e| e.into_inner()).get(&(id, sal)).copied();
+    if let Some(k) = guardada {
+        return abrir(&k).ok_or(senha_errada);
+    }
+    if !pode_contar() {
+        return Err("Muitos pedidos de outros aparelhos agora; a troca de dados tenta de novo em instantes.");
+    }
+    let mut k = [0u8; 32];
+    crate::usuarios::argon2()
+        .hash_password_into(chaves.senha.as_bytes(), &sal, &mut k)
+        .map_err(|_| "chave inválida")?;
+    let claro = abrir(&k).ok_or(senha_errada)?;
+    // Só guarda depois de conferir: sal inventado nunca ocupa lugar.
+    let mut c = conhecidos().lock().unwrap_or_else(|e| e.into_inner());
+    if c.len() >= SAIS_GUARDADOS {
+        if let Some(qualquer) = c.keys().next().copied() {
+            c.remove(&qualquer);
+        }
+    }
+    c.insert((id, sal), k);
+    Ok(claro)
 }
 
 fn enviar(fluxo: &mut TcpStream, chaves: &Chaves, v: &Value) -> Resultado<()> {
@@ -1207,6 +1387,16 @@ fn atender(caminho: &Path, mut fluxo: TcpStream) -> Resultado<()> {
 
 /// Puxa de um endereço tudo o que há de novo. Devolve (dispositivo, quantas novas).
 pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(String, usize)> {
+    puxar_ate(caminho, endereco, porta_local, None)
+}
+
+/// Como `puxar`, mas para entre um lote e outro se pedirem (fechar o programa).
+fn puxar_ate(
+    caminho: &Path,
+    endereco: &str,
+    porta_local: u16,
+    parar: Option<&AtomicBool>,
+) -> Resultado<(String, usize)> {
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let mut conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
@@ -1274,13 +1464,12 @@ pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(Str
             "UPDATE sync_par SET sincronizado_em = ?2, erro = ?3 WHERE dispositivo = ?1",
             params![dispositivo, tempo::agora(), aviso],
         )?;
-        if !resposta["temMais"].as_bool().unwrap_or(false) {
+        if !resposta["temMais"].as_bool().unwrap_or(false) || parar.is_some_and(|p| p.load(Ordering::SeqCst)) {
             break;
         }
     }
     // Depois de tudo: algum registro ficou apontando para outro que não veio?
-    let faltam = pendencias(&conn)?;
-    config::gravar(&conn, "sync_pendencias", &faltam.to_string())?;
+    registrar_referencias(&conn)?;
     if total > 0 {
         crate::usuarios::resolver_nomes_repetidos(&conn)?;
         verificar_depois(&conn)?;
@@ -1291,28 +1480,61 @@ pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(Str
 /// O motor da sincronização: três tarefas em segundo plano (servidor,
 /// anúncio/escuta na rede e puxada periódica). Fica parado enquanto a
 /// sincronização estiver desligada nas configurações.
+///
+/// R-06: as tarefas são guardadas e, ao encerrar, o motor espera todas
+/// terminarem (inclusive os atendimentos em andamento) antes de devolver.
 pub struct Motor {
     parar: Arc<AtomicBool>,
+    tarefas: Vec<thread::JoinHandle<()>>,
 }
 
 impl Drop for Motor {
     fn drop(&mut self) {
-        self.parar.store(true, Ordering::Relaxed);
+        self.encerrar(Duration::from_secs(45));
+    }
+}
+
+/// Dorme aos pouquinhos, acordando logo se pedirem para parar.
+fn cochilar(parar: &AtomicBool, tempo: Duration) {
+    let fim = Instant::now() + tempo;
+    while !parar.load(Ordering::SeqCst) && Instant::now() < fim {
+        thread::sleep(Duration::from_millis(100));
     }
 }
 
 impl Motor {
+    /// Pede para parar e espera as tarefas até o prazo. true = todas
+    /// terminaram (ninguém mais usa o banco). Pode ser chamado de novo.
+    pub fn encerrar(&mut self, prazo: Duration) -> bool {
+        self.parar.store(true, Ordering::SeqCst);
+        let fim = Instant::now() + prazo;
+        while self.tarefas.iter().any(|t| !t.is_finished()) && Instant::now() < fim {
+            thread::sleep(Duration::from_millis(50));
+        }
+        let (prontas, presas): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.tarefas).into_iter().partition(|t| t.is_finished());
+        for t in prontas {
+            let _ = t.join();
+        }
+        let ok = presas.is_empty();
+        self.tarefas = presas;
+        ok
+    }
+
     pub fn iniciar(caminho: PathBuf, porta_tcp: u16, porta_udp: u16) -> Motor {
         let parar = Arc::new(AtomicBool::new(false));
+        let mut tarefas = Vec::new();
 
         // 1. Servidor: atende os outros caixas.
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
-            thread::spawn(move || {
+            tarefas.push(thread::spawn(move || {
                 let Ok(ouvinte) = TcpListener::bind(("0.0.0.0", porta_tcp)) else { return };
                 ouvinte.set_nonblocking(true).ok();
-                while !parar.load(Ordering::Relaxed) {
+                let mut atendendo: Vec<thread::JoinHandle<()>> = Vec::new();
+                while !parar.load(Ordering::SeqCst) {
+                    atendendo.retain(|t| !t.is_finished());
                     match ouvinte.accept() {
                         Ok((fluxo, _)) => {
                             // Muitas conexões ao mesmo tempo: as de sobra são fechadas.
@@ -1331,37 +1553,56 @@ impl Motor {
                                 }
                             });
                             // Sem tarefa nova, a vaga já voltou (ela foi junto e caiu).
-                            if let Err(e) = tarefa {
-                                crate::registro::anotar(&format!("sync: não abriu tarefa: {e}"));
+                            match tarefa {
+                                Ok(t) => atendendo.push(t),
+                                Err(e) => crate::registro::anotar(&format!("sync: não abriu tarefa: {e}")),
                             }
                         }
                         Err(_) => thread::sleep(Duration::from_millis(200)),
                     }
                 }
-            });
+                // Parou de aceitar; espera quem já estava sendo atendido (cada
+                // conexão tem prazo de leitura e escrita, então termina).
+                drop(ouvinte);
+                for t in atendendo {
+                    let _ = t.join();
+                }
+            }));
         }
 
         // 2. Descoberta: anuncia este caixa e escuta os outros (UDP).
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
-            thread::spawn(move || {
+            tarefas.push(thread::spawn(move || {
                 let Ok(socket) = UdpSocket::bind(("0.0.0.0", porta_udp)) else { return };
                 socket.set_broadcast(true).ok();
                 socket.set_read_timeout(Some(Duration::from_secs(1))).ok();
                 let mut ultimo_anuncio = Instant::now() - Duration::from_secs(60);
                 let mut buf = vec![0u8; 2048];
-                while !parar.load(Ordering::Relaxed) {
+                while !parar.load(Ordering::SeqCst) {
                     let Ok(conn) = abrir_conexao(&caminho) else {
-                        thread::sleep(Duration::from_secs(5));
+                        cochilar(&parar, Duration::from_secs(5));
                         continue;
                     };
-                    let Ok(a) = ajustes(&conn) else { continue };
+                    let Ok(a) = ajustes(&conn) else {
+                        cochilar(&parar, Duration::from_secs(1));
+                        continue;
+                    };
                     if !a.ligado || a.senha.is_empty() {
-                        thread::sleep(Duration::from_secs(3));
+                        cochilar(&parar, Duration::from_secs(3));
                         continue;
                     }
-                    let Ok(k) = Chaves::de(&conn, &a.senha) else { continue };
+                    // Gravações deste laço (sal novo, par visto) respeitam a
+                    // pausa da restauração de backup, como as outras tarefas.
+                    let chaves = {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        Chaves::de(&conn, &a.senha)
+                    };
+                    let Ok(k) = chaves else {
+                        cochilar(&parar, Duration::from_secs(1));
+                        continue;
+                    };
                     if ultimo_anuncio.elapsed() > Duration::from_secs(10) {
                         let ola = json!({ "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_tcp });
                         if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
@@ -1370,11 +1611,14 @@ impl Motor {
                         ultimo_anuncio = Instant::now();
                     }
                     if let Ok((n, origem)) = socket.recv_from(&mut buf) {
+                        // R-09: sal desconhecido só passa pela conta cara
+                        // (Argon2) poucas vezes por minuto (veja `decifrar`).
                         if let Ok(claro) = decifrar(&k, &buf[..n]) {
                             if let Ok(v) = serde_json::from_slice::<Value>(&claro) {
                                 let d = v["dispositivo"].as_str().unwrap_or_default();
                                 let porta = v["porta"].as_u64().unwrap_or(PORTA_TCP as u64);
                                 if !d.is_empty() && d != a.dispositivo {
+                                    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
                                     let _ = registrar_par(
                                         &conn,
                                         d,
@@ -1386,16 +1630,19 @@ impl Motor {
                         }
                     }
                 }
-            });
+            }));
         }
 
         // 3. Puxada: a cada 4 segundos, pede o que há de novo a cada caixa.
         {
             let parar = parar.clone();
-            thread::spawn(move || {
+            tarefas.push(thread::spawn(move || {
                 let mut ultima_limpeza = Instant::now() - Duration::from_secs(50 * 60);
-                while !parar.load(Ordering::Relaxed) {
-                    thread::sleep(Duration::from_secs(4));
+                while !parar.load(Ordering::SeqCst) {
+                    cochilar(&parar, Duration::from_secs(4));
+                    if parar.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let Ok(conn) = abrir_conexao(&caminho) else { continue };
                     if ultima_limpeza.elapsed() > Duration::from_secs(60 * 60) {
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
@@ -1420,7 +1667,11 @@ impl Motor {
                     }
                     drop(conn);
                     for alvo in alvos {
-                        if let Err(e) = puxar(&caminho, &alvo, porta_tcp) {
+                        if parar.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        if let Err(e) = puxar_ate(&caminho, &alvo, porta_tcp, Some(&parar)) {
+                            let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
                             if let Ok(conn) = abrir_conexao(&caminho) {
                                 let _ = conn.execute(
                                     "UPDATE sync_par SET erro = ?2 WHERE endereco = ?1",
@@ -1430,10 +1681,10 @@ impl Motor {
                         }
                     }
                 }
-            });
+            }));
         }
 
-        Motor { parar }
+        Motor { parar, tarefas }
     }
 }
 
@@ -1532,6 +1783,212 @@ mod testes {
 
         // o caixa 1 conheceu o caixa 2 quando foi procurado por ele
         assert!(pares(&b1.conn).unwrap().iter().any(|x| x.nome == "Caixa 2"));
+    }
+
+    /// R-09: rajada de pacotes com sais inventados não faz mais que
+    /// `SAIS_NOVOS_POR_MINUTO` contas caras; o caixa conhecido continua
+    /// entrando (o sal dele já está guardado) e o próprio sal não gasta.
+    #[test]
+    fn rajada_de_sais_inventados() {
+        let b = Banco::em_memoria().unwrap();
+        let k1 = Chaves::de(&b.conn, "senha-da-loja").unwrap();
+        // Um caixa de verdade conversa antes da rajada.
+        let sal_bom = [7u8; 16];
+        let k2 = Chaves {
+            senha: "senha-da-loja".into(),
+            sal: sal_bom,
+            propria: derivar("senha-da-loja", &sal_bom).unwrap(),
+        };
+        let m_bom = cifrar(&k2, b"ola").unwrap();
+        assert_eq!(decifrar(&k1, &m_bom).unwrap(), b"ola");
+        // Rajada: 300 pacotes com sais aleatórios.
+        let inicio = Instant::now();
+        let mut recusados = 0;
+        for i in 0..300u32 {
+            let mut p = MAGICA.to_vec();
+            let mut sal = [0u8; 16];
+            sal[..4].copy_from_slice(&i.to_be_bytes());
+            sal[4] = 0xAB;
+            p.extend(sal);
+            p.extend([0u8; 12]);
+            p.extend([1u8; 40]);
+            if decifrar(&k1, &p).unwrap_err().contains("Muitos pedidos") {
+                recusados += 1;
+            }
+        }
+        // Só as primeiras fizeram a conta (o caixa bom gastou uma).
+        assert_eq!(recusados, 300 - (SAIS_NOVOS_POR_MINUTO as usize - 1));
+        // Bem menos que 300 contas de Argon2 (cada uma leva dezenas de ms).
+        assert!(inicio.elapsed() < Duration::from_secs(20), "{:?}", inicio.elapsed());
+        // O caixa conhecido e o próprio caixa continuam funcionando.
+        assert_eq!(decifrar(&k1, &cifrar(&k2, b"de novo").unwrap()).unwrap(), b"de novo");
+        assert_eq!(decifrar(&k1, &cifrar(&k1, b"eu").unwrap()).unwrap(), b"eu");
+        // E o limite volta depois de um minuto.
+        let mut p = Porteiro { inicio: Instant::now(), usados: SAIS_NOVOS_POR_MINUTO };
+        assert!(!p.permitir(Instant::now()));
+        assert!(p.permitir(Instant::now() + Duration::from_secs(61)));
+    }
+
+    /// R-06: ao encerrar, o motor espera a conexão que está sendo atendida
+    /// (mesmo lenta) antes de devolver; com prazo curto demais, avisa que
+    /// ainda tem tarefa rodando (e o serviço não solta a trava).
+    #[test]
+    fn encerrar_espera_as_tarefas() {
+        let c = temp("encerrar");
+        let b = Banco::abrir(&c).unwrap();
+        salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+        drop(b);
+        let (pt, pu) = (47940, 47941);
+        // Sem nenhuma conexão: encerra logo.
+        let mut m = Motor::iniciar(c.clone(), pt, pu);
+        thread::sleep(Duration::from_millis(300));
+        let t = Instant::now();
+        assert!(m.encerrar(Duration::from_secs(10)));
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+        drop(m);
+        thread::sleep(Duration::from_millis(300));
+        // Com um caixa lento conectado (não manda nada).
+        let mut m = Motor::iniciar(c.clone(), pt, pu);
+        thread::sleep(Duration::from_millis(400));
+        let lento = TcpStream::connect(("127.0.0.1", pt)).unwrap();
+        thread::sleep(Duration::from_millis(500));
+        // Prazo curto: ainda há tarefa (o atendimento espera até 5 s).
+        assert!(!m.encerrar(Duration::from_millis(200)));
+        // Prazo bom: espera o atendimento acabar.
+        let t = Instant::now();
+        assert!(m.encerrar(Duration::from_secs(20)));
+        assert!(t.elapsed() > Duration::from_secs(2), "esperou o atendimento: {:?}", t.elapsed());
+        assert!(m.tarefas.is_empty());
+        drop(lento);
+    }
+
+    /// R-05: filho antes do pai espera; pai apagado é problema; espera longa
+    /// vira problema; quando o pai chega, some. Nada é apagado.
+    #[test]
+    fn referencias_esperando_e_quebradas() {
+        let b = Banco::em_memoria().unwrap();
+        let sem_gatilho = |sql: &str| {
+            b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+            b.conn.pragma_update(None, "foreign_keys", false).unwrap();
+            b.conn.execute(sql, []).unwrap();
+            b.conn.pragma_update(None, "foreign_keys", true).unwrap();
+            b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+        };
+        assert_eq!(registrar_referencias(&b.conn).unwrap(), Referencias::default());
+        // Filho chegou antes do pai.
+        sem_gatilho("INSERT INTO produto_aplicacao (id, produto_id) VALUES ('ap1', 'peca-que-vem')");
+        assert_eq!(registrar_referencias(&b.conn).unwrap(), Referencias { esperando: 1, quebradas: 0 });
+        // Outro filho, de um pai que foi apagado (o log diz).
+        sem_gatilho("INSERT INTO produto_aplicacao (id, produto_id) VALUES ('ap2', 'peca-apagada')");
+        b.conn
+            .execute(
+                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
+                 VALUES ('01a00000-0000-7000-8000-000000000001', 'produto', json_array('peca-apagada'), 'apagar', NULL, 'outro', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(registrar_referencias(&b.conn).unwrap(), Referencias { esperando: 1, quebradas: 1 });
+        // Esperando há mais de 24 h: vira problema também.
+        config::gravar(&b.conn, "sync_pendencias_desde", "2020-01-01T00:00:00").unwrap();
+        assert_eq!(registrar_referencias(&b.conn).unwrap(), Referencias { esperando: 0, quebradas: 2 });
+        assert_eq!(config::ler(&b.conn, "sync_quebradas").unwrap().as_deref(), Some("2"));
+        // O pai que faltava chega: a espera some e o relógio zera.
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let mut f = produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Peça".into();
+        f.custo = "1".into();
+        let pid = produtos::salvar(&b.conn, &b.dispositivo, &u.id, &f).unwrap();
+        sem_gatilho(&format!("UPDATE produto_aplicacao SET produto_id = '{pid}' WHERE id = 'ap1'"));
+        config::gravar(&b.conn, "sync_pendencias_desde", "").unwrap();
+        assert_eq!(registrar_referencias(&b.conn).unwrap(), Referencias { esperando: 0, quebradas: 1 });
+        // Nada foi apagado para esconder.
+        let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto_aplicacao", [], |l| l.get(0)).unwrap();
+        assert_eq!(n, 2);
+        // A faixa do Início avisa.
+        assert!(crate::avisos::do_dia(&b.conn).unwrap().iter().any(|a| a.id == "referencias"));
+    }
+
+    /// R-08: a mesma alteração em vários caixas, com relógios desajustados
+    /// (um 10 min adiantado, outro 1 dia atrasado), chegando em qualquer
+    /// ordem e repetida: todos terminam iguais (vale a de id mais novo).
+    #[test]
+    fn qualquer_ordem_termina_igual() {
+        fn id(ms: i64, n: u32) -> String {
+            format!("{:08x}-{:04x}-7000-8000-{:012x}", ms >> 16, ms & 0xffff, n)
+        }
+        let t: i64 = 1_790_000_000_000;
+        let versao = |n: u32, ms: i64, disp: &str, base: Option<&str>, nome: &str| Alteracao {
+            seq: n as i64,
+            id: id(ms, n),
+            tabela: "categoria".into(),
+            chave: r#"["cat1"]"#.into(),
+            operacao: "gravar".into(),
+            dados: Some(
+                json!({ "id": "cat1", "nome": nome, "tipo": "despesa", "ordem": 0, "ativo": 1, "atualizado_em": "x" })
+                    .to_string(),
+            ),
+            dispositivo: disp.into(),
+            quando: "x".into(),
+            base: base.map(String::from),
+        };
+        let v1 = versao(1, t, "A", None, "Luz");
+        let v2 = versao(2, t + 10 * 60_000, "B", Some(&v1.id), "Luz e água");
+        let v3 = versao(3, t - 24 * 60 * 60_000 + 60_000, "C", Some(&v1.id), "Energia");
+        let todas = [v1.clone(), v2.clone(), v3.clone(), v2.clone()];
+        // Todas as ordens possíveis (24) das 4 entregas.
+        let mut ordens = vec![vec![]];
+        for _ in 0..4 {
+            let mut novas = Vec::new();
+            for o in &ordens {
+                for i in 0..4 {
+                    if !o.contains(&i) {
+                        let mut n = o.clone();
+                        n.push(i);
+                        novas.push(n);
+                    }
+                }
+            }
+            ordens = novas;
+        }
+        assert_eq!(ordens.len(), 24);
+        for o in ordens {
+            let mut b = Banco::em_memoria().unwrap();
+            for i in &o {
+                aplicar(&mut b.conn, std::slice::from_ref(&todas[*i])).unwrap();
+            }
+            let nome: String =
+                b.conn.query_row("SELECT nome FROM categoria WHERE id = 'cat1'", [], |l| l.get(0)).unwrap();
+            assert_eq!(nome, "Luz e água", "ordem {o:?}");
+            let n: i64 = b
+                .conn
+                .query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'categoria'", [], |l| l.get(0))
+                .unwrap();
+            assert_eq!(n, 3, "repetida não duplica (ordem {o:?})");
+        }
+        // Relógio atrasado: um caixa mexeu DEPOIS de ver a nossa versão, mas
+        // o id dele ficou mais velho. A nossa vale (id mais novo) e o gerente
+        // é avisado, com a versão que perdeu guardada.
+        let mut b = Banco::em_memoria().unwrap();
+        let meu = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+        aplicar(&mut b.conn, std::slice::from_ref(&v1)).unwrap();
+        let mut local = versao(4, t + 20 * 60_000, &meu, Some(&v1.id), "Luz (nossa)");
+        local.dispositivo = meu.clone();
+        b.conn
+            .execute(
+                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base)
+                 VALUES (?1, 'categoria', ?2, 'gravar', ?3, ?4, 'x', ?5)",
+                params![local.id, local.chave, local.dados, meu, local.base],
+            )
+            .unwrap();
+        let atrasado = versao(5, t + 15 * 60_000, "D", Some(&local.id), "Luz (dele, relógio atrasado)");
+        aplicar(&mut b.conn, std::slice::from_ref(&atrasado)).unwrap();
+        let abertos: i64 = b
+            .conn
+            .query_row("SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(abertos, 1, "o gerente vê a diferença");
+        let guardada: String = b.conn.query_row("SELECT dados_perdeu FROM sync_conflito", [], |l| l.get(0)).unwrap();
+        assert!(guardada.contains("relógio atrasado"));
     }
 
     #[test]

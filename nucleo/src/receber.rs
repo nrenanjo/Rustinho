@@ -274,7 +274,7 @@ pub fn avisos_venda(conn: &Connection, cliente_id: &str, valor: i64) -> Resultad
         avisos.push(format!("Tem R$ {} vencido desde {}.", s.vencido, s.vencido_desde));
     }
     if let Some(limite) = s.v_limite {
-        if s.v_em_aberto + valor > limite {
+        if numeros::soma([s.v_em_aberto, valor])? > limite {
             avisos.push(format!("Passa do limite de crédito (limite R$ {}, já deve R$ {}).", s.limite, s.em_aberto));
         }
     }
@@ -797,10 +797,10 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
             0
         }
     };
-    if desconto > saldo + juros {
+    if desconto > numeros::soma([saldo, juros])? {
         falhou(&mut falha, "desconto", "O desconto é maior que a dívida.".into());
     }
-    let total = (saldo + juros - desconto).max(0);
+    let total = numeros::soma([saldo, juros, -desconto])?.max(0);
     let recebido = match numeros::ler_dinheiro(&e.valor) {
         Ok(Some(v)) if v > 0 => v,
         Ok(Some(_)) => {
@@ -824,7 +824,7 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
             ),
         );
     }
-    let principal = (recebido - juros + desconto).clamp(0, saldo);
+    let principal = numeros::soma([recebido, -juros, desconto])?.clamp(0, saldo);
     let troco = (recebido - total).max(0);
     let mut resta = principal;
     let mut abates = Vec::new();

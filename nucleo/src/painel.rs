@@ -396,7 +396,7 @@ fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linh
     }
     let (_, vendas) = somar(conn, de, ate)?;
     somas.sort_by_key(|s| std::cmp::Reverse(s.1));
-    let total: i64 = somas.iter().map(|s| s.1).sum();
+    let total = numeros::soma(somas.iter().map(|s| s.1))?;
     let maior = somas.first().map(|s| s.1).unwrap_or(0);
     let linhas = somas
         .into_iter()
@@ -433,7 +433,7 @@ fn pecas_periodo(conn: &Connection, de: &str, ate: &str, limite: i64) -> Resulta
             Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
         })?
         .collect::<Result<_, _>>()?;
-    let total: i64 = linhas.iter().map(|l| l.4).sum();
+    let total = numeros::soma(linhas.iter().map(|l| l.4))?;
     let maior = linhas.first().map(|l| l.4).unwrap_or(0);
     Ok(linhas
         .into_iter()
@@ -460,7 +460,7 @@ fn vendedores_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<Vec<L
     let linhas: Vec<(String, i64, i64)> = c
         .query_map(params![de, ate, utc_desde(de)], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
         .collect::<Result<_, _>>()?;
-    let total: i64 = linhas.iter().map(|l| l.2).sum();
+    let total = numeros::soma(linhas.iter().map(|l| l.2))?;
     let maior = linhas.first().map(|l| l.2).unwrap_or(0);
     Ok(linhas
         .into_iter()
@@ -635,8 +635,8 @@ pub fn fornecedores(conn: &Connection, dias: i64) -> Resultado<Fornecedores> {
             Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?))
         })?
         .collect::<Result<_, _>>()?;
-    let total: i64 = linhas.iter().map(|l| l.4).sum();
-    let notas: i64 = linhas.iter().map(|l| l.3).sum();
+    let total = numeros::soma(linhas.iter().map(|l| l.4))?;
+    let notas = numeros::soma(linhas.iter().map(|l| l.3))?;
     let maior = linhas.first().map(|l| l.4).unwrap_or(0);
     let mut itens = Vec::new();
     let n = linhas.len() as i64;

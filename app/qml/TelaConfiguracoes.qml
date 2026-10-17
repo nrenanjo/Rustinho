@@ -757,6 +757,17 @@ FocusScope {
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
+                    Text {
+                        visible: !!tela.sync && tela.sync.quebradas > 0
+                        text: tela.sync ? tela.sync.quebradas + (tela.sync.quebradas === 1 ? " registro aponta" : " registros apontam")
+                                          + " para algo que foi apagado em um caixa ou que não chegou em 24 horas. Nada foi apagado por isso."
+                                          + " Confira se todos os caixas estão ligados e com a mesma versão; se continuar, chame quem cuida do sistema." : ""
+                        color: Tema.vermelho
+                        font.family: Tema.texto
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                 }
 
                 // ---------------- Gerente ----------------

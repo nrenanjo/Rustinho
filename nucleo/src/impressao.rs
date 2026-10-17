@@ -142,7 +142,11 @@ pub fn venda(conn: &Connection, id: &str) -> Resultado<String> {
         h.push_str(&format!(
             "<p style=\"margin-bottom:8pt\">Cliente: <b>{}</b>{}</p>",
             escapar(&v.cliente),
-            if v.cliente_documento.is_empty() { String::new() } else { format!(" · {}", v.cliente_documento) }
+            if v.cliente_documento.is_empty() {
+                String::new()
+            } else {
+                format!(" · {}", escapar(&v.cliente_documento))
+            }
         ));
     }
     h.push_str(&tabela_itens(conn, &v.itens, config::ligado(conn, "imprimir_local")?)?);
@@ -206,7 +210,7 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<String> {
     h.push_str(&format!(
         "<p style=\"margin-bottom:8pt\">Recebemos de <b>{}</b>{} a quantia de <b>R$ {}</b> ({}), referente a:</p>",
         escapar(&r.cliente),
-        if r.cliente_documento.is_empty() { String::new() } else { format!(" ({})", r.cliente_documento) },
+        if r.cliente_documento.is_empty() { String::new() } else { format!(" ({})", escapar(&r.cliente_documento)) },
         r.valor,
         escapar(&r.forma)
     ));
@@ -253,7 +257,7 @@ pub fn extrato(conn: &Connection, cliente_id: &str) -> Resultado<String> {
     h.push_str(&format!(
         "<h1>Extrato do crediário</h1><p><b>{}</b>{} · em {}</p>",
         escapar(&c.nome),
-        if c.documento.is_empty() { String::new() } else { format!(" · {}", c.documento) },
+        if c.documento.is_empty() { String::new() } else { format!(" · {}", escapar(&c.documento)) },
         hoje
     ));
     if c.parcelas.is_empty() {
@@ -516,7 +520,7 @@ pub fn ordem_servico(conn: &Connection, id: &str) -> Resultado<String> {
         o.criado_em,
         escapar(&o.caixa),
         if o.mecanico.is_empty() { String::new() } else { format!(" · mecânico: {}", escapar(&o.mecanico)) },
-        if o.previsao.is_empty() { String::new() } else { format!(" · <b>previsão: {}</b>", o.previsao) }
+        if o.previsao.is_empty() { String::new() } else { format!(" · <b>previsão: {}</b>", escapar(&o.previsao)) }
     ));
     h.push_str(&format!(
         "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"6\" style=\"margin:6pt 0 8pt 0; background-color:#EFE5D1\"><tr>

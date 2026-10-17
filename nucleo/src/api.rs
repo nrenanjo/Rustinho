@@ -165,7 +165,6 @@ pub const SO_LEITURA: &[&str] = &[
     "painel_clientes",
     "painel_fornecedores",
     "painel_pagamentos",
-    "estoque_dias",
     "estoque_mais_vendidos",
     "estoque_parados",
     "estoque_sugestao",
@@ -199,6 +198,8 @@ pub const SO_LEITURA: &[&str] = &[
 /// gerente estão em `acao_do_comando`). Um comando novo que não esteja em
 /// nenhuma lista faz o teste `todo_comando_tem_permissao` falhar.
 pub const DO_CAIXA: &[&str] = &[
+    // R-04: grava os dias escolhidos na tela de reposição.
+    "estoque_dias",
     "gerente_liberar",
     "gerente_encerrar",
     "computador_salvar",
@@ -298,15 +299,45 @@ fn travar(caminho: &Path) -> Resultado<std::fs::File> {
         .write(true)
         .open(std::path::PathBuf::from(nome))
         .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta dos dados: {e}")))?;
-    match f.try_lock() {
-        Ok(()) => Ok(f),
+    resultado_da_trava(f.try_lock())?;
+    Ok(f)
+}
+
+/// R-07: sem a trava, não abre. Seguir sem ela deixaria dois Rustinhos
+/// gravando no mesmo banco (pasta de rede sem trava, falta de permissão...).
+fn resultado_da_trava(r: Result<(), std::fs::TryLockError>) -> Resultado<()> {
+    match r {
+        Ok(()) => Ok(()),
         Err(std::fs::TryLockError::WouldBlock) => Err(Erro::validacao(
             "O Rustinho já está aberto neste computador (talvez em outra janela). Use o que já está aberto.",
         )),
         Err(std::fs::TryLockError::Error(e)) => {
-            // Sistema de arquivos sem trava (pasta de rede): segue sem ela.
             crate::registro::anotar(&format!("trava do banco: {e}"));
-            Ok(f)
+            Err(Erro::validacao(
+                "Não deu para garantir que só um Rustinho use estes dados: a pasta não aceita trava \
+                 (pasta de rede ou sem permissão). Guarde os dados numa pasta deste computador.",
+            ))
+        }
+    }
+}
+
+/// Quanto esperar as tarefas da sincronização terminarem ao fechar (as
+/// conexões têm prazo de no máximo uns 45 s).
+const PRAZO_PARA_ENCERRAR: Duration = Duration::from_secs(45);
+
+impl Drop for Servico {
+    /// R-06: primeiro para a sincronização e espera as tarefas que usam o
+    /// banco; só depois a trava é solta. Se alguma não terminar no prazo, a
+    /// trava fica presa até o programa fechar: outro Rustinho neste banco é
+    /// recusado em vez de gravar junto.
+    fn drop(&mut self) {
+        if let Some(mut m) = self._motor.take() {
+            if !m.encerrar(PRAZO_PARA_ENCERRAR) {
+                crate::registro::anotar("sync: tarefas não terminaram no prazo; a trava fica até fechar");
+                if let Some(t) = self._trava.take() {
+                    std::mem::forget(t);
+                }
+            }
         }
     }
 }
@@ -317,11 +348,18 @@ impl Servico {
     /// outro aberto estragaria o que ele estivesse gravando).
     pub fn abrir(caminho: &Path) -> Resultado<Servico> {
         if let Some(pasta) = caminho.parent() {
-            crate::registro::iniciar(pasta);
             std::fs::create_dir_all(pasta).ok();
+            crate::arquivos::so_do_usuario(pasta);
+            crate::registro::iniciar(pasta);
         }
         let trava = travar(caminho)?;
         let mut s = Self::com_banco(Banco::abrir(caminho)?);
+        // O banco e os arquivos que o SQLite cria ao lado: só do usuário.
+        for fim in ["", "-wal", "-shm", ".trava"] {
+            let mut nome = caminho.as_os_str().to_owned();
+            nome.push(fim);
+            crate::arquivos::so_do_usuario(Path::new(&nome));
+        }
         s._trava = Some(trava);
         s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), sync::PORTA_TCP, sync::PORTA_UDP));
         Ok(s)
@@ -1573,6 +1611,7 @@ impl Servico {
             "porta": sync::PORTA_TCP,
             "usuarios": usuarios::quantidade(conn)?,
             "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
+            "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
         }))
     }
 
@@ -2254,6 +2293,61 @@ mod testes {
         assert_eq!(chamar(&mut novo, "__teste_panico", r#"{"onde":"nenhum"}"#)["ok"], true);
     }
 
+    /// R-04: nenhum comando "só leitura" grava no banco, com entradas de
+    /// todo tipo (vazias, ids de verdade, ids que não existem). Depois de um
+    /// pânico, quem grava (como `estoque_dias`) é recusado.
+    #[test]
+    fn so_leitura_nao_grava() {
+        let mut s = conectado();
+        let ok = |s: &mut Servico, c: &str, d: Value| -> Value {
+            let r = chamar(s, c, &d.to_string());
+            assert_eq!(r["ok"], true, "{c}: {r}");
+            r["dados"].clone()
+        };
+        // Uma loja com um pouco de tudo.
+        let mut f = ok(&mut s, "produto_novo", json!({}));
+        f["nome"] = json!("Pastilha");
+        f["custo"] = json!("40");
+        f["estoqueInicial"] = json!("5");
+        let pid = ok(&mut s, "produto_salvar", f)["id"].as_str().unwrap().to_string();
+        let mut p = ok(&mut s, "pessoa_nova", json!({}));
+        p["nome"] = json!("Cliente Teste");
+        let cid = ok(&mut s, "pessoa_salvar", p)["id"].as_str().unwrap_or_default().to_string();
+        ok(&mut s, "caixa_abrir", json!({ "valor": "50" }));
+        let itens = json!([{ "produtoId": pid, "quantidade": "1" }]);
+        ok(
+            &mut s,
+            "venda_concluir",
+            json!({ "itens": itens, "tabela": 1, "pagamentos": [{ "forma": "dinheiro", "valor": "100" }] }),
+        );
+        let entradas = [
+            json!({}),
+            json!({ "id": pid, "produtoId": pid, "pessoaId": cid, "clienteId": cid, "texto": "", "codigo": "1",
+                    "dias": "30", "qual": "compra", "ordem": "valor", "itens": itens, "tabela": 1,
+                    "quantidade": "1", "valor": "1", "acao": "backup", "placa": "ABC1D23" }),
+            json!({ "id": cid, "texto": "Pas", "dias": "90", "qual": "parado", "pagina": 1 }),
+            json!({ "id": "nao-existe", "dias": "x", "qual": "?", "itens": "não é lista" }),
+        ];
+        for c in SO_LEITURA {
+            for d in &entradas {
+                let antes = s.banco.conn.total_changes();
+                let _ = s.chamar(c, &d.to_string());
+                let depois = s.banco.conn.total_changes();
+                assert_eq!(antes, depois, "\"{c}\" é só leitura mas gravou no banco (entrada {d})");
+            }
+        }
+        // Depois de um pânico: estoque_dias e as outras gravações recusadas,
+        // e o banco fica igual.
+        assert_eq!(chamar(&mut s, "__teste_panico", r#"{"onde":"antes_do_commit"}"#)["ok"], false);
+        assert!(s.comprometido);
+        let antes = s.banco.conn.total_changes();
+        for c in DO_CAIXA.iter().filter(|c| !matches!(**c, "gerente_encerrar")) {
+            let r = chamar(&mut s, c, r#"{"qual":"compra","dias":"45"}"#);
+            assert_eq!(r["ok"], false, "{c} gravou depois do pânico");
+        }
+        assert_eq!(antes, s.banco.conn.total_changes());
+    }
+
     /// C-12: um segundo Rustinho no mesmo banco é recusado; ao fechar o
     /// primeiro, abre.
     #[test]
@@ -2265,6 +2359,40 @@ mod testes {
         assert!(e.contains("já está aberto"), "{e}");
         drop(t1);
         assert!(travar(&caminho).is_ok());
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-07: qualquer falha da trava recusa abrir (não segue sem ela).
+    #[test]
+    fn trava_que_falha_recusa() {
+        assert!(resultado_da_trava(Ok(())).is_ok());
+        let e = resultado_da_trava(Err(std::fs::TryLockError::WouldBlock)).unwrap_err().to_string();
+        assert!(e.contains("já está aberto"));
+        for tipo in [std::io::ErrorKind::Unsupported, std::io::ErrorKind::PermissionDenied, std::io::ErrorKind::Other] {
+            let e = resultado_da_trava(Err(std::fs::TryLockError::Error(std::io::Error::from(tipo))))
+                .unwrap_err()
+                .to_string();
+            assert!(e.contains("não aceita trava"), "{e}");
+        }
+    }
+
+    /// Sunda: a pasta dos dados, o banco e o registro ficam só para o
+    /// usuário do computador.
+    #[cfg(unix)]
+    #[test]
+    fn dados_so_do_usuario() {
+        use std::os::unix::fs::PermissionsExt;
+        let pasta = std::env::temp_dir().join(format!("rustinho-perm-{}", crate::tempo::novo_id()));
+        let caminho = pasta.join("rustinho.db");
+        let modo = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        {
+            let mut s = Servico::abrir(&caminho).unwrap();
+            let _ = s.chamar("estado", "");
+            crate::registro::anotar("teste de permissão");
+            assert_eq!(modo(&pasta), 0o700);
+            assert_eq!(modo(&caminho), 0o600);
+            assert_eq!(modo(&pasta.join("registro")), 0o700);
+        }
         let _ = std::fs::remove_dir_all(&pasta);
     }
 

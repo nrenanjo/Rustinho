@@ -194,7 +194,10 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
     let emissao = {
         let dh = texto(ide, "dhEmi");
         let dh = if dh.is_empty() { texto(ide, "dEmi") } else { dh };
-        dh.chars().take(10).collect::<String>()
+        match data_do_xml(&dh) {
+            Some(d) => d.to_string(),
+            None => return Err("A data de emissão da nota está em formato inválido.".into()),
+        }
     };
 
     let emitente = pessoa_do_grupo(filho(inf, "emit"), "enderEmit");
@@ -215,7 +218,7 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
                 c
             }
         };
-        let icms_st = dinheiro(icms, "vICMSST")? + dinheiro(icms, "vFCPST")?;
+        let icms_st = somar_xml(dinheiro(icms, "vICMSST")?, dinheiro(icms, "vFCPST")?)?;
         let ipi = imposto.and_then(|i| filho(i, "IPI")).and_then(|i| filho(i, "IPITrib"));
         let pis = imposto.and_then(|i| filho(i, "PIS")).and_then(|i| i.children().find(|n| n.is_element()));
         let gtin = {
@@ -295,10 +298,36 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         desconto: dinheiro(tot, "vDesc")?,
         outras: dinheiro(tot, "vOutro")?,
         ipi: dinheiro(tot, "vIPI")?,
-        icms_st: dinheiro(tot, "vST")? + dinheiro(tot, "vFCPST")?,
+        icms_st: somar_xml(dinheiro(tot, "vST")?, dinheiro(tot, "vFCPST")?)?,
         total: dinheiro(tot, "vNF")?,
         duplicatas,
     })
+}
+
+/// Soma de dois valores da nota, com o limite comum (R-10).
+fn somar_xml(a: i64, b: i64) -> Result<i64, String> {
+    crate::numeros::somar([a, b]).ok_or_else(|| "Um valor da nota é grande demais.".to_string())
+}
+
+/// Início "AAAA-MM-DD" de uma data do XML (com ou sem hora e fuso), só com
+/// algarismos ASCII e mês/dia possíveis. Qualquer outra coisa: `None`.
+/// Nunca fatia texto sem conferir antes (R-02).
+pub fn data_do_xml(t: &str) -> Option<&str> {
+    let b = t.as_bytes();
+    if b.len() < 10 || (b.len() > 10 && b[10] != b'T') {
+        return None;
+    }
+    let algarismos = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
+    if !(algarismos(0..4) && b[4] == b'-' && algarismos(5..7) && b[7] == b'-' && algarismos(8..10)) {
+        return None;
+    }
+    // Daqui em diante os 10 primeiros bytes são ASCII: fatiar é seguro.
+    let mes: u32 = t[5..7].parse().ok()?;
+    let dia: u32 = t[8..10].parse().ok()?;
+    if !(1..=12).contains(&mes) || !(1..=31).contains(&dia) {
+        return None;
+    }
+    Some(&t[..10])
 }
 
 /// Dígito verificador da chave de acesso (módulo 11, pesos 2 a 9).
@@ -345,7 +374,11 @@ fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
             dh
         }
     };
-    let aamm = if emissao.len() >= 7 { format!("{}{}", &emissao[2..4], &emissao[5..7]) } else { String::new() };
+    // R-02: a data vem de fora; só a usa se for AAAA-MM-DD em ASCII.
+    let Some(data) = data_do_xml(&emissao) else {
+        return "a data de emissão está em formato inválido".into();
+    };
+    let aamm = format!("{}{}", &data[2..4], &data[5..7]);
     let com_zeros = |t: String, n: usize| if t.is_empty() { t } else { format!("{t:0>n$}") };
     let partes = [
         ("UF", 0..2, texto(ide, "cUF")),
@@ -431,5 +464,43 @@ mod testes {
         assert!(ler("isto não é xml").is_err());
         assert!(ler("<cteProc><CTe><infCte/></CTe></cteProc>").unwrap_err().contains("CT-e"));
         assert!(ler("<resNFe><chNFe>1</chNFe></resNFe>").unwrap_err().contains("resumo"));
+    }
+
+    #[test]
+    fn data_malformada_nao_derruba() {
+        // R-02: datas boas, com e sem hora e fuso.
+        assert_eq!(data_do_xml("2026-10-08"), Some("2026-10-08"));
+        assert_eq!(data_do_xml("2026-10-08T12:37:46-03:00"), Some("2026-10-08"));
+        // Ruins: vazia, curta, letras, separador errado, mês/dia impossíveis,
+        // e Unicode de vários bytes justamente nas posições fatiadas.
+        for d in [
+            "",
+            "2026",
+            "2026-10",
+            "abcd-ef-gh",
+            "2026/10/08",
+            "2026-13-01",
+            "2026-00-10",
+            "2026-10-32",
+            "2026-10-08X",
+            "2ç26-10-08",
+            "20é6-10-08",
+            "2026-1ã-08",
+            "2026-10-0€",
+            "€€€€€€€",
+            "2026-10-08 12:00",
+        ] {
+            assert_eq!(data_do_xml(d), None, "{d}");
+        }
+        // Na nota inteira: erro de validação, nunca pânico.
+        for d in ["20ã6-10-08T10:00:00-03:00", "1ç", "x"] {
+            let xml = EXEMPLO.replace(
+                &EXEMPLO[EXEMPLO.find("<dhEmi>").unwrap()..EXEMPLO.find("</dhEmi>").unwrap()],
+                &format!("<dhEmi>{d}"),
+            );
+            let r = std::panic::catch_unwind(|| ler(&xml));
+            let r = r.expect("não pode dar pânico");
+            assert!(r.unwrap_err().contains("data de emissão"), "{d}");
+        }
     }
 }

@@ -575,7 +575,7 @@ pub struct Resumo {
 }
 
 pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
-    let total: i64 = contas(conn, false)?.iter().map(|c| c.v_saldo).sum();
+    let total = numeros::soma(contas(conn, false)?.iter().map(|c| c.v_saldo))?;
     let p = pagar::painel(conn, "", "nenhuma")?;
     Ok(Resumo {
         saldo_contas: numeros::escrever_dinheiro(total),
@@ -746,7 +746,7 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     realizado.reverse();
 
     // ---- Previsto ----
-    let saldo_hoje: i64 = contas(conn, false)?.iter().map(|c| c.v_saldo).sum();
+    let saldo_hoje = numeros::soma(contas(conn, false)?.iter().map(|c| c.v_saldo))?;
     let fim = iso(ler_iso(&hoje)? + Duration::days(dias.clamp(1, 180)));
     let (atr_receber, atr_pagar): (i64, i64) = (
         conn.query_row(
@@ -883,6 +883,44 @@ mod testes {
         cli.nome = "Oficina do Zé".into();
         let cliente = pessoas::salvar(c, d, &u, &cli).unwrap();
         Loja { b, u, banco, peca, cliente }
+    }
+
+    /// R-10: conta enorme + juros enormes passam do máximo: erro de
+    /// validação, sem pânico e sem gravar nada.
+    #[test]
+    fn juros_que_estouram_sao_recusados() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        let ids = pagar::lancar(
+            c,
+            d,
+            u,
+            &LancamentoEntrada {
+                descricao: "Conta enorme".into(),
+                categoria_id: "cat-aluguel".into(),
+                valor: "99.999.999.999".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let antes = c.total_changes();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pagar::pagar(
+                c,
+                d,
+                u,
+                &PagamentoEntrada {
+                    conta_id: ids[0].clone(),
+                    juros: "99.999.999.999".into(),
+                    forma: "pix".into(),
+                    origem: l.banco.clone(),
+                    ..Default::default()
+                },
+            )
+        }))
+        .expect("não pode dar pânico");
+        assert!(r.unwrap_err().to_string().contains("grande demais"));
+        assert_eq!(antes, c.total_changes(), "nada gravado");
     }
 
     fn saldo_de(l: &Loja, conta: &str) -> String {

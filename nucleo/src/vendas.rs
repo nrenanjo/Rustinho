@@ -478,8 +478,14 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     )
     .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;
     let troco = (pago - total).max(0);
-    let quantidade_itens =
-        numeros::somar(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade)).unwrap_or(i64::MAX);
+    let quantidade_itens = numeros::soma(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade))?;
+    let em_cheque = numeros::soma(
+        e.pagamentos
+            .iter()
+            .filter(|p| p.forma == "cheque")
+            .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
+    )?;
+    let v_desconto = numeros::soma([desconto, desconto_itens])?;
     let cliente = if !e.cliente_id.is_empty() {
         conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&e.cliente_id], |l| l.get(0))
             .optional()?
@@ -508,17 +514,9 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         erro_desconto,
         cliente,
         crediario: calcular_crediario(conn, e)?,
-        cheques: calcular_cheques(
-            conn,
-            e.pagamentos
-                .iter()
-                .filter(|p| p.forma == "cheque")
-                .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).max(0))
-                .sum(),
-            &e.cheques,
-        )?,
+        cheques: calcular_cheques(conn, em_cheque, &e.cheques)?,
         v_subtotal: subtotal,
-        v_desconto: desconto + desconto_itens,
+        v_desconto,
         v_total: total,
         v_pago: pago,
         v_troco: troco,
@@ -573,10 +571,10 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
             if p.vale_id.is_empty() {
                 return Err(Erro::campo(&format!("pagamentos.{i}"), "Escolha qual vale-troca o cliente está usando."));
             }
-            let usado: i64 =
-                pagamentos.iter().filter(|x| x.2.as_deref() == Some(p.vale_id.as_str())).map(|x| x.1).sum();
+            let usado =
+                numeros::soma(pagamentos.iter().filter(|x| x.2.as_deref() == Some(p.vale_id.as_str())).map(|x| x.1))?;
             let saldo = crate::devolucoes::saldo_vale(conn, &p.vale_id)?;
-            if usado + valor > saldo {
+            if numeros::soma([usado, valor])? > saldo {
                 return Err(Erro::campo(
                     &format!("pagamentos.{i}"),
                     format!("Este vale-troca só tem R$ {}.", numeros::escrever_dinheiro((saldo - usado).max(0))),
@@ -597,7 +595,7 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
             format!("Faltam {} para fechar a venda.", numeros::escrever_dinheiro(c.v_total - c.v_pago)),
         ));
     }
-    let dinheiro: i64 = pagamentos.iter().filter(|p| p.0 == "dinheiro").map(|p| p.1).sum();
+    let dinheiro = numeros::soma(pagamentos.iter().filter(|p| p.0 == "dinheiro").map(|p| p.1))?;
     if c.v_troco > dinheiro {
         return Err(Erro::campo("pagamentos", "Pagamento a mais só em dinheiro (para dar troco)."));
     }
