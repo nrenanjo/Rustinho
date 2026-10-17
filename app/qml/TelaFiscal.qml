@@ -50,6 +50,9 @@ FocusScope {
     }
 
     function salvarRegras() {
+        janela.comGerente("configuracoes", salvarRegrasAgora)
+    }
+    function salvarRegrasAgora() {
         const lista = []
         for (let i = 0; i < regras.count; i++) {
             const g = regras.get(i)

@@ -34,7 +34,7 @@ FocusScope {
     function cancelar() {
         motivo.texto = ""
         motivo.erro = ""
-        caixaCancelar.open()
+        janela.comGerente("cancelar_venda", () => caixaCancelar.open())
     }
 
     ColumnLayout {

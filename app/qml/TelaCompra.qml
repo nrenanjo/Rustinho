@@ -92,7 +92,7 @@ FocusScope {
     function estornar() {
         motivoEstorno.texto = ""
         motivoEstorno.erro = ""
-        caixaEstorno.open()
+        janela.comGerente("estornar", () => caixaEstorno.open())
     }
 
     function descartar() {

@@ -76,7 +76,13 @@ ApplicationWindow {
     }
 
     function abrir(tela, propriedades) {
-        pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {})
+        // Telas do gerente: pede a senha dele se quem está usando é caixa.
+        const acao = ({ TelaFinanceiro: "financeiro", TelaUsuarios: "usuarios" })[tela]
+        const empurrar = () => pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {})
+        if (acao)
+            comGerente(acao, empurrar, true)
+        else
+            empurrar()
     }
 
     function voltar() {
@@ -127,6 +133,32 @@ ApplicationWindow {
         if (t)
             abrir(t[0], t[1])
     }
+
+    // Funções que a loja deixou só para o gerente. Se quem está usando é
+    // caixa, pede a senha de um gerente na hora ("aperto") e depois faz.
+    // tela = true: vale enquanto a tela estiver aberta (Financeiro, Usuários);
+    // senão, vale para essa ação só.
+    readonly property var nomesDasAcoes: ({
+        cancelar_venda: "Cancelar venda", estornar: "Estornar", ajustar_estoque: "Ajustar estoque",
+        backup: "Backup", configuracoes: "Configurações da loja", usuarios: "Usuários",
+        financeiro: "Financeiro", gerente: "Gerente"
+    })
+    function podeGerente(acao) {
+        const r = Api.chamar("permissao", { acao: acao })
+        return r.ok && r.dados.pode
+    }
+    function comGerente(acao, depois, tela) {
+        if (podeGerente(acao)) {
+            depois()
+            return
+        }
+        pedirGerente.pedir(nomesDasAcoes[acao] || "", !tela, depois)
+    }
+    // Ao sair de uma tela do gerente aberta com a senha dele.
+    function encerrarGerente() {
+        Api.chamar("gerente_encerrar")
+    }
+    PedirGerente { id: pedirGerente }
 
     function avisar(texto, tipo) {
         aviso.mostrar(texto, tipo)

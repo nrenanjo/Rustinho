@@ -53,6 +53,9 @@ Painel {
     }
 
     function cadastrar() {
+        janela.comGerente("configuracoes", cadastrarAgora)
+    }
+    function cadastrarAgora() {
         trabalhando = true
         Qt.callLater(() => {
             const r = Api.chamar("importar_cadastros", {

@@ -4,7 +4,6 @@
 //! Resposta de sucesso: `{"ok": true, "dados": ...}`
 //! Resposta de erro:    `{"ok": false, "erro": "mensagem", "campo": "nome"}`
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -23,26 +22,68 @@ use crate::{
 pub const VERSAO: &str = env!("CARGO_PKG_VERSION");
 
 const TENTATIVAS_MAXIMAS: u32 = 5;
-const ESPERA_APOS_ERROS: Duration = Duration::from_secs(30);
+/// Segundos de espera depois de muitas senhas erradas seguidas.
+const ESPERA_APOS_ERROS: i64 = 30;
+/// Quanto tempo vale a senha do gerente digitada no "aperto": numa tela do
+/// gerente, renova a cada uso; numa ação só, acaba depois de poucos minutos.
+const LIBERACAO: Duration = Duration::from_secs(15 * 60);
+const LIBERACAO_CURTA: Duration = Duration::from_secs(3 * 60);
+
+/// O que pode ficar só para o gerente. Na pílula Gerente das Configurações,
+/// cada uma tem uma marca de sim/não (de fábrica, todas ligadas).
+pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
+    ("cancelar_venda", "Cancelar venda"),
+    ("estornar", "Estornar recebimentos, pagamentos, compras e trocas"),
+    ("ajustar_estoque", "Ajustar o estoque"),
+    ("backup", "Backup e restaurar"),
+    ("configuracoes", "Configurações da loja"),
+    ("usuarios", "Usuários"),
+    ("financeiro", "Financeiro: contas a pagar, contas da loja, cheques e comissões"),
+];
+
+/// Qual ação do gerente cada comando precisa.
+fn acao_do_comando(comando: &str) -> Option<&'static str> {
+    Some(match comando {
+        "venda_cancelar" => "cancelar_venda",
+        "compra_estornar" | "recebimento_estornar" | "pagamento_estornar" | "movimento_estornar" | "devolucao_desfazer"
+        | "cheque_desfazer" | "conta_cancelar" => "estornar",
+        "estoque_ajustar" => "ajustar_estoque",
+        "backup_ler" | "backup_salvar" | "backup_agora" | "backup_conectar_drive" | "backup_desligar_drive"
+        | "backup_nuvem_lista" | "backup_conferir" | "backup_restaurar" => "backup",
+        "config_salvar" | "sync_salvar" | "fiscal_regras_salvar" | "importar_cadastros" => "configuracoes",
+        "usuario_salvar" => "usuarios",
+        "financeiro_resumo" | "pagar_painel" | "pagar_ficha" | "pagar_previa" | "pagar_lancar" | "pagar_alterar"
+        | "pagar_cancelar" | "pagar_pagar" | "pagar_formas" | "conta_loja_salvar" | "conta_loja_extrato"
+        | "movimento_lancar" | "transferir" | "conta_loja_conferir" | "categorias" | "categoria_salvar" | "fluxo_caixa"
+        | "cheques_painel" | "cheque_depositar" | "cheque_repassar" | "cheque_devolver" | "comissoes"
+        | "comissao_fechar" | "comissao_reabrir" => "financeiro",
+        // A própria pílula Gerente: sempre só o gerente.
+        "gerente_ler" | "gerente_salvar" => "gerente",
+        _ => return None,
+    })
+}
 
 /// Quem está usando o Rustinho agora.
 #[derive(Debug, Clone)]
 struct Sessao {
     usuario_id: String,
     nome: String,
+    gerente: bool,
 }
 
-/// Senhas erradas seguidas de um usuário.
-struct Falhas {
-    quantidade: u32,
-    ultima: Instant,
+/// Senha do gerente digitada na hora, para um caixa fazer algo do gerente.
+struct Liberacao {
+    ate: Instant,
+    /// Numa tela do gerente (Financeiro...) renova a cada uso; numa ação
+    /// só (cancelar uma venda), vale poucos minutos e acaba.
+    renova: bool,
 }
 
 /// O serviço que a interface usa. Guarda o banco e a sessão.
 pub struct Servico {
     banco: Banco,
     sessao: Option<Sessao>,
-    falhas: HashMap<String, Falhas>,
+    liberacao: Option<Liberacao>,
     /// Sincronização com os outros caixas (só com banco em arquivo).
     _motor: Option<sync::Motor>,
 }
@@ -64,7 +105,7 @@ impl Servico {
         Servico {
             banco,
             sessao: None,
-            falhas: HashMap::new(),
+            liberacao: None,
             _motor: None,
         }
     }
@@ -142,6 +183,7 @@ impl Servico {
                 _ => Ok(json!({ "feito": false })),
             },
             "sair" => {
+                self.liberacao = None;
                 if let Some(s) = self.sessao.take() {
                     auditoria::registrar(
                         &self.banco.conn,
@@ -166,15 +208,130 @@ impl Servico {
             }
             // Daqui para baixo, só com alguém conectado.
             _ => {
+                self.sessao()?;
+                // O papel pode ter mudado em outro caixa.
+                self.atualizar_sessao()?;
                 let sessao = self.sessao()?.clone();
                 self.executar_conectado(comando, dados, &sessao)
             }
         }
     }
 
+    /// Pode fazer esta ação do gerente? (gerente, ação liberada para todos na
+    /// loja, ou senha do gerente digitada há pouco.)
+    fn pode(&mut self, acao: &str, sessao: &Sessao) -> Resultado<bool> {
+        if sessao.gerente {
+            return Ok(true);
+        }
+        if acao != "gerente" && acoes_livres(&self.banco.conn)?.iter().any(|a| a == acao) {
+            return Ok(true);
+        }
+        if let Some(l) = self.liberacao.as_mut() {
+            if Instant::now() < l.ate {
+                if l.renova {
+                    l.ate = Instant::now() + LIBERACAO;
+                }
+                return Ok(true);
+            }
+            self.liberacao = None;
+        }
+        Ok(false)
+    }
+
+    fn exigir(&mut self, acao: &str, sessao: &Sessao) -> Resultado<()> {
+        if self.pode(acao, sessao)? {
+            return Ok(());
+        }
+        let nome = ACOES_DO_GERENTE
+            .iter()
+            .find(|(id, _)| *id == acao)
+            .map(|(_, n)| n.to_lowercase())
+            .unwrap_or_else(|| "isso".into());
+        Err(Erro::campo("gerente", format!("Só o gerente pode: {nome}. Peça para o gerente digitar a senha.")))
+    }
+
     fn executar_conectado(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let disp = self.banco.dispositivo.clone();
+        if let Some(acao) = acao_do_comando(comando) {
+            self.exigir(acao, sessao)?;
+        }
         match comando {
+            // ---- Gerente ----
+            "permissao" => {
+                let d: Acao = ler(dados)?;
+                Ok(json!({ "pode": self.pode(&d.acao, sessao)?, "gerente": sessao.gerente }))
+            }
+            "gerente_liberar" => {
+                let d: SenhaGerente = ler(dados)?;
+                self.esperar_se_errou("gerente")?;
+                match usuarios::conferir_gerente(&self.banco.conn, &d.senha)? {
+                    Some(g) => {
+                        usuarios::limpar_falhas(&self.banco.conn, "gerente")?;
+                        self.liberacao = Some(Liberacao {
+                            ate: Instant::now() + if d.curta { LIBERACAO_CURTA } else { LIBERACAO },
+                            renova: !d.curta,
+                        });
+                        auditoria::registrar(
+                            &self.banco.conn,
+                            &disp,
+                            Some(&sessao.usuario_id),
+                            "gerente.liberar",
+                            "usuario",
+                            &g.id,
+                            &[format!("{} liberou para {}", g.nome, sessao.nome)],
+                        )?;
+                        Ok(json!({ "nome": g.nome }))
+                    }
+                    None => {
+                        usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS)?;
+                        Err(Erro::campo("senha", "Senha do gerente errada."))
+                    }
+                }
+            }
+            "gerente_encerrar" => {
+                self.liberacao = None;
+                Ok(Value::Null)
+            }
+            "gerente_ler" => self.gerente_ler(),
+            "gerente_salvar" => {
+                let d: GerenteEntrada = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let mut detalhes = Vec::new();
+                let mut livres = Vec::new();
+                for (id, nome) in ACOES_DO_GERENTE {
+                    let so_gerente = d.acoes.get(*id).and_then(|v| v.as_bool()).unwrap_or(true);
+                    if !so_gerente {
+                        livres.push(*id);
+                    }
+                    let antes = !acoes_livres(&tx)?.iter().any(|a| a == id);
+                    if antes != so_gerente {
+                        detalhes.push(format!("{nome}: {}", if so_gerente { "só o gerente" } else { "todos" }));
+                    }
+                }
+                for (id, gerente) in d.gerentes.iter().filter_map(|(k, v)| v.as_bool().map(|b| (k, b))) {
+                    if usuarios::definir_gerente(&tx, id, gerente)? {
+                        let u = usuarios::buscar(&tx, id)?;
+                        detalhes.push(format!("{}: {}", u.nome, if gerente { "gerente" } else { "caixa" }));
+                    }
+                }
+                config::gravar(&tx, "gerente_livres", &livres.join(","))?;
+                if !detalhes.is_empty() {
+                    auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "gerente.salvar", "config", "gerente", &detalhes)?;
+                }
+                tx.commit()?;
+                self.atualizar_sessao()?;
+                self.gerente_ler()
+            }
+            // Configurações deste computador, para qualquer um.
+            "computador_salvar" => {
+                let d: Computador = ler(dados)?;
+                let caixa = texto::limpar(&d.caixa);
+                config::validar_nome_caixa(&caixa)?;
+                config::gravar(&self.banco.conn, "caixa_nome", &caixa)?;
+                config::gravar(&self.banco.conn, "imprimir_direto", if d.imprimir_direto { "1" } else { "0" })?;
+                self.config_ler()
+            }
+
             "menu" => Ok(json!(menu::menu(&self.banco.conn, &sessao.usuario_id)?)),
             "menu_usar" => {
                 let d: ItemMenu = ler(dados)?;
@@ -1070,7 +1227,7 @@ impl Servico {
             "primeiraVez": usuarios::quantidade(conn)? == 0,
             "loja": config::nome_loja(conn)?,
             "caixa": config::nome_caixa(conn)?,
-            "usuario": self.sessao.as_ref().map(|s| json!({ "id": s.usuario_id, "nome": s.nome })),
+            "usuario": self.sessao.as_ref().map(|s| json!({ "id": s.usuario_id, "nome": s.nome, "gerente": s.gerente })),
             "versao": VERSAO,
             "etapa": menu::ETAPA_ATUAL,
             "validadeOrcamento": config::validade_orcamento(conn)?,
@@ -1096,30 +1253,40 @@ impl Servico {
         config::gravar(&tx, "loja_nome", &loja)?;
         config::gravar(&tx, "caixa_nome", &caixa)?;
         let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, true)?;
+        // Quem configura a loja é o gerente.
+        usuarios::definir_gerente(&tx, &u.id, true)?;
         auditoria::registrar(&tx, &disp, Some(&u.id), "usuario.criar", "usuario", &u.id, &[])?;
         usuarios::registrar_acesso(&tx, &u.id)?;
         tx.commit()?;
+        self.liberacao = None;
         self.sessao = Some(Sessao {
             usuario_id: u.id,
             nome: u.nome,
+            gerente: true,
         });
         self.estado()
     }
 
-    fn entrar(&mut self, d: Entrada) -> Resultado<Value> {
-        if let Some(f) = self.falhas.get(&d.id) {
-            let passou = f.ultima.elapsed();
-            if f.quantidade >= TENTATIVAS_MAXIMAS && passou < ESPERA_APOS_ERROS {
-                let faltam = (ESPERA_APOS_ERROS - passou).as_secs() + 1;
+    /// Depois de muitas senhas erradas seguidas, espera um pouco (fica
+    /// guardado no banco: fechar e abrir o programa não zera).
+    fn esperar_se_errou(&self, id: &str) -> Resultado<()> {
+        if let Some((quantidade, passou)) = usuarios::falhas(&self.banco.conn, id)? {
+            if quantidade >= TENTATIVAS_MAXIMAS && passou < ESPERA_APOS_ERROS {
+                let faltam = ESPERA_APOS_ERROS - passou;
                 return Err(Erro::campo(
                     "senha",
                     format!("Muitas senhas erradas. Espere {faltam} segundos e tente de novo."),
                 ));
             }
         }
+        Ok(())
+    }
+
+    fn entrar(&mut self, d: Entrada) -> Resultado<Value> {
+        self.esperar_se_errou(&d.id)?;
         match usuarios::conferir_senha(&self.banco.conn, &d.id, &d.senha) {
             Ok(u) => {
-                self.falhas.remove(&d.id);
+                usuarios::limpar_falhas(&self.banco.conn, &d.id)?;
                 usuarios::registrar_acesso(&self.banco.conn, &u.id)?;
                 auditoria::registrar(
                     &self.banco.conn,
@@ -1130,29 +1297,57 @@ impl Servico {
                     &u.id,
                     &[],
                 )?;
+                self.liberacao = None;
                 self.sessao = Some(Sessao {
                     usuario_id: u.id,
                     nome: u.nome,
+                    gerente: u.gerente,
                 });
                 self.estado()
             }
             Err(e) => {
-                let f = self.falhas.entry(d.id.clone()).or_insert(Falhas {
-                    quantidade: 0,
-                    ultima: Instant::now(),
-                });
-                if f.ultima.elapsed() >= ESPERA_APOS_ERROS {
-                    f.quantidade = 0;
+                if e.nome_do_campo() == Some("senha") {
+                    usuarios::anotar_falha(&self.banco.conn, &d.id, ESPERA_APOS_ERROS)?;
                 }
-                f.quantidade += 1;
-                f.ultima = Instant::now();
                 Err(e)
             }
         }
     }
 
+    /// Nome e papel podem ter mudado (por este ou por outro caixa).
+    fn atualizar_sessao(&mut self) -> Resultado<()> {
+        if let Some(s) = self.sessao.as_mut() {
+            let u = usuarios::buscar(&self.banco.conn, &s.usuario_id)?;
+            s.nome = u.nome;
+            s.gerente = u.gerente;
+        }
+        Ok(())
+    }
+
+    fn gerente_ler(&self) -> Resultado<Value> {
+        let conn = &self.banco.conn;
+        let livres = acoes_livres(conn)?;
+        Ok(json!({
+            "acoes": ACOES_DO_GERENTE
+                .iter()
+                .map(|(id, nome)| json!({ "id": id, "nome": nome, "soGerente": !livres.iter().any(|a| a == id) }))
+                .collect::<Vec<_>>(),
+            "usuarios": usuarios::listar(conn, true)?
+                .into_iter()
+                .map(|u| json!({ "id": u.id, "nome": u.nome, "gerente": u.gerente }))
+                .collect::<Vec<_>>(),
+        }))
+    }
+
     fn usuario_salvar(&mut self, d: UsuarioEntrada, sessao: &Sessao) -> Resultado<Value> {
         let disp = self.banco.dispositivo.clone();
+        // Mexer na conta de um gerente (ou criar um) é sempre do gerente,
+        // mesmo com "Usuários" liberado para todos.
+        let mexe_em_gerente = d.gerente == Some(true)
+            || (!d.id.is_empty() && d.id != sessao.usuario_id && usuarios::buscar(&self.banco.conn, &d.id)?.gerente);
+        if mexe_em_gerente && !sessao.gerente && self.liberacao.as_ref().map(|l| Instant::now() >= l.ate).unwrap_or(true) {
+            return Err(Erro::campo("gerente", "Só o gerente pode mexer na conta de um gerente."));
+        }
         let tem_senha = !d.senha.is_empty() || !d.senha2.is_empty();
         if tem_senha && d.senha != d.senha2 {
             return Err(Erro::campo("senha2", "As duas senhas não são iguais."));
@@ -1164,6 +1359,9 @@ impl Servico {
             }
             let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, d.ativo)?;
             usuarios::definir_comissao(&tx, &u.id, &d.comissao)?;
+            if d.gerente == Some(true) {
+                usuarios::definir_gerente(&tx, &u.id, true)?;
+            }
             auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "usuario.criar", "usuario", &u.id, &[])?;
             usuarios::buscar(&tx, &u.id)?
         } else {
@@ -1183,6 +1381,11 @@ impl Servico {
             if let Some((a, b)) = usuarios::definir_comissao(&tx, &u.id, &d.comissao)? {
                 detalhes.push(format!("Comissão: {a} → {b}"));
             }
+            if let Some(g) = d.gerente {
+                if usuarios::definir_gerente(&tx, &u.id, g)? {
+                    detalhes.push(if g { "Agora é gerente".into() } else { "Agora é caixa".into() });
+                }
+            }
             let u = usuarios::buscar(&tx, &u.id)?;
             if !detalhes.is_empty() {
                 auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "usuario.alterar", "usuario", &u.id, &detalhes)?;
@@ -1190,12 +1393,8 @@ impl Servico {
             u
         };
         tx.commit()?;
-        if self.sessao.as_ref().map(|s| s.usuario_id == u.id).unwrap_or(false) {
-            if let Some(s) = self.sessao.as_mut() {
-                s.nome = u.nome.clone();
-            }
-        }
-        Ok(json!(u))
+        self.atualizar_sessao()?;
+        Ok(json!(usuarios::buscar(&self.banco.conn, &u.id)?))
     }
 
     fn config_ler(&self) -> Resultado<Value> {
@@ -1225,6 +1424,44 @@ impl Servico {
             "pecas": busca::total(conn, true)?,
         }))
     }
+}
+
+#[derive(Deserialize)]
+struct Acao {
+    acao: String,
+}
+
+#[derive(Deserialize)]
+struct SenhaGerente {
+    senha: String,
+    #[serde(default)]
+    curta: bool,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct GerenteEntrada {
+    /// {"cancelar_venda": true, ...}: true = só o gerente.
+    acoes: serde_json::Map<String, Value>,
+    /// {"<id do usuário>": true}: true = gerente.
+    gerentes: serde_json::Map<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Computador {
+    caixa: String,
+    imprimir_direto: bool,
+}
+
+/// Ações que a loja liberou para todos (as outras são só do gerente).
+fn acoes_livres(conn: &rusqlite::Connection) -> Resultado<Vec<String>> {
+    Ok(config::ler(conn, "gerente_livres")?
+        .unwrap_or_default()
+        .split(',')
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -1373,6 +1610,8 @@ struct UsuarioEntrada {
     senha: String,
     senha2: String,
     comissao: String,
+    /// None = não mexe no papel.
+    gerente: Option<bool>,
 }
 
 impl Default for UsuarioEntrada {
@@ -1384,6 +1623,7 @@ impl Default for UsuarioEntrada {
             senha: String::new(),
             senha2: String::new(),
             comissao: String::new(),
+            gerente: None,
         }
     }
 }

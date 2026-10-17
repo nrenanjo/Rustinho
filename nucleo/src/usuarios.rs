@@ -1,7 +1,9 @@
 //! Usuários: cadastro, senhas e entrada.
 //!
-//! Todos os usuários têm acesso a todas as funções. As senhas são guardadas
-//! só como "hash" Argon2 (não dá para descobrir a senha olhando o banco).
+//! Há dois papéis: gerente e caixa. O gerente faz tudo; o caixa não faz o
+//! que a loja deixou só para o gerente (veja `api::ACOES_DO_GERENTE`), a não
+//! ser que um gerente digite a senha na hora. As senhas são guardadas só como
+//! "hash" Argon2 (não dá para descobrir a senha olhando o banco).
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
@@ -25,6 +27,7 @@ pub struct Usuario {
     pub ultimo_acesso: Option<String>,
     /// Comissão padrão em % ("" = sem comissão).
     pub comissao: String,
+    pub gerente: bool,
 }
 
 fn de_linha(l: &rusqlite::Row) -> rusqlite::Result<Usuario> {
@@ -35,10 +38,11 @@ fn de_linha(l: &rusqlite::Row) -> rusqlite::Result<Usuario> {
         criado_em: l.get(3)?,
         ultimo_acesso: l.get(4)?,
         comissao: l.get::<_, Option<i64>>(5)?.map(crate::numeros::escrever_percentual).unwrap_or_default(),
+        gerente: l.get(6)?,
     })
 }
 
-const COLUNAS: &str = "id, nome, ativo, criado_em, ultimo_acesso, comissao";
+const COLUNAS: &str = "id, nome, ativo, criado_em, ultimo_acesso, comissao, gerente";
 
 /// Lista os usuários em ordem alfabética.
 pub fn listar(conn: &Connection, apenas_ativos: bool) -> Resultado<Vec<Usuario>> {
@@ -91,6 +95,12 @@ pub fn alterar(conn: &Connection, id: &str, nome: &str, ativo: bool, nova_senha:
             return Err(Erro::campo(
                 "ativo",
                 "Este é o único usuário ativo. Crie outro antes de desativar este.",
+            ));
+        }
+        if atual.gerente && gerentes_ativos_alem(conn, id)? == 0 {
+            return Err(Erro::campo(
+                "ativo",
+                "Este é o único gerente. Faça outro usuário gerente antes de desativar este.",
             ));
         }
     }
@@ -149,6 +159,111 @@ pub fn registrar_acesso(conn: &Connection, id: &str) -> Resultado<()> {
         "UPDATE usuario SET ultimo_acesso = ?2 WHERE id = ?1",
         params![id, tempo::agora()],
     )?;
+    Ok(())
+}
+
+/// Quantos gerentes ativos existem além deste usuário.
+fn gerentes_ativos_alem(conn: &Connection, id: &str) -> Resultado<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND gerente = 1 AND id <> ?1",
+        [id],
+        |l| l.get(0),
+    )?)
+}
+
+/// Faz (ou deixa de fazer) o usuário gerente. Sempre sobra pelo menos um.
+/// Devolve true se mudou.
+pub fn definir_gerente(conn: &Connection, id: &str, gerente: bool) -> Resultado<bool> {
+    let atual = buscar(conn, id)?;
+    if atual.gerente == gerente {
+        return Ok(false);
+    }
+    if !gerente && gerentes_ativos_alem(conn, id)? == 0 {
+        return Err(Erro::campo("gerente", "A loja precisa de pelo menos um gerente."));
+    }
+    conn.execute(
+        "UPDATE usuario SET gerente = ?2, atualizado_em = ?3 WHERE id = ?1",
+        params![id, gerente, tempo::agora()],
+    )?;
+    Ok(true)
+}
+
+/// Senha de algum gerente ativo (o "aperto": o gerente digita a senha na
+/// hora, sem trocar de usuário). Devolve o gerente que confere.
+pub fn conferir_gerente(conn: &Connection, senha: &str) -> Resultado<Option<Usuario>> {
+    let mut c = conn.prepare("SELECT id, senha_hash FROM usuario WHERE ativo = 1 AND gerente = 1")?;
+    let gerentes: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    for (id, hash) in gerentes {
+        if let Ok(analisado) = PasswordHash::new(&hash) {
+            if Argon2::default().verify_password(senha.as_bytes(), &analisado).is_ok() {
+                return Ok(Some(buscar(conn, &id)?));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Depois de juntar os dados dos caixas, dois usuários podem ter ficado com o
+/// mesmo nome (criados ao mesmo tempo em caixas diferentes). O mais novo
+/// ganha um número no fim: "Maria (2)". Todos os caixas escolhem o mesmo
+/// usuário e o mesmo nome, então o resultado é igual em todos.
+pub fn resolver_nomes_repetidos(conn: &Connection) -> Resultado<usize> {
+    let mut c = conn.prepare("SELECT id, nome FROM usuario ORDER BY criado_em, id")?;
+    let todos: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    let mut usados: Vec<String> = Vec::new();
+    let mut mudados = 0;
+    for (id, nome) in todos {
+        let mut final_ = nome.clone();
+        let mut n = 2;
+        while usados.contains(&texto::normalizar(&final_)) {
+            let base: String = nome.chars().take(34).collect();
+            final_ = format!("{} ({n})", base.trim_end());
+            n += 1;
+        }
+        usados.push(texto::normalizar(&final_));
+        if final_ != nome {
+            conn.execute(
+                "UPDATE usuario SET nome = ?2, atualizado_em = ?3 WHERE id = ?1",
+                params![id, final_, tempo::agora()],
+            )?;
+            mudados += 1;
+        }
+    }
+    Ok(mudados)
+}
+
+fn segundos_agora() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Quantas senhas erradas seguidas e há quantos segundos foi a última.
+pub fn falhas(conn: &Connection, id: &str) -> Resultado<Option<(u32, i64)>> {
+    let r: Option<(i64, i64)> = conn
+        .query_row("SELECT quantidade, ultima FROM entrada_falha WHERE usuario_id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
+        .optional()?;
+    Ok(r.map(|(q, u)| (q.clamp(0, u32::MAX as i64) as u32, (segundos_agora() - u).max(0))))
+}
+
+/// Anota mais uma senha errada. Depois de `espera` segundos, recomeça do 1.
+pub fn anotar_falha(conn: &Connection, id: &str, espera: i64) -> Resultado<()> {
+    let agora = segundos_agora();
+    conn.execute(
+        "INSERT INTO entrada_falha (usuario_id, quantidade, ultima) VALUES (?1, 1, ?2)
+         ON CONFLICT(usuario_id) DO UPDATE SET
+             quantidade = CASE WHEN ?2 - ultima >= ?3 OR ?2 < ultima THEN 1 ELSE quantidade + 1 END,
+             ultima = ?2",
+        params![id, agora, espera],
+    )?;
+    Ok(())
+}
+
+pub fn limpar_falhas(conn: &Connection, id: &str) -> Resultado<()> {
+    conn.execute("DELETE FROM entrada_falha WHERE usuario_id = ?1", [id])?;
     Ok(())
 }
 
@@ -225,6 +340,51 @@ mod testes {
         assert!(alterar(&b.conn, &u.id, "Maria", false, None).is_ok());
         assert!(conferir_senha(&b.conn, &u.id, "1234").is_err());
         assert!(conferir_senha(&b.conn, &outro.id, "1234").is_ok());
+    }
+
+    #[test]
+    fn primeiro_usuario_e_gerente_e_sempre_sobra_um() {
+        let b = Banco::em_memoria().unwrap();
+        let g = criar(&b.conn, &b.dispositivo, "Renan", "1234", true).unwrap();
+        definir_gerente(&b.conn, &g.id, true).unwrap();
+        let c = criar(&b.conn, &b.dispositivo, "Luigi", "5678", true).unwrap();
+        assert!(!c.gerente);
+        assert!(definir_gerente(&b.conn, &g.id, false).is_err());
+        assert!(alterar(&b.conn, &g.id, "Renan", false, None).is_err());
+        assert_eq!(conferir_gerente(&b.conn, "1234").unwrap().unwrap().id, g.id);
+        assert!(conferir_gerente(&b.conn, "5678").unwrap().is_none());
+        definir_gerente(&b.conn, &c.id, true).unwrap();
+        assert!(definir_gerente(&b.conn, &g.id, false).unwrap());
+    }
+
+    #[test]
+    fn nomes_repetidos_depois_de_juntar() {
+        let b = Banco::em_memoria().unwrap();
+        let a = criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        // Como se tivesse chegado de outro caixa, sem passar pela conferência.
+        b.conn
+            .execute(
+                "INSERT INTO usuario (id, nome, senha_hash, ativo, criado_em, atualizado_em, dispositivo)
+                 SELECT 'zzz', 'MARIA', senha_hash, 1, '2999-01-01', '2999-01-01', 'outro' FROM usuario WHERE id = ?1",
+                [&a.id],
+            )
+            .unwrap();
+        assert_eq!(resolver_nomes_repetidos(&b.conn).unwrap(), 1);
+        assert_eq!(buscar(&b.conn, &a.id).unwrap().nome, "Maria");
+        assert_eq!(buscar(&b.conn, "zzz").unwrap().nome, "MARIA (2)");
+        assert_eq!(resolver_nomes_repetidos(&b.conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn senhas_erradas_ficam_guardadas() {
+        let b = Banco::em_memoria().unwrap();
+        let u = criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        for _ in 0..3 {
+            anotar_falha(&b.conn, &u.id, 30).unwrap();
+        }
+        assert_eq!(falhas(&b.conn, &u.id).unwrap().unwrap().0, 3);
+        limpar_falhas(&b.conn, &u.id).unwrap();
+        assert!(falhas(&b.conn, &u.id).unwrap().is_none());
     }
 
     #[test]

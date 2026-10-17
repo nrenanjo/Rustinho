@@ -334,3 +334,78 @@ fn compra_por_zip() {
     assert!(msg.contains("Não achei"), "{msg}");
     std::fs::remove_dir_all(&pasta).ok();
 }
+
+#[test]
+fn gerente_e_caixa() {
+    let mut s = Servico::em_memoria().unwrap();
+    let estado = ok(
+        &mut s,
+        "configurar_inicio",
+        json!({ "loja": "Loja Modelo", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+    );
+    // Quem configura é o gerente.
+    assert_eq!(estado["usuario"]["gerente"], true);
+    let joao = ok(&mut s, "usuario_salvar", json!({ "nome": "João", "senha": "5678", "senha2": "5678" }));
+    assert_eq!(joao["gerente"], false);
+    let peca = ok(&mut s, "produto_salvar", rolamento());
+    let peca_id = peca["id"].as_str().unwrap().to_string();
+    ok(&mut s, "sair", json!({}));
+
+    // O caixa entra e não pode ajustar o estoque nem abrir a pílula Gerente.
+    let estado = ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "5678" }));
+    assert_eq!(estado["usuario"]["gerente"], false);
+    let ajuste = json!({ "produtoId": peca_id, "quantidade": "3", "motivo": "Contagem" });
+    assert_eq!(erro(&mut s, "estoque_ajustar", ajuste.clone()).1, "gerente");
+    assert_eq!(erro(&mut s, "gerente_ler", json!({})).1, "gerente");
+    assert_eq!(ok(&mut s, "permissao", json!({ "acao": "ajustar_estoque" }))["pode"], false);
+    // Ele não pode se fazer gerente.
+    assert_eq!(
+        erro(&mut s, "usuario_salvar", json!({ "id": joao["id"], "nome": "João", "gerente": true })).1,
+        "gerente"
+    );
+
+    // O "aperto": o gerente digita a senha na hora.
+    assert_eq!(erro(&mut s, "gerente_liberar", json!({ "senha": "5678" })).1, "senha");
+    assert_eq!(ok(&mut s, "gerente_liberar", json!({ "senha": "1234" }))["nome"], "Maria");
+    ok(&mut s, "estoque_ajustar", ajuste.clone());
+    ok(&mut s, "gerente_encerrar", json!({}));
+    assert_eq!(erro(&mut s, "estoque_ajustar", ajuste.clone()).1, "gerente");
+    ok(&mut s, "sair", json!({}));
+
+    // A gerente libera o ajuste de estoque para todos.
+    let maria = ok(&mut s, "usuarios_entrada", json!({}))
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|u| u["nome"] == "Maria")
+        .unwrap()["id"]
+        .clone();
+    ok(&mut s, "entrar", json!({ "id": maria, "senha": "1234" }));
+    let g = ok(&mut s, "gerente_salvar", json!({ "acoes": { "ajustar_estoque": false } }));
+    let ajustar = g["acoes"].as_array().unwrap().iter().find(|a| a["id"] == "ajustar_estoque").unwrap().clone();
+    assert_eq!(ajustar["soGerente"], false);
+    // Não pode ficar sem gerente.
+    assert_eq!(erro(&mut s, "gerente_salvar", json!({ "gerentes": { maria.as_str().unwrap(): false } })).1, "gerente");
+    ok(&mut s, "sair", json!({}));
+    ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "5678" }));
+    ok(&mut s, "estoque_ajustar", json!({ "produtoId": peca_id, "quantidade": "5", "motivo": "Contagem" }));
+    // Cancelar venda continua só do gerente.
+    assert_eq!(ok(&mut s, "permissao", json!({ "acao": "cancelar_venda" }))["pode"], false);
+}
+
+#[test]
+fn senhas_erradas_seguidas_esperam() {
+    let mut s = Servico::em_memoria().unwrap();
+    ok(
+        &mut s,
+        "configurar_inicio",
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+    );
+    let id = ok(&mut s, "estado", json!({}))["usuario"]["id"].clone();
+    ok(&mut s, "sair", json!({}));
+    for _ in 0..5 {
+        assert_eq!(erro(&mut s, "entrar", json!({ "id": id, "senha": "0000" })).1, "senha");
+    }
+    let (msg, _) = erro(&mut s, "entrar", json!({ "id": id, "senha": "1234" }));
+    assert!(msg.contains("Espere"), "{msg}");
+}

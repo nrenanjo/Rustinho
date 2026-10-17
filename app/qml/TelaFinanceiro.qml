@@ -8,6 +8,8 @@ import rustinho
 // escolhida nas pílulas do topo.
 FocusScope {
     id: tela
+    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+    Component.onDestruction: Api.chamar("gerente_encerrar")
     readonly property var janela: ApplicationWindow.window
     property string secao: "pagar"
     property var resumo: null

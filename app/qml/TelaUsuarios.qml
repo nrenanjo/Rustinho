@@ -6,6 +6,8 @@ import rustinho
 // Usuários: quem usa o Rustinho. Todos têm acesso a todas as funções.
 FocusScope {
     id: tela
+    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+    Component.onDestruction: Api.chamar("gerente_encerrar")
     readonly property var janela: ApplicationWindow.window
     property var usuarios: []
     property var editando: null      // usuário aberto à direita (null = novo)

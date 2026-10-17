@@ -11,7 +11,15 @@ FocusScope {
     property var config: null
     property bool alterado: false
     property string secao: "loja"
-    readonly property bool temSalvar: ["loja", "vendas", "receber", "impressao"].includes(secao)
+    readonly property bool temSalvar: ["loja", "vendas", "receber", "impressao", "gerente"].includes(secao)
+    // Gerente (ou senha do gerente digitada agora): vê as configurações da
+    // loja toda. O caixa vê só as deste computador.
+    property bool completo: false
+    property bool verBackup: false
+    property bool verGerente: false
+    property var gerente: null       // pílula Gerente: { acoes, usuarios }
+    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+    Component.onDestruction: Api.chamar("gerente_encerrar")
 
     // Exemplo do crediário: parcela de R$ 100,00 com 10 dias de atraso.
     function numero(t) {
@@ -54,10 +62,66 @@ FocusScope {
         ufLoja.modelo = [""].concat(config.ufs)
         ufLoja.indice = Math.max(0, ufLoja.modelo.indexOf(config.uf))
         tabelas.model = config.tabelas
+        if (verGerente)
+            carregarGerente()
         alterado = false
     }
 
+    function liberar() {
+        janela.comGerente("configuracoes", () => {
+            tela.completo = true
+            tela.verBackup = true
+            tela.verGerente = true
+            carregar()
+        }, true)
+    }
+
+    function carregarGerente() {
+        const r = Api.chamar("gerente_ler")
+        gerente = r.ok ? r.dados : null
+    }
+
+    function salvarGerente() {
+        const acoes = {}
+        for (const a of gerente.acoes)
+            acoes[a.id] = a.soGerente
+        const gerentes = {}
+        for (const u of gerente.usuarios)
+            gerentes[u.id] = u.gerente
+        const r = Api.chamar("gerente_salvar", { acoes: acoes, gerentes: gerentes })
+        if (r.ok) {
+            gerente = r.dados
+            alterado = false
+            janela.atualizarEstado()
+            janela.avisar("Salvo.", "ok")
+        } else {
+            janela.avisar(r.erro, "erro")
+            carregarGerente()
+        }
+    }
+
+    // Caixa: só o nome deste computador e a impressora.
+    function salvarComputador() {
+        caixa.erro = ""
+        const r = Api.chamar("computador_salvar", { caixa: caixa.texto, imprimirDireto: imprimirDireto.checked })
+        if (r.ok) {
+            janela.atualizarEstado()
+            carregar()
+            janela.avisar("Configurações salvas.", "ok")
+        } else if (r.campo === "caixa") {
+            secao = "loja"
+            caixa.erro = r.erro
+            caixa.focar()
+        } else {
+            janela.avisar(r.erro, "erro")
+        }
+    }
+
     function salvar() {
+        if (secao === "gerente")
+            return salvarGerente()
+        if (!completo)
+            return salvarComputador()
         const lista = []
         for (let i = 0; i < tabelas.count; i++) {
             const t = tabelas.itemAt(i)
@@ -202,7 +266,8 @@ FocusScope {
             sensivel: true
             titulo: "Configurações"
             subtitulo: ({
-                loja: "A loja, este computador e a sua senha",
+                loja: tela.completo ? "A loja, este computador e a sua senha" : "Este computador e a sua senha",
+                gerente: "Quem é gerente e o que só o gerente pode fazer",
                 vendas: "Tabelas de preço e orçamentos",
                 receber: "Multa e juros de quem paga atrasado",
                 impressao: "Comprovante, orçamento e impressora",
@@ -220,6 +285,13 @@ FocusScope {
                 Layout.rightMargin: 6
             }
             Botao {
+                visible: !tela.completo
+                text: "Senha do gerente"
+                tipo: "discreto"
+                icone: "pessoa"
+                onClicked: tela.liberar()
+            }
+            Botao {
                 visible: tela.temSalvar || tela.alterado
                 text: "Salvar"
                 icone: "check"
@@ -229,13 +301,18 @@ FocusScope {
         }
 
         Pilulas {
-            modelo: [
+            modelo: tela.completo ? [
                 { id: "loja", nome: "Loja" },
                 { id: "vendas", nome: "Vendas" },
                 { id: "receber", nome: "Crediário" },
                 { id: "impressao", nome: "Impressão" },
                 { id: "backup", nome: "Backup" },
                 { id: "caixas", nome: "Caixas da loja" },
+                { id: "gerente", nome: "Gerente" },
+                { id: "sobre", nome: "Sobre" }
+            ].filter(p => (p.id !== "backup" || tela.verBackup) && (p.id !== "gerente" || tela.verGerente)) : [
+                { id: "loja", nome: "Este computador" },
+                { id: "impressao", nome: "Impressão" },
                 { id: "sobre", nome: "Sobre" }
             ]
             atual: tela.secao
@@ -260,7 +337,7 @@ FocusScope {
                 // ---------------- Loja ----------------
                 Faixa {
                     visible: tela.secao === "loja"
-                    titulo: "A loja e este computador"
+                    titulo: tela.completo ? "A loja e este computador" : "Este computador"
                     color: Tema.pergaminho
                     Layout.fillWidth: true
                     Linha {
@@ -268,6 +345,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Campo {
                             id: loja
+                            visible: tela.completo
                             rotulo: "Nome da loja"
                             maximo: 80
                             Layout.fillWidth: true
@@ -282,6 +360,7 @@ FocusScope {
                         }
                     }
                     Linha {
+                        visible: tela.completo
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -308,6 +387,7 @@ FocusScope {
                         }
                     }
                     Linha {
+                        visible: tela.completo
                         spacing: 12
                         Layout.fillWidth: true
                         Campo {
@@ -551,6 +631,7 @@ FocusScope {
                     }
                     Marcar {
                         id: imprimirLocal
+                        visible: tela.completo
                         text: "Mostrar o local da peça (prateleira) no comprovante de venda"
                         onToggled: tela.alterado = true
                     }
@@ -562,7 +643,7 @@ FocusScope {
                 }
 
                 Faixa {
-                    visible: tela.secao === "impressao"
+                    visible: tela.secao === "impressao" && tela.completo
                     titulo: "Recado no pé da folha"
                     subtitulo: "opcional"
                     color: Tema.verde
@@ -657,6 +738,73 @@ FocusScope {
                     }
                 }
 
+                // ---------------- Gerente ----------------
+                Faixa {
+                    visible: tela.secao === "gerente"
+                    titulo: "Quem é gerente"
+                    subtitulo: "os outros usuários são caixa"
+                    color: Tema.pergaminho
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: tela.gerente ? tela.gerente.usuarios : []
+                        delegate: Marcar {
+                            required property var modelData
+                            required property int index
+                            text: modelData.nome
+                            checked: modelData.gerente
+                            onToggled: {
+                                tela.gerente.usuarios[index].gerente = checked
+                                tela.alterado = true
+                            }
+                        }
+                    }
+                    Nota {
+                        text: "A loja precisa de pelo menos um gerente. Quando o caixa precisar de algo do gerente, o gerente digita a senha na hora, sem trocar de usuário."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                }
+                Faixa {
+                    visible: tela.secao === "gerente"
+                    titulo: "Só o gerente pode"
+                    subtitulo: "desmarque o que o caixa também pode fazer"
+                    color: Tema.azul
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: tela.gerente ? tela.gerente.acoes : []
+                        delegate: Marcar {
+                            required property var modelData
+                            required property int index
+                            text: modelData.nome
+                            checked: modelData.soGerente
+                            onToggled: {
+                                tela.gerente.acoes[index].soGerente = checked
+                                tela.alterado = true
+                            }
+                        }
+                    }
+                }
+                Faixa {
+                    visible: tela.secao === "gerente"
+                    titulo: "Senha do gerente"
+                    color: Tema.verde
+                    corTitulo: Tema.verdeEscuro
+                    Layout.fillWidth: true
+                    Nota {
+                        text: "Cada gerente troca a própria senha em “Minha senha”. A senha precisa ter pelo menos 4 caracteres."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        text: "Trocar minha senha"
+                        tipo: "secundario"
+                        onClicked: {
+                            tela.secao = "loja"
+                            atual.focar()
+                        }
+                    }
+                }
+
                 // ---------------- Backup ----------------
                 Loader {
                     active: tela.secao === "backup"
@@ -717,5 +865,10 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: carregar()
+    Component.onCompleted: {
+        completo = janela.podeGerente("configuracoes")
+        verBackup = completo && janela.podeGerente("backup")
+        verGerente = completo && janela.podeGerente("gerente")
+        carregar()
+    }
 }

@@ -899,7 +899,7 @@ FocusScope {
                                         janela.avisar("Salve as alterações antes de ajustar o estoque.", "info")
                                         return
                                     }
-                                    ajusteEstoque.abrirCom(tela.ficha.id, tela.ficha.estoque, tela.ficha.unidade)
+                                    tela.janela.comGerente("ajustar_estoque", () => ajusteEstoque.abrirCom(tela.ficha.id, tela.ficha.estoque, tela.ficha.unidade))
                                 }
                             }
                         }

@@ -99,6 +99,7 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "estoque_dias_compra",
     "estoque_dias_parado",
     "backup_senha",
+    "gerente_livres",
 ];
 
 // ---------------------------------------------------------------------------
