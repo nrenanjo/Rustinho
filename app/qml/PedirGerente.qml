@@ -9,24 +9,23 @@ Painel {
     property string oQue: ""
     property bool curta: true
     property var depois: null
-    property string erro: ""
     width: Math.min(460, Tema.largura - 24)
 
     function pedir(oQue, curta, depois) {
         pedido.oQue = oQue
         pedido.curta = curta
         pedido.depois = depois
-        pedido.erro = ""
         senha.texto = ""
+        senha.erro = ""
         open()
         senha.focar()
     }
     function liberar() {
         const r = Api.chamar("gerente_liberar", { senha: senha.texto, curta: pedido.curta })
         if (!r.ok) {
-            erro = r.erro
-            senha.texto = ""
+            senha.erro = r.erro
             senha.focar()
+            senha.entrada.selectAll()
             return
         }
         const f = depois
@@ -49,7 +48,6 @@ Painel {
             rotulo: "Senha do gerente"
             senha: true
             maximo: 128
-            erro: pedido.erro
             Layout.fillWidth: true
             onConfirmado: pedido.liberar()
         }
