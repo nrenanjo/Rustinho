@@ -137,6 +137,8 @@ jobs:
           retention-days: 30
 
   publicar:
+    # Só a "main" publica; em outro ramo os arquivos ficam nos artefatos.
+    if: github.ref == 'refs/heads/main'
     needs: [windows, linux]
     runs-on: ubuntu-24.04
     permissions:

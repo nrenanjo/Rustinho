@@ -155,6 +155,8 @@ jobs:
   # (montar.yml); aqui os APKs entram nela, uma vez só, e só se foram
   # assinados com a chave da loja.
   publicar:
+    # Só a "main" publica; em outro ramo os arquivos ficam nos artefatos.
+    if: github.ref == 'refs/heads/main'
     needs: apk
     runs-on: ubuntu-24.04
     permissions:
