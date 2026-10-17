@@ -102,7 +102,7 @@ FocusScope {
                     Chip {
                         visible: !Tema.estreito && texto !== ""
                         texto: linha.c.deve ? "deve R$ " + Tema.valor(linha.c.deve) : ""
-                        color: linha.c.vencido ? Tema.rosa : Qt.rgba(1, 1, 1, 0.5)
+                        color: linha.c.vencido ? Tema.rosa : Tema.vela(0.5)
                         corTexto: linha.c.vencido ? Tema.vermelho : Tema.tintaSuave
                     }
                     ColumnLayout {

@@ -221,7 +221,7 @@ FocusScope {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Tema.raio
-                color: Qt.rgba(1, 1, 1, 0.28)
+                color: Tema.vela(0.28)
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -364,7 +364,7 @@ FocusScope {
                                     required property var modelData
                                     Layout.fillWidth: true
                                     radius: Tema.raioCampo
-                                    color: Qt.rgba(1, 1, 1, 0.45)
+                                    color: Tema.vela(0.45)
                                     implicitHeight: 46
                                     RowLayout {
                                         anchors.fill: parent
@@ -443,7 +443,7 @@ FocusScope {
         width: Math.min(660, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function entrada() {
@@ -613,7 +613,7 @@ FocusScope {
         width: Math.min(520, Tema.largura - 24)
         padding: 32
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 12
@@ -670,7 +670,7 @@ FocusScope {
         width: Math.min(580, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(conta) {
@@ -753,7 +753,7 @@ FocusScope {
                     }
                     Layout.fillWidth: true
                     radius: Tema.raioCampo
-                    color: sobreCliente.hovered ? Tema.azul : Qt.rgba(1, 1, 1, 0.5)
+                    color: sobreCliente.hovered ? Tema.azul : Tema.vela(0.5)
                     implicitHeight: 36
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
@@ -854,7 +854,7 @@ FocusScope {
         width: Math.min(500, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function perguntar(titulo, mensagem, textoBotao, acao) {

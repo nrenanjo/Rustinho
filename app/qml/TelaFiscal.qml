@@ -94,7 +94,7 @@ FocusScope {
                 Layout.fillWidth: true
                 implicitHeight: 40
                 radius: Tema.raioCampo
-                color: sobre.hovered ? Qt.rgba(1, 1, 1, 0.6) : Qt.rgba(1, 1, 1, 0.35)
+                color: sobre.hovered ? Tema.vela(0.6) : Tema.vela(0.35)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 12

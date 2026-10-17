@@ -14,7 +14,7 @@ Rectangle {
     readonly property bool atrasado: item.vencido !== "0,00"
     readonly property color corBase: (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
     readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.78) : Tema.tintaSuave
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
 
     radius: Tema.raio
     color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
@@ -63,7 +63,7 @@ Rectangle {
             Text {
                 visible: linha.atrasado
                 text: linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " de atraso"
-                color: linha.atual ? "#F0B8AE" : Tema.vermelho
+                color: linha.atual ? Tema.vermelhoSobre : Tema.vermelho
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 13

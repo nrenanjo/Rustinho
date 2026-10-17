@@ -344,8 +344,8 @@ FocusScope {
                                         height: tela.m.altura * folha.escala - 1
                                         radius: Math.min(width, height) * 0.18
                                         color: index + 1 === tela.inicio ? Tema.verdeEscuro
-                                               : vai ? Qt.rgba(0.31, 0.42, 0.29, 0.35)
-                                               : usada ? Qt.rgba(0.16, 0.15, 0.13, 0.08) : Qt.rgba(0.64, 0.57, 0.49, 0.28)
+                                               : vai ? Qt.rgba(Tema.verdeEscuro.r, Tema.verdeEscuro.g, Tema.verdeEscuro.b, 0.35)
+                                               : usada ? Tema.sombra(0.08) : Qt.rgba(Tema.dourado.r, Tema.dourado.g, Tema.dourado.b, 0.28)
                                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                                         TapHandler { onTapped: tela.inicio = index + 1 }
                                     }
@@ -385,7 +385,7 @@ FocusScope {
                                 Text {
                                     visible: tela.comLoja
                                     text: tela.janela ? (tela.janela.estado.loja || "").toUpperCase() : ""
-                                    color: Tema.tintaSuave
+                                    color: "#5C534A"
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: Math.max(6, 2.0 * previa.escala)
@@ -394,7 +394,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: previa.e ? previa.e.nome : ""
-                                    color: Tema.tinta
+                                    color: "#2A2622"
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: Math.max(7, (previa.mm.altura < 23 ? 2.3 : 2.7) * previa.escala)
@@ -408,7 +408,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                     Text {
                                         text: previa.e && !previa.e.semPreco ? "R$ " + previa.e.preco : ""
-                                        color: Tema.tinta
+                                        color: "#2A2622"
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
                                         font.pixelSize: (previa.mm.altura < 23 ? 3.9 : previa.mm.altura > 30 ? 6 : 4.6) * previa.escala * (tela.comBarras ? 1 : 1.25)
@@ -416,7 +416,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: previa.e ? "cód. " + previa.e.codigo : ""
-                                        color: Tema.tintaSuave
+                                        color: "#5C534A"
                                         font.family: Tema.texto
                                         font.pixelSize: Math.max(6, 2.0 * previa.escala)
                                         Layout.alignment: Qt.AlignBottom
@@ -437,7 +437,7 @@ FocusScope {
                                                 required property var modelData
                                                 width: parent.modulo
                                                 height: parent.height
-                                                color: modelData === "1" ? Tema.tinta : "transparent"
+                                                color: modelData === "1" ? "#2A2622" : "transparent"
                                             }
                                         }
                                     }

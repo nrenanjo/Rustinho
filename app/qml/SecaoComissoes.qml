@@ -175,7 +175,7 @@ FocusScope {
                         required property var modelData
                         Layout.fillWidth: true
                         radius: Tema.raioCampo
-                        color: Qt.rgba(1, 1, 1, 0.45)
+                        color: Tema.vela(0.45)
                         implicitHeight: 44
                         RowLayout {
                             anchors.fill: parent

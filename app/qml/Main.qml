@@ -25,18 +25,18 @@ ApplicationWindow {
     palette.base: Tema.papel
     palette.alternateBase: Tema.pergaminho
     palette.text: Tema.tinta
-    palette.button: "#E6DAC2"
+    palette.button: Tema.botao
     palette.buttonText: Tema.tinta
     palette.brightText: Tema.claro
     palette.highlight: Tema.azulEscuro
-    palette.highlightedText: "white"
-    palette.placeholderText: "#9A9086"
+    palette.highlightedText: Tema.claro
+    palette.placeholderText: Tema.dica
     palette.toolTipBase: Tema.tinta
     palette.toolTipText: Tema.claro
     palette.light: Tema.papel
     palette.midlight: Tema.pergaminho
-    palette.mid: "#B9AE9F"
-    palette.dark: "#8C8074"
+    palette.mid: Tema.escuro ? "#4A4239" : "#B9AE9F"
+    palette.dark: Tema.escuro ? "#6A6156" : "#8C8074"
     palette.shadow: Tema.tinta
     palette.link: Tema.azulEscuro
 
@@ -67,6 +67,7 @@ ApplicationWindow {
         const r = Api.chamar("estado")
         if (r.ok) {
             estado = r.dados
+            Tema.escuro = !!r.dados.escuro
             erroGeral = ""
         } else {
             erroGeral = r.erro

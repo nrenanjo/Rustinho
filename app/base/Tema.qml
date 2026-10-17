@@ -5,21 +5,51 @@ import QtQuick
 QtObject {
     id: tema
 
+    // ---- Modo escuro (sol = cinza de sempre, lua = preto AMOLED) ----
+    // Vale só para este aparelho; a janela principal lê e guarda a escolha.
+    property bool escuro: false
+
     // ---- Cores ----
-    readonly property color fundo: "#D6D3CD"        // cinza da página do livro
-    readonly property color pergaminho: "#EFE5D1"   // faixa ímpar
-    readonly property color azul: "#D9E2E4"         // faixa par
-    readonly property color verde: "#DFE4D6"        // faixa das palavras positivas
-    readonly property color rosa: "#EBDCD6"         // faixa das palavras negativas
-    readonly property color papel: "#F8F4EB"        // dentro dos campos
-    readonly property color tinta: "#2A2622"        // texto principal
-    readonly property color tintaSuave: "#5C534A"   // texto secundário
-    readonly property color apagado: "#857B70"      // rótulos
-    readonly property color dourado: "#A3927E"      // capitulares e detalhes
-    readonly property color verdeEscuro: "#4F6B4A"  // deu certo
-    readonly property color vermelho: "#94443A"     // erro
-    readonly property color azulEscuro: "#3E5F67"   // foco e destaques
-    readonly property color claro: "#F3EDE1"        // texto sobre fundo escuro
+    // No escuro: fundo preto absoluto, faixas com as mesmas cores bem
+    // escuras e letras claras, sempre com muito contraste para ler sem esforço.
+    readonly property color fundo: escuro ? "#000000" : "#D6D3CD"        // cinza da página do livro
+    readonly property color pergaminho: escuro ? "#28231D" : "#EFE5D1"   // faixa ímpar
+    readonly property color azul: escuro ? "#1C2629" : "#D9E2E4"         // faixa par
+    readonly property color verde: escuro ? "#1E271B" : "#DFE4D6"        // faixa das palavras positivas
+    readonly property color rosa: escuro ? "#33221E" : "#EBDCD6"         // faixa das palavras negativas
+    readonly property color amarelo: escuro ? "#332B14" : "#EFE0B8"      // "vence hoje"
+    readonly property color papel: escuro ? "#0F0D0B" : "#F8F4EB"        // dentro dos campos
+    readonly property color tinta: escuro ? "#F4EFE6" : "#2A2622"        // texto principal
+    readonly property color tintaSuave: escuro ? "#D6CEC2" : "#5C534A"   // texto secundário
+    readonly property color apagado: escuro ? "#ADA397" : "#857B70"      // rótulos
+    readonly property color dourado: escuro ? "#A8977F" : "#A3927E"      // capitulares e detalhes
+    readonly property color verdeEscuro: escuro ? "#A6CC9B" : "#4F6B4A"  // deu certo
+    readonly property color vermelho: escuro ? "#F4A498" : "#94443A"     // erro
+    readonly property color azulEscuro: escuro ? "#9CC6D0" : "#3E5F67"   // foco e destaques
+    readonly property color claro: escuro ? "#0F0D0B" : "#F3EDE1"        // texto sobre fundo "tinta"
+    // Vermelho sobre fundo "tinta" (linha escolhida com estoque baixo).
+    readonly property color vermelhoSobre: escuro ? "#8E2B20" : "#F2B8AE"
+    readonly property color rosaSobre: escuro ? "#432C27" : "#E4CFC7"
+    readonly property color dica: escuro ? "#958B7F" : "#9A9086"          // texto de exemplo nos campos
+
+    // Botão secundário (normal, mouse em cima, apertado).
+    readonly property color botao: escuro ? "#3A332B" : "#E6DAC2"
+    readonly property color botaoSobre: escuro ? "#463E34" : "#DDD0B5"
+    readonly property color botaoBaixo: escuro ? "#51483D" : "#D3C5A8"
+    // Botão principal (cor da tinta) com mouse em cima e apertado.
+    readonly property color principalSobre: escuro ? "#E0D9CE" : "#3B352F"
+    readonly property color principalBaixo: escuro ? "#C9C1B5" : "#1A1714"
+    readonly property color perigoSobre: escuro ? "#F7B8AE" : "#A34D42"
+    readonly property color perigoBaixo: escuro ? "#E58F82" : "#7E3930"
+
+    // Branco por cima da faixa (deixa mais claro): no escuro, bem mais leve.
+    function vela(a) { return escuro ? Qt.rgba(1, 1, 1, a * 0.16) : Qt.rgba(1, 1, 1, a) }
+    // Tinta por cima (bordas, mouse em cima): no escuro, vira claro.
+    function sombra(a) { return escuro ? Qt.rgba(0.96, 0.94, 0.9, a * 1.4) : Qt.rgba(0.16, 0.15, 0.13, a) }
+    // Texto "claro" um pouco apagado (sobre fundo "tinta").
+    function claroSuave(a) { return Qt.rgba(claro.r, claro.g, claro.b, a) }
+    // Véu atrás das janelas que abrem por cima.
+    readonly property color veu: escuro ? Qt.rgba(0, 0, 0, 0.7) : Qt.rgba(0.16, 0.15, 0.13, 0.35)
 
     // ---- Olho: esconde CPF/CNPJ, custo, lucro, comissões e saldos ----
     // Começa sempre escondido e vale para todas as telas.

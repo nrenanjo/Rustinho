@@ -107,7 +107,7 @@ FocusScope {
                             }
                             Text {
                                 text: cartao.modelData.ativo ? (cartao.modelData.tipo === "banco" ? "banco" : "dinheiro") : "desativada"
-                                color: cartao.escolhida ? Qt.rgba(0.95, 0.93, 0.88, 0.7) : Tema.apagado
+                                color: cartao.escolhida ? Tema.claroSuave(0.7) : Tema.apagado
                                 font.family: Tema.serifa
                                 font.italic: true
                                 font.pixelSize: 13
@@ -115,7 +115,7 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + Tema.valor(cartao.modelData.saldo)
-                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? "#F0B8AE" : Tema.claro)
+                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.claro)
                                                     : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelho : Tema.tinta)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -152,7 +152,7 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: Tema.raio
-            color: Qt.rgba(1, 1, 1, 0.28)
+            color: Tema.vela(0.28)
 
             ColumnLayout {
                 anchors.fill: parent
@@ -216,7 +216,7 @@ FocusScope {
                         width: listaExtrato.width - 10
                         implicitHeight: 52
                         radius: Tema.raioCampo
-                        color: modelData.futuro ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.5)
+                        color: modelData.futuro ? Tema.vela(0.25) : Tema.vela(0.5)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14

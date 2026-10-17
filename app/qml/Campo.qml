@@ -126,9 +126,9 @@ ColumnLayout {
         font.family: Tema.texto
         font.pixelSize: campo.tamanhoFonte
         color: Tema.tinta
-        placeholderTextColor: "#9A9086"
+        placeholderTextColor: Tema.dica
         selectionColor: Tema.azulEscuro
-        selectedTextColor: "white"
+        selectedTextColor: Tema.claro
         echoMode: campo.senha || campo.escondido ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"
         horizontalAlignment: campo.numerico ? TextInput.AlignRight : TextInput.AlignLeft
@@ -148,7 +148,7 @@ ColumnLayout {
 
         background: Rectangle {
             radius: Tema.raioCampo
-            color: campo.somenteLeitura ? Qt.rgba(1, 1, 1, 0.28) : Tema.papel
+            color: campo.somenteLeitura ? Tema.vela(0.28) : Tema.papel
             border.width: campo.erro !== "" || entrada.activeFocus ? 2 : 0
             border.color: campo.erro !== "" ? Tema.vermelho : Tema.azulEscuro
         }
@@ -304,7 +304,7 @@ ColumnLayout {
             color: Tema.papel
             radius: 8
             border.width: 1
-            border.color: Qt.rgba(0.16, 0.15, 0.13, 0.12)
+            border.color: Tema.sombra(0.12)
         }
         contentItem: ListView {
             id: vista
@@ -323,7 +323,7 @@ ColumnLayout {
                 highlighted: vista.currentIndex === index
                 background: Rectangle {
                     radius: 6
-                    color: parent.highlighted ? Tema.azul : (parent.hovered ? Qt.rgba(0.16, 0.15, 0.13, 0.06) : "transparent")
+                    color: parent.highlighted ? Tema.azul : (parent.hovered ? Tema.sombra(0.06) : "transparent")
                 }
                 onClicked: campo.escolher(modelData)
             }

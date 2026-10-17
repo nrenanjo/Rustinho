@@ -523,7 +523,7 @@ FocusScope {
                         Layout.fillWidth: true
                         implicitHeight: exemplo.implicitHeight + 20
                         radius: Tema.raioCampo
-                        color: Qt.rgba(1, 1, 1, 0.45)
+                        color: Tema.vela(0.45)
                         Text {
                             id: exemplo
                             anchors.verticalCenter: parent.verticalCenter

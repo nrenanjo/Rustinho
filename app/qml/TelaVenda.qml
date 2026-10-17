@@ -284,7 +284,7 @@ FocusScope {
         anchors.centerIn: T.Overlay.overlay
         width: Math.min(500, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14

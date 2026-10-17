@@ -449,7 +449,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 implicitHeight: 36
                                 radius: Tema.raioCampo
-                                color: sobreCli.hovered ? Tema.azul : Qt.rgba(1, 1, 1, 0.45)
+                                color: sobreCli.hovered ? Tema.azul : Tema.vela(0.45)
                                 Text {
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: 12
@@ -528,7 +528,7 @@ FocusScope {
                                     radius: height / 2
                                     height: 28
                                     width: rotuloPrev.implicitWidth + 22
-                                    color: sobrePrev.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(1, 1, 1, 0.45)
+                                    color: sobrePrev.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
                                     Text {
                                         id: rotuloPrev
                                         anchors.centerIn: parent
@@ -622,7 +622,7 @@ FocusScope {
                             enabled: !tela.travada
                             Chip {
                                 texto: li.servico ? "serviço" : "peça"
-                                color: Qt.rgba(1, 1, 1, 0.55)
+                                color: Tema.vela(0.55)
                                 corTexto: li.servico ? Tema.verdeEscuro : Tema.tintaSuave
                                 Layout.alignment: Qt.AlignVCenter
                             }
@@ -744,7 +744,7 @@ FocusScope {
                                     radius: height / 2
                                     height: 30
                                     width: rotuloServ.implicitWidth + 24
-                                    color: sobreServ.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(1, 1, 1, 0.45)
+                                    color: sobreServ.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
                                     Text {
                                         id: rotuloServ
                                         anchors.centerIn: parent

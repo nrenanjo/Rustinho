@@ -42,7 +42,7 @@ Item {
                 radius: height / 2
                 height: pilulas.pequenas ? 32 : (Tema.celular ? 42 : 40)
                 width: rotulo.implicitWidth + (pilulas.pequenas ? 26 : 36)
-                color: ativa ? Tema.tinta : sobre.hovered ? Qt.rgba(0.16, 0.15, 0.13, 0.07) : "transparent"
+                color: ativa ? Tema.tinta : sobre.hovered ? Tema.sombra(0.07) : "transparent"
                 Behavior on color { ColorAnimation { duration: 120 } }
                 Text {
                     id: rotulo

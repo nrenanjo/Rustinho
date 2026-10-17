@@ -155,7 +155,7 @@ FocusScope {
                     Chip {
                         visible: !Tema.estreito
                         texto: linha.p.ha
-                        color: Qt.rgba(1, 1, 1, 0.5)
+                        color: Tema.vela(0.5)
                         corTexto: Tema.tintaSuave
                     }
                     ColumnLayout {

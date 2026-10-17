@@ -63,10 +63,10 @@ Button {
             const baixo = botao.down
             const sobre = botao.hovered
             switch (botao.tipo) {
-            case "principal": return baixo ? "#1A1714" : sobre ? "#3B352F" : Tema.tinta
-            case "perigo": return baixo ? "#7E3930" : sobre ? "#A34D42" : Tema.vermelho
-            case "secundario": return baixo ? "#D3C5A8" : sobre ? "#DDD0B5" : "#E6DAC2"
-            default: return baixo ? Qt.rgba(0.16, 0.15, 0.13, 0.13) : sobre ? Qt.rgba(0.16, 0.15, 0.13, 0.07) : "transparent"
+            case "principal": return baixo ? Tema.principalBaixo : sobre ? Tema.principalSobre : Tema.tinta
+            case "perigo": return baixo ? Tema.perigoBaixo : sobre ? Tema.perigoSobre : Tema.vermelho
+            case "secundario": return baixo ? Tema.botaoBaixo : sobre ? Tema.botaoSobre : Tema.botao
+            default: return baixo ? Tema.sombra(0.13) : sobre ? Tema.sombra(0.07) : "transparent"
             }
         }
         border.width: botao.visualFocus ? 2 : 0

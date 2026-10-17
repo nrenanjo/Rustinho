@@ -14,7 +14,7 @@ Rectangle {
     readonly property bool par: (indice + 1) % 2 === 0
     readonly property color corBase: par ? Tema.azul : Tema.pergaminho
     readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.78) : Tema.tintaSuave
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
 
     radius: Tema.raio
     color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
@@ -73,11 +73,11 @@ Rectangle {
                 radius: height / 2
                 color: {
                     if (linha.atual)
-                        return Qt.rgba(1, 1, 1, 0.12)
+                        return Tema.vela(0.12)
                     switch (linha.item.situacao) {
                     case "rascunho": return Tema.rosa
                     case "lancada": return Tema.verde
-                    default: return Qt.rgba(0.16, 0.15, 0.13, 0.08)
+                    default: return Tema.sombra(0.08)
                     }
                 }
                 Text {

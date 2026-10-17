@@ -66,7 +66,7 @@ Painel {
                         radius: height / 2
                         height: Tema.celular ? 44 : 38
                         width: textoPilula.implicitWidth + 30
-                        color: ativa ? Tema.tinta : sobre.hovered ? Qt.rgba(0.16, 0.15, 0.13, 0.07) : Tema.papel
+                        color: ativa ? Tema.tinta : sobre.hovered ? Tema.sombra(0.07) : Tema.papel
                         Text {
                             id: textoPilula
                             anchors.centerIn: parent

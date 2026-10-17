@@ -20,7 +20,7 @@ Popup {
     padding: 28
     closePolicy: Popup.CloseOnEscape
 
-    T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+    T.Overlay.modal: Rectangle { color: Tema.veu }
     background: Rectangle { color: Tema.fundo; radius: Tema.raio + 3 }
 
     function abrirCom(referencia, textoInicial) {

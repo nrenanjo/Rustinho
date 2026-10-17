@@ -583,7 +583,7 @@ FocusScope {
                                             radius: height / 2
                                             height: Tema.celular ? 42 : 36
                                             width: textoGrade.implicitWidth + 28
-                                            color: este ? Tema.tinta : sobreGrade.hovered ? Qt.rgba(0.16, 0.15, 0.13, 0.07) : Tema.papel
+                                            color: este ? Tema.tinta : sobreGrade.hovered ? Tema.sombra(0.07) : Tema.papel
                                             Text {
                                                 id: textoGrade
                                                 anchors.centerIn: parent
@@ -1019,7 +1019,7 @@ FocusScope {
                             Rectangle {
                                 visible: !!tela.tributacao
                                 radius: Tema.raioCampo
-                                color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.rosa : Qt.rgba(1, 1, 1, 0.35)
+                                color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.rosa : Tema.vela(0.35)
                                 implicitHeight: textoFiscal.implicitHeight + 22
                                 Layout.fillWidth: true
                                 ColumnLayout {

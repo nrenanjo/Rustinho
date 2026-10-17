@@ -10,7 +10,7 @@ Rectangle {
 
     visible: texto !== ""
     radius: height / 2
-    color: escuro ? Qt.rgba(0.95, 0.93, 0.88, 0.16) : Tema.papel
+    color: escuro ? Tema.claroSuave(0.16) : Tema.papel
     implicitWidth: Math.min(rotulo.implicitWidth + 18, 220)
     implicitHeight: rotulo.implicitHeight + 6
 

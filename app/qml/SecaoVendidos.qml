@@ -152,7 +152,7 @@ FocusScope {
                     Chip {
                         texto: linha.v.curva
                         implicitWidth: 30
-                        color: linha.v.curva === "A" ? Tema.verde : linha.v.curva === "B" ? Tema.papel : Qt.rgba(1, 1, 1, 0.5)
+                        color: linha.v.curva === "A" ? Tema.verde : linha.v.curva === "B" ? Tema.papel : Tema.vela(0.5)
                         corTexto: linha.v.curva === "A" ? Tema.verdeEscuro : Tema.tintaSuave
                     }
                     ColumnLayout {
@@ -202,7 +202,7 @@ FocusScope {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             texto: linha.v.estoque === "0" || linha.v.estoque.startsWith("-") ? "sem estoque" : "tem " + linha.v.estoque
-                            color: linha.v.estoqueBaixo ? Tema.rosa : Qt.rgba(1, 1, 1, 0.5)
+                            color: linha.v.estoqueBaixo ? Tema.rosa : Tema.vela(0.5)
                             corTexto: linha.v.estoqueBaixo ? Tema.vermelho : Tema.tintaSuave
                         }
                     }

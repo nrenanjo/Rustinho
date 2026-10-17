@@ -18,7 +18,7 @@ Rectangle {
     signal remover()
 
     radius: Tema.raioCampo
-    color: Qt.rgba(1, 1, 1, 0.35)
+    color: Tema.vela(0.35)
     implicitHeight: coluna.implicitHeight + 24
 
     function campo(nome) {

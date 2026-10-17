@@ -391,7 +391,7 @@ FocusScope {
                     Layout.fillWidth: true
                     implicitHeight: 38
                     radius: Tema.raioCampo
-                    color: sobreCli.hovered ? Tema.azul : Qt.rgba(1, 1, 1, 0.45)
+                    color: sobreCli.hovered ? Tema.azul : Tema.vela(0.45)
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         x: 12

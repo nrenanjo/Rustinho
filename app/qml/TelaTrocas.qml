@@ -258,7 +258,7 @@ FocusScope {
                 width: listaFeitas.width
                 implicitHeight: 66
                 radius: Tema.raio
-                color: lf.modelData.cancelada ? Qt.rgba(1, 1, 1, 0.3) : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                color: lf.modelData.cancelada ? Tema.vela(0.3) : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 HoverHandler { id: sobreFeita }
                 RowLayout {
                     anchors.fill: parent

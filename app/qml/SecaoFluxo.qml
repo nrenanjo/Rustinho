@@ -151,7 +151,7 @@ FocusScope {
                 Layout.fillHeight: true
                 Layout.preferredWidth: Tema.estreito ? -1 : 1
                 radius: Tema.raio
-                color: Qt.rgba(1, 1, 1, 0.28)
+                color: Tema.vela(0.28)
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 16

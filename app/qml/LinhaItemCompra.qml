@@ -21,7 +21,7 @@ Rectangle {
     readonly property var peca: item.peca || null
 
     radius: Tema.raio
-    color: pendente ? Tema.rosa : ignorado ? Qt.rgba(1, 1, 1, 0.25) : (item.ordem % 2 === 0 ? Tema.azul : Tema.pergaminho)
+    color: pendente ? Tema.rosa : ignorado ? Tema.vela(0.25) : (item.ordem % 2 === 0 ? Tema.azul : Tema.pergaminho)
     implicitHeight: coluna.implicitHeight + 32
 
     function focarFator() {
@@ -98,7 +98,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: Tema.estreito ? 0 : 44
             radius: Tema.raioCampo
-            color: Qt.rgba(1, 1, 1, 0.42)
+            color: Tema.vela(0.42)
             implicitHeight: decisao.implicitHeight + 20
 
             ColumnLayout {

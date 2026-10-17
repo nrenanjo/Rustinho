@@ -369,7 +369,7 @@ FocusScope {
                                     radius: height / 2
                                     height: 28
                                     width: rotuloMotivo.implicitWidth + 22
-                                    color: motivo.texto === modelData ? Tema.tinta : sobreMotivo.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(1, 1, 1, 0.45)
+                                    color: motivo.texto === modelData ? Tema.tinta : sobreMotivo.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
                                     Text {
                                         id: rotuloMotivo
                                         anchors.centerIn: parent

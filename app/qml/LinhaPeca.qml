@@ -14,7 +14,7 @@ Rectangle {
     readonly property bool par: (indice + 1) % 2 === 0
     readonly property color corBase: par ? Tema.azul : Tema.pergaminho
     readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.78) : Tema.tintaSuave
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
 
     radius: Tema.raio
     color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
@@ -87,7 +87,7 @@ Rectangle {
                     id: estoqueC
                     anchors.centerIn: parent
                     text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
-                    color: linha.item.estoqueBaixo ? (linha.atual ? "#F2B8AE" : Tema.vermelho) : linha.corTexto
+                    color: linha.item.estoqueBaixo ? (linha.atual ? Tema.vermelhoSobre : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
                     font.pixelSize: 14
@@ -175,7 +175,7 @@ Rectangle {
                     id: estoque
                     anchors.centerIn: parent
                     text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
-                    color: linha.item.estoqueBaixo ? (linha.atual ? "#F2B8AE" : Tema.vermelho) : linha.corTexto
+                    color: linha.item.estoqueBaixo ? (linha.atual ? Tema.vermelhoSobre : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
                     font.pixelSize: 15

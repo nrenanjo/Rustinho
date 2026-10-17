@@ -9,9 +9,39 @@
 #include <QtCore/QStringList>
 #include <QtCore/qcoreapplication_platform.h>
 #include <QtQml/QQmlContext>
+#include <QtQml/qqml.h>
+
+#include <sys/system_properties.h>
+
+#include "vistacamera.h"
+
+// Celulares de 32 bits e chips de vídeo PowerVR (como o do Moto e6i) desenham
+// as telas do Qt com cores trocadas e sem letras. Neles, o Rustinho desenha
+// pela CPU ("software"), que é mais lento mas sempre fica certo.
+static bool desenharPorSoftware()
+{
+#if defined(__arm__) && !defined(__aarch64__)
+    return true;
+#else
+    char valor[PROP_VALUE_MAX] = {};
+    for (const char* nome : {"ro.hardware.egl", "ro.hardware.vulkan", "ro.board.platform"}) {
+        if (__system_property_get(nome, valor) > 0) {
+            const QByteArray texto = QByteArray(valor).toLower();
+            if (texto.contains("powervr") || texto.contains("pvr"))
+                return true;
+        }
+    }
+    return false;
+#endif
+}
 
 int main(int argc, char* argv[])
 {
+    // RUSTINHO_DESENHO=gpu ou =software força um dos dois (só para testes).
+    const QByteArray forcado = qgetenv("RUSTINHO_DESENHO");
+    if (forcado == "software" || (forcado != "gpu" && desenharPorSoftware()))
+        qputenv("QT_QUICK_BACKEND", "software");
+
     QGuiApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("rustinho"));
     app.setApplicationDisplayName(QStringLiteral("Rustinho"));
@@ -21,6 +51,8 @@ int main(int argc, char* argv[])
     const QString dados = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dados);
     qputenv("RUSTINHO_DADOS", dados.toUtf8());
+
+    qmlRegisterType<VistaCamera>("rustinho.camera", 1, 0, "VistaCamera");
 
     QQmlApplicationEngine engine;
 

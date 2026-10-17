@@ -41,7 +41,7 @@ Item {
                     radius: height / 2
                     height: 30
                     width: rotulo.implicitWidth + 26
-                    color: agora ? Tema.tinta : feita ? Tema.verde : Qt.rgba(1, 1, 1, 0.35)
+                    color: agora ? Tema.tinta : feita ? Tema.verde : Tema.vela(0.35)
                     anchors.verticalCenter: parent.verticalCenter
                     Text {
                         id: rotulo

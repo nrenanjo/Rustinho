@@ -9,7 +9,7 @@ Rectangle {
     radius: height / 2
     implicitHeight: 34
     implicitWidth: linha.implicitWidth + 28
-    color: Tema.oculto ? (sobre.hovered ? Qt.rgba(1, 1, 1, 0.7) : Qt.rgba(1, 1, 1, 0.45)) : (sobre.hovered ? "#E4CFC7" : Tema.rosa)
+    color: Tema.oculto ? (sobre.hovered ? Tema.vela(0.7) : Tema.vela(0.45)) : (sobre.hovered ? Tema.rosaSobre : Tema.rosa)
     Behavior on color { ColorAnimation { duration: 120 } }
 
     Row {

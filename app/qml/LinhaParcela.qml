@@ -15,8 +15,8 @@ Rectangle {
     signal abrirVenda()
 
     readonly property bool fechada: item.situacao === "paga" || item.situacao === "cancelada"
-    readonly property var cores: ({ vencida: Tema.rosa, hoje: "#EFE0B8", aberta: Qt.rgba(1, 1, 1, 0.55),
-                                    paga: Tema.verde, cancelada: Qt.rgba(0.16, 0.15, 0.13, 0.08) })
+    readonly property var cores: ({ vencida: Tema.rosa, hoje: Tema.amarelo, aberta: Tema.vela(0.55),
+                                    paga: Tema.verde, cancelada: Tema.sombra(0.08) })
     readonly property var nomes: ({ vencida: "Vencida", hoje: "Vence hoje", aberta: "Em aberto", paga: "Paga", cancelada: "Cancelada" })
 
     radius: Tema.raioCampo

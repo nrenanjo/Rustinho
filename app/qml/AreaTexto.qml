@@ -38,9 +38,9 @@ ColumnLayout {
         font.family: Tema.texto
         font.pixelSize: 16
         color: Tema.tinta
-        placeholderTextColor: "#9A9086"
+        placeholderTextColor: Tema.dica
         selectionColor: Tema.azulEscuro
-        selectedTextColor: "white"
+        selectedTextColor: Tema.claro
         padding: 12
         selectByMouse: true
         background: Rectangle {

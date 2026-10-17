@@ -117,6 +117,12 @@ impl Servico {
                 self.sync_ler()
             }
             "sync_ler" => self.sync_ler(),
+            // Modo escuro: vale só para este aparelho (não vai para os outros caixas).
+            "aparencia_salvar" => {
+                let d: Aparencia = ler(dados)?;
+                config::gravar(&self.banco.conn, "tela_escura", if d.escuro { "1" } else { "0" })?;
+                Ok(json!({ "escuro": d.escuro }))
+            }
             // Câmera do celular como leitor de código de barras.
             "codigo_ler_foto" => {
                 let d: Arquivo = ler(dados)?;
@@ -1068,6 +1074,7 @@ impl Servico {
             "versao": VERSAO,
             "etapa": menu::ETAPA_ATUAL,
             "validadeOrcamento": config::validade_orcamento(conn)?,
+            "escuro": config::ler(conn, "tela_escura")?.as_deref() == Some("1"),
         }))
     }
 
@@ -1218,6 +1225,11 @@ impl Servico {
             "pecas": busca::total(conn, true)?,
         }))
     }
+}
+
+#[derive(Deserialize)]
+struct Aparencia {
+    escuro: bool,
 }
 
 #[derive(Deserialize)]

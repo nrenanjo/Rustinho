@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtCore
 import QtMultimedia
 import rustinho
+import rustinho.camera
 
 // Câmera do celular como leitor de código de barras. Só entra no app de
 // Android (no computador, o leitor é o de mão, que "digita" o código).
@@ -54,10 +55,10 @@ Item {
                     }
                     videoOutput: saida
                 }
-                VideoOutput {
+                // Pintada pela CPU, em tons de cinza: funciona em qualquer celular.
+                VistaCamera {
                     id: saida
                     anchors.fill: parent
-                    fillMode: VideoOutput.PreserveAspectCrop
                 }
             }
         }
@@ -68,25 +69,22 @@ Item {
             repeat: true
             running: !!vista.item && vista.item.ligada
             onTriggered: {
-                if (leitor.ocupado)
+                const saida = vista.item.saida
+                if (leitor.ocupado || !saida.temQuadro)
                     return
                 leitor.ocupado = true
-                const saida = vista.item.saida
-                const larg = Math.min(saida.width, 900)
-                const alt = Math.round(saida.height * larg / Math.max(1, saida.width))
-                const ok = saida.grabToImage(resultado => {
-                    resultado.saveToFile(leitor.foto)
+                if (saida.salvar(leitor.foto, 900)) {
                     const r = Api.chamar("codigo_ler_foto", { caminho: leitor.foto })
-                    leitor.ocupado = false
                     if (r.ok && r.dados.codigo && janelaCamera.opened) {
                         const f = leitor.depois
+                        leitor.ocupado = false
                         janelaCamera.close()
                         if (f)
                             f(r.dados.codigo)
+                        return
                     }
-                }, Qt.size(larg, alt))
-                if (!ok)
-                    leitor.ocupado = false
+                }
+                leitor.ocupado = false
             }
         }
 

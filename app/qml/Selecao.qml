@@ -90,7 +90,7 @@ ColumnLayout {
                 color: Tema.papel
                 radius: 8
                 border.width: 1
-                border.color: Qt.rgba(0.16, 0.15, 0.13, 0.12)
+                border.color: Tema.sombra(0.12)
             }
         }
         HoverHandler { cursorShape: Qt.PointingHandCursor }

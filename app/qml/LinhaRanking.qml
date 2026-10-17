@@ -61,7 +61,7 @@ ColumnLayout {
             Layout.fillWidth: true
             implicitHeight: 8
             radius: 4
-            color: Qt.rgba(1, 1, 1, 0.5)
+            color: Tema.vela(0.5)
             Rectangle {
                 height: parent.height
                 radius: 4

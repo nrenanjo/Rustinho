@@ -40,7 +40,7 @@ Item {
                     height: grafico.alturaBarras
                     anchors.horizontalCenter: parent.horizontalCenter
                     radius: width / 2
-                    color: col.modelData.futuro ? Qt.rgba(1, 1, 1, 0.18) : sobre.hovered ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(1, 1, 1, 0.45)
+                    color: col.modelData.futuro ? Tema.vela(0.18) : sobre.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
                     Behavior on color { ColorAnimation { duration: 100 } }
 
                     Rectangle {

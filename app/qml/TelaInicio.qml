@@ -94,13 +94,18 @@ FocusScope {
                         text: tela.janela ? [tela.janela.estado.loja, tela.janela.estado.caixa].filter(x => !!x).join(" · ") : ""
                         Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignRight
                     }
-                    Botao {
-                        tipo: "discreto"
-                        icone: "sair"
-                        text: "Trocar usuário"
+                    RowLayout {
+                        spacing: 10
                         Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignRight
-                        Layout.leftMargin: Tema.fino ? -10 : 0
-                        onClicked: tela.janela.trocarUsuario()
+                        Layout.topMargin: 4
+                        Aparencia { Layout.alignment: Qt.AlignVCenter }
+                        Botao {
+                            tipo: "discreto"
+                            icone: "sair"
+                            text: "Trocar usuário"
+                            Layout.alignment: Qt.AlignVCenter
+                            onClicked: tela.janela.trocarUsuario()
+                        }
                     }
                 }
             }

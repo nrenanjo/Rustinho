@@ -190,7 +190,7 @@ Painel {
                         Layout.fillWidth: true
                         implicitHeight: coluna.implicitHeight + 20
                         radius: Tema.raio
-                        color: modelData.novos > 0 ? modelData.cor : Qt.rgba(1, 1, 1, 0.35)
+                        color: modelData.novos > 0 ? modelData.cor : Tema.vela(0.35)
                         ColumnLayout {
                             id: coluna
                             x: 14

@@ -49,7 +49,7 @@ FocusScope {
         orcamento: [Tema.papel, Tema.tintaSuave],
         aprovada: [Tema.azul, Tema.azulEscuro],
         pronta: [Tema.verde, Tema.verdeEscuro],
-        entregue: [Qt.rgba(1, 1, 1, 0.45), Tema.apagado],
+        entregue: [Tema.vela(0.45), Tema.apagado],
         cancelada: [Tema.rosa, Tema.vermelho]
     })
 
@@ -141,7 +141,7 @@ FocusScope {
                         radius: 6
                         color: Tema.papel
                         border.width: 1
-                        border.color: Qt.rgba(0.16, 0.15, 0.13, 0.25)
+                        border.color: Tema.sombra(0.25)
                         implicitWidth: textoPlaca.implicitWidth + 16
                         implicitHeight: 28
                         Text {

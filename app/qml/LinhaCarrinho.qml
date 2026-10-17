@@ -85,7 +85,7 @@ Rectangle {
                     }
                     Rectangle {
                         radius: height / 2
-                        color: linha.item.servico ? Tema.verde : linha.item.faltaEstoque ? Tema.rosa : Qt.rgba(1, 1, 1, 0.45)
+                        color: linha.item.servico ? Tema.verde : linha.item.faltaEstoque ? Tema.rosa : Tema.vela(0.45)
                         implicitWidth: textoEstoque.implicitWidth + 14
                         implicitHeight: textoEstoque.implicitHeight + 4
                         Text {
@@ -105,7 +105,7 @@ Rectangle {
                     Rectangle {
                         visible: !!linha.item.faltaEstoque
                         radius: height / 2
-                        color: linha.item.encomendar ? Tema.verde : sobreEnc.hovered ? Tema.papel : Qt.rgba(1, 1, 1, 0.45)
+                        color: linha.item.encomendar ? Tema.verde : sobreEnc.hovered ? Tema.papel : Tema.vela(0.45)
                         implicitWidth: linhaEnc.implicitWidth + 16
                         implicitHeight: textoEstoque.implicitHeight + 4
                         Row {

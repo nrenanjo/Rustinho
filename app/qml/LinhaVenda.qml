@@ -14,7 +14,7 @@ Rectangle {
     readonly property bool par: (indice + 1) % 2 === 0
     readonly property color corBase: par ? Tema.azul : Tema.pergaminho
     readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.78) : Tema.tintaSuave
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
     readonly property bool orcamento: item.tipo === "orcamento"
     readonly property bool apagada: ["cancelada", "cancelado"].includes(item.situacao)
 
@@ -72,8 +72,8 @@ Rectangle {
         Rectangle {
             visible: linha.apagada || linha.orcamento
             radius: height / 2
-            color: linha.atual ? Qt.rgba(1, 1, 1, 0.12) : linha.apagada ? Qt.rgba(0.16, 0.15, 0.13, 0.08)
-                   : linha.item.situacao === "vendido" ? Tema.verde : linha.item.vencido ? Tema.rosa : Qt.rgba(1, 1, 1, 0.5)
+            color: linha.atual ? Tema.vela(0.12) : linha.apagada ? Tema.sombra(0.08)
+                   : linha.item.situacao === "vendido" ? Tema.verde : linha.item.vencido ? Tema.rosa : Tema.vela(0.5)
             implicitWidth: chip.implicitWidth + 18
             implicitHeight: chip.implicitHeight + 6
             Text {

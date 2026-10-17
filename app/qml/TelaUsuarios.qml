@@ -165,7 +165,7 @@ FocusScope {
                         }
                         Text {
                             text: tela.quando(linha.modelData.ultimoAcesso)
-                            color: linha.aberto ? Qt.rgba(0.95, 0.93, 0.88, 0.75) : Tema.tintaSuave
+                            color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuave
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 14

@@ -258,7 +258,7 @@ FocusScope {
                     }
                     Layout.fillWidth: true
                     radius: Tema.raioCampo
-                    color: sobreF.hovered ? Tema.azul : Qt.rgba(1, 1, 1, 0.5)
+                    color: sobreF.hovered ? Tema.azul : Tema.vela(0.5)
                     implicitHeight: 36
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
@@ -566,7 +566,7 @@ FocusScope {
                     required property var modelData
                     Layout.fillWidth: true
                     radius: Tema.raioCampo
-                    color: Qt.rgba(1, 1, 1, 0.5)
+                    color: Tema.vela(0.5)
                     implicitHeight: 46
                     RowLayout {
                         anchors.fill: parent

@@ -542,7 +542,7 @@ FocusScope {
                         radius: Tema.raio
                         color: Tema.papel
                         border.width: 1
-                        border.color: Qt.rgba(0.16, 0.15, 0.13, 0.15)
+                        border.color: Tema.sombra(0.15)
                         z: 10
 
                         ListView {
@@ -605,7 +605,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: [Tema.estreito ? modelData.codigo : "", Tema.estreito ? modelData.local : "", modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
-                                            color: atual ? Qt.rgba(0.95, 0.93, 0.88, 0.75) : Tema.tintaSuave
+                                            color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuave
                                             font.family: Tema.serifa
                                             font.italic: true
                                             font.pixelSize: 13
@@ -630,7 +630,7 @@ FocusScope {
                                             id: txtEst
                                             anchors.centerIn: parent
                                             text: modelData.servico ? "serviço" : modelData.estoque + " " + modelData.unidade
-                                            color: modelData.estoqueBaixo ? (atual ? "#F2B8AE" : Tema.vermelho) : (atual ? Tema.claro : Tema.tinta)
+                                            color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.claro : Tema.tinta)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
                                             font.pixelSize: 15
@@ -697,7 +697,7 @@ FocusScope {
                             Layout.fillWidth: true
                             implicitHeight: 40
                             radius: Tema.raioCampo
-                            color: sobreCliente.hovered ? Tema.azul : Qt.rgba(1, 1, 1, 0.4)
+                            color: sobreCliente.hovered ? Tema.azul : Tema.vela(0.4)
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 10
@@ -871,7 +871,7 @@ FocusScope {
         width: Math.min(660, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(total) {
@@ -1200,7 +1200,7 @@ FocusScope {
         width: Math.min(520, Tema.largura - 24)
         padding: 32
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 12
@@ -1267,7 +1267,7 @@ FocusScope {
         width: Math.min(520, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 30
         closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Qt.rgba(0.16, 0.15, 0.13, 0.35) }
+        T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom() {
