@@ -11,3 +11,6 @@ authors = ["Renan Galvão"]
 
 [profile.release]
 strip = true
+# Conta que passaria do tamanho do número para a operação (vira erro e nada
+# é gravado) em vez de "dar a volta" em silêncio.
+overflow-checks = true

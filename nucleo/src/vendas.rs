@@ -196,12 +196,13 @@ pub fn calcular_cheques(conn: &Connection, valor: i64, e: &cheques::ChequesEntra
 }
 
 fn calcular_crediario(conn: &Connection, e: &VendaEntrada) -> Resultado<Crediario> {
-    let valor: i64 = e
-        .pagamentos
-        .iter()
-        .filter(|p| p.forma == "crediario")
-        .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).max(0))
-        .sum();
+    let valor = somar(
+        e.pagamentos
+            .iter()
+            .filter(|p| p.forma == "crediario")
+            .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
+    )
+    .ok_or_else(|| Erro::validacao("O crediário ficou grande demais."))?;
     let mut c = Crediario { valor: numeros::escrever_dinheiro(valor), v_valor: valor, ..Default::default() };
     if valor == 0 {
         return Ok(c);
@@ -248,7 +249,21 @@ fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
 const QUANTIDADE_MAXIMA: i64 = 1_000_000_000; // 1 milhão de unidades (em milésimos)
 const PRECO_MAXIMO: i64 = 100_000_000_000; // R$ 1 bilhão (em centavos)
 const TOTAL_MAXIMO: i64 = 10_000_000_000_000; // R$ 100 bilhões
-const ITENS_MAXIMOS: usize = 2_000;
+/// Formas de pagamento numa venda só.
+const PAGAMENTOS_MAXIMOS: usize = 50;
+
+/// Soma valores em centavos (ou milésimos). `None` se passar de
+/// `TOTAL_MAXIMO` (a conta é feita num número maior, sem "dar a volta").
+fn somar(valores: impl Iterator<Item = i64>) -> Option<i64> {
+    let mut total: i128 = 0;
+    for v in valores {
+        total += v as i128;
+        if total.abs() > TOTAL_MAXIMO as i128 {
+            return None;
+        }
+    }
+    Some(total as i64)
+}
 
 /// quantidade (milésimos) × preço (centavos) → centavos.
 fn multiplicar(quantidade: i64, preco: i64) -> i64 {
@@ -409,6 +424,9 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
                 erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
             }
         }
+        if bruto > TOTAL_MAXIMO && erro.is_empty() {
+            erro = "O valor deste item ficou grande demais. Confira a quantidade e o preço.".into();
+        }
         let total = bruto - desconto;
         let ja = if servico { 0 } else { usado.iter().find(|u| u.0 == it.produto_id).map(|u| u.1).unwrap_or(0) };
         let pedido = ja + quantidade;
@@ -447,16 +465,14 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             v_falta: falta,
         });
     }
-    if itens.len() > ITENS_MAXIMOS {
-        return Err(Erro::validacao(format!("Uma venda pode ter até {ITENS_MAXIMOS} itens.")));
+    if e.pagamentos.len() > PAGAMENTOS_MAXIMOS {
+        return Err(Erro::validacao(format!("Use no máximo {PAGAMENTOS_MAXIMOS} formas de pagamento.")));
     }
-    // Com os limites de quantidade e preço, nenhuma soma passa do tamanho do
-    // número; o total ainda é conferido.
-    let subtotal: i64 = itens.iter().map(|i| multiplicar(i.v_quantidade, i.v_preco)).sum();
-    if subtotal > TOTAL_MAXIMO {
-        return Err(Erro::validacao("O total da venda ficou grande demais. Confira as quantidades e os preços."));
-    }
-    let desconto_itens: i64 = itens.iter().map(|i| i.v_desconto).sum();
+    // As somas são feitas num número maior (i128) e conferidas antes de
+    // voltar: nenhuma conta "dá a volta" nem vira pânico.
+    let grande = || Erro::validacao("O total da venda ficou grande demais. Confira as quantidades e os preços.");
+    let subtotal = somar(itens.iter().map(|i| multiplicar(i.v_quantidade, i.v_preco))).ok_or_else(grande)?;
+    let desconto_itens = somar(itens.iter().map(|i| i.v_desconto)).ok_or_else(grande)?;
     let depois_itens = subtotal - desconto_itens;
     let (desconto, erro_desconto) = match ler_desconto(&e.desconto, depois_itens) {
         Ok(d) if d > depois_itens => (0, "O desconto é maior que o total.".to_string()),
@@ -464,12 +480,12 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         Err(m) => (0, m),
     };
     let total = depois_itens - desconto;
-    let mut pago = 0;
-    for p in &e.pagamentos {
-        pago += numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO);
-    }
+    let pago = somar(
+        e.pagamentos.iter().map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
+    )
+    .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;
     let troco = (pago - total).max(0);
-    let quantidade_itens: i64 = itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade).sum();
+    let quantidade_itens = somar(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade)).unwrap_or(i64::MAX);
     let cliente = if !e.cliente_id.is_empty() {
         conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&e.cliente_id], |l| l.get(0))
             .optional()?
