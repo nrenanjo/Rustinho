@@ -409,3 +409,31 @@ fn senhas_erradas_seguidas_esperam() {
     let (msg, _) = erro(&mut s, "entrar", json!({ "id": id, "senha": "1234" }));
     assert!(msg.contains("Espere"), "{msg}");
 }
+
+#[test]
+fn venda_confere_cliente_orcamento_e_limites() {
+    let mut s = Servico::em_memoria().unwrap();
+    ok(
+        &mut s,
+        "configurar_inicio",
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+    );
+    let peca = ok(&mut s, "produto_salvar", rolamento());
+    ok(&mut s, "caixa_abrir", json!({ "fundo": "0" }));
+    let item = json!([{ "produtoId": peca["id"], "quantidade": "1", "preco": "", "desconto": "" }]);
+    // Cliente que não existe.
+    let venda = json!({ "itens": item, "clienteId": "nao-existe", "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
+    assert_eq!(erro(&mut s, "venda_concluir", venda).1, "cliente");
+    // Quantidade e preço absurdos viram erro, não conta errada.
+    let calc = ok(&mut s, "venda_calcular", json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "9999999999999", "preco": "", "desconto": "" }] }));
+    assert!(calc["itens"][0]["erro"].as_str().unwrap().contains("grande demais"), "{calc}");
+    let calc = ok(&mut s, "venda_calcular", json!({ "itens": [{ "produtoId": peca["id"], "quantidade": "1", "preco": "9999999999999", "desconto": "" }] }));
+    assert!(calc["itens"][0]["erro"].as_str().unwrap().contains("grande demais"), "{calc}");
+    // Orçamento vendido duas vezes: a segunda não entra.
+    let orc = ok(&mut s, "orcamento_salvar", json!({ "itens": item }));
+    let orc_id = orc["id"].as_str().unwrap_or_else(|| orc.as_str().unwrap()).to_string();
+    let venda = json!({ "itens": item, "orcamentoId": orc_id, "pagamentos": [{ "forma": "dinheiro", "valor": "116,00" }] });
+    ok(&mut s, "venda_concluir", venda.clone());
+    let (msg, _) = erro(&mut s, "venda_concluir", venda);
+    assert!(msg.contains("orçamento"), "{msg}");
+}

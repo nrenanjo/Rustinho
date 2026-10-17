@@ -302,7 +302,7 @@ fn juros_de(saldo: i64, dias: i64, t: Taxas) -> i64 {
     }
     let m = saldo as i128 * t.multa as i128;
     let j = saldo as i128 * t.juros_mes as i128 * dias as i128 / 30;
-    ((m + j + 5_000) / 10_000) as i64
+    crate::numeros::saturar((m + j + 5_000) / 10_000)
 }
 
 /// Taxas para a tela de configurações ("2,00" = 2%; tolerância em dias).

@@ -101,7 +101,7 @@ pub struct Calculo {
 }
 
 fn multiplicar(quantidade: i64, preco: i64) -> i64 {
-    ((quantidade as i128 * preco as i128 + 500) / 1000) as i64
+    crate::numeros::saturar((quantidade as i128 * preco as i128 + 500) / 1000)
 }
 
 fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
@@ -114,7 +114,7 @@ fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
         if !(0..=10_000).contains(&pct) {
             return Err("Use um desconto entre 0 e 100%.".into());
         }
-        return Ok(((base as i128 * pct as i128 + 5_000) / 10_000) as i64);
+        return Ok(crate::numeros::saturar((base as i128 * pct as i128 + 5_000) / 10_000));
     }
     let v = numeros::ler_dinheiro(t)?.unwrap_or(0);
     if v < 0 {

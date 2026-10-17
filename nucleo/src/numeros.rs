@@ -44,7 +44,7 @@ pub fn escrever_quantidade(milesimos: i64) -> String {
 /// Preço de venda a partir do custo e do percentual de lucro sobre o custo.
 /// Custo R$ 58,00 com 100% → R$ 116,00.
 pub fn preco_por_lucro(custo: i64, lucro: i64) -> i64 {
-    dividir_arredondando(custo as i128 * (10_000 + lucro as i128), 10_000) as i64
+    saturar(dividir_arredondando(custo as i128 * (10_000 + lucro as i128), 10_000))
 }
 
 /// Percentual de lucro sobre o custo a partir do preço de venda.
@@ -53,7 +53,7 @@ pub fn lucro_por_preco(custo: i64, preco: i64) -> Option<i64> {
     if custo <= 0 {
         return None;
     }
-    Some(dividir_arredondando((preco as i128 - custo as i128) * 10_000, custo as i128) as i64)
+    Some(saturar(dividir_arredondando((preco as i128 - custo as i128) * 10_000, custo as i128)))
 }
 
 /// Lê um ano de aplicação: "2015" ou "15" (vira 2015) ou "98" (vira 1998).
@@ -85,6 +85,12 @@ pub fn ler_ano(texto: &str, ano_atual: i32) -> Result<Option<i32>, String> {
 }
 
 /// Divisão inteira arredondando a metade para longe do zero.
+/// Resultado de conta com i128 de volta para i64 sem "dar a volta" (um
+/// número enorme não vira negativo: fica no máximo).
+pub fn saturar(v: i128) -> i64 {
+    v.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+}
+
 fn dividir_arredondando(numerador: i128, divisor: i128) -> i128 {
     let metade = divisor / 2;
     if (numerador >= 0) == (divisor >= 0) {
@@ -123,6 +129,13 @@ fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
         if partes[1].contains('.') {
             return Err("Número inválido.".into());
         }
+        // Pontos de milhar só de 3 em 3: "1.234,56" sim, "1.2.3,45" não.
+        if partes[0].contains('.') {
+            let grupos: Vec<&str> = partes[0].split('.').collect();
+            if grupos[0].is_empty() || grupos[0].len() > 3 || grupos[1..].iter().any(|g| g.len() != 3) {
+                return Err("Número inválido.".into());
+            }
+        }
         (partes[0].replace('.', ""), partes[1].to_string())
     } else if numero.contains('.') {
         let partes: Vec<&str> = numero.split('.').collect();
@@ -130,7 +143,7 @@ fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
             // Um único ponto que não separa milhar: é o separador decimal.
             (partes[0].to_string(), partes[1].to_string())
         } else {
-            if partes[0].is_empty() || partes[1..].iter().any(|p| p.len() != 3) {
+            if partes[0].is_empty() || partes[0].len() > 3 || partes[1..].iter().any(|p| p.len() != 3) {
                 return Err("Número inválido.".into());
             }
             (partes.concat(), String::new())
@@ -196,6 +209,19 @@ fn escrever_decimal(valor: i64, casas: u32, minimo: u32) -> String {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn milhar_de_tres_em_tres() {
+        assert_eq!(ler_dinheiro("1.234,56").unwrap(), Some(123_456));
+        assert_eq!(ler_dinheiro("1.234.567,00").unwrap(), Some(123_456_700));
+        assert!(ler_dinheiro("1.2.3,45").is_err());
+        assert!(ler_dinheiro("12.34,50").is_err());
+        assert!(ler_dinheiro("1234.567,00").is_err());
+        assert!(ler_dinheiro(".123,00").is_err());
+        assert!(ler_dinheiro("1234.567.890").is_err());
+        assert_eq!(saturar(i128::MAX), i64::MAX);
+        assert_eq!(saturar(-5), -5);
+    }
 
     #[test]
     fn le_dinheiro() {

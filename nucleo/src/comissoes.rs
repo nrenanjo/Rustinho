@@ -96,7 +96,7 @@ fn calcular(conn: &Connection, usuario_id: &str, padrao: Option<i64>, de: &str, 
         comissao += base * pct;
     }
     // pct em centésimos de ponto: base * pct / 10000, arredondado
-    let comissao = ((comissao + 5000) / 10000) as i64;
+    let comissao = crate::numeros::saturar((comissao + 5000) / 10000);
     Ok((vendas.len() as i64, vendido, comissao))
 }
 

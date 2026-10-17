@@ -303,7 +303,7 @@ fn valor_unitario(it: &ItemXml, com_impostos: bool) -> i64 {
     if it.quantidade <= 0 {
         return 0;
     }
-    ((total as i128 * 1000 + it.quantidade as i128 / 2) / it.quantidade as i128) as i64
+    crate::numeros::saturar((total as i128 * 1000 + it.quantidade as i128 / 2) / it.quantidade as i128)
 }
 
 fn ficha_do_item(conn: &Connection, it: &ItemXml) -> Resultado<produtos::ProdutoFicha> {

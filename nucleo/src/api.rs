@@ -91,6 +91,9 @@ pub struct Servico {
 impl Servico {
     /// Abre o banco no arquivo indicado.
     pub fn abrir(caminho: &Path) -> Resultado<Servico> {
+        if let Some(pasta) = caminho.parent() {
+            crate::registro::iniciar(pasta);
+        }
         let mut s = Self::com_banco(Banco::abrir(caminho)?);
         s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), sync::PORTA_TCP, sync::PORTA_UDP));
         Ok(s)
@@ -123,8 +126,17 @@ impl Servico {
         }));
         let resposta = match resultado {
             Ok(Ok(valor)) => json!({ "ok": true, "dados": valor }),
-            Ok(Err(erro)) => json!({ "ok": false, "erro": erro.to_string(), "campo": erro.nome_do_campo() }),
-            Err(_) => json!({ "ok": false, "erro": "Erro interno inesperado. Tente de novo.", "campo": null }),
+            Ok(Err(erro)) => {
+                // Só o comando e o erro técnico; os dados digitados não.
+                if matches!(erro, Erro::Interno(_) | Erro::Banco(_)) {
+                    crate::registro::anotar(&format!("{comando}: {erro}"));
+                }
+                json!({ "ok": false, "erro": erro.to_string(), "campo": erro.nome_do_campo() })
+            }
+            Err(_) => {
+                crate::registro::anotar(&format!("{comando}: pânico (veja a linha anterior)"));
+                json!({ "ok": false, "erro": "Erro interno inesperado. Tente de novo.", "campo": null })
+            }
         };
         resposta.to_string()
     }

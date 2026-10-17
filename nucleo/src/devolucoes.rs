@@ -143,7 +143,7 @@ fn itens_da_venda(conn: &Connection, venda_id: &str) -> Resultado<Vec<ItemVenda>
         let dq: i64 = l.get(8)?;
         // O que o cliente pagou pelo item: o total dele menos a parte do
         // desconto da venda inteira.
-        let liquido = if soma_itens > 0 { ((total as i128 * total_venda as i128 + soma_itens as i128 / 2) / soma_itens as i128) as i64 } else { 0 };
+        let liquido = if soma_itens > 0 { crate::numeros::saturar((total as i128 * total_venda as i128 + soma_itens as i128 / 2) / soma_itens as i128) } else { 0 };
         let unidade: String = l.get(4)?;
         Ok(ItemVenda {
             venda_item_id: l.get(0)?,
@@ -153,7 +153,7 @@ fn itens_da_venda(conn: &Connection, venda_id: &str) -> Resultado<Vec<ItemVenda>
             vendido: numeros::escrever_quantidade(q),
             devolvido: if dq > 0 { numeros::escrever_quantidade(dq) } else { String::new() },
             pode: numeros::escrever_quantidade((q - dq).max(0)),
-            valor_unitario: dinheiro(if q > 0 { ((liquido as i128 * 1000 + q as i128 / 2) / q as i128) as i64 } else { 0 }),
+            valor_unitario: dinheiro(if q > 0 { crate::numeros::saturar((liquido as i128 * 1000 + q as i128 / 2) / q as i128) } else { 0 }),
             unidade,
             v_quantidade: q,
             v_total: total,
@@ -303,8 +303,8 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             (v.v_liquido - v.v_devolvido_valor, v.v_total - v.v_devolvido_item)
         } else {
             (
-                ((v.v_liquido as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128) as i64,
-                ((v.v_total as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128) as i64,
+                crate::numeros::saturar((v.v_liquido as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128),
+                crate::numeros::saturar((v.v_total as i128 * q as i128 + v.v_quantidade as i128 / 2) / v.v_quantidade as i128),
             )
         };
         c.linhas.push(Linha {

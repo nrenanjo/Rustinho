@@ -12,6 +12,50 @@ pub const MAX_ARQUIVOS: usize = 30_000;
 pub const MAX_TAMANHO: u64 = 20 * 1024 * 1024;
 /// Tamanho máximo de um .zip ou .rar.
 const MAX_PACOTE: u64 = 1024 * 1024 * 1024;
+/// Tamanho máximo de um .zip dentro de outro (é lido na memória).
+const MAX_ZIP_INTERNO: u64 = 100 * 1024 * 1024;
+/// Total descompactado numa escolha de arquivos (protege de "bombas" de zip).
+const MAX_TOTAL: u64 = 512 * 1024 * 1024;
+/// Itens olhados dentro dos pacotes, somando todos.
+const MAX_MEMBROS: usize = 100_000;
+
+/// Quanto ainda pode ser descompactado nesta escolha de arquivos.
+struct Orcamento {
+    bytes: u64,
+    membros: usize,
+}
+
+impl Orcamento {
+    fn novo() -> Orcamento {
+        Orcamento { bytes: MAX_TOTAL, membros: MAX_MEMBROS }
+    }
+    /// Conta mais um item; false = acabou o limite.
+    fn membro(&mut self) -> bool {
+        if self.membros == 0 {
+            return false;
+        }
+        self.membros -= 1;
+        true
+    }
+    fn gastar(&mut self, n: u64) -> bool {
+        if n > self.bytes {
+            self.bytes = 0;
+            return false;
+        }
+        self.bytes -= n;
+        true
+    }
+}
+
+/// Lê no máximo `limite` bytes; None se passou (o tamanho declarado mentiu).
+fn ler_ate(r: &mut impl Read, limite: u64) -> Option<Vec<u8>> {
+    let mut b = Vec::new();
+    r.take(limite + 1).read_to_end(&mut b).ok()?;
+    if b.len() as u64 > limite {
+        return None;
+    }
+    Some(b)
+}
 
 /// "file:///home/x" → "/home/x"; "file:///C:/x" → "C:/x"; "%20" → " ".
 pub fn caminho_local(t: &str) -> PathBuf {
@@ -126,6 +170,7 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
         juntar(&p, &mut lista, 0);
     }
     let mut saida = Vec::new();
+    let mut orc = Orcamento::novo();
     for p in lista {
         let nome = nome_curto(&p);
         let Ok(meta) = std::fs::metadata(&p) else { continue };
@@ -141,11 +186,11 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
                 }
             }
             "zip" | "rar" if meta.len() > MAX_PACOTE => saida.push(ruim(nome, "pacote grande demais")),
-            "zip" => match std::fs::read(&p) {
-                Ok(b) => de_zip(&nome, b, &mut saida, true),
+            "zip" => match std::fs::File::open(&p) {
+                Ok(f) => de_zip(&nome, std::io::BufReader::new(f), &mut saida, true, &mut orc),
                 Err(e) => saida.push(ruim(nome, &format!("não abriu ({e})"))),
             },
-            "rar" => de_rar(&nome, &p, &mut saida),
+            "rar" => de_rar(&nome, &p, &mut saida, &mut orc),
             _ => {}
         }
         if saida.len() >= MAX_ARQUIVOS {
@@ -155,12 +200,19 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
     Ok(saida)
 }
 
-fn de_zip(pacote: &str, bytes: Vec<u8>, saida: &mut Vec<Xml>, entrar_em_zip: bool) {
-    let Ok(mut zip) = zip::ZipArchive::new(std::io::Cursor::new(bytes)) else {
+fn de_zip<R: Read + std::io::Seek>(pacote: &str, leitor: R, saida: &mut Vec<Xml>, entrar_em_zip: bool, orc: &mut Orcamento) {
+    let Ok(mut zip) = zip::ZipArchive::new(leitor) else {
         saida.push(ruim(pacote.into(), "o .zip está estragado ou não é zip"));
         return;
     };
     for i in 0..zip.len() {
+        if saida.len() >= MAX_ARQUIVOS {
+            return;
+        }
+        if !orc.membro() {
+            saida.push(ruim(pacote.into(), "arquivos demais dentro dos pacotes"));
+            return;
+        }
         let Ok(mut f) = zip.by_index(i) else { continue };
         if !f.is_file() {
             continue;
@@ -168,27 +220,34 @@ fn de_zip(pacote: &str, bytes: Vec<u8>, saida: &mut Vec<Xml>, entrar_em_zip: boo
         let interno = f.name().rsplit('/').next().unwrap_or_default().to_string();
         let baixo = interno.to_lowercase();
         let nome = format!("{pacote} › {interno}");
+        let limite = if baixo.ends_with(".xml") {
+            MAX_TAMANHO
+        } else if entrar_em_zip && baixo.ends_with(".zip") {
+            MAX_ZIP_INTERNO
+        } else {
+            continue;
+        };
+        if f.size() > limite {
+            saida.push(ruim(nome, "grande demais para ser uma nota"));
+            continue;
+        }
+        let Some(b) = ler_ate(&mut f, limite) else {
+            saida.push(ruim(nome, "não deu para descompactar"));
+            continue;
+        };
+        if !orc.gastar(b.len() as u64) {
+            saida.push(ruim(pacote.into(), "os pacotes descompactados passam de 512 MB; escolha menos arquivos"));
+            return;
+        }
         if baixo.ends_with(".xml") {
-            if f.size() > MAX_TAMANHO {
-                saida.push(ruim(nome, "grande demais para ser uma nota"));
-                continue;
-            }
-            let mut b = Vec::new();
-            if f.read_to_end(&mut b).is_ok() {
-                saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() });
-            } else {
-                saida.push(ruim(nome, "não deu para descompactar"));
-            }
-        } else if entrar_em_zip && baixo.ends_with(".zip") && f.size() <= MAX_PACOTE {
-            let mut b = Vec::new();
-            if f.read_to_end(&mut b).is_ok() {
-                de_zip(&nome, b, saida, false);
-            }
+            saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() });
+        } else {
+            de_zip(&nome, std::io::Cursor::new(b), saida, false, orc);
         }
     }
 }
 
-fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>) {
+fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>, orc: &mut Orcamento) {
     let arquivo = match rars::ArchiveReader::read_path(caminho) {
         Ok(a) => a,
         Err(_) => {
@@ -196,12 +255,19 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>) {
             return;
         }
     };
-    let membros: Vec<(usize, String, bool)> = arquivo
+    let membros: Vec<(usize, String, bool, u64)> = arquivo
         .members()
         .enumerate()
-        .map(|(i, m)| (i, m.meta.name_lossy(), m.meta.is_directory))
+        .map(|(i, m)| (i, m.meta.name_lossy(), m.meta.is_directory, m.meta.unpacked_size))
         .collect();
-    for (i, nome_interno, pasta) in membros {
+    for (i, nome_interno, pasta, tamanho) in membros {
+        if saida.len() >= MAX_ARQUIVOS {
+            return;
+        }
+        if !orc.membro() {
+            saida.push(ruim(pacote.into(), "arquivos demais dentro dos pacotes"));
+            return;
+        }
         if pasta {
             continue;
         }
@@ -210,13 +276,26 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>) {
             continue;
         }
         let nome = format!("{pacote} › {interno}");
-        match arquivo.read_member_at(i, None) {
+        // O tamanho é conferido antes de descompactar.
+        if tamanho > MAX_TAMANHO {
+            saida.push(ruim(nome, "grande demais para ser uma nota"));
+            continue;
+        }
+        if !orc.gastar(tamanho) {
+            saida.push(ruim(pacote.into(), "os pacotes descompactados passam de 512 MB; escolha menos arquivos"));
+            return;
+        }
+        let mut opcoes = rars::ArchiveReadOptions::new();
+        opcoes.max_member_output_bytes = Some(MAX_TAMANHO);
+        opcoes.max_total_output_bytes = Some(MAX_TOTAL);
+        opcoes.rar50_dictionary_size_limit = Some(256 * 1024 * 1024);
+        match arquivo.read_member_at_with_options(i, opcoes) {
             Ok(Some(b)) if b.len() as u64 <= MAX_TAMANHO => {
                 saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() })
             }
             Ok(Some(_)) => saida.push(ruim(nome, "grande demais para ser uma nota")),
             Ok(None) => {}
-            Err(_) => saida.push(ruim(nome, "não deu para descompactar (senha?)")),
+            Err(_) => saida.push(ruim(nome, "não deu para descompactar (senha ou grande demais?)")),
         }
     }
 }
@@ -224,6 +303,34 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>) {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    fn zip_com(arquivos: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (n, b) in arquivos {
+            z.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(b).unwrap();
+        }
+        z.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn limite_total_dos_pacotes() {
+        let zip = zip_com(&[("a.xml", b"<a>0123456</a>"), ("b.xml", b"<b>0123456</b>"), ("c.xml", b"<c>0123456</c>")]);
+        let mut saida = Vec::new();
+        let mut orc = Orcamento { bytes: 30, membros: 100 };
+        de_zip("p.zip", std::io::Cursor::new(zip.clone()), &mut saida, true, &mut orc);
+        assert_eq!(saida.iter().filter(|x| x.erro.is_empty()).count(), 2);
+        assert!(saida.last().unwrap().erro.contains("512 MB"));
+        // Itens demais.
+        let mut saida = Vec::new();
+        let mut orc = Orcamento { bytes: 1000, membros: 1 };
+        de_zip("p.zip", std::io::Cursor::new(zip), &mut saida, true, &mut orc);
+        assert!(saida.iter().any(|x| x.erro.contains("demais")));
+        // Ler além do declarado não passa do limite.
+        assert!(ler_ate(&mut &b"0123456789"[..], 5).is_none());
+        assert_eq!(ler_ate(&mut &b"01234"[..], 5).unwrap(), b"01234");
+    }
 
     #[test]
     fn caminhos() {

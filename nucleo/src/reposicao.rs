@@ -261,7 +261,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
                 continue;
             }
         }
-        let custo_total = ((b.custo as i128 * sugerido as i128 + 500) / 1000) as i64;
+        let custo_total = numeros::saturar((b.custo as i128 * sugerido as i128 + 500) / 1000);
         let por_mes = por_dia * 30.0 / 1000.0;
         let ritmo = if b.vendido == 0 {
             "sem vendas".to_string()
@@ -506,7 +506,7 @@ pub fn mais_vendidos(conn: &Connection, dias: i64, ordem: &str, busca: &str) -> 
             total: numeros::escrever_dinheiro(l.total),
             lucro: numeros::escrever_dinheiro(lucro),
             margem: if l.total > 0 && l.custo > 0 {
-                format!("{}%", numeros::escrever_percentual(((lucro as i128 * 10_000) / l.total as i128) as i64))
+                format!("{}%", numeros::escrever_percentual(numeros::saturar((lucro as i128 * 10_000) / l.total as i128)))
             } else {
                 String::new()
             },
@@ -629,7 +629,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
         if !filtro.is_empty() && !texto::normalizar(&format!("{codigo} {nome} {marca} {local}")).contains(&filtro) {
             continue;
         }
-        let valor = ((custo as i128 * q as i128 + 500) / 1000) as i64;
+        let valor = numeros::saturar((custo as i128 * q as i128 + 500) / 1000);
         let ha = crate::receber::dias_entre(&referencia, &hoje);
         itens.push(Parado {
             produto_id: id,

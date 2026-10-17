@@ -5,7 +5,7 @@
 //! sempre de onde veio cada unidade, e os caixas poderão juntar seus
 //! movimentos sem perder nada.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::erro::{Erro, Resultado};
 use crate::{auditoria, numeros, tempo, texto};
@@ -73,7 +73,8 @@ pub fn ajustar(
     }
     let servico: bool = conn
         .query_row("SELECT tipo = 'servico' FROM produto WHERE id = ?1", [produto_id], |l| l.get(0))
-        .unwrap_or(false);
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Peça".into()))?;
     if servico {
         return Err(Erro::validacao("Serviço não tem estoque."));
     }

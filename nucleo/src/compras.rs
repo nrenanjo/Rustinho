@@ -47,8 +47,43 @@ pub fn aviso_cnpj(conn: &Connection, destinatario: &str) -> Resultado<String> {
     Ok(format!("Esta nota não é {loja}: foi emitida para outro CNPJ. Confira antes de lançar."))
 }
 
+/// A nota serve para entrada de compra? (Autorizada pela SEFAZ, de saída do
+/// fornecedor, normal, e para o CNPJ da loja quando ele está preenchido.)
+pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
+    if !nota.autorizada {
+        return Err(Erro::validacao(
+            "Este XML não tem a autorização da SEFAZ (ou a nota foi negada). Peça ao fornecedor o XML autorizado, o que vem com o protocolo.",
+        ));
+    }
+    if nota.tipo == "0" {
+        return Err(Erro::validacao(
+            "Esta é uma nota de entrada, não uma venda do fornecedor para a loja.",
+        ));
+    }
+    match nota.finalidade.as_str() {
+        "" | "1" => {}
+        "4" => return Err(Erro::validacao("Esta é uma nota de devolução, não de compra.")),
+        _ => {
+            return Err(Erro::validacao(
+                "Esta é uma nota complementar ou de ajuste: ela não traz mercadoria para dar entrada.",
+            ))
+        }
+    }
+    let loja = documento::limpar(&config::ler(conn, "loja_cnpj")?.unwrap_or_default());
+    let destinatario = documento::limpar(&nota.destinatario);
+    if !loja.is_empty() && !destinatario.is_empty() && destinatario != loja {
+        let nome = config::nome_loja(conn)?;
+        let nome = if nome.is_empty() { "da loja".to_string() } else { format!("da {nome}") };
+        return Err(Erro::validacao(format!(
+            "Esta nota não é {nome}: foi emitida para outro CNPJ. Confira o CNPJ em Configurações ou peça a nota certa ao fornecedor."
+        )));
+    }
+    Ok(())
+}
+
 pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml: &str) -> Resultado<String> {
     let nota = nfe_xml::ler(xml).map_err(Erro::validacao)?;
+    conferir_nota(conn, &nota)?;
     if nota.chave.len() == 44 {
         let ja: Option<(String, String)> = conn
             .query_row(
@@ -140,7 +175,7 @@ pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
         let n = pesos.len() as i64;
         return (0..n).map(|i| total / n + if i < total % n { 1 } else { 0 }).collect();
     }
-    let mut partes: Vec<i64> = pesos.iter().map(|p| (total as i128 * *p as i128 / soma as i128) as i64).collect();
+    let mut partes: Vec<i64> = pesos.iter().map(|p| crate::numeros::saturar(total as i128 * *p as i128 / soma as i128)).collect();
     let mut sobra = total - partes.iter().sum::<i64>();
     let mut restos: Vec<(usize, i128)> = pesos
         .iter()
@@ -326,7 +361,7 @@ impl ItemBanco {
     }
     /// Quantidade de peças (milésimos).
     fn pecas(&self) -> i64 {
-        ((self.quantidade as i128 * self.fator as i128 + 500) / 1000) as i64
+        crate::numeros::saturar((self.quantidade as i128 * self.fator as i128 + 500) / 1000)
     }
 }
 
@@ -385,7 +420,7 @@ fn custo_unitario(custo_total: i64, pecas_milesimos: i64) -> i64 {
     if pecas_milesimos <= 0 {
         return 0;
     }
-    ((custo_total as i128 * 1000 + pecas_milesimos as i128 / 2) / pecas_milesimos as i128) as i64
+    crate::numeros::saturar((custo_total as i128 * 1000 + pecas_milesimos as i128 / 2) / pecas_milesimos as i128)
 }
 
 struct Cabecalho {
@@ -1004,6 +1039,25 @@ mod testes {
     use super::*;
     use crate::banco::Banco;
     use crate::usuarios;
+
+    #[test]
+    fn so_entra_nota_autorizada_de_compra_para_a_loja() {
+        let b = Banco::em_memoria().unwrap();
+        let ex = nfe_xml::EXEMPLO;
+        let ler = |x: &str| nfe_xml::ler(x).unwrap();
+        assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
+        let sem_protocolo = ex.replace("<cStat>100</cStat>", "<cStat>110</cStat>");
+        assert!(conferir_nota(&b.conn, &ler(&sem_protocolo)).unwrap_err().to_string().contains("autorização"));
+        let entrada = ex.replace("<tpNF>1</tpNF>", "<tpNF>0</tpNF>");
+        assert!(conferir_nota(&b.conn, &ler(&entrada)).unwrap_err().to_string().contains("entrada"));
+        let devolucao = ex.replace("<tpNF>1</tpNF>", "<tpNF>1</tpNF><finNFe>4</finNFe>");
+        assert!(conferir_nota(&b.conn, &ler(&devolucao)).unwrap_err().to_string().contains("devolução"));
+        // CNPJ da loja preenchido e diferente do destinatário.
+        config::gravar(&b.conn, "loja_cnpj", "11222333000181").unwrap();
+        assert!(conferir_nota(&b.conn, &ler(ex)).unwrap_err().to_string().contains("outro CNPJ"));
+        config::gravar(&b.conn, "loja_cnpj", "11444777000161").unwrap();
+        assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
+    }
 
     #[test]
     fn rateio_sem_perder_centavos() {

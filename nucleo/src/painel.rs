@@ -178,7 +178,7 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
     )?;
     let nome_ant = MESES_NOME[mes_ant as usize - 1];
     let (comparacao, subiu) = if t_ant > 0 {
-        let p = ((t_mes - t_ant) as i128 * 100 / t_ant as i128) as i64;
+        let p = crate::numeros::saturar((t_mes as i128 - t_ant as i128) * 100 / t_ant as i128);
         let ate = if dia == 1 { "no dia 1".to_string() } else { format!("até o dia {dia}") };
         if p == 0 {
             (format!("igual a {nome_ant}, {ate}"), true)

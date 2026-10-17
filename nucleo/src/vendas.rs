@@ -234,7 +234,7 @@ fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
         if !(0..=10_000).contains(&pct) {
             return Err("Use um desconto entre 0 e 100%.".into());
         }
-        return Ok(((base as i128 * pct as i128 + 5_000) / 10_000) as i64);
+        return Ok(numeros::saturar((base as i128 * pct as i128 + 5_000) / 10_000));
     }
     let v = numeros::ler_dinheiro(t)?.unwrap_or(0);
     if v < 0 {
@@ -243,9 +243,16 @@ fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
     Ok(v)
 }
 
+/// Limites de uma venda de balcão (bem acima de qualquer venda real; evitam
+/// contas que passariam do tamanho dos números).
+const QUANTIDADE_MAXIMA: i64 = 1_000_000_000; // 1 milhão de unidades (em milésimos)
+const PRECO_MAXIMO: i64 = 100_000_000_000; // R$ 1 bilhão (em centavos)
+const TOTAL_MAXIMO: i64 = 10_000_000_000_000; // R$ 100 bilhões
+const ITENS_MAXIMOS: usize = 2_000;
+
 /// quantidade (milésimos) × preço (centavos) → centavos.
 fn multiplicar(quantidade: i64, preco: i64) -> i64 {
-    ((quantidade as i128 * preco as i128 + 500) / 1000) as i64
+    numeros::saturar((quantidade as i128 * preco as i128 + 500) / 1000)
 }
 
 struct Peca {
@@ -343,6 +350,10 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             erro = "Diga qual foi o serviço.".into();
         }
         let quantidade = match numeros::ler_quantidade(&it.quantidade) {
+            Ok(Some(q)) if q > QUANTIDADE_MAXIMA => {
+                erro = "Quantidade grande demais.".into();
+                0
+            }
             Ok(Some(q)) if q > 0 => q,
             Ok(_) => {
                 erro = "Quantidade precisa ser maior que zero.".into();
@@ -358,6 +369,10 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         }
         let preco_tabela = if p.preco_aberto { 0 } else { p.preco.unwrap_or(0) };
         let preco = match numeros::ler_dinheiro(&it.preco) {
+            Ok(Some(v)) if v > PRECO_MAXIMO => {
+                erro = "Preço grande demais.".into();
+                0
+            }
             Ok(Some(v)) if v > 0 => v,
             Ok(Some(_)) => {
                 erro = "O preço precisa ser maior que zero.".into();
@@ -436,7 +451,15 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             v_falta: falta,
         });
     }
+    if itens.len() > ITENS_MAXIMOS {
+        return Err(Erro::validacao(format!("Uma venda pode ter até {ITENS_MAXIMOS} itens.")));
+    }
+    // Com os limites de quantidade e preço, nenhuma soma passa do tamanho do
+    // número; o total ainda é conferido.
     let subtotal: i64 = itens.iter().map(|i| multiplicar(i.v_quantidade, i.v_preco)).sum();
+    if subtotal > TOTAL_MAXIMO {
+        return Err(Erro::validacao("O total da venda ficou grande demais. Confira as quantidades e os preços."));
+    }
     let desconto_itens: i64 = itens.iter().map(|i| i.v_desconto).sum();
     let depois_itens = subtotal - desconto_itens;
     let (desconto, erro_desconto) = match ler_desconto(&e.desconto, depois_itens) {
@@ -447,7 +470,7 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     let total = depois_itens - desconto;
     let mut pago = 0;
     for p in &e.pagamentos {
-        pago += numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).max(0);
+        pago += numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO);
     }
     let troco = (pago - total).max(0);
     let quantidade_itens: i64 = itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade).sum();
@@ -582,6 +605,7 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
         return Err(Erro::campo("cliente", c.erro_encomenda.clone()));
     }
     let cliente_id = if e.cliente_id.is_empty() { None } else { Some(e.cliente_id.clone()) };
+    conferir_cliente(conn, &cliente_id)?;
     let cliente_documento = match &cliente_id {
         Some(id) => conn
             .query_row("SELECT documento FROM pessoa WHERE id = ?1", [id], |l| l.get::<_, String>(0))
@@ -646,10 +670,14 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
         cheques::criar(conn, dispositivo, usuario_id, cliente, Some(&id), None, c.cheques.v_valor, &e.cheques)?;
     }
     if !e.orcamento_id.is_empty() {
-        conn.execute(
+        let n = conn.execute(
             "UPDATE venda SET situacao = 'vendido' WHERE id = ?1 AND tipo = 'orcamento' AND situacao = 'aberto'",
             [&e.orcamento_id],
         )?;
+        // Já vendido (aqui ou em outro caixa) ou cancelado: a venda não entra.
+        if n != 1 {
+            return Err(Erro::validacao("Este orçamento já foi vendido ou não está mais aberto. Abra o orçamento de novo."));
+        }
     }
     let pedir: Vec<(String, String, i64)> = c
         .itens
@@ -697,6 +725,20 @@ fn gravar_itens(conn: &Connection, venda_id: &str, c: &Calculo) -> Resultado<()>
 }
 
 /// Grava um orçamento (não mexe no estoque).
+/// O cliente escolhido ainda existe? (Pode ter sido apagado em outro caixa.)
+fn conferir_cliente(conn: &Connection, cliente_id: &Option<String>) -> Resultado<()> {
+    if let Some(id) = cliente_id {
+        let existe: bool = conn
+            .query_row("SELECT 1 FROM pessoa WHERE id = ?1", [id], |_| Ok(true))
+            .optional()?
+            .unwrap_or(false);
+        if !existe {
+            return Err(Erro::campo("cliente", "Esse cliente não existe mais. Escolha o cliente de novo."));
+        }
+    }
+    Ok(())
+}
+
 pub fn salvar_orcamento(conn: &Connection, dispositivo: &str, usuario_id: &str, caixa_nome: &str, e: &VendaEntrada) -> Resultado<String> {
     let c = calcular(conn, e)?;
     conferir_itens(&c)?;
@@ -705,6 +747,7 @@ pub fn salvar_orcamento(conn: &Connection, dispositivo: &str, usuario_id: &str, 
     let id = tempo::novo_id();
     let numero = proximo_numero(conn, dispositivo, "orcamento")?;
     let cliente_id = if e.cliente_id.is_empty() { None } else { Some(e.cliente_id.clone()) };
+    conferir_cliente(conn, &cliente_id)?;
     conn.execute(
         "INSERT INTO venda (id, tipo, numero, dispositivo, caixa_nome, situacao, cliente_id, cliente_nome, vendedor_id,
                             tabela, subtotal, desconto, total, validade, observacoes, criado_em)
