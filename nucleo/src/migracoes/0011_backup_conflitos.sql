@@ -8,6 +8,17 @@ ALTER TABLE usuario ADD COLUMN backup_acesso TEXT;
 -- se quiser, usar. "tipo": registro (os dois mexeram no mesmo cadastro),
 -- orcamento (o mesmo orçamento virou duas vendas) ou gerente (a loja ficou
 -- sem gerente e um voltou a ser).
+-- Um rascunho da 0.9.11 (que não chegou a sair) criou a estrutura 10 sem
+-- esta tabela: cria aqui se faltar, igual à da 0010.
+CREATE TABLE IF NOT EXISTS sync_conflito (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tabela      TEXT NOT NULL,
+    chave       TEXT NOT NULL,
+    ficou       TEXT NOT NULL,
+    perdeu      TEXT NOT NULL,
+    dispositivo TEXT NOT NULL,
+    quando      TEXT NOT NULL
+);
 ALTER TABLE sync_conflito ADD COLUMN tipo TEXT NOT NULL DEFAULT 'registro';
 ALTER TABLE sync_conflito ADD COLUMN dados_perdeu TEXT;
 ALTER TABLE sync_conflito ADD COLUMN dispositivo_ficou TEXT NOT NULL DEFAULT '';

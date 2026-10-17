@@ -14,6 +14,18 @@ No GitHub do projeto: **Settings → Secrets and variables → Actions → New r
 - `ANDROID_CHAVE_BASE64`: o texto do arquivo `ANDROID_CHAVE_BASE64.txt` (a chave em base64)
 - `ANDROID_CHAVE_SENHA`: a senha da chave
 
+Depois de cadastrar, guarde também a **impressão digital** do certificado (não é segredo), para
+a montagem nunca publicar um APK de outra chave. Ela aparece com:
+
+    keytool -list -v -keystore rustinho-loja.jks -alias rustinho | grep SHA256
+
+Em **Settings → Secrets and variables → Actions → Variables → New repository variable**:
+
+- `ANDROID_CHAVE_IMPRESSAO`: o que vem depois de `SHA256:` (com ou sem os dois-pontos)
+
+A montagem confere em cada APK quem assinou (também o que já está publicado na versão) e
+recusa a chave antiga, que era pública (`F0:07:29:D0:...:22:3A`, usada até a 0.9.1).
+
 Para gerar uma chave nova, se um dia precisar:
 
     keytool -genkeypair -keystore rustinho-loja.jks -storetype JKS -alias rustinho -keyalg RSA -keysize 4096 -validity 12000
