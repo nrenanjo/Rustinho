@@ -15,3 +15,9 @@ ALTER TABLE sync_conflito ADD COLUMN resolvido_em TEXT;
 ALTER TABLE sync_conflito ADD COLUMN resolvido_por TEXT;
 ALTER TABLE sync_conflito ADD COLUMN resolucao TEXT;
 CREATE INDEX sync_conflito_aberto ON sync_conflito (resolvido_em);
+
+-- Cada alteração anota sobre qual versão do registro ela foi feita ("base":
+-- o id da alteração mais nova que o caixa conhecia). Assim dá para saber se
+-- dois caixas mexeram no mesmo registro sem ver o do outro, sem confiar só
+-- no relógio.
+ALTER TABLE alteracao ADD COLUMN base TEXT;

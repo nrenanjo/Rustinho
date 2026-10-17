@@ -49,18 +49,15 @@ ColumnLayout {
         dias.texto = b.dias
     }
 
-    function salvar(comSenha) {
-        pasta.erro = ""; hora.erro = ""; dias.erro = ""; senha.erro = ""; senha2.erro = ""
-        const r = Api.chamar("backup_salvar", { pasta: pasta.texto, hora: hora.texto, dias: dias.texto,
-                                                senha: comSenha ? senha.texto : "", senha2: comSenha ? senha2.texto : "" })
+    function salvar() {
+        pasta.erro = ""; hora.erro = ""; dias.erro = ""
+        const r = Api.chamar("backup_salvar", { pasta: pasta.texto, hora: hora.texto, dias: dias.texto })
         if (r.ok) {
             b = r.dados
-            senha.texto = ""
-            senha2.texto = ""
-            janela.avisar(comSenha ? "Senha do backup guardada. Anote num papel." : "Ajustes do backup salvos.", "ok")
+            janela.avisar("Ajustes do backup salvos.", "ok")
             return
         }
-        const campos = { pasta: pasta, hora: hora, dias: dias, senha: senha, senha2: senha2 }
+        const campos = { pasta: pasta, hora: hora, dias: dias }
         if (campos[r.campo])
             campos[r.campo].erro = r.erro
         else
@@ -150,7 +147,13 @@ ColumnLayout {
                 + "Antes, o Rustinho guarda uma cópia de agora (fica na lista como \"antes de restaurar\"), então dá para desfazer."
         if (b && b.sincronizacao)
             msg += "\n\nCom a sincronização ligada, este caixa recebe de novo dos outros tudo o que mudou depois dessa data."
-        janela.confirmar("Restaurar o backup de " + c.quando + "?", msg, "Restaurar", () => restaurar(c, ""), "perigo")
+        janela.confirmar("Restaurar o backup de " + c.quando + "?", msg, "Continuar", () => {
+            // Restaurar sempre pede a senha de um gerente.
+            secao.pedirSenhaDe = c
+            senhaOutra.texto = ""
+            senhaOutra.erro = ""
+            senhaOutra.focar()
+        }, "perigo")
     }
 
     function restaurar(c, senhaDigitada) {
@@ -290,46 +293,20 @@ ColumnLayout {
         }
     }
 
-    // ---------------- Senha ----------------
+    // ---------------- Proteção ----------------
     Faixa {
-        titulo: "Senha do backup"
-        subtitulo: secao.b && secao.b.temSenha ? "criada · a mesma em todos os caixas" : "ainda não tem"
+        titulo: "Proteção"
+        subtitulo: secao.b && secao.b.temSenha ? "trancado · abre com a senha de um gerente" : "ainda sem trancar"
         color: secao.b && !secao.b.temSenha ? Tema.rosa : Tema.pergaminho
         Layout.fillWidth: true
         Nota {
             text: secao.b && secao.b.temSenha
-                  ? "Os backups saem trancados com esta senha. Para restaurar em outro computador, ela é pedida."
-                  : "Com senha, ninguém lê o backup se ele for copiado, e ele pode ir para o Google Drive. Sem senha, fica só neste computador."
+                  ? "Os backups saem trancados. Para restaurar (aqui ou num computador novo), é pedida a senha de um gerente: a de agora ou a de quando o backup foi feito."
+                  : "Os backups ficam trancados assim que um gerente entrar no Rustinho. Até lá, ficam só neste computador."
             Layout.fillWidth: true
-        }
-        Linha {
-            spacing: 12
-            Layout.fillWidth: true
-            Campo {
-                id: senha
-                rotulo: secao.b && secao.b.temSenha ? "Trocar a senha" : "Senha nova"
-                dica: "Pelo menos 6 letras ou números"
-                senha: true
-                maximo: 128
-                Layout.fillWidth: true
-            }
-            Campo {
-                id: senha2
-                rotulo: "Repita a senha"
-                senha: true
-                maximo: 128
-                Layout.fillWidth: true
-            }
-            Botao {
-                text: "Guardar senha"
-                tipo: "secundario"
-                enabled: senha.texto !== ""
-                Layout.alignment: Qt.AlignBottom
-                onClicked: secao.salvar(true)
-            }
         }
         Text {
-            text: "Anote a senha num papel e guarde fora da loja. Sem ela, o backup não abre — nem o Rustinho consegue."
+            text: "A proteção é a senha do gerente: com 4 números, quem copiar os dados descobre testando. Para proteger de verdade, o gerente deve usar 8 ou mais letras e números. Sem nenhuma senha de gerente, o backup não abre — nem o Rustinho consegue."
             color: Tema.vermelho
             font.family: Tema.texto
             font.weight: Font.DemiBold
@@ -430,7 +407,7 @@ ColumnLayout {
                 }
                 Nota {
                     visible: !!secao.b && !secao.b.temSenha
-                    text: "Primeiro crie a senha do backup, logo acima."
+                    text: "Um gerente precisa entrar no Rustinho antes (para os backups saírem trancados)."
                     color: Tema.vermelho
                     font.pixelSize: 14
                 }
@@ -443,7 +420,7 @@ ColumnLayout {
             spacing: 12
             Layout.fillWidth: true
             Nota {
-                text: "Cada backup do dia também vai para o seu Drive, trancado com a senha. Lá ficam os mesmos " + (secao.b ? secao.b.dias : "") + " dias."
+                text: "Cada backup do dia também vai para o seu Drive, trancado (abre com a senha de um gerente). Lá ficam os mesmos " + (secao.b ? secao.b.dias : "") + " dias."
                 Layout.fillWidth: true
             }
             Botao {
@@ -516,7 +493,7 @@ ColumnLayout {
                 tipo: "secundario"
                 icone: "check"
                 Layout.alignment: Qt.AlignBottom
-                onClicked: secao.salvar(false)
+                onClicked: secao.salvar()
             }
         }
         Nota {
@@ -573,7 +550,7 @@ ColumnLayout {
                 spacing: 12
                 Campo {
                     id: senhaOutra
-                    rotulo: "Este backup pede a senha com que foi feito"
+                    rotulo: "Senha de um gerente (backup de antes da 0.9.11: a senha do backup)"
                     senha: true
                     maximo: 128
                     Layout.fillWidth: true
@@ -642,7 +619,7 @@ ColumnLayout {
                         color: Tema.rosa
                     }
                     Text {
-                        text: secao.nomeCaixa(modelData.caixa) + " · " + secao.tamanho(modelData.tamanho) + (modelData.temSenha ? " · com senha" : " · sem senha")
+                        text: secao.nomeCaixa(modelData.caixa) + " · " + secao.tamanho(modelData.tamanho) + (modelData.temSenha ? " · trancado" : " · sem trancar")
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 15

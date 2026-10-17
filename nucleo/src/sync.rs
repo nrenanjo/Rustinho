@@ -212,8 +212,10 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
                 "DROP TRIGGER IF EXISTS sync_{tabela}_{sufixo};
                  CREATE TRIGGER sync_{tabela}_{sufixo} AFTER {evento} ON \"{tabela}\" {quando}{extra}
                  BEGIN
-                   INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
-                   VALUES (rustinho_id(), '{tabela}', {k}, '{operacao}', {dados}, {disp}, rustinho_agora());
+                   INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base)
+                   VALUES (rustinho_id(), '{tabela}', {k}, '{operacao}', {dados}, {disp}, rustinho_agora(),
+                           (SELECT b.id FROM alteracao b WHERE b.tabela = '{tabela}' AND b.chave = {k}
+                             ORDER BY b.id DESC LIMIT 1));
                  END;"
             ));
         }
@@ -265,12 +267,16 @@ pub struct Alteracao {
     pub dados: Option<String>,
     pub dispositivo: String,
     pub quando: String,
+    /// A versão do registro que o caixa conhecia quando mexeu (id da
+    /// alteração). Caixas de antes da 0.9.11 não mandam.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// Alterações deste banco depois da número `desde`.
 pub fn alteracoes_desde(conn: &Connection, desde: i64, limite: i64) -> Resultado<(Vec<Alteracao>, bool)> {
     let mut c = conn.prepare_cached(
-        "SELECT seq, id, tabela, chave, operacao, dados, dispositivo, quando FROM alteracao
+        "SELECT seq, id, tabela, chave, operacao, dados, dispositivo, quando, base FROM alteracao
           WHERE seq > ?1 ORDER BY seq LIMIT ?2",
     )?;
     let lista: Vec<Alteracao> = c
@@ -284,6 +290,7 @@ pub fn alteracoes_desde(conn: &Connection, desde: i64, limite: i64) -> Resultado
                 dados: l.get(5)?,
                 dispositivo: l.get(6)?,
                 quando: l.get(7)?,
+                base: l.get(8)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -353,6 +360,92 @@ pub fn compactar(conn: &Connection) -> Resultado<usize> {
     }
 }
 
+/// Uma versão de um registro no log de alterações.
+struct Versao {
+    id: String,
+    dispositivo: String,
+    base: Option<String>,
+    dados: Option<String>,
+}
+
+/// Colunas que mudam sozinhas (hora da última entrada, carimbo de
+/// alteração, cadeado do backup) e não contam como conflito.
+/// (`dispositivo` diz só quem mexeu por último; `busca` sai do nome.)
+const SEM_CONFLITO: &[&str] = &["atualizado_em", "ultimo_acesso", "backup_acesso", "dispositivo", "busca"];
+
+/// Colunas que diferem entre duas versões (sem as que mudam sozinhas).
+pub fn diferencas(a: Option<&str>, b: Option<&str>) -> Vec<String> {
+    let ler = |t: Option<&str>| -> Option<serde_json::Map<String, Value>> {
+        t.and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v.as_object().cloned())
+    };
+    match (ler(a), ler(b)) {
+        (Some(x), Some(y)) => {
+            let mut cols: Vec<String> = x
+                .keys()
+                .chain(y.keys())
+                .filter(|k| !SEM_CONFLITO.contains(&k.as_str()) && x.get(*k) != y.get(*k))
+                .cloned()
+                .collect();
+            cols.sort();
+            cols.dedup();
+            cols
+        }
+        // Um apagou e o outro mexeu (ou os dois apagaram).
+        (None, None) => Vec::new(),
+        _ => vec!["(apagado)".into()],
+    }
+}
+
+/// As duas versões foram feitas sem uma ver a outra? `ficou` é a mais nova
+/// pelo id (a que vale); `chegou_e_perdeu`: a que perdeu acabou de chegar.
+/// - Chegou e ganhou: quem fez `ficou` conhecia uma versão mais velha que
+///   a nossa (`base` < `perdeu`), então não viu a nossa.
+/// - Chegou e perdeu: nós nunca tivemos a que chegou, então a nossa não a
+///   viu. Só conta se as duas foram feitas no mesmo dia (versões bem velhas
+///   que voltam depois de uma restauração não são conflito).
+/// - Ou `perdeu` foi feita em cima de `ficou` e perdeu só porque o relógio
+///   do caixa dela estava atrasado.
+/// Sem a "base" (caixa de antes da 0.9.11): a menos de 30 minutos uma da
+/// outra. E só conta se mudou algo de verdade.
+fn em_conflito(ficou: &Versao, perdeu: &Versao, chegou_e_perdeu: bool) -> bool {
+    let perto = |limite: i64| match (ms_do_id(&ficou.id), ms_do_id(&perdeu.id)) {
+        (Some(x), Some(y)) => (x - y).abs() < limite,
+        _ => false,
+    };
+    let sem_ver = if chegou_e_perdeu {
+        ficou.base.as_deref() != Some(perdeu.id.as_str()) && perto(24 * 60 * 60 * 1000)
+    } else {
+        match &ficou.base {
+            Some(b) => b.as_str() < perdeu.id.as_str(),
+            None => perto(30 * 60 * 1000),
+        }
+    };
+    let relogio = perdeu.base.as_deref() == Some(ficou.id.as_str());
+    (sem_ver || relogio) && !diferencas(ficou.dados.as_deref(), perdeu.dados.as_deref()).is_empty()
+}
+
+fn anotar_conflito(conn: &Connection, tabela: &str, chave: &str, ficou: &Versao, perdeu: &Versao) -> Resultado<()> {
+    let ja: bool = conn
+        .query_row("SELECT 1 FROM sync_conflito WHERE perdeu = ?1", [&perdeu.id], |_| Ok(true))
+        .optional()?
+        .unwrap_or(false);
+    if ja {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo, dados_perdeu, dispositivo_ficou)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'registro', ?7, ?8)",
+        params![tabela, chave, ficou.id, perdeu.id, perdeu.dispositivo, tempo::agora(), perdeu.dados, ficou.dispositivo],
+    )?;
+    // Guarda os últimos 500 já resolvidos (os abertos ficam sempre).
+    conn.execute(
+        "DELETE FROM sync_conflito WHERE resolvido_em IS NOT NULL
+            AND id <= (SELECT MAX(id) - 500 FROM sync_conflito)",
+        [],
+    )?;
+    Ok(())
+}
+
 fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
     let tx = conn.transaction()?;
     tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
@@ -368,39 +461,41 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         if ja {
             continue;
         }
-        let ultima: Option<(String, String)> = tx
+        // A versão mais nova que este caixa tem deste registro.
+        let ultima: Option<Versao> = tx
             .query_row(
-                "SELECT id, dispositivo FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
+                "SELECT id, dispositivo, base, dados FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
                 params![a.tabela, a.chave],
-                |l| Ok((l.get(0)?, l.get(1)?)),
+                |l| Ok(Versao { id: l.get(0)?, dispositivo: l.get(1)?, base: l.get(2)?, dados: l.get(3)? }),
             )
             .optional()?;
         tx.execute(
-            "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando],
+            "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando, a.base],
         )?;
         novas += 1;
-        if let Some((u, de_quem)) = &ultima {
-            if u.as_str() >= a.id.as_str() {
-                // Já temos uma alteração mais nova deste registro. Se ela foi
-                // feita aqui sem ver esta, os dois caixas mexeram juntos:
-                // fica anotado (a mais nova vale).
-                // (Só quando as duas foram feitas perto uma da outra: versões
-                // velhas que voltam depois de uma restauração não contam.)
-                let perto = match (ms_do_id(u), ms_do_id(&a.id)) {
-                    (Some(x), Some(y)) => (x - y).abs() < 30 * 60 * 1000,
-                    _ => false,
-                };
-                if de_quem == &meu && a.tabela != "auditoria" && perto {
-                    tx.execute(
-                        "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        params![a.tabela, a.chave, u, a.id, a.dispositivo, tempo::agora()],
-                    )?;
-                    tx.execute("DELETE FROM sync_conflito WHERE id <= (SELECT MAX(id) - 500 FROM sync_conflito)", [])?;
-                }
+        let chegou = Versao { id: a.id.clone(), dispositivo: a.dispositivo.clone(), base: a.base.clone(), dados: a.dados.clone() };
+        if let Some(u) = &ultima {
+            // Vale a mais nova (pelo id). Se as duas foram feitas sem uma ver
+            // a outra (ou o relógio inverteu a ordem), fica anotado para o
+            // gerente: o que perdeu continua guardado.
+            let chegou_e_perdeu = u.id.as_str() >= a.id.as_str();
+            let (ficou, perdeu) = if chegou_e_perdeu { (u, &chegou) } else { (&chegou, u) };
+            if u.dispositivo == meu && a.tabela != "auditoria" && em_conflito(ficou, perdeu, chegou_e_perdeu) {
+                anotar_conflito(&tx, &a.tabela, &a.chave, ficou, perdeu)?;
+            }
+            if u.id.as_str() >= a.id.as_str() {
                 continue;
             }
+        }
+        // Quem mandou esta já tinha visto a versão que ganhou de um conflito
+        // aberto aqui: o conflito foi resolvido lá.
+        if let Some(b) = &a.base {
+            tx.execute(
+                "UPDATE sync_conflito SET resolvido_em = ?4, resolucao = 'resolvido em outro caixa'
+                  WHERE tabela = ?1 AND chave = ?2 AND ficou = ?3 AND resolvido_em IS NULL",
+                params![a.tabela, a.chave, b, tempo::agora()],
+            )?;
         }
         if !colunas_cache.iter().any(|c| c.0 == a.tabela) {
             let (todas, chave) = colunas(&tx, &a.tabela)?;
@@ -449,9 +544,332 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         );
         tx.execute(&sql, params_from_iter(cols.iter().map(|c| para_sql(&dados[c.as_str()]))))?;
     }
+    // Conflito em que, no fim, a versão que vale ficou igual à que perdeu
+    // (apagar e gravar de novo o mesmo preço, por exemplo) não é conflito.
+    let abertos: Vec<(i64, String, String, Option<String>)> = {
+        let mut c = tx.prepare(
+            "SELECT id, tabela, chave, dados_perdeu FROM sync_conflito
+              WHERE tipo = 'registro' AND (resolvido_em IS NULL OR resolucao = 'resolvido em outro caixa')",
+        )?;
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
+    for (id, tabela, chave, perdeu) in abertos {
+        let atual: Option<String> = tx
+            .query_row(
+                "SELECT dados FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
+                params![tabela, chave],
+                |l| l.get(0),
+            )
+            .optional()?
+            .flatten();
+        if diferencas(atual.as_deref(), perdeu.as_deref()).is_empty() {
+            tx.execute("DELETE FROM sync_conflito WHERE id = ?1", [id])?;
+        }
+    }
+    // A que perdeu foi substituída depois pelo próprio caixa que a fez
+    // (apagou e gravou de novo, por exemplo): vale a última dele.
+    tx.execute(
+        "DELETE FROM sync_conflito WHERE tipo = 'registro' AND resolvido_em IS NULL
+            AND EXISTS (SELECT 1 FROM alteracao x WHERE x.tabela = sync_conflito.tabela
+                           AND x.chave = sync_conflito.chave AND x.dispositivo = sync_conflito.dispositivo
+                           AND x.id > sync_conflito.perdeu)",
+        [],
+    )?;
     tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
     tx.commit()?;
     Ok(novas)
+}
+
+/// Depois de juntar os dados dos caixas, confere o que nenhuma alteração
+/// sozinha mostra:
+/// - o mesmo orçamento virou venda em dois caixas sem rede (F-12): fica
+///   anotado para o gerente cancelar a que sobrou;
+/// - a loja ficou sem gerente (cada caixa tirou um, sem ver o outro, C-06):
+///   o usuário mais antigo (quem configurou a loja) volta a ser gerente.
+///   Todos os caixas escolhem o mesmo, então o resultado é igual em todos.
+pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
+    let repetidos: Vec<(String, String)> = {
+        let mut c = conn.prepare(
+            "SELECT orcamento_id, group_concat(id, ',') FROM
+               (SELECT orcamento_id, id FROM venda
+                 WHERE tipo = 'venda' AND situacao = 'concluida' AND orcamento_id IS NOT NULL ORDER BY id)
+              GROUP BY orcamento_id HAVING COUNT(*) > 1",
+        )?;
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
+    for (orcamento, vendas) in repetidos {
+        let ja: bool = conn
+            .query_row(
+                "SELECT 1 FROM sync_conflito WHERE tipo = 'orcamento' AND chave = ?1 AND perdeu = ?2",
+                params![orcamento, vendas],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !ja {
+            let primeira = vendas.split(',').next().unwrap_or_default().to_string();
+            conn.execute(
+                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+                 VALUES ('venda', ?1, ?2, ?3, '', ?4, 'orcamento')",
+                params![orcamento, primeira, vendas, tempo::agora()],
+            )?;
+        }
+    }
+    let (usuarios, gerentes): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(gerente = 1), 0) FROM usuario WHERE ativo = 1",
+        [],
+        |l| Ok((l.get(0)?, l.get(1)?)),
+    )?;
+    if usuarios > 0 && gerentes == 0 {
+        let id: String =
+            conn.query_row("SELECT id FROM usuario WHERE ativo = 1 ORDER BY criado_em, id LIMIT 1", [], |l| l.get(0))?;
+        conn.execute("UPDATE usuario SET gerente = 1, atualizado_em = ?2 WHERE id = ?1", params![id, tempo::agora()])?;
+        conn.execute(
+            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+             VALUES ('usuario', ?1, '', '', '', ?2, 'gerente')",
+            params![id, tempo::agora()],
+        )?;
+    }
+    Ok(())
+}
+
+/// Tabelas em que o gerente pode escolher "usar a versão que perdeu"
+/// (cadastros). Nas de dinheiro e movimento (vendas, caixa, contas), mexer
+/// assim poderia desequilibrar as contas: lá o gerente só fica ciente e
+/// corrige pela tela de cada coisa.
+const PODE_USAR: &[&str] = &[
+    "produto",
+    "produto_preco",
+    "produto_aplicacao",
+    "produto_equivalente",
+    "produto_fornecedor",
+    "pessoa",
+    "pessoa_veiculo",
+    "tabela_preco",
+    "regra_st",
+    "unidade",
+    "categoria",
+    "conta_loja",
+    "config",
+];
+
+fn nome_da_tabela(t: &str) -> &'static str {
+    match t {
+        "produto" | "produto_preco" | "produto_aplicacao" | "produto_equivalente" | "produto_fornecedor" => "Peça",
+        "pessoa" | "pessoa_veiculo" => "Cliente ou fornecedor",
+        "usuario" => "Usuário",
+        "config" => "Configuração da loja",
+        "tabela_preco" => "Tabela de preço",
+        "venda" | "venda_item" | "venda_pagamento" => "Venda",
+        "caixa_sessao" | "caixa_movimento" => "Caixa",
+        "conta_receber" | "recebimento" | "recebimento_parcela" => "Contas a receber",
+        "conta_pagar" | "pagamento" => "Contas a pagar",
+        "conta_loja" | "movimento_conta" | "categoria" => "Financeiro",
+        "cheque" => "Cheque",
+        "encomenda" => "Encomenda",
+        "devolucao" | "devolucao_item" | "vale" => "Troca",
+        "ordem_servico" | "ordem_servico_item" => "Ordem de serviço",
+        "compra" | "compra_item" => "Compra",
+        _ => "Registro",
+    }
+}
+
+/// Um conflito para a lista do gerente.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conflito {
+    pub id: i64,
+    pub tipo: String,
+    pub o_que: String,
+    pub texto: String,
+    pub quando: String,
+    pub caixa: String,
+    /// O que mudou: campo, valor que ficou, valor que perdeu.
+    pub campos: Vec<Value>,
+    pub pode_usar: bool,
+    pub resolvido: String,
+}
+
+fn valor_curto(v: Option<&Value>, campo: &str) -> String {
+    if campo == "senha_hash" {
+        return "(senha)".into();
+    }
+    match v {
+        None | Some(Value::Null) => "—".into(),
+        Some(Value::String(t)) => t.chars().take(80).collect(),
+        Some(outro) => outro.to_string().chars().take(80).collect(),
+    }
+}
+
+/// Conflitos abertos (e os últimos resolvidos), mais novos primeiro.
+pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
+    #[allow(clippy::type_complexity)]
+    let linhas: Vec<(i64, String, String, String, String, String, String, Option<String>, Option<String>, Option<String>)> = {
+        let mut c = conn.prepare(
+            "SELECT id, tipo, tabela, chave, ficou, perdeu, quando, dados_perdeu, resolucao,
+                    (SELECT nome FROM sync_par p WHERE p.dispositivo = k.dispositivo)
+               FROM sync_conflito k
+              WHERE resolvido_em IS NULL OR id > (SELECT COALESCE(MAX(id), 0) - 30 FROM sync_conflito)
+              ORDER BY resolvido_em IS NOT NULL, id DESC LIMIT 200",
+        )?;
+        let l = c.query_map([], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?, l.get(8)?, l.get(9)?))
+        })?;
+        l.collect::<Result<_, _>>()?
+    };
+    let mut lista = Vec::new();
+    for (id, tipo, tabela, chave, _ficou, perdeu, quando, dados_perdeu, resolucao, caixa) in linhas {
+        let mut k = Conflito {
+            id,
+            tipo: tipo.clone(),
+            o_que: nome_da_tabela(&tabela).into(),
+            texto: String::new(),
+            quando: crate::fiscal::data_local_br(conn, &quando).unwrap_or(quando.clone()),
+            caixa: caixa.unwrap_or_default(),
+            campos: Vec::new(),
+            pode_usar: false,
+            resolvido: resolucao.unwrap_or_default(),
+        };
+        match tipo.as_str() {
+            "orcamento" => {
+                let mut c = conn.prepare(
+                    "SELECT numero, caixa_nome FROM venda WHERE id IN (SELECT value FROM json_each('[\"' || replace(?1, ',', '\",\"') || '\"]')) ORDER BY id",
+                )?;
+                let vendas: Vec<String> = c
+                    .query_map([&perdeu], |l| Ok(format!("Nº {} ({})", l.get::<_, i64>(0)?, l.get::<_, String>(1)?)))?
+                    .collect::<Result<_, _>>()?;
+                let numero: Option<i64> =
+                    conn.query_row("SELECT numero FROM venda WHERE id = ?1", [&chave], |l| l.get(0)).optional()?;
+                k.o_que = "Orçamento".into();
+                k.texto = format!(
+                    "O orçamento Nº {} virou mais de uma venda em caixas sem rede: {}. Cancele a venda que sobrou (se o cliente pagou uma vez só).",
+                    numero.map(|n| n.to_string()).unwrap_or_else(|| "?".into()),
+                    vendas.join(" e ")
+                );
+            }
+            "gerente" => {
+                let nome: String = conn
+                    .query_row("SELECT nome FROM usuario WHERE id = ?1", [&chave], |l| l.get(0))
+                    .optional()?
+                    .unwrap_or_default();
+                k.o_que = "Gerente".into();
+                k.texto = format!(
+                    "Depois da troca de dados a loja ficou sem gerente (cada caixa tirou um). {nome} voltou a ser gerente. Confira na lista acima quem deve ser gerente."
+                );
+            }
+            _ => {
+                let atual: Option<Option<String>> = conn
+                    .query_row(
+                        "SELECT dados FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
+                        params![tabela, chave],
+                        |l| l.get(0),
+                    )
+                    .optional()?;
+                let atual = atual.flatten();
+                let ler = |t: &Option<String>| -> Value {
+                    t.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null)
+                };
+                let (a, p) = (ler(&atual), ler(&dados_perdeu));
+                let nome = a.get("nome").or_else(|| p.get("nome")).and_then(|v| v.as_str()).unwrap_or_default();
+                k.texto = if nome.is_empty() {
+                    "Dois caixas mexeram no mesmo registro sem ver o do outro. Ficou a alteração mais nova.".into()
+                } else {
+                    format!("Dois caixas mexeram em \"{nome}\" sem ver o do outro. Ficou a alteração mais nova.")
+                };
+                for campo in diferencas(atual.as_deref(), dados_perdeu.as_deref()) {
+                    k.campos.push(json!({
+                        "campo": campo,
+                        "ficou": if atual.is_none() { "(apagado)".into() } else { valor_curto(a.get(&campo), &campo) },
+                        "perdeu": if dados_perdeu.is_none() { "(apagado)".into() } else { valor_curto(p.get(&campo), &campo) },
+                    }));
+                }
+                k.pode_usar = PODE_USAR.contains(&tabela.as_str());
+            }
+        }
+        lista.push(k);
+    }
+    Ok(lista)
+}
+
+/// Quantos conflitos estão esperando o gerente.
+pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL", [], |l| l.get(0))?)
+}
+
+/// O gerente decidiu: `usar` = volta a versão que tinha perdido (vira uma
+/// alteração nova, que vai para os outros caixas); senão fica como está.
+pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &str) -> Resultado<()> {
+    let (tipo, tabela, chave, dados, resolvido): (String, String, String, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT tipo, tabela, chave, dados_perdeu, resolvido_em FROM sync_conflito WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Conflito".into()))?;
+    if resolvido.is_some() {
+        return Err(Erro::validacao("Este conflito já foi resolvido."));
+    }
+    if usar {
+        if tipo != "registro" || !PODE_USAR.contains(&tabela.as_str()) {
+            return Err(Erro::validacao("Aqui não dá para voltar a outra versão: corrija pela tela de cada coisa."));
+        }
+        let (todas, pk) = colunas(conn, &tabela)?;
+        let valores_chave: Vec<Value> = serde_json::from_str(&chave)?;
+        if valores_chave.len() != pk.len() {
+            return Err(Erro::Interno("chave do conflito inválida".into()));
+        }
+        match dados.as_deref().map(serde_json::from_str::<Value>) {
+            None => {
+                let onde =
+                    pk.iter().enumerate().map(|(i, c)| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+                conn.execute(
+                    &format!("DELETE FROM \"{tabela}\" WHERE {onde}"),
+                    params_from_iter(valores_chave.iter().map(para_sql)),
+                )?;
+            }
+            Some(Ok(Value::Object(m))) => {
+                let cols: Vec<&String> =
+                    todas.iter().filter(|c| m.contains_key(c.as_str()) && c.as_str() != "atualizado_em").collect();
+                let mut nomes: Vec<String> = cols.iter().map(|c| format!("\"{c}\"")).collect();
+                let mut valores: Vec<SqlValor> = cols.iter().map(|c| para_sql(&m[c.as_str()])).collect();
+                if todas.iter().any(|c| c == "atualizado_em") {
+                    nomes.push("\"atualizado_em\"".into());
+                    valores.push(SqlValor::Text(tempo::agora()));
+                }
+                let marcas = (1..=nomes.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+                let atualizar: Vec<String> = nomes
+                    .iter()
+                    .filter(|n| !pk.iter().any(|k| format!("\"{k}\"") == **n))
+                    .map(|n| format!("{n} = excluded.{n}"))
+                    .collect();
+                let conflito =
+                    if atualizar.is_empty() { "DO NOTHING".to_string() } else { format!("DO UPDATE SET {}", atualizar.join(", ")) };
+                conn.execute(
+                    &format!(
+                        "INSERT INTO \"{tabela}\" ({}) VALUES ({marcas}) ON CONFLICT ({}) {conflito}",
+                        nomes.join(", "),
+                        pk.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
+                    ),
+                    params_from_iter(valores),
+                )
+                .map_err(|e| match e {
+                    rusqlite::Error::SqliteFailure(f, _) if f.code == rusqlite::ErrorCode::ConstraintViolation => {
+                        Erro::validacao("A versão que perdeu aponta para algo que não existe mais (ou repete outro registro). Corrija pela tela.")
+                    }
+                    outro => outro.into(),
+                })?;
+            }
+            _ => return Err(Erro::Interno("versão do conflito inválida".into())),
+        }
+    }
+    conn.execute(
+        "UPDATE sync_conflito SET resolvido_em = ?2, resolvido_por = ?3, resolucao = ?4 WHERE id = ?1",
+        params![id, tempo::agora(), usuario_id, if usar { "voltou a versão que tinha perdido" } else { "ficou como está" }],
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -782,6 +1200,7 @@ pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(Str
     config::gravar(&conn, "sync_pendencias", &faltam.to_string())?;
     if total > 0 {
         crate::usuarios::resolver_nomes_repetidos(&conn)?;
+        verificar_depois(&conn)?;
     }
     Ok((dispositivo, total))
 }
@@ -1092,6 +1511,7 @@ mod testes {
             dados: Some(dados.replace("Maria C", "Maria velha")),
             dispositivo: "outro".into(),
             quando: tempo::agora(),
+            base: None,
         };
         assert!(velha.id < id_ultima);
         let velha_clone = velha.clone();
