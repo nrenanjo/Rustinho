@@ -152,9 +152,12 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "imprimir_local",
     "estoque_dias_compra",
     "estoque_dias_parado",
-    // "backup_senha" (até a 0.9.1) fica na lista para o apagar chegar aos outros.
+    // "backup_senha" (até a 0.9.1) e "backup_chave" (rascunho da 0.9.11)
+    // ficam na lista para o apagar chegar aos outros caixas.
     "backup_senha",
     "backup_chave",
+    // Parte pública da chave do backup (a secreta só vai trancada, no usuário).
+    "backup_publica",
     "gerente_livres",
 ];
 

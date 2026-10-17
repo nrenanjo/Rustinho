@@ -278,6 +278,10 @@ pub struct Servico {
     /// Houve um erro interno grave (pânico): não dá para provar que o que
     /// está na memória ficou certo, então nada mais é gravado até reabrir.
     comprometido: bool,
+    /// Parte secreta da chave do backup, aberta com a senha de um gerente
+    /// (só na memória, enquanto o programa está aberto). Serve para trancar
+    /// a chave para um gerente novo ou com senha nova.
+    segredo_backup: Option<[u8; 32]>,
 }
 
 impl Servico {
@@ -297,7 +301,7 @@ impl Servico {
     }
 
     fn com_banco(banco: Banco) -> Servico {
-        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false }
+        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false, segredo_backup: None }
     }
 
     /// Executa um comando. Um problema vira uma resposta de erro em JSON.
@@ -486,6 +490,8 @@ impl Servico {
                 match usuarios::conferir_gerente(&self.banco.conn, &d.senha)? {
                     Some(g) => {
                         usuarios::limpar_falhas(&self.banco.conn, "gerente")?;
+                        self.segredo_backup =
+                            backup::gerente_conferido(&self.banco.conn, &g.id, &d.senha, self.segredo_backup)?;
                         self.liberacao = Some(Liberacao {
                             ate: Instant::now() + if d.curta { LIBERACAO_CURTA } else { LIBERACAO },
                             renova: !d.curta,
@@ -544,6 +550,9 @@ impl Servico {
                 }
                 for (id, gerente) in d.gerentes.iter().filter_map(|(k, v)| v.as_bool().map(|b| (k, b))) {
                     if usuarios::definir_gerente(&tx, id, gerente)? {
+                        if !gerente {
+                            backup::deixou_de_ser_gerente(&tx, id)?;
+                        }
                         let u = usuarios::buscar(&tx, id)?;
                         detalhes.push(format!("{}: {}", u.nome, if gerente { "gerente" } else { "caixa" }));
                     }
@@ -659,8 +668,11 @@ impl Servico {
                     return Err(Erro::campo("nova2", "As duas senhas novas não são iguais."));
                 }
                 let u = usuarios::buscar(&self.banco.conn, &sessao.usuario_id)?;
-                usuarios::alterar(&self.banco.conn, &u.id, &u.nome, u.ativo, Some(&d.nova))
+                let tx = self.banco.conn.transaction()?;
+                usuarios::alterar(&tx, &u.id, &u.nome, u.ativo, Some(&d.nova))
                     .map_err(renomear_campo("senha", "nova"))?;
+                backup::senha_trocada(&tx, &u.id, &d.nova, self.segredo_backup)?;
+                tx.commit()?;
                 auditoria::registrar(
                     &self.banco.conn,
                     &disp,
@@ -1535,6 +1547,7 @@ impl Servico {
         let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, true)?;
         // Quem configura a loja é o gerente.
         usuarios::definir_gerente(&tx, &u.id, true)?;
+        self.segredo_backup = backup::gerente_conferido(&tx, &u.id, &d.senha, self.segredo_backup)?;
         auditoria::registrar(&tx, &disp, Some(&u.id), "usuario.criar", "usuario", &u.id, &[])?;
         usuarios::registrar_acesso(&tx, &u.id)?;
         tx.commit()?;
@@ -1564,6 +1577,10 @@ impl Servico {
             Ok(u) => {
                 usuarios::limpar_falhas(&self.banco.conn, &d.id)?;
                 usuarios::registrar_acesso(&self.banco.conn, &u.id)?;
+                if u.gerente {
+                    self.segredo_backup =
+                        backup::gerente_conferido(&self.banco.conn, &u.id, &d.senha, self.segredo_backup)?;
+                }
                 auditoria::registrar(
                     &self.banco.conn,
                     &self.banco.dispositivo,
@@ -1636,6 +1653,7 @@ impl Servico {
             usuarios::definir_comissao(&tx, &u.id, &d.comissao)?;
             if d.gerente == Some(true) {
                 usuarios::definir_gerente(&tx, &u.id, true)?;
+                backup::senha_trocada(&tx, &u.id, &d.senha, self.segredo_backup)?;
             }
             auditoria::registrar(&tx, &disp, Some(&sessao.usuario_id), "usuario.criar", "usuario", &u.id, &[])?;
             usuarios::buscar(&tx, &u.id)?
@@ -1662,6 +1680,13 @@ impl Servico {
                 }
             }
             let u = usuarios::buscar(&tx, &u.id)?;
+            // Chave do backup: senha nova de gerente passa a abrir; quem deixou
+            // de ser gerente (ou foi desativado) não abre mais.
+            if !u.gerente || !u.ativo {
+                backup::deixou_de_ser_gerente(&tx, &u.id)?;
+            } else if tem_senha {
+                backup::senha_trocada(&tx, &u.id, &d.senha, self.segredo_backup)?;
+            }
             if !detalhes.is_empty() {
                 auditoria::registrar(
                     &tx,

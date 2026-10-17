@@ -4,12 +4,17 @@
 //! - Uma vez por dia (no horário escolhido, ou na hora se passou um dia
 //!   inteiro sem cópia) e ao fechar o Rustinho, o banco é copiado inteiro
 //!   (`VACUUM INTO`, que tira uma "foto" sem parar o caixa), comprimido em
-//!   zip e, se a loja tiver a senha do backup, criptografado
-//!   (ChaCha20-Poly1305 com chave tirada da senha por Argon2), em pedaços de
-//!   1 MB: nem o banco grande inteiro precisa caber na memória.
-//! - A senha do backup não fica guardada: só a chave tirada dela (com o
-//!   "sal" que vai junto em cada arquivo). Assim, quem abrir o banco não
-//!   descobre a senha (que a pessoa pode usar em outros lugares).
+//!   zip e criptografado (ChaCha20-Poly1305), em pedaços de 1 MB: nem o
+//!   banco grande inteiro precisa caber na memória.
+//! - Chave (desde a 0.9.11): a loja tem um par de chaves X25519. Fazer o
+//!   backup usa só a parte pública (fica no banco: o backup automático
+//!   funciona sem ninguém digitar nada). Abrir o backup precisa da parte
+//!   secreta, que só fica guardada trancada com a senha de cada gerente
+//!   (Argon2). Quem copiar o banco não abre os backups sem a senha de um
+//!   gerente. Cada arquivo leva junto os "cadeados" dos gerentes daquele dia,
+//!   para restaurar até num computador novo.
+//!   Atenção: a proteção é a da senha do gerente. Senha curta (4 números)
+//!   se descobre testando todas; para proteger de verdade, 8 ou mais.
 //! - Depois de gravar, o Rustinho abre a cópia e confere se ela está inteira.
 //!   Cópia que não abre não conta como backup e vira aviso na tela inicial.
 //! - Guarda os últimos N dias (um por dia; do dia de hoje, todos) e nunca
@@ -107,28 +112,9 @@ pub struct Ajustes {
     /// "HH:MM"
     pub hora: String,
     pub nuvem: bool,
-    /// Chave da loja tirada da senha do backup (sal, chave). None = sem senha.
-    pub chave: Option<Chave>,
-}
-
-/// Chave do backup: o "sal" (vai junto no arquivo) e a chave tirada da senha.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Chave {
-    pub sal: [u8; 16],
-    pub chave: [u8; 32],
-}
-
-impl Chave {
-    fn da_senha(senha: &str, sal: [u8; 16]) -> Resultado<Chave> {
-        Ok(Chave { sal, chave: chave_da_senha(senha, &sal)? })
-    }
-    fn escrever(&self) -> String {
-        format!("{}:{}", hex(&self.sal), hex(&self.chave))
-    }
-    fn ler(t: &str) -> Option<Chave> {
-        let (a, b) = t.split_once(':')?;
-        Some(Chave { sal: de_hex(a)?.try_into().ok()?, chave: de_hex(b)?.try_into().ok()? })
-    }
+    /// Parte pública da chave da loja. None = ainda não tem (cópia sem
+    /// criptografia, até um gerente entrar).
+    pub publica: Option<[u8; 32]>,
 }
 
 fn hex(b: &[u8]) -> String {
@@ -142,27 +128,114 @@ fn de_hex(t: &str) -> Option<Vec<u8>> {
     (0..t.len()).step_by(2).map(|i| u8::from_str_radix(t.get(i..i + 2)?, 16).ok()).collect()
 }
 
-/// Chave da loja guardada no banco (vai para os outros caixas).
-pub fn chave_da_loja(conn: &Connection) -> Resultado<Option<Chave>> {
-    Ok(config::ler(conn, "backup_chave")?.as_deref().and_then(Chave::ler))
+/// Tamanho do "cadeado" de um gerente: sal (16), nonce (12) e a parte
+/// secreta da chave trancada (32 + 16 de conferência).
+const ACESSO: usize = 76;
+
+/// Parte pública da chave da loja (vai para os outros caixas).
+pub fn publica_da_loja(conn: &Connection) -> Resultado<Option<[u8; 32]>> {
+    Ok(config::ler(conn, "backup_publica")?.and_then(|t| de_hex(&t)).and_then(|v| v.try_into().ok()))
 }
 
-/// Troca a senha do backup: guarda só a chave tirada dela.
-pub fn definir_senha(conn: &Connection, senha: &str) -> Resultado<()> {
-    let c = Chave::da_senha(senha, aleatorio()?)?;
-    config::gravar(conn, "backup_chave", &c.escrever())?;
-    conn.execute("DELETE FROM config WHERE chave = 'backup_senha'", [])?;
+fn publica_de(segredo: &[u8; 32]) -> [u8; 32] {
+    x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(*segredo)).to_bytes()
+}
+
+/// Tranca a parte secreta com a senha (Argon2 + ChaCha20-Poly1305).
+fn trancar(segredo: &[u8; 32], senha: &str) -> Resultado<Vec<u8>> {
+    let sal: [u8; 16] = aleatorio()?;
+    let nonce: [u8; 12] = aleatorio()?;
+    let cifra = ChaCha20Poly1305::new_from_slice(&chave_da_senha(senha, &sal)?)
+        .map_err(|_| Erro::Interno("chave inválida".into()))?;
+    let corpo = cifra
+        .encrypt(&nonce.into(), segredo.as_slice())
+        .map_err(|_| Erro::Interno("falha ao proteger a chave do backup".into()))?;
+    Ok([sal.as_slice(), nonce.as_slice(), corpo.as_slice()].concat())
+}
+
+fn destrancar(acesso: &[u8], senha: &str) -> Option<[u8; 32]> {
+    if acesso.len() != ACESSO || senha.is_empty() {
+        return None;
+    }
+    let k = chave_da_senha(senha, &acesso[..16]).ok()?;
+    let cifra = ChaCha20Poly1305::new_from_slice(&k).ok()?;
+    let nonce: [u8; 12] = acesso[16..28].try_into().ok()?;
+    cifra.decrypt(&nonce.into(), &acesso[28..]).ok()?.try_into().ok()
+}
+
+/// Cadeados dos gerentes ativos (para ir junto em cada backup).
+fn acessos_da_loja(conn: &Connection) -> Resultado<Vec<Vec<u8>>> {
+    let mut c = conn.prepare(
+        "SELECT backup_acesso FROM usuario WHERE gerente = 1 AND ativo = 1 AND backup_acesso IS NOT NULL ORDER BY id",
+    )?;
+    let lista: Vec<String> = c.query_map([], |l| l.get(0))?.collect::<Result<_, _>>()?;
+    Ok(lista.iter().filter_map(|t| de_hex(t)).filter(|v| v.len() == ACESSO).collect())
+}
+
+fn gravar_acesso(conn: &Connection, usuario_id: &str, acesso: Option<&[u8]>) -> Resultado<()> {
+    conn.execute(
+        "UPDATE usuario SET backup_acesso = ?2, atualizado_em = ?3 WHERE id = ?1",
+        params![usuario_id, acesso.map(hex), tempo::agora()],
+    )?;
     Ok(())
 }
 
-/// Versões até a 0.9.1 guardavam a senha do backup. Troca pela chave.
-pub fn migrar_senha_antiga(conn: &Connection) -> Resultado<()> {
-    if let Some(senha) = config::ler(conn, "backup_senha")? {
-        if !senha.is_empty() && chave_da_loja(conn)?.is_none() {
-            definir_senha(conn, &senha)?;
+/// A senha de um gerente acabou de ser conferida (entrar, aperto, primeiro
+/// usuário). Abre a parte secreta com ela (ou cria a chave da loja, se ainda
+/// não tem; ou tranca para ele a que já está na memória). Devolve a parte
+/// secreta para ficar na memória do programa enquanto ele estiver aberto.
+pub fn gerente_conferido(
+    conn: &Connection,
+    usuario_id: &str,
+    senha: &str,
+    memoria: Option<[u8; 32]>,
+) -> Resultado<Option<[u8; 32]>> {
+    let publica = publica_da_loja(conn)?;
+    let atual: Option<String> =
+        conn.query_row("SELECT backup_acesso FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0)).optional()?.flatten();
+    if let (Some(p), Some(a)) = (publica, atual.as_deref().and_then(de_hex)) {
+        if let Some(s) = destrancar(&a, senha).filter(|s| publica_de(s) == p) {
+            return Ok(Some(s));
         }
-        conn.execute("DELETE FROM config WHERE chave = 'backup_senha'", [])?;
     }
+    let segredo = match (publica, memoria) {
+        (None, _) => {
+            let s: [u8; 32] = aleatorio()?;
+            config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
+            s
+        }
+        (Some(p), Some(m)) if publica_de(&m) == p => m,
+        // Sem como abrir agora: fica para quando outro gerente entrar.
+        _ => return Ok(memoria),
+    };
+    gravar_acesso(conn, usuario_id, Some(&trancar(&segredo, senha)?))?;
+    Ok(Some(segredo))
+}
+
+/// A senha de um usuário mudou. Se ele é gerente, o cadeado passa para a
+/// senha nova (a antiga deixa de abrir os backups novos).
+pub fn senha_trocada(conn: &Connection, usuario_id: &str, nova: &str, memoria: Option<[u8; 32]>) -> Resultado<()> {
+    let gerente: bool =
+        conn.query_row("SELECT gerente FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0)).optional()?.unwrap_or(false);
+    if !gerente {
+        return Ok(());
+    }
+    match (publica_da_loja(conn)?, memoria) {
+        (Some(p), Some(m)) if publica_de(&m) == p => gravar_acesso(conn, usuario_id, Some(&trancar(&m, nova)?)),
+        _ => gravar_acesso(conn, usuario_id, None),
+    }
+}
+
+/// Quem deixa de ser gerente (ou é desativado) não abre mais os backups novos.
+pub fn deixou_de_ser_gerente(conn: &Connection, usuario_id: &str) -> Resultado<()> {
+    gravar_acesso(conn, usuario_id, None)
+}
+
+/// Até a 0.9.11 a loja guardava a senha do backup (até a 0.9.1) ou a chave
+/// tirada dela. As duas saem do banco (e dos outros caixas). Os backups
+/// antigos continuam abrindo com a senha do backup de então.
+pub fn limpar_chave_antiga(conn: &Connection) -> Resultado<()> {
+    conn.execute("DELETE FROM config WHERE chave IN ('backup_senha', 'backup_chave')", [])?;
     Ok(())
 }
 
@@ -181,7 +254,7 @@ pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajuste
         .filter(|d| (1..=365).contains(d))
         .unwrap_or(DIAS_PADRAO);
     let hora = config::ler(conn, "backup_hora")?.filter(|h| hora_valida(h)).unwrap_or_else(|| HORA_PADRAO.to_string());
-    Ok(Ajustes { pasta, dias, hora, nuvem: config::ligado(conn, "backup_nuvem")?, chave: chave_da_loja(conn)? })
+    Ok(Ajustes { pasta, dias, hora, nuvem: config::ligado(conn, "backup_nuvem")?, publica: publica_da_loja(conn)? })
 }
 
 fn hora_valida(h: &str) -> bool {
@@ -200,9 +273,6 @@ pub struct AjustesEntrada {
     pub pasta: String,
     pub dias: String,
     pub hora: String,
-    /// Vazio = manter a senha atual.
-    pub senha: String,
-    pub senha2: String,
 }
 
 pub fn salvar_ajustes(conn: &Connection, caminho_db: Option<&Path>, e: &AjustesEntrada) -> Resultado<()> {
@@ -221,24 +291,10 @@ pub fn salvar_ajustes(conn: &Connection, caminho_db: Option<&Path>, e: &AjustesE
     if !hora_valida(&hora) {
         return Err(Erro::campo("hora", "Escreva o horário assim: 18:00."));
     }
-    if !e.senha.is_empty() || !e.senha2.is_empty() {
-        if texto::tamanho(&e.senha) < 6 {
-            return Err(Erro::campo("senha", "Use pelo menos 6 letras ou números."));
-        }
-        if texto::tamanho(&e.senha) > 128 {
-            return Err(Erro::campo("senha", "Senha comprida demais."));
-        }
-        if e.senha != e.senha2 {
-            return Err(Erro::campo("senha2", "As duas senhas não são iguais."));
-        }
-    }
     let padrao = pasta_padrao(caminho_db);
     config::gravar(conn, "backup_pasta", if Path::new(pasta) == padrao { "" } else { pasta })?;
     config::gravar(conn, "backup_dias", &dias.to_string())?;
     config::gravar(conn, "backup_hora", &hora)?;
-    if !e.senha.is_empty() {
-        definir_senha(conn, &e.senha)?;
-    }
     Ok(())
 }
 
@@ -420,30 +476,31 @@ fn ler_cheio(r: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(n)
 }
 
-/// Grava o zip (do arquivo `origem`) no formato do backup, em `destino`.
-fn embrulhar(origem: &Path, destino: &mut impl Write, chave: Option<&Chave>) -> Resultado<()> {
+/// Chave de um arquivo do formato 3 (a mesma dos dois lados da troca).
+fn chave_do_arquivo(segredo_ou_efemero: &[u8; 32], outra_publica: &[u8; 32], efemera: &[u8; 32], publica: &[u8; 32]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let comum = x25519_dalek::StaticSecret::from(*segredo_ou_efemero)
+        .diffie_hellman(&x25519_dalek::PublicKey::from(*outra_publica));
+    let mut h = Sha256::new();
+    h.update(b"rustinho-backup-3");
+    h.update(comum.as_bytes());
+    h.update(efemera);
+    h.update(publica);
+    h.finalize().into()
+}
+
+fn escrever_pedacos(entrada: &mut impl Read, destino: &mut impl Write, chave: &[u8; 32], comeco: &[u8; 7]) -> Resultado<()> {
     let falha = |e: std::io::Error| Erro::validacao(format!("Não deu para gravar o backup: {e}"));
-    let mut entrada = std::fs::File::open(origem).map_err(falha)?;
-    destino.write_all(MAGICA).map_err(falha)?;
-    let Some(c) = chave else {
-        destino.write_all(&[0]).map_err(falha)?;
-        std::io::copy(&mut entrada, destino).map_err(falha)?;
-        return Ok(());
-    };
-    let comeco: [u8; 7] = aleatorio()?;
-    destino.write_all(&[2]).map_err(falha)?;
-    destino.write_all(&c.sal).map_err(falha)?;
-    destino.write_all(&comeco).map_err(falha)?;
-    let cifra = ChaCha20Poly1305::new_from_slice(&c.chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+    let cifra = ChaCha20Poly1305::new_from_slice(chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
     let mut atual = vec![0u8; PEDACO];
     let mut proximo = vec![0u8; PEDACO];
-    let mut n = ler_cheio(&mut entrada, &mut atual).map_err(falha)?;
+    let mut n = ler_cheio(entrada, &mut atual).map_err(falha)?;
     let mut numero: u32 = 0;
     loop {
-        let m = if n == PEDACO { ler_cheio(&mut entrada, &mut proximo).map_err(falha)? } else { 0 };
+        let m = if n == PEDACO { ler_cheio(entrada, &mut proximo).map_err(falha)? } else { 0 };
         let ultimo = m == 0;
         let corpo = cifra
-            .encrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n])
+            .encrypt(&nonce_do_pedaco(comeco, numero, ultimo).into(), &atual[..n])
             .map_err(|_| Erro::Interno("falha ao criptografar o backup".into()))?;
         destino.write_all(&corpo).map_err(falha)?;
         if ultimo {
@@ -453,6 +510,74 @@ fn embrulhar(origem: &Path, destino: &mut impl Write, chave: Option<&Chave>) -> 
         n = m;
         numero = numero.checked_add(1).ok_or_else(|| Erro::validacao("O backup ficou grande demais."))?;
     }
+}
+
+fn ler_pedacos(f: &mut impl Read, destino: &mut impl Write, chave: &[u8; 32], comeco: &[u8; 7], senha_errada: fn() -> Erro) -> Resultado<()> {
+    let ler_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para ler o backup: {e}"));
+    let gravar_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para abrir o backup: {e}"));
+    let incompleto = || Erro::validacao("O backup está incompleto (o arquivo foi cortado).");
+    let cifra = ChaCha20Poly1305::new_from_slice(chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+    let tamanho = PEDACO + 16;
+    let mut atual = vec![0u8; tamanho];
+    let mut proximo = vec![0u8; tamanho];
+    let mut n = ler_cheio(f, &mut atual).map_err(ler_falha)?;
+    let mut numero: u32 = 0;
+    loop {
+        if n < 16 {
+            return Err(incompleto());
+        }
+        let m = if n == tamanho { ler_cheio(f, &mut proximo).map_err(ler_falha)? } else { 0 };
+        let ultimo = m == 0;
+        let claro = cifra.decrypt(&nonce_do_pedaco(comeco, numero, ultimo).into(), &atual[..n]).map_err(|_| {
+            if numero == 0 {
+                senha_errada()
+            } else {
+                Erro::validacao("O backup está estragado.")
+            }
+        })?;
+        destino.write_all(&claro).map_err(gravar_falha)?;
+        if ultimo {
+            return Ok(());
+        }
+        std::mem::swap(&mut atual, &mut proximo);
+        n = m;
+        numero = numero.checked_add(1).ok_or_else(|| Erro::validacao("O backup está estragado."))?;
+    }
+}
+
+/// Grava o zip (do arquivo `origem`) no formato do backup, em `destino`.
+/// Com a chave pública da loja: formato 3 (criptografado), levando junto
+/// os cadeados dos gerentes. Devolve a chave do arquivo (para conferir a
+/// cópia logo depois, sem precisar de senha).
+fn embrulhar(
+    origem: &Path,
+    destino: &mut impl Write,
+    publica: Option<&[u8; 32]>,
+    acessos: &[Vec<u8>],
+) -> Resultado<Option<[u8; 32]>> {
+    let falha = |e: std::io::Error| Erro::validacao(format!("Não deu para gravar o backup: {e}"));
+    let mut entrada = std::fs::File::open(origem).map_err(falha)?;
+    destino.write_all(MAGICA).map_err(falha)?;
+    let Some(p) = publica else {
+        destino.write_all(&[0]).map_err(falha)?;
+        std::io::copy(&mut entrada, destino).map_err(falha)?;
+        return Ok(None);
+    };
+    let efemero: [u8; 32] = aleatorio()?;
+    let efemera = publica_de(&efemero);
+    let chave = chave_do_arquivo(&efemero, p, &efemera, p);
+    let comeco: [u8; 7] = aleatorio()?;
+    let acessos: Vec<&Vec<u8>> = acessos.iter().filter(|a| a.len() == ACESSO).take(255).collect();
+    destino.write_all(&[3]).map_err(falha)?;
+    destino.write_all(p).map_err(falha)?;
+    destino.write_all(&efemera).map_err(falha)?;
+    destino.write_all(&comeco).map_err(falha)?;
+    destino.write_all(&[acessos.len() as u8]).map_err(falha)?;
+    for a in acessos {
+        destino.write_all(a).map_err(falha)?;
+    }
+    escrever_pedacos(&mut entrada, destino, &chave, &comeco)?;
+    Ok(Some(chave))
 }
 
 /// O arquivo pede senha?
@@ -467,9 +592,30 @@ fn senha_errada() -> Erro {
     Erro::campo("senha", "A senha não abre este backup (ou o arquivo está estragado).")
 }
 
-/// Tira o zip de dentro do backup e grava em `destino`. Com `senha` vazia,
-/// usa a chave guardada da loja (se for a mesma do arquivo).
-fn desembrulhar(arquivo: &Path, destino: &mut impl Write, senha: &str, da_loja: Option<&Chave>) -> Resultado<()> {
+fn senha_de_gerente_errada() -> Erro {
+    Erro::campo(
+        "senha",
+        "Essa senha não abre este backup. Use a senha de um gerente: a atual deste caixa ou a de quando o backup foi feito.",
+    )
+}
+
+/// Maior backup do formato antigo (que é lido inteiro na memória).
+#[cfg(target_os = "android")]
+const TAMANHO_FORMATO_ANTIGO: u64 = 128 * 1024 * 1024;
+#[cfg(not(target_os = "android"))]
+const TAMANHO_FORMATO_ANTIGO: u64 = 1024 * 1024 * 1024;
+
+/// Como abrir um backup.
+pub enum Como<'a> {
+    /// A chave do arquivo (logo depois de fazer, para conferir).
+    Chave([u8; 32]),
+    /// Senha digitada: de um gerente (formato 3) ou do backup (antigos),
+    /// e os cadeados dos gerentes de agora deste caixa.
+    Senha { senha: &'a str, acessos: &'a [Vec<u8>] },
+}
+
+/// Tira o zip de dentro do backup e grava em `destino`.
+fn desembrulhar(arquivo: &Path, destino: &mut impl Write, como: &Como) -> Resultado<()> {
     let ler_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para ler o backup: {e}"));
     let gravar_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para abrir o backup: {e}"));
     let mut f = std::fs::File::open(arquivo).map_err(ler_falha)?;
@@ -483,67 +629,85 @@ fn desembrulhar(arquivo: &Path, destino: &mut impl Write, senha: &str, da_loja: 
         return Ok(());
     }
     let incompleto = || Erro::validacao("O backup está incompleto (o arquivo foi cortado).");
+    let (senha, acessos_aqui) = match como {
+        Como::Senha { senha, acessos } => (*senha, *acessos),
+        Como::Chave(_) => ("", &[][..]),
+    };
+    if tipo == 3 {
+        let mut fixo = [0u8; 32 + 32 + 7 + 1];
+        if ler_cheio(&mut f, &mut fixo).map_err(ler_falha)? < fixo.len() {
+            return Err(incompleto());
+        }
+        let publica: [u8; 32] = fixo[..32].try_into().unwrap_or_default();
+        let efemera: [u8; 32] = fixo[32..64].try_into().unwrap_or_default();
+        let comeco: [u8; 7] = fixo[64..71].try_into().unwrap_or_default();
+        let mut no_arquivo = vec![0u8; fixo[71] as usize * ACESSO];
+        if ler_cheio(&mut f, &mut no_arquivo).map_err(ler_falha)? < no_arquivo.len() {
+            return Err(incompleto());
+        }
+        let chave = match como {
+            Como::Chave(k) => *k,
+            Como::Senha { .. } => {
+                if senha.is_empty() {
+                    return Err(Erro::campo("senha", "Digite a senha de um gerente para abrir este backup."));
+                }
+                let mut tentados: Vec<&[u8]> = Vec::new();
+                let segredo = no_arquivo
+                    .chunks(ACESSO)
+                    .chain(acessos_aqui.iter().map(|a| a.as_slice()))
+                    .filter(|a| {
+                        let novo = !tentados.contains(a);
+                        tentados.push(a);
+                        novo
+                    })
+                    .find_map(|a| destrancar(a, senha).filter(|s| publica_de(s) == publica))
+                    .ok_or_else(senha_de_gerente_errada)?;
+                chave_do_arquivo(&segredo, &efemera, &efemera, &publica)
+            }
+        };
+        return ler_pedacos(&mut f, destino, &chave, &comeco, senha_errada);
+    }
+    if !matches!(tipo, 1 | 2) {
+        return Err(Erro::validacao("Este backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes."));
+    }
+    // Formatos antigos (até a 0.9.11): a senha do backup de então.
     let mut sal = [0u8; 16];
     if ler_cheio(&mut f, &mut sal).map_err(ler_falha)? < 16 {
         return Err(incompleto());
     }
-    let chave = if !senha.is_empty() {
-        chave_da_senha(senha, &sal)?
-    } else {
-        match da_loja.filter(|c| c.sal == sal) {
-            Some(c) => c.chave,
-            None => return Err(Erro::campo("senha", "Este backup tem senha. Digite a senha do backup.")),
-        }
-    };
-    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
-    match tipo {
-        1 => {
-            // Formato antigo: tudo de uma vez.
-            let mut nonce = [0u8; 12];
-            if ler_cheio(&mut f, &mut nonce).map_err(ler_falha)? < 12 {
-                return Err(incompleto());
-            }
-            let mut corpo = Vec::new();
-            f.read_to_end(&mut corpo).map_err(ler_falha)?;
-            let claro = cifra.decrypt(&nonce.into(), corpo.as_slice()).map_err(|_| senha_errada())?;
-            destino.write_all(&claro).map_err(gravar_falha)?;
-            Ok(())
-        }
-        2 => {
-            let mut comeco = [0u8; 7];
-            if ler_cheio(&mut f, &mut comeco).map_err(ler_falha)? < 7 {
-                return Err(incompleto());
-            }
-            let tamanho = PEDACO + 16;
-            let mut atual = vec![0u8; tamanho];
-            let mut proximo = vec![0u8; tamanho];
-            let mut n = ler_cheio(&mut f, &mut atual).map_err(ler_falha)?;
-            let mut numero: u32 = 0;
-            loop {
-                if n < 16 {
-                    return Err(incompleto());
-                }
-                let m = if n == tamanho { ler_cheio(&mut f, &mut proximo).map_err(ler_falha)? } else { 0 };
-                let ultimo = m == 0;
-                let claro =
-                    cifra.decrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n]).map_err(|_| {
-                        if numero == 0 {
-                            senha_errada()
-                        } else {
-                            Erro::validacao("O backup está estragado.")
-                        }
-                    })?;
-                destino.write_all(&claro).map_err(gravar_falha)?;
-                if ultimo {
-                    return Ok(());
-                }
-                std::mem::swap(&mut atual, &mut proximo);
-                n = m;
-                numero = numero.checked_add(1).ok_or_else(|| Erro::validacao("O backup está estragado."))?;
-            }
-        }
-        _ => Err(Erro::validacao("Este backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes.")),
+    if senha.is_empty() {
+        return Err(Erro::campo("senha", "Este backup é de antes da 0.9.11: digite a senha do backup daquela época."));
     }
+    let chave = chave_da_senha(senha, &sal)?;
+    if tipo == 1 {
+        // Formato antigo: lido inteiro na memória, então tem tamanho máximo.
+        let tamanho = std::fs::metadata(arquivo).map(|m| m.len()).unwrap_or(u64::MAX);
+        if tamanho > TAMANHO_FORMATO_ANTIGO {
+            return Err(Erro::validacao("Este backup antigo é grande demais para abrir neste aparelho. Abra num computador."));
+        }
+        let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+        let mut nonce = [0u8; 12];
+        if ler_cheio(&mut f, &mut nonce).map_err(ler_falha)? < 12 {
+            return Err(incompleto());
+        }
+        let mut corpo = Vec::new();
+        f.read_to_end(&mut corpo).map_err(ler_falha)?;
+        let claro = cifra.decrypt(&nonce.into(), corpo.as_slice()).map_err(|_| senha_errada())?;
+        destino.write_all(&claro).map_err(gravar_falha)?;
+        return Ok(());
+    }
+    let mut comeco = [0u8; 7];
+    if ler_cheio(&mut f, &mut comeco).map_err(ler_falha)? < 7 {
+        return Err(incompleto());
+    }
+    ler_pedacos(&mut f, destino, &chave, &comeco, senha_errada)
+}
+
+/// Tipo de um arquivo de backup (0 = sem criptografia).
+fn tipo_do_arquivo(arquivo: &Path) -> Option<u8> {
+    let mut cabeca = [0u8; 9];
+    std::fs::File::open(arquivo).ok()?.read_exact(&mut cabeca).ok()?;
+    tem_senha(&cabeca).map(|_| cabeca[8])
 }
 
 // ---------------------------------------------------------------------------
@@ -680,14 +844,16 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     drop(fim);
     let _ = std::fs::remove_file(&foto);
 
-    // 3. Senha e gravação (primeiro com outro nome, para não deixar meio arquivo).
+    // 3. Criptografia e gravação (primeiro com outro nome, para não deixar meio arquivo).
+    let acessos = acessos_da_loja(conn)?;
     let nome = montar_nome(conn, antes)?;
     let destino = a.pasta.join(&nome);
     let parcial = a.pasta.join(format!(".{nome}.parcial"));
+    let chave_do_arquivo;
     {
         let saida = std::fs::File::create(&parcial).map_err(|e| erro_pasta(&a.pasta, e))?;
         let mut escrita = std::io::BufWriter::new(saida);
-        embrulhar(&caminho_zip, &mut escrita, a.chave.as_ref())?;
+        chave_do_arquivo = embrulhar(&caminho_zip, &mut escrita, a.publica.as_ref(), &acessos)?;
         let saida = escrita.into_inner().map_err(|e| erro_pasta(&a.pasta, e.into_error()))?;
         saida.sync_all().map_err(|e| erro_pasta(&a.pasta, e))?;
     }
@@ -695,7 +861,11 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     let tamanho = std::fs::metadata(&destino).map(|m| m.len() as i64).unwrap_or(0);
 
     // 4. Conferir lendo de volta do disco.
-    if let Err(e) = conferir_com(&destino, "", a.chave.as_ref()) {
+    let como = match chave_do_arquivo {
+        Some(k) => Como::Chave(k),
+        None => Como::Senha { senha: "", acessos: &[] },
+    };
+    if let Err(e) = conferir_com(&destino, &como) {
         let _ = std::fs::remove_file(&destino);
         return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
     }
@@ -722,13 +892,13 @@ fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
 
 /// Abre o backup numa pasta temporária e confere. Devolve o caminho do
 /// banco tirado de dentro (vale enquanto `tmp` existir) e as informações.
-fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria) -> Resultado<(PathBuf, Info)> {
+fn abrir(arquivo: &Path, como: &Como, tmp: &Temporaria) -> Resultado<(PathBuf, Info)> {
     let caminho_zip = tmp.0.join("aberto.zip");
     {
         let saida = std::fs::File::create(&caminho_zip)
             .map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
         let mut escrita = std::io::BufWriter::new(saida);
-        desembrulhar(arquivo, &mut escrita, senha, da_loja)?;
+        desembrulhar(arquivo, &mut escrita, como)?;
         escrita.flush().map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
     }
     let arquivo_zip =
@@ -743,11 +913,18 @@ fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria)
     }
     let db = tmp.0.join("restaurar.db");
     {
-        let mut f = zip.by_name("rustinho.db").map_err(|_| Erro::validacao("O backup não tem o banco de dados."))?;
+        let f = zip.by_name("rustinho.db").map_err(|_| Erro::validacao("O backup não tem o banco de dados."))?;
+        // O tamanho escrito no zip pode mentir: o limite vale também ao descomprimir.
+        if f.size() > TAMANHO_BANCO {
+            return Err(Erro::validacao("O banco dentro do backup é grande demais para abrir neste aparelho."));
+        }
         let mut saida =
             std::fs::File::create(&db).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
-        std::io::copy(&mut f, &mut saida)
+        let copiado = std::io::copy(&mut f.take(TAMANHO_BANCO + 1), &mut saida)
             .map_err(|_| Erro::validacao("O backup está estragado (falha ao descomprimir)."))?;
+        if copiado > TAMANHO_BANCO {
+            return Err(Erro::validacao("O banco dentro do backup é grande demais para abrir neste aparelho."));
+        }
     }
     let c = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let ok: String = c
@@ -768,15 +945,22 @@ fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria)
     Ok((db, info))
 }
 
-/// Confere se um backup abre (com a senha digitada ou, sem ela, com a chave
-/// da loja). Devolve as informações de dentro dele.
+/// Maior banco dentro de um backup.
+#[cfg(target_os = "android")]
+const TAMANHO_BANCO: u64 = 1024 * 1024 * 1024;
+#[cfg(not(target_os = "android"))]
+const TAMANHO_BANCO: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Confere se um backup abre com a senha de um gerente (ou, nos antigos, a
+/// senha do backup). Devolve as informações de dentro dele.
 pub fn conferir(conn: &Connection, arquivo: &Path, senha: &str) -> Resultado<Info> {
-    conferir_com(arquivo, senha, chave_da_loja(conn)?.as_ref())
+    let acessos = acessos_da_loja(conn)?;
+    conferir_com(arquivo, &Como::Senha { senha, acessos: &acessos })
 }
 
-fn conferir_com(arquivo: &Path, senha: &str, da_loja: Option<&Chave>) -> Resultado<Info> {
+fn conferir_com(arquivo: &Path, como: &Como) -> Resultado<Info> {
     let tmp = Temporaria::nova(arquivo.parent().unwrap_or(Path::new(".")))?;
-    abrir(arquivo, senha, da_loja, &tmp).map(|(_, i)| i)
+    abrir(arquivo, como, &tmp).map(|(_, i)| i)
 }
 
 /// Cópias que estão na pasta, mais novas primeiro.
@@ -1099,7 +1283,7 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         let mais_nova = listar(&a.pasta).into_iter().find(|c| !c.antes);
         let Some(c) = mais_nova else { return Ok(()) };
         if !c.tem_senha {
-            return Err(Erro::validacao("Crie a senha do backup: sem ela nada vai para o Google Drive."));
+            return Err(Erro::validacao("Um gerente precisa entrar no Rustinho antes: sem a chave da loja nada vai para o Google Drive."));
         }
         let la = nomes_na_nuvem()?;
         if !la.iter().any(|(n, _)| *n == c.nome) {
@@ -1170,7 +1354,6 @@ pub fn restaurar(
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
     // A troca de dados com os outros caixas espera a restauração terminar.
     let _pausa = sync::pausar();
-    let a = ajustes(conn, caminho_db)?;
     let tmp = Temporaria::nova(&std::env::temp_dir())?;
 
     let local = if nuvem {
@@ -1189,7 +1372,16 @@ pub fn restaurar(
     };
 
     dizer("Conferindo o backup…");
-    let (db, info) = abrir(&local, senha, a.chave.as_ref(), &tmp)?;
+    // Backup sem criptografia (de antes de ter gerente): mesmo assim só com
+    // a senha de um gerente deste caixa.
+    if tipo_do_arquivo(&local) == Some(0)
+        && crate::usuarios::quantidade(conn)? > 0
+        && crate::usuarios::conferir_gerente(conn, senha)?.is_none()
+    {
+        return Err(Erro::campo("senha", "Digite a senha de um gerente para restaurar."));
+    }
+    let acessos = acessos_da_loja(conn)?;
+    let (db, info) = abrir(&local, &Como::Senha { senha, acessos: &acessos }, &tmp)?;
     if info.estrutura as usize > banco::versao_da_estrutura() {
         return Err(Erro::validacao("Esse backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes."));
     }
@@ -1209,8 +1401,7 @@ pub fn restaurar(
         let mut c = conn.prepare("SELECT chave, valor FROM config")?;
         for l in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
             let (k, v) = l?;
-            // A chave do backup de agora continua (a do backup pode ser outra).
-            if !da_loja.contains(&k.as_str()) || k == "backup_chave" {
+            if !da_loja.contains(&k.as_str()) {
                 locais.push((k, v));
             }
         }
@@ -1267,7 +1458,7 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
         "pastaPadrao": pasta_padrao(caminho_db).display().to_string(),
         "dias": a.dias.to_string(),
         "hora": a.hora,
-        "temSenha": a.chave.is_some(),
+        "temSenha": a.publica.is_some(),
         "nuvem": a.nuvem,
         "rclone": rclone_ok,
         "drive": drive,
@@ -1330,61 +1521,127 @@ mod testes {
         assert_eq!(apagar, vec![n("20260901", "180000", "caixa1"), n("20261014", "100000", "caixa1")]);
     }
 
-    fn embrulhar_bytes(dados: &[u8], chave: Option<&Chave>) -> Vec<u8> {
+    fn embrulhar_bytes(dados: &[u8], publica: Option<&[u8; 32]>, acessos: &[Vec<u8>]) -> (Vec<u8>, Option<[u8; 32]>) {
         let pasta = pasta_teste("embrulho");
         let origem = pasta.join("zip");
         std::fs::write(&origem, dados).unwrap();
         let mut saida = Vec::new();
-        embrulhar(&origem, &mut saida, chave).unwrap();
+        let k = embrulhar(&origem, &mut saida, publica, acessos).unwrap();
         let _ = std::fs::remove_dir_all(&pasta);
-        saida
+        (saida, k)
     }
 
-    fn desembrulhar_bytes(bytes: &[u8], senha: &str, da_loja: Option<&Chave>) -> Resultado<Vec<u8>> {
+    fn desembrulhar_bytes(bytes: &[u8], como: &Como) -> Resultado<Vec<u8>> {
         let pasta = pasta_teste("desembrulho");
         let arquivo = pasta.join("b.rbk");
         std::fs::write(&arquivo, bytes).unwrap();
         let mut saida = Vec::new();
-        let r = desembrulhar(&arquivo, &mut saida, senha, da_loja).map(|_| saida);
+        let r = desembrulhar(&arquivo, &mut saida, como).map(|_| saida);
         let _ = std::fs::remove_dir_all(&pasta);
         r
     }
 
+    fn senha<'a>(s: &'a str, acessos: &'a [Vec<u8>]) -> Como<'a> {
+        Como::Senha { senha: s, acessos }
+    }
+
+    /// C-03: o arquivo abre com a senha de um gerente (pelo cadeado que vai
+    /// junto ou pelo do caixa), nunca sem senha, e estrago é percebido.
     #[test]
-    fn senha_e_estrago() {
-        let chave = Chave::da_senha("segredo1", [7u8; 16]).unwrap();
-        // Pequeno, exatamente um pedaço, e vários pedaços.
+    fn chave_da_loja_e_estrago() {
+        let segredo = [5u8; 32];
+        let publica = publica_de(&segredo);
+        let cadeado_ana = trancar(&segredo, "senha-ana").unwrap();
+        let cadeado_bia = trancar(&segredo, "senha-bia").unwrap();
         for tamanho in [20, PEDACO, PEDACO * 2 + 333] {
             let dados: Vec<u8> = (0..tamanho).map(|i| (i % 251) as u8).collect();
-            let com = embrulhar_bytes(&dados, Some(&chave));
+            let (com, k) = embrulhar_bytes(&dados, Some(&publica), std::slice::from_ref(&cadeado_ana));
             assert_eq!(tem_senha(&com), Some(true));
-            assert_eq!(desembrulhar_bytes(&com, "segredo1", None).unwrap(), dados);
-            assert_eq!(desembrulhar_bytes(&com, "", Some(&chave)).unwrap(), dados, "chave guardada da loja");
-            assert_eq!(desembrulhar_bytes(&com, "errada", None).unwrap_err().nome_do_campo(), Some("senha"));
-            assert!(desembrulhar_bytes(&com, "", None).is_err());
+            assert_eq!(desembrulhar_bytes(&com, &Como::Chave(k.unwrap())).unwrap(), dados);
+            // Pelo cadeado que veio no arquivo (computador novo).
+            assert_eq!(desembrulhar_bytes(&com, &senha("senha-ana", &[])).unwrap(), dados);
+            // Pelo cadeado de agora deste caixa (gerente novo ou senha nova).
+            assert_eq!(desembrulhar_bytes(&com, &senha("senha-bia", std::slice::from_ref(&cadeado_bia))).unwrap(), dados);
+            assert_eq!(desembrulhar_bytes(&com, &senha("senha-bia", &[])).unwrap_err().nome_do_campo(), Some("senha"));
+            assert_eq!(desembrulhar_bytes(&com, &senha("", &[])).unwrap_err().nome_do_campo(), Some("senha"));
             let mut estragado = com.clone();
             let fim = estragado.len() - 3;
             estragado[fim] ^= 1;
-            assert!(desembrulhar_bytes(&estragado, "segredo1", None).is_err());
-            // Cortado no fim de um pedaço: recusa.
+            assert!(desembrulhar_bytes(&estragado, &senha("senha-ana", &[])).is_err());
             if tamanho > PEDACO {
-                let cortado = &com[..9 + 16 + 7 + PEDACO + 16];
-                assert!(desembrulhar_bytes(cortado, "segredo1", None).is_err());
+                let cortado = &com[..9 + 72 + ACESSO + PEDACO + 16];
+                assert!(desembrulhar_bytes(cortado, &senha("senha-ana", &[])).is_err());
             }
         }
-        let sem = embrulhar_bytes(b"PK conteudo", None);
-        assert_eq!(desembrulhar_bytes(&sem, "qualquer", None).unwrap(), b"PK conteudo");
-        assert!(desembrulhar_bytes(b"nada a ver", "", None).is_err());
+        // O segredo nunca está no arquivo.
+        let (com, _) = embrulhar_bytes(b"PK x", Some(&publica), std::slice::from_ref(&cadeado_ana));
+        assert!(!com.windows(32).any(|w| w == segredo));
+        // Sem chave da loja: cópia simples.
+        let (sem, k) = embrulhar_bytes(b"PK conteudo", None, &[]);
+        assert!(k.is_none());
+        assert_eq!(desembrulhar_bytes(&sem, &senha("", &[])).unwrap(), b"PK conteudo");
+        assert!(desembrulhar_bytes(b"nada a ver", &senha("", &[])).is_err());
     }
 
+    /// Backups antigos (formato 2, da senha do backup) continuam abrindo com
+    /// aquela senha.
     #[test]
-    fn senha_antiga_vira_chave() {
+    fn formato_antigo_abre_com_a_senha_de_entao() {
+        let sal = [7u8; 16];
+        let k = chave_da_senha("segredo1", &sal).unwrap();
+        let comeco = [1u8; 7];
+        let mut b = MAGICA.to_vec();
+        b.push(2);
+        b.extend(sal);
+        b.extend(comeco);
+        escrever_pedacos(&mut &b"PK antigo"[..], &mut b, &k, &comeco).unwrap();
+        assert_eq!(desembrulhar_bytes(&b, &senha("segredo1", &[])).unwrap(), b"PK antigo");
+        assert_eq!(desembrulhar_bytes(&b, &senha("errada", &[])).unwrap_err().nome_do_campo(), Some("senha"));
+        assert_eq!(desembrulhar_bytes(&b, &senha("", &[])).unwrap_err().nome_do_campo(), Some("senha"));
+    }
+
+    /// A chave antiga (guardada em claro) sai do banco ao abrir.
+    #[test]
+    fn chave_antiga_sai_do_banco() {
         let b = Banco::em_memoria().unwrap();
         config::gravar(&b.conn, "backup_senha", "segredo1").unwrap();
-        migrar_senha_antiga(&b.conn).unwrap();
+        config::gravar(&b.conn, "backup_chave", "aa:bb").unwrap();
+        limpar_chave_antiga(&b.conn).unwrap();
         assert!(config::ler(&b.conn, "backup_senha").unwrap().is_none());
-        let c = chave_da_loja(&b.conn).unwrap().unwrap();
-        assert_eq!(c, Chave::da_senha("segredo1", c.sal).unwrap());
+        assert!(config::ler(&b.conn, "backup_chave").unwrap().is_none());
+    }
+
+    /// C-03: cadeados dos gerentes: o primeiro cria a chave, a senha nova
+    /// passa a abrir, quem deixa de ser gerente não abre.
+    #[test]
+    fn cadeados_dos_gerentes() {
+        let b = Banco::em_memoria().unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        let bia = crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &bia.id, true).unwrap();
+        assert!(publica_da_loja(&b.conn).unwrap().is_none());
+        let m = gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().unwrap();
+        let p = publica_da_loja(&b.conn).unwrap().unwrap();
+        assert_eq!(publica_de(&m), p);
+        // Ninguém mais guarda o segredo em claro.
+        let tudo: String =
+            b.conn.query_row("SELECT group_concat(valor, '|') FROM config", [], |l| l.get(0)).unwrap();
+        assert!(!tudo.contains(&hex(&m)));
+        // Bia entra: com o segredo na memória, ganha o cadeado dela.
+        assert_eq!(gerente_conferido(&b.conn, &bia.id, "2222", Some(m)).unwrap(), Some(m));
+        assert_eq!(acessos_da_loja(&b.conn).unwrap().len(), 2);
+        // Sem a memória e com a senha certa: abre pelo próprio cadeado.
+        assert_eq!(gerente_conferido(&b.conn, &bia.id, "2222", None).unwrap(), Some(m));
+        // Senha nova: só a nova abre.
+        senha_trocada(&b.conn, &bia.id, "3333", Some(m)).unwrap();
+        assert_eq!(gerente_conferido(&b.conn, &bia.id, "3333", None).unwrap(), Some(m));
+        // Senha trocada sem o segredo na memória: o cadeado sai (volta quando outro gerente entrar).
+        senha_trocada(&b.conn, &bia.id, "4444", None).unwrap();
+        assert_eq!(gerente_conferido(&b.conn, &bia.id, "4444", None).unwrap(), None);
+        assert_eq!(gerente_conferido(&b.conn, &bia.id, "4444", Some(m)).unwrap(), Some(m));
+        deixou_de_ser_gerente(&b.conn, &bia.id).unwrap();
+        assert_eq!(acessos_da_loja(&b.conn).unwrap().len(), 1);
     }
 
     #[test]
@@ -1395,14 +1652,18 @@ mod testes {
         let mut b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "loja_nome", "Loja Teste").unwrap();
         config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
-        definir_senha(&b.conn, "segredo1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        let m = gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        assert!(m.is_some());
         b.conn.execute("INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES ('outro', 'Caixa 2', '10.0.0.2:47810', 999)", []).unwrap();
 
         let feito = fazer(&caminho, false).unwrap();
         let arquivo = PathBuf::from(&feito.arquivo);
         assert!(arquivo.exists());
-        assert_eq!(conferir(&b.conn, &arquivo, "segredo1").unwrap().loja, "Loja Teste");
-        assert_eq!(conferir(&b.conn, &arquivo, "").unwrap().loja, "Loja Teste");
+        assert_eq!(tipo_do_arquivo(&arquivo), Some(3));
+        assert_eq!(conferir(&b.conn, &arquivo, "1111").unwrap().loja, "Loja Teste");
+        assert!(conferir(&b.conn, &arquivo, "").is_err(), "sem senha não abre");
         assert!(conferir(&b.conn, &arquivo, "outra").is_err());
         let s = situacao(&b.conn).unwrap();
         assert!(!s.ultimo.is_empty() && s.erro.is_empty());
@@ -1414,11 +1675,12 @@ mod testes {
         let seq_antes: i64 =
             b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
 
-        // Senha errada: não muda nada.
+        // Senha errada ou vazia: não muda nada.
         assert!(restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "errada").is_err());
+        assert!(restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "").is_err());
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Nome Errado");
 
-        let info = restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "").unwrap();
+        let info = restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
         assert_eq!(info.loja, "Loja Teste");
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Loja Teste");
         // O que é deste computador ficou.
@@ -1438,7 +1700,13 @@ mod testes {
         drop(b);
         let b = Banco::abrir(&caminho).unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Depois");
+
+        // Computador novo (outro banco, outra chave): abre com a senha da Ana de então.
+        let pasta2 = pasta_teste("novo");
+        let b2 = Banco::abrir(&pasta2.join("rustinho.db")).unwrap();
+        assert_eq!(conferir(&b2.conn, &arquivo, "1111").unwrap().loja, "Loja Teste");
         let _ = std::fs::remove_dir_all(&pasta);
+        let _ = std::fs::remove_dir_all(&pasta2);
     }
 
     #[test]
@@ -1459,43 +1727,13 @@ mod testes {
     #[test]
     fn ajustes_validos() {
         let b = Banco::em_memoria().unwrap();
-        let e = |p: &str, d: &str, h: &str, s: &str, s2: &str| AjustesEntrada {
-            pasta: p.into(),
-            dias: d.into(),
-            hora: h.into(),
-            senha: s.into(),
-            senha2: s2.into(),
-        };
-        assert_eq!(
-            salvar_ajustes(&b.conn, None, &e("rel", "30", "18:00", "", "")).unwrap_err().nome_do_campo(),
-            Some("pasta")
-        );
-        assert_eq!(
-            salvar_ajustes(&b.conn, None, &e("", "0", "18:00", "", "")).unwrap_err().nome_do_campo(),
-            Some("dias")
-        );
-        assert_eq!(
-            salvar_ajustes(&b.conn, None, &e("", "30", "25:00", "", "")).unwrap_err().nome_do_campo(),
-            Some("hora")
-        );
-        assert_eq!(
-            salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abc", "abc")).unwrap_err().nome_do_campo(),
-            Some("senha")
-        );
-        assert_eq!(
-            salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abcdef", "abcdeg")).unwrap_err().nome_do_campo(),
-            Some("senha2")
-        );
-        salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "9:30", "abcdef", "abcdef")).unwrap();
+        let e = |p: &str, d: &str, h: &str| AjustesEntrada { pasta: p.into(), dias: d.into(), hora: h.into() };
+        assert_eq!(salvar_ajustes(&b.conn, None, &e("rel", "30", "18:00")).unwrap_err().nome_do_campo(), Some("pasta"));
+        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "0", "18:00")).unwrap_err().nome_do_campo(), Some("dias"));
+        assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "25:00")).unwrap_err().nome_do_campo(), Some("hora"));
+        salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "9:30")).unwrap();
         let a = ajustes(&b.conn, None).unwrap();
         assert_eq!((a.dias, a.hora.as_str()), (15, "09:30"));
-        let c = a.chave.unwrap();
-        assert_eq!(c, Chave::da_senha("abcdef", c.sal).unwrap());
-        // A senha não fica guardada.
-        assert!(config::ler(&b.conn, "backup_senha").unwrap().is_none());
-        // Senha vazia mantém a atual.
-        salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "09:30", "", "")).unwrap();
-        assert_eq!(ajustes(&b.conn, None).unwrap().chave, Some(c));
     }
 
     #[test]
@@ -1514,12 +1752,14 @@ mod testes {
         config::gravar(&b.conn, "loja_nome", "Na Nuvem").unwrap();
         config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
 
-        // Sem senha não vai para a nuvem.
+        // Sem chave da loja (nenhum gerente entrou ainda) não vai para a nuvem.
         fazer(&caminho, false).unwrap();
         assert!(enviar_pendentes(&b.conn, &caminho).is_err());
         assert!(!situacao(&b.conn).unwrap().nuvem_erro.is_empty());
 
-        definir_senha(&b.conn, "segredo1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
         std::thread::sleep(Duration::from_millis(1100));
         fazer(&caminho, false).unwrap();
         enviar_pendentes(&b.conn, &caminho).unwrap();
@@ -1531,7 +1771,7 @@ mod testes {
         assert_eq!(listar_nuvem().unwrap().len(), 1);
 
         config::gravar(&b.conn, "loja_nome", "Mudou").unwrap();
-        restaurar(&mut b.conn, Some(&caminho), &la[0].nome, true, "").unwrap();
+        restaurar(&mut b.conn, Some(&caminho), &la[0].nome, true, "1111").unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Na Nuvem");
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);

@@ -20,6 +20,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0008_oficina.sql"),
     include_str!("migracoes/0009_cadastro.sql"),
     include_str!("migracoes/0010_gerente.sql"),
+    include_str!("migracoes/0011_backup_conflitos.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -61,7 +62,7 @@ impl Banco {
         let dispositivo = garantir_dispositivo(&conn)?;
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
-        crate::backup::migrar_senha_antiga(&conn)?;
+        crate::backup::limpar_chave_antiga(&conn)?;
         Ok(Banco { conn, dispositivo, caminho })
     }
 }
