@@ -765,8 +765,8 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
     } else {
         abertas.iter().filter(|p| e.contas.contains(&p.id)).collect()
     };
-    let saldo: i64 = escolhidas.iter().map(|p| p.v_saldo).sum();
-    let sugerido: i64 = escolhidas.iter().map(|p| p.v_juros).sum();
+    let saldo = numeros::somar(escolhidas.iter().map(|p| p.v_saldo)).ok_or_else(numeros::grande_demais)?;
+    let sugerido = numeros::somar(escolhidas.iter().map(|p| p.v_juros)).ok_or_else(numeros::grande_demais)?;
     let mut falha: Option<(&str, String)> = None;
     fn falhou<'a>(f: &mut Option<(&'a str, String)>, c: &'a str, m: String) {
         if f.is_none() {

@@ -332,7 +332,7 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             defeito: it.defeito,
         });
     }
-    let total: i64 = c.linhas.iter().map(|l| l.valor).sum();
+    let total = numeros::somar(c.linhas.iter().map(|l| l.valor)).ok_or_else(numeros::grande_demais)?;
     c.v_valor = total;
     c.valor = dinheiro(total);
     c.itens = c.linhas.len() as i64;

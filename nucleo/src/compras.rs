@@ -57,6 +57,12 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
             "Este XML não tem a autorização da SEFAZ (ou a nota foi negada). Peça ao fornecedor o XML autorizado, o que vem com o protocolo.",
         ));
     }
+    if !nota.incoerencia.is_empty() {
+        return Err(Erro::validacao(format!(
+            "Este XML parece alterado ou montado à mão: {}. Baixe de novo o XML no portal da SEFAZ ou peça ao fornecedor.",
+            nota.incoerencia
+        )));
+    }
     if nota.tipo == "0" {
         return Err(Erro::validacao("Esta é uma nota de entrada, não uma venda do fornecedor para a loja."));
     }
@@ -546,7 +552,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
     for (i, it) in itens.iter().enumerate() {
         let custo_item = it.custo_nota() + extras[i];
         if it.acao != "ignorar" {
-            custo_total += custo_item;
+            custo_total = numeros::somar([custo_total, custo_item]).ok_or_else(numeros::grande_demais)?;
         }
         match it.acao.as_str() {
             "" => pendentes += 1,
@@ -1131,12 +1137,32 @@ mod testes {
         let b = Banco::em_memoria().unwrap();
         let ex = nfe_xml::EXEMPLO;
         let ler = |x: &str| nfe_xml::ler(x).unwrap();
+        assert_eq!(ler(ex).incoerencia, "");
         assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
         let sem_protocolo = ex.replace("<cStat>100</cStat>", "<cStat>110</cStat>");
         assert!(conferir_nota(&b.conn, &ler(&sem_protocolo)).unwrap_err().to_string().contains("autorização"));
         let entrada = ex.replace("<tpNF>1</tpNF>", "<tpNF>0</tpNF>");
         assert!(conferir_nota(&b.conn, &ler(&entrada)).unwrap_err().to_string().contains("entrada"));
         let devolucao = ex.replace("<tpNF>1</tpNF>", "<tpNF>1</tpNF><finNFe>4</finNFe>");
+        // XML alterado ou montado: o que não bate é recusado (C-04).
+        for (troca, por, motivo) in [
+            ("<nNF>12345</nNF>", "<nNF>12346</nNF>", "número"),
+            ("<CNPJ>11222333000181</CNPJ>", "<CNPJ>11222333000262</CNPJ>", "CNPJ do fornecedor"),
+            ("<chNFe>35261011222333000181550010000123451000000014", "<chNFe>35261011222333000181550010000123461000000010", "outra nota"),
+            ("<digVal>ZXhl", "<digVal>AAAA", "resumo"),
+            ("<nProt>135260000000001</nProt>", "", "sem número"),
+            ("1000000014\" versao", "1000000015\" versao", "dígito"),
+        ] {
+            let x = ex.replace(troca, por);
+            assert_ne!(x, ex, "{troca}");
+            let e = conferir_nota(&b.conn, &ler(&x)).unwrap_err().to_string();
+            assert!(e.contains("alterado") && e.contains(motivo), "{motivo}: {e}");
+        }
+        let inicio = ex.find("<Signature").unwrap();
+        let fim = ex.find("</Signature>").unwrap() + "</Signature>".len();
+        let sem_assinatura = format!("{}{}", &ex[..inicio], &ex[fim..]);
+        assert!(conferir_nota(&b.conn, &ler(&sem_assinatura)).unwrap_err().to_string().contains("assinatura"));
+        assert_eq!(nfe_xml::digito_da_chave("3526101122233300018155001000012345100000001"), Some(4));
         assert!(conferir_nota(&b.conn, &ler(&devolucao)).unwrap_err().to_string().contains("devolução"));
         // CNPJ da loja preenchido e diferente do destinatário.
         config::gravar(&b.conn, "loja_cnpj", "11222333000181").unwrap();

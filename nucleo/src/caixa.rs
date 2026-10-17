@@ -302,7 +302,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         }
     }
     let dinheiro_recebido: i64 = recebido.iter().find(|s| s.0 == "dinheiro").map(|s| s.1).unwrap_or(0);
-    let total_recebido: i64 = recebido.iter().map(|s| s.1).sum();
+    let total_recebido = numeros::somar(recebido.iter().map(|s| s.1)).ok_or_else(numeros::grande_demais)?;
     let mut c = conn.prepare_cached(
         "SELECT m.tipo, m.valor, m.motivo, COALESCE(u.nome, ''), m.criado_em
            FROM caixa_movimento m LEFT JOIN usuario u ON u.id = m.usuario_id
@@ -311,11 +311,18 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
     let movs: Vec<(String, i64, String, String, String)> = c
         .query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?
         .collect::<Result<_, _>>()?;
-    let sangrias: i64 = movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1).sum();
-    let suprimentos: i64 = movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1).sum();
+    let sangrias = numeros::somar(movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1))
+        .ok_or_else(numeros::grande_demais)?;
+    let suprimentos = numeros::somar(movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1))
+        .ok_or_else(numeros::grande_demais)?;
     let devolvido = crate::devolucoes::dinheiro_na_sessao(conn, sessao_id)?;
-    let esperado = sessao.valor_inicial + dinheiro_vendas + dinheiro_recebido + suprimentos - sangrias - devolvido;
-    let diferenca = contado.map(|c| c - esperado).unwrap_or(0);
+    let esperado =
+        numeros::somar([sessao.valor_inicial, dinheiro_vendas, dinheiro_recebido, suprimentos, -sangrias, -devolvido])
+            .ok_or_else(numeros::grande_demais)?;
+    let diferenca = match contado {
+        Some(c) => numeros::somar([c, -esperado]).ok_or_else(numeros::grande_demais)?,
+        None => 0,
+    };
     Ok(Resumo {
         valor_inicial: numeros::escrever_dinheiro(sessao.valor_inicial),
         sessao,

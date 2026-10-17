@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
   <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-    <infNFe Id="NFe35261011222333000181550010000123451000000017" versao="4.00">
+    <infNFe Id="NFe35261011222333000181550010000123451000000014" versao="4.00">
       <ide>
-        <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie><nNF>12345</nNF>
+        <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie><nNF>12345</nNF><cNF>00000001</cNF><tpEmis>1</tpEmis><cDV>4</cDV>
         <dhEmi>2026-10-08T10:15:00-03:00</dhEmi><tpNF>1</tpNF>
       </ide>
       <emit>
@@ -61,6 +61,7 @@
         <dup><nDup>002</nDup><dVenc>2026-12-07</dVenc><vDup>550.25</vDup></dup>
       </cobr>
     </infNFe>
+    <Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><Reference URI="#NFe35261011222333000181550010000123451000000014"><DigestValue>ZXhlbXBsby1kZS1yZXN1bW8tZGEtbm90YT0=</DigestValue></Reference></SignedInfo><SignatureValue>QUJD</SignatureValue></Signature>
   </NFe>
-  <protNFe versao="4.00"><infProt><chNFe>35261011222333000181550010000123451000000017</chNFe><cStat>100</cStat></infProt></protNFe>
+  <protNFe versao="4.00"><infProt><chNFe>35261011222333000181550010000123451000000014</chNFe><cStat>100</cStat><nProt>135260000000001</nProt><digVal>ZXhlbXBsby1kZS1yZXN1bW8tZGEtbm90YT0=</digVal></infProt></protNFe>
 </nfeProc>

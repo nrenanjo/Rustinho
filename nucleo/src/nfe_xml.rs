@@ -27,7 +27,13 @@ pub struct NotaXml {
     pub destinatario: String,
     /// Nome, endereço e contato de quem recebeu (para cadastrar o cliente).
     pub destinatario_dados: Emitente,
+    /// O XML diz que a SEFAZ autorizou (cStat 100/150 no protocolo). Isto
+    /// sozinho não prova nada: veja `incoerencia`.
     pub autorizada: bool,
+    /// Algo que não bate entre a chave de acesso, os dados da nota, a
+    /// assinatura e o protocolo ("" = tudo bate). Não é a conferência da
+    /// assinatura digital (essa fica para o módulo fiscal, com certificado).
+    pub incoerencia: String,
     pub itens: Vec<ItemXml>,
     pub total_produtos: i64,
     pub frete: i64,
@@ -98,6 +104,10 @@ fn decimal(texto: &str, casas: u32) -> Result<i64, String> {
         || !fracao.chars().all(|c| c.is_ascii_digit())
     {
         return Err(format!("número inválido no XML: {texto}"));
+    }
+    // Até 99 bilhões: soma de muitos valores ainda cabe no número.
+    if inteira.len() > 11 {
+        return Err(format!("número grande demais: {texto}"));
     }
     let base = 10_i64.pow(casas);
     let inteira: i64 =
@@ -263,7 +273,9 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         .and_then(|n| n.text())
         .map(|c| matches!(c.trim(), "100" | "150"))
         .unwrap_or(false);
+    let incoerencia = if autorizada { conferir_coerencia(raiz, inf, &chave) } else { String::new() };
     Ok(NotaXml {
+        incoerencia,
         chave,
         modelo,
         numero: texto(ide, "nNF"),
@@ -287,6 +299,93 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         total: dinheiro(tot, "vNF")?,
         duplicatas,
     })
+}
+
+/// Dígito verificador da chave de acesso (módulo 11, pesos 2 a 9).
+pub fn digito_da_chave(chave43: &str) -> Option<u32> {
+    let mut soma = 0;
+    for (i, c) in chave43.chars().rev().enumerate() {
+        soma += c.to_digit(10)? * (2 + (i as u32 % 8));
+    }
+    let resto = soma % 11;
+    Some(if resto < 2 { 0 } else { 11 - resto })
+}
+
+/// Confere se a chave de acesso, os dados da nota, a assinatura e o
+/// protocolo da SEFAZ falam da mesma nota. Um XML montado à mão ou alterado
+/// depois (copiando o protocolo de outra nota) não passa. Devolve "" se
+/// tudo bate, ou o que não bate.
+fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
+    if chave.len() != 44 || !chave.chars().all(|c| c.is_ascii_digit()) {
+        return "a chave de acesso não tem 44 números".into();
+    }
+    if inf.attribute("Id").map(str::trim) != Some(&format!("NFe{chave}")) {
+        return "a identificação da nota não é a chave de acesso".into();
+    }
+    if digito_da_chave(&chave[..43]) != chave[43..].parse().ok() {
+        return "o dígito da chave de acesso está errado".into();
+    }
+    let ide = filho(inf, "ide");
+    let emit = filho(inf, "emit");
+    // Partes da chave: UF(2) AAMM(4) CNPJ(14) modelo(2) série(3) número(9)
+    // tipo de emissão(1) código(8) dígito(1).
+    let doc_emit = {
+        let c = texto(emit, "CNPJ");
+        if c.is_empty() {
+            format!("000{}", texto(emit, "CPF"))
+        } else {
+            c
+        }
+    };
+    let emissao = {
+        let dh = texto(ide, "dhEmi");
+        if dh.is_empty() {
+            texto(ide, "dEmi")
+        } else {
+            dh
+        }
+    };
+    let aamm = if emissao.len() >= 7 { format!("{}{}", &emissao[2..4], &emissao[5..7]) } else { String::new() };
+    let com_zeros = |t: String, n: usize| if t.is_empty() { t } else { format!("{t:0>n$}") };
+    let partes = [
+        ("UF", 0..2, texto(ide, "cUF")),
+        ("data", 2..6, aamm),
+        ("CNPJ do fornecedor", 6..20, doc_emit),
+        ("modelo", 20..22, texto(ide, "mod")),
+        ("série", 22..25, com_zeros(texto(ide, "serie"), 3)),
+        ("número", 25..34, com_zeros(texto(ide, "nNF"), 9)),
+        ("tipo de emissão", 34..35, texto(ide, "tpEmis")),
+        ("código", 35..43, com_zeros(texto(ide, "cNF"), 8)),
+        ("dígito", 43..44, texto(ide, "cDV")),
+    ];
+    for (nome, faixa, valor) in partes {
+        // Campo que não veio no XML não é conferido (o dígito já garante a chave).
+        if !valor.is_empty() && chave[faixa] != *valor {
+            return format!("{nome} da nota não bate com a chave de acesso");
+        }
+    }
+    let Some(assinatura) = descendente(raiz, "Signature") else {
+        return "a nota não tem assinatura digital".into();
+    };
+    let referencia = descendente(assinatura, "Reference").and_then(|r| r.attribute("URI")).unwrap_or_default();
+    if referencia.trim() != format!("#NFe{chave}") {
+        return "a assinatura é de outra nota".into();
+    }
+    let resumo = descendente(assinatura, "DigestValue").and_then(|n| n.text()).unwrap_or_default().trim().to_string();
+    let Some(prot) = descendente(raiz, "protNFe").and_then(|p| filho(p, "infProt")) else {
+        return "falta o protocolo da SEFAZ".into();
+    };
+    if texto(Some(prot), "chNFe") != chave {
+        return "o protocolo da SEFAZ é de outra nota".into();
+    }
+    if texto(Some(prot), "nProt").is_empty() {
+        return "o protocolo da SEFAZ está sem número".into();
+    }
+    let dig = texto(Some(prot), "digVal");
+    if resumo.is_empty() || dig.is_empty() || resumo != dig {
+        return "o conteúdo da nota não é o que a SEFAZ autorizou (o resumo não bate)".into();
+    }
+    String::new()
 }
 
 /// XML de exemplo para os testes (uma nota com 3 itens).

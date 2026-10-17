@@ -160,6 +160,10 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             erro = "Diga qual é o serviço.".into();
         }
         let quantidade = match numeros::ler_quantidade(&it.quantidade) {
+            Ok(Some(q)) if q > 1_000_000_000 => {
+                erro = "Quantidade grande demais.".into();
+                0
+            }
             Ok(Some(q)) if q > 0 => q,
             Ok(None) if !peca => 1000,
             Ok(_) => {
@@ -172,6 +176,10 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             }
         };
         let preco = match numeros::ler_dinheiro(&it.preco) {
+            Ok(Some(v)) if v > 100_000_000_000 => {
+                erro = "Preço grande demais.".into();
+                0
+            }
             Ok(Some(v)) if v >= 0 => v,
             Ok(Some(_)) => {
                 erro = "O preço não pode ser negativo.".into();
@@ -223,8 +231,11 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             v_total: bruto - desconto,
         });
     }
-    let pecas: i64 = itens.iter().filter(|i| i.tipo == "peca").map(|i| i.v_total).sum();
-    let servicos: i64 = itens.iter().filter(|i| i.tipo == "servico").map(|i| i.v_total).sum();
+    let pecas = numeros::somar(itens.iter().filter(|i| i.tipo == "peca").map(|i| i.v_total))
+        .ok_or_else(numeros::grande_demais)?;
+    let servicos = numeros::somar(itens.iter().filter(|i| i.tipo == "servico").map(|i| i.v_total))
+        .ok_or_else(numeros::grande_demais)?;
+    let _ = numeros::somar([pecas, servicos]).ok_or_else(numeros::grande_demais)?;
     let desconto = match ler_desconto(&e.desconto, pecas + servicos) {
         Ok(d) if d > pecas + servicos => {
             falhou("desconto".into(), "O desconto é maior que o total.".into());

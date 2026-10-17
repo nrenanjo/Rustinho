@@ -84,6 +84,28 @@ pub fn ler_ano(texto: &str, ano_atual: i32) -> Result<Option<i32>, String> {
     Ok(Some(ano))
 }
 
+/// Maior valor que uma soma de dinheiro (ou quantidade) pode ter:
+/// R$ 100 bilhões, bem acima de qualquer conta real da loja.
+pub const SOMA_MAXIMA: i64 = 10_000_000_000_000;
+
+/// Soma sem "dar a volta": `None` se passar de [`SOMA_MAXIMA`] (para mais
+/// ou para menos). Use em toda soma de dinheiro antes de gravar.
+pub fn somar(valores: impl IntoIterator<Item = i64>) -> Option<i64> {
+    let mut total: i128 = 0;
+    for v in valores {
+        total += v as i128;
+        if total.abs() > SOMA_MAXIMA as i128 {
+            return None;
+        }
+    }
+    Some(total as i64)
+}
+
+/// Erro de soma grande demais, para usar com [`somar`].
+pub fn grande_demais() -> crate::erro::Erro {
+    crate::erro::Erro::validacao("O valor ficou grande demais. Confira as quantidades e os preços.")
+}
+
 /// Divisão inteira arredondando a metade para longe do zero.
 /// Resultado de conta com i128 de volta para i64 sem "dar a volta" (um
 /// número enorme não vira negativo: fica no máximo).
@@ -148,7 +170,9 @@ fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
     };
 
     let inteira = if inteira.is_empty() { "0".to_string() } else { inteira };
-    if inteira.len() > 13 {
+    // Até 99.999.999.999 (R$ 99 bilhões): somar muitos valores assim ainda
+    // cabe folgado no número (nunca "dá a volta").
+    if inteira.len() > 11 {
         return Err("Número grande demais.".into());
     }
     let parte_inteira: i64 = inteira.parse().map_err(|_| "Número inválido.".to_string())?;
