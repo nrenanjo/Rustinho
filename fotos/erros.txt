@@ -1,0 +1,150 @@
+10-17 15:42:44.448  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.463  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.469  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.479  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.486  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.491  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.503  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.512  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.525  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.531  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.540  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.548  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.562  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.594  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.602  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.618  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.635  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.653  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.670  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.689  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.708  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.717  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.726  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.873  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.899  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.920  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.941  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.954  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.972  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.982  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:44.990  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.000  5356  5874 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.050  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.176  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.340  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.350  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.361  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.411  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.426  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.443  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.461  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.476  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.495  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.568  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.601  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.704  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.716  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.731  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.744  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.779  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.840  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.848  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.869  5356  5882 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.881  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.900  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.910  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.921  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.927  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.935  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.943  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.949  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.960  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.967  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.972  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:45.987  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.007  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.035  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.047  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.074  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.096  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.123  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.137  5356  5844 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.164  5356  5844 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.180  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.189  5420  5864 W Vision  : Error loading optional module com.google.android.gms.vision.ocr: ahbb: No acceptable module com.google.android.gms.vision.ocr found. Local version is 0 and remote version is 0.
+10-17 15:42:46.194  5420  5864 W Vision  : Error loading optional module com.google.android.gms.vision.ocr: ahbb: No acceptable module com.google.android.gms.vision.ocr found. Local version is 0 and remote version is 0.
+10-17 15:42:46.228  5356  5846 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.240  5356  5878 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.286  5356  5844 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.295  5356  5872 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.310  5356  5878 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.336  5356  5878 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.353  5356  5871 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.378  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.409  5356  5878 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.418  5356  5877 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.441  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.446  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.450  5356  5555 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.454  5356  5875 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.482  5356  5547 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.511  5356  5547 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.516  5356  5547 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:46.520  5356  5547 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:42:53.237   520  2626 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:43:23.833  5420  6069 W Vision  : Error loading optional module com.google.android.gms.vision.ocr: ahbb: No acceptable module com.google.android.gms.vision.ocr found. Local version is 0 and remote version is 0.
+10-17 15:43:23.845  5420  6069 W Vision  : Error loading optional module com.google.android.gms.vision.ocr: ahbb: No acceptable module com.google.android.gms.vision.ocr found. Local version is 0 and remote version is 0.
+10-17 15:43:24.506   520   936 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:43:24.554  1809  1809 E A       : onError
+10-17 15:43:24.554  1809  1809 E A       : com.google.android.apps.gsa.shared.speech.a.m: errorCode: 65561, engine: 2
+10-17 15:43:24.554  1809  1809 E A       : Caused by: com.google.android.apps.gsa.shared.speech.a.o: errorCode: 65586, engine: 2
+10-17 15:43:24.554  1809  1809 E A       : Caused by: com.google.android.apps.gsa.shared.speech.a.k: errorCode: 401, engine: 2
+10-17 15:43:55.571   520   826 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:44:26.690   520  2217 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:44:44.384   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:44:44.721   520  1749 W AppSearchIcing: icing-search-engine.cc:283: Error: 5, Message: Document (com.google.android.googlequicksearchbox$OneSearchZeroStateGoogleSuggestions/default, zp) not found.
+10-17 15:44:46.023  1104  1104 D SearchTargetUtil: layoutType=extra_tall_icon_row resultType=131072 packageName=com.google.android.googlequicksearchbox extras=Bundle{bitmap_url=data:image/jpeg;base64,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,suggestion_type=33,suggest_truncate_start=false,is_answer=false,is_entity=true,is_personal=false,suggest_raw_text=music composer deva,group_id=web139875,response_id=04bfb073-9668-4a96-9b14-091864987ca4,support_query_builder=false,} searchAction=music composer deva searchActionExtras=Bundle{learn_more_url=https://support.google.com/websearch/answer/106230?hl=106230,suggestion_action_text=Report this,should_start_for_result=true,allow_pinning=true,skip_logging_in_target_handler=false,suggesti
+10-17 15:44:54.429   520   913 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:45:18.447   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:45:22.093   520  1749 W AppSearchIcing: icing-search-engine.cc:283: Error: 5, Message: Document (com.google.android.googlequicksearchbox$OneSearchZeroStateGoogleSuggestions/default, zp) not found.
+10-17 15:45:22.516  1494  1516 D StrictMode: 	at dalvik.system.CloseGuard.warnIfOpen(CloseGuard.java:336)
+10-17 15:45:22.816  1104  1104 D SearchTargetUtil: layoutType=extra_tall_icon_row resultType=131072 packageName=com.google.android.googlequicksearchbox extras=Bundle{bitmap_url=data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5OjcBCgoKDQwNGg8PGjclHyU3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3N//AABEIAHwAfAMBIgACEQEDEQH/xAAcAAACAgMBAQAAAAAAAAAAAAADBAUGAQIHAAj/xAA6EAACAQMCBQEGBAQEBwAAAAABAgMABBEFIRITMUFRBhQiYXGBkQcyobFCUsHwIySS0RUzNmJygqP/xAAZAQADAQEBAAAAAAAAAAAAAAABAgMEAAX/xAAgEQACAgMBAAIDAAAAAAAAAAAAAQIRAyExEjJRBCJC/9oADAMBAAIRAxEAPwCYRBR0TzWyR/CjIlbCRqqUXl7VusdGEfSg2EAI9qj5IgJW2qbWP4UjLGea21Tnwtg6xDl79K8Y/wDtp7l/CvMoA6CpGojjH8K0aM+KkigI6UNoie1E4i2jJ7UB4mqWaIigSRN2rhrIswHxQzEB1WpNgV60vIDk1wRPkof4R9q1MMWfyL/pFGfY0PPigcW1Uo0aV5RR41rRZ5h5I96MEraNaMEoNnA1SlLpAjlmIAxUhI0cETSSsFRRkk1yL1v6+mu7l9P0eMcH5SR7zP8A7CklwpjdSJf1L61ttOdra0ZHnU4ZiMhP13Nc5vvWeszXTumoyYztwAKD9KFNo13dMJZnzI3UYJ/Wsr6YflFpJMHxiovJFGjzklxFo9JevZjLb2eouroW4TK7YI+JPw6V04FXXKEEeQa+fn0hoHDIzKQfzYpuD1BqeltEhdisRJjPEcbjBHyoqSYU5R+R3Noz2FAkRuwqG9K6/BdWURkkJZiAS7ZOfl9/tVpxkZA2ph7IV4n8UvLE1TciE9qSnUjO1cGyIkhJoBjINST8VLld96AxbESmI0rCJTEaVc8wzGlF4Kyi0UClYSn/AIkXy2fpycZOSB7ucZ8frXKPSWlmZPaHUtJK2wxmrr+N11wRWFgq5kny+fABH+4qvW0c0GnW1taytA3BxNIDgio5nqi+BbstUGiXKxgGBVHgsKw+jSshIjT5ZFVqA3dnxGLUpJmx0kbjA+Y8fKn47zVoMTSNDyzgswJX+tZX4s3wWRrotqmmyRBuK3PD5G9VjULISIV4eoqzz6rrbuTYyoYuoEq5z8jUS00s7SG5jRJCckJ0ptLcWTtvUkVr0/e3Frq0MCnZpOHhIGxr6E01HbT4Dni9we95r5wuHEesCUMVCShuIdsHNfT1gH9ht+LhLctSSPlWlcM6dCUsMlJTW7eampVbvSkkZJrh0yDltyP4qCbds1LSxb70Ex1w/onoxTUYoUYplBVjz0boKIFFeQbUVRSsJyv8U7EXPqzQ+aG5Ps0xOPKkGopbGOZozIWXhxgA46dtqsv4mTmPV7ELswjAzjOxLA1EWrGaABzwhRuR1NZM0nejf+NBURZ0jGoy3nNfhYk8hXyijGMDO/61vq00j20ULY4RjKjxTl3ewWbJzg6wkgcSqDk+T4FJ63qGmHlmGYlSDjADYHkY7VGpS2zWoxSdCs9i9zpsohYe1AqEdgPcA65HfPnP0qPEE8UR58gkYbcWN6mrQiTBzhuHijbs4pW+kVoTlRxjxRt8JuC6US5snu9XFvCpLyuFUDuScD96+kvT0N3Ho1rFdxhJ44wrjOdxtXGtLghh1i1uQwDqEYZ/mD5r6AZewFaoO9GOa87+xGSJ8bilpI36bVJOppd1PimFTIqaF/NKmF89alpFJztSrRnNEdMk41plAKBHknamUQAZaqMxoIu/aiCtV69NqMAPFKEq3rP082rrBdW+OfbhsqTjiXr9xj9a5tqM0tpZOIELsFzwjfNd1GK5b600c6ff8aJ/lpSSmO3lfp+2KhkjezXgyfyznEOn3mtMXvpp4weisuP3r0/pUQxcYuHDDvyqufs/NgDRNwE/UH6UlNZXBIEvLdM/yAVP2jUsSrZV9Hu7m1vFs5n5gzmM56VM3AMiFj3NemVUlBVRlT4rzsTwr2G5pXt2BaVMmPSfpqfV9VguBH/k4JBz223xuF89cfeuvkOe1Qn4d2vs/pqGQ4zcO02fgdh+gFWUsB2q8FSMmSVyEWEnihOsnipBmPYUM5705OyLkSXxS5jkz0qXfp0oJznpXBszHhenWjIud2oMYx160dQTVCIQHJogVqGux3ogbPSlONwpqv8Arm252hNJw5MMit07Hb+oqwZbHaqp65kkexkjiZ2mUBo0VjgkbnIzg7UsuMfG0pI5pNqT2isFUgLu3gUumuJKN9ge+abuLY30AYR8XNHvrjpg0O19KtezwQR8uIs/CvENv761ltM9L9khE3ELEBXBLHAA3J+VW3056PnuCt1q8Zhg2IgbZ5P/AC/lH6/KrV6f9LadoKoYI1lu8e9cOu//AK/yipe7blRFyMnsK0Rx/Zinmb0jNnKLXKH3Yj0AH5T9Kko8OvEjBl8iq6HkmOwyx2z2rDWjbFnyR9qpRFMshVqG6tUTDqk9nHwOomRemThh9akrDUYNQU8kkOOqN1paaDZh0ehcD08yGtChzQsNikfxphTmgR770dcVVkzO9De7ji4gPeYdQKXkuSSypsvnuaVmPvEfKgcGlvpXUknhHgVHXjJDbzXsgGYYmPyHU/tTqrwhcDJJ6+KX1rH/AAG9OBnkOD9qD4MlbopGigz2hdgofmMWA6DJz/Wm2aSHE0QBkiIkQeSDnFLac3strhSMNkk1YPTdmb6bnuv+BG3+pvFecouUtHrykoY9lnjy5DEYyAceKUuGN3PylGEQ7tUg2wwvWhbIuFHf716J4xoF4cKorR0Gd6YwSMeaXnbgGB1/euOFpI1Y4xShtfZ5OekhiI7g4NSIQQLxy44z28VGXk4bPU0yAyZ0m+kvYGVnDyxnDEbZHY07/iVTrO/fTbyO4Ayh2kUfxKf7zV4R1kRXQhkYAqR3BpJKmOmIoRQ7iYq6xr1YZJ+FaKTmlSxe4Vj14sUzFCneUDHSsSLncdc5rcfnJrDbGuOCwDK71E+o25Gk34z7jRbfMnGP1qYgqv8ArX/py9buOWf/AKJSvjGj8kU3R3nvZ/Yol4ndsL8Cev07/eupWNqmn2cdtD0QY4vJ7mqX+GltG73t0wzKvCi+ADkn67Cr01JjikrK58jk/Jg7Kx74ofVlA7Vu/wCT61pH+dj4FUIG0jY2FCIVTzOrDp8K0kY7msxIGiV2JLMASSaJwrO3ESWNRtyetSV5gZ2qNnG9FHMjrlcIG7ZFN6b6jm0u29lMXOQMShJ6A9vvmgXf/KI7bVEO7KcA7UzSfQJ0f//Z,suggestion_type=33,suggest_truncate_start=false,is_answer=false,is_entity=true,is_personal=false,suggest_raw_text=music composer deva,group_id=web139875,response_id=f61df32d-f70d-4ed9-a435-3efdd682f0b5,support_query_builder=false,} searchAction=music composer deva searchActionExtras=Bundle{learn_more_url=https://support.google.com/websearch/answer/106230?hl=106230,suggestion_action_text=Report this,should_start_for_result=true,allow_pinning=true,skip_logging_in_target_handler=false,suggesti
+10-17 15:45:23.042   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:45:23.622  1809  2536 W CorpusConfigHelper: 	at android.util.JsonReader.syntaxError(JsonReader.java:1162)
+10-17 15:45:24.570   520  6381 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-17 15:45:24.577  1809  1809 W A       : Failed RenderableStream callback; SubscriptionCallbacks#onError(Throwable) called.
+10-17 15:45:24.989  1809  1809 I A       : Successfully updated last shown time for signed out error.
+10-17 15:45:28.114   520  3226 E TaskPersister: File error accessing recents directory (directory doesn't exist?).
+10-17 15:45:31.139   520   912 I ActivityTaskManager: START u0 {flg=0x10000000 cmp=io.github.nrenanjo.rustinho/org.qtproject.qt.android.bindings.QtActivity (has extras)} with LAUNCH_MULTIPLE from uid 2000 result code=-92
+10-17 15:45:47.342   520  6419 W OpenGLRenderer: Failed to initialize 101010-2 format, error = EGL_SUCCESS
+10-17 15:45:48.360  6460  6460 W ziparchive: Unable to open '/data/app/~~Fc44UT_Scw8nqqDHl9I-uA==/com.google.android.trichromelibrary_567263637-yQiQ65QTDnTAbTaDe-zHwQ==/TrichromeLibrary.dm': No such file or directory
+10-17 15:45:48.363  6460  6460 W ziparchive: Unable to open '/data/app/~~Fc44UT_Scw8nqqDHl9I-uA==/com.google.android.trichromelibrary_567263637-yQiQ65QTDnTAbTaDe-zHwQ==/TrichromeLibrary.dm': No such file or directory
+10-17 15:45:48.364  6460  6460 D nativeloader: Configuring clns-6 for other apk /data/app/~~Fc44UT_Scw8nqqDHl9I-uA==/com.google.android.trichromelibrary_567263637-yQiQ65QTDnTAbTaDe-zHwQ==/TrichromeLibrary.apk. target_sdk_version=34, uses_libraries=ALL, library_path=/data/app/~~PaZ16f_t63HQnvmwSpkDIQ==/com.google.android.webview-ZkCiHUJY8tLgN5mpaT_mVQ==/lib/x86_64:/data/app/~~PaZ16f_t63HQnvmwSpkDIQ==/com.google.android.webview-ZkCiHUJY8tLgN5mpaT_mVQ==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~Fc44UT_Scw8nqqDHl9I-uA==/com.google.android.trichromelibrary_567263637-yQiQ65QTDnTAbTaDe-zHwQ==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-17 15:45:48.366  6460  6460 D nativeloader: Configuring clns-7 for other apk /data/app/~~PaZ16f_t63HQnvmwSpkDIQ==/com.google.android.webview-ZkCiHUJY8tLgN5mpaT_mVQ==/WebViewGoogle.apk. target_sdk_version=34, uses_libraries=, library_path=/data/app/~~PaZ16f_t63HQnvmwSpkDIQ==/com.google.android.webview-ZkCiHUJY8tLgN5mpaT_mVQ==/lib/x86_64:/data/app/~~PaZ16f_t63HQnvmwSpkDIQ==/com.google.android.webview-ZkCiHUJY8tLgN5mpaT_mVQ==/WebViewGoogle.apk!/lib/x86_64:/data/app/~~Fc44UT_Scw8nqqDHl9I-uA==/com.google.android.trichromelibrary_567263637-yQiQ65QTDnTAbTaDe-zHwQ==/TrichromeLibrary.apk!/lib/x86_64, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.webview
+10-17 15:45:49.838   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:45:50.708  1809  1809 I chromium: [INFO:CONSOLE(0)] "Error with Permissions-Policy header: Origin trial controlled feature not enabled: 'unload'.", source:  (0)
+10-17 15:45:50.766  1809  1809 E A       : onError
+10-17 15:45:50.766  1809  1809 E A       : com.google.android.apps.gsa.shared.speech.a.m: errorCode: 65561, engine: 2
+10-17 15:45:50.766  1809  1809 E A       : Caused by: com.google.android.apps.gsa.shared.speech.a.o: errorCode: 65586, engine: 2
+10-17 15:45:50.766  1809  1809 E A       : Caused by: com.google.android.apps.gsa.shared.speech.a.k: errorCode: 401, engine: 2
+10-17 15:45:51.529   520  3226 E TaskPersister: File error accessing recents directory (directory doesn't exist?).
+10-17 15:45:51.618  5356  6519 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:45:51.713  1809  1809 I chromium: [INFO:CONSOLE(0)] "Error with Permissions-Policy header: Origin trial controlled feature not enabled: 'unload'.", source:  (0)
+10-17 15:45:51.740  5356  6519 I NamespaceManager: Package com.google.android.crashrecovery name not found! Using module version.
+10-17 15:45:52.236  1809  1809 I chromium: [INFO:CONSOLE(0)] "Error with Permissions-Policy header: Origin trial controlled feature not enabled: 'unload'.", source:  (0)
+10-17 15:45:52.282  6427  6506 E chromium: [ERROR:tile_manager.cc(835)] WARNING: tile memory limits exceeded, some content may not draw
+10-17 15:45:52.282  6427  6506 E chromium: [ERROR:tile_manager.cc(835)] WARNING: tile memory limits exceeded, some content may not draw
+10-17 15:45:56.723  1809  1809 I chromium: [INFO:CONSOLE(0)] "Error with Permissions-Policy header: Unrecognized feature: 'ch-ua-form-factors'.", source:  (0)
+10-17 15:46:02.120   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:46:04.077   520  3226 E TaskPersister: File error accessing recents directory (directory doesn't exist?).
+10-17 15:46:04.328   520   542 V WindowManager:     startWCT=WindowContainerTransaction { changes = {} hops = [] errorCallbackToken=null taskFragmentOrganizer=null }
+10-17 15:46:11.304  1809  6662 W native  : W0000 00:00:1792251971.304680    6662 incremental_result.cc:219] UNKNOWN: Result lattice is not set. [type.googleapis.com/util.ErrorSpacePayload='SpeechErrorSpace::SpeechError(-73542)']
+10-17 15:46:11.304  1809  6662 W native  : ./speech/common/error_codes.h:62
+10-17 15:46:11.620  1809  2642 E Velvet.S3FetchTask: com.google.android.apps.gsa.shared.r.d: Error code: 524292
+10-17 15:46:11.622  1809  2642 W A       : reportError [type: 211, code: 524292, bug: 0]: Error code: 524292
+10-17 15:46:11.629  1809  2642 W A       : reportError [type: 211, code: 524292, bug: 0]: Error code: 524292
+10-17 15:46:11.632  1809  2642 W S_WebViewRenderState: resultsPageError: not current commit, new=7957858390253026, committed=0
+10-17 15:46:11.645  1809  2642 W ForegroundSearchRunner: com.google.android.apps.gsa.shared.r.d: Error code: 524292
+10-17 15:46:11.668  1809  2536 E VSWorkerHelper: java.util.concurrent.ExecutionException: com.google.android.apps.gsa.shared.r.d: Error code: 524292
+10-17 15:46:11.668  1809  2536 E VSWorkerHelper: Caused by: com.google.android.apps.gsa.shared.r.d: Error code: 524292
