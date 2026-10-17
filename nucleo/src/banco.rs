@@ -147,6 +147,68 @@ mod testes {
         assert_eq!(tabelas, 5);
     }
 
+    /// Banco da 0.9.1 (estrutura 9, com a senha do backup em claro e o log
+    /// sem "base") abre na 0.9.11 sem perder nada: o primeiro usuário vira
+    /// gerente, a senha do backup sai do banco, a troca de dados continua e
+    /// reabrir não muda nada.
+    #[test]
+    fn banco_da_091_abre_sem_perder_nada() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-migracao-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db");
+        {
+            let mut c = Connection::open(&caminho).unwrap();
+            registrar_funcoes(&c).unwrap();
+            for (i, sql) in MIGRACOES.iter().take(9).enumerate() {
+                let tx = c.transaction().unwrap();
+                tx.execute_batch(sql).unwrap();
+                tx.pragma_update(None, "user_version", (i + 1) as i64).unwrap();
+                tx.commit().unwrap();
+            }
+            let hash = crate::usuarios::argon2_hash_para_teste("1234");
+            c.execute_batch(&format!(
+                "INSERT INTO config (chave, valor) VALUES ('dispositivo_id', 'caixa-antigo'), ('loja_nome', 'Loja Antiga'),
+                        ('backup_senha', 'segredo-antigo'), ('sync_inicio', 'x');
+                 INSERT INTO usuario (id, nome, senha_hash, ativo, criado_em, atualizado_em, dispositivo)
+                 VALUES ('u1', 'Dona', '{hash}', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'caixa-antigo'),
+                        ('u2', 'Caixa', '{hash}', 1, '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z', 'caixa-antigo');
+                 INSERT INTO produto (id, codigo, nome, custo, criado_em, atualizado_em, dispositivo)
+                 VALUES ('p1', '1', 'Pastilha', 4000, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'caixa-antigo');
+                 INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
+                 VALUES ('01990000-0000-7000-8000-000000000001', 'produto', '[\"p1\"]', 'gravar', '{{}}', 'caixa-antigo', 'x');"
+            ))
+            .unwrap();
+        }
+        let b = Banco::abrir(&caminho).unwrap();
+        let versao: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+        assert_eq!(versao as usize, MIGRACOES.len());
+        assert_eq!(b.dispositivo, "caixa-antigo");
+        assert_eq!(crate::config::nome_loja(&b.conn).unwrap(), "Loja Antiga");
+        assert!(crate::usuarios::buscar(&b.conn, "u1").unwrap().gerente, "o primeiro vira gerente");
+        assert!(!crate::usuarios::buscar(&b.conn, "u2").unwrap().gerente);
+        assert!(crate::usuarios::conferir_senha(&b.conn, "u1", "1234").is_ok(), "a senha continua valendo");
+        assert!(crate::config::ler(&b.conn, "backup_senha").unwrap().is_none(), "a senha do backup saiu do banco");
+        assert_eq!(crate::produtos::ficha(&b.conn, "p1").unwrap().nome, "Pastilha");
+        let antigas: i64 =
+            b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE base IS NULL", [], |l| l.get(0)).unwrap();
+        assert!(antigas >= 1, "o log antigo continua (sem base)");
+        // Mexer depois anota a base.
+        b.conn.execute("UPDATE produto SET nome = 'Pastilha nova' WHERE id = 'p1'", []).unwrap();
+        let base: Option<String> = b
+            .conn
+            .query_row("SELECT base FROM alteracao WHERE tabela = 'produto' ORDER BY id DESC LIMIT 1", [], |l| l.get(0))
+            .unwrap();
+        assert!(base.is_some());
+        assert_eq!(crate::sync::pendencias(&b.conn).unwrap(), 0);
+        drop(b);
+        // Reabrir: nada muda.
+        let b = Banco::abrir(&caminho).unwrap();
+        let usuarios: i64 = b.conn.query_row("SELECT COUNT(*) FROM usuario", [], |l| l.get(0)).unwrap();
+        assert_eq!(usuarios, 2);
+        drop(b);
+        std::fs::remove_dir_all(pasta).ok();
+    }
+
     #[test]
     fn reabrir_mantem_dispositivo() {
         let pasta = std::env::temp_dir().join(format!("rustinho-teste-{}", tempo::novo_id()));

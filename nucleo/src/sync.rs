@@ -405,6 +405,7 @@ pub fn diferencas(a: Option<&str>, b: Option<&str>) -> Vec<String> {
 ///   que voltam depois de uma restauração não são conflito).
 /// - Ou `perdeu` foi feita em cima de `ficou` e perdeu só porque o relógio
 ///   do caixa dela estava atrasado.
+///
 /// Sem a "base" (caixa de antes da 0.9.11): a menos de 30 minutos uma da
 /// outra. E só conta se mudou algo de verdade.
 fn em_conflito(ficou: &Versao, perdeu: &Versao, chegou_e_perdeu: bool) -> bool {
@@ -474,7 +475,12 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
             params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando, a.base],
         )?;
         novas += 1;
-        let chegou = Versao { id: a.id.clone(), dispositivo: a.dispositivo.clone(), base: a.base.clone(), dados: a.dados.clone() };
+        let chegou = Versao {
+            id: a.id.clone(),
+            dispositivo: a.dispositivo.clone(),
+            base: a.base.clone(),
+            dados: a.dados.clone(),
+        };
         if let Some(u) = &ultima {
             // Vale a mais nova (pelo id). Se as duas foram feitas sem uma ver
             // a outra (ou o relógio inverteu a ordem), fica anotado para o
@@ -617,11 +623,10 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
             )?;
         }
     }
-    let (usuarios, gerentes): (i64, i64) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(gerente = 1), 0) FROM usuario WHERE ativo = 1",
-        [],
-        |l| Ok((l.get(0)?, l.get(1)?)),
-    )?;
+    let (usuarios, gerentes): (i64, i64) =
+        conn.query_row("SELECT COUNT(*), COALESCE(SUM(gerente = 1), 0) FROM usuario WHERE ativo = 1", [], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })?;
     if usuarios > 0 && gerentes == 0 {
         let id: String =
             conn.query_row("SELECT id FROM usuario WHERE ativo = 1 ORDER BY criado_em, id LIMIT 1", [], |l| l.get(0))?;
@@ -724,7 +729,8 @@ fn nome_do_campo(campo: &str) -> String {
 }
 
 /// Colunas em centavos.
-const DINHEIRO: &[&str] = &["preco", "custo", "valor", "total", "subtotal", "desconto", "limite_credito", "saldo_inicial", "oferta_preco"];
+const DINHEIRO: &[&str] =
+    &["preco", "custo", "valor", "total", "subtotal", "desconto", "limite_credito", "saldo_inicial", "oferta_preco"];
 
 fn valor_curto(v: Option<&Value>, campo: &str) -> String {
     if campo == "senha_hash" {
@@ -748,7 +754,18 @@ fn valor_curto(v: Option<&Value>, campo: &str) -> String {
 /// Conflitos abertos (e os últimos resolvidos), mais novos primeiro.
 pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
     #[allow(clippy::type_complexity)]
-    let linhas: Vec<(i64, String, String, String, String, String, String, Option<String>, Option<String>, Option<String>)> = {
+    let linhas: Vec<(
+        i64,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = {
         let mut c = conn.prepare(
             "SELECT id, tipo, tabela, chave, ficou, perdeu, quando, dados_perdeu, resolucao,
                     (SELECT nome FROM sync_par p WHERE p.dispositivo = k.dispositivo)
@@ -757,7 +774,18 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
               ORDER BY resolvido_em IS NOT NULL, id DESC LIMIT 200",
         )?;
         let l = c.query_map([], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?, l.get(8)?, l.get(9)?))
+            Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+                l.get(6)?,
+                l.get(7)?,
+                l.get(8)?,
+                l.get(9)?,
+            ))
         })?;
         l.collect::<Result<_, _>>()?
     };
@@ -866,8 +894,12 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
         }
         match dados.as_deref().map(serde_json::from_str::<Value>) {
             None => {
-                let onde =
-                    pk.iter().enumerate().map(|(i, c)| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+                let onde = pk
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| format!("\"{c}\" = ?{}", i + 1))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
                 conn.execute(
                     &format!("DELETE FROM \"{tabela}\" WHERE {onde}"),
                     params_from_iter(valores_chave.iter().map(para_sql)),
@@ -888,8 +920,11 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
                     .filter(|n| !pk.iter().any(|k| format!("\"{k}\"") == **n))
                     .map(|n| format!("{n} = excluded.{n}"))
                     .collect();
-                let conflito =
-                    if atualizar.is_empty() { "DO NOTHING".to_string() } else { format!("DO UPDATE SET {}", atualizar.join(", ")) };
+                let conflito = if atualizar.is_empty() {
+                    "DO NOTHING".to_string()
+                } else {
+                    format!("DO UPDATE SET {}", atualizar.join(", "))
+                };
                 conn.execute(
                     &format!(
                         "INSERT INTO \"{tabela}\" ({}) VALUES ({marcas}) ON CONFLICT ({}) {conflito}",
@@ -910,7 +945,12 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
     }
     conn.execute(
         "UPDATE sync_conflito SET resolvido_em = ?2, resolvido_por = ?3, resolucao = ?4 WHERE id = ?1",
-        params![id, tempo::agora(), usuario_id, if usar { "voltou a versão que tinha perdido" } else { "ficou como está" }],
+        params![
+            id,
+            tempo::agora(),
+            usuario_id,
+            if usar { "voltou a versão que tinha perdido" } else { "ficou como está" }
+        ],
     )?;
     Ok(())
 }

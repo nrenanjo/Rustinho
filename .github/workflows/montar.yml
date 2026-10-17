@@ -43,6 +43,10 @@ jobs:
           exit $st
       - name: Testes do núcleo
         run: cargo test -p rustinho-nucleo
+      # Também como o programa final (contas que passariam do tamanho do
+      # número viram erro nos dois modos; veja overflow-checks no Cargo.toml).
+      - name: Testes do núcleo (como o programa final)
+        run: cargo test -p rustinho-nucleo --release
 
   windows:
     needs: testes

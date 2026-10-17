@@ -6,18 +6,39 @@ use std::path::{Path, PathBuf};
 
 use crate::erro::{Erro, Resultado};
 
-/// Limites para não travar com uma pasta enorme por engano.
-pub const MAX_ARQUIVOS: usize = 30_000;
+/// Limites para não travar com uma pasta enorme por engano. No celular
+/// (2 GB de memória, às vezes 32 bits) os limites são menores (C-08): um
+/// ano de notas de uma loja cabe folgado nos dois.
+#[cfg(not(target_os = "android"))]
+mod limites {
+    pub const MAX_ARQUIVOS: usize = 30_000;
+    pub const MAX_PACOTE: u64 = 1024 * 1024 * 1024;
+    pub const MAX_ZIP_INTERNO: u64 = 100 * 1024 * 1024;
+    pub const MAX_TOTAL: u64 = 512 * 1024 * 1024;
+    pub const MAX_MEMBROS: usize = 100_000;
+    pub const MAX_DICIONARIO_RAR: u64 = 256 * 1024 * 1024;
+}
+#[cfg(target_os = "android")]
+mod limites {
+    pub const MAX_ARQUIVOS: usize = 10_000;
+    pub const MAX_PACOTE: u64 = 256 * 1024 * 1024;
+    pub const MAX_ZIP_INTERNO: u64 = 32 * 1024 * 1024;
+    pub const MAX_TOTAL: u64 = 128 * 1024 * 1024;
+    pub const MAX_MEMBROS: usize = 20_000;
+    pub const MAX_DICIONARIO_RAR: u64 = 64 * 1024 * 1024;
+}
+/// Quantos arquivos numa escolha só.
+pub const MAX_ARQUIVOS: usize = limites::MAX_ARQUIVOS;
 /// Tamanho máximo de um XML de nota.
 pub const MAX_TAMANHO: u64 = 20 * 1024 * 1024;
 /// Tamanho máximo de um .zip ou .rar.
-const MAX_PACOTE: u64 = 1024 * 1024 * 1024;
+const MAX_PACOTE: u64 = limites::MAX_PACOTE;
 /// Tamanho máximo de um .zip dentro de outro (é lido na memória).
-const MAX_ZIP_INTERNO: u64 = 100 * 1024 * 1024;
+const MAX_ZIP_INTERNO: u64 = limites::MAX_ZIP_INTERNO;
 /// Total descompactado numa escolha de arquivos (protege de "bombas" de zip).
-const MAX_TOTAL: u64 = 512 * 1024 * 1024;
+const MAX_TOTAL: u64 = limites::MAX_TOTAL;
 /// Itens olhados dentro dos pacotes, somando todos.
-const MAX_MEMBROS: usize = 100_000;
+const MAX_MEMBROS: usize = limites::MAX_MEMBROS;
 
 /// Quanto ainda pode ser descompactado nesta escolha de arquivos.
 struct Orcamento {
@@ -242,7 +263,13 @@ fn de_zip<R: Read + std::io::Seek>(
             continue;
         };
         if !orc.gastar(b.len() as u64) {
-            saida.push(ruim(pacote.into(), "os pacotes descompactados passam de 512 MB; escolha menos arquivos"));
+            saida.push(ruim(
+                pacote.into(),
+                &format!(
+                    "os pacotes descompactados passam de {} MB; escolha menos arquivos",
+                    MAX_TOTAL / (1024 * 1024)
+                ),
+            ));
             return;
         }
         if baixo.ends_with(".xml") {
@@ -288,13 +315,19 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>, orc: &mut Orcament
             continue;
         }
         if !orc.gastar(tamanho) {
-            saida.push(ruim(pacote.into(), "os pacotes descompactados passam de 512 MB; escolha menos arquivos"));
+            saida.push(ruim(
+                pacote.into(),
+                &format!(
+                    "os pacotes descompactados passam de {} MB; escolha menos arquivos",
+                    MAX_TOTAL / (1024 * 1024)
+                ),
+            ));
             return;
         }
         let mut opcoes = rars::ArchiveReadOptions::new();
         opcoes.max_member_output_bytes = Some(MAX_TAMANHO);
         opcoes.max_total_output_bytes = Some(MAX_TOTAL);
-        opcoes.rar50_dictionary_size_limit = Some(256 * 1024 * 1024);
+        opcoes.rar50_dictionary_size_limit = Some(limites::MAX_DICIONARIO_RAR as _);
         match arquivo.read_member_at_with_options(i, opcoes) {
             Ok(Some(b)) if b.len() as u64 <= MAX_TAMANHO => {
                 saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() })

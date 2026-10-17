@@ -478,7 +478,8 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     )
     .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;
     let troco = (pago - total).max(0);
-    let quantidade_itens = numeros::somar(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade)).unwrap_or(i64::MAX);
+    let quantidade_itens =
+        numeros::somar(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade)).unwrap_or(i64::MAX);
     let cliente = if !e.cliente_id.is_empty() {
         conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&e.cliente_id], |l| l.get(0))
             .optional()?
@@ -1262,7 +1263,11 @@ mod testes {
             itens: vec![item(&p1, "1")],
             tabela: 1,
             pagamentos: vec![
-                PagamentoEntrada { forma: "dinheiro".into(), valor: "99999999999".into(), ..Default::default() };
+                PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "99999999999".into(),
+                    ..Default::default()
+                };
                 20
             ],
             ..Default::default()

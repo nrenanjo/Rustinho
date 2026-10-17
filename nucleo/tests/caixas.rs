@@ -89,7 +89,10 @@ fn mesmo_cadastro_em_dois_caixas() {
     assert_eq!((ka.len(), kb.len()), (1, 1), "{ka:?} {kb:?}");
     assert!(ka[0].pode_usar);
     let campo = ka[0].campos.iter().find(|c| c["campo"] == "nome").expect("o nome aparece");
-    assert_eq!((campo["ficou"].as_str(), campo["perdeu"].as_str()), (Some("Pastilha traseira"), Some("Pastilha dianteira")));
+    assert_eq!(
+        (campo["ficou"].as_str(), campo["perdeu"].as_str()),
+        (Some("Pastilha traseira"), Some("Pastilha dianteira"))
+    );
     // Trocar de novo não anota outra vez.
     trocar(&mut a, &mut b);
     assert_eq!(sync::conflitos_abertos(&a.conn).unwrap(), 1);
@@ -131,7 +134,11 @@ fn lote_repetido_fora_de_ordem_e_cortado() {
     let e = vendas::VendaEntrada {
         itens: vec![vendas::ItemEntrada { produto_id: p.clone(), quantidade: "2".into(), ..Default::default() }],
         tabela: 1,
-        pagamentos: vec![vendas::PagamentoEntrada { forma: "dinheiro".into(), valor: "200".into(), ..Default::default() }],
+        pagamentos: vec![vendas::PagamentoEntrada {
+            forma: "dinheiro".into(),
+            valor: "200".into(),
+            ..Default::default()
+        }],
         ..Default::default()
     };
     vendas::concluir(&a.conn, &a.dispositivo, &u, &e).unwrap();
@@ -180,7 +187,8 @@ fn caixa_atrasado_depois_de_compactar() {
     }
     // Apaga um registro (a aplicação da peça: tabela com "apagar").
     let mut f = produtos::ficha(&a.conn, &fica).unwrap();
-    f.aplicacoes = vec![produtos::AplicacaoFicha { montadora: "Fiat".into(), modelo: "Uno".into(), ..Default::default() }];
+    f.aplicacoes =
+        vec![produtos::AplicacaoFicha { montadora: "Fiat".into(), modelo: "Uno".into(), ..Default::default() }];
     produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
     let mut f = produtos::ficha(&a.conn, &fica).unwrap();
     f.aplicacoes.clear();
@@ -273,8 +281,12 @@ fn tres_usuarios_com_o_mesmo_nome() {
     };
     let n = nomes(&a);
     assert_eq!(n.len(), 4);
-    let mut unicos: Vec<String> =
-        n.iter().map(|x| x.to_lowercase().replace('é', "e")).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let mut unicos: Vec<String> = n
+        .iter()
+        .map(|x| x.to_lowercase().replace('é', "e"))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     unicos.dedup();
     assert_eq!(unicos.len(), 4, "{n:?}");
     assert_eq!(n, nomes(&b));

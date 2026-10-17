@@ -293,6 +293,12 @@ fn validar_senha(senha: &str) -> Resultado<()> {
     Ok(())
 }
 
+/// Para os testes de outros módulos (banco antigo com senha).
+#[cfg(test)]
+pub(crate) fn argon2_hash_para_teste(senha: &str) -> String {
+    gerar_hash(senha).unwrap()
+}
+
 fn gerar_hash(senha: &str) -> Resultado<String> {
     argon2()
         .hash_password(senha.as_bytes())

@@ -311,10 +311,10 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
     let movs: Vec<(String, i64, String, String, String)> = c
         .query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?
         .collect::<Result<_, _>>()?;
-    let sangrias = numeros::somar(movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1))
-        .ok_or_else(numeros::grande_demais)?;
-    let suprimentos = numeros::somar(movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1))
-        .ok_or_else(numeros::grande_demais)?;
+    let sangrias =
+        numeros::somar(movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
+    let suprimentos =
+        numeros::somar(movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
     let devolvido = crate::devolucoes::dinheiro_na_sessao(conn, sessao_id)?;
     let esperado =
         numeros::somar([sessao.valor_inicial, dinheiro_vendas, dinheiro_recebido, suprimentos, -sangrias, -devolvido])

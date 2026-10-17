@@ -333,7 +333,15 @@ impl Servico {
     }
 
     fn com_banco(banco: Banco) -> Servico {
-        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false, segredo_backup: None, _trava: None }
+        Servico {
+            banco,
+            sessao: None,
+            liberacao: None,
+            _motor: None,
+            comprometido: false,
+            segredo_backup: None,
+            _trava: None,
+        }
     }
 
     /// Executa um comando. Um problema vira uma resposta de erro em JSON.
@@ -374,7 +382,9 @@ impl Servico {
                 if !self.banco.conn.is_autocommit() {
                     let _ = self.banco.conn.execute_batch("ROLLBACK");
                 }
-                crate::registro::anotar(&format!("{comando}: pânico (veja a linha anterior); só consultas até reabrir"));
+                crate::registro::anotar(&format!(
+                    "{comando}: pânico (veja a linha anterior); só consultas até reabrir"
+                ));
                 json!({
                     "ok": false,
                     "erro": "Erro interno inesperado. Confira se a operação foi gravada antes de repetir. Feche e abra o Rustinho para continuar.",
@@ -573,7 +583,10 @@ impl Servico {
             "__teste_panico" => {
                 let d: Value = dados;
                 let tx = self.banco.conn.transaction()?;
-                tx.execute("INSERT INTO categoria (id, nome, tipo, atualizado_em) VALUES ('t', 'Teste', 'despesa', 'x')", [])?;
+                tx.execute(
+                    "INSERT INTO categoria (id, nome, tipo, atualizado_em) VALUES ('t', 'Teste', 'despesa', 'x')",
+                    [],
+                )?;
                 if d["onde"] == "antes_do_commit" {
                     panic!("defeito de teste com senha=segredo123 e cpf 529.982.247-25");
                 }

@@ -179,10 +179,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             id: "conflitos".into(),
             dia: hoje.clone(),
             titulo: "Caixas".into(),
-            texto: format!(
-                "{} entre caixas para o gerente ver",
-                plural(conflitos, "diferença", "diferenças")
-            ),
+            texto: format!("{} entre caixas para o gerente ver", plural(conflitos, "diferença", "diferenças")),
             atraso: String::new(),
             funcao: "configuracoes".into(),
         });

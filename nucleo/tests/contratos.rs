@@ -54,7 +54,11 @@ fn tem(v: &Value, campos: &[(&str, &str)]) {
 
 fn loja() -> Servico {
     let mut s = Servico::em_memoria().unwrap();
-    ok(&mut s, "configurar_inicio", json!({ "loja": "Loja Teste", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }));
+    ok(
+        &mut s,
+        "configurar_inicio",
+        json!({ "loja": "Loja Teste", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+    );
     s
 }
 
@@ -94,16 +98,19 @@ fn envelope_e_entradas_ruins() {
 fn estado_e_entrar() {
     let mut s = loja();
     let e = ok(&mut s, "estado", json!({}));
-    tem(&e, &[
-        ("primeiraVez", "sim/nao"),
-        ("loja", "texto"),
-        ("caixa", "texto"),
-        ("usuario", "objeto|nada"),
-        ("versao", "texto"),
-        ("etapa", "numero"),
-        ("validadeOrcamento", "numero"),
-        ("escuro", "sim/nao"),
-    ]);
+    tem(
+        &e,
+        &[
+            ("primeiraVez", "sim/nao"),
+            ("loja", "texto"),
+            ("caixa", "texto"),
+            ("usuario", "objeto|nada"),
+            ("versao", "texto"),
+            ("etapa", "numero"),
+            ("validadeOrcamento", "numero"),
+            ("escuro", "sim/nao"),
+        ],
+    );
     tem(&e["usuario"], &[("id", "texto"), ("nome", "texto"), ("gerente", "sim/nao")]);
     let lista = ok(&mut s, "usuarios_entrada", json!({}));
     tem(&lista[0], &[("id", "texto"), ("nome", "texto")]);
@@ -121,22 +128,28 @@ fn venda_e_caixa() {
     tem(&p, &[("id", "texto"), ("nome", "texto"), ("precos", "lista")]);
     let pid = p["id"].as_str().unwrap();
     let c = ok(&mut s, "venda_calcular", json!({ "itens": [{ "produtoId": pid, "quantidade": "2" }], "tabela": 1 }));
-    tem(&c, &[
-        ("itens", "lista"),
-        ("subtotal", "texto"),
-        ("descontoItens", "texto"),
-        ("total", "texto"),
-        ("falta", "texto"),
-        ("troco", "texto"),
-        ("quantidadeItens", "texto"),
-        ("erroDesconto", "texto"),
-        ("erroEncomenda", "texto"),
-        ("encomendas", "numero"),
-        ("cliente", "texto"),
-        ("crediario", "objeto"),
-        ("cheques", "objeto"),
-    ]);
-    tem(&c["itens"][0], &[("descricao", "texto"), ("quantidade", "texto"), ("preco", "texto"), ("total", "texto"), ("erro", "texto")]);
+    tem(
+        &c,
+        &[
+            ("itens", "lista"),
+            ("subtotal", "texto"),
+            ("descontoItens", "texto"),
+            ("total", "texto"),
+            ("falta", "texto"),
+            ("troco", "texto"),
+            ("quantidadeItens", "texto"),
+            ("erroDesconto", "texto"),
+            ("erroEncomenda", "texto"),
+            ("encomendas", "numero"),
+            ("cliente", "texto"),
+            ("crediario", "objeto"),
+            ("cheques", "objeto"),
+        ],
+    );
+    tem(
+        &c["itens"][0],
+        &[("descricao", "texto"), ("quantidade", "texto"), ("preco", "texto"), ("total", "texto"), ("erro", "texto")],
+    );
     // Valores internos (centavos) não vão para a tela.
     assert!(c["itens"][0].get("vTotal").is_none() && c["itens"][0].get("v_total").is_none());
     // Sem caixa aberto, concluir dá erro.
@@ -174,20 +187,32 @@ fn gerente_backup_e_caixas() {
     let k = ok(&mut s, "conflitos_listar", json!({}));
     assert!(k.is_array());
     let b = ok(&mut s, "backup_ler", json!({}));
-    tem(&b, &[
-        ("pasta", "texto"),
-        ("dias", "texto"),
-        ("hora", "texto"),
-        ("temSenha", "sim/nao"),
-        ("nuvem", "sim/nao"),
-        ("situacao", "objeto"),
-        ("ocupado", "sim/nao"),
-        ("lista", "lista"),
-    ]);
+    tem(
+        &b,
+        &[
+            ("pasta", "texto"),
+            ("dias", "texto"),
+            ("hora", "texto"),
+            ("temSenha", "sim/nao"),
+            ("nuvem", "sim/nao"),
+            ("situacao", "objeto"),
+            ("ocupado", "sim/nao"),
+            ("lista", "lista"),
+        ],
+    );
     // O gerente entrou: a chave do backup existe (backup sai trancado).
     assert_eq!(b["temSenha"], true);
     let y = ok(&mut s, "sync_ler", json!({}));
-    tem(&y, &[("ligado", "sim/nao"), ("temSenha", "sim/nao"), ("pares", "lista"), ("pendencias", "numero"), ("porta", "numero")]);
+    tem(
+        &y,
+        &[
+            ("ligado", "sim/nao"),
+            ("temSenha", "sim/nao"),
+            ("pares", "lista"),
+            ("pendencias", "numero"),
+            ("porta", "numero"),
+        ],
+    );
     let a = ok(&mut s, "avisos_do_dia", json!({}));
     assert!(a.is_array());
     // Resolver conflito que não existe: erro, não sucesso.

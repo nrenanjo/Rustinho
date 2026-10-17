@@ -191,8 +191,10 @@ pub fn gerente_conferido(
     memoria: Option<[u8; 32]>,
 ) -> Resultado<Option<[u8; 32]>> {
     let publica = publica_da_loja(conn)?;
-    let atual: Option<String> =
-        conn.query_row("SELECT backup_acesso FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0)).optional()?.flatten();
+    let atual: Option<String> = conn
+        .query_row("SELECT backup_acesso FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0))
+        .optional()?
+        .flatten();
     if let (Some(p), Some(a)) = (publica, atual.as_deref().and_then(de_hex)) {
         if let Some(s) = destrancar(&a, senha).filter(|s| publica_de(s) == p) {
             return Ok(Some(s));
@@ -215,8 +217,10 @@ pub fn gerente_conferido(
 /// A senha de um usuário mudou. Se ele é gerente, o cadeado passa para a
 /// senha nova (a antiga deixa de abrir os backups novos).
 pub fn senha_trocada(conn: &Connection, usuario_id: &str, nova: &str, memoria: Option<[u8; 32]>) -> Resultado<()> {
-    let gerente: bool =
-        conn.query_row("SELECT gerente FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0)).optional()?.unwrap_or(false);
+    let gerente: bool = conn
+        .query_row("SELECT gerente FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0))
+        .optional()?
+        .unwrap_or(false);
     if !gerente {
         return Ok(());
     }
@@ -477,7 +481,12 @@ fn ler_cheio(r: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
 }
 
 /// Chave de um arquivo do formato 3 (a mesma dos dois lados da troca).
-fn chave_do_arquivo(segredo_ou_efemero: &[u8; 32], outra_publica: &[u8; 32], efemera: &[u8; 32], publica: &[u8; 32]) -> [u8; 32] {
+fn chave_do_arquivo(
+    segredo_ou_efemero: &[u8; 32],
+    outra_publica: &[u8; 32],
+    efemera: &[u8; 32],
+    publica: &[u8; 32],
+) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let comum = x25519_dalek::StaticSecret::from(*segredo_ou_efemero)
         .diffie_hellman(&x25519_dalek::PublicKey::from(*outra_publica));
@@ -489,7 +498,12 @@ fn chave_do_arquivo(segredo_ou_efemero: &[u8; 32], outra_publica: &[u8; 32], efe
     h.finalize().into()
 }
 
-fn escrever_pedacos(entrada: &mut impl Read, destino: &mut impl Write, chave: &[u8; 32], comeco: &[u8; 7]) -> Resultado<()> {
+fn escrever_pedacos(
+    entrada: &mut impl Read,
+    destino: &mut impl Write,
+    chave: &[u8; 32],
+    comeco: &[u8; 7],
+) -> Resultado<()> {
     let falha = |e: std::io::Error| Erro::validacao(format!("Não deu para gravar o backup: {e}"));
     let cifra = ChaCha20Poly1305::new_from_slice(chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
     let mut atual = vec![0u8; PEDACO];
@@ -512,7 +526,13 @@ fn escrever_pedacos(entrada: &mut impl Read, destino: &mut impl Write, chave: &[
     }
 }
 
-fn ler_pedacos(f: &mut impl Read, destino: &mut impl Write, chave: &[u8; 32], comeco: &[u8; 7], senha_errada: fn() -> Erro) -> Resultado<()> {
+fn ler_pedacos(
+    f: &mut impl Read,
+    destino: &mut impl Write,
+    chave: &[u8; 32],
+    comeco: &[u8; 7],
+    senha_errada: fn() -> Erro,
+) -> Resultado<()> {
     let ler_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para ler o backup: {e}"));
     let gravar_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para abrir o backup: {e}"));
     let incompleto = || Erro::validacao("O backup está incompleto (o arquivo foi cortado).");
@@ -683,7 +703,9 @@ fn desembrulhar(arquivo: &Path, destino: &mut impl Write, como: &Como) -> Result
         // Formato antigo: lido inteiro na memória, então tem tamanho máximo.
         let tamanho = std::fs::metadata(arquivo).map(|m| m.len()).unwrap_or(u64::MAX);
         if tamanho > TAMANHO_FORMATO_ANTIGO {
-            return Err(Erro::validacao("Este backup antigo é grande demais para abrir neste aparelho. Abra num computador."));
+            return Err(Erro::validacao(
+                "Este backup antigo é grande demais para abrir neste aparelho. Abra num computador.",
+            ));
         }
         let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
         let mut nonce = [0u8; 12];
@@ -1283,7 +1305,9 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         let mais_nova = listar(&a.pasta).into_iter().find(|c| !c.antes);
         let Some(c) = mais_nova else { return Ok(()) };
         if !c.tem_senha {
-            return Err(Erro::validacao("Um gerente precisa entrar no Rustinho antes: sem a chave da loja nada vai para o Google Drive."));
+            return Err(Erro::validacao(
+                "Um gerente precisa entrar no Rustinho antes: sem a chave da loja nada vai para o Google Drive.",
+            ));
         }
         let la = nomes_na_nuvem()?;
         if !la.iter().any(|(n, _)| *n == c.nome) {
@@ -1561,7 +1585,10 @@ mod testes {
             // Pelo cadeado que veio no arquivo (computador novo).
             assert_eq!(desembrulhar_bytes(&com, &senha("senha-ana", &[])).unwrap(), dados);
             // Pelo cadeado de agora deste caixa (gerente novo ou senha nova).
-            assert_eq!(desembrulhar_bytes(&com, &senha("senha-bia", std::slice::from_ref(&cadeado_bia))).unwrap(), dados);
+            assert_eq!(
+                desembrulhar_bytes(&com, &senha("senha-bia", std::slice::from_ref(&cadeado_bia))).unwrap(),
+                dados
+            );
             assert_eq!(desembrulhar_bytes(&com, &senha("senha-bia", &[])).unwrap_err().nome_do_campo(), Some("senha"));
             assert_eq!(desembrulhar_bytes(&com, &senha("", &[])).unwrap_err().nome_do_campo(), Some("senha"));
             let mut estragado = com.clone();
@@ -1625,8 +1652,7 @@ mod testes {
         let p = publica_da_loja(&b.conn).unwrap().unwrap();
         assert_eq!(publica_de(&m), p);
         // Ninguém mais guarda o segredo em claro.
-        let tudo: String =
-            b.conn.query_row("SELECT group_concat(valor, '|') FROM config", [], |l| l.get(0)).unwrap();
+        let tudo: String = b.conn.query_row("SELECT group_concat(valor, '|') FROM config", [], |l| l.get(0)).unwrap();
         assert!(!tudo.contains(&hex(&m)));
         // Bia entra: com o segredo na memória, ganha o cadeado dela.
         assert_eq!(gerente_conferido(&b.conn, &bia.id, "2222", Some(m)).unwrap(), Some(m));

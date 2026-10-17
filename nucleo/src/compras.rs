@@ -1148,7 +1148,11 @@ mod testes {
         for (troca, por, motivo) in [
             ("<nNF>12345</nNF>", "<nNF>12346</nNF>", "número"),
             ("<CNPJ>11222333000181</CNPJ>", "<CNPJ>11222333000262</CNPJ>", "CNPJ do fornecedor"),
-            ("<chNFe>35261011222333000181550010000123451000000014", "<chNFe>35261011222333000181550010000123461000000010", "outra nota"),
+            (
+                "<chNFe>35261011222333000181550010000123451000000014",
+                "<chNFe>35261011222333000181550010000123461000000010",
+                "outra nota",
+            ),
             ("<digVal>ZXhl", "<digVal>AAAA", "resumo"),
             ("<nProt>135260000000001</nProt>", "", "sem número"),
             ("1000000014\" versao", "1000000015\" versao", "dígito"),
