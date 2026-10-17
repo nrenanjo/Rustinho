@@ -62,6 +62,7 @@ impl Banco {
         let dispositivo = garantir_dispositivo(&conn)?;
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
+        crate::backup::migrar_senha_antiga(&conn)?;
         Ok(Banco {
             conn,
             dispositivo,

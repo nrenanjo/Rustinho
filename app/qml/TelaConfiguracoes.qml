@@ -731,10 +731,17 @@ FocusScope {
                                 color: modelData.erro ? Tema.vermelho : Tema.tinta
                                 font.family: Tema.texto
                                 font.pixelSize: 14
-                                elide: Text.ElideRight
+                                wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
                             }
                         }
+                    }
+                    Nota {
+                        visible: !!tela.sync && tela.sync.pendencias > 0
+                        text: tela.sync ? tela.sync.pendencias + (tela.sync.pendencias === 1 ? " registro espera" : " registros esperam")
+                                          + " dados que ainda não chegaram de outro caixa. Deixe os caixas ligados na mesma rede para terminar a troca." : ""
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
                     }
                 }
 

@@ -11,15 +11,22 @@
 //! - Cada registro fica com a alteração mais recente (o id da alteração é um
 //!   UUID v7, que já vem em ordem de tempo). O estoque é só soma de
 //!   movimentos, então nunca há conflito nele.
-//! - Tudo que passa pela rede vai criptografado (ChaCha20-Poly1305) com a
-//!   "senha da rede" da loja, que precisa ser a mesma nos caixas. Sem a
-//!   senha certa, nada é lido nem aceito.
+//! - Tudo que passa pela rede vai criptografado (ChaCha20-Poly1305) com uma
+//!   chave tirada da "senha da rede" da loja por Argon2id, com um "sal" de
+//!   cada caixa que vai junto na mensagem (protocolo versão 2, desde a
+//!   0.9.11). A senha precisa ser a mesma nos caixas: sem ela, nada é lido
+//!   nem aceito.
+//! - Registros repetidos no log de alterações (versões velhas de um mesmo
+//!   registro) são apagados de tempos em tempos: só a mais nova importa.
+//! - Um caixa com o relógio errado ganharia sempre; a diferença de relógio
+//!   aparece como aviso na tela dos caixas da loja.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -37,7 +44,25 @@ use crate::{banco, config, tempo};
 pub const PORTA_TCP: u16 = 47810;
 pub const PORTA_UDP: u16 = 47811;
 const LOTE: i64 = 2000;
+/// Resposta com um lote de alterações.
 const TAMANHO_MAXIMO: usize = 64 * 1024 * 1024;
+/// Pedido de outro caixa (é sempre pequeno).
+const TAMANHO_PEDIDO: usize = 64 * 1024;
+/// Conexões atendidas ao mesmo tempo (as outras esperam a próxima rodada).
+const CONEXOES_MAXIMAS: usize = 8;
+/// Diferença de relógio entre caixas que já vira aviso.
+const RELOGIO_TOLERANCIA_MS: i64 = 2 * 60 * 1000;
+/// Começo de toda mensagem do protocolo 2.
+const MAGICA: &[u8; 4] = b"RST2";
+
+/// Enquanto um backup é restaurado, a troca de dados espera (e vice-versa).
+static TRAVA: RwLock<()> = RwLock::new(());
+static ATENDENDO: AtomicUsize = AtomicUsize::new(0);
+
+/// Para a troca de dados enquanto a guarda existir (restaurar backup).
+pub fn pausar() -> RwLockWriteGuard<'static, ()> {
+    TRAVA.write().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Tabelas que os caixas compartilham.
 pub const TABELAS: &[&str] = &[
@@ -98,7 +123,9 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "imprimir_local",
     "estoque_dias_compra",
     "estoque_dias_parado",
+    // "backup_senha" (até a 0.9.1) fica na lista para o apagar chegar aos outros.
     "backup_senha",
+    "backup_chave",
     "gerente_livres",
 ];
 
@@ -247,11 +274,41 @@ fn para_sql(v: &Value) -> SqlValor {
 /// Aplica alterações vindas de outro caixa. Devolve quantas eram novas.
 pub fn aplicar(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
     // Na ordem em que chegam, um item pode vir antes da peça (ou a peça ter
-    // sido apagada depois). As chaves estrangeiras ficam desligadas aqui.
+    // sido apagada depois). As chaves estrangeiras ficam desligadas aqui e
+    // são conferidas no fim da troca (veja `pendencias`).
     conn.pragma_update(None, "foreign_keys", false)?;
     let resultado = aplicar_dentro(conn, lista);
     conn.pragma_update(None, "foreign_keys", true)?;
     resultado
+}
+
+/// Quantos registros apontam para outro que ainda não chegou (ou foi
+/// apagado). Normalmente é zero depois de trocar tudo com os outros caixas.
+pub fn pendencias(conn: &Connection) -> Resultado<usize> {
+    let mut c = conn.prepare("PRAGMA foreign_key_check")?;
+    let n = c.query_map([], |_| Ok(()))?.count();
+    Ok(n)
+}
+
+/// Apaga do log as versões velhas de cada registro (fica a mais nova, que é
+/// a que vale). Devolve quantas apagou. Pode rodar a qualquer hora: quem
+/// pedir depois recebe só a versão que vale.
+pub fn compactar(conn: &Connection) -> Resultado<usize> {
+    let mut total = 0;
+    loop {
+        let n = conn.execute(
+            "DELETE FROM alteracao WHERE seq IN (
+                SELECT a.seq FROM alteracao a
+                 WHERE EXISTS (SELECT 1 FROM alteracao b
+                                WHERE b.tabela = a.tabela AND b.chave = a.chave AND b.id > a.id)
+                 LIMIT 5000)",
+            [],
+        )?;
+        total += n;
+        if n < 5000 {
+            return Ok(total);
+        }
+    }
 }
 
 fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
@@ -268,18 +325,36 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         if ja {
             continue;
         }
-        let ultima: Option<String> = tx.query_row(
-            "SELECT MAX(id) FROM alteracao WHERE tabela = ?1 AND chave = ?2",
-            params![a.tabela, a.chave],
-            |l| l.get(0),
-        )?;
+        let ultima: Option<(String, String)> = tx
+            .query_row(
+                "SELECT id, dispositivo FROM alteracao WHERE tabela = ?1 AND chave = ?2 ORDER BY id DESC LIMIT 1",
+                params![a.tabela, a.chave],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .optional()?;
         tx.execute(
             "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando],
         )?;
         novas += 1;
-        if ultima.as_deref().is_some_and(|u| u >= a.id.as_str()) {
-            continue; // já temos uma alteração mais nova deste registro
+        if let Some((u, de_quem)) = &ultima {
+            if u.as_str() >= a.id.as_str() {
+                // Já temos uma alteração mais nova deste registro. Se ela foi
+                // feita aqui sem ver esta, os dois caixas mexeram juntos:
+                // fica anotado (a mais nova vale).
+                if de_quem == &meu && a.tabela != "auditoria" {
+                    tx.execute(
+                        "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![a.tabela, a.chave, u, a.id, a.dispositivo, tempo::agora()],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM sync_conflito WHERE id <= (SELECT MAX(id) - 500 FROM sync_conflito)",
+                        [],
+                    )?;
+                }
+                continue;
+            }
         }
         if !colunas_cache.iter().any(|c| c.0 == a.tabela) {
             let (todas, chave) = colunas(&tx, &a.tabela)?;
@@ -332,22 +407,67 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
 // Criptografia e mensagens.
 // ---------------------------------------------------------------------------
 
-/// Chave de 32 bytes tirada da senha da rede.
-fn chave(senha: &str) -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(b"rustinho-sync-v1:");
-    h.update(senha.as_bytes());
-    let r = h.finalize();
-    let mut k = [0u8; 32];
-    k.copy_from_slice(&r);
-    k
+/// Chaves da rede: a deste caixa (com o sal dele) e as dos outros, tiradas
+/// da senha da rede por Argon2id e guardadas na memória (calcular demora).
+#[derive(Clone)]
+struct Chaves {
+    senha: String,
+    sal: [u8; 16],
+    propria: [u8; 32],
 }
 
-fn cifrar(chave: &[u8; 32], dados: &[u8]) -> Resultado<Vec<u8>> {
-    let cifra = ChaCha20Poly1305::new_from_slice(chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+fn cache() -> &'static Mutex<HashMap<([u8; 32], [u8; 16]), [u8; 32]>> {
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<([u8; 32], [u8; 16]), [u8; 32]>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn derivar(senha: &str, sal: &[u8; 16]) -> Resultado<[u8; 32]> {
+    let id: [u8; 32] = Sha256::digest(senha.as_bytes()).into();
+    if let Some(k) = cache().lock().unwrap_or_else(|e| e.into_inner()).get(&(id, *sal)) {
+        return Ok(*k);
+    }
+    let mut k = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(senha.as_bytes(), sal, &mut k)
+        .map_err(|e| Erro::Interno(format!("não foi possível proteger a rede: {e}")))?;
+    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
+    if c.len() > 64 {
+        c.clear();
+    }
+    c.insert((id, *sal), k);
+    Ok(k)
+}
+
+impl Chaves {
+    fn de(conn: &Connection, senha: &str) -> Resultado<Chaves> {
+        let sal = match config::ler(conn, "sync_sal")?.and_then(|t| de_hex(&t)).and_then(|v| <[u8; 16]>::try_from(v).ok()) {
+            Some(s) => s,
+            None => {
+                let mut s = [0u8; 16];
+                getrandom::fill(&mut s).map_err(|e| Erro::Interno(format!("sem números aleatórios: {e}")))?;
+                config::gravar(conn, "sync_sal", &s.iter().map(|b| format!("{b:02x}")).collect::<String>())?;
+                s
+            }
+        };
+        Ok(Chaves { senha: senha.to_string(), sal, propria: derivar(senha, &sal)? })
+    }
+}
+
+fn de_hex(t: &str) -> Option<Vec<u8>> {
+    if t.len() % 2 != 0 {
+        return None;
+    }
+    (0..t.len()).step_by(2).map(|i| u8::from_str_radix(t.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Mensagem: "RST2", sal de quem mandou (16), nonce (12), texto cifrado.
+fn cifrar(chaves: &Chaves, dados: &[u8]) -> Resultado<Vec<u8>> {
+    let cifra = ChaCha20Poly1305::new_from_slice(&chaves.propria).map_err(|_| Erro::Interno("chave inválida".into()))?;
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).map_err(|e| Erro::Interno(format!("sem números aleatórios: {e}")))?;
-    let mut saida = nonce.to_vec();
+    let mut saida = MAGICA.to_vec();
+    saida.extend(chaves.sal);
+    saida.extend(nonce);
     let corpo = cifra
         .encrypt(&nonce.into(), dados)
         .map_err(|_| Erro::Interno("falha ao criptografar".into()))?;
@@ -355,34 +475,47 @@ fn cifrar(chave: &[u8; 32], dados: &[u8]) -> Resultado<Vec<u8>> {
     Ok(saida)
 }
 
-fn decifrar(chave: &[u8; 32], dados: &[u8]) -> Option<Vec<u8>> {
-    if dados.len() < 12 + 16 {
-        return None;
+/// Erro quando o outro caixa fala outra versão (ou a senha não confere).
+fn decifrar(chaves: &Chaves, dados: &[u8]) -> Result<Vec<u8>, &'static str> {
+    if dados.len() < 4 + 16 + 12 + 16 || &dados[..4] != MAGICA {
+        return Err("O outro caixa está com outra versão do Rustinho. Atualize todos os caixas para a mesma versão.");
     }
-    let cifra = ChaCha20Poly1305::new_from_slice(chave).ok()?;
+    let mut sal = [0u8; 16];
+    sal.copy_from_slice(&dados[4..20]);
+    let chave = if sal == chaves.sal { chaves.propria } else { derivar(&chaves.senha, &sal).map_err(|_| "chave inválida")? };
+    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| "chave inválida")?;
     let mut nonce = [0u8; 12];
-    nonce.copy_from_slice(&dados[..12]);
-    cifra.decrypt(&nonce.into(), &dados[12..]).ok()
+    nonce.copy_from_slice(&dados[20..32]);
+    cifra
+        .decrypt(&nonce.into(), &dados[32..])
+        .map_err(|_| "A senha da rede não confere com a deste caixa.")
 }
 
-fn enviar(fluxo: &mut TcpStream, chave: &[u8; 32], v: &Value) -> Resultado<()> {
-    let corpo = cifrar(chave, v.to_string().as_bytes())?;
+fn enviar(fluxo: &mut TcpStream, chaves: &Chaves, v: &Value) -> Resultado<()> {
+    let corpo = cifrar(chaves, v.to_string().as_bytes())?;
     let tam = (corpo.len() as u32).to_be_bytes();
     fluxo.write_all(&tam).and_then(|_| fluxo.write_all(&corpo)).map_err(rede)?;
     Ok(())
 }
 
-fn receber(fluxo: &mut TcpStream, chave: &[u8; 32]) -> Resultado<Value> {
+fn receber(fluxo: &mut TcpStream, chaves: &Chaves, limite: usize) -> Resultado<Value> {
     let mut tam = [0u8; 4];
     fluxo.read_exact(&mut tam).map_err(rede)?;
     let tam = u32::from_be_bytes(tam) as usize;
-    if tam > TAMANHO_MAXIMO {
+    if tam > limite {
         return Err(Erro::validacao("Mensagem grande demais."));
     }
     let mut corpo = vec![0u8; tam];
     fluxo.read_exact(&mut corpo).map_err(rede)?;
-    let claro = decifrar(chave, &corpo).ok_or_else(|| Erro::validacao("A senha da rede não confere com a deste caixa."))?;
+    let claro = decifrar(chaves, &corpo).map_err(Erro::validacao)?;
     Ok(serde_json::from_slice(&claro)?)
+}
+
+fn agora_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn rede(e: std::io::Error) -> Erro {
@@ -488,15 +621,17 @@ fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
 
 /// Atende um pedido de outro caixa.
 fn atender(caminho: &Path, mut fluxo: TcpStream) -> Resultado<()> {
-    fluxo.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    // Quem não manda nada em 5 s é desligado.
+    fluxo.set_read_timeout(Some(Duration::from_secs(5))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
+    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
     if !a.ligado || a.senha.is_empty() {
         return Ok(());
     }
-    let k = chave(&a.senha);
-    let pedido = receber(&mut fluxo, &k)?;
+    let k = Chaves::de(&conn, &a.senha)?;
+    let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO)?;
     if pedido["tipo"] != "puxar" {
         return Ok(());
     }
@@ -512,15 +647,16 @@ fn atender(caminho: &Path, mut fluxo: TcpStream) -> Resultado<()> {
     enviar(
         &mut fluxo,
         &k,
-        &json!({ "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista, "temMais": tem_mais }),
+        &json!({ "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista, "temMais": tem_mais, "agoraMs": agora_ms() }),
     )
 }
 
 /// Puxa de um endereço tudo o que há de novo. Devolve (dispositivo, quantas novas).
 pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(String, usize)> {
+    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let mut conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
-    let k = chave(&a.senha);
+    let k = Chaves::de(&conn, &a.senha)?;
     let alvo: SocketAddr = match endereco.parse::<SocketAddr>() {
         Ok(s) => s,
         Err(_) => format!("{endereco}:{PORTA_TCP}").parse().map_err(|_| Erro::validacao("Endereço inválido."))?,
@@ -539,12 +675,15 @@ pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(Str
         };
         let mut fluxo = TcpStream::connect_timeout(&alvo, Duration::from_secs(3)).map_err(rede)?;
         fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
+        fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
+        let saiu = agora_ms();
         enviar(
             &mut fluxo,
             &k,
             &json!({ "tipo": "puxar", "desde": cursor, "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local }),
         )?;
-        let resposta = receber(&mut fluxo, &k)?;
+        let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO)?;
+        let voltou = agora_ms();
         dispositivo = resposta["dispositivo"].as_str().unwrap_or_default().to_string();
         if dispositivo.is_empty() || dispositivo == a.dispositivo {
             return Err(Erro::validacao("Este endereço é deste mesmo caixa."));
@@ -561,13 +700,35 @@ pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(Str
                 params![dispositivo, m, cursor],
             )?;
         }
+        // Relógio do outro caixa (descontando o tempo da viagem pela rede).
+        let aviso = match resposta["agoraMs"].as_i64() {
+            Some(dele) => {
+                let diferenca = dele - (saiu + voltou) / 2;
+                if diferenca.abs() > RELOGIO_TOLERANCIA_MS {
+                    let minutos = (diferenca.abs() + 30_000) / 60_000;
+                    format!(
+                        "O relógio dele está {minutos} min {} em relação a este. Acerte a data e a hora dos dois.",
+                        if diferenca > 0 { "adiantado" } else { "atrasado" }
+                    )
+                } else {
+                    String::new()
+                }
+            }
+            None => String::new(),
+        };
         conn.execute(
-            "UPDATE sync_par SET sincronizado_em = ?2, erro = '' WHERE dispositivo = ?1",
-            params![dispositivo, tempo::agora()],
+            "UPDATE sync_par SET sincronizado_em = ?2, erro = ?3 WHERE dispositivo = ?1",
+            params![dispositivo, tempo::agora(), aviso],
         )?;
         if !resposta["temMais"].as_bool().unwrap_or(false) {
             break;
         }
+    }
+    // Depois de tudo: algum registro ficou apontando para outro que não veio?
+    let faltam = pendencias(&conn)?;
+    config::gravar(&conn, "sync_pendencias", &faltam.to_string())?;
+    if total > 0 {
+        crate::usuarios::resolver_nomes_repetidos(&conn)?;
     }
     Ok((dispositivo, total))
 }
@@ -599,10 +760,17 @@ impl Motor {
                 while !parar.load(Ordering::Relaxed) {
                     match ouvinte.accept() {
                         Ok((fluxo, _)) => {
+                            // Muitas conexões ao mesmo tempo: as de sobra são fechadas.
+                            if ATENDENDO.fetch_add(1, Ordering::SeqCst) >= CONEXOES_MAXIMAS {
+                                ATENDENDO.fetch_sub(1, Ordering::SeqCst);
+                                drop(fluxo);
+                                continue;
+                            }
                             fluxo.set_nonblocking(false).ok();
                             let caminho = caminho.clone();
                             thread::spawn(move || {
                                 let _ = atender(&caminho, fluxo);
+                                ATENDENDO.fetch_sub(1, Ordering::SeqCst);
                             });
                         }
                         Err(_) => thread::sleep(Duration::from_millis(200)),
@@ -631,7 +799,7 @@ impl Motor {
                         thread::sleep(Duration::from_secs(3));
                         continue;
                     }
-                    let k = chave(&a.senha);
+                    let Ok(k) = Chaves::de(&conn, &a.senha) else { continue };
                     if ultimo_anuncio.elapsed() > Duration::from_secs(10) {
                         let ola = json!({ "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_tcp });
                         if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
@@ -640,7 +808,7 @@ impl Motor {
                         ultimo_anuncio = Instant::now();
                     }
                     if let Ok((n, origem)) = socket.recv_from(&mut buf) {
-                        if let Some(claro) = decifrar(&k, &buf[..n]) {
+                        if let Ok(claro) = decifrar(&k, &buf[..n]) {
                             if let Ok(v) = serde_json::from_slice::<Value>(&claro) {
                                 let d = v["dispositivo"].as_str().unwrap_or_default();
                                 let porta = v["porta"].as_u64().unwrap_or(PORTA_TCP as u64);
@@ -658,9 +826,15 @@ impl Motor {
         {
             let parar = parar.clone();
             thread::spawn(move || {
+                let mut ultima_limpeza = Instant::now() - Duration::from_secs(50 * 60);
                 while !parar.load(Ordering::Relaxed) {
                     thread::sleep(Duration::from_secs(4));
                     let Ok(conn) = abrir_conexao(&caminho) else { continue };
+                    if ultima_limpeza.elapsed() > Duration::from_secs(60 * 60) {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        let _ = compactar(&conn);
+                        ultima_limpeza = Instant::now();
+                    }
                     let Ok(a) = ajustes(&conn) else { continue };
                     if !a.ligado || a.senha.is_empty() {
                         continue;
@@ -791,6 +965,60 @@ mod testes {
 
         // o caixa 1 conheceu o caixa 2 quando foi procurado por ele
         assert!(pares(&b1.conn).unwrap().iter().any(|x| x.nome == "Caixa 2"));
+    }
+
+    #[test]
+    fn mensagens_do_protocolo_2() {
+        let b = Banco::em_memoria().unwrap();
+        let k1 = Chaves::de(&b.conn, "senha-da-loja").unwrap();
+        // Outro caixa: mesmo senha, outro sal.
+        let k2 = Chaves { senha: "senha-da-loja".into(), sal: [9u8; 16], propria: derivar("senha-da-loja", &[9u8; 16]).unwrap() };
+        assert_ne!(k1.propria, k2.propria);
+        let m = cifrar(&k2, b"ola").unwrap();
+        assert_eq!(decifrar(&k1, &m).unwrap(), b"ola");
+        // Senha errada.
+        let k3 = Chaves { senha: "outra-senha".into(), sal: [9u8; 16], propria: derivar("outra-senha", &[9u8; 16]).unwrap() };
+        assert!(decifrar(&k3, &m).unwrap_err().contains("senha"));
+        // Versão antiga (sem "RST2").
+        assert!(decifrar(&k1, &[0u8; 80]).unwrap_err().contains("versão"));
+        // O sal deste caixa fica guardado.
+        assert_eq!(Chaves::de(&b.conn, "senha-da-loja").unwrap().sal, k1.sal);
+    }
+
+    #[test]
+    fn compactar_e_conflito() {
+        let mut b = Banco::em_memoria().unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        config::gravar(&b.conn, "sync_inicio", "x").unwrap();
+        for nome in ["Maria A", "Maria B", "Maria C"] {
+            usuarios::alterar(&b.conn, &u.id, nome, true, None).unwrap();
+        }
+        let antes: i64 = b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
+        assert!(antes >= 4);
+        assert!(compactar(&b.conn).unwrap() >= 3);
+        let depois: i64 = b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'usuario'", [], |l| l.get(0)).unwrap();
+        assert_eq!(depois, 1);
+        // Uma alteração mais velha de outro caixa chega depois: não vale e fica anotada.
+        let (id_ultima, chave_u, dados): (String, String, String) = b
+            .conn
+            .query_row("SELECT id, chave, dados FROM alteracao WHERE tabela = 'usuario'", [], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))
+            .unwrap();
+        let velha = Alteracao {
+            seq: 1,
+            id: "00000000-0000-7000-8000-000000000000".into(),
+            tabela: "usuario".into(),
+            chave: chave_u,
+            operacao: "gravar".into(),
+            dados: Some(dados.replace("Maria C", "Maria velha")),
+            dispositivo: "outro".into(),
+            quando: tempo::agora(),
+        };
+        assert!(velha.id < id_ultima);
+        aplicar(&mut b.conn, &[velha]).unwrap();
+        assert_eq!(usuarios::buscar(&b.conn, &u.id).unwrap().nome, "Maria C");
+        let conflitos: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_conflito", [], |l| l.get(0)).unwrap();
+        assert_eq!(conflitos, 1);
+        assert_eq!(pendencias(&b.conn).unwrap(), 0);
     }
 
     #[test]

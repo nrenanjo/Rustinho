@@ -11,3 +11,16 @@ CREATE TABLE entrada_falha (
     quantidade INTEGER NOT NULL,
     ultima     INTEGER NOT NULL
 );
+
+-- Troca de dados entre caixas: quando uma alteração feita aqui "ganhou" de
+-- outra, feita antes num outro caixa que ainda não tinha chegado (os dois
+-- mexeram no mesmo registro sem ver o do outro). Só deste aparelho.
+CREATE TABLE sync_conflito (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tabela      TEXT NOT NULL,
+    chave       TEXT NOT NULL,
+    ficou       TEXT NOT NULL,
+    perdeu      TEXT NOT NULL,
+    dispositivo TEXT NOT NULL,
+    quando      TEXT NOT NULL
+);

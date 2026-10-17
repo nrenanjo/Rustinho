@@ -5,7 +5,11 @@
 //!   inteiro sem cópia) e ao fechar o Rustinho, o banco é copiado inteiro
 //!   (`VACUUM INTO`, que tira uma "foto" sem parar o caixa), comprimido em
 //!   zip e, se a loja tiver a senha do backup, criptografado
-//!   (ChaCha20-Poly1305 com chave tirada da senha por Argon2).
+//!   (ChaCha20-Poly1305 com chave tirada da senha por Argon2), em pedaços de
+//!   1 MB: nem o banco grande inteiro precisa caber na memória.
+//! - A senha do backup não fica guardada: só a chave tirada dela (com o
+//!   "sal" que vai junto em cada arquivo). Assim, quem abrir o banco não
+//!   descobre a senha (que a pessoa pode usar em outros lugares).
 //! - Depois de gravar, o Rustinho abre a cópia e confere se ela está inteira.
 //!   Cópia que não abre não conta como backup e vira aviso na tela inicial.
 //! - Guarda os últimos N dias (um por dia; do dia de hoje, todos) e nunca
@@ -18,7 +22,7 @@
 //!   pasta do backup). Com a sincronização ligada, este caixa recebe de novo
 //!   dos outros tudo o que mudou depois da data do backup.
 
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -103,7 +107,63 @@ pub struct Ajustes {
     /// "HH:MM"
     pub hora: String,
     pub nuvem: bool,
-    pub senha: String,
+    /// Chave da loja tirada da senha do backup (sal, chave). None = sem senha.
+    pub chave: Option<Chave>,
+}
+
+/// Chave do backup: o "sal" (vai junto no arquivo) e a chave tirada da senha.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Chave {
+    pub sal: [u8; 16],
+    pub chave: [u8; 32],
+}
+
+impl Chave {
+    fn da_senha(senha: &str, sal: [u8; 16]) -> Resultado<Chave> {
+        Ok(Chave { sal, chave: chave_da_senha(senha, &sal)? })
+    }
+    fn escrever(&self) -> String {
+        format!("{}:{}", hex(&self.sal), hex(&self.chave))
+    }
+    fn ler(t: &str) -> Option<Chave> {
+        let (a, b) = t.split_once(':')?;
+        Some(Chave { sal: de_hex(a)?.try_into().ok()?, chave: de_hex(b)?.try_into().ok()? })
+    }
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn de_hex(t: &str) -> Option<Vec<u8>> {
+    if t.len() % 2 != 0 {
+        return None;
+    }
+    (0..t.len()).step_by(2).map(|i| u8::from_str_radix(t.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Chave da loja guardada no banco (vai para os outros caixas).
+pub fn chave_da_loja(conn: &Connection) -> Resultado<Option<Chave>> {
+    Ok(config::ler(conn, "backup_chave")?.as_deref().and_then(Chave::ler))
+}
+
+/// Troca a senha do backup: guarda só a chave tirada dela.
+pub fn definir_senha(conn: &Connection, senha: &str) -> Resultado<()> {
+    let c = Chave::da_senha(senha, aleatorio()?)?;
+    config::gravar(conn, "backup_chave", &c.escrever())?;
+    conn.execute("DELETE FROM config WHERE chave = 'backup_senha'", [])?;
+    Ok(())
+}
+
+/// Versões até a 0.9.1 guardavam a senha do backup. Troca pela chave.
+pub fn migrar_senha_antiga(conn: &Connection) -> Resultado<()> {
+    if let Some(senha) = config::ler(conn, "backup_senha")? {
+        if !senha.is_empty() && chave_da_loja(conn)?.is_none() {
+            definir_senha(conn, &senha)?;
+        }
+        conn.execute("DELETE FROM config WHERE chave = 'backup_senha'", [])?;
+    }
+    Ok(())
 }
 
 /// Pasta padrão: `backups` ao lado do banco.
@@ -131,7 +191,7 @@ pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajuste
         dias,
         hora,
         nuvem: config::ligado(conn, "backup_nuvem")?,
-        senha: config::ler(conn, "backup_senha")?.unwrap_or_default(),
+        chave: chave_da_loja(conn)?,
     })
 }
 
@@ -188,7 +248,7 @@ pub fn salvar_ajustes(conn: &Connection, caminho_db: Option<&Path>, e: &AjustesE
     config::gravar(conn, "backup_dias", &dias.to_string())?;
     config::gravar(conn, "backup_hora", &hora)?;
     if !e.senha.is_empty() {
-        config::gravar(conn, "backup_senha", &e.senha)?;
+        definir_senha(conn, &e.senha)?;
     }
     Ok(())
 }
@@ -327,9 +387,15 @@ fn dia_menos(dia: &str, dias: i64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Formato do arquivo: MAGICA, 1 byte (1 = criptografado), [sal 16, nonce 12],
-// depois o zip (rustinho.db + info.json), criptografado ou não.
+// Formato do arquivo: MAGICA, 1 byte, depois:
+//   0 = sem senha: o zip (rustinho.db + info.json) como está;
+//   1 = com senha, até a 0.9.1: sal 16, nonce 12, o zip criptografado inteiro;
+//   2 = com senha, desde a 0.9.11: sal 16, começo do nonce 7, e o zip
+//       criptografado em pedaços de 1 MB (cada um com o número do pedaço e
+//       a marca de último; nada pode ser cortado, trocado de lugar ou mudado).
 // ---------------------------------------------------------------------------
+
+const PEDACO: usize = 1024 * 1024;
 
 fn chave_da_senha(senha: &str, sal: &[u8]) -> Resultado<[u8; 32]> {
     let mut k = [0u8; 32];
@@ -345,25 +411,59 @@ fn aleatorio<const N: usize>() -> Resultado<[u8; N]> {
     Ok(b)
 }
 
-fn embrulhar(zip: Vec<u8>, senha: &str) -> Resultado<Vec<u8>> {
-    let mut saida = MAGICA.to_vec();
-    if senha.is_empty() {
-        saida.push(0);
-        saida.extend(zip);
-        return Ok(saida);
+fn nonce_do_pedaco(comeco: &[u8; 7], numero: u32, ultimo: bool) -> [u8; 12] {
+    let mut n = [0u8; 12];
+    n[..7].copy_from_slice(comeco);
+    n[7..11].copy_from_slice(&numero.to_be_bytes());
+    n[11] = ultimo as u8;
+    n
+}
+
+/// Lê até encher o buffer (ou acabar o arquivo). Devolve quantos leu.
+fn ler_cheio(r: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match r.read(&mut buf[n..])? {
+            0 => break,
+            k => n += k,
+        }
     }
-    let sal: [u8; 16] = aleatorio()?;
-    let nonce: [u8; 12] = aleatorio()?;
-    let k = chave_da_senha(senha, &sal)?;
-    let cifra = ChaCha20Poly1305::new_from_slice(&k).map_err(|_| Erro::Interno("chave inválida".into()))?;
-    let corpo = cifra
-        .encrypt(&nonce.into(), zip.as_slice())
-        .map_err(|_| Erro::Interno("falha ao criptografar o backup".into()))?;
-    saida.push(1);
-    saida.extend(sal);
-    saida.extend(nonce);
-    saida.extend(corpo);
-    Ok(saida)
+    Ok(n)
+}
+
+/// Grava o zip (do arquivo `origem`) no formato do backup, em `destino`.
+fn embrulhar(origem: &Path, destino: &mut impl Write, chave: Option<&Chave>) -> Resultado<()> {
+    let falha = |e: std::io::Error| Erro::validacao(format!("Não deu para gravar o backup: {e}"));
+    let mut entrada = std::fs::File::open(origem).map_err(falha)?;
+    destino.write_all(MAGICA).map_err(falha)?;
+    let Some(c) = chave else {
+        destino.write_all(&[0]).map_err(falha)?;
+        std::io::copy(&mut entrada, destino).map_err(falha)?;
+        return Ok(());
+    };
+    let comeco: [u8; 7] = aleatorio()?;
+    destino.write_all(&[2]).map_err(falha)?;
+    destino.write_all(&c.sal).map_err(falha)?;
+    destino.write_all(&comeco).map_err(falha)?;
+    let cifra = ChaCha20Poly1305::new_from_slice(&c.chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+    let mut atual = vec![0u8; PEDACO];
+    let mut proximo = vec![0u8; PEDACO];
+    let mut n = ler_cheio(&mut entrada, &mut atual).map_err(falha)?;
+    let mut numero: u32 = 0;
+    loop {
+        let m = if n == PEDACO { ler_cheio(&mut entrada, &mut proximo).map_err(falha)? } else { 0 };
+        let ultimo = m == 0;
+        let corpo = cifra
+            .encrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n])
+            .map_err(|_| Erro::Interno("falha ao criptografar o backup".into()))?;
+        destino.write_all(&corpo).map_err(falha)?;
+        if ultimo {
+            return Ok(());
+        }
+        std::mem::swap(&mut atual, &mut proximo);
+        n = m;
+        numero = numero.checked_add(1).ok_or_else(|| Erro::validacao("O backup ficou grande demais."))?;
+    }
 }
 
 /// O arquivo pede senha?
@@ -371,28 +471,84 @@ pub fn tem_senha(bytes: &[u8]) -> Option<bool> {
     if bytes.len() < 9 || &bytes[..8] != MAGICA {
         return None;
     }
-    Some(bytes[8] == 1)
+    Some(bytes[8] != 0)
 }
 
-fn desembrulhar(bytes: &[u8], senha: &str) -> Resultado<Vec<u8>> {
-    match tem_senha(bytes) {
-        None => Err(Erro::validacao("Este arquivo não é um backup do Rustinho.")),
-        Some(false) => Ok(bytes[9..].to_vec()),
-        Some(true) => {
-            if bytes.len() < 9 + 16 + 12 + 16 {
-                return Err(Erro::validacao("O backup está incompleto (o arquivo foi cortado)."));
-            }
-            if senha.is_empty() {
-                return Err(Erro::campo("senha", "Este backup tem senha. Digite a senha do backup."));
-            }
-            let k = chave_da_senha(senha, &bytes[9..25])?;
-            let cifra = ChaCha20Poly1305::new_from_slice(&k).map_err(|_| Erro::Interno("chave inválida".into()))?;
-            let mut nonce = [0u8; 12];
-            nonce.copy_from_slice(&bytes[25..37]);
-            cifra.decrypt(&nonce.into(), &bytes[37..]).map_err(|_| {
-                Erro::campo("senha", "A senha não abre este backup (ou o arquivo está estragado).")
-            })
+fn senha_errada() -> Erro {
+    Erro::campo("senha", "A senha não abre este backup (ou o arquivo está estragado).")
+}
+
+/// Tira o zip de dentro do backup e grava em `destino`. Com `senha` vazia,
+/// usa a chave guardada da loja (se for a mesma do arquivo).
+fn desembrulhar(arquivo: &Path, destino: &mut impl Write, senha: &str, da_loja: Option<&Chave>) -> Resultado<()> {
+    let ler_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para ler o backup: {e}"));
+    let gravar_falha = |e: std::io::Error| Erro::validacao(format!("Não deu para abrir o backup: {e}"));
+    let mut f = std::fs::File::open(arquivo).map_err(ler_falha)?;
+    let mut cabeca = [0u8; 9];
+    if ler_cheio(&mut f, &mut cabeca).map_err(ler_falha)? < 9 || tem_senha(&cabeca).is_none() {
+        return Err(Erro::validacao("Este arquivo não é um backup do Rustinho."));
+    }
+    let tipo = cabeca[8];
+    if tipo == 0 {
+        std::io::copy(&mut f, destino).map_err(gravar_falha)?;
+        return Ok(());
+    }
+    let incompleto = || Erro::validacao("O backup está incompleto (o arquivo foi cortado).");
+    let mut sal = [0u8; 16];
+    if ler_cheio(&mut f, &mut sal).map_err(ler_falha)? < 16 {
+        return Err(incompleto());
+    }
+    let chave = if !senha.is_empty() {
+        chave_da_senha(senha, &sal)?
+    } else {
+        match da_loja.filter(|c| c.sal == sal) {
+            Some(c) => c.chave,
+            None => return Err(Erro::campo("senha", "Este backup tem senha. Digite a senha do backup.")),
         }
+    };
+    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave inválida".into()))?;
+    match tipo {
+        1 => {
+            // Formato antigo: tudo de uma vez.
+            let mut nonce = [0u8; 12];
+            if ler_cheio(&mut f, &mut nonce).map_err(ler_falha)? < 12 {
+                return Err(incompleto());
+            }
+            let mut corpo = Vec::new();
+            f.read_to_end(&mut corpo).map_err(ler_falha)?;
+            let claro = cifra.decrypt(&nonce.into(), corpo.as_slice()).map_err(|_| senha_errada())?;
+            destino.write_all(&claro).map_err(gravar_falha)?;
+            Ok(())
+        }
+        2 => {
+            let mut comeco = [0u8; 7];
+            if ler_cheio(&mut f, &mut comeco).map_err(ler_falha)? < 7 {
+                return Err(incompleto());
+            }
+            let tamanho = PEDACO + 16;
+            let mut atual = vec![0u8; tamanho];
+            let mut proximo = vec![0u8; tamanho];
+            let mut n = ler_cheio(&mut f, &mut atual).map_err(ler_falha)?;
+            let mut numero: u32 = 0;
+            loop {
+                if n < 16 {
+                    return Err(incompleto());
+                }
+                let m = if n == tamanho { ler_cheio(&mut f, &mut proximo).map_err(ler_falha)? } else { 0 };
+                let ultimo = m == 0;
+                let claro = cifra
+                    .decrypt(&nonce_do_pedaco(&comeco, numero, ultimo).into(), &atual[..n])
+                    .map_err(|_| if numero == 0 { senha_errada() } else { Erro::validacao("O backup está estragado.") })?;
+                destino.write_all(&claro).map_err(gravar_falha)?;
+                if ultimo {
+                    return Ok(());
+                }
+                std::mem::swap(&mut atual, &mut proximo);
+                n = m;
+                numero = numero.checked_add(1).ok_or_else(|| Erro::validacao("O backup está estragado."))?;
+            }
+        }
+        _ => Err(Erro::validacao("Este backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes.")),
     }
 }
 
@@ -511,8 +667,10 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         quando: tempo::agora(),
     };
 
-    // 2. Zip.
-    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    // 2. Zip (num arquivo, não na memória).
+    let caminho_zip = tmp.0.join("backup.zip");
+    let arquivo_zip = std::fs::File::create(&caminho_zip).map_err(|e| erro_pasta(&a.pasta, e))?;
+    let mut zip = zip::ZipWriter::new(std::io::BufWriter::new(arquivo_zip));
     let opcoes = zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .large_file(true);
@@ -523,22 +681,27 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     let mut f = std::fs::File::open(&foto).map_err(|e| erro_pasta(&a.pasta, e))?;
     std::io::copy(&mut f, &mut zip).map_err(|e| erro_pasta(&a.pasta, e))?;
     drop(f);
-    let bytes = zip.finish().map_err(erro_zip)?.into_inner();
+    let mut fim = zip.finish().map_err(erro_zip)?;
+    fim.flush().map_err(|e| erro_pasta(&a.pasta, e))?;
+    drop(fim);
+    let _ = std::fs::remove_file(&foto);
 
     // 3. Senha e gravação (primeiro com outro nome, para não deixar meio arquivo).
-    let bytes = embrulhar(bytes, &a.senha)?;
     let nome = montar_nome(conn, antes)?;
     let destino = a.pasta.join(&nome);
     let parcial = a.pasta.join(format!(".{nome}.parcial"));
     {
-        let mut saida = std::fs::File::create(&parcial).map_err(|e| erro_pasta(&a.pasta, e))?;
-        saida.write_all(&bytes).map_err(|e| erro_pasta(&a.pasta, e))?;
+        let saida = std::fs::File::create(&parcial).map_err(|e| erro_pasta(&a.pasta, e))?;
+        let mut escrita = std::io::BufWriter::new(saida);
+        embrulhar(&caminho_zip, &mut escrita, a.chave.as_ref())?;
+        let saida = escrita.into_inner().map_err(|e| erro_pasta(&a.pasta, e.into_error()))?;
         saida.sync_all().map_err(|e| erro_pasta(&a.pasta, e))?;
     }
     std::fs::rename(&parcial, &destino).map_err(|e| erro_pasta(&a.pasta, e))?;
+    let tamanho = std::fs::metadata(&destino).map(|m| m.len() as i64).unwrap_or(0);
 
     // 4. Conferir lendo de volta do disco.
-    if let Err(e) = conferir(&destino, &a.senha) {
+    if let Err(e) = conferir_com(&destino, "", a.chave.as_ref()) {
         let _ = std::fs::remove_file(&destino);
         return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
     }
@@ -549,7 +712,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         let _ = std::fs::remove_file(a.pasta.join(velho));
     }
 
-    Ok(Feito { arquivo: destino.display().to_string(), tamanho: bytes.len() as i64 })
+    Ok(Feito { arquivo: destino.display().to_string(), tamanho })
 }
 
 fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
@@ -565,10 +728,16 @@ fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
 
 /// Abre o backup numa pasta temporária e confere. Devolve o caminho do
 /// banco tirado de dentro (vale enquanto `tmp` existir) e as informações.
-fn abrir(arquivo: &Path, senha: &str, tmp: &Temporaria) -> Resultado<(PathBuf, Info)> {
-    let bytes = std::fs::read(arquivo).map_err(|e| Erro::validacao(format!("Não deu para ler o backup: {e}")))?;
-    let zip_bytes = desembrulhar(&bytes, senha)?;
-    let mut zip = zip::ZipArchive::new(Cursor::new(zip_bytes))
+fn abrir(arquivo: &Path, senha: &str, da_loja: Option<&Chave>, tmp: &Temporaria) -> Resultado<(PathBuf, Info)> {
+    let caminho_zip = tmp.0.join("aberto.zip");
+    {
+        let saida = std::fs::File::create(&caminho_zip).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+        let mut escrita = std::io::BufWriter::new(saida);
+        desembrulhar(arquivo, &mut escrita, senha, da_loja)?;
+        escrita.flush().map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+    }
+    let arquivo_zip = std::fs::File::open(&caminho_zip).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(arquivo_zip))
         .map_err(|_| Erro::validacao("O backup está estragado (o zip não abre)."))?;
     let mut info = Info::default();
     if let Ok(mut f) = zip.by_name("info.json") {
@@ -599,10 +768,15 @@ fn abrir(arquivo: &Path, senha: &str, tmp: &Temporaria) -> Resultado<(PathBuf, I
     Ok((db, info))
 }
 
-/// Confere se um backup abre. Devolve as informações de dentro dele.
-pub fn conferir(arquivo: &Path, senha: &str) -> Resultado<Info> {
+/// Confere se um backup abre (com a senha digitada ou, sem ela, com a chave
+/// da loja). Devolve as informações de dentro dele.
+pub fn conferir(conn: &Connection, arquivo: &Path, senha: &str) -> Resultado<Info> {
+    conferir_com(arquivo, senha, chave_da_loja(conn)?.as_ref())
+}
+
+fn conferir_com(arquivo: &Path, senha: &str, da_loja: Option<&Chave>) -> Resultado<Info> {
     let tmp = Temporaria::nova(arquivo.parent().unwrap_or(Path::new(".")))?;
-    abrir(arquivo, senha, &tmp).map(|(_, i)| i)
+    abrir(arquivo, senha, da_loja, &tmp).map(|(_, i)| i)
 }
 
 /// Cópias que estão na pasta, mais novas primeiro.
@@ -986,8 +1160,9 @@ pub fn listar_nuvem() -> Resultado<Vec<Copia>> {
 /// Antes, guarda uma cópia do que existe agora (`caminho_db`, se houver).
 pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str, nuvem: bool, senha: &str) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…").ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
+    // A troca de dados com os outros caixas espera a restauração terminar.
+    let _pausa = sync::pausar();
     let a = ajustes(conn, caminho_db)?;
-    let senha = if senha.is_empty() { a.senha.clone() } else { senha.to_string() };
     let tmp = Temporaria::nova(&std::env::temp_dir())?;
 
     let local = if nuvem {
@@ -1003,7 +1178,7 @@ pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str
     };
 
     dizer("Conferindo o backup…");
-    let (db, info) = abrir(&local, &senha, &tmp)?;
+    let (db, info) = abrir(&local, senha, a.chave.as_ref(), &tmp)?;
     if info.estrutura as usize > banco::versao_da_estrutura() {
         return Err(Erro::validacao("Esse backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes."));
     }
@@ -1023,7 +1198,8 @@ pub fn restaurar(conn: &mut Connection, caminho_db: Option<&Path>, arquivo: &str
         let mut c = conn.prepare("SELECT chave, valor FROM config")?;
         for l in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
             let (k, v) = l?;
-            if !da_loja.contains(&k.as_str()) || k == "backup_senha" {
+            // A chave do backup de agora continua (a do backup pode ser outra).
+            if !da_loja.contains(&k.as_str()) || k == "backup_chave" {
                 locais.push((k, v));
             }
         }
@@ -1079,7 +1255,7 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
         "pastaPadrao": pasta_padrao(caminho_db).display().to_string(),
         "dias": a.dias.to_string(),
         "hora": a.hora,
-        "temSenha": !a.senha.is_empty(),
+        "temSenha": a.chave.is_some(),
         "nuvem": a.nuvem,
         "rclone": rclone_ok,
         "drive": drive,
@@ -1139,21 +1315,61 @@ mod testes {
         assert_eq!(apagar, vec![n("20260901", "180000", "caixa1"), n("20261014", "100000", "caixa1")]);
     }
 
+    fn embrulhar_bytes(dados: &[u8], chave: Option<&Chave>) -> Vec<u8> {
+        let pasta = pasta_teste("embrulho");
+        let origem = pasta.join("zip");
+        std::fs::write(&origem, dados).unwrap();
+        let mut saida = Vec::new();
+        embrulhar(&origem, &mut saida, chave).unwrap();
+        let _ = std::fs::remove_dir_all(&pasta);
+        saida
+    }
+
+    fn desembrulhar_bytes(bytes: &[u8], senha: &str, da_loja: Option<&Chave>) -> Resultado<Vec<u8>> {
+        let pasta = pasta_teste("desembrulho");
+        let arquivo = pasta.join("b.rbk");
+        std::fs::write(&arquivo, bytes).unwrap();
+        let mut saida = Vec::new();
+        let r = desembrulhar(&arquivo, &mut saida, senha, da_loja).map(|_| saida);
+        let _ = std::fs::remove_dir_all(&pasta);
+        r
+    }
+
     #[test]
     fn senha_e_estrago() {
-        let dados = b"PK conteudo qualquer".to_vec();
-        let com = embrulhar(dados.clone(), "segredo1").unwrap();
-        assert_eq!(tem_senha(&com), Some(true));
-        assert_eq!(desembrulhar(&com, "segredo1").unwrap(), dados);
-        assert_eq!(desembrulhar(&com, "errada").unwrap_err().nome_do_campo(), Some("senha"));
-        assert!(desembrulhar(&com, "").is_err());
-        let mut estragado = com.clone();
-        let fim = estragado.len() - 3;
-        estragado[fim] ^= 1;
-        assert!(desembrulhar(&estragado, "segredo1").is_err());
-        let sem = embrulhar(dados.clone(), "").unwrap();
-        assert_eq!(desembrulhar(&sem, "qualquer").unwrap(), dados);
-        assert!(desembrulhar(b"nada a ver", "").is_err());
+        let chave = Chave::da_senha("segredo1", [7u8; 16]).unwrap();
+        // Pequeno, exatamente um pedaço, e vários pedaços.
+        for tamanho in [20, PEDACO, PEDACO * 2 + 333] {
+            let dados: Vec<u8> = (0..tamanho).map(|i| (i % 251) as u8).collect();
+            let com = embrulhar_bytes(&dados, Some(&chave));
+            assert_eq!(tem_senha(&com), Some(true));
+            assert_eq!(desembrulhar_bytes(&com, "segredo1", None).unwrap(), dados);
+            assert_eq!(desembrulhar_bytes(&com, "", Some(&chave)).unwrap(), dados, "chave guardada da loja");
+            assert_eq!(desembrulhar_bytes(&com, "errada", None).unwrap_err().nome_do_campo(), Some("senha"));
+            assert!(desembrulhar_bytes(&com, "", None).is_err());
+            let mut estragado = com.clone();
+            let fim = estragado.len() - 3;
+            estragado[fim] ^= 1;
+            assert!(desembrulhar_bytes(&estragado, "segredo1", None).is_err());
+            // Cortado no fim de um pedaço: recusa.
+            if tamanho > PEDACO {
+                let cortado = &com[..9 + 16 + 7 + PEDACO + 16];
+                assert!(desembrulhar_bytes(cortado, "segredo1", None).is_err());
+            }
+        }
+        let sem = embrulhar_bytes(b"PK conteudo", None);
+        assert_eq!(desembrulhar_bytes(&sem, "qualquer", None).unwrap(), b"PK conteudo");
+        assert!(desembrulhar_bytes(b"nada a ver", "", None).is_err());
+    }
+
+    #[test]
+    fn senha_antiga_vira_chave() {
+        let b = Banco::em_memoria().unwrap();
+        config::gravar(&b.conn, "backup_senha", "segredo1").unwrap();
+        migrar_senha_antiga(&b.conn).unwrap();
+        assert!(config::ler(&b.conn, "backup_senha").unwrap().is_none());
+        let c = chave_da_loja(&b.conn).unwrap().unwrap();
+        assert_eq!(c, Chave::da_senha("segredo1", c.sal).unwrap());
     }
 
     #[test]
@@ -1164,14 +1380,15 @@ mod testes {
         let mut b = Banco::abrir(&caminho).unwrap();
         config::gravar(&b.conn, "loja_nome", "Loja Teste").unwrap();
         config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
-        config::gravar(&b.conn, "backup_senha", "segredo1").unwrap();
+        definir_senha(&b.conn, "segredo1").unwrap();
         b.conn.execute("INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES ('outro', 'Caixa 2', '10.0.0.2:47810', 999)", []).unwrap();
 
         let feito = fazer(&caminho, false).unwrap();
         let arquivo = PathBuf::from(&feito.arquivo);
         assert!(arquivo.exists());
-        assert_eq!(conferir(&arquivo, "segredo1").unwrap().loja, "Loja Teste");
-        assert!(conferir(&arquivo, "outra").is_err());
+        assert_eq!(conferir(&b.conn, &arquivo, "segredo1").unwrap().loja, "Loja Teste");
+        assert_eq!(conferir(&b.conn, &arquivo, "").unwrap().loja, "Loja Teste");
+        assert!(conferir(&b.conn, &arquivo, "outra").is_err());
         let s = situacao(&b.conn).unwrap();
         assert!(!s.ultimo.is_empty() && s.erro.is_empty());
         assert!(!esta_na_hora(&b.conn, Some(&caminho)).unwrap());
@@ -1238,10 +1455,14 @@ mod testes {
         assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "18:00", "abcdef", "abcdeg")).unwrap_err().nome_do_campo(), Some("senha2"));
         salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "9:30", "abcdef", "abcdef")).unwrap();
         let a = ajustes(&b.conn, None).unwrap();
-        assert_eq!((a.dias, a.hora.as_str(), a.senha.as_str()), (15, "09:30", "abcdef"));
+        assert_eq!((a.dias, a.hora.as_str()), (15, "09:30"));
+        let c = a.chave.unwrap();
+        assert_eq!(c, Chave::da_senha("abcdef", c.sal).unwrap());
+        // A senha não fica guardada.
+        assert!(config::ler(&b.conn, "backup_senha").unwrap().is_none());
         // Senha vazia mantém a atual.
         salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "09:30", "", "")).unwrap();
-        assert_eq!(ajustes(&b.conn, None).unwrap().senha, "abcdef");
+        assert_eq!(ajustes(&b.conn, None).unwrap().chave, Some(c));
     }
 
     #[test]
@@ -1265,7 +1486,7 @@ mod testes {
         assert!(enviar_pendentes(&b.conn, &caminho).is_err());
         assert!(!situacao(&b.conn).unwrap().nuvem_erro.is_empty());
 
-        config::gravar(&b.conn, "backup_senha", "segredo1").unwrap();
+        definir_senha(&b.conn, "segredo1").unwrap();
         std::thread::sleep(Duration::from_millis(1100));
         fazer(&caminho, false).unwrap();
         enviar_pendentes(&b.conn, &caminho).unwrap();

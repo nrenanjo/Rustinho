@@ -1172,8 +1172,7 @@ impl Servico {
             "backup_nuvem_lista" => Ok(json!(backup::listar_nuvem()?)),
             "backup_conferir" => {
                 let d: Restaurar = ler(dados)?;
-                let senha = if d.senha.is_empty() { backup::ajustes(&self.banco.conn, None)?.senha } else { d.senha };
-                Ok(json!(backup::conferir(std::path::Path::new(&d.arquivo), &senha)?))
+                Ok(json!(backup::conferir(&self.banco.conn, std::path::Path::new(&d.arquivo), &d.senha)?))
             }
             "backup_restaurar" => {
                 let d: Restaurar = ler(dados)?;
@@ -1218,6 +1217,7 @@ impl Servico {
             "meuEndereco": endereco_local(),
             "porta": sync::PORTA_TCP,
             "usuarios": usuarios::quantidade(conn)?,
+            "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
         }))
     }
 
