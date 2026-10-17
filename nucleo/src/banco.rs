@@ -21,6 +21,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0009_cadastro.sql"),
     include_str!("migracoes/0010_gerente.sql"),
     include_str!("migracoes/0011_backup_conflitos.sql"),
+    include_str!("migracoes/0012_historia_das_alteracoes.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -80,6 +81,13 @@ pub fn registrar_funcoes(conn: &Connection) -> Resultado<()> {
     })?;
     conn.create_scalar_function("rustinho_id", 0, FunctionFlags::SQLITE_UTF8, |_| Ok(tempo::novo_id()))?;
     conn.create_scalar_function("rustinho_agora", 0, FunctionFlags::SQLITE_UTF8, |_| Ok(tempo::agora()))?;
+    // História de uma alteração nova: a base e o que ela já conhecia (R-08).
+    conn.create_scalar_function("rustinho_historia", 3, deterministica, |ctx| {
+        let base: Option<String> = ctx.get(0)?;
+        let historia: Option<String> = ctx.get(1)?;
+        let base_da_base: Option<String> = ctx.get(2)?;
+        Ok(crate::sync::historia_nova(base.as_deref(), historia.as_deref(), base_da_base.as_deref()))
+    })?;
     Ok(())
 }
 
@@ -196,7 +204,11 @@ mod testes {
         b.conn.execute("UPDATE produto SET nome = 'Pastilha nova' WHERE id = 'p1'", []).unwrap();
         let base: Option<String> = b
             .conn
-            .query_row("SELECT base FROM alteracao WHERE tabela = 'produto' ORDER BY id DESC LIMIT 1", [], |l| l.get(0))
+            .query_row(
+                "SELECT base FROM alteracao WHERE tabela = 'produto' ORDER BY ordem DESC, id DESC LIMIT 1",
+                [],
+                |l| l.get(0),
+            )
             .unwrap();
         assert!(base.is_some());
         assert_eq!(crate::sync::pendencias(&b.conn).unwrap(), 0);

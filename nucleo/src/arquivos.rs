@@ -123,17 +123,38 @@ fn decodificar_url(t: &str) -> String {
 
 /// Deixa a pasta ou o arquivo só para o usuário do computador (Linux,
 /// macOS, Android): o banco, os backups e o registro têm dados da loja e
-/// dos clientes. No Windows, a pasta do usuário já é só dele. Se o lugar não
-/// aceitar (pen drive FAT, por exemplo), segue sem mudar.
-pub fn so_do_usuario(caminho: &Path) {
+/// dos clientes. No Windows, a pasta do usuário já é só dele.
+///
+/// Confere depois se ficou mesmo assim. Se o lugar não aceitar (pen drive
+/// FAT, por exemplo) ou der erro, anota no registro de falhas só o que era
+/// (`o_que`: "banco", "backup"...) e o tipo do erro, sem o caminho (que pode
+/// ter o nome do usuário), e segue: nada é apagado nem escondido. Devolve se
+/// ficou protegido.
+pub fn so_do_usuario(caminho: &Path, o_que: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let modo = if caminho.is_dir() { 0o700 } else { 0o600 };
-        let _ = std::fs::set_permissions(caminho, std::fs::Permissions::from_mode(modo));
+        let Ok(antes) = std::fs::metadata(caminho) else {
+            crate::registro::anotar(&format!("permissões: {o_que} não existe para proteger"));
+            return false;
+        };
+        let modo = if antes.is_dir() { 0o700 } else { 0o600 };
+        if let Err(e) = std::fs::set_permissions(caminho, std::fs::Permissions::from_mode(modo)) {
+            crate::registro::anotar(&format!("permissões: não deu para proteger {o_que} ({:?})", e.kind()));
+            return false;
+        }
+        let ficou = std::fs::metadata(caminho).map(|m| m.permissions().mode() & 0o777).unwrap_or(0);
+        if ficou != modo {
+            crate::registro::anotar(&format!("permissões: {o_que} ficou com {ficou:o} (a pasta não aceita)"));
+            return false;
+        }
+        true
     }
     #[cfg(not(unix))]
-    let _ = caminho;
+    {
+        let _ = (caminho, o_que);
+        true
+    }
 }
 
 /// Extensões aceitas onde se pede XML.

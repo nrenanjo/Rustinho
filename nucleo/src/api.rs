@@ -89,7 +89,9 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "comissao_fechar"
         | "comissao_reabrir" => "financeiro",
         // A própria pílula Gerente: sempre só o gerente.
-        "gerente_ler" | "gerente_salvar" | "conflitos_listar" | "conflito_resolver" => "gerente",
+        "gerente_ler" | "gerente_salvar" | "conflitos_listar" | "conflito_resolver" | "conflitos_manter_todos" => {
+            "gerente"
+        }
         _ => return None,
     })
 }
@@ -286,6 +288,8 @@ pub struct Servico {
     segredo_backup: Option<[u8; 32]>,
     /// Trava do arquivo do banco (solta quando o serviço acaba).
     _trava: Option<std::fs::File>,
+    /// Quanto esperar as tarefas da sincronização ao fechar.
+    prazo_encerrar: Duration,
 }
 
 /// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
@@ -332,7 +336,7 @@ impl Drop for Servico {
     /// recusado em vez de gravar junto.
     fn drop(&mut self) {
         if let Some(mut m) = self._motor.take() {
-            if !m.encerrar(PRAZO_PARA_ENCERRAR) {
+            if !m.encerrar(self.prazo_encerrar) {
                 crate::registro::anotar("sync: tarefas não terminaram no prazo; a trava fica até fechar");
                 if let Some(t) = self._trava.take() {
                     std::mem::forget(t);
@@ -349,16 +353,19 @@ impl Servico {
     pub fn abrir(caminho: &Path) -> Resultado<Servico> {
         if let Some(pasta) = caminho.parent() {
             std::fs::create_dir_all(pasta).ok();
-            crate::arquivos::so_do_usuario(pasta);
+            crate::arquivos::so_do_usuario(pasta, "pasta dos dados");
             crate::registro::iniciar(pasta);
         }
         let trava = travar(caminho)?;
         let mut s = Self::com_banco(Banco::abrir(caminho)?);
         // O banco e os arquivos que o SQLite cria ao lado: só do usuário.
-        for fim in ["", "-wal", "-shm", ".trava"] {
+        for (fim, o_que) in [("", "banco"), ("-wal", "banco (-wal)"), ("-shm", "banco (-shm)"), (".trava", "trava")] {
             let mut nome = caminho.as_os_str().to_owned();
             nome.push(fim);
-            crate::arquivos::so_do_usuario(Path::new(&nome));
+            // -wal e -shm só existem com o banco aberto e em uso.
+            if Path::new(&nome).exists() {
+                crate::arquivos::so_do_usuario(Path::new(&nome), o_que);
+            }
         }
         s._trava = Some(trava);
         s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), sync::PORTA_TCP, sync::PORTA_UDP));
@@ -379,6 +386,7 @@ impl Servico {
             comprometido: false,
             segredo_backup: None,
             _trava: None,
+            prazo_encerrar: PRAZO_PARA_ENCERRAR,
         }
     }
 
@@ -612,6 +620,21 @@ impl Servico {
                     "sync_conflito",
                     &d.id.to_string(),
                     &[if d.usar { "Voltou a versão que tinha perdido".into() } else { "Ficou como está".into() }],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::conflitos(&self.banco.conn)?))
+            }
+            "conflitos_manter_todos" => {
+                let tx = self.banco.conn.transaction()?;
+                let n = sync::manter_todos(&tx, &sessao.usuario_id)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "conflito.manter_todos",
+                    "sync_conflito",
+                    "",
+                    &[format!("{n} diferenças ficaram como estão")],
                 )?;
                 tx.commit()?;
                 Ok(json!(sync::conflitos(&self.banco.conn)?))
@@ -1612,6 +1635,7 @@ impl Servico {
             "usuarios": usuarios::quantidade(conn)?,
             "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
+            "referencias": sync::referencias(conn)?,
         }))
     }
 
@@ -2393,6 +2417,70 @@ mod testes {
             assert_eq!(modo(&caminho), 0o600);
             assert_eq!(modo(&pasta.join("registro")), 0o700);
         }
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-06/R-07: fechar com uma tarefa da sincronização travada não solta a
+    /// trava (outro Rustinho no mesmo banco é recusado, em vez de gravar
+    /// junto); fechar normal solta na hora e abre de novo.
+    #[test]
+    fn fechar_com_tarefa_travada_segura_a_trava() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-fechar-{}", crate::tempo::novo_id()));
+        let caminho = pasta.join("rustinho.db");
+        // Normal: fecha e abre de novo.
+        drop(Servico::abrir(&caminho).unwrap());
+        let s = Servico::abrir(&caminho).unwrap();
+        drop(s);
+        assert!(travar(&caminho).is_ok(), "fechou direito, a trava saiu");
+        // Com uma tarefa que não termina no prazo.
+        let mut s = Servico::abrir(&caminho).unwrap();
+        s.prazo_encerrar = Duration::from_millis(200);
+        let (solta, espera) = std::sync::mpsc::channel::<()>();
+        let presa = std::thread::spawn(move || {
+            let _ = espera.recv();
+        });
+        s._motor.as_mut().unwrap().esperar_tambem(presa);
+        let t = Instant::now();
+        drop(s);
+        assert!(t.elapsed() < Duration::from_secs(5), "não fica preso para sempre: {:?}", t.elapsed());
+        let e = travar(&caminho).unwrap_err().to_string();
+        assert!(e.contains("já está aberto"), "a trava continua: {e}");
+        assert!(Servico::abrir(&caminho).is_err(), "outro Rustinho não abre o mesmo banco");
+        solta.send(()).unwrap();
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-07: pasta que não dá para usar (no lugar dela há um arquivo): erro
+    /// claro, sem pânico; numa pasta boa abre normalmente.
+    #[test]
+    fn pasta_ruim_da_erro_e_a_boa_abre() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-pasta-ruim-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("sou-um-arquivo"), b"x").unwrap();
+        let ruim = pasta.join("sou-um-arquivo").join("rustinho.db");
+        let r = std::panic::catch_unwind(|| Servico::abrir(&ruim).err().map(|e| e.to_string()));
+        let e = r.expect("sem pânico").expect("dá erro");
+        assert!(e.contains("Não deu para usar a pasta dos dados"), "{e}");
+        assert!(std::fs::metadata(pasta.join("sou-um-arquivo")).unwrap().is_file(), "nada foi mexido");
+        let boa = pasta.join("boa").join("rustinho.db");
+        drop(Servico::abrir(&boa).unwrap());
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Permissões: confere o resultado e diz quando não deu.
+    #[cfg(unix)]
+    #[test]
+    fn permissoes_conferidas() {
+        use std::os::unix::fs::PermissionsExt;
+        let pasta = std::env::temp_dir().join(format!("rustinho-perm2-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let arquivo = pasta.join("a.db");
+        std::fs::write(&arquivo, b"x").unwrap();
+        std::fs::set_permissions(&arquivo, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(crate::arquivos::so_do_usuario(&arquivo, "banco"));
+        assert_eq!(std::fs::metadata(&arquivo).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(!crate::arquivos::so_do_usuario(&pasta.join("nao-existe"), "backup"));
+        assert!(arquivo.exists(), "nada foi apagado");
         let _ = std::fs::remove_dir_all(&pasta);
     }
 

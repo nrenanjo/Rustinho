@@ -250,6 +250,27 @@ mod testes {
     }
 
     /// F-23: separadores errados, espaços, sinais e limites.
+    /// R-10: soma logo abaixo, no limite e acima (para mais e para menos).
+    #[test]
+    fn soma_nos_limites() {
+        assert_eq!(soma([SOMA_MAXIMA - 1, 1]).unwrap(), SOMA_MAXIMA);
+        assert_eq!(soma([SOMA_MAXIMA]).unwrap(), SOMA_MAXIMA);
+        assert!(soma([SOMA_MAXIMA, 1]).is_err());
+        assert_eq!(soma([-SOMA_MAXIMA]).unwrap(), -SOMA_MAXIMA);
+        assert!(soma([-SOMA_MAXIMA, -1]).is_err());
+        // Passa do limite no meio e volta: recusa (nunca "dá a volta").
+        assert!(soma([SOMA_MAXIMA, 1, -1]).is_err());
+        assert!(soma([i64::MAX, i64::MAX]).is_err());
+        assert!(soma([i64::MIN, -1]).is_err());
+        assert_eq!(soma([]).unwrap(), 0);
+        // O maior valor que se digita (11 algarismos e centavos) cabe; dois
+        // juntos passam.
+        let maior = ler_dinheiro("99.999.999.999,99").unwrap().unwrap();
+        assert!(soma([maior]).is_ok());
+        assert!(soma([maior, maior]).is_err());
+        assert!(ler_dinheiro("999.999.999.999").is_err(), "12 algarismos não");
+    }
+
     #[test]
     fn fronteiras_do_numero() {
         for ruim in ["1.2.3", "1,,2", "12.34,56", "1,2,3", ",", ".", "-", "--1", "1-", "+1", "1e5", "0x10", "١٢"] {

@@ -20,8 +20,9 @@ pub fn iniciar(pasta_dados: &Path) {
     if std::fs::create_dir_all(&pasta).is_err() {
         return;
     }
-    crate::arquivos::so_do_usuario(&pasta);
-    *PASTA.lock().unwrap_or_else(|e| e.into_inner()) = Some(pasta);
+    *PASTA.lock().unwrap_or_else(|e| e.into_inner()) = Some(pasta.clone());
+    // Depois de saber a pasta: se não der para proteger, fica anotado.
+    crate::arquivos::so_do_usuario(&pasta, "pasta do registro");
     // Pânico (defeito no programa): anota só ONDE foi (arquivo e linha).
     // A mensagem do pânico não entra: ela pode trazer um valor digitado
     // (senha, CPF, nome do cliente) vindo de alguma biblioteca. Fora do
@@ -63,7 +64,7 @@ pub fn anotar(texto: &str) {
     let novo = !arquivo.exists();
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&arquivo) {
         if novo {
-            crate::arquivos::so_do_usuario(&arquivo);
+            crate::arquivos::so_do_usuario(&arquivo, "registro");
         }
         let _ = writeln!(f, "{} v{} {}", crate::tempo::agora(), crate::VERSAO, curto(texto));
     }

@@ -768,6 +768,24 @@ FocusScope {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
+                    // Cada registro incompleto: o que é, o que falta e o que fazer.
+                    Repeater {
+                        model: tela.sync && tela.sync.referencias ? tela.sync.referencias.slice(0, 20) : []
+                        delegate: Text {
+                            required property var modelData
+                            text: "<b>" + modelData.oQue + "</b> (desde " + modelData.desde + ") aponta para "
+                                  + modelData.oQueFalta.toLowerCase() + " que "
+                                  + (modelData.estado === "esperando" ? "ainda não chegou"
+                                     : modelData.estado === "apagado" ? "foi apagado" : "não bate")
+                                  + ". " + modelData.acao
+                            textFormat: Text.StyledText
+                            color: modelData.estado === "esperando" ? Tema.tintaSuave : Tema.vermelho
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
                 }
 
                 // ---------------- Gerente ----------------
@@ -846,9 +864,24 @@ FocusScope {
                     color: tela.conflitos.some(c => !c.resolvido) ? Tema.rosa : Tema.pergaminho
                     Layout.fillWidth: true
                     Nota {
-                        text: "Quando dois caixas mexem na mesma coisa sem rede, fica a alteração mais nova e a outra aparece aqui. Escolha a que vale."
+                        text: "Quando dois caixas mexem na mesma coisa sem ver o do outro (ou não dá para saber qual veio depois), "
+                              + "uma fica valendo e a outra aparece aqui, guardada. Escolha a que vale; a escolha vai para os outros caixas."
                         font.pixelSize: 14
                         Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: tela.conflitos.filter(c => !c.resolvido).length >= 3
+                        text: "Deixar todas como estão"
+                        tipo: "secundario"
+                        onClicked: {
+                            const r = Api.chamar("conflitos_manter_todos")
+                            if (r.ok) {
+                                tela.conflitos = r.dados
+                                janela.avisar("Ficaram como estão. As versões que perderam continuam guardadas na lista.", "ok")
+                            } else {
+                                janela.avisar(r.erro, "erro")
+                            }
+                        }
                     }
                     Repeater {
                         model: tela.conflitos
@@ -884,7 +917,7 @@ FocusScope {
                                     model: modelData.campos
                                     delegate: Text {
                                         required property var modelData
-                                        text: modelData.nome + ": ficou " + modelData.ficou + " · o outro caixa tinha " + modelData.perdeu
+                                        text: modelData.nome + ": ficou " + modelData.ficou + " · a outra versão tinha " + modelData.perdeu
                                         color: Tema.tintaSuave
                                         font.family: Tema.texto
                                         font.pixelSize: 14

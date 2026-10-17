@@ -923,6 +923,76 @@ mod testes {
         assert_eq!(antes, c.total_changes(), "nada gravado");
     }
 
+    /// R-10: pagar e receber logo abaixo, no limite e acima: acima é erro
+    /// de validação e nenhuma tabela muda.
+    #[test]
+    fn limites_ao_pagar_e_receber() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        let conta = |valor: &str| {
+            pagar::lancar(
+                c,
+                d,
+                u,
+                &LancamentoEntrada {
+                    descricao: "Conta grande".into(),
+                    categoria_id: "cat-aluguel".into(),
+                    valor: valor.into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()[0]
+                .clone()
+        };
+        let pg = |id: &str, juros: &str| PagamentoEntrada {
+            conta_id: id.into(),
+            juros: juros.into(),
+            forma: "pix".into(),
+            origem: l.banco.clone(),
+            ..Default::default()
+        };
+        // No limite: 99.999.999.999,00 + 1,00 de juros = R$ 100 bilhões.
+        let a = conta("99.999.999.999");
+        pagar::pagar(c, d, u, &pg(&a, "1")).unwrap();
+        // Acima: + 1,01 de juros. Recusado, nada gravado.
+        let b = conta("99.999.999.999");
+        let antes = c.total_changes();
+        let e = pagar::pagar(c, d, u, &pg(&b, "1,01")).unwrap_err().to_string();
+        assert!(e.contains("grande demais"), "{e}");
+        assert_eq!(antes, c.total_changes());
+        // Receber: dívida enorme + juros enormes passa do limite.
+        let ids = receber::lancar(
+            c,
+            d,
+            u,
+            &receber::LancamentoEntrada {
+                cliente_id: l.cliente.clone(),
+                descricao: "Caderno".into(),
+                valor: "99.999.999.999".into(),
+                parcelas: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(ids.len(), 1);
+        caixa::abrir(c, d, u, "Caixa 1", "0").unwrap();
+        let r = ReceberEntrada {
+            cliente_id: l.cliente.clone(),
+            juros: "99.999.999.999".into(),
+            forma: "pix".into(),
+            ..Default::default()
+        };
+        let antes = c.total_changes();
+        let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| receber::receber(c, d, u, &r)))
+            .expect("não pode dar pânico");
+        let e = e.unwrap_err().to_string();
+        assert!(e.contains("grande demais"), "{e}");
+        assert_eq!(antes, c.total_changes(), "nada gravado");
+        // Abaixo do limite: recebe.
+        let r = ReceberEntrada { juros: "0".into(), ..r };
+        receber::receber(c, d, u, &r).unwrap();
+    }
+
     fn saldo_de(l: &Loja, conta: &str) -> String {
         numeros::escrever_dinheiro(saldo(&l.b.conn, conta, &fiscal::hoje(&l.b.conn).unwrap()).unwrap())
     }

@@ -753,7 +753,7 @@ impl Temporaria {
         std::fs::create_dir_all(&p)
             .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta {}: {e}", base.display())))?;
         // Aqui fica, por um instante, a cópia do banco sem criptografia.
-        crate::arquivos::so_do_usuario(&p);
+        crate::arquivos::so_do_usuario(&p, "pasta temporária do backup");
         Ok(Temporaria(p))
     }
 }
@@ -876,7 +876,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     let chave_do_arquivo;
     {
         let saida = std::fs::File::create(&parcial).map_err(|e| erro_pasta(&a.pasta, e))?;
-        crate::arquivos::so_do_usuario(&parcial);
+        crate::arquivos::so_do_usuario(&parcial, "backup");
         let mut escrita = std::io::BufWriter::new(saida);
         chave_do_arquivo = embrulhar(&caminho_zip, &mut escrita, a.publica.as_ref(), &acessos)?;
         let saida = escrita.into_inner().map_err(|e| erro_pasta(&a.pasta, e.into_error()))?;
