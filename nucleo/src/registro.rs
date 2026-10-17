@@ -21,22 +21,26 @@ pub fn iniciar(pasta_dados: &Path) {
         return;
     }
     *PASTA.lock().unwrap_or_else(|e| e.into_inner()) = Some(pasta);
-    // Pânico (defeito no programa): anota onde foi, antes da mensagem
-    // genérica que aparece na tela.
+    // Pânico (defeito no programa): anota só ONDE foi (arquivo e linha).
+    // A mensagem do pânico não entra: ela pode trazer um valor digitado
+    // (senha, CPF, nome do cliente) vindo de alguma biblioteca. Fora do
+    // modo de desenvolvimento, nada vai para a saída de erro (logcat).
     GANCHO.call_once(|| {
         let anterior = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            let onde = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
-            let msg = info
-                .payload()
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| info.payload().downcast_ref::<String>().cloned())
-                .unwrap_or_default();
-            anotar(&format!("PÂNICO em {onde}: {}", curto(&msg)));
-            anterior(info);
+            anotar(&linha_do_panico(info.location().map(|l| (l.file(), l.line()))));
+            if cfg!(debug_assertions) {
+                anterior(info);
+            }
         }));
     });
+}
+
+/// O que fica registrado de um pânico: só o lugar no código e a tarefa.
+fn linha_do_panico(onde: Option<(&str, u32)>) -> String {
+    let onde = onde.map(|(f, l)| format!("{f}:{l}")).unwrap_or_else(|| "lugar desconhecido".into());
+    let tarefa = std::thread::current().name().unwrap_or("sem nome").to_string();
+    format!("PÂNICO em {onde} (tarefa {tarefa})")
 }
 
 fn curto(t: &str) -> String {
@@ -75,6 +79,14 @@ mod testes {
         anotar("depois");
         assert!(pasta.join("registro/rustinho.log.1").exists());
         assert!(std::fs::read_to_string(pasta.join("registro/rustinho.log")).unwrap().contains("depois"));
+        // C-16: o pânico fica registrado sem a mensagem (que pode ter dados).
+        let r = std::panic::catch_unwind(|| panic!("senha=segredo123 cpf=529.982.247-25 cliente Fulano"));
+        assert!(r.is_err());
+        let t = std::fs::read_to_string(pasta.join("registro/rustinho.log")).unwrap();
+        assert!(t.contains("PÂNICO em nucleo/src/registro.rs"), "{t}");
+        for segredo in ["segredo123", "529.982.247-25", "Fulano"] {
+            assert!(!t.contains(segredo), "{segredo} vazou: {t}");
+        }
         let _ = std::fs::remove_dir_all(&pasta);
     }
 }

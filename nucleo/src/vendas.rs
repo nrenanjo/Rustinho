@@ -392,6 +392,15 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             };
         }
         let bruto = multiplicar(quantidade, preco);
+        // Item que sozinho passa do total de uma venda: fica com erro e não conta.
+        let (quantidade, preco, bruto) = if bruto > TOTAL_MAXIMO {
+            if erro.is_empty() {
+                erro = "O valor deste item ficou grande demais. Confira a quantidade e o preço.".into();
+            }
+            (0, 0, 0)
+        } else {
+            (quantidade, preco, bruto)
+        };
         let desconto = match ler_desconto(&it.desconto, bruto) {
             Ok(d) if d > bruto => {
                 erro = "O desconto é maior que o valor do item.".into();
@@ -410,9 +419,6 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             if cheio > 0 && dado > 0 && dado as i128 * 10_000 > cheio as i128 * max as i128 && erro.is_empty() {
                 erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
             }
-        }
-        if bruto > TOTAL_MAXIMO && erro.is_empty() {
-            erro = "O valor deste item ficou grande demais. Confira a quantidade e o preço.".into();
         }
         let total = bruto - desconto;
         let ja = if servico { 0 } else { usado.iter().find(|u| u.0 == it.produto_id).map(|u| u.1).unwrap_or(0) };
@@ -1224,6 +1230,62 @@ mod testes {
         assert!(!calcular(&b.conn, &e).unwrap().itens[0].erro.is_empty());
         e.itens[0].preco = "75".into();
         assert!(calcular(&b.conn, &e).unwrap().itens[0].erro.is_empty());
+    }
+
+    /// C-05: valores na fronteira e além. Nada "dá a volta", nada é gravado.
+    #[test]
+    fn valores_extremos_sao_recusados_sem_gravar() {
+        let (b, u, p1, _) = base();
+        let c = &b.conn;
+        caixa::abrir(c, &b.dispositivo, &u, "Caixa 1", "0").unwrap();
+        let contar = |t: &str| -> i64 { c.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |l| l.get(0)).unwrap() };
+        let antes = (contar("venda"), contar("venda_item"), contar("estoque_movimento"), contar("caixa_movimento"));
+        let avulso = |q: &str, p: &str| ItemEntrada {
+            produto_id: String::new(),
+            descricao: "Serviço".into(),
+            quantidade: q.into(),
+            preco: p.into(),
+            ..Default::default()
+        };
+        // Número com mais de 11 dígitos inteiros: recusado na leitura.
+        assert!(numeros::ler_dinheiro("999999999999").is_err());
+        assert_eq!(numeros::ler_dinheiro("99999999999,99"), Ok(Some(9_999_999_999_999)));
+        // Quantidade e preço no máximo: o item sozinho já passa do total da venda.
+        let e = VendaEntrada { itens: vec![avulso("1000000", "1000000000")], tabela: 1, ..Default::default() };
+        let r = calcular(c, &e).unwrap();
+        assert!(r.itens[0].erro.contains("grande"), "{}", r.itens[0].erro);
+        // Muitos itens grandes: a soma é conferida e recusada, sem pânico.
+        let e = VendaEntrada { itens: vec![avulso("1", "1000000000"); 200], tabela: 1, ..Default::default() };
+        assert!(calcular(c, &e).unwrap_err().to_string().contains("grande"));
+        // Pagamentos enormes: recusados.
+        let e = VendaEntrada {
+            itens: vec![item(&p1, "1")],
+            tabela: 1,
+            pagamentos: vec![
+                PagamentoEntrada { forma: "dinheiro".into(), valor: "99999999999".into(), ..Default::default() };
+                20
+            ],
+            ..Default::default()
+        };
+        assert!(concluir(c, &b.dispositivo, &u, &e).is_err());
+        // Formas de pagamento demais.
+        let e = VendaEntrada {
+            itens: vec![item(&p1, "1")],
+            tabela: 1,
+            pagamentos: vec![PagamentoEntrada { forma: "pix".into(), valor: "1".into(), ..Default::default() }; 51],
+            ..Default::default()
+        };
+        assert!(concluir(c, &b.dispositivo, &u, &e).is_err());
+        // Desconto negativo e acima de 100%.
+        let mut e = VendaEntrada { itens: vec![item(&p1, "1")], tabela: 1, ..Default::default() };
+        e.desconto = "-5".into();
+        assert!(!calcular(c, &e).unwrap().erro_desconto.is_empty());
+        e.desconto = "101%".into();
+        assert!(!calcular(c, &e).unwrap().erro_desconto.is_empty());
+        // Nenhuma das tentativas gravou nada.
+        let depois = (contar("venda"), contar("venda_item"), contar("estoque_movimento"), contar("caixa_movimento"));
+        assert_eq!(antes, depois);
+        assert_eq!(estoque::saldo(c, &p1).unwrap(), 5000);
     }
 
     #[test]

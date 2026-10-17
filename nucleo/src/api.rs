@@ -94,6 +94,164 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
     })
 }
 
+/// Comandos que funcionam sem ninguém conectado.
+pub const SEM_SESSAO: &[&str] = &[
+    "estado",
+    "configurar_inicio",
+    "usuarios_entrada",
+    "entrar",
+    "sync_juntar",
+    "sync_ler",
+    "aparencia_salvar",
+    "codigo_ler_foto",
+    "backup_automatico",
+    "backup_ao_fechar",
+    "sair",
+    "numero_formatar",
+    "preco_calcular",
+];
+
+/// Comandos que só leem (não gravam nada no banco). Depois de um erro
+/// interno grave, só estes continuam (veja `Servico::chamar`).
+pub const SO_LEITURA: &[&str] = &[
+    "estado",
+    "usuarios_entrada",
+    "sync_ler",
+    "codigo_ler_foto",
+    "numero_formatar",
+    "preco_calcular",
+    "permissao",
+    "gerente_ler",
+    "menu",
+    "produtos_buscar",
+    "produto_novo",
+    "produto_abrir",
+    "produto_por_codigo",
+    "produto_sugestoes",
+    "unidades_listar",
+    "usuarios_listar",
+    "pessoas_buscar",
+    "pessoa_abrir",
+    "pessoa_nova",
+    "situacao_cliente",
+    "compras_listar",
+    "compra_abrir",
+    "fiscal_conferir",
+    "fiscal_tributacao",
+    "venda_calcular",
+    "venda_abrir",
+    "vendas_listar",
+    "orcamento_carregar",
+    "formas_pagamento",
+    "os_abrir",
+    "os_calcular",
+    "os_listar",
+    "os_placa",
+    "os_para_venda",
+    "mecanicos",
+    "devolucao_venda",
+    "devolucao_calcular",
+    "devolucoes_listar",
+    "vales_abertos",
+    "caixa_estado",
+    "caixa_resumo",
+    "avisos_do_dia",
+    "receber_painel",
+    "receber_cliente",
+    "receber_calcular",
+    "receber_previa",
+    "painel_resumo",
+    "painel_clientes",
+    "painel_fornecedores",
+    "painel_pagamentos",
+    "estoque_dias",
+    "estoque_mais_vendidos",
+    "estoque_parados",
+    "estoque_sugestao",
+    "etiqueta_previa",
+    "etiquetas_da_compra",
+    "etiquetas_opcoes",
+    "encomendas_painel",
+    "encomenda_whatsapp",
+    "encomenda_para_venda",
+    "financeiro_resumo",
+    "pagar_painel",
+    "pagar_ficha",
+    "pagar_previa",
+    "pagar_formas",
+    "contas_loja",
+    "conta_loja_extrato",
+    "categorias",
+    "fluxo_caixa",
+    "cheques_painel",
+    "cheques_previa",
+    "comissoes",
+    "config_ler",
+    "backup_ler",
+    "backup_nuvem_lista",
+    "backup_conferir",
+    "importar_previa",
+    "impressao",
+];
+
+/// Comandos que gravam e que qualquer usuário conectado pode usar (os do
+/// gerente estão em `acao_do_comando`). Um comando novo que não esteja em
+/// nenhuma lista faz o teste `todo_comando_tem_permissao` falhar.
+pub const DO_CAIXA: &[&str] = &[
+    "gerente_liberar",
+    "gerente_encerrar",
+    "computador_salvar",
+    "menu_usar",
+    "menu_fixar",
+    "produto_salvar",
+    "produto_variacao_criar",
+    "unidade_salvar",
+    "senha_trocar",
+    "pessoa_salvar",
+    "compra_importar",
+    "compra_atualizar",
+    "compra_lancar",
+    "compra_descartar",
+    "fiscal_automatico",
+    "venda_concluir",
+    "orcamento_salvar",
+    "os_salvar",
+    "os_situacao",
+    "os_cancelar",
+    "devolucao_gravar",
+    "caixa_abrir",
+    "caixa_fechar",
+    "caixa_movimentar",
+    "aviso_esconder",
+    "receber_lancar",
+    "receber_baixar",
+    "encomenda_criar",
+    "encomenda_pedir",
+    "encomenda_chegou",
+    "encomenda_entregar",
+    "encomenda_cancelar",
+];
+
+/// O que podemos fazer depois de um erro interno grave: ler, sair e fazer o
+/// backup ao fechar.
+fn pode_depois_de_erro(comando: &str) -> bool {
+    SO_LEITURA.contains(&comando) || matches!(comando, "sair" | "backup_ao_fechar" | "gerente_encerrar")
+}
+
+/// Classificação de um comando (para os testes de permissão).
+pub fn classe_do_comando(comando: &str) -> Option<&'static str> {
+    if let Some(a) = acao_do_comando(comando) {
+        return Some(a);
+    }
+    if SO_LEITURA.contains(&comando) {
+        return Some("leitura");
+    }
+    if DO_CAIXA.contains(&comando) || SEM_SESSAO.contains(&comando) {
+        return Some("caixa");
+    }
+    None
+}
+
 /// Quem está usando o Rustinho agora.
 #[derive(Debug, Clone)]
 struct Sessao {
@@ -117,6 +275,9 @@ pub struct Servico {
     liberacao: Option<Liberacao>,
     /// Sincronização com os outros caixas (só com banco em arquivo).
     _motor: Option<sync::Motor>,
+    /// Houve um erro interno grave (pânico): não dá para provar que o que
+    /// está na memória ficou certo, então nada mais é gravado até reabrir.
+    comprometido: bool,
 }
 
 impl Servico {
@@ -136,12 +297,27 @@ impl Servico {
     }
 
     fn com_banco(banco: Banco) -> Servico {
-        Servico { banco, sessao: None, liberacao: None, _motor: None }
+        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false }
     }
 
-    /// Executa um comando. Nunca entra em pânico: qualquer problema vira uma
-    /// resposta de erro em JSON.
+    /// Executa um comando. Um problema vira uma resposta de erro em JSON.
+    ///
+    /// Defeito no programa (pânico): a transação que estava aberta é
+    /// desfeita pelo SQLite, a resposta é um erro genérico e o serviço fica
+    /// "comprometido": daí em diante só consultas, até fechar e abrir o
+    /// Rustinho. Assim uma venda que talvez tenha sido gravada não é
+    /// repetida, e nada é gravado a partir de um estado que pode estar
+    /// errado. (Isto vale porque o perfil de compilação usa `panic = unwind`,
+    /// o padrão; com `abort` o programa fecharia na hora.)
     pub fn chamar(&mut self, comando: &str, dados: &str) -> String {
+        if self.comprometido && !pode_depois_de_erro(comando) {
+            return json!({
+                "ok": false,
+                "erro": "O Rustinho teve um erro interno. Feche e abra de novo para continuar; até lá nada é gravado.",
+                "campo": null
+            })
+            .to_string();
+        }
         let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let dados: Value = if dados.trim().is_empty() { json!({}) } else { serde_json::from_str(dados)? };
             self.executar(comando, dados)
@@ -156,8 +332,18 @@ impl Servico {
                 json!({ "ok": false, "erro": erro.to_string(), "campo": erro.nome_do_campo() })
             }
             Err(_) => {
-                crate::registro::anotar(&format!("{comando}: pânico (veja a linha anterior)"));
-                json!({ "ok": false, "erro": "Erro interno inesperado. Tente de novo.", "campo": null })
+                self.comprometido = true;
+                self.liberacao = None;
+                // Se algo ficou no meio de uma transação, desfaz.
+                if !self.banco.conn.is_autocommit() {
+                    let _ = self.banco.conn.execute_batch("ROLLBACK");
+                }
+                crate::registro::anotar(&format!("{comando}: pânico (veja a linha anterior); só consultas até reabrir"));
+                json!({
+                    "ok": false,
+                    "erro": "Erro interno inesperado. Confira se a operação foi gravada antes de repetir. Feche e abra o Rustinho para continuar.",
+                    "campo": null
+                })
             }
         };
         resposta.to_string()
@@ -326,6 +512,21 @@ impl Servico {
                 Ok(Value::Null)
             }
             "gerente_ler" => self.gerente_ler(),
+            // Só nos testes: defeito de propósito em pontos diferentes (C-15).
+            #[cfg(test)]
+            "__teste_panico" => {
+                let d: Value = dados;
+                let tx = self.banco.conn.transaction()?;
+                tx.execute("INSERT INTO categoria (id, nome, tipo, atualizado_em) VALUES ('t', 'Teste', 'despesa', 'x')", [])?;
+                if d["onde"] == "antes_do_commit" {
+                    panic!("defeito de teste com senha=segredo123 e cpf 529.982.247-25");
+                }
+                tx.commit()?;
+                if d["onde"] == "depois_do_commit" {
+                    panic!("defeito de teste depois de gravar");
+                }
+                Ok(Value::Null)
+            }
             "gerente_salvar" => {
                 let d: GerenteEntrada = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
@@ -1894,4 +2095,122 @@ struct Tributacao {
 /// Resposta de erro no mesmo formato do `Servico::chamar`.
 pub fn resposta_de_erro(mensagem: &str) -> String {
     json!({ "ok": false, "erro": mensagem, "campo": null }).to_string()
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn conectado() -> Servico {
+        let mut s = Servico::em_memoria().unwrap();
+        let r: Value = serde_json::from_str(&s.chamar(
+            "configurar_inicio",
+            r#"{"loja":"Loja Teste","caixa":"Caixa 1","nome":"Ana","senha":"1234","senha2":"1234"}"#,
+        ))
+        .unwrap();
+        assert_eq!(r["ok"], true, "{r}");
+        s
+    }
+
+    fn chamar(s: &mut Servico, c: &str, d: &str) -> Value {
+        serde_json::from_str(&s.chamar(c, d)).unwrap()
+    }
+
+    fn categorias_teste(s: &Servico) -> i64 {
+        s.banco.conn.query_row("SELECT COUNT(*) FROM categoria WHERE id = 't'", [], |l| l.get(0)).unwrap()
+    }
+
+    /// C-15: pânico antes do commit desfaz a gravação e bloqueia novas
+    /// gravações; consultas continuam.
+    #[test]
+    fn panico_antes_do_commit_desfaz_e_bloqueia() {
+        let mut s = conectado();
+        let r = chamar(&mut s, "__teste_panico", r#"{"onde":"antes_do_commit"}"#);
+        assert_eq!(r["ok"], false);
+        assert!(r["erro"].as_str().unwrap().contains("Erro interno"));
+        // Nada de dado técnico na resposta.
+        assert!(!r.to_string().contains("segredo123"));
+        assert_eq!(categorias_teste(&s), 0, "a transação foi desfeita");
+        assert!(s.banco.conn.is_autocommit());
+        // Consulta continua; gravação não.
+        assert_eq!(chamar(&mut s, "estado", "")["ok"], true);
+        assert_eq!(chamar(&mut s, "produtos_buscar", r#"{"texto":""}"#)["ok"], true);
+        let r = chamar(&mut s, "produto_salvar", r#"{"nome":"X"}"#);
+        assert_eq!(r["ok"], false);
+        assert!(r["erro"].as_str().unwrap().contains("Feche e abra"));
+        let r = chamar(&mut s, "__teste_panico", r#"{"onde":"nenhum"}"#);
+        assert_eq!(r["ok"], false);
+        assert_eq!(categorias_teste(&s), 0);
+    }
+
+    /// C-15: pânico depois do commit: o que foi gravado fica (uma vez só) e
+    /// a repetição é bloqueada (não duplica).
+    #[test]
+    fn panico_depois_do_commit_nao_repete() {
+        let mut s = conectado();
+        let r = chamar(&mut s, "__teste_panico", r#"{"onde":"depois_do_commit"}"#);
+        assert_eq!(r["ok"], false);
+        assert!(r["erro"].as_str().unwrap().contains("Confira se a operação foi gravada"));
+        assert_eq!(categorias_teste(&s), 1);
+        assert_eq!(chamar(&mut s, "__teste_panico", r#"{"onde":"depois_do_commit"}"#)["ok"], false);
+        assert_eq!(categorias_teste(&s), 1, "não gravou de novo");
+        // Reabrir (um serviço novo) volta ao normal.
+        let mut novo = conectado();
+        assert_eq!(chamar(&mut novo, "__teste_panico", r#"{"onde":"nenhum"}"#)["ok"], true);
+    }
+
+    /// C-07: todo comando que a API atende tem uma classe de permissão, e
+    /// todo comando que as telas chamam existe na API.
+    #[test]
+    fn todo_comando_tem_permissao() {
+        let fonte = include_str!("api.rs");
+        let fim = fonte.find("#[cfg(test)]\nmod testes").unwrap();
+        let mut comandos = Vec::new();
+        for linha in fonte[..fim].lines() {
+            let t = linha.trim_start();
+            if !(linha.starts_with("            \"") || linha.starts_with("        | \"")) || !t.contains('"') {
+                continue;
+            }
+            if !(t.ends_with("=> {") || t.contains("\" =>") || t.starts_with("| \"")) {
+                continue;
+            }
+            for parte in t.split('|') {
+                let p = parte.trim();
+                if let Some(nome) = p.strip_prefix('"').and_then(|r| r.split('"').next()) {
+                    if nome.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !nome.starts_with("__") {
+                        comandos.push(nome.to_string());
+                    }
+                }
+            }
+        }
+        comandos.sort();
+        comandos.dedup();
+        assert!(comandos.len() > 130, "{}", comandos.len());
+        let sem: Vec<&String> = comandos.iter().filter(|c| classe_do_comando(c).is_none()).collect();
+        assert!(sem.is_empty(), "comandos sem permissão definida: {sem:?}");
+        // Um comando não pode ser "só leitura" e "grava" ao mesmo tempo.
+        for c in SO_LEITURA {
+            assert!(!DO_CAIXA.contains(c), "{c} está em duas listas");
+            assert!(comandos.iter().any(|x| x == c), "{c} não existe mais");
+        }
+        for c in DO_CAIXA {
+            assert!(comandos.iter().any(|x| x == c), "{c} não existe mais");
+        }
+        // As telas só chamam comandos que existem.
+        let pasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app");
+        let mut faltam = Vec::new();
+        for sub in ["qml", "qml_android", "base"] {
+            let Ok(lista) = std::fs::read_dir(pasta.join(sub)) else { continue };
+            for arq in lista.flatten() {
+                let texto = std::fs::read_to_string(arq.path()).unwrap_or_default();
+                for pedaco in texto.split("Api.chamar(\"").skip(1) {
+                    let nome = pedaco.split('"').next().unwrap_or_default();
+                    if !comandos.iter().any(|c| c == nome) {
+                        faltam.push(format!("{}: {nome}", arq.file_name().to_string_lossy()));
+                    }
+                }
+            }
+        }
+        assert!(faltam.is_empty(), "as telas chamam comandos que não existem: {faltam:?}");
+    }
 }

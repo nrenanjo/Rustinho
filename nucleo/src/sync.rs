@@ -59,6 +59,35 @@ const MAGICA: &[u8; 4] = b"RST2";
 static TRAVA: RwLock<()> = RwLock::new(());
 static ATENDENDO: AtomicUsize = AtomicUsize::new(0);
 
+/// Uma vaga de atendimento. Ao sair de cena (fim normal, erro ou pânico da
+/// tarefa) a vaga volta (C-01): o contador nunca fica preso.
+struct Vaga(&'static AtomicUsize);
+
+impl Vaga {
+    fn pegar() -> Option<Vaga> {
+        Vaga::pegar_de(&ATENDENDO)
+    }
+
+    fn pegar_de(contador: &'static AtomicUsize) -> Option<Vaga> {
+        let mut atual = contador.load(Ordering::SeqCst);
+        loop {
+            if atual >= CONEXOES_MAXIMAS {
+                return None;
+            }
+            match contador.compare_exchange(atual, atual + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Vaga(contador)),
+                Err(outro) => atual = outro,
+            }
+        }
+    }
+}
+
+impl Drop for Vaga {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Para a troca de dados enquanto a guarda existir (restaurar backup).
 pub fn pausar() -> RwLockWriteGuard<'static, ()> {
     TRAVA.write().unwrap_or_else(|e| e.into_inner())
@@ -374,7 +403,7 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
             let (todas, chave) = colunas(&tx, &a.tabela)?;
             colunas_cache.push((a.tabela.clone(), todas, chave));
         }
-        let (_, todas, chave) = colunas_cache.iter().find(|c| c.0 == a.tabela).expect("acabou de entrar");
+        let Some((_, todas, chave)) = colunas_cache.iter().find(|c| c.0 == a.tabela) else { continue };
         let valores_chave: Vec<Value> = serde_json::from_str(&a.chave)?;
         if valores_chave.len() != chave.len() {
             continue;
@@ -782,17 +811,24 @@ impl Motor {
                     match ouvinte.accept() {
                         Ok((fluxo, _)) => {
                             // Muitas conexões ao mesmo tempo: as de sobra são fechadas.
-                            if ATENDENDO.fetch_add(1, Ordering::SeqCst) >= CONEXOES_MAXIMAS {
-                                ATENDENDO.fetch_sub(1, Ordering::SeqCst);
+                            let Some(vaga) = Vaga::pegar() else {
                                 drop(fluxo);
                                 continue;
-                            }
+                            };
                             fluxo.set_nonblocking(false).ok();
                             let caminho = caminho.clone();
-                            thread::spawn(move || {
-                                let _ = atender(&caminho, fluxo);
-                                ATENDENDO.fetch_sub(1, Ordering::SeqCst);
+                            let tarefa = thread::Builder::new().name("sync-atender".into()).spawn(move || {
+                                let _vaga = vaga;
+                                if let Err(e) = atender(&caminho, fluxo) {
+                                    if matches!(e, Erro::Banco(_) | Erro::Interno(_)) {
+                                        crate::registro::anotar(&format!("sync atender: {e}"));
+                                    }
+                                }
                             });
+                            // Sem tarefa nova, a vaga já voltou (ela foi junto e caiu).
+                            if let Err(e) = tarefa {
+                                crate::registro::anotar(&format!("sync: não abriu tarefa: {e}"));
+                            }
                         }
                         Err(_) => thread::sleep(Duration::from_millis(200)),
                     }
@@ -1067,6 +1103,27 @@ mod testes {
         let conflitos: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_conflito", [], |l| l.get(0)).unwrap();
         assert_eq!(conflitos, 1);
         assert_eq!(pendencias(&b.conn).unwrap(), 0);
+    }
+
+    /// C-01: a vaga volta mesmo se a tarefa der pânico, e nunca passa do teto.
+    #[test]
+    fn vaga_volta_depois_de_panico() {
+        static CONTADOR: AtomicUsize = AtomicUsize::new(0);
+        let vagas: Vec<Vaga> = (0..CONEXOES_MAXIMAS).filter_map(|_| Vaga::pegar_de(&CONTADOR)).collect();
+        assert_eq!(vagas.len(), CONEXOES_MAXIMAS);
+        assert!(Vaga::pegar_de(&CONTADOR).is_none(), "não passa do teto");
+        let mut vagas = vagas.into_iter();
+        let uma = vagas.next().unwrap();
+        let r = thread::spawn(move || {
+            let _v = uma;
+            panic!("defeito de teste");
+        })
+        .join();
+        assert!(r.is_err());
+        let outra = Vaga::pegar_de(&CONTADOR).expect("a vaga voltou depois do pânico");
+        drop(outra);
+        drop(vagas);
+        assert_eq!(CONTADOR.load(Ordering::SeqCst), 0);
     }
 
     #[test]

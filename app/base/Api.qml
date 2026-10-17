@@ -6,11 +6,20 @@ import rustinho
 QtObject {
     function chamar(comando, dados) {
         const texto = Sistema.chamar(comando, JSON.stringify(dados === undefined ? {} : dados))
+        let r
         try {
-            return JSON.parse(texto)
+            r = JSON.parse(texto)
         } catch (e) {
             return { ok: false, erro: "Resposta inválida do sistema.", campo: null }
         }
+        // Só "ok: true" de verdade conta como sucesso (C-14).
+        if (r === null || typeof r !== "object" || typeof r.ok !== "boolean")
+            return { ok: false, erro: "Resposta inválida do sistema.", campo: null }
+        if (!r.ok && typeof r.erro !== "string")
+            r.erro = "Erro desconhecido."
+        if (r.ok && r.dados === undefined)
+            r.dados = null
+        return r
     }
 
     // Caminho do computador → endereço "file://" (também "C:\\..." do Windows).
