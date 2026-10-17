@@ -283,15 +283,46 @@ pub struct Servico {
     /// (só na memória, enquanto o programa está aberto). Serve para trancar
     /// a chave para um gerente novo ou com senha nova.
     segredo_backup: Option<[u8; 32]>,
+    /// Trava do arquivo do banco (solta quando o serviço acaba).
+    _trava: Option<std::fs::File>,
+}
+
+/// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
+/// o Rustinho fechar de qualquer jeito (até travando).
+fn travar(caminho: &Path) -> Resultado<std::fs::File> {
+    let mut nome = caminho.as_os_str().to_owned();
+    nome.push(".trava");
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(std::path::PathBuf::from(nome))
+        .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta dos dados: {e}")))?;
+    match f.try_lock() {
+        Ok(()) => Ok(f),
+        Err(std::fs::TryLockError::WouldBlock) => Err(Erro::validacao(
+            "O Rustinho já está aberto neste computador (talvez em outra janela). Use o que já está aberto.",
+        )),
+        Err(std::fs::TryLockError::Error(e)) => {
+            // Sistema de arquivos sem trava (pasta de rede): segue sem ela.
+            crate::registro::anotar(&format!("trava do banco: {e}"));
+            Ok(f)
+        }
+    }
 }
 
 impl Servico {
-    /// Abre o banco no arquivo indicado.
+    /// Abre o banco no arquivo indicado. Um Rustinho só por banco (C-12):
+    /// um segundo, aberto sem querer, é recusado (restaurar um backup com
+    /// outro aberto estragaria o que ele estivesse gravando).
     pub fn abrir(caminho: &Path) -> Resultado<Servico> {
         if let Some(pasta) = caminho.parent() {
             crate::registro::iniciar(pasta);
+            std::fs::create_dir_all(pasta).ok();
         }
+        let trava = travar(caminho)?;
         let mut s = Self::com_banco(Banco::abrir(caminho)?);
+        s._trava = Some(trava);
         s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), sync::PORTA_TCP, sync::PORTA_UDP));
         Ok(s)
     }
@@ -302,7 +333,7 @@ impl Servico {
     }
 
     fn com_banco(banco: Banco) -> Servico {
-        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false, segredo_backup: None }
+        Servico { banco, sessao: None, liberacao: None, _motor: None, comprometido: false, segredo_backup: None, _trava: None }
     }
 
     /// Executa um comando. Um problema vira uma resposta de erro em JSON.
@@ -2208,6 +2239,25 @@ mod testes {
         // Reabrir (um serviço novo) volta ao normal.
         let mut novo = conectado();
         assert_eq!(chamar(&mut novo, "__teste_panico", r#"{"onde":"nenhum"}"#)["ok"], true);
+    }
+
+    /// C-12: um segundo Rustinho no mesmo banco é recusado; ao fechar o
+    /// primeiro, abre.
+    #[test]
+    fn um_rustinho_por_banco() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-trava-{}", crate::tempo::novo_id()));
+        let caminho = pasta.join("rustinho.db");
+        let t1 = travar_para_teste(&caminho);
+        let e = travar(&caminho).unwrap_err().to_string();
+        assert!(e.contains("já está aberto"), "{e}");
+        drop(t1);
+        assert!(travar(&caminho).is_ok());
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    fn travar_para_teste(caminho: &Path) -> std::fs::File {
+        std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+        travar(caminho).unwrap()
     }
 
     /// C-07: todo comando que a API atende tem uma classe de permissão, e

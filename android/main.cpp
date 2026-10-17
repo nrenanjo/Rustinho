@@ -6,6 +6,7 @@
 #include <QtQml/QQmlApplicationEngine>
 
 #include <QtCore/QJniObject>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/qcoreapplication_platform.h>
 #include <QtQml/QQmlContext>
@@ -70,6 +71,17 @@ int main(int argc, char* argv[])
                 extras = texto.toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
         }
     }
+    // Outro app pode mandar esse "extra": só passam "--abrir NomeDaTela" e
+    // "--camera" (nada de dados). O resto é ignorado (C-13).
+    static const QRegularExpression nomeTela(QStringLiteral("^Tela[A-Za-z]{1,40}$"));
+    QStringList aceitos;
+    for (int i = 0; i < extras.size(); ++i) {
+        if (extras[i] == QLatin1String("--camera"))
+            aceitos << extras[i];
+        else if (extras[i] == QLatin1String("--abrir") && i + 1 < extras.size() && nomeTela.match(extras[i + 1]).hasMatch())
+            aceitos << extras[i] << extras[++i];
+    }
+    extras = aceitos;
     if (!extras.isEmpty())
         qInfo("Rustinho: argumentos de teste: %s", qPrintable(extras.join(QLatin1Char(' '))));
     engine.rootContext()->setContextProperty(QStringLiteral("argumentosExtras"), extras);

@@ -942,7 +942,7 @@ fn derivar(senha: &str, sal: &[u8; 16]) -> Resultado<[u8; 32]> {
         return Ok(*k);
     }
     let mut k = [0u8; 32];
-    argon2::Argon2::default()
+    crate::usuarios::argon2()
         .hash_password_into(senha.as_bytes(), sal, &mut k)
         .map_err(|e| Erro::Interno(format!("não foi possível proteger a rede: {e}")))?;
     let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());

@@ -134,7 +134,9 @@ fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
         Some(resto) => (true, resto.to_string()),
         None => (false, limpo),
     };
-    if numero.is_empty() || !numero.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.') {
+    if !numero.chars().any(|c| c.is_ascii_digit())
+        || !numero.chars().all(|c| c.is_ascii_digit() || c == ',' || c == '.')
+    {
         return Err("Digite só números, como 85,50.".into());
     }
 
@@ -240,6 +242,29 @@ mod testes {
         assert!(ler_dinheiro("1234.567.890").is_err());
         assert_eq!(saturar(i128::MAX), i64::MAX);
         assert_eq!(saturar(-5), -5);
+    }
+
+    /// F-23: separadores errados, espaços, sinais e limites.
+    #[test]
+    fn fronteiras_do_numero() {
+        for ruim in ["1.2.3", "1,,2", "12.34,56", "1,2,3", ",", ".", "-", "--1", "1-", "+1", "1e5", "0x10", "١٢"] {
+            assert!(ler_dinheiro(ruim).is_err() || ler_dinheiro(ruim) == Ok(None), "{ruim} devia ser recusado");
+        }
+        assert!(ler_dinheiro("1 . 234").is_err() || ler_dinheiro("1 . 234") == Ok(Some(123_400)));
+        assert_eq!(ler_dinheiro(" 1.234,56 "), Ok(Some(123_456)));
+        assert_eq!(ler_dinheiro("-0"), Ok(Some(0)));
+        assert_eq!(ler_dinheiro("-1.234,5"), Ok(Some(-123_450)));
+        assert_eq!(ler_dinheiro("99.999.999.999,99"), Ok(Some(9_999_999_999_999)));
+        assert!(ler_dinheiro("100.000.000.000").is_err(), "12 dígitos");
+        assert!(ler_quantidade("999999999999").is_err());
+        assert_eq!(ler_quantidade("0,0005"), Ok(Some(1)), "arredonda o que passa das casas");
+        assert_eq!(ler_percentual("12,345"), Ok(Some(1235)));
+        // Soma: limite para mais e para menos, sem dar a volta.
+        assert_eq!(somar([SOMA_MAXIMA, 0]), Some(SOMA_MAXIMA));
+        assert_eq!(somar([SOMA_MAXIMA, 1]), None);
+        assert_eq!(somar([-SOMA_MAXIMA, -1]), None);
+        assert_eq!(somar([i64::MAX, i64::MAX]), None);
+        assert_eq!(somar(std::iter::repeat_n(1, 1000)), Some(1000));
     }
 
     #[test]

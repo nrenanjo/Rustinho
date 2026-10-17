@@ -16,6 +16,19 @@ use crate::{tempo, texto};
 
 const SENHA_MINIMA: usize = 4;
 
+/// Argon2id com os parâmetros escritos aqui (os mesmos de sempre, o padrão
+/// da biblioteca: 19 MiB de memória, 2 passadas, 1 linha). Escritos para
+/// que uma atualização da biblioteca não mude a chave da rede nem a dos
+/// backups. Num celular de entrada leva perto de 1 s; o resultado fica
+/// guardado na memória enquanto o programa está aberto.
+pub fn argon2() -> Argon2<'static> {
+    Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        argon2::Params::new(19 * 1024, 2, 1, None).unwrap_or_default(),
+    )
+}
+
 /// Um usuário, sem a senha.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -142,7 +155,7 @@ pub fn conferir_senha(conn: &Connection, id: &str, senha: &str) -> Resultado<Usu
         return Err(Erro::campo("senha", "Este usuário está desativado."));
     }
     let analisado = PasswordHash::new(&hash).map_err(|e| Erro::Interno(format!("senha guardada inválida: {e}")))?;
-    if Argon2::default().verify_password(senha.as_bytes(), &analisado).is_err() {
+    if argon2().verify_password(senha.as_bytes(), &analisado).is_err() {
         return Err(Erro::campo("senha", "Senha errada."));
     }
     Ok(usuario)
@@ -184,7 +197,7 @@ pub fn conferir_gerente(conn: &Connection, senha: &str) -> Resultado<Option<Usua
     let gerentes: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
     for (id, hash) in gerentes {
         if let Ok(analisado) = PasswordHash::new(&hash) {
-            if Argon2::default().verify_password(senha.as_bytes(), &analisado).is_ok() {
+            if argon2().verify_password(senha.as_bytes(), &analisado).is_ok() {
                 return Ok(Some(buscar(conn, &id)?));
             }
         }
@@ -281,7 +294,7 @@ fn validar_senha(senha: &str) -> Resultado<()> {
 }
 
 fn gerar_hash(senha: &str) -> Resultado<String> {
-    Argon2::default()
+    argon2()
         .hash_password(senha.as_bytes())
         .map(|h| h.to_string())
         .map_err(|e| Erro::Interno(format!("não foi possível proteger a senha: {e}")))
@@ -290,6 +303,18 @@ fn gerar_hash(senha: &str) -> Resultado<String> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// F-02: os parâmetros escritos dão a mesma chave de antes (a rede e os
+    /// backups de versões anteriores continuam abrindo).
+    #[test]
+    fn argon2_igual_ao_de_antes() {
+        let (mut a, mut b) = ([0u8; 32], [0u8; 32]);
+        argon2().hash_password_into(b"senha-da-loja", b"sal-de-16-bytes!", &mut a).unwrap();
+        Argon2::default().hash_password_into(b"senha-da-loja", b"sal-de-16-bytes!", &mut b).unwrap();
+        assert_eq!(a, b);
+        let p = argon2().params().clone();
+        assert_eq!((p.m_cost(), p.t_cost(), p.p_cost()), (19 * 1024, 2, 1));
+    }
     use crate::banco::Banco;
 
     #[test]

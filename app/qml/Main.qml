@@ -108,9 +108,17 @@ ApplicationWindow {
         // (No Android, os do teste vêm em "argumentosExtras", de main.cpp.)
         const args = Qt.application.arguments.concat(typeof argumentosExtras !== "undefined" ? argumentosExtras : [])
         const i = args.indexOf("--abrir")
-        if (i >= 0 && i + 1 < args.length) {
+        // Só nomes de tela de verdade; dados quebrados são ignorados (C-13).
+        if (i >= 0 && i + 1 < args.length && /^Tela[A-Za-z]{1,40}$/.test(args[i + 1])) {
             const j = args.indexOf("--props")
-            abrir(args[i + 1], j >= 0 && j + 1 < args.length ? JSON.parse(args[j + 1]) : {})
+            let props = {}
+            try {
+                if (j >= 0 && j + 1 < args.length)
+                    props = JSON.parse(args[j + 1])
+            } catch (e) {
+                props = {}
+            }
+            abrir(args[i + 1], props !== null && typeof props === "object" && !Array.isArray(props) ? props : {})
         }
         if (args.indexOf("--camera") >= 0)
             Qt.callLater(() => lerCodigo(c => avisar("Código lido: " + c, "ok")))

@@ -444,7 +444,7 @@ const PEDACO: usize = 1024 * 1024;
 
 fn chave_da_senha(senha: &str, sal: &[u8]) -> Resultado<[u8; 32]> {
     let mut k = [0u8; 32];
-    argon2::Argon2::default()
+    crate::usuarios::argon2()
         .hash_password_into(senha.as_bytes(), sal, &mut k)
         .map_err(|e| Erro::Interno(format!("não foi possível proteger o backup: {e}")))?;
     Ok(k)
