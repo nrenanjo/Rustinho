@@ -1464,12 +1464,10 @@ pub fn restaurar(
             params![d, n, e],
         )?;
     }
-    // A numeração das alterações deste caixa continua de onde estava.
-    tx.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'alteracao'", [seq])?;
-    tx.execute(
-        "INSERT INTO sqlite_sequence (name, seq) SELECT 'alteracao', ?1 WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'alteracao')",
-        [seq],
-    )?;
+    // A numeração das alterações deste caixa continua de onde estava; este
+    // caixa recomeça do zero com os outros e ganha geração nova (os outros
+    // também recomeçam com ele).
+    sync::depois_de_restaurar(&tx, seq)?;
     tx.commit()?;
     Ok(info)
 }

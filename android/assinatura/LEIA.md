@@ -32,6 +32,26 @@ Para gerar uma chave nova, se um dia precisar:
     keytool -genkeypair -keystore rustinho-loja.jks -storetype JKS -alias rustinho -keyalg RSA -keysize 4096 -validity 12000
     base64 -w0 rustinho-loja.jks > ANDROID_CHAVE_BASE64.txt
 
+## Celular com a 0.9.0 ou a 0.9.1 (assinadas com a chave antiga, que era pública)
+
+Esses APKs não devem mais ser baixados nem instalados. O Android não deixa a versão nova
+(chave da loja) atualizar por cima deles: é preciso **desinstalar** o antigo, e desinstalar
+**apaga os dados do celular** (o banco e os backups ficam dentro do app). Apagar os APKs do
+GitHub impede novos downloads, mas não mexe nos celulares onde já estão instalados.
+
+Para mudar sem perder dados, use a troca de dados com o computador da loja:
+
+1. Com o celular e o computador **ainda na versão antiga**, ligue a troca de dados nos dois
+   (mesma senha da rede) e espere o celular aparecer como sincronizado em "Caixas da loja".
+   Confira no computador uma venda recente feita no celular.
+2. Atualize o computador para a versão nova (o banco dele é convertido sozinho).
+3. No celular, desinstale o Rustinho antigo e instale o APK novo.
+4. Abra o Rustinho novo no celular e, na primeira tela, escolha **juntar este caixa** à loja
+   (não configure uma loja nova), com a mesma senha da rede: o celular recebe tudo do computador.
+
+Sem computador na loja: anote o que for importante (ou feche o caixa e o dia) antes de
+desinstalar; o celular começa vazio. Se o celular só foi usado para teste, basta desinstalar.
+
 ## Importante
 
 - Guarde o arquivo `rustinho-loja.jks` e a senha fora do computador (pen drive e papel, por

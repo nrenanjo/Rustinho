@@ -8,7 +8,7 @@
 -- atrasado.
 --
 -- "historia": as versões anteriores do registro que o caixa conhecia (a base
--- primeiro, até 32), em JSON. Um "+" no fim quer dizer que a história não
+-- primeiro, até 8), em JSON. Um "+" no fim quer dizer que a história não
 -- chega até o começo do registro. Com ela se sabe se duas alterações são uma
 -- depois da outra ou se foram feitas sem uma ver a outra (conflito). Quando
 -- não dá para saber, conta como conflito: o gerente vê e as duas ficam
@@ -43,10 +43,14 @@ CREATE TABLE sync_resolucao (
     -- a versão que valia quando o gerente decidiu e a que tinha perdido
     ficou      TEXT NOT NULL,
     perdeu     TEXT NOT NULL,
-    -- "usar" (voltou a que tinha perdido) ou "manter" (ficou como estava)
-    escolha    TEXT NOT NULL CHECK (escolha IN ('usar', 'manter')),
+    -- "usar" (voltou a que tinha perdido), "manter" (ficou como estava) ou
+    -- "aplicada": dois gerentes decidiram diferente sobre o mesmo conflito;
+    -- este registro diz qual regra valeu e quais decisões houve.
+    escolha    TEXT NOT NULL CHECK (escolha IN ('usar', 'manter', 'aplicada')),
     usuario_id TEXT,
-    quando     TEXT NOT NULL
+    quando     TEXT NOT NULL,
+    -- só em "aplicada": os ids das decisões que se contradisseram (JSON)
+    decisoes   TEXT
 );
 CREATE INDEX sync_resolucao_perdeu ON sync_resolucao (perdeu);
 
@@ -66,3 +70,11 @@ CREATE TABLE sync_referencia (
     desde   TEXT NOT NULL,
     PRIMARY KEY (tabela, chave, pai)
 );
+
+-- Contador de cada outro caixa com a "marca" (o id da última alteração
+-- recebida dele) e a "geração" do banco dele. Se o outro caixa voltou de um
+-- backup, foi trocado por um computador novo ou teve o banco copiado à mão,
+-- a marca não bate (ou a geração mudou): este caixa recomeça do zero com ele.
+-- As repetidas são reconhecidas pelo id e não são aplicadas de novo.
+ALTER TABLE sync_par ADD COLUMN marca TEXT;
+ALTER TABLE sync_par ADD COLUMN geracao TEXT;

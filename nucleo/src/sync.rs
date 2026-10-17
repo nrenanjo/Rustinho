@@ -10,7 +10,7 @@
 //!   ainda não tem ("desde a número N") e aplica.
 //! - Cada alteração guarda sobre qual versão foi feita ("base"), um contador
 //!   do registro ("ordem": base + 1) e as versões anteriores que o caixa
-//!   conhecia ("historia", até 32). Vale a de maior ordem (empate: maior id,
+//!   conhecia ("historia", até 8, só como atalho). Vale a de maior ordem (empate: maior id,
 //!   o UUID v7). Uma alteração feita depois de outra sempre vale, mesmo com
 //!   o relógio do caixa atrasado, e todos os caixas escolhem a mesma, em
 //!   qualquer ordem de chegada (R-08).
@@ -73,36 +73,56 @@ const MAGICA: &[u8; 4] = b"RST3";
 pub const PROTOCOLO: i64 = 3;
 const PROTOCOLO_DIFERENTE: &str =
     "O outro caixa está com outra versão do Rustinho. Atualize todos os caixas para a mesma versão.";
-/// Quantas versões anteriores cada alteração leva na história.
-pub const HISTORIA_MAXIMA: usize = 32;
+/// Quantas versões anteriores cada alteração leva na história. É só um
+/// atalho: a relação certa entre versões vem da cadeia de bases no log (as
+/// versões compactadas continuam lá). Pouca coisa para não pesar no banco
+/// (medido no teste `volume_do_historico`).
+pub const HISTORIA_MAXIMA: usize = 8;
 /// Marca no fim da história: ela não chega até o começo do registro.
 const INCOMPLETA: &str = "+";
 
 /// Enquanto um backup é restaurado, a troca de dados espera (e vice-versa).
 static TRAVA: RwLock<()> = RwLock::new(());
-static ATENDENDO: AtomicUsize = AtomicUsize::new(0);
 
 /// Uma vaga de atendimento. Ao sair de cena (fim normal, erro ou pânico da
 /// tarefa) a vaga volta (C-01): o contador nunca fica preso.
-struct Vaga(&'static AtomicUsize);
+struct Vaga(Arc<AtomicUsize>);
 
 impl Vaga {
-    fn pegar() -> Option<Vaga> {
-        Vaga::pegar_de(&ATENDENDO)
-    }
-
-    fn pegar_de(contador: &'static AtomicUsize) -> Option<Vaga> {
+    fn pegar_de(contador: &Arc<AtomicUsize>) -> Option<Vaga> {
         let mut atual = contador.load(Ordering::SeqCst);
         loop {
             if atual >= CONEXOES_MAXIMAS {
                 return None;
             }
             match contador.compare_exchange(atual, atual + 1, Ordering::SeqCst, Ordering::SeqCst) {
-                Ok(_) => return Some(Vaga(contador)),
+                Ok(_) => return Some(Vaga(contador.clone())),
                 Err(outro) => atual = outro,
             }
         }
     }
+}
+
+/// Conexões atendidas ao mesmo tempo vindas de um mesmo endereço.
+const VAGAS_POR_ORIGEM: usize = 2;
+/// Prazo para quem conectou mandar o pedido (um caixa de verdade manda na
+/// hora; o pedido é pequeno).
+const PRAZO_DO_PEDIDO: Duration = Duration::from_secs(2);
+/// Conexões que chegaram e ainda não mandaram nada (esperam numa fila, sem
+/// tarefa e sem vaga; a mais antiga sai quando a fila enche).
+const NA_FILA_MAXIMO: usize = 64;
+
+/// Uma conexão sendo atendida pelo servidor.
+struct Atendimento {
+    ip: std::net::IpAddr,
+    tarefa: thread::JoinHandle<()>,
+}
+
+/// Uma conexão na fila, esperando o pedido chegar.
+struct NaFila {
+    fluxo: TcpStream,
+    ip: std::net::IpAddr,
+    desde: Instant,
 }
 
 impl Drop for Vaga {
@@ -498,7 +518,15 @@ pub fn registrar_referencias(conn: &Connection) -> Resultado<Referencias> {
         conn.execute("INSERT INTO temp.ref_atual VALUES (?1, ?2, ?3)", params![tabela, chave, pai])?;
         conn.execute(
             "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (tabela, chave, pai) DO UPDATE SET falta = excluded.falta, estado = excluded.estado",
+             ON CONFLICT (tabela, chave, pai) DO UPDATE SET
+                 -- A espera recomeça só se o registro que falta mudou; a mesma
+                 -- referência, conferida de novo, guarda a data do começo.
+                 desde = CASE WHEN sync_referencia.falta <> excluded.falta THEN excluded.desde ELSE sync_referencia.desde END,
+                 falta = excluded.falta,
+                 estado = CASE WHEN sync_referencia.falta <> excluded.falta THEN excluded.estado
+                               WHEN sync_referencia.estado = 'inconsistente' AND excluded.estado = 'esperando'
+                                    THEN 'inconsistente'
+                               ELSE excluded.estado END",
             params![tabela, chave, pai, falta, estado, agora_txt],
         )?;
     }
@@ -838,27 +866,84 @@ fn anotar_conflito(
     Ok(())
 }
 
-/// Fecha os conflitos que o gerente já decidiu (aqui ou em outro caixa).
+/// Fecha os conflitos que um gerente já decidiu (aqui ou em outro caixa) e
+/// escreve no conflito o que cada gerente decidiu.
+///
+/// Dois gerentes podem decidir diferente sobre o mesmo conflito, com os
+/// caixas sem rede. A regra (igual em todos os caixas, sem relógio): **vale
+/// "usar a que perdeu"**. Essa escolha gravou uma alteração nova feita em
+/// cima da versão que valia, e uma alteração feita depois sempre vale (pela
+/// ordem). "Manter" não grava nada no registro, então não tem como valer
+/// contra ela. A divergência fica registrada num evento "aplicada", com o
+/// mesmo id em todos os caixas (feito a partir das decisões), e a tela diz
+/// quem decidiu o quê e qual versão vale agora.
 fn fechar_decididos(conn: &Connection) -> Resultado<()> {
-    conn.execute(
-        "UPDATE sync_conflito
-            SET resolvido_em = ?1,
-                resolucao = (SELECT CASE r.escolha WHEN 'usar' THEN 'voltou a versão que tinha perdido'
-                                                   ELSE 'ficou como está' END
-                               || CASE WHEN r.usuario_id IS NOT NULL AND u.nome IS NOT NULL THEN ' (' || u.nome || ')' ELSE '' END
-                               FROM sync_resolucao r LEFT JOIN usuario u ON u.id = r.usuario_id
-                              WHERE r.tabela = sync_conflito.tabela AND r.chave = sync_conflito.chave
-                                AND r.perdeu = sync_conflito.perdeu
-                              ORDER BY r.id LIMIT 1),
-                resolvido_por = (SELECT r.usuario_id FROM sync_resolucao r
-                                  WHERE r.tabela = sync_conflito.tabela AND r.chave = sync_conflito.chave
-                                    AND r.perdeu = sync_conflito.perdeu ORDER BY r.id LIMIT 1)
-          WHERE resolvido_em IS NULL
-            AND EXISTS (SELECT 1 FROM sync_resolucao r
-                         WHERE r.tabela = sync_conflito.tabela AND r.chave = sync_conflito.chave
-                           AND r.perdeu = sync_conflito.perdeu)",
-        [tempo::agora()],
-    )?;
+    #[allow(clippy::type_complexity)]
+    let decisoes: Vec<(String, String, String, String, String, Option<String>, String)> = {
+        let mut c = conn.prepare(
+            "SELECT r.id, r.tabela, r.chave, r.perdeu, r.escolha, u.nome, r.quando FROM sync_resolucao r
+               LEFT JOIN usuario u ON u.id = r.usuario_id
+              WHERE r.escolha IN ('usar', 'manter') ORDER BY r.tabela, r.chave, r.perdeu, r.id",
+        )?;
+        let l =
+            c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
+    // (tabela, chave, versão que perdeu) → decisões (id, escolha, quem, quando).
+    type Decisao = (String, String, String, String);
+    let mut grupos: Vec<((String, String, String), Vec<Decisao>)> = Vec::new();
+    for (id, tabela, chave, perdeu, escolha, nome, quando) in decisoes {
+        let k = (tabela, chave, perdeu);
+        let d = (id, escolha, nome.unwrap_or_else(|| "um gerente".into()), quando);
+        match grupos.last_mut() {
+            Some((g, lista)) if *g == k => lista.push(d),
+            _ => grupos.push((k, vec![d])),
+        }
+    }
+    for ((tabela, chave, perdeu), lista) in grupos {
+        let usou = lista.iter().any(|d| d.1 == "usar");
+        let manteve = lista.iter().any(|d| d.1 == "manter");
+        let quem = |e: &str| lista.iter().filter(|d| d.1 == e).map(|d| d.2.clone()).collect::<Vec<_>>().join(", ");
+        let texto = if usou && manteve {
+            // Evento da divergência: mesmo id e mesmo conteúdo em todos os caixas.
+            let ids: Vec<&str> = lista.iter().map(|d| d.0.as_str()).collect();
+            let resumo: [u8; 32] =
+                Sha256::digest(format!("{tabela}|{chave}|{perdeu}|{}", ids.join(",")).as_bytes()).into();
+            let id_evento =
+                format!("aplicada-{}", resumo.iter().take(16).map(|b| format!("{b:02x}")).collect::<String>());
+            let quando = lista.iter().map(|d| d.3.as_str()).max().unwrap_or_default().to_string();
+            conn.execute(
+                "INSERT OR IGNORE INTO sync_resolucao (id, tabela, chave, ficou, perdeu, escolha, usuario_id, quando, decisoes)
+                 VALUES (?1, ?2, ?3, '', ?4, 'aplicada', NULL, ?5, ?6)",
+                params![id_evento, tabela, chave, perdeu, quando, serde_json::to_string(&ids)?],
+            )?;
+            format!(
+                "decisões diferentes: {} manteve, {} usou a que tinha perdido. Valeu a de usar a que tinha perdido \
+                 (ela gravou uma alteração nova); a decisão de manter ficou registrada",
+                quem("manter"),
+                quem("usar")
+            )
+        } else if usou {
+            format!("voltou a versão que tinha perdido ({})", quem("usar"))
+        } else {
+            format!("ficou como está ({})", quem("manter"))
+        };
+        let primeiro = conn
+            .query_row(
+                "SELECT usuario_id FROM sync_resolucao WHERE tabela = ?1 AND chave = ?2 AND perdeu = ?3
+                    AND escolha IN ('usar', 'manter') ORDER BY id LIMIT 1",
+                params![tabela, chave, perdeu],
+                |l| l.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        conn.execute(
+            "UPDATE sync_conflito SET resolvido_em = COALESCE(resolvido_em, ?4), resolvido_por = COALESCE(resolvido_por, ?5),
+                    resolucao = ?6
+              WHERE tabela = ?1 AND chave = ?2 AND perdeu = ?3 AND (resolucao IS NULL OR resolucao <> ?6)",
+            params![tabela, chave, perdeu, tempo::agora(), primeiro, texto],
+        )?;
+    }
     Ok(())
 }
 
@@ -1303,6 +1388,16 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     }));
                 }
                 k.pode_usar = PODE_USAR.contains(&tabela.as_str());
+                // Depois de resolvido, o que vale agora de fato (pelos dados,
+                // não pela decisão anotada).
+                if !k.resolvido.is_empty() {
+                    let igual_a_que_perdeu = diferencas(atual.as_deref(), dados_perdeu.as_deref()).is_empty();
+                    k.resolvido.push_str(if igual_a_que_perdeu {
+                        ". Vale agora: a versão que tinha perdido"
+                    } else {
+                        ". Vale agora: a versão que estava valendo; a outra continua guardada aqui"
+                    });
+                }
             }
         }
         lista.push(k);
@@ -1810,8 +1905,8 @@ fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
 
 /// Atende um pedido de outro caixa.
 fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultado<()> {
-    // Quem não manda nada em 5 s é desligado.
-    fluxo.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    // Quem não manda o pedido em `PRAZO_DO_PEDIDO` é desligado.
+    fluxo.set_read_timeout(Some(PRAZO_DO_PEDIDO)).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let conn = abrir_conexao(caminho)?;
@@ -1820,7 +1915,7 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
         return Ok(());
     }
     let k = Chaves::de(&conn, &a.senha)?;
-    let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO, Duration::from_secs(5), Some(parar))?;
+    let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
     if pedido["tipo"] != "puxar" {
         return Ok(());
     }
@@ -1834,14 +1929,65 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
             registrar_par(&conn, d, pedido["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()))?;
         }
     }
-    let desde = pedido["desde"].as_i64().unwrap_or(0);
+    let desde = pedido["desde"].as_i64().unwrap_or(0).max(0);
+    let geracao = geracao(&conn)?;
+    let seq_maxima = seq_maxima(&conn)?;
+    // O contador de quem pediu ainda vale neste banco? A alteração número
+    // `desde` aqui tem de ser a mesma que ele recebeu (a "marca"). Se não é
+    // (este banco voltou de um backup, é outro computador, foi copiado à
+    // mão), ele recomeça do zero.
+    if desde > 0 {
+        let aqui: Option<String> =
+            conn.query_row("SELECT id FROM alteracao WHERE seq = ?1", [desde], |l| l.get(0)).optional()?;
+        if aqui.is_none() || aqui.as_deref() != pedido["marca"].as_str() {
+            return enviar(
+                &mut fluxo,
+                &k,
+                &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": [],
+                         "temMais": false, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
+                         "recomecar": true }),
+            );
+        }
+    }
     let (lista, tem_mais) = alteracoes_desde(&conn, desde, LOTE)?;
     enviar(
         &mut fluxo,
         &k,
         &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista,
-                 "temMais": tem_mais, "agoraMs": agora_ms() }),
+                 "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima }),
     )
+}
+
+/// Geração deste banco: muda quando ele volta de um backup (veja
+/// `depois_de_restaurar`). Fica só neste computador.
+pub fn geracao(conn: &Connection) -> Resultado<String> {
+    if let Some(g) = config::ler(conn, "sync_geracao")?.filter(|g| !g.is_empty()) {
+        return Ok(g);
+    }
+    let g = tempo::novo_id();
+    config::gravar(conn, "sync_geracao", &g)?;
+    Ok(g)
+}
+
+/// O maior número de alteração deste banco.
+fn seq_maxima(conn: &Connection) -> Resultado<i64> {
+    Ok(conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))?)
+}
+
+/// Depois de restaurar um backup neste caixa: a numeração das alterações
+/// continua de onde estava (`seq_anterior`), este caixa recomeça do zero com
+/// cada outro caixa (recebe de volta o que o backup não tinha) e o banco
+/// ganha uma geração nova (os outros caixas também recomeçam com ele).
+pub fn depois_de_restaurar(conn: &Connection, seq_anterior: i64) -> Resultado<()> {
+    conn.execute("UPDATE sync_par SET cursor = 0, marca = NULL, geracao = NULL", [])?;
+    conn.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'alteracao'", [seq_anterior])?;
+    conn.execute(
+        "INSERT INTO sqlite_sequence (name, seq) SELECT 'alteracao', ?1
+          WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'alteracao')",
+        [seq_anterior],
+    )?;
+    config::gravar(conn, "sync_geracao", &tempo::novo_id())?;
+    Ok(())
 }
 
 /// Puxa de um endereço tudo o que há de novo. Devolve (dispositivo, quantas novas).
@@ -1866,16 +2012,27 @@ fn puxar_ate(
     };
     let mut total = 0;
     let mut dispositivo = String::new();
+    let mut recomecos = 0;
     loop {
-        let cursor: i64 = if dispositivo.is_empty() {
-            conn.query_row("SELECT cursor FROM sync_par WHERE endereco = ?1", [alvo.to_string()], |l| l.get(0))
-                .optional()?
-                .unwrap_or(0)
+        // Contador, marca e geração guardados deste outro caixa (na primeira
+        // volta, pelo endereço: pode ser de um computador que já não está lá).
+        #[allow(clippy::type_complexity)]
+        let guardado: Option<(String, i64, Option<String>, Option<String>)> = if dispositivo.is_empty() {
+            conn.query_row(
+                "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE endereco = ?1 ORDER BY visto_em DESC LIMIT 1",
+                [alvo.to_string()],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+            )
+            .optional()?
         } else {
-            conn.query_row("SELECT cursor FROM sync_par WHERE dispositivo = ?1", [&dispositivo], |l| l.get(0))
-                .optional()?
-                .unwrap_or(0)
+            conn.query_row(
+                "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE dispositivo = ?1",
+                [&dispositivo],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+            )
+            .optional()?
         };
+        let (dono, cursor, marca, geracao_guardada) = guardado.unwrap_or_default();
         let mut fluxo = TcpStream::connect_timeout(&alvo, Duration::from_secs(3)).map_err(rede)?;
         fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
         fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
@@ -1883,8 +2040,8 @@ fn puxar_ate(
         enviar(
             &mut fluxo,
             &k,
-            &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": cursor, "dispositivo": a.dispositivo,
-                     "nome": a.nome, "porta": porta_local }),
+            &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": cursor, "marca": marca,
+                     "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local }),
         )?;
         let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
         // Outro protocolo: recusa antes de ler qualquer alteração.
@@ -1897,17 +2054,54 @@ fn puxar_ate(
             return Err(Erro::validacao("Este endereço é deste mesmo caixa."));
         }
         registrar_par(&conn, &dispositivo, resposta["nome"].as_str().unwrap_or(""), &alvo.to_string())?;
-        let lista: Vec<Alteracao> = serde_json::from_value(resposta["alteracoes"].clone())?;
-        // Se o outro caixa foi reinstalado (banco novo), o contador volta do zero.
-        let maior = lista.iter().map(|x| x.seq).max();
-        total += aplicar(&mut conn, &lista)?;
-        if let Some(m) = maior {
-            // Só avança se ninguém zerou o cursor no meio (restauração de backup).
-            conn.execute(
-                "UPDATE sync_par SET cursor = ?2 WHERE dispositivo = ?1 AND cursor = ?3",
-                params![dispositivo, m, cursor],
-            )?;
+        // Neste endereço agora está outro caixa (computador trocado): pede de
+        // novo com o contador dele, sem aplicar o que veio.
+        if !dono.is_empty() && dono != dispositivo {
+            recomecos += 1;
+            if recomecos > 3 {
+                return Err(Erro::validacao("A troca de dados não conseguiu recomeçar com este caixa."));
+            }
+            continue;
         }
+        let geracao_dele = resposta["geracao"].as_str().unwrap_or_default().to_string();
+        let seq_dele = resposta["seqMaxima"].as_i64().unwrap_or(i64::MAX);
+        let motivo = if resposta["recomecar"].as_bool().unwrap_or(false) {
+            Some("o contador não bate com o banco dele")
+        } else if geracao_guardada.as_deref().is_some_and(|g| !g.is_empty() && g != geracao_dele) {
+            Some("o banco dele voltou de um backup")
+        } else if seq_dele < cursor {
+            Some("a numeração dele voltou para trás")
+        } else {
+            None
+        };
+        if let Some(motivo) = motivo {
+            // Recomeça do zero com ele: recebe tudo de novo; o que já estava
+            // aqui é reconhecido pelo id e não é aplicado outra vez.
+            crate::registro::anotar(&format!("troca de dados: recomeçando do zero com um caixa ({motivo})"));
+            conn.execute(
+                "UPDATE sync_par SET cursor = 0, marca = NULL, geracao = ?2 WHERE dispositivo = ?1",
+                params![dispositivo, geracao_dele],
+            )?;
+            recomecos += 1;
+            if recomecos > 3 {
+                return Err(Erro::validacao("A troca de dados não conseguiu recomeçar com este caixa."));
+            }
+            continue;
+        }
+        let lista: Vec<Alteracao> = serde_json::from_value(resposta["alteracoes"].clone())?;
+        let ultima = lista.iter().max_by_key(|x| x.seq).map(|x| (x.seq, x.id.clone()));
+        total += aplicar(&mut conn, &lista)?;
+        match ultima {
+            // Só avança se ninguém zerou o cursor no meio (restauração de backup).
+            Some((m, id)) => conn.execute(
+                "UPDATE sync_par SET cursor = ?2, marca = ?4, geracao = ?5 WHERE dispositivo = ?1 AND cursor = ?3",
+                params![dispositivo, m, cursor, id, geracao_dele],
+            )?,
+            None => conn.execute(
+                "UPDATE sync_par SET geracao = ?2 WHERE dispositivo = ?1 AND (geracao IS NULL OR geracao = '')",
+                params![dispositivo, geracao_dele],
+            )?,
+        };
         // Relógio do outro caixa (descontando o tempo da viagem pela rede).
         let aviso = match resposta["agoraMs"].as_i64() {
             Some(dele) => {
@@ -2009,41 +2203,95 @@ impl Motor {
             tarefas.push(thread::spawn(move || {
                 let Ok(ouvinte) = TcpListener::bind(("0.0.0.0", porta_tcp)) else { return };
                 ouvinte.set_nonblocking(true).ok();
-                let mut atendendo: Vec<thread::JoinHandle<()>> = Vec::new();
+                let vagas = Arc::new(AtomicUsize::new(0));
+                let mut atendendo: Vec<Atendimento> = Vec::new();
+                // Quem conecta espera na fila até mandar alguma coisa: conexão
+                // muda nunca ocupa vaga nem tarefa. Um caixa de verdade manda o
+                // pedido na hora e passa logo para o atendimento.
+                let mut fila: Vec<NaFila> = Vec::new();
                 while !parar.load(Ordering::SeqCst) {
-                    atendendo.retain(|t| !t.is_finished());
-                    match ouvinte.accept() {
-                        Ok((fluxo, _)) => {
-                            // Muitas conexões ao mesmo tempo: as de sobra são fechadas.
-                            let Some(vaga) = Vaga::pegar() else {
-                                drop(fluxo);
-                                continue;
-                            };
-                            fluxo.set_nonblocking(false).ok();
-                            let caminho = caminho.clone();
-                            let parar_tarefa = parar.clone();
-                            let tarefa = thread::Builder::new().name("sync-atender".into()).spawn(move || {
-                                let _vaga = vaga;
-                                if let Err(e) = atender(&caminho, fluxo, &parar_tarefa) {
-                                    if matches!(e, Erro::Banco(_) | Erro::Interno(_)) {
-                                        crate::registro::anotar(&format!("sync atender: {e}"));
-                                    }
-                                }
-                            });
-                            // Sem tarefa nova, a vaga já voltou (ela foi junto e caiu).
-                            match tarefa {
-                                Ok(t) => atendendo.push(t),
-                                Err(e) => crate::registro::anotar(&format!("sync: não abriu tarefa: {e}")),
-                            }
+                    atendendo.retain(|a| !a.tarefa.is_finished());
+                    let mut mexeu = false;
+                    // 1. Aceita quem chegou.
+                    while let Ok((fluxo, origem)) = ouvinte.accept() {
+                        mexeu = true;
+                        let ip = origem.ip();
+                        // Um endereço não tem mais que `VAGAS_POR_ORIGEM` na fila.
+                        if fila.iter().filter(|f| f.ip == ip).count() >= VAGAS_POR_ORIGEM {
+                            continue;
                         }
-                        Err(_) => thread::sleep(Duration::from_millis(200)),
+                        if fluxo.set_nonblocking(true).is_err() {
+                            continue;
+                        }
+                        // Fila cheia: sai a mais antiga (está muda há mais tempo).
+                        if fila.len() >= NA_FILA_MAXIMO {
+                            fila.remove(0);
+                        }
+                        fila.push(NaFila { fluxo, ip, desde: Instant::now() });
+                    }
+                    // 2. Quem já mandou alguma coisa passa para o atendimento (se
+                    // houver vaga, e no máximo `VAGAS_POR_ORIGEM` por endereço);
+                    // quem passou do prazo calado, ou fechou, sai da fila.
+                    let mut i = 0;
+                    while i < fila.len() {
+                        let mut espiada = [0u8; 4];
+                        let estado = fila[i].fluxo.peek(&mut espiada);
+                        let sair = match estado {
+                            Ok(0) => true,
+                            Ok(_) => {
+                                let do_ip = atendendo.iter().filter(|a| a.ip == fila[i].ip).count();
+                                if do_ip >= VAGAS_POR_ORIGEM {
+                                    false
+                                } else if let Some(vaga) = Vaga::pegar_de(&vagas) {
+                                    let NaFila { fluxo, ip, .. } = fila.remove(i);
+                                    mexeu = true;
+                                    fluxo.set_nonblocking(false).ok();
+                                    let caminho = caminho.clone();
+                                    let parar_tarefa = parar.clone();
+                                    let tarefa = thread::Builder::new().name("sync-atender".into()).spawn(move || {
+                                        let _vaga = vaga;
+                                        if let Err(e) = atender(&caminho, fluxo, &parar_tarefa) {
+                                            if matches!(e, Erro::Banco(_) | Erro::Interno(_)) {
+                                                crate::registro::anotar(&format!("sync atender: {e}"));
+                                            }
+                                        }
+                                    });
+                                    // Sem tarefa nova, a vaga já voltou (ela foi junto e caiu).
+                                    match tarefa {
+                                        Ok(t) => atendendo.push(Atendimento { ip, tarefa: t }),
+                                        Err(e) => crate::registro::anotar(&format!("sync: não abriu tarefa: {e}")),
+                                    }
+                                    continue;
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(e)
+                                if matches!(
+                                    e.kind(),
+                                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                                ) =>
+                            {
+                                fila[i].desde.elapsed() > PRAZO_DO_PEDIDO
+                            }
+                            Err(_) => true,
+                        };
+                        if sair {
+                            fila.remove(i);
+                            mexeu = true;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    if !mexeu {
+                        thread::sleep(Duration::from_millis(10));
                     }
                 }
                 // Parou de aceitar; espera quem já estava sendo atendido (cada
                 // conexão tem prazo de leitura e escrita, então termina).
                 drop(ouvinte);
-                for t in atendendo {
-                    let _ = t.join();
+                for a in atendendo {
+                    let _ = a.tarefa.join();
                 }
             }));
         }
@@ -2170,12 +2418,197 @@ impl Motor {
 mod testes {
     use super::*;
     use crate::banco::Banco;
-    use crate::{estoque, produtos, usuarios};
+    use crate::{caixa, estoque, produtos, usuarios, vendas};
 
     fn temp(nome: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("rustinho-sync-{nome}-{}", tempo::novo_id()));
         std::fs::create_dir_all(&p).unwrap();
         p.join("rustinho.db")
+    }
+
+    /// Item 1 da revisão: o caixa A volta para trás (backup restaurado no
+    /// mesmo computador, computador novo no mesmo endereço, ou banco copiado
+    /// à mão) e faz uma alteração nova. O caixa B, que guardava um contador
+    /// alto de A, tem de receber a alteração nova; A recupera o que perdeu;
+    /// nada é aplicado duas vezes (vendas, itens, estoque), o apagado não
+    /// volta, e depois os dois continuam trocando normalmente.
+    #[test]
+    fn recuo_do_contador_e_ressincronizacao() {
+        // Cada cenário numa tarefa própria: o limite de contas caras dos
+        // testes é por tarefa, e cada cenário tem caixas novos.
+        for (n, cenario) in ["mesmo computador", "computador novo", "copia manual"].into_iter().enumerate() {
+            thread::spawn(move || recuo_um_cenario(n, cenario)).join().expect(cenario);
+        }
+    }
+
+    fn recuo_um_cenario(n: usize, cenario: &str) {
+        {
+            let (pt_a, pu_a, pt_b, pu_b) =
+                (48010 + 10 * n as u16, 48011 + 10 * n as u16, 48012 + 10 * n as u16, 48013 + 10 * n as u16);
+            let ca = temp(&format!("recuo-a-{n}"));
+            let cb = temp(&format!("recuo-b-{n}"));
+            let a = Banco::abrir(&ca).unwrap();
+            let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
+            usuarios::definir_gerente(&a.conn, &u, true).unwrap();
+            config::gravar(&a.conn, "caixa_nome", "Caixa A").unwrap();
+            salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
+            let b = Banco::abrir(&cb).unwrap();
+            config::gravar(&b.conn, "caixa_nome", "Caixa B").unwrap();
+            salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
+            let _mb = Motor::iniciar(cb.clone(), pt_b, pu_b);
+            thread::sleep(Duration::from_millis(400));
+            let (para_a, para_b) = (format!("127.0.0.1:{pt_a}"), format!("127.0.0.1:{pt_b}"));
+            let trocar_rede = || {
+                for _ in 0..3 {
+                    puxar(&cb, &para_a, pt_b).unwrap();
+                    puxar(&ca, &para_b, pt_a).unwrap();
+                }
+            };
+            // A tem uma peça com aplicação, faz uma venda; B recebe tudo.
+            let mut f = produtos::ficha_nova(&a.conn).unwrap();
+            f.nome = "Correia".into();
+            f.custo = "10".into();
+            f.estoque_inicial = "10".into();
+            f.aplicacoes =
+                vec![produtos::AplicacaoFicha { montadora: "Fiat".into(), modelo: "Uno".into(), ..Default::default() }];
+            let p = produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+            caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa A", "0").unwrap();
+            let venda = |x: &Banco| {
+                let e = vendas::VendaEntrada {
+                    itens: vec![vendas::ItemEntrada {
+                        produto_id: p.clone(),
+                        quantidade: "1".into(),
+                        ..Default::default()
+                    }],
+                    tabela: 1,
+                    pagamentos: vec![vendas::PagamentoEntrada {
+                        forma: "dinheiro".into(),
+                        valor: "100".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+                vendas::concluir(&x.conn, &x.dispositivo, &u, &e).unwrap();
+            };
+            venda(&a);
+            trocar_rede();
+            // Cópia do banco de A (o "backup" ou a cópia manual).
+            let copia = ca.with_file_name("copia.db");
+            a.conn.backup(rusqlite::MAIN_DB, &copia, None).unwrap();
+            let seq_antes_do_backup: i64 =
+                a.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+            // Depois da cópia: A apaga a aplicação, vende de novo, mexe muito
+            // (o contador de B para A sobe bem acima do da cópia).
+            let mut f = produtos::ficha(&a.conn, &p).unwrap();
+            f.aplicacoes.clear();
+            produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+            venda(&a);
+            for i in 0..30 {
+                let mut f = produtos::ficha(&a.conn, &p).unwrap();
+                f.observacoes = format!("obs {i}");
+                produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+            }
+            trocar_rede();
+            let cursor_b: i64 = b
+                .conn
+                .query_row("SELECT cursor FROM sync_par WHERE dispositivo = ?1", [&a.dispositivo], |l| l.get(0))
+                .unwrap();
+            assert!(cursor_b > seq_antes_do_backup, "{cenario}: B guardou um contador alto de A");
+            // A volta para trás.
+            assert!(ma.encerrar(Duration::from_secs(20)));
+            let seq_antes: i64 = a.conn.query_row("SELECT MAX(seq) FROM alteracao", [], |l| l.get(0)).unwrap();
+            drop(a);
+            for fim in ["", "-wal", "-shm"] {
+                let mut x = ca.as_os_str().to_owned();
+                x.push(fim);
+                let _ = std::fs::remove_file(std::path::PathBuf::from(x));
+            }
+            match cenario {
+                "mesmo computador" => {
+                    std::fs::copy(&copia, &ca).unwrap();
+                    let a = Banco::abrir(&ca).unwrap();
+                    depois_de_restaurar(&a.conn, seq_antes).unwrap();
+                }
+                "copia manual" => {
+                    std::fs::copy(&copia, &ca).unwrap();
+                }
+                _ => {
+                    // Computador novo no mesmo endereço: banco vazio, entra na rede.
+                    let a = Banco::abrir(&ca).unwrap();
+                    config::gravar(&a.conn, "caixa_nome", "Caixa A").unwrap();
+                    salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
+                }
+            }
+            let mut a = Banco::abrir(&ca).unwrap();
+            let _ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
+            thread::sleep(Duration::from_millis(400));
+            // A, antes de qualquer troca, faz uma alteração nova.
+            let mut g = produtos::ficha_nova(&a.conn).unwrap();
+            g.nome = format!("Feita depois de voltar ({cenario})");
+            g.custo = "5".into();
+            // Código escolhido à mão: o computador novo, ainda vazio, daria o
+            // código 1, que já é de outra peça na loja.
+            g.codigo = format!("90{n}");
+            let nova = produtos::salvar(&a.conn, &a.dispositivo, &u, &g).unwrap_or_else(|_| {
+                // Computador novo ainda não tem o usuário: cria um.
+                let u2 = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;
+                produtos::salvar(&a.conn, &a.dispositivo, &u2, &g).unwrap()
+            });
+            // B pede a A com o contador antigo: tem de receber a alteração nova.
+            puxar(&cb, &para_a, pt_b).unwrap();
+            assert!(produtos::ficha(&b.conn, &nova).is_ok(), "{cenario}: B recebeu a alteração nova de A");
+            trocar_rede();
+            let contar = |x: &Banco, sql: &str| -> i64 { x.conn.query_row(sql, [], |l| l.get(0)).unwrap() };
+            for (quem, x) in [("A", &a), ("B", &b)] {
+                assert_eq!(
+                    contar(x, "SELECT COUNT(*) FROM venda WHERE tipo = 'venda'"),
+                    2,
+                    "{cenario} {quem}: duas vendas, sem repetir"
+                );
+                assert_eq!(contar(x, "SELECT COUNT(*) FROM venda_item"), 2, "{cenario} {quem}");
+                assert_eq!(estoque::saldo(&x.conn, &p).unwrap(), 8000, "{cenario} {quem}: estoque certo");
+                assert!(
+                    produtos::ficha(&x.conn, &p).unwrap().aplicacoes.is_empty(),
+                    "{cenario} {quem}: o apagado não volta"
+                );
+                assert_eq!(produtos::ficha(&x.conn, &p).unwrap().observacoes, "obs 29", "{cenario} {quem}");
+                assert!(produtos::ficha(&x.conn, &nova).is_ok(), "{cenario} {quem}");
+                assert_eq!(pendencias(&x.conn).unwrap(), 0, "{cenario} {quem}: nada apontando para o que falta");
+                assert_eq!(
+                    conflitos_abertos(&x.conn).unwrap(),
+                    0,
+                    "{cenario} {quem}: sem aviso falso: {:?}",
+                    x.conn
+                        .prepare("SELECT tabela, chave, ficou, perdeu, certeza, dados_perdeu FROM sync_conflito")
+                        .unwrap()
+                        .query_map([], |l| Ok(format!(
+                            "{:?}",
+                            (
+                                l.get::<_, String>(0)?,
+                                l.get::<_, String>(1)?,
+                                l.get::<_, String>(4)?,
+                                l.get::<_, Option<String>>(5)?
+                            )
+                        )))
+                        .unwrap()
+                        .collect::<Vec<_>>()
+                );
+            }
+            // Depois, os dois continuam trocando alterações novas.
+            let mut h = produtos::ficha_nova(&b.conn).unwrap();
+            h.nome = "Nova de B".into();
+            h.custo = "1".into();
+            let de_b = produtos::salvar(&b.conn, &b.dispositivo, &u, &h).unwrap();
+            let mut f = produtos::ficha(&a.conn, &nova).unwrap();
+            f.nome = "Nova de A, mexida".into();
+            let quem_salva = usuarios::listar(&a.conn, false).unwrap()[0].id.clone();
+            produtos::salvar(&a.conn, &a.dispositivo, &quem_salva, &f).unwrap();
+            trocar_rede();
+            assert!(produtos::ficha(&a.conn, &de_b).is_ok(), "{cenario}: A recebe de B");
+            assert_eq!(produtos::ficha(&b.conn, &nova).unwrap().nome, "Nova de A, mexida", "{cenario}: B recebe de A");
+            let _ = &mut a;
+        }
     }
 
     #[test]
@@ -2326,6 +2759,117 @@ mod testes {
         assert!(!p.permitir(Instant::now(), ip(99_999)));
         assert!(p.permitir(Instant::now() + Duration::from_secs(61), ip(99_999)));
         assert_eq!(p.por_origem.len(), 1);
+    }
+
+    /// Conexão TCP saindo de um endereço escolhido (127.0.0.x), para simular
+    /// aparelhos diferentes na rede.
+    #[cfg(unix)]
+    fn conectar_de(origem: [u8; 4], porta: u16) -> std::io::Result<TcpStream> {
+        use std::os::fd::FromRawFd;
+        // SAFETY: chamadas de socket do sistema com estruturas zeradas e do
+        // tamanho certo; o descritor vira um TcpStream (dono) ou é fechado.
+        unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let tam = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            let mut de: libc::sockaddr_in = std::mem::zeroed();
+            de.sin_family = libc::AF_INET as libc::sa_family_t;
+            de.sin_addr.s_addr = u32::from_ne_bytes(origem);
+            if libc::bind(fd, &de as *const libc::sockaddr_in as *const libc::sockaddr, tam) != 0 {
+                let e = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(e);
+            }
+            let mut para: libc::sockaddr_in = std::mem::zeroed();
+            para.sin_family = libc::AF_INET as libc::sa_family_t;
+            para.sin_port = porta.to_be();
+            para.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
+            if libc::connect(fd, &para as *const libc::sockaddr_in as *const libc::sockaddr, tam) != 0 {
+                let e = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(e);
+            }
+            Ok(TcpStream::from_raw_fd(fd))
+        }
+    }
+
+    /// A conexão foi fechada pelo servidor (lê fim de arquivo logo)?
+    #[cfg(unix)]
+    fn fechada(f: &mut TcpStream) -> bool {
+        f.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+        let mut b = [0u8; 1];
+        match f.read(&mut b) {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(e) => !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
+        }
+    }
+
+    /// Item 5 da revisão: conexões que não mandam nada. Um endereço não
+    /// ocupa mais que `VAGAS_POR_ORIGEM` vagas; quem fica mudo cai em
+    /// `PRAZO_DO_PEDIDO`; com tudo ocupado por conexões mudas de vários
+    /// endereços (e outras chegando sem parar), o caixa de verdade ainda
+    /// consegue trocar dados; o servidor nunca passa de `CONEXOES_MAXIMAS`.
+    #[cfg(unix)]
+    #[test]
+    fn conexoes_mudas_nao_tomam_o_servidor() {
+        let ca = temp("mudas-a");
+        let a = Banco::abrir(&ca).unwrap();
+        let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Peça do servidor".into();
+        f.custo = "1".into();
+        let p = produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+        salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
+        drop(a);
+        let cb = temp("mudas-b");
+        let b = Banco::abrir(&cb).unwrap();
+        salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+        let (pt, pu) = (48110, 48111);
+        let _m = Motor::iniciar(ca.clone(), pt, pu);
+        thread::sleep(Duration::from_millis(400));
+        // Um endereço só abre 10 conexões mudas: só 2 ficam abertas.
+        let mut de_um: Vec<TcpStream> = (0..10).filter_map(|_| conectar_de([127, 0, 0, 66], pt).ok()).collect();
+        thread::sleep(Duration::from_millis(200));
+        let abertas = de_um.iter_mut().map(|c| !fechada(c)).filter(|aberta| *aberta).count();
+        assert_eq!(abertas, VAGAS_POR_ORIGEM, "um endereço só ocupa {VAGAS_POR_ORIGEM} vagas");
+        // Quem fica mudo cai no prazo.
+        thread::sleep(PRAZO_DO_PEDIDO + Duration::from_millis(600));
+        assert!(de_um.iter_mut().all(fechada), "as mudas caíram no prazo");
+        // Muitos endereços mudos ocupam todas as vagas e continuam chegando.
+        let parar = Arc::new(AtomicBool::new(false));
+        let parar_ataque = parar.clone();
+        let ataque = thread::spawn(move || {
+            let mut abertas: Vec<TcpStream> = Vec::new();
+            let mut n = 0u32;
+            while !parar_ataque.load(Ordering::SeqCst) {
+                let ip = [127, 0, 1 + (n % 20) as u8, 10 + (n / 20 % 200) as u8];
+                if let Ok(c) = conectar_de(ip, pt) {
+                    abertas.push(c);
+                }
+                n += 1;
+                if abertas.len() > 200 {
+                    abertas.drain(..100);
+                }
+                thread::sleep(Duration::from_millis(15));
+            }
+            n
+        });
+        thread::sleep(Duration::from_millis(800));
+        // O caixa de verdade troca dados mesmo assim (várias vezes).
+        let t = Instant::now();
+        for _ in 0..3 {
+            puxar(&cb, &format!("127.0.0.1:{pt}"), 1).unwrap();
+        }
+        let tempo = t.elapsed();
+        parar.store(true, Ordering::SeqCst);
+        let tentativas = ataque.join().unwrap();
+        assert!(produtos::ficha(&b.conn, &p).is_ok(), "o caixa de verdade recebeu os dados");
+        assert!(tempo < Duration::from_secs(15), "{tempo:?}");
+        assert!(tentativas > 50, "o ataque mandou {tentativas} conexões");
+        println!("conexões mudas durante o teste: {tentativas}; 3 trocas de dados do caixa de verdade em {tempo:?}");
     }
 
     /// R-06: fechar no meio de uma puxada travada (o outro caixa aceita a
@@ -2486,6 +3030,72 @@ mod testes {
         assert_eq!(total, 3, "uma linha por referência, sem repetir");
         // A faixa do Início avisa.
         assert!(crate::avisos::do_dia(&b.conn).unwrap().iter().any(|a| a.id == "referencias"));
+    }
+
+    /// Item 3 da revisão: a espera de uma referência guarda a data do
+    /// começo enquanto for o mesmo registro faltando; recomeça quando passa
+    /// a faltar outro; some quando o registro que falta chega.
+    #[test]
+    fn espera_recomeca_quando_o_que_falta_muda() {
+        // Outro caixa tem as peças X e Y; este ainda não recebeu nenhuma.
+        let a = Banco::em_memoria().unwrap();
+        let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap();
+        let mut ids = Vec::new();
+        for n in ["Peça X", "Peça Y"] {
+            let mut f = produtos::ficha_nova(&a.conn).unwrap();
+            f.nome = n.into();
+            f.custo = "1".into();
+            ids.push(produtos::salvar(&a.conn, &a.dispositivo, &u.id, &f).unwrap());
+        }
+        let (x, y) = (ids[0].clone(), ids[1].clone());
+        let (tudo, _) = alteracoes_desde(&a.conn, 0, 100_000).unwrap();
+        let da_y: Vec<_> = tudo
+            .iter()
+            .filter(|v| v.chave.contains(&y) || v.dados.as_deref().is_some_and(|d| d.contains(&y)))
+            .cloned()
+            .collect();
+        let mut b = Banco::em_memoria().unwrap();
+        let sem_gatilho = |b: &Banco, sql: &str| {
+            b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+            b.conn.pragma_update(None, "foreign_keys", false).unwrap();
+            b.conn.execute(sql, []).unwrap();
+            b.conn.pragma_update(None, "foreign_keys", true).unwrap();
+            b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+        };
+        let ler = |b: &Banco| -> (String, String, String) {
+            b.conn
+                .query_row("SELECT falta, estado, desde FROM sync_referencia WHERE chave LIKE '%ap1%'", [], |l| {
+                    Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+                })
+                .unwrap()
+        };
+        sem_gatilho(&b, &format!("INSERT INTO produto_aplicacao (id, produto_id) VALUES ('ap1', '{x}')"));
+        registrar_referencias(&b.conn).unwrap();
+        // Esperando há quase 24 horas.
+        b.conn
+            .execute("UPDATE sync_referencia SET desde = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-23 hours')", [])
+            .unwrap();
+        let (_, _, quase) = ler(&b);
+        // Conferir de novo (outra troca de dados): a data do começo não muda.
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(ler(&b), (format!(r#"["{x}"]"#), "esperando".into(), quase.clone()));
+        // Passa a apontar para a outra peça, que também não chegou: conta do zero.
+        sem_gatilho(&b, &format!("UPDATE produto_aplicacao SET produto_id = '{y}' WHERE id = 'ap1'"));
+        registrar_referencias(&b.conn).unwrap();
+        let (falta, estado, desde) = ler(&b);
+        assert_eq!((falta, estado.as_str()), (format!(r#"["{y}"]"#), "esperando"));
+        assert!(desde > quase, "a nova referência começou a contar agora: {desde} > {quase}");
+        // Uma hora depois ainda é "esperando" (a anterior já passaria de 24 h).
+        b.conn
+            .execute("UPDATE sync_referencia SET desde = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hours')", [])
+            .unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(ler(&b).1, "esperando");
+        // A peça Y chega pela troca de dados: a pendência some.
+        aplicar(&mut b.conn, &da_y).unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_referencia", [], |l| l.get(0)).unwrap();
+        assert_eq!(n, 0, "{:?}", referencias(&b.conn).unwrap());
     }
 
     // ------------------------------------------------------------------
@@ -2722,6 +3332,87 @@ mod testes {
         }
     }
 
+    /// Item 2 da revisão: dois gerentes decidem diferente sobre o mesmo
+    /// conflito, com os caixas sem rede (A: manter; B: usar a que perdeu, com
+    /// o relógio de B dias atrasado). As decisões se cruzam nas duas ordens
+    /// e um terceiro caixa recebe tudo depois. Todos terminam com os mesmos
+    /// dados (vale "usar"), a mesma resolução escrita (que diz que houve
+    /// decisões diferentes e qual valeu), as duas decisões guardadas, o
+    /// mesmo evento da divergência e a versão que perdeu ainda guardada.
+    #[test]
+    fn dois_gerentes_decidem_diferente() {
+        for ordem_a_primeiro in [true, false] {
+            let (mut a, mut b, u, p) = dois_caixas();
+            let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "5678", true).unwrap().id;
+            let mut c = Banco::em_memoria().unwrap();
+            trocar(&mut a, &mut b);
+            trocar(&mut a, &mut c);
+            renomear(&a, &u, &p, "Nome da A");
+            renomear(&b, &u, &p, "Nome da B");
+            trocar(&mut a, &mut b);
+            let vale = nome(&a, &p);
+            let perdeu = if vale == "Nome da A" { "Nome da B" } else { "Nome da A" };
+            // Sem rede: cada gerente decide no seu caixa.
+            let ka = conflitos(&a.conn).unwrap()[0].id;
+            let kb = conflitos(&b.conn).unwrap()[0].id;
+            resolver_conflito(&a.conn, ka, false, &u).unwrap();
+            com_relogio(-5 * DIA, || resolver_conflito(&b.conn, kb, true, &bia).unwrap());
+            assert_eq!(nome(&b, &p), perdeu);
+            // As decisões se cruzam (nas duas ordens) e chegam a um terceiro.
+            if ordem_a_primeiro {
+                levar(&a, &mut b);
+                levar(&b, &mut a);
+            } else {
+                levar(&b, &mut a);
+                levar(&a, &mut b);
+            }
+            trocar(&mut a, &mut b);
+            trocar(&mut b, &mut c);
+            trocar(&mut a, &mut c);
+            let mut textos = Vec::new();
+            for (quem, x) in [("A", &a), ("B", &b), ("C", &c)] {
+                assert_eq!(nome(x, &p), perdeu, "{quem}: vale usar a que perdeu");
+                assert_eq!(conflitos_abertos(&x.conn).unwrap(), 0, "{quem}");
+                let k = conflitos(&x.conn).unwrap();
+                let r = k.iter().find(|k| k.tipo == "registro").expect("o conflito continua na lista");
+                assert!(r.resolvido.contains("decisões diferentes"), "{quem}: {}", r.resolvido);
+                assert!(
+                    r.resolvido.contains("Ana manteve") && r.resolvido.contains("Bia usou"),
+                    "{quem}: {}",
+                    r.resolvido
+                );
+                assert!(r.resolvido.contains("Vale agora: a versão que tinha perdido"), "{quem}: {}", r.resolvido);
+                textos.push(r.resolvido.clone());
+                let decisoes: Vec<(String, String)> = x
+                    .conn
+                    .prepare("SELECT id, escolha FROM sync_resolucao ORDER BY id")
+                    .unwrap()
+                    .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert_eq!(decisoes.len(), 3, "{quem}: as duas decisões e o evento da divergência: {decisoes:?}");
+                assert_eq!(decisoes.iter().filter(|d| d.1 == "aplicada").count(), 1, "{quem}");
+                // A versão que estava valendo (a de "manter") continua no log de
+                // alterações, com os dados, nos três caixas.
+                let guardada: i64 = x
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto' AND json_extract(dados, '$.nome') = ?1",
+                        [&vale],
+                        |l| l.get(0),
+                    )
+                    .unwrap();
+                assert!(guardada >= 1, "{quem}: a versão de quem manteve não some");
+            }
+            assert!(textos.windows(2).all(|w| w[0] == w[1]), "a mesma resolução nos três: {textos:?}");
+            let evento = |x: &Banco| -> String {
+                x.conn.query_row("SELECT id FROM sync_resolucao WHERE escolha = 'aplicada'", [], |l| l.get(0)).unwrap()
+            };
+            assert!(evento(&a) == evento(&b) && evento(&b) == evento(&c), "o mesmo evento nos três");
+        }
+    }
+
     /// Backup restaurado num caixa, com o outro caixa tendo mexido muitas
     /// vezes no mesmo registro e compactado o log: as versões velhas do
     /// restaurado não viram aviso (a cadeia de versões mostra que vieram
@@ -2806,6 +3497,155 @@ mod testes {
         trocar(&mut a, &mut b);
         assert_eq!(conflitos_abertos(&a.conn).unwrap(), 0);
         assert_eq!(conflitos_abertos(&b.conn).unwrap(), 0, "a decisão chegou ao outro caixa");
+    }
+
+    /// Item 4 da revisão: volume. Um caixa com muitas alterações (peças
+    /// criadas e mexidas, uma peça mexida milhares de vezes, vendas), o log
+    /// compactado, um caixa novo recebendo tudo e um caixa que ficou muito
+    /// tempo sem rede (e mexeu na peça mais mexida, sem ver as outras)
+    /// voltando. Mede tamanho e tempos; confere que tudo fica igual e que o
+    /// conflito é achado. Roda à parte (demora):
+    /// `cargo test -p rustinho-nucleo --release -- --ignored volume --nocapture`
+    #[test]
+    #[ignore]
+    fn volume_do_historico() {
+        let (pecas, edicoes, quente, vendas_n) = (2000usize, 10usize, 3000usize, 500usize);
+        let pasta = std::env::temp_dir().join(format!("rustinho-volume-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let abrir = |n: &str| Banco::abrir(&pasta.join(n)).unwrap();
+        let tamanho = |b: &Banco, n: &str| -> f64 {
+            b.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+            std::fs::metadata(pasta.join(n)).unwrap().len() as f64 / 1_048_576.0
+        };
+        let linhas = |b: &Banco| -> (i64, i64) {
+            b.conn
+                .query_row("SELECT COUNT(*), COALESCE(SUM(compactada), 0) FROM alteracao", [], |l| {
+                    Ok((l.get(0)?, l.get(1)?))
+                })
+                .unwrap()
+        };
+        let mut a = abrir("a.db");
+        let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
+        usuarios::definir_gerente(&a.conn, &u, true).unwrap();
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Peça mais mexida".into();
+        f.custo = "10".into();
+        f.estoque_inicial = "100000".into();
+        let quente_id = produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+        // B recebe o começo e fica sem rede.
+        let mut b = abrir("b.db");
+        levar(&a, &mut b);
+        let t = Instant::now();
+        let mut ids = Vec::new();
+        a.conn.execute_batch("BEGIN").unwrap();
+        for i in 0..pecas {
+            let mut f = produtos::ficha_nova(&a.conn).unwrap();
+            f.nome = format!("Peça {i}");
+            f.custo = "10".into();
+            f.estoque_inicial = "50".into();
+            ids.push(produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap());
+        }
+        for e in 0..edicoes {
+            for id in &ids {
+                let mut f = produtos::ficha(&a.conn, id).unwrap();
+                f.observacoes = format!("edição {e}");
+                produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+            }
+        }
+        for e in 0..quente {
+            let mut f = produtos::ficha(&a.conn, &quente_id).unwrap();
+            f.observacoes = format!("quente {e}");
+            produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+        }
+        a.conn.execute_batch("COMMIT").unwrap();
+        caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa A", "0").unwrap();
+        for i in 0..vendas_n {
+            let e = vendas::VendaEntrada {
+                itens: vec![vendas::ItemEntrada {
+                    produto_id: ids[i % ids.len()].clone(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                }],
+                tabela: 1,
+                pagamentos: vec![vendas::PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "100".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            vendas::concluir(&a.conn, &a.dispositivo, &u, &e).unwrap();
+        }
+        let gerar = t.elapsed();
+        let (antes_linhas, _) = linhas(&a);
+        let antes_mb = tamanho(&a, "a.db");
+        let t = Instant::now();
+        let compactadas = compactar(&a.conn).unwrap();
+        let tempo_compactar = t.elapsed();
+        a.conn.execute_batch("VACUUM").unwrap();
+        let (depois_linhas, sem_dados) = linhas(&a);
+        let depois_mb = tamanho(&a, "a.db");
+        // B, sem rede, mexe na peça mais mexida (sem ver as 3000 de A).
+        let mut f = produtos::ficha(&b.conn, &quente_id).unwrap();
+        f.nome = "Mexida pelo caixa sem rede".into();
+        produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        // Caixa novo recebe tudo.
+        let mut c = abrir("c.db");
+        let t = Instant::now();
+        let recebidas = levar(&a, &mut c);
+        let tempo_novo = t.elapsed();
+        let c_mb = tamanho(&c, "c.db");
+        // B volta (recebe só o que falta, a partir do seu contador; aqui, tudo
+        // pelo id: o que ele já tem é pulado) e acha o conflito.
+        let t = Instant::now();
+        levar(&a, &mut b);
+        let tempo_atrasado = t.elapsed();
+        let t = Instant::now();
+        levar(&b, &mut a);
+        let tempo_volta = t.elapsed();
+        let conflitos_a = conflitos_abertos(&a.conn).unwrap();
+        // Tudo igual.
+        for x in [&b, &c] {
+            let n: i64 = x.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
+            assert_eq!(n as usize, pecas + 1);
+            let v: i64 = x.conn.query_row("SELECT COUNT(*) FROM venda WHERE tipo = 'venda'", [], |l| l.get(0)).unwrap();
+            assert_eq!(v as usize, vendas_n);
+            assert_eq!(produtos::ficha(&x.conn, &ids[0]).unwrap().observacoes, format!("edição {}", edicoes - 1));
+        }
+        assert_eq!(produtos::ficha(&c.conn, &quente_id).unwrap().observacoes, format!("quente {}", quente - 1));
+        assert!(conflitos_abertos(&b.conn).unwrap() >= 1, "o caixa que voltou acha o conflito");
+        assert!(conflitos_a >= 1, "e o principal também");
+        println!("\n=== Volume do histórico ===");
+        println!("peças: {pecas}, edições por peça: {edicoes}, peça mais mexida: {quente} vezes, vendas: {vendas_n}");
+        println!("gerar tudo no caixa A: {:.1} s", gerar.as_secs_f64());
+        println!("log antes de compactar: {antes_linhas} linhas, banco {antes_mb:.1} MB");
+        println!("compactar: {compactadas} versões ficaram sem dados em {:.2} s", tempo_compactar.as_secs_f64());
+        println!("log depois (VACUUM): {depois_linhas} linhas ({sem_dados} só esqueleto), banco {depois_mb:.1} MB");
+        let (esqueleto, com_dados): (f64, f64) = a
+            .conn
+            .query_row(
+                "SELECT AVG(CASE WHEN compactada = 1 THEN length(id) + length(tabela) + length(chave) + length(operacao)
+                                 + length(dispositivo) + length(quando) + COALESCE(length(base), 0) + 8 END),
+                        AVG(CASE WHEN compactada = 0 THEN length(id) + length(tabela) + length(chave) + length(operacao)
+                                 + length(dispositivo) + length(quando) + COALESCE(length(base), 0) + 8
+                                 + COALESCE(length(dados), 0) + COALESCE(length(historia), 0) END)
+                   FROM alteracao",
+                [],
+                |l| Ok((l.get::<_, Option<f64>>(0)?.unwrap_or(0.0), l.get::<_, Option<f64>>(1)?.unwrap_or(0.0))),
+            )
+            .unwrap();
+        println!("conteúdo médio: versão só esqueleto {esqueleto:.0} bytes; versão com dados {com_dados:.0} bytes (sem contar índices)");
+        println!(
+            "caixa novo recebe tudo: {recebidas} alterações em {:.1} s, banco {c_mb:.1} MB",
+            tempo_novo.as_secs_f64()
+        );
+        println!(
+            "caixa que ficou sem rede volta: {:.1} s (e manda a dele: {:.2} s)",
+            tempo_atrasado.as_secs_f64(),
+            tempo_volta.as_secs_f64()
+        );
+        println!("conflitos achados: B {}, A {conflitos_a}", conflitos_abertos(&b.conn).unwrap());
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     /// História: cresce até o limite e marca quando não chega ao começo.
@@ -2926,10 +3766,10 @@ mod testes {
     /// C-01: a vaga volta mesmo se a tarefa der pânico, e nunca passa do teto.
     #[test]
     fn vaga_volta_depois_de_panico() {
-        static CONTADOR: AtomicUsize = AtomicUsize::new(0);
-        let vagas: Vec<Vaga> = (0..CONEXOES_MAXIMAS).filter_map(|_| Vaga::pegar_de(&CONTADOR)).collect();
+        let contador = Arc::new(AtomicUsize::new(0));
+        let vagas: Vec<Vaga> = (0..CONEXOES_MAXIMAS).filter_map(|_| Vaga::pegar_de(&contador)).collect();
         assert_eq!(vagas.len(), CONEXOES_MAXIMAS);
-        assert!(Vaga::pegar_de(&CONTADOR).is_none(), "não passa do teto");
+        assert!(Vaga::pegar_de(&contador).is_none(), "não passa do teto");
         let mut vagas = vagas.into_iter();
         let uma = vagas.next().unwrap();
         let r = thread::spawn(move || {
@@ -2938,10 +3778,10 @@ mod testes {
         })
         .join();
         assert!(r.is_err());
-        let outra = Vaga::pegar_de(&CONTADOR).expect("a vaga voltou depois do pânico");
+        let outra = Vaga::pegar_de(&contador).expect("a vaga voltou depois do pânico");
         drop(outra);
         drop(vagas);
-        assert_eq!(CONTADOR.load(Ordering::SeqCst), 0);
+        assert_eq!(contador.load(Ordering::SeqCst), 0);
     }
 
     #[test]

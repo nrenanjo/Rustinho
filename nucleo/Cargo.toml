@@ -22,4 +22,7 @@ rars = { version = "0.11", default-features = false }
 rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs"] }
 
 [dev-dependencies]
+# Só nos testes: conectar de endereços diferentes (127.0.0.x) para testar o
+# limite por endereço do servidor da troca de dados.
+libc = "0.2"
 rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs", "encoders"] }
