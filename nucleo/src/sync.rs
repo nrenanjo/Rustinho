@@ -283,6 +283,15 @@ pub fn aplicar(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
     resultado
 }
 
+/// Hora (ms desde 1970) guardada no começo de um UUID v7.
+fn ms_do_id(id: &str) -> Option<i64> {
+    let hex: String = id.chars().filter(|c| *c != '-').take(12).collect();
+    if hex.len() < 12 {
+        return None;
+    }
+    i64::from_str_radix(&hex, 16).ok()
+}
+
 /// Quantos registros apontam para outro que ainda não chegou (ou foi
 /// apagado). Normalmente é zero depois de trocar tudo com os outros caixas.
 pub fn pendencias(conn: &Connection) -> Resultado<usize> {
@@ -344,7 +353,13 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
                 // Já temos uma alteração mais nova deste registro. Se ela foi
                 // feita aqui sem ver esta, os dois caixas mexeram juntos:
                 // fica anotado (a mais nova vale).
-                if de_quem == &meu && a.tabela != "auditoria" {
+                // (Só quando as duas foram feitas perto uma da outra: versões
+                // velhas que voltam depois de uma restauração não contam.)
+                let perto = match (ms_do_id(u), ms_do_id(&a.id)) {
+                    (Some(x), Some(y)) => (x - y).abs() < 30 * 60 * 1000,
+                    _ => false,
+                };
+                if de_quem == &meu && a.tabela != "auditoria" && perto {
                     tx.execute(
                         "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1026,9 +1041,12 @@ mod testes {
                 Ok((l.get(0)?, l.get(1)?, l.get(2)?))
             })
             .unwrap();
+        // Feita 1 segundo antes da nossa, em outro caixa.
+        let ms = ms_do_id(&id_ultima).unwrap() - 1000;
+        let h = format!("{ms:012x}");
         let velha = Alteracao {
             seq: 1,
-            id: "00000000-0000-7000-8000-000000000000".into(),
+            id: format!("{}-{}-7000-8000-000000000000", &h[..8], &h[8..12]),
             tabela: "usuario".into(),
             chave: chave_u,
             operacao: "gravar".into(),
@@ -1037,8 +1055,15 @@ mod testes {
             quando: tempo::agora(),
         };
         assert!(velha.id < id_ultima);
+        let velha_clone = velha.clone();
         aplicar(&mut b.conn, &[velha]).unwrap();
         assert_eq!(usuarios::buscar(&b.conn, &u.id).unwrap().nome, "Maria C");
+        let conflitos: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_conflito", [], |l| l.get(0)).unwrap();
+        assert_eq!(conflitos, 1);
+        // Uma versão bem velha (de antes de uma restauração) não é conflito.
+        let mut antiga = velha_clone;
+        antiga.id = "00000000-0000-7000-8000-000000000001".into();
+        aplicar(&mut b.conn, &[antiga]).unwrap();
         let conflitos: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_conflito", [], |l| l.get(0)).unwrap();
         assert_eq!(conflitos, 1);
         assert_eq!(pendencias(&b.conn).unwrap(), 0);
