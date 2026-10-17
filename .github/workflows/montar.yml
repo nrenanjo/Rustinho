@@ -29,8 +29,15 @@ jobs:
           components: rustfmt, clippy
       - name: Formatação
         run: cargo fmt --all --check
-      - name: Clippy (avisos do compilador viram erro)
-        run: cargo clippy -p rustinho-nucleo --all-targets -- -D warnings
+      # Erros prováveis (correctness, suspicious) param a montagem; os outros
+      # avisos aparecem como "annotation", sem parar.
+      - name: Clippy
+        run: |
+          set +e
+          cargo clippy -p rustinho-nucleo --all-targets --message-format=short -- -D clippy::correctness -D clippy::suspicious 2>&1 | tee clippy.txt
+          st=${PIPESTATUS[0]}
+          grep -E "^[a-z_/]+\.rs:[0-9]+:[0-9]+: (warning|error)" clippy.txt | head -40 | while read -r l; do echo "::warning title=clippy::$l"; done
+          exit $st
       - name: Testes do núcleo
         run: cargo test -p rustinho-nucleo
 

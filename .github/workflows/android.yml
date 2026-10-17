@@ -198,10 +198,22 @@ jobs:
           done
 
   # Abre o APK num Android de mentira (emulador) e tira fotos da tela.
-  # As fotos e o registro vão para o ramo "testes-android".
+  # As fotos e o registro vão para o ramo "testes-android" (64 bits) e
+  # "testes-android-32bits" (32 bits, desenho pela CPU; teste mais curto).
   testar:
     needs: apk
     if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: "64bits"
+            sufixo: ""
+            curto: ""
+          - nome: "32bits"
+            sufixo: "-32bits"
+            curto: "1"
+    name: testar (${{ matrix.nome }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -210,7 +222,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Rustinho-Android
+          name: Rustinho-Android${{ matrix.sufixo }}
           path: saida
       - name: Liberar o KVM
         run: |
@@ -221,6 +233,8 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         env:
           TOKEN_FOTOS: ${{ github.token }}
+          RAMO_FOTOS: testes-android${{ matrix.sufixo }}
+          CURTO: ${{ matrix.curto }}
         with:
           api-level: 34
           arch: x86_64
@@ -233,10 +247,10 @@ jobs:
         if: always()
         run: |
           mkdir -p /tmp/r && cp -r fotos /tmp/r/ 2>/dev/null || true
-          cd /tmp/r && git init -q -b testes-android
+          cd /tmp/r && git init -q -b testes-android${{ matrix.sufixo }}
           git config user.name "montagem" && git config user.email "montagem@users.noreply.github.com"
           git add -A && git commit -qm "Fotos do teste ${GITHUB_SHA::7}" || exit 0
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" testes-android
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" testes-android${{ matrix.sufixo }}
       - name: Avisos do registro
         if: always()
         run: |

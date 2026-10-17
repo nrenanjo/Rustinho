@@ -8,10 +8,10 @@ mkdir -p fotos
 guardar() {
     [ -n "$TOKEN_FOTOS" ] || return 0
     rm -rf /tmp/r && mkdir -p /tmp/r && cp -r fotos /tmp/r/
-    (cd /tmp/r && git init -q -b testes-android && git config user.name montagem &&
+    (cd /tmp/r && git init -q -b "${RAMO_FOTOS:-testes-android}" && git config user.name montagem &&
      git config user.email montagem@users.noreply.github.com && git add -A &&
      git commit -qm "Fotos do teste ${GITHUB_SHA::7} ($1)" &&
-     git push -q -f "https://x-access-token:$TOKEN_FOTOS@github.com/$GITHUB_REPOSITORY.git" testes-android) || true
+     git push -q -f "https://x-access-token:$TOKEN_FOTOS@github.com/$GITHUB_REPOSITORY.git" "${RAMO_FOTOS:-testes-android}") || true
 }
 APK=$(ls saida/*.apk | head -1)
 adb install -r "$APK" 2>&1 | tee fotos/instalar.txt
@@ -41,6 +41,11 @@ tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 foto 02-inicio 6
+# Modo escuro: a lua, ao lado de "Trocar usuário". No teste de 32 bits fica
+# escuro até o fim; no de 64, volta para o sol.
+adb shell input tap 187 472
+foto 02b-escuro 3
+[ -n "$CURTO" ] || { adb shell input tap 91 472; sleep 2; }
 adb shell input swipe 500 1800 500 600 400
 foto 03-inicio-rolado 3
 
@@ -51,9 +56,12 @@ abrir() {
     sleep 15
     texto "1234"; tecla KEYCODE_ENTER
 }
-for t in TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro \
-         TelaPeca TelaPessoa TelaPessoas TelaReceber TelaOrcamentos TelaOrdens TelaOrdem TelaEstoque \
-         TelaEtiquetas TelaTrocas TelaUsuarios TelaFiscal; do
+TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro \
+       TelaPeca TelaPessoa TelaPessoas TelaReceber TelaOrcamentos TelaOrdens TelaOrdem TelaEstoque \
+       TelaEtiquetas TelaTrocas TelaUsuarios TelaFiscal"
+# Teste curto (32 bits, mais lento no emulador): só algumas telas.
+[ -n "$CURTO" ] && TELAS="TelaVender TelaConfiguracoes TelaPeca TelaFinanceiro"
+for t in $TELAS; do
     abrir $t
     foto "10-$t" 5
     adb shell input swipe 540 1700 540 700 500
