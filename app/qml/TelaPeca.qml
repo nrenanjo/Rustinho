@@ -405,7 +405,7 @@ FocusScope {
                     return ""
                 if (tela.nova)
                     return "Preencha o nome e o preço. O resto pode ficar para depois."
-                let s = "Código " + tela.ficha.codigo
+                let s = "Código " + (tela.ficha.codigo || "a definir")
                 if (tela.ficha.atualizadoEm) {
                     const nova = tela.ficha.atualizadoEm === tela.ficha.criadoEm
                     s += (nova ? " · cadastrada" : " · alterada")
@@ -499,6 +499,10 @@ FocusScope {
                             Campo {
                                 id: codigo
                                 rotulo: "Código interno"
+                                // Vazio: o Rustinho dá o código ao salvar, da faixa deste caixa.
+                                dica: !tela.ficha ? "" : tela.nova
+                                      ? (tela.ficha.codigoPrevisto ? "Automático: " + tela.ficha.codigoPrevisto : "Automático")
+                                      : "A definir"
                                 maximo: 60
                                 Layout.preferredWidth: 130
                                 onEditado: tela.marcarAlterado()
@@ -520,6 +524,16 @@ FocusScope {
                                 Layout.fillWidth: true
                                 onEditado: tela.marcarAlterado()
                             }
+                        }
+                        // Código a definir, ou código que também leva a outra peça.
+                        Text {
+                            visible: !!tela.ficha && !!tela.ficha.codigoAviso
+                            text: tela.ficha ? tela.ficha.codigoAviso : ""
+                            color: tela.ficha && tela.ficha.codigo && tela.ficha.codigoAviso ? Tema.vermelho : Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
                         }
                         Linha {
                             spacing: 12

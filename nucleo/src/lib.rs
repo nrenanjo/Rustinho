@@ -23,6 +23,7 @@ pub mod encomendas;
 pub mod erro;
 pub mod estoque;
 pub mod etiquetas;
+pub mod faixas;
 pub mod financeiro;
 pub mod fiscal;
 pub mod gtin;

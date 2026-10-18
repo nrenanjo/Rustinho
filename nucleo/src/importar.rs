@@ -488,7 +488,7 @@ fn salvar_peca(
         Ok(id) => Ok(id),
         Err(Erro::Validacao { campo: Some(c), .. }) if c == "codigoBarras" || c == "codigo" => {
             f.codigo_barras = String::new();
-            f.codigo = produtos::proximo_codigo(conn)?;
+            f.codigo = String::new();
             produtos::salvar(conn, dispositivo, usuario_id, &f)
         }
         Err(e) => Err(e),
@@ -515,6 +515,8 @@ mod testes {
         let b = Banco::em_memoria().unwrap();
         let (c, d) = (&b.conn, b.dispositivo.as_str());
         let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        // Loja configurada (como na primeira tela): este caixa tem a faixa 1 a 99.999.
+        crate::faixas::comecar_loja(c).unwrap();
         let pasta = std::env::temp_dir().join(format!("rustinho-importar-{}", tempo::novo_id()));
         std::fs::create_dir_all(pasta.join("sub")).unwrap();
         std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();

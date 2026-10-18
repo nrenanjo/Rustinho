@@ -19,6 +19,8 @@ FocusScope {
     property bool verGerente: false
     property var gerente: null       // pílula Gerente: { acoes, usuarios }
     property var conflitos: []       // pílula Gerente: diferenças entre caixas
+    property var codigos: null       // pílula Gerente: faixas e códigos repetidos
+    property bool confirmarAssumir: false
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
     Component.onDestruction: Api.chamar("gerente_encerrar")
 
@@ -82,7 +84,27 @@ FocusScope {
         gerente = r.ok ? r.dados : null
         const k = Api.chamar("conflitos_listar")
         conflitos = k.ok ? k.dados : []
+        const c = Api.chamar("codigos_situacao")
+        codigos = c.ok ? c.dados : null
+        confirmarAssumir = false
     }
+
+    function milhar(n) {
+        return Number(n).toLocaleString(Qt.locale("pt_BR"), "f", 0)
+    }
+
+    // Códigos das peças (pílula Gerente).
+    function comandoCodigos(comando, dados, mensagem) {
+        const r = Api.chamar(comando, dados || {})
+        if (r.ok) {
+            codigos = r.dados
+            janela.avisar(mensagem, "ok")
+        } else {
+            janela.avisar(r.erro, "erro")
+        }
+        confirmarAssumir = false
+    }
+    readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length : 0
 
     // Conflito entre caixas: usar a versão que perdeu, ou deixar como está.
     function resolverConflito(c, usar) {
@@ -950,6 +972,174 @@ FocusScope {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                Faixa {
+                    visible: tela.secao === "gerente" && !!tela.codigos
+                    titulo: "Códigos das peças"
+                    subtitulo: tela.codigosParaVer > 0 ? tela.codigosParaVer + " para ver" : "nenhum repetido"
+                    color: tela.codigosParaVer > 0 ? Tema.rosa : Tema.pergaminho
+                    Layout.fillWidth: true
+                    Nota {
+                        text: "Cada caixa dá códigos só da faixa de números dele, e as faixas são dadas por um caixa só"
+                              + (tela.codigos && tela.codigos.distribuidor ? " (" + tela.codigos.distribuidor.nome + ")" : "")
+                              + ". Assim dois caixas nunca dão o mesmo código. Nenhum código que já existe é trocado sozinho."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: {
+                            const c = tela.codigos
+                            if (!c)
+                                return ""
+                            const livres = c.minhas.filter(f => f.restantes > 0)
+                            if (livres.length === 0)
+                                return c.distribuidor
+                                       ? "Este caixa ainda não tem faixa (ou a dele acabou): as peças novas ficam com código a definir até a troca de dados com " + c.distribuidor.nome + "."
+                                       : "Ainda não há caixa distribuindo as faixas: as peças novas ficam com código a definir."
+                            return "Este caixa: " + livres.map(f => tela.milhar(f.inicio) + " a " + tela.milhar(f.fim)).join(", ")
+                                   + " · próximo código " + tela.milhar(livres[0].proximo) + " · restam " + tela.milhar(c.restantes)
+                        }
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        visible: !!tela.codigos && tela.codigos.pendentes > 0
+                        text: tela.codigos ? tela.codigos.pendentes + (tela.codigos.pendentes === 1 ? " peça está" : " peças estão")
+                                             + " com código a definir (" + tela.codigos.pendentesDeste + " deste caixa). Cada caixa dá o código das dele quando recebe a faixa." : ""
+                        color: Tema.tintaSuave
+                        font.family: Tema.texto
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: !!tela.codigos && tela.codigos.pendentes > tela.codigos.pendentesDeste && tela.codigos.restantes > 0
+                        text: "Dar código deste caixa a todas as peças a definir"
+                        tipo: "secundario"
+                        onClicked: tela.comandoCodigos("codigos_definir_pendentes", {}, "As peças a definir receberam código deste caixa.")
+                    }
+                    // Faixas de dois caixas que se cruzam (lojas juntadas, dois distribuidores).
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.cruzadas : []
+                        delegate: Text {
+                            required property var modelData
+                            text: "Os códigos de " + tela.milhar(modelData.inicio) + " a " + tela.milhar(modelData.fim) + " são de dois caixas ("
+                                  + modelData.caixas.join(" e ") + "). Nenhum caixa dá código novo nesse pedaço; as peças que já têm código dele ficam como estão."
+                            color: Tema.vermelho
+                            font.family: Tema.texto
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Nota {
+                        visible: !!tela.codigos && tela.codigos.repetidos.length > 0
+                        text: "Códigos que levam a mais de uma peça. O leitor e a busca perguntam qual é, e a etiqueta dessas peças não sai. "
+                              + "Para resolver, dê um código novo a uma delas: o código de antes fica guardado (a etiqueta velha ainda acha a peça e o leitor pergunta qual é). "
+                              + "Troque também a etiqueta na prateleira."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.repetidos.slice(0, 50) : []
+                        delegate: Rectangle {
+                            id: grupo
+                            required property var modelData
+                            color: Tema.papel
+                            radius: Tema.raioCampo
+                            Layout.fillWidth: true
+                            implicitHeight: colunaGrupo.implicitHeight + 20
+                            ColumnLayout {
+                                id: colunaGrupo
+                                x: 14; y: 10
+                                width: parent.width - 28
+                                spacing: 4
+                                Text {
+                                    text: (grupo.modelData.tipo === "barras" ? "Código de barras " : "Código ") + grupo.modelData.codigo
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    Layout.fillWidth: true
+                                }
+                                Repeater {
+                                    model: grupo.modelData.pecas
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        spacing: 10
+                                        Layout.fillWidth: true
+                                        Text {
+                                            text: modelData.nome + (modelData.antigo ? " (era o código dela; agora é " + modelData.codigo + ")" : "")
+                                            color: Tema.tinta
+                                            font.family: Tema.texto
+                                            font.pixelSize: 14
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+                                        Botao {
+                                            text: "Abrir"
+                                            tipo: "discreto"
+                                            onClicked: tela.janela.abrir("TelaPeca", { produtoId: modelData.id })
+                                        }
+                                        Botao {
+                                            visible: grupo.modelData.tipo === "interno" && !modelData.antigo
+                                            text: "Dar código novo"
+                                            tipo: "secundario"
+                                            onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
+                                                                           "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text {
+                        visible: !!tela.codigos && !!tela.codigos.inventario
+                        text: {
+                            const i = tela.codigos ? tela.codigos.inventario : null
+                            if (!i)
+                                return ""
+                            return "Quando as faixas começaram: " + tela.milhar(i.pecas) + " peças; maior código de números " + tela.milhar(i.maior)
+                                   + "; " + i.acimaDoLimite + " acima de 99.999; " + i.comLetras + " com letras; "
+                                   + i.foraDoPadrao + " com zero na frente ou muito longos; " + i.repetidos + " códigos repetidos ("
+                                   + i.pecasRepetidas + " peças). Nada foi renumerado."
+                        }
+                        color: Tema.tintaSuave
+                        font.family: Tema.texto
+                        font.pixelSize: 13
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: !!tela.codigos && !(tela.codigos.distribuidor && tela.codigos.distribuidor.esteCaixa) && !tela.confirmarAssumir
+                        text: "Este caixa passa a distribuir as faixas"
+                        tipo: "secundario"
+                        onClicked: tela.confirmarAssumir = true
+                    }
+                    Nota {
+                        visible: tela.confirmarAssumir
+                        text: "Só faça isso se o caixa que distribui as faixas não vai voltar (computador quebrado, trocado). "
+                              + "Este caixa pula 20 faixas por segurança. Se o outro voltar, ele para de distribuir quando receber esta mudança."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Linha {
+                        visible: tela.confirmarAssumir
+                        spacing: 12
+                        Botao {
+                            text: "Confirmar"
+                            onClicked: tela.comandoCodigos("codigos_assumir", {}, "Este caixa passou a distribuir as faixas de códigos.")
+                        }
+                        Botao {
+                            text: "Cancelar"
+                            tipo: "secundario"
+                            onClicked: tela.confirmarAssumir = false
                         }
                     }
                 }

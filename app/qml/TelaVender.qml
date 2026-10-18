@@ -103,7 +103,15 @@ FocusScope {
         Qt.callLater(() => listaCarrinho.positionViewAtIndex(itemAtual, ListView.Contain))
     }
 
-    // Enter na busca: código exato (leitor) entra direto; senão, o resultado escolhido.
+    // Texto da lista que está na tela (a pessoa já viu) e o código repetido
+    // já avisado.
+    property string resultadosDe: ""
+    property string avisadoRepetido: ""
+
+    // Enter na busca: código exato de uma peça só (leitor) entra direto. Senão,
+    // entra a peça marcada na lista, mas só se a lista deste texto já estava na
+    // tela; se não estava, mostra a lista e espera o próximo Enter. Código de
+    // mais de uma peça: mostra as peças e avisa; nunca escolhe sozinho.
     function confirmarBusca() {
         const p = separarQuantidade(busca.texto)
         if (p.texto === "")
@@ -114,25 +122,35 @@ FocusScope {
             limparBusca()
             return
         }
-        espera.stop()
-        buscar()
-        if (resultados.length > 0 && listaResultados.currentIndex >= 0) {
+        if (r.ok && r.dados.repetidos > 1 && avisadoRepetido !== p.texto) {
+            espera.stop()
+            buscar()
+            avisadoRepetido = p.texto
+            janela.avisar("O código “" + p.texto + "” é de " + r.dados.repetidos + " peças. Escolha na lista qual é.", "erro")
+            return
+        }
+        if (resultadosDe === p.texto && resultados.length > 0 && listaResultados.currentIndex >= 0) {
             adicionar(resultados[listaResultados.currentIndex].id, p.quantidade)
             limparBusca()
-        } else {
-            janela.avisar("Nenhuma peça com “" + p.texto + "”.", "erro")
+            return
         }
+        espera.stop()
+        buscar()
+        if (resultados.length === 0)
+            janela.avisar("Nenhuma peça com “" + p.texto + "”.", "erro")
     }
 
     function buscar() {
         const p = separarQuantidade(busca.texto)
         if (p.texto.length < 2) {
             resultados = []
+            resultadosDe = ""
             return
         }
         const r = Api.chamar("produtos_buscar", { texto: p.texto, inativas: false, limite: 30 })
         if (r.ok) {
             resultados = r.dados.itens
+            resultadosDe = p.texto
             listaResultados.currentIndex = resultados.length > 0 ? 0 : -1
         }
     }
@@ -140,6 +158,8 @@ FocusScope {
     function limparBusca() {
         busca.texto = ""
         resultados = []
+        resultadosDe = ""
+        avisadoRepetido = ""
         busca.focar()
     }
 

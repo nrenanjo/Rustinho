@@ -22,6 +22,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0010_gerente.sql"),
     include_str!("migracoes/0011_backup_conflitos.sql"),
     include_str!("migracoes/0012_historia_das_alteracoes.sql"),
+    include_str!("migracoes/0013_faixas_de_codigo.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -64,6 +65,9 @@ impl Banco {
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
         crate::backup::limpar_chave_antiga(&conn)?;
+        // Códigos das peças: arquivo ao lado do banco, distribuidor e
+        // peças com código a definir (veja `faixas`).
+        crate::faixas::preparar(&mut conn)?;
         Ok(Banco { conn, dispositivo, caminho })
     }
 }
@@ -100,6 +104,19 @@ pub(crate) fn migrar(conn: &mut Connection) -> Resultado<()> {
         )));
     }
     for (i, sql) in MIGRACOES.iter().enumerate().skip(versao) {
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", (i + 1) as i64)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+/// Só nos testes: leva a estrutura até a versão `ate` (para simular um
+/// banco de uma versão antiga do Rustinho).
+#[cfg(test)]
+pub(crate) fn migrar_ate(conn: &mut Connection, ate: usize) -> Resultado<()> {
+    for (i, sql) in MIGRACOES.iter().enumerate().take(ate) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
         tx.pragma_update(None, "user_version", (i + 1) as i64)?;

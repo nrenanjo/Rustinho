@@ -86,7 +86,9 @@ pub fn buscar(
                 (SELECT COALESCE(SUM(quantidade), 0) FROM estoque_movimento WHERE produto_id = p.id),
                 CASE WHEN ?1 <> '' AND (instr(p.codigos, ' ' || ?1 || ' ') > 0
                                OR EXISTS (SELECT 1 FROM produto_fornecedor f
-                                           WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)) THEN 0
+                                           WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)
+                               OR EXISTS (SELECT 1 FROM produto_codigo_antigo a
+                                           WHERE a.produto_id = p.id AND a.codigo_compacto = ?1)) THEN 0
                      WHEN ?2 <> '' AND p.busca LIKE ?2 || '%' THEN 1
                      ELSE 2 END AS ordem,
                 p.busca, p.codigo_barras, {}, p.tipo = 'servico'
@@ -127,10 +129,13 @@ pub fn buscar(
         grupo.push(format!("({condicao})"));
     }
     if !grupo.is_empty() {
-        // Ou acha pelas palavras, ou pelo código que o fornecedor usa.
+        // Ou acha pelas palavras, ou pelo código que o fornecedor usa, ou
+        // por um código que a peça já teve (etiqueta velha).
         sql.push_str(&format!(
-            " AND (({}) OR (?1 <> '' AND EXISTS (SELECT 1 FROM produto_fornecedor f
-                     WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)))",
+            " AND (({}) OR (?1 <> '' AND (EXISTS (SELECT 1 FROM produto_fornecedor f
+                     WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)
+                  OR EXISTS (SELECT 1 FROM produto_codigo_antigo a
+                     WHERE a.produto_id = p.id AND a.codigo_compacto = ?1))))",
             grupo.join(" AND ")
         ));
     }
@@ -225,6 +230,12 @@ fn achou_por(conn: &Connection, item: &ProdutoResumo, codigo_barras: &str, compa
         let curto: String = nome.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
         candidatos.push((codigo, format!("Fornecedor · {curto}")));
     }
+    let mut c =
+        conn.prepare_cached("SELECT codigo_compacto, codigo FROM produto_codigo_antigo WHERE produto_id = ?1")?;
+    for linha in c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
+        let (compacto, _) = linha?;
+        candidatos.push((compacto, "Cód. antigo".to_string()));
+    }
     let igual = candidatos.iter().find(|(codigo, _)| codigo == compacto);
     let comeca = || candidatos.iter().find(|(codigo, _)| !codigo.is_empty() && codigo.starts_with(compacto));
     Ok(igual.or_else(comeca).map(|(_, nome)| nome.clone()).unwrap_or_default())
@@ -288,6 +299,16 @@ fn resumo(carros: &[Carro]) -> String {
         partes.push(format!("+{}", carros.len() - MOSTRAR));
     }
     partes.join(" · ")
+}
+
+/// Leitor de código de barras (ou código digitado e Enter): as peças com
+/// este código exato (interno, de barras, original, similar, do fornecedor
+/// ou antigo). Mais de uma = a tela pergunta qual; nunca escolhe sozinha.
+pub fn pelo_codigo_exato(conn: &Connection, codigo: &str) -> Resultado<Vec<ProdutoResumo>> {
+    if texto::compactar(codigo).is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(buscar(conn, codigo, false, 50)?.into_iter().filter(|p| p.codigo_exato).collect())
 }
 
 /// Quantas peças existem.

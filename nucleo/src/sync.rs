@@ -148,6 +148,10 @@ pub const TABELAS: &[&str] = &[
     "produto_aplicacao",
     "produto_equivalente",
     "produto_fornecedor",
+    // Códigos que uma peça já teve.
+    "produto_codigo_antigo",
+    // Faixas de códigos das peças de cada caixa (veja `faixas`).
+    "faixa_codigo",
     "estoque_movimento",
     "pessoa",
     "pessoa_veiculo",
@@ -204,6 +208,8 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     // Parte pública da chave do backup (a secreta só vai trancada, no usuário).
     "backup_publica",
     "gerente_livres",
+    // O caixa que dá as faixas de códigos das peças.
+    "codigos_distribuidor",
 ];
 
 // ---------------------------------------------------------------------------
@@ -337,32 +343,85 @@ pub struct Alteracao {
     pub compactada: bool,
 }
 
+const COLUNAS_ALTERACAO: &str =
+    "seq, id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada";
+
+fn ler_alteracao(l: &rusqlite::Row) -> rusqlite::Result<Alteracao> {
+    Ok(Alteracao {
+        seq: l.get(0)?,
+        id: l.get(1)?,
+        tabela: l.get(2)?,
+        chave: l.get(3)?,
+        operacao: l.get(4)?,
+        dados: l.get(5)?,
+        dispositivo: l.get(6)?,
+        quando: l.get(7)?,
+        base: l.get(8)?,
+        ordem: l.get(9)?,
+        historia: l.get(10)?,
+        compactada: l.get::<_, i64>(11)? != 0,
+    })
+}
+
 /// Alterações deste banco depois da número `desde`.
 pub fn alteracoes_desde(conn: &Connection, desde: i64, limite: i64) -> Resultado<(Vec<Alteracao>, bool)> {
-    let mut c = conn.prepare_cached(
-        "SELECT seq, id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada
-           FROM alteracao WHERE seq > ?1 ORDER BY seq LIMIT ?2",
-    )?;
-    let lista: Vec<Alteracao> = c
-        .query_map(params![desde, limite + 1], |l| {
-            Ok(Alteracao {
-                seq: l.get(0)?,
-                id: l.get(1)?,
-                tabela: l.get(2)?,
-                chave: l.get(3)?,
-                operacao: l.get(4)?,
-                dados: l.get(5)?,
-                dispositivo: l.get(6)?,
-                quando: l.get(7)?,
-                base: l.get(8)?,
-                ordem: l.get(9)?,
-                historia: l.get(10)?,
-                compactada: l.get::<_, i64>(11)? != 0,
-            })
-        })?
-        .collect::<Result<_, _>>()?;
+    let mut c = conn
+        .prepare_cached(&format!("SELECT {COLUNAS_ALTERACAO} FROM alteracao WHERE seq > ?1 ORDER BY seq LIMIT ?2"))?;
+    let lista: Vec<Alteracao> = c.query_map(params![desde, limite + 1], ler_alteracao)?.collect::<Result<_, _>>()?;
     let tem_mais = lista.len() as i64 > limite;
     Ok((lista.into_iter().take(limite as usize).collect(), tem_mais))
+}
+
+/// Resposta do distribuidor a um pedido de faixa de códigos das peças: as
+/// alterações do log com as faixas (as mesmas que ele gravou), ou o motivo
+/// da recusa.
+pub fn responder_faixa(conn: &mut Connection, pedido: &Value) -> Resultado<Value> {
+    let eu = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    let dono = pedido["dispositivo"].as_str().unwrap_or_default();
+    let geracao_dono = pedido["geracao"].as_str().unwrap_or_default();
+    let nome_dono = pedido["nome"].as_str().unwrap_or_default();
+    let tenho: Vec<i64> = pedido["tenho"]
+        .as_array()
+        .map(|l| l.iter().filter_map(|v| v.as_i64()).take(10_000).collect())
+        .unwrap_or_default();
+    Ok(match crate::faixas::atender_pedido(conn, dono, geracao_dono, nome_dono, &tenho) {
+        Ok(chaves) => json!({ "protocolo": PROTOCOLO, "dispositivo": eu,
+                              "alteracoes": alteracoes_das_faixas(conn, &chaves)? }),
+        Err(Erro::Validacao { mensagem, .. }) => {
+            json!({ "protocolo": PROTOCOLO, "dispositivo": eu, "recusado": mensagem })
+        }
+        Err(e) => return Err(e),
+    })
+}
+
+/// O caixa que pediu grava as faixas que vieram (como alterações do log,
+/// com o mesmo id). Devolve quantas eram novas.
+pub fn gravar_faixa_recebida(conn: &mut Connection, resposta: &Value) -> Resultado<usize> {
+    if resposta["protocolo"].as_i64() != Some(PROTOCOLO) {
+        return Err(Erro::validacao(PROTOCOLO_DIFERENTE));
+    }
+    if let Some(m) = resposta["recusado"].as_str() {
+        return Err(Erro::validacao(m));
+    }
+    let lista: Vec<Alteracao> = serde_json::from_value(resposta["alteracoes"].clone())?;
+    let lista: Vec<Alteracao> = lista.into_iter().filter(|x| x.tabela == "faixa_codigo").collect();
+    aplicar(conn, &lista)
+}
+
+/// As alterações (com dados) das faixas de códigos pedidas, para a
+/// resposta do pedido de faixa.
+fn alteracoes_das_faixas(conn: &Connection, chaves: &[(i64, String, String)]) -> Resultado<Vec<Alteracao>> {
+    let mut c = conn.prepare_cached(&format!(
+        "SELECT {COLUNAS_ALTERACAO} FROM alteracao
+          WHERE tabela = 'faixa_codigo' AND chave = json_array(?1, ?2, ?3) AND compactada = 0 ORDER BY seq"
+    ))?;
+    let mut lista = Vec::new();
+    for (inicio, dono, geracao) in chaves {
+        for a in c.query_map(params![inicio, dono, geracao], ler_alteracao)? {
+            lista.push(a?);
+        }
+    }
+    Ok(lista)
 }
 
 fn para_sql(v: &Value) -> SqlValor {
@@ -1173,7 +1232,13 @@ const PODE_USAR: &[&str] = &[
 
 fn nome_da_tabela(t: &str) -> &'static str {
     match t {
-        "produto" | "produto_preco" | "produto_aplicacao" | "produto_equivalente" | "produto_fornecedor" => "Peça",
+        "produto"
+        | "produto_preco"
+        | "produto_aplicacao"
+        | "produto_equivalente"
+        | "produto_fornecedor"
+        | "produto_codigo_antigo" => "Peça",
+        "faixa_codigo" => "Faixa de códigos das peças",
         "pessoa" | "pessoa_veiculo" => "Cliente ou fornecedor",
         "usuario" => "Usuário",
         "config" => "Configuração da loja",
@@ -1269,7 +1334,7 @@ fn valor_curto(v: Option<&Value>, campo: &str) -> String {
 }
 
 /// Nome de um caixa para a tela ("este caixa" para o próprio).
-fn nome_do_caixa(conn: &Connection, dispositivo: &str) -> Resultado<String> {
+pub(crate) fn nome_do_caixa(conn: &Connection, dispositivo: &str) -> Resultado<String> {
     if dispositivo.is_empty() {
         return Ok(String::new());
     }
@@ -1909,18 +1974,24 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
     fluxo.set_read_timeout(Some(PRAZO_DO_PEDIDO)).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-    let conn = abrir_conexao(caminho)?;
+    let mut conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
     if !a.ligado || a.senha.is_empty() {
         return Ok(());
     }
     let k = Chaves::de(&conn, &a.senha)?;
     let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
-    if pedido["tipo"] != "puxar" {
+    if pedido["tipo"] != "puxar" && pedido["tipo"] != "faixa" {
         return Ok(());
     }
     if pedido["protocolo"].as_i64() != Some(PROTOCOLO) {
         return Err(Erro::validacao(PROTOCOLO_DIFERENTE));
+    }
+    // Pedido de faixa de códigos das peças: só o distribuidor atende, numa
+    // gravação só (veja `faixas::atender_pedido`).
+    if pedido["tipo"] == "faixa" {
+        let resposta = responder_faixa(&mut conn, &pedido)?;
+        return enviar(&mut fluxo, &k, &resposta);
     }
     // Quem pediu também vira um par conhecido (com o endereço de onde veio).
     if let (Some(d), Ok(origem)) = (pedido["dispositivo"].as_str(), fluxo.peer_addr()) {
@@ -1987,6 +2058,8 @@ pub fn depois_de_restaurar(conn: &Connection, seq_anterior: i64) -> Resultado<()
         [seq_anterior],
     )?;
     config::gravar(conn, "sync_geracao", &tempo::novo_id())?;
+    // Códigos das peças: geração nova (a faixa de antes não é mais usada).
+    crate::faixas::depois_de_restaurar(conn)?;
     Ok(())
 }
 
@@ -2126,13 +2199,45 @@ fn puxar_ate(
             break;
         }
     }
+    // Códigos das peças: depois de receber tudo do caixa que distribui as
+    // faixas (assim este caixa já conhece todos os códigos que ele conhece),
+    // pede a faixa se não tem ou se está acabando (veja `faixas`).
+    if !parar.is_some_and(|p| p.load(Ordering::SeqCst))
+        && crate::faixas::distribuidor(&conn)?.as_deref() == Some(dispositivo.as_str())
+        && crate::faixas::precisa(&conn)?
+    {
+        match pedir_faixa(&mut conn, &k, &alvo) {
+            Ok(n) => total += n,
+            Err(e) => crate::registro::anotar(&format!("troca de dados: pedido de faixa de códigos: {e}")),
+        }
+    }
     // Depois de tudo: algum registro ficou apontando para outro que não veio?
     registrar_referencias(&conn)?;
     if total > 0 {
         crate::usuarios::resolver_nomes_repetidos(&conn)?;
         verificar_depois(&conn)?;
     }
+    // Peças deste caixa com código a definir recebem código da faixa.
+    if let Err(e) = crate::faixas::manter(&mut conn) {
+        crate::registro::anotar(&format!("códigos das peças: {e}"));
+    }
     Ok((dispositivo, total))
+}
+
+/// Pede ao distribuidor uma faixa de códigos das peças. A faixa chega como
+/// uma alteração do log (com o mesmo id que o distribuidor gravou) e fica
+/// gravada aqui antes de qualquer código dela ser dado. Devolve quantas
+/// alterações eram novas.
+fn pedir_faixa(conn: &mut Connection, k: &Chaves, alvo: &SocketAddr) -> Resultado<usize> {
+    let mut pedido = crate::faixas::pedido(conn)?;
+    pedido["tipo"] = json!("faixa");
+    pedido["protocolo"] = json!(PROTOCOLO);
+    let mut fluxo = TcpStream::connect_timeout(alvo, Duration::from_secs(3)).map_err(rede)?;
+    fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
+    enviar(&mut fluxo, k, &pedido)?;
+    let resposta = receber(&mut fluxo, k, TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
+    gravar_faixa_recebida(conn, &resposta)
 }
 
 /// O motor da sincronização: três tarefas em segundo plano (servidor,
@@ -2369,11 +2474,22 @@ impl Motor {
                     if parar.load(Ordering::SeqCst) {
                         break;
                     }
-                    let Ok(conn) = abrir_conexao(&caminho) else { continue };
+                    let Ok(mut conn) = abrir_conexao(&caminho) else { continue };
                     if ultima_limpeza.elapsed() > Duration::from_secs(60 * 60) {
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
                         let _ = compactar(&conn);
                         ultima_limpeza = Instant::now();
+                    }
+                    // Códigos das peças (mesmo com a troca de dados desligada):
+                    // o distribuidor cria a faixa dele quando falta e as peças
+                    // com código a definir recebem código.
+                    {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        if let Err(e) = crate::faixas::manter(&mut conn) {
+                            if matches!(e, Erro::Banco(_) | Erro::Interno(_)) {
+                                crate::registro::anotar(&format!("códigos das peças: {e}"));
+                            }
+                        }
                     }
                     let Ok(a) = ajustes(&conn) else { continue };
                     if !a.ligado || a.senha.is_empty() {
@@ -2424,6 +2540,49 @@ mod testes {
         let p = std::env::temp_dir().join(format!("rustinho-sync-{nome}-{}", tempo::novo_id()));
         std::fs::create_dir_all(&p).unwrap();
         p.join("rustinho.db")
+    }
+
+    /// Pedido de faixa de códigos das peças pela rede: os caixas novos puxam
+    /// do distribuidor, pedem a faixa (dois ao mesmo tempo) e já dão códigos
+    /// dela; as faixas são diferentes.
+    #[test]
+    fn faixa_de_codigos_pela_rede() {
+        thread::spawn(|| {
+            let (pt_a, pu_a) = (48210, 48211);
+            let ca = temp("faixa-a");
+            let a = Banco::abrir(&ca).unwrap();
+            let u = crate::faixas::para_testes::configurar(&a, "Caixa A", 0);
+            salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
+            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
+            thread::sleep(Duration::from_millis(400));
+            let para_a = format!("127.0.0.1:{pt_a}");
+            let mut tarefas = Vec::new();
+            for (i, nome) in ["Caixa B", "Caixa C"].into_iter().enumerate() {
+                let (para_a, u) = (para_a.clone(), u.clone());
+                tarefas.push(thread::spawn(move || {
+                    let c = temp(&format!("faixa-{i}"));
+                    let b = Banco::abrir(&c).unwrap();
+                    config::gravar(&b.conn, "caixa_nome", nome).unwrap();
+                    salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+                    puxar(&c, &para_a, 48220 + i as u16).unwrap();
+                    let p = crate::faixas::para_testes::peca(&b, &u, "Peça nova");
+                    (crate::faixas::para_testes::minhas(&b), crate::faixas::para_testes::codigo(&b, &p))
+                }));
+            }
+            let mut r: Vec<(Vec<(i64, i64)>, String)> = tarefas.into_iter().map(|t| t.join().unwrap()).collect();
+            r.sort();
+            assert_eq!(
+                r,
+                vec![
+                    (vec![(100_000, 199_999)], "100000".to_string()),
+                    (vec![(200_000, 299_999)], "200000".to_string())
+                ]
+            );
+            assert!(crate::faixas::cruzadas(&a.conn).unwrap().is_empty());
+            assert!(ma.encerrar(Duration::from_secs(20)));
+        })
+        .join()
+        .unwrap();
     }
 
     /// Item 1 da revisão: o caixa A volta para trás (backup restaurado no
@@ -2547,9 +2706,9 @@ mod testes {
             let mut g = produtos::ficha_nova(&a.conn).unwrap();
             g.nome = format!("Feita depois de voltar ({cenario})");
             g.custo = "5".into();
-            // Código escolhido à mão: o computador novo, ainda vazio, daria o
-            // código 1, que já é de outra peça na loja.
-            g.codigo = format!("90{n}");
+            // Sem faixa de códigos ainda: a peça fica com código a definir
+            // (antes das faixas, o computador novo dava o código 1, que já
+            // era de outra peça na loja).
             let nova = produtos::salvar(&a.conn, &a.dispositivo, &u, &g).unwrap_or_else(|_| {
                 // Computador novo ainda não tem o usuário: cria um.
                 let u2 = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;

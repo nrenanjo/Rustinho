@@ -185,6 +185,20 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         });
     }
 
+    // Códigos das peças que levam a mais de uma peça (ou faixas de dois
+    // caixas que se cruzam): o gerente resolve na pílula Gerente.
+    let codigos = crate::faixas::para_ver(conn)?;
+    if codigos > 0 && !escondido(conn, "codigos", &hoje)? {
+        avisos.push(Aviso {
+            id: "codigos".into(),
+            dia: hoje.clone(),
+            titulo: "Códigos".into(),
+            texto: format!("{} em mais de uma peça", plural(codigos, "código", "códigos")),
+            atraso: "o gerente resolve em Configurações › Gerente".into(),
+            funcao: "configuracoes".into(),
+        });
+    }
+
     // R-05: registros que apontam para algo apagado (ou que não chegou em
     // 24 h). Não some sozinho: o gerente precisa olhar.
     let quebradas: i64 = config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse().ok()).unwrap_or(0);

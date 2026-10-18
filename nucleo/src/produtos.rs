@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::{auditoria, config, estoque, fiscal, gtin, numeros, tempo, texto, unidades};
+use crate::{auditoria, config, estoque, faixas, fiscal, gtin, numeros, tempo, texto, unidades};
 
 /// Origem da mercadoria (tabela da NF-e), na ordem do código.
 pub const ORIGENS: &[&str] = &[
@@ -104,6 +104,13 @@ pub struct ProdutoFicha {
     /// Fornecedores e códigos que eles usam para esta peça.
     #[serde(skip_deserializing)]
     pub fornecedores: Vec<CodigoFornecedor>,
+    /// Peça nova: o código que ela deve receber ao salvar (só para mostrar;
+    /// o código é dado na hora de salvar, da faixa deste caixa).
+    #[serde(skip_deserializing)]
+    pub codigo_previsto: String,
+    /// Aviso sobre o código: a definir, ou também de outra peça.
+    #[serde(skip_deserializing)]
+    pub codigo_aviso: String,
 }
 
 /// Um tamanho ou cor da grade.
@@ -470,15 +477,66 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
 // Gravar e ler.
 // ---------------------------------------------------------------------------
 
-/// Próximo código interno livre (maior código numérico + 1).
-pub fn proximo_codigo(conn: &Connection) -> Resultado<String> {
-    let maior: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(CAST(codigo AS INTEGER)), 0) FROM produto
-          WHERE codigo <> '' AND codigo NOT GLOB '*[^0-9]*' AND length(codigo) <= 15",
-        [],
-        |l| l.get(0),
+/// O gerente resolve um código repetido: a peça recebe um código novo da
+/// faixa deste caixa; o de antes fica guardado como código antigo (a
+/// etiqueta velha ainda acha a peça e o leitor pergunta qual é). Não mexe
+/// em mais nada da peça.
+pub fn trocar_codigo(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<String> {
+    let mut dados = carregar(conn, id)?;
+    let velho = dados.codigo.clone();
+    let novo = faixas::gerar_para_peca(conn)?.ok_or_else(|| {
+        Erro::validacao(
+            "Este caixa ainda não tem faixa de códigos (ou ela acabou). Faça a troca de dados com o caixa que distribui as faixas.",
+        )
+    })?;
+    dados.codigo = novo.clone();
+    let (busca, codigos) = texto_busca(&dados);
+    let agora = tempo::agora();
+    conn.execute(
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, atualizado_por = ?6, dispositivo = ?7
+          WHERE id = ?1",
+        params![id, novo, busca, codigos, agora, usuario_id, dispositivo],
     )?;
-    Ok((maior + 1).to_string())
+    if !velho.is_empty() {
+        conn.execute(
+            "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![velho, id, texto::compactar(&velho), agora],
+        )?;
+    }
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "produto.alterar",
+        "produto",
+        id,
+        &[format!(
+            "Código: {} → {novo} (código repetido resolvido pelo gerente)",
+            if velho.is_empty() { "a definir" } else { &velho }
+        )],
+    )?;
+    Ok(novo)
+}
+
+/// Dá o código da faixa deste caixa a uma peça que estava com código a
+/// definir (não muda nenhum outro dado). false = a peça já tinha código.
+pub fn definir_codigo(conn: &Connection, dispositivo: &str, id: &str, codigo: &str) -> Resultado<bool> {
+    let mut dados = carregar(conn, id)?;
+    if !dados.codigo.is_empty() {
+        return Ok(false);
+    }
+    dados.codigo = codigo.to_string();
+    let (busca, codigos) = texto_busca(&dados);
+    let n = conn.execute(
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6
+          WHERE id = ?1 AND codigo = ''",
+        params![id, codigo, busca, codigos, tempo::agora(), dispositivo],
+    )?;
+    if n == 1 {
+        auditoria::registrar(conn, dispositivo, None, "produto.codigo", "produto", id, &[format!("Código: {codigo}")])?;
+    }
+    Ok(n == 1)
 }
 
 /// Salva a peça (nova ou alterada). Devolve o id.
@@ -498,20 +556,30 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     }
     unidades::garantir(conn, &dados.unidade)?;
 
+    // Código interno. Vazio numa peça nova (ou que está com código a
+    // definir): o Rustinho dá o da faixa deste caixa no fim (veja `faixas`).
+    // Escrito à mão: não pode ser de outra peça (atual ou antigo) nem da
+    // faixa de outro caixa. Uma peça que já está com código repetido (de
+    // antes das faixas) continua podendo ser alterada sem trocar o código.
+    let codigo_antes = antes.as_ref().map(|a| a.codigo.clone());
+    let codigo_mudou = codigo_antes.as_deref() != Some(dados.codigo.as_str());
     if dados.codigo.is_empty() {
-        if novo {
-            dados.codigo = proximo_codigo(conn)?;
-        } else {
+        if codigo_antes.as_deref().is_some_and(|c| !c.is_empty()) {
             return Err(Erro::campo("codigo", "O código interno não pode ficar vazio."));
         }
+    } else if codigo_mudou {
+        let mesmo_codigo: Option<String> = conn
+            .query_row("SELECT nome FROM produto WHERE codigo = ?1 AND id <> ?2", params![dados.codigo, id], |l| {
+                l.get(0)
+            })
+            .optional()?;
+        if let Some(outro) = mesmo_codigo {
+            return Err(Erro::campo("codigo", format!("O código {} já é da peça \"{outro}\".", dados.codigo)));
+        }
+        faixas::conferir_digitado(conn, &id, &dados.codigo)?;
     }
-    let mesmo_codigo: Option<String> = conn
-        .query_row("SELECT nome FROM produto WHERE codigo = ?1 AND id <> ?2", params![dados.codigo, id], |l| l.get(0))
-        .optional()?;
-    if let Some(outro) = mesmo_codigo {
-        return Err(Erro::campo("codigo", format!("O código {} já é da peça \"{outro}\".", dados.codigo)));
-    }
-    if !dados.codigo_barras.is_empty() {
+    let barras_mudou = antes.as_ref().map(|a| a.codigo_barras.as_str()) != Some(dados.codigo_barras.as_str());
+    if !dados.codigo_barras.is_empty() && barras_mudou {
         let mesmo_barras: Option<String> = conn
             .query_row(
                 "SELECT nome FROM produto WHERE codigo_barras = ?1 AND id <> ?2",
@@ -522,6 +590,10 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         if let Some(outro) = mesmo_barras {
             return Err(Erro::campo("codigoBarras", format!("Este código de barras já é da peça \"{outro}\".")));
         }
+    }
+
+    if dados.codigo.is_empty() {
+        dados.codigo = faixas::gerar_para_peca(conn)?.unwrap_or_default();
     }
 
     let tabelas = config::tabelas_preco(conn)?;
@@ -645,6 +717,15 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         conn.execute("DELETE FROM produto_preco WHERE produto_id = ?1", [&id])?;
         conn.execute("DELETE FROM produto_aplicacao WHERE produto_id = ?1", [&id])?;
         conn.execute("DELETE FROM produto_equivalente WHERE produto_id = ?1", [&id])?;
+        // O código de antes fica guardado: etiquetas velhas ainda o têm, e ele
+        // nunca vai para outra peça.
+        if let Some(velho) = codigo_antes.filter(|c| !c.is_empty() && *c != dados.codigo) {
+            conn.execute(
+                "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![velho, id, texto::compactar(&velho), agora],
+            )?;
+        }
     }
 
     for (tabela, preco, lucro) in &dados.precos {
@@ -805,8 +886,11 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         })
         .collect();
 
+    let codigo_aviso = faixas::problema_da_peca(conn, id)?.unwrap_or_default();
     Ok(ProdutoFicha {
         id: id.to_string(),
+        codigo_aviso,
+        codigo_previsto: String::new(),
         codigo: d.codigo,
         nome: d.nome,
         marca: d.marca,
@@ -961,8 +1045,18 @@ pub fn ficha_nova(conn: &Connection) -> Resultado<ProdutoFicha> {
         .into_iter()
         .map(|t| PrecoFicha { tabela: t.numero, nome: t.nome, lucro: t.lucro_padrao, preco: String::new() })
         .collect();
+    let codigo_previsto = faixas::previsto(conn)?.unwrap_or_default();
+    let codigo_aviso = if codigo_previsto.is_empty() && !faixas::sou_distribuidor(conn)? {
+        "Este caixa ainda não recebeu a faixa de códigos: a peça fica com código a definir até a troca de dados \
+         com o caixa que distribui as faixas."
+            .to_string()
+    } else {
+        String::new()
+    };
     Ok(ProdutoFicha {
-        codigo: proximo_codigo(conn)?,
+        codigo: String::new(),
+        codigo_previsto,
+        codigo_aviso,
         unidade: "UN".into(),
         tipo: "produto".into(),
         ativo: true,

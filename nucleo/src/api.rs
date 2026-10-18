@@ -15,8 +15,8 @@ use crate::banco::Banco;
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento,
-    encomendas, estoque, etiquetas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar, painel,
-    pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
+    encomendas, estoque, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar,
+    painel, pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho.
@@ -89,9 +89,15 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "comissao_fechar"
         | "comissao_reabrir" => "financeiro",
         // A própria pílula Gerente: sempre só o gerente.
-        "gerente_ler" | "gerente_salvar" | "conflitos_listar" | "conflito_resolver" | "conflitos_manter_todos" => {
-            "gerente"
-        }
+        "gerente_ler"
+        | "gerente_salvar"
+        | "conflitos_listar"
+        | "conflito_resolver"
+        | "conflitos_manter_todos"
+        | "codigos_situacao"
+        | "codigos_assumir"
+        | "codigos_definir_pendentes"
+        | "codigos_dar_novo" => "gerente",
         _ => return None,
     })
 }
@@ -125,6 +131,7 @@ pub const SO_LEITURA: &[&str] = &[
     "permissao",
     "gerente_ler",
     "conflitos_listar",
+    "codigos_situacao",
     "menu",
     "produtos_buscar",
     "produto_novo",
@@ -624,6 +631,46 @@ impl Servico {
                 tx.commit()?;
                 Ok(json!(sync::conflitos(&self.banco.conn)?))
             }
+            // Códigos das peças: faixas, repetidos e peças com código a definir.
+            "codigos_situacao" => faixas::situacao(&self.banco.conn),
+            "codigos_assumir" => {
+                let tx = self.banco.conn.transaction()?;
+                faixas::assumir(&tx)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "codigos.assumir",
+                    "config",
+                    "codigos_distribuidor",
+                    &["Este caixa passou a distribuir as faixas de códigos".into()],
+                )?;
+                tx.commit()?;
+                faixas::manter(&mut self.banco.conn)?;
+                faixas::situacao(&self.banco.conn)
+            }
+            "codigos_definir_pendentes" => {
+                let tx = self.banco.conn.transaction()?;
+                let n = faixas::definir_todos_pendentes(&tx)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "codigos.definir",
+                    "produto",
+                    "",
+                    &[format!("{n} peças com código a definir receberam código deste caixa")],
+                )?;
+                tx.commit()?;
+                faixas::situacao(&self.banco.conn)
+            }
+            "codigos_dar_novo" => {
+                let d: Id = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                produtos::trocar_codigo(&tx, &disp, &sessao.usuario_id, &d.id)?;
+                tx.commit()?;
+                faixas::situacao(&self.banco.conn)
+            }
             "conflitos_manter_todos" => {
                 let tx = self.banco.conn.transaction()?;
                 let n = sync::manter_todos(&tx, &sessao.usuario_id)?;
@@ -978,12 +1025,15 @@ impl Servico {
                 Ok(json!(vendas::ficha(&self.banco.conn, &d.id)?))
             }
             "produto_por_codigo" => {
-                // Leitor de código de barras: só o código exato.
+                // Leitor de código de barras: só o código exato, e só se for
+                // de uma peça. Duas ou mais com o mesmo código: a tela mostra
+                // as peças e a pessoa escolhe (nunca entra uma sozinha).
                 let d: BuscaProdutos = ler(dados)?;
-                let lista = busca::buscar(&self.banco.conn, &d.texto, false, 2)?;
-                Ok(match lista.first() {
-                    Some(p) if p.codigo_exato => json!({ "id": p.id }),
-                    _ => json!({ "id": null }),
+                let lista = busca::pelo_codigo_exato(&self.banco.conn, &d.texto)?;
+                Ok(match lista.as_slice() {
+                    [p] => json!({ "id": p.id, "repetidos": 1 }),
+                    [] => json!({ "id": null, "repetidos": 0 }),
+                    varias => json!({ "id": null, "repetidos": varias.len(), "opcoes": varias }),
                 })
             }
             // O vale-troca aparece à parte no Receber (só quando há vale).
@@ -1673,6 +1723,9 @@ impl Servico {
         let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, true)?;
         // Quem configura a loja é o gerente.
         usuarios::definir_gerente(&tx, &u.id, true)?;
+        // Loja nova: este caixa distribui as faixas de códigos das peças e
+        // fica com a primeira (1 a 99.999).
+        faixas::comecar_loja(&tx)?;
         self.segredo_backup = backup::gerente_conferido(&tx, &u.id, &d.senha, self.segredo_backup)?;
         auditoria::registrar(&tx, &disp, Some(&u.id), "usuario.criar", "usuario", &u.id, &[])?;
         usuarios::registrar_acesso(&tx, &u.id)?;
@@ -2268,6 +2321,40 @@ mod testes {
         .unwrap();
         assert_eq!(r["ok"], true, "{r}");
         s
+    }
+
+    /// f) Pela api, do jeito que a tela usa: com duas peças com o mesmo
+    /// código, o leitor não escolhe nenhuma (mostra as duas), a etiqueta é
+    /// recusada e o gerente vê a repetição.
+    #[test]
+    fn leitor_e_etiqueta_com_codigo_repetido() {
+        use crate::faixas::para_testes::*;
+        let mut s = conectado();
+        let u = s.sessao.as_ref().unwrap().usuario_id.clone();
+        let p = peca(&s.banco, &u, "Filtro de óleo");
+        let chamar = |s: &mut Servico, c: &str, d: Value| -> Value {
+            serde_json::from_str(&s.chamar(c, &d.to_string())).unwrap()
+        };
+        let r = chamar(&mut s, "produto_por_codigo", json!({ "texto": "1" }));
+        assert_eq!(r["dados"]["id"], json!(p), "código de uma peça só: entra direto");
+        let (b, ub) = loja("Outra loja");
+        peca(&b, &ub, "Pastilha de freio");
+        receber(&mut s.banco, &b);
+        let r = chamar(&mut s, "produto_por_codigo", json!({ "texto": "1" }));
+        assert_eq!(r["ok"], true);
+        assert!(r["dados"]["id"].is_null(), "{r}");
+        assert_eq!(r["dados"]["repetidos"], 2);
+        assert_eq!(r["dados"]["opcoes"].as_array().unwrap().len(), 2);
+        let e = chamar(&mut s, "etiqueta_previa", json!({ "id": p }));
+        assert!(e["dados"]["bloqueio"].as_str().unwrap().contains("também é da peça"), "{e}");
+        let pedido = json!({ "itens": [{ "produtoId": p, "quantidade": 1 }], "modelo": "", "inicio": 1,
+                             "barras": true, "loja": false, "ajusteX": 0, "ajusteY": 0 });
+        let i = chamar(&mut s, "impressao", json!({ "tipo": "etiquetas", "id": pedido.to_string() }));
+        assert_eq!(i["ok"], false, "{i}");
+        let sit = chamar(&mut s, "codigos_situacao", json!({}));
+        assert_eq!(sit["ok"], true, "{sit}");
+        assert_eq!(sit["dados"]["repetidos"].as_array().unwrap().len(), 1);
+        assert_eq!(sit["dados"]["cruzadas"].as_array().unwrap().len(), 1);
     }
 
     fn chamar(s: &mut Servico, c: &str, d: &str) -> Value {

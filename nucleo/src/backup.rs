@@ -1736,6 +1736,72 @@ mod testes {
         let _ = std::fs::remove_dir_all(&pasta2);
     }
 
+    /// d) Caixa restaurado cria peças. O backup tinha a faixa do caixa, mas
+    /// o banco perdido pode ter dado códigos dela depois do backup (e as
+    /// etiquetas deles podem estar na prateleira): a faixa não é mais usada
+    /// por ninguém, o caixa recebe outra e nada se repete.
+    #[test]
+    fn caixa_restaurado_nao_reusa_codigos_da_faixa() {
+        use crate::faixas::para_testes::*;
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut a, u) = loja("Caixa A");
+        let pasta = pasta_teste("faixa");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa B").unwrap();
+        config::gravar(&b.conn, "codigos_espera_teste", "0").unwrap();
+        pedir_faixa(&mut b, &mut a);
+        assert_eq!(minhas(&b), vec![(100_000, 199_999)]);
+        assert!(gerente_conferido(&b.conn, &u, "1234", None).unwrap().is_some());
+        let p1 = peca(&b, &u, "P1");
+        trocar(&mut a, &mut b);
+        let feito = fazer(&caminho, false).unwrap();
+        // Depois do backup: P2 vai para A; P3 fica só em B (e a etiqueta sai).
+        let p2 = peca(&b, &u, "P2");
+        trocar(&mut a, &mut b);
+        let p3 = peca(&b, &u, "P3");
+        assert!(crate::etiquetas::etiqueta(&b.conn, &p3).unwrap().bloqueio.is_empty());
+        assert_eq!(
+            (codigo(&b, &p1), codigo(&b, &p2), codigo(&b, &p3)),
+            ("100000".into(), "100001".into(), "100002".into())
+        );
+
+        restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1234").unwrap();
+        // O backup tinha a faixa de B, mas ela ficou para trás.
+        assert!(crate::faixas::faixas(&b.conn).unwrap().iter().any(|f| f.inicio == 100_000));
+        assert!(minhas(&b).is_empty());
+        assert!(crate::faixas::precisa(&b.conn).unwrap());
+        // Ainda sem troca: a definir; e o 100002 à mão não passa.
+        let p4 = peca(&b, &u, "P4");
+        assert_eq!(codigo(&b, &p4), "");
+        let e = peca_com(&b, &u, "À mão", "100002").unwrap_err().to_string();
+        assert!(e.contains("antes de restaurar"), "{e}");
+        // A troca volta: faixa nova; P2 volta com o mesmo código.
+        pedir_faixa(&mut b, &mut a);
+        trocar(&mut a, &mut b);
+        assert_eq!(minhas(&b), vec![(200_000, 299_999)]);
+        assert_eq!(codigo(&b, &p4), "200000");
+        assert_eq!(codigo(&b, &p2), "100001");
+        // O 100002 (da peça que se perdeu) não é de ninguém e não volta.
+        for x in [&a, &b] {
+            assert!(todas(x).iter().all(|(_, c)| c != "100002"));
+        }
+        let e = peca_com(&a, &u, "À mão", "100002").unwrap_err().to_string();
+        assert!(e.contains("100000 a 199999"), "{e}");
+        let p5 = peca(&b, &u, "P5");
+        assert_eq!(codigo(&b, &p5), "200001");
+        trocar(&mut a, &mut b);
+        assert_eq!(todas(&a), todas(&b));
+        assert!(codigos_repetidos(&a).is_empty());
+        // Fechar e abrir de novo não muda nada.
+        drop(b);
+        let b = Banco::abrir(&caminho).unwrap();
+        assert_eq!(minhas(&b), vec![(200_000, 299_999)]);
+        let p6 = peca(&b, &u, "P6");
+        assert_eq!(codigo(&b, &p6), "200002");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     #[test]
     fn pasta_que_nao_da() {
         let pasta = pasta_teste("ruim");

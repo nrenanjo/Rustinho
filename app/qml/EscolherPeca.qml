@@ -9,6 +9,8 @@ Popup {
     id: janela
     property string referencia: ""
     property var itens: []
+    // Texto da lista que está na tela: Enter só escolhe se a lista é deste texto.
+    property string itensDe: ""
 
     signal escolhida(string produtoId)
 
@@ -34,6 +36,7 @@ Popup {
         const r = Api.chamar("produtos_buscar", { texto: busca.texto, inativas: false, limite: 100 })
         if (r.ok) {
             itens = r.dados.itens
+            itensDe = busca.texto
             lista.currentIndex = itens.length > 0 ? 0 : -1
         }
     }
@@ -76,7 +79,16 @@ Popup {
             dica: "Qualquer código, nome, modelo, marca ou carro"
             Layout.fillWidth: true
             onEditado: espera.restart()
-            onConfirmado: janela.escolher(lista.currentIndex)
+            // Leitor rápido: a lista ainda é do texto de antes. Mostra a deste
+            // texto e espera outro Enter (nunca escolhe a peça errada).
+            onConfirmado: {
+                if (janela.itensDe !== busca.texto) {
+                    espera.stop()
+                    janela.buscar()
+                } else {
+                    janela.escolher(lista.currentIndex)
+                }
+            }
         }
         ListView {
             id: lista

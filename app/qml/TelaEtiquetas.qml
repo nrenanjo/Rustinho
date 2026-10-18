@@ -44,8 +44,14 @@ FocusScope {
         if (compraId !== "") {
             const c = Api.chamar("etiquetas_da_compra", { id: compraId })
             compraId = ""
-            if (c.ok)
-                itens = c.dados
+            if (c.ok) {
+                // Peça com código a definir ou repetido: não entra (o leitor
+                // pegaria a peça errada).
+                const bloqueadas = c.dados.filter(x => !!x.etiqueta.bloqueio)
+                itens = c.dados.filter(x => !x.etiqueta.bloqueio)
+                if (bloqueadas.length > 0)
+                    janela.avisar(bloqueadas.map(x => x.etiqueta.nome + ": " + x.etiqueta.bloqueio).join("\n"), "erro")
+            }
         }
     }
 
@@ -58,6 +64,10 @@ FocusScope {
             const r = Api.chamar("etiqueta_previa", { id: id })
             if (!r.ok) {
                 janela.avisar(r.erro, "erro")
+                return
+            }
+            if (r.dados.bloqueio) {
+                janela.avisar(r.dados.bloqueio, "erro")
                 return
             }
             lista.push({ etiqueta: r.dados, quantidade: quantidade })

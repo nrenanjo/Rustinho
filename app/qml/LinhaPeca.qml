@@ -66,7 +66,7 @@ Rectangle {
             spacing: 8
             Layout.fillWidth: true
             Text {
-                text: [linha.item.codigo ? "Cód. " + linha.item.codigo : "", linha.item.local].filter(x => !!x).join("  ·  ")
+                text: ["Cód. " + (linha.item.codigo || "a definir"), linha.item.local].filter(x => !!x).join("  ·  ")
                 color: linha.corSuave
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -106,7 +106,7 @@ Rectangle {
         opacity: linha.item.ativo ? 1 : 0.6
 
         Text {
-            text: linha.item.codigo || ""
+            text: linha.item.codigo || "a definir"
             color: linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold

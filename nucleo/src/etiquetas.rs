@@ -124,6 +124,9 @@ pub struct Etiqueta {
     /// O número embaixo das barras.
     pub texto_barras: String,
     pub sem_preco: bool,
+    /// Por que esta etiqueta não pode sair agora (código a definir, ou um
+    /// código dela leva também a outra peça). Vazio = pode.
+    pub bloqueio: String,
 }
 
 pub fn etiqueta(conn: &Connection, produto_id: &str) -> Resultado<Etiqueta> {
@@ -143,7 +146,15 @@ pub fn etiqueta(conn: &Connection, produto_id: &str) -> Resultado<Etiqueta> {
     } else {
         (code128(&codigo).unwrap_or_default(), codigo.clone())
     };
+    // Etiqueta com um código que leva a outra peça faria o leitor pegar a
+    // peça errada: não sai até o gerente resolver.
+    let bloqueio = match crate::faixas::problema_da_peca(conn, produto_id)? {
+        Some(p) if codigo.is_empty() => format!("{p} Até lá, não sai etiqueta."),
+        Some(p) => format!("{p} Resolva em Configurações › Gerente › Códigos das peças antes de imprimir."),
+        None => String::new(),
+    };
     Ok(Etiqueta {
+        bloqueio,
         produto_id: produto_id.to_string(),
         nome,
         preco: preco.map(numeros::escrever_dinheiro).unwrap_or_default(),
@@ -182,6 +193,9 @@ pub fn montar(conn: &Connection, p: &Pedido) -> Resultado<Value> {
             continue;
         }
         let e = etiqueta(conn, &it.produto_id)?;
+        if !e.bloqueio.is_empty() {
+            return Err(Erro::validacao(format!("{}: {}", e.nome, e.bloqueio)));
+        }
         let v = json!({
             "nome": e.nome,
             "preco": if e.sem_preco { String::new() } else { format!("R$ {}", e.preco) },

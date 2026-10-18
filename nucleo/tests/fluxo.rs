@@ -97,9 +97,11 @@ fn fluxo_completo() {
         json!({ "loja": "X", "caixa": "Caixa 1", "nome": "Outro", "senha": "1234", "senha2": "1234" }),
     );
 
-    // Ficha nova vem com código 1 e 100% de lucro na Revenda.
+    // Ficha nova: o código sai ao salvar, da faixa deste caixa (a primeira,
+    // 1 a 99.999); a tela mostra o previsto. 100% de lucro na Revenda.
     let nova = ok(&mut s, "produto_novo", json!({}));
-    assert_eq!(nova["codigo"], "1");
+    assert_eq!(nova["codigo"], "");
+    assert_eq!(nova["codigoPrevisto"], "1");
     assert_eq!(nova["precos"][0]["nome"], "Revenda");
     assert_eq!(nova["precos"][0]["lucro"], "100");
     assert_eq!(nova["precos"].as_array().unwrap().len(), 5);
@@ -237,7 +239,7 @@ fn fluxo_completo() {
     let cfg = ok(&mut s, "config_salvar", cfg);
     assert_eq!(cfg["tabelas"][1]["nome"], "Oficina");
     let nova = ok(&mut s, "produto_novo", json!({}));
-    assert_eq!(nova["codigo"], "4");
+    assert_eq!(nova["codigoPrevisto"], "4");
     assert_eq!(nova["precos"][1]["nome"], "Oficina");
     assert_eq!(nova["precos"][1]["lucro"], "80");
 

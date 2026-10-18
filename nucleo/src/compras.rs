@@ -221,10 +221,14 @@ fn ligar_sozinho(
         }
     }
     if !item.gtin.is_empty() {
-        let r: Option<String> =
-            conn.query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [&item.gtin], |l| l.get(0)).optional()?;
-        if let Some(pid) = r {
-            return Ok(("ligar".into(), Some(pid), "barras".into(), 1000));
+        // Só se o código de barras for de uma peça só (dois caixas podem ter
+        // cadastrado o mesmo): com duas, a pessoa escolhe na tela.
+        let r: Vec<String> = conn
+            .prepare_cached("SELECT id FROM produto WHERE codigo_barras = ?1 LIMIT 2")?
+            .query_map([&item.gtin], |l| l.get(0))?
+            .collect::<Result<_, _>>()?;
+        if r.len() == 1 {
+            return Ok(("ligar".into(), Some(r[0].clone()), "barras".into(), 1000));
         }
     }
     if compacto.len() >= 3 {
