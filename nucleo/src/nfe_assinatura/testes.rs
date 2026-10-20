@@ -99,6 +99,17 @@ fn a05_a08_qualquer_mudanca_no_conteudo_assinado_e_recusada() {
 }
 
 #[test]
+fn comparacao_do_resumo_confere_todos_os_bytes() {
+    let a = [7u8; 20];
+    let mut b = a;
+    b[19] ^= 1;
+    assert!(iguais(&a, &a));
+    assert!(!iguais(&a, &b), "último byte diferente");
+    assert!(!iguais(&a, &a[..19]), "tamanho diferente");
+    assert!(!iguais(&a[..4], &a), "prefixo não basta");
+}
+
+#[test]
 fn a09_resumo_recalculado_sem_a_assinatura_e_recusado() {
     let ok = fx("ok.xml");
     let adulterado = trocar(&ok, "<qCom>", "<qCom>9");
@@ -277,6 +288,11 @@ fn a21_estruturas_que_enganariam_a_leitura_sao_recusadas() {
     let casos = [
         // Segundo infNFe (com outro Id) depois do assinado.
         ("segundo infNFe", ok.replacen("</infNFe>", &format!("</infNFe>{}", inf.replace("Id=\"NFe", "Id=\"NFeX")), 1)),
+        // infNFe extra escondido no protocolo (fora do NFe).
+        (
+            "infNFe dentro do protNFe",
+            ok.replacen("<infProt>", &format!("<infProt>{}", inf.replace("Id=\"NFe", "Id=\"NFeY")), 1),
+        ),
         // Dois elementos com o mesmo Id.
         ("Id repetido", trocar(&ok, "<emit>", &format!("<emit Id=\"{}\">", id_de(&ok)))),
         // Reference para outro elemento.
