@@ -1,7 +1,7 @@
 # PEND-09 · Validação criptográfica da NF-e (assinatura do emitente) e prova de autorização da SEFAZ
 
-**Status:** **revisão 2 do desenho** (20/10/2026, tarde), **sem código**. Incorpora a sua revisão: biblioteca existente antes de criptografia própria, âncoras de confiança por critério histórico, uso do pacote oficial verificado, e separação entre "o emitente assinou" e "a SEFAZ autorizou". Versão 0.9.11; só commits locais; nada vai ao GitHub.
-**Decisões D1 a D6: aprovadas por você em 20/10/2026 (13:37), sem opção de forçar importação.** D7 e D8 (novas, §6) aguardam você.
+**Status:** **revisão 3, critérios finais** (20/10/2026, 14:3x), **sem código**. Incorpora a revisão sobre biblioteca existente, âncoras por critério histórico e pacote oficial verificado (rev. 2) e as decisões **D7 e D8 aprovadas**. Versão 0.9.11; só commits locais; nada vai ao GitHub.
+**Decisões D1 a D8: todas aprovadas por você em 20/10/2026** (D1–D6 às 13:37; D7 e D8 às 14:06), sem opção de forçar importação. **D7 é provisória** (vale até o PEND-15 existir e ser revisada nesse momento).
 **Regra de ouro:** *coerência entre campos não é prova de autenticidade, e assinatura válida não é prova de autorização.* Duas provas diferentes, tratadas separadamente (§4 e §5).
 
 ## 0. Estado e o que falta
@@ -107,13 +107,13 @@ Novo campo da compra (migração 0020): `xml_verificacao` (`verificada` | `nao_v
 | `aguardando` | Assinatura do emitente válida, autorização ainda não comprovada (**estado normal logo após a importação**) | **Não** |
 | `comprovada_sefaz` | Consulta à SEFAZ pela chave mostrou autorização vigente (cStat 100) e resumo igual (PEND-15, automática) | Sim |
 | `comprovada_assinatura_sefaz` | O `protNFe` traz assinatura da SEFAZ e ela passa na mesma cadeia ICP-Brasil (raro; nenhum dos 539 tem) | Sim |
-| `confirmada_gerente` | O **gerente** conferiu a autorização no portal oficial e registrou: chave, protocolo, data da conferência; **fica na auditoria**. É **atestado humano, não prova criptográfica**, e aparece rotulado assim | Sim (se D7-B) |
-| `negada` | A SEFAZ informou cancelada/denegada/rejeitada | **Não**, sem exceção |
+| `confirmada_gerente` | O **gerente** conferiu a autorização no portal oficial e registrou, **na mesma ação**: chave, protocolo (iguais aos do XML), data e hora, e a situação conferida = **Autorizada**; autenticação de gerente refeita; **auditoria**. É **atestado humano, não prova criptográfica**, e a tela diz isso (D7, provisória) | Sim |
+| `negada` | O gerente registrou que a nota está **rejeitada, cancelada ou denegada** (ou, no futuro, a SEFAZ informou isso na consulta automática) | **Não, sem exceção**; nenhum atestado posterior a libera; o rascunho só pode ser descartado. A ação pede confirmação antes de gravar, para evitar clique errado |
 | compra **sem XML** (digitada) | Não há nota eletrônica | Sim (como hoje) |
 
 **Caminhos de comprovação (separados, com o que cada um custa):**
 1. **PEND-15 (automático):** consulta à SEFAZ pela chave dentro do programa (web service de consulta, que exige **certificado digital da empresa** e internet) → `comprovada_sefaz`. Exige: importar/guardar o certificado A1 da loja (segredo novo), cliente TLS com certificado, tratamento de ambiente/UF, limites de uso. É uma pendência própria e **não** é feita nesta etapa.
-2. **Confirmação do gerente (interina, desde já):** o gerente consulta a chave no portal da NF-e, confere situação "Autorizada" e registra. Rotulada como `confirmada_gerente`. Se você **não** aceitar atestado humano como prova (D7-A), até o PEND-15 **nenhuma nota é lançável**, e a importação por XML continua criando só o rascunho.
+2. **Confirmação do gerente (D7, provisória):** diálogo "Registrar conferência no portal…" (só gerente): situação conferida (**Autorizada** / Rejeitada / Cancelada / Denegada), chave, protocolo, data e hora. Só "Autorizada" com chave e protocolo iguais aos do XML libera; as outras três gravam `negada`. Fica rotulada `confirmada_gerente`.
 3. **Assinatura da SEFAZ no `protNFe`:** aceita se existir e validar.
 
 **Efeito na tela** (sem poluir): o rascunho de compra mostra **uma** linha curta no cabeçalho da nota ("Assinatura do emitente conferida · autorização da SEFAZ ainda não comprovada"), e o botão **Lançar** fica desabilitado com o motivo ao tocar; para o gerente aparece **uma** ação "Registrar conferência no portal…" (diálogo com chave, protocolo, data). Operador não registra. Nada de aviso fixo permanente: o aviso `LIMITE_DA_CONFERENCIA` sai.
@@ -123,8 +123,8 @@ Novo campo da compra (migração 0020): `xml_verificacao` (`verificada` | `nao_v
 | ID | Decisão | Estado |
 |---|---|---|
 | D1 a D6 | Sem forçar importação; cadastros por XML também verificados; titular do certificado; homologação recusada; compras antigas só marcadas; CPF quando aplicável | **Aprovadas** |
-| **D7** | O atestado do gerente (`confirmada_gerente`) **libera** o lançamento enquanto o PEND-15 não existe? **A)** não: nada é lançável por XML até o PEND-15; **B)** sim, com rótulo claro e auditoria | **Recomendo B** para não parar a loja, **mas é decisão sua**: B é prova humana, não criptográfica |
-| **D8** | Importação de **cadastros** por XML (pessoas/peças): exige só a **assinatura do emitente (P1)** e **não** a autorização (P2) | **Recomendo sim** (dado de cadastro; sem efeito em estoque/financeiro) |
+| **D7** | **Atestado do gerente libera o lançamento, provisoriamente.** Condições obrigatórias: conferência no **portal oficial**; **chave** (44 dígitos) e **protocolo** (`nProt`, 15 dígitos) digitados e **iguais aos do XML**; **data e hora da conferência**; **identificação do gerente** (autenticação de gerente refeita no ato); **auditoria**; a tela diz **"Conferência humana do gerente, não é prova automática da SEFAZ"**; nota **rejeitada, cancelada ou denegada nunca é liberada** por esse caminho; o XML e o protocolo dele, sozinhos, nunca comprovam autorização | **Aprovada (provisória)** |
+| **D8** | **Cadastros por XML** (pessoas e peças): exigem **assinatura válida do emitente (P1)**; **não** exigem autorização (P2); **não podem alterar estoque, custos nem financeiro** (teste A-43) | **Aprovada** |
 
 ## 7. Desenho técnico (resumo)
 
@@ -170,12 +170,20 @@ Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da N
 | **A-39** | Compra digitada (sem XML) | Lança como hoje. |
 | **A-40** | Estorno/lançamentos antigos | Intactos. |
 | **A-42** | **Titular pelo Selo Eletrônico:** certificado de teste com o CNPJ no `serialNumber` do titular (sem o OID do e-CNPJ) | Aceito quando a raiz do CNPJ bate; recusado quando não bate (extração do titular é **plugável**, ver `docs/FISCAL-assinatura-arquitetura.md`) |
+| **A-43** | **D8:** importar cadastros por XML (assinatura válida, **sem** autorização): cria/atualiza pessoas e peças; **estoque, custo médio, movimentos, contas a pagar/receber e `alteracao` financeira idênticos antes e depois** (comparação por linha); XML adulterado = nada é cadastrado | Conforme |
+| **A-44** | **D7, campos obrigatórios:** sem chave, sem protocolo, protocolo diferente do `nProt` do XML, chave diferente, data/hora ausente, gerente não autenticado ou usuário operador | Recusado; `autorizacao` continua `aguardando` |
+| **A-45** | **D7, situação:** "Rejeitada", "Cancelada" ou "Denegada" → `negada`; **tentativa de atestar "Autorizada" depois de `negada`** | Recusada; `lancar` continua bloqueado |
+| **A-46** | **D7, trilha:** cada atestado grava gerente, data/hora do registro, data/hora informada da conferência, chave, protocolo, situação e rótulo "confirmação humana" na auditoria; a tela da compra mostra o rótulo | Conforme |
+| **A-47** | **Pacote de ACs como intermediárias, não como confiança:** todas as raízes do pacote presentes na lista de certificados, mas **só** as âncoras selecionadas por SHA-256 validam; v3 (revogada), v10 e v11 (finalidade), v4/v6/v7/v13 (sem suporte) **não** validam nenhuma nota; certificado do XML igual a uma raiz do pacote **não** a promove; hashes originais e evidências guardados | Conforme |
+| **A-48** | Mudar um byte de qualquer certificado embutido (pacote ou âncora) faz o teste de integridade (SHA-256 do arquivo e de cada âncora) **falhar** | Falha, bloqueia a compilação do teste |
 | A-31 | 528 notas em sequência | Tempo total e por nota registrados (meta < 50 ms/nota no final). |
 | A-32 | Suítes completas, **desenvolvimento e programa final (release)**, clippy, formatação | 0 falhas. |
 | A-33 | `cargo tree`; compilação das bibliotecas novas para Linux; **Windows e Android não testados aqui** | Registrado (L5). |
 | A-41 | Avaliador diferencial (`xml-sec`, se suportar SHA-1): mesma decisão que o verificador | Sem divergência; se divergir, **bloqueia a entrega**. |
 
-**Mutações planejadas** (defeitos plantados, todos pegos): ignorar o resumo; comparar só um prefixo; não conferir a assinatura; usar chave de outro ponto do XML; aceitar sem cadeia; âncora por nome; data de hoje em vez de `dhEmi`; âncora v3/v10/v11 aceita; certificado do XML tratado como âncora; não conferir `CA`/`pathLen`; não conferir CNPJ; aceitar `tpAmb=2`; ler os dados de um segundo `infNFe`; aceitar `Reference` para outro `Id`; transformações extras; **gravar a compra/fornecedor antes de verificar**; **`lancar` sem consultar `autorizacao`**; **`protNFe` do XML tratado como prova**; **`negada` liberada**; RSA-1024; ordem dos atributos na C14N; pacote com raiz nova; `nao_verificada` virar `verificada` na migração.
+**Mutações planejadas** (defeitos plantados, todos pegos; inclui, para D7/D8: atestado sem conferir o protocolo do XML; `negada` liberável por atestado; operador atestando; cadastro por XML mexendo em estoque/custo; qualquer raiz do pacote tratada como âncora): ignorar o resumo; comparar só um prefixo; não conferir a assinatura; usar chave de outro ponto do XML; aceitar sem cadeia; âncora por nome; data de hoje em vez de `dhEmi`; âncora v3/v10/v11 aceita; certificado do XML tratado como âncora; não conferir `CA`/`pathLen`; não conferir CNPJ; aceitar `tpAmb=2`; ler os dados de um segundo `infNFe`; aceitar `Reference` para outro `Id`; transformações extras; **gravar a compra/fornecedor antes de verificar**; **`lancar` sem consultar `autorizacao`**; **`protNFe` do XML tratado como prova**; **`negada` liberada**; RSA-1024; ordem dos atributos na C14N; pacote com raiz nova; `nao_verificada` virar `verificada` na migração.
+
+**Verificação de fechamento (executada depois da implementação):** suítes completas em **desenvolvimento e release**, mutações, testes de atomicidade (A-24, A-25, A-43) e registro explícito do que **não** foi testado em **Windows e Android**.
 
 ## 9. Limites que continuam depois da implementação (não escondidos)
 

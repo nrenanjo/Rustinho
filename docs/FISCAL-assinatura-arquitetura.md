@@ -17,16 +17,19 @@ Confiança: **P** = texto da norma lido (reprodução em site de legislação; c
 | 1 | Resolução CG ICP-Brasil **211/2024** (assinada em 31/10/2024; publicada no DOU em novembro/2024; vigente desde a publicação): cria os certificados **SE-S** e **SE-H** (Selo Eletrônico em software e em hardware) e **AE-S/AE-H** (aplicações específicas); **extingue os tipos A1 e A2** de assinatura. | P | normasbrasil.com.br (Resolução 211/2024), Arts. 2, 3, 17 |
 | 2 | **Selo Eletrônico** = garante **origem e integridade** de documento emitido por pessoa jurídica; **só para pessoa jurídica**; **vedado** usá-lo para manifestar vontade (isso segue com o e-CPF do representante); CNPJ no campo `serialNumber`; responsável pelo uso identificado por **biometria** em posto credenciado; SE-S = repositório em software protegido por senha/biometria; **SE-H = mídia criptográfica de hardware homologada pela ICP-Brasil ou certificada pelo INMETRO** (a norma lida não trata de HSM remoto/nuvem). Validade: SE-S 1 ano; SE-H 5 anos. | P | idem, Art. 4 e itens 1.1.7, 3.2.9.7, Tabelas 4 e 6 do DOC-ICP-04 |
 | 3 | **A3 e A4 passam a ser só de pessoa física** (item 1.1.6 do perfil novo). | P | idem |
-| 4 | **Cadeia V5:** A1, A2, A3 e A4 **podem ser emitidos e usados** nos perfis anteriores **até 2 de março de 2029**. **Cadeia V10:** emissão de A1 e A3 até **31/12/2026**, só para aplicações específicas. | P | idem, Arts. 13 e 14 |
-| 5 | Consequência para o **e-CNPJ A3 que você já tem**: se ele é da cadeia V5, a norma permite seguir usando-o **até o fim do seu prazo de validade e, no máximo, até 02/03/2029**. A confirmar no **seu** certificado (cadeia, data de validade). | P + inferência | idem; a conferir no certificado |
+| 4 | **Cadeia V5:** A1, A2, A3 e A4 **podem ser emitidos e usados** nos perfis anteriores **até 2 de março de 2029**. **Cadeia V10:** emissão de A1 e A3 até **31/12/2026**, só para aplicações específicas. **FAQ oficial do ITI (Perguntas 01 e 04):** "até 02/03/2029 todos os tipos de certificados hoje existentes" continuam utilizáveis; "a partir de 03/03/2029 não será mais possível a utilização dos certificados A1, A2, S1, S2, S3 e S4" (a lista da FAQ **não cita A3**; a renovação de certificados já emitidos **não é tratada**). | P | normasbrasil.com.br (Arts. 13 e 14) e **gov.br/iti › Comitê Gestor › Perguntas frequentes** (lida em 20/10/2026) |
+| 5 | Consequência para o **e-CNPJ A3 que você já tem**: pode ser usado até o fim da sua validade e, **no máximo, até 02/03/2029** (data confirmada pelo ITI). Como a FAQ não fala do A3 depois dessa data, o plano **trata 02/03/2029 como o fim de uso** (conservador) até haver norma em contrário. Cadeia e validade do **seu** certificado: **a conferir no inventário**. | P + inferência | FAQ do ITI; inventário pendente |
 | 6 | Prazos de mercado ("fim da emissão de A3 PJ de 3 anos em 28/02/2026", "eliminação de OIDs do SAN em 31/12/2028", "metas de adesão ao Selo 10/30/80/100%") | **C** | blogs de fornecedores (um deles com inconsistências internas) |
 | 7 | Selo "pode ser usado em nuvem por Prestador de Serviço de Confiança (PSC)", "um Selo atende vários sistemas" | **C** | blogs de ACs/fornecedores |
-| 8 | **PAA (Provedor de Assinatura e Autorização)**, Nota Técnica **2026.001**: modelo em que o **provedor** assina e transmite pelo contribuinte (assinatura híbrida: RSA avançada gerada pelo Fisco + assinatura ICP-Brasil **do provedor**); vínculo no portal da SVRS com gov.br prata/ouro; **não disponível para regime normal** (exceto produtor rural), pensado para MEI, Simples e produtor rural; datas de homologação/produção **adiadas** (v1.02, 09/06/2026) | **C** (resumos de artigos; não li a NT) | blogs |
+| 8 | **PAA (NT 2026.001 v1.00, março/2026; PDF oficial lido, 18 páginas):** o provedor gera o XML e o transmite; assina com **o e-CNPJ do próprio PAA** (assinatura ICP-Brasil qualificada) e inclui uma assinatura RSA "avançada" (chave RSA-1024 gerada pela Plataforma de Emissão Simplificada no vínculo do contribuinte, assinando o atributo `Id` com RSA-SHA1); vínculo no portal da SVRS com gov.br; autorização **somente na SVRS**; série exclusiva **970–979**; **rejeição 1178 se CRT = 3 (regime normal) ou 2 (Simples com excesso de sublimite)**, exceto produtor rural (`tpIE = 5`). Cronograma do PDF v1.00: teste 08/06/2026 e produção 03/08/2026 (**adiamentos posteriores só por resumo de blogs; conferir a versão vigente**). O PAA **não** substitui o certificado: é outro modo de emissão. | P | PDF anexado por você |
+| 8b | **Regra F03 (rejeição 213):** o **CNPJ-base do emitente deve ser igual ao CNPJ-base do certificado de assinatura** (exceções: SVRS com PAA; NFF; emissão no site da SEFAZ). A tabela de assinatura para "aplicativo da empresa" diz **"e-CNPJ do Emitente"**, séries **000–889** (a faixa 970–979 é exclusiva do PAA; usá-la fora do PAA gera a rejeição 244). **O PDF não menciona Selo Eletrônico em nenhum ponto.** | P | PDF da NT 2026.001, p. 8 e 13–15 |
 | 9 | **O Selo Eletrônico é aceito pelos serviços da SEFAZ (assinatura do XML e/ou autenticação TLS do cliente)? Desde quando? Em quais UFs? Cadeia V12 aceita nos autorizadores?** | **N** | **Nenhuma fonte oficial encontrada.** Nem o Manual de Orientação do Contribuinte nem nota técnica específica foram localizados. **Não presumir.** |
 | 10 | Mecanismos para **TLS mútuo** (certificado do cliente) com certificado de nuvem ou de Selo | **N** | A autenticação TLS exige operação com a chave privada em cada conexão; depende do provedor oferecer um módulo/agente local compatível. A validar. |
 | 11 | Preços (token, cartão, leitora, Selo, PSC, HSM) | **N** | Não pesquisados em fonte confiável; **cotação com a AC** é requisito (§6). |
 
-**Perguntas para você que mudam o desenho** (§8): regime tributário (afeta PAA); modelos a emitir (55, 65, NFS-e, MDF-e); cadeia e validade do seu e-CNPJ A3; AC e modelo do token; sistemas operacionais dos computadores; volume diário de documentos.
+**Decisões recebidas em 20/10/2026 (14:06)** (ver §8): estação assinadora como topologia inicial (adaptadores independentes, sem dependência rígida do núcleo); **A1 mantido como objetivo arquitetural**, sem distribuir arquivos de certificado indiscriminadamente; **prioridade: e-CNPJ A3 em cartão com leitor USB**; Selo Eletrônico previsto, **não anunciado** para XML nem TLS até haver aceitação confirmada; PAA **não** ativado por presunção; regime e parâmetros tributários configuráveis por empresa/CNPJ, sem valores fiscais fixos no código; documentos: NF-e 55 e NFC-e 65 primeiro (NFS-e e MDF-e conforme a necessidade); **nunca solicitar nem registrar PIN ou chave privada**; falha da estação: documentos em fila, sem perda, duplicação nem falsa indicação de emissão, com retomada e contingência conforme as regras do documento.
+
+**Ainda a confirmar (sem presumir, sem travar o PEND-09):** regime tributário da FANTI (com o contador); AC emissora, cadeia, validade e modelo do token do seu A3.
 
 ## 2. Os mecanismos **não** são equivalentes
 
@@ -137,6 +140,9 @@ Regras: (a) **não renovar nem comprar nada por pressa**; decisão de compra é 
 | S-11 | Credenciais múltiplas: prioridade e validade; a vencida é pulada; nenhuma disponível → erro tipado, sem emissão parcial | Conforme |
 | S-12 | Concorrência: dois pedidos simultâneos ao mesmo token não corrompem a sessão | Conforme |
 | S-13 | Falha no meio da assinatura (token removido): nenhuma nota "meio emitida"; numeração tratada conforme a regra de inutilização (**N**: confirmar no manual) | Conforme |
+| S-14 | **Falha da estação:** com a estação desligada, o documento fica em **fila** persistente (sobrevive a reinício); ao voltar, é assinado/transmitido **uma só vez** (sem duplicar número nem chave); nunca aparece como "emitido" antes da autorização; a contingência segue as regras do tipo de documento (a confirmar no manual: NF-e e NFC-e diferem) | Conforme |
+| S-15 | **Estação como adaptador, não como dependência:** o módulo fiscal compila e passa nos testes com a estação **desativada** (T1 e assinador falso); nenhum tipo do núcleo menciona a estação | Conforme |
+| S-16 | Nenhum campo, log, mensagem de erro ou arquivo contém PIN ou chave privada; a interface **nunca** pede o PIN fora do diálogo do próprio sistema do token/driver quando o driver o oferece | Conforme |
 | **F-01** | **Físico:** assinar com o **seu e-CNPJ A3** na homologação e verificar o XML no próprio PEND-09 | A fazer por você |
 | **F-02** | **Físico:** TLS mútuo com o token contra a homologação | A fazer |
 | **F-03** | **Físico:** estação em Windows e em Linux; computadores e celular como solicitantes | A fazer |
@@ -146,12 +152,12 @@ Regras: (a) **não renovar nem comprar nada por pressa**; decisão de compra é 
 
 ## 8. Perguntas e decisões
 
-1. **Regime tributário** da FANTI (Simples, Lucro Presumido ou Real)? Define se o PAA é opção.
-2. Quais documentos emitir primeiro (NF-e 55, NFC-e 65, NFS-e, MDF-e)? Cada um tem serviço e município/UF próprios.
-3. Dados do seu e-CNPJ A3: AC, cadeia, validade, modelo do token (preciso para planejar o driver).
-4. **T2 (estação assinadora) como arquitetura-base?** (recomendo)
-5. Aceita adiar A1 por completo (só PKCS#11 + estação), já que o tipo está extinto e o risco de cópia da chave é o que você quer evitar? (recomendo)
-6. Ordem: **PEND-09** (verificação de XML) → **PEND-13/14** (rede) → **esta arquitetura** (portas e estação) → PEND-15 (consulta à SEFAZ, que **precisa** da porta de credencial/TLS) → emissão. Ou prioridade diferente?
+**Decidido (20/10/2026):** estação assinadora como base, sem ser dependência do núcleo; A1 mantido (uso restrito, sem distribuir arquivos); prioridade ao e-CNPJ A3 em cartão com leitor USB; Selo previsto e não anunciado; NF-e 55 e NFC-e 65 primeiro; ordem **PEND-09 → PEND-13/14 → porta de assinatura (A3 e estação) → projeto do PEND-15 → emissão com contingência e homologação**.
+
+**Pendente de informação da empresa (não bloqueia o PEND-09):**
+1. **Regime tributário** da FANTI (com o contador): define se o PAA é opção (rejeição 1178 no regime normal).
+2. Dados do seu e-CNPJ A3: AC emissora, cadeia, validade, modelo do token e do leitor.
+3. Se haverá NFS-e (município) e MDF-e.
 
 ## 9. Etapas, modelo e esforço
 
