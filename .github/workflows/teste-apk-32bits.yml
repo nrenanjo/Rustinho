@@ -1,0 +1,117 @@
+# SÓ PARA TESTE. Monta um APK de 32 bits (ARMv7) com identificador próprio
+# (io.github.nrenanjo.rustinho.teste) e chave descartável. Não lê nenhum
+# segredo, não publica em Releases e só roda neste ramo.
+name: Teste APK 32 bits
+
+on:
+  push:
+    branches: [teste-apk-32bits]
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSAO: "6.8.3"
+  CARGO_TERM_COLOR: never
+
+jobs:
+  apk:
+    name: apk teste (32bits)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+          targets: armv7-linux-androideabi
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Qt (computador e Android ARMv7)
+        run: |
+          set -o pipefail
+          (
+            pip install --quiet aqtinstall &&
+            aqt install-qt linux desktop "$QT_VERSAO" linux_gcc_64 -O "$RUNNER_TEMP/qt" &&
+            aqt install-qt linux android "$QT_VERSAO" android_armv7 -m qtmultimedia -O "$RUNNER_TEMP/qt" &&
+            chmod +x "$RUNNER_TEMP/qt/$QT_VERSAO/android_armv7/bin/"* &&
+            ls "$RUNNER_TEMP/qt/$QT_VERSAO"
+          ) 2>&1 | tee -a registro.txt
+      - name: NDK
+        run: |
+          NDK_VER=26.1.10909125
+          if [ ! -d "$ANDROID_SDK_ROOT/ndk/$NDK_VER" ]; then
+            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VER" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          fi
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VER" >> $GITHUB_ENV
+          sudo apt-get install -y ninja-build > /dev/null 2>&1 || true
+      # Só na cópia da montagem (não vai para o repositório): versão e
+      # identificador de teste, para não substituir um Rustinho instalado.
+      - name: Versão e identificador de teste
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          IFS=. read A B C <<< "$V"
+          echo "VERSAO=$V" >> $GITHUB_ENV
+          echo "CODIGO=$((A*10000 + B*100 + C))" >> $GITHUB_ENV
+          sed -i 's/"io.github.nrenanjo.rustinho"/"io.github.nrenanjo.rustinho.teste"/' android/CMakeLists.txt
+          grep -n 'QT_ANDROID_PACKAGE_NAME' android/CMakeLists.txt
+      - name: Chave descartável (só teste)
+        run: |
+          mkdir -p saida
+          SENHA=$(openssl rand -hex 16)
+          echo "::add-mask::$SENHA"
+          keytool -genkeypair -keystore "$RUNNER_TEMP/teste.jks" -alias teste -keyalg RSA -keysize 2048 \
+            -validity 30 -storepass "$SENHA" -keypass "$SENHA" -dname "CN=Rustinho teste descartavel" > /dev/null 2>&1
+          echo "QT_ANDROID_KEYSTORE_STORE_PASS=$SENHA" >> $GITHUB_ENV
+          echo "QT_ANDROID_KEYSTORE_KEY_PASS=$SENHA" >> $GITHUB_ENV
+          echo "QT_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/teste.jks" >> $GITHUB_ENV
+          echo "QT_ANDROID_KEYSTORE_ALIAS=teste" >> $GITHUB_ENV
+      - name: Compilar o APK
+        env:
+          CFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
+          CXXFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
+        run: |
+          QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/android_armv7"
+          QT_HOST="$RUNNER_TEMP/qt/$QT_VERSAO/gcc_64"
+          set -o pipefail
+          (
+            "$QT_ANDROID/bin/qt-cmake" -S android -B build-android -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DQT_HOST_PATH="$QT_HOST" \
+              -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+              -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
+              -DQT_ANDROID_SIGN_APK=ON \
+              -DRUSTINHO_QMAKE="$QT_ANDROID/bin/qmake" \
+              -DRUSTINHO_VERSAO_CODIGO=$CODIGO &&
+            cmake --build build-android --target apk
+          ) 2>&1 | tee -a registro.txt
+      - name: Juntar e conferir
+        run: |
+          set -eu
+          APK=$(find build-android -name "*.apk" | grep -v unsigned | head -1)
+          [ -z "$APK" ] && APK=$(find build-android -name "*.apk" | head -1)
+          cp "$APK" "saida/Rustinho-$VERSAO-teste-32bits.apk"
+          APK=saida/Rustinho-$VERSAO-teste-32bits.apk
+          BT=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)
+          {
+            echo "== apksigner verify --print-certs"
+            "${BT}apksigner" verify --verbose --print-certs "$APK"
+            echo "== aapt2 dump badging (cabeçalho)"
+            "${BT}aapt2" dump badging "$APK" | grep -E "^package|native-code|sdkVersion|targetSdk|application-label:" || true
+            echo "== bibliotecas nativas por ABI"
+            unzip -l "$APK" | grep -E "lib/[a-z0-9_-]+/" | awk '{print $4}' | cut -d/ -f1-2 | sort | uniq -c
+            echo "== SHA-256"
+            sha256sum "$APK"
+          } 2>&1 | tee saida/conferencia.txt
+          grep -q 'lib/armeabi-v7a/' <(unzip -l "$APK") || { echo "sem armeabi-v7a"; exit 1; }
+          ! unzip -l "$APK" | grep -qE 'lib/(arm64-v8a|x86|x86_64)/' || { echo "ABI extra"; exit 1; }
+          cp registro.txt saida/registro-compilacao.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Rustinho-teste-32bits
+          path: |
+            saida/
+            registro.txt
+          retention-days: 1
