@@ -340,9 +340,26 @@ ApplicationWindow {
             trocarPara("TelaEntrar")
     }
 
+    // Diagnóstico do Android (PEND-18): só existe no celular; no computador
+    // "diagnostico" não existe e nada acontece.
+    function marcarDiagnostico(texto) {
+        if (typeof diagnostico !== "undefined")
+            diagnostico.marcar(texto)
+    }
+    Connections {
+        target: pilha
+        function onCurrentItemChanged() {
+            if (pilha.currentItem && typeof diagnostico !== "undefined")
+                diagnostico.telaPronta(String(pilha.currentItem).split("(")[0])
+        }
+    }
+    onErroGeralChanged: if (erroGeral !== "") marcarDiagnostico("erro ao abrir: " + erroGeral)
+
     Component.onCompleted: {
+        marcarDiagnostico("Main.qml: início")
         if (atualizarEstado())
             iniciar()
+        marcarDiagnostico("Main.qml: estado " + (erroGeral === "" ? "lido" : "COM ERRO"))
         janela.showMaximized()
     }
 }

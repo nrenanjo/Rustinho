@@ -1,6 +1,6 @@
 # R-05 (revisado) · Atraso de sincronização × inconsistência comprovada — critérios e testes antes do código
 
-**Versão 2**, substitui o documento anterior (que previa "24 h viram inconsistente"). Ramo `versao-0.9.11`, versão 0.9.11. Escrito antes do código; o código e os testes R5-T1 a R5-T11 vieram depois (migração 0017).
+**Versão 2**, substitui o documento anterior (que previa "24 h viram inconsistente"). Ramo `versao-0.9.11`, versão 0.9.11 (hoje a base é a 0.9.12; este documento é histórico). Escrito antes do código; o código e os testes R5-T1 a R5-T11 vieram depois (migração 0017).
 **Sua orientação (20/10, 10:44):** não classificar como inconsistente só porque passaram 24 h; separar atraso de inconsistência comprovada; bloquear só onde for realmente necessário.
 
 ## 1. O que muda em relação à versão 1

@@ -1,17 +1,19 @@
 # PEND-09 · Validação criptográfica da NF-e (assinatura do emitente) e prova de autorização da SEFAZ
 
-**Status:** **revisão 4, critérios finais** (20/10/2026, 14:4x), **sem código ainda**. A revisão 4 fecha as duas questões que você levantou: **instante de validade do certificado** (§3.5) e **uso do certificado: assinatura × TLS** (§3.6). Incorpora a revisão sobre biblioteca existente, âncoras por critério histórico e pacote oficial verificado (rev. 2) e as decisões **D7 e D8 aprovadas**. Versão 0.9.11; só commits locais; nada vai ao GitHub.
+**Status (20/10/2026, rev. 5): IMPLEMENTADO e testado no Linux** (entrega técnica r10; base da versão 0.9.12). Este documento mantém, como histórico, os critérios finais da revisão 4 (§1 a §10, escritos **antes** do código) e registra os resultados no §11. As decisões D1–D8 foram aprovadas; **D7 é provisória** (vale até o PEND-15). **Não** significa que o módulo fiscal está pronto para produção: PEND-15 (autorização automática da SEFAZ), Windows e Android reais e o resto do §11.5 continuam abertos. Só commits locais; nada vai ao GitHub.
 **Decisões D1 a D8: todas aprovadas por você em 20/10/2026** (D1–D6 às 13:37; D7 e D8 às 14:06), sem opção de forçar importação. **D7 é provisória** (vale até o PEND-15 existir e ser revisada nesse momento).
 **Regra de ouro:** *coerência entre campos não é prova de autenticidade, e assinatura válida não é prova de autorização.* Duas provas diferentes, tratadas separadamente (§4 e §5).
 
 ## 0. Estado e o que falta
 
-| Item | Situação |
+| Item | Situação (rev. 5) |
 |---|---|
-| Pacote oficial de ACs | **Obtido por você, SHA-512 conferido** (os dois arquivos). Relatório em `docs/PEND-09-pacote-acs.md`. |
-| Viabilidade medida | Cadeia: 528 de 528 notas reais com cadeia completa validadas por biblioteca madura, na data de emissão (4 de teste recusadas). Assinatura e resumo: 539/539 conferem (protótipo). |
-| Falta antes de codificar | Sua resposta a **D7 e D8** (§6) e a aprovação destes critérios finais. |
-| Modelo/esforço da implementação | **Opus 5.5, esforço alto**, depois da sua aprovação. |
+| Pacote oficial de ACs | Obtido e **embutido**, SHA-512 conferido no carregamento. Relatório em `docs/PEND-09-pacote-acs.md`. |
+| Implementação | **Feita** (verificador, âncoras, migração 0020, importação atômica, D7, D8, telas). Resultados no §11. |
+| Comprovado | Linux: suítes de desenvolvimento e release, acervo real (528/528 aceitas), 35 mutações, atomicidade, inspeção visual. |
+| **Aberto** | PEND-15 (autorização automática da SEFAZ); revogação (CRL); cadeias SHA-1 e raízes ECDSA/Ed448 sem suporte; assinatura da SEFAZ no `protNFe` (A-38); avaliador `xml-sec` (A-41, **não executado**); atualização do pacote de ACs pela tela; Windows e Android reais; PEND-17 (tela de compra no celular). |
+
+(Os trechos abaixo, até o §10, são o histórico dos critérios como foram aprovados; onde dizem "antes do código" ou "depois da sua aprovação", leia como estado daquele momento.)
 
 ## 1. O que existe hoje (lido no código)
 
@@ -251,13 +253,13 @@ Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da N
 
 | Etapa | O que | Modelo / esforço |
 |---|---|---|
-| E1 | Desenho, medições, pacote verificado (feito) | Sonnet 5.5 |
-| E2 | **Sua aprovação** do desenho, D7 e D8 | Você |
-| E3a | Teste de viabilidade inicial: `xml-sec` como avaliador, adaptador SHA-1, `ring` e `webpki` nos 3 alvos de compilação disponíveis | Opus 5.5, alto |
-| E3b | Testes A-xx primeiro; PKI de teste; `c14n`; `xmldsig`; cadeia; autorização; migração 0020; telas | **Opus 5.5, alto** |
-| E4 | Mutações, suítes completas (desenvolvimento **e** release), clippy, inspeção visual, entrega | Sonnet 5.5, médio |
-| E5 | PEND-15 (consulta à SEFAZ com certificado) — só se você mandar | Opus 5.5, alto |
-| E6 | Windows e Android (L5) | Você, com os aparelhos |
+| E1 | Desenho, medições, pacote verificado (**feito**) | Sonnet 5.5 |
+| E2 | Aprovação do desenho, D7 e D8 (**feita**, 20/10/2026) | Você |
+| E3a | (**feito**) Teste de viabilidade inicial: `xml-sec` como avaliador, adaptador SHA-1, `ring` e `webpki` nos 3 alvos de compilação disponíveis | Opus 5.5, alto |
+| E3b | (**feito**) Testes A-xx primeiro; PKI de teste; `c14n`; `xmldsig`; cadeia; autorização; migração 0020; telas | **Opus 5.5, alto** |
+| E4 | (**feito e repetido na r11**) Mutações, suítes completas (desenvolvimento **e** release), clippy, inspeção visual, entrega | Sonnet 5.5, médio |
+| E5 | **Aberto:** PEND-15 (consulta à SEFAZ com certificado); desenho antes do código | Opus 5.5, alto |
+| E6 | **Aberto:** Windows e Android (L5) | Você, com os aparelhos |
 
 ## 11. Resultados da implementação (20/10/2026) — comprovado no Linux; Windows e Android não testados
 
@@ -315,7 +317,9 @@ Tela larga: compra aguardando (faixa discreta + "Registrar conferência…"), la
 
 Continua **não provado em lugar nenhum**: autorização da SEFAZ (PEND-15), revogação dos certificados (LCR), Selo Eletrônico. **O módulo fiscal não está pronto para produção.**
 
-### 11.6 Verificação completa (commit `2a23d1a`, Linux)
+### 11.6 Verificação completa da r10 (commit `2a23d1a`, Linux) — **repetida na r11 no commit final**; ver o relatório da r11
+
+Nota de rastreabilidade: `2a23d1a` → `41b0a5d` só acrescentou este documento. A r11 refez **tudo** sobre o commit exato entregue (hash no relatório da r11).
 
 | Etapa | Resultado |
 |---|---|

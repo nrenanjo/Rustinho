@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(DiagnosticoTeste LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_AUTOMOC ON)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+add_executable(teste teste.cpp ../diagnostico.cpp ../diagnostico.h)
+target_link_libraries(teste PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick)

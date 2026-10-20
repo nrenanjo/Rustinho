@@ -93,6 +93,10 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
 
+### Novo na versão 0.9.12
+
+- **Versão 0.9.12:** é a 0.9.11 com a conferência da assinatura digital das notas de compra (veja "Compras pelo XML" e a "Autorização da SEFAZ", acima). O restante do que está descrito na 0.9.11 vale igual. A autorização automática da SEFAZ **ainda não existe**: o gerente confere no portal.
+
 ### Novo na versão 0.9.11: gerente, modo escuro e mais segurança
 
 - **Modo escuro:** no topo da tela inicial, a pílula pequena do **sol** (fundo cinza de sempre) e da **lua** (fundo preto, bom para tela AMOLED). Vale só para o aparelho onde foi escolhido. Impressão e PDF continuam em folha branca.

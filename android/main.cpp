@@ -14,6 +14,10 @@
 
 #include <sys/system_properties.h>
 
+#include <QtCore/QTimer>
+#include <QtQuick/QQuickWindow>
+
+#include "diagnostico.h"
 #include "vistacamera.h"
 
 // Celulares de 32 bits e chips de vídeo PowerVR (como o do Moto e6i) desenham
@@ -38,12 +42,31 @@ static bool desenharPorSoftware()
 
 int main(int argc, char* argv[])
 {
-    // RUSTINHO_DESENHO=gpu ou =software força um dos dois (só para testes).
-    const QByteArray forcado = qgetenv("RUSTINHO_DESENHO");
-    if (forcado == "software" || (forcado != "gpu" && desenharPorSoftware()))
+    // PEND-18: registro de diagnóstico desde o primeiro instante.
+    Diagnostico diagnostico;
+    diagnostico.iniciar();
+
+    // Modo de desenho. Quem manda, na ordem: RUSTINHO_DESENHO (só testes),
+    // o arquivo "desenho.txt" na pasta do app (gpu ou software; serve para
+    // testar no celular sem APK novo) e, por fim, a escolha automática.
+    QByteArray forcado = qgetenv("RUSTINHO_DESENHO");
+    QString motivo = QStringLiteral("variável RUSTINHO_DESENHO");
+    if (forcado.isEmpty()) {
+        const QString pedido = Diagnostico::desenhoPedido();
+        if (!pedido.isEmpty()) {
+            forcado = pedido.toUtf8();
+            motivo = QStringLiteral("arquivo desenho.txt");
+        } else {
+            motivo = QStringLiteral("escolha automática");
+        }
+    }
+    const bool software = forcado == "software" || (forcado != "gpu" && desenharPorSoftware());
+    if (software)
         qputenv("QT_QUICK_BACKEND", "software");
+    diagnostico.marcar(QStringLiteral("modo de desenho: %1 (%2)").arg(software ? QStringLiteral("software (processador)") : QStringLiteral("placa de vídeo"), motivo));
 
     QGuiApplication app(argc, argv);
+    diagnostico.marcar(QStringLiteral("QGuiApplication criado"));
     app.setApplicationName(QStringLiteral("rustinho"));
     app.setApplicationDisplayName(QStringLiteral("Rustinho"));
     app.setOrganizationName(QStringLiteral("rustinho"));
@@ -85,9 +108,22 @@ int main(int argc, char* argv[])
     if (!extras.isEmpty())
         qInfo("Rustinho: argumentos de teste: %s", qPrintable(extras.join(QLatin1Char(' '))));
     engine.rootContext()->setContextProperty(QStringLiteral("argumentosExtras"), extras);
+    engine.rootContext()->setContextProperty(QStringLiteral("diagnostico"), &diagnostico);
     engine.addImportPath(QStringLiteral("qrc:/qt/qml"));
+    diagnostico.marcar(QStringLiteral("carregando Main.qml"));
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/rustinho/qml/Main.qml")));
-    if (engine.rootObjects().isEmpty())
+    if (engine.rootObjects().isEmpty()) {
+        // A tela principal nem carregou: em vez de fechar em silêncio, avisa.
+        diagnostico.marcar(QStringLiteral("Main.qml NÃO carregou"));
+        QString msg = QStringLiteral("Rustinho: a tela principal não carregou. Mande o arquivo diagnostico.txt (pasta Android/data do app).");
+        if (!diagnostico.primeirosErros().isEmpty())
+            msg += QStringLiteral(" Erro: ") + diagnostico.primeirosErros().first().left(160);
+        diagnostico.avisarNaTela(msg);
+        QTimer::singleShot(10000, &app, &QCoreApplication::quit);
+        app.exec();
         return 1;
+    }
+    diagnostico.marcar(QStringLiteral("Main.qml carregado"));
+    diagnostico.vigiar(qobject_cast<QQuickWindow*>(engine.rootObjects().first()));
     return app.exec();
 }

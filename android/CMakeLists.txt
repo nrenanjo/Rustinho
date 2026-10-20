@@ -2,7 +2,7 @@
 # (.github/workflows/android.yml) roda:
 #   qt-cmake -S android -B build-android && cmake --build build-android --target apk
 cmake_minimum_required(VERSION 3.24)
-project(Rustinho VERSION 0.9.11 LANGUAGES CXX)
+project(Rustinho VERSION 0.9.12 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,7 +40,7 @@ cxx_qt_import_qml_module(rustinho_qml
     SOURCE_CRATE rustinho_android
 )
 
-qt_add_executable(Rustinho main.cpp vistacamera.cpp vistacamera.h)
+qt_add_executable(Rustinho main.cpp vistacamera.cpp vistacamera.h diagnostico.cpp diagnostico.h)
 target_link_libraries(Rustinho PRIVATE
     rustinho_qml
     Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2 Qt::Network Qt::Multimedia
