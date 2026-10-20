@@ -59,7 +59,7 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
     }
     if !nota.incoerencia.is_empty() {
         return Err(Erro::validacao(format!(
-            "Este XML parece alterado ou montado à mão: {}. Baixe de novo o XML no portal da SEFAZ ou peça ao fornecedor. (Passar nesta conferência não prova que o XML é autêntico: a assinatura digital ainda não é verificada.)",
+            "Este XML parece alterado ou montado à mão: {}. Baixe de novo o XML no portal da SEFAZ ou peça ao fornecedor.",
             nota.incoerencia
         )));
     }
@@ -87,8 +87,14 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
     Ok(())
 }
 
+/// Importa a NF-e como rascunho de compra. PEND-09: a assinatura do emitente
+/// é verificada **antes de qualquer escrita** (nem o fornecedor é cadastrado
+/// se a nota for recusada) e a compra nasce com `autorizacao = 'aguardando'`:
+/// só pode ser lançada depois de comprovada a autorização da SEFAZ (D7).
 pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml: &str) -> Resultado<String> {
-    let nota = nfe_xml::ler(xml).map_err(Erro::validacao)?;
+    let verificada = nfe_xml::ler_verificada(xml, crate::nfe_assinatura::Ancoras::padrao()).map_err(Erro::validacao)?;
+    let nota = verificada.nota;
+    let prova = &verificada.prova;
     conferir_nota(conn, &nota)?;
     if nota.chave.len() == 44 {
         let ja: Option<(String, String)> = conn
@@ -114,12 +120,18 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
 
     conn.execute(
         "INSERT INTO compra (id, fornecedor_id, chave, numero, serie, emissao, natureza, total_produtos, frete, seguro,
-                             desconto, outras, ipi, icms_st, total, destinatario, xml, criado_em, criado_por, dispositivo)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                             desconto, outras, ipi, icms_st, total, destinatario, xml, criado_em, criado_por, dispositivo,
+                             xml_verificacao, xml_prova, autorizacao)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                 'verificada', ?21, 'aguardando')",
         params![
             id, fornecedor_id, nota.chave, nota.numero, nota.serie, nota.emissao, nota.natureza, nota.total_produtos,
             nota.frete, nota.seguro, nota.desconto, nota.outras, nota.ipi, nota.icms_st, nota.total,
-            nota.destinatario, xml, tempo::agora(), usuario_id, dispositivo
+            nota.destinatario, xml, tempo::agora(), usuario_id, dispositivo,
+            serde_json::json!({
+                "titular": prova.titular, "sujeito": prova.sujeito, "tipo": prova.tipo, "algoritmo": prova.algoritmo,
+                "cadeia": prova.cadeia, "raiz": prova.raiz, "avisos": prova.avisos,
+            }).to_string()
         ],
     )?;
     for (ordem, item) in itens.iter().enumerate() {
@@ -244,6 +256,210 @@ fn ligar_sozinho(
 }
 
 // ---------------------------------------------------------------------------
+// PEND-09: assinatura verificada e autorização da SEFAZ (D5, D7).
+// ---------------------------------------------------------------------------
+
+/// O que se sabe da nota da compra.
+pub struct SituacaoFiscal {
+    pub tem_xml: bool,
+    pub verificacao: String,
+    pub prova: serde_json::Value,
+    pub autorizacao: String,
+    pub dados: serde_json::Value,
+}
+
+impl SituacaoFiscal {
+    /// Por que a compra não pode ser lançada (None = pode).
+    pub fn bloqueio(&self) -> Option<String> {
+        if !self.tem_xml {
+            return None;
+        }
+        match self.autorizacao.as_str() {
+            "confirmada_gerente" | "comprovada_sefaz" | "anterior" => None,
+            "negada" => Some(
+                "Esta nota foi conferida no portal como rejeitada, cancelada ou denegada: ela não pode entrar no estoque nem no financeiro. Descarte a importação."
+                    .into(),
+            ),
+            _ => Some(
+                "A autorização desta nota pela SEFAZ ainda não foi comprovada. O gerente precisa conferir a chave no portal da NF-e e registrar a conferência antes de lançar."
+                    .into(),
+            ),
+        }
+    }
+
+    pub fn assinatura_texto(&self) -> String {
+        if !self.tem_xml {
+            return String::new();
+        }
+        if self.verificacao == "verificada" {
+            let tipo = self.prova["tipo"].as_str().unwrap_or("");
+            format!(
+                "Assinatura digital do emitente conferida{}",
+                if tipo.is_empty() { String::new() } else { format!(" · certificado {tipo}") }
+            )
+        } else {
+            "Importada antes da verificação da assinatura digital".into()
+        }
+    }
+
+    pub fn autorizacao_texto(&self) -> String {
+        if !self.tem_xml {
+            return String::new();
+        }
+        match self.autorizacao.as_str() {
+            "aguardando" => "Autorização da SEFAZ ainda não comprovada".into(),
+            "confirmada_gerente" => format!(
+                "Conferência humana do gerente {} no portal da NF-e em {} (não é prova automática da SEFAZ)",
+                self.dados["gerente"].as_str().unwrap_or(""),
+                self.dados["conferido_em_br"].as_str().unwrap_or("")
+            ),
+            "negada" => format!(
+                "Conferida no portal como {} pelo gerente {}: não pode ser lançada",
+                self.dados["situacao"].as_str().unwrap_or("negada"),
+                self.dados["gerente"].as_str().unwrap_or("")
+            ),
+            "comprovada_sefaz" => "Autorização comprovada na SEFAZ".into(),
+            _ => String::new(),
+        }
+    }
+}
+
+pub fn situacao_fiscal(conn: &Connection, id: &str) -> Resultado<SituacaoFiscal> {
+    let (xml_vazio, verificacao, prova, autorizacao, dados): (bool, String, String, String, String) = conn
+        .query_row(
+            "SELECT xml = '', xml_verificacao, xml_prova, autorizacao, autorizacao_dados FROM compra WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Compra".into()))?;
+    let json = |t: &str| serde_json::from_str(t).unwrap_or(serde_json::Value::Null);
+    Ok(SituacaoFiscal { tem_xml: !xml_vazio, verificacao, prova: json(&prova), autorizacao, dados: json(&dados) })
+}
+
+/// "dd/mm/aaaa hh:mm" → "aaaa-mm-dd hh:mm" (hora local), ou None se inválida.
+fn data_hora_local(t: &str) -> Option<String> {
+    let (d, h) = t.trim().split_once(' ')?;
+    let p: Vec<&str> = d.split('/').collect();
+    let q: Vec<&str> = h.trim().split(':').collect();
+    if p.len() != 3
+        || q.len() != 2
+        || p[0].len() != 2
+        || p[1].len() != 2
+        || p[2].len() != 4
+        || q[0].len() != 2
+        || q[1].len() != 2
+    {
+        return None;
+    }
+    let n = |x: &str| x.parse::<u16>().ok();
+    let (dia, mes, ano, hora, minuto) = (n(p[0])?, n(p[1])?, n(p[2])?, n(q[0])?, n(q[1])?);
+    let mes_t = time::Month::try_from(mes as u8).ok()?;
+    time::Date::from_calendar_date(ano as i32, mes_t, dia as u8).ok()?;
+    if hora > 23 || minuto > 59 {
+        return None;
+    }
+    Some(format!("{ano:04}-{mes:02}-{dia:02} {hora:02}:{minuto:02}"))
+}
+
+/// O que o gerente conferiu no portal da NF-e (D7).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Conferencia {
+    pub id: String,
+    /// "autorizada", "rejeitada", "cancelada" ou "denegada".
+    pub situacao: String,
+    /// Número do protocolo visto no portal (obrigatório para "autorizada").
+    #[serde(default)]
+    pub protocolo: String,
+    /// Data e hora da conferência: "dd/mm/aaaa hh:mm" (hora deste computador).
+    pub conferido_em: String,
+}
+
+/// D7 (provisória, até o PEND-15): registra a conferência humana do gerente.
+/// `gerente_id` tem de ser de um gerente ativo autenticado **no ato** (a API
+/// confere a senha). Só "autorizada" com chave e protocolo iguais aos do XML
+/// libera; rejeitada/cancelada/denegada gravam `negada`, que nunca mais é
+/// liberada por este caminho.
+pub fn registrar_conferencia(conn: &Connection, dispositivo: &str, gerente_id: &str, c: &Conferencia) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "compra", &c.id)?;
+    let gerente: Option<String> = conn
+        .query_row("SELECT nome FROM usuario WHERE id = ?1 AND gerente = 1 AND ativo = 1", [gerente_id], |l| l.get(0))
+        .optional()?;
+    let Some(gerente) = gerente else {
+        return Err(Erro::campo("senha", "Só o gerente pode registrar a conferência da nota no portal."));
+    };
+    let cab = cabecalho(conn, &c.id)?;
+    if cab.situacao != "rascunho" {
+        return Err(Erro::validacao("Esta compra não está mais em rascunho."));
+    }
+    let atual = situacao_fiscal(conn, &c.id)?;
+    if !atual.tem_xml {
+        return Err(Erro::validacao("Esta compra não veio de um XML."));
+    }
+    match atual.autorizacao.as_str() {
+        "aguardando" => {}
+        "negada" => {
+            return Err(Erro::validacao(
+                "Esta nota já foi registrada como rejeitada, cancelada ou denegada e não pode ser liberada.",
+            ))
+        }
+        _ => return Err(Erro::validacao("A autorização desta nota já está registrada.")),
+    }
+    let situacao = c.situacao.trim();
+    if !matches!(situacao, "autorizada" | "rejeitada" | "cancelada" | "denegada") {
+        return Err(Erro::campo("situacao", "Escolha o que o portal mostrou."));
+    }
+    // Data e hora da conferência: não pode ser no futuro.
+    let quando = data_hora_local(&c.conferido_em)
+        .ok_or_else(|| Erro::campo("conferidoEm", "Informe a data e a hora da conferência (dd/mm/aaaa hh:mm)."))?;
+    let limite: String =
+        conn.query_row("SELECT strftime('%Y-%m-%d %H:%M', 'now', 'localtime', '+5 minutes')", [], |l| l.get(0))?;
+    if quando > limite {
+        return Err(Erro::campo("conferidoEm", "A conferência não pode estar no futuro."));
+    }
+    let xml: String = conn.query_row("SELECT xml FROM compra WHERE id = ?1", [&c.id], |l| l.get(0))?;
+    let nota = nfe_xml::ler(&xml).map_err(Erro::validacao)?;
+    let protocolo: String = c.protocolo.chars().filter(|x| x.is_ascii_digit()).collect();
+    if situacao == "autorizada" {
+        if protocolo.is_empty() {
+            return Err(Erro::campo("protocolo", "Digite o número do protocolo de autorização que o portal mostrou."));
+        }
+        if protocolo != nota.protocolo {
+            return Err(Erro::campo(
+                "protocolo",
+                "Este protocolo não é o desta nota. Confira no portal da NF-e pela chave de acesso.",
+            ));
+        }
+    }
+    let novo = if situacao == "autorizada" { "confirmada_gerente" } else { "negada" };
+    let dados = serde_json::json!({
+        "gerente_id": gerente_id, "gerente": gerente, "situacao": situacao, "chave": nota.chave,
+        "protocolo": protocolo, "conferido_em": quando, "conferido_em_br": c.conferido_em.trim(),
+        "registrado_em": tempo::agora(), "tipo": "conferencia_humana",
+    });
+    conn.execute(
+        "UPDATE compra SET autorizacao = ?2, autorizacao_dados = ?3 WHERE id = ?1",
+        params![c.id, novo, dados.to_string()],
+    )?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(gerente_id),
+        "compra.autorizacao",
+        "compra",
+        &c.id,
+        &[format!(
+            "Conferência humana no portal da NF-e (não é prova automática da SEFAZ): {situacao}; chave {}; protocolo {}; conferido em {}; gerente {gerente}",
+            nota.chave,
+            if protocolo.is_empty() { "-".into() } else { protocolo.clone() },
+            c.conferido_em.trim()
+        )],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Ler para a tela.
 // ---------------------------------------------------------------------------
 
@@ -273,8 +489,18 @@ pub struct CompraFicha {
     pub observacoes: String,
     /// Aviso quando a nota não é para o CNPJ da loja.
     pub aviso_destinatario: String,
-    /// R-01: o que a conferência do XML não garante (texto fixo).
-    pub aviso_conferencia: String,
+    /// PEND-09: "verificada" (assinatura do emitente conferida) ou
+    /// "nao_verificada" (importada antes da verificação, D5).
+    pub verificacao: String,
+    /// Linha curta sobre a assinatura (ex.: "Assinatura do emitente conferida · A1").
+    pub assinatura_texto: String,
+    /// "anterior", "aguardando", "confirmada_gerente", "negada", "comprovada_sefaz".
+    pub autorizacao: String,
+    /// Linha curta sobre a autorização da SEFAZ.
+    pub autorizacao_texto: String,
+    /// A compra pode ser lançada agora? (só a autorização; os itens à parte)
+    pub pode_lancar: bool,
+    pub motivo_bloqueio: String,
     pub itens: Vec<ItemFicha>,
     pub pendentes: i64,
     pub novas: i64,
@@ -606,6 +832,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         });
     }
     let aviso_destinatario = aviso_cnpj(conn, &destinatario)?;
+    let fiscal_xml = situacao_fiscal(conn, id)?;
     Ok(CompraFicha {
         id: id.to_string(),
         situacao,
@@ -629,7 +856,12 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         atualizar_precos,
         observacoes,
         aviso_destinatario,
-        aviso_conferencia: nfe_xml::LIMITE_DA_CONFERENCIA.to_string(),
+        verificacao: fiscal_xml.verificacao.clone(),
+        assinatura_texto: fiscal_xml.assinatura_texto(),
+        autorizacao: fiscal_xml.autorizacao.clone(),
+        autorizacao_texto: fiscal_xml.autorizacao_texto(),
+        pode_lancar: fiscal_xml.bloqueio().is_none(),
+        motivo_bloqueio: fiscal_xml.bloqueio().unwrap_or_default(),
         itens: lista,
         pendentes,
         novas,
@@ -828,6 +1060,10 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
     let cab = cabecalho(conn, id)?;
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Esta compra já foi lançada."));
+    }
+    // PEND-09 / D7: porta única do estoque, do custo e do financeiro.
+    if let Some(motivo) = situacao_fiscal(conn, id)?.bloqueio() {
+        return Err(Erro::validacao(motivo));
     }
     let itens = itens_banco(conn, id)?;
     if let Some(p) = itens.iter().find(|i| i.acao.is_empty()) {
@@ -1149,6 +1385,32 @@ pub fn listar(conn: &Connection, busca: &str, limite: i64) -> Resultado<Vec<Comp
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
+/// Só nos testes: libera uma compra como faria o gerente (D7), pelo mesmo
+/// caminho do programa (`registrar_conferencia`).
+#[cfg(test)]
+pub(crate) fn liberar_para_teste(c: &Connection, d: &str, id: &str) {
+    let g: String = match c
+        .query_row("SELECT id FROM usuario WHERE gerente = 1 AND ativo = 1 LIMIT 1", [], |l| l.get(0))
+        .optional()
+        .unwrap()
+    {
+        Some(g) => g,
+        None => {
+            let g = crate::usuarios::criar(c, d, "Gerente de teste", "Gerente-teste-123", true).unwrap().id;
+            crate::usuarios::definir_gerente(c, &g, true).unwrap();
+            g
+        }
+    };
+    let agora: String = c.query_row("SELECT strftime('%d/%m/%Y %H:%M', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
+    let conf = Conferencia {
+        id: id.into(),
+        situacao: "autorizada".into(),
+        protocolo: "135260000000001".into(),
+        conferido_em: agora,
+    };
+    registrar_conferencia(c, d, &g, &conf).unwrap();
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -1185,7 +1447,7 @@ mod testes {
                 "<chNFe>35261011222333000181550010000123461000000010",
                 "outra nota",
             ),
-            ("<digVal>ZXhl", "<digVal>AAAA", "resumo"),
+            ("<digVal>", "<digVal>AAAA", "resumo"),
             ("<nProt>135260000000001</nProt>", "", "sem número"),
             ("1000000014\" versao", "1000000015\" versao", "dígito"),
         ] {
@@ -1207,36 +1469,235 @@ mod testes {
         assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
     }
 
-    /// R-01 · LIMITE CONHECIDO, documentado de propósito.
-    ///
-    /// Este teste NÃO diz que o XML está protegido. Ele registra o que o
-    /// Rustinho 0.9.11 ainda não faz: um XML com itens, quantidades ou valores
-    /// mudados, mantendo a chave, o `DigestValue` e o protocolo, PASSA na
-    /// conferência e entra no estoque e no custo. Só o cálculo do resumo do
-    /// `infNFe` canonicalizado e a verificação da assinatura (módulo fiscal)
-    /// fecham isso. Quando isso for feito, este teste deve passar a exigir a
-    /// recusa (veja PENDENCIAS.md, R-01).
+    /// A-20 (PEND-09): o antigo "limite conhecido" agora é RECUSADO. 10 peças
+    /// a R$ 52,00 viram 1000 peças a R$ 1,00, mantendo a chave, o
+    /// `DigestValue`, o `digVal` e o protocolo: a coerência entre campos não
+    /// vê a troca, mas o resumo do conteúdo assinado vê. Nada é gravado.
     #[test]
-    fn limite_conhecido_xml_adulterado_com_resumos_mantidos_ainda_passa() {
+    fn a20_xml_adulterado_com_resumos_mantidos_e_recusado_sem_gravar_nada() {
         let (b, u) = base();
         let original = nfe_xml::EXEMPLO;
-        // 10 peças a R$ 52,00 viram 1000 peças a R$ 1,00: o resumo (DigestValue
-        // e digVal) é o mesmo texto de antes e a chave não mudou.
         let adulterado = original.replace("<qCom>10.0000</qCom>", "<qCom>1000.0000</qCom>").replace(
             "<vUnCom>52.0000000000</vUnCom><vProd>520.00</vProd>",
             "<vUnCom>1.0000000000</vUnCom><vProd>1000.00</vProd>",
         );
         assert_ne!(adulterado, original);
-        let nota = nfe_xml::ler(&adulterado).unwrap();
-        assert_eq!(nota.incoerencia, "", "limite conhecido: a conferência de coerência não vê a troca");
-        assert!(conferir_nota(&b.conn, &nota).is_ok());
-        let id = importar_xml(&b.conn, &b.dispositivo, &u, &adulterado)
-            .expect("limite conhecido: o XML adulterado ainda é importado");
+        // A coerência entre campos continua sem ver a troca (por isso não é prova).
+        assert_eq!(nfe_xml::ler(&adulterado).unwrap().incoerencia, "");
+        let antes = retrato(&b.conn);
+        let e = importar_xml(&b.conn, &b.dispositivo, &u, &adulterado).unwrap_err().to_string();
+        assert!(e.contains("alterada depois da assinatura"), "{e}");
+        assert_eq!(retrato(&b.conn), antes, "nada pode ser gravado");
+    }
+
+    /// Contagem de tudo que uma importação ou um lançamento poderia mudar.
+    fn retrato(c: &Connection) -> Vec<(String, i64)> {
+        let mut v = Vec::new();
+        for t in
+            ["compra", "compra_item", "pessoa", "produto", "estoque_movimento", "conta_pagar", "auditoria", "alteracao"]
+        {
+            v.push((t.to_string(), c.query_row(&format!("SELECT count(*) FROM {t}"), [], |l| l.get(0)).unwrap()));
+        }
+        v.push(("custo".into(), c.query_row("SELECT COALESCE(sum(custo), 0) FROM produto", [], |l| l.get(0)).unwrap()));
+        v.push((
+            "estoque".into(),
+            c.query_row("SELECT COALESCE(sum(quantidade), 0) FROM estoque_movimento", [], |l| l.get(0)).unwrap(),
+        ));
+        v
+    }
+
+    fn fixture(nome: &str) -> String {
+        std::fs::read_to_string(format!("{}/tests/pki/xml/{nome}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    /// A-24: cada nota recusada pelo verificador não grava NADA (nem o
+    /// fornecedor, que antes era cadastrado logo no começo da importação).
+    #[test]
+    fn a24_atomicidade_de_toda_recusa_da_assinatura() {
+        let (b, u) = base();
+        let recusadas = [
+            "ku_ausente.xml",
+            "ku_nao_critica.xml",
+            "ku_sem_ds.xml",
+            "ku_sem_nr.xml",
+            "eku_ausente.xml",
+            "eku_so_servidor.xml",
+            "politica_a4.xml",
+            "politica_ausente.xml",
+            "politica_ssl.xml",
+            "folha_ca.xml",
+            "cnpj_outra_raiz.xml",
+            "sem_cnpj.xml",
+            "vencido_antes_emissao.xml",
+            "comeca_depois_emissao.xml",
+            "vence_antes_recebimento.xml",
+            "rsa1024.xml",
+            "homologacao.xml",
+            "autoassinado.xml",
+            "raiz_falsa_mesmo_nome.xml",
+            "ac_sem_keycertsign.xml",
+            "ac_vence_no_recebimento.xml",
+            "raiz_vence_no_recebimento.xml",
+            "certificado_trocado.xml",
+            "adulterada_reassinada_propria.xml",
+            "cpf_outro.xml",
+        ];
+        let antes = retrato(&b.conn);
+        for nome in recusadas {
+            let e = importar_xml(&b.conn, &b.dispositivo, &u, &fixture(nome));
+            assert!(e.is_err(), "{nome} deveria ser recusada");
+            assert_eq!(retrato(&b.conn), antes, "{nome} gravou algo");
+        }
+        // Malformados também.
+        for x in ["", "<nfeProc/>", "lixo", &nfe_xml::EXEMPLO[..800]] {
+            assert!(importar_xml(&b.conn, &b.dispositivo, &u, x).is_err());
+            assert_eq!(retrato(&b.conn), antes);
+        }
+    }
+
+    /// A-26: nota válida vira rascunho verificado, aguardando a autorização.
+    #[test]
+    fn a26_nota_valida_vira_rascunho_verificado_aguardando_autorizacao() {
+        let (b, u) = base();
+        let id = importar_xml(&b.conn, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
         let f = ficha(&b.conn, &id).unwrap();
-        assert_eq!(f.itens[0].quantidade, "1.000", "a quantidade adulterada (1000 peças) chegou à ficha");
-        // O Rustinho avisa o usuário sobre o limite em toda compra.
-        assert!(f.aviso_conferencia.contains("NÃO verifica a assinatura digital"));
-        assert!(f.aviso_conferencia.contains("adulterado"));
+        assert_eq!(f.verificacao, "verificada");
+        assert_eq!(f.autorizacao, "aguardando");
+        assert!(!f.pode_lancar);
+        assert!(f.assinatura_texto.contains("conferida"), "{}", f.assinatura_texto);
+        assert!(f.autorizacao_texto.contains("não comprovada"), "{}", f.autorizacao_texto);
+        let prova: String =
+            b.conn.query_row("SELECT xml_prova FROM compra WHERE id = ?1", [&id], |l| l.get(0)).unwrap();
+        assert!(prova.contains("11222333000181") && prova.contains("AC de TESTE"), "{prova}");
+    }
+
+    fn gerente_e_operador(b: &Banco) -> (String, String) {
+        let g = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "Ana-senha-12345", true).unwrap();
+        usuarios::definir_gerente(&b.conn, &g.id, true).unwrap();
+        let o = usuarios::criar(&b.conn, &b.dispositivo, "Operador Bia", "Bia-senha-1234", true).unwrap();
+        (g.id, o.id)
+    }
+
+    fn conferencia(id: &str, situacao: &str, protocolo: &str, quando: &str) -> Conferencia {
+        Conferencia {
+            id: id.into(),
+            situacao: situacao.into(),
+            protocolo: protocolo.into(),
+            conferido_em: quando.into(),
+        }
+    }
+
+    fn agora_br(c: &Connection) -> String {
+        c.query_row("SELECT strftime('%d/%m/%Y %H:%M', 'now', 'localtime')", [], |l| l.get(0)).unwrap()
+    }
+
+    /// A-34, A-35: `lancar` é a porta única e respeita a autorização.
+    #[test]
+    fn a34_a35_lancar_exige_autorizacao_comprovada_e_negada_nunca_libera() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let (g, _) = gerente_e_operador(&b);
+        let id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        for it in ficha(c, &id).unwrap().itens {
+            c.execute("UPDATE compra_item SET acao = 'nova' WHERE id = ?1", [&it.id]).unwrap();
+        }
+        let antes = retrato(c);
+        let e = lancar(c, &b.dispositivo, &u, &id).unwrap_err().to_string();
+        assert!(e.contains("autorização desta nota pela SEFAZ ainda não foi comprovada"), "{e}");
+        assert_eq!(retrato(c), antes, "lançamento recusado não muda estoque, custo nem financeiro");
+        // Rejeitada no portal: negada para sempre.
+        registrar_conferencia(c, &b.dispositivo, &g, &conferencia(&id, "cancelada", "", &agora_br(c))).unwrap();
+        assert_eq!(ficha(c, &id).unwrap().autorizacao, "negada");
+        let e = lancar(c, &b.dispositivo, &u, &id).unwrap_err().to_string();
+        assert!(e.contains("não pode entrar no estoque"), "{e}");
+        let e = registrar_conferencia(
+            c,
+            &b.dispositivo,
+            &g,
+            &conferencia(&id, "autorizada", "135260000000001", &agora_br(c)),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("não pode ser liberada"), "{e}");
+        assert!(lancar(c, &b.dispositivo, &u, &id).is_err());
+    }
+
+    /// A-36, A-44, A-45, A-46: a conferência humana do gerente (D7).
+    #[test]
+    fn a36_a46_conferencia_do_gerente() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let (g, o) = gerente_e_operador(&b);
+        let id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        let agora = agora_br(c);
+        let erro =
+            |quem: &str, x: Conferencia| registrar_conferencia(c, &b.dispositivo, quem, &x).unwrap_err().to_string();
+        // Operador não registra (A-44).
+        assert!(erro(&o, conferencia(&id, "autorizada", "135260000000001", &agora)).contains("Só o gerente"));
+        // Protocolo ausente, diferente do XML (A-44).
+        assert!(erro(&g, conferencia(&id, "autorizada", "", &agora)).contains("protocolo"));
+        assert!(erro(&g, conferencia(&id, "autorizada", "135260000000002", &agora)).contains("não é o desta nota"));
+        // Data e hora: ausente, inválida, no futuro (A-44).
+        assert!(erro(&g, conferencia(&id, "autorizada", "135260000000001", "")).contains("data e a hora"));
+        assert!(
+            erro(&g, conferencia(&id, "autorizada", "135260000000001", "31/02/2026 10:00")).contains("data e a hora")
+        );
+        assert!(erro(&g, conferencia(&id, "autorizada", "135260000000001", "01/01/2099 10:00")).contains("futuro"));
+        // Situação desconhecida.
+        assert!(erro(&g, conferencia(&id, "talvez", "135260000000001", &agora)).contains("portal mostrou"));
+        // Nada disso mudou a compra.
+        assert_eq!(ficha(c, &id).unwrap().autorizacao, "aguardando");
+        // Certo: libera, com rótulo e auditoria (A-36, A-46).
+        registrar_conferencia(c, &b.dispositivo, &g, &conferencia(&id, "autorizada", "1352 6000 0000 001", &agora))
+            .unwrap();
+        let f = ficha(c, &id).unwrap();
+        assert_eq!(f.autorizacao, "confirmada_gerente");
+        assert!(f.pode_lancar);
+        assert!(f.autorizacao_texto.contains("Conferência humana do gerente Gerente Ana"), "{}", f.autorizacao_texto);
+        assert!(f.autorizacao_texto.contains("não é prova automática da SEFAZ"));
+        let trilha: String = c
+            .query_row(
+                "SELECT detalhes FROM auditoria WHERE acao = 'compra.autorizacao' AND entidade_id = ?1",
+                [&id],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert!(
+            trilha.contains("Conferência humana")
+                && trilha.contains("135260000000001")
+                && trilha.contains("Gerente Ana"),
+            "{trilha}"
+        );
+        assert!(trilha.contains("35261011222333000181550010000123451000000014"), "{trilha}");
+        let dados: String =
+            c.query_row("SELECT autorizacao_dados FROM compra WHERE id = ?1", [&id], |l| l.get(0)).unwrap();
+        assert!(
+            dados.contains(&g) && dados.contains("conferencia_humana") && dados.contains("registrado_em"),
+            "{dados}"
+        );
+        // Já registrada: não registra de novo.
+        assert!(erro(&g, conferencia(&id, "cancelada", "", &agora)).contains("já está registrada"));
+        // E agora lança (os itens ainda precisam de decisão, como antes).
+        for it in &f.itens {
+            c.execute("UPDATE compra_item SET acao = 'nova' WHERE id = ?1", [&it.id]).unwrap();
+        }
+        lancar(c, &b.dispositivo, &u, &id).unwrap();
+    }
+
+    /// D5: compras de antes desta versão não são bloqueadas.
+    #[test]
+    fn d5_compra_anterior_nao_e_bloqueada() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        c.execute(
+            "UPDATE compra SET xml_verificacao = 'nao_verificada', autorizacao = 'anterior' WHERE id = ?1",
+            [&id],
+        )
+        .unwrap();
+        let f = ficha(c, &id).unwrap();
+        assert!(f.pode_lancar);
+        assert!(f.assinatura_texto.contains("antes da verificação"), "{}", f.assinatura_texto);
     }
 
     #[test]
@@ -1345,6 +1806,7 @@ mod testes {
 
         assert_eq!(f.duplicatas, ["001 · vence 07/11/2026 · R$ 550,25", "002 · vence 07/12/2026 · R$ 550,25"]);
         assert!(f.gerar_pagar);
+        liberar_para_teste(c, &b.dispositivo, &id);
         let r = lancar(c, &b.dispositivo, &u, &id).unwrap();
         assert_eq!((r.itens_estoque, r.pecas_novas), (3, 1));
         // as duplicatas foram para o A pagar

@@ -116,8 +116,13 @@ fn compra_por_xml() {
             ("total", "texto"),
             ("freteExtra", "texto"),
             ("avisoDestinatario", "texto"),
-            // R-01: o aviso do limite da conferência do XML chega à tela.
-            ("avisoConferencia", "texto"),
+            // PEND-09: assinatura verificada e autorização da SEFAZ (D7).
+            ("verificacao", "texto"),
+            ("assinaturaTexto", "texto"),
+            ("autorizacao", "texto"),
+            ("autorizacaoTexto", "texto"),
+            ("podeLancar", "sim/nao"),
+            ("motivoBloqueio", "texto"),
             ("itens", "lista"),
             ("pendentes", "numero"),
             ("novas", "numero"),
@@ -127,7 +132,9 @@ fn compra_por_xml() {
             ("parcelasPagar", "numero"),
         ],
     );
-    assert!(c["avisoConferencia"].as_str().unwrap().contains("assinatura digital"));
+    assert_eq!(c["verificacao"], "verificada");
+    assert_eq!(c["podeLancar"], false);
+    assert!(c["motivoBloqueio"].as_str().unwrap().contains("ainda não foi comprovada"));
     // Itens (LinhaItemCompra).
     assert_eq!(c["itens"].as_array().unwrap().len(), 3);
     for it in c["itens"].as_array().unwrap() {
@@ -163,6 +170,19 @@ fn compra_por_xml() {
         .iter()
         .map(|it| json!({ "id": it["id"], "acao": "nova", "produtoId": "", "fator": "1", "baixarPreco": false }))
         .collect();
+    // Sem a conferência do gerente (D7), não lança.
+    let r = chamar(&mut s, "compra_lancar", json!({ "id": id, "itens": escolhas }));
+    assert_eq!(r["ok"], false, "{r}");
+    // Senha errada: recusa; certa: registra e devolve a ficha.
+    let conf = |senha: &str| {
+        json!({ "id": id, "situacao": "autorizada", "protocolo": "135260000000001",
+                "conferidoEm": "08/10/2026 11:00", "senha": senha })
+    };
+    let r = chamar(&mut s, "compra_conferir_autorizacao", conf("senha-errada"));
+    assert_eq!(r["ok"], false, "{r}");
+    let f = ok(&mut s, "compra_conferir_autorizacao", conf("balcao-azul-2026"));
+    assert_eq!(f["autorizacao"], "confirmada_gerente");
+    assert_eq!(f["podeLancar"], true);
     let l = ok(&mut s, "compra_lancar", json!({ "id": id, "itens": escolhas }));
     tem("compra_lancar", &l, &[("resumo", "objeto|nada"), ("compra", "objeto")]);
     let depois = &l["compra"];

@@ -140,8 +140,11 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
     let mut lido = Lido::default();
     let mut chaves: HashSet<String> = HashSet::new();
     let total = cada_xml(arquivos, |nome, xml| {
-        let nota: NotaXml = match nfe_xml::ler_cadastro(xml) {
-            Ok(n) => n,
+        // PEND-09 (D2, D8): só cadastra a partir de nota com a assinatura do
+        // emitente verificada; a autorização da SEFAZ não é exigida aqui
+        // (cadastro não mexe em estoque, custo nem financeiro).
+        let nota: NotaXml = match nfe_xml::ler_cadastro_verificada(xml, crate::nfe_assinatura::Ancoras::padrao()) {
+            Ok(n) => n.nota,
             Err(e) => {
                 lido.ignorados += 1;
                 if lido.avisos.len() < 5 && !e.contains("evento") && !e.contains("CT-e") {
@@ -501,14 +504,9 @@ mod testes {
     use crate::banco::Banco;
     use crate::usuarios;
 
-    const NOTA_LOJA: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<nfeProc><NFe><infNFe Id="NFe35261011222333000181550010000001231000001230">
- <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-09-10T10:00:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe><natOp>VENDA</natOp></ide>
- <emit><CNPJ>11444777000161</CNPJ><xNome>LOJA MODELO AUTO PECAS</xNome><enderEmit><UF>SP</UF></enderEmit></emit>
- <dest><CPF>52998224725</CPF><xNome>JOAO DA SILVA</xNome><enderDest><xLgr>RUA A</xLgr><nro>10</nro><xBairro>CENTRO</xBairro><xMun>AVARE</xMun><UF>SP</UF><fone>15999990000</fone></enderDest><email>joao@exemplo.com</email></dest>
- <det nItem="1"><prod><cProd>4455</cProd><cEAN>SEM GTIN</cEAN><xProd>FILTRO DE OLEO PSL55</xProd><NCM>84212300</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vProd>60.00</vProd></prod>
-  <imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto></det>
-</infNFe></NFe></nfeProc>"#;
+    /// Nota de venda da própria loja, assinada pela PKI de teste, sem
+    /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
+    const NOTA_LOJA: &str = include_str!("../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
 
     #[test]
     fn importa_clientes_pecas_e_fornecedores() {
@@ -590,6 +588,53 @@ mod testes {
         assert_eq!((p.arquivos, p.notas_loja, p.clientes_ja, p.pecas_ja), (1, 1, 1, 1));
         let p = previa(c, &arquivos).unwrap();
         assert_eq!((p.arquivos, p.notas), (4, 2));
+        std::fs::remove_dir_all(&pasta).ok();
+    }
+    /// A-43 (D8): cadastro por XML exige a assinatura do emitente (não a
+    /// autorização) e não mexe em estoque, custo nem financeiro. A nota
+    /// adulterada não cadastra nada.
+    #[test]
+    fn a43_cadastro_por_xml_so_com_assinatura_e_sem_efeito_financeiro() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-a43-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let adulterada = NOTA_LOJA.replace("JOAO DA SILVA", "JOAO DA SILVA FALSO");
+        std::fs::write(pasta.join("adulterada.xml"), &adulterada).unwrap();
+        let arquivos = vec![pasta.display().to_string()];
+        let e = Entrada {
+            arquivos: arquivos.clone(),
+            clientes: true,
+            fornecedores: true,
+            pecas_loja: true,
+            pecas_fornecedor: true,
+        };
+        let conta = |t: &str| -> i64 { c.query_row(&format!("SELECT count(*) FROM {t}"), [], |l| l.get(0)).unwrap() };
+        let financeiro = || {
+            (
+                conta("estoque_movimento"),
+                conta("conta_pagar"),
+                conta("conta_receber"),
+                conta("compra"),
+                c.query_row("SELECT COALESCE(sum(custo), 0) FROM produto", [], |l| l.get::<_, i64>(0)).unwrap(),
+            )
+        };
+        let (pessoas, pecas, fin) = (conta("pessoa"), conta("produto"), financeiro());
+        let p = previa(c, &arquivos).unwrap();
+        assert_eq!((p.notas, p.ignorados), (0, 1), "adulterada é ignorada");
+        assert!(p.avisos.iter().any(|a| a.contains("alterada depois da assinatura")), "{:?}", p.avisos);
+        let r = importar(c, d, &u, &e).unwrap();
+        assert_eq!((r.clientes, r.fornecedores, r.pecas), (0, 0, 0));
+        assert_eq!((conta("pessoa"), conta("produto")), (pessoas, pecas));
+        // A original (assinada, sem protocolo): cadastra, sem efeito no financeiro.
+        std::fs::remove_file(pasta.join("adulterada.xml")).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        let r = importar(c, d, &u, &e).unwrap();
+        assert_eq!((r.clientes, r.pecas), (1, 1));
+        assert_eq!(financeiro(), fin, "cadastro não muda estoque, custo nem financeiro");
         std::fs::remove_dir_all(&pasta).ok();
     }
 }

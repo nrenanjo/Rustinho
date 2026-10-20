@@ -1,11 +1,17 @@
 //! Leitura do XML da NF-e (nota de compra que o fornecedor manda).
 //!
 //! Lê só o que a entrada no estoque precisa: emitente, número, itens e
-//! totais. Aceita o arquivo "procNFe" (nota autorizada, o mais comum) ou só
-//! a "NFe".
+//! totais.
+//!
+//! PEND-09: para dar entrada (compra) ou cadastrar (pessoas e peças), a nota
+//! passa antes por `nfe_assinatura::verificar` (resumo, assinatura RSA, cadeia
+//! ICP-Brasil, uso e titular do certificado) e os dados são lidos **do nó
+//! `infNFe` verificado** (`ler_verificada`, `ler_cadastro_verificada`). A
+//! leitura sem verificação (`ler`) só serve para reler um XML já guardado.
 
 use roxmltree::{Document, Node};
 
+use crate::nfe_assinatura::{self, Ancoras, Prova};
 use crate::pessoas::Emitente;
 
 /// Uma nota lida do XML.
@@ -28,13 +34,15 @@ pub struct NotaXml {
     /// Nome, endereço e contato de quem recebeu (para cadastrar o cliente).
     pub destinatario_dados: Emitente,
     /// O XML diz que a SEFAZ autorizou (cStat 100/150 no protocolo). Isto
-    /// sozinho não prova nada: veja `incoerencia` e `LIMITE_DA_CONFERENCIA`.
+    /// sozinho não prova nada: o protocolo dos arquivos distribuídos não é
+    /// assinado (PEND-15; até lá, conferência do gerente, D7).
     pub autorizada: bool,
+    /// Número do protocolo de autorização (`nProt`) escrito no XML.
+    pub protocolo: String,
     /// Algo que não bate entre a chave de acesso, os dados da nota, a
-    /// assinatura e o protocolo ("" = tudo bate). É uma conferência de
-    /// COERÊNCIA entre campos, não uma prova de autenticidade: não calcula o
-    /// resumo (digest) do conteúdo da nota nem verifica a assinatura digital
-    /// (RSA / cadeia ICP-Brasil). Veja `LIMITE_DA_CONFERENCIA`.
+    /// assinatura e o protocolo ("" = tudo bate). É só COERÊNCIA entre
+    /// campos (verificação adicional); a prova de que o conteúdo é o assinado
+    /// é a de `nfe_assinatura`.
     pub incoerencia: String,
     pub itens: Vec<ItemXml>,
     pub total_produtos: i64,
@@ -131,15 +139,10 @@ fn dinheiro(no: Option<Node>, nome: &str) -> Result<i64, String> {
     decimal(&texto(no, nome), 2)
 }
 
-/// Lê o XML. Devolve uma mensagem clara quando não é uma NF-e.
+/// Relê um XML **já guardado** (aceito na importação ou de antes do
+/// PEND-09). Não verifica a assinatura: nunca usar para dar entrada nova.
 pub fn ler(xml: &str) -> Result<NotaXml, String> {
     ler_nota(xml, false)
-}
-
-/// Lê o XML de uma NF-e ou NFC-e para cadastrar clientes, fornecedores e
-/// peças (aceita também o cupom, modelo 65).
-pub fn ler_cadastro(xml: &str) -> Result<NotaXml, String> {
-    ler_nota(xml, true)
 }
 
 fn pessoa_do_grupo(grupo: Option<Node>, endereco: &str) -> Emitente {
@@ -170,9 +173,53 @@ fn pessoa_do_grupo(grupo: Option<Node>, endereco: &str) -> Emitente {
     }
 }
 
+/// Nota lida do nó verificado, com a prova da assinatura.
+#[derive(Debug, Clone)]
+pub struct NotaVerificada {
+    pub nota: NotaXml,
+    pub prova: Prova,
+}
+
+/// Nota de compra (NF-e modelo 55) com a assinatura do emitente verificada.
+pub fn ler_verificada(xml: &str, ancoras: &Ancoras) -> Result<NotaVerificada, String> {
+    verificada(xml, ancoras, false)
+}
+
+/// Nota para cadastrar pessoas e peças (NF-e ou NFC-e) com a assinatura do
+/// emitente verificada (D2/D8: sem exigir a autorização da SEFAZ).
+pub fn ler_cadastro_verificada(xml: &str, ancoras: &Ancoras) -> Result<NotaVerificada, String> {
+    verificada(xml, ancoras, true)
+}
+
+fn verificada(xml: &str, ancoras: &Ancoras, aceita_nfce: bool) -> Result<NotaVerificada, String> {
+    let resultado = if aceita_nfce {
+        nfe_assinatura::verificar_para_cadastro(xml, ancoras)
+    } else {
+        nfe_assinatura::verificar(xml, ancoras)
+    };
+    let v = match resultado {
+        Ok(v) => v,
+        Err(r) => {
+            // Arquivo que nem é NF-e (CT-e, evento, resumo...): a mensagem
+            // de antes explica melhor o que fazer.
+            if matches!(r.motivo, nfe_assinatura::Motivo::Estrutura | nfe_assinatura::Motivo::Malformado) {
+                ler_nota(xml, aceita_nfce)?;
+            }
+            return Err(format!("{r} Peça ao fornecedor o XML original ou baixe-o no portal da SEFAZ."));
+        }
+    };
+    let inf = v.doc.get_node(v.inf).ok_or("nota verificada sem o nó infNFe")?;
+    let nota = nota_do_no(v.doc.root_element(), inf, aceita_nfce)?;
+    Ok(NotaVerificada { nota, prova: v.prova })
+}
+
 fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
     // Alguns arquivos vêm com BOM ou espaços antes da declaração.
     let xml = xml.trim_start_matches('\u{feff}').trim_start();
+    // O leitor é recursivo: arquivo profundo demais derrubaria o programa.
+    if nfe_assinatura::profundidade_excessiva(xml, nfe_assinatura::PROFUNDIDADE_MAXIMA) {
+        return Err("O arquivo não é um XML de NF-e válido (aninhamento profundo demais).".into());
+    }
     let doc = Document::parse(xml).map_err(|e| format!("O arquivo não é um XML válido ({e})."))?;
     let raiz = doc.root_element();
     let inf = descendente(raiz, "infNFe").ok_or_else(|| {
@@ -185,7 +232,11 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
             "Este XML não é de uma NF-e.".to_string()
         }
     })?;
+    nota_do_no(raiz, inf, aceita_nfce)
+}
 
+/// Lê os dados de `inf` (o nó `infNFe`); `raiz` só serve para o protocolo.
+fn nota_do_no(raiz: Node, inf: Node, aceita_nfce: bool) -> Result<NotaXml, String> {
     let ide = filho(inf, "ide");
     let modelo = texto(ide, "mod");
     if modelo == "65" && !aceita_nfce {
@@ -279,8 +330,13 @@ fn ler_nota(xml: &str, aceita_nfce: bool) -> Result<NotaXml, String> {
         .map(|c| matches!(c.trim(), "100" | "150"))
         .unwrap_or(false);
     let incoerencia = if autorizada { conferir_coerencia(raiz, inf, &chave) } else { String::new() };
+    let protocolo = descendente(raiz, "protNFe")
+        .and_then(|p| filho(p, "infProt"))
+        .map(|p| texto(Some(p), "nProt"))
+        .unwrap_or_default();
     Ok(NotaXml {
         incoerencia,
+        protocolo,
         chave,
         modelo,
         numero: texto(ide, "nNF"),
@@ -342,18 +398,11 @@ pub fn digito_da_chave(chave43: &str) -> Option<u32> {
     Some(if resto < 2 { 0 } else { 11 - resto })
 }
 
-/// O que a conferência do XML NÃO faz. É mostrado ao usuário na tela da
-/// compra (R-01): o Rustinho ainda não prova que o XML é o que a SEFAZ
-/// autorizou.
-pub const LIMITE_DA_CONFERENCIA: &str = "Conferência do XML: o Rustinho confere se a chave, os dados da nota e o protocolo combinam entre si, mas ainda NÃO verifica a assinatura digital nem o resumo do conteúdo. Um XML adulterado com cuidado pode passar. Use só XML que veio direto do fornecedor ou do portal da SEFAZ e confira os itens e valores antes de lançar.";
-
 /// Confere se a chave de acesso, os dados da nota, a assinatura e o
-/// protocolo da SEFAZ falam da mesma nota (coerência entre campos). Pega XML
-/// montado à mão ou com o protocolo copiado de outra nota, mas NÃO pega um XML
-/// em que só itens, quantidades ou valores foram mudados mantendo a chave, o
-/// resumo (`DigestValue`/`digVal`) e o protocolo: isso exige calcular o resumo
-/// do `infNFe` canonicalizado e verificar a assinatura (pendente: módulo
-/// fiscal). Devolve "" se tudo bate, ou o que não bate.
+/// protocolo da SEFAZ falam da mesma nota (coerência entre campos). É uma
+/// verificação ADICIONAL: a prova de que o conteúdo é o que foi assinado é a
+/// de `nfe_assinatura` (PEND-09), feita antes. Devolve "" se tudo bate, ou o
+/// que não bate.
 fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
     if chave.len() != 44 || !chave.chars().all(|c| c.is_ascii_digit()) {
         return "a chave de acesso não tem 44 números".into();

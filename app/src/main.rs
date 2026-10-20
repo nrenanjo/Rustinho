@@ -10,6 +10,12 @@ mod ponte;
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
 fn main() {
+    // PEND-09: um programa montado com a raiz de TESTE aceitaria notas
+    // assinadas por ela. Isso nunca pode chegar à loja.
+    if rustinho_nucleo::nfe_assinatura::ANCORAS_DE_TESTE_COMPILADAS {
+        eprintln!("Rustinho montado com as âncoras de TESTE da NF-e: este programa não pode ser usado.");
+        std::process::exit(2);
+    }
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         app.as_mut().set_application_name(&QString::from("rustinho"));

@@ -816,6 +816,7 @@ mod testes {
             })
             .collect();
         compras::atualizar(c, &compras::CompraEntrada { id: compra.clone(), itens, ..Default::default() }).unwrap();
+        compras::liberar_para_teste(c, d, &compra);
         let r = compras::lancar(c, d, &u, &compra).unwrap();
         assert_eq!(r.encomendas, 1);
         assert_eq!(estoque::saldo(c, &rol).unwrap(), 8000);

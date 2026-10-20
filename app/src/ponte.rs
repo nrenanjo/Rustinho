@@ -61,6 +61,10 @@ impl qobject::Sistema {
     fn servico(self: Pin<&mut Self>) -> &mut Result<Servico, String> {
         let estado = self.rust_mut().get_mut();
         estado.servico.get_or_insert_with(|| {
+            // PEND-09: programa montado com a raiz de TESTE da NF-e não abre.
+            if rustinho_nucleo::nfe_assinatura::ANCORAS_DE_TESTE_COMPILADAS {
+                return Err("Este Rustinho foi montado com as âncoras de TESTE da NF-e e não pode ser usado.".into());
+            }
             let caminho = rustinho_nucleo::caminho_padrao();
             // Antes de abrir o banco: o núcleo compara a identidade deste
             // computador com a que o banco guardou (cópia do banco).

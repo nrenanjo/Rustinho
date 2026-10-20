@@ -88,11 +88,7 @@ fn a05_a08_qualquer_mudanca_no_conteudo_assinado_e_recusada() {
         } else {
             format!("X{original}")
         };
-        let adulterado = ok.replacen(
-            &format!("{abre}{original}</{campo}>"),
-            &format!("{abre}{novo}</{campo}>"),
-            1,
-        );
+        let adulterado = ok.replacen(&format!("{abre}{original}</{campo}>"), &format!("{abre}{novo}</{campo}>"), 1);
         assert_ne!(adulterado, ok);
         assert_eq!(motivo(&adulterado), Motivo::Resumo, "campo {campo}");
         testados += 1;
@@ -108,10 +104,8 @@ fn a09_resumo_recalculado_sem_a_assinatura_e_recusado() {
     let adulterado = trocar(&ok, "<qCom>", "<qCom>9");
     let doc = roxmltree::Document::parse(&adulterado).unwrap();
     let inf = doc.descendants().find(|n| n.has_tag_name((NS_NFE, "infNFe"))).unwrap();
-    let novo = BASE64.encode(ring::digest::digest(
-        &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
-        &c14n::canonicalizar(inf).unwrap(),
-    ));
+    let novo = BASE64
+        .encode(ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, &c14n::canonicalizar(inf).unwrap()));
     let antigo = texto_de(&ok, "DigestValue");
     let refeito = adulterado.replace(&antigo, &novo);
     assert_eq!(motivo(&refeito), Motivo::Assinatura);
@@ -288,7 +282,10 @@ fn a21_estruturas_que_enganariam_a_leitura_sao_recusadas() {
         // Reference para outro elemento.
         ("Reference para outro Id", ok.replacen(&format!("URI=\"#{}\"", id_de(&ok)), "URI=\"#outro\"", 1)),
         // Assinatura fora do NFe.
-        ("Signature no nfeProc", ok.replacen(assinatura, "", 1).replacen("</nfeProc>", &format!("{assinatura}</nfeProc>"), 1)),
+        (
+            "Signature no nfeProc",
+            ok.replacen(assinatura, "", 1).replacen("</nfeProc>", &format!("{assinatura}</nfeProc>"), 1),
+        ),
         // Duas assinaturas.
         ("duas Signature", ok.replacen(assinatura, &format!("{assinatura}{assinatura}"), 1)),
         // infNFe embrulhado em outro elemento.
@@ -296,7 +293,11 @@ fn a21_estruturas_que_enganariam_a_leitura_sao_recusadas() {
         // Assinatura dentro do infNFe.
         ("Signature dentro do infNFe", ok.replacen("</infNFe>", &format!("{assinatura}</infNFe>"), 1)),
         // Prefixo em elemento da região assinada.
-        ("prefixo", ok.replacen("<ide>", "<n:ide xmlns:n=\"http://www.portalfiscal.inf.br/nfe\">", 1).replacen("</ide>", "</n:ide>", 1)),
+        (
+            "prefixo",
+            ok.replacen("<ide>", "<n:ide xmlns:n=\"http://www.portalfiscal.inf.br/nfe\">", 1)
+                .replacen("</ide>", "</n:ide>", 1),
+        ),
         // Comentário e instrução de processamento na região assinada.
         ("comentário", trocar(&ok, "<ide>", "<ide><!-- x -->")),
         ("instrução", trocar(&ok, "<ide>", "<ide><?x y?>")),
@@ -465,12 +466,7 @@ fn a03_c14n_bate_com_o_libxml2_nos_casos_sinteticos() {
         let doc = roxmltree::Document::parse(&xml).unwrap();
         let alvo = doc.descendants().find(|n| n.attribute("Id") == Some("alvo")).unwrap();
         let obtido = c14n::canonicalizar(alvo).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
-        assert_eq!(
-            String::from_utf8_lossy(&obtido),
-            String::from_utf8_lossy(&esperado),
-            "{}",
-            p.display()
-        );
+        assert_eq!(String::from_utf8_lossy(&obtido), String::from_utf8_lossy(&esperado), "{}", p.display());
         n += 1;
     }
     assert!(n >= 10, "só {n} casos");
@@ -518,7 +514,8 @@ fn acervo_a01_a55_notas_reais_com_as_ancoras_da_icp_brasil() {
                     teste_fsist += 1;
                 } else {
                     assert!(!nfe || r.motivo != Motivo::Resumo, "{nome}: {r}");
-                    *outras.entry(format!("{:?}{}", r.motivo, if nfe { "" } else { " (não é NF-e)" })).or_default() += 1;
+                    *outras.entry(format!("{:?}{}", r.motivo, if nfe { "" } else { " (não é NF-e)" })).or_default() +=
+                        1;
                 }
             }
         }

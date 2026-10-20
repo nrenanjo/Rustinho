@@ -258,6 +258,10 @@ def main():
     proprio = emitir_folha("EMITENTE DE TESTE", k3, None, None, autoassinado=True)
     adulterado = MODELO.replace("<qCom>", "<qCom>9", 1)
     gravar("adulterada_reassinada_propria.xml", assinar(adulterado, k3, proprio))
+    # Nota de venda DA LOJA (cadastro por XML, D8): só a NFe, sem protocolo.
+    venda = open(os.path.join(AQUI, "nfe_venda_loja_modelo.xml"), encoding="utf-8").read()
+    k, c = folha(cnpj="11444777000161")
+    gravar("venda_da_loja_sem_protocolo.xml", assinar(venda, k, c))
     print("ok:", len(os.listdir(SAIDA)), "notas de teste em", SAIDA)
 
 

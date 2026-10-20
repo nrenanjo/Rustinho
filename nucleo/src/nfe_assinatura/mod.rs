@@ -34,6 +34,10 @@ use x509_parser::prelude::*;
 
 pub use ancoras::{Ancoras, Categoria, Raiz};
 
+/// Verdadeiro se o recurso `ancoras-de-teste` (raiz FICTÍCIA) foi compilado.
+/// O aplicativo se recusa a abrir quando isso acontece.
+pub const ANCORAS_DE_TESTE_COMPILADAS: bool = cfg!(feature = "ancoras-de-teste");
+
 pub const NS_NFE: &str = "http://www.portalfiscal.inf.br/nfe";
 pub const NS_DS: &str = "http://www.w3.org/2000/09/xmldsig#";
 
@@ -102,7 +106,9 @@ impl fmt::Display for Recusa {
             Motivo::Certificado => "O certificado digital do emitente não pôde ser aceito",
             Motivo::Uso => "O certificado do emitente não é de assinatura de NF-e (uso fora do perfil ICP-Brasil)",
             Motivo::Tipo => "O tipo de certificado do emitente não é aceito para NF-e (precisa ser A1 ou A3)",
-            Motivo::Cadeia => "O certificado do emitente não é de uma autoridade certificadora da ICP-Brasil reconhecida",
+            Motivo::Cadeia => {
+                "O certificado do emitente não é de uma autoridade certificadora da ICP-Brasil reconhecida"
+            }
             Motivo::Validade => "O certificado do emitente não estava válido na emissão ou na autorização da nota",
             Motivo::Titular => "O certificado da assinatura não é do emitente da nota",
             Motivo::Homologacao => "Esta nota é de homologação (teste da SEFAZ), sem valor fiscal",
@@ -136,9 +142,10 @@ pub struct Prova {
     pub tipo: &'static str,
     /// Observações técnicas que não recusam (ex.: fuso errado no recebimento).
     pub avisos: Vec<String>,
-    /// `dhEmi` e `dhRecbto` (segundos desde 1970, UTC).
+    /// `dhEmi` e `dhRecbto` (segundos desde 1970, UTC). Sem protocolo
+    /// (só no cadastro, D8), não há `dhRecbto`.
     pub emissao: i64,
-    pub recebimento: i64,
+    pub recebimento: Option<i64>,
 }
 
 /// Nota verificada: o documento e **o nó `infNFe` que foi verificado** (a
@@ -196,7 +203,8 @@ fn nomes(lista: &[Node], ns: &str, esperado: &[&str]) -> bool {
 /// (o leitor recusa em seguida).
 pub fn profundidade_excessiva(texto: &str, limite: usize) -> bool {
     let b = texto.as_bytes();
-    let achar = |de: usize, alvo: &[u8]| b[de.min(b.len())..].windows(alvo.len()).position(|w| w == alvo).map(|p| p + de);
+    let achar =
+        |de: usize, alvo: &[u8]| b[de.min(b.len())..].windows(alvo.len()).position(|w| w == alvo).map(|p| p + de);
     let (mut i, mut d) = (0usize, 0usize);
     while i < b.len() {
         if b[i] != b'<' {
@@ -350,10 +358,7 @@ fn conferir_uso(c: &X509Certificate) -> Result<(&'static str, Vec<String>), Recu
         avisos.push("certificado sem keyEncipherment (fora do perfil A1/A3, irrelevante para a assinatura)".into());
     }
     // U3: EKU presente com clientAuth ou emailProtection (perfil, não TLS).
-    let eku = c
-        .extended_key_usage()
-        .map_err(ilegivel)?
-        .ok_or_else(|| recusa(Motivo::Uso, "sem ExtendedKeyUsage"))?;
+    let eku = c.extended_key_usage().map_err(ilegivel)?.ok_or_else(|| recusa(Motivo::Uso, "sem ExtendedKeyUsage"))?;
     if !(eku.value.client_auth || eku.value.email_protection) {
         return Err(recusa(Motivo::Uso, "ExtendedKeyUsage sem clientAuth nem emailProtection"));
     }
@@ -442,8 +447,20 @@ fn iguais(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Verifica a nota (§3.3, §3.5, §3.6 dos critérios).
+/// Verifica a nota distribuída (`nfeProc` com o protocolo): entrada de compra.
 pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, Recusa> {
+    verificar_com(xml, ancoras, true)
+}
+
+/// Para cadastrar pessoas e peças (D8): a assinatura do emitente é exigida
+/// do mesmo jeito; o protocolo da SEFAZ não (aceita também a `NFe` sozinha).
+/// Havendo protocolo, a validade também é conferida no recebimento.
+pub fn verificar_para_cadastro<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, Recusa> {
+    verificar_com(xml, ancoras, false)
+}
+
+/// Verifica a nota (§3.3, §3.5, §3.6 dos critérios).
+fn verificar_com<'a>(xml: &'a str, ancoras: &Ancoras, exigir_protocolo: bool) -> Result<Verificado<'a>, Recusa> {
     // ---- tamanho, leitura, profundidade
     let x = xml.trim_start_matches('\u{feff}').trim_start();
     if x.is_empty() {
@@ -463,14 +480,17 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
 
     // ---- estrutura: nfeProc → [NFe, protNFe]; NFe → [infNFe, (infNFeSupl), Signature]
     let raiz = doc.root_element();
-    if !e(raiz, NS_NFE, "nfeProc") {
+    let (nfe, prot) = if e(raiz, NS_NFE, "nfeProc") {
+        let filhos = elementos(raiz);
+        if !nomes(&filhos, NS_NFE, &["NFe", "protNFe"]) {
+            return Err(recusa(Motivo::Estrutura, "nfeProc deve ter NFe e protNFe"));
+        }
+        (filhos[0], Some(filhos[1]))
+    } else if !exigir_protocolo && e(raiz, NS_NFE, "NFe") {
+        (raiz, None)
+    } else {
         return Err(recusa(Motivo::Estrutura, "a raiz não é nfeProc"));
-    }
-    let filhos = elementos(raiz);
-    if !nomes(&filhos, NS_NFE, &["NFe", "protNFe"]) {
-        return Err(recusa(Motivo::Estrutura, "nfeProc deve ter NFe e protNFe"));
-    }
-    let (nfe, prot) = (filhos[0], filhos[1]);
+    };
     let nf = elementos(nfe);
     let ok_nf = match nf.len() {
         2 => e(nf[0], NS_NFE, "infNFe") && e(nf[1], NS_DS, "Signature"),
@@ -500,7 +520,7 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     }
     // Outras assinaturas só dentro do protNFe (ignoradas: não provam nada aqui).
     for s in doc.descendants().filter(|n| e(*n, NS_DS, "Signature")) {
-        if s != sig && !s.ancestors().any(|a| a == prot) {
+        if s != sig && !s.ancestors().any(|a| Some(a) == prot) {
             return Err(recusa(Motivo::Estrutura, "assinatura fora do lugar"));
         }
     }
@@ -550,9 +570,7 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
                 &ring::digest::SHA1_FOR_LEGACY_USE_ONLY,
                 &ring::signature::RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
             ),
-            (RSA_SHA256, SHA256) => {
-                ("rsa-sha256", &ring::digest::SHA256, &ring::signature::RSA_PKCS1_2048_8192_SHA256)
-            }
+            (RSA_SHA256, SHA256) => ("rsa-sha256", &ring::digest::SHA256, &ring::signature::RSA_PKCS1_2048_8192_SHA256),
             _ => return Err(recusa(Motivo::Algoritmo, "par de algoritmos")),
         };
     let kif = elementos(ki);
@@ -565,9 +583,7 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     }
 
     // ---- resumo
-    let declarado = BASE64
-        .decode(texto_limpo(rf[2]))
-        .map_err(|_| recusa(Motivo::Estrutura, "DigestValue inválido"))?;
+    let declarado = BASE64.decode(texto_limpo(rf[2])).map_err(|_| recusa(Motivo::Estrutura, "DigestValue inválido"))?;
     let canonico = c14n::canonicalizar(inf).map_err(|e| recusa(Motivo::Estrutura, e))?;
     let calculado = ring::digest::digest(resumo_alg, &canonico);
     if !iguais(calculado.as_ref(), &declarado) {
@@ -575,9 +591,8 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     }
 
     // ---- certificado e assinatura RSA
-    let der = BASE64
-        .decode(texto_limpo(xd[0]))
-        .map_err(|_| recusa(Motivo::Certificado, "certificado em Base64 inválido"))?;
+    let der =
+        BASE64.decode(texto_limpo(xd[0])).map_err(|_| recusa(Motivo::Certificado, "certificado em Base64 inválido"))?;
     let (sobra, cert) =
         X509Certificate::from_der(&der).map_err(|_| recusa(Motivo::Certificado, "certificado ilegível"))?;
     if !sobra.is_empty() {
@@ -590,9 +605,7 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     if bits < 2048 {
         return Err(recusa(Motivo::Certificado, format!("chave RSA de {bits} bits; o mínimo é 2048")));
     }
-    let valor = BASE64
-        .decode(texto_limpo(sv))
-        .map_err(|_| recusa(Motivo::Estrutura, "SignatureValue inválido"))?;
+    let valor = BASE64.decode(texto_limpo(sv)).map_err(|_| recusa(Motivo::Estrutura, "SignatureValue inválido"))?;
     let info = c14n::canonicalizar(si).map_err(|e| recusa(Motivo::Estrutura, e))?;
     ring::signature::UnparsedPublicKey::new(rsa_alg, cert.public_key().subject_public_key.data.as_ref())
         .verify(&info, &valor)
@@ -606,18 +619,31 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     let emissao = texto_do_filho(ide, "dhEmi")
         .and_then(|t| data(&t))
         .ok_or_else(|| recusa(Motivo::Estrutura, "data de emissão (dhEmi) ausente ou inválida"))?;
-    let inf_prot = prot
-        .children()
-        .find(|n| e(*n, NS_NFE, "infProt"))
-        .ok_or_else(|| recusa(Motivo::Estrutura, "protocolo sem infProt"))?;
-    let recebimento = texto_do_filho(inf_prot, "dhRecbto")
-        .and_then(|t| data(&t))
-        .ok_or_else(|| recusa(Motivo::Estrutura, "protocolo sem data de recebimento (dhRecbto)"))?;
-    if recebimento < emissao - 5 * 60 {
-        avisos.push("data de recebimento anterior à emissão no protocolo (fuso horário errado no carimbo da SEFAZ)".into());
+    let recebimento = match prot {
+        Some(prot) => {
+            let inf_prot = prot
+                .children()
+                .find(|n| e(*n, NS_NFE, "infProt"))
+                .ok_or_else(|| recusa(Motivo::Estrutura, "protocolo sem infProt"))?;
+            let r = texto_do_filho(inf_prot, "dhRecbto")
+                .and_then(|t| data(&t))
+                .ok_or_else(|| recusa(Motivo::Estrutura, "protocolo sem data de recebimento (dhRecbto)"))?;
+            if r < emissao - 5 * 60 {
+                avisos.push(
+                    "data de recebimento anterior à emissão no protocolo (fuso horário errado no carimbo da SEFAZ)"
+                        .into(),
+                );
+            }
+            Some(r)
+        }
+        None => None,
+    };
+    let mut instantes = vec![(emissao, "na emissão")];
+    if let Some(r) = recebimento {
+        instantes.push((r, "no recebimento"));
     }
     let (de, ate) = (cert.validity().not_before.timestamp(), cert.validity().not_after.timestamp());
-    for (t, qual) in [(emissao, "na emissão"), (recebimento, "no recebimento")] {
+    for &(t, qual) in &instantes {
         if t < de || t > ate {
             return Err(recusa(Motivo::Validade, format!("certificado do emitente fora da validade {qual}")));
         }
@@ -629,7 +655,7 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
     let lista = ancoras.ancoras_webpki();
     let mut cadeia = Vec::new();
     let mut raiz_usada = None;
-    for (t, qual) in [(emissao, "na emissão"), (recebimento, "no recebimento")] {
+    for &(t, qual) in &instantes {
         let problema: RefCell<Option<Recusa>> = RefCell::new(None);
         let achado: RefCell<Option<(Vec<String>, String, Categoria)>> = RefCell::new(None);
         let conferir = |p: &webpki::VerifiedPath<'_>| -> Result<(), webpki::Error> {
@@ -643,7 +669,8 @@ pub fn verificar<'a>(xml: &'a str, ancoras: &Ancoras) -> Result<Verificado<'a>, 
                 // U8: AC com keyCertSign (a biblioteca ignora o KeyUsage).
                 let assina = matches!(c.key_usage(), Ok(Some(k)) if k.value.key_cert_sign());
                 if !assina {
-                    *problema.borrow_mut() = Some(recusa(Motivo::Cadeia, format!("AC sem keyCertSign: {}", nome_comum(&c))));
+                    *problema.borrow_mut() =
+                        Some(recusa(Motivo::Cadeia, format!("AC sem keyCertSign: {}", nome_comum(&c))));
                     return Err(webpki::Error::UnknownIssuer);
                 }
                 nomes_ac.push(nome_comum(&c));

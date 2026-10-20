@@ -61,6 +61,11 @@ FocusScope {
     function lancar() {
         if (!rascunho)
             return
+        // PEND-09 / D7: sem a autorização comprovada, não lança.
+        if (!compra.podeLancar) {
+            janela.avisar(compra.motivoBloqueio, "erro")
+            return
+        }
         if (compra.pendentes > 0) {
             janela.avisar("Decida o que fazer com " + (compra.pendentes === 1 ? "o item marcado" : "os " + compra.pendentes + " itens marcados") + " em rosa.", "erro")
             const i = compra.itens.findIndex(it => it.acao === "")
@@ -87,6 +92,45 @@ FocusScope {
                 mostrarErro(r)
             }
         })
+    }
+
+    function abrirConferencia() {
+        conferencia.situacao = "autorizada"
+        protocoloConferido.texto = ""
+        protocoloConferido.erro = ""
+        quandoConferido.texto = Qt.formatDateTime(new Date(), "dd/MM/yyyy HH:mm")
+        quandoConferido.erro = ""
+        senhaConferencia.texto = ""
+        senhaConferencia.erro = ""
+        conferencia.open()
+        protocoloConferido.focar()
+    }
+
+    function registrarConferencia() {
+        const r = Api.chamar("compra_conferir_autorizacao", {
+            id: compra.id, situacao: conferencia.situacao, protocolo: protocoloConferido.texto,
+            conferidoEm: quandoConferido.texto, senha: senhaConferencia.texto
+        })
+        if (r.ok) {
+            compra = r.dados
+            conferencia.close()
+            janela.avisar(conferencia.situacao === "autorizada" ? "Conferência registrada. A compra já pode ser lançada."
+                                                                : "Conferência registrada: esta nota não pode ser lançada.", "ok")
+            return
+        }
+        if (r.campo === "protocolo") {
+            protocoloConferido.erro = r.erro
+            protocoloConferido.focar()
+        } else if (r.campo === "conferidoEm") {
+            quandoConferido.erro = r.erro
+            quandoConferido.focar()
+        } else if (r.campo === "senha") {
+            senhaConferencia.erro = r.erro
+            senhaConferencia.focar()
+            senhaConferencia.entrada.selectAll()
+        } else {
+            janela.avisar(r.erro, "erro")
+        }
     }
 
     function estornar() {
@@ -198,25 +242,53 @@ FocusScope {
                 header: Item {
                     width: lista.width
                     height: (avisoTopo.visible ? avisoTopo.height + 10 : 0) + (avisoConferencia.visible ? avisoConferencia.height + 10 : 0)
-                    // R-01: o que a conferência do XML não garante (fica sempre à vista).
+                    // PEND-09: assinatura do emitente e autorização da SEFAZ (uma faixa só).
                     Rectangle {
                         id: avisoConferencia
-                        visible: !!tela.compra && tela.compra.avisoConferencia !== ""
+                        visible: !!tela.compra && tela.compra.assinaturaTexto !== ""
                         y: avisoTopo.visible ? avisoTopo.height + 10 : 0
                         width: parent.width
-                        height: textoConferencia.implicitHeight + 20
+                        height: faixaNota.implicitHeight + 20
                         radius: Tema.raioCampo
                         color: Tema.pergaminho
-                        Text {
-                            id: textoConferencia
+                        readonly property bool aguardando: !!tela.compra && tela.compra.autorizacao === "aguardando"
+                        readonly property bool negada: !!tela.compra && tela.compra.autorizacao === "negada"
+                        GridLayout {
+                            id: faixaNota
                             x: 14
                             y: 10
                             width: parent.width - 28
-                            text: tela.compra ? tela.compra.avisoConferencia : ""
-                            color: Tema.tintaSuave
-                            font.family: Tema.texto
-                            font.pixelSize: 14
-                            wrapMode: Text.WordWrap
+                            columns: Tema.estreito ? 1 : 2
+                            columnSpacing: 12
+                            rowSpacing: 8
+                            ColumnLayout {
+                                spacing: 2
+                                Layout.fillWidth: true
+                                Text {
+                                    text: tela.compra ? tela.compra.assinaturaTexto : ""
+                                    color: Tema.tintaSuave
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: text !== ""
+                                    text: tela.compra ? tela.compra.autorizacaoTexto : ""
+                                    color: avisoConferencia.negada ? Tema.vermelho : Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: avisoConferencia.aguardando || avisoConferencia.negada ? Font.DemiBold : Font.Normal
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            Botao {
+                                visible: tela.rascunho && avisoConferencia.aguardando
+                                text: "Registrar conferência…"
+                                tipo: "secundario"
+                                onClicked: tela.abrirConferencia()
+                            }
                         }
                     }
                     Rectangle {
@@ -278,15 +350,20 @@ FocusScope {
                     spacing: 14
 
                     Faixa {
+                        id: paraLancar
                         visible: tela.rascunho
+                        // PEND-09: sem a autorização comprovada também falta algo.
+                        readonly property bool falta: !!tela.compra && (tela.compra.pendentes > 0 || !tela.compra.podeLancar)
                         titulo: "Para lançar"
-                        color: tela.compra && tela.compra.pendentes > 0 ? Tema.rosa : Tema.verde
-                        corTitulo: tela.compra && tela.compra.pendentes > 0 ? Tema.vermelho : Tema.verdeEscuro
+                        color: falta ? Tema.rosa : Tema.verde
+                        corTitulo: falta ? Tema.vermelho : Tema.verdeEscuro
                         Layout.fillWidth: true
                         Text {
                             text: !tela.compra ? "" : tela.compra.pendentes > 0
                                   ? (tela.compra.pendentes === 1 ? "Falta decidir 1 item" : "Faltam decidir " + tela.compra.pendentes + " itens")
-                                  : "Tudo pronto"
+                                  : !tela.compra.podeLancar
+                                    ? (tela.compra.autorizacao === "negada" ? "Não pode ser lançada" : "Falta a conferência da autorização")
+                                    : "Tudo pronto"
                             color: Tema.tinta
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -461,6 +538,90 @@ FocusScope {
     EscolherPeca {
         id: escolher
         onEscolhida: (produtoId) => tela.gravar(tela.itemEscolhendo, { acao: "ligar", produtoId: produtoId })
+    }
+
+    // D7 (provisória, até o PEND-15): conferência humana do gerente no portal.
+    Painel {
+        id: conferencia
+        property string situacao: "autorizada"
+        readonly property bool bloqueia: situacao !== "autorizada"
+        width: Math.min(520, Tema.largura - 24)
+        contentItem: ColumnLayout {
+            spacing: 14
+            Titulo { text: "Conferência no portal da NF-e"; font.pixelSize: 28; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            Nota {
+                text: "Consulte esta chave no portal da NF-e e registre o que ele mostra. É uma conferência humana do gerente, não uma prova automática da SEFAZ."
+                font.pixelSize: 15
+                Layout.fillWidth: true
+            }
+            ColumnLayout {
+                spacing: 4
+                Layout.fillWidth: true
+                Rotulo { text: "Chave de acesso"; color: Tema.apagado; Layout.fillWidth: true }
+                // Quebra a linha no celular; dá para selecionar e copiar.
+                TextEdit {
+                    text: tela.compra ? tela.compra.chave.replace(/(\d{4})(?=\d)/g, "$1 ") : ""
+                    readOnly: true
+                    selectByMouse: true
+                    color: Tema.tinta
+                    font.family: Tema.texto
+                    font.pixelSize: 16
+                    wrapMode: TextEdit.Wrap
+                    Layout.fillWidth: true
+                }
+            }
+            Pilulas {
+                modelo: [{ id: "autorizada", nome: "Autorizada" }, { id: "rejeitada", nome: "Rejeitada" },
+                         { id: "cancelada", nome: "Cancelada" }, { id: "denegada", nome: "Denegada" }]
+                atual: conferencia.situacao
+                pequenas: true
+                onEscolhido: id => conferencia.situacao = id
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: protocoloConferido
+                visible: !conferencia.bloqueia
+                rotulo: "Protocolo de autorização"
+                numerico: true
+                maximo: 20
+                Layout.fillWidth: true
+                onConfirmado: quandoConferido.focar()
+            }
+            Nota {
+                visible: conferencia.bloqueia
+                text: "A nota ficará bloqueada: não poderá entrar no estoque nem no financeiro."
+                color: Tema.vermelho
+                font.pixelSize: 15
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: quandoConferido
+                rotulo: "Data e hora da conferência"
+                dica: "dd/mm/aaaa hh:mm"
+                maximo: 16
+                Layout.fillWidth: true
+                onConfirmado: senhaConferencia.focar()
+            }
+            Campo {
+                id: senhaConferencia
+                rotulo: "Senha do gerente"
+                senha: true
+                maximo: 256
+                Layout.fillWidth: true
+                onConfirmado: tela.registrarConferencia()
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                Botao { text: "Voltar"; tipo: "discreto"; onClicked: conferencia.close() }
+                Botao {
+                    text: conferencia.bloqueia ? "Registrar e bloquear" : "Registrar"
+                    icone: conferencia.bloqueia ? "" : "check"
+                    tipo: conferencia.bloqueia ? "perigo" : "principal"
+                    onClicked: tela.registrarConferencia()
+                }
+            }
+        }
     }
 
     Popup {

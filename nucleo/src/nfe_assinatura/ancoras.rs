@@ -125,10 +125,7 @@ impl Ancoras {
                 }
             };
             Ancoras::montar(
-                vec![
-                    (d("raiz_teste.der"), Categoria::Vigente),
-                    (d("raiz_historica_teste.der"), Categoria::Historica),
-                ],
+                vec![(d("raiz_teste.der"), Categoria::Vigente), (d("raiz_historica_teste.der"), Categoria::Historica)],
                 vec![
                     d("ac_teste.der"),
                     d("ac_sem_keycertsign.der"),
@@ -221,8 +218,9 @@ impl Ancoras {
     }
 
     pub(super) fn raiz_da_ancora(&self, a: &TrustAnchor) -> Option<&Raiz> {
-        self.raizes
-            .iter()
-            .find(|r| r.ancora.subject.as_ref() == a.subject.as_ref() && r.ancora.subject_public_key_info.as_ref() == a.subject_public_key_info.as_ref())
+        self.raizes.iter().find(|r| {
+            r.ancora.subject.as_ref() == a.subject.as_ref()
+                && r.ancora.subject_public_key_info.as_ref() == a.subject_public_key_info.as_ref()
+        })
     }
 }

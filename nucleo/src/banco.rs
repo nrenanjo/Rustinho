@@ -29,6 +29,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0017_referencias_com_prova.sql"),
     include_str!("migracoes/0018_situacao_da_senha.sql"),
     include_str!("migracoes/0019_caminhos_da_rede.sql"),
+    include_str!("migracoes/0020_verificacao_da_nfe.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -339,6 +340,39 @@ mod testes {
         );
         let versao: i64 = c.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
         assert_eq!(versao as usize, MIGRACOES.len());
-        assert_eq!(MIGRACOES.len(), 19);
+        assert!(MIGRACOES.len() >= 19);
+    }
+    /// A-27 (PEND-09): a migração 19 → 20 só marca as compras de antes
+    /// (`nao_verificada` / `anterior`, D5): nada é apagado nem bloqueado.
+    #[test]
+    fn a27_migracao_20_marca_as_compras_antigas_sem_bloquear() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 19).unwrap();
+        for (id, situacao) in [("c1", "rascunho"), ("c2", "lancada")] {
+            c.execute(
+                "INSERT INTO compra (id, chave, numero, situacao, xml, criado_em, dispositivo)
+                 VALUES (?1, ?1, '1', ?2, '<nfeProc/>', '2026-01-01T00:00:00Z', 'd')",
+                [id, situacao],
+            )
+            .unwrap();
+        }
+        migrar(&mut c).unwrap();
+        let linhas: Vec<(String, String, String, String)> = c
+            .prepare("SELECT id, situacao, xml_verificacao, autorizacao FROM compra ORDER BY id")
+            .unwrap()
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            linhas,
+            vec![
+                ("c1".into(), "rascunho".into(), "nao_verificada".into(), "anterior".into()),
+                ("c2".into(), "lancada".into(), "nao_verificada".into(), "anterior".into()),
+            ]
+        );
+        assert_eq!(MIGRACOES.len(), 20);
     }
 }

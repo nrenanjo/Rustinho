@@ -227,6 +227,8 @@ pub const DO_CAIXA: &[&str] = &[
     "compra_atualizar",
     "compra_lancar",
     "compra_descartar",
+    // D7: a senha do gerente é pedida e conferida no próprio comando.
+    "compra_conferir_autorizacao",
     "fiscal_automatico",
     "venda_concluir",
     "orcamento_salvar",
@@ -1021,6 +1023,24 @@ impl Servico {
                 compras::estornar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
                 tx.commit()?;
                 Ok(json!(compras::ficha(&self.banco.conn, &d.id)?))
+            }
+            "compra_conferir_autorizacao" => {
+                let d: ConferenciaDoGerente = ler(dados)?;
+                self.esperar_se_errou("gerente")?;
+                let g = match usuarios::conferir_gerente(&self.banco.conn, &d.senha)? {
+                    Some(g) => {
+                        usuarios::limpar_falhas(&self.banco.conn, "gerente")?;
+                        g
+                    }
+                    None => {
+                        usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS)?;
+                        return Err(Erro::campo("senha", "Senha do gerente errada."));
+                    }
+                };
+                let tx = self.banco.conn.transaction()?;
+                compras::registrar_conferencia(&tx, &disp, &g.id, &d.conferencia)?;
+                tx.commit()?;
+                Ok(json!(compras::ficha(&self.banco.conn, &d.conferencia.id)?))
             }
             "compra_descartar" => {
                 let d: Id = ler(dados)?;
@@ -2046,6 +2066,13 @@ struct Resolver {
     id: i64,
     #[serde(default)]
     usar: bool,
+}
+
+#[derive(Deserialize)]
+struct ConferenciaDoGerente {
+    #[serde(flatten)]
+    conferencia: compras::Conferencia,
+    senha: String,
 }
 
 #[derive(Deserialize)]
