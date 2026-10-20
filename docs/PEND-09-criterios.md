@@ -258,3 +258,72 @@ Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da N
 | E4 | Mutações, suítes completas (desenvolvimento **e** release), clippy, inspeção visual, entrega | Sonnet 5.5, médio |
 | E5 | PEND-15 (consulta à SEFAZ com certificado) — só se você mandar | Opus 5.5, alto |
 | E6 | Windows e Android (L5) | Você, com os aparelhos |
+
+## 11. Resultados da implementação (20/10/2026) — comprovado no Linux; Windows e Android não testados
+
+Commits locais (nada no GitHub): `f976c4f` testes e PKI de teste **antes** do verificador; `e07b0a4` verificador; `f9fbb6c` integração (importação, cadastro, lançamento, D7, migração 0020, tela, trava); `2a23d1a` teste e documentos.
+
+### 11.1 Desvios do plano (registrados, não escondidos)
+
+| Item | O que mudou | Por quê |
+|---|---|---|
+| D8 / cadastro | `verificar_para_cadastro` aceita também a `NFe` **sem** `nfeProc`/protocolo (a assinatura é exigida igual; a validade é conferida em `dhEmi` e, se houver protocolo, também em `dhRecbto`) | D8: cadastro não exige autorização da SEFAZ. A compra continua exigindo `nfeProc` com protocolo e `dhRecbto`. |
+| A-38 (`comprovada_assinatura_sefaz`) | **Não implementado.** Uma `Signature` dentro do `protNFe` é **ignorada**: não conta como prova e a compra fica `aguardando` | Nenhuma das 532 notas reais tem; implementar sem caso real aumentaria a superfície. Pendência. |
+| A-41 (avaliador `xml-sec`) | **Não executado.** | Os oráculos usados foram o libxml2 (16 casos sintéticos) e **as 532 assinaturas reais** (o resumo do próprio emitente): ambos independentes da implementação. |
+| §3.4-i (adaptador SHA-1 para as raízes v1/original) | **Não adotado**: v1 e a original não são âncoras | Nenhuma nota do acervo depende delas. Notas dessa época são recusadas com "não chega a uma raiz reconhecida". |
+| A-29/A-30 (atualizar o pacote de ACs pela tela) | **Não implementado**: o pacote vai embutido e conferido pelo SHA-512 a cada abertura | Pendência; nenhuma raiz pode entrar por fora do programa. |
+| Achado durante a implementação | O leitor de XML (`roxmltree`) é recursivo e não limita a profundidade: um XML com milhares de níveis **derrubava o programa** (estouro de pilha, não interceptável) — risco que já existia na importação. **Corrigido**: a profundidade é contada antes de ler, também no leitor de antes (`nfe_xml::ler`). | Teste `profundidade_e_contada_antes_de_ler_sem_estourar_a_pilha` (100 mil níveis) e mutação V24. |
+| Painel "Para lançar" | Passa a dizer "Falta a conferência da autorização" / "Não pode ser lançada" em vez de "Tudo pronto" | Achado na inspeção visual: a tela se contradizia. |
+| Trava do aplicativo | O aplicativo (computador e Android) **se recusa a abrir** se o recurso `ancoras-de-teste` (raiz fictícia) tiver sido compilado | Só os testes ligam esse recurso. |
+
+### 11.2 Testes de aceitação → testes → resultado (simulado, PKI de teste)
+
+| Critério | Teste(s) | Resultado |
+|---|---|---|
+| A-03 C14N | `a03_c14n_bate_com_o_libxml2_nos_casos_sinteticos` (16 casos) e `acervo_a03_…` | ok; **532/532** resumos reais reproduzidos |
+| A-04 | `a04_nota_assinada_pela_pki_de_teste_e_aceita`, `a04_par_sha256_…` | ok |
+| A-05 a A-08 | `a05_a08_qualquer_mudanca_no_conteudo_assinado_e_recusada` (qCom, vUnCom, vProd, vNF, xProd, cProd, NCM, CFOP, IE, vDup, xNome e 1 espaço) | ok |
+| A-09 a A-14 | `a09_…`, `a10_…`, `a11_…`, `a12_…`, `a13_…`, `a14_cadeia_quebrada` | ok |
+| A-15, A-16, A-16b, A-16c | `a15_…`, `a16_…`, `a16b_…`, `a16c_fuso_errado_…`, `protocolo_sem_data_de_recebimento_e_recusado` | ok |
+| A-17, A-49 a A-55 | `a49_…`, `a50_…`, `a51_eku_e_conferido_como_perfil_nao_como_tls`, `a52_…`, `a53_…`, `a54_…`, `rsa_1024_e_recusado` | ok |
+| A-18, A-19 | `a18_titular_do_certificado` (CNPJ, filial, PrintableString, CPF), `a19_homologacao_e_recusada` | ok |
+| A-20 | `a20_xml_adulterado_com_resumos_mantidos_e_recusado_sem_gravar_nada` (o antigo "limite conhecido", invertido) | ok |
+| A-21, A-22, A-23 | `a21_…` (14 variações), `a21_dados_lidos_sao_do_no_verificado`, `a22_…` (7), `a23_…` (8, cada um < 2 s), profundidade | ok |
+| A-24, A-25, A-43 | `a24_atomicidade_de_toda_recusa_da_assinatura` (25 notas + 4 malformadas; compra, itens, **pessoa**, peça, estoque, custo, A pagar, auditoria, `alteracao`), `a43_cadastro_por_xml_…` | ok |
+| A-26, A-27, A-28 | `a26_…`, `a27_migracao_20_…`, duplicidade em `importa_liga_lanca_e_estorna` | ok |
+| A-34 a A-36, A-44 a A-46 | `a34_a35_…`, `a36_a46_conferencia_do_gerente`, `d5_compra_anterior_nao_e_bloqueada`, contrato de tela `compra_por_xml` (senha errada, D7 pela API) | ok |
+| A-47, A-48 | `a47_so_as_ancoras_escolhidas_valem_…`, `a47_certificado_do_xml_nunca_vira_ancora`, `a48_pacote_embutido_confere_com_o_sha512_publicado_pelo_iti` | ok |
+| A-01, A-02, A-31 (acervo real, fora do repositório) | `acervo_a01_a55_notas_reais_com_as_ancoras_da_icp_brasil` | **528/528** aceitas (479 A1, 49 A3; 3 avisos: 2 fusos do Paraná + 1 cadeia histórica v2); 4 de teste recusadas (RSA-1024); 9 não-NF-e recusadas; ~1,9 ms por arquivo (programa final) |
+
+### 11.3 Mutações (defeitos plantados): **35 de 35 pegas**
+
+V1 resumo ignorado · V2 só o começo do resumo (pego depois do teste `comparacao_do_resumo_confere_todos_os_bytes`) · V3 RSA não conferida · V4 âncora pelo nome · V5 data de hoje · V6 tolerância de 48 h · V7 só `dhEmi` · V8 só `dhRecbto` · V9–V11 KeyUsage (digitalSignature, nonRepudiation, crítica) · V12 EKU fora do perfil · V13 regra de TLS (`clientAuth`) na assinatura · V14 política fora de A1/A3 · V15 AC sem keyCertSign · V16 AC como emitente · V17 raiz do CNPJ · V18 homologação · V19 segundo `infNFe` · V20 Id repetido · V21 transformações extras · V22 RSA-1024 · V23 C14N sem ordenar atributos · V24 sem contagem de profundidade (teste aborta) · V25 certificado do XML como âncora · V26 raiz histórica vencida · C1 fornecedor gravado antes · C2 lançar sem autorização · C3 negada liberada · C4 protocolo do XML como prova · C5 operador atesta · C6 protocolo não conferido · C7 negada atestada de novo · C8 migração marca como verificada · C9 conferência no futuro. Arquivos restaurados idênticos (SHA-256).
+
+### 11.4 Inspeção visual real (aplicativo montado **sem** as âncoras de teste, Linux/Xvfb)
+
+Tela larga: compra aguardando (faixa discreta + "Registrar conferência…"), lançar bloqueado (mensagem), diálogo (chave, situação, protocolo, data e hora, senha), protocolo errado (erro no campo), conferida (rótulo "conferência humana… não é prova automática"), itens decididos sem conferência ("Falta a conferência da autorização"), cancelada ("Registrar e bloquear", faixa vermelha, "Não pode ser lançada"). Tela estreita (412 px): faixa com o botão abaixo; diálogo com a chave quebrando a linha (corrigido) e rótulo curto (corrigido). Defeito antigo achado: PEND-17.
+
+### 11.5 O que foi comprovado e o que não foi
+
+| | Linux (este ambiente) | Windows | Android 32/64 |
+|---|---|---|---|
+| Compilação (núcleo e aplicativo) | **sim** (desenvolvimento e programa final) | **não testado** | **não testado** (`ring` tem código C/assembly por plataforma) |
+| Testes automáticos | **sim** (§11.6) | não | não |
+| Acervo real | **sim** (528/528) | não | não |
+| Tela | **sim** (larga e estreita) | não | não (toque e teclado virtual não vistos) |
+| Desempenho | ~1,9 ms/nota | não medido | não medido (celular de 2 GB) |
+
+Continua **não provado em lugar nenhum**: autorização da SEFAZ (PEND-15), revogação dos certificados (LCR), Selo Eletrônico. **O módulo fiscal não está pronto para produção.**
+
+### 11.6 Verificação completa (commit `2a23d1a`, Linux)
+
+| Etapa | Resultado |
+|---|---|
+| `cargo fmt --check` | ok |
+| `cargo clippy --workspace --all-targets -D warnings` | ok |
+| Testes, desenvolvimento | núcleo **297 ok + 3 ignorados** (volume e 2 do acervo real, rodados à parte); integração 9 / 4 / 7 / 5; **0 falhas** |
+| Testes, programa final (release, `overflow-checks`) | mesmos números, **0 falhas** |
+| Acervo real (release, fora do repositório) | 528/528 aceitas; 532/532 resumos; 1,58 ms por arquivo |
+| Volume | ok |
+| Montagem do aplicativo (release) | ok; a árvore de recursos do programa final **não** contém `ancoras-de-teste` |
+| Mutações | 35/35 pegas |
