@@ -33,6 +33,8 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 - **PEND-09 · R-01: a importação de XML não verifica a assinatura digital (bloqueador para confiar no estoque e no custo).**
   O Rustinho confere só a **coerência** entre chave, dígito, dados da nota, referência da assinatura, protocolo e `digVal == DigestValue` (textos copiados). Não calcula o resumo (SHA-1) do `infNFe` canonicalizado nem verifica a assinatura RSA / cadeia ICP-Brasil. Um XML com itens, quantidades ou valores mudados, mantendo a chave, o resumo e o protocolo, passa, entra no estoque e muda o custo. Hoje isso está **documentado** (manual, aviso fixo na tela da compra, mensagem de recusa e o teste `limite_conhecido_xml_adulterado_com_resumos_mantidos_ainda_passa`) e **não resolvido**.
   Para dar como resolvido: (1) canonicalização C14N do `infNFe` e conferência do `DigestValue`; (2) verificação da assinatura RSA com o certificado do XML; (3) cadeia até a ICP-Brasil (ou, no mínimo, validade e emissor); (4) testes com XMLs adulterados (item, quantidade, valor, chave, protocolo, certificado trocado, assinatura de outra nota) que devem ser recusados; (5) inverter o teste do limite conhecido para exigir a recusa. Enquanto isso, o uso em produção fiscal não deve ser tratado como seguro.
+  **Status (20/10/2026): desenho e testes de aceitação prontos em `docs/PEND-09-criterios.md` (sem código); aguarda o pacote de ACs do ITI, as decisões D1–D6 e a troca para Opus 5.5.**
+- **PEND-15 · A autorização da SEFAZ não é provada pelo XML (o `protNFe` não é assinado).** Depois do PEND-09 o Rustinho prova que o emitente assinou o conteúdo, mas não que a SEFAZ o autorizou; isso exige consulta online pela chave. Só se você quiser.
 
 ## Sincronização
 
