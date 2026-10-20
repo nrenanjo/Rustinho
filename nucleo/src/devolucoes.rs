@@ -573,6 +573,8 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
 /// Desfaz a devolução: as peças saem de novo do estoque, o vale é
 /// cancelado e o abatimento no crediário é estornado.
 pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "devolucao", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "devolucao_item", "devolucao_id", id)?;
     let d: (Option<String>, Option<String>, Option<String>, String, i64, i64) = conn
         .query_row(
             "SELECT cancelado_em, vale_id, recebimento_id, venda_id, numero, dinheiro FROM devolucao WHERE id = ?1",

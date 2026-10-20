@@ -744,6 +744,8 @@ pub struct ItemEntrada {
 
 /// Grava as escolhas da tela (só em rascunho).
 pub fn atualizar(conn: &Connection, e: &CompraEntrada) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "compra", &e.id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "compra_item", "compra_id", &e.id)?;
     let cab = cabecalho(conn, &e.id)?;
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Esta compra já foi lançada e não pode mais ser mudada."));
@@ -821,6 +823,8 @@ pub struct Lancamento {
 
 /// Põe a compra no estoque.
 pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<Lancamento> {
+    crate::sync::exigir_editavel(conn, "compra", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "compra_item", "compra_id", id)?;
     let cab = cabecalho(conn, id)?;
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Esta compra já foi lançada."));
@@ -1036,6 +1040,8 @@ fn cadastrar_peca(
 /// Desfaz a entrada no estoque. O custo e os preços não voltam (podem ter
 /// mudado de novo depois).
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "compra", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "compra_item", "compra_id", id)?;
     let cab = cabecalho(conn, id)?;
     if cab.situacao != "lancada" {
         return Err(Erro::validacao("Só dá para estornar uma compra lançada."));

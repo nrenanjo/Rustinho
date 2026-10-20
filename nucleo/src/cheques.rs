@@ -380,6 +380,7 @@ fn mudar(
 
 /// Deposita o cheque numa conta da loja (o valor entra nela).
 pub fn depositar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, conta: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "cheque", id)?;
     let d = dados(conn, id)?;
     if d.situacao != "carteira" {
         return Err(Erro::validacao("Só dá para depositar cheque em carteira."));
@@ -414,6 +415,7 @@ pub fn depositar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &st
 
 /// Repassa o cheque (para um fornecedor, por exemplo).
 pub fn repassar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, para_quem: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "cheque", id)?;
     let d = dados(conn, id)?;
     if d.situacao != "carteira" {
         return Err(Erro::validacao("Só dá para repassar cheque em carteira."));
@@ -445,6 +447,7 @@ pub fn devolver(
     motivo: &str,
     divida: bool,
 ) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "cheque", id)?;
     let d = dados(conn, id)?;
     if d.situacao != "carteira" && d.situacao != "depositado" {
         return Err(Erro::validacao("Este cheque não está em carteira nem depositado."));
@@ -500,6 +503,7 @@ pub fn devolver(
 
 /// Volta para a carteira (depositou ou repassou por engano).
 pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "cheque", id)?;
     let d = dados(conn, id)?;
     match d.situacao.as_str() {
         "depositado" => {

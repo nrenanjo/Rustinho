@@ -465,6 +465,9 @@ pub struct Referencias {
     /// Apontam para algo que foi apagado (aqui ou em outro caixa). Não
     /// resolve sozinho; nada é apagado para esconder: o gerente decide.
     pub quebradas: usize,
+    /// Das que esperam, quantas esperam há 24 horas ou mais. É só um aviso:
+    /// atraso não é inconsistência e não bloqueia nada.
+    pub atrasadas: usize,
 }
 
 /// Uma referência que não bate, para a lista em "Caixas da loja".
@@ -480,15 +483,27 @@ pub struct Referencia {
     pub pai: String,
     pub falta: String,
     pub o_que_falta: String,
-    /// "esperando", "apagado" ou "inconsistente".
+    /// "esperando", "apagado", "inconsistente" (com prova) ou "aceito" (o
+    /// gerente aceitou como está).
     pub estado: String,
     pub desde: String,
+    /// Prova da inconsistência: "log" ou "pares" (vazio nos outros estados).
+    pub motivo: String,
+    /// Esperando há 24 horas ou mais (aviso, não erro).
+    pub atrasada: bool,
+    /// Dá para o gerente "aceitar como está".
+    pub pode_aceitar: bool,
+    pub aceita_por: String,
+    pub aceita_em: String,
+    pub aceite_motivo: String,
     /// O que fazer.
     pub acao: String,
 }
 
-/// Quanto tempo uma referência pode esperar dados antes de virar problema.
-const ESPERA_MAXIMA_HORAS: i64 = 24;
+/// Depois de quanto tempo esperando uma referência passa a ser mostrada como
+/// "atrasada". É só um aviso para o gerente olhar: **o tempo sozinho nunca a
+/// torna inconsistente** (o dado pode chegar quando o outro caixa ligar).
+const ATRASO_AVISO_HORAS: i64 = 24;
 
 /// Confere cada referência quebrada: o registro que falta ainda não chegou
 /// (espera), foi apagado em algum caixa (o log diz), ou é inconsistente (o
@@ -564,30 +579,45 @@ pub fn conferir_referencias(conn: &Connection) -> Resultado<Referencias> {
 }
 
 /// Confere de novo e guarda a lista (cada referência com a data em que
-/// apareceu). A que espera há mais de `ESPERA_MAXIMA_HORAS` vira
-/// "inconsistente" (os dados não vão mais chegar sozinhos: o outro caixa
-/// foi reinstalado, por exemplo). A que deixou de faltar (o registro chegou)
-/// sai da lista sozinha. Nenhum dado da loja é apagado.
+/// apareceu). Refeita a cada conferência, sem estado "grudado":
+/// - **apagado**: o log diz que o registro foi apagado;
+/// - **inconsistente (log)**: o log diz que o registro existe e a tabela não
+///   tem (contradição entre dois registros locais, prova por si);
+/// - **inconsistente (pares)**: o log nunca o mencionou, existe ao menos um
+///   outro caixa conhecido e **todos** eles fizeram uma troca completa depois
+///   de a referência aparecer, e o registro continua faltando;
+/// - **esperando**: todo o resto. Sem prova não se bloqueia, e o tempo
+///   sozinho não é prova (passadas 24 horas só ganha o marcador "atrasada").
+///
+/// O que o gerente aceitou (`aceito`) continua aceito enquanto o que falta for
+/// o mesmo. A que deixou de faltar (o registro chegou) sai da lista sozinha.
+/// Nenhum dado da loja é apagado.
 pub fn registrar_referencias(conn: &Connection) -> Resultado<Referencias> {
     let agora = referencias_agora(conn)?;
     let agora_txt = tempo::agora();
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS ref_atual (tabela TEXT, chave TEXT, pai TEXT)", [])?;
     conn.execute("DELETE FROM temp.ref_atual", [])?;
+    // O aceite do gerente vale para a mesma falta, desde que a prova continue
+    // sendo de inconsistência (apagado volta a ser apagado).
+    const MANTEM_ACEITE: &str =
+        "(sync_referencia.estado = 'aceito' AND sync_referencia.falta = excluded.falta AND excluded.estado <> 'apagado')";
+    let upsert = format!(
+        "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT (tabela, chave, pai) DO UPDATE SET
+             -- A espera recomeça só se o registro que falta mudou; a mesma
+             -- referência, conferida de novo, guarda a data do começo.
+             desde = CASE WHEN sync_referencia.falta <> excluded.falta THEN excluded.desde ELSE sync_referencia.desde END,
+             estado = CASE WHEN {MANTEM_ACEITE} THEN 'aceito' ELSE excluded.estado END,
+             motivo = CASE WHEN {MANTEM_ACEITE} THEN sync_referencia.motivo ELSE excluded.motivo END,
+             aceita_por = CASE WHEN {MANTEM_ACEITE} THEN sync_referencia.aceita_por END,
+             aceita_em = CASE WHEN {MANTEM_ACEITE} THEN sync_referencia.aceita_em END,
+             aceite_motivo = CASE WHEN {MANTEM_ACEITE} THEN sync_referencia.aceite_motivo END,
+             falta = excluded.falta"
+    );
     for (tabela, chave, pai, falta, estado) in &agora {
         conn.execute("INSERT INTO temp.ref_atual VALUES (?1, ?2, ?3)", params![tabela, chave, pai])?;
-        conn.execute(
-            "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (tabela, chave, pai) DO UPDATE SET
-                 -- A espera recomeça só se o registro que falta mudou; a mesma
-                 -- referência, conferida de novo, guarda a data do começo.
-                 desde = CASE WHEN sync_referencia.falta <> excluded.falta THEN excluded.desde ELSE sync_referencia.desde END,
-                 falta = excluded.falta,
-                 estado = CASE WHEN sync_referencia.falta <> excluded.falta THEN excluded.estado
-                               WHEN sync_referencia.estado = 'inconsistente' AND excluded.estado = 'esperando'
-                                    THEN 'inconsistente'
-                               ELSE excluded.estado END",
-            params![tabela, chave, pai, falta, estado, agora_txt],
-        )?;
+        let motivo = if *estado == "inconsistente" { "log" } else { "" };
+        conn.execute(&upsert, params![tabela, chave, pai, falta, estado, agora_txt, motivo])?;
     }
     conn.execute(
         "DELETE FROM sync_referencia WHERE NOT EXISTS
@@ -595,41 +625,90 @@ pub fn registrar_referencias(conn: &Connection) -> Resultado<Referencias> {
                 AND a.chave = sync_referencia.chave AND a.pai = sync_referencia.pai)",
         [],
     )?;
+    // Prova dos pares: todos os caixas conhecidos já entregaram tudo (troca
+    // completa) DEPOIS de a referência aparecer, e o registro não veio.
     conn.execute(
-        "UPDATE sync_referencia SET estado = 'inconsistente'
-          WHERE estado = 'esperando' AND (julianday('now') - julianday(desde)) * 24 >= ?1",
-        [ESPERA_MAXIMA_HORAS],
-    )?;
-    let (esperando, quebradas): (i64, i64) = conn.query_row(
-        "SELECT COALESCE(SUM(estado = 'esperando'), 0), COALESCE(SUM(estado <> 'esperando'), 0) FROM sync_referencia",
+        "UPDATE sync_referencia SET estado = 'inconsistente', motivo = 'pares'
+          WHERE estado = 'esperando'
+            AND EXISTS (SELECT 1 FROM sync_par)
+            AND NOT EXISTS (SELECT 1 FROM sync_par p
+                             WHERE p.completo_em IS NULL OR p.completo_em <= sync_referencia.desde)",
         [],
-        |l| Ok((l.get(0)?, l.get(1)?)),
+    )?;
+    let (esperando, atrasadas, quebradas): (i64, i64, i64) = conn.query_row(
+        "SELECT COALESCE(SUM(estado = 'esperando'), 0),
+                COALESCE(SUM(estado = 'esperando' AND (julianday('now') - julianday(desde)) * 24 >= ?1), 0),
+                COALESCE(SUM(estado IN ('apagado', 'inconsistente')), 0)
+           FROM sync_referencia",
+        [ATRASO_AVISO_HORAS],
+        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
     )?;
     config::gravar(conn, "sync_pendencias", &esperando.to_string())?;
+    config::gravar(conn, "sync_atrasadas", &atrasadas.to_string())?;
     config::gravar(conn, "sync_quebradas", &quebradas.to_string())?;
-    Ok(Referencias { esperando: esperando as usize, quebradas: quebradas as usize })
+    Ok(Referencias { esperando: esperando as usize, quebradas: quebradas as usize, atrasadas: atrasadas as usize })
 }
 
 /// A lista para a tela (as mais antigas primeiro, até 100).
 pub fn referencias(conn: &Connection) -> Resultado<Vec<Referencia>> {
-    let mut c = conn.prepare(
-        "SELECT tabela, chave, pai, falta, estado, desde FROM sync_referencia
-          ORDER BY estado = 'esperando', desde LIMIT 100",
-    )?;
-    let linhas: Vec<(String, String, String, String, String, String)> = c
-        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)))?
+    #[allow(clippy::type_complexity)]
+    let linhas: Vec<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        bool,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = conn
+        .prepare(
+            "SELECT r.tabela, r.chave, r.pai, r.falta, r.estado, r.desde, r.motivo,
+                    r.estado = 'esperando' AND (julianday('now') - julianday(r.desde)) * 24 >= ?1,
+                    (SELECT nome FROM usuario WHERE id = r.aceita_por), r.aceita_em, r.aceite_motivo
+               FROM sync_referencia r
+              ORDER BY r.estado = 'esperando', r.desde LIMIT 100",
+        )?
+        .query_map([ATRASO_AVISO_HORAS], |l| {
+            Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+                l.get(6)?,
+                l.get(7)?,
+                l.get(8)?,
+                l.get(9)?,
+                l.get(10)?,
+            ))
+        })?
         .collect::<Result<_, _>>()?;
     let mut lista = Vec::new();
-    for (tabela, chave, pai, falta, estado, desde) in linhas {
+    for (tabela, chave, pai, falta, estado, desde, motivo, atrasada, aceita_por, aceita_em, aceite_motivo) in linhas {
         let o_que_falta = nome_da_tabela(&pai).to_string();
-        let acao = match estado.as_str() {
-            "esperando" => "Ainda não chegou de outro caixa. Deixe os caixas ligados na mesma rede: resolve sozinho.".to_string(),
-            "apagado" => format!(
+        let acao = match (estado.as_str(), motivo.as_str()) {
+            ("esperando", _) if atrasada => "Está esperando há mais de 24 horas. Isso não é erro e não bloqueia nada: o dado pode \
+                  chegar quando o outro caixa ligar. Confira se os outros caixas estão ligados, na mesma rede e na mesma \
+                  versão, e se algum aparece acima com erro."
+                .to_string(),
+            ("esperando", _) => {
+                "Ainda não chegou de outro caixa. Deixe os caixas ligados na mesma rede: resolve sozinho.".to_string()
+            }
+            ("apagado", _) => format!(
                 "{o_que_falta} foi apagado em um caixa, mas este registro ainda aponta para ele. Abra o registro e \
                  corrija (escolha outro), ou cadastre de novo o que foi apagado. Nada foi apagado por isso."
             ),
-            _ => "Não chegou em 24 horas (ou o registro de alterações diz que existe e a tabela não tem). Confira se \
-                  todos os caixas estão ligados e na mesma versão; se continuar, faça um backup e chame quem cuida do sistema."
+            ("aceito", _) => "O gerente aceitou este registro como está. As operações estão liberadas.".to_string(),
+            (_, "pares") => "Todos os caixas conhecidos já entregaram tudo o que têm e nenhum tem o que falta (o caixa que \
+                  criou isto pode ter se perdido). Restaure o backup desse caixa, ou o gerente pode aceitar como está."
+                .to_string(),
+            _ => "O registro de alterações diz que o que falta existe, mas o banco não tem. Faça um backup e deixe os \
+                  caixas trocarem dados de novo; se continuar, o gerente pode aceitar como está."
                 .to_string(),
         };
         lista.push(Referencia {
@@ -639,12 +718,98 @@ pub fn referencias(conn: &Connection) -> Resultado<Vec<Referencia>> {
             pai,
             falta,
             o_que_falta,
+            pode_aceitar: estado == "inconsistente",
             estado,
             desde: crate::fiscal::data_local_br(conn, &desde).unwrap_or(desde),
+            motivo,
+            atrasada,
+            aceita_por: aceita_por.unwrap_or_default(),
+            aceita_em: aceita_em.map(|q| crate::fiscal::data_local_br(conn, &q).unwrap_or(q)).unwrap_or_default(),
+            aceite_motivo: aceite_motivo.unwrap_or_default(),
             acao,
         });
     }
     Ok(lista)
+}
+
+/// O gerente aceita um registro **comprovadamente inconsistente** como está
+/// (R-05). Exige o motivo; só vale para o que está `inconsistente`; não
+/// inventa o registro que falta, só libera as operações. Quem chama grava a
+/// auditoria. Devolve quantas referências foram aceitas.
+pub fn aceitar_inconsistencia(
+    conn: &Connection,
+    usuario_id: &str,
+    tabela: &str,
+    chave: &str,
+    motivo: &str,
+) -> Resultado<usize> {
+    let motivo = crate::texto::limpar(motivo);
+    if motivo.chars().count() < 5 {
+        return Err(Erro::campo("motivo", "Escreva o motivo (pelo menos 5 letras): fica no histórico."));
+    }
+    let n = conn.execute(
+        "UPDATE sync_referencia SET estado = 'aceito', aceita_por = ?3, aceita_em = ?4, aceite_motivo = ?5
+          WHERE tabela = ?1 AND chave = ?2 AND estado = 'inconsistente'",
+        params![tabela, chave, usuario_id, tempo::agora(), motivo],
+    )?;
+    if n == 0 {
+        return Err(Erro::validacao(
+            "Este registro não está inconsistente (pode já ter sido resolvido). Atualize a lista.",
+        ));
+    }
+    Ok(n)
+}
+
+/// R-05: recusa mexer no dinheiro de um registro **comprovadamente
+/// inconsistente** (`sync_referencia.estado = 'inconsistente'`). Registro
+/// esperando, apagado ou aceito pelo gerente passa; ver e imprimir nunca
+/// passam por aqui. `id` é a chave do registro em `tabela`.
+pub fn exigir_editavel(conn: &Connection, tabela: &str, id: &str) -> Resultado<()> {
+    exigir_sem_inconsistencia(
+        conn,
+        "r.tabela = ?1 AND EXISTS (SELECT 1 FROM json_each(r.chave) WHERE value = ?2)",
+        params![tabela, id],
+    )
+}
+
+/// O mesmo para os registros "filhos" de um registro (os itens de uma compra,
+/// os itens de uma devolução...): `filha.coluna = id`.
+pub fn exigir_filhos_editaveis(conn: &Connection, filha: &str, coluna: &str, id: &str) -> Resultado<()> {
+    let nome_ok = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+    if !nome_ok(filha) || !nome_ok(coluna) {
+        return Err(Erro::Interno("exigir_filhos_editaveis: nome de tabela ou coluna inválido".into()));
+    }
+    exigir_sem_inconsistencia(
+        conn,
+        &format!("r.tabela = ?1 AND r.chave IN (SELECT json_array(f.id) FROM \"{filha}\" f WHERE f.\"{coluna}\" = ?2)"),
+        params![filha, id],
+    )
+}
+
+fn exigir_sem_inconsistencia(conn: &Connection, onde: &str, valores: impl rusqlite::Params) -> Resultado<()> {
+    let achada: Option<(String, String, String)> = conn
+        .query_row(
+            &format!(
+                "SELECT r.tabela, r.pai, r.motivo FROM sync_referencia r
+                  WHERE r.estado = 'inconsistente' AND {onde} LIMIT 1"
+            ),
+            valores,
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+        )
+        .optional()?;
+    let Some((tabela, pai, motivo)) = achada else { return Ok(()) };
+    let prova = if motivo == "pares" {
+        "todos os outros caixas já entregaram tudo e nenhum tem esse dado"
+    } else {
+        "o registro de alterações diz que ele existe e o banco não tem"
+    };
+    Err(Erro::validacao(format!(
+        "Este registro ({}) ficou inconsistente: falta {} ({prova}). Por segurança o Rustinho não deixa mexer no \
+         dinheiro dele até o gerente resolver. Configurações › Caixas da loja mostra o que fazer: restaurar o backup do \
+         caixa de origem, ou o gerente aceitar como está.",
+        nome_da_tabela(&tabela).to_lowercase(),
+        nome_da_tabela(&pai).to_lowercase(),
+    )))
 }
 
 /// Tira os dados das versões velhas de cada registro (fica a que vale).
@@ -2056,7 +2221,7 @@ fn seq_maxima(conn: &Connection) -> Resultado<i64> {
 /// cada outro caixa (recebe de volta o que o backup não tinha) e o banco
 /// ganha uma geração nova (os outros caixas também recomeçam com ele).
 pub fn depois_de_restaurar(conn: &Connection, seq_anterior: i64) -> Resultado<()> {
-    conn.execute("UPDATE sync_par SET cursor = 0, marca = NULL, geracao = NULL", [])?;
+    conn.execute("UPDATE sync_par SET cursor = 0, marca = NULL, geracao = NULL, completo_em = NULL", [])?;
     conn.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?1) WHERE name = 'alteracao'", [seq_anterior])?;
     conn.execute(
         "INSERT INTO sqlite_sequence (name, seq) SELECT 'alteracao', ?1
@@ -2161,7 +2326,7 @@ fn puxar_ate(
             // aqui é reconhecido pelo id e não é aplicado outra vez.
             crate::registro::anotar(&format!("troca de dados: recomeçando do zero com um caixa ({motivo})"));
             conn.execute(
-                "UPDATE sync_par SET cursor = 0, marca = NULL, geracao = ?2 WHERE dispositivo = ?1",
+                "UPDATE sync_par SET cursor = 0, marca = NULL, geracao = ?2, completo_em = NULL WHERE dispositivo = ?1",
                 params![dispositivo, geracao_dele],
             )?;
             recomecos += 1;
@@ -2172,18 +2337,31 @@ fn puxar_ate(
         }
         let lista: Vec<Alteracao> = serde_json::from_value(resposta["alteracoes"].clone())?;
         let ultima = lista.iter().max_by_key(|x| x.seq).map(|x| (x.seq, x.id.clone()));
+        let novo_cursor = ultima.as_ref().map_or(cursor, |(m, _)| *m);
         total += aplicar(&mut conn, &lista)?;
-        match ultima {
-            // Só avança se ninguém zerou o cursor no meio (restauração de backup).
-            Some((m, id)) => conn.execute(
-                "UPDATE sync_par SET cursor = ?2, marca = ?4, geracao = ?5 WHERE dispositivo = ?1 AND cursor = ?3",
-                params![dispositivo, m, cursor, id, geracao_dele],
-            )?,
-            None => conn.execute(
-                "UPDATE sync_par SET geracao = ?2 WHERE dispositivo = ?1 AND (geracao IS NULL OR geracao = '')",
-                params![dispositivo, geracao_dele],
-            )?,
-        };
+        let avancou =
+            match ultima {
+                // Só avança se ninguém zerou o cursor no meio (restauração de backup).
+                Some((m, id)) => conn.execute(
+                    "UPDATE sync_par SET cursor = ?2, marca = ?4, geracao = ?5 WHERE dispositivo = ?1 AND cursor = ?3",
+                    params![dispositivo, m, cursor, id, geracao_dele],
+                )? > 0,
+                None => {
+                    conn.execute(
+                        "UPDATE sync_par SET geracao = ?2 WHERE dispositivo = ?1 AND (geracao IS NULL OR geracao = '')",
+                        params![dispositivo, geracao_dele],
+                    )?;
+                    true
+                }
+            };
+        // Troca COMPLETA com este caixa (R-05): não há mais nada a receber e o
+        // contador chegou ao máximo dele. É a prova de que ele já entregou tudo.
+        if avancou && !resposta["temMais"].as_bool().unwrap_or(false) && novo_cursor >= seq_dele {
+            conn.execute(
+                "UPDATE sync_par SET completo_em = ?2 WHERE dispositivo = ?1",
+                params![dispositivo, tempo::agora()],
+            )?;
+        }
         // Relógio do outro caixa (descontando o tempo da viagem pela rede).
         let aviso = match resposta["agoraMs"].as_i64() {
             Some(dele) => {
@@ -3218,20 +3396,24 @@ mod testes {
             .unwrap()
             .acao
             .contains("Nada foi apagado"));
-        // Esperando há mais de 24 h: vira inconsistente.
+        // Esperando há muito tempo, sem prova nenhuma: continua ESPERANDO (R-05
+        // revisado). O tempo sozinho não torna nada inconsistente; só ganha o
+        // marcador "atrasada".
         sem_gatilho("INSERT INTO produto_aplicacao (id, produto_id) VALUES ('ap4', 'peca-que-nunca-vem')");
         registrar_referencias(&b.conn).unwrap();
         b.conn
             .execute("UPDATE sync_referencia SET desde = '2020-01-01T00:00:00Z' WHERE chave LIKE '%ap4%'", [])
             .unwrap();
         registrar_referencias(&b.conn).unwrap();
-        assert_eq!(estado(&b, "ap4").as_deref(), Some("inconsistente"));
-        assert_eq!(config::ler(&b.conn, "sync_quebradas").unwrap().as_deref(), Some("3"));
+        assert_eq!(estado(&b, "ap4").as_deref(), Some("esperando"));
+        assert!(referencias(&b.conn).unwrap().iter().find(|x| x.chave.contains("ap4")).unwrap().atrasada);
+        assert_eq!(config::ler(&b.conn, "sync_quebradas").unwrap().as_deref(), Some("2"));
+        assert_eq!(config::ler(&b.conn, "sync_atrasadas").unwrap().as_deref(), Some("1"));
         // A peça chega depois (e chega de novo): a espera some sozinha.
         aplicar(&mut b.conn, &so_a_peca).unwrap();
         aplicar(&mut b.conn, &so_a_peca).unwrap();
         let r = registrar_referencias(&b.conn).unwrap();
-        assert_eq!(r, Referencias { esperando: 0, quebradas: 3 });
+        assert_eq!(r, Referencias { esperando: 1, quebradas: 2, atrasadas: 1 });
         assert!(referencias(&b.conn).unwrap().iter().all(|x| !x.falta.contains(&pid)), "resolvida sozinha");
         assert_eq!(produtos::ficha(&b.conn, &pid).unwrap().aplicacoes.len(), 1);
         // Nada foi apagado para esconder.
@@ -3307,6 +3489,246 @@ mod testes {
         registrar_referencias(&b.conn).unwrap();
         let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_referencia", [], |l| l.get(0)).unwrap();
         assert_eq!(n, 0, "{:?}", referencias(&b.conn).unwrap());
+    }
+
+    // ------------------------------------------------------------------
+    // R-05 (revisado): atraso não é inconsistência; só a prova bloqueia.
+    // ------------------------------------------------------------------
+
+    /// Grava direto, sem gatilho nem chave estrangeira (simula o que a troca
+    /// de dados deixa para trás).
+    fn sem_gatilho(b: &Banco, sql: &str) {
+        b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+        b.conn.pragma_update(None, "foreign_keys", false).unwrap();
+        b.conn.execute(sql, []).unwrap();
+        b.conn.pragma_update(None, "foreign_keys", true).unwrap();
+        b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    }
+
+    fn estado_de(b: &Banco, id: &str) -> (String, String) {
+        b.conn
+            .query_row("SELECT estado, motivo FROM sync_referencia WHERE chave = json_array(?1)", [id], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap()
+    }
+
+    fn banco_com_aplicacao_sem_peca(id: &str) -> Banco {
+        let b = Banco::em_memoria().unwrap();
+        sem_gatilho(
+            &b,
+            &format!("INSERT INTO produto_aplicacao (id, produto_id) VALUES ('{id}', 'peca-ausente-{id}')"),
+        );
+        registrar_referencias(&b.conn).unwrap();
+        b
+    }
+
+    fn envelhecer(b: &Banco, id: &str) {
+        b.conn
+            .execute("UPDATE sync_referencia SET desde = '2020-01-01T00:00:00Z' WHERE chave = json_array(?1)", [id])
+            .unwrap();
+    }
+
+    fn par_com_troca(b: &Banco, dispositivo: &str, completo_em: Option<&str>) {
+        b.conn
+            .execute(
+                "INSERT OR REPLACE INTO sync_par (dispositivo, nome, endereco, completo_em) VALUES (?1, ?1, '', ?2)",
+                params![dispositivo, completo_em],
+            )
+            .unwrap();
+    }
+
+    /// R5-T1 · R5-1, R5-2, R5-4: 30 dias esperando e nenhum caixa conhecido: continua
+    /// esperando (atrasada), não bloqueia nada.
+    #[test]
+    fn r5_t1_tempo_sozinho_nunca_e_prova() {
+        let b = banco_com_aplicacao_sem_peca("ap1");
+        envelhecer(&b, "ap1");
+        let r = registrar_referencias(&b.conn).unwrap();
+        assert_eq!(r, Referencias { esperando: 1, quebradas: 0, atrasadas: 1 });
+        assert_eq!(estado_de(&b, "ap1").0, "esperando");
+        let l = referencias(&b.conn).unwrap();
+        assert!(l[0].atrasada && !l[0].pode_aceitar && l[0].acao.contains("não bloqueia"), "{:?}", l[0]);
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap();
+        // Recente: esperando, mas ainda não atrasada.
+        let n = banco_com_aplicacao_sem_peca("ap9");
+        assert!(!referencias(&n.conn).unwrap()[0].atrasada);
+        assert_eq!(config::ler(&n.conn, "sync_atrasadas").unwrap().as_deref(), Some("0"));
+    }
+
+    /// R5-T2 · R5-3, R5-7: o log diz que existe e a tabela não tem: inconsistente (log).
+    #[test]
+    fn r5_t2_prova_do_log_bloqueia() {
+        let b = banco_com_aplicacao_sem_peca("ap3");
+        b.conn
+            .execute(
+                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, ordem)
+                 VALUES ('01a00000-0000-7000-8000-0000000000aa', 'produto', json_array('peca-ausente-ap3'), 'gravar', NULL, 'outro', '2026-01-01', 2)",
+                [],
+            )
+            .unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap3"), ("inconsistente".into(), "log".into()));
+        let e = exigir_editavel(&b.conn, "produto_aplicacao", "ap3").unwrap_err().to_string();
+        assert!(e.contains("inconsistente") && e.contains("gerente"), "{e}");
+        assert!(referencias(&b.conn).unwrap()[0].pode_aceitar);
+        // Outro registro da mesma tabela passa.
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap-outro").unwrap();
+    }
+
+    /// R5-T3 · R5-4, R5-5: a prova dos pares exige TODOS os caixas conhecidos com
+    /// troca completa DEPOIS de a referência aparecer; um par novo desfaz a prova.
+    #[test]
+    fn r5_t3_prova_dos_pares_exige_todos() {
+        let b = banco_com_aplicacao_sem_peca("ap1");
+        let depois = "2999-01-01T00:00:00Z";
+        // Nenhum par conhecido: sem prova.
+        assert_eq!(estado_de(&b, "ap1").0, "esperando");
+        // Dois pares, nenhum com troca completa: sem prova.
+        par_com_troca(&b, "p1", None);
+        par_com_troca(&b, "p2", None);
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1").0, "esperando");
+        // Só um completou depois: sem prova.
+        par_com_troca(&b, "p1", Some(depois));
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1").0, "esperando");
+        // O outro completou, mas ANTES de a referência aparecer: sem prova.
+        par_com_troca(&b, "p2", Some("2000-01-01T00:00:00Z"));
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1").0, "esperando");
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap();
+        // Os dois completaram depois: comprovado pelos pares.
+        par_com_troca(&b, "p2", Some(depois));
+        let r = registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1"), ("inconsistente".into(), "pares".into()));
+        assert_eq!(r.quebradas, 1);
+        let e = exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap_err().to_string();
+        assert!(e.contains("todos os outros caixas"), "{e}");
+        // Aparece um caixa novo, que ainda não trocou nada: a prova se desfaz
+        // e o registro volta a funcionar, sem ninguém aceitar nada.
+        par_com_troca(&b, "p3", None);
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1"), ("esperando".into(), "".into()));
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap();
+    }
+
+    /// R5-T4/T5 · R5-6, R5-7: o pai chega e o bloqueio some sozinho; apagado não bloqueia.
+    #[test]
+    fn r5_t4_pai_que_chega_desbloqueia_e_apagado_nao_bloqueia() {
+        // Caixa A cria a peça com uma aplicação; B recebe a aplicação antes da peça.
+        let a = Banco::em_memoria().unwrap();
+        let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap();
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Correia".into();
+        f.custo = "10".into();
+        f.aplicacoes =
+            vec![produtos::AplicacaoFicha { montadora: "Fiat".into(), modelo: "Uno".into(), ..Default::default() }];
+        produtos::salvar(&a.conn, &a.dispositivo, &u.id, &f).unwrap();
+        let (tudo, _) = alteracoes_desde(&a.conn, 0, 100_000).unwrap();
+        let sem_a_peca: Vec<_> = tudo.iter().filter(|x| x.tabela != "produto").cloned().collect();
+        let so_a_peca: Vec<_> = tudo.iter().filter(|x| x.tabela == "produto").cloned().collect();
+        let mut b = Banco::em_memoria().unwrap();
+        aplicar(&mut b.conn, &sem_a_peca).unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        let ap: String = b.conn.query_row("SELECT id FROM produto_aplicacao", [], |l| l.get(0)).unwrap();
+        par_com_troca(&b, "p1", Some("2999-01-01T00:00:00Z"));
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, &ap).0, "inconsistente");
+        exigir_editavel(&b.conn, "produto_aplicacao", &ap).unwrap_err();
+        // O pai chega: a linha e o bloqueio somem sozinhos.
+        aplicar(&mut b.conn, &so_a_peca).unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM sync_referencia", [], |l| l.get(0)).unwrap();
+        assert_eq!(n, 0, "{:?}", referencias(&b.conn).unwrap());
+        exigir_editavel(&b.conn, "produto_aplicacao", &ap).unwrap();
+        // Apagado: o log diz "apagar"; a correção (editar) tem de passar.
+        sem_gatilho(&b, "INSERT INTO produto_aplicacao (id, produto_id) VALUES ('ap2', 'peca-apagada')");
+        b.conn
+            .execute(
+                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, ordem)
+                 VALUES ('01a00000-0000-7000-8000-0000000000bb', 'produto', json_array('peca-apagada'), 'apagar', NULL, 'outro', '2026-01-01', 2)",
+                [],
+            )
+            .unwrap();
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap2").0, "apagado");
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap2").unwrap();
+    }
+
+    /// R5-T8 · R5-9: aceite do gerente (motivo obrigatório, só inconsistente, mesma falta).
+    #[test]
+    fn r5_t8_aceite_do_gerente() {
+        let b = banco_com_aplicacao_sem_peca("ap1");
+        let chave = r#"["ap1"]"#;
+        // Esperando não pode ser aceito (não há prova de nada).
+        let e = aceitar_inconsistencia(&b.conn, "u1", "produto_aplicacao", chave, "motivo bom").unwrap_err();
+        assert!(e.to_string().contains("não está inconsistente"), "{e}");
+        par_com_troca(&b, "p1", Some("2999-01-01T00:00:00Z"));
+        registrar_referencias(&b.conn).unwrap();
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap_err();
+        // Sem motivo: recusa.
+        for m in ["", "  ", "abc"] {
+            let e = aceitar_inconsistencia(&b.conn, "u1", "produto_aplicacao", chave, m).unwrap_err();
+            assert_eq!(e.nome_do_campo(), Some("motivo"), "{m:?}");
+        }
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap_err();
+        // Com motivo: libera, guarda quem/quando/por quê.
+        usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let ana: String = b.conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0)).unwrap();
+        assert_eq!(
+            aceitar_inconsistencia(&b.conn, &ana, "produto_aplicacao", chave, "Caixa antigo foi perdido").unwrap(),
+            1
+        );
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap();
+        let l = referencias(&b.conn).unwrap();
+        assert_eq!(l[0].estado, "aceito");
+        assert_eq!((l[0].aceita_por.as_str(), l[0].aceite_motivo.as_str()), ("Ana", "Caixa antigo foi perdido"));
+        assert!(!l[0].pode_aceitar && l[0].acao.contains("aceitou"));
+        // Conferir de novo não desfaz o aceite (mesma falta).
+        registrar_referencias(&b.conn).unwrap();
+        assert_eq!(estado_de(&b, "ap1").0, "aceito");
+        exigir_editavel(&b.conn, "produto_aplicacao", "ap1").unwrap();
+        // Passa a faltar OUTRA coisa: o aceite não vale, é avaliado de novo.
+        sem_gatilho(&b, "UPDATE produto_aplicacao SET produto_id = 'outra-peca' WHERE id = 'ap1'");
+        registrar_referencias(&b.conn).unwrap();
+        assert_ne!(estado_de(&b, "ap1").0, "aceito");
+        let aceita: Option<String> = b
+            .conn
+            .query_row("SELECT aceita_por FROM sync_referencia WHERE chave = json_array('ap1')", [], |l| l.get(0))
+            .unwrap();
+        assert!(aceita.is_none());
+    }
+
+    /// R5-T10 · R5-11: a troca completa grava `completo_em`; o recomeço do zero apaga.
+    #[test]
+    fn r5_t10_troca_completa_marca_o_par() {
+        let c1 = temp("r5-c1");
+        let b1 = Banco::abrir(&c1).unwrap();
+        let u = usuarios::criar(&b1.conn, &b1.dispositivo, "Maria", "1234", true).unwrap();
+        let mut f = produtos::ficha_nova(&b1.conn).unwrap();
+        f.nome = "Pastilha".into();
+        f.custo = "40".into();
+        produtos::salvar(&b1.conn, &b1.dispositivo, &u.id, &f).unwrap();
+        salvar_ajustes(&b1.conn, true, "senha-da-loja", "").unwrap();
+        let c2 = temp("r5-c2");
+        let b2 = Banco::abrir(&c2).unwrap();
+        salvar_ajustes(&b2.conn, true, "senha-da-loja", "").unwrap();
+        let (pt1, pu1) = (48300, 48301);
+        let _m1 = Motor::iniciar(c1.clone(), pt1, pu1);
+        thread::sleep(Duration::from_millis(400));
+        let completo = |b: &Banco| -> Option<String> {
+            b.conn
+                .query_row("SELECT completo_em FROM sync_par WHERE dispositivo = ?1", [&b1.dispositivo], |l| l.get(0))
+                .unwrap()
+        };
+        puxar(&c2, &format!("127.0.0.1:{pt1}"), 48310).unwrap();
+        assert!(completo(&b2).is_some(), "depois de receber tudo, a troca está completa");
+        // Restaurar um backup recomeça do zero: a prova some até nova troca completa.
+        depois_de_restaurar(&b2.conn, 0).unwrap();
+        assert!(completo(&b2).is_none());
+        puxar(&c2, &format!("127.0.0.1:{pt1}"), 48310).unwrap();
+        assert!(completo(&b2).is_some());
     }
 
     // ------------------------------------------------------------------

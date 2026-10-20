@@ -229,6 +229,13 @@ FocusScope {
         }
     }
 
+    // Só a situação e a lista de referências (não mexe no que está sendo digitado).
+    function recarregarReferencias() {
+        const r = Api.chamar("sync_ler")
+        if (r.ok)
+            sync = r.dados
+    }
+
     function salvarSync() {
         syncSenha.erro = ""
         syncEnderecos.erro = ""
@@ -775,18 +782,20 @@ FocusScope {
                             }
                         }
                     }
+                    // Esperar dados de outro caixa é normal: uma linha discreta (e o atraso só se existir).
                     Nota {
                         visible: !!tela.sync && tela.sync.pendencias > 0
                         text: tela.sync ? tela.sync.pendencias + (tela.sync.pendencias === 1 ? " registro espera" : " registros esperam")
-                                          + " dados que ainda não chegaram de outro caixa. Deixe os caixas ligados na mesma rede para terminar a troca." : ""
+                                          + " dados de outro caixa e isso se resolve sozinho."
+                                          + (tela.sync.atrasadas > 0 ? " " + tela.sync.atrasadas + " há mais de 24 horas: confira se os outros caixas estão ligados, na mesma rede e com a mesma versão." : "") : ""
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
+                    // Só o que tem problema comprovado aparece em vermelho.
                     Text {
                         visible: !!tela.sync && tela.sync.quebradas > 0
-                        text: tela.sync ? tela.sync.quebradas + (tela.sync.quebradas === 1 ? " registro aponta" : " registros apontam")
-                                          + " para algo que foi apagado em um caixa ou que não chegou em 24 horas. Nada foi apagado por isso."
-                                          + " Confira se todos os caixas estão ligados e com a mesma versão; se continuar, chame quem cuida do sistema." : ""
+                        text: tela.sync ? tela.sync.quebradas + (tela.sync.quebradas === 1 ? " registro com problema." : " registros com problema.")
+                                          + " Só o dinheiro desses registros fica bloqueado até o gerente resolver; o resto da loja funciona normalmente." : ""
                         color: Tema.vermelho
                         font.family: Tema.texto
                         font.pixelSize: 13
@@ -795,20 +804,41 @@ FocusScope {
                     }
                     // Cada registro incompleto: o que é, o que falta e o que fazer.
                     Repeater {
-                        model: tela.sync && tela.sync.referencias ? tela.sync.referencias.slice(0, 20) : []
-                        delegate: Text {
+                        model: tela.sync && tela.sync.referencias ? tela.sync.referencias.filter(r => r.estado !== "esperando" || r.atrasada).slice(0, 20) : []
+                        delegate: ColumnLayout {
+                            id: linhaRef
                             required property var modelData
-                            text: "<b>" + modelData.oQue + "</b> (desde " + modelData.desde + ") aponta para "
-                                  + modelData.oQueFalta.toLowerCase() + " que "
-                                  + (modelData.estado === "esperando" ? "ainda não chegou"
-                                     : modelData.estado === "apagado" ? "foi apagado" : "não bate")
-                                  + ". " + modelData.acao
-                            textFormat: Text.StyledText
-                            color: modelData.estado === "esperando" ? Tema.tintaSuave : Tema.vermelho
-                            font.family: Tema.texto
-                            font.pixelSize: 13
-                            wrapMode: Text.WordWrap
+                            spacing: 6
                             Layout.fillWidth: true
+                            Text {
+                                text: "<b>" + linhaRef.modelData.oQue + "</b> (desde " + linhaRef.modelData.desde + ") aponta para "
+                                      + linhaRef.modelData.oQueFalta.toLowerCase() + " que "
+                                      + (linhaRef.modelData.estado === "esperando" ? (linhaRef.modelData.atrasada ? "ainda não chegou (atrasada)" : "ainda não chegou")
+                                         : linhaRef.modelData.estado === "apagado" ? "foi apagado"
+                                         : linhaRef.modelData.estado === "aceito" ? "não existe (aceito pelo gerente " + linhaRef.modelData.aceitaPor
+                                                                                  + " em " + linhaRef.modelData.aceitaEm + ": " + linhaRef.modelData.aceiteMotivo + ")"
+                                         : "não existe (comprovado)")
+                                      + ". " + linhaRef.modelData.acao
+                                textFormat: Text.StyledText
+                                color: linhaRef.modelData.estado === "esperando" || linhaRef.modelData.estado === "aceito" ? Tema.tintaSuave : Tema.vermelho
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Botao {
+                                visible: linhaRef.modelData.podeAceitar
+                                text: "Aceitar como está"
+                                tipo: "secundario"
+                                onClicked: motivoReferencia.perguntar(
+                                    "Aceitar como está?",
+                                    "O que falta não vai aparecer por isso: só libera o dinheiro deste registro. Fica no histórico com o seu nome e o motivo.",
+                                    "Aceitar", function (m) {
+                                        const r = Api.chamar("referencia_aceitar",
+                                                             { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m })
+                                        return r
+                                    }, "Motivo (por que aceitar?)", "secundario")
+                            }
                         }
                     }
                 }
@@ -1405,6 +1435,8 @@ FocusScope {
             }
         }
     }
+
+    PerguntaMotivo { id: motivoReferencia; onFeito: tela.recarregarReferencias() }
 
     Component.onCompleted: {
         completo = janela.podeGerente("configuracoes")

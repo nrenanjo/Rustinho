@@ -26,6 +26,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0014_codigo_confirmado.sql"),
     include_str!("migracoes/0015_codigo_das_pessoas.sql"),
     include_str!("migracoes/0016_codigo_das_pessoas_confirmado.sql"),
+    include_str!("migracoes/0017_referencias_com_prova.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -260,5 +261,43 @@ mod testes {
         let de_novo = Banco::abrir(&caminho).unwrap().dispositivo;
         assert_eq!(id, de_novo);
         std::fs::remove_dir_all(pasta).ok();
+    }
+
+    /// R5-T11 · R5-1: a migração 16 → 17 preserva os pares e as referências
+    /// que já existiam (inclusive as que a regra antiga chamou de
+    /// inconsistentes por tempo); a próxima conferência as reavalia só por prova.
+    #[test]
+    fn r5_t11_migracao_17_preserva_pares_e_referencias() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 16).unwrap();
+        c.execute(
+            "INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES ('d1', 'Caixa 2', '10.0.0.2:47810', 7)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde)
+             VALUES ('produto_aplicacao', '[\"ap1\"]', 'produto', '[\"x\"]', 'inconsistente', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        migrar(&mut c).unwrap();
+        let (cursor, completo): (i64, Option<String>) = c
+            .query_row("SELECT cursor, completo_em FROM sync_par WHERE dispositivo = 'd1'", [], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((cursor, completo), (7, None));
+        let (estado, motivo): (String, String) =
+            c.query_row("SELECT estado, motivo FROM sync_referencia", [], |l| Ok((l.get(0)?, l.get(1)?))).unwrap();
+        assert_eq!(
+            (estado.as_str(), motivo.as_str()),
+            ("esperando", ""),
+            "sem prova, deixa de bloquear já na migração"
+        );
+        let versao: i64 = c.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+        assert_eq!(versao as usize, MIGRACOES.len());
     }
 }

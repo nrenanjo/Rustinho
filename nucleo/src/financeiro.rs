@@ -399,6 +399,7 @@ pub fn estornar_movimento(
     id: &str,
     motivo: &str,
 ) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "movimento_conta", id)?;
     let (tipo, grupo, estornado, descricao, conta): (String, Option<String>, Option<String>, String, String) = conn
         .query_row(
             "SELECT tipo, grupo, estornado_em, descricao, conta_id FROM movimento_conta WHERE id = ?1",

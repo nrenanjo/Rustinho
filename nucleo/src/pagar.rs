@@ -297,6 +297,7 @@ pub fn cancelar_da_compra(conn: &Connection, usuario_id: &str, compra_id: &str) 
 
 /// Tira uma parcela (lançada errada, paga por fora...). Sem pagamento.
 pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "conta_pagar", id)?;
     let (pago, cancelada, descricao): (i64, Option<String>, String) = conn
         .query_row("SELECT pago, cancelado_em, descricao FROM conta_pagar_saldo WHERE id = ?1", [id], |l| {
             Ok((l.get(0)?, l.get(1)?, l.get(2)?))
@@ -343,6 +344,7 @@ pub struct AlteracaoEntrada {
 
 /// Corrige uma parcela (vencimento, valor, descrição, categoria).
 pub fn alterar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &AlteracaoEntrada) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "conta_pagar", &e.id)?;
     let (pago, cancelada, antes_valor, antes_venc, antes_desc): (i64, Option<String>, i64, String, String) = conn
         .query_row(
             "SELECT pago, cancelado_em, valor, vencimento, descricao FROM conta_pagar_saldo WHERE id = ?1",
@@ -653,6 +655,7 @@ pub struct PagamentoEntrada {
 
 /// Paga uma parcela (inteira ou em parte). Devolve o id do pagamento.
 pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &PagamentoEntrada) -> Resultado<String> {
+    crate::sync::exigir_editavel(conn, "conta_pagar", &e.conta_id)?;
     let (descricao, valor_conta, pago, cancelada): (String, i64, i64, Option<String>) = conn
         .query_row(
             "SELECT descricao, valor, pago, cancelado_em FROM conta_pagar_saldo WHERE id = ?1",
@@ -770,6 +773,7 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
 /// gaveta, o dinheiro volta para ela (caixa ainda aberto) ou para o Caixa
 /// geral (caixa já fechado).
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "pagamento", id)?;
     let (conta_id, valor, juros, desconto, sessao, estornado, descricao): (
         String,
         i64,

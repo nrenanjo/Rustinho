@@ -93,6 +93,7 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "gerente_salvar"
         | "conflitos_listar"
         | "conflito_resolver"
+        | "referencia_aceitar"
         | "conflitos_manter_todos"
         | "codigos_situacao"
         | "codigos_assumir"
@@ -633,6 +634,23 @@ impl Servico {
                 )?;
                 tx.commit()?;
                 Ok(json!(sync::conflitos(&self.banco.conn)?))
+            }
+            // R-05: o gerente aceita como está um registro comprovadamente inconsistente.
+            "referencia_aceitar" => {
+                let d: AceitarReferencia = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                sync::aceitar_inconsistencia(&tx, &sessao.usuario_id, &d.tabela, &d.chave, &d.motivo)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "referencia.aceitar",
+                    &d.tabela,
+                    &d.chave,
+                    &[format!("Aceito como está. Motivo: {}", crate::texto::limpar(&d.motivo))],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::referencias(&self.banco.conn)?))
             }
             // Códigos das peças: faixas, repetidos e peças com código a definir.
             "codigos_situacao" => faixas::situacao(&self.banco.conn),
@@ -1742,6 +1760,7 @@ impl Servico {
             "usuarios": usuarios::quantidade(conn)?,
             "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
+            "atrasadas": config::ler(conn, "sync_atrasadas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "referencias": sync::referencias(conn)?,
         }))
     }
@@ -1973,6 +1992,13 @@ impl Servico {
 #[derive(Deserialize)]
 struct Acao {
     acao: String,
+}
+
+#[derive(Deserialize)]
+struct AceitarReferencia {
+    tabela: String,
+    chave: String,
+    motivo: String,
 }
 
 #[derive(Deserialize)]
@@ -2779,5 +2805,212 @@ mod testes {
             }
         }
         assert!(faltam.is_empty(), "as telas chamam comandos que não existem: {faltam:?}");
+    }
+
+    // ------------------------------------------------------------------
+    // R-05 (revisado): o bloqueio só vale para o dinheiro de um registro
+    // comprovadamente inconsistente.
+    // ------------------------------------------------------------------
+    use rusqlite::{params, Connection};
+
+    fn plantar(conn: &Connection, tabela: &str, id: &str, estado: &str) {
+        conn.execute("DELETE FROM sync_referencia", []).unwrap();
+        conn.execute(
+            "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+             VALUES (?1, json_array(?2), 'pessoa', '[\"sumiu\"]', ?3, '2026-01-01T00:00:00Z', 'log')",
+            params![tabela, id, estado],
+        )
+        .unwrap();
+    }
+
+    type Operacao = Box<dyn Fn(&Connection) -> Resultado<()>>;
+
+    /// R5-T6 · R5-7, R5-8: cada operação de dinheiro das famílias do documento recusa
+    /// o registro inconsistente e deixa passar o esperando, o apagado, o aceito e
+    /// qualquer outro registro.
+    #[test]
+    fn r5_t6_operacoes_de_dinheiro_recusam_so_o_inconsistente() {
+        use crate::{cheques, compras, devolucoes, financeiro, pagar, receber};
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        let operacoes: Vec<(&str, &str, &str, Operacao)> = vec![
+            (
+                "conta_receber",
+                "id1",
+                "receber::cancelar_conta",
+                Box::new(|c| receber::cancelar_conta(c, "d", "u", "id1", "motivo")),
+            ),
+            ("recebimento", "id1", "receber::estornar", Box::new(|c| receber::estornar(c, "d", "u", "id1", "motivo"))),
+            ("cheque", "id1", "cheques::depositar", Box::new(|c| cheques::depositar(c, "d", "u", "id1", "conta"))),
+            ("cheque", "id1", "cheques::repassar", Box::new(|c| cheques::repassar(c, "d", "u", "id1", "fornecedor"))),
+            (
+                "cheque",
+                "id1",
+                "cheques::devolver",
+                Box::new(|c| cheques::devolver(c, "d", "u", "id1", "motivo", false)),
+            ),
+            ("cheque", "id1", "cheques::desfazer", Box::new(|c| cheques::desfazer(c, "d", "u", "id1"))),
+            ("conta_pagar", "id1", "pagar::cancelar", Box::new(|c| pagar::cancelar(c, "d", "u", "id1", "motivo"))),
+            (
+                "conta_pagar",
+                "id1",
+                "pagar::alterar",
+                Box::new(|c| {
+                    pagar::alterar(c, "d", "u", &pagar::AlteracaoEntrada { id: "id1".into(), ..Default::default() })
+                }),
+            ),
+            (
+                "conta_pagar",
+                "id1",
+                "pagar::pagar",
+                Box::new(|c| {
+                    pagar::pagar(c, "d", "u", &pagar::PagamentoEntrada { conta_id: "id1".into(), ..Default::default() })
+                        .map(|_| ())
+                }),
+            ),
+            ("pagamento", "id1", "pagar::estornar", Box::new(|c| pagar::estornar(c, "d", "u", "id1", "motivo"))),
+            ("compra", "id1", "compras::lancar", Box::new(|c| compras::lancar(c, "d", "u", "id1").map(|_| ()))),
+            ("compra", "id1", "compras::estornar", Box::new(|c| compras::estornar(c, "d", "u", "id1", "motivo"))),
+            (
+                "compra",
+                "id1",
+                "compras::atualizar",
+                Box::new(|c| compras::atualizar(c, &compras::CompraEntrada { id: "id1".into(), ..Default::default() })),
+            ),
+            (
+                "devolucao",
+                "id1",
+                "devolucoes::desfazer",
+                Box::new(|c| devolucoes::desfazer(c, "d", "u", "id1", "motivo")),
+            ),
+            (
+                "movimento_conta",
+                "id1",
+                "financeiro::estornar_movimento",
+                Box::new(|c| financeiro::estornar_movimento(c, "d", "u", "id1", "motivo")),
+            ),
+        ];
+        for (tabela, id, nome, op) in &operacoes {
+            plantar(c, tabela, id, "inconsistente");
+            let e = op(c).expect_err(nome).to_string();
+            assert!(e.contains("inconsistente"), "{nome}: devia recusar por inconsistência: {e}");
+            for livre in ["esperando", "apagado", "aceito"] {
+                plantar(c, tabela, id, livre);
+                let r = op(c);
+                assert!(
+                    !r.err().is_some_and(|e| e.to_string().contains("inconsistente")),
+                    "{nome} ({livre}) não podia recusar"
+                );
+            }
+            // Inconsistente em OUTRO registro da mesma tabela: esta operação passa.
+            plantar(c, tabela, "outro-id", "inconsistente");
+            assert!(
+                !op(c).err().is_some_and(|e| e.to_string().contains("inconsistente")),
+                "{nome}: outro registro não podia bloquear"
+            );
+        }
+        // Os filhos (itens) também seguram a operação do pai.
+        c.execute("DELETE FROM sync_referencia", []).unwrap();
+    }
+
+    /// R5-T7 · R5-8: pelo fluxo real da tela, uma parcela inconsistente não segura as outras,
+    /// nem a venda, nem o fechamento do caixa; ver e imprimir continuam.
+    #[test]
+    fn r5_t7_o_resto_da_loja_continua() {
+        let mut s = conectado();
+        let cliente = {
+            let mut f = chamar(&mut s, "pessoa_nova", r#"{"papel":"cliente"}"#)["dados"].clone();
+            f["nome"] = json!("Oficina do Zé");
+            chamar(&mut s, "pessoa_salvar", &f.to_string())["dados"]["id"].as_str().unwrap().to_string()
+        };
+        let r = chamar(
+            &mut s,
+            "receber_lancar",
+            &json!({ "clienteId": cliente, "descricao": "caderno", "valor": "200", "parcelas": 2, "primeiroVencimento": "" }).to_string(),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let conta = chamar(&mut s, "receber_cliente", &json!({ "id": cliente, "todas": false }).to_string());
+        let ids: Vec<String> = conta["dados"]["parcelas"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(chamar(&mut s, "caixa_abrir", r#"{"valor":"50"}"#)["ok"], true);
+        plantar(&s.banco.conn, "conta_receber", &ids[0], "inconsistente");
+        let baixar = |s: &mut Servico, id: &str| {
+            chamar(
+                s,
+                "receber_baixar",
+                &json!({ "clienteId": cliente, "contas": [id], "valor": "100", "forma": "dinheiro" }).to_string(),
+            )
+        };
+        let r = baixar(&mut s, &ids[0]);
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["erro"].as_str().unwrap().contains("inconsistente"), "{r}");
+        // A outra parcela do mesmo cliente é recebida normalmente.
+        let r = baixar(&mut s, &ids[1]);
+        assert_eq!(r["ok"], true, "{r}");
+        // Ver continua; fechar o caixa não é bloqueado por isso.
+        assert_eq!(chamar(&mut s, "receber_cliente", &json!({ "id": cliente, "todas": true }).to_string())["ok"], true);
+        let r = chamar(&mut s, "caixa_fechar", r#"{"contado":"150","observacoes":""}"#);
+        assert!(!r.to_string().contains("inconsistente"), "{r}");
+    }
+
+    /// R5-9 pela API: aceitar é comando de gerente, exige motivo e grava a auditoria.
+    #[test]
+    fn r5_api_aceitar_exige_gerente_motivo_e_audita() {
+        let mut s = conectado();
+        assert_eq!(acao_do_comando("referencia_aceitar"), Some("gerente"));
+        plantar(&s.banco.conn, "conta_receber", "c1", "inconsistente");
+        let dados = |m: &str| json!({ "tabela": "conta_receber", "chave": "[\"c1\"]", "motivo": m }).to_string();
+        let r = chamar(&mut s, "referencia_aceitar", &dados(""));
+        assert_eq!(r["ok"], false, "{r}");
+        let r = chamar(&mut s, "referencia_aceitar", &dados("Caixa de origem foi perdido"));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"][0]["estado"], "aceito");
+        let n: i64 = s
+            .banco
+            .conn
+            .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'referencia.aceitar' AND detalhes LIKE '%Caixa de origem%'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        crate::sync::exigir_editavel(&s.banco.conn, "conta_receber", "c1").unwrap();
+    }
+
+    /// R5-T9 · R5-10: varredura. Toda operação de dinheiro listada chama o bloqueio; se alguém
+    /// tirar a chamada (ou criar uma operação nova sem ela e listá-la aqui), o teste falha.
+    #[test]
+    fn r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio() {
+        let fontes: [(&str, &str, &[&str]); 6] = [
+            ("receber", include_str!("receber.rs"), &["receber", "estornar", "cancelar_conta"]),
+            ("cheques", include_str!("cheques.rs"), &["depositar", "repassar", "devolver", "desfazer"]),
+            ("pagar", include_str!("pagar.rs"), &["pagar", "estornar", "alterar", "cancelar"]),
+            ("compras", include_str!("compras.rs"), &["lancar", "atualizar", "estornar"]),
+            ("devolucoes", include_str!("devolucoes.rs"), &["desfazer"]),
+            ("financeiro", include_str!("financeiro.rs"), &["estornar_movimento"]),
+        ];
+        let corpo = |codigo: &str, nome: &str| -> String {
+            let ini = codigo.find(&format!("pub fn {nome}(")).unwrap_or_else(|| panic!("não achei {nome}"));
+            let resto = &codigo[ini + 1..];
+            let fim = ["\npub fn ", "\nfn ", "\n#[cfg(test)]"]
+                .iter()
+                .filter_map(|m| resto.find(m))
+                .min()
+                .unwrap_or(resto.len());
+            resto[..fim].to_string()
+        };
+        for (arq, codigo, nomes) in fontes {
+            for nome in nomes {
+                let c = corpo(codigo, nome);
+                assert!(
+                    c.contains("exigir_editavel") || c.contains("exigir_filhos_editaveis"),
+                    "{arq}::{nome} mexe em dinheiro e não chama o bloqueio de registro inconsistente (R-05)"
+                );
+            }
+        }
+        // Controle: uma função de leitura não precisa (e a varredura sabe diferenciar).
+        assert!(!corpo(include_str!("receber.rs"), "previa").contains("exigir_editavel"));
     }
 }

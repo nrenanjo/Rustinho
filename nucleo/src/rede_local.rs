@@ -75,13 +75,26 @@ pub fn classificar(nome: &str) -> Tipo {
     let comeca = |prefixos: &[&str]| prefixos.iter().any(|p| n.starts_with(p));
     // Virtual primeiro: "vEthernet" e "VirtualBox" têm "ethernet"/"box" no nome.
     if tem(&[
-        "docker", "virtual", "vmware", "vmnet", "vboxnet", "hyper-v", "vethernet", "tailscale", "zerotier", "loopback",
-        "pseudo", "bluetooth", "tunnel", "vpn",
+        "docker",
+        "virtual",
+        "vmware",
+        "vmnet",
+        "vboxnet",
+        "hyper-v",
+        "vethernet",
+        "tailscale",
+        "zerotier",
+        "loopback",
+        "pseudo",
+        "bluetooth",
+        "tunnel",
+        "vpn",
     ]) || comeca(&["veth", "br-", "virbr", "tun", "tap", "wg", "utun", "dummy", "lxc", "cni", "flannel", "podman"])
     {
         return Tipo::Virtual;
     }
-    if comeca(&["rmnet", "ccmni", "wwan", "ppp", "usb0"]) || tem(&["celular", "cellular", "mobile", "móvel", "movel"]) {
+    if comeca(&["rmnet", "ccmni", "wwan", "ppp", "usb0"]) || tem(&["celular", "cellular", "mobile", "móvel", "movel"])
+    {
         return Tipo::Celular;
     }
     if comeca(&["wlan", "wlp", "wlx", "wifi", "wl0", "wl1", "swlan", "p2p"])
@@ -91,7 +104,10 @@ pub fn classificar(nome: &str) -> Tipo {
     }
     let cabo_linux = n.starts_with("eth")
         || (n.starts_with("en")
-            && n[2..].chars().next().is_some_and(|c| c == 'p' || c == 'o' || c == 's' || c == 'x' || c.is_ascii_digit()));
+            && n[2..]
+                .chars()
+                .next()
+                .is_some_and(|c| c == 'p' || c == 'o' || c == 's' || c == 'x' || c.is_ascii_digit()));
     if cabo_linux || tem(&["ethernet", "conexão local", "conexao local", "local area connection", "lan"]) {
         return Tipo::Cabo;
     }
@@ -111,13 +127,7 @@ pub fn listar() -> std::io::Result<Vec<Interface>> {
             i.oper_status,
             if_addrs::IfOperStatus::Up | if_addrs::IfOperStatus::Unknown | if_addrs::IfOperStatus::Dormant
         ) && !v4.ip.is_unspecified();
-        lista.push(Interface {
-            tipo: tipo_no_sistema(&i.name),
-            nome: i.name,
-            ip: v4.ip,
-            mascara: v4.netmask,
-            ativa,
-        });
+        lista.push(Interface { tipo: tipo_no_sistema(&i.name), nome: i.name, ip: v4.ip, mascara: v4.netmask, ativa });
     }
     Ok(lista)
 }
@@ -280,19 +290,59 @@ mod testes {
     use std::time::Duration;
 
     fn c(endereco: &str, ok: i64, visto: i64) -> Caminho {
-        Caminho { endereco: endereco.into(), digitado: false, visto_ms: visto, ultimo_ok_ms: ok, falhas: 0, proxima_ms: 0 }
+        Caminho {
+            endereco: endereco.into(),
+            digitado: false,
+            visto_ms: visto,
+            ultimo_ok_ms: ok,
+            falhas: 0,
+            proxima_ms: 0,
+        }
     }
 
     /// T-01 · CA-R1: classificação pelo nome da interface.
     #[test]
     fn t01_classifica_pelo_nome() {
-        for n in ["eth0", "eth1", "enp3s0", "eno1", "ens33", "enx00e04c680001", "Ethernet", "Ethernet 2", "Conexão local", "Local Area Connection"] {
+        for n in [
+            "eth0",
+            "eth1",
+            "enp3s0",
+            "eno1",
+            "ens33",
+            "enx00e04c680001",
+            "Ethernet",
+            "Ethernet 2",
+            "Conexão local",
+            "Local Area Connection",
+        ] {
             assert_eq!(classificar(n), Tipo::Cabo, "{n}");
         }
-        for n in ["wlan0", "wlp2s0", "wlx0013ef", "Wi-Fi", "Wi-Fi 2", "Conexão de Rede Wireless", "Wireless Network Connection", "Rede sem fio"] {
+        for n in [
+            "wlan0",
+            "wlp2s0",
+            "wlx0013ef",
+            "Wi-Fi",
+            "Wi-Fi 2",
+            "Conexão de Rede Wireless",
+            "Wireless Network Connection",
+            "Rede sem fio",
+        ] {
             assert_eq!(classificar(n), Tipo::Wifi, "{n}");
         }
-        for n in ["docker0", "veth12ab", "br-3f2a", "virbr0", "tun0", "tap0", "vEthernet (Default Switch)", "VirtualBox Host-Only Network", "VMware Network Adapter VMnet8", "tailscale0", "wg0", "dummy0"] {
+        for n in [
+            "docker0",
+            "veth12ab",
+            "br-3f2a",
+            "virbr0",
+            "tun0",
+            "tap0",
+            "vEthernet (Default Switch)",
+            "VirtualBox Host-Only Network",
+            "VMware Network Adapter VMnet8",
+            "tailscale0",
+            "wg0",
+            "dummy0",
+        ] {
             assert_eq!(classificar(n), Tipo::Virtual, "{n}");
         }
         for n in ["rmnet_data0", "ccmni0", "wwan0", "ppp0", "Conexão Celular"] {
@@ -319,7 +369,11 @@ mod testes {
         assert_eq!(b([169, 254, 7, 8], 16), Some(Ipv4Addr::new(169, 254, 255, 255)));
         assert_eq!(b([192, 168, 0, 12], 31), None, "/31 não tem broadcast");
         assert_eq!(b([192, 168, 0, 12], 32), None, "/32 não tem broadcast");
-        assert_eq!(broadcast_dirigido(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(255, 0, 255, 0)), None, "máscara torta");
+        assert_eq!(
+            broadcast_dirigido(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(255, 0, 255, 0)),
+            None,
+            "máscara torta"
+        );
         assert_eq!(broadcast_dirigido(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::UNSPECIFIED), None);
     }
 
@@ -412,10 +466,10 @@ mod testes {
         ];
         // o Wi-Fi funcionou mais recentemente, mesmo assim o cabo vai primeiro
         let caminhos = vec![
-            c("192.168.1.7:47810", 9_000, 9_000),   // Wi-Fi
-            c("192.168.0.7:47810", 1_000, 1_000),   // cabo
-            c("172.17.0.7:47810", 8_000, 8_000),    // virtual
-            c("100.64.0.9:47810", 7_000, 7_000),    // celular
+            c("192.168.1.7:47810", 9_000, 9_000),                         // Wi-Fi
+            c("192.168.0.7:47810", 1_000, 1_000),                         // cabo
+            c("172.17.0.7:47810", 8_000, 8_000),                          // virtual
+            c("100.64.0.9:47810", 7_000, 7_000),                          // celular
             Caminho { digitado: true, ..c("10.50.0.7:47810", 500, 500) }, // digitado, fora das sub-redes (roteador)
         ];
         let ordem: Vec<String> = ordenar(&caminhos, Some(&lista), 10_000).into_iter().map(|c| c.endereco).collect();
@@ -423,7 +477,8 @@ mod testes {
         assert_eq!(ordem, ["192.168.0.7:47810", "10.50.0.7:47810", "192.168.1.7:47810"]);
 
         // na mesma classe, o que funcionou há menos tempo vai primeiro
-        let dois_cabos = vec![c("192.168.0.7:47810", 1_000, 1), Caminho { digitado: true, ..c("192.168.0.8:47810", 5_000, 1) }];
+        let dois_cabos =
+            vec![c("192.168.0.7:47810", 1_000, 1), Caminho { digitado: true, ..c("192.168.0.8:47810", 5_000, 1) }];
         let ordem: Vec<String> = ordenar(&dois_cabos, Some(&lista), 10_000).into_iter().map(|c| c.endereco).collect();
         assert_eq!(ordem, ["192.168.0.8:47810", "192.168.0.7:47810"]);
     }
@@ -459,7 +514,10 @@ mod testes {
     /// T-08 (parte pura) · CA-R3: a espera cresce e o caminho em espera fica de fora.
     #[test]
     fn t08_espera_crescente() {
-        assert_eq!([espera_ms(0), espera_ms(1), espera_ms(2), espera_ms(3), espera_ms(40)], [0, 8_000, 16_000, 30_000, 30_000]);
+        assert_eq!(
+            [espera_ms(0), espera_ms(1), espera_ms(2), espera_ms(3), espera_ms(40)],
+            [0, 8_000, 16_000, 30_000, 30_000]
+        );
         let mut cabo = c("192.168.0.7:47810", 1_000, 1_000);
         cabo.falhas = 1;
         cabo.proxima_ms = 20_000 + espera_ms(1);
@@ -469,9 +527,14 @@ mod testes {
             Interface::de_teste("wlan0", [192, 168, 1, 40], 24, Tipo::Wifi),
         ];
         let todos = vec![cabo.clone(), wifi.clone()];
-        let nomes = |agora| -> Vec<String> { ordenar(&todos, Some(&lista), agora).into_iter().map(|c| c.endereco).collect() };
+        let nomes =
+            |agora| -> Vec<String> { ordenar(&todos, Some(&lista), agora).into_iter().map(|c| c.endereco).collect() };
         assert_eq!(nomes(20_000), ["192.168.1.7:47810"], "dentro da espera só o Wi-Fi");
         assert_eq!(nomes(27_999), ["192.168.1.7:47810"]);
-        assert_eq!(nomes(28_000), ["192.168.0.7:47810", "192.168.1.7:47810"], "passada a espera o cabo volta a ser o primeiro");
+        assert_eq!(
+            nomes(28_000),
+            ["192.168.0.7:47810", "192.168.1.7:47810"],
+            "passada a espera o cabo volta a ser o primeiro"
+        );
     }
 }

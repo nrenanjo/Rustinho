@@ -393,6 +393,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Lancam
 
 /// Cancela uma parcela lançada à mão (as de venda saem cancelando a venda).
 pub fn cancelar_conta(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "conta_receber", id)?;
     let (cliente_id, venda_id, pago, cancelada, descricao): (String, Option<String>, i64, Option<String>, String) =
         conn.query_row(
             "SELECT cliente_id, venda_id, pago, cancelado_em, descricao FROM conta_receber_saldo WHERE id = ?1",
@@ -885,6 +886,10 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
     if !c.erro.is_empty() {
         return Err(Erro::campo(&c.campo, c.erro));
     }
+    // R-05: só as parcelas que seriam baixadas contam; as outras seguem.
+    for a in &c.abates {
+        crate::sync::exigir_editavel(conn, "conta_receber", &a.conta_id)?;
+    }
     if c.v_troco > 0 && e.forma != "dinheiro" {
         return Err(Erro::campo("valor", "Pagamento a mais só em dinheiro (para dar troco)."));
     }
@@ -954,6 +959,8 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
 
 /// Desfaz um recebimento: as parcelas voltam a ficar em aberto.
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    crate::sync::exigir_editavel(conn, "recebimento", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "recebimento_parcela", "recebimento_id", id)?;
     let (cliente_id, numero, caixa_nome, estornado): (String, i64, String, Option<String>) = conn
         .query_row("SELECT cliente_id, numero, caixa_nome, estornado_em FROM recebimento WHERE id = ?1", [id], |l| {
             Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
