@@ -37,7 +37,9 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 ## Sincronização
 
 - **PEND-10 · A sincronização deve funcionar sem internet, por todas as interfaces locais, priorizando cabo (Ethernet) e recorrendo ao Wi-Fi sem perder nem duplicar operações.**
-  Pedido do usuário (20/10/2026). Hoje a troca de dados já funciona sem internet (rede local, `127.0.0.1` nos testes), mas: a descoberta por broadcast usa um só caminho, cada caixa guarda um único endereço "ip:porta", não há preferência cabo/Wi-Fi nem troca automática, e não há teste com mais de uma interface. Critérios de aceitação e plano de testes em `docs/PEND-10-criterios.md`. **Status: critérios definidos (commit dbed2df); implementação em andamento; validação física (FV-1 a FV-10) pendente.**
+  Pedido do usuário (20/10/2026). Hoje a troca de dados já funciona sem internet (rede local, `127.0.0.1` nos testes), mas: a descoberta por broadcast usa um só caminho, cada caixa guarda um único endereço "ip:porta", não há preferência cabo/Wi-Fi nem troca automática, e não há teste com mais de uma interface. Critérios de aceitação e plano de testes em `docs/PEND-10-criterios.md`. **Status: implementada e testada em simulação (commits 28ddc52, 7dc5a73; resultados em `docs/PEND-10-criterios.md` §8); validação física (FV-1 a FV-13) PENDENTE; lacunas de Windows e Android em PEND-13 e PEND-14.**
+- **PEND-13 · Windows: prender a conexão de sincronização à interface (`IP_UNICAST_IF`) e classificar placas pela API do sistema.** Hoje só há `bind` ao IP e conferência por `local_addr()`; a classificação cai no nome. Precisa de alvo Windows para compilar e de dois PCs para validar (FV-1, FV-6, FV-9, FV-12).
+- **PEND-14 · Android: usar a rede escolhida (Wi-Fi) para o soquete de sincronização (`ConnectivityManager`/`Network.bindSocket`, via JNI).** Risco: dados móveis ligados com Wi-Fi da loja sem internet (FV-11). Validar em aparelhos reais (Android 32 e 64 bits).
 
 ## Identidade visual
 

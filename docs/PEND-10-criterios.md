@@ -1,6 +1,6 @@
 # PEND-10 · Sincronização sem internet, por todas as interfaces locais (cabo primeiro, Wi-Fi como reserva)
 
-**Status:** critérios e plano de testes definidos **antes** do código (20/10/2026); **revisão 2** (20/10/2026, 11:3x) incorpora as 5 observações do dono do projeto (§0). Versão 0.9.11; o protocolo (`PROTOCOLO`) não muda.
+**Status:** **revisão 3 (20/10/2026): implementado e testado em simulação; validação física (FV-1 a FV-13) pendente; Windows e Android têm lacunas registradas (§8.3).** Critérios e plano de testes foram definidos **antes** do código (revisão 1); a revisão 2 incorporou as 5 observações do dono do projeto (§0); a revisão 3 (§8) registra o que foi feito e os resultados. Versão 0.9.11; o protocolo (`PROTOCOLO`) não muda.
 **Regra de ouro:** *o caixa é identificado pelo `dispositivo` (id), nunca pelo endereço.* Endereço é só um caminho para chegar nele. Trocar de cabo para Wi-Fi troca o caminho; o contador (`cursor`), a marca, a geração e o histórico continuam sendo do caixa.
 
 ## 0. Revisão 2 — as cinco observações do dono do projeto (20/10/2026)
@@ -239,3 +239,41 @@ Técnica para simular "várias interfaces" neste computador, sem inventar rede: 
 | E4 | Mutações, suíte completa (dev e final), clippy, entrega | Sonnet 5.5, **médio** (rodar scripts e conferir) |
 | E5 | Roteiro FV-1…FV-10 em equipamentos reais | Você, com os aparelhos; eu só reviso as evidências em **Sonnet 5.5, baixo** |
 Opus não é necessário nesta pendência.
+
+## 8. Revisão 3 — implementação e resultados (commits 266f570, 28ddc52, 7dc5a73; nada enviado ao remoto)
+
+### 8.1 O que foi implementado
+
+| Parte | Onde | Resumo |
+|---|---|---|
+| Interfaces e classificação | `nucleo/src/rede_local.rs` | Lista as interfaces, classifica por **metadado do sistema** (Linux/Android: `sysfs`) e só então pelo nome; o que não se identifica fica "desconhecida" (nunca adivinhado). Alvos de anúncio por interface (broadcast dirigido; link-local 169.254.x.y incluído). |
+| Caminhos por caixa | `nucleo/src/caminhos.rs`, migração `0019_caminhos_da_rede.sql` (tabela local `sync_endereco`) | O caixa continua sendo o `dispositivo`; o endereço é só um caminho. Ordem: cabo, desconhecida, Wi-Fi, virtual, celular (digitado no meio). Um caminho com sucesso por caixa por ciclo; espera crescente 8/16/30 s; cabo reassume quando volta; endereço que mudou de dono não herda contador; endereço próprio não vira caixa nem conta falha. |
+| Ciclo limitado | `caminhos::ciclo` | Orçamento de 8 s e no máximo 4 caixas "mortos" por ciclo; ativos primeiro; mortos em rodízio. Operações locais não esperam a rede. |
+| Conexão presa à interface | `sync.rs` (`puxar_por`, socket2) | `bind` ao IP da interface planejada; `SO_BINDTODEVICE` (Linux/Android, melhor esforço); conferência por `local_addr()` → "em uso" só quando confirmado; senão "não confirmado" (registrado uma vez). |
+| Anúncio | `sync.rs` | Um pacote por interface apropriada (cabo, Wi-Fi); VPN/virtual/celular só com configuração explícita (`sync_interfaces`); interfaces relistadas a cada 1 s, mudança dispara anúncio imediato (CA-R4: < 1 s em vez de até 10 s). Pacote e `PROTOCOLO = 3` inalterados. |
+| Identidade de endereço novo | `sync.rs`/`caminhos.rs` | Sonda de identidade (cursor máximo, resposta "recomeçar" já existente) quando o endereço é desconhecido e já há pares: caminho novo de caixa conhecido continua do contador. |
+| Backup | `backup.rs` | `sync_endereco` é preservado ao restaurar (pertence a este computador). |
+| Tela | `TelaConfiguracoes.qml`, `TelaJuntar.qml` | "Caixas da loja": "via cabo / Wi-Fi / rede" só quando confirmado; campo de interfaces liberadas só em modo completo. Corrigido defeito antigo: as bolinhas de situação das linhas dos caixas nunca eram desenhadas. |
+
+### 8.2 Resultados — **simulados** (este computador; 127.0.0.x, conectores falsos, relógio injetado)
+
+| Verificação | Resultado |
+|---|---|
+| T-01 a T-38 (tabela §4) | Todos escritos antes do código e verdes. T-21 = suíte anterior de rede (127.0.0.1) sem alteração. Testes novos de PEND-10: 39 (mais o de integração `i01`: cabo cai, Wi-Fi entrega, cabo reassume). |
+| Suíte completa, desenvolvimento | núcleo 256 ok + 1 ignorado; testes de integração 9 / 4 / 7 / 5 ok; 0 falhas |
+| Suíte completa, programa final (release, `overflow-checks`) | mesmos números, 0 falhas |
+| Teste de volume (ignorado por padrão) | ok |
+| `cargo fmt --check`, `clippy -D warnings` | limpos |
+| Mutações (P1–P31, defeitos plantados) | **31/31 pegas** (P11 e P31 foram inicialmente "não pega"; corrigido o filtro do teste e acrescentado `confirmacao_compara_o_ip_local_com_o_planejado`) |
+| Inspeção visual (Linux, janela real sob xvfb) | Configurações › Caixas da loja como gerente e como operador (capturas em `visual11/`) |
+
+### 8.3 Limites e lacunas (não escondidos)
+
+1. **Windows:** prender a conexão a uma interface (`IP_UNICAST_IF`) e obter o tipo da placa pela API do sistema **não foram implementados** (só há alvo Linux aqui). No Windows vale `bind` ao IP + conferência por `local_addr()` + classificação por nome. → PEND-13.
+2. **Android:** a conexão precisa de `Network.bindSocket` (ConnectivityManager/JNI) para escolher Wi-Fi quando há dados móveis ligados e o Wi-Fi não tem internet; hoje só `bind` ao IP. Risco de FV-11. → PEND-14.
+3. Celular em modo USB (tethering) aparece como cabo (limite dos metadados).
+4. A filtragem de interfaces virtuais no `Motor` só é testada via `aceitar_anuncio`; o `listar()` real não pode ser simulado.
+5. O teste de "porta ocupada" confere `Motor::problemas()`, não o arquivo de registro global.
+6. Rótulo de interface desconhecida fica neutro ("rede").
+7. Layout estreito (Android) e Windows: inspeção visual impossível neste ambiente.
+8. **Nenhum teste físico (FV-1 a FV-13) foi feito.** Nenhum resultado desta revisão deve ser lido como prova física.
