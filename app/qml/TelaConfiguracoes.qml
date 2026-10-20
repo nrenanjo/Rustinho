@@ -1204,6 +1204,44 @@ FocusScope {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
+                    // Clientes e fornecedores com código com letras: o mesmo princípio das peças.
+                    Nota {
+                        visible: !!tela.codigos && tela.codigos.pessoasEsperando.length > 0
+                        text: "Clientes e fornecedores com código com letras esperando a confirmação do caixa que distribui as faixas. Enquanto esperam, "
+                              + "o cadastro é achado pelo nome e funciona normalmente, mas o código ainda não vale como único. Se outro cadastro já tem o código, "
+                              + "só um fica com ele: dê um código novo ao que ficou esperando. Nada é trocado sozinho."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.pessoasEsperando : []
+                        delegate: RowLayout {
+                            required property var modelData
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Text {
+                                text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
+                                      + (modelData.conflito ? " · já é de “" + modelData.outraPessoa + "”" : " · esperando a confirmação")
+                                color: modelData.conflito ? Tema.vermelho : Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Botao {
+                                text: "Abrir"
+                                tipo: "discreto"
+                                onClicked: tela.janela.abrir("TelaPessoa", { pessoaId: modelData.id, papel: "cliente" })
+                            }
+                            Botao {
+                                visible: modelData.conflito
+                                text: "Dar código novo"
+                                tipo: "secundario"
+                                onClicked: tela.comandoCodigos("codigos_pessoa_dar_novo", { id: modelData.id },
+                                                               "“" + modelData.nome + "” ganhou um código novo.")
+                            }
+                        }
+                    }
                     Nota {
                         visible: !!tela.codigos && tela.codigos.pessoasRepetidas.length > 0
                         text: "Códigos de clientes ou fornecedores que levam a mais de uma pessoa. Nada foi trocado: as vendas, os débitos e as notas "

@@ -16,6 +16,9 @@ const MAX_VEICULOS: usize = 50;
 pub struct PessoaFicha {
     pub id: String,
     pub codigo: String,
+    /// O código com letras ainda espera a confirmação do caixa que distribui
+    /// as faixas (PEND-07): não vale como único até lá.
+    pub codigo_pendente: bool,
     pub cliente: bool,
     pub fornecedor: bool,
     /// "F" ou "J"
@@ -74,6 +77,8 @@ pub struct VeiculoFicha {
 pub struct PessoaResumo {
     pub id: String,
     pub codigo: String,
+    /// Código esperando a confirmação (PEND-07).
+    pub codigo_pendente: bool,
     pub nome: String,
     pub fantasia: String,
     pub documento: String,
@@ -269,7 +274,8 @@ pub fn definir_codigo(conn: &Connection, dispositivo: &str, id: &str, codigo: &s
     let (_, dados) = carregar(conn, id)?;
     let busca = texto_busca(codigo, &dados);
     let n = conn.execute(
-        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, dispositivo = ?5 WHERE id = ?1 AND codigo = ''",
+        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, dispositivo = ?5, codigo_validado = 1
+          WHERE id = ?1 AND codigo = ''",
         params![id, codigo, busca, tempo::agora(), dispositivo],
     )?;
     if n == 1 {
@@ -287,7 +293,8 @@ pub fn trocar_codigo(conn: &Connection, dispositivo: &str, usuario_id: &str, id:
     };
     let busca = texto_busca(&novo, &dados);
     conn.execute(
-        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, atualizado_por = ?5, dispositivo = ?6
+        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, atualizado_por = ?5, dispositivo = ?6,
+                codigo_validado = 1
           WHERE id = ?1",
         params![id, novo, busca, tempo::agora(), usuario_id, dispositivo],
     )?;
@@ -378,9 +385,29 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
             return Err(Erro::campo("documento", format!("Este documento já está cadastrado em \"{outro}\".")));
         }
     }
+    // O código vale já (de números, ou confirmado aqui pelo caixa que
+    // distribui as faixas) ou fica esperando a confirmação dele (veja
+    // `faixas`). Com o código igual ao de antes, continua como estava, e o
+    // distribuidor confirma se já pode.
+    let validado: i64 = if !novo && codigo == codigo_antes {
+        let atual: i64 = conn.query_row("SELECT codigo_validado FROM pessoa WHERE id = ?1", [&id], |l| l.get(0))?;
+        if atual == 1 {
+            1
+        } else {
+            faixas::confirmado_ao_salvar_pessoa(conn, &id, &codigo)?
+        }
+    } else {
+        faixas::confirmado_ao_salvar_pessoa(conn, &id, &codigo)?
+    };
     let detalhes = match &antes {
         Some(a) => {
-            let d = diferencas(a, &dados);
+            let mut d = diferencas(a, &dados);
+            if codigo != codigo_antes {
+                d.push(format!(
+                    "Código: {} → {codigo}",
+                    if codigo_antes.is_empty() { "a definir" } else { &codigo_antes }
+                ));
+            }
             if d.is_empty() {
                 return Ok(id);
             }
@@ -388,7 +415,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
         }
         None => vec![],
     };
-    gravar(conn, dispositivo, usuario_id, &id, &codigo, &dados, novo)?;
+    gravar(conn, dispositivo, usuario_id, &id, Codigo { texto: &codigo, validado }, &dados, novo)?;
     auditoria::registrar(
         conn,
         dispositivo,
@@ -401,15 +428,23 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
     Ok(id)
 }
 
+/// O código que vai para o cadastro e se ele já vale (`pessoa.codigo_validado`).
+#[derive(Clone, Copy)]
+struct Codigo<'a> {
+    texto: &'a str,
+    validado: i64,
+}
+
 fn gravar(
     conn: &Connection,
     dispositivo: &str,
     usuario_id: &str,
     id: &str,
-    codigo: &str,
+    codigo: Codigo,
     d: &Dados,
     novo: bool,
 ) -> Resultado<()> {
+    let Codigo { texto: codigo, validado } = codigo;
     let agora = tempo::agora();
     let busca = texto_busca(codigo, d);
     if novo {
@@ -417,9 +452,9 @@ fn gravar(
             "INSERT INTO pessoa (id, codigo, cliente, fornecedor, tipo, nome, fantasia, documento, ie, indicador_ie,
                                  telefone, celular, email, cep, logradouro, numero, complemento, bairro, municipio,
                                  municipio_ibge, uf, limite_credito, observacoes, ativo, busca,
-                                 criado_em, criado_por, atualizado_em, atualizado_por, dispositivo)
+                                 criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, codigo_validado)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?26, ?27, ?28)",
+                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?26, ?27, ?28, ?29)",
             params![
                 id,
                 codigo,
@@ -448,7 +483,8 @@ fn gravar(
                 busca,
                 agora,
                 usuario_id,
-                dispositivo
+                dispositivo,
+                validado
             ],
         )?;
     } else {
@@ -457,7 +493,7 @@ fn gravar(
                     documento = ?8, ie = ?9, indicador_ie = ?10, telefone = ?11, celular = ?12, email = ?13,
                     cep = ?14, logradouro = ?15, numero = ?16, complemento = ?17, bairro = ?18, municipio = ?19,
                     municipio_ibge = ?20, uf = ?21, limite_credito = ?22, observacoes = ?23, ativo = ?24,
-                    busca = ?25, atualizado_em = ?26, atualizado_por = ?27, dispositivo = ?28
+                    busca = ?25, atualizado_em = ?26, atualizado_por = ?27, dispositivo = ?28, codigo_validado = ?29
               WHERE id = ?1",
             params![
                 id,
@@ -487,7 +523,8 @@ fn gravar(
                 busca,
                 agora,
                 usuario_id,
-                dispositivo
+                dispositivo,
+                validado
             ],
         )?;
         conn.execute("DELETE FROM pessoa_veiculo WHERE pessoa_id = ?1", [id])?;
@@ -565,6 +602,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<PessoaFicha> {
         conn.query_row("SELECT COUNT(*) FROM compra WHERE fornecedor_id = ?1 AND situacao = 'lancada'", [id], |l| {
             l.get(0)
         })?;
+    let codigo_pendente = faixas::pessoa_esperando_confirmacao(conn, id)?;
     let codigo_aviso = if codigo.is_empty() {
         "Cadastro com código a definir: o código sai quando este caixa receber a faixa de códigos.".to_string()
     } else {
@@ -573,16 +611,20 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<PessoaFicha> {
                 l.get(0)
             })
             .optional()?;
-        match outro {
-            Some(n) => {
+        match (outro, codigo_pendente) {
+            (Some(n), _) => {
                 format!("O código {codigo} também é de \"{n}\". O gerente pode dar um código novo a um dos dois.")
             }
-            None => String::new(),
+            (None, true) => format!(
+                "O código {codigo} ainda não foi confirmado pelo caixa que distribui os códigos. Até lá, ache este cadastro pelo nome: o código pode ser mudado se outro caixa já tiver escolhido o mesmo."
+            ),
+            (None, false) => String::new(),
         }
     };
     Ok(PessoaFicha {
         id: id.to_string(),
         codigo,
+        codigo_pendente,
         codigo_aviso,
         cliente: d.cliente,
         fornecedor: d.fornecedor,
@@ -676,7 +718,8 @@ pub fn buscar(
         "SELECT p.id, p.codigo, p.nome, p.fantasia, p.documento, CASE WHEN p.celular <> '' THEN p.celular ELSE p.telefone END,
                 CASE WHEN p.municipio <> '' THEN p.municipio || CASE WHEN p.uf <> '' THEN ' · ' || p.uf ELSE '' END ELSE '' END,
                 p.cliente, p.fornecedor, p.ativo,
-                (SELECT group_concat(placa, ' · ') FROM pessoa_veiculo v WHERE v.pessoa_id = p.id AND placa <> '')
+                (SELECT group_concat(placa, ' · ') FROM pessoa_veiculo v WHERE v.pessoa_id = p.id AND placa <> ''),
+                p.codigo_validado = 0 AND p.codigo <> ''
            FROM pessoa p WHERE 1 = 1",
     );
     let mut valores: Vec<Value> = Vec::new();
@@ -704,6 +747,7 @@ pub fn buscar(
         Ok(PessoaResumo {
             id: l.get(0)?,
             codigo: l.get(1)?,
+            codigo_pendente: l.get(11)?,
             nome: l.get(2)?,
             fantasia: l.get(3)?,
             documento: documento::escrever(&l.get::<_, String>(4)?),
@@ -847,7 +891,7 @@ pub fn garantir_pela_nota(
     let dados = Dados { nome, ..dados };
     let id = tempo::novo_id();
     let codigo = codigo_novo(conn)?;
-    gravar(conn, dispositivo, usuario_id, &id, &codigo, &dados, true)?;
+    gravar(conn, dispositivo, usuario_id, &id, Codigo { texto: &codigo, validado: 1 }, &dados, true)?;
     auditoria::registrar(conn, dispositivo, Some(usuario_id), "pessoa.criar", "pessoa", &id, &[origem.to_string()])?;
     Ok((id, true))
 }

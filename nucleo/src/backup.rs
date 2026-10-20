@@ -625,6 +625,42 @@ const TAMANHO_FORMATO_ANTIGO: u64 = 128 * 1024 * 1024;
 #[cfg(not(target_os = "android"))]
 const TAMANHO_FORMATO_ANTIGO: u64 = 1024 * 1024 * 1024;
 
+/// Maior backup do formato antigo, com ajuste só para os testes (F-11): o
+/// teste de "grande demais" não precisa de um arquivo de gigabytes.
+fn limite_formato_antigo() -> u64 {
+    #[cfg(test)]
+    {
+        let v = limites_de_teste::FORMATO_ANTIGO.with(|c| c.get());
+        if v != 0 {
+            return v;
+        }
+    }
+    TAMANHO_FORMATO_ANTIGO
+}
+
+/// Maior banco dentro de um backup, com o mesmo ajuste para os testes.
+fn limite_do_banco() -> u64 {
+    #[cfg(test)]
+    {
+        let v = limites_de_teste::BANCO.with(|c| c.get());
+        if v != 0 {
+            return v;
+        }
+    }
+    TAMANHO_BANCO
+}
+
+/// Ajuste dos limites por teste (cada teste roda na sua própria thread, então
+/// um teste não muda o limite dos outros).
+#[cfg(test)]
+mod limites_de_teste {
+    use std::cell::Cell;
+    thread_local! {
+        pub static FORMATO_ANTIGO: Cell<u64> = const { Cell::new(0) };
+        pub static BANCO: Cell<u64> = const { Cell::new(0) };
+    }
+}
+
 /// Como abrir um backup.
 pub enum Como<'a> {
     /// A chave do arquivo (logo depois de fazer, para conferir).
@@ -702,7 +738,7 @@ fn desembrulhar(arquivo: &Path, destino: &mut impl Write, como: &Como) -> Result
     if tipo == 1 {
         // Formato antigo: lido inteiro na memória, então tem tamanho máximo.
         let tamanho = std::fs::metadata(arquivo).map(|m| m.len()).unwrap_or(u64::MAX);
-        if tamanho > TAMANHO_FORMATO_ANTIGO {
+        if tamanho > limite_formato_antigo() {
             return Err(Erro::validacao(
                 "Este backup antigo é grande demais para abrir neste aparelho. Abra num computador.",
             ));
@@ -940,14 +976,15 @@ fn abrir(arquivo: &Path, como: &Como, tmp: &Temporaria) -> Resultado<(PathBuf, I
     {
         let f = zip.by_name("rustinho.db").map_err(|_| Erro::validacao("O backup não tem o banco de dados."))?;
         // O tamanho escrito no zip pode mentir: o limite vale também ao descomprimir.
-        if f.size() > TAMANHO_BANCO {
+        let limite = limite_do_banco();
+        if f.size() > limite {
             return Err(Erro::validacao("O banco dentro do backup é grande demais para abrir neste aparelho."));
         }
         let mut saida =
             std::fs::File::create(&db).map_err(|e| Erro::validacao(format!("Não deu para abrir o backup: {e}")))?;
-        let copiado = std::io::copy(&mut f.take(TAMANHO_BANCO + 1), &mut saida)
+        let copiado = std::io::copy(&mut f.take(limite + 1), &mut saida)
             .map_err(|_| Erro::validacao("O backup está estragado (falha ao descomprimir)."))?;
-        if copiado > TAMANHO_BANCO {
+        if copiado > limite {
             return Err(Erro::validacao("O banco dentro do backup é grande demais para abrir neste aparelho."));
         }
     }
@@ -1609,6 +1646,90 @@ mod testes {
         assert!(k.is_none());
         assert_eq!(desembrulhar_bytes(&sem, &senha("", &[])).unwrap(), b"PK conteudo");
         assert!(desembrulhar_bytes(b"nada a ver", &senha("", &[])).is_err());
+    }
+
+    /// Um backup (formato sem senha: magia + 0 + zip) com um "banco" de
+    /// `tamanho` bytes dentro, gravado em `pasta`.
+    fn backup_com_banco_de(pasta: &Path, tamanho: usize, mentir_tamanho: Option<u32>) -> PathBuf {
+        use std::io::Write as _;
+        let mut zip_bytes = std::io::Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut zip_bytes);
+            let opcoes = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            z.start_file("rustinho.db", opcoes).unwrap();
+            z.write_all(&vec![7u8; tamanho]).unwrap();
+            z.finish().unwrap();
+        }
+        let mut zip_bytes = zip_bytes.into_inner();
+        if let Some(falso) = mentir_tamanho {
+            // O tamanho "descomprimido" escrito na lista do zip passa a mentir.
+            let pos = zip_bytes.windows(4).position(|w| w == b"PK\x01\x02").expect("diretório central");
+            zip_bytes[pos + 24..pos + 28].copy_from_slice(&falso.to_le_bytes());
+        }
+        let mut arquivo = MAGICA.to_vec();
+        arquivo.push(0);
+        arquivo.extend(zip_bytes);
+        let caminho = pasta.join("grande.rbk");
+        std::fs::write(&caminho, arquivo).unwrap();
+        caminho
+    }
+
+    fn sem_senha() -> Como<'static> {
+        Como::Senha { senha: "", acessos: &[] }
+    }
+
+    /// F-11: o banco dentro do backup que passa do limite é recusado, e o
+    /// motivo é o limite (um banco do mesmo tamanho dentro do limite passa
+    /// desta etapa e só falha adiante, por não ser um banco de verdade).
+    #[test]
+    fn f11_banco_dentro_do_backup_maior_que_o_limite_e_recusado() {
+        let pasta = pasta_teste("f11-banco");
+        let arquivo = backup_com_banco_de(&pasta, 5000, None);
+        limites_de_teste::BANCO.with(|c| c.set(1000));
+        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        assert!(e.contains("grande demais"), "{e}");
+        // Controle: com o limite acima do tamanho, o erro é outro (não é banco).
+        limites_de_teste::BANCO.with(|c| c.set(10_000));
+        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        assert!(!e.contains("grande demais"), "o limite não deveria disparar: {e}");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// F-11: o tamanho escrito no zip pode mentir. O limite vale também ao
+    /// descomprimir (o que foi copiado de fato), não só pelo que o zip diz.
+    #[test]
+    fn f11_zip_que_mente_o_tamanho_nao_passa_do_limite() {
+        let pasta = pasta_teste("f11-mentira");
+        let arquivo = backup_com_banco_de(&pasta, 5000, Some(100));
+        limites_de_teste::BANCO.with(|c| c.set(1000));
+        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        // O que importa: não grava 5000 bytes como se coubessem em 1000.
+        assert!(e.contains("grande demais"), "{e}");
+        let temp = std::fs::read_dir(&pasta).unwrap().filter_map(|x| x.ok()).count();
+        assert_eq!(temp, 1, "a pasta temporária foi apagada (sobrou só o backup)");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// F-11: o formato antigo (lido inteiro na memória) acima do limite é
+    /// recusado antes de ler o corpo.
+    #[test]
+    fn f11_formato_antigo_acima_do_limite_e_recusado_sem_ler_o_corpo() {
+        let pasta = pasta_teste("f11-antigo");
+        let mut b = MAGICA.to_vec();
+        b.push(1);
+        b.extend([3u8; 16]); // sal
+        b.extend(vec![9u8; 4000]); // "corpo"
+        let arquivo = pasta.join("antigo.rbk");
+        std::fs::write(&arquivo, &b).unwrap();
+        limites_de_teste::FORMATO_ANTIGO.with(|c| c.set(1000));
+        let como = Como::Senha { senha: "qualquer", acessos: &[] };
+        let e = conferir_com(&arquivo, &como).unwrap_err().to_string();
+        assert!(e.contains("grande demais"), "{e}");
+        // Controle: dentro do limite o erro é outro (senha errada/estragado).
+        limites_de_teste::FORMATO_ANTIGO.with(|c| c.set(1_000_000));
+        let e = conferir_com(&arquivo, &como).unwrap_err().to_string();
+        assert!(!e.contains("grande demais"), "{e}");
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     /// Backups antigos (formato 2, da senha do backup) continuam abrindo com

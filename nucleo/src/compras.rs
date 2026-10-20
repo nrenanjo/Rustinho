@@ -59,7 +59,7 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
     }
     if !nota.incoerencia.is_empty() {
         return Err(Erro::validacao(format!(
-            "Este XML parece alterado ou montado à mão: {}. Baixe de novo o XML no portal da SEFAZ ou peça ao fornecedor.",
+            "Este XML parece alterado ou montado à mão: {}. Baixe de novo o XML no portal da SEFAZ ou peça ao fornecedor. (Passar nesta conferência não prova que o XML é autêntico: a assinatura digital ainda não é verificada.)",
             nota.incoerencia
         )));
     }
@@ -273,6 +273,8 @@ pub struct CompraFicha {
     pub observacoes: String,
     /// Aviso quando a nota não é para o CNPJ da loja.
     pub aviso_destinatario: String,
+    /// R-01: o que a conferência do XML não garante (texto fixo).
+    pub aviso_conferencia: String,
     pub itens: Vec<ItemFicha>,
     pub pendentes: i64,
     pub novas: i64,
@@ -627,6 +629,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         atualizar_precos,
         observacoes,
         aviso_destinatario,
+        aviso_conferencia: nfe_xml::LIMITE_DA_CONFERENCIA.to_string(),
         itens: lista,
         pendentes,
         novas,
@@ -1196,6 +1199,38 @@ mod testes {
         assert!(conferir_nota(&b.conn, &ler(ex)).unwrap_err().to_string().contains("outro CNPJ"));
         config::gravar(&b.conn, "loja_cnpj", "11444777000161").unwrap();
         assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
+    }
+
+    /// R-01 · LIMITE CONHECIDO, documentado de propósito.
+    ///
+    /// Este teste NÃO diz que o XML está protegido. Ele registra o que o
+    /// Rustinho 0.9.11 ainda não faz: um XML com itens, quantidades ou valores
+    /// mudados, mantendo a chave, o `DigestValue` e o protocolo, PASSA na
+    /// conferência e entra no estoque e no custo. Só o cálculo do resumo do
+    /// `infNFe` canonicalizado e a verificação da assinatura (módulo fiscal)
+    /// fecham isso. Quando isso for feito, este teste deve passar a exigir a
+    /// recusa (veja PENDENCIAS.md, R-01).
+    #[test]
+    fn limite_conhecido_xml_adulterado_com_resumos_mantidos_ainda_passa() {
+        let (b, u) = base();
+        let original = nfe_xml::EXEMPLO;
+        // 10 peças a R$ 52,00 viram 1000 peças a R$ 1,00: o resumo (DigestValue
+        // e digVal) é o mesmo texto de antes e a chave não mudou.
+        let adulterado = original.replace("<qCom>10.0000</qCom>", "<qCom>1000.0000</qCom>").replace(
+            "<vUnCom>52.0000000000</vUnCom><vProd>520.00</vProd>",
+            "<vUnCom>1.0000000000</vUnCom><vProd>1000.00</vProd>",
+        );
+        assert_ne!(adulterado, original);
+        let nota = nfe_xml::ler(&adulterado).unwrap();
+        assert_eq!(nota.incoerencia, "", "limite conhecido: a conferência de coerência não vê a troca");
+        assert!(conferir_nota(&b.conn, &nota).is_ok());
+        let id = importar_xml(&b.conn, &b.dispositivo, &u, &adulterado)
+            .expect("limite conhecido: o XML adulterado ainda é importado");
+        let f = ficha(&b.conn, &id).unwrap();
+        assert_eq!(f.itens[0].quantidade, "1.000", "a quantidade adulterada (1000 peças) chegou à ficha");
+        // O Rustinho avisa o usuário sobre o limite em toda compra.
+        assert!(f.aviso_conferencia.contains("NÃO verifica a assinatura digital"));
+        assert!(f.aviso_conferencia.contains("adulterado"));
     }
 
     #[test]

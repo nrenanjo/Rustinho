@@ -1035,9 +1035,11 @@ pub fn conferir_digitado(conn: &Connection, produto_id: &str, codigo: &str) -> R
 /// Confere um código escrito à mão para um cliente ou fornecedor. Códigos de
 /// números só dentro das faixas deste caixa (ou, no distribuidor, fora de
 /// todas as faixas), como os das peças. Os outros formatos (letras, traço)
-/// não são confirmados por ninguém: se dois caixas sem rede escolherem o mesmo,
-/// as duas pessoas ficam como estão e o gerente vê o código repetido (as
-/// vendas, os débitos e as notas usam o identificador interno, não o código).
+/// valem depois de confirmados pelo caixa que distribui as faixas
+/// (`confirmado_ao_salvar_pessoa`, PEND-07): se dois caixas sem rede escolherem
+/// o mesmo, só o mais antigo fica confirmado; o outro espera e o gerente vê o
+/// conflito (as vendas, os débitos e as notas usam o identificador interno,
+/// não o código).
 pub fn conferir_digitado_pessoa(conn: &Connection, codigo: &str) -> Resultado<()> {
     let Some(n) = numero(codigo) else { return Ok(()) };
     if let Some(m) = bloqueio(conn)? {
@@ -1136,13 +1138,91 @@ pub fn confirmar_esperando(conn: &Connection) -> Resultado<usize> {
             n += 1;
         }
     }
+    Ok(n + confirmar_esperando_pessoas(conn)?)
+}
+
+/// O mesmo para clientes e fornecedores (PEND-07): na ordem em que foram
+/// cadastrados, o mais antigo fica com o código; o outro continua esperando,
+/// em conflito, até o gerente dar um código novo. Nada é renumerado sozinho.
+fn confirmar_esperando_pessoas(conn: &Connection) -> Resultado<usize> {
+    let esperando: Vec<(String, String)> = conn
+        .prepare_cached(
+            "SELECT id, codigo FROM pessoa WHERE codigo_validado = 0 AND codigo <> '' ORDER BY criado_em, id LIMIT 2000",
+        )?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut n = 0;
+    for (id, codigo) in esperando {
+        if !exige_confirmacao(&codigo) || codigo_livre_pessoa(conn, &id, &codigo)? {
+            // Só o valor da coluna muda (os dados da pessoa não são alterados).
+            conn.execute("UPDATE pessoa SET codigo_validado = 1 WHERE id = ?1 AND codigo_validado = 0", [&id])?;
+            n += 1;
+        }
+    }
     Ok(n)
 }
 
+/// Nenhuma outra pessoa (cliente ou fornecedor) tem este código confirmado.
+fn codigo_livre_pessoa(conn: &Connection, pessoa_id: &str, codigo: &str) -> Resultado<bool> {
+    let ocupado: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pessoa WHERE codigo = ?1 AND id <> ?2 AND codigo_validado = 1)",
+        params![codigo, pessoa_id],
+        |l| l.get(0),
+    )?;
+    Ok(!ocupado)
+}
+
+/// O valor de `pessoa.codigo_validado` para uma pessoa que está sendo salva
+/// com este código (novo ou trocado): 1 = vale (de números, ou confirmado
+/// aqui pelo caixa que distribui as faixas), 0 = espera a confirmação dele.
+pub fn confirmado_ao_salvar_pessoa(conn: &Connection, pessoa_id: &str, codigo: &str) -> Resultado<i64> {
+    if !exige_confirmacao(codigo) {
+        return Ok(1);
+    }
+    Ok((posso_confirmar(conn)? && codigo_livre_pessoa(conn, pessoa_id, codigo)?) as i64)
+}
+
+/// A pessoa espera a confirmação do código.
+pub fn pessoa_esperando_confirmacao(conn: &Connection, pessoa_id: &str) -> Resultado<bool> {
+    Ok(conn
+        .query_row("SELECT codigo_validado = 0 AND codigo <> '' FROM pessoa WHERE id = ?1", [pessoa_id], |l| {
+            l.get::<_, bool>(0)
+        })
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// Clientes e fornecedores que esperam a confirmação do código, para o
+/// gerente: com o conflito (outra pessoa com o mesmo código) quando há.
+pub fn esperando_pessoas(conn: &Connection) -> Resultado<Vec<Value>> {
+    let mut c = conn.prepare(
+        "SELECT p.id, p.nome, p.codigo, p.dispositivo,
+                (SELECT o.nome FROM pessoa o WHERE o.codigo = p.codigo AND o.id <> p.id
+                  ORDER BY o.codigo_validado DESC, o.criado_em, o.id LIMIT 1)
+           FROM pessoa p WHERE p.codigo_validado = 0 AND p.codigo <> ''
+          ORDER BY p.criado_em, p.id LIMIT 200",
+    )?;
+    let linhas: Vec<(String, String, String, String, Option<String>)> =
+        c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?.collect::<Result<_, _>>()?;
+    let mut r = Vec::new();
+    for (id, nome, codigo, disp, outra) in linhas {
+        r.push(json!({
+            "id": id, "nome": nome, "codigo": codigo,
+            "caixa": crate::sync::nome_do_caixa(conn, &disp)?,
+            "conflito": outra.is_some(),
+            "outraPessoa": outra.unwrap_or_default(),
+        }));
+    }
+    Ok(r)
+}
+
 fn tem_esperando(conn: &Connection) -> Resultado<bool> {
-    Ok(conn.query_row("SELECT EXISTS (SELECT 1 FROM produto WHERE codigo_validado = 0 AND codigo <> '')", [], |l| {
-        l.get(0)
-    })?)
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM produto WHERE codigo_validado = 0 AND codigo <> '')
+             OR EXISTS (SELECT 1 FROM pessoa WHERE codigo_validado = 0 AND codigo <> '')",
+        [],
+        |l| l.get(0),
+    )?)
 }
 
 /// A peça espera a confirmação do código.
@@ -1515,6 +1595,7 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
         "pessoasPendentes": conn.query_row("SELECT COUNT(*) FROM pessoa WHERE codigo = ''", [], |l| l.get::<_, i64>(0))?,
         "pessoasRepetidas": repetidos_pessoas(conn)?,
         "esperando": esperando(conn)?,
+        "pessoasEsperando": esperando_pessoas(conn)?,
         "repetidos": repetidos(conn)?,
         "inventario": inventario,
         "agora": self::inventario(conn)?,
@@ -2763,6 +2844,10 @@ mod testes_pessoas {
         l.collect::<Result<_, _>>().unwrap()
     }
 
+    fn pessoa_pendente(b: &Banco, id: &str) -> bool {
+        b.conn.query_row("SELECT codigo_validado = 0 FROM pessoa WHERE id = ?1", [id], |l| l.get(0)).unwrap()
+    }
+
     fn erro_codigo(r: Resultado<String>) -> String {
         match r {
             Err(Erro::Validacao { campo: Some(c), mensagem }) if c == "codigo" => mensagem,
@@ -2922,6 +3007,10 @@ mod testes_pessoas {
         // Mesmo código com letras em dois caixas sem rede.
         let pb = pessoa_com(&b, &ua, "cliente", "Mecânica do Zé", "C-9").unwrap();
         let pc = pessoa_com(&c, &ua, "cliente", "Auto Elétrica Lima", "C-9").unwrap();
+        // PEND-07: nenhum dos dois caixas confirma sozinho; a de B é mais antiga.
+        assert!(pessoa_pendente(&b, &pb) && pessoa_pendente(&c, &pc));
+        b.conn.execute("UPDATE pessoa SET criado_em = '2026-10-18T09:00:00Z' WHERE id = ?1", [&pb]).unwrap();
+        c.conn.execute("UPDATE pessoa SET criado_em = '2026-10-18T10:00:00Z' WHERE id = ?1", [&pc]).unwrap();
         trocar(&mut a, &mut b);
         trocar(&mut a, &mut c);
         trocar(&mut b, &mut c);
@@ -2929,6 +3018,8 @@ mod testes_pessoas {
         for banco in [&a, &b, &c] {
             assert_eq!(codigo_p(banco, &pb), "C-9", "nada foi trocado");
             assert_eq!(codigo_p(banco, &pc), "C-9", "nada foi trocado");
+            assert!(!pessoa_pendente(banco, &pb), "a mais antiga ficou com o código");
+            assert!(pessoa_pendente(banco, &pc), "a outra espera, em conflito");
             let grupos = repetidos_pessoas(&banco.conn).unwrap();
             assert_eq!(grupos.len(), 1);
             assert_eq!(grupos[0].codigo, "C-9");
@@ -3140,6 +3231,11 @@ mod testes_pessoas {
             assert_eq!(codigo_p(&a, id), cod, "{id} não pode mudar");
         }
         assert_eq!(repetidos_pessoas(&a.conn).unwrap().len(), 1);
+        // PEND-07: os cadastros de antes valem como confirmados (nenhum fica esperando).
+        for (id, _) in esperado {
+            assert!(!pessoa_pendente(&a, id), "{id} de antes não pode ficar esperando");
+        }
+        assert!(situacao(&a.conn).unwrap()["pessoasEsperando"].as_array().unwrap().is_empty());
         // A primeira faixa cobre o 250.000 (e o próximo cliente vem depois).
         let faixa = minhas(&a)[0];
         assert!(faixa.0 == 1 && faixa.1 >= 250_000, "{faixa:?}");
@@ -3148,6 +3244,303 @@ mod testes_pessoas {
         // A peça nova não é afetada pelos clientes.
         let p = produtos_nova(&a);
         assert_eq!(codigo(&a, &p), "1");
+    }
+
+    // ---------------------------------------------------------------------
+    // PEND-07: código com letras de cliente/fornecedor só vale depois de
+    // confirmado, como o das peças.
+    // ---------------------------------------------------------------------
+
+    /// Loja de um caixa só: o código com letras vale na hora. Quando um
+    /// segundo caixa entra, os códigos continuam válidos.
+    #[test]
+    fn k_loja_de_um_caixa_so_confirma_pessoa_na_hora() {
+        let (mut a, ua) = loja("Caixa A");
+        let p = pessoa_com(&a, &ua, "cliente", "Mecânica Central", "C-1").unwrap();
+        assert!(!pessoa_pendente(&a, &p));
+        let ficha = pessoas::ficha(&a.conn, &p).unwrap();
+        assert!(!ficha.codigo_pendente && ficha.codigo_aviso.is_empty(), "{}", ficha.codigo_aviso);
+        assert!(situacao(&a.conn).unwrap()["pessoasEsperando"].as_array().unwrap().is_empty());
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        assert!(!pessoa_pendente(&b, &p));
+        assert_eq!(para_ver(&b.conn).unwrap(), 0);
+    }
+
+    /// Caixa que não distribui: o código com letras espera. Acha pelo nome,
+    /// mostra o aviso, mantém o código ao ser alterada; o distribuidor confirma
+    /// sem mexer nos dados da pessoa e a confirmação volta.
+    #[test]
+    fn k_pessoa_com_letras_espera_a_confirmacao_do_distribuidor() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        let f = pessoa_com(&b, &ua, "fornecedor", "Distribuidora Vale", "F-22").unwrap();
+        assert_eq!(codigo_p(&b, &f), "F-22", "o código não é trocado");
+        assert!(pessoa_pendente(&b, &f));
+        let ficha = pessoas::ficha(&b.conn, &f).unwrap();
+        assert!(ficha.codigo_pendente);
+        assert!(ficha.codigo_aviso.contains("ainda não foi confirmado"), "{}", ficha.codigo_aviso);
+        // Consulta pelo nome acha, e a lista marca o código como pendente.
+        let achou = pessoas::buscar(&b.conn, "vale", "fornecedor", false, 10).unwrap();
+        assert_eq!(achou.len(), 1);
+        assert!(achou[0].codigo_pendente);
+        // Alterar outro dado não confirma nem troca o código.
+        let mut alt = ficha.clone();
+        alt.telefone = "(15) 3552-9999".into();
+        pessoas::salvar(&b.conn, &b.dispositivo, &ua, &alt).unwrap();
+        assert!(pessoa_pendente(&b, &f));
+        assert_eq!(codigo_p(&b, &f), "F-22");
+        // O gerente vê a pessoa esperando, sem conflito.
+        let sit = situacao(&b.conn).unwrap();
+        assert_eq!(sit["pessoasEsperando"].as_array().unwrap().len(), 1);
+        assert_eq!(sit["pessoasEsperando"][0]["conflito"], false);
+        // O código pendente sozinho não é "repetição" nem pede ação do gerente.
+        assert!(repetidos_pessoas(&b.conn).unwrap().is_empty());
+        assert_eq!(para_ver(&b.conn).unwrap(), 0);
+        // Sem rede com o distribuidor: continua esperando e consultável pelo nome.
+        manter(&mut b.conn).unwrap();
+        assert!(pessoa_pendente(&b, &f));
+        // Chega ao distribuidor: ele confirma sem alterar a pessoa.
+        receber(&mut a, &b);
+        let antes: (String, String) = a
+            .conn
+            .query_row("SELECT atualizado_em, telefone FROM pessoa WHERE id = ?1", [&f], |l| Ok((l.get(0)?, l.get(1)?)))
+            .unwrap();
+        manter(&mut a.conn).unwrap();
+        assert!(!pessoa_pendente(&a, &f));
+        let depois: (String, String) = a
+            .conn
+            .query_row("SELECT atualizado_em, telefone FROM pessoa WHERE id = ?1", [&f], |l| Ok((l.get(0)?, l.get(1)?)))
+            .unwrap();
+        assert_eq!(antes, depois);
+        assert_eq!(codigo_p(&a, &f), "F-22");
+        // A confirmação volta ao caixa B.
+        assert!(pessoa_pendente(&b, &f));
+        receber(&mut b, &a);
+        assert!(!pessoa_pendente(&b, &f));
+        assert!(!pessoas::ficha(&b.conn, &f).unwrap().codigo_pendente);
+        assert!(situacao(&b.conn).unwrap()["pessoasEsperando"].as_array().unwrap().is_empty());
+    }
+
+    /// Dois caixas sem rede com o mesmo código, e o distribuidor também: só um
+    /// confirma; os outros esperam com o conflito visível ao gerente; nada é
+    /// trocado sozinho. O gerente resolve dando código novo, que vale na hora.
+    #[test]
+    fn k_mesmo_codigo_em_varios_caixas_so_um_confirma_e_o_gerente_resolve() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        let pb = pessoa_com(&b, &ua, "cliente", "Oficina do Zé", "AB-7").unwrap();
+        let pc = pessoa_com(&c, &ua, "fornecedor", "Peças Lima", "AB-7").unwrap();
+        let pa = pessoa_com(&a, &ua, "cliente", "Auto Posto Sul", "AB-7").unwrap();
+        assert!(!pessoa_pendente(&a, &pa), "o distribuidor confirma na hora");
+        assert!(pessoa_pendente(&b, &pb) && pessoa_pendente(&c, &pc));
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        trocar(&mut b, &mut c);
+        trocar(&mut a, &mut b);
+        for banco in [&a, &b, &c] {
+            for id in [&pa, &pb, &pc] {
+                assert_eq!(codigo_p(banco, id), "AB-7", "nenhum código foi trocado sozinho");
+            }
+            assert!(!pessoa_pendente(banco, &pa));
+            assert!(pessoa_pendente(banco, &pb) && pessoa_pendente(banco, &pc));
+            let sit = situacao(banco_conn(banco)).unwrap();
+            let esp = sit["pessoasEsperando"].as_array().unwrap();
+            assert_eq!(esp.len(), 2);
+            assert!(esp.iter().all(|e| e["conflito"] == true && e["outraPessoa"] == "Auto Posto Sul"));
+            assert_eq!(repetidos_pessoas(&banco.conn).unwrap().len(), 1);
+            assert!(para_ver(&banco.conn).unwrap() >= 1);
+        }
+        // O gerente resolve as duas que esperavam: código novo da faixa, que vale na hora.
+        for id in [&pb, &pc] {
+            let novo = pessoas::trocar_codigo(&a.conn, &a.dispositivo, &ua, id).unwrap();
+            assert!(numero(&novo).is_some());
+            assert!(!pessoa_pendente(&a, id));
+        }
+        assert!(repetidos_pessoas(&a.conn).unwrap().is_empty());
+        assert_eq!(para_ver(&a.conn).unwrap(), 0);
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        assert_eq!(todas_p(&a), todas_p(&b));
+        assert_eq!(todas_p(&a), todas_p(&c));
+        assert!(repetidos_p(&b).is_empty() && repetidos_p(&c).is_empty());
+        // A auditoria do gerente ficou registrada para as duas.
+        let n: i64 = a
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM auditoria WHERE acao = 'pessoa.alterar' AND detalhes LIKE '%código repetido resolvido pelo gerente%'",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
+    }
+
+    fn banco_conn(b: &Banco) -> &Connection {
+        &b.conn
+    }
+
+    /// Duas esperando o mesmo código chegando juntas ao distribuidor: a mais
+    /// antiga confirma, exatamente uma; repetir a manutenção não muda nada; e
+    /// um novo cadastro do mesmo código no distribuidor é recusado.
+    #[test]
+    fn k_confirmacao_de_pessoas_e_atomica_e_na_ordem_de_criacao() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        let pb = pessoa_com(&b, &ua, "cliente", "Cliente de B", "ZZ-9").unwrap();
+        let pc = pessoa_com(&c, &ua, "cliente", "Cliente de C", "ZZ-9").unwrap();
+        b.conn.execute("UPDATE pessoa SET criado_em = '2026-10-18T10:00:00Z' WHERE id = ?1", [&pb]).unwrap();
+        c.conn.execute("UPDATE pessoa SET criado_em = '2026-10-18T09:00:00Z' WHERE id = ?1", [&pc]).unwrap();
+        receber(&mut a, &b);
+        receber(&mut a, &c);
+        manter(&mut a.conn).unwrap();
+        manter(&mut a.conn).unwrap();
+        let confirmadas = [&pb, &pc].iter().filter(|id| !pessoa_pendente(&a, id)).count();
+        assert_eq!(confirmadas, 1, "exatamente uma confirma");
+        assert!(!pessoa_pendente(&a, &pc) && pessoa_pendente(&a, &pb), "a mais antiga fica com o código");
+        let r = pessoa_com(&a, &ua, "cliente", "Terceiro", "ZZ-9");
+        assert!(matches!(r, Err(Erro::Validacao { .. })), "{r:?}");
+        // Uma pessoa esperando não bloqueia outro caixa de confirmar a sua: só
+        // código CONFIRMADO ocupa o código.
+        let livre = pessoa_com(&a, &ua, "cliente", "Outra com letras", "QQ-1").unwrap();
+        assert!(!pessoa_pendente(&a, &livre));
+    }
+
+    /// Mudar o código de um cadastro existente (sem mudar mais nada) grava a
+    /// mudança e passa pela mesma confirmação. (Antes, uma alteração só de
+    /// código era descartada em silêncio.)
+    #[test]
+    fn k_alterar_so_o_codigo_da_pessoa_grava_e_confirma_de_novo() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        trocar(&mut a, &mut b);
+        let p = pessoa_com(&a, &ua, "cliente", "Cliente Troca", "T-1").unwrap();
+        trocar(&mut a, &mut b);
+        // No caixa B (não distribui) só o código muda.
+        let mut f = pessoas::ficha(&b.conn, &p).unwrap();
+        assert!(!f.codigo_pendente);
+        f.codigo = "T-2".into();
+        pessoas::salvar(&b.conn, &b.dispositivo, &ua, &f).unwrap();
+        assert_eq!(codigo_p(&b, &p), "T-2", "a mudança só do código foi gravada");
+        assert!(pessoa_pendente(&b, &p), "código novo com letras volta a esperar");
+        trocar(&mut a, &mut b);
+        assert_eq!(codigo_p(&a, &p), "T-2");
+        assert!(!pessoa_pendente(&a, &p));
+        trocar(&mut a, &mut b);
+        assert!(!pessoa_pendente(&b, &p));
+        // No distribuidor, o código novo vale na hora.
+        let mut f = pessoas::ficha(&a.conn, &p).unwrap();
+        f.codigo = "T-3".into();
+        pessoas::salvar(&a.conn, &a.dispositivo, &ua, &f).unwrap();
+        assert!(!pessoa_pendente(&a, &p));
+        assert_eq!(codigo_p(&a, &p), "T-3");
+    }
+
+    /// Banco copiado (caixa bloqueado) não confirma: o código com letras de
+    /// pessoa espera, e depois de registrado como caixa novo e assumindo a
+    /// distribuição, o próprio caixa confirma. Nada é renumerado.
+    #[test]
+    fn k_banco_copiado_deixa_pessoa_com_letras_esperando() {
+        let (mut a, ua) = loja("Caixa A");
+        let antes = pessoa_com(&a, &ua, "cliente", "Cliente de antes", "X-1").unwrap();
+        assert!(!pessoa_pendente(&a, &antes));
+        conferir_computador(&a.conn, Some("outro-computador")).unwrap();
+        assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        // Bloqueado: nem o distribuidor da cópia confirma.
+        let na_copia = pessoa_com(&a, &ua, "cliente", "Cliente na cópia", "X-2").unwrap();
+        assert_eq!(codigo_p(&a, &na_copia), "X-2");
+        assert!(pessoa_pendente(&a, &na_copia));
+        assert!(!pessoa_pendente(&a, &antes), "o que já valia continua valendo");
+        manter(&mut a.conn).unwrap();
+        assert!(pessoa_pendente(&a, &na_copia), "bloqueado não confirma");
+        // Registra como caixa novo e assume as faixas: agora confirma.
+        registrar_caixa_novo(&a.conn, Some("outro-computador"), Some("Caixa copiado")).unwrap();
+        assumir(&a.conn).unwrap();
+        manter(&mut a.conn).unwrap();
+        assert!(!pessoa_pendente(&a, &na_copia));
+        assert_eq!(codigo_p(&a, &na_copia), "X-2");
+        assert_eq!(codigo_p(&a, &antes), "X-1");
+    }
+
+    fn peca_validada(b: &Banco, id: &str) -> bool {
+        b.conn.query_row("SELECT codigo_validado = 1 FROM produto WHERE id = ?1", [id], |l| l.get(0)).unwrap()
+    }
+
+    /// PEND-08, testado para PEÇAS e para PESSOAS criadas num banco copiado
+    /// (caixa bloqueado): sem código enquanto bloqueado (e código de números
+    /// digitado é recusado); código com letras espera; depois do registro como
+    /// caixa novo a manutenção NÃO atribui sozinha (o identificador antigo é
+    /// o mesmo do caixa original, então não dá para saber quem é dono); o
+    /// gerente faz este caixa distribuir e dá os códigos de uma faixa que pula
+    /// as de antes. Nada de antes é renumerado e nada se repete.
+    #[test]
+    fn l_pend08_pecas_e_pessoas_criadas_no_banco_copiado() {
+        let (mut a, ua) = loja("Caixa A");
+        let p_antes = peca(&a, &ua, "Peça de antes");
+        let c_antes = cliente(&a, &ua, "Cliente de antes");
+        assert_eq!((codigo(&a, &p_antes).as_str(), codigo_p(&a, &c_antes).as_str()), ("1", "1"));
+        let faixa_velha = minhas(&a)[0];
+
+        conferir_computador(&a.conn, Some("outro-computador")).unwrap();
+        assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        // Cadastros feitos na cópia.
+        let p_sem = peca(&a, &ua, "Peça na cópia");
+        let p_letras = peca_com(&a, &ua, "Peça com letras na cópia", "CP-1").unwrap();
+        let c_sem = cliente(&a, &ua, "Cliente na cópia");
+        let c_letras = pessoa_com(&a, &ua, "fornecedor", "Fornecedor com letras na cópia", "FC-1").unwrap();
+        assert_eq!((codigo(&a, &p_sem).as_str(), codigo_p(&a, &c_sem).as_str()), ("", ""));
+        assert_eq!((codigo(&a, &p_letras).as_str(), codigo_p(&a, &c_letras).as_str()), ("CP-1", "FC-1"));
+        assert!(!peca_validada(&a, &p_letras) && pessoa_pendente(&a, &c_letras), "bloqueado não confirma");
+        // Número digitado à mão é recusado nos dois.
+        assert!(matches!(peca_com(&a, &ua, "X", "7"), Err(Erro::Validacao { .. })));
+        assert!(erro_codigo(pessoa_com(&a, &ua, "cliente", "X", "7")).contains("outro computador"));
+        assert_eq!(atribuir_pendentes(&mut a.conn).unwrap(), 0);
+        assert_eq!(definir_todos_pendentes_ou_zero(&a), 0);
+
+        // O gerente registra como caixa novo.
+        registrar_caixa_novo(&a.conn, Some("outro-computador"), Some("Caixa copiado")).unwrap();
+        a.dispositivo = config::ler(&a.conn, "dispositivo_id").unwrap().unwrap();
+        manter(&mut a.conn).unwrap();
+        // PEND-08: não é automático, e nada foi trocado.
+        assert_eq!((codigo(&a, &p_sem).as_str(), codigo_p(&a, &c_sem).as_str()), ("", ""));
+        assert!(!peca_validada(&a, &p_letras) && pessoa_pendente(&a, &c_letras), "não é mais o distribuidor");
+        assert_eq!(codigo(&a, &p_letras), "CP-1");
+        assert_eq!(codigo_p(&a, &c_letras), "FC-1");
+
+        // O gerente faz este caixa distribuir e dá os códigos a definir.
+        assumir(&a.conn).unwrap();
+        manter(&mut a.conn).unwrap();
+        assert!(peca_validada(&a, &p_letras) && !pessoa_pendente(&a, &c_letras), "agora confirma");
+        assert_eq!(definir_todos_pendentes(&a.conn).unwrap(), 1);
+        assert_eq!(definir_todas_pessoas_pendentes(&a.conn).unwrap(), 1);
+        for (nome, c) in [("peça", codigo(&a, &p_sem)), ("pessoa", codigo_p(&a, &c_sem))] {
+            let n: i64 = c.parse().unwrap_or_else(|_| panic!("{nome} sem código de números: {c:?}"));
+            assert!(n > faixa_velha.1, "{nome}: {n} não pode estar na faixa de antes {faixa_velha:?}");
+        }
+        assert_eq!(codigo(&a, &p_antes), "1", "o código de antes não mudou");
+        assert_eq!(codigo_p(&a, &c_antes), "1", "o código de antes não mudou");
+        // Novos cadastros seguem sem repetir.
+        let p_novo = peca(&a, &ua, "Peça nova");
+        let c_novo = cliente(&a, &ua, "Cliente novo");
+        assert_ne!(codigo(&a, &p_novo), codigo(&a, &p_sem));
+        assert_ne!(codigo_p(&a, &c_novo), codigo_p(&a, &c_sem));
+        assert!(codigos_repetidos(&a).is_empty() && repetidos_p(&a).is_empty());
+        assert_eq!(para_ver(&a.conn).unwrap(), 0);
+    }
+
+    /// Quantos cadastros o gerente conseguiria definir agora (0 se bloqueado).
+    fn definir_todos_pendentes_ou_zero(b: &Banco) -> usize {
+        definir_todos_pendentes(&b.conn).unwrap_or_default()
     }
 
     fn produtos_nova(b: &Banco) -> String {

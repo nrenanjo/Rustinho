@@ -53,7 +53,7 @@ FocusScope {
         if (novas.length === 1)
             janela.abrir("TelaCompra", { compraId: novas[0].id })
         else if (novas.length > 1)
-            janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar."
+            janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar. O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ."
                           + (deOutra > 0 ? " Atenção: " + deOutra + (deOutra === 1 ? " nota não é" : " notas não são") + " da loja (outro CNPJ)." : ""),
                           deOutra > 0 ? "info" : "ok")
     }

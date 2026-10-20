@@ -29,8 +29,8 @@ Rectangle {
         opacity: linha.item.ativo ? 1 : 0.6
 
         Text {
-            text: linha.item.codigo || ""
-            color: linha.corSuave
+            text: (linha.item.codigo || "") + (linha.item.codigoPendente ? " (?)" : "")
+            color: linha.item.codigoPendente ? Tema.vermelho : linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold
             font.pixelSize: 15

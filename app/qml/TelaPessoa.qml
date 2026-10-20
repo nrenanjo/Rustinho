@@ -191,7 +191,7 @@ FocusScope {
                     return ""
                 if (tela.nova)
                     return "Só o nome é obrigatório. Para emitir nota, preencha CPF/CNPJ e endereço."
-                let s = "Código " + (tela.ficha.codigo || "a definir")
+                let s = "Código " + (tela.ficha.codigo || "a definir") + (tela.ficha.codigoPendente ? " (aguardando confirmação)" : "")
                 if (tela.ficha.compras > 0)
                     s += " · " + tela.ficha.compras + (tela.ficha.compras === 1 ? " compra lançada" : " compras lançadas")
                 if (tela.ficha.atualizadoEm)

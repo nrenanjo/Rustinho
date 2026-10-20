@@ -28,11 +28,13 @@ pub struct NotaXml {
     /// Nome, endereço e contato de quem recebeu (para cadastrar o cliente).
     pub destinatario_dados: Emitente,
     /// O XML diz que a SEFAZ autorizou (cStat 100/150 no protocolo). Isto
-    /// sozinho não prova nada: veja `incoerencia`.
+    /// sozinho não prova nada: veja `incoerencia` e `LIMITE_DA_CONFERENCIA`.
     pub autorizada: bool,
     /// Algo que não bate entre a chave de acesso, os dados da nota, a
-    /// assinatura e o protocolo ("" = tudo bate). Não é a conferência da
-    /// assinatura digital (essa fica para o módulo fiscal, com certificado).
+    /// assinatura e o protocolo ("" = tudo bate). É uma conferência de
+    /// COERÊNCIA entre campos, não uma prova de autenticidade: não calcula o
+    /// resumo (digest) do conteúdo da nota nem verifica a assinatura digital
+    /// (RSA / cadeia ICP-Brasil). Veja `LIMITE_DA_CONFERENCIA`.
     pub incoerencia: String,
     pub itens: Vec<ItemXml>,
     pub total_produtos: i64,
@@ -340,10 +342,18 @@ pub fn digito_da_chave(chave43: &str) -> Option<u32> {
     Some(if resto < 2 { 0 } else { 11 - resto })
 }
 
+/// O que a conferência do XML NÃO faz. É mostrado ao usuário na tela da
+/// compra (R-01): o Rustinho ainda não prova que o XML é o que a SEFAZ
+/// autorizou.
+pub const LIMITE_DA_CONFERENCIA: &str = "Conferência do XML: o Rustinho confere se a chave, os dados da nota e o protocolo combinam entre si, mas ainda NÃO verifica a assinatura digital nem o resumo do conteúdo. Um XML adulterado com cuidado pode passar. Use só XML que veio direto do fornecedor ou do portal da SEFAZ e confira os itens e valores antes de lançar.";
+
 /// Confere se a chave de acesso, os dados da nota, a assinatura e o
-/// protocolo da SEFAZ falam da mesma nota. Um XML montado à mão ou alterado
-/// depois (copiando o protocolo de outra nota) não passa. Devolve "" se
-/// tudo bate, ou o que não bate.
+/// protocolo da SEFAZ falam da mesma nota (coerência entre campos). Pega XML
+/// montado à mão ou com o protocolo copiado de outra nota, mas NÃO pega um XML
+/// em que só itens, quantidades ou valores foram mudados mantendo a chave, o
+/// resumo (`DigestValue`/`digVal`) e o protocolo: isso exige calcular o resumo
+/// do `infNFe` canonicalizado e verificar a assinatura (pendente: módulo
+/// fiscal). Devolve "" se tudo bate, ou o que não bate.
 fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
     if chave.len() != 44 || !chave.chars().all(|c| c.is_ascii_digit()) {
         return "a chave de acesso não tem 44 números".into();

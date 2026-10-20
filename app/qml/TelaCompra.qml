@@ -197,7 +197,28 @@ FocusScope {
                 ScrollBar.vertical: ScrollBar {}
                 header: Item {
                     width: lista.width
-                    height: avisoTopo.visible ? avisoTopo.height + 10 : 0
+                    height: (avisoTopo.visible ? avisoTopo.height + 10 : 0) + (avisoConferencia.visible ? avisoConferencia.height + 10 : 0)
+                    // R-01: o que a conferência do XML não garante (fica sempre à vista).
+                    Rectangle {
+                        id: avisoConferencia
+                        visible: !!tela.compra && tela.compra.avisoConferencia !== ""
+                        y: avisoTopo.visible ? avisoTopo.height + 10 : 0
+                        width: parent.width
+                        height: textoConferencia.implicitHeight + 20
+                        radius: Tema.raioCampo
+                        color: Tema.pergaminho
+                        Text {
+                            id: textoConferencia
+                            x: 14
+                            y: 10
+                            width: parent.width - 28
+                            text: tela.compra ? tela.compra.avisoConferencia : ""
+                            color: Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                        }
+                    }
                     Rectangle {
                         id: avisoTopo
                         visible: !!tela.compra && (tela.compra.avisoDestinatario !== "" || tela.compra.situacao === "estornada")
