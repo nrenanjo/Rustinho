@@ -143,7 +143,8 @@ jobs:
           export OUTPUT="Rustinho-$VERSAO-Linux-x86_64.AppImage"
           ./linuxdeploy --appdir AppDir \
             --desktop-file instalador/rustinho.desktop \
-            --icon-file instalador/rustinho-256.png --icon-filename rustinho \
+            $(for n in 16 22 24 32 48 64 128 256 512; do printf -- '--icon-file instalador/icones/hicolor/%sx%s/apps/rustinho.png ' "$n" "$n"; done) \
+            --icon-filename rustinho \
             --plugin qt --output appimage
           mkdir -p saida && mv Rustinho-*.AppImage saida/
           ls -la saida
