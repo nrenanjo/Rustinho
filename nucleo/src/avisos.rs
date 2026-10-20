@@ -57,7 +57,7 @@ pub fn da_senha(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>>
         dia: hoje,
         titulo: "Sua senha".into(),
         texto: format!("{} · troque quando puder", problema.resumo()),
-        atraso: if gerente { "a do gerente também protege os backups".into() } else { String::new() },
+        atraso: if gerente { "ela também protege os backups".into() } else { String::new() },
         funcao: "configuracoes".into(),
     }))
 }

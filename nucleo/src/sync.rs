@@ -3546,6 +3546,24 @@ mod testes {
             .unwrap();
     }
 
+    /// R5-T12: chave composta. Se QUALQUER elemento da chave de um registro
+    /// inconsistente é o que a operação está mexendo, ela é recusada (e só ela).
+    #[test]
+    fn r5_t12_chave_composta_bloqueia_por_qualquer_elemento() {
+        let b = Banco::em_memoria().unwrap();
+        b.conn
+            .execute(
+                "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+                 VALUES ('conta_receber', '[\"c0\",\"c1\"]', 'pessoa', '[\"x\"]', 'inconsistente', '2020-01-01T00:00:00Z', 'log')",
+                [],
+            )
+            .unwrap();
+        assert!(exigir_editavel(&b.conn, "conta_receber", "c0").is_err(), "primeiro elemento");
+        assert!(exigir_editavel(&b.conn, "conta_receber", "c1").is_err(), "segundo elemento");
+        assert!(exigir_editavel(&b.conn, "conta_receber", "c9").is_ok(), "outro registro");
+        assert!(exigir_editavel(&b.conn, "recebimento", "c1").is_ok(), "outra tabela");
+    }
+
     fn par_com_troca(b: &Banco, dispositivo: &str, completo_em: Option<&str>) {
         b.conn
             .execute(
