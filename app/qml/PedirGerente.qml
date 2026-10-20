@@ -47,7 +47,7 @@ Painel {
             id: senha
             rotulo: "Senha do gerente"
             senha: true
-            maximo: 128
+            maximo: 256
             Layout.fillWidth: true
             onConfirmado: pedido.liberar()
         }

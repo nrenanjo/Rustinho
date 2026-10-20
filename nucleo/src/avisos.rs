@@ -38,6 +38,30 @@ fn plural(n: i64, um: &str, varios: &str) -> String {
     format!("{n} {}", if n == 1 { um } else { varios })
 }
 
+/// Aviso de quem entrou com uma senha antiga fora da política (F-17). Não
+/// bloqueia nada; some por um dia quando a pessoa o arrasta para o lado e
+/// some de vez quando ela troca a senha. É por usuário: o computador pode
+/// ter vários, e esconder o aviso de um não esconde o do outro.
+pub fn da_senha(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>> {
+    let Some(Some(problema)) = crate::usuarios::situacao_senha(conn, usuario_id)? else {
+        return Ok(None);
+    };
+    let id = format!("senha.{usuario_id}");
+    let hoje = fiscal::hoje(conn)?;
+    if escondido(conn, &id, &hoje)? {
+        return Ok(None);
+    }
+    let gerente = crate::usuarios::buscar(conn, usuario_id)?.gerente;
+    Ok(Some(Aviso {
+        id,
+        dia: hoje,
+        titulo: "Sua senha".into(),
+        texto: format!("{} · troque quando puder", problema.resumo()),
+        atraso: if gerente { "a do gerente também protege os backups".into() } else { String::new() },
+        funcao: "configuracoes".into(),
+    }))
+}
+
 /// Avisos de hoje.
 pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     let hoje = fiscal::hoje(conn)?;

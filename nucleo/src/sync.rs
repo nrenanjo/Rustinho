@@ -2062,6 +2062,18 @@ pub fn ajustes(conn: &Connection) -> Resultado<Ajustes> {
     })
 }
 
+/// A senha da rede gravada está fora da política? (só informa; não força troca)
+pub fn senha_fora_da_politica(conn: &Connection) -> Resultado<bool> {
+    let senha = config::ler(conn, "sync_senha")?.unwrap_or_default();
+    if senha.is_empty() {
+        return Ok(false);
+    }
+    let loja = config::nome_loja(conn)?;
+    let caixa = config::nome_caixa(conn)?;
+    let ctx = crate::senhas::Contexto { usuario: "", loja: &loja, caixa: &caixa, gerente: false };
+    Ok(crate::senhas::avaliar(&senha, &ctx).is_some())
+}
+
 /// Grava as configurações da sincronização (só deste computador).
 pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &str) -> Resultado<()> {
     let senha = senha.trim();
@@ -2070,6 +2082,11 @@ pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &
             "senha",
             "A senha da rede precisa ter pelo menos 8 caracteres. Use a mesma em todos os caixas.",
         ));
+    }
+    // Senha da rede nova ou trocada segue a política (F-17). Manter a que já
+    // estava gravada (o campo vazio da tela) não exige nada: nada é forçado.
+    if ligado && senha != config::ler(conn, "sync_senha")?.unwrap_or_default() {
+        crate::usuarios::exigir_politica(conn, senha, "", false, "senha")?;
     }
     for e in enderecos.split([',', ' ', ';', '\n']).filter(|e| !e.trim().is_empty()) {
         let e = e.trim();
@@ -4421,8 +4438,9 @@ mod testes {
     fn senha_curta_recusada() {
         let b = Banco::em_memoria().unwrap();
         assert!(salvar_ajustes(&b.conn, true, "123", "").is_err());
-        assert!(salvar_ajustes(&b.conn, true, "12345678", "192.168.0.300").is_err());
-        salvar_ajustes(&b.conn, true, "12345678", "192.168.0.12, 192.168.0.13").unwrap();
+        assert!(salvar_ajustes(&b.conn, true, "bola-de-gude", "192.168.0.300").is_err());
+        assert!(salvar_ajustes(&b.conn, true, "12345678", "192.168.0.12").is_err(), "trivial (F-17)");
+        salvar_ajustes(&b.conn, true, "bola-de-gude", "192.168.0.12, 192.168.0.13").unwrap();
         assert_eq!(ajustes(&b.conn).unwrap().enderecos.len(), 2);
     }
 }

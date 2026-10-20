@@ -83,6 +83,7 @@ fn descrever(acao: &str) -> &'static str {
         "compra.estornar" => "estornou",
         "fiscal.regras" => "mudou as regras de ST",
         "usuario.alterar" => "alterou o usuário",
+        "usuario.senha_fora_da_politica" => "entrou com senha fora da política",
         "receber.lancar" => "lançou dívida",
         "receber.receber" => "recebeu",
         "receber.estornar" => "estornou um pagamento",

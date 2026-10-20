@@ -896,6 +896,10 @@ impl Servico {
                         let voce = u.id == sessao.usuario_id;
                         let mut v = json!(u);
                         v["voce"] = json!(voce);
+                        // Só o gerente vê quem está com senha fora da política.
+                        let fraca = sessao.gerente
+                            && matches!(usuarios::situacao_senha(&self.banco.conn, &u.id), Ok(Some(Some(_))));
+                        v["senhaFraca"] = json!(fraca);
                         v
                     })
                     .collect::<Vec<_>>()))
@@ -909,6 +913,7 @@ impl Servico {
                     return Err(Erro::campo("nova2", "As duas senhas novas não são iguais."));
                 }
                 let u = usuarios::buscar(&self.banco.conn, &sessao.usuario_id)?;
+                usuarios::exigir_politica(&self.banco.conn, &d.nova, &u.nome, u.gerente, "nova")?;
                 let tx = self.banco.conn.transaction()?;
                 usuarios::alterar(&tx, &u.id, &u.nome, u.ativo, Some(&d.nova))
                     .map_err(renomear_campo("senha", "nova"))?;
@@ -1255,7 +1260,13 @@ impl Servico {
             }
 
             // Crediário e contas a receber
-            "avisos_do_dia" => Ok(json!(crate::avisos::do_dia(&self.banco.conn)?)),
+            "avisos_do_dia" => {
+                let mut avisos = crate::avisos::do_dia(&self.banco.conn)?;
+                if let Some(a) = crate::avisos::da_senha(&self.banco.conn, &sessao.usuario_id)? {
+                    avisos.push(a);
+                }
+                Ok(json!(avisos))
+            }
             "aviso_esconder" => {
                 let d: Value = ler(dados)?;
                 crate::avisos::esconder(&self.banco.conn, d["id"].as_str().unwrap_or_default())?;
@@ -1752,6 +1763,7 @@ impl Servico {
         Ok(json!({
             "ligado": a.ligado,
             "temSenha": !a.senha.is_empty(),
+            "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
@@ -1796,6 +1808,8 @@ impl Servico {
         let tx = self.banco.conn.transaction()?;
         config::gravar(&tx, "loja_nome", &loja)?;
         config::gravar(&tx, "caixa_nome", &caixa)?;
+        // Quem configura a loja é gerente: vale a regra do gerente (12).
+        usuarios::exigir_politica(&tx, &d.senha, &d.nome, true, "senha")?;
         let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, true)?;
         // Quem configura a loja é o gerente.
         usuarios::definir_gerente(&tx, &u.id, true)?;
@@ -1832,6 +1846,21 @@ impl Servico {
             Ok(u) => {
                 usuarios::limpar_falhas(&self.banco.conn, &d.id)?;
                 usuarios::registrar_acesso(&self.banco.conn, &u.id)?;
+                // F-17: senha antiga fora da política só gera aviso e marcador;
+                // nunca impede a entrada nem muda nada na senha ou nos backups.
+                if let Ok(a) = usuarios::avaliar_no_login(&self.banco.conn, &u, &d.senha) {
+                    if let (true, Some(p)) = (a.nova, a.problema) {
+                        let _ = auditoria::registrar(
+                            &self.banco.conn,
+                            &self.banco.dispositivo,
+                            Some(&u.id),
+                            "usuario.senha_fora_da_politica",
+                            "usuario",
+                            &u.id,
+                            &[format!("Senha fora da política: {}", p.resumo())],
+                        );
+                    }
+                }
                 if u.gerente {
                     self.segredo_backup =
                         backup::gerente_conferido(&self.banco.conn, &u.id, &d.senha, self.segredo_backup)?;
@@ -1904,6 +1933,7 @@ impl Servico {
             if !tem_senha {
                 return Err(Erro::campo("senha", "Crie uma senha para o novo usuário."));
             }
+            usuarios::exigir_politica(&tx, &d.senha, &d.nome, d.gerente == Some(true), "senha")?;
             let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, d.ativo)?;
             usuarios::definir_comissao(&tx, &u.id, &d.comissao)?;
             if d.gerente == Some(true) {
@@ -1915,6 +1945,11 @@ impl Servico {
         } else {
             let antes = usuarios::buscar(&tx, &d.id)?;
             let senha = if tem_senha { Some(d.senha.as_str()) } else { None };
+            if tem_senha {
+                // A regra é a do papel que o usuário terá depois de salvar.
+                let sera_gerente = d.gerente.unwrap_or(antes.gerente);
+                usuarios::exigir_politica(&tx, &d.senha, &d.nome, sera_gerente, "senha")?;
+            }
             let u = usuarios::alterar(&tx, &d.id, &d.nome, d.ativo, senha)?;
             let mut detalhes = Vec::new();
             if antes.nome != u.nome {
@@ -2394,12 +2429,13 @@ pub fn resposta_de_erro(mensagem: &str) -> String {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use crate::senhas::Problema;
 
     fn conectado() -> Servico {
         let mut s = Servico::em_memoria().unwrap();
         let r: Value = serde_json::from_str(&s.chamar(
             "configurar_inicio",
-            r#"{"loja":"Loja Teste","caixa":"Caixa 1","nome":"Ana","senha":"1234","senha2":"1234"}"#,
+            r#"{"loja":"Loja Teste","caixa":"Caixa 1","nome":"Ana","senha":"balcao-azul-2026","senha2":"balcao-azul-2026"}"#,
         ))
         .unwrap();
         assert_eq!(r["ok"], true, "{r}");
@@ -3012,5 +3048,343 @@ mod testes {
         }
         // Controle: uma função de leitura não precisa (e a varredura sabe diferenciar).
         assert!(!corpo(include_str!("receber.rs"), "previa").contains("exigir_editavel"));
+    }
+
+    // ------------------------------------------------------------------
+    // F-17: política das senhas na borda (tela) e aviso para senhas antigas.
+    // ------------------------------------------------------------------
+
+    fn f17_novo_servico() -> Servico {
+        Servico::em_memoria().unwrap()
+    }
+
+    fn f17_inicio(s: &mut Servico, senha: &str) -> Value {
+        chamar(
+            s,
+            "configurar_inicio",
+            &json!({ "loja": "Fanti Auto Peças", "caixa": "Caixa 1", "nome": "Ana", "senha": senha, "senha2": senha })
+                .to_string(),
+        )
+    }
+
+    /// Usuário "de antes da política": criado pelo núcleo com senha curta.
+    fn f17_legado(s: &Servico, nome: &str, gerente: bool) -> String {
+        let u = usuarios::criar(&s.banco.conn, &s.banco.dispositivo, nome, "1234", true).unwrap();
+        if gerente {
+            usuarios::definir_gerente(&s.banco.conn, &u.id, true).unwrap();
+        }
+        u.id
+    }
+
+    fn f17_entrar(s: &mut Servico, id: &str, senha: &str) -> Value {
+        chamar(s, "entrar", &json!({ "id": id, "senha": senha }).to_string())
+    }
+
+    fn f17_auditorias(s: &Servico, usuario: &str) -> i64 {
+        s.banco
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM auditoria WHERE acao = 'usuario.senha_fora_da_politica' AND usuario_id = ?1",
+                [usuario],
+                |l| l.get(0),
+            )
+            .unwrap()
+    }
+
+    /// F17-A1: a primeira configuração aplica a regra do gerente (12) e recusa triviais,
+    /// sem criar nada quando recusa.
+    #[test]
+    fn f17_a1_primeira_configuracao() {
+        let mut s = f17_novo_servico();
+        for (senha, parte) in [
+            ("1234", "12"),
+            ("cafe-com-pa", "12"),
+            ("12345678901234", "sequências"),
+            ("senhasenhasenha", "repetições"),
+            ("fantiautopecas", "nome"),
+        ] {
+            let r = f17_inicio(&mut s, senha);
+            assert_eq!(r["ok"], false, "{senha}: {r}");
+            assert_eq!(r["campo"], "senha", "{senha}: {r}");
+            assert!(r["erro"].as_str().unwrap().contains(parte), "{senha}: {r}");
+            assert_eq!(usuarios::quantidade(&s.banco.conn).unwrap(), 0, "recusada: nada foi criado");
+            assert!(config::ler(&s.banco.conn, "loja_nome").unwrap().is_none(), "nem a loja");
+        }
+        let r = f17_inicio(&mut s, "cafe-com-pao");
+        assert_eq!(r["ok"], true, "{r}");
+    }
+
+    /// F17-A2: usuários — operador 8, gerente 12, triviais recusados, Unicode e espaços valem.
+    #[test]
+    fn f17_a2_usuario_salvar() {
+        let mut s = conectado();
+        let novo = |s: &mut Servico, nome: &str, senha: &str, gerente: Option<bool>| {
+            chamar(
+                s,
+                "usuario_salvar",
+                &json!({ "nome": nome, "senha": senha, "senha2": senha, "ativo": true, "gerente": gerente })
+                    .to_string(),
+            )
+        };
+        for (senha, ok) in [("curta7x", false), ("12345678", false), ("qwertyui", false), ("pão de queijo", true)] {
+            let r = novo(&mut s, "Bia", senha, None);
+            assert_eq!(r["ok"], ok, "{senha}: {r}");
+            if !ok {
+                assert_eq!(r["campo"], "senha");
+            }
+        }
+        // Já criada com a boa; as seguintes testam o gerente.
+        let r = novo(&mut s, "Cida", "oito-oito", Some(true));
+        assert_eq!(r["ok"], false, "gerente precisa de 12: {r}");
+        assert!(r["erro"].as_str().unwrap().contains("backups"), "{r}");
+        let r = novo(&mut s, "Cida", "doze-caracteres-ok", Some(true));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["gerente"], true);
+        // Promover junto com uma senha de 8 não vale; promover sem trocar a senha não é bloqueado.
+        let bia = usuarios::listar(&s.banco.conn, false).unwrap().into_iter().find(|u| u.nome == "Bia").unwrap();
+        let r = chamar(
+            &mut s,
+            "usuario_salvar",
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "oito-oito", "senha2": "oito-oito", "gerente": true })
+                .to_string(),
+        );
+        assert_eq!(r["ok"], false, "{r}");
+        let r = chamar(
+            &mut s,
+            "usuario_salvar",
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "", "senha2": "", "gerente": true })
+                .to_string(),
+        );
+        assert_eq!(r["ok"], true, "sem trocar a senha nada é forçado: {r}");
+        // Operador comum: 8 basta na troca.
+        let r = chamar(
+            &mut s,
+            "usuario_salvar",
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "mesa-verde", "senha2": "mesa-verde", "gerente": false })
+                .to_string(),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+    }
+
+    /// F17-A3: troca da própria senha: a regra é a do papel; se recusar, a senha antiga continua valendo.
+    #[test]
+    fn f17_a3_senha_trocar() {
+        let mut s = conectado(); // Ana, gerente, senha "balcao-azul-2026"
+        let trocar = |s: &mut Servico, nova: &str| {
+            chamar(s, "senha_trocar", &json!({ "atual": "balcao-azul-2026", "nova": nova, "nova2": nova }).to_string())
+        };
+        let r = trocar(&mut s, "cafe-pao");
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(r["campo"], "nova");
+        assert!(r["erro"].as_str().unwrap().contains("12"), "{r}");
+        let id = s.sessao.as_ref().unwrap().usuario_id.clone();
+        assert!(usuarios::conferir_senha(&s.banco.conn, &id, "balcao-azul-2026").is_ok(), "a antiga continua valendo");
+        assert_eq!(trocar(&mut s, "password1234")["ok"], false);
+        assert_eq!(trocar(&mut s, "chuva de manhã na oficina")["ok"], true);
+        // Operador: 8 basta.
+        let bia = usuarios::criar(&s.banco.conn, &s.banco.dispositivo, "Bia", "balcao-bia-1", true).unwrap();
+        assert_eq!(f17_entrar(&mut s, &bia.id, "balcao-bia-1")["ok"], true);
+        let r = chamar(
+            &mut s,
+            "senha_trocar",
+            &json!({ "atual": "balcao-bia-1", "nova": "cafe-pao", "nova2": "cafe-pao" }).to_string(),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+    }
+
+    /// F17-A4: quem tem senha antiga entra normalmente; vira aviso e marcador, não bloqueio.
+    #[test]
+    fn f17_a4_senha_antiga_entra_com_aviso() {
+        let mut s = conectado();
+        let bia = f17_legado(&s, "Bia", false);
+        let cida = f17_legado(&s, "Cida", true);
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), None, "ninguém foi avaliado ainda");
+        let hash_antes: String =
+            s.banco.conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [&bia], |l| l.get(0)).unwrap();
+
+        let r = f17_entrar(&mut s, &bia, "1234");
+        assert_eq!(r["ok"], true, "senha antiga entra: {r}");
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Curta)));
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        let a = avisos["dados"].as_array().unwrap().iter().find(|a| a["id"] == format!("senha.{bia}")).cloned();
+        let a = a.expect("aviso da senha");
+        assert!(a["texto"].as_str().unwrap().contains("é curta"), "{a}");
+        assert_eq!(a["atraso"], "", "operador: sem alarme em vermelho");
+        assert_eq!(a["funcao"], "configuracoes");
+
+        // Segunda entrada: o aviso continua, a auditoria não repete.
+        f17_entrar(&mut s, &bia, "1234");
+        assert_eq!(f17_auditorias(&s, &bia), 1);
+
+        // Gerente: aviso mais firme (backups) e entra do mesmo jeito.
+        assert_eq!(f17_entrar(&mut s, &cida, "1234")["ok"], true);
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        let a =
+            avisos["dados"].as_array().unwrap().iter().find(|a| a["id"] == format!("senha.{cida}")).cloned().unwrap();
+        assert!(a["atraso"].as_str().unwrap().contains("backups"), "{a}");
+        assert!(
+            avisos["dados"].as_array().unwrap().iter().all(|a| a["id"] != format!("senha.{bia}")),
+            "aviso é de quem entrou"
+        );
+        assert_eq!(f17_auditorias(&s, &cida), 1);
+
+        // Nada foi forçado nem tocado: o hash é o mesmo e o marcador não é sincronizado nem guarda a senha.
+        let hash_depois: String =
+            s.banco.conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [&bia], |l| l.get(0)).unwrap();
+        assert_eq!(hash_antes, hash_depois);
+        let n: i64 = s
+            .banco
+            .conn
+            .query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'senha_situacao'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "marcador só deste computador");
+        let guardou: i64 = s
+            .banco
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM auditoria WHERE detalhes LIKE '%1234%'
+                 OR (SELECT COUNT(*) FROM senha_situacao WHERE hash LIKE '%1234%' OR problema LIKE '%1234%') > 0",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(guardou, 0, "a senha em claro não vai para lugar nenhum");
+    }
+
+    /// F17-A5: esconder o aviso vale para quem escondeu; o painel do gerente mostra quem está com
+    /// senha antiga, e o operador não vê isso; trocar a senha apaga o aviso e a marca.
+    #[test]
+    fn f17_a5_esconder_painel_e_troca() {
+        let mut s = conectado();
+        let ana = s.sessao.as_ref().unwrap().usuario_id.clone();
+        let bia = f17_legado(&s, "Bia", false);
+        let cida = f17_legado(&s, "Cida", false);
+        f17_entrar(&mut s, &bia, "1234");
+        f17_entrar(&mut s, &cida, "1234");
+        // Cida esconde o aviso dela; o de Bia continua para a Bia.
+        let r = chamar(&mut s, "aviso_esconder", &json!({ "id": format!("senha.{cida}") }).to_string());
+        assert_eq!(r["ok"], true);
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        assert!(avisos["dados"].as_array().unwrap().iter().all(|a| a["id"] != format!("senha.{cida}")));
+        f17_entrar(&mut s, &bia, "1234");
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        assert!(avisos["dados"].as_array().unwrap().iter().any(|a| a["id"] == format!("senha.{bia}")));
+
+        // Operador (Bia) não vê a marca de ninguém.
+        let lista = chamar(&mut s, "usuarios_listar", "{}");
+        assert!(lista["dados"].as_array().unwrap().iter().all(|u| u["senhaFraca"] == false), "{lista}");
+        // O gerente vê quem está fora da política (Ana está dentro).
+        usuarios::definir_gerente(&s.banco.conn, &cida, true).unwrap(); // papel mudou: marcador deixa de valer
+        let hash_ana: String =
+            s.banco.conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [&ana], |l| l.get(0)).unwrap();
+        assert!(!hash_ana.is_empty());
+        assert_eq!(f17_entrar(&mut s, &ana, "balcao-azul-2026")["ok"], true);
+        let lista = chamar(&mut s, "usuarios_listar", "{}");
+        let fraca = |nome: &str| {
+            lista["dados"].as_array().unwrap().iter().find(|u| u["nome"] == nome).unwrap()["senhaFraca"].clone()
+        };
+        assert_eq!(fraca("Bia"), true, "{lista}");
+        assert_eq!(fraca("Ana"), false);
+        assert_eq!(fraca("Cida"), false, "o papel mudou: a avaliação antiga não vale mais (volta a não avaliada)");
+
+        // Bia troca a senha: aviso e marca somem.
+        f17_entrar(&mut s, &bia, "1234");
+        let r = chamar(
+            &mut s,
+            "senha_trocar",
+            &json!({ "atual": "1234", "nova": "mesa-verde-9", "nova2": "mesa-verde-9" }).to_string(),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        assert!(avisos["dados"].as_array().unwrap().iter().all(|a| a["id"] != format!("senha.{bia}")));
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), None);
+        f17_entrar(&mut s, &ana, "balcao-azul-2026");
+        let lista = chamar(&mut s, "usuarios_listar", "{}");
+        assert_eq!(
+            lista["dados"].as_array().unwrap().iter().find(|u| u["nome"] == "Bia").unwrap()["senhaFraca"],
+            false
+        );
+    }
+
+    /// F17-A6: se outro caixa trocar a senha (o hash muda), a avaliação antiga deixa de valer.
+    #[test]
+    fn f17_a6_hash_trocado_por_outro_caixa() {
+        let mut s = conectado();
+        let bia = f17_legado(&s, "Bia", false);
+        f17_entrar(&mut s, &bia, "1234");
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Curta)));
+        let novo = usuarios::argon2_hash_para_teste("mesa-verde-9");
+        s.banco.conn.execute("UPDATE usuario SET senha_hash = ?2 WHERE id = ?1", params![bia, novo]).unwrap();
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), None);
+        let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+        assert!(avisos["dados"].as_array().unwrap().iter().all(|a| a["id"] != format!("senha.{bia}")));
+        // Entrando com a nova (boa): dentro da política, sem aviso e sem auditoria.
+        f17_entrar(&mut s, &bia, "mesa-verde-9");
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(None));
+        assert_eq!(f17_auditorias(&s, &bia), 1, "só a da entrada antiga");
+    }
+
+    /// F17-A7: tamanhos grandes e Unicode funcionam de ponta a ponta (criar, sair e entrar).
+    #[test]
+    fn f17_a7_senha_longa_e_unicode() {
+        let mut s = f17_novo_servico();
+        let longa: String =
+            (0..).map(|i| format!("palavra{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(256).collect();
+        assert_eq!(longa.chars().count(), 256);
+        let r = f17_inicio(&mut s, &format!("{longa}z"));
+        assert_eq!(r["ok"], false, "257 caracteres");
+        let r = f17_inicio(&mut s, &longa);
+        assert_eq!(r["ok"], true, "256 caracteres: {r}");
+        let ana = s.sessao.as_ref().unwrap().usuario_id.clone();
+        assert_eq!(f17_entrar(&mut s, &ana, &longa)["ok"], true, "entra com a senha de 256");
+        let enorme = "a".repeat(100_000);
+        let r = f17_entrar(&mut s, &ana, &enorme);
+        assert_eq!(r["ok"], false, "texto enorme é recusado sem gastar o Argon2");
+        // Unicode: acento composto, frase com espaços, outro alfabeto.
+        let b = chamar(
+            &mut s,
+            "usuario_salvar",
+            &json!({ "nome": "Bia", "senha": "pão de queijo quente", "senha2": "pão de queijo quente", "ativo": true })
+                .to_string(),
+        );
+        assert_eq!(b["ok"], true, "{b}");
+        let bia = b["dados"]["id"].as_str().unwrap().to_string();
+        assert_eq!(f17_entrar(&mut s, &bia, "pão de queijo quente")["ok"], true);
+        assert_eq!(f17_entrar(&mut s, &ana, &longa)["ok"], true);
+        let c = chamar(
+            &mut s,
+            "usuario_salvar",
+            &json!({ "nome": "Dai", "senha": "日本語のパスワードです", "senha2": "日本語のパスワードです", "ativo": true })
+                .to_string(),
+        );
+        assert_eq!(c["ok"], true, "{c}");
+    }
+
+    /// F17-A8: senha da rede da loja: nova segue a política; a que já estava gravada não é forçada
+    /// e aparece só como informação.
+    #[test]
+    fn f17_a8_senha_da_rede() {
+        let mut s = conectado();
+        let salvar = |s: &mut Servico, senha: &str| {
+            chamar(s, "sync_salvar", &json!({ "ligado": true, "senha": senha, "enderecos": "" }).to_string())
+        };
+        for fraca in ["12345678", "senha123", "qwertyui", "caixa1234ab"] {
+            let r = salvar(&mut s, fraca);
+            assert_eq!(r["ok"], false, "{fraca}: {r}");
+            assert_eq!(r["campo"], "senha");
+        }
+        // Senha antiga gravada (de antes da política): salvar só os endereços não força troca.
+        config::gravar(&s.banco.conn, "sync_senha", "12345678").unwrap();
+        let r = chamar(
+            &mut s,
+            "sync_salvar",
+            &json!({ "ligado": true, "senha": "", "enderecos": "192.168.0.12" }).to_string(),
+        );
+        assert_eq!(r["ok"], true, "não força a troca: {r}");
+        assert_eq!(r["dados"]["senhaFraca"], true);
+        let r = salvar(&mut s, "bola-de-gude-azul");
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["senhaFraca"], false);
+        assert_eq!(chamar(&mut s, "sync_ler", "{}")["dados"]["senhaFraca"], false);
     }
 }

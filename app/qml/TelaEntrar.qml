@@ -129,7 +129,7 @@ FocusScope {
                 id: senha
                 rotulo: tela.escolhido >= 0 ? "Senha de " + tela.usuarios[tela.escolhido].nome : "Senha"
                 senha: true
-                maximo: 128
+                maximo: 256
                 Layout.fillWidth: true
                 onConfirmado: tela.entrar()
             }

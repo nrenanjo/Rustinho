@@ -306,7 +306,7 @@ ColumnLayout {
             Layout.fillWidth: true
         }
         Text {
-            text: "A proteção é a senha do gerente: com 4 números, quem copiar os dados descobre testando. Para proteger de verdade, o gerente deve usar 8 ou mais letras e números. Sem nenhuma senha de gerente, o backup não abre — nem o Rustinho consegue."
+            text: "A proteção é a senha do gerente: com uma senha curta, quem copiar os dados descobre testando. Para proteger de verdade, o gerente deve usar 12 ou mais caracteres, de preferência uma frase. Sem nenhuma senha de gerente, o backup não abre — nem o Rustinho consegue."
             color: Tema.vermelho
             font.family: Tema.texto
             font.weight: Font.DemiBold
@@ -552,7 +552,7 @@ ColumnLayout {
                     id: senhaOutra
                     rotulo: "Senha de um gerente (backup de antes da 0.9.11: a senha do backup)"
                     senha: true
-                    maximo: 128
+                    maximo: 256
                     Layout.fillWidth: true
                     onConfirmado: secao.restaurar(secao.pedirSenhaDe, senhaOutra.texto)
                 }

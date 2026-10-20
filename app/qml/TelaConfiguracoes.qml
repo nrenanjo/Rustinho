@@ -466,15 +466,16 @@ FocusScope {
                             id: atual
                             rotulo: "Senha atual"
                             senha: true
-                            maximo: 128
+                            maximo: 256
                             Layout.fillWidth: true
                             onConfirmado: nova.focar()
                         }
                         Campo {
                             id: nova
                             rotulo: "Nova senha"
+                            dica: tela.janela.estado.usuario && tela.janela.estado.usuario.gerente ? "Pelo menos 12 caracteres" : "Pelo menos 8 caracteres"
                             senha: true
-                            maximo: 128
+                            maximo: 256
                             Layout.fillWidth: true
                             onConfirmado: nova2.focar()
                         }
@@ -482,7 +483,7 @@ FocusScope {
                             id: nova2
                             rotulo: "Repita a nova senha"
                             senha: true
-                            maximo: 128
+                            maximo: 256
                             Layout.fillWidth: true
                             onConfirmado: tela.trocarSenha()
                         }
@@ -739,7 +740,7 @@ FocusScope {
                             rotulo: "Senha da rede da loja"
                             dica: tela.sync && tela.sync.temSenha ? "•••••••• (deixe vazio para manter)" : "A mesma em todos os caixas"
                             senha: true
-                            maximo: 128
+                            maximo: 256
                             Layout.fillWidth: true
                         }
                         Campo {
@@ -752,6 +753,12 @@ FocusScope {
                     }
                     Nota {
                         text: tela.sync ? "Endereço deste caixa: " + (tela.sync.meuEndereco || "sem rede") : ""
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
+                    Nota {
+                        visible: !!tela.sync && tela.sync.senhaFraca
+                        text: "A senha da rede é fraca (curta ou comum). Quando puder, troque-a em todos os caixas."
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
@@ -896,7 +903,7 @@ FocusScope {
                     corTitulo: Tema.verdeEscuro
                     Layout.fillWidth: true
                     Nota {
-                        text: "Cada gerente troca a própria senha em “Minha senha”. A senha precisa ter pelo menos 4 caracteres."
+                        text: "Cada gerente troca a própria senha em “Minha senha”. A senha de gerente precisa ter pelo menos 12 caracteres, porque ela também protege os backups."
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }

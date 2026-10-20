@@ -46,7 +46,7 @@ fn loja() -> Servico {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja Teste", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja Teste", "caixa": "Caixa 1", "nome": "Ana", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     s
 }

@@ -42,6 +42,7 @@ pub mod receber;
 pub mod rede_local;
 pub mod registro;
 pub mod reposicao;
+pub mod senhas;
 pub mod sync;
 pub mod tempo;
 pub mod texto;

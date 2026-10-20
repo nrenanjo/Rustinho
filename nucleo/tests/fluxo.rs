@@ -80,13 +80,13 @@ fn fluxo_completo() {
     let (_, campo) = erro(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja Modelo Auto Peças", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "4321" }),
+        json!({ "loja": "Loja Modelo Auto Peças", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "mesa-verde-2026" }),
     );
     assert_eq!(campo, "senha2");
     let estado = ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja Modelo Auto Peças", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja Modelo Auto Peças", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     assert_eq!(estado["primeiraVez"], false);
     assert_eq!(estado["usuario"]["nome"], "Maria");
@@ -94,7 +94,7 @@ fn fluxo_completo() {
     erro(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "X", "caixa": "Caixa 1", "nome": "Outro", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "X", "caixa": "Caixa 1", "nome": "Outro", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
 
     // Ficha nova: o código sai ao salvar, da faixa deste caixa (a primeira,
@@ -244,8 +244,11 @@ fn fluxo_completo() {
     assert_eq!(nova["precos"][1]["lucro"], "80");
 
     // Usuários e entrada.
-    let luigi =
-        ok(&mut s, "usuario_salvar", json!({ "nome": "Luigi", "senha": "4321", "senha2": "4321", "ativo": true }));
+    let luigi = ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "Luigi", "senha": "mesa-verde-2026", "senha2": "mesa-verde-2026", "ativo": true }),
+    );
     let luigi_id = luigi["id"].as_str().unwrap().to_string();
     let lista = ok(&mut s, "usuarios_listar", json!({}));
     assert_eq!(lista.as_array().unwrap().len(), 2);
@@ -260,18 +263,30 @@ fn fluxo_completo() {
         assert_eq!(campo, "senha");
         assert_eq!(msg, "Senha errada.");
     }
-    let (msg, _) = erro(&mut s, "entrar", json!({ "id": luigi_id, "senha": "4321" }));
+    let (msg, _) = erro(&mut s, "entrar", json!({ "id": luigi_id, "senha": "mesa-verde-2026" }));
     assert!(msg.contains("Espere"), "{msg}");
     let maria_id = entrada[1]["id"].as_str().unwrap().to_string();
-    let estado = ok(&mut s, "entrar", json!({ "id": maria_id, "senha": "1234" }));
+    let estado = ok(&mut s, "entrar", json!({ "id": maria_id, "senha": "balcao-azul-2026" }));
     assert_eq!(estado["usuario"]["nome"], "Maria");
 
     // Trocar a própria senha.
-    assert_eq!(erro(&mut s, "senha_trocar", json!({ "atual": "0000", "nova": "abcd", "nova2": "abcd" })).1, "atual");
-    ok(&mut s, "senha_trocar", json!({ "atual": "1234", "nova": "abcd", "nova2": "abcd" }));
+    assert_eq!(
+        erro(
+            &mut s,
+            "senha_trocar",
+            json!({ "atual": "0000", "nova": "outra-senha-2026", "nova2": "outra-senha-2026" })
+        )
+        .1,
+        "atual"
+    );
+    ok(
+        &mut s,
+        "senha_trocar",
+        json!({ "atual": "balcao-azul-2026", "nova": "outra-senha-2026", "nova2": "outra-senha-2026" }),
+    );
     ok(&mut s, "sair", json!({}));
-    erro(&mut s, "entrar", json!({ "id": maria_id, "senha": "1234" }));
-    ok(&mut s, "entrar", json!({ "id": maria_id, "senha": "abcd" }));
+    erro(&mut s, "entrar", json!({ "id": maria_id, "senha": "balcao-azul-2026" }));
+    ok(&mut s, "entrar", json!({ "id": maria_id, "senha": "outra-senha-2026" }));
 
     // Comando desconhecido e JSON quebrado viram erro, sem derrubar nada.
     erro(&mut s, "nao_existe", json!({}));
@@ -288,7 +303,7 @@ fn compra_por_zip() {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     let nota = include_str!("nfe_exemplo.xml");
     let pasta = std::env::temp_dir().join(format!("rustinho-compra-zip-{}", std::process::id()));
@@ -325,18 +340,22 @@ fn gerente_e_caixa() {
     let estado = ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja Modelo", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja Modelo", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     // Quem configura é o gerente.
     assert_eq!(estado["usuario"]["gerente"], true);
-    let joao = ok(&mut s, "usuario_salvar", json!({ "nome": "João", "senha": "5678", "senha2": "5678" }));
+    let joao = ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "João", "senha": "oficina-verde-77", "senha2": "oficina-verde-77" }),
+    );
     assert_eq!(joao["gerente"], false);
     let peca = ok(&mut s, "produto_salvar", rolamento());
     let peca_id = peca["id"].as_str().unwrap().to_string();
     ok(&mut s, "sair", json!({}));
 
     // O caixa entra e não pode ajustar o estoque nem abrir a pílula Gerente.
-    let estado = ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "5678" }));
+    let estado = ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "oficina-verde-77" }));
     assert_eq!(estado["usuario"]["gerente"], false);
     let ajuste = json!({ "produtoId": peca_id, "quantidade": "3", "motivo": "Contagem" });
     assert_eq!(erro(&mut s, "estoque_ajustar", ajuste.clone()).1, "gerente");
@@ -349,8 +368,8 @@ fn gerente_e_caixa() {
     );
 
     // O "aperto": o gerente digita a senha na hora.
-    assert_eq!(erro(&mut s, "gerente_liberar", json!({ "senha": "5678" })).1, "senha");
-    assert_eq!(ok(&mut s, "gerente_liberar", json!({ "senha": "1234" }))["nome"], "Maria");
+    assert_eq!(erro(&mut s, "gerente_liberar", json!({ "senha": "oficina-verde-77" })).1, "senha");
+    assert_eq!(ok(&mut s, "gerente_liberar", json!({ "senha": "balcao-azul-2026" }))["nome"], "Maria");
     ok(&mut s, "estoque_ajustar", ajuste.clone());
     ok(&mut s, "gerente_encerrar", json!({}));
     assert_eq!(erro(&mut s, "estoque_ajustar", ajuste.clone()).1, "gerente");
@@ -361,14 +380,14 @@ fn gerente_e_caixa() {
         ok(&mut s, "usuarios_entrada", json!({})).as_array().unwrap().iter().find(|u| u["nome"] == "Maria").unwrap()
             ["id"]
             .clone();
-    ok(&mut s, "entrar", json!({ "id": maria, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": maria, "senha": "balcao-azul-2026" }));
     let g = ok(&mut s, "gerente_salvar", json!({ "acoes": { "ajustar_estoque": false } }));
     let ajustar = g["acoes"].as_array().unwrap().iter().find(|a| a["id"] == "ajustar_estoque").unwrap().clone();
     assert_eq!(ajustar["soGerente"], false);
     // Não pode ficar sem gerente.
     assert_eq!(erro(&mut s, "gerente_salvar", json!({ "gerentes": { maria.as_str().unwrap(): false } })).1, "gerente");
     ok(&mut s, "sair", json!({}));
-    ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "5678" }));
+    ok(&mut s, "entrar", json!({ "id": joao["id"], "senha": "oficina-verde-77" }));
     ok(&mut s, "estoque_ajustar", json!({ "produtoId": peca_id, "quantidade": "5", "motivo": "Contagem" }));
     // Cancelar venda continua só do gerente.
     assert_eq!(ok(&mut s, "permissao", json!({ "acao": "cancelar_venda" }))["pode"], false);
@@ -380,14 +399,14 @@ fn senhas_erradas_seguidas_esperam() {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     let id = ok(&mut s, "estado", json!({}))["usuario"]["id"].clone();
     ok(&mut s, "sair", json!({}));
     for _ in 0..5 {
         assert_eq!(erro(&mut s, "entrar", json!({ "id": id, "senha": "0000" })).1, "senha");
     }
-    let (msg, _) = erro(&mut s, "entrar", json!({ "id": id, "senha": "1234" }));
+    let (msg, _) = erro(&mut s, "entrar", json!({ "id": id, "senha": "balcao-azul-2026" }));
     assert!(msg.contains("Espere"), "{msg}");
 }
 
@@ -397,7 +416,7 @@ fn venda_confere_cliente_orcamento_e_limites() {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
     let peca = ok(&mut s, "produto_salvar", rolamento());
     ok(&mut s, "caixa_abrir", json!({ "fundo": "0" }));

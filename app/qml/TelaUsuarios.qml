@@ -166,7 +166,7 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: tela.quando(linha.modelData.ultimoAcesso)
+                            text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha fraca" : "")
                             color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuave
                             font.family: Tema.serifa
                             font.italic: true
@@ -229,8 +229,8 @@ FocusScope {
             Campo {
                 id: senha
                 senha: true
-                dica: tela.editando ? "Nova senha" : "Pelo menos 4 caracteres"
-                maximo: 128
+                dica: tela.editando ? "Nova senha" : "Pelo menos 8 caracteres"
+                maximo: 256
                 Layout.fillWidth: true
                 onConfirmado: senha2.focar()
             }
@@ -238,7 +238,7 @@ FocusScope {
                 id: senha2
                 senha: true
                 dica: "Repita a senha"
-                maximo: 128
+                maximo: 256
                 Layout.fillWidth: true
                 onConfirmado: tela.salvar()
             }

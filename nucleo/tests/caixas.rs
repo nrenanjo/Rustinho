@@ -41,7 +41,7 @@ fn contar(b: &Banco, sql: &str) -> i64 {
 
 fn loja() -> (Banco, Banco, String) {
     let a = Banco::em_memoria().unwrap();
-    let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap();
+    let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "balcao-azul-2026", true).unwrap();
     usuarios::definir_gerente(&a.conn, &u.id, true).unwrap();
     config::gravar(&a.conn, "loja_nome", "Loja de Teste").unwrap();
     let mut b = Banco::em_memoria().unwrap();
@@ -241,7 +241,7 @@ fn mesmo_orcamento_em_dois_caixas() {
 #[test]
 fn loja_nunca_fica_sem_gerente() {
     let (mut a, mut b, ana) = loja();
-    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "5678", true).unwrap();
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "oficina-verde-77", true).unwrap();
     usuarios::definir_gerente(&a.conn, &bia.id, true).unwrap();
     trocar(&mut a, &mut b);
     usuarios::definir_gerente(&a.conn, &ana, false).unwrap();

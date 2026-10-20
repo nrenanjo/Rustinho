@@ -125,7 +125,9 @@ FocusScope {
                             const f = tela.funcao(modelData.funcao)
                             if (!f)
                                 return
-                            if (modelData.id === "backup" || modelData.id === "backup_nuvem") {
+                            if (modelData.id.indexOf("senha.") === 0) {
+                                tela.janela.abrir("TelaConfiguracoes", { secao: "loja" })
+                            } else if (modelData.id === "backup" || modelData.id === "backup_nuvem") {
                                 tela.janela.abrir("TelaConfiguracoes", { secao: "backup" })
                             } else if (modelData.id === "cheques") {
                                 Api.chamar("menu_usar", { id: f.id })

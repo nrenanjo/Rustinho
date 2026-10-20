@@ -12,6 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::erro::{Erro, Resultado};
+use crate::senhas::Problema;
 use crate::{tempo, texto};
 
 const SENHA_MINIMA: usize = 4;
@@ -147,6 +148,9 @@ pub fn definir_comissao(conn: &Connection, id: &str, texto_pct: &str) -> Resulta
 
 /// Confere a senha de um usuário. Devolve o usuário se estiver certa.
 pub fn conferir_senha(conn: &Connection, id: &str, senha: &str) -> Resultado<Usuario> {
+    if senha.chars().count() > crate::senhas::MAXIMO {
+        return Err(Erro::campo("senha", "Senha errada."));
+    }
     let hash: Option<String> =
         conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [id], |l| l.get(0)).optional()?;
     let hash = hash.ok_or_else(|| Erro::NaoEncontrado("Usuário".into()))?;
@@ -193,6 +197,9 @@ pub fn definir_gerente(conn: &Connection, id: &str, gerente: bool) -> Resultado<
 /// Senha de algum gerente ativo (o "aperto": o gerente digita a senha na
 /// hora, sem trocar de usuário). Devolve o gerente que confere.
 pub fn conferir_gerente(conn: &Connection, senha: &str) -> Resultado<Option<Usuario>> {
+    if senha.chars().count() > crate::senhas::MAXIMO {
+        return Ok(None);
+    }
     let mut c = conn.prepare("SELECT id, senha_hash FROM usuario WHERE ativo = 1 AND gerente = 1")?;
     let gerentes: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
     for (id, hash) in gerentes {
@@ -287,10 +294,67 @@ fn validar_senha(senha: &str) -> Resultado<()> {
     if senha.chars().count() < SENHA_MINIMA {
         return Err(Erro::campo("senha", format!("A senha precisa ter pelo menos {SENHA_MINIMA} caracteres.")));
     }
-    if senha.len() > 128 {
+    if senha.chars().count() > crate::senhas::MAXIMO {
         return Err(Erro::campo("senha", "Senha comprida demais."));
     }
     Ok(())
+}
+
+/// A política da F-17 (`senhas.rs`), na borda: vale para quem digita uma senha
+/// nova (primeira configuração, usuário novo, troca). O piso de 4 de
+/// `validar_senha` continua só como último recurso do núcleo.
+pub fn exigir_politica(conn: &Connection, senha: &str, usuario: &str, gerente: bool, campo: &str) -> Resultado<()> {
+    let usuario = texto::limpar(usuario);
+    let loja = crate::config::nome_loja(conn)?;
+    let caixa = crate::config::nome_caixa(conn)?;
+    let ctx = crate::senhas::Contexto { usuario: &usuario, loja: &loja, caixa: &caixa, gerente };
+    match crate::senhas::avaliar(senha, &ctx) {
+        None => Ok(()),
+        Some(p) => Err(Erro::campo(campo, p.mensagem(gerente))),
+    }
+}
+
+/// Resultado de avaliar a senha que a pessoa acabou de digitar ao entrar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Avaliacao {
+    pub problema: Option<Problema>,
+    /// A situação "fora da política" é nova (primeira vez, ou mudou o motivo).
+    pub nova: bool,
+}
+
+/// Avalia a senha digitada no login e guarda só o resultado (nunca a senha),
+/// numa tabela que não é sincronizada. Não muda a senha, o hash nem nada do
+/// backup: é só um marcador para o aviso e para o painel do gerente.
+pub fn avaliar_no_login(conn: &Connection, u: &Usuario, senha: &str) -> Resultado<Avaliacao> {
+    let loja = crate::config::nome_loja(conn)?;
+    let caixa = crate::config::nome_caixa(conn)?;
+    let ctx = crate::senhas::Contexto { usuario: &u.nome, loja: &loja, caixa: &caixa, gerente: u.gerente };
+    let problema = crate::senhas::avaliar(senha, &ctx);
+    let antes = situacao_senha(conn, &u.id)?;
+    let hash: String = conn.query_row("SELECT senha_hash FROM usuario WHERE id = ?1", [&u.id], |l| l.get(0))?;
+    conn.execute(
+        "INSERT INTO senha_situacao (usuario_id, hash, gerente, problema, avaliada_em)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(usuario_id) DO UPDATE SET hash = ?2, gerente = ?3, problema = ?4, avaliada_em = ?5",
+        params![u.id, hash, u.gerente, problema.map(|p| p.codigo()), tempo::agora()],
+    )?;
+    let nova = problema.is_some() && antes != Some(problema);
+    Ok(Avaliacao { problema, nova })
+}
+
+/// Situação conhecida da senha do usuário: `None` = não avaliada (ou a senha
+/// ou o papel mudaram desde a última avaliação), `Some(None)` = dentro da
+/// política, `Some(Some(p))` = fora da política pelo motivo `p`.
+pub fn situacao_senha(conn: &Connection, id: &str) -> Resultado<Option<Option<Problema>>> {
+    let r: Option<Option<String>> = conn
+        .query_row(
+            "SELECT s.problema FROM senha_situacao s JOIN usuario u ON u.id = s.usuario_id
+              WHERE s.usuario_id = ?1 AND s.hash = u.senha_hash AND s.gerente = u.gerente",
+            [id],
+            |l| l.get(0),
+        )
+        .optional()?;
+    Ok(r.map(|p| p.and_then(|c| Problema::do_codigo(&c))))
 }
 
 /// Para os testes de outros módulos (banco antigo com senha).
