@@ -1475,6 +1475,12 @@ pub fn restaurar(
         let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?;
         l.collect::<Result<_, _>>()?
     };
+    // Os caminhos até os outros caixas também são deste computador, não do backup.
+    let caminhos: Vec<(String, String, i64, i64)> = {
+        let mut c = conn.prepare("SELECT endereco, dispositivo, digitado, visto_ms FROM sync_endereco")?;
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
     let seq: i64 = conn
         .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0))
         .optional()?
@@ -1499,6 +1505,13 @@ pub fn restaurar(
         tx.execute(
             "INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES (?1, ?2, ?3, 0)",
             params![d, n, e],
+        )?;
+    }
+    tx.execute("DELETE FROM sync_endereco", [])?;
+    for (e, d, digitado, visto) in &caminhos {
+        tx.execute(
+            "INSERT INTO sync_endereco (endereco, dispositivo, digitado, visto_ms) VALUES (?1, ?2, ?3, ?4)",
+            params![e, d, digitado, visto],
         )?;
     }
     // A numeração das alterações deste caixa continua de onde estava; este

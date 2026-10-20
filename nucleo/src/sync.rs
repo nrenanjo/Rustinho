@@ -41,7 +41,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -53,7 +53,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::caminhos::{self, CaminhoPar, Puxada};
 use crate::erro::{Erro, Resultado};
+use crate::rede_local::{self, Interface, Saida};
 use crate::{banco, config, tempo};
 
 pub const PORTA_TCP: u16 = 47810;
@@ -134,6 +136,24 @@ impl Drop for Vaga {
 /// Para a troca de dados enquanto a guarda existir (restaurar backup).
 pub fn pausar() -> RwLockWriteGuard<'static, ()> {
     TRAVA.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Para quem grava no meio da troca de dados (as tarefas deste módulo e o
+/// ciclo de caminhos): respeita a pausa da restauração de backup.
+pub(crate) fn travar() -> RwLockReadGuard<'static, ()> {
+    TRAVA.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Quantas alterações vão em cada resposta. Só os testes mudam isso, por banco
+/// (chave `sync_lote_teste`), para provar a troca de caminho entre lotes.
+fn lote(_conn: &Connection) -> i64 {
+    #[cfg(test)]
+    if let Ok(Some(v)) = config::ler(_conn, "sync_lote_teste") {
+        if let Ok(n) = v.parse::<i64>() {
+            return n.max(1);
+        }
+    }
+    LOTE
 }
 
 /// Tabelas que os caixas compartilham.
@@ -2045,6 +2065,9 @@ pub struct Ajustes {
     pub enderecos: Vec<String>,
     pub dispositivo: String,
     pub nome: String,
+    /// Interfaces de VPN/virtual/celular que o gerente liberou pelo nome
+    /// (`sync_interfaces`, só deste computador).
+    pub interfaces: Vec<String>,
 }
 
 pub fn ajustes(conn: &Connection) -> Resultado<Ajustes> {
@@ -2059,7 +2082,38 @@ pub fn ajustes(conn: &Connection) -> Resultado<Ajustes> {
             .collect(),
         dispositivo: config::ler(conn, "dispositivo_id")?.unwrap_or_default(),
         nome: config::nome_caixa(conn)?,
+        interfaces: lista_de_interfaces(&config::ler(conn, "sync_interfaces")?.unwrap_or_default()),
     })
+}
+
+fn lista_de_interfaces(texto: &str) -> Vec<String> {
+    texto.split([',', ';', '\n']).map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect()
+}
+
+/// Nomes das interfaces deste computador que **não** anunciam o caixa (VPN,
+/// virtuais, dados móveis sem liberação). Só para a tela de Configurações em
+/// modo completo ajudar o gerente a escolher.
+pub fn interfaces_ignoradas(liberadas: &[String]) -> Vec<String> {
+    let mut nomes: Vec<String> = rede_local::listar()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.ativa && !rede_local::anunciavel(i, liberadas))
+        .map(|i| i.nome)
+        .collect();
+    nomes.sort();
+    nomes.dedup();
+    nomes
+}
+
+/// Interfaces (VPN, virtuais, dados móveis) que também anunciam este caixa e
+/// servem de caminho, pelo nome, separados por vírgula. Só deste computador.
+pub fn salvar_interfaces(conn: &Connection, nomes: &str) -> Resultado<()> {
+    let lista = lista_de_interfaces(nomes);
+    if let Some(n) = lista.iter().find(|n| n.chars().count() > 64 || n.chars().any(|c| c.is_control())) {
+        return Err(Erro::campo("interfaces", format!("Nome de interface inválido: {n}")));
+    }
+    config::gravar(conn, "sync_interfaces", &lista.join(", "))?;
+    Ok(())
 }
 
 /// A senha da rede gravada está fora da política? (só informa; não força troca)
@@ -2106,10 +2160,15 @@ pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &
 pub struct Par {
     pub dispositivo: String,
     pub nome: String,
+    /// O caminho em uso (o último que funcionou) ou, sem nenhum, o melhor conhecido.
     pub endereco: String,
     pub visto_em: String,
     pub sincronizado_em: String,
     pub erro: String,
+    /// Por onde a última conexão **confirmou** ter saído ("cabo", "Wi-Fi",
+    /// "rede"); vazio quando não se sabe (nunca se inventa).
+    pub via: String,
+    pub caminhos: Vec<CaminhoPar>,
 }
 
 pub fn pares(conn: &Connection) -> Resultado<Vec<Par>> {
@@ -2117,33 +2176,43 @@ pub fn pares(conn: &Connection) -> Resultado<Vec<Par>> {
         "SELECT dispositivo, nome, endereco, COALESCE(visto_em, ''), COALESCE(sincronizado_em, ''), erro
            FROM sync_par ORDER BY nome",
     )?;
-    let linhas = c.query_map([], |l| {
-        Ok(Par {
-            dispositivo: l.get(0)?,
-            nome: l.get(1)?,
-            endereco: l.get(2)?,
-            visto_em: l.get(3)?,
-            sincronizado_em: l.get(4)?,
-            erro: l.get(5)?,
+    let linhas: Vec<Par> = c
+        .query_map([], |l| {
+            Ok(Par {
+                dispositivo: l.get(0)?,
+                nome: l.get(1)?,
+                endereco: l.get(2)?,
+                visto_em: l.get(3)?,
+                sincronizado_em: l.get(4)?,
+                erro: l.get(5)?,
+                via: String::new(),
+                caminhos: Vec::new(),
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    linhas
+        .into_iter()
+        .map(|mut p| {
+            p.caminhos = caminhos::caminhos_do_par(conn, &p.dispositivo)?;
+            if let Some(em_uso) = p.caminhos.iter().find(|x| x.em_uso) {
+                p.endereco = em_uso.endereco.clone();
+                p.via = em_uso.via.clone();
+            }
+            Ok(p)
         })
-    })?;
-    Ok(linhas.collect::<Result<_, _>>()?)
+        .collect()
 }
 
-fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, endereco: &str) -> Resultado<()> {
-    conn.execute(
-        "INSERT INTO sync_par (dispositivo, nome, endereco, visto_em) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT (dispositivo) DO UPDATE SET nome = excluded.nome, endereco = excluded.endereco, visto_em = excluded.visto_em",
-        params![dispositivo, nome, endereco, tempo::agora()],
-    )?;
-    Ok(())
+/// Um outro caixa se apresentou vindo de `endereco` (veja `caminhos::aprender`).
+pub(crate) fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, endereco: &str) -> Resultado<()> {
+    caminhos::aprender(conn, dispositivo, nome, endereco, agora_ms())
 }
 
 // ---------------------------------------------------------------------------
 // Servidor, descoberta e puxada.
 // ---------------------------------------------------------------------------
 
-fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
+pub(crate) fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
     let conn = Connection::open(caminho)?;
     conn.busy_timeout(Duration::from_secs(10))?;
     banco::registrar_funcoes(&conn)?;
@@ -2208,7 +2277,7 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
             );
         }
     }
-    let (lista, tem_mais) = alteracoes_desde(&conn, desde, LOTE)?;
+    let (lista, tem_mais) = alteracoes_desde(&conn, desde, lote(&conn))?;
     enviar(
         &mut fluxo,
         &k,
@@ -2263,6 +2332,33 @@ fn puxar_ate(
     porta_local: u16,
     parar: Option<&AtomicBool>,
 ) -> Resultado<(String, usize)> {
+    puxar_por(caminho, endereco, porta_local, parar, None).map(|p| (p.dispositivo, p.total))
+}
+
+/// O endereço de um caixa como `SocketAddr` (sem porta = a porta da troca).
+fn endereco_completo(endereco: &str) -> Resultado<SocketAddr> {
+    match endereco.parse::<SocketAddr>() {
+        Ok(s) => Ok(s),
+        Err(_) => format!("{endereco}:{PORTA_TCP}").parse().map_err(|_| Erro::validacao("Endereço inválido.")),
+    }
+}
+
+/// Os endereços digitados, já com a porta.
+fn digitados_completos(a: &Ajustes) -> Vec<String> {
+    a.enderecos.iter().filter_map(|e| endereco_completo(e).ok()).map(|s| s.to_string()).collect()
+}
+
+/// Puxa de **um caminho** (`endereco`), saindo pela `saida` planejada quando
+/// houver. Quem o caminho é — qual caixa — só se sabe pela resposta: o contador,
+/// a marca e a geração são do caixa, nunca do endereço. Um caminho novo de um
+/// caixa conhecido continua do contador dele.
+pub(crate) fn puxar_por(
+    caminho: &Path,
+    endereco: &str,
+    porta_local: u16,
+    parar: Option<&AtomicBool>,
+    saida: Option<&Saida>,
+) -> Resultado<Puxada> {
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let mut conn = abrir_conexao(caminho)?;
     if crate::faixas::copia_detectada(&conn)? {
@@ -2270,24 +2366,35 @@ fn puxar_ate(
     }
     let a = ajustes(&conn)?;
     let k = Chaves::de(&conn, &a.senha)?;
-    let alvo: SocketAddr = match endereco.parse::<SocketAddr>() {
-        Ok(s) => s,
-        Err(_) => format!("{endereco}:{PORTA_TCP}").parse().map_err(|_| Erro::validacao("Endereço inválido."))?,
-    };
+    let alvo = endereco_completo(endereco)?;
     let mut total = 0;
     let mut dispositivo = String::new();
     let mut recomecos = 0;
+    let mut sondou = false;
+    let mut confirmacao: Option<rede_local::Confirmacao>;
     loop {
-        // Contador, marca e geração guardados deste outro caixa (na primeira
-        // volta, pelo endereço: pode ser de um computador que já não está lá).
+        // Contador, marca e geração guardados deste outro caixa. Na primeira
+        // volta o caixa só se conhece pelo endereço: pelo caminho já aprendido
+        // (outro caminho do mesmo caixa) ou, antes, pelo par que tinha este endereço.
         #[allow(clippy::type_complexity)]
         let guardado: Option<(String, i64, Option<String>, Option<String>)> = if dispositivo.is_empty() {
-            conn.query_row(
-                "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE endereco = ?1 ORDER BY visto_em DESC LIMIT 1",
-                [alvo.to_string()],
-                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
-            )
-            .optional()?
+            let dono = caminhos::dono_do_endereco(&conn, &alvo.to_string())?;
+            match dono {
+                Some(d) => conn
+                    .query_row(
+                        "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE dispositivo = ?1",
+                        [d],
+                        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+                    )
+                    .optional()?,
+                None => conn
+                    .query_row(
+                        "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE endereco = ?1 ORDER BY visto_em DESC LIMIT 1",
+                        [alvo.to_string()],
+                        |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+                    )
+                    .optional()?,
+            }
         } else {
             conn.query_row(
                 "SELECT dispositivo, cursor, marca, geracao FROM sync_par WHERE dispositivo = ?1",
@@ -2297,14 +2404,25 @@ fn puxar_ate(
             .optional()?
         };
         let (dono, cursor, marca, geracao_guardada) = guardado.unwrap_or_default();
-        let mut fluxo = TcpStream::connect_timeout(&alvo, Duration::from_secs(3)).map_err(rede)?;
+        // Endereço de caixa ainda desconhecido, numa loja que já tem outros
+        // caixas: pode ser outro caminho de um deles (ex.: endereço digitado).
+        // Uma pergunta curta, com um contador que não existe em nenhum banco,
+        // faz o outro lado responder só quem é (é o jeito que o protocolo já
+        // tem de dizer "recomece"); depois se pede de verdade, do contador certo.
+        let sonda = dono.is_empty() && !sondou && {
+            let existe: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM sync_par)", [], |l| l.get(0))?;
+            existe
+        };
+        let (mut fluxo, conf) = rede_local::conectar(alvo, saida, Duration::from_secs(3)).map_err(rede)?;
+        confirmacao = Some(conf);
         fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
         fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
         let saiu = agora_ms();
         enviar(
             &mut fluxo,
             &k,
-            &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": cursor, "marca": marca,
+            &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": if sonda { i64::MAX } else { cursor },
+                     "marca": if sonda { Some("sonda".to_string()) } else { marca },
                      "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local }),
         )?;
         let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
@@ -2315,9 +2433,14 @@ fn puxar_ate(
         let voltou = agora_ms();
         dispositivo = resposta["dispositivo"].as_str().unwrap_or_default().to_string();
         if dispositivo.is_empty() || dispositivo == a.dispositivo {
-            return Err(Erro::validacao("Este endereço é deste mesmo caixa."));
+            return Err(Erro::validacao(caminhos::ESTE_MESMO_CAIXA));
         }
         registrar_par(&conn, &dispositivo, resposta["nome"].as_str().unwrap_or(""), &alvo.to_string())?;
+        if sonda {
+            // Só queria saber quem é; a resposta (sem alterações) não se aplica.
+            sondou = true;
+            continue;
+        }
         // Neste endereço agora está outro caixa (computador trocado): pede de
         // novo com o contador dele, sem aplicar o que veio.
         if !dono.is_empty() && dono != dispositivo {
@@ -2410,7 +2533,7 @@ fn puxar_ate(
         && crate::faixas::distribuidor(&conn)?.as_deref() == Some(dispositivo.as_str())
         && crate::faixas::precisa(&conn)?
     {
-        match pedir_faixa(&mut conn, &k, &alvo) {
+        match pedir_faixa(&mut conn, &k, &alvo, saida) {
             Ok(n) => total += n,
             Err(e) => crate::registro::anotar(&format!("troca de dados: pedido de faixa de códigos: {e}")),
         }
@@ -2425,23 +2548,43 @@ fn puxar_ate(
     if let Err(e) = crate::faixas::manter(&mut conn) {
         crate::registro::anotar(&format!("códigos das peças: {e}"));
     }
-    Ok((dispositivo, total))
+    let confirmacao =
+        confirmacao.unwrap_or(rede_local::Confirmacao { preso_ao_ip: false, preso_a_interface: None, local: None });
+    Ok(Puxada { dispositivo, total, confirmacao })
 }
 
 /// Pede ao distribuidor uma faixa de códigos das peças. A faixa chega como
 /// uma alteração do log (com o mesmo id que o distribuidor gravou) e fica
 /// gravada aqui antes de qualquer código dela ser dado. Devolve quantas
 /// alterações eram novas.
-fn pedir_faixa(conn: &mut Connection, k: &Chaves, alvo: &SocketAddr) -> Resultado<usize> {
+fn pedir_faixa(conn: &mut Connection, k: &Chaves, alvo: &SocketAddr, saida: Option<&Saida>) -> Resultado<usize> {
     let mut pedido = crate::faixas::pedido(conn)?;
     pedido["tipo"] = json!("faixa");
     pedido["protocolo"] = json!(PROTOCOLO);
-    let mut fluxo = TcpStream::connect_timeout(alvo, Duration::from_secs(3)).map_err(rede)?;
+    let (mut fluxo, _) = rede_local::conectar(*alvo, saida, Duration::from_secs(3)).map_err(rede)?;
     fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
     enviar(&mut fluxo, k, &pedido)?;
     let resposta = receber(&mut fluxo, k, TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
     gravar_faixa_recebida(conn, &resposta)
+}
+
+/// O pacote de anúncio: continua `{dispositivo, nome, porta}` (o protocolo não
+/// muda); quem lê aceita campos a mais.
+fn anuncio(dispositivo: &str, nome: &str, porta: u16) -> Value {
+    json!({ "dispositivo": dispositivo, "nome": nome, "porta": porta })
+}
+
+/// (dispositivo, nome, porta) de um anúncio; `None` se não diz quem é.
+fn ler_anuncio(v: &Value) -> Option<(String, String, u16)> {
+    let d = v["dispositivo"].as_str().filter(|d| !d.is_empty())?;
+    let porta = v["porta"].as_u64().and_then(|p| u16::try_from(p).ok()).unwrap_or(PORTA_TCP);
+    Some((d.to_string(), v["nome"].as_str().unwrap_or("").to_string(), porta))
+}
+
+/// O que vai para o registro quando uma porta da troca de dados não abre.
+fn texto_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
+    format!("troca de dados: não foi possível abrir a porta {protocolo} {porta} ({erro}); outro programa pode estar usando essa porta")
 }
 
 /// O motor da sincronização: três tarefas em segundo plano (servidor,
@@ -2453,6 +2596,8 @@ fn pedir_faixa(conn: &mut Connection, k: &Chaves, alvo: &SocketAddr) -> Resultad
 pub struct Motor {
     parar: Arc<AtomicBool>,
     tarefas: Vec<thread::JoinHandle<()>>,
+    /// O que impediu o motor de funcionar por inteiro (ex.: porta ocupada).
+    problemas: Arc<Mutex<Vec<String>>>,
     /// Já pediram para encerrar com um prazo (quem pediu decide o que fazer
     /// se não deu tempo; o descarte não espera de novo).
     encerrado: bool,
@@ -2494,6 +2639,12 @@ impl Motor {
         ok
     }
 
+    /// O que está impedindo o motor de funcionar (ex.: porta ocupada). Também
+    /// vai para o registro, uma vez.
+    pub fn problemas(&self) -> Vec<String> {
+        self.problemas.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
     /// Só nos testes: uma tarefa a mais para o motor esperar ao encerrar
     /// (simula uma tarefa travada).
     #[cfg(test)]
@@ -2504,13 +2655,23 @@ impl Motor {
     pub fn iniciar(caminho: PathBuf, porta_tcp: u16, porta_udp: u16) -> Motor {
         let parar = Arc::new(AtomicBool::new(false));
         let mut tarefas = Vec::new();
+        let problemas: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
         // 1. Servidor: atende os outros caixas.
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
+            let problemas = problemas.clone();
             tarefas.push(thread::spawn(move || {
-                let Ok(ouvinte) = TcpListener::bind(("0.0.0.0", porta_tcp)) else { return };
+                let ouvinte = match TcpListener::bind(("0.0.0.0", porta_tcp)) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        let texto = texto_da_porta("TCP", porta_tcp, &e.to_string());
+                        crate::registro::anotar(&texto);
+                        problemas.lock().unwrap_or_else(|e| e.into_inner()).push(texto);
+                        return;
+                    }
+                };
                 ouvinte.set_nonblocking(true).ok();
                 let vagas = Arc::new(AtomicUsize::new(0));
                 let mut atendendo: Vec<Atendimento> = Vec::new();
@@ -2609,11 +2770,26 @@ impl Motor {
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
+            let problemas = problemas.clone();
             tarefas.push(thread::spawn(move || {
-                let Ok(socket) = UdpSocket::bind(("0.0.0.0", porta_udp)) else { return };
+                let socket = match UdpSocket::bind(("0.0.0.0", porta_udp)) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let texto = texto_da_porta("UDP", porta_udp, &e.to_string());
+                        crate::registro::anotar(&texto);
+                        problemas.lock().unwrap_or_else(|e| e.into_inner()).push(texto);
+                        return;
+                    }
+                };
                 socket.set_broadcast(true).ok();
                 socket.set_read_timeout(Some(Duration::from_secs(1))).ok();
                 let mut ultimo_anuncio = Instant::now() - Duration::from_secs(60);
+                let mut ultima_lista = Instant::now() - Duration::from_secs(60);
+                // As interfaces são lidas de novo a cada segundo; uma mudança
+                // (cabo plugado, Wi-Fi que caiu, IP novo) anuncia na hora.
+                let mut interfaces: Option<Vec<Interface>> = None;
+                let mut conhecidas: Vec<Interface> = Vec::new();
+                let mut erros_de_envio: Vec<(std::net::Ipv4Addr, String)> = Vec::new();
                 let mut buf = vec![0u8; 2048];
                 while !parar.load(Ordering::SeqCst) {
                     let Ok(conn) = abrir_conexao(&caminho) else {
@@ -2638,10 +2814,26 @@ impl Motor {
                         cochilar(&parar, Duration::from_secs(1));
                         continue;
                     };
-                    if ultimo_anuncio.elapsed() > Duration::from_secs(10) {
-                        let ola = json!({ "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_tcp });
+                    let mudou = if ultima_lista.elapsed() >= Duration::from_secs(1) {
+                        ultima_lista = Instant::now();
+                        interfaces = rede_local::lista_ou_nada(rede_local::listar());
+                        let agora = interfaces.clone().unwrap_or_default();
+                        let mudou = rede_local::interfaces_mudaram(&conhecidas, &agora);
+                        conhecidas = agora;
+                        mudou
+                    } else {
+                        false
+                    };
+                    if mudou || ultimo_anuncio.elapsed() > Duration::from_secs(10) {
+                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp);
                         if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
-                            let _ = socket.send_to(&pacote, ("255.255.255.255", porta_udp));
+                            // Um anúncio por interface apropriada (um broadcast só
+                            // sai por uma), mais o limitado de sempre. Se o sistema
+                            // não soube listar, só o limitado.
+                            let erros = rede_local::anunciar(&conhecidas, &a.interfaces, &pacote, porta_udp);
+                            for (ip, e) in rede_local::erros_novos(&mut erros_de_envio, erros) {
+                                crate::registro::anotar(&format!("troca de dados: anúncio pela interface {ip}: {e}"));
+                            }
                         }
                         ultimo_anuncio = Instant::now();
                     }
@@ -2650,16 +2842,21 @@ impl Motor {
                         // (Argon2) poucas vezes por minuto (veja `decifrar`).
                         if let Ok(claro) = decifrar(&k, &buf[..n], Some(origem.ip())) {
                             if let Ok(v) = serde_json::from_slice::<Value>(&claro) {
-                                let d = v["dispositivo"].as_str().unwrap_or_default();
-                                let porta = v["porta"].as_u64().unwrap_or(PORTA_TCP as u64);
-                                if !d.is_empty() && d != a.dispositivo {
-                                    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-                                    let _ = registrar_par(
-                                        &conn,
-                                        d,
-                                        v["nome"].as_str().unwrap_or(""),
-                                        &format!("{}:{porta}", origem.ip()),
-                                    );
+                                if let Some((d, nome, porta)) = ler_anuncio(&v) {
+                                    let endereco = format!("{}:{porta}", origem.ip());
+                                    // Anúncio recebido vale de qualquer interface, mas o
+                                    // caminho que sai de VPN/virtual/celular só entra se
+                                    // o gerente liberou essa interface.
+                                    if d != a.dispositivo
+                                        && rede_local::caminho_aprendido_vale(
+                                            interfaces.as_deref(),
+                                            &endereco,
+                                            &a.interfaces,
+                                        )
+                                    {
+                                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                                        let _ = registrar_par(&conn, &d, &nome, &endereco);
+                                    }
                                 }
                             }
                         }
@@ -2668,7 +2865,8 @@ impl Motor {
             }));
         }
 
-        // 3. Puxada: a cada 4 segundos, pede o que há de novo a cada caixa.
+        // 3. Puxada: a cada 4 segundos, pede o que há de novo a cada caixa,
+        // pelo melhor caminho de cada um (veja `caminhos::ciclo`).
         {
             let parar = parar.clone();
             tarefas.push(thread::spawn(move || {
@@ -2699,38 +2897,29 @@ impl Motor {
                     if !a.ligado || a.senha.is_empty() {
                         continue;
                     }
-                    let mut alvos: Vec<String> = pares(&conn)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|p| !p.endereco.is_empty())
-                        .map(|p| p.endereco)
-                        .collect();
-                    for e in &a.enderecos {
-                        let completo = if e.contains(':') { e.clone() } else { format!("{e}:{PORTA_TCP}") };
-                        if !alvos.contains(&completo) {
-                            alvos.push(completo);
-                        }
+                    {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        let _ = caminhos::digitar(&conn, &digitados_completos(&a), agora_ms());
                     }
-                    drop(conn);
-                    for alvo in alvos {
-                        if parar.load(Ordering::SeqCst) {
-                            break;
-                        }
-                        if let Err(e) = puxar_ate(&caminho, &alvo, porta_tcp, Some(&parar)) {
-                            let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-                            if let Ok(conn) = abrir_conexao(&caminho) {
-                                let _ = conn.execute(
-                                    "UPDATE sync_par SET erro = ?2 WHERE endereco = ?1",
-                                    params![alvo, e.to_string()],
-                                );
-                            }
-                        }
-                    }
+                    // A lista de interfaces é lida a cada ciclo: um cabo
+                    // desconectado deixa de ser caminho já no ciclo seguinte.
+                    let ambiente = caminhos::Ambiente {
+                        proprio: a.dispositivo.clone(),
+                        interfaces: rede_local::lista_ou_nada(rede_local::listar()),
+                        liberadas: a.interfaces.clone(),
+                        agora_ms: agora_ms(),
+                        orcamento: caminhos::ORCAMENTO,
+                    };
+                    let (caminho_banco, parar_ciclo) = (caminho.clone(), parar.clone());
+                    let mut puxar = |endereco: &str, saida: Option<&Saida>| {
+                        puxar_por(&caminho_banco, endereco, porta_tcp, Some(&parar_ciclo), saida)
+                    };
+                    caminhos::ciclo(&conn, &ambiente, &|| parar.load(Ordering::SeqCst), &mut puxar);
                 }
             }));
         }
 
-        Motor { parar, tarefas, encerrado: false }
+        Motor { parar, tarefas, problemas, encerrado: false }
     }
 }
 
@@ -4460,5 +4649,87 @@ mod testes {
         assert!(salvar_ajustes(&b.conn, true, "12345678", "192.168.0.12").is_err(), "trivial (F-17)");
         salvar_ajustes(&b.conn, true, "bola-de-gude", "192.168.0.12, 192.168.0.13").unwrap();
         assert_eq!(ajustes(&b.conn).unwrap().enderecos.len(), 2);
+    }
+
+    // ------------------------------------------------------------------
+    // PEND-10: anúncio, portas e descoberta por várias origens.
+    // ------------------------------------------------------------------
+
+    /// T-22 · CA-I6: o pacote de anúncio continua `{dispositivo, nome, porta}`
+    /// e o leitor aceita campos a mais (versões futuras); `PROTOCOLO` não muda.
+    #[test]
+    fn t22_pacote_de_anuncio_compativel() {
+        let novo = anuncio("d1", "Caixa 1", 47810);
+        let mut chaves: Vec<&str> = novo.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        chaves.sort();
+        assert_eq!(chaves, ["dispositivo", "nome", "porta"], "o pacote enviado é o de antes");
+        assert_eq!(ler_anuncio(&novo), Some(("d1".into(), "Caixa 1".into(), 47810)));
+        let antigo = json!({ "dispositivo": "d2", "nome": "Caixa 2", "porta": 47900 });
+        assert_eq!(ler_anuncio(&antigo), Some(("d2".into(), "Caixa 2".into(), 47900)));
+        let futuro = json!({ "dispositivo": "d3", "nome": "Caixa 3", "porta": 47810, "interfaces": ["cabo"], "x": 1 });
+        assert_eq!(ler_anuncio(&futuro), Some(("d3".into(), "Caixa 3".into(), 47810)));
+        assert_eq!(ler_anuncio(&json!({ "dispositivo": "d4" })), Some(("d4".into(), String::new(), PORTA_TCP)));
+        assert_eq!(ler_anuncio(&json!({ "nome": "sem id" })), None);
+        assert_eq!(PROTOCOLO, 3, "o protocolo não mudou");
+    }
+
+    /// T-23 · CA-F2: porta ocupada deixa de ser silenciosa: o motor guarda o
+    /// problema (e o registro recebe), sem pânico, e encerra normalmente.
+    #[test]
+    fn t23_porta_ocupada_nao_e_silenciosa() {
+        let tcp = TcpListener::bind("0.0.0.0:0").unwrap();
+        let udp = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let (pt, pu) = (tcp.local_addr().unwrap().port(), udp.local_addr().unwrap().port());
+        let c = temp("ocupada");
+        let b = Banco::abrir(&c).unwrap();
+        salvar_ajustes(&b.conn, true, "balcao-azul-2026", "").unwrap();
+        let mut m = Motor::iniciar(c, pt, pu);
+        thread::sleep(Duration::from_millis(600));
+        let problemas = m.problemas();
+        assert_eq!(problemas.len(), 2, "{problemas:?}");
+        assert!(problemas.iter().any(|p| p.contains("TCP") && p.contains(&pt.to_string())), "{problemas:?}");
+        assert!(problemas.iter().any(|p| p.contains("UDP") && p.contains(&pu.to_string())), "{problemas:?}");
+        assert!(m.encerrar(Duration::from_secs(10)));
+        assert_eq!(
+            texto_da_porta("TCP", 47810, "Address already in use"),
+            texto_da_porta("TCP", 47810, "Address already in use")
+        );
+        assert!(texto_da_porta("TCP", 47810, "x").contains("47810"));
+    }
+
+    /// T-05 (rede) · CA-D2, CA-I1, CA-I5: o mesmo caixa anunciando de dois
+    /// endereços (cabo e Wi-Fi) vira um par com dois caminhos; anúncio com a
+    /// senha errada é ignorado em qualquer origem; o próprio caixa por outra
+    /// interface não vira par.
+    #[test]
+    fn t05_descoberta_por_varias_origens() {
+        let c = temp("descoberta");
+        let b = Banco::abrir(&c).unwrap();
+        salvar_ajustes(&b.conn, true, "balcao-azul-2026", "").unwrap();
+        let (pt, pu) = (49310, 49311);
+        let mut m = Motor::iniciar(c.clone(), pt, pu);
+        thread::sleep(Duration::from_millis(500));
+        let sal = [9u8; 16];
+        let boa = Chaves { senha: "balcao-azul-2026".into(), sal, propria: derivar("balcao-azul-2026", &sal).unwrap() };
+        let errada =
+            Chaves { senha: "outra-senha-2026".into(), sal, propria: derivar("outra-senha-2026", &sal).unwrap() };
+        let enviar_de = |ip: [u8; 4], k: &Chaves, d: &str| {
+            let s = UdpSocket::bind((std::net::Ipv4Addr::from(ip), 0)).unwrap();
+            let pacote = cifrar(k, anuncio(d, "Caixa X", 47810).to_string().as_bytes()).unwrap();
+            s.send_to(&pacote, ("127.0.0.1", pu)).unwrap();
+        };
+        enviar_de([127, 0, 0, 2], &boa, "dx"); // cabo
+        enviar_de([127, 0, 0, 3], &boa, "dx"); // Wi-Fi
+        enviar_de([127, 0, 0, 4], &errada, "dy"); // outra loja
+        enviar_de([127, 0, 0, 5], &errada, "dx"); // outra loja dizendo ser o dx
+        enviar_de([127, 0, 0, 6], &boa, &b.dispositivo); // ele mesmo, por outra interface
+        thread::sleep(Duration::from_millis(3500));
+        let pares = pares(&b.conn).unwrap();
+        assert_eq!(pares.len(), 1, "{pares:?}");
+        assert_eq!(pares[0].dispositivo, "dx");
+        let mut enderecos: Vec<&str> = pares[0].caminhos.iter().map(|x| x.endereco.as_str()).collect();
+        enderecos.sort();
+        assert_eq!(enderecos, ["127.0.0.2:47810", "127.0.0.3:47810"], "dois caminhos do mesmo caixa");
+        assert!(m.encerrar(Duration::from_secs(10)));
     }
 }

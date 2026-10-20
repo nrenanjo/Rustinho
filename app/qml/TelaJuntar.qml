@@ -65,7 +65,7 @@ FocusScope {
                     Layout.fillWidth: true
                 }
                 Nota {
-                    text: "Este " + Tema.aparelho + " vai receber tudo do outro caixa: usuários, peças, clientes e estoque. Os dois precisam estar no mesmo Wi-Fi, com o Rustinho aberto."
+                    text: "Este " + Tema.aparelho + " vai receber tudo do outro caixa: usuários, peças, clientes e estoque. Os dois precisam estar na mesma rede (Wi-Fi ou cabo), com o Rustinho aberto."
                     font.pixelSize: 17
                     Layout.fillWidth: true
                 }

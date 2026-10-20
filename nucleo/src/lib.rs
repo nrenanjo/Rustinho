@@ -12,6 +12,7 @@ pub mod backup;
 pub mod banco;
 pub mod busca;
 pub mod caixa;
+pub mod caminhos;
 pub mod cheques;
 pub mod codigo;
 pub mod comissoes;
@@ -45,6 +46,8 @@ pub mod reposicao;
 pub mod senhas;
 pub mod sync;
 pub mod tempo;
+#[cfg(test)]
+pub(crate) mod teste_rede;
 pub mod texto;
 pub mod unidades;
 pub mod usuarios;

@@ -28,6 +28,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0016_codigo_das_pessoas_confirmado.sql"),
     include_str!("migracoes/0017_referencias_com_prova.sql"),
     include_str!("migracoes/0018_situacao_da_senha.sql"),
+    include_str!("migracoes/0019_caminhos_da_rede.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -300,5 +301,44 @@ mod testes {
         );
         let versao: i64 = c.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
         assert_eq!(versao as usize, MIGRACOES.len());
+    }
+
+    /// T-24 · CA-F3: a migração 18 → 19 preserva os pares e os endereços deles
+    /// (que viram o primeiro caminho de cada um).
+    #[test]
+    fn t24_migracao_19_preserva_pares_e_enderecos() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 18).unwrap();
+        c.execute(
+            "INSERT INTO sync_par (dispositivo, nome, endereco, cursor, marca) VALUES ('d1', 'Caixa 2', '10.0.0.2:47810', 7, 'm1')",
+            [],
+        )
+        .unwrap();
+        c.execute("INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES ('d2', 'Caixa 3', '', 3)", [])
+            .unwrap();
+        migrar(&mut c).unwrap();
+        let (cursor, marca): (i64, String) = c
+            .query_row("SELECT cursor, marca FROM sync_par WHERE dispositivo = 'd1'", [], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((cursor, marca.as_str()), (7, "m1"), "contador e marca intactos");
+        let linhas: Vec<(String, String, i64)> = c
+            .prepare("SELECT endereco, dispositivo, digitado FROM sync_endereco")
+            .unwrap()
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            linhas,
+            vec![("10.0.0.2:47810".to_string(), "d1".to_string(), 0)],
+            "par sem endereço não vira caminho"
+        );
+        let versao: i64 = c.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+        assert_eq!(versao as usize, MIGRACOES.len());
+        assert_eq!(MIGRACOES.len(), 19);
     }
 }

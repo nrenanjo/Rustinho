@@ -1693,6 +1693,9 @@ impl Servico {
             "sync_salvar" => {
                 let d: AjustesSync = ler(dados)?;
                 let senha = if d.senha.is_empty() { sync::ajustes(&self.banco.conn)?.senha } else { d.senha };
+                if let Some(nomes) = &d.interfaces {
+                    sync::salvar_interfaces(&self.banco.conn, nomes)?;
+                }
                 sync::salvar_ajustes(&self.banco.conn, d.ligado, &senha, &d.enderecos)?;
                 self.sync_ler()
             }
@@ -1765,6 +1768,8 @@ impl Servico {
             "temSenha": !a.senha.is_empty(),
             "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
+            "interfaces": a.interfaces.join(", "),
+            "interfacesIgnoradas": sync::interfaces_ignoradas(&a.interfaces),
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),
@@ -2253,6 +2258,9 @@ struct AjustesSync {
     ligado: bool,
     senha: String,
     enderecos: String,
+    /// Interfaces extras (VPN, virtuais, dados móveis). `None` = a tela não
+    /// mostrou o campo (modo simples): o que está gravado fica como está.
+    interfaces: Option<String>,
 }
 
 #[derive(Deserialize, Default)]

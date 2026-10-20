@@ -225,6 +225,7 @@ FocusScope {
             sync = r.dados
             syncLigado.checked = sync.ligado
             syncEnderecos.texto = sync.enderecos
+            syncInterfaces.texto = sync.interfaces
             syncSenha.texto = ""
         }
     }
@@ -239,13 +240,20 @@ FocusScope {
     function salvarSync() {
         syncSenha.erro = ""
         syncEnderecos.erro = ""
-        const r = Api.chamar("sync_salvar", { ligado: syncLigado.checked, senha: syncSenha.texto, enderecos: syncEnderecos.texto })
+        syncInterfaces.erro = ""
+        // O campo das interfaces só existe no modo completo; no simples não se manda nada.
+        const dados = { ligado: syncLigado.checked, senha: syncSenha.texto, enderecos: syncEnderecos.texto }
+        if (completo)
+            dados.interfaces = syncInterfaces.texto
+        const r = Api.chamar("sync_salvar", dados)
         if (r.ok) {
             sync = r.dados
             syncSenha.texto = ""
             janela.avisar(syncLigado.checked ? "Sincronização ligada. Os outros caixas aparecem em alguns segundos." : "Sincronização desligada.", "ok")
         } else if (r.campo === "enderecos") {
             syncEnderecos.erro = r.erro
+        } else if (r.campo === "interfaces") {
+            syncInterfaces.erro = r.erro
         } else {
             syncSenha.erro = r.erro
         }
@@ -318,7 +326,7 @@ FocusScope {
                 receber: "Multa e juros de quem paga atrasado",
                 impressao: "Comprovante, orçamento e impressora",
                 backup: "Cópias dos dados no computador e no Google Drive",
-                caixas: "Os computadores da loja trocando dados pelo Wi-Fi",
+                caixas: "Os computadores da loja trocando dados pela rede",
                 sobre: "Versão e onde ficam os dados"
             })[tela.secao]
             Layout.fillWidth: true
@@ -723,7 +731,7 @@ FocusScope {
                 Faixa {
                     visible: tela.secao === "caixas"
                     titulo: "Caixas da loja"
-                    subtitulo: "sincronização pelo Wi-Fi"
+                    subtitulo: "sincronização pela rede da loja"
                     color: Tema.verde
                     corTitulo: Tema.verdeEscuro
                     Layout.fillWidth: true
@@ -751,6 +759,18 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                     }
+                    // Só no modo completo: quem usa VPN ou rede virtual entre os caixas
+                    // diz quais interfaces também valem; o resto da loja nem vê o campo.
+                    Campo {
+                        id: syncInterfaces
+                        visible: tela.completo
+                        rotulo: "Interfaces extras (VPN, rede virtual, dados móveis)"
+                        dica: tela.sync && tela.sync.interfacesIgnoradas.length > 0
+                              ? "Hoje não anunciam: " + tela.sync.interfacesIgnoradas.join(", ")
+                              : "Só se os caixas se falam por uma delas (ex.: tailscale0)"
+                        maximo: 300
+                        Layout.fillWidth: true
+                    }
                     Nota {
                         text: tela.sync ? "Endereço deste caixa: " + (tela.sync.meuEndereco || "sem rede") : ""
                         font.pixelSize: 13
@@ -774,13 +794,14 @@ FocusScope {
                             spacing: 8
                             Layout.fillWidth: true
                             Rectangle {
-                                width: 10
-                                height: 10
+                                Layout.preferredWidth: 10
+                                Layout.preferredHeight: 10
+                                Layout.alignment: Qt.AlignVCenter
                                 radius: 5
                                 color: modelData.erro ? Tema.vermelho : modelData.sincronizadoEm ? Tema.verdeEscuro : Tema.apagado
                             }
                             Text {
-                                text: (modelData.nome || "Caixa") + " · " + (modelData.erro ? modelData.erro : "sincronizado " + tela.quandoFoi(modelData.sincronizadoEm))
+                                text: (modelData.nome || "Caixa") + " · " + (modelData.erro ? modelData.erro : "sincronizado " + tela.quandoFoi(modelData.sincronizadoEm) + (modelData.via ? " · via " + modelData.via : ""))
                                 color: modelData.erro ? Tema.vermelho : Tema.tinta
                                 font.family: Tema.texto
                                 font.pixelSize: 14
