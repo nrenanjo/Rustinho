@@ -19,6 +19,7 @@ pub mod qobject {
         include!("rustinho/cpp/janela.h");
         fn rustinho_preparar_janela();
         fn rustinho_arquivo_local(endereco: &QString) -> QString;
+        fn rustinho_identidade_do_computador() -> QString;
     }
 
     extern "RustQt" {
@@ -61,6 +62,9 @@ impl qobject::Sistema {
         let estado = self.rust_mut().get_mut();
         estado.servico.get_or_insert_with(|| {
             let caminho = rustinho_nucleo::caminho_padrao();
+            // Antes de abrir o banco: o núcleo compara a identidade deste
+            // computador com a que o banco guardou (cópia do banco).
+            rustinho_nucleo::computador::definir(&qobject::rustinho_identidade_do_computador().to_string());
             Servico::abrir(&caminho)
                 .map_err(|e| format!("Não consegui abrir o banco de dados em {}. {e}", caminho.display()))
         })

@@ -225,6 +225,155 @@ fn conferir_arquivo(conn: &Connection) -> Resultado<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Computador onde o banco está.
+// ---------------------------------------------------------------------------
+
+/// O banco foi criado em outro computador (a identidade do computador de
+/// agora é diferente da que o banco guardou): é uma cópia.
+pub const BLOQUEIO_COPIA: &str = "copia";
+/// O sistema não informa a identidade deste computador.
+pub const BLOQUEIO_SEM_IDENTIDADE: &str = "sem_identidade";
+/// O banco é de antes da conferência do computador e o gerente ainda não
+/// confirmou que este é o computador de sempre.
+pub const BLOQUEIO_SEM_REGISTRO: &str = "sem_registro";
+
+/// Por que este caixa está sem poder dar códigos nem faixas (None = livre).
+/// Fica gravado no banco: só uma ação explícita do gerente tira o bloqueio
+/// de uma cópia ou de um banco sem registro.
+pub fn bloqueio(conn: &Connection) -> Resultado<Option<String>> {
+    Ok(config::ler(conn, "codigos_bloqueio")?.filter(|b| !b.is_empty()))
+}
+
+/// O texto do bloqueio, para a tela do gerente.
+pub fn texto_do_bloqueio(motivo: &str) -> &'static str {
+    match motivo {
+        BLOQUEIO_COPIA => {
+            "Este banco de dados foi criado em outro computador (foi copiado para cá). Para não repetir códigos, \
+             este caixa não dá códigos de peças, não distribui faixas e não troca dados com os outros caixas até \
+             o gerente registrá-lo como caixa novo."
+        }
+        BLOQUEIO_SEM_IDENTIDADE => {
+            "O Rustinho não conseguiu confirmar em que computador este banco está. Para não repetir códigos, \
+             este caixa não dá códigos de peças até a identidade do computador poder ser lida."
+        }
+        _ => {
+            "Este banco é de antes da conferência do computador. Para não repetir códigos, este caixa não dá \
+             códigos de peças até o gerente confirmar que este é o computador de sempre, ou registrá-lo como caixa novo."
+        }
+    }
+}
+
+/// Este banco é uma cópia de outro computador (e ninguém o registrou ainda).
+pub fn copia_detectada(conn: &Connection) -> Resultado<bool> {
+    Ok(bloqueio(conn)?.as_deref() == Some(BLOQUEIO_COPIA))
+}
+
+fn ordem_do_bloqueio(motivo: &str) -> u8 {
+    match motivo {
+        BLOQUEIO_COPIA => 3,
+        BLOQUEIO_SEM_REGISTRO => 2,
+        _ => 1,
+    }
+}
+
+/// Ao abrir o banco: compara a identidade do computador de agora com a que
+/// o banco guardou. Não olha arquivo nenhum do Rustinho (uma cópia da pasta
+/// dos dados leva todos eles), só a identidade que o sistema dá ao computador.
+/// - igual: nada muda;
+/// - diferente: o banco é uma cópia, bloqueio "copia";
+/// - o sistema não informa a identidade: não dá para confirmar, bloqueio;
+/// - banco sem identidade guardada: se é novo (sem usuários), guarda a de
+///   agora; se já tem usuários (versão antiga), bloqueio até o gerente confirmar.
+pub fn conferir_computador(conn: &Connection, atual: Option<&str>) -> Resultado<()> {
+    let registrado = config::ler(conn, "computador_id")?.filter(|r| !r.is_empty());
+    let motivo = match (registrado.as_deref(), atual) {
+        (Some(r), Some(a)) if r == a => {
+            // A causa de um bloqueio "sem identidade" passou.
+            if bloqueio(conn)?.as_deref() == Some(BLOQUEIO_SEM_IDENTIDADE) {
+                conn.execute("DELETE FROM config WHERE chave = 'codigos_bloqueio'", [])?;
+            }
+            return Ok(());
+        }
+        (Some(_), Some(_)) => BLOQUEIO_COPIA,
+        (_, None) => BLOQUEIO_SEM_IDENTIDADE,
+        (None, Some(a)) => {
+            let tem_usuarios: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM usuario)", [], |l| l.get(0))?;
+            if tem_usuarios {
+                BLOQUEIO_SEM_REGISTRO
+            } else {
+                config::gravar(conn, "computador_id", a)?;
+                return Ok(());
+            }
+        }
+    };
+    let ja = bloqueio(conn)?;
+    if ja.as_deref().map(ordem_do_bloqueio).unwrap_or(0) < ordem_do_bloqueio(motivo) {
+        crate::registro::anotar(&format!("códigos das peças: caixa bloqueado ({motivo})"));
+        config::gravar(conn, "codigos_bloqueio", motivo)?;
+    }
+    Ok(())
+}
+
+pub fn texto_sem_poder_dar(conn: &Connection) -> Resultado<String> {
+    Ok(match bloqueio(conn)? {
+        Some(m) => texto_do_bloqueio(&m).to_string(),
+        None => "Este caixa ainda não tem faixa de códigos (ou ela acabou). Faça a troca de dados com o caixa que \
+                 distribui as faixas."
+            .to_string(),
+    })
+}
+
+/// O gerente confirma que este é o computador de sempre (banco de uma versão
+/// sem a conferência do computador). Só vale para o bloqueio "sem_registro".
+pub fn confirmar_computador(conn: &Connection, atual: Option<&str>) -> Resultado<()> {
+    if bloqueio(conn)?.as_deref() != Some(BLOQUEIO_SEM_REGISTRO) {
+        return Err(Erro::validacao("Este caixa não está esperando essa confirmação."));
+    }
+    let Some(atual) = atual else {
+        return Err(Erro::validacao(texto_do_bloqueio(BLOQUEIO_SEM_IDENTIDADE)));
+    };
+    config::gravar(conn, "computador_id", atual)?;
+    conn.execute("DELETE FROM config WHERE chave = 'codigos_bloqueio'", [])?;
+    crate::registro::anotar("códigos das peças: o gerente confirmou o computador deste caixa");
+    Ok(())
+}
+
+/// O gerente registra este banco como um caixa novo (é uma cópia, ou o
+/// computador não pôde ser confirmado): identificador novo do caixa, geração
+/// de códigos nova e troca de dados do zero com os outros caixas. As faixas
+/// de antes (do caixa de onde veio a cópia) nunca são usadas por este caixa;
+/// ele pede uma faixa nova ao distribuidor. Devolve o identificador novo.
+pub fn registrar_caixa_novo(conn: &Connection, atual: Option<&str>, nome: Option<&str>) -> Resultado<String> {
+    if bloqueio(conn)?.is_none() {
+        return Err(Erro::validacao("Este caixa não precisa ser registrado de novo."));
+    }
+    let Some(atual) = atual else {
+        return Err(Erro::validacao(
+            "Este computador não informa a própria identidade, então não dá para registrá-lo como caixa novo aqui.",
+        ));
+    };
+    let velho = dispositivo(conn)?;
+    let novo = tempo::novo_id();
+    // A troca de dados recomeça do zero com cada caixa (o banco continua
+    // com tudo o que já tinha) e com um identificador de troca novo.
+    let seq: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))?;
+    config::gravar(conn, "dispositivo_id", &novo)?;
+    if let Some(n) = nome.map(str::trim).filter(|n| !n.is_empty()) {
+        config::gravar(conn, "caixa_nome", &n.chars().take(60).collect::<String>())?;
+    }
+    crate::sync::depois_de_restaurar(conn, seq)?;
+    crate::registro::anotar(&format!("códigos das peças: banco registrado como caixa novo (antes {velho})"));
+    // `depois_de_restaurar` marcou o banco como "de antes das faixas" se não
+    // havia distribuidor; aqui o distribuidor continua sendo quem era.
+    nova_geracao(conn, "registrado como caixa novo")?;
+    // Por último (a restauração acima também mexe nisto): a identidade deste
+    // computador fica registrada e o bloqueio sai.
+    config::gravar(conn, "computador_id", atual)?;
+    conn.execute("DELETE FROM config WHERE chave = 'codigos_bloqueio'", [])?;
+    Ok(novo)
+}
+
+// ---------------------------------------------------------------------------
 // Faixas.
 // ---------------------------------------------------------------------------
 
@@ -337,6 +486,9 @@ fn proximo_em(conn: &Connection, f: &Faixa, ultimo: i64) -> Resultado<Option<i64
 /// O código que a próxima peça deste caixa vai receber (só para mostrar;
 /// não reserva nada).
 pub fn previsto(conn: &Connection) -> Resultado<Option<String>> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(None);
+    }
     let u = ultimo(conn, &geracao(conn)?)?;
     for f in minhas_livres(conn)? {
         if let Some(c) = proximo_em(conn, &f, u)? {
@@ -348,6 +500,9 @@ pub fn previsto(conn: &Connection) -> Resultado<Option<String>> {
 
 /// Quantos códigos ainda restam nas faixas deste caixa.
 pub fn restantes(conn: &Connection) -> Resultado<i64> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(0);
+    }
     let u = ultimo(conn, &geracao(conn)?)?;
     let mut total = 0;
     for f in minhas_livres(conn)? {
@@ -360,6 +515,9 @@ pub fn restantes(conn: &Connection) -> Resultado<i64> {
 
 /// Este caixa precisa de mais uma faixa (não tem, ou falta pouco).
 pub fn precisa(conn: &Connection) -> Resultado<bool> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(false);
+    }
     let livres = minhas_livres(conn)?;
     let Some(mais_nova) = livres.iter().max_by_key(|f| f.inicio) else { return Ok(true) };
     Ok(restantes(conn)? < limiar(mais_nova))
@@ -368,6 +526,9 @@ pub fn precisa(conn: &Connection) -> Resultado<bool> {
 /// Dá o próximo código deste caixa e guarda que deu (no banco, na mesma
 /// transação de quem chamou, e no arquivo ao lado). None = sem faixa.
 pub fn gerar(conn: &Connection) -> Resultado<Option<String>> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(None);
+    }
     let g = geracao(conn)?;
     let u = ultimo(conn, &g)?;
     for f in minhas_livres(conn)? {
@@ -384,6 +545,9 @@ pub fn gerar(conn: &Connection) -> Resultado<Option<String>> {
 /// distribuidor sem faixa cria a dele na mesma transação. None = a peça
 /// fica com código a definir.
 pub fn gerar_para_peca(conn: &Connection) -> Resultado<Option<String>> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(None);
+    }
     garantir_distribuidor(conn)?;
     if let Some(c) = gerar(conn)? {
         return Ok(Some(c));
@@ -424,6 +588,9 @@ pub fn comecar_loja(conn: &Connection) -> Resultado<Inventario> {
 /// loja ainda não tem faixa nenhuma, fica com a primeira (de 1 até 99.999,
 /// ou até o fim da faixa do maior código de números que já existe).
 fn comecar_distribuidor(conn: &Connection) -> Resultado<Inventario> {
+    if let Some(m) = bloqueio(conn)? {
+        return Err(Erro::validacao(texto_do_bloqueio(&m)));
+    }
     let inv = inventario(conn)?;
     let eu = dispositivo(conn)?;
     let g = geracao(conn)?;
@@ -452,7 +619,7 @@ fn comecar_distribuidor(conn: &Connection) -> Resultado<Inventario> {
 /// caixas: o que gravou o nome da loja que vale (todos os caixas escolhem o
 /// mesmo, porque olham a mesma versão); só ele se marca. Os outros esperam.
 pub fn garantir_distribuidor(conn: &Connection) -> Resultado<()> {
-    if config::ler(conn, "codigos_legado")?.as_deref() != Some("1") {
+    if config::ler(conn, "codigos_legado")?.as_deref() != Some("1") || bloqueio(conn)?.is_some() {
         return Ok(());
     }
     if distribuidor(conn)?.is_some() {
@@ -487,6 +654,9 @@ pub fn garantir_distribuidor(conn: &Connection) -> Resultado<()> {
 pub fn assumir(conn: &Connection) -> Resultado<()> {
     if sou_distribuidor(conn)? {
         return Ok(());
+    }
+    if let Some(m) = bloqueio(conn)? {
+        return Err(Erro::validacao(texto_do_bloqueio(&m)));
     }
     config::gravar(conn, "codigos_distribuidor", &dispositivo(conn)?)?;
     config::gravar(conn, "codigos_salto", "1")?;
@@ -547,6 +717,9 @@ pub fn distribuir_dentro(
     nome_dono: &str,
     tenho: &[i64],
 ) -> Resultado<Vec<i64>> {
+    if let Some(m) = bloqueio(conn)? {
+        return Err(Erro::validacao(texto_do_bloqueio(&m)));
+    }
     if !sou_distribuidor(conn)? {
         return Err(Erro::validacao("Este caixa não distribui as faixas de códigos."));
     }
@@ -619,12 +792,20 @@ pub fn manter(conn: &mut Connection) -> Resultado<usize> {
         }
         tx.commit()?;
     }
+    if tem_esperando(conn)? && posso_confirmar(conn)? {
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        confirmar_esperando(&tx)?;
+        tx.commit()?;
+    }
     atribuir_pendentes(conn)
 }
 
 /// As peças deste caixa que estão com código a definir recebem código da
 /// faixa (as dos outros caixas, eles mesmos dão).
 pub fn atribuir_pendentes(conn: &mut Connection) -> Resultado<usize> {
+    if bloqueio(conn)?.is_some() {
+        return Ok(0);
+    }
     let eu = dispositivo(conn)?;
     let ids: Vec<String> = conn
         .prepare_cached(
@@ -658,9 +839,7 @@ pub fn definir_todos_pendentes(conn: &Connection) -> Resultado<usize> {
     let mut n = 0;
     for id in ids {
         let Some(c) = gerar_para_peca(conn)? else {
-            return Err(Erro::validacao(
-                "Este caixa ainda não tem faixa de códigos (ou ela acabou). Faça a troca de dados com o caixa que distribui as faixas.",
-            ));
+            return Err(Erro::validacao(texto_sem_poder_dar(conn)?));
         };
         if crate::produtos::definir_codigo(conn, &eu, &id, &c)? {
             n += 1;
@@ -671,9 +850,12 @@ pub fn definir_todos_pendentes(conn: &Connection) -> Resultado<usize> {
 
 /// Ao abrir o banco: confere o arquivo, escolhe o distribuidor (loja de
 /// antes das faixas) e faz a manutenção.
-pub fn preparar(conn: &mut Connection) -> Resultado<()> {
+pub fn preparar(conn: &mut Connection, computador: Option<&str>) -> Resultado<()> {
     // Nada disto impede o banco de abrir: o que falhar fica no registro e a
     // manutenção roda de novo a cada poucos segundos.
+    if let Err(e) = conferir_computador(conn, computador) {
+        crate::registro::anotar(&format!("códigos das peças: identidade do computador: {e}"));
+    }
     if let Err(e) = conferir_arquivo(conn) {
         crate::registro::anotar(&format!("códigos das peças: arquivo ao lado do banco: {e}"));
     }
@@ -688,6 +870,14 @@ pub fn preparar(conn: &mut Connection) -> Resultado<()> {
 /// faixas: a loja escolhe o distribuidor de novo.
 pub fn depois_de_restaurar(conn: &Connection) -> Resultado<()> {
     nova_geracao(conn, "backup restaurado")?;
+    // O banco restaurado pode ser de outro computador (backup de um caixa
+    // que quebrou): quem restaura é o gerente, e a geração nova já impede o
+    // uso da faixa de antes; este computador passa a ser o do banco.
+    conn.execute("DELETE FROM config WHERE chave IN ('codigos_bloqueio', 'computador_id')", [])?;
+    match crate::computador::atual() {
+        Some(a) => config::gravar(conn, "computador_id", &a)?,
+        None => config::gravar(conn, "codigos_bloqueio", BLOQUEIO_SEM_IDENTIDADE)?,
+    }
     let tem_usuarios: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM usuario)", [], |l| l.get(0))?;
     if distribuidor(conn)?.is_none() && tem_usuarios {
         config::gravar(conn, "codigos_legado", "1")?;
@@ -716,6 +906,9 @@ pub fn conferir_digitado(conn: &Connection, produto_id: &str, codigo: &str) -> R
         return Err(Erro::campo("codigo", format!("O código {codigo} já foi da peça \"{outro}\". Use outro código.")));
     }
     let Some(n) = numero(codigo) else { return Ok(()) };
+    if let Some(m) = bloqueio(conn)? {
+        return Err(Erro::campo("codigo", format!("{} Use um código com letras (ex.: A-123).", texto_do_bloqueio(&m))));
+    }
     let (eu, g) = (dispositivo(conn)?, geracao(conn)?);
     let todas = faixas(conn)?;
     let com_ele: Vec<&Faixa> = todas.iter().filter(|f| f.contem(n)).collect();
@@ -737,6 +930,119 @@ pub fn conferir_digitado(conn: &Connection, produto_id: &str, codigo: &str) -> R
         ));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Confirmação dos códigos que não são de números (letras, traço, zero na frente).
+// ---------------------------------------------------------------------------
+//
+// Um código de números sai da faixa do caixa e, por isso, nunca se repete.
+// Um código com letras escrito à mão não tem essa garantia: dois caixas sem
+// rede podem escolher o mesmo. Por isso ele só vale depois de confirmado pelo
+// caixa que distribui as faixas (o único que decide, numa gravação só):
+// - o distribuidor confirma na hora, se ninguém mais tem o código;
+// - os outros caixas deixam a peça "esperando" (`produto.codigo_validado = 0`);
+//   quando a peça chega ao distribuidor pela troca de dados, ele confirma (se
+//   o código é livre) ou deixa esperando (se já é de outra peça: conflito,
+//   que o gerente vê). Nada é renumerado nem trocado sozinho;
+// - esperando: a peça vende e é achada pelo nome, mas a etiqueta não sai e o
+//   leitor não acha a peça por esse código;
+// - os códigos que já existiam antes desta versão valem como confirmados.
+
+/// Este código precisa de confirmação (não é de números).
+pub fn exige_confirmacao(codigo: &str) -> bool {
+    !codigo.is_empty() && numero(codigo).is_none()
+}
+
+/// Este caixa pode confirmar códigos: é o distribuidor e não está bloqueado.
+pub fn posso_confirmar(conn: &Connection) -> Resultado<bool> {
+    Ok(bloqueio(conn)?.is_none() && sou_distribuidor(conn)?)
+}
+
+/// Nenhuma outra peça tem este código confirmado (nem o teve: código antigo).
+fn codigo_livre(conn: &Connection, produto_id: &str, codigo: &str) -> Resultado<bool> {
+    let ocupado: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM produto WHERE codigo = ?1 AND id <> ?2 AND codigo_validado = 1)
+             OR EXISTS (SELECT 1 FROM produto_codigo_antigo WHERE codigo = ?1 AND produto_id <> ?2)",
+        params![codigo, produto_id],
+        |l| l.get(0),
+    )?;
+    Ok(!ocupado)
+}
+
+/// O valor de `produto.codigo_validado` para uma peça que está sendo salva
+/// com este código (código novo ou trocado): 1 = vale, 0 = espera a
+/// confirmação do distribuidor.
+pub fn confirmado_ao_salvar(conn: &Connection, produto_id: &str, codigo: &str) -> Resultado<i64> {
+    if !exige_confirmacao(codigo) {
+        return Ok(1);
+    }
+    Ok((posso_confirmar(conn)? && codigo_livre(conn, produto_id, codigo)?) as i64)
+}
+
+/// Confirma (no distribuidor, dentro de uma transação de escrita) os códigos
+/// que estão esperando e são livres, na ordem em que as peças foram criadas:
+/// se duas peças esperam o mesmo código, a mais antiga fica com ele e a outra
+/// continua esperando, em conflito. Devolve quantos foram confirmados.
+pub fn confirmar_esperando(conn: &Connection) -> Resultado<usize> {
+    if !posso_confirmar(conn)? {
+        return Ok(0);
+    }
+    let esperando: Vec<(String, String)> = conn
+        .prepare_cached(
+            "SELECT id, codigo FROM produto WHERE codigo_validado = 0 AND codigo <> '' ORDER BY criado_em, id LIMIT 2000",
+        )?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut n = 0;
+    for (id, codigo) in esperando {
+        if !exige_confirmacao(&codigo) || codigo_livre(conn, &id, &codigo)? {
+            // Só o valor da coluna muda (a peça em si não é alterada).
+            conn.execute("UPDATE produto SET codigo_validado = 1 WHERE id = ?1 AND codigo_validado = 0", [&id])?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+fn tem_esperando(conn: &Connection) -> Resultado<bool> {
+    Ok(conn.query_row("SELECT EXISTS (SELECT 1 FROM produto WHERE codigo_validado = 0 AND codigo <> '')", [], |l| {
+        l.get(0)
+    })?)
+}
+
+/// A peça espera a confirmação do código.
+pub fn esperando_confirmacao(conn: &Connection, produto_id: &str) -> Resultado<bool> {
+    Ok(conn
+        .query_row("SELECT codigo_validado = 0 AND codigo <> '' FROM produto WHERE id = ?1", [produto_id], |l| {
+            l.get::<_, bool>(0)
+        })
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// As peças que esperam a confirmação do código, para o gerente: com o
+/// conflito (outra peça com o mesmo código) quando há.
+pub fn esperando(conn: &Connection) -> Resultado<Vec<Value>> {
+    let mut c = conn.prepare(
+        "SELECT p.id, p.nome, p.codigo, p.dispositivo,
+                (SELECT o.nome FROM produto o WHERE o.codigo = p.codigo AND o.id <> p.id
+                  ORDER BY o.codigo_validado DESC, o.criado_em, o.id LIMIT 1)
+           FROM produto p WHERE p.codigo_validado = 0 AND p.codigo <> ''
+          ORDER BY p.criado_em, p.id LIMIT 200",
+    )?;
+    let linhas: Vec<(String, String, String, String, Option<String>)> =
+        c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?.collect::<Result<_, _>>()?;
+    let mut r = Vec::new();
+    for (id, nome, codigo, disp, outra) in linhas {
+        r.push(json!({
+            "id": id, "nome": nome, "codigo": codigo,
+            "caixa": crate::sync::nome_do_caixa(conn, &disp)?,
+            "conflito": outra.is_some(),
+            "outraPeca": outra.unwrap_or_default(),
+        }));
+    }
+    Ok(r)
 }
 
 // ---------------------------------------------------------------------------
@@ -950,6 +1256,12 @@ pub fn problema_da_peca(conn: &Connection, produto_id: &str) -> Resultado<Option
     )? {
         return Ok(Some(format!("O código {codigo} já foi da peça \"{n}\" (etiquetas antigas).")));
     }
+    if esperando_confirmacao(conn, produto_id)? {
+        return Ok(Some(format!(
+            "O código {codigo} ainda não foi confirmado pelo caixa que distribui as faixas. Enquanto isso a peça vende \
+             e é achada pelo nome, mas a etiqueta não sai e o leitor não a acha por este código."
+        )));
+    }
     if !barras.is_empty() {
         if let Some(n) = outra("SELECT nome FROM produto WHERE codigo_barras = ?1 AND id <> ?2 LIMIT 1", &barras)? {
             return Ok(Some(format!("O código de barras {barras} também é da peça \"{n}\".")));
@@ -994,7 +1306,20 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
         })?;
     let inventario: Option<Inventario> =
         config::ler(conn, "codigos_inventario")?.and_then(|t| serde_json::from_str(&t).ok());
+    let bloqueio_json = match bloqueio(conn)? {
+        Some(m) => {
+            let tem_identidade = crate::computador::atual().is_some();
+            json!({
+                "motivo": m,
+                "texto": texto_do_bloqueio(&m),
+                "podeConfirmar": m == BLOQUEIO_SEM_REGISTRO && tem_identidade,
+                "podeRegistrar": tem_identidade,
+            })
+        }
+        None => Value::Null,
+    };
     Ok(json!({
+        "bloqueio": bloqueio_json,
         "distribuidor": match &dist {
             Some(d) => json!({ "nome": crate::sync::nome_do_caixa(conn, d)?, "esteCaixa": *d == eu }),
             None => Value::Null,
@@ -1005,6 +1330,7 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
         "cruzadas": cruzam,
         "pendentes": pendentes,
         "pendentesDeste": deste,
+        "esperando": esperando(conn)?,
         "repetidos": repetidos(conn)?,
         "inventario": inventario,
         "agora": self::inventario(conn)?,
@@ -1393,6 +1719,10 @@ mod testes {
         }
         // O gerente resolve trocando o código de uma (controlado, à mão):
         // o código antigo fica guardado e o leitor continua perguntando.
+        // (Duas lojas juntadas: a configuração da outra loja trocou quem
+        // distribui; o gerente escolhe este caixa, que confirma os códigos
+        // com letras.)
+        assumir(&a.conn).unwrap();
         let mut f = produtos::ficha(&a.conn, &q).unwrap();
         f.codigo = "PF-1".into();
         produtos::salvar(&a.conn, &a.dispositivo, &ua, &f).unwrap();
@@ -1479,6 +1809,13 @@ mod testes {
             }
         }
         let mut a = Banco::abrir(&caminho).unwrap();
+        // Banco de antes da conferência do computador: nenhum código novo, e
+        // a primeira faixa só sai depois de o gerente confirmar o computador.
+        assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_SEM_REGISTRO));
+        assert_eq!(gerar_para_peca(&a.conn).unwrap(), None);
+        assert!(config::ler(&a.conn, "codigos_inventario").unwrap().is_none());
+        confirmar_computador(&a.conn, crate::computador::atual().as_deref()).unwrap();
+        manter(&mut a.conn).unwrap();
         // Conferiu antes de dar a primeira faixa.
         let inv: Inventario =
             serde_json::from_str(&config::ler(&a.conn, "codigos_inventario").unwrap().unwrap()).unwrap();
@@ -1511,6 +1848,12 @@ mod testes {
         let esperado: Vec<(String, String)> = antes.iter().map(|(i, c)| (i.to_string(), c.to_string())).collect();
         assert_eq!(ver(&a), esperado);
         assert_eq!(repetidos(&a.conn).unwrap().len(), 1);
+        // Os códigos com letras (e os outros) de antes valem como confirmados.
+        let esperando_n: i64 =
+            a.conn.query_row("SELECT COUNT(*) FROM produto WHERE codigo_validado = 0", [], |l| l.get(0)).unwrap();
+        assert_eq!(esperando_n, 0);
+        assert_eq!(busca::pelo_codigo_exato(&a.conn, "A-12").unwrap().len(), 1);
+        assert!(etiquetas::etiqueta(&a.conn, "p4").unwrap().bloqueio.is_empty());
         // A próxima peça vai depois do maior código da faixa.
         let u = "u1";
         let nova = peca(&a, u, "Nova");
@@ -1642,5 +1985,550 @@ mod testes {
         assert!(erro_do_codigo(peca_com(&b, &u, "À mão", "150500")).contains("de 150000 a 249999"));
         let p = peca(&b, &u, "Depois de cruzar");
         assert_ne!(codigo(&b, &p), "100001");
+    }
+
+    // -----------------------------------------------------------------------
+    // Cópia do banco para outro computador (identidade do computador).
+    // -----------------------------------------------------------------------
+
+    fn copiar_pasta(de: &std::path::Path, para: &std::path::Path) {
+        std::fs::create_dir_all(para).unwrap();
+        for e in std::fs::read_dir(de).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_file() {
+                std::fs::copy(e.path(), para.join(e.file_name())).unwrap();
+            }
+        }
+    }
+
+    fn esvaziar_pasta(p: &std::path::Path) {
+        for e in std::fs::read_dir(p).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_file() {
+                std::fs::remove_file(e.path()).unwrap();
+            }
+        }
+    }
+
+    fn pasta_de(caminho: &std::path::Path) -> PathBuf {
+        caminho.parent().unwrap().to_path_buf()
+    }
+
+    fn eu_pc(nome: &str) -> String {
+        crate::computador::impressao(nome)
+    }
+
+    /// g) O banco e o arquivo `rustinho.db.codigos` são copiados para outro
+    /// computador e ficam no mesmo caminho, com o mesmo identificador de
+    /// caixa e a mesma geração de códigos. Só a identidade do computador
+    /// mostra que é uma cópia: o caixa copiado não dá código nenhum (as
+    /// peças ficam com código a definir), não distribui faixa, não aceita
+    /// código só de números nem troca dados, e continua assim depois de
+    /// fechar e abrir.
+    #[test]
+    fn g_banco_copiado_com_o_arquivo_dos_codigos_para_outro_computador_nao_da_codigo() {
+        let caminho = temp("copia-integral");
+        let pasta = pasta_de(&caminho);
+        let (u, g_a, d_a);
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            u = configurar(&a, "Caixa A", 0);
+            let p1 = peca(&a, &u, "Filtro");
+            assert_eq!(codigo(&a, &p1), "1");
+            assert_eq!(bloqueio(&a.conn).unwrap(), None);
+            g_a = geracao(&a.conn).unwrap();
+            d_a = a.dispositivo.clone();
+        }
+        assert!(std::path::Path::new(&format!("{}.codigos", caminho.display())).exists());
+        // A pasta inteira vai para o outro computador.
+        let levada = pasta_de(&temp("copia-integral-levada"));
+        copiar_pasta(&pasta, &levada);
+
+        // O caixa de sempre continua a dar códigos (o outro computador não vê).
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap(), None);
+            assert_eq!(geracao(&a.conn).unwrap(), g_a);
+            let p2 = peca(&a, &u, "Vela");
+            assert_eq!(codigo(&a, &p2), "2");
+        }
+
+        // No outro computador, a cópia está no mesmo caminho.
+        esvaziar_pasta(&pasta);
+        copiar_pasta(&levada, &pasta);
+        let b = Banco::abrir_em(&caminho, Some("pc-b")).unwrap();
+        assert_eq!(b.dispositivo, d_a, "a cópia tem o mesmo identificador de caixa");
+        assert_eq!(geracao(&b.conn).unwrap(), g_a, "e a mesma geração de códigos (o arquivo ao lado bate)");
+        assert_eq!(bloqueio(&b.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        assert!(copia_detectada(&b.conn).unwrap());
+        // Nada de código: nem da faixa que a cópia herdou. E nenhuma faixa
+        // nova é criada para si enquanto bloqueado.
+        let faixas_antes = faixas(&b.conn).unwrap().len();
+        assert_eq!(gerar(&b.conn).unwrap(), None);
+        assert_eq!(gerar_para_peca(&b.conn).unwrap(), None);
+        assert_eq!(previsto(&b.conn).unwrap(), None);
+        assert_eq!(restantes(&b.conn).unwrap(), 0);
+        assert!(!precisa(&b.conn).unwrap(), "não pede faixa");
+        let nova = peca(&b, &u, "Correia");
+        assert_eq!(codigo(&b, &nova), "", "fica com código a definir");
+        let mut b = b;
+        assert_eq!(manter(&mut b.conn).unwrap(), 0);
+        assert_eq!(codigo(&b, &nova), "");
+        assert_eq!(faixas(&b.conn).unwrap().len(), faixas_antes, "bloqueado não cria faixa");
+        // Código só de números, nem o que seria o próximo da faixa herdada.
+        let erro = erro_do_codigo(peca_com(&b, &u, "À mão", "2"));
+        assert!(erro.contains("criado em outro computador"), "{erro}");
+        // Não distribui faixa (esta cópia era o distribuidor).
+        assert!(sou_distribuidor(&b.conn).unwrap());
+        let r = distribuir_dentro(&b.conn, "outro-caixa", "g", "Caixa X", &[]);
+        assert!(matches!(r, Err(Erro::Validacao { .. })), "{r:?}");
+        let r = assumir(&b.conn);
+        assert!(r.is_ok(), "já era o distribuidor");
+        // A ficha da peça nova explica.
+        let ficha = produtos::ficha_nova(&b.conn).unwrap();
+        assert!(ficha.codigo_aviso.contains("outro computador"), "{}", ficha.codigo_aviso);
+        // O gerente vê o bloqueio.
+        let sit = situacao(&b.conn).unwrap();
+        assert_eq!(sit["bloqueio"]["motivo"], "copia");
+        assert_eq!(sit["bloqueio"]["podeRegistrar"], true);
+        assert_eq!(sit["bloqueio"]["podeConfirmar"], false);
+        // Não troca dados: a troca de dados recusa antes de abrir a rede.
+        let r = crate::sync::puxar(&caminho, "127.0.0.1:9", 0);
+        assert!(matches!(r, Err(Erro::Validacao { .. })), "{r:?}");
+        // Fechou e abriu de novo: continua bloqueado (fica gravado).
+        drop(b);
+        let b = Banco::abrir_em(&caminho, Some("pc-b")).unwrap();
+        assert_eq!(bloqueio(&b.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        assert_eq!(gerar_para_peca(&b.conn).unwrap(), None);
+    }
+
+    /// g) Identidade diferente, ausente ou nunca registrada: o caixa não dá
+    /// código; só o registro explícito libera (e só se o computador sabe
+    /// dizer quem é). Voltar ao computador de origem não desfaz sozinho o
+    /// bloqueio de uma cópia.
+    #[test]
+    fn g_identidade_divergente_ou_nao_confirmada_bloqueia_e_so_o_registro_libera() {
+        let caminho = temp("identidade");
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            configurar(&a, "Caixa A", 0);
+            assert_eq!(config::ler(&a.conn, "computador_id").unwrap(), Some(eu_pc("pc-a")));
+            // Só a impressão digital fica no banco, nunca o identificador.
+            assert!(!config::ler(&a.conn, "computador_id").unwrap().unwrap().contains("pc-a"));
+        }
+        // O sistema não informa a identidade: não dá para confirmar.
+        {
+            let a = Banco::abrir_em(&caminho, None).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_SEM_IDENTIDADE));
+            assert_eq!(gerar_para_peca(&a.conn).unwrap(), None);
+            assert!(registrar_caixa_novo(&a.conn, None, None).is_err());
+            assert!(confirmar_computador(&a.conn, None).is_err());
+            // Sem identidade a troca de dados não é recusada (não há prova de cópia).
+            assert!(!copia_detectada(&a.conn).unwrap());
+        }
+        // O computador de sempre voltou a informar: o bloqueio por falta de
+        // identidade passa sozinho.
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap(), None);
+            assert!(gerar_para_peca(&a.conn).unwrap().is_some());
+            // Sem bloqueio, não há o que registrar.
+            assert!(registrar_caixa_novo(&a.conn, Some(&eu_pc("pc-a")), None).is_err());
+        }
+        // Outro computador: cópia. Sem identidade depois, continua cópia.
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-b")).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        }
+        {
+            let a = Banco::abrir_em(&caminho, None).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        }
+        // O banco voltar ao computador de origem não libera sozinho.
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+            assert_eq!(gerar_para_peca(&a.conn).unwrap(), None);
+            // "Confirmar o computador de sempre" é só para banco sem registro:
+            // uma cópia só se libera registrando como caixa novo.
+            assert!(confirmar_computador(&a.conn, Some(&eu_pc("pc-a"))).is_err());
+            assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        }
+    }
+
+    /// g) O caixa copiado é registrado como caixa novo: identificador e
+    /// geração novos, sem faixa; pede uma ao distribuidor e nunca repete um
+    /// código do caixa de onde veio a cópia (que continua a dar os dele).
+    #[test]
+    fn g_caixa_registrado_como_novo_recebe_faixa_nova_e_nao_repete_codigos_do_original() {
+        let caminho = temp("registrar-novo");
+        let pasta = pasta_de(&caminho);
+        let u;
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            u = configurar(&a, "Caixa A", 10);
+            for n in ["Filtro", "Vela", "Correia"] {
+                peca(&a, &u, n);
+            }
+        }
+        let levada = pasta_de(&temp("registrar-novo-levada"));
+        copiar_pasta(&pasta, &levada);
+        // O caixa A segue: mais duas peças.
+        {
+            let a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+            peca(&a, &u, "Pastilha");
+            peca(&a, &u, "Disco");
+            assert_eq!(todas(&a).iter().filter(|(_, c)| !c.is_empty()).count(), 5);
+        }
+        let a_final = pasta_de(&temp("registrar-novo-a"));
+        copiar_pasta(&pasta, &a_final);
+
+        // A cópia, no mesmo caminho, no outro computador.
+        esvaziar_pasta(&pasta);
+        copiar_pasta(&levada, &pasta);
+        let (novo, g_antes, d_a);
+        {
+            let b = Banco::abrir_em(&caminho, Some("pc-b")).unwrap();
+            d_a = b.dispositivo.clone();
+            g_antes = geracao(&b.conn).unwrap();
+            assert_eq!(bloqueio(&b.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+            novo = registrar_caixa_novo(&b.conn, Some(&eu_pc("pc-b")), Some("Caixa B")).unwrap();
+            assert_ne!(novo, d_a);
+            assert_eq!(config::ler(&b.conn, "dispositivo_id").unwrap().as_deref(), Some(novo.as_str()));
+            assert_eq!(config::ler(&b.conn, "caixa_nome").unwrap().as_deref(), Some("Caixa B"));
+            assert_eq!(config::ler(&b.conn, "computador_id").unwrap(), Some(eu_pc("pc-b")));
+            assert_ne!(geracao(&b.conn).unwrap(), g_antes);
+            assert_eq!(bloqueio(&b.conn).unwrap(), None);
+            // A faixa de antes (do caixa de onde veio a cópia) não é dele.
+            assert!(minhas(&b).is_empty());
+            assert!(!sou_distribuidor(&b.conn).unwrap());
+            assert_eq!(distribuidor(&b.conn).unwrap().as_deref(), Some(d_a.as_str()));
+            assert_eq!(gerar_para_peca(&b.conn).unwrap(), None);
+            // Troca de dados do zero com todos os caixas.
+            let cursores: i64 =
+                b.conn.query_row("SELECT COALESCE(SUM(cursor), 0) FROM sync_par", [], |l| l.get(0)).unwrap();
+            assert_eq!(cursores, 0);
+        }
+        // Do outro computador, B continua de onde está (outro caminho: tanto faz).
+        let caminho_b = temp("registrar-novo-b");
+        copiar_pasta(&pasta, &pasta_de(&caminho_b));
+        // O banco de B é o rustinho.db da pasta; o nome do arquivo é o mesmo.
+        let mut b = Banco::abrir_em(&caminho_b, Some("pc-b")).unwrap();
+        assert_eq!(b.dispositivo, novo);
+        assert_eq!(bloqueio(&b.conn).unwrap(), None);
+        // O caixa A (onde o original continuou) volta a abrir.
+        esvaziar_pasta(&pasta);
+        copiar_pasta(&a_final, &pasta);
+        let mut a = Banco::abrir_em(&caminho, Some("pc-a")).unwrap();
+        assert_eq!(a.dispositivo, d_a);
+        assert!(sou_distribuidor(&a.conn).unwrap());
+
+        // B cadastra uma peça antes de ter faixa: código a definir.
+        let sem = peca(&b, &u, "Junta");
+        assert_eq!(codigo(&b, &sem), "");
+        // B pede a faixa nova; A segue dando os códigos dele.
+        pedir_faixa(&mut b, &mut a);
+        let minhas_b = minhas(&b);
+        assert_eq!(minhas_b.len(), 1);
+        let depois_a = peca(&a, &u, "Amortecedor");
+        let cod_b = codigo(&b, &sem);
+        assert!(!cod_b.is_empty(), "recebeu código da faixa nova");
+        let n_b: i64 = cod_b.parse().unwrap();
+        assert!(n_b >= minhas_b[0].0 && n_b <= minhas_b[0].1);
+        // Nenhum código de B está na faixa de A, onde A deu os códigos 1 a 5 e deu mais um.
+        let n_a: i64 = codigo(&a, &depois_a).parse().unwrap();
+        assert!(!(minhas_b[0].0..=minhas_b[0].1).contains(&n_a));
+        assert!(n_b > 5, "não repete os códigos que o original deu depois da cópia");
+        trocar(&mut a, &mut b);
+        assert!(codigos_repetidos(&a).is_empty());
+        assert!(codigos_repetidos(&b).is_empty());
+        assert_eq!(todas(&a), todas(&b));
+        assert!(cruzadas(&a.conn).unwrap().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Códigos com letras: só valem depois de confirmados pelo distribuidor.
+    // -----------------------------------------------------------------------
+
+    fn confirmado(b: &Banco, id: &str) -> bool {
+        b.conn.query_row("SELECT codigo_validado FROM produto WHERE id = ?1", [id], |l| l.get::<_, i64>(0)).unwrap()
+            == 1
+    }
+
+    fn vender(b: &Banco, u: &str, ids: &[&str]) -> String {
+        crate::caixa::abrir(&b.conn, &b.dispositivo, u, "Caixa", "0").ok();
+        let e = crate::vendas::VendaEntrada {
+            itens: ids
+                .iter()
+                .map(|id| crate::vendas::ItemEntrada {
+                    produto_id: id.to_string(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                })
+                .collect(),
+            tabela: 1,
+            pagamentos: vec![crate::vendas::PagamentoEntrada {
+                forma: "dinheiro".into(),
+                valor: "100".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        crate::vendas::concluir(&b.conn, &b.dispositivo, u, &e).unwrap()
+    }
+
+    /// h) Loja de um caixa só: o caixa que distribui é a única autoridade e
+    /// o código com letras vale na hora (leitor, etiqueta). Os códigos que
+    /// já existiam continuam valendo quando um segundo caixa entra.
+    #[test]
+    fn h_loja_de_um_caixa_so_confirma_na_hora_e_o_segundo_caixa_recebe_os_codigos_validos() {
+        let (mut a, ua) = loja("Caixa A");
+        let p = peca_com(&a, &ua, "Filtro", "AB-1").unwrap();
+        assert!(confirmado(&a, &p));
+        assert_eq!(busca::pelo_codigo_exato(&a.conn, "AB-1").unwrap().len(), 1);
+        assert!(etiquetas::etiqueta(&a.conn, &p).unwrap().bloqueio.is_empty());
+        assert!(esperando(&a.conn).unwrap().is_empty());
+        // Código de números da faixa: sempre valeu.
+        let n = peca(&a, &ua, "Vela");
+        assert!(confirmado(&a, &n));
+        // Um segundo caixa entra: recebe a loja e os códigos continuam válidos.
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        assert!(confirmado(&b, &p));
+        assert_eq!(busca::pelo_codigo_exato(&b.conn, "AB-1").unwrap().len(), 1);
+        assert!(etiquetas::etiqueta(&b.conn, &p).unwrap().bloqueio.is_empty());
+        assert_eq!(para_ver(&b.conn).unwrap(), 0);
+    }
+
+    /// h) Um caixa que não distribui deixa o código com letras esperando.
+    /// Enquanto espera: vende e acha pelo nome, mas não sai etiqueta e o
+    /// leitor não acha a peça por esse código. Quando a peça chega ao
+    /// distribuidor, ele confirma (só a coluna muda) e a confirmação volta.
+    #[test]
+    fn h_codigo_com_letras_espera_a_confirmacao_do_distribuidor() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        let p = peca_com(&b, &ua, "Correia dentada", "CD-2").unwrap();
+        assert_eq!(codigo(&b, &p), "CD-2", "o código não é trocado");
+        assert!(!confirmado(&b, &p));
+        // Leitor: não acha por esse código, e a venda avisa que espera.
+        assert!(busca::pelo_codigo_exato(&b.conn, "CD-2").unwrap().is_empty());
+        assert_eq!(busca::esperando_pelo_codigo(&b.conn, "cd 2").unwrap(), 1);
+        // Pelo nome acha; pelo texto do código lista, mas nunca como "exata".
+        assert_eq!(busca::buscar(&b.conn, "correia", false, 10).unwrap().len(), 1);
+        let lista = busca::buscar(&b.conn, "CD-2", false, 10).unwrap();
+        assert!(lista.iter().all(|x| !x.codigo_exato));
+        // Etiqueta não sai (nem pela impressão direta).
+        let e = etiquetas::etiqueta(&b.conn, &p).unwrap();
+        assert!(e.bloqueio.contains("ainda não foi confirmado"), "{}", e.bloqueio);
+        let pedido = etiquetas::Pedido {
+            itens: vec![etiquetas::Item { produto_id: p.clone(), quantidade: 1 }],
+            modelo: String::new(),
+            inicio: 1,
+            barras: true,
+            loja: false,
+            ajuste_x: 0,
+            ajuste_y: 0,
+        };
+        assert!(etiquetas::montar(&b.conn, &pedido).is_err());
+        assert!(produtos::ficha(&b.conn, &p).unwrap().codigo_aviso.contains("ainda não foi confirmado"));
+        // Vende normalmente.
+        let venda = vender(&b, &ua, &[&p]);
+        let guardado: String =
+            b.conn.query_row("SELECT codigo FROM venda_item WHERE venda_id = ?1", [&venda], |l| l.get(0)).unwrap();
+        assert_eq!(guardado, "CD-2");
+        // O gerente vê a peça esperando, sem conflito.
+        let sit = situacao(&b.conn).unwrap();
+        assert_eq!(sit["esperando"].as_array().unwrap().len(), 1);
+        assert_eq!(sit["esperando"][0]["conflito"], false);
+        assert_eq!(para_ver(&b.conn).unwrap(), 0);
+
+        // A peça chega ao distribuidor: ele confirma, sem mexer na peça.
+        receber(&mut a, &b);
+        let atualizado_antes: String =
+            a.conn.query_row("SELECT atualizado_em FROM produto WHERE id = ?1", [&p], |l| l.get(0)).unwrap();
+        manter(&mut a.conn).unwrap();
+        assert!(confirmado(&a, &p));
+        let atualizado_depois: String =
+            a.conn.query_row("SELECT atualizado_em FROM produto WHERE id = ?1", [&p], |l| l.get(0)).unwrap();
+        assert_eq!(atualizado_antes, atualizado_depois);
+        assert_eq!(codigo(&a, &p), "CD-2");
+        // A confirmação volta ao caixa B pela troca de dados.
+        assert!(!confirmado(&b, &p));
+        receber(&mut b, &a);
+        assert!(confirmado(&b, &p));
+        assert_eq!(busca::pelo_codigo_exato(&b.conn, "CD-2").unwrap().len(), 1);
+        assert!(etiquetas::etiqueta(&b.conn, &p).unwrap().bloqueio.is_empty());
+        assert!(situacao(&b.conn).unwrap()["esperando"].as_array().unwrap().is_empty());
+    }
+
+    /// h) Dois caixas sem rede cadastram o mesmo código com letras: só um
+    /// confirma (o distribuidor decide, numa gravação só); o outro continua
+    /// esperando, com o conflito visível ao gerente. Nenhum código é trocado
+    /// sozinho. O gerente resolve dando um código novo à que esperava, e o
+    /// código que ela nunca teve confirmado não fica guardado como antigo.
+    #[test]
+    fn h_dois_caixas_offline_com_o_mesmo_codigo_so_um_confirma() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        // Sem rede: B e C cadastram peças diferentes com o mesmo código.
+        let pb = peca_com(&b, &ua, "Vela de ignição", "AB-7").unwrap();
+        let pc = peca_com(&c, &ua, "Bomba de combustível", "AB-7").unwrap();
+        assert!(!confirmado(&b, &pb) && !confirmado(&c, &pc));
+        // Também o próprio distribuidor, sem saber, cadastra outra com ele.
+        // (Tem de ser antes de receber as deles: depois, o cadastro recusaria.)
+        let pa = peca_com(&a, &ua, "Palheta", "AB-7").unwrap();
+        assert!(confirmado(&a, &pa), "o distribuidor confirma na hora");
+        // A troca de dados junta tudo.
+        receber(&mut a, &b);
+        receber(&mut a, &c);
+        manter(&mut a.conn).unwrap();
+        // Só a do distribuidor tem o código confirmado.
+        assert!(confirmado(&a, &pa));
+        assert!(!confirmado(&a, &pb) && !confirmado(&a, &pc));
+        receber(&mut b, &a);
+        receber(&mut c, &a);
+        receber(&mut b, &c);
+        receber(&mut c, &b);
+        for banco in [&a, &b, &c] {
+            // Nenhum código foi trocado.
+            assert_eq!(codigo(banco, &pa), "AB-7");
+            assert_eq!(codigo(banco, &pb), "AB-7");
+            assert_eq!(codigo(banco, &pc), "AB-7");
+            // O leitor acha só a confirmada.
+            let achou = busca::pelo_codigo_exato(&banco.conn, "AB-7").unwrap();
+            assert_eq!(achou.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), vec![pa.as_str()]);
+            // As duas que esperam não têm etiqueta, e dizem por quê.
+            for id in [&pb, &pc] {
+                let bloqueio = etiquetas::etiqueta(&banco.conn, id).unwrap().bloqueio;
+                assert!(bloqueio.contains("também é da peça"), "{bloqueio}");
+            }
+            assert!(etiquetas::etiqueta(&banco.conn, &pa).unwrap().bloqueio.contains("também é da peça"));
+            // O gerente vê o conflito.
+            let sit = situacao(&banco.conn).unwrap();
+            let esp = sit["esperando"].as_array().unwrap();
+            assert_eq!(esp.len(), 2);
+            assert!(esp.iter().all(|e| e["conflito"] == true && e["outraPeca"] == "Palheta"));
+            assert!(para_ver(&banco.conn).unwrap() >= 1);
+            assert_eq!(repetidos(&banco.conn).unwrap().len(), 1);
+        }
+        // Vende normalmente enquanto espera.
+        vender(&b, &ua, &[&pb]);
+
+        // O gerente, no distribuidor, resolve as duas que esperavam.
+        for id in [&pb, &pc] {
+            let novo = produtos::trocar_codigo(&a.conn, &a.dispositivo, &ua, id).unwrap();
+            assert!(numero(&novo).is_some());
+        }
+        let antigos: i64 = a.conn.query_row("SELECT COUNT(*) FROM produto_codigo_antigo", [], |l| l.get(0)).unwrap();
+        assert_eq!(antigos, 0, "um código que nunca foi confirmado não é guardado como antigo");
+        assert!(confirmado(&a, &pb) && confirmado(&a, &pc));
+        assert!(etiquetas::etiqueta(&a.conn, &pa).unwrap().bloqueio.is_empty());
+        assert!(repetidos(&a.conn).unwrap().is_empty());
+        assert_eq!(para_ver(&a.conn).unwrap(), 0);
+        receber(&mut b, &a);
+        receber(&mut c, &a);
+        assert!(codigos_repetidos(&b).is_empty() && codigos_repetidos(&c).is_empty());
+        assert_eq!(todas(&a), todas(&b));
+        assert_eq!(todas(&a), todas(&c));
+    }
+
+    /// h) Desta vez o caixa B cadastra primeiro e pede a confirmação antes de
+    /// o distribuidor ter a mesma ideia: a mais antiga confirma; a outra
+    /// espera. E dois pedidos ao mesmo tempo (duas peças esperando o mesmo
+    /// código, chegando juntas) confirmam exatamente uma.
+    #[test]
+    fn h_confirmacao_e_atomica_no_distribuidor() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        let pb = peca_com(&b, &ua, "Peça de B", "ZZ-9").unwrap();
+        let pc = peca_com(&c, &ua, "Peça de C", "ZZ-9").unwrap();
+        // A de C foi criada antes (a de B, depois): é ela que fica com o código.
+        b.conn.execute("UPDATE produto SET criado_em = '2026-10-18T10:00:00Z' WHERE id = ?1", [&pb]).unwrap();
+        c.conn.execute("UPDATE produto SET criado_em = '2026-10-18T09:00:00Z' WHERE id = ?1", [&pc]).unwrap();
+        // As duas chegam juntas ao distribuidor, na mesma troca.
+        receber(&mut a, &b);
+        receber(&mut a, &c);
+        manter(&mut a.conn).unwrap();
+        manter(&mut a.conn).unwrap(); // repetir não muda nada
+        let confirmadas = [&pb, &pc].iter().filter(|id| confirmado(&a, id)).count();
+        assert_eq!(confirmadas, 1, "exatamente uma confirma");
+        // Fica com a que foi criada primeiro.
+        assert!(confirmado(&a, &pc) && !confirmado(&a, &pb));
+        // Um terceiro cadastro do mesmo código no distribuidor é recusado:
+        // já é de outra peça confirmada.
+        let r = peca_com(&a, &ua, "Terceira", "ZZ-9");
+        assert!(matches!(r, Err(Erro::Validacao { .. })), "{r:?}");
+    }
+
+    /// i) O distribuidor se perde (computador quebrado) com uma faixa dada
+    /// que os outros caixas ainda não receberam. O gerente faz outro caixa
+    /// distribuir: a faixa nova pula 20 faixas, então não cruza com nenhuma
+    /// que o distribuidor perdido tenha dado. Os códigos que já existem não
+    /// mudam, e os caixas continuam sem repetir.
+    #[test]
+    fn i_distribuidor_perdido_outro_caixa_assume_sem_repetir() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        peca(&b, &ua, "Peça de B");
+        let pc = peca(&c, &ua, "Peça de C");
+        trocar(&mut b, &mut c);
+        // A ainda deu uma faixa a D, que nunca chegou a B nem a C; depois A se perdeu.
+        let mut d = caixa_novo("Caixa D");
+        pedir_faixa(&mut d, &mut a);
+        let faixa_de_d = minhas(&d);
+        assert_eq!(faixa_de_d.len(), 1);
+        let pd = peca(&d, &ua, "Peça de D");
+        let codigo_de_d: i64 = codigo(&d, &pd).parse().unwrap();
+        drop(a);
+        // B assume (não é o distribuidor ainda; C continua o dono da faixa dele).
+        assert!(!sou_distribuidor(&b.conn).unwrap());
+        assumir(&b.conn).unwrap();
+        assert!(sou_distribuidor(&b.conn).unwrap());
+        manter(&mut b.conn).unwrap();
+        // C pede uma faixa nova a B: não cruza com a que A deu a D.
+        let tinha_c = minhas(&c);
+        receber(&mut c, &b);
+        let r = {
+            let mut pedido = pedido(&c.conn).unwrap();
+            pedido["tipo"] = json!("faixa");
+            pedido["protocolo"] = json!(crate::sync::PROTOCOLO);
+            pedido["tenho"] = json!(tinha_c.iter().map(|f| f.0).collect::<Vec<_>>());
+            crate::sync::responder_faixa(&mut b.conn, &pedido).unwrap()
+        };
+        crate::sync::gravar_faixa_recebida(&mut c.conn, &r).unwrap();
+        let nova_de_c = minhas(&c).into_iter().find(|f| !tinha_c.contains(f)).expect("C recebeu faixa nova");
+        assert!(
+            nova_de_c.0 > faixa_de_d[0].1 + 10 * TAMANHO_FAIXA,
+            "pulou faixas: {nova_de_c:?} depois de {faixa_de_d:?}"
+        );
+        // D chega depois a B e a C: nada cruza e nada se repete.
+        receber(&mut b, &d);
+        receber(&mut c, &d);
+        receber(&mut b, &c);
+        receber(&mut c, &b);
+        assert!(cruzadas(&b.conn).unwrap().is_empty());
+        assert!(cruzadas(&c.conn).unwrap().is_empty());
+        let p_novo = peca(&c, &ua, "Peça nova de C");
+        let n_novo: i64 = codigo(&c, &p_novo).parse().unwrap();
+        assert_ne!(n_novo, codigo_de_d);
+        assert!(codigos_repetidos(&b).is_empty() && codigos_repetidos(&c).is_empty());
+        assert_eq!(codigo(&c, &pc), codigo(&b, &pc), "os códigos de antes não mudaram");
+        // Os dois (B e D) ainda sem trocar entre si: faixas diferentes.
+        trocar(&mut b, &mut d);
+        assert!(cruzadas(&d.conn).unwrap().is_empty());
+        assert!(codigos_repetidos(&d).is_empty());
     }
 }

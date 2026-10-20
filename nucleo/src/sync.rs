@@ -1979,6 +1979,12 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
     if !a.ligado || a.senha.is_empty() {
         return Ok(());
     }
+    // Banco copiado de outro computador: tem o identificador de troca do
+    // caixa de onde veio e não pode trocar dados com ele até ser registrado
+    // como caixa novo (veja `faixas::registrar_caixa_novo`).
+    if crate::faixas::copia_detectada(&conn)? {
+        return Ok(());
+    }
     let k = Chaves::de(&conn, &a.senha)?;
     let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
     if pedido["tipo"] != "puxar" && pedido["tipo"] != "faixa" {
@@ -2077,6 +2083,9 @@ fn puxar_ate(
 ) -> Resultado<(String, usize)> {
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
     let mut conn = abrir_conexao(caminho)?;
+    if crate::faixas::copia_detectada(&conn)? {
+        return Err(Erro::validacao(crate::faixas::texto_do_bloqueio(crate::faixas::BLOQUEIO_COPIA)));
+    }
     let a = ajustes(&conn)?;
     let k = Chaves::de(&conn, &a.senha)?;
     let alvo: SocketAddr = match endereco.parse::<SocketAddr>() {
@@ -2579,6 +2588,49 @@ mod testes {
                 ]
             );
             assert!(crate::faixas::cruzadas(&a.conn).unwrap().is_empty());
+            assert!(ma.encerrar(Duration::from_secs(20)));
+        })
+        .join()
+        .unwrap();
+    }
+
+    /// Banco copiado de outro computador (identidade diferente da guardada):
+    /// não responde a quem pede dados nem puxa de ninguém até ser registrado
+    /// como caixa novo; depois do registro, troca de novo com os outros.
+    #[test]
+    fn banco_copiado_nao_troca_dados_pela_rede_ate_ser_registrado() {
+        thread::spawn(|| {
+            let (pt_a, pu_a) = (48300, 48301);
+            let (ca, cb) = (temp("copia-rede-a"), temp("copia-rede-b"));
+            let a = Banco::abrir(&ca).unwrap();
+            let u = crate::faixas::para_testes::configurar(&a, "Caixa A", 0);
+            salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
+            crate::faixas::para_testes::peca(&a, &u, "Filtro");
+            let b = Banco::abrir(&cb).unwrap();
+            config::gravar(&b.conn, "caixa_nome", "Caixa B").unwrap();
+            salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+            // A vira "cópia": o banco diz que nasceu em outro computador.
+            config::gravar(&a.conn, "computador_id", &crate::computador::impressao("outro-pc")).unwrap();
+            crate::faixas::conferir_computador(&a.conn, crate::computador::atual().as_deref()).unwrap();
+            assert!(crate::faixas::copia_detectada(&a.conn).unwrap());
+            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
+            thread::sleep(Duration::from_millis(400));
+            let para_a = format!("127.0.0.1:{pt_a}");
+            // Quem pede a ela não recebe nada.
+            let r = puxar(&cb, &para_a, 48302);
+            assert!(r.is_err(), "{r:?}");
+            let produtos_b: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
+            assert_eq!(produtos_b, 0);
+            // Ela também não puxa de ninguém.
+            let r = puxar(&ca, "127.0.0.1:48399", pt_a);
+            assert!(matches!(r, Err(Erro::Validacao { .. })), "{r:?}");
+            // Registrada como caixa nova, volta a trocar.
+            crate::faixas::registrar_caixa_novo(&a.conn, crate::computador::atual().as_deref(), Some("Caixa A2"))
+                .unwrap();
+            assert!(!crate::faixas::copia_detectada(&a.conn).unwrap());
+            puxar(&cb, &para_a, 48302).unwrap();
+            let produtos_b: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
+            assert_eq!(produtos_b, 1);
             assert!(ma.encerrar(Duration::from_secs(20)));
         })
         .join()

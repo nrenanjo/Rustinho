@@ -91,7 +91,8 @@ pub fn buscar(
                                            WHERE a.produto_id = p.id AND a.codigo_compacto = ?1)) THEN 0
                      WHEN ?2 <> '' AND p.busca LIKE ?2 || '%' THEN 1
                      ELSE 2 END AS ordem,
-                p.busca, p.codigo_barras, {}, p.tipo = 'servico'
+                p.busca, p.codigo_barras, {}, p.tipo = 'servico',
+                (p.codigo_validado = 0 AND p.codigo <> '')
            FROM produto p
           WHERE 1 = 1",
         crate::produtos::SQL_PRECO_1,
@@ -159,10 +160,15 @@ pub fn buscar(
         let codigo_barras: String = l.get(13)?;
         let oferta: bool = l.get(14)?;
         let servico: bool = l.get(15)?;
+        // Código com letras que ainda espera a confirmação do caixa que
+        // distribui as faixas: o leitor não acha a peça por ele.
+        let esperando: bool = l.get(16)?;
+        let codigo: String = l.get(1)?;
+        let exato_pelo_interno_esperando = esperando && texto::compactar(&codigo) == compacto;
         Ok((
             ProdutoResumo {
                 id: l.get(0)?,
-                codigo: l.get(1)?,
+                codigo,
                 nome: l.get(2)?,
                 marca: l.get(3)?,
                 unidade: l.get(4)?,
@@ -176,7 +182,7 @@ pub fn buscar(
                 oferta,
                 servico,
                 aplicacoes: String::new(),
-                codigo_exato: ordem == 0 && !compacto.is_empty(),
+                codigo_exato: ordem == 0 && !compacto.is_empty() && !exato_pelo_interno_esperando,
                 achou: String::new(),
             },
             busca,
@@ -309,6 +315,24 @@ pub fn pelo_codigo_exato(conn: &Connection, codigo: &str) -> Resultado<Vec<Produ
         return Ok(Vec::new());
     }
     Ok(buscar(conn, codigo, false, 50)?.into_iter().filter(|p| p.codigo_exato).collect())
+}
+
+/// Quantas peças esperam a confirmação do código interno e têm exatamente
+/// este código (o leitor não as acha por ele; veja `faixas`).
+pub fn esperando_pelo_codigo(conn: &Connection, codigo: &str) -> Resultado<usize> {
+    let compacto = texto::compactar(codigo);
+    if compacto.is_empty() {
+        return Ok(0);
+    }
+    let mut c = conn.prepare_cached(
+        "SELECT codigo FROM produto WHERE codigo_validado = 0 AND codigo <> '' AND instr(codigos, ' ' || ?1 || ' ') > 0",
+    )?;
+    let n = c
+        .query_map([&compacto], |l| l.get::<_, String>(0))?
+        .filter_map(Result::ok)
+        .filter(|c| texto::compactar(c) == compacto)
+        .count();
+    Ok(n)
 }
 
 /// Quantas peças existem.

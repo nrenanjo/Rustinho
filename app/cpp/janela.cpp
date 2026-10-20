@@ -6,6 +6,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QSysInfo>
 #include <QtCore/QUrl>
 
 void rustinho_preparar_janela()
@@ -31,4 +32,13 @@ QString rustinho_arquivo_local(const QString& endereco)
     if (!origem.copy(destino))
         return endereco;
     return destino;
+}
+
+// Identificador que o sistema dá a este computador (Windows: MachineGuid,
+// Linux: machine-id, Android: ANDROID_ID). O núcleo guarda só uma impressão
+// digital dele no banco, para saber se o banco foi copiado para outro
+// computador.
+QString rustinho_identidade_do_computador()
+{
+    return QString::fromUtf8(QSysInfo::machineUniqueId());
 }

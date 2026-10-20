@@ -97,7 +97,9 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "codigos_situacao"
         | "codigos_assumir"
         | "codigos_definir_pendentes"
-        | "codigos_dar_novo" => "gerente",
+        | "codigos_dar_novo"
+        | "codigos_confirmar_computador"
+        | "codigos_registrar_caixa_novo" => "gerente",
         _ => return None,
     })
 }
@@ -664,6 +666,45 @@ impl Servico {
                 tx.commit()?;
                 faixas::situacao(&self.banco.conn)
             }
+            "codigos_confirmar_computador" => {
+                let tx = self.banco.conn.transaction()?;
+                faixas::confirmar_computador(&tx, crate::computador::atual().as_deref())?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "codigos.computador",
+                    "config",
+                    "computador_id",
+                    &["O gerente confirmou que este é o computador de sempre deste caixa".into()],
+                )?;
+                tx.commit()?;
+                faixas::manter(&mut self.banco.conn)?;
+                faixas::situacao(&self.banco.conn)
+            }
+            "codigos_registrar_caixa_novo" => {
+                #[derive(Deserialize, Default)]
+                #[serde(default)]
+                struct Nome {
+                    nome: String,
+                }
+                let d: Nome = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let novo = faixas::registrar_caixa_novo(&tx, crate::computador::atual().as_deref(), Some(&d.nome))?;
+                auditoria::registrar(
+                    &tx,
+                    &novo,
+                    Some(&sessao.usuario_id),
+                    "codigos.caixa_novo",
+                    "config",
+                    "dispositivo_id",
+                    &["Este banco foi registrado como caixa novo (identificador novo, faixa de códigos nova)".into()],
+                )?;
+                tx.commit()?;
+                self.banco.dispositivo = novo;
+                faixas::manter(&mut self.banco.conn)?;
+                faixas::situacao(&self.banco.conn)
+            }
             "codigos_dar_novo" => {
                 let d: Id = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
@@ -1030,10 +1071,15 @@ impl Servico {
                 // as peças e a pessoa escolhe (nunca entra uma sozinha).
                 let d: BuscaProdutos = ler(dados)?;
                 let lista = busca::pelo_codigo_exato(&self.banco.conn, &d.texto)?;
+                // Peças com este código que ainda esperam a confirmação do
+                // caixa que distribui as faixas: o leitor não as acha.
+                let esperando = busca::esperando_pelo_codigo(&self.banco.conn, &d.texto)?;
                 Ok(match lista.as_slice() {
-                    [p] => json!({ "id": p.id, "repetidos": 1 }),
-                    [] => json!({ "id": null, "repetidos": 0 }),
-                    varias => json!({ "id": null, "repetidos": varias.len(), "opcoes": varias }),
+                    [p] => json!({ "id": p.id, "repetidos": 1, "esperando": esperando }),
+                    [] => json!({ "id": null, "repetidos": 0, "esperando": esperando }),
+                    varias => {
+                        json!({ "id": null, "repetidos": varias.len(), "opcoes": varias, "esperando": esperando })
+                    }
                 })
             }
             // O vale-troca aparece à parte no Receber (só quando há vale).
@@ -2355,6 +2401,67 @@ mod testes {
         assert_eq!(sit["ok"], true, "{sit}");
         assert_eq!(sit["dados"]["repetidos"].as_array().unwrap().len(), 1);
         assert_eq!(sit["dados"]["cruzadas"].as_array().unwrap().len(), 1);
+    }
+
+    /// g) Pela api, do jeito que a tela usa: o banco é uma cópia (a
+    /// identidade do computador não bate), o caixa não dá código e só o
+    /// gerente o registra como caixa novo, que ganha identificador novo.
+    #[test]
+    fn copia_do_banco_so_o_gerente_registra_como_caixa_novo() {
+        let mut s = conectado();
+        let antigo = s.banco.dispositivo.clone();
+        // Os dois comandos são só do gerente.
+        for c in ["codigos_confirmar_computador", "codigos_registrar_caixa_novo"] {
+            assert_eq!(acao_do_comando(c), Some("gerente"), "{c}");
+        }
+        // A peça criada antes da cópia tem código.
+        let ficha = chamar(&mut s, "produto_novo", "{}");
+        assert_eq!(ficha["dados"]["codigoPrevisto"], "1");
+        // O banco vira cópia.
+        config::gravar(&s.banco.conn, "computador_id", &crate::computador::impressao("outro-pc")).unwrap();
+        faixas::conferir_computador(&s.banco.conn, crate::computador::atual().as_deref()).unwrap();
+        let sit = chamar(&mut s, "codigos_situacao", "{}");
+        assert_eq!(sit["dados"]["bloqueio"]["motivo"], "copia");
+        assert_eq!(sit["dados"]["bloqueio"]["podeRegistrar"], true);
+        let ficha = chamar(&mut s, "produto_novo", "{}");
+        assert_eq!(ficha["dados"]["codigoPrevisto"], "");
+        assert!(ficha["dados"]["codigoAviso"].as_str().unwrap().contains("outro computador"), "{ficha}");
+        // Confirmar "o computador de sempre" não vale para uma cópia.
+        let r = chamar(&mut s, "codigos_confirmar_computador", "{}");
+        assert_eq!(r["ok"], false, "{r}");
+        // O aviso do Início.
+        let avisos = crate::avisos::do_dia(&s.banco.conn).unwrap();
+        assert!(avisos.iter().any(|a| a.id == "codigos_bloqueio"));
+        // Registrar como caixa novo.
+        let r = chamar(&mut s, "codigos_registrar_caixa_novo", r#"{"nome":"Caixa 7"}"#);
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(r["dados"]["bloqueio"].is_null());
+        assert_ne!(s.banco.dispositivo, antigo);
+        assert_eq!(config::ler(&s.banco.conn, "dispositivo_id").unwrap().unwrap(), s.banco.dispositivo);
+        assert_eq!(config::nome_caixa(&s.banco.conn).unwrap(), "Caixa 7");
+        // Sem bloqueio, não há o que registrar.
+        let r = chamar(&mut s, "codigos_registrar_caixa_novo", "{}");
+        assert_eq!(r["ok"], false, "{r}");
+        // O que o caixa novo faz já sai com o identificador novo.
+        let r = chamar(&mut s, "estado", "{}");
+        assert_eq!(r["ok"], true);
+    }
+
+    /// g) Banco de antes da conferência do computador: o gerente confirma que
+    /// este é o computador de sempre e o caixa volta a dar códigos.
+    #[test]
+    fn banco_sem_registro_do_computador_o_gerente_confirma() {
+        let mut s = conectado();
+        s.banco.conn.execute("DELETE FROM config WHERE chave = 'computador_id'", []).unwrap();
+        faixas::conferir_computador(&s.banco.conn, crate::computador::atual().as_deref()).unwrap();
+        let sit = chamar(&mut s, "codigos_situacao", "{}");
+        assert_eq!(sit["dados"]["bloqueio"]["motivo"], "sem_registro");
+        assert_eq!(sit["dados"]["bloqueio"]["podeConfirmar"], true);
+        let r = chamar(&mut s, "codigos_confirmar_computador", "{}");
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(r["dados"]["bloqueio"].is_null());
+        let ficha = chamar(&mut s, "produto_novo", "{}");
+        assert_ne!(ficha["dados"]["codigoPrevisto"], "");
     }
 
     fn chamar(s: &mut Servico, c: &str, d: &str) -> Value {

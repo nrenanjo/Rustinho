@@ -185,6 +185,23 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         });
     }
 
+    // Banco copiado de outro computador (ou computador não confirmado): o
+    // caixa não dá códigos até o gerente resolver. Não dá para esconder.
+    if let Some(motivo) = crate::faixas::bloqueio(conn)? {
+        avisos.push(Aviso {
+            id: "codigos_bloqueio".into(),
+            dia: hoje.clone(),
+            titulo: "Códigos".into(),
+            texto: "Este caixa está sem poder dar códigos de peças".into(),
+            atraso: if motivo == crate::faixas::BLOQUEIO_COPIA {
+                "o banco veio de outro computador: o gerente registra em Configurações › Gerente".into()
+            } else {
+                "o gerente confirma em Configurações › Gerente".into()
+            },
+            funcao: "configuracoes".into(),
+        });
+    }
+
     // Códigos das peças que levam a mais de uma peça (ou faixas de dois
     // caixas que se cruzam): o gerente resolve na pílula Gerente.
     let codigos = crate::faixas::para_ver(conn)?;

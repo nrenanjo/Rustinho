@@ -16,6 +16,7 @@ pub mod cheques;
 pub mod codigo;
 pub mod comissoes;
 pub mod compras;
+pub mod computador;
 pub mod config;
 pub mod devolucoes;
 pub mod documento;

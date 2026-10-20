@@ -484,20 +484,24 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
 pub fn trocar_codigo(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<String> {
     let mut dados = carregar(conn, id)?;
     let velho = dados.codigo.clone();
-    let novo = faixas::gerar_para_peca(conn)?.ok_or_else(|| {
-        Erro::validacao(
-            "Este caixa ainda não tem faixa de códigos (ou ela acabou). Faça a troca de dados com o caixa que distribui as faixas.",
-        )
-    })?;
+    // Um código que ficou esperando confirmação nunca foi confirmado: não
+    // saiu em etiqueta nem achou a peça no leitor, então não precisa ficar
+    // guardado como código antigo.
+    let confirmado_antes = !faixas::esperando_confirmacao(conn, id)?;
+    let novo = match faixas::gerar_para_peca(conn)? {
+        Some(c) => c,
+        None => return Err(Erro::validacao(faixas::texto_sem_poder_dar(conn)?)),
+    };
     dados.codigo = novo.clone();
     let (busca, codigos) = texto_busca(&dados);
     let agora = tempo::agora();
     conn.execute(
-        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, atualizado_por = ?6, dispositivo = ?7
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, atualizado_por = ?6, dispositivo = ?7,
+                codigo_validado = 1
           WHERE id = ?1",
         params![id, novo, busca, codigos, agora, usuario_id, dispositivo],
     )?;
-    if !velho.is_empty() {
+    if !velho.is_empty() && confirmado_antes {
         conn.execute(
             "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
              VALUES (?1, ?2, ?3, ?4)",
@@ -529,7 +533,8 @@ pub fn definir_codigo(conn: &Connection, dispositivo: &str, id: &str, codigo: &s
     dados.codigo = codigo.to_string();
     let (busca, codigos) = texto_busca(&dados);
     let n = conn.execute(
-        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6,
+                codigo_validado = 1
           WHERE id = ?1 AND codigo = ''",
         params![id, codigo, busca, codigos, tempo::agora(), dispositivo],
     )?;
@@ -596,6 +601,23 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         dados.codigo = faixas::gerar_para_peca(conn)?.unwrap_or_default();
     }
 
+    // O código vale já (de números, ou confirmado aqui pelo caixa que
+    // distribui as faixas) ou fica esperando a confirmação dele (veja
+    // `faixas`). Com o código igual ao de antes, continua como estava, e o
+    // distribuidor confirma se já pode.
+    let confirmado: i64 = match &antes {
+        Some(a) if a.codigo == dados.codigo => {
+            let atual: i64 =
+                conn.query_row("SELECT codigo_validado FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
+            if atual == 1 {
+                1
+            } else {
+                faixas::confirmado_ao_salvar(conn, &id, &dados.codigo)?
+            }
+        }
+        _ => faixas::confirmado_ao_salvar(conn, &id, &dados.codigo)?,
+    };
+
     let tabelas = config::tabelas_preco(conn)?;
     let detalhes = match &antes {
         Some(a) => {
@@ -625,9 +647,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                                   custo, estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao,
                                   peso_gramas, desconto_maximo, comissao, observacoes, ativo, busca, codigos,
                                   criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, csosn, monofasico,
-                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal)
+                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal, codigo_validado)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)",
+                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)",
             params![
                 id,
                 dados.codigo,
@@ -664,6 +686,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.variacao,
                 dados.grade,
                 dados.fiscal.para_json(),
+                confirmado,
             ],
         )?;
     } else {
@@ -674,7 +697,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                     peso_gramas = ?17, desconto_maximo = ?18, comissao = ?19, observacoes = ?20, ativo = ?21,
                     busca = ?22, codigos = ?23, atualizado_em = ?24, atualizado_por = ?25, dispositivo = ?26,
                     csosn = ?27, monofasico = ?28, tipo = ?29, oferta_preco = ?30, oferta_ate = ?31,
-                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35
+                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35, codigo_validado = ?36
               WHERE id = ?1",
             params![
                 id,
@@ -712,6 +735,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.variacao,
                 dados.grade,
                 dados.fiscal.para_json(),
+                confirmado,
             ],
         )?;
         conn.execute("DELETE FROM produto_preco WHERE produto_id = ?1", [&id])?;
@@ -1046,7 +1070,9 @@ pub fn ficha_nova(conn: &Connection) -> Resultado<ProdutoFicha> {
         .map(|t| PrecoFicha { tabela: t.numero, nome: t.nome, lucro: t.lucro_padrao, preco: String::new() })
         .collect();
     let codigo_previsto = faixas::previsto(conn)?.unwrap_or_default();
-    let codigo_aviso = if codigo_previsto.is_empty() && !faixas::sou_distribuidor(conn)? {
+    let codigo_aviso = if let Some(m) = faixas::bloqueio(conn)? {
+        faixas::texto_do_bloqueio(&m).to_string()
+    } else if codigo_previsto.is_empty() && !faixas::sou_distribuidor(conn)? {
         "Este caixa ainda não recebeu a faixa de códigos: a peça fica com código a definir até a troca de dados \
          com o caixa que distribui as faixas."
             .to_string()

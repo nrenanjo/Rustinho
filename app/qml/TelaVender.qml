@@ -129,6 +129,13 @@ FocusScope {
             janela.avisar("O código “" + p.texto + "” é de " + r.dados.repetidos + " peças. Escolha na lista qual é.", "erro")
             return
         }
+        if (r.ok && r.dados.esperando > 0 && avisadoRepetido !== p.texto) {
+            espera.stop()
+            buscar()
+            avisadoRepetido = p.texto
+            janela.avisar("O código “" + p.texto + "” ainda não foi confirmado pelo caixa que distribui os códigos. Escolha a peça na lista pelo nome.", "erro")
+            return
+        }
         if (resultadosDe === p.texto && resultados.length > 0 && listaResultados.currentIndex >= 0) {
             adicionar(resultados[listaResultados.currentIndex].id, p.quantidade)
             limparBusca()

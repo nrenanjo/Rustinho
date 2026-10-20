@@ -23,6 +23,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0011_backup_conflitos.sql"),
     include_str!("migracoes/0012_historia_das_alteracoes.sql"),
     include_str!("migracoes/0013_faixas_de_codigo.sql"),
+    include_str!("migracoes/0014_codigo_confirmado.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -48,15 +49,26 @@ impl Banco {
         }
         let conn = Connection::open(caminho)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        Self::preparar(conn, Some(caminho.to_path_buf()))
+        Self::preparar(conn, Some(caminho.to_path_buf()), crate::computador::atual())
+    }
+
+    /// Só nos testes: abre o banco como se este fosse o computador de
+    /// identidade `computador` (None = o sistema não informa a identidade).
+    #[cfg(test)]
+    pub(crate) fn abrir_em(caminho: &Path, computador: Option<&str>) -> Resultado<Banco> {
+        let conn = Connection::open(caminho)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        Self::preparar(conn, Some(caminho.to_path_buf()), computador.map(crate::computador::impressao))
     }
 
     /// Banco temporário em memória (para testes).
     pub fn em_memoria() -> Resultado<Banco> {
-        Self::preparar(Connection::open_in_memory()?, None)
+        // Um banco em memória não vai para outro computador: a identidade
+        // é sempre a mesma (assim os testes não dependem de onde rodam).
+        Self::preparar(Connection::open_in_memory()?, None, Some(crate::computador::impressao("em-memoria")))
     }
 
-    fn preparar(mut conn: Connection, caminho: Option<PathBuf>) -> Resultado<Banco> {
+    fn preparar(mut conn: Connection, caminho: Option<PathBuf>, computador: Option<String>) -> Resultado<Banco> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         registrar_funcoes(&conn)?;
@@ -67,7 +79,7 @@ impl Banco {
         crate::backup::limpar_chave_antiga(&conn)?;
         // Códigos das peças: arquivo ao lado do banco, distribuidor e
         // peças com código a definir (veja `faixas`).
-        crate::faixas::preparar(&mut conn)?;
+        crate::faixas::preparar(&mut conn, computador.as_deref())?;
         Ok(Banco { conn, dispositivo, caminho })
     }
 }

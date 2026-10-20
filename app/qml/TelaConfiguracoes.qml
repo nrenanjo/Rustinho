@@ -21,6 +21,7 @@ FocusScope {
     property var conflitos: []       // pílula Gerente: diferenças entre caixas
     property var codigos: null       // pílula Gerente: faixas e códigos repetidos
     property bool confirmarAssumir: false
+    property bool confirmarCaixaNovo: false
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
     Component.onDestruction: Api.chamar("gerente_encerrar")
 
@@ -87,6 +88,7 @@ FocusScope {
         const c = Api.chamar("codigos_situacao")
         codigos = c.ok ? c.dados : null
         confirmarAssumir = false
+        confirmarCaixaNovo = false
     }
 
     function milhar(n) {
@@ -103,8 +105,9 @@ FocusScope {
             janela.avisar(r.erro, "erro")
         }
         confirmarAssumir = false
+        confirmarCaixaNovo = false
     }
-    readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length : 0
+    readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length + (codigos.bloqueio ? 1 : 0) : 0
 
     // Conflito entre caixas: usar a versão que perdeu, ou deixar como está.
     function resolverConflito(c, usar) {
@@ -989,6 +992,58 @@ FocusScope {
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }
+                    // Banco copiado de outro computador (ou computador não confirmado).
+                    Text {
+                        visible: !!tela.codigos && !!tela.codigos.bloqueio
+                        text: tela.codigos && tela.codigos.bloqueio ? tela.codigos.bloqueio.texto : ""
+                        color: Tema.vermelho
+                        font.family: Tema.texto
+                        font.weight: Font.DemiBold
+                        font.pixelSize: 15
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: !!tela.codigos && !!tela.codigos.bloqueio && tela.codigos.bloqueio.podeConfirmar
+                        text: "Este é o computador de sempre deste caixa"
+                        onClicked: tela.comandoCodigos("codigos_confirmar_computador", {},
+                                                       "Computador confirmado. Este caixa volta a dar códigos.")
+                    }
+                    Botao {
+                        visible: !!tela.codigos && !!tela.codigos.bloqueio && tela.codigos.bloqueio.podeRegistrar && !tela.confirmarCaixaNovo
+                        text: "Registrar como caixa novo"
+                        tipo: "secundario"
+                        onClicked: tela.confirmarCaixaNovo = true
+                    }
+                    Nota {
+                        visible: tela.confirmarCaixaNovo
+                        text: "O caixa de onde veio esta cópia continua com as faixas dele. Este vira um caixa novo da loja: ganha identificador novo "
+                              + "e pede uma faixa de códigos nova ao caixa que distribui (na próxima troca de dados). Até lá, as peças novas ficam com código a definir. "
+                              + "Se o caixa de antes não existe mais, depois use “Este caixa passa a distribuir as faixas”."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Campo {
+                        id: nomeCaixaNovo
+                        visible: tela.confirmarCaixaNovo
+                        rotulo: "Nome deste caixa (diferente do caixa de onde veio a cópia)"
+                        maximo: 30
+                        Layout.preferredWidth: 320
+                    }
+                    Linha {
+                        visible: tela.confirmarCaixaNovo
+                        spacing: 12
+                        Botao {
+                            text: "Registrar"
+                            onClicked: tela.comandoCodigos("codigos_registrar_caixa_novo", { nome: nomeCaixaNovo.texto },
+                                                           "Este banco foi registrado como caixa novo.")
+                        }
+                        Botao {
+                            text: "Cancelar"
+                            tipo: "secundario"
+                            onClicked: tela.confirmarCaixaNovo = false
+                        }
+                    }
                     Text {
                         text: {
                             const c = tela.codigos
@@ -1023,6 +1078,45 @@ FocusScope {
                         text: "Dar código deste caixa a todas as peças a definir"
                         tipo: "secundario"
                         onClicked: tela.comandoCodigos("codigos_definir_pendentes", {}, "As peças a definir receberam código deste caixa.")
+                    }
+                    // Códigos com letras escritos à mão: só valem depois de confirmados
+                    // pelo caixa que distribui as faixas.
+                    Nota {
+                        visible: !!tela.codigos && tela.codigos.esperando.length > 0
+                        text: "Códigos com letras esperando a confirmação do caixa que distribui as faixas. Enquanto esperam, a peça vende e é achada pelo nome, "
+                              + "mas a etiqueta não sai e o leitor não acha a peça por esse código. Se outra peça já tem o código, só uma fica com ele: "
+                              + "dê um código novo à que ficou esperando."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.esperando : []
+                        delegate: RowLayout {
+                            required property var modelData
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Text {
+                                text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
+                                      + (modelData.conflito ? " · já é da peça “" + modelData.outraPeca + "”" : " · esperando a confirmação")
+                                color: modelData.conflito ? Tema.vermelho : Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Botao {
+                                text: "Abrir"
+                                tipo: "discreto"
+                                onClicked: tela.janela.abrir("TelaPeca", { produtoId: modelData.id })
+                            }
+                            Botao {
+                                visible: modelData.conflito
+                                text: "Dar código novo"
+                                tipo: "secundario"
+                                onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
+                                                               "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
+                            }
+                        }
                     }
                     // Faixas de dois caixas que se cruzam (lojas juntadas, dois distribuidores).
                     Repeater {
