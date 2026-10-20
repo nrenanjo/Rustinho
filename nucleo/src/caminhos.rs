@@ -705,6 +705,24 @@ mod testes {
         assert_eq!((l(&b.conn, CABO).falhas, l(&b.conn, CABO).proxima_ms), (0, 0));
     }
 
+    /// CA-D4: o que o gerente digita vira caminho; o que sai da lista deixa de
+    /// ser "digitado" (e some se nunca conversou); o que já conversou fica como
+    /// um caminho aprendido qualquer.
+    #[test]
+    fn digitar_e_tirar_da_lista() {
+        let b = Banco::em_memoria().unwrap();
+        let (x, y) = ("10.4.0.1:47810".to_string(), "10.4.0.2:47810".to_string());
+        digitar(&b.conn, &[x.clone(), y.clone()], T0).unwrap();
+        assert!(l(&b.conn, &x).digitado && l(&b.conn, &y).digitado);
+        b.conn.execute("UPDATE sync_endereco SET dispositivo = 'd9' WHERE endereco = ?1", [&y]).unwrap(); // y já conversou
+        digitar(&b.conn, std::slice::from_ref(&x), T0 + 1).unwrap();
+        assert!(l(&b.conn, &x).digitado);
+        assert!(!l(&b.conn, &y).digitado, "deixou de ser digitado, mas conversou: fica como aprendido");
+        digitar(&b.conn, &[], T0 + 2).unwrap();
+        assert!(linha(&b.conn, &x).unwrap().is_none(), "nunca conversou e saiu da lista: some");
+        assert!(linha(&b.conn, &y).unwrap().is_some());
+    }
+
     /// T-17 · CA-R5: o IP do par mudou; o novo é aprendido, o velho some só
     /// depois de falhar **e** de 7 dias sem notícia; o digitado nunca some;
     /// o contador é preservado.

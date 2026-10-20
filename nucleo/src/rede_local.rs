@@ -814,6 +814,23 @@ mod testes {
         assert_eq!(servidor.join().unwrap().len(), 2);
     }
 
+    /// CA-T2: a conferência compara o IP local que o sistema diz ter usado com
+    /// o planejado. Um sistema que ignora o `bind` (conexão presa, mas saída por
+    /// outro IP) nunca é dado como confirmado.
+    #[test]
+    fn confirmacao_compara_o_ip_local_com_o_planejado() {
+        let planejada = Saida { ip: Ipv4Addr::new(192, 168, 0, 12), nome: None };
+        let c = |preso: bool, local: Option<[u8; 4]>| Confirmacao {
+            preso_ao_ip: preso,
+            preso_a_interface: None,
+            local: local.map(Ipv4Addr::from),
+        };
+        assert!(c(true, Some([192, 168, 0, 12])).confirmada(&planejada));
+        assert!(!c(true, Some([192, 168, 1, 40])).confirmada(&planejada), "saiu por outra placa");
+        assert!(!c(true, None).confirmada(&planejada), "o sistema não disse");
+        assert!(!c(false, Some([192, 168, 0, 12])).confirmada(&planejada), "não prendeu: coincidência não prova");
+    }
+
     /// A saída planejada para um caminho: a interface deste computador que o alcança.
     #[test]
     fn saida_planejada_vem_da_interface_que_alcanca() {
@@ -950,10 +967,11 @@ mod testes {
         assert!(aceita_na_lista(false, false), "link-local não é ponto a ponto");
         assert!(!aceita_na_lista(false, true), "PPP/VPN marcado pelo sistema sai");
         assert!(!aceita_na_lista(true, false), "loopback sai");
+        // (o cabo não é o primeiro da lista: o desempate é pelo tipo, não pela ordem)
         let lista = vec![
-            Interface::de_teste("eth0", [169, 254, 10, 5], 16, Tipo::Cabo),
             Interface::de_teste("wlan0", [169, 254, 7, 7], 16, Tipo::Wifi), // Wi-Fi sem DHCP
             Interface::de_teste("xyz0", [169, 254, 8, 8], 16, Tipo::Desconhecida),
+            Interface::de_teste("eth0", [169, 254, 10, 5], 16, Tipo::Cabo),
         ];
         let alvos = alvos_de_anuncio(&lista, &[]);
         for ip in [[169, 254, 10, 5], [169, 254, 7, 7], [169, 254, 8, 8]] {

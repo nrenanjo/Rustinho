@@ -1818,8 +1818,13 @@ mod testes {
         let m = gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
         assert!(m.is_some());
         b.conn.execute("INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES ('outro', 'Caixa 2', '10.0.0.2:47810', 999)", []).unwrap();
+        // Os caminhos até os outros caixas também são deste computador (PEND-10).
+        b.conn.execute("INSERT INTO sync_endereco (endereco, dispositivo, digitado, visto_ms) VALUES ('10.0.0.2:47810', 'outro', 0, 5)", []).unwrap();
 
         let feito = fazer(&caminho, false).unwrap();
+        // Depois do backup os caminhos mudam (um aprendido, um digitado): é isto que deve ficar.
+        b.conn.execute("DELETE FROM sync_endereco", []).unwrap();
+        b.conn.execute("INSERT INTO sync_endereco (endereco, dispositivo, digitado, visto_ms) VALUES ('172.16.0.7:47810', 'outro', 0, 5), ('192.168.9.9:47810', '', 1, 5)", []).unwrap();
         let arquivo = PathBuf::from(&feito.arquivo);
         assert!(arquivo.exists());
         assert_eq!(tipo_do_arquivo(&arquivo), Some(3));
@@ -1850,6 +1855,22 @@ mod testes {
         let cursor: i64 =
             b.conn.query_row("SELECT cursor FROM sync_par WHERE dispositivo = 'outro'", [], |l| l.get(0)).unwrap();
         assert_eq!(cursor, 0);
+        let caminhos: Vec<(String, String, i64)> = b
+            .conn
+            .prepare("SELECT endereco, dispositivo, digitado FROM sync_endereco ORDER BY endereco")
+            .unwrap()
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            caminhos,
+            vec![
+                ("172.16.0.7:47810".to_string(), "outro".to_string(), 0),
+                ("192.168.9.9:47810".to_string(), String::new(), 1)
+            ],
+            "os caminhos deste computador continuam depois de restaurar"
+        );
         let seq_depois: i64 =
             b.conn.query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0)).unwrap();
         assert!(seq_depois >= seq_antes);

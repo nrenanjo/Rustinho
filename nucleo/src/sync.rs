@@ -2582,6 +2582,12 @@ fn ler_anuncio(v: &Value) -> Option<(String, String, u16)> {
     Some((d.to_string(), v["nome"].as_str().unwrap_or("").to_string(), porta))
 }
 
+/// Um anúncio recebido vira caminho? Não o do próprio caixa (por outra de
+/// suas interfaces) e não o que vem de VPN/virtual/celular sem liberação.
+fn aceitar_anuncio(dispositivo: &str, a: &Ajustes, interfaces: Option<&[Interface]>, endereco: &str) -> bool {
+    dispositivo != a.dispositivo && rede_local::caminho_aprendido_vale(interfaces, endereco, &a.interfaces)
+}
+
 /// O que vai para o registro quando uma porta da troca de dados não abre.
 fn texto_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
     format!("troca de dados: não foi possível abrir a porta {protocolo} {porta} ({erro}); outro programa pode estar usando essa porta")
@@ -2847,13 +2853,7 @@ impl Motor {
                                     // Anúncio recebido vale de qualquer interface, mas o
                                     // caminho que sai de VPN/virtual/celular só entra se
                                     // o gerente liberou essa interface.
-                                    if d != a.dispositivo
-                                        && rede_local::caminho_aprendido_vale(
-                                            interfaces.as_deref(),
-                                            &endereco,
-                                            &a.interfaces,
-                                        )
-                                    {
+                                    if aceitar_anuncio(&d, &a, interfaces.as_deref(), &endereco) {
                                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
                                         let _ = registrar_par(&conn, &d, &nome, &endereco);
                                     }
@@ -4731,5 +4731,22 @@ mod testes {
         enderecos.sort();
         assert_eq!(enderecos, ["127.0.0.2:47810", "127.0.0.3:47810"], "dois caminhos do mesmo caixa");
         assert!(m.encerrar(Duration::from_secs(10)));
+    }
+
+    /// CA-A3, CA-I4 (na entrada do anúncio): o próprio caixa e o que vem de
+    /// interface virtual sem liberação não viram caminho; liberada, vira.
+    #[test]
+    fn anuncio_do_proprio_caixa_ou_de_interface_virtual_e_ignorado() {
+        let a = Ajustes { dispositivo: "eu".into(), ..Ajustes::default() };
+        let lista = vec![
+            Interface::de_teste("eno1", [192, 168, 0, 5], 24, rede_local::Tipo::Cabo),
+            Interface::de_teste("tailscale0", [100, 100, 1, 1], 24, rede_local::Tipo::Virtual),
+        ];
+        assert!(aceitar_anuncio("outro", &a, Some(&lista), "192.168.0.9:47810"));
+        assert!(!aceitar_anuncio("eu", &a, Some(&lista), "192.168.0.9:47810"), "ele mesmo");
+        assert!(!aceitar_anuncio("outro", &a, Some(&lista), "100.100.1.9:47810"), "virtual sem liberação");
+        let liberada = Ajustes { interfaces: vec!["tailscale0".into()], ..a };
+        assert!(aceitar_anuncio("outro", &liberada, Some(&lista), "100.100.1.9:47810"));
+        assert!(aceitar_anuncio("outro", &liberada, None, "100.100.1.9:47810"), "sem lista: como antes");
     }
 }
