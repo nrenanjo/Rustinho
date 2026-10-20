@@ -30,6 +30,6 @@ for nome, xml in CASOS.items():
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n' + xml)
     doc = etree.parse(caminho).getroot()
     alvo = doc.xpath('//*[@Id="alvo"]')[0]
-    saida = etree.tostring(etree.fromstring(etree.tostring(alvo)), method="c14n")
+    saida = etree.tostring(etree.fromstring(etree.tostring(alvo)), method="c14n", with_comments=False)
     open(os.path.join(AQUI, nome + ".c14n"), "wb").write(saida)
 print(len(CASOS), "casos em", AQUI)

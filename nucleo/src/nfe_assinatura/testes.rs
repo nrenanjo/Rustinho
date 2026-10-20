@@ -358,6 +358,19 @@ fn a22_algoritmos_e_transformacoes_fora_do_padrao_sao_recusados() {
 }
 
 #[test]
+fn profundidade_e_contada_antes_de_ler_sem_estourar_a_pilha() {
+    // 100 mil níveis: antes da contagem prévia, isto derrubava o programa.
+    let fundo = format!("<a>{}{}</a>", "<b>".repeat(100_000), "</b>".repeat(100_000));
+    assert!(profundidade_excessiva(&fundo, PROFUNDIDADE_MAXIMA));
+    assert_eq!(motivo(&fundo), Motivo::Malformado);
+    // Comentários, CDATA, atributos com '>' e vazios não contam como nível.
+    let raso = "<a x=\"1>2\"><!-- <b><b><b> --><![CDATA[<c><c>]]><d/><d/></a>";
+    assert!(!profundidade_excessiva(raso, 1));
+    assert!(profundidade_excessiva("<a><b><c/></b></a>", 1));
+    assert!(!profundidade_excessiva(&fx("ok.xml"), PROFUNDIDADE_MAXIMA));
+}
+
+#[test]
 fn a23_malformados_sao_recusados_sem_panico_e_rapido() {
     let ok = fx("ok.xml");
     let grande = format!("{}{}", ok, " ".repeat(6 * 1024 * 1024));
@@ -380,6 +393,7 @@ fn a23_malformados_sao_recusados_sem_panico_e_rapido() {
         ("DER do certificado", der_ruim, &[Motivo::Certificado]),
     ];
     for (nome, xml, esperado) in casos {
+        eprintln!("A-23: {nome}");
         let t = Instant::now();
         let m = motivo(&xml);
         assert!(esperado.contains(&m), "{nome}: {m:?}");
@@ -450,7 +464,7 @@ fn a03_c14n_bate_com_o_libxml2_nos_casos_sinteticos() {
         let esperado = std::fs::read(p.with_extension("c14n")).unwrap();
         let doc = roxmltree::Document::parse(&xml).unwrap();
         let alvo = doc.descendants().find(|n| n.attribute("Id") == Some("alvo")).unwrap();
-        let obtido = c14n::canonicalizar(alvo).unwrap();
+        let obtido = c14n::canonicalizar(alvo).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
         assert_eq!(
             String::from_utf8_lossy(&obtido),
             String::from_utf8_lossy(&esperado),
@@ -498,9 +512,10 @@ fn acervo_a01_a55_notas_reais_com_as_ancoras_da_icp_brasil() {
                 avisos += v.prova.avisos.len();
             }
             Err(r) => {
-                if xml.contains("fsist") {
+                // As 4 de teste do fsist ("SEM VALIDADE JURÍDICA") têm chave
+                // RSA-1024: são recusadas antes mesmo da cadeia.
+                if nfe && r.motivo == Motivo::Certificado && r.texto.contains("1024") {
                     teste_fsist += 1;
-                    assert_eq!(r.motivo, Motivo::Cadeia, "{nome}");
                 } else {
                     assert!(!nfe || r.motivo != Motivo::Resumo, "{nome}: {r}");
                     *outras.entry(format!("{:?}{}", r.motivo, if nfe { "" } else { " (não é NF-e)" })).or_default() += 1;
@@ -513,6 +528,8 @@ fn acervo_a01_a55_notas_reais_com_as_ancoras_da_icp_brasil() {
     println!("tipos: {tipos:?}; avisos: {avisos}; tempo total {ms:.0} ms ({:.2} ms por arquivo)", ms / 541.0);
     assert_eq!(aceitas, 528);
     assert_eq!(teste_fsist, 4);
+    assert_eq!(outras.get("Estrutura (não é NF-e)"), Some(&9), "{outras:?}");
+    assert_eq!(outras.len(), 1, "{outras:?}");
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub mod gtin;
 pub mod importar;
 pub mod impressao;
 pub mod menu;
+pub mod nfe_assinatura;
 pub mod nfe_xml;
 pub mod numeros;
 pub mod oficina;

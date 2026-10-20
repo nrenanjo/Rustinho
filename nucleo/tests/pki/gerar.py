@@ -124,7 +124,7 @@ def der(c):
 def c14n(elemento):
     # C14N 1.0 inclusiva do elemento no contexto do documento (o modelo só
     # declara o namespace padrão, como as notas reais).
-    return etree.tostring(etree.fromstring(etree.tostring(elemento)), method="c14n")
+    return etree.tostring(etree.fromstring(etree.tostring(elemento)), method="c14n", with_comments=False)
 
 
 def assinar(texto, chave_assina, cert, *, alg="sha1", mexer=None):
