@@ -22,8 +22,24 @@ rars = { version = "0.11", default-features = false }
 rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs"] }
 if-addrs = "0.15.0"
 socket2 = { version = "0.6", features = ["all"] }
+# PEND-09: verificação da assinatura das NF-e recebidas. Nenhuma criptografia
+# própria: RSA/SHA-1 legado e SHA-2 vêm do `ring`; a cadeia X.509 do
+# `rustls-webpki`; a leitura dos certificados do `x509-parser` (sem o recurso
+# `verify`, que não usamos).
+ring = "0.17"
+rustls-webpki = { version = "0.103", default-features = false, features = ["ring", "std", "alloc"] }
+rustls-pki-types = "1"
+x509-parser = { version = "0.18", default-features = false }
+base64 = "0.22"
+
+[features]
+# Só para os testes de integração (tests/*.rs): troca as raízes da ICP-Brasil
+# pela raiz FICTÍCIA de teste (nucleo/tests/pki). Nunca ligar no programa: o
+# aplicativo se recusa a abrir se este recurso estiver compilado.
+ancoras-de-teste = []
 
 [dev-dependencies]
+rustinho-nucleo = { path = ".", features = ["ancoras-de-teste"] }
 # Só nos testes: conectar de endereços diferentes (127.0.0.x) para testar o
 # limite por endereço do servidor da troca de dados.
 libc = "0.2"

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+    <infNFe Id="NFe35261011222333000181550010000123451000000014" versao="4.00">
+      <ide>
+        <cUF>35</cUF><natOp>VENDA DE MERCADORIA</natOp><mod>55</mod><serie>1</serie><nNF>12345</nNF><cNF>00000001</cNF><tpEmis>1</tpEmis><tpAmb>1</tpAmb><cDV>4</cDV>
+        <dhEmi>2026-10-08T10:15:00-03:00</dhEmi><tpNF>1</tpNF>
+      </ide>
+      <emit>
+        <CNPJ>11222333000181</CNPJ><xNome>DISTRIBUIDORA DE AUTOPECAS EXEMPLO LTDA</xNome><xFant>DIST EXEMPLO</xFant>
+        <enderEmit>
+          <xLgr>RUA DAS PECAS</xLgr><nro>100</nro><xBairro>CENTRO</xBairro><cMun>3552205</cMun><xMun>SOROCABA</xMun>
+          <UF>SP</UF><CEP>18010000</CEP><fone>1532320000</fone>
+        </enderEmit>
+        <IE>123456789110</IE><CRT>3</CRT>
+      </emit>
+      <dest><CNPJ>11444777000161</CNPJ><xNome>AUTO PECAS EXEMPLO</xNome></dest>
+      <det nItem="1">
+        <prod>
+          <cProd>FAG-32206</cProd><cEAN>7891234567895</cEAN><xProd>ROLAMENTO RODA TRASEIRA 32206</xProd>
+          <NCM>84822010</NCM><CEST>0100100</CEST><CFOP>6102</CFOP><uCom>PC</uCom><qCom>10.0000</qCom>
+          <vUnCom>52.0000000000</vUnCom><vProd>520.00</vProd><vFrete>20.00</vFrete>
+        </prod>
+        <imposto>
+          <ICMS><ICMS00><orig>0</orig><CST>00</CST></ICMS00></ICMS>
+          <IPI><cEnq>999</cEnq><IPITrib><CST>50</CST><vIPI>20.50</vIPI></IPITrib></IPI>
+          <PIS><PISAliq><CST>01</CST></PISAliq></PIS>
+        </imposto>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>N1100</cProd><cEAN>SEM GTIN</cEAN><xProd>PASTILHA FREIO DIANT COBREQ N-1100</xProd>
+          <NCM>68138110</NCM><CEST>0100800</CEST><CFOP>6102</CFOP><uCom>JG</uCom><qCom>4.0000</qCom>
+          <vUnCom>40.00</vUnCom><vProd>160.00</vProd><vFrete>10.00</vFrete>
+        </prod>
+        <imposto>
+          <ICMS><ICMS00><orig>0</orig><CST>00</CST></ICMS00></ICMS>
+          <PIS><PISAliq><CST>01</CST></PISAliq></PIS>
+        </imposto>
+      </det>
+      <det nItem="3">
+        <prod>
+          <cProd>OL5W30</cProd><cEAN>SEM GTIN</cEAN><xProd>OLEO MOTOR 5W30 SINTETICO 1L</xProd>
+          <NCM>27101932</NCM><CEST>0600700</CEST><CFOP>6102</CFOP><uCom>UN</uCom><qCom>12.0000</qCom>
+          <vUnCom>30.00</vUnCom><vProd>360.00</vProd><vFrete>10.00</vFrete>
+        </prod>
+        <imposto>
+          <ICMS><ICMS00><orig>0</orig><CST>00</CST></ICMS00></ICMS>
+          <PIS><PISNT><CST>04</CST></PISNT></PIS>
+        </imposto>
+      </det>
+      <total>
+        <ICMSTot>
+          <vProd>1040.00</vProd><vFrete>40.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vIPI>20.50</vIPI>
+          <vST>0.00</vST><vOutro>0.00</vOutro><vNF>1100.50</vNF>
+        </ICMSTot>
+      </total>
+      <cobr>
+        <fat><nFat>12345</nFat><vOrig>1100.50</vOrig><vLiq>1100.50</vLiq></fat>
+        <dup><nDup>001</nDup><dVenc>2026-11-07</dVenc><vDup>550.25</vDup></dup>
+        <dup><nDup>002</nDup><dVenc>2026-12-07</dVenc><vDup>550.25</vDup></dup>
+      </cobr>
+    </infNFe>
+    <Signature xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/><SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/><Reference URI="#NFe35261011222333000181550010000123451000000014"><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/></Transforms><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><DigestValue>ezzZvjQRAMkB/Gu4dYFVesU44CM=</DigestValue></Reference></SignedInfo><SignatureValue>UqL3D0RSyFD0IoWw4W3YN9jFrBXdO700hCZbISZu8BOlLhdb8ZzQsUDFQ06teLEzN4fnXR0r3cK7mquPmRuH5PGlSOJj89f4Kc10rBhVINGgQAoElSv8ZP8NARbJYHg0J0I5k79j6WDRDgo3TBxB60S/k0P780AcrtAQNHCJ8XK38DBBpuRJfEsX8iNxyBd5R2HgtZLp+B5L7GuPGgDwbwzm7D/DhlHKLV1VYJQX1ki0IoOujdymvpGFKb+ytXNfJWohn637eb/OBi8Qi26uIaUr9nj8yb6sCr6TI3AJbQo9m2KfUCTbWMhYNkLvGwCdfM87rKGoCGEUd4h5ECMvlQ==</SignatureValue><KeyInfo><X509Data><X509Certificate>MIIEFDCCAvygAwIBAgIUQeVgcBjE8nJlJGwdVgn13HhpyGEwDQYJKoZIhvcNAQELBQAwUTELMAkGA1UEBhMCQlIxEzARBgNVBAoMCklDUC1CcmFzaWwxLTArBgNVBAMMJEFDIGRlIFRFU1RFIGRvIFJ1c3RpbmhvIFNFTSBWQUxJREFERTAeFw0yMDAxMDEwMDAwMDBaFw00NTAxMDEwMDAwMDBaMD4xCzAJBgNVBAYTAkJSMRMwEQYDVQQKDApJQ1AtQnJhc2lsMRowGAYDVQQDDBFFTUlURU5URSBERSBURVNURTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJDiPeiV4iiT0UAOKlDMpoceQ6RkxKfIVJ6SdMEKKCgFCRGHP6RpXT/AaJjRmcOldnitvx3bgYjOARVn3mIBvo/O2O9o4vapJ/jyHBRkQsyxP9AIz7R4ICSn/xyFy8ABf/W1tRZMvQDk1ZoaSSKqa1vSRENkNescORUCk5KLuavnn2w42XjtTEHRiptPF9JEGMAmR864fuhUFswAliamqr1L8fTvAFVOz3um8Hu8a7rEYI5r5qtC62L5UyxHxaTSwLvfdP91HZ5S/GXF0Cp6jI9IYIBvMSAtUpJ7dmn9BVNgNhU6jvBRVQI4JmDwJ3IGhMo6hhUDAeHeWhZJgXNSrhcCAwEAAaOB9jCB8zAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIFYDAdBgNVHSUEFjAUBggrBgEFBQcDAgYIKwYBBQUHAwQwFAYDVR0gBA0wCzAJBgdgTAECAc4PMIGgBgNVHREEgZgwgZWgHwYFYEwBAwKgFgQUUkVTUE9OU0FWRUwgREUgVEVTVEWgGQYFYEwBAwOgEAQOMTEyMjIzMzMwMDAxODGgPgYFYEwBAwSgNQQzMDEwMTE5OTAxMjM0NTY3ODkwOTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwU1NQU1AgoBcGBWBMAQMHoA4EDDAwMDAwMDAwMDAwMDANBgkqhkiG9w0BAQsFAAOCAQEAJi+S32GwLVcP1rkJad0gfU/VhMdbIoG+OGttoizo7YXm6cMfLDPP+O/fWKjLNAUU9fZVw1Wn6ZD6BgHm5sCt6lopNjsaAGlvmRks24KhFEuHV7W2aQXTrz/AOnEuYoRjMNCp0HUw/fGW0SNAwHhUbqtL/4hiyuJ+EHhlreE4aTAh/i20bGj1acXVCBf43H3ACn8bBzrjrGz877hO6gebw1qYPPre6+OzDzS69tLVcXGcdLLNttHxztlrZ6adzkItgdNRmsMhf4L9RONeYnZx2Rz5qJfjcJ2i7vrHGobLICMfi0/lT7+F6wKx51GpFjPoo5euMUzA9juQukCOPwd+4Q==</X509Certificate></X509Data></KeyInfo></Signature>
+  </NFe>
+  <protNFe versao="4.00"><infProt><chNFe>35261011222333000181550010000123451000000014</chNFe><cStat>100</cStat><dhRecbto>2026-10-08T10:16:30-03:00</dhRecbto><nProt>135260000000001</nProt><digVal>ezzZvjQRAMkB/Gu4dYFVesU44CM=</digVal></infProt></protNFe>
+</nfeProc>
