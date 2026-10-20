@@ -49,6 +49,8 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 
 ## Identidade visual
 
+- **PEND-18 · Android 32 bits: tela toda cinza ao abrir (20/10/2026) — ABERTO, causa desconhecida.** Visto por você no APK de teste (ramo `teste-apk-32bits`, código `f50aa30`/r10). O teste automático de 32 bits de 17/10 nunca rodou o app (`INSTALL_FAILED_NO_MATCHING_ABIS` no emulador; as fotos do ramo `testes-android-32bits` são de outro aplicativo): o Android de 32 bits nunca foi visto funcionando. Plano em `docs/PLANO-fiscal-e-plataformas.md` (P0).
+- **PEND-19 · CNPJ alfanumérico (leiautes de jul/2026) — ABERTO.** Validação, chave de acesso, titular do certificado (PEND-09) e importação precisam aceitar letras. Plano (F0).
 - **PEND-11 · Autorização para usar o símbolo da Rust (engrenagem com "R") como ícone do Rustinho — NÃO RESOLVIDA (registrada à parte; não bloqueia o desenvolvimento).**
   O ícone enviado pelo dono do projeto (20/10/2026) é a engrenagem com o "R" do logotipo da linguagem Rust, com acabamento próprio (azulejo preto texturizado e degradê colorido). Ele já está aplicado em todas as plataformas (veja `identidade/LEIA.md`), mas **incorporar o ícone ao programa não resolve a questão de a marca poder ser usada assim**. Quem decide é o dono do projeto: conferir a política de marca/uso do logotipo da Rust Foundation e, se for preciso, pedir a autorização, ou trocar o símbolo. Nada neste repositório afirma que a autorização existe. Trocar o símbolo depois é simples: substituir `identidade/rustinho-icone-original.png` (e o `SHA256_DA_FONTE` do script) e rodar `python3 identidade/gerar_icones.py`.
 - **PEND-12 · Ícone: adaptações que mudariam a aparência dependem da sua aprovação (nada disso foi aplicado).**
