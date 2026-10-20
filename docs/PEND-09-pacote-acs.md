@@ -67,7 +67,7 @@ Usei `rustls-webpki` 0.103 (com `ring`), âncoras = só as raízes permitidas, A
 |---|---|---|
 | A. âncoras v5 + v2, data de emissão | **528** | 4 (as de teste fsist: emissor desconhecido) |
 | B. só v5 | 527 | 5 (a da raiz v2 também é recusada) |
-| C. v5 + v2, mas data = **hoje** | muitas recusadas (certificados vencidos) | prova que a data de referência importa |
+| C. v5 + v2, mas data = **hoje** | 190 | 342 (certificados vencidos): a data de referência importa |
 | D. âncoras v10 + v11 (SSL/código) | **0** | 532 |
 
 Conclusão: a validação de cadeia pode ser feita por uma biblioteca madura, sem escrever lógica própria de cadeia. Limitação já vista: a biblioteca **não aceita assinatura SHA-1 em certificado** (cadeias das raízes v1 e original), tratada no desenho.

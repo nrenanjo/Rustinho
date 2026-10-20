@@ -32,7 +32,7 @@ Consequência para o desenho: a verificação tem de acontecer **antes** de `gar
 |---|---|---|
 | Algoritmos | 539/539: c14n 1.0 inclusivo, transformações `enveloped-signature` + c14n, **SHA-1**, **RSA-SHA1** | Aceitar só essas URIs fixas (+ par SHA-256). |
 | Resumo e assinatura recalculados | **539/539 conferem** | Compatível com todos os documentos válidos já usados. |
-| Cadeia (biblioteca `rustls-webpki`, âncoras v5+v2 do pacote, data = `dhEmi`) | **528 aceitas**, 4 recusadas (fsist de teste); só v5: 527; âncoras v10/v11: **0 de 532**; data = hoje: muitas recusadas | Biblioteca madura resolve a cadeia; a **data de referência é a de emissão**. |
+| Cadeia (biblioteca `rustls-webpki`, âncoras v5+v2 do pacote, data = `dhEmi`) | **528 aceitas**, 4 recusadas (fsist de teste); só v5: 527; âncoras v10/v11: **0 de 532**; data = hoje: só 190 aceitas, 342 recusadas | Biblioteca madura resolve a cadeia; a **data de referência é a de emissão**. |
 | Validade | 346 de 539 certificados já venceram hoje; todas as 528 estavam válidas na emissão | Nunca conferir validade "hoje". |
 | Titular × emitente | CNPJ idêntico ou mesma raiz de 8 dígitos em todas as NF-e | D3 não recusa nada real. |
 | `protNFe` | **Sem assinatura** nos arquivos distribuídos | Assinatura do emitente ≠ autorização (§5). |
