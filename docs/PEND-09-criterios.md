@@ -1,6 +1,6 @@
 # PEND-09 · Validação criptográfica da NF-e (assinatura do emitente) e prova de autorização da SEFAZ
 
-**Status:** **revisão 3, critérios finais** (20/10/2026, 14:3x), **sem código**. Incorpora a revisão sobre biblioteca existente, âncoras por critério histórico e pacote oficial verificado (rev. 2) e as decisões **D7 e D8 aprovadas**. Versão 0.9.11; só commits locais; nada vai ao GitHub.
+**Status:** **revisão 4, critérios finais** (20/10/2026, 14:4x), **sem código ainda**. A revisão 4 fecha as duas questões que você levantou: **instante de validade do certificado** (§3.5) e **uso do certificado: assinatura × TLS** (§3.6). Incorpora a revisão sobre biblioteca existente, âncoras por critério histórico e pacote oficial verificado (rev. 2) e as decisões **D7 e D8 aprovadas**. Versão 0.9.11; só commits locais; nada vai ao GitHub.
 **Decisões D1 a D8: todas aprovadas por você em 20/10/2026** (D1–D6 às 13:37; D7 e D8 às 14:06), sem opção de forçar importação. **D7 é provisória** (vale até o PEND-15 existir e ser revisada nesse momento).
 **Regra de ouro:** *coerência entre campos não é prova de autenticidade, e assinatura válida não é prova de autorização.* Duas provas diferentes, tratadas separadamente (§4 e §5).
 
@@ -63,7 +63,48 @@ Consequência para o desenho: a verificação tem de acontecer **antes** de `gar
 
 ### 3.4 Cadeia por biblioteca (não própria)
 
-`rustls-webpki` constrói e valida o caminho (assinatura de cada elo, `CA`/`pathLen`, uso de chave, **data de referência** passada por nós, nomes). Medido com os dados reais (§2). Limites a tratar no teste de viabilidade inicial da implementação: (i) a biblioteca **não aceita SHA-1 em certificado** → para as raízes v1 e original, avaliar um **adaptador SHA-1 controlado** (algoritmo extra declarado só para essas raízes e só com `dhEmi` dentro da validade da raiz); se não for seguro, essas cadeias ficam **recusadas com motivo claro**; (ii) certificados de ACs antigos com DER fora do padrão (1 caso, Serpro) ficam fora; (iii) ECDSA P-521/Ed448/pós-quântico: sem suporte inicial.
+`rustls-webpki` constrói e valida o caminho (assinatura de cada elo, `CA`/`pathLen`, validade na **data de referência** passada por nós, nomes, extensões críticas desconhecidas). **Lido no código da biblioteca (0.103.16):** ela **ignora o `KeyUsage`** (inclusive `keyCertSign` das ACs) e aplica a regra de `ExtendedKeyUsage` passada por nós a **todos** os certificados do caminho; por isso o Rustinho confere `KeyUsage` por conta própria e passa uma regra de EKU própria (§3.6). Medido com os dados reais (§2). Limites a tratar no teste de viabilidade inicial da implementação: (i) a biblioteca **não aceita SHA-1 em certificado** → para as raízes v1 e original, avaliar um **adaptador SHA-1 controlado** (algoritmo extra declarado só para essas raízes e só com `dhEmi` dentro da validade da raiz); se não for seguro, essas cadeias ficam **recusadas com motivo claro**; (ii) certificados de ACs antigos com DER fora do padrão (1 caso, Serpro) ficam fora; (iii) ECDSA P-521/Ed448/pós-quântico: sem suporte inicial.
+
+### 3.5 Instante de validade do certificado (revisão 4, item 1)
+
+**Regras oficiais:** o Manual de Orientação do Contribuinte (padrões técnicos, versão 6.0, item 3.2.5) manda a SEFAZ "verificar o prazo de validade do certificado utilizado" e conferir a revogação pela lista "disponível no momento da conferência da assinatura", isto é, **no recebimento**; a regra E02 (rejeição 291) confere "data início e data fim" da validade; a regra B09-10 (rejeição 703) recusa `dhEmi` mais de **5 minutos depois** do recebimento; a B09-20 (rejeição 228) recusa emissão com mais de **30 dias** (salvo contingência). Nenhuma regra oficial dá **tolerância de 48 h** antes do início da validade.
+
+**Medição no acervo** (528 NF-e genuínas, emitidas de 04/03/2021 a 14/10/2026, todas `tpEmis = 1`; as 4 de teste fsist já excluídas):
+
+| Alternativa (certificado e cadeia válidos em…) | Aceitas | Recusadas | Observação |
+|---|---|---|---|
+| A. agora (20/10/2026) | 190 | 338 | Recusaria notas legítimas antigas. **Descartada.** |
+| B. `dhEmi` (estrito) | 528 | 0 | `dhEmi` está **dentro** da região assinada. |
+| C. `dhEmi` com 48 h de tolerância | 528 | 0 | A tolerância **nunca foi usada**: a menor folga entre o início da validade e `dhEmi` é de **5 h 11 min**. **Sem fundamento: removida.** |
+| D. `dhRecbto` (estrito) | 528 | 0 | Instante em que a SEFAZ conferiu, mas o campo **não é assinado** (qualquer um escreve). |
+| **E. `dhEmi` E `dhRecbto` (estritos)** | **528** | **0** | **Escolhida.** |
+
+Cadeia completa (biblioteca de cadeia, âncoras v5+v2): **528 de 528 em `dhEmi` e 528 de 528 em `dhRecbto`**. Nenhum certificado começa ou vence entre `dhEmi` e `dhRecbto` no acervo.
+
+**Por que E:** `dhEmi` é a afirmação **assinada** do emitente; `dhRecbto` é quando a SEFAZ **de fato** conferiu a validade (MOC). Uma nota autorizada de verdade passou nas duas condições. Exigir as duas **só restringe**: o `dhRecbto`, por não ser assinado, nunca é usado para **ampliar** a aceitação. **Limite honesto:** quem tiver uma chave vazada de um certificado vencido pode escrever datas antigas nos dois campos; nenhuma data dentro do XML protege disso. Só a consulta à SEFAZ (PEND-15) ou a conferência do gerente (D7) cobrem esse caso.
+
+**Coerência entre os dois instantes (B09) não é exigida:** no acervo há **1 nota do Paraná** (em 2 arquivos) com o recebimento carimbado pela SEFAZ com fuso `-02:00` errado (os relógios distam 14 s, mas a conta dá "recebida 1 h antes da emissão"). Exigir a regra B09 recusaria uma nota legítima por defeito do carimbo da SEFAZ; ela fica só registrada no resultado (aviso técnico, sem recusa).
+
+### 3.6 Uso do certificado: assinatura do XML × autenticação TLS (revisão 4, item 2)
+
+**Fontes oficiais:** MOC (padrões técnicos, "Padrão de Certificado Digital"): certificado ICP-Brasil **tipo A1 ou A3**, com o CNPJ do titular no `otherName` **2.16.76.1.3.3**; **para assinatura de mensagens:** o CNPJ de um estabelecimento do emitente e o **"uso da chave" previsto para assinatura digital**, respeitando a política do certificado; **para transmissão (TLS):** o CNPJ de quem transmite (pode ser outro) e a extensão **Extended Key Usage com "Autenticação Cliente"**. Políticas de Certificado tipo **A1** (OID 2.16.76.1.2.1.161) e **A3** (OID 2.16.76.1.2.3.152) da AC IDFEDERAL, versão 1.1 de março/2025, item 7.1.2: **`KeyUsage` crítica com `digitalSignature`, `nonRepudiation` e `keyEncipherment`**; **`ExtendedKeyUsage` obrigatória, não crítica, com pelo menos `clientAuth` (1.3.6.1.5.5.7.3.2) ou `emailProtection` (1.3.6.1.5.5.7.3.4)**; `certificatePolicies` com o OID da política; para pessoa jurídica, `otherName` 2.16.76.1.3.4, .2, **.3 (CNPJ)** e .7; para pessoa física, **2.16.76.1.3.1** (CPF nas posições 9 a 19). Regra F03 da NT 2026.001 (rejeição 213): **raiz do CNPJ do certificado = raiz do CNPJ do emitente**; F03A (rejeição 227): CPF igual.
+
+**Medição no acervo (528 certificados de assinatura):** `KeyUsage` crítica com `digitalSignature + nonRepudiation + keyEncipherment` em **528**; `ExtendedKeyUsage` não crítica com `clientAuth + emailProtection` em **521** (+ `msSmartcardLogin` em 7); políticas **2.16.76.1.2.1.\*** (A1) em **479** e **2.16.76.1.2.3.\*** (A3) em **49**; `otherName` .2, .3, .4 e .7 em **528**; `BasicConstraints` `CA:FALSE` em 508 e ausente em 20; nenhuma extensão crítica além de `keyUsage` e `basicConstraints`. **ACs do pacote:** `keyCertSign` em todas as legíveis; 330 sem EKU; 7 com `serverAuth` (são as ACs de SSL, fora das âncoras de NF-e).
+
+**Regra de uso do Rustinho para verificar a assinatura do XML (perfil "NF-e, leiaute 4.00, A1/A3"):**
+
+| # | Regra | Base | Acervo |
+|---|---|---|---|
+| U1 | `KeyUsage` **presente e crítica**, com **`digitalSignature`** e **`nonRepudiation`** | MOC ("uso da chave para assinatura") + PC A1/A3 item 7.1.2.7.f | 528/528 |
+| U2 | `keyEncipherment` **não** é exigido para verificar assinatura (é uso de cifragem de chave); a ausência fica registrada como "fora do perfil", **sem** recusar | PC exige o bit, mas ele não participa da assinatura | 528/528 têm |
+| U3 | `ExtendedKeyUsage` **presente**, com **`clientAuth` ou `emailProtection`**. Ela é conferida **como conformidade com o perfil A1/A3**, **não** como permissão de assinar: o perfil não tem um propósito de "assinatura de documento"; uma leitura literal da RFC 5280 recusaria os 528 certificados legítimos | PC A1/A3 item 7.1.2.7.f | 528/528 |
+| U4 | `certificatePolicies` com OID sob **2.16.76.1.2.1** (A1) ou **2.16.76.1.2.3** (A3). Outros tipos (A2, A4, S, T, **Selo SE-S/SE-H**) são recusados com "tipo de certificado não aceito para NF-e por este perfil" até haver fonte oficial que os inclua | MOC ("tipo A1 ou A3") | 528/528 |
+| U5 | `BasicConstraints` ausente ou `CA:FALSE` | perfil de usuário final | 528/528 |
+| U6 | Titular: `otherName` 2.16.76.1.3.3 com a mesma **raiz de 8 dígitos** do CNPJ do emitente; emitente com CPF: `otherName` 2.16.76.1.3.1 com o mesmo CPF | MOC + F03/F03A | 528/528 (CNPJ) |
+| U7 | Extensão crítica desconhecida → recusa | RFC 5280 (feito pela biblioteca) | 0 casos |
+| U8 | ACs do caminho: `CA:TRUE`, **`keyCertSign`** (conferido pelo Rustinho, pois a biblioteca ignora), `pathLen`; EKU das ACs **não** restringe a assinatura | perfil de AC | 29/29 caminhos reais |
+
+**Para TLS (futuro: PEND-15 e emissão), perfil separado:** EKU **com `clientAuth` obrigatório** (MOC); CNPJ de quem transmite, que pode não ser o do emitente. **Os dois perfis não se misturam no código:** a verificação de XML nunca usa a regra `clientAuth` (o protótipo usava, e isso está corrigido nestes critérios).
 
 ## 4. Âncoras de confiança (item 3 e 4 da sua revisão)
 
@@ -128,7 +169,7 @@ Novo campo da compra (migração 0020): `xml_verificacao` (`verificada` | `nao_v
 
 ## 7. Desenho técnico (resumo)
 
-Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da NF-e), `xmldsig.rs` (estrutura estrita e verificação, RSA via `ring`), `cadeia.rs` (invólucro fino sobre `rustls-webpki`), `ancoras.rs` (âncoras por SHA-256 + ACs do pacote, com categoria e validade), `mod.rs` (`verificar(xml, &Ancoras) -> Result<Prova, Recusa>`); a **regra de titular é uma função plugável** (hoje: CNPJ/CPF nos OIDs do e-CNPJ/e-CPF; também CNPJ em `serialNumber`, como no Selo Eletrônico — Resolução 211/2024), para a transição de certificados não exigir reescrita, e `autorizacao.rs` (estados da §5.2, sem rede). Estrutura aceita (anti "wrapping"): uma `Signature` filha de `NFe` depois de `infNFe`; uma `Reference` para o `Id` do `infNFe`, **único** no documento; transformações exatamente `[enveloped-signature, c14n-20010315]`; pares sha1/rsa-sha1 ou sha256/rsa-sha256; 1 certificado de `KeyInfo`; sem `DOCTYPE`; ≤ 5 MB; profundidade ≤ 64. Ordem: estrutura → resumo → assinatura RSA → cadeia na data `dhEmi` (+48 h de tolerância no início da validade do certificado) → titular (raiz do CNPJ/CPF) → `tpAmb = 1` → só então `nfe_xml` lê os dados do **mesmo nó** e a coerência atual segue como verificação adicional. `importar_xml` verifica **antes** de qualquer escrita (inclusive `garantir_fornecedor`).
+Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da NF-e), `xmldsig.rs` (estrutura estrita e verificação, RSA via `ring`), `cadeia.rs` (invólucro fino sobre `rustls-webpki`), `ancoras.rs` (âncoras por SHA-256 + ACs do pacote, com categoria e validade), `mod.rs` (`verificar(xml, &Ancoras) -> Result<Prova, Recusa>`); a **regra de titular é uma função plugável** (hoje: CNPJ/CPF nos OIDs do e-CNPJ/e-CPF; também CNPJ em `serialNumber`, como no Selo Eletrônico — Resolução 211/2024), para a transição de certificados não exigir reescrita, e `autorizacao.rs` (estados da §5.2, sem rede). Estrutura aceita (anti "wrapping"): uma `Signature` filha de `NFe` depois de `infNFe`; uma `Reference` para o `Id` do `infNFe`, **único** no documento; transformações exatamente `[enveloped-signature, c14n-20010315]`; pares sha1/rsa-sha1 ou sha256/rsa-sha256; 1 certificado de `KeyInfo`; sem `DOCTYPE`; ≤ 5 MB; profundidade ≤ 64. Ordem: estrutura → resumo → assinatura RSA → cadeia e certificado válidos em `dhEmi` **e** em `dhRecbto`, sem tolerância (§3.5) → uso do certificado U1–U8 (§3.6) → titular (raiz do CNPJ/CPF) → `tpAmb = 1` → só então `nfe_xml` lê os dados do **mesmo nó** e a coerência atual segue como verificação adicional. `importar_xml` verifica **antes** de qualquer escrita (inclusive `garantir_fornecedor`).
 
 ## 8. Testes de aceitação finais (escritos **antes** do código)
 
@@ -147,10 +188,19 @@ Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da N
 | A-12 | Nota adulterada reassinada com certificado próprio autoassinado | Recusa (cadeia). |
 | A-13 | AC fictícia com nome "ICP-Brasil" | Recusa (âncora é por SHA-256). |
 | A-14 | AC intermediária ausente / assinatura da AC corrompida / AC de outra raiz | Recusa, um motivo por caso. |
-| A-15 | Certificado fora da validade **na data de emissão** | Recusa. |
-| A-16 | Certificado vencido **hoje**, válido na emissão | **Aceita.** |
+| A-15 | Certificado fora da validade em `dhEmi` (vencido antes; começa **1 s** depois de `dhEmi`, sem tolerância) e, separadamente, fora da validade em `dhRecbto` com `dhEmi` válido | Recusa nos três casos. |
+| A-16 | Certificado vencido **hoje**, válido em `dhEmi` e `dhRecbto` (como 338 do acervo) | **Aceita.** |
+| A-16b | AC intermediária ou raiz (v2) válida em `dhEmi` e vencida em `dhRecbto` | Recusa. |
+| A-16c | Nota do acervo com fuso errado no `dhRecbto` (Paraná) | **Aceita**; aviso técnico registrado. |
 | A-17 | AC com `CA:FALSE`, sem `keyCertSign`, `pathLen` estourado | Recusa. |
 | A-18 | CNPJ de outra raiz; mesma raiz/outra filial; CPF | Recusa; aceita; confere CPF. |
+| **A-49** | `KeyUsage` ausente; não crítica; sem `digitalSignature`; sem `nonRepudiation` | Recusa nos quatro. |
+| **A-50** | `KeyUsage` sem `keyEncipherment` (resto conforme) | **Aceita**, com registro "fora do perfil". |
+| **A-51** | EKU ausente; EKU só com `serverAuth`; EKU vazia | Recusa. EKU só `emailProtection`: **aceita**; só `clientAuth`: **aceita**; `clientAuth + emailProtection + msSmartcardLogin` (7 do acervo): **aceita**. |
+| **A-52** | Política fora de A1/A3 (A4, Selo de teste, SSL) ou ausente | Recusa com motivo "tipo de certificado". |
+| **A-53** | Certificado de usuário com `CA:TRUE` | Recusa. |
+| **A-54** | AC do caminho sem `keyCertSign` | Recusa (prova que o Rustinho confere o que a biblioteca ignora). |
+| **A-55** | Acervo real: as 528 passam em U1–U8; o verificador **não** chama a regra `clientAuth` de TLS (teste de código: o perfil de XML e o de TLS são tipos diferentes) | 528 aceitas; teste de tipo passa. |
 | A-19 | `tpAmb = 2` | Recusa. |
 | A-20 | Teste do limite conhecido **invertido**; aviso fixo removido | O adulterado antes aceito é **recusado**. |
 | A-21 | Wrapping: dois `infNFe`/`Id`, `Reference` para outro `Id`, `Signature` fora do lugar, duas `Signature` | Recusa em todos; dados lidos do nó verificado. |
@@ -181,7 +231,7 @@ Módulo `nucleo/src/fiscal/` (puro, sem rede, sem banco): `c14n.rs` (perfil da N
 | A-33 | `cargo tree`; compilação das bibliotecas novas para Linux; **Windows e Android não testados aqui** | Registrado (L5). |
 | A-41 | Avaliador diferencial (`xml-sec`, se suportar SHA-1): mesma decisão que o verificador | Sem divergência; se divergir, **bloqueia a entrega**. |
 
-**Mutações planejadas** (defeitos plantados, todos pegos; inclui, para D7/D8: atestado sem conferir o protocolo do XML; `negada` liberável por atestado; operador atestando; cadastro por XML mexendo em estoque/custo; qualquer raiz do pacote tratada como âncora): ignorar o resumo; comparar só um prefixo; não conferir a assinatura; usar chave de outro ponto do XML; aceitar sem cadeia; âncora por nome; data de hoje em vez de `dhEmi`; âncora v3/v10/v11 aceita; certificado do XML tratado como âncora; não conferir `CA`/`pathLen`; não conferir CNPJ; aceitar `tpAmb=2`; ler os dados de um segundo `infNFe`; aceitar `Reference` para outro `Id`; transformações extras; **gravar a compra/fornecedor antes de verificar**; **`lancar` sem consultar `autorizacao`**; **`protNFe` do XML tratado como prova**; **`negada` liberada**; RSA-1024; ordem dos atributos na C14N; pacote com raiz nova; `nao_verificada` virar `verificada` na migração.
+**Mutações planejadas** (defeitos plantados, todos pegos; inclui, para a revisão 4: voltar a tolerância de 48 h; conferir só `dhEmi`; conferir só `dhRecbto`; usar a data de hoje; não conferir `KeyUsage`/`nonRepudiation`; aceitar EKU ausente; exigir `clientAuth` (recusaria `emailProtection`); aceitar política fora de A1/A3; não conferir `keyCertSign` das ACs; e, para D7/D8: atestado sem conferir o protocolo do XML; `negada` liberável por atestado; operador atestando; cadastro por XML mexendo em estoque/custo; qualquer raiz do pacote tratada como âncora): ignorar o resumo; comparar só um prefixo; não conferir a assinatura; usar chave de outro ponto do XML; aceitar sem cadeia; âncora por nome; data de hoje em vez de `dhEmi`; âncora v3/v10/v11 aceita; certificado do XML tratado como âncora; não conferir `CA`/`pathLen`; não conferir CNPJ; aceitar `tpAmb=2`; ler os dados de um segundo `infNFe`; aceitar `Reference` para outro `Id`; transformações extras; **gravar a compra/fornecedor antes de verificar**; **`lancar` sem consultar `autorizacao`**; **`protNFe` do XML tratado como prova**; **`negada` liberada**; RSA-1024; ordem dos atributos na C14N; pacote com raiz nova; `nao_verificada` virar `verificada` na migração.
 
 **Verificação de fechamento (executada depois da implementação):** suítes completas em **desenvolvimento e release**, mutações, testes de atomicidade (A-24, A-25, A-43) e registro explícito do que **não** foi testado em **Windows e Android**.
 
