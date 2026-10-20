@@ -40,7 +40,7 @@ cxx_qt_import_qml_module(rustinho_qml
     SOURCE_CRATE rustinho_android
 )
 
-qt_add_executable(Rustinho main.cpp vistacamera.cpp vistacamera.h)
+qt_add_executable(Rustinho main.cpp vistacamera.cpp vistacamera.h diagnostico.cpp diagnostico.h)
 target_link_libraries(Rustinho PRIVATE
     rustinho_qml
     Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2 Qt::Network Qt::Multimedia
