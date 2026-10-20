@@ -3463,6 +3463,10 @@ mod testes_pessoas {
         assert!(!pessoa_pendente(&a, &antes), "o que já valia continua valendo");
         manter(&mut a.conn).unwrap();
         assert!(pessoa_pendente(&a, &na_copia), "bloqueado não confirma");
+        // A própria função de confirmar também recusa, chamada direto (não
+        // depende de quem a chama ter olhado o bloqueio antes).
+        assert_eq!(confirmar_esperando(&a.conn).unwrap(), 0, "bloqueado não confirma, nem chamando direto");
+        assert!(pessoa_pendente(&a, &na_copia));
         // Registra como caixa novo e assume as faixas: agora confirma.
         registrar_caixa_novo(&a.conn, Some("outro-computador"), Some("Caixa copiado")).unwrap();
         assumir(&a.conn).unwrap();
