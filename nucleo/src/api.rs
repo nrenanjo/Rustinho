@@ -98,6 +98,7 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "codigos_assumir"
         | "codigos_definir_pendentes"
         | "codigos_dar_novo"
+        | "codigos_pessoa_dar_novo"
         | "codigos_confirmar_computador"
         | "codigos_registrar_caixa_novo" => "gerente",
         _ => return None,
@@ -654,6 +655,7 @@ impl Servico {
             "codigos_definir_pendentes" => {
                 let tx = self.banco.conn.transaction()?;
                 let n = faixas::definir_todos_pendentes(&tx)?;
+                let p = faixas::definir_todas_pessoas_pendentes(&tx)?;
                 auditoria::registrar(
                     &tx,
                     &disp,
@@ -661,7 +663,9 @@ impl Servico {
                     "codigos.definir",
                     "produto",
                     "",
-                    &[format!("{n} peças com código a definir receberam código deste caixa")],
+                    &[format!(
+                        "{n} peças e {p} clientes ou fornecedores com código a definir receberam código deste caixa"
+                    )],
                 )?;
                 tx.commit()?;
                 faixas::situacao(&self.banco.conn)
@@ -703,6 +707,13 @@ impl Servico {
                 tx.commit()?;
                 self.banco.dispositivo = novo;
                 faixas::manter(&mut self.banco.conn)?;
+                faixas::situacao(&self.banco.conn)
+            }
+            "codigos_pessoa_dar_novo" => {
+                let d: Id = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                pessoas::trocar_codigo(&tx, &disp, &sessao.usuario_id, &d.id)?;
+                tx.commit()?;
                 faixas::situacao(&self.banco.conn)
             }
             "codigos_dar_novo" => {
@@ -2462,6 +2473,38 @@ mod testes {
         assert!(r["dados"]["bloqueio"].is_null());
         let ficha = chamar(&mut s, "produto_novo", "{}");
         assert_ne!(ficha["dados"]["codigoPrevisto"], "");
+    }
+
+    /// PEND-01 pela API: a ficha nova de cliente mostra o código previsto; o
+    /// código sai da faixa ao salvar; o gerente resolve um código repetido.
+    #[test]
+    fn codigo_de_cliente_sai_da_faixa_e_o_gerente_resolve_repetido() {
+        let mut s = conectado();
+        assert_eq!(acao_do_comando("codigos_pessoa_dar_novo"), Some("gerente"));
+        let ficha = chamar(&mut s, "pessoa_nova", r#"{"papel":"cliente"}"#);
+        assert_eq!(ficha["dados"]["codigo"], "");
+        assert_eq!(ficha["dados"]["codigoPrevisto"], "1");
+        let mut f = ficha["dados"].clone();
+        f["nome"] = json!("Cliente Um");
+        let r = chamar(&mut s, "pessoa_salvar", &f.to_string());
+        assert_eq!(r["ok"], true, "{r}");
+        let id1 = r["dados"]["id"].as_str().unwrap_or_default().to_string();
+        let aberta = chamar(&mut s, "pessoa_abrir", &json!({ "id": id1 }).to_string());
+        assert_eq!(aberta["dados"]["codigo"], "1");
+        // Outro cadastro com o mesmo código (chegou de outra loja): só o gerente vê.
+        let mut g = chamar(&mut s, "pessoa_nova", r#"{"papel":"fornecedor"}"#)["dados"].clone();
+        g["nome"] = json!("Fornecedor Dois");
+        let r = chamar(&mut s, "pessoa_salvar", &g.to_string());
+        let id2 = r["dados"]["id"].as_str().unwrap_or_default().to_string();
+        s.banco.conn.execute("UPDATE pessoa SET codigo = '1' WHERE id = ?1", [&id2]).unwrap();
+        let sit = chamar(&mut s, "codigos_situacao", "{}");
+        assert_eq!(sit["dados"]["pessoasRepetidas"][0]["codigo"], "1");
+        assert_eq!(sit["dados"]["pessoasRepetidas"][0]["pessoas"].as_array().unwrap().len(), 2);
+        let r = chamar(&mut s, "codigos_pessoa_dar_novo", &json!({ "id": id2 }).to_string());
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(r["dados"]["pessoasRepetidas"].as_array().unwrap().is_empty());
+        let aberta = chamar(&mut s, "pessoa_abrir", &json!({ "id": id2 }).to_string());
+        assert_eq!(aberta["dados"]["codigo"], "3");
     }
 
     fn chamar(s: &mut Servico, c: &str, d: &str) -> Value {

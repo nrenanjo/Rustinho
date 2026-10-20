@@ -24,6 +24,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0012_historia_das_alteracoes.sql"),
     include_str!("migracoes/0013_faixas_de_codigo.sql"),
     include_str!("migracoes/0014_codigo_confirmado.sql"),
+    include_str!("migracoes/0015_codigo_das_pessoas.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.

@@ -67,6 +67,31 @@ fn espera_entre_faixas(conn: &Connection) -> Resultado<Duration> {
 /// só algarismos, sem zero na frente, até 9 algarismos.
 const SQL_NUMERO: &str = "codigo GLOB '[1-9]*' AND codigo NOT GLOB '*[^0-9]*' AND length(codigo) <= 9";
 
+/// Para que o código serve. A faixa de um caixa vale para os dois: um código
+/// de números de cliente ou fornecedor sai da mesma faixa do caixa que os das
+/// peças, então também nunca se repete entre caixas. Cada uso tem a sua
+/// própria contagem (os clientes continuam 1, 2, 3... e as peças também).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Uso {
+    Peca,
+    Pessoa,
+}
+
+impl Uso {
+    fn chave_ultimo(self) -> &'static str {
+        match self {
+            Uso::Peca => "codigos_ultimo",
+            Uso::Pessoa => "codigos_ultimo_pessoa",
+        }
+    }
+    fn tabelas(self) -> &'static [&'static str] {
+        match self {
+            Uso::Peca => &["produto", "produto_codigo_antigo"],
+            Uso::Pessoa => &["pessoa"],
+        }
+    }
+}
+
 /// O valor de um código de números (None para os outros formatos).
 pub fn numero(codigo: &str) -> Option<i64> {
     let b = codigo.as_bytes();
@@ -133,9 +158,14 @@ fn ler_numero(conn: &Connection, chave: &str) -> Resultado<i64> {
     Ok(config::ler(conn, chave)?.and_then(|t| t.parse().ok()).unwrap_or(0))
 }
 
-/// Último código dado por este caixa na geração atual.
+/// Último código de peça dado por este caixa na geração atual.
 fn ultimo(conn: &Connection, g: &str) -> Resultado<i64> {
-    Ok(config::ler(conn, "codigos_ultimo")?
+    ultimo_de(conn, g, Uso::Peca)
+}
+
+/// Último código dado por este caixa na geração atual, para um uso.
+fn ultimo_de(conn: &Connection, g: &str, uso: Uso) -> Resultado<i64> {
+    Ok(config::ler(conn, uso.chave_ultimo())?
         .and_then(|t| t.split_once('|').filter(|(gg, _)| *gg == g).and_then(|(_, n)| n.parse().ok()))
         .unwrap_or(0))
 }
@@ -152,6 +182,9 @@ struct Arquivo {
     dispositivo: String,
     geracao: String,
     ultimo: i64,
+    /// Último código de cliente ou fornecedor (arquivos de antes dele não têm).
+    #[serde(default)]
+    ultimo_pessoa: i64,
     maior: i64,
 }
 
@@ -163,6 +196,7 @@ fn escrever_arquivo(conn: &Connection) -> Resultado<()> {
     let a = Arquivo {
         dispositivo: dispositivo(conn)?,
         ultimo: ultimo(conn, &g)?,
+        ultimo_pessoa: ultimo_de(conn, &g, Uso::Pessoa)?,
         geracao: g,
         maior: ler_numero(conn, "codigos_maior")?,
     };
@@ -205,6 +239,9 @@ fn conferir_arquivo(conn: &Connection) -> Resultado<()> {
             if a.geracao == g {
                 if ultimo(conn, &g)? < a.ultimo {
                     config::gravar(conn, "codigos_ultimo", &format!("{g}|{}", a.ultimo))?;
+                }
+                if ultimo_de(conn, &g, Uso::Pessoa)? < a.ultimo_pessoa {
+                    config::gravar(conn, "codigos_ultimo_pessoa", &format!("{g}|{}", a.ultimo_pessoa))?;
                 }
                 if marca.as_deref() != Some(&caminho.display().to_string()) {
                     banco_de_outro_lugar(conn, "o banco veio de outro lugar")?;
@@ -455,10 +492,11 @@ pub fn cruzadas(conn: &Connection) -> Resultado<Vec<(Faixa, Faixa)>> {
     Ok(r)
 }
 
-/// O maior código de números entre `a` e `b`, atual ou antigo (0 se não há).
-fn maior_existente(conn: &Connection, a: i64, b: i64) -> Resultado<i64> {
+/// O maior código de números entre `a` e `b` nas tabelas de um uso, atual ou
+/// antigo (0 se não há).
+fn maior_existente_de(conn: &Connection, a: i64, b: i64, uso: Uso) -> Resultado<i64> {
     let mut maior = 0;
-    for tabela in ["produto", "produto_codigo_antigo"] {
+    for tabela in uso.tabelas() {
         let n: Option<i64> = conn.query_row(
             &format!(
                 "SELECT MAX(CAST(codigo AS INTEGER)) FROM {tabela}
@@ -472,68 +510,89 @@ fn maior_existente(conn: &Connection, a: i64, b: i64) -> Resultado<i64> {
     Ok(maior)
 }
 
+/// O maior código de números entre `a` e `b` em qualquer uso (as faixas novas
+/// começam depois dele).
+fn maior_existente(conn: &Connection, a: i64, b: i64) -> Resultado<i64> {
+    Ok(maior_existente_de(conn, a, b, Uso::Peca)?.max(maior_existente_de(conn, a, b, Uso::Pessoa)?))
+}
+
 /// Próximo código livre numa faixa deste caixa: depois do último que ele
 /// deu e depois de qualquer código que já exista nela (nunca preenche
 /// buracos: um código que já foi usado e sumiu não volta).
-fn proximo_em(conn: &Connection, f: &Faixa, ultimo: i64) -> Resultado<Option<i64>> {
+fn proximo_em(conn: &Connection, f: &Faixa, ultimo: i64, uso: Uso) -> Resultado<Option<i64>> {
     if f.fim <= ultimo {
         return Ok(None);
     }
-    let c = (ultimo + 1).max(f.inicio).max(maior_existente(conn, f.inicio, f.fim)? + 1);
+    let c = (ultimo + 1).max(f.inicio).max(maior_existente_de(conn, f.inicio, f.fim, uso)? + 1);
     Ok((c <= f.fim).then_some(c))
 }
 
 /// O código que a próxima peça deste caixa vai receber (só para mostrar;
 /// não reserva nada).
 pub fn previsto(conn: &Connection) -> Resultado<Option<String>> {
+    previsto_de(conn, Uso::Peca)
+}
+
+/// O código que o próximo cliente ou fornecedor deste caixa vai receber.
+pub fn previsto_de(conn: &Connection, uso: Uso) -> Resultado<Option<String>> {
     if bloqueio(conn)?.is_some() {
         return Ok(None);
     }
-    let u = ultimo(conn, &geracao(conn)?)?;
+    let u = ultimo_de(conn, &geracao(conn)?, uso)?;
     for f in minhas_livres(conn)? {
-        if let Some(c) = proximo_em(conn, &f, u)? {
+        if let Some(c) = proximo_em(conn, &f, u, uso)? {
             return Ok(Some(c.to_string()));
         }
     }
     Ok(None)
 }
 
-/// Quantos códigos ainda restam nas faixas deste caixa.
+/// Quantos códigos de peça ainda restam nas faixas deste caixa.
 pub fn restantes(conn: &Connection) -> Resultado<i64> {
+    restantes_de(conn, Uso::Peca)
+}
+
+fn restantes_de(conn: &Connection, uso: Uso) -> Resultado<i64> {
     if bloqueio(conn)?.is_some() {
         return Ok(0);
     }
-    let u = ultimo(conn, &geracao(conn)?)?;
+    let u = ultimo_de(conn, &geracao(conn)?, uso)?;
     let mut total = 0;
     for f in minhas_livres(conn)? {
-        if let Some(c) = proximo_em(conn, &f, u)? {
+        if let Some(c) = proximo_em(conn, &f, u, uso)? {
             total += f.fim - c + 1;
         }
     }
     Ok(total)
 }
 
-/// Este caixa precisa de mais uma faixa (não tem, ou falta pouco).
+/// Este caixa precisa de mais uma faixa (não tem, ou falta pouco para peças
+/// ou para clientes e fornecedores).
 pub fn precisa(conn: &Connection) -> Resultado<bool> {
     if bloqueio(conn)?.is_some() {
         return Ok(false);
     }
     let livres = minhas_livres(conn)?;
     let Some(mais_nova) = livres.iter().max_by_key(|f| f.inicio) else { return Ok(true) };
-    Ok(restantes(conn)? < limiar(mais_nova))
+    let limite = limiar(mais_nova);
+    Ok(restantes_de(conn, Uso::Peca)? < limite || restantes_de(conn, Uso::Pessoa)? < limite)
 }
 
-/// Dá o próximo código deste caixa e guarda que deu (no banco, na mesma
-/// transação de quem chamou, e no arquivo ao lado). None = sem faixa.
+/// Dá o próximo código de peça deste caixa e guarda que deu (no banco, na
+/// mesma transação de quem chamou, e no arquivo ao lado). None = sem faixa.
 pub fn gerar(conn: &Connection) -> Resultado<Option<String>> {
+    gerar_de(conn, Uso::Peca)
+}
+
+fn gerar_de(conn: &Connection, uso: Uso) -> Resultado<Option<String>> {
     if bloqueio(conn)?.is_some() {
         return Ok(None);
     }
     let g = geracao(conn)?;
-    let u = ultimo(conn, &g)?;
+    let u = ultimo_de(conn, &g, uso)?;
     for f in minhas_livres(conn)? {
-        if let Some(c) = proximo_em(conn, &f, u)? {
-            config::gravar(conn, "codigos_ultimo", &format!("{g}|{c}"))?;
+        if let Some(c) = proximo_em(conn, &f, u, uso)? {
+            config::gravar(conn, uso.chave_ultimo(), &format!("{g}|{c}"))?;
             escrever_arquivo(conn)?;
             return Ok(Some(c.to_string()));
         }
@@ -545,16 +604,25 @@ pub fn gerar(conn: &Connection) -> Resultado<Option<String>> {
 /// distribuidor sem faixa cria a dele na mesma transação. None = a peça
 /// fica com código a definir.
 pub fn gerar_para_peca(conn: &Connection) -> Resultado<Option<String>> {
+    gerar_para(conn, Uso::Peca)
+}
+
+/// O mesmo para um cliente ou fornecedor novo (ou a definir).
+pub fn gerar_para_pessoa(conn: &Connection) -> Resultado<Option<String>> {
+    gerar_para(conn, Uso::Pessoa)
+}
+
+fn gerar_para(conn: &Connection, uso: Uso) -> Resultado<Option<String>> {
     if bloqueio(conn)?.is_some() {
         return Ok(None);
     }
     garantir_distribuidor(conn)?;
-    if let Some(c) = gerar(conn)? {
+    if let Some(c) = gerar_de(conn, uso)? {
         return Ok(Some(c));
     }
     if sou_distribuidor(conn)? {
         faixa_propria(conn)?;
-        return gerar(conn);
+        return gerar_de(conn, uso);
     }
     Ok(None)
 }
@@ -800,8 +868,9 @@ pub fn manter(conn: &mut Connection) -> Resultado<usize> {
     atribuir_pendentes(conn)
 }
 
-/// As peças deste caixa que estão com código a definir recebem código da
-/// faixa (as dos outros caixas, eles mesmos dão).
+/// As peças, clientes e fornecedores deste caixa que estão com código a
+/// definir recebem código da faixa (os dos outros caixas, eles mesmos dão).
+/// Devolve quantos receberam.
 pub fn atribuir_pendentes(conn: &mut Connection) -> Resultado<usize> {
     if bloqueio(conn)?.is_some() {
         return Ok(0);
@@ -813,7 +882,13 @@ pub fn atribuir_pendentes(conn: &mut Connection) -> Resultado<usize> {
         )?
         .query_map([&eu], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
-    if ids.is_empty() {
+    let pessoas: Vec<String> = conn
+        .prepare_cached(
+            "SELECT id FROM pessoa WHERE codigo = '' AND dispositivo = ?1 ORDER BY criado_em, id LIMIT 2000",
+        )?
+        .query_map([&eu], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    if ids.is_empty() && pessoas.is_empty() {
         return Ok(0);
     }
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -821,6 +896,12 @@ pub fn atribuir_pendentes(conn: &mut Connection) -> Resultado<usize> {
     for id in ids {
         let Some(c) = gerar_para_peca(&tx)? else { break };
         if crate::produtos::definir_codigo(&tx, &eu, &id, &c)? {
+            n += 1;
+        }
+    }
+    for id in pessoas {
+        let Some(c) = gerar_para_pessoa(&tx)? else { break };
+        if crate::pessoas::definir_codigo(&tx, &eu, &id, &c)? {
             n += 1;
         }
     }
@@ -842,6 +923,25 @@ pub fn definir_todos_pendentes(conn: &Connection) -> Resultado<usize> {
             return Err(Erro::validacao(texto_sem_poder_dar(conn)?));
         };
         if crate::produtos::definir_codigo(conn, &eu, &id, &c)? {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// O mesmo para clientes e fornecedores com código a definir.
+pub fn definir_todas_pessoas_pendentes(conn: &Connection) -> Resultado<usize> {
+    let eu = dispositivo(conn)?;
+    let ids: Vec<String> = conn
+        .prepare_cached("SELECT id FROM pessoa WHERE codigo = '' ORDER BY criado_em, id")?
+        .query_map([], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut n = 0;
+    for id in ids {
+        let Some(c) = gerar_para_pessoa(conn)? else {
+            return Err(Erro::validacao(texto_sem_poder_dar(conn)?));
+        };
+        if crate::pessoas::definir_codigo(conn, &eu, &id, &c)? {
             n += 1;
         }
     }
@@ -913,6 +1013,40 @@ pub fn conferir_digitado(conn: &Connection, produto_id: &str, codigo: &str) -> R
     let todas = faixas(conn)?;
     let com_ele: Vec<&Faixa> = todas.iter().filter(|f| f.contem(n)).collect();
     let em_branco = "Deixe o código em branco para o Rustinho dar um, ou use um código com letras (ex.: A-123).";
+    if let Some(f) = com_ele.iter().find(|f| !(f.dispositivo == eu && f.geracao == g)) {
+        let dono = if f.dispositivo == eu {
+            "deste caixa antes de restaurar o backup (ou de o banco mudar de lugar) e não são mais usados".to_string()
+        } else {
+            format!("do {}", nome_do_dono(conn, f)?)
+        };
+        return Err(Erro::campo("codigo", format!("Os códigos de {} a {} são {dono}. {em_branco}", f.inicio, f.fim)));
+    }
+    if com_ele.is_empty() && !sou_distribuidor(conn)? {
+        return Err(Erro::campo(
+            "codigo",
+            format!(
+                "Códigos só com números saem da faixa de cada caixa, e o {codigo} não é da faixa deste. {em_branco}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Confere um código escrito à mão para um cliente ou fornecedor. Códigos de
+/// números só dentro das faixas deste caixa (ou, no distribuidor, fora de
+/// todas as faixas), como os das peças. Os outros formatos (letras, traço)
+/// não são confirmados por ninguém: se dois caixas sem rede escolherem o mesmo,
+/// as duas pessoas ficam como estão e o gerente vê o código repetido (as
+/// vendas, os débitos e as notas usam o identificador interno, não o código).
+pub fn conferir_digitado_pessoa(conn: &Connection, codigo: &str) -> Resultado<()> {
+    let Some(n) = numero(codigo) else { return Ok(()) };
+    if let Some(m) = bloqueio(conn)? {
+        return Err(Erro::campo("codigo", format!("{} Use um código com letras (ex.: C-123).", texto_do_bloqueio(&m))));
+    }
+    let (eu, g) = (dispositivo(conn)?, geracao(conn)?);
+    let todas = faixas(conn)?;
+    let com_ele: Vec<&Faixa> = todas.iter().filter(|f| f.contem(n)).collect();
+    let em_branco = "Deixe o código em branco para o Rustinho dar um, ou use um código com letras (ex.: C-123).";
     if let Some(f) = com_ele.iter().find(|f| !(f.dispositivo == eu && f.geracao == g)) {
         let dono = if f.dispositivo == eu {
             "deste caixa antes de restaurar o backup (ou de o banco mudar de lugar) e não são mais usados".to_string()
@@ -1229,6 +1363,54 @@ pub fn repetidos(conn: &Connection) -> Resultado<Vec<Repetido>> {
         .collect())
 }
 
+/// Uma pessoa dentro de um código repetido.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PessoaRepetida {
+    pub id: String,
+    pub nome: String,
+    /// "cliente", "fornecedor" ou "cliente e fornecedor"
+    pub papel: String,
+    pub caixa: String,
+}
+
+/// Um código de cliente ou fornecedor que leva a mais de uma pessoa.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PessoasRepetidas {
+    pub codigo: String,
+    pub pessoas: Vec<PessoaRepetida>,
+}
+
+/// Códigos de clientes e fornecedores que levam a mais de uma pessoa (de
+/// antes das faixas, de duas lojas juntadas, ou o mesmo código com letras
+/// escolhido por dois caixas sem rede). Nada é trocado sozinho: o gerente
+/// decide qual pessoa recebe um código novo.
+pub fn repetidos_pessoas(conn: &Connection) -> Resultado<Vec<PessoasRepetidas>> {
+    let mut c = conn.prepare(
+        "SELECT codigo, id, nome, cliente, fornecedor, dispositivo FROM pessoa
+          WHERE codigo IN (SELECT codigo FROM pessoa WHERE codigo <> '' GROUP BY codigo HAVING COUNT(*) > 1)
+          ORDER BY codigo, criado_em, id",
+    )?;
+    let linhas: Vec<(String, String, String, bool, bool, String)> = c
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut grupos: Vec<PessoasRepetidas> = Vec::new();
+    for (codigo, id, nome, cliente, fornecedor, disp) in linhas {
+        let papel = match (cliente, fornecedor) {
+            (true, true) => "cliente e fornecedor",
+            (false, true) => "fornecedor",
+            _ => "cliente",
+        };
+        let p = PessoaRepetida { id, nome, papel: papel.to_string(), caixa: crate::sync::nome_do_caixa(conn, &disp)? };
+        match grupos.last_mut() {
+            Some(g) if g.codigo == codigo => g.pessoas.push(p),
+            _ => grupos.push(PessoasRepetidas { codigo, pessoas: vec![p] }),
+        }
+    }
+    Ok(grupos)
+}
+
 /// Por que esta peça não pode ter etiqueta agora (código a definir, ou um
 /// código dela leva também a outra peça). None = pode.
 pub fn problema_da_peca(conn: &Connection, produto_id: &str) -> Resultado<Option<String>> {
@@ -1277,7 +1459,7 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
     let u = ultimo(conn, &g)?;
     let mut minhas = Vec::new();
     for f in minhas_livres(conn)? {
-        let proximo = proximo_em(conn, &f, u)?;
+        let proximo = proximo_em(conn, &f, u, Uso::Peca)?;
         minhas.push(json!({
             "inicio": f.inicio, "fim": f.fim,
             "proximo": proximo,
@@ -1330,6 +1512,8 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
         "cruzadas": cruzam,
         "pendentes": pendentes,
         "pendentesDeste": deste,
+        "pessoasPendentes": conn.query_row("SELECT COUNT(*) FROM pessoa WHERE codigo = ''", [], |l| l.get::<_, i64>(0))?,
+        "pessoasRepetidas": repetidos_pessoas(conn)?,
         "esperando": esperando(conn)?,
         "repetidos": repetidos(conn)?,
         "inventario": inventario,
@@ -1340,7 +1524,7 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
 /// Quantas coisas sobre os códigos o gerente precisa ver (para o aviso do
 /// Início): códigos que levam a mais de uma peça e faixas cruzadas.
 pub fn para_ver(conn: &Connection) -> Resultado<i64> {
-    Ok(repetidos(conn)?.len() as i64 + cruzadas(conn)?.len() as i64)
+    Ok((repetidos(conn)?.len() + repetidos_pessoas(conn)?.len() + cruzadas(conn)?.len()) as i64)
 }
 
 #[cfg(test)]
@@ -2530,5 +2714,446 @@ mod testes {
         trocar(&mut b, &mut d);
         assert!(cruzadas(&d.conn).unwrap().is_empty());
         assert!(codigos_repetidos(&d).is_empty());
+    }
+}
+
+/// Código de clientes e fornecedores (PEND-01): sai da faixa do caixa, como o
+/// das peças, e nunca se repete entre caixas sem rede.
+#[cfg(test)]
+mod testes_pessoas {
+    use super::para_testes::*;
+    use super::*;
+    use crate::banco::Banco;
+    use crate::{pessoas, produtos};
+    use std::path::PathBuf;
+
+    fn temp(nome: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("rustinho-pessoas-{nome}-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&p).unwrap();
+        p.join("rustinho.db")
+    }
+
+    fn pessoa_com(b: &Banco, u: &str, papel: &str, nome: &str, codigo: &str) -> Resultado<String> {
+        let mut f = pessoas::ficha_nova(&b.conn, papel)?;
+        f.nome = nome.into();
+        f.codigo = codigo.into();
+        pessoas::salvar(&b.conn, &b.dispositivo, u, &f)
+    }
+
+    fn cliente(b: &Banco, u: &str, nome: &str) -> String {
+        pessoa_com(b, u, "cliente", nome, "").unwrap()
+    }
+
+    fn codigo_p(b: &Banco, id: &str) -> String {
+        b.conn.query_row("SELECT codigo FROM pessoa WHERE id = ?1", [id], |l| l.get(0)).unwrap()
+    }
+
+    fn todas_p(b: &Banco) -> Vec<(String, String, String)> {
+        let mut c = b.conn.prepare("SELECT id, codigo, nome FROM pessoa ORDER BY id").unwrap();
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?))).unwrap();
+        l.collect::<Result<_, _>>().unwrap()
+    }
+
+    fn repetidos_p(b: &Banco) -> Vec<String> {
+        let mut c = b
+            .conn
+            .prepare("SELECT codigo FROM pessoa WHERE codigo <> '' GROUP BY codigo HAVING COUNT(*) > 1 ORDER BY codigo")
+            .unwrap();
+        let l = c.query_map([], |l| l.get(0)).unwrap();
+        l.collect::<Result<_, _>>().unwrap()
+    }
+
+    fn erro_codigo(r: Resultado<String>) -> String {
+        match r {
+            Err(Erro::Validacao { campo: Some(c), mensagem }) if c == "codigo" => mensagem,
+            outro => panic!("esperava erro no código, veio {outro:?}"),
+        }
+    }
+
+    /// Dois caixas sem rede cadastram clientes e fornecedores: cada um usa a
+    /// sua faixa, nenhum código se repete e a loja de um caixa só continua
+    /// com 1, 2, 3...
+    #[test]
+    fn j_dois_caixas_offline_nao_repetem_codigo_de_pessoa() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        trocar(&mut a, &mut b);
+        // Loja de um caixa só: continua 1, 2, 3.
+        let a1 = cliente(&a, &ua, "Ana Clara");
+        let a2 = pessoa_com(&a, &ua, "fornecedor", "Auto Peças Sul", "").unwrap();
+        assert_eq!((codigo_p(&a, &a1).as_str(), codigo_p(&a, &a2).as_str()), ("1", "2"));
+        // Sem rede, os dois cadastram vários.
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            ids.push(cliente(&a, &ua, &format!("Cliente A{i}")));
+            ids.push(cliente(&b, &ua, &format!("Cliente B{i}")));
+            ids.push(pessoa_com(&b, &ua, "fornecedor", &format!("Fornecedor B{i}"), "").unwrap());
+        }
+        let faixa_b = minhas(&b)[0];
+        for (id, _) in todas_p(&b).iter().map(|(i, c, _)| (i.clone(), c.clone())).filter(|(i, _)| ids.contains(i)) {
+            if let Ok(n) = codigo_p(&b, &id).parse::<i64>() {
+                assert!(n >= 1);
+            }
+        }
+        let de_b: Vec<i64> =
+            todas_p(&b).iter().filter_map(|(_, c, _)| c.parse::<i64>().ok()).filter(|n| *n >= faixa_b.0).collect();
+        assert_eq!(de_b.len(), 10, "os 10 cadastros de B saíram da faixa de B");
+        assert!(de_b.iter().all(|n| *n >= faixa_b.0 && *n <= faixa_b.1));
+        // Troca de dados: ninguém repete, nada muda.
+        let antes_a: Vec<_> = todas_p(&a);
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut b);
+        assert!(repetidos_p(&a).is_empty() && repetidos_p(&b).is_empty());
+        assert!(repetidos_pessoas(&a.conn).unwrap().is_empty());
+        for (id, cod, nome) in antes_a {
+            assert_eq!(codigo_p(&b, &id), cod, "o código de {nome} não mudou");
+        }
+        assert_eq!(todas_p(&a), todas_p(&b));
+        assert_eq!(todas_p(&a).len(), 17);
+        // As peças continuam com a contagem delas.
+        let p = peca(&a, &ua, "Filtro");
+        assert_eq!(codigo(&a, &p), "1");
+    }
+
+    /// Cadastro de antes das faixas (código 300, outros) continua como está e
+    /// o próximo vem depois; códigos repetidos de antes só aparecem para o
+    /// gerente.
+    #[test]
+    fn j_codigos_de_antes_continuam_e_o_proximo_vem_depois() {
+        let (a, u) = loja("Caixa A");
+        let velho = pessoa_com(&a, &u, "cliente", "Cliente antigo", "300").unwrap();
+        let letras = pessoa_com(&a, &u, "cliente", "Cliente com letras", "C-7").unwrap();
+        let novo = cliente(&a, &u, "Cliente novo");
+        assert_eq!(codigo_p(&a, &velho), "300");
+        assert_eq!(codigo_p(&a, &letras), "C-7");
+        assert_eq!(codigo_p(&a, &novo), "301");
+        // Código repetido de antes (duas lojas juntadas): nada é trocado.
+        a.conn.execute("UPDATE pessoa SET codigo = '300' WHERE id = ?1", [&novo]).unwrap();
+        let grupos = repetidos_pessoas(&a.conn).unwrap();
+        assert_eq!(grupos.len(), 1);
+        assert_eq!(grupos[0].codigo, "300");
+        assert_eq!(grupos[0].pessoas.len(), 2);
+        assert!(para_ver(&a.conn).unwrap() >= 1);
+        assert_eq!(situacao(&a.conn).unwrap()["pessoasRepetidas"].as_array().unwrap().len(), 1);
+        assert_eq!(codigo_p(&a, &velho), "300");
+        // A pessoa com código repetido continua podendo ser alterada.
+        let mut f = pessoas::ficha(&a.conn, &novo).unwrap();
+        assert!(f.codigo_aviso.contains("também é de"), "{}", f.codigo_aviso);
+        f.telefone = "(15) 3552-1000".into();
+        pessoas::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+        assert_eq!(codigo_p(&a, &novo), "300");
+        // Mas escolher à mão um código que já é de outra continua recusado.
+        f.codigo = "C-7".into();
+        assert!(
+            erro_codigo(pessoas::salvar(&a.conn, &a.dispositivo, &u, &f).map(|_| String::new())).contains("já é de")
+        );
+        // O gerente resolve: código novo para uma delas.
+        let c = pessoas::trocar_codigo(&a.conn, &a.dispositivo, &u, &novo).unwrap();
+        assert_eq!(c, "302");
+        assert!(repetidos_pessoas(&a.conn).unwrap().is_empty());
+        assert_eq!(codigo_p(&a, &velho), "300");
+    }
+
+    /// Caixa sem faixa: o cadastro fica com código a definir; o código sai
+    /// quando a faixa chega, sem mudar mais nada.
+    #[test]
+    fn j_caixa_sem_faixa_deixa_codigo_a_definir_e_recebe_depois() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        trocar(&mut a, &mut b);
+        let ficha = pessoas::ficha_nova(&b.conn, "cliente").unwrap();
+        assert_eq!(ficha.codigo, "");
+        assert!(ficha.codigo_aviso.contains("ainda não recebeu a faixa"));
+        let c1 = cliente(&b, &ua, "Cliente sem faixa");
+        let f1 = pessoa_com(&b, &ua, "fornecedor", "Fornecedor sem faixa", "").unwrap();
+        assert_eq!((codigo_p(&b, &c1).as_str(), codigo_p(&b, &f1).as_str()), ("", ""));
+        assert_eq!(situacao(&b.conn).unwrap()["pessoasPendentes"], 2);
+        let nome_antes: String =
+            b.conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&c1], |l| l.get(0)).unwrap();
+        // A pessoa a definir pode ser alterada sem receber código escolhido.
+        let mut f = pessoas::ficha(&b.conn, &c1).unwrap();
+        assert!(f.codigo_aviso.contains("a definir"));
+        f.telefone = "(15) 3552-0000".into();
+        pessoas::salvar(&b.conn, &b.dispositivo, &ua, &f).unwrap();
+        // A faixa chega.
+        pedir_faixa(&mut b, &mut a);
+        let faixa = minhas(&b)[0];
+        let (cc, cf) = (codigo_p(&b, &c1), codigo_p(&b, &f1));
+        for c in [&cc, &cf] {
+            let n: i64 = c.parse().expect("recebeu código de números");
+            assert!(n >= faixa.0 && n <= faixa.1);
+        }
+        assert_ne!(cc, cf);
+        // Um cadastro que já tem código nunca é sobrescrito pela atribuição.
+        assert!(!pessoas::definir_codigo(&b.conn, &b.dispositivo, &c1, "999999").unwrap());
+        assert_eq!(codigo_p(&b, &c1), cc);
+        let nome_depois: String =
+            b.conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&c1], |l| l.get(0)).unwrap();
+        assert_eq!(nome_antes, nome_depois);
+        trocar(&mut a, &mut b);
+        assert_eq!(codigo_p(&a, &c1), cc);
+        assert!(repetidos_p(&a).is_empty());
+        assert_eq!(situacao(&a.conn).unwrap()["pessoasPendentes"], 0);
+    }
+
+    /// Código escrito à mão: de números só dentro da faixa do caixa; com
+    /// letras vale, e dois caixas sem rede com o mesmo código ficam como
+    /// estão, com o conflito visível ao gerente.
+    #[test]
+    fn j_codigo_digitado_e_mesmo_codigo_com_letras_em_dois_caixas() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        let mut c = caixa_novo("Caixa C");
+        pedir_faixa(&mut b, &mut a);
+        pedir_faixa(&mut c, &mut a);
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        let fb = minhas(&b)[0];
+        // Número fora da faixa de B: recusado; da faixa de A (de outro dono): recusado; da própria: aceito.
+        assert!(erro_codigo(pessoa_com(&b, &ua, "cliente", "X", "250000000")).contains("não é da faixa deste"));
+        assert!(erro_codigo(pessoa_com(&b, &ua, "cliente", "X", "50")).contains("Os códigos de 1 a"));
+        let proprio = (fb.0 + 40).to_string();
+        let ok = pessoa_com(&b, &ua, "cliente", "Cliente digitado", &proprio).unwrap();
+        assert_eq!(codigo_p(&b, &ok), proprio);
+        // O automático de B continua depois do digitado, sem repetir.
+        let seguinte = cliente(&b, &ua, "Cliente seguinte");
+        assert_eq!(codigo_p(&b, &seguinte), (fb.0 + 41).to_string());
+        // Mesmo código com letras em dois caixas sem rede.
+        let pb = pessoa_com(&b, &ua, "cliente", "Mecânica do Zé", "C-9").unwrap();
+        let pc = pessoa_com(&c, &ua, "cliente", "Auto Elétrica Lima", "C-9").unwrap();
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        trocar(&mut b, &mut c);
+        trocar(&mut a, &mut b);
+        for banco in [&a, &b, &c] {
+            assert_eq!(codigo_p(banco, &pb), "C-9", "nada foi trocado");
+            assert_eq!(codigo_p(banco, &pc), "C-9", "nada foi trocado");
+            let grupos = repetidos_pessoas(&banco.conn).unwrap();
+            assert_eq!(grupos.len(), 1);
+            assert_eq!(grupos[0].codigo, "C-9");
+            assert_eq!(grupos[0].pessoas.len(), 2);
+            assert!(para_ver(&banco.conn).unwrap() >= 1);
+        }
+        // O gerente dá código novo a uma; a outra fica com o dela.
+        let novo = pessoas::trocar_codigo(&a.conn, &a.dispositivo, &ua, &pc).unwrap();
+        assert!(numero(&novo).is_some());
+        trocar(&mut a, &mut b);
+        trocar(&mut a, &mut c);
+        for banco in [&a, &b, &c] {
+            assert!(repetidos_pessoas(&banco.conn).unwrap().is_empty());
+            assert_eq!(codigo_p(banco, &pb), "C-9");
+            assert_eq!(codigo_p(banco, &pc), novo);
+        }
+    }
+
+    /// Cópia do banco: caixa bloqueado não dá código de pessoa; depois de
+    /// registrado como caixa novo, o código vem de faixa nova, nunca da de
+    /// antes.
+    #[test]
+    fn j_banco_copiado_nao_da_codigo_de_pessoa_ate_ser_registrado() {
+        let (mut a, ua) = loja("Caixa A");
+        let antes = cliente(&a, &ua, "Cliente de antes");
+        assert_eq!(codigo_p(&a, &antes), "1");
+        let faixa_velha = minhas(&a)[0];
+        // O banco aparece em outro computador.
+        conferir_computador(&a.conn, Some("outro-computador")).unwrap();
+        assert_eq!(bloqueio(&a.conn).unwrap().as_deref(), Some(BLOQUEIO_COPIA));
+        let ficha = pessoas::ficha_nova(&a.conn, "cliente").unwrap();
+        assert!(ficha.codigo_aviso.contains("outro computador"), "{}", ficha.codigo_aviso);
+        let c = cliente(&a, &ua, "Cliente na cópia");
+        assert_eq!(codigo_p(&a, &c), "", "sem código enquanto bloqueado");
+        let n = atribuir_pendentes(&mut a.conn).unwrap();
+        assert_eq!(n, 0);
+        assert!(erro_codigo(pessoa_com(&a, &ua, "cliente", "Y", "2")).contains("outro computador"));
+        // Registro explícito.
+        registrar_caixa_novo(&a.conn, Some("outro-computador"), Some("Caixa copiado")).unwrap();
+        a.dispositivo = config::ler(&a.conn, "dispositivo_id").unwrap().unwrap();
+        manter(&mut a.conn).unwrap();
+        // A cópia já não é o distribuidor (o identificador mudou) e ainda não
+        // tem faixa: o cadastro continua a definir. O gerente faz este caixa
+        // distribuir (a recuperação do manual) e dá o código dele, de uma
+        // faixa que pula as de antes.
+        assert_eq!(codigo_p(&a, &c), "");
+        assert!(!sou_distribuidor(&a.conn).unwrap());
+        assumir(&a.conn).unwrap();
+        manter(&mut a.conn).unwrap();
+        assert_eq!(definir_todas_pessoas_pendentes(&a.conn).unwrap(), 1);
+        let depois = codigo_p(&a, &c);
+        let n: i64 = depois.parse().expect("recebeu código");
+        assert!(n > faixa_velha.1, "{n} não pode estar na faixa de antes {faixa_velha:?}");
+        assert_eq!(codigo_p(&a, &antes), "1", "o código de antes não mudou");
+        // Nada de duplicado entre o original (A, que ficou) e a cópia.
+        let outro = cliente(&a, &ua, "Cliente depois");
+        assert_ne!(codigo_p(&a, &outro), depois);
+        assert!(repetidos_p(&a).is_empty());
+    }
+
+    /// Depois de restaurar um backup (geração nova) o código de pessoa vem de
+    /// faixa nova; o que o backup perdeu nunca é reutilizado.
+    #[test]
+    fn j_restaurar_backup_nao_reaproveita_codigo_de_pessoa() {
+        let (a, u) = loja("Caixa A");
+        let antes = cliente(&a, &u, "Cliente");
+        assert_eq!(codigo_p(&a, &antes), "1");
+        depois_de_restaurar(&a.conn).unwrap();
+        let mut a = a;
+        manter(&mut a.conn).unwrap();
+        let depois = cliente(&a, &u, "Cliente depois do backup");
+        let n: i64 = codigo_p(&a, &depois).parse().unwrap();
+        assert!(n >= TAMANHO_FAIXA, "faixa nova: {n}");
+    }
+
+    /// A faixa que acaba só por causa de clientes também faz o caixa pedir
+    /// outra; nada se repete.
+    #[test]
+    fn j_faixa_esgotada_por_pessoas_pede_outra() {
+        let (mut a, u) = loja_com("Caixa A", 10);
+        let mut vistos = Vec::new();
+        for i in 0..25 {
+            let id = cliente(&a, &u, &format!("Cliente {i}"));
+            vistos.push(codigo_p(&a, &id));
+            manter(&mut a.conn).unwrap();
+        }
+        assert!(vistos.iter().all(|c| !c.is_empty()), "{vistos:?}");
+        let mut unicos = vistos.clone();
+        unicos.sort();
+        unicos.dedup();
+        assert_eq!(unicos.len(), 25);
+        assert!(minhas(&a).len() >= 3);
+    }
+
+    /// Um caixa comum (que não distribui) cuja faixa acaba só por causa de
+    /// clientes pede a próxima, e o cadastro que ficou a definir recebe o
+    /// código dela.
+    #[test]
+    fn j_caixa_comum_com_faixa_acabando_por_pessoas_pede_outra() {
+        let (mut a, ua) = loja_com("Caixa A", 10);
+        let mut b = caixa_novo("Caixa B");
+        pedir_faixa(&mut b, &mut a);
+        trocar(&mut a, &mut b);
+        let faixa = minhas(&b)[0];
+        // Só clientes: a faixa inteira (10 códigos) é usada.
+        for i in 0..10 {
+            cliente(&b, &ua, &format!("Cliente B{i}"));
+        }
+        assert_eq!(restantes(&b.conn).unwrap(), 10, "as peças não gastaram nada");
+        assert!(precisa(&b.conn).unwrap(), "a faixa acabou para os clientes");
+        let extra = cliente(&b, &ua, "Cliente sem faixa");
+        assert_eq!(codigo_p(&b, &extra), "", "acabou a faixa: código a definir");
+        pedir_faixa(&mut b, &mut a);
+        let n: i64 = codigo_p(&b, &extra).parse().expect("recebeu código da faixa nova");
+        assert!(n > faixa.1, "{n} depois de {faixa:?}");
+        trocar(&mut a, &mut b);
+        assert!(repetidos_p(&a).is_empty() && repetidos_p(&b).is_empty());
+    }
+
+    /// O gerente, num caixa que distribui, dá código a cadastros a definir de
+    /// qualquer caixa.
+    #[test]
+    fn j_gerente_define_pessoas_a_definir_de_outro_caixa() {
+        let (mut a, ua) = loja("Caixa A");
+        let mut b = caixa_novo("Caixa B");
+        trocar(&mut a, &mut b);
+        let c = cliente(&b, &ua, "Cliente do B");
+        receber(&mut a, &b);
+        assert_eq!(definir_todas_pessoas_pendentes(&a.conn).unwrap(), 1);
+        let cod = codigo_p(&a, &c);
+        assert!(numero(&cod).is_some());
+        receber(&mut b, &a);
+        assert_eq!(codigo_p(&b, &c), cod);
+    }
+
+    /// O arquivo ao lado do banco guarda também a contagem das pessoas, e um
+    /// arquivo de antes dela continua legível.
+    #[test]
+    fn j_arquivo_ao_lado_guarda_a_contagem_das_pessoas() {
+        let antigo: Arquivo =
+            serde_json::from_str(r#"{"dispositivo":"d","geracao":"g","ultimo":5,"maior":9}"#).unwrap();
+        assert_eq!((antigo.ultimo, antigo.ultimo_pessoa), (5, 0));
+        let caminho = temp("arquivo");
+        let (dispositivo_antes, u);
+        {
+            let a = Banco::abrir(&caminho).unwrap();
+            u = configurar(&a, "Caixa A", 0);
+            dispositivo_antes = a.dispositivo.clone();
+            let c1 = cliente(&a, &u, "Um");
+            let c2 = cliente(&a, &u, "Dois");
+            assert_eq!((codigo_p(&a, &c1).as_str(), codigo_p(&a, &c2).as_str()), ("1", "2"));
+        }
+        let lido: Arquivo =
+            serde_json::from_slice(&std::fs::read(format!("{}.codigos", caminho.display())).unwrap()).unwrap();
+        assert_eq!((lido.dispositivo.as_str(), lido.ultimo_pessoa), (dispositivo_antes.as_str(), 2));
+        // Um banco que voltou para trás (cópia antiga por cima) continua depois
+        // do que o arquivo diz.
+        {
+            let a = Banco::abrir(&caminho).unwrap();
+            config::gravar(&a.conn, "codigos_ultimo_pessoa", "").unwrap();
+            conferir_arquivo(&a.conn).unwrap();
+            let g = geracao(&a.conn).unwrap();
+            assert_eq!(ultimo_de(&a.conn, &g, Uso::Pessoa).unwrap(), 2);
+            let c3 = cliente(&a, &u, "Três");
+            assert_eq!(codigo_p(&a, &c3), "3");
+        }
+    }
+
+    /// Banco de antes desta parte: os códigos de pessoas de antes não mudam
+    /// (nem os repetidos nem os acima de 99.999) e a primeira faixa cobre o
+    /// maior deles.
+    #[test]
+    fn j_migracao_nao_renumera_pessoas_e_faixa_cobre_o_maior_codigo() {
+        let caminho = temp("migracao");
+        {
+            let mut conn = rusqlite::Connection::open(&caminho).unwrap();
+            crate::banco::registrar_funcoes(&conn).unwrap();
+            crate::banco::migrar_ate(&mut conn, 14).unwrap();
+            conn.execute(
+                "INSERT INTO usuario (id, nome, senha_hash, criado_em, atualizado_em, dispositivo, gerente)
+                 VALUES ('u1', 'Ana', 'x', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'velho', 1)",
+                [],
+            )
+            .unwrap();
+            for (id, codigo, nome) in [
+                ("c1", "1", "Cliente 1"),
+                ("c2", "2", "Cliente 2"),
+                ("c3", "2", "Cliente 2 de outra loja"),
+                ("c4", "250000", "Cliente grande"),
+                ("c5", "C-9", "Cliente com letras"),
+                ("c6", "123456789012", "Cliente longo"),
+            ] {
+                conn.execute(
+                    "INSERT INTO pessoa (id, codigo, cliente, nome, busca, criado_em, atualizado_em, dispositivo)
+                     VALUES (?1, ?2, 1, ?3, lower(?3), '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'velho')",
+                    [id, codigo, nome],
+                )
+                .unwrap();
+            }
+            conn.execute("INSERT INTO config (chave, valor) VALUES ('codigos_legado', '1')", []).ok();
+        }
+        let mut a = Banco::abrir(&caminho).unwrap();
+        let versao: i64 = a.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+        assert_eq!(versao as usize, crate::banco::versao_da_estrutura());
+        confirmar_computador(&a.conn, crate::computador::atual().as_deref()).ok();
+        manter(&mut a.conn).unwrap();
+        let esperado = [("c1", "1"), ("c2", "2"), ("c3", "2"), ("c4", "250000"), ("c5", "C-9"), ("c6", "123456789012")];
+        for (id, cod) in esperado {
+            assert_eq!(codigo_p(&a, id), cod, "{id} não pode mudar");
+        }
+        assert_eq!(repetidos_pessoas(&a.conn).unwrap().len(), 1);
+        // A primeira faixa cobre o 250.000 (e o próximo cliente vem depois).
+        let faixa = minhas(&a)[0];
+        assert!(faixa.0 == 1 && faixa.1 >= 250_000, "{faixa:?}");
+        let novo = cliente(&a, "u1", "Cliente novo");
+        assert_eq!(codigo_p(&a, &novo), "250001");
+        // A peça nova não é afetada pelos clientes.
+        let p = produtos_nova(&a);
+        assert_eq!(codigo(&a, &p), "1");
+    }
+
+    fn produtos_nova(b: &Banco) -> String {
+        let mut f = produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Peça".into();
+        f.custo = "10".into();
+        produtos::salvar(&b.conn, &b.dispositivo, "u1", &f).unwrap()
     }
 }

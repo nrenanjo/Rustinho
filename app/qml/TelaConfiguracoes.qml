@@ -1074,10 +1074,10 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Botao {
-                        visible: !!tela.codigos && tela.codigos.pendentes > tela.codigos.pendentesDeste && tela.codigos.restantes > 0
-                        text: "Dar código deste caixa a todas as peças a definir"
+                        visible: !!tela.codigos && (tela.codigos.pendentes > tela.codigos.pendentesDeste || tela.codigos.pessoasPendentes > 0) && tela.codigos.restantes > 0
+                        text: "Dar código deste caixa a todos os cadastros a definir"
                         tipo: "secundario"
-                        onClicked: tela.comandoCodigos("codigos_definir_pendentes", {}, "As peças a definir receberam código deste caixa.")
+                        onClicked: tela.comandoCodigos("codigos_definir_pendentes", {}, "Os cadastros a definir receberam código deste caixa.")
                     }
                     // Códigos com letras escritos à mão: só valem depois de confirmados
                     // pelo caixa que distribui as faixas.
@@ -1187,6 +1187,76 @@ FocusScope {
                                             tipo: "secundario"
                                             onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
                                                                            "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Clientes e fornecedores: o código sai da faixa do caixa, como o das peças.
+                    Text {
+                        visible: !!tela.codigos && tela.codigos.pessoasPendentes > 0
+                        text: tela.codigos ? tela.codigos.pessoasPendentes + (tela.codigos.pessoasPendentes === 1 ? " cliente ou fornecedor está" : " clientes ou fornecedores estão")
+                                             + " com código a definir. Cada caixa dá o código dos dele quando recebe a faixa." : ""
+                        color: Tema.tintaSuave
+                        font.family: Tema.texto
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Nota {
+                        visible: !!tela.codigos && tela.codigos.pessoasRepetidas.length > 0
+                        text: "Códigos de clientes ou fornecedores que levam a mais de uma pessoa. Nada foi trocado: as vendas, os débitos e as notas "
+                              + "usam o cadastro, não o código. Para resolver, dê um código novo a uma delas."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.pessoasRepetidas.slice(0, 50) : []
+                        delegate: Rectangle {
+                            id: grupoPessoas
+                            required property var modelData
+                            color: Tema.papel
+                            radius: Tema.raioCampo
+                            Layout.fillWidth: true
+                            implicitHeight: colunaPessoas.implicitHeight + 20
+                            ColumnLayout {
+                                id: colunaPessoas
+                                x: 14; y: 10
+                                width: parent.width - 28
+                                spacing: 4
+                                Text {
+                                    text: "Código " + grupoPessoas.modelData.codigo
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    Layout.fillWidth: true
+                                }
+                                Repeater {
+                                    model: grupoPessoas.modelData.pessoas
+                                    delegate: RowLayout {
+                                        required property var modelData
+                                        spacing: 10
+                                        Layout.fillWidth: true
+                                        Text {
+                                            text: modelData.nome + " · " + modelData.papel + " (" + modelData.caixa + ")"
+                                            color: Tema.tinta
+                                            font.family: Tema.texto
+                                            font.pixelSize: 14
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+                                        Botao {
+                                            text: "Abrir"
+                                            tipo: "discreto"
+                                            onClicked: tela.janela.abrir("TelaPessoa", { pessoaId: modelData.id, papel: modelData.papel === "fornecedor" ? "fornecedor" : "cliente" })
+                                        }
+                                        Botao {
+                                            text: "Dar código novo"
+                                            tipo: "secundario"
+                                            onClicked: tela.comandoCodigos("codigos_pessoa_dar_novo", { id: modelData.id },
+                                                                           "“" + modelData.nome + "” ganhou um código novo.")
                                         }
                                     }
                                 }

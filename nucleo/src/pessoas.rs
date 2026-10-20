@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::documento::{self, UFS};
 use crate::erro::{Erro, Resultado};
-use crate::{auditoria, numeros, tempo, texto};
+use crate::{auditoria, faixas, numeros, tempo, texto};
 
 const MAX_VEICULOS: usize = 50;
 
@@ -43,6 +43,12 @@ pub struct PessoaFicha {
     pub ativo: bool,
     pub veiculos: Vec<VeiculoFicha>,
 
+    /// Ficha nova: o código que o próximo cadastro deste caixa vai receber.
+    #[serde(skip_deserializing)]
+    pub codigo_previsto: String,
+    /// Aviso sobre o código (caixa bloqueado, ou sem faixa ainda).
+    #[serde(skip_deserializing)]
+    pub codigo_aviso: String,
     #[serde(skip_deserializing)]
     pub criado_em: String,
     #[serde(skip_deserializing)]
@@ -249,14 +255,55 @@ fn validar(f: &PessoaFicha) -> Resultado<Dados> {
     })
 }
 
-fn proximo_codigo(conn: &Connection) -> Resultado<String> {
-    let maior: i64 = conn.query_row(
-        "SELECT COALESCE(MAX(CAST(codigo AS INTEGER)), 0) FROM pessoa
-          WHERE codigo <> '' AND codigo NOT GLOB '*[^0-9]*' AND length(codigo) <= 15",
-        [],
-        |l| l.get(0),
+/// Código para um cliente ou fornecedor novo: o próximo da faixa deste caixa
+/// (veja `faixas`). Vazio = "código a definir": o caixa ainda não tem faixa
+/// (ou está bloqueado); o código sai quando a faixa chegar, sem mudar nenhum
+/// outro dado da pessoa.
+fn codigo_novo(conn: &Connection) -> Resultado<String> {
+    Ok(faixas::gerar_para_pessoa(conn)?.unwrap_or_default())
+}
+
+/// Dá o código da faixa deste caixa a uma pessoa que estava com código a
+/// definir (não muda nenhum outro dado). false = a pessoa já tinha código.
+pub fn definir_codigo(conn: &Connection, dispositivo: &str, id: &str, codigo: &str) -> Resultado<bool> {
+    let (_, dados) = carregar(conn, id)?;
+    let busca = texto_busca(codigo, &dados);
+    let n = conn.execute(
+        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, dispositivo = ?5 WHERE id = ?1 AND codigo = ''",
+        params![id, codigo, busca, tempo::agora(), dispositivo],
     )?;
-    Ok((maior + 1).to_string())
+    if n == 1 {
+        auditoria::registrar(conn, dispositivo, None, "pessoa.codigo", "pessoa", id, &[format!("Código: {codigo}")])?;
+    }
+    Ok(n == 1)
+}
+
+/// O gerente resolve um código repetido: a pessoa recebe um código novo da
+/// faixa deste caixa. Não muda mais nada.
+pub fn trocar_codigo(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<String> {
+    let (velho, dados) = carregar(conn, id)?;
+    let Some(novo) = faixas::gerar_para_pessoa(conn)? else {
+        return Err(Erro::validacao(faixas::texto_sem_poder_dar(conn)?));
+    };
+    let busca = texto_busca(&novo, &dados);
+    conn.execute(
+        "UPDATE pessoa SET codigo = ?2, busca = ?3, atualizado_em = ?4, atualizado_por = ?5, dispositivo = ?6
+          WHERE id = ?1",
+        params![id, novo, busca, tempo::agora(), usuario_id, dispositivo],
+    )?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "pessoa.alterar",
+        "pessoa",
+        id,
+        &[format!(
+            "Código: {} → {novo} (código repetido resolvido pelo gerente)",
+            if velho.is_empty() { "a definir" } else { &velho }
+        )],
+    )?;
+    Ok(novo)
 }
 
 fn texto_busca(codigo: &str, d: &Dados) -> String {
@@ -278,17 +325,28 @@ fn texto_busca(codigo: &str, d: &Dados) -> String {
     texto::normalizar(&partes.join(" "))
 }
 
+/// O código que a pessoa tem agora (vazio para pessoa nova).
+fn antes_codigo(conn: &Connection, id: &str, novo: bool) -> Resultado<String> {
+    if novo {
+        return Ok(String::new());
+    }
+    Ok(conn.query_row("SELECT codigo FROM pessoa WHERE id = ?1", [id], |l| l.get(0))?)
+}
+
 /// Salva a pessoa. Devolve o id.
 pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &PessoaFicha) -> Resultado<String> {
     let novo = ficha.id.trim().is_empty();
     let antes = if novo { None } else { Some(carregar(conn, &ficha.id)?.1) };
     let dados = validar(ficha)?;
     let id = if novo { tempo::novo_id() } else { ficha.id.clone() };
+    let codigo_antes = antes_codigo(conn, &id, novo)?;
     let codigo = {
         let c = texto::limpar(&ficha.codigo);
         if c.is_empty() {
-            if novo {
-                proximo_codigo(conn)?
+            if novo || codigo_antes.is_empty() {
+                // Vazio: o Rustinho dá o código ao salvar, da faixa deste
+                // caixa (ou deixa "a definir" se o caixa ainda não tem faixa).
+                codigo_novo(conn)?
             } else {
                 return Err(Erro::campo("codigo", "O código não pode ficar vazio."));
             }
@@ -298,11 +356,17 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
             c
         }
     };
-    let mesmo_codigo: Option<String> = conn
-        .query_row("SELECT nome FROM pessoa WHERE codigo = ?1 AND id <> ?2", params![codigo, id], |l| l.get(0))
-        .optional()?;
-    if let Some(outro) = mesmo_codigo {
-        return Err(Erro::campo("codigo", format!("O código {codigo} já é de \"{outro}\".")));
+    // Só confere o código quando ele é novo ou foi trocado: uma pessoa que
+    // veio da troca de dados com o código igual ao de outra (veja
+    // `faixas::repetidos_pessoas`) continua podendo ser alterada.
+    if !codigo.is_empty() && codigo != codigo_antes {
+        faixas::conferir_digitado_pessoa(conn, &codigo)?;
+        let mesmo_codigo: Option<String> = conn
+            .query_row("SELECT nome FROM pessoa WHERE codigo = ?1 AND id <> ?2", params![codigo, id], |l| l.get(0))
+            .optional()?;
+        if let Some(outro) = mesmo_codigo {
+            return Err(Erro::campo("codigo", format!("O código {codigo} já é de \"{outro}\".")));
+        }
     }
     if !dados.documento.is_empty() {
         let mesmo_doc: Option<String> = conn
@@ -501,9 +565,25 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<PessoaFicha> {
         conn.query_row("SELECT COUNT(*) FROM compra WHERE fornecedor_id = ?1 AND situacao = 'lancada'", [id], |l| {
             l.get(0)
         })?;
+    let codigo_aviso = if codigo.is_empty() {
+        "Cadastro com código a definir: o código sai quando este caixa receber a faixa de códigos.".to_string()
+    } else {
+        let outro: Option<String> = conn
+            .query_row("SELECT nome FROM pessoa WHERE codigo = ?1 AND id <> ?2 LIMIT 1", params![codigo, id], |l| {
+                l.get(0)
+            })
+            .optional()?;
+        match outro {
+            Some(n) => {
+                format!("O código {codigo} também é de \"{n}\". O gerente pode dar um código novo a um dos dois.")
+            }
+            None => String::new(),
+        }
+    };
     Ok(PessoaFicha {
         id: id.to_string(),
         codigo,
+        codigo_aviso,
         cliente: d.cliente,
         fornecedor: d.fornecedor,
         tipo: d.tipo,
@@ -537,14 +617,27 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<PessoaFicha> {
         atualizado_por,
         compras,
         historico: auditoria::historico(conn, "pessoa", id, 30)?,
+        codigo_previsto: String::new(),
     })
 }
 
 /// Ficha em branco. `papel` = "cliente" ou "fornecedor".
 pub fn ficha_nova(conn: &Connection, papel: &str) -> Resultado<PessoaFicha> {
     let fornecedor = papel == "fornecedor";
+    let codigo_previsto = faixas::previsto_de(conn, faixas::Uso::Pessoa)?.unwrap_or_default();
+    let codigo_aviso = if let Some(m) = faixas::bloqueio(conn)? {
+        faixas::texto_do_bloqueio(&m).to_string()
+    } else if codigo_previsto.is_empty() && !faixas::sou_distribuidor(conn)? {
+        "Este caixa ainda não recebeu a faixa de códigos: o cadastro fica com código a definir até a troca de dados \
+         com o caixa que distribui as faixas."
+            .to_string()
+    } else {
+        String::new()
+    };
     Ok(PessoaFicha {
-        codigo: proximo_codigo(conn)?,
+        codigo: String::new(),
+        codigo_previsto,
+        codigo_aviso,
         cliente: !fornecedor,
         fornecedor,
         tipo: if fornecedor { "J".into() } else { "F".into() },
@@ -753,7 +846,7 @@ pub fn garantir_pela_nota(
     };
     let dados = Dados { nome, ..dados };
     let id = tempo::novo_id();
-    let codigo = proximo_codigo(conn)?;
+    let codigo = codigo_novo(conn)?;
     gravar(conn, dispositivo, usuario_id, &id, &codigo, &dados, true)?;
     auditoria::registrar(conn, dispositivo, Some(usuario_id), "pessoa.criar", "pessoa", &id, &[origem.to_string()])?;
     Ok((id, true))

@@ -191,7 +191,7 @@ FocusScope {
                     return ""
                 if (tela.nova)
                     return "Só o nome é obrigatório. Para emitir nota, preencha CPF/CNPJ e endereço."
-                let s = "Código " + tela.ficha.codigo
+                let s = "Código " + (tela.ficha.codigo || "a definir")
                 if (tela.ficha.compras > 0)
                     s += " · " + tela.ficha.compras + (tela.ficha.compras === 1 ? " compra lançada" : " compras lançadas")
                 if (tela.ficha.atualizadoEm)
@@ -309,10 +309,24 @@ FocusScope {
                             Campo {
                                 id: codigo
                                 rotulo: "Código"
+                                // Vazio: o Rustinho dá o código ao salvar, da faixa deste caixa.
+                                dica: !tela.ficha ? "" : tela.nova
+                                      ? (tela.ficha.codigoPrevisto ? "Automático: " + tela.ficha.codigoPrevisto : "Automático")
+                                      : "A definir"
                                 maximo: 20
-                                Layout.preferredWidth: 100
+                                Layout.preferredWidth: 150
                                 onEditado: tela.marcarAlterado()
                             }
+                        }
+                        // Código a definir, caixa bloqueado ou código que também é de outra pessoa.
+                        Text {
+                            visible: !!tela.ficha && !!tela.ficha.codigoAviso
+                            text: tela.ficha ? tela.ficha.codigoAviso : ""
+                            color: tela.ficha && tela.ficha.codigo && tela.ficha.codigoAviso ? Tema.vermelho : Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
                         }
                         Linha {
                             visible: tela.juridica

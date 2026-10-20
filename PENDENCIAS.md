@@ -4,8 +4,14 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 
 ## Códigos
 
-- **PEND-01 · Código de clientes e fornecedores pode repetir entre caixas sem rede.**
-  Os códigos das **peças** saem de uma faixa de números de cada caixa (veja o manual). Os códigos de **clientes e fornecedores** ainda usam o método antigo: cada caixa dá "o maior código + 1" (`pessoas::proximo_codigo`). Dois caixas sem rede podem dar o mesmo código a pessoas diferentes. Nada é apagado ou trocado quando isso acontece; as pessoas continuam separadas (a chave é o identificador interno, não o código), mas dois cadastros ficam com o mesmo número. Não foi corrigido porque estava fora do pedido da correção dos códigos das peças. A correção pede o mesmo desenho (faixa por caixa, sem renumerar o que existe, repetidos para o gerente) e deve ser feita à parte.
+- **PEND-01 · Código de clientes e fornecedores entre caixas sem rede — corrigido nesta rodada, com um limite (PEND-07).**
+  Os códigos de números de clientes e fornecedores agora saem da faixa do caixa (a mesma das peças, com contagem própria), sem renumerar nada que existe. Veja o manual e os testes `j_*` em `faixas.rs`. O que resta está na PEND-07.
+
+- **PEND-07 · Código de cliente/fornecedor com letras escolhido por dois caixas sem rede pode repetir.**
+  Diferente das peças, o código com letras de uma pessoa **não** espera a confirmação do caixa que distribui as faixas: vale na hora. Se dois caixas sem rede escolherem o mesmo, as duas pessoas ficam com ele; nada é trocado, as vendas e os débitos usam o identificador interno, e o código repetido aparece para o gerente em **Gerente › Códigos** (com **Dar código novo**). Foi uma escolha para não repetir toda a mecânica de confirmação onde o código não é lido por leitor nem impresso em etiqueta. Se o Mário quiser a mesma confirmação das peças, é uma coluna `codigo_validado` em `pessoa` e a mesma varredura do distribuidor.
+
+- **PEND-08 · Cadastros feitos num banco copiado ficam com o identificador antigo.**
+  Pessoas (e peças) criadas enquanto o caixa está bloqueado como cópia ficam com código a definir e com o identificador do caixa de antes; depois de **Registrar como caixa novo**, o próprio caixa não as atribui sozinho (a manutenção só atribui as do identificador atual). O gerente usa **Dar código deste caixa a todos os cadastros a definir** (ou o caixa de origem as atribui quando recebe). Não repete código; só não é automático.
 
 - **PEND-02 · Código com letras digitado à mão em loja com vários caixas depende do caixa que dá as faixas.**
   Sem esse caixa por perto, o código fica "esperando" (a peça vende, mas sem etiqueta e sem leitor por esse código). É de propósito (não dá para garantir que seja único sem ele), mas, se o caixa que dá as faixas ficar muito tempo fora, o gerente precisa usar **Este caixa passa a distribuir as faixas** em outro caixa.
