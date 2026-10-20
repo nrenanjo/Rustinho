@@ -41,6 +41,7 @@ pub mod produtos;
 pub mod receber;
 pub mod registro;
 pub mod reposicao;
+pub mod rede_local;
 pub mod sync;
 pub mod tempo;
 pub mod texto;
