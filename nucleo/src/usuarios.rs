@@ -294,7 +294,7 @@ fn validar_senha(senha: &str) -> Resultado<()> {
     if senha.chars().count() < SENHA_MINIMA {
         return Err(Erro::campo("senha", format!("A senha precisa ter pelo menos {SENHA_MINIMA} caracteres.")));
     }
-    if senha.chars().count() > crate::senhas::MAXIMO {
+    if senha.chars().count() > crate::senhas::MAXIMO_NOVA {
         return Err(Erro::campo("senha", "Senha comprida demais."));
     }
     Ok(())

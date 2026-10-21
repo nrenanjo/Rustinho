@@ -229,7 +229,7 @@ FocusScope {
             Campo {
                 id: senha
                 senha: true
-                dica: tela.editando ? "Nova senha" : "Pelo menos 8 caracteres"
+                dica: tela.editando ? "Nova senha" : "Pelo menos 4 caracteres"
                 maximo: 256
                 Layout.fillWidth: true
                 onConfirmado: senha2.focar()

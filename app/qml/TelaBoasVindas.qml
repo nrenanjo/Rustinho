@@ -112,7 +112,7 @@ FocusScope {
                         id: senha
                         rotulo: "Senha"
                         senha: true
-                        dica: "Pelo menos 12 caracteres"
+                        dica: "Pelo menos 4 caracteres"
                         maximo: 256
                         Layout.fillWidth: true
                         onConfirmado: senha2.focar()

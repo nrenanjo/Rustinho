@@ -6,12 +6,13 @@
 //! qualquer caractere (espaços e Unicode inclusive), recusar o que é
 //! previsível, sem exigir maiúscula/símbolo nem troca periódica.
 //!
-//! - Operador: pelo menos 8 caracteres. Gerente: pelo menos 12, porque a
-//!   senha do gerente também tranca os backups (veja `backup`).
-//! - No máximo 256 caracteres (conta caracteres, não bytes: acento não pesa
-//!   dobrado).
-//! - Recusa: senhas comuns, sequências (`12345678`, `abcdefgh`), repetições
-//!   (`11111111`, `abababab`), trechos do teclado (`qwertyui`) e o nome do
+//! - Operador e gerente: pelo menos 4 caracteres (decisão do dono da loja).
+//!   A senha do gerente também tranca os backups (veja `backup`).
+//! - Senha nova: no máximo 128 caracteres. O login e a conferência de senhas
+//!   antigas continuam aceitando até 256 (`MAXIMO`), para ninguém ficar de fora.
+//!   Conta caracteres, não bytes: acento não pesa dobrado.
+//! - Recusa: senhas comuns, sequências (`1234`, `abcdefgh`), repetições
+//!   (`1111`, `abababab`), trechos do teclado (`qwertyui`) e o nome do
 //!   usuário, da loja ou do computador.
 //!
 //! A senha não é normalizada (NFC/NFKC) antes de virar hash: mudar isso
@@ -21,9 +22,12 @@ use serde::Serialize;
 use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::UnicodeNormalization;
 
+/// Limite aceito no login e na conferência (senhas antigas podem ser longas).
 pub const MAXIMO: usize = 256;
-pub const MINIMO_OPERADOR: usize = 8;
-pub const MINIMO_GERENTE: usize = 12;
+/// Limite para senha nova.
+pub const MAXIMO_NOVA: usize = 128;
+pub const MINIMO_OPERADOR: usize = 4;
+pub const MINIMO_GERENTE: usize = 4;
 
 /// Quem vai usar a senha e onde: serve para recusar a senha que repete o
 /// nome do usuário, da loja ou do computador.
@@ -79,16 +83,16 @@ impl Problema {
     pub fn mensagem(self, gerente: bool) -> String {
         match self {
             Problema::Curta if gerente => format!(
-                "A senha de gerente precisa ter pelo menos {MINIMO_GERENTE} caracteres: ela também protege os backups. \
-                 Dica: junte palavras, como cafe-com-pao-2026."
+                "A senha de gerente precisa ter pelo menos {MINIMO_GERENTE} caracteres. Ela também protege os backups: \
+                 quanto mais longa, mais segura (dica: junte palavras, como cafe-com-pao-2026)."
             ),
             Problema::Curta => format!(
-                "A senha precisa ter pelo menos {MINIMO_OPERADOR} caracteres. Dica: junte palavras, como cafe-com-pao-2026."
+                "A senha precisa ter pelo menos {MINIMO_OPERADOR} caracteres. Quanto mais longa, mais segura."
             ),
-            Problema::Comprida => format!("Senha comprida demais: use no máximo {MAXIMO} caracteres."),
+            Problema::Comprida => format!("Senha comprida demais: use no máximo {MAXIMO_NOVA} caracteres."),
             Problema::Comum => "Essa senha é muito comum. Junte palavras, como cafe-com-pao-2026.".into(),
-            Problema::Sequencia => "Evite sequências como 12345678 ou abcdefgh. Junte palavras.".into(),
-            Problema::Repetida => "Evite repetições como 11111111 ou abababab. Junte palavras.".into(),
+            Problema::Sequencia => "Evite sequências como 1234 ou abcd. Junte palavras.".into(),
+            Problema::Repetida => "Evite repetições como 1111 ou abab. Junte palavras.".into(),
             Problema::Teclado => "Evite trechos do teclado, como qwertyui. Junte palavras.".into(),
             Problema::ParecidaComNome => {
                 "A senha não pode ser o nome do usuário, da loja ou deste computador (nem parecida com eles).".into()
@@ -126,7 +130,7 @@ pub fn dica(gerente: bool) -> String {
 /// Avalia a senha. `None` = dentro da política.
 pub fn avaliar(senha: &str, ctx: &Contexto) -> Option<Problema> {
     let total = senha.chars().count();
-    if total > MAXIMO {
+    if total > MAXIMO_NOVA {
         return Some(Problema::Comprida);
     }
     if total < minimo(ctx.gerente) {
@@ -345,23 +349,21 @@ mod testes {
         avaliar(s, &Contexto { usuario, loja, caixa, gerente: false })
     }
 
-    /// S-01: limites de tamanho (operador 8, gerente 12, máximo 256 caracteres).
+    /// S-01: limites de tamanho (operador 4, gerente 4, senha nova até 128; login aceita até 256).
     #[test]
     fn s01_tamanhos() {
-        assert_eq!(op("cafe-pa"), Some(Problema::Curta));
-        assert_eq!(op("cafe-pao"), None);
-        assert_eq!(ger("cafe-com-pa"), Some(Problema::Curta), "11 caracteres");
-        assert_eq!(ger("cafe-com-pao"), None, "12 caracteres");
+        assert_eq!(op("caf"), Some(Problema::Curta));
+        assert_eq!(op("café"), None, "4 caracteres");
+        assert_eq!(ger("caf"), Some(Problema::Curta), "3 caracteres");
+        assert_eq!(ger("café"), None, "4 caracteres, gerente igual ao operador");
         assert_eq!(op(&format!("éé{}", "cafe-com-pao")), None);
-        let max = format!("{}x", "cafe-com-pao-".repeat(19)); // 19*13+1 = 248
-        assert!(max.chars().count() <= MAXIMO);
-        assert_eq!(op(&max), None);
-        let exato: String =
-            (0..).map(|i| format!("açúcar{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(256).collect();
-        assert_eq!(exato.chars().count(), 256);
-        assert_eq!(op(&exato), None, "256 caracteres (mais de 256 bytes) passa");
-        assert_eq!(op(&format!("{exato}z")), Some(Problema::Comprida));
-        assert_eq!(ger(&format!("{exato}z")), Some(Problema::Comprida));
+        let max: String =
+            (0..).map(|i| format!("açúcar{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(MAXIMO_NOVA).collect();
+        assert_eq!(max.chars().count(), 128);
+        assert_eq!(op(&max), None, "128 caracteres passa");
+        assert_eq!(op(&format!("{max}z")), Some(Problema::Comprida));
+        assert_eq!(ger(&format!("{max}z")), Some(Problema::Comprida));
+        assert!(MAXIMO >= 256, "o login continua aceitando senhas antigas longas");
     }
 
     /// S-02: acento conta como um caractere; espaços, emoji e outros alfabetos valem.
@@ -373,7 +375,7 @@ mod testes {
         assert_eq!(op("日本語のパスワードです"), None);
         assert_eq!(op("🙂🔑🙂🔒🌟🌞🌙⭐"), None);
         assert_eq!(ger("frase longa com espaços"), None);
-        assert_eq!(op("áéíó"), Some(Problema::Curta));
+        assert_eq!(op("áéí"), Some(Problema::Curta));
     }
 
     /// S-03: não exige maiúscula, número nem símbolo.
@@ -485,12 +487,12 @@ mod testes {
             assert!(!p.mensagem(false).is_empty() && !p.mensagem(true).is_empty() && !p.resumo().is_empty());
             assert_eq!(Problema::do_codigo(p.codigo()), Some(p));
         }
-        assert!(Problema::Curta.mensagem(true).contains("12"));
+        assert!(Problema::Curta.mensagem(true).contains('4'));
         assert!(Problema::Curta.mensagem(true).contains("backups"));
-        assert!(Problema::Curta.mensagem(false).contains('8'));
+        assert!(Problema::Curta.mensagem(false).contains('4'));
         assert_eq!(Problema::do_codigo("nada"), None);
-        assert_eq!(dica(false), "Pelo menos 8 caracteres");
-        assert_eq!(dica(true), "Pelo menos 12 caracteres");
+        assert_eq!(dica(false), "Pelo menos 4 caracteres");
+        assert_eq!(dica(true), "Pelo menos 4 caracteres");
     }
 
     /// S-10: senhas boas de verdade passam, para operador e gerente.
