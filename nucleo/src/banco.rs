@@ -374,6 +374,41 @@ mod testes {
                 ("c2".into(), "lancada".into(), "nao_verificada".into(), "anterior".into()),
             ]
         );
-        assert_eq!(MIGRACOES.len(), 20);
+        assert!(MIGRACOES.len() >= 20);
+    }
+
+    /// DRE gerencial: a migração 20 → 21 sugere a classificação das
+    /// categorias de fábrica, deixa as criadas pela loja sem classificação e
+    /// não inventa competência para as contas que já existiam.
+    #[test]
+    fn migracao_21_dre_nao_inventa_nada() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 20).unwrap();
+        c.execute(
+            "INSERT INTO categoria (id, nome, tipo, ordem, atualizado_em) VALUES ('cat-loja', 'Brindes', 'despesa', 99, 'x')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO conta_pagar (id, categoria_id, descricao, valor, vencimento, criado_em, dispositivo)
+             VALUES ('p1', 'cat-aluguel', 'Aluguel', 1000, '2026-10-05', '2026-10-01T00:00:00Z', 'd')",
+            [],
+        )
+        .unwrap();
+        migrar(&mut c).unwrap();
+        let g = |id: &str| -> Option<String> {
+            c.query_row("SELECT dre_grupo FROM categoria WHERE id = ?1", [id], |l| l.get(0)).unwrap()
+        };
+        assert_eq!(g("cat-aluguel").as_deref(), Some("fixa"));
+        assert_eq!(g("cat-fornecedores").as_deref(), Some("estoque"));
+        assert_eq!(g("cat-loja"), None, "categoria da loja: sem classificação");
+        let comp: Option<String> =
+            c.query_row("SELECT competencia FROM conta_pagar WHERE id = 'p1'", [], |l| l.get(0)).unwrap();
+        assert_eq!(comp, None);
+        let metas: i64 = c.query_row("SELECT COUNT(*) FROM meta", [], |l| l.get(0)).unwrap();
+        assert_eq!(metas, 0);
+        assert_eq!(MIGRACOES.len(), 21);
     }
 }

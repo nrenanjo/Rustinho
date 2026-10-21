@@ -1246,7 +1246,7 @@ dependencies = [
 
 [[package]]
 name = "rustinho"
-version = "0.9.12"
+version = "0.9.13"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "rustinho-nucleo"
-version = "0.9.12"
+version = "0.9.13"
 dependencies = [
  "argon2",
  "base64",

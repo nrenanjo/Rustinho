@@ -94,6 +94,20 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
 
+### Novo na versão 0.9.13
+
+- **Senhas:** só o tamanho é exigido (pelo menos 4 caracteres; no máximo 128 numa senha nova). Vale "1234". Ninguém é obrigado a trocar a senha que já tem.
+- **CNPJ com letras** (CNPJ alfanumérico, que a Receita dá desde julho de 2026): aceito nos cadastros, no CNPJ da loja, na busca e nas notas de compra pelo XML (a chave de acesso pode ter letras).
+- **Painel → Resultado (DRE):** a DRE gerencial do período (hoje, 7 dias, mês atual, mês anterior, ano ou datas escolhidas), com comparação, pendências, os últimos 12 meses e as despesas por categoria. Toque numa linha para ver os lançamentos que formam o total. **Imprimir** gera o PDF. É um **resultado gerencial estimado**: não substitui a contabilidade nem a DRE oficial.
+  - **Pendências** deixam o resultado incompleto, nunca viram zero: peça vendida sem custo, despesa sem categoria (ou categoria sem classificação), conta sem mês de referência, classificação não confirmada, contas mensais fora de um período menor que um mês, nenhum imposto lançado no mês.
+  - **Classificar categorias:** em que linha da DRE entra cada categoria (despesa fixa, variável, tributos sobre as vendas, financeira...). A de fábrica é só uma sugestão: **confira com o contador** e marque a confirmação.
+  - **Metas:** mensais ou semanais, da loja ou de cada vendedor (vendas líquidas, lucro bruto, margem ou quantidade de vendas), com o realizado e o percentual.
+- **Painel → Peças e vendedores:** as peças que mais venderam por quantidade, por receita, por lucro e por margem (separados: vender mais não é lucrar mais) e o desempenho de cada vendedor.
+- **Painel → Resumo:** "Vendas" agora são as vendas líquidas (já com desconto); as devoluções aparecem à parte. O lucro do mês vem da DRE: peça sem custo deixa o lucro **incompleto** (antes contava como lucro inteiro). Para o gerente, aparecem também despesas, resultado estimado, ticket médio e os avisos.
+- **Contas a pagar → Mês de referência:** o mês a que a conta se refere (o aluguel de outubro pago em novembro é de 10/aaaa). Vazio = o mês do vencimento (e a DRE avisa). A comissão fechada já vem com o mês certo.
+- **Permissão nova do gerente: Resultados** (lucro, custos, despesas, DRE e metas). De fábrica só o gerente vê; dá para liberar para todos em Configurações → Gerente. Sem ela, o caixa vê no Painel só vendas, quantidade e ticket.
+- **Regras da DRE** (detalhes em `docs/DRE-gerencial.md`): venda a prazo entra uma vez, na data da venda; receber a parcela não é receita nova; pagar uma conta não cria outra despesa; compra de mercadoria entra pelo custo quando a peça é vendida; venda cancelada depois continua no mês dela e o cancelamento entra no mês em que aconteceu; taxas da maquininha precisam ser lançadas como despesa.
+
 ### Novo na versão 0.9.12
 
 - **Versão 0.9.12:** é a 0.9.11 com a conferência da assinatura digital das notas de compra (veja "Compras pelo XML" e a "Autorização da SEFAZ", acima). O restante do que está descrito na 0.9.11 vale igual. A autorização automática da SEFAZ **ainda não existe**: o gerente confere no portal.

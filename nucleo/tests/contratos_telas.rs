@@ -492,3 +492,290 @@ fn cliente_e_fornecedor() {
         ],
     );
 }
+
+/// Campos que `SecaoResumo`, `SecaoDre`, `SecaoIndicadores`, `DetalheDre`,
+/// `ClassificarCategorias`, `MetasDre` e `TelaPainel` leem (DRE gerencial), e
+/// a permissão "Resultados": o caixa não vê lucro nem a DRE.
+#[test]
+fn dre_gerencial() {
+    let mut s = loja();
+    let mut f = ok(&mut s, "produto_novo", json!({}));
+    f["nome"] = json!("Filtro");
+    f["custo"] = json!("60");
+    f["estoqueInicial"] = json!("10");
+    f["precos"][0]["preco"] = json!("100");
+    f["precos"][0]["lucro"] = json!("");
+    let peca = ok(&mut s, "produto_salvar", f)["id"].as_str().unwrap().to_string();
+    ok(&mut s, "caixa_abrir", json!({ "valorInicial": "0" }));
+    ok(
+        &mut s,
+        "venda_concluir",
+        json!({ "itens": [{ "produtoId": peca, "quantidade": "1" }], "tabela": 1,
+                "pagamentos": [{ "forma": "dinheiro", "valor": "100" }] }),
+    );
+    let ids = ok(
+        &mut s,
+        "pagar_lancar",
+        json!({ "categoriaId": "cat-aluguel", "descricao": "Aluguel", "valor": "300", "parcelas": 1, "competencia": "" }),
+    );
+    let f = ok(&mut s, "pagar_ficha", json!({ "id": ids[0] }));
+    tem("pagar_ficha.parcela", &f["parcela"], &[("competencia", "texto")]);
+
+    let p = ok(&mut s, "painel_resumo", json!({}));
+    tem(
+        "painel_resumo",
+        &p,
+        &[
+            ("resultados", "sim/nao"),
+            ("lucroMes", "texto"),
+            ("margemMes", "texto"),
+            ("semCusto", "numero"),
+            ("devolvidoMes", "texto"),
+        ],
+    );
+    assert_eq!((p["resultados"].as_bool(), p["lucroMes"].as_str()), (Some(true), Some("40,00")));
+
+    let r = ok(&mut s, "dre_resumo", json!({}));
+    tem(
+        "dre_resumo",
+        &r,
+        &[
+            ("despesas", "texto"),
+            ("resultado", "texto"),
+            ("resultadoNegativo", "sim/nao"),
+            ("estado", "texto"),
+            ("ticket", "texto"),
+            ("devolucoes", "texto"),
+            ("avisos", "lista"),
+        ],
+    );
+
+    let filtro = json!({ "periodo": "mes", "de": "", "ate": "", "vendedorId": "" });
+    let d = ok(&mut s, "dre_apurar", filtro.clone());
+    tem(
+        "dre_apurar",
+        &d,
+        &[
+            ("periodo", "objeto"),
+            ("comparacao", "objeto"),
+            ("vendedor", "texto"),
+            ("estado", "texto"),
+            ("estadoTexto", "texto"),
+            ("base", "texto"),
+            ("linhas", "lista"),
+            ("margemBruta", "texto"),
+            ("margemContribuicao", "texto"),
+            ("pendencias", "lista"),
+            ("variacoes", "lista"),
+            ("resultadoComparavel", "sim/nao"),
+            ("comercial", "objeto"),
+            ("avisos", "lista"),
+        ],
+    );
+    tem("dre_apurar.periodo", &d["periodo"], &[("rotulo", "texto"), ("de", "texto"), ("ate", "texto")]);
+    tem(
+        "dre_apurar.linhas",
+        &d["linhas"][0],
+        &[
+            ("id", "texto"),
+            ("nome", "texto"),
+            ("valor", "texto"),
+            ("v", "numero"),
+            ("percentual", "texto"),
+            ("subtotal", "sim/nao"),
+            ("detalhavel", "sim/nao"),
+        ],
+    );
+    tem("dre_apurar.pendencias", &d["pendencias"][0], &[("codigo", "texto"), ("texto", "texto")]);
+    tem(
+        "dre_apurar.variacoes",
+        &d["variacoes"][0],
+        &[("nome", "texto"), ("atual", "texto"), ("anterior", "texto"), ("variacao", "texto"), ("subiu", "sim/nao")],
+    );
+    tem(
+        "dre_apurar.comercial",
+        &d["comercial"],
+        &[
+            ("vendasLiquidas", "texto"),
+            ("quantidade", "numero"),
+            ("ticket", "texto"),
+            ("itensPorVenda", "texto"),
+            ("descontos", "texto"),
+            ("devolucoes", "numero"),
+            ("devolucoesValor", "texto"),
+            ("canceladas", "numero"),
+            ("canceladasValor", "texto"),
+        ],
+    );
+
+    let serie = ok(&mut s, "dre_serie", json!({}));
+    assert_eq!(serie.as_array().unwrap().len(), 12);
+    tem(
+        "dre_serie",
+        &serie[11],
+        &[
+            ("rotulo", "texto"),
+            ("vendas", "texto"),
+            ("vVendas", "numero"),
+            ("lucroBruto", "texto"),
+            ("despesas", "texto"),
+            ("resultado", "texto"),
+            ("vResultado", "numero"),
+            ("estado", "texto"),
+            ("parcial", "sim/nao"),
+        ],
+    );
+
+    let mut dados = filtro.clone();
+    dados["categoria"] = json!("");
+    let e = ok(&mut s, "dre_despesas", dados);
+    tem("dre_despesas", &e, &[("total", "texto"), ("categorias", "lista"), ("lancamentos", "lista")]);
+    tem(
+        "dre_despesas.categorias",
+        &e["categorias"][0],
+        &[("categoria", "texto"), ("grupo", "texto"), ("valor", "texto"), ("parte", "numero")],
+    );
+
+    let mut dados = filtro.clone();
+    dados["linha"] = json!("fixas");
+    let det = ok(&mut s, "dre_detalhe", dados);
+    tem(
+        "dre_detalhe",
+        &det,
+        &[("nome", "texto"), ("total", "texto"), ("quantidade", "numero"), ("itens", "lista"), ("cortado", "sim/nao")],
+    );
+    tem(
+        "dre_detalhe.itens",
+        &det["itens"][0],
+        &[
+            ("data", "texto"),
+            ("descricao", "texto"),
+            ("categoria", "texto"),
+            ("fornecedor", "texto"),
+            ("valor", "texto"),
+            ("semCompetencia", "sim/nao"),
+        ],
+    );
+
+    let mut dados = filtro.clone();
+    dados["busca"] = json!("");
+    let i = ok(&mut s, "dre_indicadores", dados);
+    tem(
+        "dre_indicadores",
+        &i,
+        &[
+            ("periodo", "objeto"),
+            ("porQuantidade", "lista"),
+            ("porReceita", "lista"),
+            ("porLucro", "lista"),
+            ("porMargem", "lista"),
+            ("vendedores", "lista"),
+            ("criterioVendedor", "texto"),
+            ("nota", "texto"),
+        ],
+    );
+    tem(
+        "dre_indicadores.porReceita",
+        &i["porReceita"][0],
+        &[
+            ("nome", "texto"),
+            ("quantidade", "texto"),
+            ("receita", "texto"),
+            ("lucro", "texto"),
+            ("margem", "texto"),
+            ("semCusto", "sim/nao"),
+        ],
+    );
+    tem(
+        "dre_indicadores.vendedores",
+        &i["vendedores"][0],
+        &[
+            ("nome", "texto"),
+            ("vendas", "numero"),
+            ("receita", "texto"),
+            ("ticket", "texto"),
+            ("descontos", "texto"),
+            ("lucro", "texto"),
+            ("margem", "texto"),
+            ("semCusto", "sim/nao"),
+            ("devolucoes", "numero"),
+            ("devolucoesValor", "texto"),
+            ("canceladas", "numero"),
+            ("canceladasValor", "texto"),
+        ],
+    );
+
+    let c = ok(&mut s, "dre_classificacao", json!({}));
+    tem(
+        "dre_classificacao",
+        &c,
+        &[("categorias", "lista"), ("grupos", "lista"), ("confirmada", "sim/nao"), ("nota", "texto")],
+    );
+    tem(
+        "dre_classificacao.categorias",
+        &c["categorias"][0],
+        &[("id", "texto"), ("nome", "texto"), ("tipo", "texto"), ("grupo", "texto"), ("ativo", "sim/nao")],
+    );
+    tem("dre_classificacao.grupos", &c["grupos"][0], &[("id", "texto"), ("nome", "texto")]);
+    let c = ok(
+        &mut s,
+        "dre_classificacao_salvar",
+        json!({ "categorias": [{ "id": "cat-aluguel", "grupo": "fixa" }], "confirmar": true }),
+    );
+    assert_eq!(c["confirmada"], true);
+
+    let m = ok(
+        &mut s,
+        "dre_meta_salvar",
+        json!({ "periodo": "mes", "indicador": "vendas", "vendedorId": "", "valor": "500" }),
+    );
+    tem(
+        "dre_metas",
+        &m[0],
+        &[
+            ("periodo", "texto"),
+            ("indicador", "texto"),
+            ("indicadorNome", "texto"),
+            ("vendedorId", "texto"),
+            ("vendedor", "texto"),
+            ("meta", "texto"),
+            ("realizado", "texto"),
+            ("diferenca", "texto"),
+            ("percentual", "texto"),
+            ("parte", "numero"),
+            ("atingida", "sim/nao"),
+            ("periodoRotulo", "texto"),
+            ("unidade", "texto"),
+        ],
+    );
+    let u = ok(&mut s, "usuarios_listar", json!({}));
+    tem("usuarios_listar", &u[0], &[("id", "texto"), ("nome", "texto"), ("ativo", "sim/nao")]);
+
+    // Impressão (PDF) da DRE.
+    let imp = ok(&mut s, "impressao", json!({ "tipo": "dre", "id": filtro.to_string() }));
+    assert!(imp["html"].as_str().unwrap().contains("DRE gerencial"));
+
+    // Caixa (não gerente): sem lucro no Painel e sem DRE.
+    ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "Bia", "senha": "1234", "senha2": "1234", "ativo": true, "gerente": false }),
+    );
+    let bia =
+        ok(&mut s, "usuarios_entrada", json!({})).as_array().unwrap().iter().find(|x| x["nome"] == "Bia").unwrap()
+            ["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    ok(&mut s, "sair", json!({}));
+    ok(&mut s, "entrar", json!({ "id": bia, "senha": "1234" }));
+    let p = ok(&mut s, "painel_resumo", json!({}));
+    assert_eq!((p["resultados"].as_bool(), p["lucroMes"].as_str()), (Some(false), Some("")));
+    for comando in ["dre_apurar", "dre_resumo", "dre_indicadores", "dre_metas", "dre_classificacao_salvar"] {
+        let v = chamar(&mut s, comando, filtro.clone());
+        assert_eq!(v["ok"], false, "{comando}: {v}");
+        assert_eq!(v["campo"], "gerente", "{comando}: {v}");
+    }
+    let v = chamar(&mut s, "impressao", json!({ "tipo": "dre", "id": "" }));
+    assert_eq!(v["ok"], false, "{v}");
+}

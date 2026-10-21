@@ -1,6 +1,9 @@
 //! Testes da DRE gerencial. O cenário `dre_cenario_manual` é o do
 //! docs/DRE-gerencial.md §6, conferido à mão.
 
+// Valores escritos como reais_centavos (450_00 = R$ 450,00), para ler como dinheiro.
+#![allow(clippy::inconsistent_digit_grouping)]
+
 use super::*;
 use crate::banco::Banco;
 use crate::devolucoes::{self, ItemEntrada as ItemDev};

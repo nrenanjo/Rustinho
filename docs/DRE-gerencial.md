@@ -113,3 +113,12 @@ rastreabilidade (cada total = soma do detalhe).
 
 **Antes de declarar o recurso concluído, a conferência precisa ser aprovada
 pelo dono da loja (e pelo contador, para a classificação).**
+
+## 7. Etapas 3 e 4: telas (0.9.13)
+
+- **Painel → Resultado (DRE):** períodos Hoje, 7 dias, Mês atual (padrão), Mês anterior, Ano e datas escolhidas; filtro por vendedor (só a parte das vendas); estado (completo / incompleto / sem dados); linhas com subtotais e % da receita líquida; cada linha abre os lançamentos (`DetalheDre`); comparação com o período anterior (com aviso de períodos parciais; despesas e resultado só se comparam quando os dois períodos tratam as contas mensais igual); pendências; "como foi calculado"; últimos 12 meses (mês sem dados e meses antes do primeiro registro marcados, nunca zero); despesas e tributos por categoria; Classificar categorias (com confirmação e auditoria); Metas; Imprimir (PDF).
+- **Painel → Peças e vendedores:** rankings separados (quantidade, receita líquida, lucro bruto, margem), busca por peça, vendedores (vendas, receita, ticket, descontos, lucro estimado antes dos tributos, margem, devoluções e cancelamentos à parte).
+- **Painel → Resumo:** cartões essenciais (vendas líquidas, lucro bruto e margem, despesas registradas, resultado estimado com o estado, ticket médio) e avisos (custo ausente, despesas sem classificação, meta não atingida). Sem a permissão "Resultados", só vendas, quantidade e ticket.
+- **Permissão:** ação do gerente "Resultados" (lucro, custos, despesas, DRE e metas); de fábrica, só o gerente.
+- **Contrato com as telas:** teste `contratos_telas::dre_gerencial` (campos que as telas leem e a recusa para o caixa).
+- **Fotos** (X virtual, banco de teste): ficam fora do repositório, na entrega.
