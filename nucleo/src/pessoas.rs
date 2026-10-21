@@ -151,7 +151,10 @@ fn validar(f: &PessoaFicha) -> Resultado<Dados> {
         };
         if !ok {
             let o_que = if tipo == "J" || doc.len() > 11 { "CNPJ" } else { "CPF" };
-            return Err(Erro::campo("documento", format!("{o_que} inválido. Confira os números.")));
+            return Err(Erro::campo(
+                "documento",
+                format!("{o_que} inválido. Confira os números{}.", if o_que == "CNPJ" { " e as letras" } else { "" }),
+            ));
         }
     }
     let nome = curto(&f.nome, "nome", "Nome", 100)?;
@@ -1015,6 +1018,29 @@ mod testes {
         f.fornecedor = true;
         let id = salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
         assert_eq!(ficha(&b.conn, &id).unwrap().tipo, "J");
+    }
+
+    /// PEND-19: cadastro com CNPJ alfanumérico (digitado com pontuação e
+    /// minúsculas), busca e fornecedor vindo da nota.
+    #[test]
+    fn pend19_cnpj_alfanumerico_no_cadastro() {
+        let (b, u) = base();
+        let mut f = ficha_nova(&b.conn, "fornecedor").unwrap();
+        f.nome = "Distribuidora Alfa".into();
+        f.documento = "12.abc.345/01de-36".into();
+        let e = salvar(&b.conn, &b.dispositivo, &u, &f).unwrap_err();
+        assert_eq!(e.nome_do_campo(), Some("documento"));
+        assert!(e.to_string().contains("letras"), "{e}");
+        f.documento = "12.abc.345/01de-35".into();
+        let id = salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        let fi = ficha(&b.conn, &id).unwrap();
+        assert_eq!(fi.documento, "12.ABC.345/01DE-35");
+        assert_eq!(fi.tipo, "J");
+        let achados = buscar(&b.conn, "12abc345", "", false, 10).unwrap();
+        assert!(achados.iter().any(|p| p.id == id), "busca pelo CNPJ com letras");
+        let nota = Emitente { documento: "12ABC34501DE35".into(), nome: "Outro nome".into(), ..Default::default() };
+        let (id2, criado) = garantir_fornecedor(&b.conn, &b.dispositivo, &u, &nota).unwrap();
+        assert_eq!((id2.as_str(), criado), (id.as_str(), false), "a nota acha o mesmo cadastro");
     }
 
     #[test]

@@ -1571,6 +1571,40 @@ mod testes {
         assert!(prova.contains("11222333000181") && prova.contains("AC de TESTE"), "{prova}");
     }
 
+    /// PEND-19: nota de fornecedor com CNPJ alfanumérico entra de ponta a
+    /// ponta: verificação, fornecedor cadastrado com letras, conferência e lançamento.
+    #[test]
+    fn pend19_compra_de_fornecedor_com_cnpj_alfanumerico() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let (g, _) = gerente_e_operador(&b);
+        let id = importar_xml(c, &b.dispositivo, &u, &fixture("alfa_ok.xml")).unwrap();
+        let f = ficha(c, &id).unwrap();
+        assert_eq!(f.verificacao, "verificada");
+        assert_eq!(f.chave, "35261012ABC34501DE35550010000123451000000015");
+        let doc: String = c
+            .query_row(
+                "SELECT p.documento FROM compra k JOIN pessoa p ON p.id = k.fornecedor_id WHERE k.id = ?1",
+                [&id],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(doc, "12ABC34501DE35");
+        assert_eq!(crate::documento::escrever(&doc), "12.ABC.345/01DE-35");
+        // A mesma nota de novo é reconhecida pela chave com letras.
+        assert!(importar_xml(c, &b.dispositivo, &u, &fixture("alfa_ok.xml")).is_err());
+        for it in f.itens {
+            c.execute("UPDATE compra_item SET acao = 'nova' WHERE id = ?1", [&it.id]).unwrap();
+        }
+        registrar_conferencia(c, &b.dispositivo, &g, &conferencia(&id, "autorizada", "135260000000001", &agora_br(c)))
+            .unwrap();
+        lancar(c, &b.dispositivo, &u, &id).unwrap();
+        // Outra raiz no certificado: recusada sem gravar nada.
+        let antes = retrato(c);
+        assert!(importar_xml(c, &b.dispositivo, &u, &fixture("alfa_cert_outra_raiz.xml")).is_err());
+        assert_eq!(retrato(c), antes);
+    }
+
     fn gerente_e_operador(b: &Banco) -> (String, String) {
         let g = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "Ana-senha-12345", true).unwrap();
         usuarios::definir_gerente(&b.conn, &g.id, true).unwrap();

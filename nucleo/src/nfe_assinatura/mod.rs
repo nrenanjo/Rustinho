@@ -420,7 +420,7 @@ fn titular_do_certificado(c: &X509Certificate) -> (Option<String>, Option<String
             if let GeneralName::OtherName(oid, bruto) = g {
                 let id = oid.to_id_string();
                 let Some(v) = conteudo_outro_nome(bruto) else { continue };
-                if id == OID_CNPJ && v.len() == 14 && v.bytes().all(|b| b.is_ascii_digit()) {
+                if id == OID_CNPJ && crate::documento::cnpj_formato(&v) {
                     cnpj = Some(v);
                 } else if id == OID_PESSOA_FISICA && v.len() >= 19 {
                     let x = &v[8..19];
@@ -722,7 +722,8 @@ fn verificar_com<'a>(xml: &'a str, ancoras: &Ancoras, exigir_protocolo: bool) ->
     let (cnpj_cert, cpf_cert) = titular_do_certificado(&cert);
     let titular = if let Some(cnpj) = texto_do_filho(emit, "CNPJ").filter(|c| !c.is_empty()) {
         match cnpj_cert {
-            Some(c) if c.len() == 14 && cnpj.len() == 14 && c[..8] == cnpj[..8] => c,
+            // Raiz = 8 primeiras posições (com letras, no CNPJ alfanumérico).
+            Some(c) if crate::documento::cnpj_formato(&cnpj) && c.get(..8) == cnpj.get(..8) => c,
             Some(_) => return Err(recusa(Motivo::Titular, "a raiz do CNPJ do certificado é diferente da do emitente")),
             None => return Err(recusa(Motivo::Titular, "o certificado não traz CNPJ")),
         }

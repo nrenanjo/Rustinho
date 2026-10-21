@@ -124,7 +124,7 @@ pub fn salvar(conn: &Connection, entrada: &ConfigEntrada) -> Resultado<()> {
     }
     let cnpj = documento::limpar(&entrada.cnpj);
     if !cnpj.is_empty() && !documento::cnpj_valido(&cnpj) && !documento::cpf_valido(&cnpj) {
-        return Err(Erro::campo("cnpj", "CNPJ inválido. Confira os números."));
+        return Err(Erro::campo("cnpj", "CNPJ inválido. Confira os números e as letras."));
     }
 
     let mut nomes_usados: Vec<String> = Vec::new();

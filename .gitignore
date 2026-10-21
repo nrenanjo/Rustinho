@@ -10,3 +10,4 @@ target/
 *.AppImage
 aqtinstall.log
 *.jks
+__pycache__/

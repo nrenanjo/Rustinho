@@ -269,6 +269,17 @@ fn a18_titular_do_certificado() {
     assert_eq!(motivo(&fx("cpf_outro.xml")), Motivo::Titular);
 }
 
+/// PEND-19: CNPJ alfanumérico no certificado (otherName 2.16.76.1.3.3) e no
+/// emitente; a raiz (8 primeiras posições, com letras) decide o titular.
+#[test]
+fn pend19_titular_com_cnpj_alfanumerico() {
+    let p = aceita(&fx("alfa_ok.xml"));
+    assert_eq!(p.titular, "12ABC34501DE35");
+    let p = aceita(&fx("alfa_cert_filial.xml"));
+    assert_eq!(p.titular, "12ABC345000269", "mesma raiz 12ABC345, outro estabelecimento");
+    assert_eq!(motivo(&fx("alfa_cert_outra_raiz.xml")), Motivo::Titular);
+}
+
 #[test]
 fn a19_homologacao_e_recusada() {
     assert_eq!(motivo(&fx("homologacao.xml")), Motivo::Homologacao);

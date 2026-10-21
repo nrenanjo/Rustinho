@@ -41,16 +41,25 @@ pub fn cpf_valido(cpf: &str) -> bool {
     dv(9) == d[9] && dv(10) == d[10]
 }
 
+/// Formato do CNPJ (sem conferir os dígitos): 14 caracteres, os 12
+/// primeiros números ou letras maiúsculas, os 2 últimos números.
+pub fn cnpj_formato(cnpj: &str) -> bool {
+    let c: Vec<char> = cnpj.chars().collect();
+    c.len() == 14
+        && c[..12].iter().all(|x| x.is_ascii_digit() || x.is_ascii_uppercase())
+        && c[12..].iter().all(|x| x.is_ascii_digit())
+}
+
+/// Valor de um caractere na conta do dígito (código ASCII − 48): '0'..'9' =
+/// 0..9, 'A'..'Z' = 17..42. Só aceita número ou letra maiúscula.
+pub fn valor_no_digito(c: char) -> Option<u32> {
+    (c.is_ascii_digit() || c.is_ascii_uppercase()).then(|| c as u32 - 48)
+}
+
 /// CNPJ válido? (14 caracteres; os 12 primeiros podem ter letras)
 pub fn cnpj_valido(cnpj: &str) -> bool {
     let c: Vec<char> = cnpj.chars().collect();
-    if c.len() != 14 || todos_iguais(cnpj) {
-        return false;
-    }
-    if !c[..12].iter().all(|x| x.is_ascii_digit() || x.is_ascii_uppercase()) {
-        return false;
-    }
-    if !c[12..].iter().all(|x| x.is_ascii_digit()) {
+    if !cnpj_formato(cnpj) || todos_iguais(cnpj) {
         return false;
     }
     let valor = |x: char| x as u32 - 48;

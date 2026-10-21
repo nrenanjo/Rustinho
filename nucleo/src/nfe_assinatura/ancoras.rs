@@ -121,13 +121,23 @@ impl Ancoras {
                     "ac_vence_no_recebimento.der" => {
                         include_bytes!("../../tests/pki/ac_vence_no_recebimento.der").to_vec()
                     }
+                    "raiz_alfanumerico_teste.der" => {
+                        include_bytes!("../../tests/pki/raiz_alfanumerico_teste.der").to_vec()
+                    }
+                    "ac_alfanumerico_teste.der" => include_bytes!("../../tests/pki/ac_alfanumerico_teste.der").to_vec(),
                     _ => include_bytes!("../../tests/pki/ac_raiz_historica.der").to_vec(),
                 }
             };
             Ancoras::montar(
-                vec![(d("raiz_teste.der"), Categoria::Vigente), (d("raiz_historica_teste.der"), Categoria::Historica)],
+                vec![
+                    (d("raiz_teste.der"), Categoria::Vigente),
+                    (d("raiz_historica_teste.der"), Categoria::Historica),
+                    // PEND-19: notas com CNPJ alfanumérico (tests/pki/gerar_alfanumerico.py).
+                    (d("raiz_alfanumerico_teste.der"), Categoria::Vigente),
+                ],
                 vec![
                     d("ac_teste.der"),
+                    d("ac_alfanumerico_teste.der"),
                     d("ac_sem_keycertsign.der"),
                     d("ac_vence_no_recebimento.der"),
                     d("ac_raiz_historica.der"),

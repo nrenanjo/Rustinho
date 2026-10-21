@@ -243,7 +243,10 @@ fn nota_do_no(raiz: Node, inf: Node, aceita_nfce: bool) -> Result<NotaXml, Strin
         return Err("Este XML é de uma NFC-e (cupom de consumidor). A entrada de compra usa NF-e (modelo 55).".into());
     }
     let id = inf.attribute("Id").unwrap_or_default();
-    let chave: String = id.chars().filter(|c| c.is_ascii_digit()).collect();
+    // "NFe" + 44 posições; desde o CNPJ alfanumérico (NT Conjunta 2025.001)
+    // as posições do CNPJ podem ter letras maiúsculas.
+    let id = id.trim();
+    let chave: String = id.strip_prefix("NFe").unwrap_or(id).chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let emissao = {
         let dh = texto(ide, "dhEmi");
         let dh = if dh.is_empty() { texto(ide, "dEmi") } else { dh };
@@ -388,14 +391,23 @@ pub fn data_do_xml(t: &str) -> Option<&str> {
     Some(&t[..10])
 }
 
-/// Dígito verificador da chave de acesso (módulo 11, pesos 2 a 9).
+/// Dígito verificador da chave de acesso (módulo 11, pesos 2 a 9). Letras
+/// (CNPJ alfanumérico) valem o código ASCII − 48, como no próprio CNPJ.
 pub fn digito_da_chave(chave43: &str) -> Option<u32> {
     let mut soma = 0;
     for (i, c) in chave43.chars().rev().enumerate() {
-        soma += c.to_digit(10)? * (2 + (i as u32 % 8));
+        soma += crate::documento::valor_no_digito(c)? * (2 + (i as u32 % 8));
     }
     let resto = soma % 11;
     Some(if resto < 2 { 0 } else { 11 - resto })
+}
+
+/// Formato da chave de acesso: 44 posições, todas números, menos as 12
+/// primeiras do CNPJ (posições 7 a 18), que podem ser letras maiúsculas.
+pub fn chave_formato(chave: &str) -> bool {
+    let c: Vec<char> = chave.chars().collect();
+    c.len() == 44
+        && c.iter().enumerate().all(|(i, x)| x.is_ascii_digit() || ((6..18).contains(&i) && x.is_ascii_uppercase()))
 }
 
 /// Confere se a chave de acesso, os dados da nota, a assinatura e o
@@ -404,8 +416,8 @@ pub fn digito_da_chave(chave43: &str) -> Option<u32> {
 /// de `nfe_assinatura` (PEND-09), feita antes. Devolve "" se tudo bate, ou o
 /// que não bate.
 fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
-    if chave.len() != 44 || !chave.chars().all(|c| c.is_ascii_digit()) {
-        return "a chave de acesso não tem 44 números".into();
+    if !chave_formato(chave) {
+        return "a chave de acesso não tem 44 posições válidas".into();
     }
     if inf.attribute("Id").map(str::trim) != Some(&format!("NFe{chave}")) {
         return "a identificação da nota não é a chave de acesso".into();
@@ -516,6 +528,36 @@ mod testes {
         assert_eq!(n.duplicatas.len(), 2);
         assert_eq!(n.duplicatas[0], Duplicata { numero: "001".into(), vencimento: "2026-11-07".into(), valor: 55_025 });
         assert_eq!(n.duplicatas[1].vencimento, "2026-12-07");
+    }
+
+    fn alfa(nome: &str) -> String {
+        std::fs::read_to_string(format!("{}/tests/pki/xml/{nome}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    /// PEND-19: a chave de acesso com CNPJ alfanumérico (letras nas posições 7
+    /// a 18) e o dígito calculado com ASCII − 48 (NT Conjunta 2025.001).
+    #[test]
+    fn pend19_chave_com_cnpj_alfanumerico() {
+        // Conta feita à mão em tests/pki/gerar_alfanumerico.py.
+        assert_eq!(digito_da_chave("35261012ABC34501DE3555001000012345100000001"), Some(5));
+        assert_eq!(digito_da_chave("3526101122233300018155001000012345100000001"), Some(4), "numérica igual");
+        assert_eq!(digito_da_chave("35261012abc34501DE3555001000012345100000001"), None, "minúscula não vale");
+        assert!(chave_formato("35261012ABC34501DE35550010000123451000000015"));
+        assert!(chave_formato("35261011222333000181550010000123451000000014"));
+        assert!(!chave_formato("35261012ABC34501DEX5550010000123451000000015"), "letra no dígito do CNPJ");
+        assert!(!chave_formato("A5261012ABC34501DE35550010000123451000000015"), "letra fora do CNPJ");
+        assert!(!chave_formato("35261012ABC34501DE3555001000012345100000001"), "43 posições");
+
+        let v = ler_verificada(&alfa("alfa_ok.xml"), crate::nfe_assinatura::Ancoras::de_teste()).unwrap();
+        let n = v.nota;
+        assert_eq!(n.chave, "35261012ABC34501DE35550010000123451000000015");
+        assert_eq!(n.emitente.documento, "12ABC34501DE35");
+        assert!(n.autorizada);
+        assert_eq!(n.incoerencia, "", "chave, CNPJ, dígito e protocolo batem");
+
+        // Letra minúscula na chave: fora do padrão, nunca passa como coerente.
+        let r = ler_verificada(&alfa("alfa_chave_minuscula.xml"), crate::nfe_assinatura::Ancoras::de_teste());
+        assert_eq!(r.unwrap().nota.incoerencia, "a chave de acesso não tem 44 posições válidas");
     }
 
     #[test]
