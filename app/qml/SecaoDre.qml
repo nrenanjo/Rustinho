@@ -170,7 +170,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(linhaDre.modelData.valor)
-                                    color: linhaDre.modelData.subtotal && linhaDre.modelData.v < 0 ? Tema.vermelho : Tema.tinta
+                                    color: linhaDre.modelData.subtotal && linhaDre.modelData.v < 0 && !Tema.oculto ? Tema.vermelho : Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
                                     font.pixelSize: linhaDre.modelData.subtotal ? 16 : 14
@@ -262,7 +262,7 @@ FocusScope {
                                     Layout.minimumWidth: 90
                                 }
                                 Text {
-                                    text: Tema.oculto && varia.dinheiro ? "•••" : "antes " + (varia.modelData.anterior || "—")
+                                    text: Tema.oculto && varia.dinheiro ? "•••" : "antes " + (varia.dinheiro && varia.modelData.anterior ? "R$ " : "") + (varia.modelData.anterior || "—")
                                     color: Tema.apagado
                                     font.family: Tema.texto
                                     font.pixelSize: 12
@@ -270,7 +270,7 @@ FocusScope {
                                     Layout.minimumWidth: 90
                                 }
                                 Text {
-                                    text: varia.modelData.variacao
+                                    text: Tema.oculto && varia.dinheiro ? "" : varia.modelData.variacao
                                     color: varia.modelData.subiu ? Tema.verdeEscuro : Tema.vermelho
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -365,7 +365,7 @@ FocusScope {
                             Text {
                                 visible: mes.modelData.estado !== "sem_dados"
                                 text: "resultado R$ " + Tema.valor(mes.modelData.resultado)
-                                color: mes.modelData.vResultado < 0 ? Tema.vermelho : Tema.tinta
+                                color: mes.modelData.vResultado < 0 && !Tema.oculto ? Tema.vermelho : Tema.tinta
                                 font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 13
                             }
                             Chip {

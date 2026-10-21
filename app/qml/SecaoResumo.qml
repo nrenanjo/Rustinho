@@ -118,7 +118,7 @@ FocusScope {
                     rotulo: "Resultado gerencial estimado"
                     sensivel: true
                     valor: secao.dre ? secao.dre.resultado : ""
-                    corValor: secao.dre && secao.dre.resultadoNegativo ? Tema.vermelho : Tema.tinta
+                    corValor: secao.dre && secao.dre.resultadoNegativo && !Tema.oculto ? Tema.vermelho : Tema.tinta
                     nota: secao.dre ? (secao.dre.estado === "completo" ? "completo com os dados registrados"
                                        : secao.dre.estado === "incompleto" ? "incompleto: veja as pendências" : "sem dados") : ""
                     corNota: secao.dre && secao.dre.estado === "incompleto" ? Tema.vermelho : Tema.apagado
