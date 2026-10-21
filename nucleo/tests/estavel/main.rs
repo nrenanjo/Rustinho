@@ -4,6 +4,7 @@
 //! `docs/TESTES-estabilidade.md`; os defeitos achados, em `docs/DEFEITOS.md`.
 
 mod comum;
+mod d09_custos;
 mod t1_backup;
 mod t2_estoque;
 mod t3_crediario;

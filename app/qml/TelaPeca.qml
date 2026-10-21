@@ -15,6 +15,8 @@ FocusScope {
     property bool alterado: false
     property bool carregando: true
     property bool mostrarOutros: false
+    // D-09: custo e % de lucro só para quem vê os resultados (vem da ficha).
+    readonly property bool verCustos: !!ficha && !!ficha.verCustos
     readonly property bool nova: !ficha || ficha.id === ""
     property string tipo: "produto"
     readonly property bool servico: tipo === "servico"
@@ -216,10 +218,16 @@ FocusScope {
         carregar()
     }
 
-    function salvar() {
+    function salvar(jaPediuGerente) {
         limparErros()
         const eraNova = nova
         const r = Api.chamar("produto_salvar", coletar())
+        // D-09: mudar o preço de uma peça com custo muda o % de lucro, que é
+        // regra de preço: o gerente digita a senha (vale só para este salvar).
+        if (!r.ok && r.campo === "precos" && !jaPediuGerente) {
+            janela.comGerente("precos", () => tela.salvar(true))
+            return
+        }
         if (r.ok) {
             const s = Api.chamar("produto_sugestoes")
             if (s.ok)
@@ -793,6 +801,7 @@ FocusScope {
 
                         Campo {
                             id: campoCusto
+                            visible: tela.verCustos
                             sensivel: true
                             rotulo: "Custo"
                             prefixo: "R$"
@@ -816,11 +825,18 @@ FocusScope {
                                 lucroInicial: modelData.lucro
                                 precoInicial: modelData.preco
                                 custo: campoCusto.texto
+                                verLucro: tela.verCustos
                                 destaque: tabela === 1
                                 Layout.fillWidth: true
                                 Layout.topMargin: tabela === 2 ? 4 : 0
                                 onEditado: tela.marcarAlterado()
                             }
+                        }
+                        Nota {
+                            visible: !tela.verCustos
+                            text: "O custo e o % de lucro ficam com o gerente. Mudar o preço de uma peça que já tem custo pede a senha do gerente."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
                         }
                         Botao {
                             text: tela.mostrarOutros ? "Esconder outros preços" : "Outros preços"

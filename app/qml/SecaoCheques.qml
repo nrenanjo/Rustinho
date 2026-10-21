@@ -224,13 +224,14 @@ FocusScope {
                             text: "Desfazer"
                             tipo: "discreto"
                             implicitHeight: 36
-                            onClicked: janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
+                            // D-09: a senha do Financeiro não vale para desfazer.
+                            onClicked: janela.comGerente("estornar", () => janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
                                                         "Voltar", () => {
                                                             const r = Api.chamar("cheque_desfazer", { id: linha.ch.id })
                                                             if (!r.ok)
                                                                 janela.avisar(r.erro, "erro")
                                                             secao.carregar()
-                                                        })
+                                                        }))
                         }
                 }
             }

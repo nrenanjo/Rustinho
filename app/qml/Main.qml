@@ -144,12 +144,13 @@ ApplicationWindow {
 
     // Funções que a loja deixou só para o gerente. Se quem está usando é
     // caixa, pede a senha de um gerente na hora ("aperto") e depois faz.
-    // tela = true: vale enquanto a tela estiver aberta (Financeiro, Usuários);
-    // senão, vale para essa ação só.
+    // tela = true: vale enquanto a tela estiver aberta (Financeiro, Usuários),
+    // só para o que é daquela tela; senão, vale para essa ação uma vez só.
     readonly property var nomesDasAcoes: ({
         cancelar_venda: "Cancelar venda", estornar: "Estornar", ajustar_estoque: "Ajustar estoque",
         backup: "Backup", configuracoes: "Configurações da loja", usuarios: "Usuários",
-        financeiro: "Financeiro", resultados: "Resultados (lucro e DRE)", gerente: "Gerente"
+        financeiro: "Financeiro", resultados: "Resultados (lucro e DRE)", gerente: "Gerente",
+        precos: "Mudar a regra de preço (% de lucro)"
     })
     function podeGerente(acao) {
         const r = Api.chamar("permissao", { acao: acao })
@@ -160,7 +161,7 @@ ApplicationWindow {
             depois()
             return
         }
-        pedirGerente.pedir(nomesDasAcoes[acao] || "", !tela, depois)
+        pedirGerente.pedir(acao, nomesDasAcoes[acao] || "", !tela, depois)
     }
     // Ao sair de uma tela do gerente aberta com a senha dele.
     function encerrarGerente() {
@@ -304,6 +305,34 @@ ApplicationWindow {
         sequence: "F12"
         enabled: !!janela.estado.usuario
         onActivated: Tema.oculto = !Tema.oculto
+    }
+
+    // Para os testes das telas (app/testes): rustinho --textos-da-tela.
+    // Ctrl+Shift+F12 escreve na saída cada texto que está na tela e onde
+    // (sem senhas: os campos de senha dão os pontinhos). Sem a opção, nada.
+    readonly property bool textosDaTela: Qt.application.arguments.indexOf("--textos-da-tela") >= 0
+    Shortcut {
+        sequence: "Ctrl+Shift+F12"
+        enabled: janela.textosDaTela
+        context: Qt.ApplicationShortcut
+        onActivated: janela.escreverTextos()
+    }
+    function escreverTextos() {
+        const linhas = []
+        function andar(item) {
+            if (!item || !item.visible || item.opacity === 0)
+                return
+            const t = item.displayText !== undefined ? item.displayText : item.text
+            if (typeof t === "string" && t.trim() !== "") {
+                const p = item.mapToItem(null, item.width / 2, item.height / 2)
+                linhas.push(Math.round(p.x) + "\t" + Math.round(p.y) + "\t" + t.replace(/\s+/g, " ").trim())
+            }
+            for (let i = 0; i < item.children.length; i++)
+                andar(item.children[i])
+        }
+        // A raiz da janela: as telas e, por cima, as janelinhas (senha do gerente...).
+        andar(janela.contentItem.parent || janela.contentItem)
+        console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
 
     Aviso { id: aviso }

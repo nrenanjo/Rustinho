@@ -156,12 +156,12 @@ fn t5_4_gerente_continua_vendo() {
 fn t5_5_liberacao_do_gerente() {
     let (mut l, p) = loja_com_bia();
     for _ in 0..5 {
-        l.erro("gerente_liberar", json!({ "senha": "errada", "curta": true }));
+        l.erro("gerente_liberar", json!({ "senha": "errada", "curta": true, "acao": "cancelar_venda" }));
     }
-    let m = l.erro("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true }));
+    let m = l.erro("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "cancelar_venda" }));
     assert!(m.contains("Espere"), "depois de 5 erradas, espera: {m}");
     l.executar("DELETE FROM entrada_falha");
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true }));
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "cancelar_venda" }));
     l.ok("venda_cancelar", json!({ "id": p.v2, "motivo": "o gerente liberou" }));
     l.ok("gerente_encerrar", json!({}));
     let m = l.erro("estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "1", "motivo": "x" }));

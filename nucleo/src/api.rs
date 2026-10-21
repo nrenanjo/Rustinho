@@ -43,6 +43,50 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
     ("resultados", "Resultados: lucro, custos, despesas, DRE gerencial e metas"),
 ];
 
+/// Nunca ficam livres para todos (a pílula Gerente não tem marca para elas).
+/// "precos": mudar as regras de formação de preço (D-09).
+const SEMPRE_DO_GERENTE: &[&str] = &["gerente", "precos"];
+
+/// Nome da ação para as mensagens.
+fn nome_da_acao(acao: &str) -> String {
+    match acao {
+        "gerente" => "a pílula Gerente".into(),
+        "precos" => "mudar as regras de preço (% de lucro)".into(),
+        _ => ACOES_DO_GERENTE
+            .iter()
+            .find(|(id, _)| *id == acao)
+            .map(|(_, n)| n.to_lowercase())
+            .unwrap_or_else(|| "isso".into()),
+    }
+}
+
+/// A ação pedida existe? (A senha do gerente só vale para uma ação certa.)
+fn acao_conhecida(acao: &str) -> Resultado<&'static str> {
+    ACOES_DO_GERENTE
+        .iter()
+        .map(|(id, _)| *id)
+        .chain(SEMPRE_DO_GERENTE.iter().copied())
+        .find(|a| *a == acao.trim())
+        .ok_or_else(|| Erro::validacao("Diga para que é a senha do gerente."))
+}
+
+/// O que a senha do gerente libera. Uma ação só: só ela. Numa tela, as
+/// ações daquela tela (Configurações tem o backup e a pílula Gerente).
+fn acoes_da_liberacao(acao: &'static str, curta: bool) -> Vec<&'static str> {
+    match acao {
+        "configuracoes" if !curta => vec!["configuracoes", "backup", "gerente"],
+        _ => vec![acao],
+    }
+}
+
+/// Como a ação do gerente foi permitida.
+enum Por {
+    Gerente,
+    Livre,
+    Tela,
+    UmaVez,
+}
+
 /// Qual ação do gerente cada comando precisa.
 fn acao_do_comando(comando: &str) -> Option<&'static str> {
     Some(match comando {
@@ -298,6 +342,8 @@ struct Sessao {
 
 /// Senha do gerente digitada na hora, para um caixa fazer algo do gerente.
 struct Liberacao {
+    /// Só para estas ações (a pedida; numa tela, as da tela).
+    acoes: Vec<&'static str>,
     ate: Instant,
     /// Numa tela do gerente (Financeiro...) renova a cada uso; numa ação
     /// só (cancelar uma venda), vale poucos minutos e acaba.
@@ -308,7 +354,12 @@ struct Liberacao {
 pub struct Servico {
     banco: Banco,
     sessao: Option<Sessao>,
-    liberacao: Option<Liberacao>,
+    /// Senhas do gerente digitadas no aperto (D-09: cada uma vale só para
+    /// a ação pedida; a de uma ação só acaba quando é usada).
+    liberacoes: Vec<Liberacao>,
+    /// Ações liberadas uma vez só usadas pelo comando que está rodando:
+    /// acabam se ele der certo.
+    gastas: Vec<String>,
     /// Sincronização com os outros caixas (só com banco em arquivo).
     _motor: Option<sync::Motor>,
     /// Houve um erro interno grave (pânico): não dá para provar que o que
@@ -413,7 +464,8 @@ impl Servico {
         Servico {
             banco,
             sessao: None,
-            liberacao: None,
+            liberacoes: Vec::new(),
+            gastas: Vec::new(),
             _motor: None,
             comprometido: false,
             segredo_backup: None,
@@ -455,7 +507,7 @@ impl Servico {
             }
             Err(_) => {
                 self.comprometido = true;
-                self.liberacao = None;
+                self.liberacoes.clear();
                 // Se algo ficou no meio de uma transação, desfaz.
                 if !self.banco.conn.is_autocommit() {
                     let _ = self.banco.conn.execute_batch("ROLLBACK");
@@ -526,7 +578,7 @@ impl Servico {
                 _ => Ok(json!({ "feito": false })),
             },
             "sair" => {
-                self.liberacao = None;
+                self.liberacoes.clear();
                 if let Some(s) = self.sessao.take() {
                     auditoria::registrar(
                         &self.banco.conn,
@@ -561,39 +613,66 @@ impl Servico {
     }
 
     /// Pode fazer esta ação do gerente? (gerente, ação liberada para todos na
-    /// loja, ou senha do gerente digitada há pouco.)
+    /// loja, ou senha do gerente digitada há pouco para esta ação.)
     fn pode(&mut self, acao: &str, sessao: &Sessao) -> Resultado<bool> {
+        Ok(self.como_pode(acao, sessao)?.is_some())
+    }
+
+    fn como_pode(&mut self, acao: &str, sessao: &Sessao) -> Resultado<Option<Por>> {
         if sessao.gerente {
-            return Ok(true);
+            return Ok(Some(Por::Gerente));
         }
-        if acao != "gerente" && acoes_livres(&self.banco.conn)?.iter().any(|a| a == acao) {
-            return Ok(true);
+        if !SEMPRE_DO_GERENTE.contains(&acao) && acoes_livres(&self.banco.conn)?.iter().any(|a| a == acao) {
+            return Ok(Some(Por::Livre));
         }
-        if let Some(l) = self.liberacao.as_mut() {
-            if Instant::now() < l.ate {
-                if l.renova {
-                    l.ate = Instant::now() + LIBERACAO;
-                }
-                return Ok(true);
+        Ok(self.liberado_por_senha(acao))
+    }
+
+    /// A senha do gerente foi digitada há pouco para esta ação? A de uma
+    /// tela renova a cada uso; a de uma ação só não.
+    fn liberado_por_senha(&mut self, acao: &str) -> Option<Por> {
+        let agora = Instant::now();
+        self.liberacoes.retain(|l| agora < l.ate);
+        let mut achou = None;
+        for l in self.liberacoes.iter_mut().filter(|l| l.acoes.contains(&acao)) {
+            if l.renova {
+                l.ate = agora + LIBERACAO;
+                return Some(Por::Tela);
             }
-            self.liberacao = None;
+            achou = Some(Por::UmaVez);
         }
-        Ok(false)
+        achou
     }
 
     fn exigir(&mut self, acao: &str, sessao: &Sessao) -> Resultado<()> {
-        if self.pode(acao, sessao)? {
-            return Ok(());
+        match self.como_pode(acao, sessao)? {
+            Some(Por::UmaVez) => {
+                self.gastas.push(acao.to_string());
+                Ok(())
+            }
+            Some(_) => Ok(()),
+            // "precos" tem campo próprio: a tela sabe que é a regra de preço
+            // (e não a tela do gerente) que pede a senha.
+            None => Err(Erro::campo(
+                if acao == "precos" { "precos" } else { "gerente" },
+                format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
+            )),
         }
-        let nome = ACOES_DO_GERENTE
-            .iter()
-            .find(|(id, _)| *id == acao)
-            .map(|(_, n)| n.to_lowercase())
-            .unwrap_or_else(|| "isso".into());
-        Err(Erro::campo("gerente", format!("Só o gerente pode: {nome}. Peça para o gerente digitar a senha.")))
     }
 
+    /// Roda o comando e, se deu certo, gasta a senha do gerente que foi
+    /// digitada para uma ação só (D-09: não fica aberta para outra coisa).
     fn executar_conectado(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
+        self.gastas.clear();
+        let r = self.executar_comando(comando, dados, sessao);
+        let gastas = std::mem::take(&mut self.gastas);
+        if r.is_ok() && !gastas.is_empty() {
+            self.liberacoes.retain(|l| l.renova || !l.acoes.iter().any(|a| gastas.iter().any(|g| g == a)));
+        }
+        r
+    }
+
+    fn executar_comando(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let disp = self.banco.dispositivo.clone();
         if let Some(acao) = acao_do_comando(comando) {
             self.exigir(acao, sessao)?;
@@ -606,13 +685,17 @@ impl Servico {
             }
             "gerente_liberar" => {
                 let d: SenhaGerente = ler(dados)?;
+                let acao = acao_conhecida(&d.acao)?;
                 self.esperar_se_errou("gerente")?;
                 match usuarios::conferir_gerente(&self.banco.conn, &d.senha)? {
                     Some(g) => {
                         usuarios::limpar_falhas(&self.banco.conn, "gerente")?;
                         self.segredo_backup =
                             backup::gerente_conferido(&self.banco.conn, &g.id, &d.senha, self.segredo_backup)?;
-                        self.liberacao = Some(Liberacao {
+                        let acoes = acoes_da_liberacao(acao, d.curta);
+                        self.liberacoes.retain(|l| !l.acoes.iter().any(|a| acoes.contains(a)));
+                        self.liberacoes.push(Liberacao {
+                            acoes,
                             ate: Instant::now() + if d.curta { LIBERACAO_CURTA } else { LIBERACAO },
                             renova: !d.curta,
                         });
@@ -623,7 +706,13 @@ impl Servico {
                             "gerente.liberar",
                             "usuario",
                             &g.id,
-                            &[format!("{} liberou para {}", g.nome, sessao.nome)],
+                            &[format!(
+                                "{} liberou para {}: {}{}",
+                                g.nome,
+                                sessao.nome,
+                                nome_da_acao(acao),
+                                if d.curta { " (uma vez)" } else { " (nesta tela)" }
+                            )],
                         )?;
                         Ok(json!({ "nome": g.nome }))
                     }
@@ -634,7 +723,7 @@ impl Servico {
                 }
             }
             "gerente_encerrar" => {
-                self.liberacao = None;
+                self.liberacoes.clear();
                 Ok(Value::Null)
             }
             "gerente_ler" => self.gerente_ler(),
@@ -842,7 +931,8 @@ impl Servico {
                 config::validar_nome_caixa(&caixa)?;
                 config::gravar(&self.banco.conn, "caixa_nome", &caixa)?;
                 config::gravar(&self.banco.conn, "imprimir_direto", if d.imprimir_direto { "1" } else { "0" })?;
-                self.config_ler()
+                let ve = self.ve_custos(sessao)?;
+                self.config_ler(ve)
             }
 
             "menu" => Ok(json!(menu::menu(&self.banco.conn, &sessao.usuario_id)?)),
@@ -863,17 +953,32 @@ impl Servico {
                 let total = busca::total(&self.banco.conn, d.inativas)?;
                 Ok(json!({ "itens": lista, "total": total }))
             }
-            "produto_novo" => Ok(json!(produtos::ficha_nova(&self.banco.conn)?)),
+            "produto_novo" => {
+                let f = produtos::ficha_nova(&self.banco.conn)?;
+                self.peca_para_tela(f, sessao)
+            }
             "produto_abrir" => {
                 let d: Id = ler(dados)?;
-                Ok(json!(produtos::ficha(&self.banco.conn, &d.id)?))
+                let f = produtos::ficha(&self.banco.conn, &d.id)?;
+                self.peca_para_tela(f, sessao)
             }
             "produto_salvar" => {
-                let ficha: produtos::ProdutoFicha = ler(dados)?;
+                let mut ficha: produtos::ProdutoFicha = ler(dados)?;
+                // D-09: quem não vê custo e lucro não mexe neles (o custo
+                // gravado fica; o % segue o preço).
+                if !self.ve_custos(sessao)? {
+                    produtos::tirar_custos_da_entrada(&self.banco.conn, &mut ficha)?;
+                }
+                // Mudar o % de lucro (ou o preço de uma peça com custo, que
+                // muda o %) é mudar a regra de preço: só com o gerente.
+                if produtos::muda_regra_de_preco(&self.banco.conn, &ficha)? {
+                    self.exigir("precos", sessao)?;
+                }
                 let tx = self.banco.conn.transaction()?;
                 let id = produtos::salvar(&tx, &disp, &sessao.usuario_id, &ficha)?;
                 tx.commit()?;
-                Ok(json!(produtos::ficha(&self.banco.conn, &id)?))
+                let f = produtos::ficha(&self.banco.conn, &id)?;
+                self.peca_para_tela(f, sessao)
             }
             "produto_sugestoes" => {
                 let mut v = json!(produtos::sugestoes(&self.banco.conn)?);
@@ -898,7 +1003,8 @@ impl Servico {
                 let tx = self.banco.conn.transaction()?;
                 let id = produtos::criar_variacao(&tx, &disp, &sessao.usuario_id, &d.id, &d.atual, &d.nova)?;
                 tx.commit()?;
-                Ok(json!(produtos::ficha(&self.banco.conn, &id)?))
+                let f = produtos::ficha(&self.banco.conn, &id)?;
+                self.peca_para_tela(f, sessao)
             }
             "estoque_ajustar" => {
                 let d: AjusteEstoque = ler(dados)?;
@@ -906,7 +1012,8 @@ impl Servico {
                 produtos::ficha(&tx, &d.produto_id)?; // confere se a peça existe
                 estoque::ajustar(&tx, &disp, &sessao.usuario_id, &d.produto_id, &d.quantidade, &d.motivo)?;
                 tx.commit()?;
-                Ok(json!(produtos::ficha(&self.banco.conn, &d.produto_id)?))
+                let f = produtos::ficha(&self.banco.conn, &d.produto_id)?;
+                self.peca_para_tela(f, sessao)
             }
 
             "usuarios_listar" => {
@@ -1478,7 +1585,19 @@ impl Servico {
             }
             "estoque_parados" => {
                 let d: Filtro = ler(dados)?;
-                Ok(json!(reposicao::parados(&self.banco.conn, &d.texto)?))
+                let pode = self.pode("resultados", sessao)?;
+                let mut v = json!(reposicao::parados(&self.banco.conn, &d.texto)?);
+                // D-09: o valor parado é pelo custo (estoque × custo de cada peça).
+                if !pode {
+                    v["valor"] = json!("");
+                    if let Some(itens) = v["itens"].as_array_mut() {
+                        for it in itens {
+                            it["valor"] = json!("");
+                        }
+                    }
+                }
+                v["resultados"] = json!(pode);
+                Ok(v)
             }
             "encomendas_painel" => {
                 let d: Filtro = ler(dados)?;
@@ -1876,14 +1995,37 @@ impl Servico {
                 Ok(json!(info))
             }
 
-            "config_ler" => self.config_ler(),
+            "config_ler" => {
+                let ve = self.ve_custos(sessao)?;
+                self.config_ler(ve)
+            }
             "config_salvar" => {
-                let d: config::ConfigEntrada = ler(dados)?;
+                let mut d: config::ConfigEntrada = ler(dados)?;
+                // D-09: o lucro sugerido das tabelas é regra de preço.
+                let ve = self.ve_custos(sessao)?;
+                if !ve {
+                    config::manter_lucro(&self.banco.conn, &mut d)?;
+                }
+                let regras = config::mudancas_no_lucro(&self.banco.conn, &d)?;
+                if !regras.is_empty() {
+                    self.exigir("precos", sessao)?;
+                }
                 let tx = self.banco.conn.transaction()?;
                 config::salvar(&tx, &d)?;
                 receber::salvar_taxas(&tx, &d.crediario_multa, &d.crediario_juros, &d.crediario_carencia)?;
+                if !regras.is_empty() {
+                    auditoria::registrar(
+                        &tx,
+                        &disp,
+                        Some(&sessao.usuario_id),
+                        "precos.regras",
+                        "config",
+                        "tabela_preco",
+                        &regras,
+                    )?;
+                }
                 tx.commit()?;
-                self.config_ler()
+                self.config_ler(ve)
             }
 
             _ => Err(Erro::Interno(format!("comando desconhecido: {comando}"))),
@@ -1959,7 +2101,7 @@ impl Servico {
         auditoria::registrar(&tx, &disp, Some(&u.id), "usuario.criar", "usuario", &u.id, &[])?;
         usuarios::registrar_acesso(&tx, &u.id)?;
         tx.commit()?;
-        self.liberacao = None;
+        self.liberacoes.clear();
         self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: true });
         self.estado()
     }
@@ -2013,7 +2155,7 @@ impl Servico {
                     &u.id,
                     &[],
                 )?;
-                self.liberacao = None;
+                self.liberacoes.clear();
                 self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: u.gerente });
                 self.estado()
             }
@@ -2033,7 +2175,7 @@ impl Servico {
             // D-07: desativado (aqui ou em outro caixa): a sessão acaba na hora.
             if !u.ativo {
                 self.sessao = None;
-                self.liberacao = None;
+                self.liberacoes.clear();
                 return Err(Erro::campo("sessao", "Seu usuário foi desativado. Fale com o gerente."));
             }
             s.nome = u.nome;
@@ -2063,10 +2205,7 @@ impl Servico {
         // mesmo com "Usuários" liberado para todos.
         let mexe_em_gerente = d.gerente == Some(true)
             || (!d.id.is_empty() && d.id != sessao.usuario_id && usuarios::buscar(&self.banco.conn, &d.id)?.gerente);
-        if mexe_em_gerente
-            && !sessao.gerente
-            && self.liberacao.as_ref().map(|l| Instant::now() >= l.ate).unwrap_or(true)
-        {
+        if mexe_em_gerente && !sessao.gerente && self.liberado_por_senha("usuarios").is_none() {
             return Err(Erro::campo("gerente", "Só o gerente pode mexer na conta de um gerente."));
         }
         let tem_senha = !d.senha.is_empty() || !d.senha2.is_empty();
@@ -2140,13 +2279,36 @@ impl Servico {
         Ok(json!(usuarios::buscar(&self.banco.conn, &u.id)?))
     }
 
-    fn config_ler(&self) -> Resultado<Value> {
+    /// Pode ver custo e % de lucro das peças (D-09): quem vê os resultados.
+    fn ve_custos(&mut self, sessao: &Sessao) -> Resultado<bool> {
+        self.pode("resultados", sessao)
+    }
+
+    /// Ficha da peça para a tela: sem custo, % de lucro e histórico do
+    /// custo para quem não vê os resultados (D-09).
+    fn peca_para_tela(&mut self, mut f: produtos::ProdutoFicha, sessao: &Sessao) -> Resultado<Value> {
+        f.ver_custos = self.ve_custos(sessao)?;
+        if !f.ver_custos {
+            produtos::esconder_custos(&mut f);
+        }
+        Ok(json!(f))
+    }
+
+    fn config_ler(&self, ve_custos: bool) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let taxas = receber::taxas_texto(conn)?;
+        let mut tabelas = config::tabelas_preco(conn)?;
+        if !ve_custos {
+            for t in &mut tabelas {
+                t.lucro_padrao = String::new();
+                t.lucro_padrao_valor = None;
+            }
+        }
         Ok(json!({
             "loja": config::nome_loja(conn)?,
             "caixa": config::nome_caixa(conn)?,
-            "tabelas": config::tabelas_preco(conn)?,
+            "tabelas": tabelas,
+            "verLucro": ve_custos,
             "uf": config::ler(conn, "loja_uf")?.unwrap_or_default(),
             "cnpj": documento::escrever(&config::ler(conn, "loja_cnpj")?.unwrap_or_default()),
             "ufs": documento::UFS,
@@ -2200,6 +2362,9 @@ struct SenhaGerente {
     senha: String,
     #[serde(default)]
     curta: bool,
+    /// Para que é a senha (D-09: ela só vale para isso).
+    #[serde(default)]
+    acao: String,
 }
 
 #[derive(Deserialize, Default)]

@@ -614,9 +614,10 @@ FocusScope {
                             text: "Estornar"
                             tipo: "discreto"
                             implicitHeight: 32
-                            onClicked: motivo.perguntar("Estornar o pagamento?",
+                            // D-09: a senha do Financeiro não vale para estornar.
+                            onClicked: secao.janela.comGerente("estornar", () => motivo.perguntar("Estornar o pagamento?",
                                 "R$ " + modelData.total + " de " + modelData.data + ". A conta volta a ficar em aberto.",
-                                "Estornar", m => Api.chamar("pagamento_estornar", { id: modelData.id, motivo: m }))
+                                "Estornar", m => Api.chamar("pagamento_estornar", { id: modelData.id, motivo: m })))
                         }
                     }
                 }

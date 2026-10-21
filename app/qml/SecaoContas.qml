@@ -280,8 +280,9 @@ FocusScope {
                                     visible: mov.modelData.estornavel
                                     text: "Estornar"
                                     tipo: "discreto"
-                                    onClicked: motivo.perguntar("Estornar o movimento?", mov.modelData.descricao + " · R$ " + mov.modelData.valor,
-                                                                "Estornar", m => Api.chamar("movimento_estornar", { id: mov.modelData.id, motivo: m }))
+                                    // D-09: a senha do Financeiro não vale para estornar.
+                                    onClicked: secao.janela.comGerente("estornar", () => motivo.perguntar("Estornar o movimento?", mov.modelData.descricao + " · R$ " + mov.modelData.valor,
+                                                                "Estornar", m => Api.chamar("movimento_estornar", { id: mov.modelData.id, motivo: m })))
                                 }
                             }
                         }

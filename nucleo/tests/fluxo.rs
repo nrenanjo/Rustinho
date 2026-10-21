@@ -368,8 +368,14 @@ fn gerente_e_caixa() {
     );
 
     // O "aperto": o gerente digita a senha na hora.
-    assert_eq!(erro(&mut s, "gerente_liberar", json!({ "senha": "oficina-verde-77" })).1, "senha");
-    assert_eq!(ok(&mut s, "gerente_liberar", json!({ "senha": "balcao-azul-2026" }))["nome"], "Maria");
+    assert_eq!(
+        erro(&mut s, "gerente_liberar", json!({ "senha": "oficina-verde-77", "acao": "ajustar_estoque" })).1,
+        "senha"
+    );
+    assert_eq!(
+        ok(&mut s, "gerente_liberar", json!({ "senha": "balcao-azul-2026", "acao": "ajustar_estoque" }))["nome"],
+        "Maria"
+    );
     ok(&mut s, "estoque_ajustar", ajuste.clone());
     ok(&mut s, "gerente_encerrar", json!({}));
     assert_eq!(erro(&mut s, "estoque_ajustar", ajuste.clone()).1, "gerente");

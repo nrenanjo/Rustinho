@@ -12,6 +12,8 @@ RowLayout {
     property string precoInicial: ""
     property string custo: ""
     property bool destaque: false
+    // D-09: o % de lucro só para quem vê os custos (o caixa vê só o preço).
+    property bool verLucro: true
     property alias campoLucro: lucro
     property alias campoPreco: preco
     readonly property string lucroTexto: lucro.texto
@@ -42,6 +44,7 @@ RowLayout {
 
     Campo {
         id: lucro
+        visible: linha.verLucro
         sensivel: true
         rotulo: linha.destaque ? "% sobre o custo" : linha.nome
         sufixo: "%"
@@ -60,7 +63,7 @@ RowLayout {
 
     Campo {
         id: preco
-        rotulo: linha.destaque ? "Preço de " + linha.nome.toLowerCase() : "Preço"
+        rotulo: linha.destaque ? "Preço de " + linha.nome.toLowerCase() : (linha.verLucro ? "Preço" : linha.nome)
         prefixo: "R$"
         numerico: true
         maximo: 18

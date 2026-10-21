@@ -111,6 +111,10 @@ pub struct ProdutoFicha {
     /// Aviso sobre o código: a definir, ou também de outra peça.
     #[serde(skip_deserializing)]
     pub codigo_aviso: String,
+    /// Quem está usando vê o custo e o % de lucro (D-09). Sem isso, a ficha
+    /// vem sem eles (veja `esconder_custos`).
+    #[serde(skip_deserializing)]
+    pub ver_custos: bool,
 }
 
 /// Um tamanho ou cor da grade.
@@ -551,6 +555,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     let (mut dados, estoque_inicial) = validar(ficha)?;
     let id = if novo { tempo::novo_id() } else { ficha.id.clone() };
     if let Some(a) = &antes {
+        manter_lucros(a, &mut dados);
         dados.grade = a.grade.clone();
         if !a.grade.is_empty() && dados.variacao.is_empty() {
             return Err(Erro::campo("variacao", "Diga o tamanho ou a cor deste produto."));
@@ -788,6 +793,65 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     Ok(id)
 }
 
+/// Preço e custo iguais aos de antes: o % de lucro gravado fica como está
+/// (não muda por arredondamento ao salvar outra coisa da peça).
+fn manter_lucros(antes: &Dados, dados: &mut Dados) {
+    if antes.custo != dados.custo {
+        return;
+    }
+    for p in &mut dados.precos {
+        if let Some(a) = antes.precos.iter().find(|a| a.0 == p.0 && a.1 == p.1) {
+            p.2 = a.2;
+        }
+    }
+}
+
+/// D-09: a ficha para quem não vê custos (o caixa): sem o custo, sem o %
+/// de lucro e sem as linhas do histórico que mostram o custo.
+pub fn esconder_custos(f: &mut ProdutoFicha) {
+    f.custo = String::new();
+    for p in &mut f.precos {
+        p.lucro = String::new();
+    }
+    for r in &mut f.historico {
+        r.detalhes.retain(|d| !d.starts_with("Custo"));
+    }
+    f.ver_custos = false;
+}
+
+/// D-09: o que chega de quem não vê custos não mexe neles. O custo fica o
+/// gravado (peça nova: sem custo) e o % de lucro sai do preço, como sempre.
+pub fn tirar_custos_da_entrada(conn: &Connection, f: &mut ProdutoFicha) -> Resultado<()> {
+    f.custo = if f.id.trim().is_empty() {
+        String::new()
+    } else {
+        let custo = carregar(conn, &f.id)?.custo;
+        if custo > 0 {
+            numeros::escrever_dinheiro(custo)
+        } else {
+            String::new()
+        }
+    };
+    for p in &mut f.precos {
+        p.lucro = String::new();
+    }
+    Ok(())
+}
+
+/// Salvar esta ficha muda a regra de preço da peça (o % de lucro de alguma
+/// tabela, ou o custo)? Peça nova não tem regra antes. Ficha com erro: não
+/// (o `salvar` recusa com a mensagem certa).
+pub fn muda_regra_de_preco(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
+    if f.id.trim().is_empty() {
+        return Ok(false);
+    }
+    let antes = carregar(conn, &f.id)?;
+    let Ok((mut dados, _)) = validar(f) else { return Ok(false) };
+    manter_lucros(&antes, &mut dados);
+    let lucros = |d: &Dados| d.precos.iter().map(|p| (p.0, p.2)).filter(|p| p.1.is_some()).collect::<Vec<_>>();
+    Ok(lucros(&antes) != lucros(&dados))
+}
+
 /// Lê os dados gravados de uma peça.
 fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
     let mut d = conn
@@ -915,6 +979,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         id: id.to_string(),
         codigo_aviso,
         codigo_previsto: String::new(),
+        ver_custos: true,
         codigo: d.codigo,
         nome: d.nome,
         marca: d.marca,
@@ -1088,6 +1153,7 @@ pub fn ficha_nova(conn: &Connection) -> Resultado<ProdutoFicha> {
         ativo: true,
         precos,
         estoque: "0".into(),
+        ver_custos: true,
         tributacao: Some(fiscal::tributacao(conn, &fiscal::uf_loja(conn)?, "", "", &fiscal::hoje(conn)?)?),
         ..Default::default()
     })

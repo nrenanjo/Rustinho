@@ -73,6 +73,9 @@ DRE, metas, olho). Faça primeiro: os cadastros dali servem para o resto.
 | F2 | Início e Painel → Resumo. | Não aparece "A pagar" nem o aviso de contas a pagar. |
 | F3 | Tente Financeiro, Usuários, Backup, cancelar venda, estornar, ajustar estoque, DRE (também pelos atalhos do teclado). | Sempre pede a senha do gerente. |
 | F4 | Como gerente, desative o usuário caixa enquanto ele está aberto em outro computador (ou: desative, volte ao caixa e clique em qualquer coisa). | O caixa volta para a tela de entrada com "Seu usuário foi desativado". |
+| F5 | Como caixa, abra uma peça que tem custo. Depois mude o preço dela e salve (F2). | Não aparece o custo nem o "% sobre o custo"; ao salvar, pede a senha do gerente. Com a senha, salva. Mude de novo: pede de novo. |
+| F6 | Como caixa, lance uma compra por XML com uma peça nova. | Vê o custo de cada item; a peça nova sai com o preço; abrindo a peça, não aparece o custo. |
+| F7 | Como caixa, abra o Financeiro com a senha do gerente e tente estornar um pagamento. | Pede a senha do gerente de novo (a do Financeiro não vale para estornar). |
 
 ## G. Fechamento inesperado (prioridade 1)
 

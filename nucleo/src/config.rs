@@ -110,6 +110,38 @@ pub struct TabelaEntrada {
     pub lucro_padrao: String,
 }
 
+/// O que muda no lucro sugerido das tabelas (regra de formação de preço,
+/// D-09: só com o gerente). Vazio = nada muda. Percentual inválido não
+/// conta aqui (o `salvar` recusa com a mensagem certa).
+pub fn mudancas_no_lucro(conn: &Connection, entrada: &ConfigEntrada) -> Resultado<Vec<String>> {
+    let atuais = tabelas_preco(conn)?;
+    let mut v = Vec::new();
+    for t in &entrada.tabelas {
+        let Ok(novo) = numeros::ler_percentual(&t.lucro_padrao) else { continue };
+        let Some(atual) = atuais.iter().find(|a| a.numero == t.numero) else { continue };
+        if novo != atual.lucro_padrao_valor {
+            let ou_traco = |x: Option<i64>| x.map(numeros::escrever_percentual).unwrap_or_else(|| "—".into());
+            v.push(format!(
+                "Lucro sugerido {}: {}% → {}%",
+                atual.nome,
+                ou_traco(atual.lucro_padrao_valor),
+                ou_traco(novo)
+            ));
+        }
+    }
+    Ok(v)
+}
+
+/// Quem não vê o lucro (D-09) salva as configurações sem mexer nele.
+pub fn manter_lucro(conn: &Connection, entrada: &mut ConfigEntrada) -> Resultado<()> {
+    let atuais = tabelas_preco(conn)?;
+    for t in &mut entrada.tabelas {
+        t.lucro_padrao =
+            atuais.iter().find(|a| a.numero == t.numero).map(|a| a.lucro_padrao.clone()).unwrap_or_default();
+    }
+    Ok(())
+}
+
 /// Confere e grava as configurações.
 pub fn salvar(conn: &Connection, entrada: &ConfigEntrada) -> Resultado<()> {
     let loja = texto::limpar(&entrada.loja);

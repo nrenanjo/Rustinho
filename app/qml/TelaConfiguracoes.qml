@@ -156,7 +156,7 @@ FocusScope {
         }
     }
 
-    function salvar() {
+    function salvar(jaPediuGerente) {
         if (secao === "gerente")
             return salvarGerente()
         if (!completo)
@@ -186,6 +186,12 @@ FocusScope {
                                                 crediarioCarencia: carencia.texto, orcamentoValidade: validadeOrc.texto,
                                                 rodapeVenda: rodapeVenda.texto, rodapeOrcamento: rodapeOrcamento.texto, rodapeOs: rodapeOs.texto,
                                                 imprimirLocal: imprimirLocal.checked })
+        // D-09: o lucro sugerido é regra de preço: pede a senha do gerente
+        // (vale só para este salvar).
+        if (!r.ok && r.campo === "precos" && !jaPediuGerente) {
+            janela.comGerente("precos", () => tela.salvar(true))
+            return
+        }
         if (r.ok) {
             janela.atualizarEstado()
             carregar()
@@ -559,21 +565,24 @@ FocusScope {
                                 Layout.fillWidth: true
                                 onEditado: tela.alterado = true
                             }
+                            // D-09: só quem vê os custos vê e muda o lucro sugerido
+                            // (o campo fica, sem esconder: veja D-10).
                             Campo {
                                 id: lucroTabela
                                 texto: linhaTabela.modelData.lucroPadrao
+                                enabled: !!tela.config && tela.config.verLucro
                                 sufixo: "%"
                                 numerico: true
                                 sensivel: true
                                 maximo: 10
-                                dica: "—"
+                                dica: !!tela.config && tela.config.verLucro ? "—" : "só o gerente"
                                 Layout.preferredWidth: 150
                                 onEditado: tela.alterado = true
                             }
                         }
                     }
                     Nota {
-                        text: "O lucro sugerido já vem preenchido quando se cadastra uma peça nova. As tabelas 2 a 5 aparecem em “Outros preços” no cadastro da peça."
+                        text: "O lucro sugerido já vem preenchido quando se cadastra uma peça nova. As tabelas 2 a 5 aparecem em “Outros preços” no cadastro da peça. Mudar o lucro sugerido pede a senha do gerente."
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }

@@ -56,11 +56,15 @@ FocusScope {
                 valor: secao.dados ? String(secao.dados.quantidade) : ""
                 nota: secao.dados ? "mais de " + secao.dados.dias + " dias" : ""
             }
+            // D-09: o dinheiro parado é pelo custo: só para quem vê os
+            // resultados. O cartão fica (sem esconder: veja D-10).
             CartaoNumero {
+                readonly property bool pode: !!secao.dados && secao.dados.resultados
                 rotulo: "Dinheiro parado"
-                sensivel: true
-                valor: secao.dados ? secao.dados.valor : ""
-                nota: "pelo custo"
+                sensivel: pode
+                prefixo: pode ? "R$ " : ""
+                valor: secao.dados ? (pode ? secao.dados.valor : "—") : ""
+                nota: secao.dados && !pode ? "só o gerente" : "pelo custo"
                 cor: Tema.rosa
             }
             CartaoNumero {
@@ -162,6 +166,7 @@ FocusScope {
                         spacing: 0
                         Layout.preferredWidth: Tema.estreito ? -1 : 130
                         Text {
+                            visible: linha.p.valor !== ""
                             text: "R$ " + Tema.valor(linha.p.valor)
                             color: Tema.tinta
                             font.family: Tema.texto

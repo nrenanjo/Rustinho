@@ -3,15 +3,18 @@ import QtQuick.Layouts
 import rustinho
 
 // O "aperto": o gerente digita a senha na hora, sem trocar de usuário.
-// Uso: pedir.pedir("Cancelar venda", curta, () => { ... })
+// Uso: pedir.pedir("cancelar_venda", "Cancelar venda", curta, () => { ... })
+// A senha vale só para a ação pedida; a de uma ação só acaba quando é usada.
 Painel {
     id: pedido
+    property string acao: ""
     property string oQue: ""
     property bool curta: true
     property var depois: null
     width: Math.min(460, Tema.largura - 24)
 
-    function pedir(oQue, curta, depois) {
+    function pedir(acao, oQue, curta, depois) {
+        pedido.acao = acao
         pedido.oQue = oQue
         pedido.curta = curta
         pedido.depois = depois
@@ -21,7 +24,7 @@ Painel {
         senha.focar()
     }
     function liberar() {
-        const r = Api.chamar("gerente_liberar", { senha: senha.texto, curta: pedido.curta })
+        const r = Api.chamar("gerente_liberar", { senha: senha.texto, curta: pedido.curta, acao: pedido.acao })
         if (!r.ok) {
             senha.erro = r.erro
             senha.focar()
