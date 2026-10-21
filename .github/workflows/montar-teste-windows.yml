@@ -35,6 +35,9 @@ jobs:
         run: |
           set -o pipefail
           cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
+      - name: Resumo dos testes (avisos)
+        if: always()
+        run: python3 .github/scripts/resumir_testes.py testes-linux.txt "Linux"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -56,6 +59,10 @@ jobs:
         run: |
           set -o pipefail
           cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
+      - name: Resumo dos testes (avisos)
+        if: always()
+        shell: bash
+        run: python .github/scripts/resumir_testes.py testes-windows.txt "Windows"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -145,6 +152,8 @@ jobs:
           if (Test-Path $outra) { throw "O portátil usou RUSTINHO_DADOS: $outra" }
           if (Test-Path "$env:PASTA\dados\rustinho.db") { throw "A pasta que vai no ZIP ganhou um banco" }
           "Isolamento conferido: banco em $banco; nada em $instalado nem em $outra." | Tee-Object -FilePath isolamento.txt
+          $lista = (Get-ChildItem -Recurse "$copia\dados" | ForEach-Object { $_.FullName.Substring((Resolve-Path $copia).Path.Length) }) -join "%0A"
+          Write-Output "::notice title=Isolamento do portátil::Banco criado em dados\ da cópia; nada em LOCALAPPDATA\Rustinho nem em RUSTINHO_DADOS. Arquivos em dados:%0A$lista"
       - name: ZIP e SHA-256
         shell: pwsh
         run: |
@@ -155,6 +164,16 @@ jobs:
           Copy-Item isolamento.txt saida\
           Get-Content "saida\$env:NOME.zip.sha256"
           Get-ChildItem saida -File | Select-Object Name, Length | Format-Table
+          $tam = (Get-Item $zip).Length
+          Write-Output "::notice title=ZIP portátil::$env:NOME.zip%0ASHA-256: $h%0ATamanho: $tam bytes%0ACommit: $env:GITHUB_SHA"
+          # O que vai dentro do ZIP (para conferir sem baixar).
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          $topo = $z.Entries | ForEach-Object { ($_.FullName -split '/')[1] } | Where-Object { $_ } | Sort-Object -Unique
+          $n = $z.Entries.Count
+          $z.Dispose()
+          $raiz = ($topo -join ', ')
+          Write-Output "::notice title=Conteúdo do ZIP::$n arquivos. Na pasta: $raiz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Rustinho-Windows-portatil

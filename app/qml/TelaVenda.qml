@@ -291,7 +291,7 @@ FocusScope {
             Titulo { text: tela.orcamento ? "Cancelar o orçamento?" : "Cancelar a venda?"; font.pixelSize: 30; Layout.fillWidth: true }
             Nota {
                 text: tela.orcamento ? "O orçamento fica guardado como cancelado."
-                                     : "As peças voltam ao estoque e a venda sai do total do caixa. Devolva o dinheiro ao cliente. Venda de um caixa já fechado: o fechamento dele não muda; o dinheiro sai da gaveta aberta (sem caixa aberto, do Caixa geral)."
+                                     : "As peças voltam ao estoque. Venda do caixa aberto: sai do total do caixa; devolva o dinheiro ao cliente. Venda de um caixa já fechado: o fechamento dele não muda; o dinheiro devolvido sai da gaveta aberta (sem caixa aberto, do Caixa geral)."
                 Layout.fillWidth: true
             }
             Campo {

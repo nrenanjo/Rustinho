@@ -2,6 +2,10 @@
 
 Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem um número para ser citada. Quando uma for resolvida, ela sai desta lista e entra no manual.
 
+## Auditoria técnica da 0.9.14 (decisões do dono)
+
+- **PEND-23 · Riscos da auditoria que dependem de decisão** (`docs/AUDITORIA-0.9.14.md`, seção 2): **R-01** senha da rede com 4 caracteres pode ser descoberta fora da loja por quem capturar um anúncio na rede (recomendação: 10 ou mais só para a senha da rede); **R-02** cancelar/estornar/desfazer neste computador uma operação de um caixa **aberto em outro computador** tira do total daquele caixa, e o dinheiro sai deste (recomendação: o mesmo tratamento da D-14); **R-03** dois caixas sem rede recebendo a mesma parcela deixam a parcela paga a mais, sem aviso (recomendação: aviso na pílula Gerente). Os outros riscos (R-05 a R-12) e as melhorias (M-01 a M-06) estão no mesmo documento.
+
 ## Códigos
 
 - **PEND-01 · Código de clientes e fornecedores entre caixas sem rede — corrigido nesta rodada, com um limite (PEND-07).**
@@ -21,7 +25,7 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 
 ## Testes que ainda precisam ser feitos de verdade
 
-- **PEND-22 · Versão estável: testes de estabilidade (21/10/2026).** Plano por prioridade em `docs/TESTES-estabilidade.md` (T1 backup, T2 estoque, T3 crediário, T4 DRE, T5 permissões, T6 fechamento inesperado, T7 importação do SINTEC, T8 troca de dados); automáticos em `nucleo/tests/estavel/`, aprovados no Linux. Defeitos em `docs/DEFEITOS.md` (D-01 a D-08 e D-10 a D-13 corrigidos; D-09 espera a decisão do dono). **O Rustinho não é estável até:** roteiro à mão no Linux (`docs/ROTEIRO-linux-completo.md`), o mesmo no Windows 10/11, FV-1 a FV-13 com dois computadores, conferência da DRE (PEND-20) e importação de uma cópia da exportação real do SINTEC.
+- **PEND-22 · Versão estável: testes de estabilidade (21/10/2026).** Plano por prioridade em `docs/TESTES-estabilidade.md` (T1 backup, T2 estoque, T3 crediário, T4 DRE, T5 permissões, T6 fechamento inesperado, T7 importação do SINTEC, T8 troca de dados); automáticos em `nucleo/tests/estavel/`, aprovados no Linux. Defeitos em `docs/DEFEITOS.md` (D-01 a D-16 corrigidos; D-09 decidida e corrigida na 0.9.13, D-14 a D-16 achados na auditoria da 0.9.14). Na 0.9.14 há o ZIP portátil para o Windows. **O Rustinho não é estável até:** roteiro à mão no Linux (`docs/ROTEIRO-linux-completo.md`), o mesmo no Windows 10/11, FV-1 a FV-13 com dois computadores, conferência da DRE (PEND-20) e importação de uma cópia da exportação real do SINTEC.
 
 - **PEND-04 · Teclado, leitor de código de barras e mouse.** As telas foram abertas sem janela (modo `offscreen`) e a lógica de qual peça entra, de a etiqueta sair e de o leitor achar tem teste automático, mas ninguém usou as telas com teclado, leitor e mouse reais.
 - **PEND-05 · Windows, Android, celular físico e rede real entre computadores.** Os testes de rede usam o próprio computador (127.0.0.1). A identidade do computador no Windows e no Android vem do Qt (`QSysInfo::machineUniqueId`) e não foi conferida nesses sistemas.

@@ -7,10 +7,13 @@ estiverem aprovados, os automáticos **e** os feitos à mão, no **Linux** e no
 - Testes automáticos: `cargo test -p rustinho-nucleo --test estavel` (pasta
   `nucleo/tests/estavel/`). Rodam sozinhos, com dados de mentira, em pastas
   temporárias.
-- Teste das telas (D-09): `python3 app/testes/telas_d09.py` depois de
-  `cargo build -p rustinho` (precisa de Xvfb, xdotool e ImageMagick).
+- Teste das telas: `python3 app/testes/telas_d09.py` (D-09) e
+  `python3 app/testes/telas_d14_portatil.py` (D-14 e o Rustinho portátil),
+  depois de `cargo build -p rustinho` (precisa de Xvfb, xdotool e ImageMagick).
 - Testes à mão: `docs/ROTEIRO-linux-completo.md` (o mesmo roteiro serve no
-  Windows quando houver o instalador).
+  Windows, com o ZIP portátil `Rustinho-<versão>-Windows-portatil.zip`).
+- Auditoria técnica da 0.9.14 (defeitos, riscos, melhorias, testes que
+  faltam e critérios de maturidade): `docs/AUDITORIA-0.9.14.md`.
 - Defeitos: cada um é anotado em `docs/DEFEITOS.md` **antes** da correção.
   Nenhuma função nova entra enquanto houver defeito aberto de prioridade alta.
 
@@ -29,6 +32,10 @@ ou informação. **Prioridade 2** — o que depende de fora (sistema antigo, red
 | T6 | 1 | Fechamento inesperado | O próprio teste abre um Rustinho "filho" que vende, recebe e devolve sem parar e **mata o processo de uma vez** (como falta de luz), duas vezes seguidas: o banco abre inteiro, sem venda pela metade, estoque e crediário batendo, tudo na fila da troca de dados, caixa ainda aberto. T6.2 queda no meio do backup: dados intactos, cópias prontas abrem, sobras limpas. T6.3 queda no meio da restauração: ao abrir, termina sozinha. | Roteiro, parte G | automático ✔ (achou D-08, corrigido) |
 | T7 | 2 | Importação do SINTEC | Acervo fictício (15 arquivos: compras, vendas num .zip, nota repetida, devoluções, nota adulterada, evento, arquivo estragado, **mesmo código em peças diferentes**) com a conta à mão: 11 notas, 3 ignorados, 2 clientes, 2 fornecedores, 11 peças, 1 código ligado; código repetido não funde peças (D-13); preço da nota mais nova; custo e preço certos; **nada de estoque nem dinheiro**; importar de novo não repete; **a pasta de origem fica igual** (conteúdo e data de cada arquivo). Só o gerente importa. T7.3: compra por XML com o mesmo código do fornecedor em duas peças não liga sozinha. | Roteiro, parte H (com uma **cópia** da exportação real) | automático ✔ (achou D-13, corrigido) · com o acervo real pendente |
 | D-09 | 1 | O caixa e os custos | `d09_custos` (9): o caixa não recebe custo, % nem histórico do custo (ficha, peça nova, busca, Configurações, estoque parado); o que ele manda não muda custo nem % (nem por chamada direta); continua cadastrando, criando tamanhos e lançando compras; na compra vê o custo; peça nova da compra sai com o preço pelo lucro sugerido; **qualquer** mudança do preço de venda de peça cadastrada (tabela, oferta, preço na hora, com custo ou sem), do % ou do lucro sugerido pede o gerente; desconto na venda não pede. Senha do gerente: presa ao usuário, ao comando e aos dados (outro motivo, outra venda, um campo a mais, outro comando: recusado; chaves em outra ordem: aceito); uma vez e acaba; com erro, só repete a mesma coisa; consulta de tela só lê aquela tela (não grava, não abre outra tela, nem Backup nem pílula Gerente), acaba ao sair e não passa para outro usuário; a senha não fica no banco, no registro nem em arquivo nenhum. `app/testes/telas_d09.py`: as telas de verdade como caixa e como gerente; o caixa muda um preço (com e sem custo), a tela pede a senha, salva uma vez, pede de novo; desistir não grava; nas Configurações, Backup e Gerente pedem a senha deles. Cada teste foi conferido desligando a regra de propósito. | Roteiro, parte F (F5 a F10) | automático ✔ |
+| D-14 | 1 | Caixa já fechado não muda | `a1_auditoria::d14_*` (10): cancelar venda (dinheiro com troco, Pix, sem caixa aberto, gaveta sem dinheiro bastante, venda do caixa aberto), estornar recebimento e desfazer devolução de um caixa fechado: o fechamento antigo fica **idêntico** (esperado, contado, diferença, vendas, canceladas, por forma, recebido, devolvido), o dinheiro fica na gaveta aberta (sangria/suprimento ligado à operação) ou no Caixa geral, uma vez só (repetir é recusado), auditoria; o fluxo de caixa não conta duas vezes; depois de reabrir, igual. `d14_migracao_22_nao_muda_o_que_existia`. Tela de verdade: a gerente cancela pela tela a venda de um caixa fechado; o banco e a tela do caixa conferem. Cada parte desligada de propósito: os testes falharam. | Roteiro, parte K | automático ✔ |
+| D-15 | 1 | % de lucro abaixo do custo na compra | `compras::testes::d15_lucro_abaixo_do_custo` (5 custos, igual à conta do cadastro); falha sem a correção. | — | automático ✔ |
+| D-16 | 1 | Configuração deste computador não vem da rede | `sync::testes::d16_configuracao_deste_computador_nao_vem_da_rede`; falha sem a correção. | — | automático ✔ |
+| P | 1 | Rustinho portátil isolado | `tests/portatil.rs`: o teste copia o próprio executável para uma pasta com a marca e roda a cópia (outro processo) com as pastas de sempre e `RUSTINHO_DADOS` apontando para uma "instalação de verdade" de mentira: o banco fica em `dados/`; troca de dados nas portas 47820/47821 e com outra chave; backup só dentro da pasta (pasta de fora recusada, e uma de fora já gravada não vale); Google Drive com configuração própria; **nenhum arquivo da instalação muda nem aparece**. Tela de verdade (Linux): abre a loja nova, banco em `dados/`, nada do Rustinho fora da pasta. No Windows (robô do GitHub): uma cópia do portátil aberta sem tela cria o banco em `dados\` e nada em `%LOCALAPPDATA%\Rustinho` nem em `RUSTINHO_DADOS`. Desligado de propósito: os testes falharam. | Roteiro, parte L | automático ✔ · **Windows à mão pendente** |
 | T8 | 2 | Troca de dados entre computadores | Pela rede de verdade (portas do mesmo computador): B puxa 40 vendas de A, **o processo de B é morto no meio**, B volta e termina com as 40, sem nada em dobro; puxar de novo não traz nada; os dois vendem e trocam até ficarem iguais. Senha da rede errada não troca nada. | FV-1 a FV-13 (abaixo) | automático ✔ · **validação física pendente** |
 
 Observação do T8: depois de uma queda, o outro caixa pode levar até cerca de
@@ -38,13 +45,17 @@ rede). A troca de dados tenta de novo sozinha.
 ## O que ainda falta para "estável"
 
 1. Rodar o roteiro à mão no Linux (`docs/ROTEIRO-linux-completo.md`).
-2. Compilar e rodar o mesmo roteiro no Windows 10/11 (precisa de autorização
-   para enviar ao GitHub e montar o instalador).
+2. Rodar o mesmo roteiro no Windows 10/11 com o ZIP portátil da 0.9.14 (o
+   ZIP já é montado pelo robô do GitHub; os testes do núcleo também rodam lá,
+   veja abaixo).
 3. Validação física da troca de dados (FV-1 a FV-13) com dois computadores na loja.
 4. Conferência da DRE pelo dono e pelo contador (PEND-20).
 5. Importação de uma **cópia** da exportação real do SINTEC, conferindo os totais.
 6. ~~Decisão do dono sobre a D-09~~: decidida e corrigida (testes `d09_custos` e `app/testes/telas_d09.py`).
 7. As fotos das telas (Linux, X virtual) acharam D-10, D-11 e D-12; o roteiro à mão pode achar mais.
+8. Decidir os riscos R-01 (senha da rede curta), R-02 (cancelar venda de um
+   caixa aberto em outro computador) e R-03 (parcela paga a mais por dois
+   caixas sem rede) de `docs/AUDITORIA-0.9.14.md`.
 
 ## FV-1 a FV-13 em português simples
 

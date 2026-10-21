@@ -1233,6 +1233,14 @@ fn limpar_conflitos(conn: &Connection) -> Resultado<()> {
     Ok(())
 }
 
+/// A chave (`["loja_nome"]`) é de uma configuração da loja?
+fn config_da_loja(chave: &str) -> bool {
+    match serde_json::from_str::<Vec<Value>>(chave).ok().as_deref() {
+        Some([Value::String(c)]) => CONFIG_DA_LOJA.contains(&c.as_str()),
+        _ => false,
+    }
+}
+
 fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
     let tx = conn.transaction()?;
     tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
@@ -1240,6 +1248,11 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
     let mut colunas_cache: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
     for a in lista {
         if !TABELAS.contains(&a.tabela.as_str()) {
+            continue;
+        }
+        // D-16: da tabela de configurações só chegam as da loja (as mesmas
+        // que os gatilhos mandam); as deste computador nunca vêm da rede.
+        if a.tabela == "config" && !config_da_loja(&a.chave) {
             continue;
         }
         // Já vista (reenvio, a própria alteração voltando, backup restaurado
@@ -2943,6 +2956,45 @@ impl Motor {
 mod testes {
     use super::*;
     use crate::banco::Banco;
+
+    /// D-16: configuração só deste computador que chega pela rede é
+    /// ignorada; as da loja continuam chegando.
+    #[test]
+    fn d16_configuracao_deste_computador_nao_vem_da_rede() {
+        let mut b = Banco::em_memoria().unwrap();
+        let identidade = config::ler(&b.conn, "dispositivo_id").unwrap();
+        config::gravar(&b.conn, "sync_senha", "segredo-daqui").unwrap();
+        let alteracao = |chave: &str, valor: &str| Alteracao {
+            seq: 1,
+            id: crate::tempo::novo_id(),
+            tabela: "config".into(),
+            chave: json!([chave]).to_string(),
+            operacao: "gravar".into(),
+            dados: Some(json!({ "chave": chave, "valor": valor }).to_string()),
+            dispositivo: "outro".into(),
+            quando: crate::tempo::agora(),
+            base: None,
+            ordem: 1,
+            historia: None,
+            compactada: false,
+        };
+        let lista = [
+            alteracao("dispositivo_id", "invasor"),
+            alteracao("sync_senha", "outra"),
+            alteracao("caixa_nome", "Caixa do invasor"),
+            alteracao("loja_nome", "Loja Nova"),
+        ];
+        aplicar(&mut b.conn, &lista).unwrap();
+        assert_eq!(config::ler(&b.conn, "dispositivo_id").unwrap(), identidade);
+        assert_eq!(config::ler(&b.conn, "sync_senha").unwrap().as_deref(), Some("segredo-daqui"));
+        assert_ne!(config::ler(&b.conn, "caixa_nome").unwrap().as_deref(), Some("Caixa do invasor"));
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Loja Nova", "as da loja continuam chegando");
+        // Chave estranha (não é uma lista com um texto): ignorada.
+        let mut ruim = alteracao("loja_nome", "x");
+        ruim.chave = "[1, 2]".into();
+        aplicar(&mut b.conn, &[ruim]).unwrap();
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Loja Nova");
+    }
     use crate::{caixa, estoque, produtos, usuarios, vendas};
 
     fn temp(nome: &str) -> PathBuf {

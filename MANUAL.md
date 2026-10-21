@@ -91,8 +91,16 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 | Windows | `%LOCALAPPDATA%\Rustinho\rustinho.db` | `%LOCALAPPDATA%\Rustinho\backups` |
 | Linux | `~/.local/share/rustinho/rustinho.db` | `~/.local/share/rustinho/backups` |
 | Android | dentro do app (só ele vê) | dentro do app |
+| Portátil (ZIP de teste) | `dados\rustinho.db`, na pasta do `rustinho.exe` | `dados\backups` (só dentro da pasta) |
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
+
+### Novo na versão 0.9.14
+
+- **Caixa já fechado não muda mais (D-14):** cancelar uma venda, estornar um recebimento ou desfazer uma devolução de um caixa que **já foi fechado** não mexe no fechamento daquele dia (ele continua como foi impresso). O dinheiro que sai (cancelamento, estorno) ou volta (devolução desfeita) fica **na gaveta aberta deste computador**, como sangria ou suprimento com o nome da operação ("Cancelamento da venda 12 · Caixa 1 (caixa já fechado)"). Sem caixa aberto, vai para o **Caixa geral** ("Acerto de caixa já fechado"). Pix e cartão não mexem em gaveta. Se a gaveta não tiver dinheiro bastante para devolver, o Rustinho recusa e nada muda. Venda do caixa que ainda está aberto: como sempre.
+- **Rustinho portátil (para testar no Windows sem instalar):** um ZIP com tudo dentro. O arquivo `rustinho-portatil.txt` ao lado do `rustinho.exe` liga o modo portátil: os dados, os backups e a ligação com o Google Drive ficam na pasta `dados`, dentro da pasta do ZIP; o Rustinho instalado no computador não é aberto nem mudado; a troca de dados só conversa com outro Rustinho portátil (portas 47820 e 47821, e outra chave, mesmo com a mesma senha da rede). Para apagar o teste, apague a pasta. Instruções no `LEIA-ME.txt` do ZIP.
+- **Troca de dados (D-16):** uma configuração que é só deste computador (a identidade do caixa, a senha da rede) não é mais aceita se chegar pela rede; as da loja continuam chegando.
+- **Compras (D-15):** quando a compra muda o custo e o preço fica, o % de lucro abaixo do custo sai com o arredondamento certo.
 
 ### Novo na versão 0.9.13
 
