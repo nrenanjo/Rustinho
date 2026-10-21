@@ -778,7 +778,7 @@ FocusScope {
                     }
                     Nota {
                         visible: !!tela.sync && tela.sync.senhaFraca
-                        text: "A senha da rede é fraca (curta ou comum). Quando puder, troque-a em todos os caixas."
+                        text: "A senha da rede tem menos de 4 caracteres. Quando puder, troque-a em todos os caixas."
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }

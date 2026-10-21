@@ -166,7 +166,7 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha fraca" : "")
+                            text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha curta" : "")
                             color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuave
                             font.family: Tema.serifa
                             font.italic: true

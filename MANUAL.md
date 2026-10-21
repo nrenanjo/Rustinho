@@ -6,6 +6,7 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 - **Primeira vez:** nome da loja, nome deste computador (ex.: Caixa 1) e o seu usuário.
 - **Entrada:** cada pessoa clica no próprio nome e digita a senha. Depois de 5 senhas erradas, espera 30 segundos.
+- **Senhas:** só se exige o tamanho: pelo menos 4 caracteres (no máximo 128 numa senha nova). Vale qualquer letra, número, espaço ou símbolo, inclusive "1234". Quanto mais longa, mais segura.
 - **Início:** as funções mais usadas aparecem primeiro. O alfinete fixa uma função em "Mais usados". Funções das próximas etapas aparecem como "em breve".
 - **Peças:** uma busca só, que acha a peça por código interno, código de barras, código original, equivalente, nome, marca, carro e ano (ex.: `pastilha gol 2015`, `vw gol 1.6`, `32206a`).
 - **Cadastro de peça:** uma tela só, sem abas:

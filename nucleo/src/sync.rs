@@ -2131,15 +2131,17 @@ pub fn senha_fora_da_politica(conn: &Connection) -> Resultado<bool> {
 /// Grava as configurações da sincronização (só deste computador).
 pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &str) -> Resultado<()> {
     let senha = senha.trim();
-    if ligado && senha.chars().count() < 4 {
-        return Err(Erro::campo(
-            "senha",
-            "A senha da rede precisa ter pelo menos 4 caracteres. Use a mesma em todos os caixas.",
-        ));
-    }
-    // Senha da rede nova ou trocada segue a política (F-17). Manter a que já
-    // estava gravada (o campo vazio da tela) não exige nada: nada é forçado.
-    if ligado && senha != config::ler(conn, "sync_senha")?.unwrap_or_default() {
+    // Senha da rede nova ou trocada segue a política (F-17: só o tamanho).
+    // Manter a que já estava gravada (o campo vazio da tela) não exige nada:
+    // nada é forçado.
+    let gravada = config::ler(conn, "sync_senha")?.unwrap_or_default();
+    if ligado && (senha != gravada || senha.is_empty()) {
+        if senha.chars().count() < 4 {
+            return Err(Erro::campo(
+                "senha",
+                "A senha da rede precisa ter pelo menos 4 caracteres. Use a mesma em todos os caixas.",
+            ));
+        }
         crate::usuarios::exigir_politica(conn, senha, "", false, "senha")?;
     }
     for e in enderecos.split([',', ' ', ';', '\n']).filter(|e| !e.trim().is_empty()) {
@@ -4646,7 +4648,8 @@ mod testes {
         let b = Banco::em_memoria().unwrap();
         assert!(salvar_ajustes(&b.conn, true, "123", "").is_err());
         assert!(salvar_ajustes(&b.conn, true, "bola-de-gude", "192.168.0.300").is_err());
-        assert!(salvar_ajustes(&b.conn, true, "12345678", "192.168.0.12").is_err(), "trivial (F-17)");
+        assert!(salvar_ajustes(&b.conn, true, "", "").is_err(), "vazia");
+        salvar_ajustes(&b.conn, true, "1234", "192.168.0.12").unwrap(); // só o tamanho conta (0.9.13)
         salvar_ajustes(&b.conn, true, "bola-de-gude", "192.168.0.12, 192.168.0.13").unwrap();
         assert_eq!(ajustes(&b.conn).unwrap().enderecos.len(), 2);
     }
