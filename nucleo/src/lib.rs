@@ -21,6 +21,7 @@ pub mod computador;
 pub mod config;
 pub mod devolucoes;
 pub mod documento;
+pub mod dre;
 pub mod encomendas;
 pub mod erro;
 pub mod estoque;

@@ -192,6 +192,8 @@ pub const TABELAS: &[&str] = &[
     "movimento_conta",
     "cheque",
     "comissao_fechamento",
+    // Metas da DRE gerencial (veja `dre`).
+    "meta",
     "encomenda",
     "devolucao",
     "devolucao_item",
@@ -230,6 +232,8 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "gerente_livres",
     // O caixa que dá as faixas de códigos das peças.
     "codigos_distribuidor",
+    // O gerente confirmou a classificação das categorias na DRE.
+    "dre_classificacao_confirmada",
 ];
 
 // ---------------------------------------------------------------------------

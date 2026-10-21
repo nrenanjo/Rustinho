@@ -226,6 +226,8 @@ pub fn fechar(
             valor: numeros::escrever_dinheiro(comissao),
             parcelas: 1,
             primeiro_vencimento: vencimento.to_string(),
+            // A comissão é despesa do mês em que o período fecha (DRE).
+            competencia: ate.chars().take(7).collect(),
             ..Default::default()
         },
     )?;

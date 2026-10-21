@@ -64,6 +64,41 @@ pub struct LancamentoEntrada {
     /// Vazio = hoje.
     pub primeiro_vencimento: String,
     pub observacoes: String,
+    /// Mês a que a conta se refere ("10/2026"), para a DRE. Vazio = o mês
+    /// do vencimento de cada parcela.
+    pub competencia: String,
+}
+
+/// "10/2026", "10/26", "2026-10" → "2026-10". Vazio = sem competência.
+pub fn ler_competencia(texto: &str) -> Resultado<Option<String>> {
+    let t = texto.trim();
+    if t.is_empty() {
+        return Ok(None);
+    }
+    let erro = || Erro::campo("competencia", "Competência inválida (use mês/ano, ex.: 10/2026).");
+    let partes: Vec<&str> = t.split(['/', '-', '.']).collect();
+    let (m, a) = match partes.as_slice() {
+        [a, m] if a.len() == 4 => (*m, *a),
+        [m, a] => (*m, *a),
+        _ => return Err(erro()),
+    };
+    let (Ok(m), Ok(mut a)) = (m.parse::<u32>(), a.parse::<i32>()) else { return Err(erro()) };
+    if a < 100 {
+        a += 2000;
+    }
+    if !(1..=12).contains(&m) || !(2000..=2100).contains(&a) {
+        return Err(erro());
+    }
+    Ok(Some(format!("{a:04}-{m:02}")))
+}
+
+/// "2026-10" → "10/2026".
+pub fn escrever_competencia(c: &str) -> String {
+    if c.len() == 7 {
+        format!("{}/{}", &c[5..7], &c[..4])
+    } else {
+        c.to_string()
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -133,6 +168,7 @@ fn gravar(
     descricao: &str,
     documento: &str,
     observacoes: &str,
+    competencia: Option<&str>,
     lista: &[(String, i64)],
 ) -> Resultado<Vec<String>> {
     let agora = tempo::agora();
@@ -141,8 +177,8 @@ fn gravar(
         let id = tempo::novo_id();
         conn.execute(
             "INSERT INTO conta_pagar (id, fornecedor_id, compra_id, categoria_id, descricao, documento, parcela, parcelas,
-                                      valor, vencimento, observacoes, criado_em, criado_por, dispositivo)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                                      valor, vencimento, observacoes, criado_em, criado_por, dispositivo, competencia)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 fornecedor_id,
@@ -157,7 +193,8 @@ fn gravar(
                 observacoes,
                 agora,
                 usuario_id,
-                dispositivo
+                dispositivo,
+                competencia
             ],
         )?;
         ids.push(id);
@@ -185,6 +222,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Lancam
     let valor = ler_valor(&e.valor, "valor", true)?;
     let lista = previa(conn, valor, e.parcelas, &e.primeiro_vencimento)?;
     let observacoes: String = texto::limpar(&e.observacoes).chars().take(300).collect();
+    let competencia = ler_competencia(&e.competencia)?;
     let ids = gravar(
         conn,
         dispositivo,
@@ -195,6 +233,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Lancam
         &descricao,
         &documento,
         &observacoes,
+        competencia.as_deref(),
         &lista,
     )?;
     auditoria::registrar(
@@ -261,6 +300,7 @@ pub fn criar_da_compra(conn: &Connection, dispositivo: &str, usuario_id: &str, c
         &descricao,
         &numero,
         "",
+        None,
         &lista,
     )?;
     // Os números das duplicatas vão no documento ("12345/001").
@@ -340,16 +380,26 @@ pub struct AlteracaoEntrada {
     pub valor: String,
     pub vencimento: String,
     pub observacoes: String,
+    /// Mês de competência ("10/2026"). Ausente = não muda; vazio = tira.
+    pub competencia: Option<String>,
 }
 
 /// Corrige uma parcela (vencimento, valor, descrição, categoria).
 pub fn alterar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &AlteracaoEntrada) -> Resultado<()> {
     crate::sync::exigir_editavel(conn, "conta_pagar", &e.id)?;
-    let (pago, cancelada, antes_valor, antes_venc, antes_desc): (i64, Option<String>, i64, String, String) = conn
+    #[allow(clippy::type_complexity)]
+    let (pago, cancelada, antes_valor, antes_venc, antes_desc, antes_comp): (
+        i64,
+        Option<String>,
+        i64,
+        String,
+        String,
+        Option<String>,
+    ) = conn
         .query_row(
-            "SELECT pago, cancelado_em, valor, vencimento, descricao FROM conta_pagar_saldo WHERE id = ?1",
+            "SELECT pago, cancelado_em, valor, vencimento, descricao, competencia FROM conta_pagar_saldo WHERE id = ?1",
             [&e.id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Conta".into()))?;
@@ -374,6 +424,11 @@ pub fn alterar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Alter
     let vencimento = fiscal::ler_data(&e.vencimento)
         .map_err(|m| Erro::campo("vencimento", m))?
         .ok_or_else(|| Erro::campo("vencimento", "Digite o vencimento."))?;
+    let competencia = match &e.competencia {
+        Some(t) => ler_competencia(t)?,
+        None => antes_comp.clone(),
+    };
+    conn.execute("UPDATE conta_pagar SET competencia = ?2 WHERE id = ?1", params![e.id, competencia])?;
     conn.execute(
         "UPDATE conta_pagar SET descricao = ?2, categoria_id = ?3, documento = ?4, valor = ?5, vencimento = ?6, observacoes = ?7
           WHERE id = ?1",
@@ -400,6 +455,10 @@ pub fn alterar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Alter
     }
     if antes_venc != vencimento {
         detalhes.push(format!("Vencimento: {} → {}", fiscal::data_br(&antes_venc), fiscal::data_br(&vencimento)));
+    }
+    if antes_comp != competencia {
+        let t = |c: &Option<String>| c.as_deref().map(escrever_competencia).unwrap_or_else(|| "pelo vencimento".into());
+        detalhes.push(format!("Competência: {} → {}", t(&antes_comp), t(&competencia)));
     }
     if !detalhes.is_empty() {
         auditoria::registrar(conn, dispositivo, Some(usuario_id), "pagar.alterar", "conta_pagar", &e.id, &detalhes)?;
@@ -432,13 +491,16 @@ pub struct Parcela {
     /// aberta, hoje, vencida, paga, cancelada
     pub situacao: String,
     pub observacoes: String,
+    /// Mês de competência ("10/2026"); vazio = pelo vencimento.
+    pub competencia: String,
     #[serde(skip)]
     pub v_saldo: i64,
 }
 
 const SELECAO: &str = "SELECT c.id, c.descricao, COALESCE(p.nome, ''), COALESCE(c.fornecedor_id, ''), COALESCE(g.nome, ''),
                               COALESCE(c.categoria_id, ''), c.documento, COALESCE(c.compra_id, ''), c.parcela, c.parcelas,
-                              c.vencimento, c.valor, c.pago, c.cancelado_em IS NOT NULL, c.observacoes
+                              c.vencimento, c.valor, c.pago, c.cancelado_em IS NOT NULL, c.observacoes,
+                              COALESCE(c.competencia, '')
                          FROM conta_pagar_saldo c
                          LEFT JOIN pessoa p ON p.id = c.fornecedor_id
                          LEFT JOIN categoria g ON g.id = c.categoria_id";
@@ -466,6 +528,7 @@ fn ler_linhas(conn: &Connection, sql: &str, valores: &[&dyn rusqlite::ToSql]) ->
             pago,
             cancelada,
             l.get::<_, String>(14)?,
+            l.get::<_, String>(15)?,
         ))
     })?;
     let mut lista = Vec::new();
@@ -485,6 +548,7 @@ fn ler_linhas(conn: &Connection, sql: &str, valores: &[&dyn rusqlite::ToSql]) ->
             pago,
             cancelada,
             observacoes,
+            competencia,
         ) = linha?;
         let saldo = (valor - pago).max(0);
         let situacao = if cancelada {
@@ -515,6 +579,7 @@ fn ler_linhas(conn: &Connection, sql: &str, valores: &[&dyn rusqlite::ToSql]) ->
             saldo: numeros::escrever_dinheiro(saldo),
             situacao: situacao.into(),
             observacoes,
+            competencia: escrever_competencia(&competencia),
             v_saldo: saldo,
         });
     }
