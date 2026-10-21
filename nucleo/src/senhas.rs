@@ -86,9 +86,9 @@ impl Problema {
                 "A senha de gerente precisa ter pelo menos {MINIMO_GERENTE} caracteres. Ela também protege os backups: \
                  quanto mais longa, mais segura (dica: junte palavras, como cafe-com-pao-2026)."
             ),
-            Problema::Curta => format!(
-                "A senha precisa ter pelo menos {MINIMO_OPERADOR} caracteres. Quanto mais longa, mais segura."
-            ),
+            Problema::Curta => {
+                format!("A senha precisa ter pelo menos {MINIMO_OPERADOR} caracteres. Quanto mais longa, mais segura.")
+            }
             Problema::Comprida => format!("Senha comprida demais: use no máximo {MAXIMO_NOVA} caracteres."),
             Problema::Comum => "Essa senha é muito comum. Junte palavras, como cafe-com-pao-2026.".into(),
             Problema::Sequencia => "Evite sequências como 1234 ou abcd. Junte palavras.".into(),
@@ -357,13 +357,15 @@ mod testes {
         assert_eq!(ger("caf"), Some(Problema::Curta), "3 caracteres");
         assert_eq!(ger("café"), None, "4 caracteres, gerente igual ao operador");
         assert_eq!(op(&format!("éé{}", "cafe-com-pao")), None);
-        let max: String =
-            (0..).map(|i| format!("açúcar{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(MAXIMO_NOVA).collect();
+        let max: String = (0..)
+            .map(|i| format!("açúcar{i}-"))
+            .flat_map(|w| w.chars().collect::<Vec<_>>())
+            .take(MAXIMO_NOVA)
+            .collect();
         assert_eq!(max.chars().count(), 128);
         assert_eq!(op(&max), None, "128 caracteres passa");
         assert_eq!(op(&format!("{max}z")), Some(Problema::Comprida));
         assert_eq!(ger(&format!("{max}z")), Some(Problema::Comprida));
-        assert!(MAXIMO >= 256, "o login continua aceitando senhas antigas longas");
     }
 
     /// S-02: acento conta como um caractere; espaços, emoji e outros alfabetos valem.

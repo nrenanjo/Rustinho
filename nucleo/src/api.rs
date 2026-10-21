@@ -3126,14 +3126,14 @@ mod testes {
             .unwrap()
     }
 
-    /// F17-A1: a primeira configuração aplica a regra do gerente (12) e recusa triviais,
+    /// F17-A1: a primeira configuração aplica a regra do gerente (4) e recusa triviais,
     /// sem criar nada quando recusa.
     #[test]
     fn f17_a1_primeira_configuracao() {
         let mut s = f17_novo_servico();
         for (senha, parte) in [
-            ("1234", "12"),
-            ("cafe-com-pa", "12"),
+            ("123", "pelo menos 4"),
+            ("caf", "pelo menos 4"),
             ("12345678901234", "sequências"),
             ("senhasenhasenha", "repetições"),
             ("fantiautopecas", "nome"),
@@ -3161,7 +3161,7 @@ mod testes {
                     .to_string(),
             )
         };
-        for (senha, ok) in [("curta7x", false), ("12345678", false), ("qwertyui", false), ("pão de queijo", true)] {
+        for (senha, ok) in [("cur", false), ("12345678", false), ("qwertyui", false), ("pão de queijo", true)] {
             let r = novo(&mut s, "Bia", senha, None);
             assert_eq!(r["ok"], ok, "{senha}: {r}");
             if !ok {
@@ -3169,18 +3169,18 @@ mod testes {
             }
         }
         // Já criada com a boa; as seguintes testam o gerente.
-        let r = novo(&mut s, "Cida", "oito-oito", Some(true));
-        assert_eq!(r["ok"], false, "gerente precisa de 12: {r}");
+        let r = novo(&mut s, "Cida", "abc", Some(true));
+        assert_eq!(r["ok"], false, "gerente também precisa de 4: {r}");
         assert!(r["erro"].as_str().unwrap().contains("backups"), "{r}");
         let r = novo(&mut s, "Cida", "doze-caracteres-ok", Some(true));
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(r["dados"]["gerente"], true);
-        // Promover junto com uma senha de 8 não vale; promover sem trocar a senha não é bloqueado.
+        // Promover junto com uma senha curta demais não vale; promover sem trocar a senha não é bloqueado.
         let bia = usuarios::listar(&s.banco.conn, false).unwrap().into_iter().find(|u| u.nome == "Bia").unwrap();
         let r = chamar(
             &mut s,
             "usuario_salvar",
-            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "oito-oito", "senha2": "oito-oito", "gerente": true })
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "abc", "senha2": "abc", "gerente": true })
                 .to_string(),
         );
         assert_eq!(r["ok"], false, "{r}");
@@ -3191,7 +3191,7 @@ mod testes {
                 .to_string(),
         );
         assert_eq!(r["ok"], true, "sem trocar a senha nada é forçado: {r}");
-        // Operador comum: 8 basta na troca.
+        // Operador comum: 4 basta na troca.
         let r = chamar(
             &mut s,
             "usuario_salvar",
@@ -3208,10 +3208,10 @@ mod testes {
         let trocar = |s: &mut Servico, nova: &str| {
             chamar(s, "senha_trocar", &json!({ "atual": "balcao-azul-2026", "nova": nova, "nova2": nova }).to_string())
         };
-        let r = trocar(&mut s, "cafe-pao");
+        let r = trocar(&mut s, "caf");
         assert_eq!(r["ok"], false, "{r}");
         assert_eq!(r["campo"], "nova");
-        assert!(r["erro"].as_str().unwrap().contains("12"), "{r}");
+        assert!(r["erro"].as_str().unwrap().contains("4"), "{r}");
         let id = s.sessao.as_ref().unwrap().usuario_id.clone();
         assert!(usuarios::conferir_senha(&s.banco.conn, &id, "balcao-azul-2026").is_ok(), "a antiga continua valendo");
         assert_eq!(trocar(&mut s, "password1234")["ok"], false);
@@ -3239,11 +3239,11 @@ mod testes {
 
         let r = f17_entrar(&mut s, &bia, "1234");
         assert_eq!(r["ok"], true, "senha antiga entra: {r}");
-        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Curta)));
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Sequencia)));
         let avisos = chamar(&mut s, "avisos_do_dia", "{}");
         let a = avisos["dados"].as_array().unwrap().iter().find(|a| a["id"] == format!("senha.{bia}")).cloned();
         let a = a.expect("aviso da senha");
-        assert!(a["texto"].as_str().unwrap().contains("é curta"), "{a}");
+        assert!(a["texto"].as_str().unwrap().contains("é uma sequência"), "{a}");
         assert_eq!(a["atraso"], "", "operador: sem alarme em vermelho");
         assert_eq!(a["funcao"], "configuracoes");
 
@@ -3347,7 +3347,7 @@ mod testes {
         let mut s = conectado();
         let bia = f17_legado(&s, "Bia", false);
         f17_entrar(&mut s, &bia, "1234");
-        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Curta)));
+        assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), Some(Some(Problema::Sequencia)));
         let novo = usuarios::argon2_hash_para_teste("mesa-verde-9");
         s.banco.conn.execute("UPDATE usuario SET senha_hash = ?2 WHERE id = ?1", params![bia, novo]).unwrap();
         assert_eq!(usuarios::situacao_senha(&s.banco.conn, &bia).unwrap(), None);
@@ -3364,14 +3364,14 @@ mod testes {
     fn f17_a7_senha_longa_e_unicode() {
         let mut s = f17_novo_servico();
         let longa: String =
-            (0..).map(|i| format!("palavra{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(256).collect();
-        assert_eq!(longa.chars().count(), 256);
+            (0..).map(|i| format!("palavra{i}-")).flat_map(|w| w.chars().collect::<Vec<_>>()).take(128).collect();
+        assert_eq!(longa.chars().count(), 128);
         let r = f17_inicio(&mut s, &format!("{longa}z"));
-        assert_eq!(r["ok"], false, "257 caracteres");
+        assert_eq!(r["ok"], false, "129 caracteres");
         let r = f17_inicio(&mut s, &longa);
-        assert_eq!(r["ok"], true, "256 caracteres: {r}");
+        assert_eq!(r["ok"], true, "128 caracteres: {r}");
         let ana = s.sessao.as_ref().unwrap().usuario_id.clone();
-        assert_eq!(f17_entrar(&mut s, &ana, &longa)["ok"], true, "entra com a senha de 256");
+        assert_eq!(f17_entrar(&mut s, &ana, &longa)["ok"], true, "entra com a senha de 128");
         let enorme = "a".repeat(100_000);
         let r = f17_entrar(&mut s, &ana, &enorme);
         assert_eq!(r["ok"], false, "texto enorme é recusado sem gastar o Argon2");
