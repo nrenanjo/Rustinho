@@ -89,5 +89,9 @@ não. **O Rustinho não é estável ainda.**
 
 ## 6. O que foi executado (resultados reais)
 
-Ver `docs/TESTES-estabilidade.md` (seção 0.9.14) e os registros entregues
-com esta etapa.
+- **Linux, computador de desenvolvimento** (commit `ac2a8ba`): `cargo test --workspace` com 396 aprovados, 0 falharam, 7 só à mão; `cargo fmt --check` e `cargo clippy` sem aviso; telas de verdade numa tela virtual: D-09 (13 conferências) e D-14 + portátil (9), todas ✔.
+- **Mutação** (regra desligada de propósito, o teste tem de falhar): D-14 (6 variações), D-15, D-16, portátil (3): todas falharam como deviam; o código voltou ao original. Nas telas, D-14 sabotada e portátil sabotado reprovaram.
+- **Robô do GitHub** (mesmo commit): Linux 396 aprovados, 0 falharam; **Windows 389 aprovados, 0 falharam** (a primeira rodada no Windows achou D-17 e D-18); ZIP portátil montado e aberto sem tela no Windows; AppImage montado, sem biblioteca faltando e aberto numa tela virtual com FUSE.
+- **Pacotes baixados e conferidos aqui:** SHA-256 iguais aos do robô; conteúdo do ZIP; AppImage aberto numa tela virtual, loja configurada pela tela.
+- `cargo audit`: os 3 avisos da `zip` (R-07), que não afetam o Rustinho.
+- **Não feito:** nenhum teste em computador de verdade (Windows 10/11 ou CachyOS com tela, mouse e teclado); roteiro à mão; FV-1 a FV-13.
