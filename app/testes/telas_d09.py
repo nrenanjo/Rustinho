@@ -51,8 +51,9 @@ def montar_loja(pasta):
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
     filtro = c.execute("SELECT id FROM produto WHERE nome = 'Filtro de óleo'").fetchone()[0]
     compra = c.execute("SELECT id FROM compra ORDER BY rowid LIMIT 1").fetchone()[0]
+    oleo = c.execute("SELECT id FROM produto WHERE nome = 'Óleo 5W30'").fetchone()[0]
     c.close()
-    return filtro, compra
+    return filtro, compra, oleo
 
 
 def preco_gravado(pasta, peca):
@@ -173,7 +174,7 @@ def main():
     time.sleep(1)
     tudo_certo = True
     try:
-        filtro, compra = montar_loja(pasta)
+        filtro, compra, oleo = montar_loja(pasta)
         casos = [
             # (nome, usuário, tela, propriedades, conferências)
             ("caixa-peca", "Bia", "TelaPeca", {"produtoId": filtro},
@@ -212,7 +213,7 @@ def main():
             xdo("key", "F2")
             time.sleep(2)
             tudo_certo &= conferir("caixa-muda-preco: pede o gerente", r.foto("-1"), r.textos(),
-                                   tem=["Liberar", "Mudar a regra de preço (% de lucro): só o gerente pode"])
+                                   tem=["Liberar", "Só o gerente pode: mudar o preço de venda", "vale só para isto, uma vez"])
             if preco_gravado(pasta, filtro) != antes:
                 print("✘ caixa-muda-preco: gravou sem a senha do gerente")
                 tudo_certo = False
@@ -233,10 +234,59 @@ def main():
             xdo("key", "F2")
             time.sleep(2)
             tudo_certo &= conferir("caixa-muda-preco: a senha não ficou aberta", r.foto("-3"), r.textos(),
-                                   tem=["Liberar", "Mudar a regra de preço"])
+                                   tem=["Liberar", "mudar o preço de venda"])
             if preco_gravado(pasta, filtro) != 12000:
                 print("✘ caixa-muda-preco: gravou a segunda mudança sem a senha")
                 tudo_certo = False
+        finally:
+            r.fechar()
+
+        # Peça sem custo: mudar o preço também pede o gerente; desistir não grava.
+        antes = preco_gravado(pasta, oleo)
+        r = Rustinho(pasta, "TelaPeca", {"produtoId": oleo}, fotos, "caixa-preco-sem-custo")
+        try:
+            r.entrar("Bia")
+            if not r.clicar("30,00"):
+                raise RuntimeError(f"não achei o preço do óleo (veja {r.saida})")
+            xdo("key", "ctrl+a")
+            xdo("type", "--delay", "60", "33")
+            time.sleep(0.5)
+            xdo("key", "F2")
+            time.sleep(2)
+            tudo_certo &= conferir("caixa-preco-sem-custo: pede o gerente", r.foto("-1"), r.textos(),
+                                   tem=["Liberar", "mudar o preço de venda"])
+            r.clicar("Voltar")
+            time.sleep(1.5)
+            ok = preco_gravado(pasta, oleo) == antes
+            print(("✔ " if ok else "✘ ") + "caixa-preco-sem-custo: desistiu, nada gravado")
+            tudo_certo &= ok
+        finally:
+            r.fechar()
+
+        # Configurações: a senha abre só para consultar; o Backup pede a dele.
+        r = Rustinho(pasta, "TelaConfiguracoes", {}, fotos, "caixa-configuracoes")
+        try:
+            r.entrar("Bia")
+            if not r.clicar("Senha do gerente"):
+                raise RuntimeError(f"não achei o botão Senha do gerente (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: a senha é só para consultar", r.foto("-1"), r.textos(),
+                                   tem=["Configurações da loja: só o gerente pode", "só consulta esta tela"])
+            xdo("type", "--delay", "80", SENHA["Ana"])
+            xdo("key", "Return")
+            time.sleep(2)
+            if not r.clicar("Backup"):
+                raise RuntimeError(f"a pílula Backup não apareceu (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: o Backup pede a senha dele", r.foto("-2"), r.textos(),
+                                   tem=["Backup: só o gerente pode", "Liberar"])
+            r.clicar("Voltar")
+            time.sleep(1)
+            if not r.clicar("Gerente"):
+                raise RuntimeError(f"a pílula Gerente não apareceu (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: a pílula Gerente pede a senha dela", r.foto("-3"), r.textos(),
+                                   tem=["Gerente: só o gerente pode", "Liberar"])
         finally:
             r.fechar()
     finally:

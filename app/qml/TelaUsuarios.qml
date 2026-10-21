@@ -53,33 +53,34 @@ FocusScope {
 
     function salvar() {
         limparErros()
-        const r = Api.chamar("usuario_salvar", {
+        janela.chamarGerente("usuario_salvar", {
             id: editando ? editando.id : "",
             nome: nome.texto,
             ativo: ativo.checked,
             senha: senha.texto,
             senha2: senha2.texto,
             comissao: comissao.texto
-        })
-        if (r.ok) {
-            janela.avisar(editando ? "Usuário alterado." : "Usuário criado.", "ok")
-            carregar()
-            janela.atualizarEstado()
-            const salvo = usuarios.find(u => u.id === r.dados.id)
-            if (salvo)
-                editar(salvo)
-            if (Tema.estreito)
-                mostrarFicha = false
-        } else {
-            const campos = { nome: nome, senha: senha, senha2: senha2, comissao: comissao }
-            const alvo = campos[r.campo]
-            if (alvo) {
-                alvo.erro = r.erro
-                alvo.focar()
+        }, r => {
+            if (r.ok) {
+                janela.avisar(editando ? "Usuário alterado." : "Usuário criado.", "ok")
+                carregar()
+                janela.atualizarEstado()
+                const salvo = usuarios.find(u => u.id === r.dados.id)
+                if (salvo)
+                    editar(salvo)
+                if (Tema.estreito)
+                    mostrarFicha = false
             } else {
-                janela.avisar(r.erro, "erro")
+                const campos = { nome: nome, senha: senha, senha2: senha2, comissao: comissao }
+                const alvo = campos[r.campo]
+                if (alvo) {
+                    alvo.erro = r.erro
+                    alvo.focar()
+                } else {
+                    janela.avisar(r.erro, "erro")
+                }
             }
-        }
+        })
     }
 
     function quando(iso) {

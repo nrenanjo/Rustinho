@@ -28,8 +28,14 @@ Painel {
         open()
         campo.focar()
     }
+    // A ação devolve a resposta, ou (gravação do gerente, D-09) chama
+    // `pronto(r)` depois de pedir a senha e devolve nada.
     function confirmar() {
-        const r = acao(campo.texto)
+        const r = acao(campo.texto, resposta => motivo.terminar(resposta))
+        if (r !== undefined)
+            terminar(r)
+    }
+    function terminar(r) {
         if (!r.ok) {
             erro = r.erro
             return

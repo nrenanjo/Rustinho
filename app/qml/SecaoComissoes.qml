@@ -205,12 +205,12 @@ FocusScope {
                                 text: "Desfazer"
                                 tipo: "discreto"
                                 implicitHeight: 32
-                                onClicked: janela.confirmar("Desfazer o fechamento?", "A conta da comissão sai do A pagar.", "Desfazer", () => {
-                                    const r = Api.chamar("comissao_reabrir", { id: modelData.id })
+                                onClicked: janela.confirmar("Desfazer o fechamento?", "A conta da comissão sai do A pagar.", "Desfazer",
+                                                            () => janela.chamarGerente("comissao_reabrir", { id: modelData.id }, r => {
                                     if (!r.ok)
                                         janela.avisar(r.erro, "erro")
                                     secao.carregar()
-                                })
+                                }))
                             }
                         }
                     }
@@ -233,14 +233,15 @@ FocusScope {
             vencimento.focar()
         }
         function salvar() {
-            const r = Api.chamar("comissao_fechar", { usuarioId: vendedor.usuarioId, de: de.texto, ate: ate.texto, vencimento: vencimento.texto })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            secao.dados = r.dados
-            janela.avisar("Comissão lançada no A pagar.", "ok")
+            secao.janela.chamarGerente("comissao_fechar", { usuarioId: vendedor.usuarioId, de: de.texto, ate: ate.texto, vencimento: vencimento.texto }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                secao.dados = r.dados
+                janela.avisar("Comissão lançada no A pagar.", "ok")
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12

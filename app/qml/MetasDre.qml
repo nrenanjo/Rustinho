@@ -35,16 +35,19 @@ Painel {
         carregar()
         open()
     }
-    function salvar(periodo, indicador, vendedorId, v) {
-        const r = Api.chamar("dre_meta_salvar", { periodo: periodo, indicador: indicador, vendedorId: vendedorId, valor: v })
-        if (!r.ok) {
-            erro = r.erro
-            return false
-        }
-        erro = ""
-        metas = r.dados
-        mudou()
-        return true
+    // depois(): só quando gravou (a senha do gerente pode ser pedida antes, D-09).
+    function salvar(periodo, indicador, vendedorId, v, depois) {
+        ApplicationWindow.window.chamarGerente("dre_meta_salvar", { periodo: periodo, indicador: indicador, vendedorId: vendedorId, valor: v }, r => {
+            if (!r.ok) {
+                erro = r.erro
+                return
+            }
+            erro = ""
+            metas = r.dados
+            mudou()
+            if (depois)
+                depois()
+        })
     }
 
     contentItem: ColumnLayout {
@@ -166,8 +169,8 @@ Painel {
                 icone: "check"
                 onClicked: {
                     const vend = quem.indice > 0 ? janelinha.vendedores[quem.indice - 1].id : ""
-                    if (janelinha.salvar(periodo.indice === 1 ? "semana" : "mes", janelinha.indicadores[indicador.indice].id, vend, valor.texto))
-                        valor.texto = ""
+                    janelinha.salvar(periodo.indice === 1 ? "semana" : "mes", janelinha.indicadores[indicador.indice].id, vend, valor.texto,
+                                     () => valor.texto = "")
                 }
             }
         }

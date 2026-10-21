@@ -280,9 +280,9 @@ FocusScope {
                                     visible: mov.modelData.estornavel
                                     text: "Estornar"
                                     tipo: "discreto"
-                                    // D-09: a senha do Financeiro não vale para estornar.
-                                    onClicked: secao.janela.comGerente("estornar", () => motivo.perguntar("Estornar o movimento?", mov.modelData.descricao + " · R$ " + mov.modelData.valor,
-                                                                "Estornar", m => Api.chamar("movimento_estornar", { id: mov.modelData.id, motivo: m })))
+                                    // D-09: a senha da consulta do Financeiro não vale para estornar.
+                                    onClicked: motivo.perguntar("Estornar o movimento?", mov.modelData.descricao + " · R$ " + mov.modelData.valor,
+                                                                "Estornar", (m, pronto) => secao.janela.chamarGerente("movimento_estornar", { id: mov.modelData.id, motivo: m }, pronto))
                                 }
                             }
                         }
@@ -315,15 +315,16 @@ FocusScope {
             cNome.focar()
         }
         function salvar() {
-            const r = Api.chamar("conta_loja_salvar", { id: id_, nome: cNome.texto, tipo: cTipo.indice === 1 ? "caixa" : "banco",
-                                                        saldoInicial: cInicial.texto, ativo: cAtiva.checked })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            secao.contaId = r.dados
-            secao.carregar()
+            secao.janela.chamarGerente("conta_loja_salvar", { id: id_, nome: cNome.texto, tipo: cTipo.indice === 1 ? "caixa" : "banco",
+                                                        saldoInicial: cInicial.texto, ativo: cAtiva.checked }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                secao.contaId = r.dados
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -377,16 +378,17 @@ FocusScope {
             mDescricao.focar()
         }
         function salvar() {
-            const r = Api.chamar("movimento_lancar", {
+            secao.janela.chamarGerente("movimento_lancar", {
                 contaId: secao.contaId, tipo: tipo, valor: mValor.texto, data: mData.texto, descricao: mDescricao.texto,
                 categoriaId: mCategoria.indice > 0 ? cats[mCategoria.indice - 1].id : ""
+            }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                secao.carregar()
             })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            secao.carregar()
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -442,14 +444,15 @@ FocusScope {
         }
         function salvar() {
             const para = outras[tPara.indice]
-            const r = Api.chamar("transferir", { de: secao.contaId, para: para ? para.id : "", valor: tValor.texto,
-                                                 data: tData.texto, descricao: tDescricao.texto })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            secao.carregar()
+            secao.janela.chamarGerente("transferir", { de: secao.contaId, para: para ? para.id : "", valor: tValor.texto,
+                                                 data: tData.texto, descricao: tDescricao.texto }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -489,14 +492,15 @@ FocusScope {
             real.focar()
         }
         function salvar() {
-            const r = Api.chamar("conta_loja_conferir", { contaId: secao.contaId, saldo: real.texto })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            janela.avisar(r.dados === "0,00" ? "Saldo certinho." : "Ajuste de R$ " + r.dados + " lançado.", "ok")
-            secao.carregar()
+            secao.janela.chamarGerente("conta_loja_conferir", { contaId: secao.contaId, saldo: real.texto }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                janela.avisar(r.dados === "0,00" ? "Saldo certinho." : "Ajuste de R$ " + r.dados + " lançado.", "ok")
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12

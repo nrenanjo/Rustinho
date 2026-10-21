@@ -51,49 +51,51 @@ ColumnLayout {
 
     function salvar() {
         pasta.erro = ""; hora.erro = ""; dias.erro = ""
-        const r = Api.chamar("backup_salvar", { pasta: pasta.texto, hora: hora.texto, dias: dias.texto })
-        if (r.ok) {
-            b = r.dados
-            janela.avisar("Ajustes do backup salvos.", "ok")
-            return
-        }
-        const campos = { pasta: pasta, hora: hora, dias: dias }
-        if (campos[r.campo])
-            campos[r.campo].erro = r.erro
-        else
-            janela.avisar(r.erro, "erro")
+        janela.chamarGerente("backup_salvar", { pasta: pasta.texto, hora: hora.texto, dias: dias.texto }, r => {
+            if (r.ok) {
+                b = r.dados
+                janela.avisar("Ajustes do backup salvos.", "ok")
+                return
+            }
+            const campos = { pasta: pasta, hora: hora, dias: dias }
+            if (campos[r.campo])
+                campos[r.campo].erro = r.erro
+            else
+                janela.avisar(r.erro, "erro")
+        })
     }
 
     function agora() {
-        const r = Api.chamar("backup_agora")
-        if (!r.ok) {
-            janela.avisar(r.erro, "erro")
-            return
-        }
-        estavaOcupado = true
-        b = r.dados
-        b.ocupado = true
+        janela.chamarGerente("backup_agora", r => {
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            estavaOcupado = true
+            b = r.dados
+            b.ocupado = true
+        })
     }
 
     function conectar() {
-        const r = Api.chamar("backup_conectar_drive")
-        if (!r.ok) {
-            janela.avisar(r.erro, "erro")
-            return
-        }
-        estavaOcupado = true
-        conectando = true
-        carregar()
+        janela.chamarGerente("backup_conectar_drive", r => {
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            estavaOcupado = true
+            conectando = true
+            carregar()
+        })
     }
 
     function desligar() {
         janela.confirmar("Parar de mandar para o Google Drive?",
                          "As cópias que já estão lá continuam lá. As novas ficam só neste computador.",
-                         "Parar", () => {
-                             const r = Api.chamar("backup_desligar_drive")
+                         "Parar", () => janela.chamarGerente("backup_desligar_drive", {}, r => {
                              if (r.ok)
                                  b = r.dados
-                         }, "perigo")
+                         }), "perigo")
     }
 
     function buscarNuvem() {
@@ -170,24 +172,25 @@ ColumnLayout {
         interval: 120
         onTriggered: {
             const c = esperaRestaurar.copia
-            const r = Api.chamar("backup_restaurar", { arquivo: c.nuvem ? c.nome : c.caminho, nuvem: !!c.nuvem,
-                                                       senha: esperaRestaurar.senhaUsada })
-            secao.restaurando = false
-            if (r.ok) {
-                secao.pedirSenhaDe = null
-                janela.avisar("Backup de " + c.quando + " restaurado. Entre de novo.", "ok")
-                janela.atualizarEstado()
-                janela.trocarPara("TelaEntrar")
-                return
-            }
-            if (r.campo === "senha") {
-                secao.pedirSenhaDe = c
-                senhaOutra.erro = esperaRestaurar.senhaUsada !== "" ? r.erro : ""
-                senhaOutra.focar()
-                return
-            }
-            janela.avisar(r.erro, "erro")
-            secao.carregar()
+            janela.chamarGerente("backup_restaurar", { arquivo: c.nuvem ? c.nome : c.caminho, nuvem: !!c.nuvem,
+                                                       senha: esperaRestaurar.senhaUsada }, r => {
+                secao.restaurando = false
+                if (r.ok) {
+                    secao.pedirSenhaDe = null
+                    janela.avisar("Backup de " + c.quando + " restaurado. Entre de novo.", "ok")
+                    janela.atualizarEstado()
+                    janela.trocarPara("TelaEntrar")
+                    return
+                }
+                if (r.campo === "senha") {
+                    secao.pedirSenhaDe = c
+                    senhaOutra.erro = esperaRestaurar.senhaUsada !== "" ? r.erro : ""
+                    senhaOutra.focar()
+                    return
+                }
+                janela.avisar(r.erro, "erro")
+                secao.carregar()
+            })
         }
     }
 

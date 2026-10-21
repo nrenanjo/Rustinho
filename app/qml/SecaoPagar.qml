@@ -198,14 +198,15 @@ FocusScope {
             achados = r.ok ? r.dados.itens : []
         }
         function salvar() {
-            const r = Api.chamar("pagar_lancar", entrada())
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            janela.avisar(r.dados.length > 1 ? r.dados.length + " parcelas lançadas." : "Conta lançada.", "ok")
-            secao.carregar()
+            secao.janela.chamarGerente("pagar_lancar", entrada(), r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                janela.avisar(r.dados.length > 1 ? r.dados.length + " parcelas lançadas." : "Conta lançada.", "ok")
+                secao.carregar()
+            })
         }
 
         Timer { id: esperaFornecedor; interval: 200; onTriggered: lancamento.buscarFornecedor() }
@@ -399,18 +400,19 @@ FocusScope {
             return t.toLocaleString(Qt.locale("pt_BR"), "f", 2)
         }
         function concluir() {
-            const r = Api.chamar("pagar_pagar", {
+            secao.janela.chamarGerente("pagar_pagar", {
                 contaId: conta.id, valor: pValor.texto, juros: pJuros.texto, desconto: pDesconto.texto, data: pData.texto,
                 forma: forma, origem: origens[pOrigem.indice] || "", chequeNumero: pCheque.texto
+            }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                janela.avisar("Pago R$ " + total + ".", "ok")
+                secao.carregar()
+                ficha.recarregar()
             })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            janela.avisar("Pago R$ " + total + ".", "ok")
-            secao.carregar()
-            ficha.recarregar()
         }
 
         contentItem: ColumnLayout {
@@ -614,10 +616,10 @@ FocusScope {
                             text: "Estornar"
                             tipo: "discreto"
                             implicitHeight: 32
-                            // D-09: a senha do Financeiro não vale para estornar.
-                            onClicked: secao.janela.comGerente("estornar", () => motivo.perguntar("Estornar o pagamento?",
+                            // D-09: a senha da consulta do Financeiro não vale para estornar.
+                            onClicked: motivo.perguntar("Estornar o pagamento?",
                                 "R$ " + modelData.total + " de " + modelData.data + ". A conta volta a ficar em aberto.",
-                                "Estornar", m => Api.chamar("pagamento_estornar", { id: modelData.id, motivo: m })))
+                                "Estornar", (m, pronto) => secao.janela.chamarGerente("pagamento_estornar", { id: modelData.id, motivo: m }, pronto))
                         }
                     }
                 }
@@ -631,7 +633,7 @@ FocusScope {
                     text: "Tirar"
                     tipo: "discreto"
                     onClicked: motivo.perguntar("Tirar esta conta?", ficha.p.descricao + " · R$ " + ficha.p.valor,
-                                                "Tirar", m => Api.chamar("pagar_cancelar", { id: ficha.contaId, motivo: m }))
+                                                "Tirar", (m, pronto) => secao.janela.chamarGerente("pagar_cancelar", { id: ficha.contaId, motivo: m }, pronto))
                 }
                 Botao {
                     visible: ficha.aberta
@@ -681,16 +683,17 @@ FocusScope {
             cVencimento.focar()
         }
         function salvar() {
-            const r = Api.chamar("pagar_alterar", { id: contaId, descricao: cDescricao.texto, categoriaId: secao.idCategoria(cCategoria.indice),
+            secao.janela.chamarGerente("pagar_alterar", { id: contaId, descricao: cDescricao.texto, categoriaId: secao.idCategoria(cCategoria.indice),
                                                     documento: cDocumento.texto, valor: cValor.texto, vencimento: cVencimento.texto,
-                                                    competencia: cCompetencia.texto, observacoes: cObs.texto })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            ficha.dados = r.dados
-            secao.carregar()
+                                                    competencia: cCompetencia.texto, observacoes: cObs.texto }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                ficha.dados = r.dados
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -738,14 +741,17 @@ FocusScope {
             if (r.ok)
                 itens = r.dados.filter(c => c.tipo === "despesa")
         }
-        function salvar(c, nome, ativo) {
-            const r = Api.chamar("categoria_salvar", { id: c ? c.id : "", nome: nome, tipo: "despesa", ativo: ativo })
-            erro = r.ok ? "" : r.erro
-            if (r.ok) {
-                recarregar()
-                secao.carregar()
-            }
-            return r.ok
+        // depois(): só quando gravou (a senha do gerente pode ser pedida antes).
+        function salvar(c, nome, ativo, depois) {
+            secao.janela.chamarGerente("categoria_salvar", { id: c ? c.id : "", nome: nome, tipo: "despesa", ativo: ativo }, r => {
+                erro = r.ok ? "" : r.erro
+                if (r.ok) {
+                    recarregar()
+                    secao.carregar()
+                    if (depois)
+                        depois()
+                }
+            })
         }
         contentItem: ColumnLayout {
             spacing: 10
@@ -791,13 +797,13 @@ FocusScope {
                     dica: "Nova categoria"
                     maximo: 40
                     Layout.fillWidth: true
-                    onConfirmado: if (categorias.salvar(null, texto, true)) texto = ""
+                    onConfirmado: categorias.salvar(null, texto, true, () => texto = "")
                 }
                 Botao {
                     text: "Criar"
                     icone: "mais"
                     tipo: "secundario"
-                    onClicked: if (categorias.salvar(null, nova.texto, true)) nova.texto = ""
+                    onClicked: categorias.salvar(null, nova.texto, true, () => nova.texto = "")
                 }
             }
             TextoErro { text: categorias.erro }

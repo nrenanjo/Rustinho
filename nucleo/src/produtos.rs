@@ -838,18 +838,23 @@ pub fn tirar_custos_da_entrada(conn: &Connection, f: &mut ProdutoFicha) -> Resul
     Ok(())
 }
 
-/// Salvar esta ficha muda a regra de preço da peça (o % de lucro de alguma
-/// tabela, ou o custo)? Peça nova não tem regra antes. Ficha com erro: não
-/// (o `salvar` recusa com a mensagem certa).
-pub fn muda_regra_de_preco(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
+/// Salvar esta ficha muda o preço de venda da peça (o preço de alguma
+/// tabela, a oferta, o "preço na hora da venda") ou a regra de preço (o %
+/// de lucro)? Isso é do gerente, com custo ou sem (D-09). Peça nova não
+/// conta (o caixa cadastra com o preço). Desconto na venda é outra coisa
+/// (tem as permissões dele). Ficha com erro: não (o `salvar` recusa com a
+/// mensagem certa).
+pub fn muda_preco(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
     if f.id.trim().is_empty() {
         return Ok(false);
     }
     let antes = carregar(conn, &f.id)?;
     let Ok((mut dados, _)) = validar(f) else { return Ok(false) };
     manter_lucros(&antes, &mut dados);
-    let lucros = |d: &Dados| d.precos.iter().map(|p| (p.0, p.2)).filter(|p| p.1.is_some()).collect::<Vec<_>>();
-    Ok(lucros(&antes) != lucros(&dados))
+    Ok(antes.precos != dados.precos
+        || antes.oferta_preco != dados.oferta_preco
+        || antes.oferta_ate != dados.oferta_ate
+        || antes.preco_aberto != dados.preco_aberto)
 }
 
 /// Lê os dados gravados de uma peça.

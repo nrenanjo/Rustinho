@@ -3,37 +3,69 @@ import QtQuick.Layouts
 import rustinho
 
 // O "aperto": o gerente digita a senha na hora, sem trocar de usuário.
-// Uso: pedir.pedir("cancelar_venda", "Cancelar venda", curta, () => { ... })
-// A senha vale só para a ação pedida; a de uma ação só acaba quando é usada.
+// Duas formas (D-09):
+//   consultar(acao, nome, depois): só para ler a tela da ação, até sair dela;
+//   paraChamada(comando, dados, mensagem, depois, desistiu): para esta
+//   gravação, com estes dados exatos, uma vez. A senha não fica guardada.
 Painel {
     id: pedido
     property string acao: ""
+    property string comando: ""
+    property var dados: null
     property string oQue: ""
-    property bool curta: true
+    property string mensagem: ""
     property var depois: null
+    property var desistiu: null
     width: Math.min(460, Tema.largura - 24)
 
-    function pedir(acao, oQue, curta, depois) {
-        pedido.acao = acao
-        pedido.oQue = oQue
-        pedido.curta = curta
-        pedido.depois = depois
+    function abrirPedido() {
         senha.texto = ""
         senha.erro = ""
         open()
         senha.focar()
     }
+    function consultar(acao, oQue, depois) {
+        pedido.acao = acao
+        pedido.comando = ""
+        pedido.dados = null
+        pedido.oQue = oQue
+        pedido.mensagem = ""
+        pedido.depois = depois
+        pedido.desistiu = null
+        abrirPedido()
+    }
+    function paraChamada(comando, dados, mensagem, depois, desistiu) {
+        pedido.acao = ""
+        pedido.comando = comando
+        pedido.dados = dados
+        pedido.oQue = ""
+        pedido.mensagem = mensagem
+        pedido.depois = depois
+        pedido.desistiu = desistiu
+        abrirPedido()
+    }
     function liberar() {
-        const r = Api.chamar("gerente_liberar", { senha: senha.texto, curta: pedido.curta, acao: pedido.acao })
+        const r = Api.chamar("gerente_liberar", pedido.comando !== ""
+                             ? { senha: senha.texto, comando: pedido.comando, dados: pedido.dados }
+                             : { senha: senha.texto, acao: pedido.acao })
+        senha.texto = ""
         if (!r.ok) {
             senha.erro = r.erro
             senha.focar()
-            senha.entrada.selectAll()
             return
         }
         const f = depois
         depois = null
+        desistiu = null
         close()
+        if (f)
+            f()
+    }
+    onClosed: {
+        senha.texto = ""
+        const f = desistiu
+        desistiu = null
+        depois = null
         if (f)
             f()
     }
@@ -42,7 +74,9 @@ Painel {
         spacing: 14
         Titulo { text: "Senha do gerente"; font.pixelSize: 30; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         Nota {
-            text: (pedido.oQue ? pedido.oQue + ": s" : "S") + "ó o gerente pode. Peça para um gerente digitar a senha aqui; você continua no seu usuário."
+            text: pedido.comando !== ""
+                  ? (pedido.mensagem || "Só o gerente pode.") + " A senha vale só para isto, uma vez; você continua no seu usuário."
+                  : (pedido.oQue ? pedido.oQue + ": s" : "S") + "ó o gerente pode. Com a senha você só consulta esta tela; para gravar, ela é pedida de novo."
             font.pixelSize: 15
             Layout.fillWidth: true
         }

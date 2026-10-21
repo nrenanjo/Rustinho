@@ -218,26 +218,24 @@ FocusScope {
         carregar()
     }
 
-    function salvar(jaPediuGerente) {
+    function salvar() {
         limparErros()
         const eraNova = nova
-        const r = Api.chamar("produto_salvar", coletar())
-        // D-09: mudar o preço de uma peça com custo muda o % de lucro, que é
-        // regra de preço: o gerente digita a senha (vale só para este salvar).
-        if (!r.ok && r.campo === "precos" && !jaPediuGerente) {
-            janela.comGerente("precos", () => tela.salvar(true))
-            return
-        }
-        if (r.ok) {
-            const s = Api.chamar("produto_sugestoes")
-            if (s.ok)
-                sugestoes = s.dados
-            preencher(r.dados)
-            produtoId = r.dados.id
-            janela.avisar(eraNova ? (servico ? "Serviço cadastrado." : "Peça cadastrada.") : "Alterações salvas.", "ok")
-        } else {
-            mostrarErro(r.campo, r.erro)
-        }
+        // D-09: mudar o preço de venda de uma peça cadastrada pede a senha
+        // do gerente, para este salvar com estes dados (desconto na venda é
+        // outra coisa).
+        janela.chamarGerente("produto_salvar", coletar(), r => {
+            if (r.ok) {
+                const s = Api.chamar("produto_sugestoes")
+                if (s.ok)
+                    sugestoes = s.dados
+                preencher(r.dados)
+                produtoId = r.dados.id
+                janela.avisar(eraNova ? (servico ? "Serviço cadastrado." : "Peça cadastrada.") : "Alterações salvas.", "ok")
+            } else {
+                mostrarErro(r.campo, r.erro)
+            }
+        })
     }
 
     function limparErros() {
@@ -834,7 +832,7 @@ FocusScope {
                         }
                         Nota {
                             visible: !tela.verCustos
-                            text: "O custo e o % de lucro ficam com o gerente. Mudar o preço de uma peça que já tem custo pede a senha do gerente."
+                            text: "O custo e o % de lucro ficam com o gerente. Mudar o preço de venda de uma peça já cadastrada pede a senha do gerente."
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
@@ -929,7 +927,7 @@ FocusScope {
                                         janela.avisar("Salve as alterações antes de ajustar o estoque.", "info")
                                         return
                                     }
-                                    tela.janela.comGerente("ajustar_estoque", () => ajusteEstoque.abrirCom(tela.ficha.id, tela.ficha.estoque, tela.ficha.unidade))
+                                    ajusteEstoque.abrirCom(tela.ficha.id, tela.ficha.estoque, tela.ficha.unidade)
                                 }
                             }
                         }

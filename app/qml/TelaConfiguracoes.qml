@@ -71,13 +71,32 @@ FocusScope {
         alterado = false
     }
 
+    // D-09: a senha do gerente abre as Configurações só para consultar;
+    // Backup e a pílula Gerente pedem a senha deles; cada gravação pede a
+    // senha para ela (veja janela.chamarGerente).
     function liberar() {
         janela.comGerente("configuracoes", () => {
             tela.completo = true
-            tela.verBackup = true
-            tela.verGerente = true
             carregar()
-        }, true)
+        })
+    }
+    function escolherSecao(id) {
+        if (id === "backup" && !verBackup) {
+            janela.comGerente("backup", () => {
+                tela.verBackup = true
+                tela.secao = id
+            })
+            return
+        }
+        if (id === "gerente" && !verGerente) {
+            janela.comGerente("gerente", () => {
+                tela.verGerente = true
+                carregarGerente()
+                tela.secao = id
+            })
+            return
+        }
+        secao = id
     }
 
     function carregarGerente() {
@@ -97,27 +116,29 @@ FocusScope {
 
     // Códigos das peças (pílula Gerente).
     function comandoCodigos(comando, dados, mensagem) {
-        const r = Api.chamar(comando, dados || {})
-        if (r.ok) {
-            codigos = r.dados
-            janela.avisar(mensagem, "ok")
-        } else {
-            janela.avisar(r.erro, "erro")
-        }
-        confirmarAssumir = false
-        confirmarCaixaNovo = false
+        janela.chamarGerente(comando, dados || {}, r => {
+            if (r.ok) {
+                codigos = r.dados
+                janela.avisar(mensagem, "ok")
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+            confirmarAssumir = false
+            confirmarCaixaNovo = false
+        })
     }
     readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length + (codigos.bloqueio ? 1 : 0) : 0
 
     // Conflito entre caixas: usar a versão que perdeu, ou deixar como está.
     function resolverConflito(c, usar) {
-        const r = Api.chamar("conflito_resolver", { id: c.id, usar: usar })
-        if (r.ok) {
-            conflitos = r.dados
-            janela.avisar(usar ? "Voltou a versão que tinha perdido. Ela vai para os outros caixas." : "Ficou como está.", "ok")
-        } else {
-            janela.avisar(r.erro, "erro")
-        }
+        janela.chamarGerente("conflito_resolver", { id: c.id, usar: usar }, r => {
+            if (r.ok) {
+                conflitos = r.dados
+                janela.avisar(usar ? "Voltou a versão que tinha perdido. Ela vai para os outros caixas." : "Ficou como está.", "ok")
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
     }
 
     function salvarGerente() {
@@ -127,16 +148,17 @@ FocusScope {
         const gerentes = {}
         for (const u of gerente.usuarios)
             gerentes[u.id] = u.gerente
-        const r = Api.chamar("gerente_salvar", { acoes: acoes, gerentes: gerentes })
-        if (r.ok) {
-            gerente = r.dados
-            alterado = false
-            janela.atualizarEstado()
-            janela.avisar("Salvo.", "ok")
-        } else {
-            janela.avisar(r.erro, "erro")
-            carregarGerente()
-        }
+        janela.chamarGerente("gerente_salvar", { acoes: acoes, gerentes: gerentes }, r => {
+            if (r.ok) {
+                gerente = r.dados
+                alterado = false
+                janela.atualizarEstado()
+                janela.avisar("Salvo.", "ok")
+            } else {
+                janela.avisar(r.erro, "erro")
+                carregarGerente()
+            }
+        })
     }
 
     // Caixa: só o nome deste computador e a impressora.
@@ -156,7 +178,7 @@ FocusScope {
         }
     }
 
-    function salvar(jaPediuGerente) {
+    function salvar() {
         if (secao === "gerente")
             return salvarGerente()
         if (!completo)
@@ -178,49 +200,44 @@ FocusScope {
         rodapeVenda.erro = ""
         rodapeOrcamento.erro = ""
         rodapeOs.erro = ""
-        const r = Api.chamar("config_salvar", { loja: loja.texto, caixa: caixa.texto, tabelas: lista,
+        janela.chamarGerente("config_salvar", { loja: loja.texto, caixa: caixa.texto, tabelas: lista,
                                                 cnpj: cnpjLoja.texto, uf: ufLoja.indice > 0 ? ufLoja.modelo[ufLoja.indice] : "",
                                                 endereco: enderecoLoja.texto, telefone: telefoneLoja.texto,
                                                 imprimirDireto: imprimirDireto.checked,
                                                 crediarioMulta: multa.texto, crediarioJuros: jurosMes.texto,
                                                 crediarioCarencia: carencia.texto, orcamentoValidade: validadeOrc.texto,
                                                 rodapeVenda: rodapeVenda.texto, rodapeOrcamento: rodapeOrcamento.texto, rodapeOs: rodapeOs.texto,
-                                                imprimirLocal: imprimirLocal.checked })
-        // D-09: o lucro sugerido é regra de preço: pede a senha do gerente
-        // (vale só para este salvar).
-        if (!r.ok && r.campo === "precos" && !jaPediuGerente) {
-            janela.comGerente("precos", () => tela.salvar(true))
-            return
-        }
-        if (r.ok) {
-            janela.atualizarEstado()
-            carregar()
-            janela.avisar("Configurações salvas.", "ok")
-            return
-        }
-        const campos = { loja: [loja, "loja"], caixa: [caixa, "loja"], cnpj: [cnpjLoja, "loja"], uf: [ufLoja, "loja"],
-                         crediarioMulta: [multa, "receber"], crediarioJuros: [jurosMes, "receber"], crediarioCarencia: [carencia, "receber"],
-                         orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
-                         rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] }
-        if (campos[r.campo]) {
-            const [alvo, onde] = campos[r.campo]
-            secao = onde
-            alvo.erro = r.erro
-            if (typeof alvo.focar === "function")
-                alvo.focar()
-            return
-        }
-        const m = r.campo ? r.campo.match(/^tabela(\d)(Nome|Lucro)$/) : null
-        if (m) {
-            secao = "vendas"
-            for (let i = 0; i < tabelas.count; i++) {
-                const t = tabelas.itemAt(i)
-                if (t.numero === parseInt(m[1]))
-                    t.mostrarErro(m[2], r.erro)
+                                                imprimirLocal: imprimirLocal.checked }, r => {
+            if (r.ok) {
+                janela.atualizarEstado()
+                carregar()
+                janela.avisar("Configurações salvas.", "ok")
+                return
             }
-        } else {
-            janela.avisar(r.erro, "erro")
-        }
+            const campos = { loja: [loja, "loja"], caixa: [caixa, "loja"], cnpj: [cnpjLoja, "loja"], uf: [ufLoja, "loja"],
+                             crediarioMulta: [multa, "receber"], crediarioJuros: [jurosMes, "receber"], crediarioCarencia: [carencia, "receber"],
+                             orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
+                             rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] }
+            if (campos[r.campo]) {
+                const [alvo, onde] = campos[r.campo]
+                secao = onde
+                alvo.erro = r.erro
+                if (typeof alvo.focar === "function")
+                    alvo.focar()
+                return
+            }
+            const m = r.campo ? r.campo.match(/^tabela(\d)(Nome|Lucro)$/) : null
+            if (m) {
+                secao = "vendas"
+                for (let i = 0; i < tabelas.count; i++) {
+                    const t = tabelas.itemAt(i)
+                    if (t.numero === parseInt(m[1]))
+                        t.mostrarErro(m[2], r.erro)
+                }
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
     }
 
     property var sync: null
@@ -251,18 +268,19 @@ FocusScope {
         const dados = { ligado: syncLigado.checked, senha: syncSenha.texto, enderecos: syncEnderecos.texto }
         if (completo)
             dados.interfaces = syncInterfaces.texto
-        const r = Api.chamar("sync_salvar", dados)
-        if (r.ok) {
-            sync = r.dados
-            syncSenha.texto = ""
-            janela.avisar(syncLigado.checked ? "Sincronização ligada. Os outros caixas aparecem em alguns segundos." : "Sincronização desligada.", "ok")
-        } else if (r.campo === "enderecos") {
-            syncEnderecos.erro = r.erro
-        } else if (r.campo === "interfaces") {
-            syncInterfaces.erro = r.erro
-        } else {
-            syncSenha.erro = r.erro
-        }
+        janela.chamarGerente("sync_salvar", dados, r => {
+            if (r.ok) {
+                sync = r.dados
+                syncSenha.texto = ""
+                janela.avisar(syncLigado.checked ? "Sincronização ligada. Os outros caixas aparecem em alguns segundos." : "Sincronização desligada.", "ok")
+            } else if (r.campo === "enderecos") {
+                syncEnderecos.erro = r.erro
+            } else if (r.campo === "interfaces") {
+                syncInterfaces.erro = r.erro
+            } else {
+                syncSenha.erro = r.erro
+            }
+        })
     }
 
     Timer {
@@ -370,13 +388,13 @@ FocusScope {
                 { id: "caixas", nome: "Caixas da loja" },
                 { id: "gerente", nome: "Gerente" },
                 { id: "sobre", nome: "Sobre" }
-            ].filter(p => (p.id !== "backup" || tela.verBackup) && (p.id !== "gerente" || tela.verGerente)) : [
+            ] : [
                 { id: "loja", nome: "Este computador" },
                 { id: "impressao", nome: "Impressão" },
                 { id: "sobre", nome: "Sobre" }
             ]
             atual: tela.secao
-            onEscolhido: id => tela.secao = id
+            onEscolhido: id => tela.escolherSecao(id)
         }
 
         Flickable {
@@ -870,11 +888,9 @@ FocusScope {
                                 onClicked: motivoReferencia.perguntar(
                                     "Aceitar como está?",
                                     "O que falta não vai aparecer por isso: só libera o dinheiro deste registro. Fica no histórico com o seu nome e o motivo.",
-                                    "Aceitar", function (m) {
-                                        const r = Api.chamar("referencia_aceitar",
-                                                             { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m })
-                                        return r
-                                    }, "Motivo (por que aceitar?)", "secundario")
+                                    "Aceitar", (m, pronto) => janela.chamarGerente("referencia_aceitar",
+                                                             { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m }, pronto),
+                                    "Motivo (por que aceitar?)", "secundario")
                             }
                         }
                     }
@@ -965,15 +981,14 @@ FocusScope {
                         visible: tela.conflitos.filter(c => !c.resolvido).length >= 3
                         text: "Deixar todas como estão"
                         tipo: "secundario"
-                        onClicked: {
-                            const r = Api.chamar("conflitos_manter_todos")
+                        onClicked: janela.chamarGerente("conflitos_manter_todos", {}, r => {
                             if (r.ok) {
                                 tela.conflitos = r.dados
                                 janela.avisar("Ficaram como estão. As versões que perderam continuam guardadas na lista.", "ok")
                             } else {
                                 janela.avisar(r.erro, "erro")
                             }
-                        }
+                        })
                     }
                     Repeater {
                         model: tela.conflitos
@@ -1476,9 +1491,9 @@ FocusScope {
     PerguntaMotivo { id: motivoReferencia; onFeito: tela.recarregarReferencias() }
 
     Component.onCompleted: {
-        completo = janela.podeGerente("configuracoes")
-        verBackup = completo && janela.podeGerente("backup")
-        verGerente = completo && janela.podeGerente("gerente")
+        completo = janela.podeGerente("configuracoes", true)
+        verBackup = janela.podeGerente("backup", true)
+        verGerente = janela.podeGerente("gerente", true)
         carregar()
     }
 }

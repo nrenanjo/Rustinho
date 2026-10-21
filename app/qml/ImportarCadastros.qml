@@ -53,15 +53,20 @@ Painel {
     }
 
     function cadastrar() {
-        janela.comGerente("configuracoes", cadastrarAgora)
+        cadastrarAgora()
     }
     function cadastrarAgora() {
         trabalhando = true
         Qt.callLater(() => {
-            const r = Api.chamar("importar_cadastros", {
+            // D-09: a senha do gerente vale para esta importação, com estes arquivos.
+            painel.janela.chamarGerente("importar_cadastros", {
                 arquivos: painel.arquivos, clientes: painel.qClientes, fornecedores: painel.qFornecedores,
                 pecasLoja: painel.qPecasLoja, pecasFornecedor: painel.qPecasFornecedor
-            })
+            }, r => painel.depoisDeImportar(r))
+        })
+    }
+    function depoisDeImportar(r) {
+        Qt.callLater(() => {
             painel.trabalhando = false
             if (!r.ok) {
                 painel.erro = r.erro

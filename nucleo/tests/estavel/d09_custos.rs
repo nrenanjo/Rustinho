@@ -144,11 +144,11 @@ fn d09_2_caixa_cadastra_sem_mexer_no_custo() {
     let id = nova["id"].as_str().unwrap().to_string();
     assert_eq!(gravado(&l, &id), (0, 2500, None));
     assert_eq!(l.estoque(&id), "4");
-    // Peça sem custo: o caixa muda o preço à vontade (não há regra).
+    // Mudar o preço depois, mesmo sem custo, é do gerente (veja d09_7).
     let mut f = l.ok("produto_abrir", json!({ "id": id }));
     f["precos"][0]["preco"] = json!("27");
-    l.ok("produto_salvar", f);
-    assert_eq!(gravado(&l, &id), (0, 2700, None));
+    assert_eq!(l.chamar("produto_salvar", f)["campo"], "precos");
+    assert_eq!(gravado(&l, &id), (0, 2500, None));
     // Mais um tamanho a partir de uma peça com custo: copia a regra, sem mostrar.
     let v = l.ok("produto_variacao_criar", json!({ "id": p.pastilha, "atual": "Dianteira", "nova": "Traseira" }));
     sem_custos(&v, "produto_variacao_criar");
@@ -200,9 +200,29 @@ fn d09_3_compra_mostra_custo_sem_margem() {
     }
 }
 
-/// D-09.4 — Regras de preço só com a senha do gerente: o % de lucro da peça
-/// (o caixa mudar o preço de uma peça com custo muda o %) e o lucro
-/// sugerido das tabelas. A senha vale para um salvar só.
+/// A senha do gerente para esta gravação, com estes dados exatos.
+fn liberar(l: &mut Loja, comando: &str, dados: &Value) {
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "comando": comando, "dados": dados }));
+}
+
+/// A senha do gerente para consultar a tela desta ação.
+fn consultar(l: &mut Loja, acao: &str) {
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "acao": acao }));
+}
+
+/// Uma mudança na ficha da peça (para os testes de preço).
+type Mudar = fn(&mut Value);
+
+fn so_o_gerente(l: &mut Loja, comando: &str, dados: Value) {
+    let r = l.chamar(comando, dados);
+    assert_eq!(r["ok"], false, "{comando} passou sem a senha do gerente: {r}");
+    let campo = r["campo"].as_str().unwrap_or("");
+    assert!(campo == "gerente" || campo == "precos", "{comando}: {r}");
+}
+
+/// D-09.4 — Regras de preço só com a senha do gerente: o preço e o % de
+/// lucro da peça e o lucro sugerido das tabelas. A senha vale para aquele
+/// salvar, com aqueles dados, uma vez.
 #[test]
 fn d09_4_regras_de_preco_pedem_o_gerente() {
     let (mut l, p) = loja();
@@ -214,25 +234,23 @@ fn d09_4_regras_de_preco_pedem_o_gerente() {
     assert_eq!(r["ok"], false);
     assert_eq!(r["campo"], "precos", "{r}");
     assert_eq!(gravado(&l, &p.filtro), antes, "a recusa não pode gravar nada");
-    // Senha do gerente para isso: salva uma vez.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "precos" }));
-    l.ok("produto_salvar", f);
+    // Senha do gerente para este salvar: grava uma vez.
+    liberar(&mut l, "produto_salvar", &f);
+    l.ok("produto_salvar", f.clone());
     let depois = gravado(&l, &p.filtro);
     assert_eq!((depois.0, depois.1), (6200, 12000));
     assert_ne!(depois.2, antes.2, "o % segue o preço");
-    // A senha já foi usada: outra mudança pede de novo.
-    let mut f = l.ok("produto_abrir", json!({ "id": p.filtro }));
-    f["precos"][0]["preco"] = json!("130");
-    assert_eq!(l.chamar("produto_salvar", f)["campo"], "precos");
+    // A senha já foi usada: outra mudança (e até a mesma de novo) pede outra vez.
+    let mut f2 = l.ok("produto_abrir", json!({ "id": p.filtro }));
+    f2["precos"][0]["preco"] = json!("130");
+    assert_eq!(l.chamar("produto_salvar", f2)["campo"], "precos");
     assert_eq!(gravado(&l, &p.filtro), depois);
-    // Tabela 2 com preço novo numa peça com custo também é regra.
-    let mut f = l.ok("produto_abrir", json!({ "id": p.filtro }));
-    f["precos"][1]["preco"] = json!("95");
-    assert_eq!(l.chamar("produto_salvar", f)["campo"], "precos");
+    let mut f3 = l.ok("produto_abrir", json!({ "id": p.filtro }));
+    f3["precos"][1]["preco"] = json!("95");
+    assert_eq!(l.chamar("produto_salvar", f3)["campo"], "precos");
 
-    // Lucro sugerido das tabelas: o caixa (com a senha do gerente para as
-    // Configurações) não vê e o que ele mandar fica como estava.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": false, "acao": "configuracoes" }));
+    // Lucro sugerido das tabelas: o caixa (com a senha para salvar as
+    // Configurações) não vê, e o que ele mandar fica como estava.
     let mut cfg = l.ok("config_ler", json!({}));
     let tabelas: Vec<Value> = cfg["tabelas"]
         .as_array()
@@ -241,21 +259,21 @@ fn d09_4_regras_de_preco_pedem_o_gerente() {
         .map(|t| json!({ "numero": t["numero"], "nome": t["nome"], "lucroPadrao": "300" }))
         .collect();
     cfg["tabelas"] = json!(tabelas);
+    liberar(&mut l, "config_salvar", &cfg);
     l.ok("config_salvar", cfg.clone());
     assert_eq!(l.numero("SELECT lucro_padrao FROM tabela_preco WHERE numero = 1"), 10_000);
-    l.ok("gerente_encerrar", json!({}));
 
     // O gerente muda: grava e fica na auditoria.
     l.entrar("Ana", SENHA_ANA);
     l.ok("config_salvar", cfg);
     assert_eq!(l.numero("SELECT lucro_padrao FROM tabela_preco WHERE numero = 1"), 30_000);
     assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'precos.regras'"), 1);
-    // A regra nova vale para a próxima peça.
     assert_eq!(l.ok("produto_novo", json!({}))["precos"][0]["lucro"], "300");
 
     // Loja que libera os resultados para todos: o caixa vê custo e %, mas
-    // mudar a regra continua pedindo o gerente (a pílula não tem marca para isso).
-    l.ok("gerente_salvar", json!({ "acoes": { "resultados": false } }));
+    // mudar preço continua pedindo o gerente (a pílula não tem marca para isso,
+    // nem mandando a marca por chamada direta).
+    l.ok("gerente_salvar", json!({ "acoes": { "resultados": false, "precos": false } }));
     let g = l.ok("gerente_ler", json!({}));
     assert!(g["acoes"].as_array().unwrap().iter().all(|a| a["id"] != "precos"), "{g}");
     l.entrar("Bia", SENHA_BIA);
@@ -265,80 +283,85 @@ fn d09_4_regras_de_preco_pedem_o_gerente() {
     f["precos"][0]["lucro"] = json!("150");
     f["precos"][0]["preco"] = json!("100");
     assert_eq!(l.chamar("produto_salvar", f.clone())["campo"], "precos");
+    // A senha dada para salvar a peça não serve para as Configurações.
+    liberar(&mut l, "produto_salvar", &f);
     let mut cfg = l.ok("config_ler", json!({}));
     cfg["tabelas"][0]["lucroPadrao"] = json!("80");
-    // config_salvar é das Configurações: com a senha só para a regra de preço,
-    // não passa (cada senha vale para o que foi pedido).
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "precos" }));
     assert_eq!(l.chamar("config_salvar", cfg)["campo"], "gerente");
     l.ok("produto_salvar", f);
     assert_eq!(gravado(&l, &p.pastilha).1, 10_000);
 }
 
-/// D-09 — A senha do gerente não fica aberta para outras operações: vale
-/// só para a ação pedida; a de uma ação só acaba quando dá certo (não quando
-/// dá erro); a de uma tela não vale para outra coisa (estornar no
-/// Financeiro pede de novo); "encerrar" acaba com todas; não dá para pedir
-/// a senha sem dizer para quê.
+/// D-09 — A senha para uma gravação fica presa ao usuário, ao comando e aos
+/// dados exatos: qualquer dado diferente pede senha nova; não serve para
+/// outro comando, nem para outro que precisa da mesma permissão; dá certo
+/// uma vez e acaba; se der erro, só a mesma coisa pode ser repetida.
 #[test]
-fn d09_5_senha_do_gerente_nao_fica_aberta() {
+fn d09_5_senha_presa_a_acao_e_aos_dados() {
     let (mut l, p) = loja();
     l.entrar("Bia", SENHA_BIA);
     l.abrir_caixa();
     let v = id(&l.vender(&[(&p.filtro, "1")], &[("dinheiro", "100")]));
-    let ajuste = json!({ "produtoId": p.filtro, "quantidade": "3", "motivo": "contagem" });
+    let cancelar = json!({ "id": v, "motivo": "cliente desistiu" });
 
-    assert!(l.erro("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true })).contains("para que"));
-    assert!(l.erro("gerente_liberar", json!({ "senha": SENHA_ANA, "acao": "tudo" })).contains("para que"));
+    // Sem dizer para quê, para algo que não existe, para a regra de preço
+    // "só de olhar" ou para um comando que não é do gerente: não libera.
+    for pedido in [
+        json!({ "senha": SENHA_ANA }),
+        json!({ "senha": SENHA_ANA, "acao": "tudo" }),
+        json!({ "senha": SENHA_ANA, "acao": "precos" }),
+        json!({ "senha": SENHA_ANA, "comando": "venda_concluir", "dados": {} }),
+        json!({ "senha": SENHA_ANA, "comando": "qualquer_coisa", "dados": {} }),
+    ] {
+        assert!(l.erro("gerente_liberar", pedido.clone()).contains("para que"), "{pedido}");
+    }
 
-    // Para cancelar uma venda: não serve para ajustar o estoque.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "cancelar_venda" }));
-    assert_eq!(l.ok("permissao", json!({ "acao": "cancelar_venda" }))["pode"], true);
-    assert_eq!(l.ok("permissao", json!({ "acao": "ajustar_estoque" }))["pode"], false);
-    assert!(l.erro("estoque_ajustar", ajuste.clone()).contains("Só o gerente"));
-    // Erro (sem motivo) não gasta a senha; dar certo gasta.
-    l.erro("venda_cancelar", json!({ "id": v, "motivo": "" }));
-    l.ok("venda_cancelar", json!({ "id": v, "motivo": "cliente desistiu" }));
+    liberar(&mut l, "venda_cancelar", &cancelar);
+    // Outros dados, outro motivo, outra venda, outro comando da mesma
+    // permissão ou de outra: tudo recusado.
+    so_o_gerente(&mut l, "venda_cancelar", json!({ "id": v, "motivo": "outro motivo" }));
+    so_o_gerente(&mut l, "venda_cancelar", json!({ "id": p.v2, "motivo": "cliente desistiu" }));
+    so_o_gerente(&mut l, "venda_cancelar", json!({ "id": v, "motivo": "cliente desistiu", "extra": 1 }));
+    so_o_gerente(&mut l, "estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "3", "motivo": "x" }));
+    so_o_gerente(&mut l, "compra_estornar", json!({ "id": p.compra, "motivo": "cliente desistiu" }));
     assert_eq!(l.ok("permissao", json!({ "acao": "cancelar_venda" }))["pode"], false);
-    assert!(l.erro("venda_cancelar", json!({ "id": p.v2, "motivo": "de novo" })).contains("Só o gerente"));
+    // A mesma, com os mesmos dados (as chaves em outra ordem dão no mesmo): passa uma vez.
+    l.ok("venda_cancelar", json!({ "motivo": "cliente desistiu", "id": v }));
+    so_o_gerente(&mut l, "venda_cancelar", cancelar.clone());
 
-    // Tela do Financeiro: vale para o Financeiro (várias vezes), não para estornar.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": false, "acao": "financeiro" }));
-    l.ok("financeiro_resumo", json!({}));
-    l.ok("pagar_painel", json!({}));
-    l.ok("contas_loja", json!({}));
-    let pago: String =
-        l.conexao().query_row("SELECT id FROM pagamento WHERE estornado_em IS NULL LIMIT 1", [], |r| r.get(0)).unwrap();
-    let m = l.erro("pagamento_estornar", json!({ "id": pago, "motivo": "errado" }));
-    assert!(m.contains("Só o gerente"), "{m}");
-    assert!(l.erro("estoque_ajustar", ajuste.clone()).contains("Só o gerente"));
-    assert!(l.erro("dre_apurar", json!({ "periodo": "mes" })).contains("Só o gerente"));
-    // Senha só para estornar, dentro do Financeiro: estorna uma vez; o
-    // Financeiro continua aberto.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "estornar" }));
-    l.ok("pagamento_estornar", json!({ "id": pago, "motivo": "errado" }));
-    assert_eq!(l.ok("permissao", json!({ "acao": "estornar" }))["pode"], false);
-    l.ok("financeiro_resumo", json!({}));
-    // Sair da tela (encerrar) acaba com a do Financeiro.
-    l.ok("gerente_encerrar", json!({}));
-    assert!(l.erro("financeiro_resumo", json!({})).contains("Só o gerente"));
+    // Erro: a senha fica só para repetir a mesma coisa.
+    let errado = json!({ "produtoId": p.filtro, "quantidade": "abc", "motivo": "contagem" });
+    liberar(&mut l, "estoque_ajustar", &errado);
+    for _ in 0..2 {
+        let r = l.chamar("estoque_ajustar", errado.clone());
+        assert_eq!(r["ok"], false);
+        assert_ne!(r["campo"], "gerente", "deu erro do ajuste, não de permissão: {r}");
+    }
+    so_o_gerente(&mut l, "estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "3", "motivo": "contagem" }));
+    // 10 − 2 + 1 − 1 (do povoar), −1 +1 (venda cancelada acima): 8, sem ajuste.
+    assert_eq!(l.estoque(&p.filtro), "8", "o ajuste corrigido não podia passar com a senha do errado");
 
-    // Configurações: a tela vale para o backup e a pílula Gerente (estão
-    // nela), não para cancelar venda nem para a regra de preço.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": false, "acao": "configuracoes" }));
-    l.ok("gerente_ler", json!({}));
-    l.ok("backup_ler", json!({}));
-    assert_eq!(l.ok("permissao", json!({ "acao": "precos" }))["pode"], false);
-    assert_eq!(l.ok("permissao", json!({ "acao": "cancelar_venda" }))["pode"], false);
-    l.ok("gerente_encerrar", json!({}));
-    assert_eq!(l.ok("permissao", json!({ "acao": "backup" }))["pode"], false);
-
-    // Trocar de usuário acaba com qualquer senha.
-    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "curta": true, "acao": "ajustar_estoque" }));
+    // Usuários: mexer na conta de um gerente com Usuários livre ainda pede
+    // a senha para aquela gravação.
+    l.entrar("Ana", SENHA_ANA);
+    l.ok("gerente_salvar", json!({ "acoes": { "usuarios": false } }));
     l.entrar("Bia", SENHA_BIA);
-    assert_eq!(l.ok("permissao", json!({ "acao": "ajustar_estoque" }))["pode"], false);
+    let nova_gerente =
+        json!({ "nome": "Gil", "senha": "gil-12345", "senha2": "gil-12345", "ativo": true, "gerente": true });
+    so_o_gerente(&mut l, "usuario_salvar", nova_gerente.clone());
+    let outra =
+        json!({ "nome": "Gil", "senha": "outra-senha", "senha2": "outra-senha", "ativo": true, "gerente": true });
+    liberar(&mut l, "usuario_salvar", &outra);
+    so_o_gerente(&mut l, "usuario_salvar", nova_gerente);
+    l.ok("usuario_salvar", outra);
 
-    // Cada liberação fica na auditoria com o que foi liberado.
+    // Presa ao usuário: trocar de usuário acaba com ela.
+    let ajuste = json!({ "produtoId": p.filtro, "quantidade": "5", "motivo": "contagem" });
+    liberar(&mut l, "estoque_ajustar", &ajuste);
+    l.entrar("Bia", SENHA_BIA);
+    so_o_gerente(&mut l, "estoque_ajustar", ajuste);
+
+    // Auditoria: o que foi liberado, para quem, sem os dados.
     let c = l.conexao();
     let detalhes: Vec<String> = c
         .prepare("SELECT detalhes FROM auditoria WHERE acao = 'gerente.liberar' ORDER BY rowid")
@@ -347,9 +370,217 @@ fn d09_5_senha_do_gerente_nao_fica_aberta() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(detalhes.len(), 5, "{detalhes:?}");
-    assert!(detalhes[0].contains("cancelar venda") && detalhes[0].contains("uma vez"), "{detalhes:?}");
-    assert!(detalhes[1].contains("nesta tela"), "{detalhes:?}");
+    assert_eq!(detalhes.len(), 4, "{detalhes:?}");
+    assert!(detalhes[0].contains("Bia") && detalhes[0].contains("cancelar venda"), "{detalhes:?}");
+    assert!(detalhes.iter().all(|d| d.contains("uma vez, com estes dados")), "{detalhes:?}");
+    assert!(detalhes.iter().all(|d| !d.contains("cliente desistiu") && !d.contains("outra-senha")), "{detalhes:?}");
+}
+
+/// D-09 — Consulta de uma tela do gerente: a senha deixa só ler a tela
+/// daquela ação, até sair dela. Não grava, não abre outras telas nem a
+/// pílula Gerente, nem por chamada direta.
+#[test]
+fn d09_8_consulta_so_le_a_propria_tela() {
+    let (mut l, p) = loja();
+    l.entrar("Bia", SENHA_BIA);
+    let pago: String =
+        l.conexao().query_row("SELECT id FROM pagamento WHERE estornado_em IS NULL LIMIT 1", [], |r| r.get(0)).unwrap();
+
+    // Financeiro: lê (várias vezes) e vê os saldos das contas.
+    consultar(&mut l, "financeiro");
+    assert_eq!(l.ok("permissao", json!({ "acao": "financeiro" }))["pode"], false, "sem senha, não");
+    assert_eq!(l.ok("permissao", json!({ "acao": "financeiro", "consulta": true }))["pode"], true);
+    for _ in 0..2 {
+        l.ok("financeiro_resumo", json!({}));
+        l.ok("pagar_painel", json!({}));
+        l.ok("cheques_painel", json!({}));
+    }
+    assert!(l.ok("contas_loja", json!({}))[0]["saldo"].is_string());
+    // Não grava nada do Financeiro.
+    so_o_gerente(
+        &mut l,
+        "pagar_lancar",
+        json!({ "categoriaId": "cat-aluguel", "descricao": "x", "valor": "10", "parcelas": 1 }),
+    );
+    so_o_gerente(
+        &mut l,
+        "movimento_lancar",
+        json!({ "contaId": "caixa-geral", "tipo": "saida", "valor": "5", "categoriaId": "cat-energia", "descricao": "x" }),
+    );
+    so_o_gerente(&mut l, "pagamento_estornar", json!({ "id": pago, "motivo": "errado" }));
+    so_o_gerente(&mut l, "comissao_fechar", json!({ "usuarioId": "x", "de": "", "ate": "", "vencimento": "" }));
+    // Não abre outras telas, nem a pílula Gerente nem o Backup.
+    so_o_gerente(&mut l, "dre_apurar", json!({ "periodo": "mes" }));
+    so_o_gerente(&mut l, "gerente_ler", json!({}));
+    so_o_gerente(&mut l, "backup_ler", json!({}));
+    so_o_gerente(&mut l, "gerente_salvar", json!({ "acoes": { "financeiro": false } }));
+    assert_eq!(l.ok("painel_resumo", json!({}))["pagar7Dias"], "", "o Painel é outra tela");
+    // Gravar com a senha para aquela gravação: passa uma vez; a consulta continua.
+    let estorno = json!({ "id": pago, "motivo": "errado" });
+    liberar(&mut l, "pagamento_estornar", &estorno);
+    l.ok("pagamento_estornar", estorno);
+    l.ok("financeiro_resumo", json!({}));
+    // Sair da tela acaba com a consulta.
+    l.ok("gerente_encerrar", json!({}));
+    so_o_gerente(&mut l, "financeiro_resumo", json!({}));
+    assert!(l.ok("contas_loja", json!({}))[0].get("saldo").is_none());
+
+    // Resultados: lê a DRE e o lucro do Painel; não grava metas nem abre o
+    // cadastro com custo nem o lucro do Estoque.
+    consultar(&mut l, "resultados");
+    l.ok("dre_apurar", json!({ "periodo": "mes" }));
+    l.ok("dre_metas", json!({}));
+    assert_ne!(l.ok("painel_resumo", json!({}))["lucroMes"], "");
+    so_o_gerente(
+        &mut l,
+        "dre_meta_salvar",
+        json!({ "periodo": "mes", "indicador": "vendas", "vendedorId": "", "valor": "5" }),
+    );
+    so_o_gerente(&mut l, "dre_classificacao_salvar", json!({ "categorias": [], "confirmar": true }));
+    sem_custos(&l.ok("produto_abrir", json!({ "id": p.filtro })), "cadastro com a consulta dos resultados");
+    assert_eq!(l.ok("estoque_mais_vendidos", json!({ "dias": 30, "ordem": "valor", "texto": "" }))["lucro"], "");
+    so_o_gerente(&mut l, "financeiro_resumo", json!({}));
+    l.ok("gerente_encerrar", json!({}));
+
+    // Configurações: a senha das Configurações não abre o Backup nem a
+    // pílula Gerente, nem grava as Configurações; cada um pede a sua.
+    consultar(&mut l, "configuracoes");
+    so_o_gerente(&mut l, "backup_ler", json!({}));
+    so_o_gerente(&mut l, "gerente_ler", json!({}));
+    so_o_gerente(&mut l, "codigos_situacao", json!({}));
+    let cfg = l.ok("config_ler", json!({}));
+    so_o_gerente(&mut l, "config_salvar", cfg);
+    so_o_gerente(&mut l, "sync_salvar", json!({ "ligado": false, "senha": "", "enderecos": "" }));
+    consultar(&mut l, "backup");
+    l.ok("backup_ler", json!({}));
+    so_o_gerente(&mut l, "backup_salvar", json!({ "pasta": "", "hora": "", "dias": "" }));
+    so_o_gerente(&mut l, "gerente_ler", json!({}));
+    consultar(&mut l, "gerente");
+    l.ok("gerente_ler", json!({}));
+    l.ok("conflitos_listar", json!({}));
+    so_o_gerente(&mut l, "gerente_salvar", json!({ "acoes": { "cancelar_venda": false } }));
+    so_o_gerente(&mut l, "codigos_definir_pendentes", json!({}));
+    assert_eq!(l.numero("SELECT COUNT(*) FROM config WHERE chave = 'gerente_livres' AND valor LIKE '%cancelar%'"), 0);
+    l.ok("gerente_encerrar", json!({}));
+    so_o_gerente(&mut l, "backup_ler", json!({}));
+
+    // Presa ao usuário: outro caixa que entra depois não herda a consulta.
+    l.entrar("Ana", SENHA_ANA);
+    l.usuario_caixa("Caio", "2222");
+    l.entrar("Bia", SENHA_BIA);
+    consultar(&mut l, "financeiro");
+    l.ok("financeiro_resumo", json!({}));
+    // Entra direto, sem "sair" antes (como quem troca de usuário na tela de entrada).
+    let caio = l.ok("usuarios_entrada", json!({})).as_array().unwrap().iter().find(|u| u["nome"] == "Caio").unwrap()
+        ["id"]
+        .clone();
+    l.ok("entrar", json!({ "id": caio, "senha": "2222" }));
+    so_o_gerente(&mut l, "financeiro_resumo", json!({}));
+    assert_eq!(l.ok("permissao", json!({ "acao": "financeiro", "consulta": true }))["pode"], false);
+
+    // A auditoria diz que foi só consulta.
+    let n = l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.liberar' AND detalhes LIKE '%só leitura%'");
+    assert_eq!(n, 6);
+}
+
+/// D-09 — Preço padrão de venda: qualquer mudança numa peça cadastrada (com
+/// custo ou sem, em qualquer tabela, na oferta ou no "preço na hora da
+/// venda") pede o gerente. Cadastrar peça nova com preço e mudar o resto
+/// da peça, não. Desconto na venda é outra coisa: segue as permissões dele.
+#[test]
+fn d09_7_preco_padrao_e_desconto_na_venda() {
+    let (mut l, p) = loja();
+    l.entrar("Bia", SENHA_BIA);
+    let oleo = gravado(&l, &p.oleo);
+    assert_eq!(oleo.0, 0, "o óleo não tem custo");
+    let base = l.ok("produto_abrir", json!({ "id": p.oleo }));
+    let mudancas: [(&str, Mudar); 4] = [
+        ("preço da revenda", |f| f["precos"][0]["preco"] = json!("31")),
+        ("preço de outra tabela", |f| f["precos"][1]["preco"] = json!("28")),
+        ("oferta", |f| f["ofertaPreco"] = json!("25")),
+        ("preço na hora da venda", |f| f["precoAberto"] = json!(true)),
+    ];
+    for (o_que, mudar) in &mudancas {
+        let mut f = base.clone();
+        mudar(&mut f);
+        let r = l.chamar("produto_salvar", f);
+        assert_eq!(r["campo"], "precos", "{o_que}: {r}");
+    }
+    assert_eq!(gravado(&l, &p.oleo), oleo);
+    // O resto da peça o caixa muda sem senha.
+    let mut f = base.clone();
+    f["local"] = json!("Estante 2");
+    f["precos"][0]["preco"] = json!("30,00");
+    l.ok("produto_salvar", f);
+    // Peça nova: cadastra com preço, oferta e tudo, sem senha.
+    let mut f = l.ok("produto_novo", json!({}));
+    f["nome"] = json!("Palheta");
+    f["precos"][0]["preco"] = json!("40");
+    f["precos"][1]["preco"] = json!("35");
+    f["ofertaPreco"] = json!("38");
+    l.ok("produto_salvar", f);
+    // Com a senha para aquela mudança: grava.
+    let mut f = base.clone();
+    f["precos"][0]["preco"] = json!("31");
+    liberar(&mut l, "produto_salvar", &f);
+    l.ok("produto_salvar", f);
+    assert_eq!(gravado(&l, &p.oleo).1, 3100);
+
+    // Desconto na venda: dentro do limite da loja, o caixa dá sem senha, e o
+    // preço da peça não muda.
+    l.abrir_caixa();
+    let v = l.vender_com(&[(&p.oleo, "1")], &[("dinheiro", "28")], json!({ "desconto": "3" }));
+    assert!(v["id"].is_string(), "{v}");
+    assert_eq!(gravado(&l, &p.oleo).1, 3100);
+}
+
+/// D-09 — A senha do gerente digitada no aperto não fica gravada em lugar
+/// nenhum: nem no banco, nem no histórico, nem no registro de erros, nem em
+/// outro arquivo da pasta da loja (também quando é digitada errada).
+#[test]
+fn d09_9_senha_do_gerente_nao_e_gravada() {
+    let (mut l, p) = loja();
+    const SENHA_GIL: &str = "Zebra-Listrada-Azul-4729";
+    l.ok(
+        "usuario_salvar",
+        json!({ "nome": "Gil", "senha": SENHA_GIL, "senha2": SENHA_GIL, "ativo": true, "gerente": true }),
+    );
+    l.entrar("Bia", SENHA_BIA);
+    let errada = "Girafa-Pintada-Verde-8113";
+    let ajuste = json!({ "produtoId": p.filtro, "quantidade": "4", "motivo": "contagem" });
+    l.erro("gerente_liberar", json!({ "senha": errada, "comando": "estoque_ajustar", "dados": ajuste }));
+    l.ok("gerente_liberar", json!({ "senha": SENHA_GIL, "comando": "estoque_ajustar", "dados": ajuste }));
+    l.ok("estoque_ajustar", ajuste);
+    l.ok("gerente_liberar", json!({ "senha": SENHA_GIL, "acao": "financeiro" }));
+    l.ok("financeiro_resumo", json!({}));
+    // Erro interno vai para o registro: provoca um (comando que não existe).
+    l.chamar("comando_que_nao_existe", json!({ "senha": SENHA_GIL }));
+    l.fechar();
+    let mut achados = Vec::new();
+    fn procurar(pasta: &std::path::Path, agulhas: &[&str], achados: &mut Vec<String>) {
+        let Ok(lista) = std::fs::read_dir(pasta) else { return };
+        for e in lista.flatten() {
+            let caminho = e.path();
+            if caminho.is_dir() {
+                procurar(&caminho, agulhas, achados);
+            } else if let Ok(bytes) = std::fs::read(&caminho) {
+                for a in agulhas {
+                    if bytes.windows(a.len()).any(|w| w == a.as_bytes()) {
+                        achados.push(format!("{} em {}", a, caminho.display()));
+                    }
+                }
+            }
+        }
+    }
+    // A pasta de todas as lojas de teste: o registro de erros é um só no
+    // programa e pode estar na pasta de outro teste.
+    for e in std::fs::read_dir(std::env::temp_dir()).unwrap().flatten() {
+        if e.file_name().to_string_lossy().starts_with("rustinho-estavel-") {
+            procurar(&e.path(), &[SENHA_GIL, errada], &mut achados);
+        }
+    }
+    assert!(achados.is_empty(), "a senha ficou gravada: {achados:?}");
+    l.reabrir();
 }
 
 /// D-09.5 — Relatórios e indicadores de custo, lucro e margem continuam só

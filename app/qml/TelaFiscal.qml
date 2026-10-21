@@ -50,7 +50,7 @@ FocusScope {
     }
 
     function salvarRegras() {
-        janela.comGerente("configuracoes", salvarRegrasAgora)
+        salvarRegrasAgora()
     }
     function salvarRegrasAgora() {
         const lista = []
@@ -58,19 +58,20 @@ FocusScope {
             const g = regras.get(i)
             lista.push({ uf: g.uf, cestInicio: g.cestInicio, vigenteDe: g.vigenteDe, vigenteAte: g.vigenteAte, comSt: g.comSt, descricao: g.descricao })
         }
-        const r = Api.chamar("fiscal_regras_salvar", { regras: lista })
-        if (r.ok) {
-            preencher(r.dados)
-            janela.avisar("Regras de ST salvas.", "ok")
-        } else {
-            const m = r.campo ? r.campo.match(/^regras\.(\d+)\.(\w+)$/) : null
-            if (m) {
-                const linha = repRegras.itemAt(parseInt(m[1]))
-                if (linha)
-                    linha.campo(m[2]).erro = r.erro
+        janela.chamarGerente("fiscal_regras_salvar", { regras: lista }, r => {
+            if (r.ok) {
+                preencher(r.dados)
+                janela.avisar("Regras de ST salvas.", "ok")
+            } else {
+                const m = r.campo ? r.campo.match(/^regras\.(\d+)\.(\w+)$/) : null
+                if (m) {
+                    const linha = repRegras.itemAt(parseInt(m[1]))
+                    if (linha)
+                        linha.campo(m[2]).erro = r.erro
+                }
+                janela.avisar(r.erro, "erro")
             }
-            janela.avisar(r.erro, "erro")
-        }
+        })
     }
 
     function aoEsc() {

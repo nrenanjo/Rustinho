@@ -342,8 +342,8 @@ FocusScope {
                             marcada: tela.marcadas.includes(modelData.id)
                             onMarcar: sim => tela.marcar(modelData.id, sim)
                             onAbrirVenda: tela.janela.abrir("TelaVenda", { vendaId: modelData.vendaId })
-                            onCancelar: tela.janela.comGerente("estornar", () => motivo.perguntar("Tirar esta dívida?", modelData.descricao + " · R$ " + modelData.valor,
-                                                         "Tirar", id => Api.chamar("conta_cancelar", { id: modelData.id, motivo: id })))
+                            onCancelar: motivo.perguntar("Tirar esta dívida?", modelData.descricao + " · R$ " + modelData.valor,
+                                                         "Tirar", (m, pronto) => tela.janela.chamarGerente("conta_cancelar", { id: modelData.id, motivo: m }, pronto))
                         }
                         Nota {
                             anchors.centerIn: parent
@@ -400,9 +400,9 @@ FocusScope {
                                             text: "Estornar"
                                             tipo: "discreto"
                                             implicitHeight: 32
-                                            onClicked: tela.janela.comGerente("estornar", () => motivo.perguntar("Estornar o pagamento?",
+                                            onClicked: motivo.perguntar("Estornar o pagamento?",
                                                 "R$ " + modelData.valor + " de " + modelData.quando + ". As parcelas voltam a ficar em aberto.",
-                                                "Estornar", m => Api.chamar("recebimento_estornar", { id: modelData.id, motivo: m })))
+                                                "Estornar", (m, pronto) => tela.janela.chamarGerente("recebimento_estornar", { id: modelData.id, motivo: m }, pronto))
                                         }
                                     }
                                 }

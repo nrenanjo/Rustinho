@@ -34,7 +34,7 @@ FocusScope {
     function cancelar() {
         motivo.texto = ""
         motivo.erro = ""
-        janela.comGerente("cancelar_venda", () => caixaCancelar.open())
+        caixaCancelar.open()
     }
 
     ColumnLayout {
@@ -310,14 +310,15 @@ FocusScope {
                     text: tela.orcamento ? "Cancelar orçamento" : "Cancelar venda"
                     tipo: "perigo"
                     onClicked: {
-                        const r = Api.chamar("venda_cancelar", { id: tela.vendaId, motivo: motivo.texto })
-                        if (r.ok) {
-                            tela.v = r.dados
-                            caixaCancelar.close()
-                            tela.janela.avisar(tela.orcamento ? "Orçamento cancelado." : "Venda cancelada. As peças voltaram ao estoque.", "ok")
-                        } else {
-                            motivo.erro = r.erro
-                        }
+                        tela.janela.chamarGerente("venda_cancelar", { id: tela.vendaId, motivo: motivo.texto }, r => {
+                            if (r.ok) {
+                                tela.v = r.dados
+                                caixaCancelar.close()
+                                tela.janela.avisar(tela.orcamento ? "Orçamento cancelado." : "Venda cancelada. As peças voltaram ao estoque.", "ok")
+                            } else {
+                                motivo.erro = r.erro
+                            }
+                        })
                     }
                 }
             }

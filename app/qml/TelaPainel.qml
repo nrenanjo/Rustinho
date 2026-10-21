@@ -24,7 +24,7 @@ FocusScope {
                     vendedores = u.ok ? u.dados : []
                 }
                 secao = id
-            }, true)
+            })
             return
         }
         secao = id

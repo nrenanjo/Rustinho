@@ -40,13 +40,14 @@ Painel {
     }
     function salvar() {
         const lista = Object.keys(escolhas).map(id => ({ id: id, grupo: escolhas[id] }))
-        const r = Api.chamar("dre_classificacao_salvar", { categorias: lista, confirmar: confirmar.checked })
-        if (!r.ok) {
-            erro = r.erro
-            return
-        }
-        close()
-        salvo()
+        ApplicationWindow.window.chamarGerente("dre_classificacao_salvar", { categorias: lista, confirmar: confirmar.checked }, r => {
+            if (!r.ok) {
+                erro = r.erro
+                return
+            }
+            close()
+            salvo()
+        })
     }
 
     contentItem: ColumnLayout {

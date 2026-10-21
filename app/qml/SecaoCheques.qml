@@ -217,17 +217,16 @@ FocusScope {
                             implicitHeight: 36
                             onClicked: motivo.perguntar("Repassar o cheque nº " + linha.ch.numero + "?",
                                                         "R$ " + linha.ch.valor + ". Ex.: pagou o fornecedor com ele.", "Repassar",
-                                                        m => Api.chamar("cheque_repassar", { id: linha.ch.id, motivo: m }), "Para quem", "principal")
+                                                        (m, pronto) => secao.janela.chamarGerente("cheque_repassar", { id: linha.ch.id, motivo: m }, pronto), "Para quem", "principal")
                         }
                         Botao {
                             visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular)
                             text: "Desfazer"
                             tipo: "discreto"
                             implicitHeight: 36
-                            // D-09: a senha do Financeiro não vale para desfazer.
-                            onClicked: janela.comGerente("estornar", () => janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
-                                                        "Voltar", () => {
-                                                            const r = Api.chamar("cheque_desfazer", { id: linha.ch.id })
+                            // D-09: a senha da consulta do Financeiro não vale para desfazer.
+                            onClicked: janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
+                                                        "Voltar", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
                                                             if (!r.ok)
                                                                 janela.avisar(r.erro, "erro")
                                                             secao.carregar()
@@ -272,14 +271,15 @@ FocusScope {
         }
         function salvar() {
             const c = bancos[conta.indice]
-            const r = Api.chamar("cheque_depositar", { id: cheque.id, conta: c ? c.id : "" })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            janela.avisar("Cheque depositado.", "ok")
-            secao.carregar()
+            secao.janela.chamarGerente("cheque_depositar", { id: cheque.id, conta: c ? c.id : "" }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                janela.avisar("Cheque depositado.", "ok")
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -316,13 +316,14 @@ FocusScope {
             dMotivo.focar()
         }
         function salvar() {
-            const r = Api.chamar("cheque_devolver", { id: cheque.id, motivo: dMotivo.texto, divida: divida.checked })
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            secao.carregar()
+            secao.janela.chamarGerente("cheque_devolver", { id: cheque.id, motivo: dMotivo.texto, divida: divida.checked }, r => {
+                if (!r.ok) {
+                    erro = r.erro
+                    return
+                }
+                close()
+                secao.carregar()
+            })
         }
         contentItem: ColumnLayout {
             spacing: 12

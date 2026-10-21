@@ -35,7 +35,11 @@ Popup {
     }
 
     function confirmar() {
-        const r = Api.chamar("estoque_ajustar", { produtoId: produtoId, quantidade: quantidade.texto, motivo: motivo.texto })
+        // D-09: a senha do gerente vale para este ajuste, com estes números.
+        ApplicationWindow.window.chamarGerente("estoque_ajustar",
+                { produtoId: produtoId, quantidade: quantidade.texto, motivo: motivo.texto }, r => ajuste.depoisDeAjustar(r))
+    }
+    function depoisDeAjustar(r) {
         if (r.ok) {
             close()
             ajustado(r.dados)

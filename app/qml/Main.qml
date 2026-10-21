@@ -80,7 +80,7 @@ ApplicationWindow {
         const acao = ({ TelaFinanceiro: "financeiro", TelaUsuarios: "usuarios" })[tela]
         const empurrar = () => pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {})
         if (acao)
-            comGerente(acao, empurrar, true)
+            comGerente(acao, empurrar)
         else
             empurrar()
     }
@@ -142,26 +142,47 @@ ApplicationWindow {
             abrir(t[0], t[1])
     }
 
-    // Funções que a loja deixou só para o gerente. Se quem está usando é
-    // caixa, pede a senha de um gerente na hora ("aperto") e depois faz.
-    // tela = true: vale enquanto a tela estiver aberta (Financeiro, Usuários),
-    // só para o que é daquela tela; senão, vale para essa ação uma vez só.
+    // Funções que a loja deixou só para o gerente (D-09). Se quem está
+    // usando é caixa:
+    // - comGerente(acao, depois): abrir a tela da ação para CONSULTAR. A
+    //   senha vale só para ler aquela tela, até sair dela;
+    // - chamarGerente(comando, dados, depois): uma GRAVAÇÃO. Tenta; se o
+    //   Rustinho pedir o gerente, pede a senha presa a este comando com estes
+    //   dados e repete. depois(r) recebe a resposta final (também se desistir).
     readonly property var nomesDasAcoes: ({
         cancelar_venda: "Cancelar venda", estornar: "Estornar", ajustar_estoque: "Ajustar estoque",
         backup: "Backup", configuracoes: "Configurações da loja", usuarios: "Usuários",
         financeiro: "Financeiro", resultados: "Resultados (lucro e DRE)", gerente: "Gerente",
-        precos: "Mudar a regra de preço (% de lucro)"
+        precos: "Mudar o preço de venda"
     })
-    function podeGerente(acao) {
-        const r = Api.chamar("permissao", { acao: acao })
+    function podeGerente(acao, consulta) {
+        const r = Api.chamar("permissao", { acao: acao, consulta: !!consulta })
         return r.ok && r.dados.pode
     }
-    function comGerente(acao, depois, tela) {
-        if (podeGerente(acao)) {
+    function comGerente(acao, depois) {
+        if (podeGerente(acao, true)) {
             depois()
             return
         }
-        pedirGerente.pedir(acao, nomesDasAcoes[acao] || "", !tela, depois)
+        pedirGerente.consultar(acao, nomesDasAcoes[acao] || "", depois)
+    }
+    function chamarGerente(comando, dados, depois) {
+        const r = Api.chamar(comando, dados)
+        const pedeSenha = !r.ok && (r.campo === "gerente" || r.campo === "precos")
+                          && !(estado.usuario && estado.usuario.gerente)
+        if (!pedeSenha) {
+            if (depois)
+                depois(r)
+            return
+        }
+        pedirGerente.paraChamada(comando, dados, r.erro, () => {
+            const r2 = Api.chamar(comando, dados)
+            if (depois)
+                depois(r2)
+        }, () => {
+            if (depois)
+                depois(r)
+        })
     }
     // Ao sair de uma tela do gerente aberta com a senha dele.
     function encerrarGerente() {

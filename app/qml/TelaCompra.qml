@@ -136,7 +136,7 @@ FocusScope {
     function estornar() {
         motivoEstorno.texto = ""
         motivoEstorno.erro = ""
-        janela.comGerente("estornar", () => caixaEstorno.open())
+        caixaEstorno.open()
     }
 
     function descartar() {
@@ -655,14 +655,15 @@ FocusScope {
                     text: "Estornar"
                     tipo: "perigo"
                     onClicked: {
-                        const r = Api.chamar("compra_estornar", { id: tela.compra.id, motivo: motivoEstorno.texto })
-                        if (r.ok) {
-                            tela.compra = r.dados
-                            caixaEstorno.close()
-                            tela.janela.avisar("Compra estornada.", "ok")
-                        } else {
-                            motivoEstorno.erro = r.erro
-                        }
+                        tela.janela.chamarGerente("compra_estornar", { id: tela.compra.id, motivo: motivoEstorno.texto }, r => {
+                            if (r.ok) {
+                                tela.compra = r.dados
+                                caixaEstorno.close()
+                                tela.janela.avisar("Compra estornada.", "ok")
+                            } else {
+                                motivoEstorno.erro = r.erro
+                            }
+                        })
                     }
                 }
             }

@@ -302,11 +302,11 @@ FocusScope {
                         text: "Desfazer"
                         tipo: "discreto"
                         implicitHeight: 36
-                        onClicked: tela.janela.comGerente("estornar", () => pergunta.perguntar("Desfazer a devolução " + lf.modelData.numero + "?",
+                        onClicked: pergunta.perguntar("Desfazer a devolução " + lf.modelData.numero + "?",
                                                       lf.modelData.valeUsado ? "O vale-troca desta devolução já foi usado: cancele antes a venda que usou o vale."
                                                                              : "As peças saem de novo do estoque" + (lf.modelData.como.indexOf("vale") >= 0 ? " e o vale-troca é cancelado." : "."),
                                                       "Desfazer",
-                                                      (m) => Api.chamar("devolucao_desfazer", { id: lf.modelData.id, motivo: m })))
+                                                      (m, pronto) => tela.janela.chamarGerente("devolucao_desfazer", { id: lf.modelData.id, motivo: m }, pronto))
                     }
                     ColumnLayout {
                         spacing: 0
