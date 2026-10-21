@@ -56,7 +56,7 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 - **Caixa:** abertura com o troco da gaveta, **sangria** e **suprimento**, "dinheiro na gaveta" sempre à vista, vendas por forma de pagamento e **fechamento** com o dinheiro contado (mostra se sobrou ou faltou e imprime). Cada venda pode ser aberta, reimpressa ou **cancelada** (as peças voltam ao estoque).
 - **Compras:** quando o custo de uma peça **baixa**, a compra pergunta se o preço de revenda fica ou baixa junto. Quando sobe, o preço segue o % de lucro.
 - **Vários caixas juntos (Wi-Fi):**
-  1. No caixa que já tem os dados: **Configurações → Caixas da loja** → marque "Trocar dados com os outros caixas" e crie uma **senha da rede da loja** (pelo menos 8 caracteres).
+  1. No caixa que já tem os dados: **Configurações → Caixas da loja** → marque "Trocar dados com os outros caixas" e crie uma **senha da rede da loja** (pelo menos 4 caracteres).
   2. Nos outros computadores, na primeira vez que o Rustinho abrir: **"Já uso o Rustinho em outro caixa da loja"** → nome do computador (Caixa 2, 3, 4) e a mesma senha. Em segundos chegam usuários, peças, clientes, estoque e vendas.
   3. Daí em diante, cada venda, compra ou cadastro aparece nos outros caixas em poucos segundos. Sem internet ou sem rede, cada caixa continua vendendo e acerta quando a rede volta.
   - Os caixas se acham sozinhos. Se a rede não deixar, digite o endereço do outro caixa (aparece em Configurações).

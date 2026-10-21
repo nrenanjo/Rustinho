@@ -2131,10 +2131,10 @@ pub fn senha_fora_da_politica(conn: &Connection) -> Resultado<bool> {
 /// Grava as configurações da sincronização (só deste computador).
 pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &str) -> Resultado<()> {
     let senha = senha.trim();
-    if ligado && senha.chars().count() < 8 {
+    if ligado && senha.chars().count() < 4 {
         return Err(Erro::campo(
             "senha",
-            "A senha da rede precisa ter pelo menos 8 caracteres. Use a mesma em todos os caixas.",
+            "A senha da rede precisa ter pelo menos 4 caracteres. Use a mesma em todos os caixas.",
         ));
     }
     // Senha da rede nova ou trocada segue a política (F-17). Manter a que já
