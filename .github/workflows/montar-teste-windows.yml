@@ -95,6 +95,7 @@ jobs:
       - name: Juntar os arquivos (Qt, rclone, runtime)
         shell: pwsh
         run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
           $nome = "Rustinho-$env:VERSAO-Windows-portatil"
           $p = "saida\$nome"
           New-Item -ItemType Directory -Force $p | Out-Null
@@ -118,8 +119,6 @@ jobs:
           [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "LICENCA.txt"), $t, $utf8)
           $t = (Get-Content -Raw -Encoding UTF8 docs\ROTEIRO-linux-completo.md) -replace "`r?`n", "`r`n"
           [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "ROTEIRO-DE-TESTE.txt"), $t, $utf8)
-          New-Item -ItemType Directory -Force "$p\exemplos" | Out-Null
-          Copy-Item exemplos\nfe_exemplo.xml "$p\exemplos\nota-de-teste.xml"
           New-Item -ItemType Directory -Force "$p\dados" | Out-Null
           echo "PASTA=$p" >> $env:GITHUB_ENV
           echo "NOME=$nome" >> $env:GITHUB_ENV
@@ -130,6 +129,7 @@ jobs:
       - name: Conferir o isolamento (abre uma cópia)
         shell: pwsh
         run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
           $copia = "conferir\$env:NOME"
           New-Item -ItemType Directory -Force conferir | Out-Null
           Copy-Item -Recurse $env:PASTA $copia
@@ -157,6 +157,7 @@ jobs:
       - name: ZIP e SHA-256
         shell: pwsh
         run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
           $zip = "saida\$env:NOME.zip"
           Compress-Archive -Path $env:PASTA -DestinationPath $zip -CompressionLevel Optimal
           $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()

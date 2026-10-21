@@ -34,10 +34,11 @@ O QUE FICA ISOLADO
 - Não restaure aqui um backup da loja de verdade.
 
 
-ARQUIVO DE TESTE
-----------------
-exemplos\nota-de-teste.xml é uma nota fiscal de mentira, para testar
-Compras > Importar XML.
+COMPRAS (IMPORTAR XML)
+----------------------
+O Rustinho confere a assinatura digital da nota: uma nota de mentira é
+recusada. Para testar Compras, use uma CÓPIA do XML de uma nota de compra
+de verdade (o arquivo original fica onde está).
 
 
 DUAS LOJAS NO MESMO COMPUTADOR (parte B do roteiro: backup)
