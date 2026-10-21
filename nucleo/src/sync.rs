@@ -147,7 +147,9 @@ pub(crate) fn travar() -> RwLockReadGuard<'static, ()> {
 /// Quantas alterações vão em cada resposta. Só os testes mudam isso, por banco
 /// (chave `sync_lote_teste`), para provar a troca de caminho entre lotes.
 fn lote(_conn: &Connection) -> i64 {
-    #[cfg(test)]
+    // Também nos testes de fora do núcleo (tests/estavel, T8), que ligam o
+    // recurso de teste; o programa final nunca tem isso.
+    #[cfg(any(test, feature = "ancoras-de-teste"))]
     if let Ok(Some(v)) = config::ler(_conn, "sync_lote_teste") {
         if let Ok(n) = v.parse::<i64>() {
             return n.max(1);
@@ -2219,8 +2221,10 @@ pub(crate) fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, en
 // ---------------------------------------------------------------------------
 
 pub(crate) fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
-    let conn = Connection::open(caminho)?;
+    let mut conn = Connection::open(caminho)?;
     conn.busy_timeout(Duration::from_secs(10))?;
+    // D-05: espera a vez de gravar em vez de falhar (veja `Banco::preparar`).
+    conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
     banco::registrar_funcoes(&conn)?;
     Ok(conn)
 }

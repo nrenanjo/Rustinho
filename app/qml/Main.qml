@@ -355,6 +355,28 @@ ApplicationWindow {
     }
     onErroGeralChanged: if (erroGeral !== "") marcarDiagnostico("erro ao abrir: " + erroGeral)
 
+    // D-07: usuário desativado (aqui ou em outro caixa) ou sessão perdida:
+    // volta para a entrada uma vez só, com o motivo.
+    property bool voltandoParaEntrada: false
+    Connections {
+        target: Api
+        function onSessaoEncerrada(motivo) {
+            if (janela.voltandoParaEntrada)
+                return
+            const atual = pilha.currentItem ? String(pilha.currentItem) : ""
+            if (atual.startsWith("TelaEntrar") || atual.startsWith("TelaBoasVindas"))
+                return
+            janela.voltandoParaEntrada = true
+            Qt.callLater(() => {
+                Tema.oculto = true
+                janela.atualizarEstado()
+                janela.trocarPara("TelaEntrar")
+                janela.avisar(motivo, "erro")
+                janela.voltandoParaEntrada = false
+            })
+        }
+    }
+
     Component.onCompleted: {
         marcarDiagnostico("Main.qml: início")
         if (atualizarEstado())

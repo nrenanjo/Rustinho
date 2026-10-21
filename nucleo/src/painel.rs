@@ -130,7 +130,8 @@ fn bloco(total: i64, vendas: i64) -> Bloco {
     Bloco {
         total: numeros::escrever_dinheiro(total),
         vendas,
-        ticket: if vendas > 0 { numeros::escrever_dinheiro(total / vendas) } else { String::new() },
+        // D-11: arredonda (como a DRE), não corta os centavos.
+        ticket: if vendas > 0 { numeros::escrever_dinheiro((total + vendas / 2) / vendas) } else { String::new() },
     }
 }
 
@@ -543,7 +544,7 @@ pub fn clientes(conn: &Connection, dias: i64) -> Resultado<Clientes> {
             telefone,
             compras: n,
             total: numeros::escrever_dinheiro(t),
-            ticket: numeros::escrever_dinheiro(if n > 0 { t / n } else { 0 }),
+            ticket: numeros::escrever_dinheiro(if n > 0 { (t + n / 2) / n } else { 0 }),
             ultima: fiscal::data_local_br(conn, &ultima)?,
             deve: if deve > 0 { numeros::escrever_dinheiro(deve) } else { String::new() },
             vencido: vencido > 0,
@@ -556,7 +557,7 @@ pub fn clientes(conn: &Connection, dias: i64) -> Resultado<Clientes> {
         parte_com_cliente: percentual(total_com, total_geral),
         clientes: clientes_n,
         novos,
-        ticket: if n_com > 0 { numeros::escrever_dinheiro(total_com / n_com) } else { String::new() },
+        ticket: if n_com > 0 { numeros::escrever_dinheiro((total_com + n_com / 2) / n_com) } else { String::new() },
         itens,
     })
 }

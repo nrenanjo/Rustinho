@@ -125,7 +125,7 @@ Rectangle {
                                     return "Que peça é esta?"
                                 if (linha.ignorado)
                                     return "Não entra no estoque"
-                                if (linha.item.acao === "nova")
+                                if (linha.item.acao === "nova" && !linha.peca)
                                     return "Vai ser cadastrada como peça nova"
                                 return linha.peca ? linha.peca.codigo + " · " + linha.peca.nome + (linha.peca.marca ? " (" + linha.peca.marca + ")" : "") : "Peça não encontrada"
                             }
@@ -152,7 +152,8 @@ Rectangle {
                                 if (linha.pendente)
                                     return "Não achei esta peça pelo código nem pelo código de barras."
                                 if (linha.item.acao === "nova")
-                                    return "Com o nome, NCM, CEST e código de barras da nota, e o preço pelo lucro padrão."
+                                    return linha.peca ? "Cadastrada como peça nova nesta compra."
+                                                      : "Com o nome, NCM, CEST e código de barras da nota, e o preço pelo lucro padrão."
                                 if (linha.ignorado)
                                     return "Use para material de uso da loja, brinde ou item que não é vendido."
                                 return ""
@@ -214,6 +215,8 @@ Rectangle {
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
+                        // D-12: com pouco espaço, quebra a linha em vez de passar por baixo do custo.
+                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
                     ColumnLayout {

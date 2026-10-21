@@ -35,6 +35,8 @@ impl Erro {
     pub fn nome_do_campo(&self) -> Option<&str> {
         match self {
             Erro::Validacao { campo, .. } => campo.as_deref(),
+            // A tela volta para a entrada quando o campo é "sessao" (D-07).
+            Erro::SemSessao => Some("sessao"),
             _ => None,
         }
     }

@@ -16,6 +16,8 @@
 //! quantidade de peças. O Simples Nacional não aproveita crédito de IPI nem
 //! de ICMS-ST, por isso eles entram no custo.
 
+use std::collections::{HashMap, HashSet};
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -134,8 +136,10 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
             }).to_string()
         ],
     )?;
+    let ambiguos = codigos_ambiguos(itens.iter().map(|i| (i.codigo.as_str(), i.descricao.as_str())));
     for (ordem, item) in itens.iter().enumerate() {
-        let (acao, produto_id, achado_por, fator) = ligar_sozinho(conn, &fornecedor_id, item)?;
+        let ambiguo = ambiguos.contains(&texto::compactar(&item.codigo));
+        let (acao, produto_id, achado_por, fator) = ligar_sozinho(conn, &fornecedor_id, item, ambiguo)?;
         conn.execute(
             "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, descricao, ncm, cest, cfop, unidade,
                                       origem, cst_icms, cst_pis, quantidade, valor_produtos, frete, seguro, desconto,
@@ -211,15 +215,30 @@ pub fn ratear(total: i64, pesos: &[i64]) -> Vec<i64> {
     partes
 }
 
+/// D-13: códigos (compactados) que aparecem na mesma nota em itens com
+/// descrições diferentes. Esses não ligam sozinhos pelo código do
+/// fornecedor nem gravam a ligação ao lançar: são peças diferentes.
+fn codigos_ambiguos<'a>(itens: impl Iterator<Item = (&'a str, &'a str)>) -> HashSet<String> {
+    let mut vistos: HashMap<String, HashSet<String>> = HashMap::new();
+    for (codigo, descricao) in itens {
+        let c = texto::compactar(codigo);
+        if !c.is_empty() {
+            vistos.entry(c).or_default().insert(texto::compactar(descricao));
+        }
+    }
+    vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(c, _)| c).collect()
+}
+
 /// Tenta achar a peça do item: código do fornecedor → código de barras →
 /// código original/equivalente. Devolve (ação, peça, como achou, fator).
 fn ligar_sozinho(
     conn: &Connection,
     fornecedor_id: &str,
     item: &ItemXml,
+    ambiguo: bool,
 ) -> Resultado<(String, Option<String>, String, i64)> {
     let compacto = texto::compactar(&item.codigo);
-    if !compacto.is_empty() {
+    if !compacto.is_empty() && !ambiguo {
         let r: Option<(String, i64)> = conn
             .query_row(
                 "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
@@ -806,6 +825,8 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         let cu = custo_unitario(custo_item, pecas);
         let peca = match (&it.acao[..], &it.produto_id) {
             ("ligar", Some(pid)) => peca_ligada(conn, pid, cu, atualizar_precos, it.baixar_preco)?,
+            // D-06: depois de lançada, o item "peça nova" mostra a peça criada.
+            ("nova", Some(pid)) => peca_ligada(conn, pid, cu, false, false)?,
             _ => None,
         };
         lista.push(ItemFicha {
@@ -1086,6 +1107,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
     let mut resumo =
         Lancamento { pecas_novas: 0, itens_estoque: 0, precos_atualizados: 0, parcelas_pagar: 0, encomendas: 0 };
     let mut entraram: Vec<(String, i64)> = Vec::new();
+    let ambiguos = codigos_ambiguos(itens.iter().map(|i| (i.codigo_fornecedor.as_str(), i.descricao.as_str())));
 
     for (i, it) in itens.iter().enumerate() {
         if it.acao == "ignorar" {
@@ -1136,7 +1158,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             None => entraram.push((produto_id.clone(), pecas)),
         }
         let compacto = texto::compactar(&it.codigo_fornecedor);
-        if !cab.fornecedor_id.is_empty() && !compacto.is_empty() {
+        if !cab.fornecedor_id.is_empty() && !compacto.is_empty() && !ambiguos.contains(&compacto) {
             conn.execute(
                 "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)

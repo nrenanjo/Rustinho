@@ -1301,6 +1301,11 @@ impl Servico {
             // Crediário e contas a receber
             "avisos_do_dia" => {
                 let mut avisos = crate::avisos::do_dia(&self.banco.conn)?;
+                // D-03: os avisos de contas a pagar e cheques têm valores do
+                // financeiro: só para quem pode ver o financeiro.
+                if !self.pode("financeiro", sessao)? {
+                    avisos.retain(|a| a.funcao != "financeiro");
+                }
                 if let Some(a) = crate::avisos::da_senha(&self.banco.conn, &sessao.usuario_id)? {
                     avisos.push(a);
                 }
@@ -1381,13 +1386,20 @@ impl Servico {
                 // Lucro e custos só para quem pode ver os resultados (gerente,
                 // ou ação liberada para todos na pílula Gerente).
                 let pode = self.pode("resultados", sessao)?;
+                let financeiro = self.pode("financeiro", sessao)?;
                 let mut v = json!(painel::resumo(&self.banco.conn)?);
                 if !pode {
                     v["lucroMes"] = json!("");
                     v["margemMes"] = json!("");
                     v["semCusto"] = json!(0);
                 }
+                // D-04: o que a loja tem a pagar é do financeiro.
+                if !financeiro {
+                    v["pagar7Dias"] = json!("");
+                    v["pagarVencido"] = json!("");
+                }
                 v["resultados"] = json!(pode);
+                v["financeiro"] = json!(financeiro);
                 Ok(v)
             }
 
@@ -1449,7 +1461,20 @@ impl Servico {
             }
             "estoque_mais_vendidos" => {
                 let d: MaisVendidos = ler(dados)?;
-                Ok(json!(reposicao::mais_vendidos(&self.banco.conn, d.dias, &d.ordem, &d.texto)?))
+                let pode = self.pode("resultados", sessao)?;
+                let mut v = json!(reposicao::mais_vendidos(&self.banco.conn, d.dias, &d.ordem, &d.texto)?);
+                // D-01: lucro e margem só para quem pode ver os resultados.
+                if !pode {
+                    v["lucro"] = json!("");
+                    if let Some(itens) = v["itens"].as_array_mut() {
+                        for it in itens {
+                            it["lucro"] = json!("");
+                            it["margem"] = json!("");
+                        }
+                    }
+                }
+                v["resultados"] = json!(pode);
+                Ok(v)
             }
             "estoque_parados" => {
                 let d: Filtro = ler(dados)?;
@@ -1566,7 +1591,17 @@ impl Servico {
             // Financeiro: contas da loja e categorias
             "contas_loja" => {
                 let d: Filtro = ler(dados)?;
-                Ok(json!(financeiro::contas(&self.banco.conn, d.quais == "todas")?))
+                let mut v = json!(financeiro::contas(&self.banco.conn, d.quais == "todas")?);
+                // D-02: o caixa usa só o nome (para escolher a conta); o saldo é do financeiro.
+                if !self.pode("financeiro", sessao)? {
+                    if let Some(lista) = v.as_array_mut() {
+                        for c in lista.iter_mut().filter_map(|c| c.as_object_mut()) {
+                            c.remove("saldo");
+                            c.remove("saldoInicial");
+                        }
+                    }
+                }
+                Ok(v)
             }
             "conta_loja_salvar" => {
                 let d: financeiro::ContaEntrada = ler(dados)?;
@@ -1995,6 +2030,12 @@ impl Servico {
     fn atualizar_sessao(&mut self) -> Resultado<()> {
         if let Some(s) = self.sessao.as_mut() {
             let u = usuarios::buscar(&self.banco.conn, &s.usuario_id)?;
+            // D-07: desativado (aqui ou em outro caixa): a sessão acaba na hora.
+            if !u.ativo {
+                self.sessao = None;
+                self.liberacao = None;
+                return Err(Erro::campo("sessao", "Seu usuário foi desativado. Fale com o gerente."));
+            }
             s.nome = u.nome;
             s.gerente = u.gerente;
         }

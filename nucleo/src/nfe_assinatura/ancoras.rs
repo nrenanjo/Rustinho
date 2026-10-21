@@ -125,6 +125,8 @@ impl Ancoras {
                         include_bytes!("../../tests/pki/raiz_alfanumerico_teste.der").to_vec()
                     }
                     "ac_alfanumerico_teste.der" => include_bytes!("../../tests/pki/ac_alfanumerico_teste.der").to_vec(),
+                    "raiz_acervo_teste.der" => include_bytes!("../../tests/pki/raiz_acervo_teste.der").to_vec(),
+                    "ac_acervo_teste.der" => include_bytes!("../../tests/pki/ac_acervo_teste.der").to_vec(),
                     _ => include_bytes!("../../tests/pki/ac_raiz_historica.der").to_vec(),
                 }
             };
@@ -134,10 +136,13 @@ impl Ancoras {
                     (d("raiz_historica_teste.der"), Categoria::Historica),
                     // PEND-19: notas com CNPJ alfanumérico (tests/pki/gerar_alfanumerico.py).
                     (d("raiz_alfanumerico_teste.der"), Categoria::Vigente),
+                    // T7: acervo fictício de uma exportação do sistema antigo (tests/pki/gerar_acervo.py).
+                    (d("raiz_acervo_teste.der"), Categoria::Vigente),
                 ],
                 vec![
                     d("ac_teste.der"),
                     d("ac_alfanumerico_teste.der"),
+                    d("ac_acervo_teste.der"),
                     d("ac_sem_keycertsign.der"),
                     d("ac_vence_no_recebimento.der"),
                     d("ac_raiz_historica.der"),

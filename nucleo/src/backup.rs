@@ -773,8 +773,10 @@ fn tipo_do_arquivo(arquivo: &Path) -> Option<u8> {
 // ---------------------------------------------------------------------------
 
 fn abrir_conexao(caminho_db: &Path) -> Resultado<Connection> {
-    let conn = Connection::open(caminho_db)?;
+    let mut conn = Connection::open(caminho_db)?;
     conn.busy_timeout(Duration::from_secs(20))?;
+    // D-05: espera a vez de gravar em vez de falhar (veja `Banco::preparar`).
+    conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
     banco::registrar_funcoes(&conn)?;
     Ok(conn)
 }
@@ -1459,67 +1461,147 @@ pub fn restaurar(
     }
 
     // O que é deste computador fica como está.
-    let da_loja: Vec<&str> = sync::CONFIG_DA_LOJA.to_vec();
-    let mut locais: Vec<(String, String)> = Vec::new();
-    {
-        let mut c = conn.prepare("SELECT chave, valor FROM config")?;
-        for l in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
-            let (k, v) = l?;
-            if !da_loja.contains(&k.as_str()) {
-                locais.push((k, v));
-            }
-        }
+    let pendente = Pendente::ler(conn)?;
+    // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
+    // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
+    let marca = caminho_db.map(marca_da_restauracao);
+    if let Some(m) = &marca {
+        pendente.gravar(m)?;
     }
-    let pares: Vec<(String, String, String)> = {
-        let mut c = conn.prepare("SELECT dispositivo, nome, endereco FROM sync_par")?;
-        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?;
-        l.collect::<Result<_, _>>()?
-    };
-    // Os caminhos até os outros caixas também são deste computador, não do backup.
-    let caminhos: Vec<(String, String, i64, i64)> = {
-        let mut c = conn.prepare("SELECT endereco, dispositivo, digitado, visto_ms FROM sync_endereco")?;
-        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?;
-        l.collect::<Result<_, _>>()?
-    };
-    let seq: i64 = conn
-        .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0))
-        .optional()?
-        .unwrap_or(0);
 
     dizer("Restaurando…");
-    conn.restore(rusqlite::MAIN_DB, &db, None::<fn(rusqlite::backup::Progress)>)?;
+    if let Err(e) = conn.restore(rusqlite::MAIN_DB, &db, None::<fn(rusqlite::backup::Progress)>) {
+        // O banco não foi trocado: não há o que terminar depois.
+        if let Some(m) = &marca {
+            let _ = std::fs::remove_file(m);
+        }
+        return Err(e.into());
+    }
+    // Só nos testes de queda (T6.3): cai aqui, como numa falta de luz.
+    #[cfg(feature = "ancoras-de-teste")]
+    if std::env::var("RUSTINHO_TESTE_CAIR_RESTAURANDO").is_ok_and(|v| v == "1") {
+        std::process::abort();
+    }
     banco::migrar(conn)?;
     sync::criar_gatilhos(conn)?;
-
-    let tx = conn.transaction()?;
-    tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
-    let lista_loja = da_loja.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
-    tx.execute(&format!("DELETE FROM config WHERE chave NOT IN ({lista_loja})"), [])?;
-    tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
-    for (k, v) in &locais {
-        config::gravar(&tx, k, v)?;
+    pendente.aplicar(conn)?;
+    if let Some(m) = &marca {
+        let _ = std::fs::remove_file(m);
     }
-    // Recebe tudo de novo dos outros caixas (fica com o mais novo de cada registro).
-    tx.execute("DELETE FROM sync_par", [])?;
-    for (d, n, e) in &pares {
-        tx.execute(
-            "INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES (?1, ?2, ?3, 0)",
-            params![d, n, e],
-        )?;
-    }
-    tx.execute("DELETE FROM sync_endereco", [])?;
-    for (e, d, digitado, visto) in &caminhos {
-        tx.execute(
-            "INSERT INTO sync_endereco (endereco, dispositivo, digitado, visto_ms) VALUES (?1, ?2, ?3, ?4)",
-            params![e, d, digitado, visto],
-        )?;
-    }
-    // A numeração das alterações deste caixa continua de onde estava; este
-    // caixa recomeça do zero com os outros e ganha geração nova (os outros
-    // também recomeçam com ele).
-    sync::depois_de_restaurar(&tx, seq)?;
-    tx.commit()?;
     Ok(info)
+}
+
+/// Arquivo ao lado do banco que diz "restauração pela metade" (D-08).
+pub fn marca_da_restauracao(caminho_db: &Path) -> PathBuf {
+    let mut nome = caminho_db.as_os_str().to_owned();
+    nome.push(".restaurando");
+    PathBuf::from(nome)
+}
+
+/// O que é deste computador e não pode vir do backup: configurações locais
+/// (nome do caixa, identidade, pasta do backup...), os outros caixas e os
+/// caminhos até eles, e a numeração das alterações deste caixa.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Pendente {
+    locais: Vec<(String, String)>,
+    pares: Vec<(String, String, String)>,
+    caminhos: Vec<(String, String, i64, i64)>,
+    seq: i64,
+}
+
+impl Pendente {
+    fn ler(conn: &Connection) -> Resultado<Pendente> {
+        let da_loja: Vec<&str> = sync::CONFIG_DA_LOJA.to_vec();
+        let mut locais: Vec<(String, String)> = Vec::new();
+        {
+            let mut c = conn.prepare("SELECT chave, valor FROM config")?;
+            for l in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
+                let (k, v) = l?;
+                if !da_loja.contains(&k.as_str()) {
+                    locais.push((k, v));
+                }
+            }
+        }
+        let pares: Vec<(String, String, String)> = {
+            let mut c = conn.prepare("SELECT dispositivo, nome, endereco FROM sync_par")?;
+            let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?;
+            l.collect::<Result<_, _>>()?
+        };
+        // Os caminhos até os outros caixas também são deste computador, não do backup.
+        let caminhos: Vec<(String, String, i64, i64)> = {
+            let mut c = conn.prepare("SELECT endereco, dispositivo, digitado, visto_ms FROM sync_endereco")?;
+            let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?;
+            l.collect::<Result<_, _>>()?
+        };
+        let seq: i64 = conn
+            .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0))
+            .optional()?
+            .unwrap_or(0);
+        Ok(Pendente { locais, pares, caminhos, seq })
+    }
+
+    /// Grava a marca e garante que chegou ao disco antes de seguir.
+    fn gravar(&self, marca: &Path) -> Resultado<()> {
+        let erro = |e: std::io::Error| Erro::validacao(format!("Não deu para começar a restauração: {e}"));
+        let mut f = std::fs::File::create(marca).map_err(erro)?;
+        crate::arquivos::so_do_usuario(marca, "restauração");
+        f.write_all(serde_json::to_string(self)?.as_bytes()).map_err(erro)?;
+        f.sync_all().map_err(erro)?;
+        Ok(())
+    }
+
+    /// Põe de volta o que é deste computador (depois de trocar o banco).
+    fn aplicar(&self, conn: &mut Connection) -> Resultado<()> {
+        let da_loja: Vec<&str> = sync::CONFIG_DA_LOJA.to_vec();
+        let tx = conn.transaction()?;
+        tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
+        let lista_loja = da_loja.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
+        tx.execute(&format!("DELETE FROM config WHERE chave NOT IN ({lista_loja})"), [])?;
+        tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
+        for (k, v) in &self.locais {
+            config::gravar(&tx, k, v)?;
+        }
+        // Recebe tudo de novo dos outros caixas (fica com o mais novo de cada registro).
+        tx.execute("DELETE FROM sync_par", [])?;
+        for (d, n, e) in &self.pares {
+            tx.execute(
+                "INSERT INTO sync_par (dispositivo, nome, endereco, cursor) VALUES (?1, ?2, ?3, 0)",
+                params![d, n, e],
+            )?;
+        }
+        tx.execute("DELETE FROM sync_endereco", [])?;
+        for (e, d, digitado, visto) in &self.caminhos {
+            tx.execute(
+                "INSERT INTO sync_endereco (endereco, dispositivo, digitado, visto_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![e, d, digitado, visto],
+            )?;
+        }
+        // A numeração das alterações deste caixa continua de onde estava; este
+        // caixa recomeça do zero com os outros e ganha geração nova (os outros
+        // também recomeçam com ele).
+        sync::depois_de_restaurar(&tx, self.seq)?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+/// Ao abrir o banco: uma restauração que caiu no meio (D-08) termina agora.
+/// Devolve se havia uma pela metade.
+pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path) -> Resultado<bool> {
+    let marca = marca_da_restauracao(caminho_db);
+    let Ok(texto) = std::fs::read_to_string(&marca) else { return Ok(false) };
+    match serde_json::from_str::<Pendente>(&texto) {
+        Ok(p) => {
+            sync::criar_gatilhos(conn)?;
+            p.aplicar(conn)?;
+            crate::registro::anotar("restauração interrompida: terminada ao abrir");
+        }
+        // Marca estragada (caiu enquanto ela era gravada): o banco ainda não
+        // tinha sido trocado, então não há o que terminar.
+        Err(_) => crate::registro::anotar("restauração interrompida antes de começar: nada a terminar"),
+    }
+    let _ = std::fs::remove_file(&marca);
+    Ok(true)
 }
 
 /// Resumo para a tela.

@@ -76,24 +76,18 @@ FocusScope {
                     implicitHeight: 96
                     notaEmbaixo: true
                 }
+                // D-10: um cartão só, que troca o conteúdo (lucro para quem pode
+                // ver os resultados, ticket médio para os outros). Dois cartões
+                // trocando de "visible" ficavam um em cima do outro no Qt 6.4.
                 CartaoNumero {
-                    visible: !!secao.r && secao.r.resultados
-                    rotulo: "Lucro bruto do mês"
+                    readonly property bool lucro: !!secao.r && secao.r.resultados
+                    rotulo: lucro ? "Lucro bruto do mês" : "Ticket médio do mês"
                     sensivel: true
-                    valor: secao.r ? secao.r.lucroMes : ""
-                    nota: !secao.r ? "" : (secao.r.margemMes && !Tema.oculto ? "margem " + secao.r.margemMes : "")
+                    valor: !secao.r ? "" : lucro ? secao.r.lucroMes : secao.r.mes.ticket
+                    nota: !secao.r ? "" : !lucro ? "lucro e custos: só o gerente"
+                                         : (secao.r.margemMes && !Tema.oculto ? "margem " + secao.r.margemMes : "")
                                            + (secao.r.semCusto > 0 ? (secao.r.margemMes && !Tema.oculto ? " · " : "") + "incompleto" : "")
-                    corNota: secao.r && secao.r.semCusto > 0 ? Tema.vermelho : Tema.apagado
-                    cor: Tema.rosa
-                    implicitHeight: 96
-                    notaEmbaixo: true
-                }
-                CartaoNumero {
-                    visible: !!secao.r && !secao.r.resultados
-                    rotulo: "Ticket médio do mês"
-                    sensivel: true
-                    valor: secao.r ? secao.r.mes.ticket : ""
-                    nota: "lucro e custos: só o gerente"
+                    corNota: lucro && secao.r.semCusto > 0 ? Tema.vermelho : Tema.apagado
                     cor: Tema.rosa
                     implicitHeight: 96
                     notaEmbaixo: true
@@ -225,12 +219,14 @@ FocusScope {
 
                     // A receber e a pagar (clica para abrir).
                     Repeater {
+                        // D-04: "A pagar" só para quem pode ver o financeiro.
                         model: secao.r ? [
                             { titulo: "A receber no crediário", valor: secao.r.aReceber, vencido: secao.r.receberVencido,
-                              cor: Tema.verde, funcao: "receber", tela: "TelaReceber", props: {} },
+                              cor: Tema.verde, funcao: "receber", tela: "TelaReceber", props: {} }
+                        ].concat(secao.r.financeiro ? [
                             { titulo: "A pagar em 7 dias", valor: secao.r.pagar7Dias, vencido: secao.r.pagarVencido,
                               cor: Tema.rosa, funcao: "financeiro", tela: "TelaFinanceiro", props: { secao: "pagar" } }
-                        ] : []
+                        ] : []) : []
                         delegate: Rectangle {
                             id: conta
                             required property var modelData

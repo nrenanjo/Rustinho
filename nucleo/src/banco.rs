@@ -78,8 +78,17 @@ impl Banco {
     fn preparar(mut conn: Connection, caminho: Option<PathBuf>, computador: Option<String>) -> Resultado<Banco> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // D-05: a transação já começa reservando a gravação. Assim, se outra
+        // conexão (a troca de dados, o backup) estiver gravando, esta espera
+        // a vez em vez de falhar no meio com "database is locked".
+        conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
         registrar_funcoes(&conn)?;
         migrar(&mut conn)?;
+        // D-08: restauração que caiu no meio termina antes de tudo (a
+        // identidade deste computador volta antes de ser lida).
+        if let Some(c) = &caminho {
+            crate::backup::terminar_restauracao_pela_metade(&mut conn, c)?;
+        }
         let dispositivo = garantir_dispositivo(&conn)?;
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;

@@ -4,6 +4,10 @@ import rustinho
 
 // Fala com o núcleo em Rust. Resposta: {ok, dados} ou {ok: false, erro, campo}.
 QtObject {
+    // D-07: a sessão acabou (usuário desativado, ou ninguém conectado): a
+    // janela volta para a tela de entrada.
+    signal sessaoEncerrada(string motivo)
+
     function chamar(comando, dados) {
         const texto = Sistema.chamar(comando, JSON.stringify(dados === undefined ? {} : dados))
         let r
@@ -19,6 +23,8 @@ QtObject {
             r.erro = "Erro desconhecido."
         if (r.ok && r.dados === undefined)
             r.dados = null
+        if (!r.ok && r.campo === "sessao" && comando !== "entrar")
+            sessaoEncerrada(r.erro)
         return r
     }
 

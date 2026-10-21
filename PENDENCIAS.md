@@ -21,6 +21,8 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 
 ## Testes que ainda precisam ser feitos de verdade
 
+- **PEND-22 · Versão estável: testes de estabilidade (21/10/2026).** Plano por prioridade em `docs/TESTES-estabilidade.md` (T1 backup, T2 estoque, T3 crediário, T4 DRE, T5 permissões, T6 fechamento inesperado, T7 importação do SINTEC, T8 troca de dados); automáticos em `nucleo/tests/estavel/`, aprovados no Linux. Defeitos em `docs/DEFEITOS.md` (D-01 a D-08 e D-10 a D-13 corrigidos; D-09 espera a decisão do dono). **O Rustinho não é estável até:** roteiro à mão no Linux (`docs/ROTEIRO-linux-completo.md`), o mesmo no Windows 10/11, FV-1 a FV-13 com dois computadores, conferência da DRE (PEND-20) e importação de uma cópia da exportação real do SINTEC.
+
 - **PEND-04 · Teclado, leitor de código de barras e mouse.** As telas foram abertas sem janela (modo `offscreen`) e a lógica de qual peça entra, de a etiqueta sair e de o leitor achar tem teste automático, mas ninguém usou as telas com teclado, leitor e mouse reais.
 - **PEND-05 · Windows, Android, celular físico e rede real entre computadores.** Os testes de rede usam o próprio computador (127.0.0.1). A identidade do computador no Windows e no Android vem do Qt (`QSysInfo::machineUniqueId`) e não foi conferida nesses sistemas.
 
@@ -29,6 +31,8 @@ Coisas que sabemos que faltam ou que ainda não foram resolvidas. Cada uma tem u
 - **PEND-06 · Assinatura do APK e artefatos antigos.** Antes de qualquer lançamento, confirmar a assinatura do APK e revisar os artefatos antigos que ainda possam trazer a chave pública conhecida. Os 4 APKs das versões 0.9.0 e 0.9.1 não devem ser apagados até se confirmar se algum celular tem dados reais.
 
 ## Fiscal
+
+- **Referência (21/10/2026):** NF-e de venda e boleto reais mostrados pelo dono, resumidos sem dados identificáveis em `docs/REFERENCIA-nfe-e-boleto.md` (estrutura da nota, tributação configurável, boleto só vira recebimento depois da confirmação do pagamento). Falta o **XML autorizado** da mesma nota para validar a estrutura fiscal completa (fica fora do repositório).
 
 - **PEND-09 · R-01: verificação criptográfica da NF-e recebida — IMPLEMENTADA (20/10/2026) e comprovada no Linux; o módulo fiscal continua NÃO pronto para produção (PEND-15).**
   Feito (critérios finais em `docs/PEND-09-criterios.md`, revisão 4; resultados no §11): resumo do `infNFe` canonicalizado (C14N 1.0 inclusiva, perfil fechado), assinatura RSA (SHA-1/SHA-256, `ring`), cadeia até as raízes da ICP-Brasil escolhidas por SHA-256 (v5, v12; v2 histórica) com o pacote oficial do ITI (SHA-512 conferido) e `rustls-webpki`, validade do certificado e da cadeia em `dhEmi` **e** em `dhRecbto` sem tolerância, uso do certificado conforme o MOC e as Políticas A1/A3 (KeyUsage, EKU como perfil, política, AC com keyCertSign), titular (raiz do CNPJ / CPF), homologação recusada, estrutura estrita contra "wrapping", limites de tamanho e de profundidade (a profundidade é contada antes de ler: o leitor de XML é recursivo). Importação verifica **antes de gravar** (nem o fornecedor é cadastrado); cadastro por XML exige a assinatura (D8); `lancar` exige autorização comprovada (D7: conferência humana do gerente, provisória); migração 0020; tela da compra. Acervo real (fora do repositório): **528 de 528 NF-e aceitas**, 4 de teste recusadas, **532 de 532 resumos reproduzidos**.

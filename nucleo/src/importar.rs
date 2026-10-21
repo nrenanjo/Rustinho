@@ -57,6 +57,9 @@ pub struct Previa {
     pub exemplos_clientes: Vec<String>,
     pub exemplos_fornecedores: Vec<String>,
     pub exemplos_pecas: Vec<String>,
+    /// D-13: códigos que aparecem em peças com descrições diferentes (cada
+    /// descrição vira uma peça; o código não é dado a nenhuma delas).
+    pub codigos_repetidos: i64,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -79,10 +82,65 @@ struct Lido {
     /// documento → (pessoa, emissão da nota mais nova)
     clientes: HashMap<String, (Emitente, String)>,
     fornecedores: HashMap<String, (Emitente, String)>,
-    /// código interno da loja → (item, emissão)
-    pecas_loja: BTreeMap<String, (ItemXml, String)>,
-    /// (documento do fornecedor, código do fornecedor) → (item, emissão)
-    pecas_fornecedor: BTreeMap<(String, String), (ItemXml, String)>,
+    /// (código interno da loja, descrição compactada) → (item, emissão).
+    /// D-13: a descrição entra na chave para não fundir peças diferentes que
+    /// o sistema antigo deixou com o mesmo código.
+    pecas_loja: BTreeMap<(String, String), (ItemXml, String)>,
+    /// (documento do fornecedor, código do fornecedor, descrição compactada) → (item, emissão)
+    pecas_fornecedor: BTreeMap<(String, String, String), (ItemXml, String)>,
+}
+
+impl Lido {
+    /// Códigos da loja que estão em mais de uma descrição.
+    fn repetidos_loja(&self) -> HashSet<String> {
+        let mut vistos: HashMap<&str, usize> = HashMap::new();
+        for (cod, _) in self.pecas_loja.keys() {
+            *vistos.entry(cod.as_str()).or_default() += 1;
+        }
+        vistos.into_iter().filter(|(_, n)| *n > 1).map(|(c, _)| c.to_string()).collect()
+    }
+
+    /// (fornecedor, código) que estão em mais de uma descrição.
+    fn repetidos_fornecedor(&self) -> HashSet<(String, String)> {
+        let mut vistos: HashMap<(&str, &str), usize> = HashMap::new();
+        for (f, cod, _) in self.pecas_fornecedor.keys() {
+            *vistos.entry((f.as_str(), cod.as_str())).or_default() += 1;
+        }
+        vistos.into_iter().filter(|(_, n)| *n > 1).map(|((f, c), _)| (f.to_string(), c.to_string())).collect()
+    }
+
+    /// Avisos dos códigos repetidos (até 5), com as descrições.
+    fn avisos_repetidos(&self) -> Vec<String> {
+        let mut r: Vec<String> = Vec::new();
+        let mut loja: Vec<String> = self.repetidos_loja().into_iter().collect();
+        loja.sort();
+        for cod in loja {
+            let nomes: Vec<String> = self
+                .pecas_loja
+                .iter()
+                .filter(|((c, _), _)| *c == cod)
+                .map(|(_, (it, _))| texto::limpar(&it.descricao))
+                .collect();
+            r.push(format!(
+                "Código {cod} em {} peças diferentes nas notas da loja ({}). Entram separadas e nenhuma fica com o código {cod}; ele fica como código antigo de todas (a busca mostra as peças para escolher).",
+                nomes.len(),
+                nomes.join(" / ")
+            ));
+        }
+        let mut forn: Vec<(String, String)> = self.repetidos_fornecedor().into_iter().collect();
+        forn.sort();
+        for (_, cod) in forn {
+            r.push(format!(
+                "Código {cod} de um fornecedor está em peças diferentes. Entram separadas e o código não fica ligado a nenhuma: na próxima compra, escolha a peça certa."
+            ));
+        }
+        r
+    }
+}
+
+/// Descrição para comparar (sem espaços, pontuação, acentos e maiúsculas).
+fn descricao_chave(it: &ItemXml) -> String {
+    texto::compactar(&it.descricao)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +228,8 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
             for it in &nota.itens {
                 let cod = it.codigo.trim().to_string();
                 if !cod.is_empty() {
-                    guardar_mais_nova_b(&mut lido.pecas_loja, cod, it.clone(), &nota.emissao);
+                    let chave = (cod, descricao_chave(it));
+                    guardar_mais_nova_b(&mut lido.pecas_loja, chave, it.clone(), &nota.emissao);
                 }
             }
         } else {
@@ -182,12 +241,17 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
             for it in &nota.itens {
                 let cod = it.codigo.trim().to_string();
                 if !cod.is_empty() {
-                    guardar_mais_nova_b(&mut lido.pecas_fornecedor, (emitente.clone(), cod), it.clone(), &nota.emissao);
+                    let chave = (emitente.clone(), cod, descricao_chave(it));
+                    guardar_mais_nova_b(&mut lido.pecas_fornecedor, chave, it.clone(), &nota.emissao);
                 }
             }
         }
     })?;
     lido.arquivos = total;
+    let avisos = lido.avisos_repetidos();
+    for a in avisos.into_iter().take(5) {
+        lido.avisos.push(a);
+    }
     Ok(lido)
 }
 
@@ -219,6 +283,36 @@ fn peca_por_fornecedor(conn: &Connection, fornecedor_doc: &str, codigo: &str) ->
             |l| l.get(0),
         )
         .optional()?)
+}
+
+/// D-13: peça de código repetido já cadastrada (mesmo código antigo ou
+/// principal e a mesma descrição).
+fn peca_repetida(conn: &Connection, codigo: &str, it: &ItemXml) -> Resultado<Option<String>> {
+    let desc = descricao_chave(it);
+    let mut c = conn.prepare_cached(
+        "SELECT p.id, p.nome FROM produto p
+          WHERE p.codigo = ?1
+             OR EXISTS (SELECT 1 FROM produto_codigo_antigo a WHERE a.produto_id = p.id AND a.codigo = ?1)",
+    )?;
+    let lista: Vec<(String, String)> =
+        c.query_map([codigo], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok(lista.into_iter().find(|(_, nome)| texto::compactar(nome) == desc).map(|(id, _)| id))
+}
+
+/// D-13: peça de fornecedor de código repetido já cadastrada (pela descrição).
+fn peca_pela_descricao(conn: &Connection, it: &ItemXml) -> Resultado<Option<String>> {
+    let desc = descricao_chave(it);
+    let mut c = conn.prepare_cached("SELECT id, nome FROM produto")?;
+    let lista: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok(lista.into_iter().find(|(_, nome)| texto::compactar(nome) == desc).map(|(id, _)| id))
+}
+
+/// A peça da loja deste item já existe?
+fn peca_loja_existe(conn: &Connection, codigo: &str, it: &ItemXml, repetido: bool) -> Resultado<bool> {
+    if repetido {
+        return Ok(peca_repetida(conn, codigo, it)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some());
+    }
+    Ok(peca_por_codigo(conn, codigo)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some())
 }
 
 pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
@@ -255,10 +349,13 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
     nomes.sort();
     p.exemplos_fornecedores = nomes.into_iter().take(6).collect();
 
+    let repetidos = lido.repetidos_loja();
+    let repetidos_f = lido.repetidos_fornecedor();
+    p.codigos_repetidos = (repetidos.len() + repetidos_f.len()) as i64;
     let mut barras_novas: HashSet<String> = HashSet::new();
     let mut exemplos: Vec<String> = Vec::new();
-    for (codigo, (it, _)) in &lido.pecas_loja {
-        if peca_por_codigo(conn, codigo)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some() {
+    for ((codigo, _), (it, _)) in &lido.pecas_loja {
+        if peca_loja_existe(conn, codigo, it, repetidos.contains(codigo))? {
             p.pecas_ja += 1;
         } else {
             p.pecas_loja_novas += 1;
@@ -270,10 +367,13 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
             }
         }
     }
-    for ((forn, codigo), (it, _)) in &lido.pecas_fornecedor {
-        if peca_por_fornecedor(conn, forn, codigo)?.is_some()
-            || peca_por_barras(conn, &it.gtin)?.is_some()
-            || (!it.gtin.is_empty() && barras_novas.contains(&it.gtin))
+    for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
+        let ja = if repetidos_f.contains(&(forn.clone(), codigo.clone())) {
+            peca_pela_descricao(conn, it)?.is_some()
+        } else {
+            peca_por_fornecedor(conn, forn, codigo)?.is_some()
+        };
+        if ja || peca_por_barras(conn, &it.gtin)?.is_some() || (!it.gtin.is_empty() && barras_novas.contains(&it.gtin))
         {
             p.pecas_ja += 1;
         } else {
@@ -393,16 +493,21 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
         }
     }
 
+    let repetidos = lido.repetidos_loja();
+    let repetidos_f = lido.repetidos_fornecedor();
     if e.pecas_loja {
-        for (codigo, (it, _)) in &lido.pecas_loja {
-            if peca_por_codigo(conn, codigo)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some() {
+        for ((codigo, _), (it, _)) in &lido.pecas_loja {
+            let repetido = repetidos.contains(codigo);
+            if peca_loja_existe(conn, codigo, it, repetido)? {
                 continue;
             }
             let mut f = ficha_do_item(conn, it)?;
             // O código da loja só se usar letras, números e traço, sem repetir.
+            // D-13: código que o sistema antigo deu a peças diferentes não fica
+            // com nenhuma (o leitor daria a peça errada); vira código antigo.
             let cod = texto::limpar(codigo);
-            if !cod.is_empty() && cod.chars().count() <= 20 && peca_por_codigo(conn, &cod)?.is_none() {
-                f.codigo = cod;
+            if !repetido && !cod.is_empty() && cod.chars().count() <= 20 && peca_por_codigo(conn, &cod)?.is_none() {
+                f.codigo = cod.clone();
             }
             let preco = valor_unitario(it, false);
             if preco > 0 {
@@ -412,23 +517,39 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 }
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
-            auditoria::registrar(
-                conn,
-                dispositivo,
-                Some(usuario_id),
-                "produto.importar",
-                "produto",
-                &id,
-                &["Cadastrada pelo XML de uma nota da loja".into()],
-            )?;
+            let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
+            if repetido && !cod.is_empty() {
+                conn.execute(
+                    "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![cod, id, texto::compactar(&cod), tempo::agora()],
+                )?;
+                detalhes.push(format!(
+                    "O código {cod} do sistema antigo está em mais de uma peça: ficou como código antigo"
+                ));
+                // A faixa deste caixa pode ter dado justamente esse número a
+                // esta peça (antes de ele virar código antigo): troca.
+                let atual: String = conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
+                if texto::compactar(&atual) == texto::compactar(&cod) {
+                    produtos::trocar_codigo(conn, dispositivo, usuario_id, &id)?;
+                }
+            }
+            auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.importar", "produto", &id, &detalhes)?;
             r.pecas += 1;
         }
     }
 
     if e.pecas_fornecedor {
-        for ((forn, codigo), (it, _)) in &lido.pecas_fornecedor {
+        for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
             let Some(fornecedor_id) = ids_fornecedor.get(forn) else { continue };
-            if peca_por_fornecedor(conn, forn, codigo)?.is_some() {
+            // D-13: código repetido com descrições diferentes: peças separadas,
+            // sem ligar o código a nenhuma delas.
+            let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
+            if repetido {
+                if peca_pela_descricao(conn, it)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some() {
+                    continue;
+                }
+            } else if peca_por_fornecedor(conn, forn, codigo)?.is_some() {
                 continue;
             }
             // Já existe pelo código de barras: só liga o código do fornecedor.
@@ -449,7 +570,9 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 }
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
-            ligar_fornecedor(conn, fornecedor_id, codigo, &id)?;
+            if !repetido {
+                ligar_fornecedor(conn, fornecedor_id, codigo, &id)?;
+            }
             auditoria::registrar(
                 conn,
                 dispositivo,
@@ -464,9 +587,11 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
     } else {
         // Mesmo sem cadastrar peças novas, liga o código do fornecedor às
         // peças que já existem (pelo código de barras): ajuda na próxima compra.
-        for ((forn, codigo), (it, _)) in &lido.pecas_fornecedor {
+        for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
             let Some(fornecedor_id) = ids_fornecedor.get(forn) else { continue };
-            if peca_por_fornecedor(conn, forn, codigo)?.is_some() {
+            if repetidos_f.contains(&(forn.clone(), codigo.clone()))
+                || peca_por_fornecedor(conn, forn, codigo)?.is_some()
+            {
                 continue;
             }
             if let Some(pid) = peca_por_barras(conn, &it.gtin)? {

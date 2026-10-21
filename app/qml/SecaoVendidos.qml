@@ -41,7 +41,16 @@ FocusScope {
             spacing: 12
             Layout.fillWidth: true
             CartaoNumero { rotulo: "Vendido"; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
-            CartaoNumero { rotulo: "Lucro bruto"; sensivel: true; valor: secao.dados ? secao.dados.lucro : "" }
+            // D-01: o lucro só para quem pode ver os resultados. O cartão fica
+            // sempre (trocar "visible" dentro da linha embaralha no Qt 6.4, D-10).
+            CartaoNumero {
+                readonly property bool pode: !!secao.dados && secao.dados.resultados
+                rotulo: "Lucro bruto"
+                sensivel: pode
+                prefixo: pode ? "R$ " : ""
+                valor: !secao.dados ? "" : pode ? secao.dados.lucro : "—"
+                nota: secao.dados && !pode ? "só o gerente" : ""
+            }
             CartaoNumero {
                 rotulo: "Peças vendidas"
                 prefixo: ""
@@ -187,6 +196,7 @@ FocusScope {
                             Layout.alignment: Qt.AlignRight
                         }
                         Text {
+                            visible: linha.v.lucro !== ""
                             text: "lucro R$ " + Tema.valor(linha.v.lucro) + (linha.v.margem && !Tema.oculto ? " (" + linha.v.margem + ")" : "")
                             color: Tema.tintaSuave
                             font.family: Tema.texto
