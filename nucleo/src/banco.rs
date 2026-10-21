@@ -31,6 +31,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0019_caminhos_da_rede.sql"),
     include_str!("migracoes/0020_verificacao_da_nfe.sql"),
     include_str!("migracoes/0021_dre_gerencial.sql"),
+    include_str!("migracoes/0022_caixa_fechado.sql"),
 ];
 
 /// Número da estrutura mais nova que este Rustinho conhece.
@@ -171,7 +172,13 @@ fn garantir_dispositivo(conn: &Connection) -> Resultado<String> {
 ///
 /// A variável de ambiente `RUSTINHO_DADOS` troca a pasta (útil para testes;
 /// o app de Android usa para apontar a pasta do aplicativo).
+///
+/// No Rustinho portátil (veja `portatil`), sempre `dados/` ao lado do
+/// executável: nem a pasta de sempre nem `RUSTINHO_DADOS` valem.
 pub fn caminho_padrao() -> PathBuf {
+    if let Some(raiz) = crate::portatil::raiz() {
+        return crate::portatil::caminho_do_banco(raiz);
+    }
     let pasta = if let Some(p) = std::env::var_os("RUSTINHO_DADOS").filter(|p| !p.is_empty()) {
         PathBuf::from(p)
     } else if let Some(p) = std::env::var_os("LOCALAPPDATA").filter(|p| cfg!(windows) && !p.is_empty()) {
@@ -418,6 +425,46 @@ mod testes {
         assert_eq!(comp, None);
         let metas: i64 = c.query_row("SELECT COUNT(*) FROM meta", [], |l| l.get(0)).unwrap();
         assert_eq!(metas, 0);
-        assert_eq!(MIGRACOES.len(), 21);
+        assert!(MIGRACOES.len() >= 21);
+    }
+
+    /// D-14: a migração 21 → 22 só acrescenta colunas (com valor de fábrica):
+    /// vendas, recebimentos, devoluções e movimentos que já existiam ficam
+    /// iguais e continuam contando no caixa deles como antes.
+    #[test]
+    fn d14_migracao_22_nao_muda_o_que_existia() {
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 21).unwrap();
+        c.execute_batch(
+            "INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, valor_inicial, fechado_em, contado, esperado)
+             VALUES ('s1', 'd', 'Caixa 1', '2026-10-01T10:00:00Z', 5000, '2026-10-01T20:00:00Z', 15000, 15000);
+             INSERT INTO caixa_movimento (id, sessao_id, tipo, valor, motivo, criado_em)
+             VALUES ('m1', 's1', 'sangria', 1000, 'banco', '2026-10-01T12:00:00Z');",
+        )
+        .unwrap();
+        migrar(&mut c).unwrap();
+        let (tipo, id): (String, Option<String>) = c
+            .query_row("SELECT origem_tipo, origem_id FROM caixa_movimento WHERE id = 'm1'", [], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((tipo.as_str(), id), ("", None));
+        let esperado: i64 = c.query_row("SELECT esperado FROM caixa_sessao WHERE id = 's1'", [], |l| l.get(0)).unwrap();
+        assert_eq!(esperado, 15000);
+        for (t, col) in [
+            ("venda", "cancelado_apos_fechar"),
+            ("recebimento", "estornado_apos_fechar"),
+            ("devolucao", "desfeita_apos_fechar"),
+        ] {
+            let n: i64 = c
+                .query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{t}') WHERE name = '{col}'"), [], |l| {
+                    l.get(0)
+                })
+                .unwrap();
+            assert_eq!(n, 1, "{t}.{col}");
+        }
+        assert_eq!(MIGRACOES.len(), 22);
     }
 }

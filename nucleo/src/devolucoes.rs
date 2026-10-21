@@ -575,11 +575,13 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
 pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
     crate::sync::exigir_editavel(conn, "devolucao", id)?;
     crate::sync::exigir_filhos_editaveis(conn, "devolucao_item", "devolucao_id", id)?;
-    let d: (Option<String>, Option<String>, Option<String>, String, i64, i64) = conn
+    #[allow(clippy::type_complexity)]
+    let d: (Option<String>, Option<String>, Option<String>, String, i64, i64, Option<String>, String) = conn
         .query_row(
-            "SELECT cancelado_em, vale_id, recebimento_id, venda_id, numero, dinheiro FROM devolucao WHERE id = ?1",
+            "SELECT cancelado_em, vale_id, recebimento_id, venda_id, numero, dinheiro, sessao_id, caixa_nome
+               FROM devolucao WHERE id = ?1",
             [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?)),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Devolução".into()))?;
@@ -629,23 +631,35 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             &format!("Devolução nº {} desfeita · venda {venda_numero} · {venda_caixa} · {motivo}", d.4),
         )?;
     }
+    // D-14: devolução em dinheiro de um caixa já fechado. O fechamento dele
+    // não muda; o dinheiro que o cliente devolve entra na gaveta aberta (ou
+    // no Caixa geral).
+    let fechado = caixa::sessao_fechada(conn, d.6.as_deref())?;
     conn.execute(
-        "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
-        params![id, agora, usuario_id, motivo],
+        "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4, desfeita_apos_fechar = ?5
+          WHERE id = ?1",
+        params![id, agora, usuario_id, motivo, fechado],
     )?;
-    auditoria::registrar(
-        conn,
-        dispositivo,
-        Some(usuario_id),
-        "venda.devolucao_desfeita",
-        "venda",
-        &d.3,
-        &[format!(
-            "Devolução nº {} desfeita · {motivo}{}",
-            d.4,
-            if d.5 > 0 { " (o dinheiro volta a contar na gaveta)" } else { "" }
-        )],
-    )?;
+    let mut detalhes = vec![format!(
+        "Devolução nº {} desfeita · {motivo}{}",
+        d.4,
+        if d.5 > 0 && !fechado { " (o dinheiro volta a contar na gaveta)" } else { "" }
+    )];
+    if fechado {
+        let onde = caixa::compensar_caixa_fechado(
+            conn,
+            dispositivo,
+            usuario_id,
+            d.5.max(0),
+            "devolucao_desfeita",
+            id,
+            &format!("Devolução nº {} · {} desfeita (caixa já fechado) · {motivo}", d.4, d.7),
+        )?;
+        if let Some(o) = onde {
+            detalhes.push(format!("O caixa da devolução já estava fechado (o fechamento não muda): {o}"));
+        }
+    }
+    auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.devolucao_desfeita", "venda", &d.3, &detalhes)?;
     Ok(())
 }
 
@@ -844,7 +858,8 @@ pub fn no_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(i64, i64
 /// Dinheiro devolvido (saiu da gaveta) numa sessão de caixa.
 pub fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> {
     Ok(conn.query_row(
-        "SELECT COALESCE(SUM(dinheiro), 0) FROM devolucao WHERE sessao_id = ?1 AND cancelado_em IS NULL",
+        "SELECT COALESCE(SUM(dinheiro), 0) FROM devolucao
+          WHERE sessao_id = ?1 AND (cancelado_em IS NULL OR desfeita_apos_fechar = 1)",
         [sessao_id],
         |l| l.get(0),
     )?)

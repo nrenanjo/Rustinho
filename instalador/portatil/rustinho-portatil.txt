@@ -1,0 +1,5 @@
+Este arquivo liga o modo PORTÁTIL do Rustinho. Não apague.
+
+Com ele, o Rustinho desta pasta fica todo aqui dentro (na pasta "dados")
+e não abre nem muda o Rustinho instalado neste computador.
+Veja o LEIA-ME.txt.

@@ -16,6 +16,12 @@ fn main() {
         eprintln!("Rustinho montado com as âncoras de TESTE da NF-e: este programa não pode ser usado.");
         std::process::exit(2);
     }
+    // Rustinho portátil: nada fora da própria pasta. O Qt guardaria a cópia
+    // compilada das telas na pasta de sempre do usuário (no Windows,
+    // %LOCALAPPDATA%\rustinho, a mesma do Rustinho instalado).
+    if rustinho_nucleo::portatil::ligado() {
+        std::env::set_var("QML_DISABLE_DISK_CACHE", "1");
+    }
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         app.as_mut().set_application_name(&QString::from("rustinho"));

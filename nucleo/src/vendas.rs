@@ -788,9 +788,9 @@ pub fn salvar_orcamento(
 
 /// Cancela uma venda (as peças voltam ao estoque) ou um orçamento.
 pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
-    let (tipo, situacao, numero, caixa_nome): (String, String, i64, String) = conn
-        .query_row("SELECT tipo, situacao, numero, caixa_nome FROM venda WHERE id = ?1", [id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+    let (tipo, situacao, numero, caixa_nome, sessao_id): (String, String, i64, String, Option<String>) = conn
+        .query_row("SELECT tipo, situacao, numero, caixa_nome, sessao_id FROM venda WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
         })
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Venda".into()))?;
@@ -826,19 +826,39 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 &format!("Cancelamento da venda {numero} · {caixa_nome} · {motivo}"),
             )?;
         }
+        // D-14: venda de um caixa já fechado. O fechamento dele não muda; o
+        // dinheiro devolvido sai da gaveta aberta (ou do Caixa geral).
+        let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
         conn.execute(
-            "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
-            params![id, tempo::agora(), usuario_id, motivo],
+            "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4,
+                              cancelado_apos_fechar = ?5 WHERE id = ?1",
+            params![id, tempo::agora(), usuario_id, motivo, fechado],
         )?;
-        auditoria::registrar(
-            conn,
-            dispositivo,
-            Some(usuario_id),
-            "venda.cancelar",
-            "venda",
-            id,
-            &[format!("Motivo: {motivo}")],
-        )?;
+        let mut detalhes = vec![format!("Motivo: {motivo}")];
+        if fechado {
+            let dinheiro: i64 = conn.query_row(
+                "SELECT COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = ?1 AND forma = 'dinheiro'), 0)
+                        - troco FROM venda WHERE id = ?1",
+                [id],
+                |l| l.get(0),
+            )?;
+            let onde = caixa::compensar_caixa_fechado(
+                conn,
+                dispositivo,
+                usuario_id,
+                -dinheiro.max(0),
+                "venda_cancelada",
+                id,
+                &format!("Cancelamento da venda {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
+            )?;
+            detalhes.push(match onde {
+                Some(o) => format!("O caixa da venda já estava fechado (o fechamento não muda): {o}"),
+                None => {
+                    "O caixa da venda já estava fechado (o fechamento não muda); não havia dinheiro a devolver".into()
+                }
+            });
+        }
+        auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.cancelar", "venda", id, &detalhes)?;
     } else {
         if situacao != "aberto" {
             return Err(Erro::validacao("Só dá para cancelar um orçamento em aberto."));

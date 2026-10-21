@@ -1,0 +1,61 @@
+RUSTINHO PORTÁTIL — VERSÃO DE TESTE
+Windows 10 e 11 (64 bits)
+
+Esta é uma versão para TESTE. Use só dados de mentira.
+Não use com a loja de verdade.
+
+
+COMO ABRIR
+----------
+1. Extraia o ZIP inteiro para uma pasta sua (por exemplo, na Área de
+   Trabalho). Não abra o programa de dentro do ZIP.
+2. Abra a pasta extraída e dê dois cliques em rustinho.exe.
+3. Se aparecer "O Windows protegeu o computador":
+   clique em "Mais informações" e depois em "Executar assim mesmo".
+4. Na primeira vez, o Rustinho pede o nome da loja, do caixa e do
+   gerente. Use dados de mentira, por exemplo:
+   loja "Loja Teste", caixa "TESTE", gerente "Ana", senha "1234".
+5. Se o Windows perguntar sobre o Firewall, pode clicar em Cancelar.
+   Só precisa permitir (em "Redes privadas") para testar a troca de
+   dados entre dois computadores, cada um com o seu Rustinho portátil.
+
+
+O QUE FICA ISOLADO
+------------------
+- Tudo fica dentro desta pasta, em "dados": o banco, os backups, o
+  registro de falhas e os PDFs.
+- Não abre nem muda o Rustinho instalado neste computador
+  (pasta %LOCALAPPDATA%\Rustinho), nem os backups dele.
+- Backups: só dentro desta pasta.
+- Google Drive: usa uma ligação própria. Não ligue a conta do Google da
+  loja nos testes.
+- Troca de dados: só conversa com outro Rustinho PORTÁTIL (portas 47820
+  e 47821). Nunca com um caixa da loja, mesmo com a mesma senha da rede.
+- Não restaure aqui um backup da loja de verdade.
+
+
+ARQUIVO DE TESTE
+----------------
+exemplos\nota-de-teste.xml é uma nota fiscal de mentira, para testar
+Compras > Importar XML.
+
+
+DUAS LOJAS NO MESMO COMPUTADOR (parte B do roteiro: backup)
+-----------------------------------------------------------
+Copie a pasta inteira (por exemplo, "Rustinho-Teste-2"). Cada cópia tem
+os seus próprios dados. Abra uma de cada vez.
+
+
+COMO APAGAR O TESTE
+-------------------
+Feche o Rustinho e apague a pasta inteira. Nada fica no computador.
+
+
+O QUE TESTAR
+------------
+O roteiro está no arquivo ROTEIRO-DE-TESTE.txt, nesta pasta (é o mesmo
+do Linux; no Windows, em vez dos comandos do começo, use esta pasta). Anote em cada linha: certo, errado (o que apareceu) ou não deu
+para fazer. Mande as fotos do que deu errado.
+
+Se o Rustinho fechar sozinho ou mostrar erro, mande também o arquivo
+dados\registro\rustinho.log (não tem senhas nem dados dos clientes).

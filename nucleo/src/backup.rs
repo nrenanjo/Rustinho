@@ -252,6 +252,8 @@ pub fn ajustes(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<Ajuste
     let pasta = config::ler(conn, "backup_pasta")?
         .filter(|p| !p.trim().is_empty())
         .map(PathBuf::from)
+        // Portátil: uma pasta de fora (vinda de outro lugar) não vale.
+        .filter(|p| crate::portatil::raiz().is_none_or(|r| crate::portatil::dentro_de(r, p)))
         .unwrap_or_else(|| pasta_padrao(caminho_db));
     let dias = config::ler(conn, "backup_dias")?
         .and_then(|d| d.parse().ok())
@@ -294,6 +296,15 @@ pub fn salvar_ajustes(conn: &Connection, caminho_db: Option<&Path>, e: &AjustesE
     }
     if !hora_valida(&hora) {
         return Err(Erro::campo("hora", "Escreva o horário assim: 18:00."));
+    }
+    // O portátil guarda os backups só dentro da própria pasta.
+    if let Some(raiz) = crate::portatil::raiz() {
+        if !pasta.is_empty() && !crate::portatil::dentro_de(raiz, Path::new(pasta)) {
+            return Err(Erro::campo(
+                "pasta",
+                format!("No Rustinho portátil, os backups ficam dentro da pasta dele ({}).", raiz.display()),
+            ));
+        }
     }
     let padrao = pasta_padrao(caminho_db);
     config::gravar(conn, "backup_pasta", if Path::new(pasta) == padrao { "" } else { pasta })?;
@@ -1181,6 +1192,11 @@ fn programa_rclone() -> String {
 fn comando_rclone() -> Command {
     #[allow(unused_mut)]
     let mut c = Command::new(programa_rclone());
+    // O portátil tem a sua configuração do Google Drive: nunca usa a do
+    // Rustinho instalado (veja `portatil`).
+    if let Some(conf) = crate::portatil::rclone_conf() {
+        c.env("RCLONE_CONFIG", conf);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

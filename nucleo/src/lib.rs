@@ -40,6 +40,7 @@ pub mod oficina;
 pub mod pagar;
 pub mod painel;
 pub mod pessoas;
+pub mod portatil;
 pub mod produtos;
 pub mod receber;
 pub mod rede_local;

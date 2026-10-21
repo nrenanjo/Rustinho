@@ -3,6 +3,7 @@
 //! importação e troca de dados. O plano e o que cada teste prova estão em
 //! `docs/TESTES-estabilidade.md`; os defeitos achados, em `docs/DEFEITOS.md`.
 
+mod a1_auditoria;
 mod comum;
 mod d09_custos;
 mod t1_backup;

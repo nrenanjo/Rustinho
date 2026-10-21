@@ -1,0 +1,165 @@
+# SÓ PARA TESTE: monta o Rustinho portátil para Windows 10/11 (64 bits) num
+# ZIP, como artefato. Não publica em Releases e não lê segredos.
+# Também roda os testes do núcleo no Linux e no Windows.
+name: Montar teste Windows (portátil)
+
+on:
+  push:
+    branches: [build-0.9.14]
+
+permissions:
+  contents: read
+
+# Versões fixas de tudo o que a montagem usa (os arquivos baixados têm o
+# SHA-256 conferido).
+env:
+  QT_VERSAO: "6.8.3"
+  RCLONE_VERSAO: "v1.68.2"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  testes:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+          components: rustfmt, clippy
+      - name: Formatação
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy -p rustinho-nucleo --all-targets -- -D clippy::correctness -D clippy::suspicious
+      - name: Testes do núcleo
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Testes-Linux
+          path: testes-linux.txt
+          retention-days: 30
+
+  # Os testes do núcleo também no Windows (não seguram o ZIP: o resultado
+  # vai no artefato "Testes-Windows").
+  testes-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Testes do núcleo (Windows)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Testes-Windows
+          path: testes-windows.txt
+          retention-days: 30
+
+  portatil:
+    needs: testes
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Versão
+        shell: bash
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake.exe"
+          cargo build --release -p rustinho
+      - name: Juntar os arquivos (Qt, rclone, runtime)
+        shell: pwsh
+        run: |
+          $nome = "Rustinho-$env:VERSAO-Windows-portatil"
+          $p = "saida\$nome"
+          New-Item -ItemType Directory -Force $p | Out-Null
+          Copy-Item target\release\rustinho.exe $p\
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --qmldir app\qml --qmldir app\base --no-translations --no-system-d3d-compiler --no-opengl-sw $p\rustinho.exe
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            Copy-Item "$env:WINDIR\System32\$dll" $p\ -ErrorAction SilentlyContinue
+          }
+          Invoke-WebRequest "https://github.com/rclone/rclone/releases/download/$env:RCLONE_VERSAO/rclone-$env:RCLONE_VERSAO-windows-amd64.zip" -OutFile rclone.zip
+          $hash = (Get-FileHash rclone.zip -Algorithm SHA256).Hash
+          if ($hash -ne "812BF76CC02C04CF6327F3683F3D5A88E47D36C39DB84C1A745777496BE7D993") { throw "rclone.zip diferente do esperado: $hash" }
+          Expand-Archive rclone.zip -DestinationPath rclone-tmp
+          Copy-Item (Get-ChildItem rclone-tmp -Recurse -Filter rclone.exe | Select-Object -First 1).FullName $p\
+          # A marca do modo portátil e as instruções (texto do Windows: UTF-8 com BOM e CRLF).
+          $utf8 = New-Object System.Text.UTF8Encoding $true
+          foreach ($f in "rustinho-portatil.txt","LEIA-ME.txt") {
+            $t = (Get-Content -Raw -Encoding UTF8 "instalador\portatil\$f") -replace "`r?`n", "`r`n"
+            [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) $f), $t, $utf8)
+          }
+          $t = (Get-Content -Raw -Encoding UTF8 LICENSE) -replace "`r?`n", "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "LICENCA.txt"), $t, $utf8)
+          $t = (Get-Content -Raw -Encoding UTF8 docs\ROTEIRO-linux-completo.md) -replace "`r?`n", "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "ROTEIRO-DE-TESTE.txt"), $t, $utf8)
+          New-Item -ItemType Directory -Force "$p\exemplos" | Out-Null
+          Copy-Item exemplos\nfe_exemplo.xml "$p\exemplos\nota-de-teste.xml"
+          New-Item -ItemType Directory -Force "$p\dados" | Out-Null
+          echo "PASTA=$p" >> $env:GITHUB_ENV
+          echo "NOME=$nome" >> $env:GITHUB_ENV
+          Get-ChildItem $p | Select-Object Name, Length | Format-Table
+      # Abre uma CÓPIA do portátil sem tela (offscreen) e confere: os dados
+      # ficam em "dados" dentro dela, e nada aparece na pasta do Rustinho
+      # instalado (%LOCALAPPDATA%\Rustinho) nem na de RUSTINHO_DADOS.
+      - name: Conferir o isolamento (abre uma cópia)
+        shell: pwsh
+        run: |
+          $copia = "conferir\$env:NOME"
+          New-Item -ItemType Directory -Force conferir | Out-Null
+          Copy-Item -Recurse $env:PASTA $copia
+          Copy-Item "$env:QT_ROOT_DIR\plugins\platforms\qoffscreen.dll" "$copia\platforms\"
+          $instalado = Join-Path $env:LOCALAPPDATA "Rustinho"
+          $outra = Join-Path $env:RUNNER_TEMP "rustinho-dados-env"
+          if (Test-Path $instalado) { throw "A pasta do Rustinho instalado já existia no robô: $instalado" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:QT_QUICK_BACKEND = "software"
+          $env:RUSTINHO_DADOS = $outra
+          $proc = Start-Process -FilePath "$copia\rustinho.exe" -WorkingDirectory $copia -PassThru
+          $banco = "$copia\dados\rustinho.db"
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $banco); $i++) { Start-Sleep -Seconds 1 }
+          Start-Sleep -Seconds 3
+          $vivo = -not $proc.HasExited
+          if ($vivo) { Stop-Process -Id $proc.Id -Force }
+          Get-ChildItem -Recurse "$copia\dados" | Select-Object FullName, Length | Format-Table -AutoSize
+          if (-not (Test-Path $banco)) { throw "O portátil não criou o banco em dados\ (o programa abriu? $vivo)" }
+          if (Test-Path $instalado) { throw "O portátil criou dados na pasta do Rustinho instalado: $instalado" }
+          if (Test-Path $outra) { throw "O portátil usou RUSTINHO_DADOS: $outra" }
+          if (Test-Path "$env:PASTA\dados\rustinho.db") { throw "A pasta que vai no ZIP ganhou um banco" }
+          "Isolamento conferido: banco em $banco; nada em $instalado nem em $outra." | Tee-Object -FilePath isolamento.txt
+      - name: ZIP e SHA-256
+        shell: pwsh
+        run: |
+          $zip = "saida\$env:NOME.zip"
+          Compress-Archive -Path $env:PASTA -DestinationPath $zip -CompressionLevel Optimal
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$h  $env:NOME.zip" | Out-File -Encoding ascii "saida\$env:NOME.zip.sha256"
+          Copy-Item isolamento.txt saida\
+          Get-Content "saida\$env:NOME.zip.sha256"
+          Get-ChildItem saida -File | Select-Object Name, Length | Format-Table
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Windows-portatil
+          path: |
+            saida/*.zip
+            saida/*.sha256
+            saida/isolamento.txt
+          retention-days: 30

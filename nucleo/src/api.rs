@@ -493,7 +493,9 @@ impl Servico {
             }
         }
         s._trava = Some(trava);
-        s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), sync::PORTA_TCP, sync::PORTA_UDP));
+        // O portátil usa outras portas (não conversa com um caixa instalado).
+        let (tcp, udp) = crate::portatil::portas();
+        s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), tcp, udp));
         Ok(s)
     }
 
@@ -2146,7 +2148,7 @@ impl Servico {
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),
-            "porta": sync::PORTA_TCP,
+            "porta": crate::portatil::portas().0,
             "usuarios": usuarios::quantidade(conn)?,
             "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),

@@ -12,6 +12,14 @@ RUSTINHO_DADOS=~/rustinho-teste ./Rustinho-*-Linux-x86_64.AppImage
 Para apagar o teste: feche o Rustinho e apague a pasta `~/rustinho-teste`
 (e `~/rustinho-teste-2` da parte B).
 
+**No Windows (Rustinho portátil, 0.9.14):** extraia o ZIP
+`Rustinho-0.9.14-Windows-portatil.zip` para uma pasta sua e abra
+`rustinho.exe` (veja o `LEIA-ME.txt` que vem junto). Os dados ficam na pasta
+`dados` dentro dela. Na parte B, em vez de `~/rustinho-teste-2`, copie a
+pasta inteira (ex.: `Rustinho-Teste-2`). Para fechar à força (parte G), use o
+Gerenciador de Tarefas → Rustinho → Finalizar tarefa. Para apagar o teste,
+apague a pasta.
+
 Anote em cada linha: ✔ (deu certo), ✘ (deu errado: o que apareceu) ou — (não deu
 para fazer). Mande as fotos dos ✘.
 
@@ -114,3 +122,34 @@ mesmo estoque e nada repetido.
 | # | Faça | Deve acontecer |
 |---|---|---|
 | J1 | Imprima uma venda, um orçamento, um recibo do crediário, o fechamento do caixa e a DRE. | Gera os PDFs, legíveis, com os valores certos. |
+
+## K. Caixa já fechado (D-14, novo na 0.9.14 — prioridade 1)
+
+Use o caixa de um dia (ou de agora há pouco) **já fechado**. Anote, antes, o
+fechamento dele (Caixa → histórico → abrir): esperado, contado e diferença.
+
+| # | Faça | Deve acontecer |
+|---|---|---|
+| K1 | Abra o caixa de novo (um caixa novo). Como gerente, cancele uma venda **em dinheiro** do caixa fechado. | O fechamento antigo continua igual (esperado, contado, diferença, vendas). No caixa aberto aparece uma **Sangria** "Cancelamento da venda … (caixa já fechado)" com o valor que ficou na gaveta (pago menos troco), e o "dinheiro na gaveta" diminui. |
+| K2 | Cancele de novo a mesma venda. | Recusa ("já foi cancelada"); nenhuma sangria a mais. |
+| K3 | Estorne um recebimento em dinheiro do caixa fechado. | O fechamento antigo não muda; sangria "Estorno do recebimento … (caixa já fechado)" no caixa aberto; o cliente volta a dever. |
+| K4 | Desfaça uma devolução em dinheiro do caixa fechado. | O fechamento antigo não muda; **Suprimento** "Devolução nº … desfeita (caixa já fechado)" no caixa aberto. |
+| K5 | Feche o caixa. Sem nenhum caixa aberto, cancele outra venda em dinheiro de um caixa fechado. | O fechamento antigo não muda; no Financeiro → Caixa geral aparece "Acerto de caixa já fechado" (saída) com o valor. |
+| K6 | Com o caixa aberto com pouco dinheiro (ex.: R$ 10), cancele uma venda em dinheiro de R$ 100 de um caixa fechado. | Recusa ("só há R$ 10,00 em dinheiro na gaveta…"); nada muda (a venda continua, o estoque também). |
+| K7 | Cancele uma venda do caixa que **ainda está aberto**. | Como sempre: a venda sai do total do caixa, sem sangria. |
+
+## L. Rustinho portátil no Windows (novo na 0.9.14)
+
+Num computador com o Rustinho **instalado** (ou um que já teve), anote antes a
+data de modificação de `%LOCALAPPDATA%\Rustinho\rustinho.db`.
+
+| # | Faça | Deve acontecer |
+|---|---|---|
+| L1 | Extraia o ZIP e abra `rustinho.exe`. | Pede para configurar uma loja nova (não abre a loja instalada). |
+| L2 | Configure e abra Configurações → Sobre → "Pasta dos dados". | O caminho é a pasta `dados` dentro da pasta portátil. |
+| L3 | Faça um backup agora. Depois tente escolher, como pasta dos backups, uma pasta fora da pasta portátil (ex.: Documentos). | O backup aparece em `dados\backups`. A pasta de fora é recusada ("No Rustinho portátil, os backups ficam dentro da pasta dele"). |
+| L4 | Feche o portátil. Confira `%LOCALAPPDATA%\Rustinho\rustinho.db`. | Mesma data de modificação de antes (nada mudou). |
+| L5 | Com o Rustinho instalado aberto em outro computador da rede, com a troca de dados ligada: ligue a troca de dados no portátil com a **mesma** senha da rede. | O portátil não acha o caixa instalado e nada passa de um para o outro (nenhuma venda nem peça a mais em nenhum). |
+| L6 | Dois portáteis em dois computadores, com a mesma senha da rede. | Os dois se acham e trocam dados (é como se faz o FV-1 a FV-13 sem tocar na loja). |
+| L7 | Apague a pasta portátil. | Nada fica no computador (o Rustinho instalado continua igual). |
+

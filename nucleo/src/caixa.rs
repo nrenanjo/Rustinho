@@ -121,6 +121,22 @@ pub fn movimentar_com_conta(
     motivo: &str,
     conta_loja: Option<&str>,
 ) -> Resultado<String> {
+    movimentar_de(conn, dispositivo, usuario_id, tipo, valor, motivo, conta_loja, None)
+}
+
+/// Como [`movimentar_com_conta`], com a operação que causou o movimento
+/// (`origem` = tipo e id; D-14).
+#[allow(clippy::too_many_arguments)]
+fn movimentar_de(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    tipo: &str,
+    valor: &str,
+    motivo: &str,
+    conta_loja: Option<&str>,
+    origem: Option<(&str, &str)>,
+) -> Resultado<String> {
     let sessao = sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("O caixa está fechado."))?;
     if tipo != "sangria" && tipo != "suprimento" {
         return Err(Erro::Interno(format!("movimento desconhecido: {tipo}")));
@@ -155,9 +171,21 @@ pub fn movimentar_com_conta(
     }
     let id = tempo::novo_id();
     conn.execute(
-        "INSERT INTO caixa_movimento (id, sessao_id, tipo, valor, motivo, usuario_id, criado_em, conta_loja_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, sessao.id, tipo, valor, motivo, usuario_id, tempo::agora(), conta_loja],
+        "INSERT INTO caixa_movimento (id, sessao_id, tipo, valor, motivo, usuario_id, criado_em, conta_loja_id,
+                                      origem_tipo, origem_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            id,
+            sessao.id,
+            tipo,
+            valor,
+            motivo,
+            usuario_id,
+            tempo::agora(),
+            conta_loja,
+            origem.map(|o| o.0).unwrap_or_default(),
+            origem.map(|o| o.1)
+        ],
     )?;
     if let Some(c) = conta_loja {
         let (sinal, de_onde) = if tipo == "sangria" { (1, "Sangria do") } else { (-1, "Suprimento para o") };
@@ -242,7 +270,10 @@ pub struct Resumo {
     pub fechado_por: String,
 }
 
-/// Resumo de uma sessão de caixa.
+/// Resumo de uma sessão de caixa. D-14: o que foi cancelado, estornado ou
+/// desfeito depois de o caixa fechar continua contando nele como estava ao
+/// fechar (o dinheiro dessas operações fica onde elas foram feitas, veja
+/// [`compensar_caixa_fechado`]).
 pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
     let sessao = conn
         .query_row(
@@ -260,18 +291,20 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
     )?;
     let (vendas, total_vendido, troco): (i64, i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(total), 0), COALESCE(SUM(troco), 0) FROM venda
-          WHERE sessao_id = ?1 AND tipo = 'venda' AND situacao = 'concluida'",
+          WHERE sessao_id = ?1 AND tipo = 'venda' AND (situacao = 'concluida' OR cancelado_apos_fechar = 1)",
         [sessao_id],
         |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
     )?;
     let canceladas: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM venda WHERE sessao_id = ?1 AND tipo = 'venda' AND situacao = 'cancelada'",
+        "SELECT COUNT(*) FROM venda
+          WHERE sessao_id = ?1 AND tipo = 'venda' AND situacao = 'cancelada' AND cancelado_apos_fechar = 0",
         [sessao_id],
         |l| l.get(0),
     )?;
     let mut c = conn.prepare_cached(
         "SELECT p.forma, SUM(p.valor) FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
-          WHERE v.sessao_id = ?1 AND v.tipo = 'venda' AND v.situacao = 'concluida' GROUP BY p.forma",
+          WHERE v.sessao_id = ?1 AND v.tipo = 'venda' AND (v.situacao = 'concluida' OR v.cancelado_apos_fechar = 1)
+          GROUP BY p.forma",
     )?;
     let somas: Vec<(String, i64)> =
         c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
@@ -392,6 +425,90 @@ pub fn fechar(
         ],
     )?;
     Ok(sessao.id)
+}
+
+/// A sessão de caixa `sessao_id` já foi fechada? (Sem sessão: não.)
+pub fn sessao_fechada(conn: &Connection, sessao_id: Option<&str>) -> Resultado<bool> {
+    let Some(id) = sessao_id else { return Ok(false) };
+    Ok(conn
+        .query_row("SELECT fechado_em IS NOT NULL FROM caixa_sessao WHERE id = ?1", [id], |l| l.get(0))
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// D-14: dinheiro que sai (`valor` negativo) ou volta (positivo) por causa de
+/// uma operação feita depois de o caixa dela ter sido fechado (venda
+/// cancelada, recebimento estornado, devolução desfeita). O caixa fechado não
+/// muda: o dinheiro fica na gaveta aberta deste computador ou, sem caixa
+/// aberto, no Caixa geral, ligado à operação de origem (`origem_tipo`,
+/// `origem_id`). Uma operação nunca ganha dois movimentos. Devolve onde ficou
+/// (para a auditoria), ou nada se não havia dinheiro.
+pub fn compensar_caixa_fechado(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    valor: i64,
+    origem_tipo: &str,
+    origem_id: &str,
+    descricao: &str,
+) -> Resultado<Option<String>> {
+    if valor == 0 {
+        return Ok(None);
+    }
+    let ja: bool = conn
+        .query_row(
+            "SELECT 1 FROM caixa_movimento WHERE origem_id = ?1 AND origem_tipo = ?2
+             UNION ALL SELECT 1 FROM movimento_conta WHERE origem_id = ?1 AND origem_tipo = ?2 LIMIT 1",
+            params![origem_id, origem_tipo],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if ja {
+        return Err(Erro::Interno(format!("o dinheiro de {origem_tipo} {origem_id} já foi registrado")));
+    }
+    let descricao: String = texto::limpar(descricao).chars().take(200).collect();
+    let dinheiro = numeros::escrever_dinheiro(valor.abs());
+    if let Some(s) = sessao_aberta(conn, dispositivo)? {
+        let tipo = if valor < 0 { "sangria" } else { "suprimento" };
+        movimentar_de(conn, dispositivo, usuario_id, tipo, &dinheiro, &descricao, None, Some((origem_tipo, origem_id)))
+            .map_err(|e| match e {
+                Erro::Validacao { mensagem, .. } if valor < 0 => Erro::validacao(format!(
+                    "{mensagem} Não dá para devolver R$ {dinheiro} ao cliente por esta gaveta."
+                )),
+                outro => outro,
+            })?;
+        let o_que = if valor < 0 { "saiu da gaveta" } else { "entrou na gaveta" };
+        return Ok(Some(format!("R$ {dinheiro} {o_que} do {}", s.caixa_nome)));
+    }
+    conn.execute(
+        "INSERT INTO movimento_conta (id, conta_id, data, valor, tipo, descricao, origem_id, origem_tipo, usuario_id,
+                                      criado_em, dispositivo)
+         VALUES (?1, 'caixa-geral', ?2, ?3, 'caixa_fechado', ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            tempo::novo_id(),
+            crate::fiscal::hoje(conn)?,
+            valor,
+            descricao,
+            origem_id,
+            origem_tipo,
+            usuario_id,
+            tempo::agora(),
+            dispositivo
+        ],
+    )?;
+    let o_que = if valor < 0 { "saiu do" } else { "entrou no" };
+    let texto = format!("R$ {dinheiro} {o_que} Caixa geral (nenhum caixa aberto neste computador)");
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "caixa.caixa_fechado",
+        "conta_loja",
+        "caixa-geral",
+        &[format!("{texto} · {descricao}")],
+    )?;
+    Ok(Some(texto))
 }
 
 /// Últimos caixas deste computador.

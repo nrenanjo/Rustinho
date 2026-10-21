@@ -1239,12 +1239,19 @@ fn atualizar_custo(
             }
         }
     } else if custo > 0 {
-        // Sem atualizar o preço, o % de lucro muda (o preço fica).
-        conn.execute(
-            "UPDATE produto_preco SET lucro = CASE WHEN ?2 > 0 THEN ((preco - ?2) * 10000 + ?2 / 2) / ?2 ELSE lucro END
-              WHERE produto_id = ?1",
-            params![produto_id, custo],
-        )?;
+        // Sem atualizar o preço, o % de lucro muda (o preço fica). D-15: a
+        // mesma conta do cadastro (`numeros::lucro_por_preco`), que arredonda
+        // certo também com o preço abaixo do custo.
+        let precos: Vec<(i64, Option<i64>)> = conn
+            .prepare_cached("SELECT tabela, preco FROM produto_preco WHERE produto_id = ?1 ORDER BY tabela")?
+            .query_map([produto_id], |l| Ok((l.get(0)?, l.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (tabela, preco) in precos {
+            conn.execute(
+                "UPDATE produto_preco SET lucro = ?3 WHERE produto_id = ?1 AND tabela = ?2",
+                params![produto_id, tabela, preco.and_then(|p| numeros::lucro_por_preco(custo, p))],
+            )?;
+        }
     }
     if !detalhes.is_empty() {
         conn.execute(
@@ -1785,6 +1792,29 @@ mod testes {
         f.codigo_original = original.into();
         f.custo = custo.into();
         produtos::salvar(&b.conn, &b.dispositivo, u, &f).unwrap()
+    }
+
+    /// D-15: o % de lucro refeito quando a compra muda o custo e o preço
+    /// fica é a mesma conta do cadastro, também abaixo do custo.
+    #[test]
+    fn d15_lucro_abaixo_do_custo() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "Peça de teste".into();
+        f.custo = "5,00".into();
+        f.precos[0].preco = "8,00".into();
+        f.precos[0].lucro = String::new();
+        let pid = produtos::salvar(c, &b.dispositivo, &u, &f).unwrap();
+        let tabelas = config::tabelas_preco(c).unwrap();
+        for (custo, esperado) in [(1000, -2000), (1100, -2727), (300, 16667), (800, 0), (1, 7_990_000)] {
+            atualizar_custo(c, &b.dispositivo, &u, &pid, custo, false, false, &tabelas).unwrap();
+            let lucro: i64 = c
+                .query_row("SELECT lucro FROM produto_preco WHERE produto_id = ?1 AND tabela = 1", [&pid], |l| l.get(0))
+                .unwrap();
+            assert_eq!(Some(lucro), numeros::lucro_por_preco(custo, 800), "custo {custo}");
+            assert_eq!(lucro, esperado, "custo {custo}");
+        }
     }
 
     #[test]

@@ -416,6 +416,11 @@ pub fn estornar_movimento(
         "sangria" | "suprimento" => {
             return Err(Erro::validacao("Este movimento veio de uma sangria ou suprimento do caixa."))
         }
+        "caixa_fechado" => {
+            return Err(Erro::validacao(
+                "Este movimento veio de uma venda cancelada, recebimento estornado ou devolução desfeita de um caixa já fechado.",
+            ))
+        }
         _ => return Err(Erro::validacao("Este movimento é de um cheque; desfaça na lista de cheques.")),
     }
     let motivo = texto::limpar(motivo);
@@ -535,6 +540,9 @@ pub fn extrato(conn: &Connection, conta_id: &str, limite: i64) -> Resultado<Extr
             (_, "deposito_cheque") => "Depósito de cheque".into(),
             (_, "cheque_devolvido") => "Cheque devolvido".into(),
             (_, "ajuste") => "Ajuste".into(),
+            // D-14: dinheiro de uma venda cancelada, recebimento estornado ou
+            // devolução desfeita de um caixa já fechado.
+            (_, "caixa_fechado") => "Acerto de caixa já fechado".into(),
             (_, t) => t.to_string(),
         };
         linhas.push(LinhaExtrato {

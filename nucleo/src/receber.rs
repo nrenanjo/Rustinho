@@ -961,10 +961,21 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
     crate::sync::exigir_editavel(conn, "recebimento", id)?;
     crate::sync::exigir_filhos_editaveis(conn, "recebimento_parcela", "recebimento_id", id)?;
-    let (cliente_id, numero, caixa_nome, estornado): (String, i64, String, Option<String>) = conn
-        .query_row("SELECT cliente_id, numero, caixa_nome, estornado_em FROM recebimento WHERE id = ?1", [id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
-        })
+    #[allow(clippy::type_complexity)]
+    let (cliente_id, numero, caixa_nome, estornado, sessao_id, forma, valor): (
+        String,
+        i64,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT cliente_id, numero, caixa_nome, estornado_em, sessao_id, forma, valor FROM recebimento WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?)),
+        )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Recebimento".into()))?;
     if estornado.is_some() {
@@ -975,19 +986,31 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
     crate::cheques::cancelar_de(conn, usuario_id, "recebimento_id", id)?;
+    // D-14: recebimento de um caixa já fechado. O fechamento dele não muda; o
+    // dinheiro sai da gaveta aberta (ou do Caixa geral).
+    let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
     conn.execute(
-        "UPDATE recebimento SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = ?4 WHERE id = ?1",
-        params![id, tempo::agora(), usuario_id, motivo],
+        "UPDATE recebimento SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = ?4, estornado_apos_fechar = ?5
+          WHERE id = ?1",
+        params![id, tempo::agora(), usuario_id, motivo, fechado],
     )?;
-    auditoria::registrar(
-        conn,
-        dispositivo,
-        Some(usuario_id),
-        "receber.estornar",
-        "pessoa",
-        &cliente_id,
-        &[format!("Estorno do recebimento {numero} · {caixa_nome} · {motivo}")],
-    )?;
+    let mut detalhes = vec![format!("Estorno do recebimento {numero} · {caixa_nome} · {motivo}")];
+    if fechado {
+        let onde = caixa::compensar_caixa_fechado(
+            conn,
+            dispositivo,
+            usuario_id,
+            if forma == "dinheiro" { -valor.max(0) } else { 0 },
+            "recebimento_estornado",
+            id,
+            &format!("Estorno do recebimento {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
+        )?;
+        detalhes.push(match onde {
+            Some(o) => format!("O caixa do recebimento já estava fechado (o fechamento não muda): {o}"),
+            None => "O caixa do recebimento já estava fechado (o fechamento não muda); não era dinheiro".into(),
+        });
+    }
+    auditoria::registrar(conn, dispositivo, Some(usuario_id), "receber.estornar", "pessoa", &cliente_id, &detalhes)?;
     Ok(())
 }
 
@@ -1074,12 +1097,13 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
 /// Recebimentos de uma sessão de caixa, por forma: (forma, soma).
 pub fn por_forma_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<(i64, Vec<(String, i64)>)> {
     let qtd: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND estornado_em IS NULL",
+        "SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1)",
         [sessao_id],
         |l| l.get(0),
     )?;
     let mut c = conn.prepare_cached(
-        "SELECT forma, SUM(valor) FROM recebimento WHERE sessao_id = ?1 AND estornado_em IS NULL GROUP BY forma",
+        "SELECT forma, SUM(valor) FROM recebimento
+          WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1) GROUP BY forma",
     )?;
     let somas = c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
     Ok((qtd, somas))

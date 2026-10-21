@@ -1830,6 +1830,10 @@ fn cache() -> &'static CacheChaves {
 }
 
 fn derivar(senha: &str, sal: &[u8; 16]) -> Resultado<[u8; 32]> {
+    // O portátil tira a chave de outro jeito: nunca a mesma de um caixa
+    // instalado, mesmo com a mesma senha (veja `portatil`).
+    let senha = crate::portatil::senha_da_rede(senha);
+    let senha = senha.as_ref();
     let id: [u8; 32] = Sha256::digest(senha.as_bytes()).into();
     if let Some(k) = cache().lock().unwrap_or_else(|e| e.into_inner()).get(&(id, *sal)) {
         return Ok(*k);
@@ -2262,7 +2266,7 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
     }
     // Quem pediu também vira um par conhecido (com o endereço de onde veio).
     if let (Some(d), Ok(origem)) = (pedido["dispositivo"].as_str(), fluxo.peer_addr()) {
-        let porta = pedido["porta"].as_u64().unwrap_or(PORTA_TCP as u64);
+        let porta = pedido["porta"].as_u64().unwrap_or(crate::portatil::portas().0 as u64);
         if d != a.dispositivo {
             registrar_par(&conn, d, pedido["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()))?;
         }
@@ -2349,7 +2353,9 @@ fn puxar_ate(
 fn endereco_completo(endereco: &str) -> Resultado<SocketAddr> {
     match endereco.parse::<SocketAddr>() {
         Ok(s) => Ok(s),
-        Err(_) => format!("{endereco}:{PORTA_TCP}").parse().map_err(|_| Erro::validacao("Endereço inválido.")),
+        Err(_) => format!("{endereco}:{}", crate::portatil::portas().0)
+            .parse()
+            .map_err(|_| Erro::validacao("Endereço inválido.")),
     }
 }
 
@@ -2588,7 +2594,7 @@ fn anuncio(dispositivo: &str, nome: &str, porta: u16) -> Value {
 /// (dispositivo, nome, porta) de um anúncio; `None` se não diz quem é.
 fn ler_anuncio(v: &Value) -> Option<(String, String, u16)> {
     let d = v["dispositivo"].as_str().filter(|d| !d.is_empty())?;
-    let porta = v["porta"].as_u64().and_then(|p| u16::try_from(p).ok()).unwrap_or(PORTA_TCP);
+    let porta = v["porta"].as_u64().and_then(|p| u16::try_from(p).ok()).unwrap_or(crate::portatil::portas().0);
     Some((d.to_string(), v["nome"].as_str().unwrap_or("").to_string(), porta))
 }
 
