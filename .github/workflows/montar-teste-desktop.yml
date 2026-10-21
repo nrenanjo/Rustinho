@@ -1,0 +1,121 @@
+# SÓ PARA TESTE: monta o instalador do Windows e o AppImage do Linux da versão
+# do Cargo.toml, como artefatos. Não publica em Releases e não lê segredos.
+name: Montar teste desktop
+
+on:
+  push:
+    branches: [build-0.9.12]
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSAO: "6.8.3"
+  RCLONE_VERSAO: "v1.68.2"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Versão
+        shell: bash
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake.exe"
+          cargo build --release -p rustinho
+      - name: Juntar os arquivos (Qt, rclone, runtime)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\rustinho.exe dist\
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --qmldir app\qml --qmldir app\base --no-translations --no-system-d3d-compiler --no-opengl-sw dist\rustinho.exe
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            Copy-Item "$env:WINDIR\System32\$dll" dist\ -ErrorAction SilentlyContinue
+          }
+          Invoke-WebRequest "https://github.com/rclone/rclone/releases/download/$env:RCLONE_VERSAO/rclone-$env:RCLONE_VERSAO-windows-amd64.zip" -OutFile rclone.zip
+          $hash = (Get-FileHash rclone.zip -Algorithm SHA256).Hash
+          if ($hash -ne "812BF76CC02C04CF6327F3683F3D5A88E47D36C39DB84C1A745777496BE7D993") { throw "rclone.zip diferente do esperado: $hash" }
+          Expand-Archive rclone.zip -DestinationPath rclone-tmp
+          Copy-Item (Get-ChildItem rclone-tmp -Recurse -Filter rclone.exe | Select-Object -First 1).FullName dist\
+          Copy-Item LICENSE dist\LICENCA.txt
+          Get-ChildItem dist | Select-Object Name, Length | Format-Table
+      - name: Instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersao=$env:VERSAO" "/DOrigem=..\dist" instalador\rustinho.iss
+          Get-ChildItem saida
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Windows
+          path: saida/*.exe
+          retention-days: 3
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Bibliotecas do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libfuse2 file
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Versão
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build --release -p rustinho
+      - name: AppImage
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp target/release/rustinho AppDir/usr/bin/
+          curl -fsSL -o rclone.zip "https://github.com/rclone/rclone/releases/download/$RCLONE_VERSAO/rclone-$RCLONE_VERSAO-linux-amd64.zip"
+          echo "0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c  rclone.zip" | sha256sum -c -
+          unzip -q -j rclone.zip '*/rclone' -d AppDir/usr/bin/
+          # Versões fixas (não a "continuous", que muda sozinha).
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          # Confere se são os mesmos arquivos de sempre (C-11): um byte diferente para a montagem.
+          printf '%s  %s\n' \
+            c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d linuxdeploy \
+            15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 linuxdeploy-plugin-qt | sha256sum -c -
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base"
+          export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:$LD_LIBRARY_PATH"
+          export OUTPUT="Rustinho-$VERSAO-Linux-x86_64.AppImage"
+          ./linuxdeploy --appdir AppDir \
+            --desktop-file instalador/rustinho.desktop \
+            $(for n in 16 22 24 32 48 64 128 256 512; do printf -- '--icon-file instalador/icones/hicolor/%sx%s/apps/rustinho.png ' "$n" "$n"; done) \
+            --icon-filename rustinho \
+            --plugin qt --output appimage
+          mkdir -p saida && mv Rustinho-*.AppImage saida/
+          ls -la saida
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Linux
+          path: saida/*.AppImage
+          retention-days: 3
+
