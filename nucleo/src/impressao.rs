@@ -388,6 +388,17 @@ pub fn lista_compra(conn: &Connection) -> Resultado<String> {
     ))
 }
 
+/// DRE gerencial (não é a DRE contábil).
+pub fn dre(conn: &Connection, f: &crate::dre::Filtro) -> Resultado<String> {
+    let quando =
+        conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', 'now', 'localtime')", [], |l| l.get::<_, String>(0))?;
+    Ok(format!(
+        "<html><head>{ESTILO}</head><body>{}{}<p class=\"nota\">Impresso em {quando}.</p></body></html>",
+        cabecalho_loja(conn)?,
+        crate::dre::html(conn, f)?
+    ))
+}
+
 fn caixa_vale(conn: &Connection, vale_id: &str) -> Resultado<String> {
     let v: (i64, String, String, i64, i64, String) = conn.query_row(
         "SELECT numero, caixa_nome, cliente_nome, valor, saldo, criado_em FROM vale_saldo WHERE id = ?1",

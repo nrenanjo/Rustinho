@@ -70,7 +70,7 @@ Item {
                 ToolTip.visible: sobre.hovered && !col.modelData.futuro
                 ToolTip.delay: 150
                 ToolTip.text: (grafico.dinheiro ? "R$ " + Tema.valor(col.modelData.valor) : col.modelData.valor + grafico.unidade)
-                              + "\n" + col.modelData.dica
+                              + "\n" + Tema.sigiloTexto(col.modelData.dica)
             }
         }
     }

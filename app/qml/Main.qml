@@ -149,7 +149,7 @@ ApplicationWindow {
     readonly property var nomesDasAcoes: ({
         cancelar_venda: "Cancelar venda", estornar: "Estornar", ajustar_estoque: "Ajustar estoque",
         backup: "Backup", configuracoes: "Configurações da loja", usuarios: "Usuários",
-        financeiro: "Financeiro", gerente: "Gerente"
+        financeiro: "Financeiro", resultados: "Resultados (lucro e DRE)", gerente: "Gerente"
     })
     function podeGerente(acao) {
         const r = Api.chamar("permissao", { acao: acao })

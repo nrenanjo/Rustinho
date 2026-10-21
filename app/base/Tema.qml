@@ -59,6 +59,11 @@ QtObject {
     function sigilo(t) {
         return oculto && t ? String(t).replace(/[0-9A-Za-z]/g, "•") : (t || "")
     }
+    // Texto com valores em reais dentro ("lucro R$ 12,00"): com o olho
+    // fechado, os valores somem e o resto do texto fica.
+    function sigiloTexto(t) {
+        return oculto && t ? String(t).replace(/R\$ ?-?[\d.]+,\d\d/g, "R$ •••") : (t || "")
+    }
     // Valor em dinheiro escondido (sem dar ideia do tamanho).
     function valor(t) {
         return oculto && t !== undefined && t !== null && String(t) !== "" ? "•••,••" : (t === undefined || t === null ? "" : String(t))

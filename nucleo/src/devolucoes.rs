@@ -955,9 +955,10 @@ mod testes {
         assert_eq!(estoque::saldo(c, &filtro).unwrap(), 8_000);
         assert_eq!(saldo_vale(c, &vale).unwrap(), 0);
 
-        // No painel, a venda conta sem o que foi devolvido (72 - 9).
+        // No painel, a venda conta inteira (vendas líquidas) e a devolução à parte.
         let p = painel::resumo(c).unwrap();
-        assert_eq!(p.hoje.total, "63,00");
+        assert_eq!(p.hoje.total, "72,00");
+        assert_eq!(p.devolvido_mes, "9,00");
 
         // Resto da venda: o último filtro e as 3 velas (com o arredondamento certo).
         let x = calcular(c, &entrada(&venda, vec![(&i_filtro, "2", false), (&i_vela, "3", false)], "pix", "")).unwrap();

@@ -172,6 +172,7 @@ FocusScope {
             lValor.texto = ""
             lParcelas.texto = "1"
             lVencimento.texto = ""
+            lCompetencia.texto = ""
             previa = []
             open()
             lDescricao.focar()
@@ -179,7 +180,7 @@ FocusScope {
         function entrada() {
             return { fornecedorId: fornecedor, categoriaId: secao.idCategoria(lCategoria.indice), descricao: lDescricao.texto,
                      documento: lDocumento.texto, valor: lValor.texto, parcelas: parseInt(lParcelas.texto) || 1,
-                     primeiroVencimento: lVencimento.texto }
+                     primeiroVencimento: lVencimento.texto, competencia: lCompetencia.texto }
         }
         function atualizar() {
             const r = Api.chamar("pagar_previa", entrada())
@@ -300,8 +301,21 @@ FocusScope {
                     maximo: 10
                     Layout.preferredWidth: 160
                     onEditado: lancamento.atualizar()
+                    onConfirmado: lCompetencia.focar()
+                }
+                Campo {
+                    id: lCompetencia
+                    rotulo: "Mês de referência"
+                    dica: "mm/aaaa"
+                    maximo: 7
+                    Layout.preferredWidth: 150
                     onConfirmado: lancamento.salvar()
                 }
+            }
+            Nota {
+                text: "Mês de referência: o mês a que a conta se refere (o aluguel de outubro pago em novembro é de 10/aaaa). Vazio: o mês do vencimento. Serve para o resultado (DRE) do Painel."
+                font.pixelSize: 13
+                Layout.fillWidth: true
             }
             Flow {
                 spacing: 14
@@ -529,7 +543,8 @@ FocusScope {
             }
             Nota {
                 text: !ficha.p ? "" : [ficha.p.fornecedor, ficha.p.categoria, ficha.p.documento ? "doc. " + ficha.p.documento : "",
-                                       ficha.p.parcela !== "1/1" ? "parcela " + ficha.p.parcela : ""].filter(x => !!x).join("  ·  ")
+                                       ficha.p.parcela !== "1/1" ? "parcela " + ficha.p.parcela : "",
+                                       ficha.p.competencia ? "referente a " + ficha.p.competencia : ""].filter(x => !!x).join("  ·  ")
                 visible: text !== ""
                 font.pixelSize: 15
                 Layout.fillWidth: true
@@ -659,6 +674,7 @@ FocusScope {
             cDocumento.texto = p.documento
             cValor.texto = p.valor
             cVencimento.texto = p.vencimento
+            cCompetencia.texto = p.competencia || ""
             cObs.texto = p.observacoes
             open()
             cVencimento.focar()
@@ -666,7 +682,7 @@ FocusScope {
         function salvar() {
             const r = Api.chamar("pagar_alterar", { id: contaId, descricao: cDescricao.texto, categoriaId: secao.idCategoria(cCategoria.indice),
                                                     documento: cDocumento.texto, valor: cValor.texto, vencimento: cVencimento.texto,
-                                                    observacoes: cObs.texto })
+                                                    competencia: cCompetencia.texto, observacoes: cObs.texto })
             if (!r.ok) {
                 erro = r.erro
                 return
@@ -690,6 +706,7 @@ FocusScope {
                 Layout.fillWidth: true
                 Campo { id: cValor; rotulo: "Valor"; prefixo: "R$"; numerico: true; maximo: 14; Layout.fillWidth: true }
                 Campo { id: cVencimento; rotulo: "Vencimento"; maximo: 10; Layout.preferredWidth: 160; onConfirmado: correcao.salvar() }
+                Campo { id: cCompetencia; rotulo: "Mês de referência"; dica: "mm/aaaa"; maximo: 7; Layout.preferredWidth: 150; onConfirmado: correcao.salvar() }
             }
             Campo { id: cObs; rotulo: "Observações"; maximo: 300; Layout.fillWidth: true }
             TextoErro { text: correcao.erro }

@@ -184,7 +184,7 @@ pub fn periodos(hoje: &str, tipo: &str, de: &str, ate: &str) -> Resultado<(Perio
             let o = h - Duration::days(1);
             (
                 periodo("hoje", h, h, format!("Hoje, {}", br(h)), true, false),
-                periodo("comparacao", o, o, format!("Ontem, {}", br(o)), false, false),
+                periodo("comparacao", o, o, format!("ontem, {}", br(o)), false, false),
             )
         }
         "7dias" => {
@@ -929,7 +929,7 @@ fn apurar(conn: &Connection, lido: Lido, p: &Periodo, hoje: &str, vendedor: bool
         pend.push(Pendencia {
             codigo: "sem_custo".into(),
             texto: format!(
-                "{q} {} sem custo no cadastro (R$ {} de venda): o CMV e o lucro estão incompletos, não contam essas peças como lucro inteiro.",
+                "{q} {} sem custo no cadastro (R$ {} de venda): o CMV e o lucro estão incompletos (essas peças não entram como lucro).",
                 if q == 1 { "peça vendida" } else { "peças vendidas" },
                 dinheiro(n.receita_sem_custo)
             ),
@@ -1077,7 +1077,11 @@ fn comercial(conn: &Connection, de: &str, ate: &str, vendedor: Option<&str>) -> 
         vendas_liquidas: dinheiro(total),
         quantidade: q,
         ticket: if q > 0 { dinheiro((total + q / 2) / q) } else { String::new() },
-        itens_por_venda: if q > 0 { numeros::escrever_quantidade((unidades / q / 100) * 100) } else { String::new() },
+        itens_por_venda: if q > 0 {
+            numeros::escrever_quantidade(((unidades / q + 50) / 100) * 100)
+        } else {
+            String::new()
+        },
         descontos: dinheiro(desconto),
         canceladas: canc,
         canceladas_valor: dinheiro(canc_valor),
@@ -1804,11 +1808,8 @@ pub fn indicadores(conn: &Connection, f: &Filtro, busca: &str, limite: usize) ->
                     receita: dinheiro(total),
                     ticket: if q > 0 { dinheiro((total + q / 2) / q) } else { String::new() },
                     descontos: dinheiro(descontos),
-                    lucro: match (lucro, sem) {
-                        (Some(l), false) => dinheiro(l),
-                        (Some(l), true) => format!("{} (incompleto)", dinheiro(l)),
-                        _ => String::new(),
-                    },
+                    // Com peça sem custo o lucro fica incompleto (`sem_custo`): a tela marca.
+                    lucro: lucro.map(dinheiro).unwrap_or_default(),
                     margem: if sem { String::new() } else { texto_pct(lucro.and_then(|l| pct(l, receita))) },
                     sem_custo: sem,
                     devolucoes: dq,
@@ -1828,7 +1829,7 @@ pub fn indicadores(conn: &Connection, f: &Filtro, busca: &str, limite: usize) ->
         por_margem,
         vendedores: saida.into_iter().map(|x| x.1).collect(),
         criterio_vendedor:
-            "Cada venda conta para quem a concluiu no caixa (uma venda tem um vendedor só). Devoluções e cancelamentos aparecem à parte."
+            "Cada venda conta para quem a concluiu no caixa (uma venda tem um vendedor só). Lucro do vendedor: receita menos o custo das peças, antes dos tributos. Devoluções e cancelamentos aparecem à parte."
                 .into(),
         nota: "Peças: vendas concluídas e não canceladas do período, menos as devoluções do período. O desconto geral da venda é dividido entre os itens pelo valor de cada um. Serviços (mão de obra) não entram nos rankings de peças. Maior venda não é o mesmo que maior lucro."
             .into(),

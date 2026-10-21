@@ -173,7 +173,7 @@ fn dre_cenario_manual() {
     assert_eq!(d.comercial.vendas_liquidas, "430,00", "180 + 200 + 50");
     assert_eq!(d.comercial.quantidade, 3);
     assert_eq!(d.comercial.ticket, "143,33");
-    assert_eq!(d.comercial.itens_por_venda, "1,6", "5 peças ÷ 3 vendas");
+    assert_eq!(d.comercial.itens_por_venda, "1,7", "5 peças ÷ 3 vendas (arredondado)");
     assert_eq!(d.comercial.devolucoes_valor, "100,00");
     // Incompleto: peça sem custo e classificação não confirmada.
     assert_eq!(d.estado, "incompleto");
@@ -479,7 +479,7 @@ fn dre_rankings_e_vendedores() {
     assert_eq!(i.vendedores.len(), 2);
     let maria = i.vendedores.iter().find(|v| v.nome == "Maria").unwrap();
     assert_eq!((maria.vendas, maria.receita.as_str(), maria.descontos.as_str()), (2, "210,00", "20,00"));
-    assert!(maria.sem_custo && maria.lucro.contains("incompleto"));
+    assert!(maria.sem_custo && maria.margem.is_empty(), "lucro incompleto: sem margem");
     let ana_v = i.vendedores.iter().find(|v| v.nome == "Ana").unwrap();
     assert_eq!((ana_v.lucro.as_str(), ana_v.margem.as_str()), ("40,00", "40%"));
     // Filtro por vendedor: só a parte das vendas.

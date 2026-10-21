@@ -101,7 +101,7 @@ Despesas fixas                                       = 1.000,00
 Resultado operacional 120 − 1.000                    = −880,00
 Resultado financeiro  +2,00 (juros recebidos)        =   2,00
 Resultado gerencial estimado                         = −878,00 (incompleto)
-Vendas líquidas (comercial) 180 + 200 + 50           = 430,00 · 3 vendas · ticket 143,33 · 1,6 peça por venda
+Vendas líquidas (comercial) 180 + 200 + 50           = 430,00 · 3 vendas · ticket 143,33 · 1,7 peça por venda
 ```
 
 O teste `dre::testes::dre_cenario_manual` confere exatamente estes números; os

@@ -9,6 +9,8 @@ FocusScope {
     id: secao
     readonly property var janela: ApplicationWindow.window
     property var r: null
+    // O essencial da DRE gerencial do mês (só para quem pode ver resultados).
+    property var dre: null
 
     function carregar() {
         const x = Api.chamar("painel_resumo")
@@ -16,6 +18,12 @@ FocusScope {
             r = x.dados
         else
             janela.avisar(x.erro, "erro")
+        if (r && r.resultados) {
+            const d = Api.chamar("dre_resumo")
+            dre = d.ok ? d.dados : null
+        } else {
+            dre = null
+        }
     }
 
     function abrir(funcao, propriedades, tela) {
@@ -69,13 +77,82 @@ FocusScope {
                     notaEmbaixo: true
                 }
                 CartaoNumero {
-                    rotulo: "Lucro do mês"
+                    visible: !!secao.r && secao.r.resultados
+                    rotulo: "Lucro bruto do mês"
                     sensivel: true
                     valor: secao.r ? secao.r.lucroMes : ""
-                    nota: secao.r && secao.r.margemMes && !Tema.oculto ? secao.r.margemMes + " das vendas" : ""
+                    nota: !secao.r ? "" : (secao.r.margemMes && !Tema.oculto ? "margem " + secao.r.margemMes : "")
+                                           + (secao.r.semCusto > 0 ? (secao.r.margemMes && !Tema.oculto ? " · " : "") + "incompleto" : "")
+                    corNota: secao.r && secao.r.semCusto > 0 ? Tema.vermelho : Tema.apagado
                     cor: Tema.rosa
                     implicitHeight: 96
                     notaEmbaixo: true
+                }
+                CartaoNumero {
+                    visible: !!secao.r && !secao.r.resultados
+                    rotulo: "Ticket médio do mês"
+                    sensivel: true
+                    valor: secao.r ? secao.r.mes.ticket : ""
+                    nota: "lucro e custos: só o gerente"
+                    cor: Tema.rosa
+                    implicitHeight: 96
+                    notaEmbaixo: true
+                }
+            }
+
+            // DRE gerencial do mês: o essencial (a DRE inteira fica em "Resultado").
+            Linha {
+                visible: !!secao.dre
+                colunasEstreito: 2
+                spacing: 12
+                Layout.fillWidth: true
+                CartaoNumero {
+                    rotulo: "Despesas registradas"
+                    sensivel: true
+                    valor: secao.dre ? secao.dre.despesas : ""
+                    nota: "no mês, por competência"
+                    implicitHeight: 86
+                    notaEmbaixo: true
+                }
+                CartaoNumero {
+                    rotulo: "Resultado gerencial estimado"
+                    sensivel: true
+                    valor: secao.dre ? secao.dre.resultado : ""
+                    corValor: secao.dre && secao.dre.resultadoNegativo ? Tema.vermelho : Tema.tinta
+                    nota: secao.dre ? (secao.dre.estado === "completo" ? "completo com os dados registrados"
+                                       : secao.dre.estado === "incompleto" ? "incompleto: veja as pendências" : "sem dados") : ""
+                    corNota: secao.dre && secao.dre.estado === "incompleto" ? Tema.vermelho : Tema.apagado
+                    cor: secao.dre && secao.dre.estado === "completo" ? Tema.verde : Tema.amarelo
+                    implicitHeight: 86
+                    notaEmbaixo: true
+                }
+                CartaoNumero {
+                    rotulo: "Ticket médio"
+                    sensivel: true
+                    valor: secao.dre ? secao.dre.ticket : ""
+                    nota: secao.dre && secao.dre.devolucoes !== "0,00" ? "devoluções R$ " + Tema.valor(secao.dre.devolucoes) : "vendas do mês"
+                    implicitHeight: 86
+                    notaEmbaixo: true
+                }
+            }
+            Faixa {
+                visible: !!secao.dre && secao.dre.avisos.length > 0
+                titulo: "Atenção"
+                color: Tema.amarelo
+                corTitulo: Tema.tinta
+                espacamento: 6
+                Layout.fillWidth: true
+                Repeater {
+                    model: secao.dre ? secao.dre.avisos : []
+                    delegate: Text {
+                        required property var modelData
+                        text: "• " + (Tema.oculto ? String(modelData).replace(/R\$ ?-?[\d.]+,\d\d/g, "R$ •••") : modelData)
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                 }
             }
 
@@ -132,9 +209,9 @@ FocusScope {
                     }
 
                     Nota {
-                        visible: !!secao.r && secao.r.semCusto > 0 && !Tema.oculto
+                        visible: !!secao.r && secao.r.semCusto > 0 && !Tema.oculto && !secao.dre
                         text: secao.r ? secao.r.semCusto + (secao.r.semCusto === 1 ? " peça vendida no mês está" : " peças vendidas no mês estão")
-                                        + " sem custo no cadastro e contam inteiras como lucro." : ""
+                                        + " sem custo no cadastro: o lucro do mês está incompleto (elas não contam como lucro)." : ""
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }

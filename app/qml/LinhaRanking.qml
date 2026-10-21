@@ -10,6 +10,8 @@ ColumnLayout {
     property bool dinheiro: true
     property color cor: Tema.azulEscuro
     property int posicao: 0
+    // Valor que não é dinheiro mas também some com o olho fechado (margem).
+    property bool sensivel: false
     signal abrir()
 
     spacing: 4
@@ -37,14 +39,15 @@ ColumnLayout {
             Layout.fillWidth: true
         }
         Text {
-            text: linha.item.detalhe || ""
+            text: Tema.sigiloTexto(linha.item.detalhe || "")
             color: Tema.apagado
             font.family: Tema.serifa
             font.italic: true
             font.pixelSize: 12
         }
         Text {
-            text: (linha.dinheiro ? "R$ " + Tema.valor(linha.item.valor) : linha.item.valor || "")
+            text: (linha.dinheiro ? "R$ " + Tema.valor(linha.item.valor)
+                   : linha.sensivel && Tema.oculto ? "••" : linha.item.valor || "")
             color: Tema.tinta
             font.family: Tema.texto
             font.weight: Font.Bold

@@ -76,9 +76,13 @@ pub struct Resumo {
     pub comparacao_subiu: bool,
     pub ano: Bloco,
     pub ano_numero: String,
+    /// Lucro bruto do mês (DRE gerencial).
     pub lucro_mes: String,
     pub margem_mes: String,
+    /// Peças vendidas no mês sem custo (o lucro fica incompleto).
     pub sem_custo: i64,
+    /// Devoluções do mês (à parte das vendas líquidas).
+    pub devolvido_mes: String,
     pub a_receber: String,
     pub receber_vencido: String,
     pub pagar_7_dias: String,
@@ -130,8 +134,9 @@ fn bloco(total: i64, vendas: i64) -> Bloco {
     }
 }
 
-/// Soma e conta as vendas concluídas entre duas datas locais (inclusive),
-/// menos o que foi devolvido no período.
+/// Soma e conta as vendas concluídas (e não canceladas) entre duas datas
+/// locais (inclusive), já com os descontos: as "vendas líquidas" da DRE
+/// gerencial. As devoluções aparecem à parte (veja `dre`).
 fn somar(conn: &Connection, de: &str, ate: &str) -> Resultado<(i64, i64)> {
     let (total, n): (i64, i64) = conn.query_row(
         "SELECT COALESCE(SUM(total), 0), COUNT(*) FROM venda
@@ -140,22 +145,7 @@ fn somar(conn: &Connection, de: &str, ate: &str) -> Resultado<(i64, i64)> {
         params![de, ate, utc_desde(de)],
         |l| Ok((l.get(0)?, l.get(1)?)),
     )?;
-    let (devolvido, _) = devolucoes::no_periodo(conn, de, ate)?;
-    Ok((total - devolvido, n))
-}
-
-/// Devoluções agrupadas (por dia "%Y-%m-%d" ou por mês "%Y-%m").
-fn devolvido_por(conn: &Connection, formato: &str, de: &str) -> Resultado<HashMap<String, i64>> {
-    let mut c = conn.prepare(
-        "SELECT strftime(?1, criado_em, 'localtime') AS k, SUM(valor) FROM devolucao
-          WHERE cancelado_em IS NULL AND date(criado_em, 'localtime') >= ?2 GROUP BY k",
-    )?;
-    let mut mapa = HashMap::new();
-    for l in c.query_map(params![formato, de], |l| Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)?)))? {
-        let (k, v) = l?;
-        mapa.insert(k, v);
-    }
-    Ok(mapa)
+    Ok((total, n))
 }
 
 /// Corte em UTC um dia antes da data local, para usar o índice de `criado_em`
@@ -201,21 +191,12 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
         (String::new(), true)
     };
 
-    // Lucro do mês: venda menos o custo das peças na hora da venda.
+    // Lucro bruto do mês: o da DRE gerencial (peça sem custo deixa o lucro
+    // incompleto; nunca conta como lucro inteiro).
     let desde_mes = utc_desde(&iso(inicio_mes));
-    let (custo_mes, sem_custo): (i64, i64) = conn.query_row(
-        "SELECT COALESCE(SUM((vi.custo * vi.quantidade + 500) / 1000), 0),
-                COUNT(DISTINCT CASE WHEN vi.custo = 0 THEN COALESCE(vi.produto_id, vi.descricao) END)
-           FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
-          WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND v.criado_em >= ?3
-            AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2",
-        params![iso(inicio_mes), hoje_txt, desde_mes],
-        |l| Ok((l.get(0)?, l.get(1)?)),
-    )?;
-    // Peça devolvida: o custo dela não conta mais (o valor já saiu do total).
-    let (_, custo_devolvido) = devolucoes::no_periodo(conn, &iso(inicio_mes), &hoje_txt)?;
-    let custo_mes = custo_mes - custo_devolvido;
-    let lucro = t_mes - custo_mes;
+    let dre_mes = crate::dre::apurar_dre(conn, &crate::dre::Filtro { periodo: "mes".into(), ..Default::default() })?;
+    let sem_custo = dre_mes.pendencias.iter().find(|p| p.codigo == "sem_custo").map(|p| p.quantidade).unwrap_or(0);
+    let (devolvido_mes, _) = devolucoes::no_periodo(conn, &iso(inicio_mes), &hoje_txt)?;
 
     // A receber (crediário) e a pagar.
     let (a_receber, receber_vencido): (i64, i64) = conn.query_row(
@@ -240,9 +221,6 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
         })? {
             let (d, t, n) = l?;
             por_dia_mapa.insert(d, (t, n));
-        }
-        for (d, v) in devolvido_por(conn, "%Y-%m-%d", &iso(inicio_mes))? {
-            por_dia_mapa.entry(d).or_insert((0, 0)).0 -= v;
         }
     }
     let dias_mes = mes.length(ano);
@@ -284,9 +262,6 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
         })? {
             let (k, t, n) = l?;
             por_mes_mapa.insert(k, (t, n));
-        }
-        for (k, v) in devolvido_por(conn, "%Y-%m", &inicio_12)? {
-            por_mes_mapa.entry(k).or_insert((0, 0)).0 -= v;
         }
     }
     let maior_mes = por_mes_mapa.values().map(|v| v.0).max().unwrap_or(0);
@@ -356,9 +331,10 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
         comparacao_subiu: subiu,
         ano: bloco(t_ano, n_ano),
         ano_numero: ano.to_string(),
-        lucro_mes: numeros::escrever_dinheiro(lucro),
-        margem_mes: if t_mes > 0 && custo_mes > 0 { percentual(lucro, t_mes) } else { String::new() },
+        lucro_mes: numeros::escrever_dinheiro(dre_mes.numeros.lucro_bruto),
+        margem_mes: dre_mes.margem_bruta.clone(),
         sem_custo,
+        devolvido_mes: numeros::escrever_dinheiro(devolvido_mes),
         a_receber: numeros::escrever_dinheiro(a_receber),
         receber_vencido: numeros::escrever_dinheiro(receber_vencido),
         pagar_7_dias: pagar.vence_7_dias,

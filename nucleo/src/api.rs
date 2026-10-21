@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use crate::banco::Banco;
 use crate::erro::{Erro, Resultado};
 use crate::{
-    arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento,
+    arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
     encomendas, estoque, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar,
     painel, pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
 };
@@ -40,6 +40,7 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
     ("configuracoes", "Configurações da loja"),
     ("usuarios", "Usuários"),
     ("financeiro", "Financeiro: contas a pagar, contas da loja, cheques e comissões"),
+    ("resultados", "Resultados: lucro, custos, despesas, DRE gerencial e metas"),
 ];
 
 /// Qual ação do gerente cada comando precisa.
@@ -88,6 +89,16 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "comissoes"
         | "comissao_fechar"
         | "comissao_reabrir" => "financeiro",
+        "dre_apurar"
+        | "dre_detalhe"
+        | "dre_despesas"
+        | "dre_indicadores"
+        | "dre_serie"
+        | "dre_resumo"
+        | "dre_classificacao"
+        | "dre_classificacao_salvar"
+        | "dre_metas"
+        | "dre_meta_salvar" => "resultados",
         // A própria pílula Gerente: sempre só o gerente.
         "gerente_ler"
         | "gerente_salvar"
@@ -175,6 +186,14 @@ pub const SO_LEITURA: &[&str] = &[
     "receber_calcular",
     "receber_previa",
     "painel_resumo",
+    "dre_apurar",
+    "dre_detalhe",
+    "dre_despesas",
+    "dre_indicadores",
+    "dre_serie",
+    "dre_resumo",
+    "dre_classificacao",
+    "dre_metas",
     "painel_clientes",
     "painel_fornecedores",
     "painel_pagamentos",
@@ -1358,7 +1377,55 @@ impl Servico {
             }
 
             // Painel: como a loja está indo
-            "painel_resumo" => Ok(json!(painel::resumo(&self.banco.conn)?)),
+            "painel_resumo" => {
+                // Lucro e custos só para quem pode ver os resultados (gerente,
+                // ou ação liberada para todos na pílula Gerente).
+                let pode = self.pode("resultados", sessao)?;
+                let mut v = json!(painel::resumo(&self.banco.conn)?);
+                if !pode {
+                    v["lucroMes"] = json!("");
+                    v["margemMes"] = json!("");
+                    v["semCusto"] = json!(0);
+                }
+                v["resultados"] = json!(pode);
+                Ok(v)
+            }
+
+            // DRE gerencial (docs/DRE-gerencial.md)
+            "dre_apurar" => {
+                let d: dre::Filtro = ler(dados)?;
+                Ok(json!(dre::apurar_dre(&self.banco.conn, &d)?))
+            }
+            "dre_detalhe" => {
+                let d: DreLinha = ler(dados)?;
+                Ok(json!(dre::detalhe(&self.banco.conn, &d.filtro, &d.linha)?))
+            }
+            "dre_despesas" => {
+                let d: DreLinha = ler(dados)?;
+                Ok(json!(dre::despesas(&self.banco.conn, &d.filtro, &d.categoria)?))
+            }
+            "dre_indicadores" => {
+                let d: DreLinha = ler(dados)?;
+                Ok(json!(dre::indicadores(&self.banco.conn, &d.filtro, &d.busca, 10)?))
+            }
+            "dre_serie" => Ok(json!(dre::serie(&self.banco.conn)?)),
+            "dre_resumo" => Ok(json!(dre::resumo_painel(&self.banco.conn)?)),
+            "dre_classificacao" => Ok(json!(dre::classificacao(&self.banco.conn)?)),
+            "dre_classificacao_salvar" => {
+                let d: dre::ClassificacaoEntrada = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                dre::salvar_classificacao(&tx, &disp, &sessao.usuario_id, &d)?;
+                tx.commit()?;
+                Ok(json!(dre::classificacao(&self.banco.conn)?))
+            }
+            "dre_metas" => Ok(json!(dre::metas(&self.banco.conn)?)),
+            "dre_meta_salvar" => {
+                let d: dre::MetaEntrada = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                dre::salvar_meta(&tx, &disp, &sessao.usuario_id, &d)?;
+                tx.commit()?;
+                Ok(json!(dre::metas(&self.banco.conn)?))
+            }
             "painel_clientes" => {
                 let d: Dias90 = ler(dados)?;
                 Ok(json!(painel::clientes(&self.banco.conn, d.dias.max(1))?))
@@ -1640,6 +1707,7 @@ impl Servico {
 
             "impressao" => {
                 let d: Impressao = ler(dados)?;
+                let pode_resultados = d.tipo == "dre" && self.pode("resultados", sessao)?;
                 let conn = &self.banco.conn;
                 let pasta = match &self.banco.caminho {
                     Some(c) => c.parent().map(|p| p.join("impressoes")).unwrap_or_default(),
@@ -1675,6 +1743,17 @@ impl Servico {
                         impressao::extrato(conn, &d.id)?,
                         format!("extrato-{}", texto::compactar(&pessoas::ficha(conn, &d.id)?.nome)),
                     ),
+                    "dre" => {
+                        if !pode_resultados {
+                            return Err(Erro::campo(
+                                "gerente",
+                                "Só o gerente pode: resultados. Peça para o gerente digitar a senha.",
+                            ));
+                        }
+                        let f: dre::Filtro =
+                            if d.id.trim().is_empty() { dre::Filtro::default() } else { serde_json::from_str(&d.id)? };
+                        (impressao::dre(conn, &f)?, format!("dre-gerencial-{}", fiscal::hoje(conn)?))
+                    }
                     "lista_compra" => {
                         (impressao::lista_compra(conn)?, format!("lista-de-compra-{}", fiscal::hoje(conn)?))
                     }
@@ -2144,6 +2223,17 @@ fn formatar(tipo: &str, texto: &str) -> String {
 }
 
 /// Converte os dados JSON no tipo esperado pelo comando.
+/// Uma linha (ou categoria, ou busca) da DRE, com o período.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct DreLinha {
+    #[serde(flatten)]
+    filtro: dre::Filtro,
+    linha: String,
+    categoria: String,
+    busca: String,
+}
+
 fn ler<T: DeserializeOwned>(dados: Value) -> Resultado<T> {
     Ok(serde_json::from_value(dados)?)
 }
