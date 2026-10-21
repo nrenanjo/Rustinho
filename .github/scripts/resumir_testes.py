@@ -4,6 +4,7 @@ aparecem na página da montagem e na API), para ler sem baixar os registros.
 
     python3 .github/scripts/resumir_testes.py saida.txt "Testes no Windows"
 """
+import os
 import re
 import sys
 
@@ -39,6 +40,24 @@ def main():
     erros = [l for l in linhas if l.startswith("error") and "test failed" not in l][:20]
     if erros:
         aviso("error", f"{titulo}: erros de compilação/execução", erros)
+    # Para a página da versão: uma linha com as contas.
+    soma = {"passed": 0, "failed": 0, "ignored": 0}
+    for l in linhas:
+        if l.startswith("test result"):
+            for chave in soma:
+                m = re.search(rf"(\d+) {chave}", l)
+                if m:
+                    soma[chave] += int(m.group(1))
+    nomes = [re.sub(r"^test (.*) \.\.\. FAILED$", r"\1", l) for l in falhas]
+    resumo = f"{soma['passed']} aprovados, {soma['failed']} falharam, {soma['ignored']} só à mão (ignorados)"
+    if not resultados:
+        resumo = "não terminaram (sem resultado)"
+    saida = os.environ.get("GITHUB_OUTPUT")
+    if saida:
+        with open(saida, "a", encoding="utf-8") as f:
+            f.write(f"resumo={resumo}\n")
+            f.write(f"falhas={', '.join(nomes) if nomes else 'nenhuma'}\n")
+    print(resumo)
 
 
 if __name__ == "__main__":

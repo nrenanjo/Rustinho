@@ -1,7 +1,9 @@
-# SÓ PARA TESTE: monta o Rustinho portátil para Windows 10/11 (64 bits) num
-# ZIP, como artefato. Não publica em Releases e não lê segredos.
-# Também roda os testes do núcleo no Linux e no Windows.
-name: Montar teste Windows (portátil)
+# SÓ PARA TESTE: monta, do mesmo commit, o Rustinho portátil para Windows
+# 10/11 (64 bits, ZIP) e o AppImage do Linux (x86-64), confere os dois e
+# roda os testes do núcleo no Linux e no Windows. Com "[rascunho]" na
+# mensagem do commit, prepara um RASCUNHO de versão (não publicado, só o
+# dono vê) com os dois arquivos; publicar é outro passo, feito à parte.
+name: Montar teste (Windows portátil e Linux AppImage)
 
 on:
   push:
@@ -20,6 +22,8 @@ env:
 jobs:
   testes:
     runs-on: ubuntu-24.04
+    outputs:
+      resumo: ${{ steps.resumo.outputs.resumo }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -36,6 +40,7 @@ jobs:
           set -o pipefail
           cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
       - name: Resumo dos testes (avisos)
+        id: resumo
         if: always()
         run: python3 .github/scripts/resumir_testes.py testes-linux.txt "Linux"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -49,6 +54,9 @@ jobs:
   # vai no artefato "Testes-Windows").
   testes-windows:
     runs-on: windows-2022
+    outputs:
+      resumo: ${{ steps.resumo.outputs.resumo }}
+      falhas: ${{ steps.resumo.outputs.falhas }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -60,6 +68,7 @@ jobs:
           set -o pipefail
           cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
       - name: Resumo dos testes (avisos)
+        id: resumo
         if: always()
         shell: bash
         run: python .github/scripts/resumir_testes.py testes-windows.txt "Windows"
@@ -73,6 +82,9 @@ jobs:
   portatil:
     needs: testes
     runs-on: windows-2022
+    outputs:
+      nome: ${{ steps.zip.outputs.nome }}
+      sha: ${{ steps.zip.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -155,6 +167,7 @@ jobs:
           $lista = (Get-ChildItem -Recurse "$copia\dados" | ForEach-Object { $_.FullName.Substring((Resolve-Path $copia).Path.Length) }) -join "%0A"
           Write-Output "::notice title=Isolamento do portátil::Banco criado em dados\ da cópia; nada em LOCALAPPDATA\Rustinho nem em RUSTINHO_DADOS. Arquivos em dados:%0A$lista"
       - name: ZIP e SHA-256
+        id: zip
         shell: pwsh
         run: |
           trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
@@ -166,6 +179,8 @@ jobs:
           Get-Content "saida\$env:NOME.zip.sha256"
           Get-ChildItem saida -File | Select-Object Name, Length | Format-Table
           $tam = (Get-Item $zip).Length
+          "nome=$env:NOME.zip" >> $env:GITHUB_OUTPUT
+          "sha=$h" >> $env:GITHUB_OUTPUT
           Write-Output "::notice title=ZIP portátil::$env:NOME.zip%0ASHA-256: $h%0ATamanho: $tam bytes%0ACommit: $env:GITHUB_SHA"
           # O que vai dentro do ZIP (para conferir sem baixar).
           Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -183,3 +198,180 @@ jobs:
             saida/*.sha256
             saida/isolamento.txt
           retention-days: 30
+
+  # AppImage normal do Linux (o mesmo da montagem de sempre), com conferência.
+  linux:
+    needs: testes
+    runs-on: ubuntu-22.04
+    outputs:
+      nome: ${{ steps.appimage.outputs.nome }}
+      sha: ${{ steps.appimage.outputs.sha }}
+      conferencia: ${{ steps.conferir.outputs.conferencia }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Bibliotecas do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libfuse2 file xvfb
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Versão
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build --release -p rustinho
+      - name: AppImage
+        id: appimage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin
+          cp target/release/rustinho AppDir/usr/bin/
+          curl -fsSL -o rclone.zip "https://github.com/rclone/rclone/releases/download/$RCLONE_VERSAO/rclone-$RCLONE_VERSAO-linux-amd64.zip"
+          echo "0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c  rclone.zip" | sha256sum -c -
+          unzip -q -j rclone.zip '*/rclone' -d AppDir/usr/bin/
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          printf '%s  %s\n' \
+            c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d linuxdeploy \
+            15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 linuxdeploy-plugin-qt | sha256sum -c -
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base"
+          export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:${LD_LIBRARY_PATH:-}"
+          export OUTPUT="Rustinho-$VERSAO-Linux-x86_64.AppImage"
+          ./linuxdeploy --appdir AppDir \
+            --desktop-file instalador/rustinho.desktop \
+            $(for n in 16 22 24 32 48 64 128 256 512; do printf -- '--icon-file instalador/icones/hicolor/%sx%s/apps/rustinho.png ' "$n" "$n"; done) \
+            --icon-filename rustinho \
+            --plugin qt --output appimage
+          mkdir -p saida && mv Rustinho-*.AppImage saida/
+          h=$(sha256sum "saida/$OUTPUT" | cut -d' ' -f1)
+          echo "$h  $OUTPUT" > "saida/$OUTPUT.sha256"
+          echo "nome=$OUTPUT" >> $GITHUB_OUTPUT
+          echo "sha=$h" >> $GITHUB_OUTPUT
+          echo "::notice title=AppImage::$OUTPUT%0ASHA-256: $h%0ATamanho: $(stat -c %s saida/$OUTPUT) bytes%0ACommit: $GITHUB_SHA"
+      # Confere o arquivo pronto: (1) nenhuma biblioteca faltando dentro
+      # dele; (2) abre numa tela virtual, carrega as telas e cria o banco
+      # (pasta de dados de teste, HOME de mentira).
+      - name: Conferir o AppImage (dependências e abrir)
+        id: conferir
+        shell: bash
+        run: |
+          set -uo pipefail
+          A="$PWD/saida/${{ steps.appimage.outputs.nome }}"
+          chmod +x "$A"
+          mkdir -p conferir && cd conferir
+          "$A" --appimage-extract >/dev/null
+          r=squashfs-root
+          falta=$(find "$r/usr" -type f \( -name '*.so*' -o -path '*/usr/bin/rustinho' \) -print0 \
+                  | xargs -0 -n1 ldd 2>/dev/null | grep "not found" | sort -u || true)
+          libs=$(find "$r/usr/lib" -maxdepth 1 -name '*.so*' | wc -l)
+          plataformas=$(ls "$r/usr/plugins/platforms" 2>/dev/null | tr '\n' ' ')
+          qml=$(ls "$r/usr/qml" 2>/dev/null | tr '\n' ' ')
+          xcbcursor=$(ls "$r/usr/lib" | grep -c "libxcb-cursor" || true)
+          echo "::notice title=AppImage por dentro::$libs bibliotecas em usr/lib; plataformas: $plataformas; módulos QML: $qml; libxcb-cursor junto: $xcbcursor"
+          if [ -n "$falta" ]; then echo "::error title=Bibliotecas faltando::$(echo "$falta" | tr '\n' ';')"; exit 1; fi
+          cd ..
+          export HOME="$RUNNER_TEMP/casa"; mkdir -p "$HOME"
+          export RUSTINHO_DADOS="$RUNNER_TEMP/dados-teste"
+          export QT_QUICK_BACKEND=software
+          fechar_arvore() { for c in $(pgrep -P "$1"); do fechar_arvore "$c"; done; kill -TERM "$1" 2>/dev/null || true; }
+          abrir() {
+            rm -rf "$RUSTINHO_DADOS"
+            xvfb-run -a -s "-screen 0 1280x800x24" "$A" > abrir.log 2>&1 &
+            pid=$!
+            for i in $(seq 1 60); do [ -f "$RUSTINHO_DADOS/rustinho.db" ] && break; kill -0 $pid 2>/dev/null || break; sleep 1; done
+            sleep 8
+            if kill -0 $pid 2>/dev/null; then vivo=sim; else vivo=nao; fi
+            fechar_arvore $pid
+            sleep 3
+          }
+          modo="com FUSE (como no computador)"
+          abrir
+          if [ ! -f "$RUSTINHO_DADOS/rustinho.db" ] && grep -qi "fuse" abrir.log; then
+            cat abrir.log
+            modo="sem FUSE no robô (APPIMAGE_EXTRACT_AND_RUN)"
+            export APPIMAGE_EXTRACT_AND_RUN=1
+            abrir
+          fi
+          problemas=$(grep -iE "failed to load component|is not installed|cannot load library|could not load the qt platform|segmentation|abort" abrir.log | head -5 | tr '\n' ';' || true)
+          echo "--- registro ao abrir ---"; cat abrir.log | head -60
+          if [ ! -f "$RUSTINHO_DADOS/rustinho.db" ]; then echo "::error title=AppImage não abriu::não criou o banco em RUSTINHO_DADOS; $problemas"; exit 1; fi
+          if [ -n "$problemas" ]; then echo "::error title=AppImage com problema ao abrir::$problemas"; exit 1; fi
+          if [ -e "$HOME/.local/share/rustinho" ]; then echo "::error title=AppImage::usou a pasta de sempre com RUSTINHO_DADOS"; exit 1; fi
+          if [ "$vivo" != sim ]; then echo "::error title=AppImage fechou sozinho::$problemas"; exit 1; fi
+          msg="sem biblioteca faltando dentro do arquivo ($libs bibliotecas junto; plataforma $plataformas); aberto $modo numa tela virtual (X), carregou as telas, criou o banco na pasta de RUSTINHO_DADOS e continuava aberto depois de 8 s"
+          echo "conferencia=$msg" >> $GITHUB_OUTPUT
+          echo "::notice title=AppImage aberto::$msg"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Linux
+          path: |
+            saida/*.AppImage
+            saida/*.sha256
+          retention-days: 30
+
+  # RASCUNHO da versão (não publicado: só o dono do repositório vê). Os dois
+  # arquivos são os mesmos que as tarefas acima montaram e conferiram.
+  rascunho:
+    needs: [testes, testes-windows, portatil, linux]
+    if: always() && needs.testes.result == 'success' && needs.portatil.result == 'success' && needs.linux.result == 'success' && contains(github.event.head_commit.message, '[rascunho]')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: Rustinho-*
+          path: saida
+          merge-multiple: true
+      - name: Conferir os arquivos e escrever as notas
+        shell: bash
+        env:
+          ZIP: ${{ needs.portatil.outputs.nome }}
+          SHA_ZIP: ${{ needs.portatil.outputs.sha }}
+          APPIMAGE: ${{ needs.linux.outputs.nome }}
+          SHA_APPIMAGE: ${{ needs.linux.outputs.sha }}
+          TESTES_LINUX: ${{ needs.testes.outputs.resumo }}
+          TESTES_WINDOWS: ${{ needs.testes-windows.outputs.resumo || 'não terminaram' }}
+          FALHAS_WINDOWS: ${{ needs.testes-windows.outputs.falhas || 'sem resultado' }}
+          CONFERENCIA_LINUX: ${{ needs.linux.outputs.conferencia }}
+        run: |
+          set -euo pipefail
+          ls -la saida
+          echo "$SHA_ZIP  saida/$ZIP" | sha256sum -c -
+          echo "$SHA_APPIMAGE  saida/$APPIMAGE" | sha256sum -c -
+          echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+          python3 - <<'PY'
+          import os
+          t = open("instalador/portatil/NOTAS-DA-VERSAO.md", encoding="utf-8").read()
+          for k in ["ZIP", "SHA_ZIP", "APPIMAGE", "SHA_APPIMAGE", "TESTES_LINUX", "TESTES_WINDOWS", "FALHAS_WINDOWS", "CONFERENCIA_LINUX"]:
+              t = t.replace("{{" + k + "}}", os.environ[k])
+          t = t.replace("{{COMMIT}}", os.environ["GITHUB_SHA"])
+          assert "{{" not in t, t
+          open("notas.md", "w", encoding="utf-8").write(t)
+          PY
+          echo "::notice title=Rascunho::notas prontas para v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+      - name: Rascunho da versão (não publicado)
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: v${{ env.VERSAO }}
+          target_commitish: ${{ github.sha }}
+          name: Rustinho ${{ env.VERSAO }} — versão de TESTE (não estável)
+          body_path: notas.md
+          draft: true
+          prerelease: true
+          make_latest: false
+          files: |
+            saida/${{ needs.portatil.outputs.nome }}
+            saida/${{ needs.linux.outputs.nome }}

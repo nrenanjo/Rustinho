@@ -2077,7 +2077,8 @@ mod testes {
         assert_eq!(salvar_ajustes(&b.conn, None, &e("rel", "30", "18:00")).unwrap_err().nome_do_campo(), Some("pasta"));
         assert_eq!(salvar_ajustes(&b.conn, None, &e("", "0", "18:00")).unwrap_err().nome_do_campo(), Some("dias"));
         assert_eq!(salvar_ajustes(&b.conn, None, &e("", "30", "25:00")).unwrap_err().nome_do_campo(), Some("hora"));
-        salvar_ajustes(&b.conn, None, &e("/tmp/bk", "15", "9:30")).unwrap();
+        let pasta = std::env::temp_dir().join("bk");
+        salvar_ajustes(&b.conn, None, &e(&pasta.display().to_string(), "15", "9:30")).unwrap();
         let a = ajustes(&b.conn, None).unwrap();
         assert_eq!((a.dias, a.hora.as_str()), (15, "09:30"));
     }
