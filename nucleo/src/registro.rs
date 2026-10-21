@@ -89,7 +89,8 @@ mod testes {
         let r = std::panic::catch_unwind(|| panic!("senha=segredo123 cpf=529.982.247-25 cliente Fulano"));
         assert!(r.is_err());
         let t = std::fs::read_to_string(pasta.join("registro/rustinho.log")).unwrap();
-        assert!(t.contains("PÂNICO em nucleo/src/registro.rs"), "{t}");
+        // (No Windows o caminho vem com "\".)
+        assert!(t.replace('\\', "/").contains("PÂNICO em nucleo/src/registro.rs"), "{t}");
         for segredo in ["segredo123", "529.982.247-25", "Fulano"] {
             assert!(!t.contains(segredo), "{segredo} vazou: {t}");
         }

@@ -54,25 +54,40 @@ pub fn rclone_conf() -> Option<PathBuf> {
 /// estão no disco, sem `..` nem atalhos; uma pasta que ainda não existe vale
 /// pelo caminho escrito, depois de tirar `..`.)
 pub fn dentro_de(raiz: &Path, caminho: &Path) -> bool {
+    /// Tira `.` e `..` pelo caminho escrito; depois, a parte que já existe
+    /// no disco é trocada pela forma do sistema (atalhos resolvidos; no
+    /// Windows, `\\?\C:\...`), igual para a pasta portátil e para o caminho.
     fn limpo(p: &Path) -> PathBuf {
-        if let Ok(c) = std::fs::canonicalize(p) {
-            return c;
-        }
-        let mut saida = PathBuf::new();
+        let mut escrito = PathBuf::new();
         for parte in p.components() {
             match parte {
                 std::path::Component::ParentDir => {
-                    saida.pop();
+                    escrito.pop();
                 }
                 std::path::Component::CurDir => {}
-                outra => saida.push(outra.as_os_str()),
+                outra => escrito.push(outra.as_os_str()),
             }
         }
-        saida
+        let mut resto = Vec::new();
+        let mut base = escrito.as_path();
+        loop {
+            if let Ok(c) = std::fs::canonicalize(base) {
+                let mut saida = c;
+                for r in resto.iter().rev() {
+                    saida.push(r);
+                }
+                return saida;
+            }
+            match (base.file_name(), base.parent()) {
+                (Some(nome), Some(pai)) => {
+                    resto.push(nome.to_os_string());
+                    base = pai;
+                }
+                _ => return escrito,
+            }
+        }
     }
-    let r = limpo(raiz);
-    let c = limpo(caminho);
-    c.starts_with(&r)
+    limpo(caminho).starts_with(limpo(raiz))
 }
 
 /// A senha da rede como entra na chave: no portátil, misturada com um texto

@@ -1319,7 +1319,10 @@ mod testes {
         wifi.fechar();
         let inicio = Instant::now();
         let r = ciclo_real(&b, T0, vec![eth_cabo(), eth_wifi()]);
-        assert!(inicio.elapsed() < Duration::from_secs(3), "{:?}", inicio.elapsed());
+        // No Windows, a conexão recusada demora uns 2 s por caminho (o
+        // sistema tenta de novo antes de desistir); no Linux é na hora.
+        let limite = if cfg!(windows) { 10 } else { 3 };
+        assert!(inicio.elapsed() < Duration::from_secs(limite), "{:?}", inicio.elapsed());
         assert!(r.tentativas.iter().all(|t| !t.ok) && r.tentativas.len() == 2);
         let c = b.conexao();
         assert!(!l(&c, &cabo.endereco()).erro.is_empty() && !l(&c, &wifi.endereco()).erro.is_empty());

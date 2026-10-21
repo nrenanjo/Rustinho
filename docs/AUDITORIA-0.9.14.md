@@ -23,9 +23,11 @@ só mudaram onde o dono decidiu (D-14).
 |---|---|---|---|---|
 | D-14 | Alta | Cancelar uma venda, estornar um recebimento ou desfazer uma devolução de um caixa **já fechado** mudava o fechamento daquele dia (fechou certo com R$ 150,00 → depois mostrava "sobrou R$ 100,00"), e o dinheiro devolvido hoje não aparecia em gaveta nenhuma (ia faltar no fechamento de hoje). | 3 sondas: o fechamento de ontem passou de (esperado 150,00; diferença 0) para (50,00; +100,00), (50,00; +40,00) e (250,00; −100,00). | Decisão do dono: o caixa fechado nunca muda; o dinheiro sai/entra na gaveta aberta deste computador (sangria/suprimento ligado à operação) ou, sem caixa aberto, no Caixa geral ("Acerto de caixa já fechado"); sem movimento duplicado; auditoria. Migração 22 só acrescenta colunas. |
 | D-16 | Média | Na troca de dados, uma configuração **só deste computador** que chegasse pela rede (a identidade do caixa, a senha da rede) era gravada; na saída os caixas só mandam as da loja, mas na chegada nada era conferido. Só um caixa com a senha da rede consegue (veja R-01). | Sonda: a identidade do caixa virou "invasor". | Na chegada, só as configurações da loja. |
+| D-17 | Média | No Windows, sem a identidade do computador vinda do Qt, nem dava para configurar a loja (achado nos testes rodados no Windows). | 47 testes de estabilidade falharam no Windows com essa mensagem. | O núcleo lê o MachineGuid do registro (o mesmo valor do Qt). |
+| D-18 | Baixa | No portátil do Windows, uma pasta de backup ainda não criada dentro da pasta portátil era recusada. | Teste `dentro_da_pasta_portatil` no Windows. | Comparação igual dos dois lados. |
 | D-15 | Baixa | Na compra que muda o custo sem atualizar o preço, o % de lucro era refeito por uma conta do banco que arredonda errado quando o preço fica abaixo do custo (−19,99% em vez de −20,00%). | Sonda `d15_lucro_abaixo_do_custo`. | Usa a mesma conta do cadastro. |
 
-Detalhes, testes e o que ficou de fora em `docs/DEFEITOS.md` (D-14, D-15, D-16).
+Detalhes, testes e o que ficou de fora em `docs/DEFEITOS.md` (D-14 a D-18).
 
 ## 2. Riscos que precisam de investigação ou decisão
 
