@@ -98,7 +98,7 @@ Nenhum dado fiscal real (CNPJ, clientes, documentos, senhas) foi copiado para o 
 - H1. O Sintec usa esse ACBrMonitor para emitir. Só há coincidência de computador e de arquivo monitorado; **não foi comprovado** que o Sintec escreve no ENT.TXT dele.
 - H2. A resposta volta por arquivo de saída (SAI.TXT ou arquivo de resposta). **Não verificado**: as páginas consultadas do fórum do ACBr só mostram o ENT.TXT em formato INI (por exemplo `NFE.CriarNFe`); não há descrição do arquivo de resposta.
 - H3. O A3 funciona porque o ACBrMonitor está ativo. **Não presumir.** Estar em execução não prova que o certificado assina neste computador.
-- Como confirmar H1/H2 sem o Sintec: ver, no computador da loja, a pasta do ACBrMonitor (arquivos ENT.TXT, SAI.TXT e de resposta, datas de modificação) logo depois de emitir uma nota em homologação, e o INI de configuração (somente a estrutura; sem copiar senha nem número de série).
+- Como confirmar H1/H2: **não emitir nota só para investigar.** Só com um teste de homologação seguro, combinado antes (quem faz, em qual computador, com qual certificado, sem afetar a numeração de produção). Observar arquivos e horários dá indício, mas não prova qual programa os gerou. Perguntar ao Rogério ou ao contador como a emissão é feita hoje é a forma sem risco.
 
 ### Comparação das duas alternativas
 | Critério | Integração por arquivos (ACBrMonitor) | ACBrLib (biblioteca) |
@@ -125,6 +125,13 @@ Resumo provisório: a ACBrLib parece mais adequada ao Rustinho (sem disputa de a
 ### Riscos a registrar
 - Mexer na pasta do ACBrMonitor da loja pode atrapalhar o Sintec em produção; qualquer teste com ele deve ser feito com cópia ou em horário combinado.
 - Substituir o Sintec exige tratar a transição: mesmo certificado, mesma numeração de série de notas (não repetir número), e nenhum cancelamento ou inutilização duplicado.
+
+## Decisão provisória (22/10/2026)
+- A ACBrLib é a **primeira candidata**, não a escolha definitiva. Depende dos testes de A3, Windows e Linux.
+- O A3 continua sendo o principal ponto de incerteza; documentação não substitui o teste com o cartão e o leitor reais.
+- Prioridade: terminar antes os testes de vendas, recebimentos, parcelas, troco e permissões já combinados. O código principal do Rustinho não muda para o fiscal agora.
+- O protótipo fiscal, se vier, fica separado do Rustinho principal até validar a solução.
+- Ainda **incompleto**: a tabela comparativa dos 4 projetos (fiscal-rs, ACBrLib, sped-nfe, @brasil-fiscal/nfe) está vazia e depende da leitura dos repositórios (etapa do Opus).
 
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
