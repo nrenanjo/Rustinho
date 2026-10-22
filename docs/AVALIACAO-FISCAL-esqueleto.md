@@ -133,21 +133,29 @@ Resumo provisório: a ACBrLib parece mais adequada ao Rustinho (sem disputa de a
 - O protótipo fiscal, se vier, fica separado do Rustinho principal até validar a solução.
 - Ainda **incompleto**: a tabela comparativa dos 4 projetos (fiscal-rs, ACBrLib, sped-nfe, @brasil-fiscal/nfe) está vazia e depende da leitura dos repositórios (etapa do Opus).
 
-## Pendência: tela de unidades de medida (22/10/2026, versão 3 grupos)
-Três grupos, nesta ordem:
-1. **Primeira linha:** unidades por quantidade de produtos cadastrados que as usam (maior → menor); empate: sigla A→Z.
-2. **Segunda linha:** unidades dos produtos com maior volume de vendas nas últimas 24 horas (maior → menor); empate: sigla A→Z. Recalculada conforme as vendas. Sem vendas no período: a segunda linha não é preenchida por vendas (ver dúvidas).
-3. **Demais linhas:** restantes em ordem alfabética pela sigla (ex.: BD, CX, KG, LT, UN).
+## Pendência: tela de unidades de medida — especificação alinhada (22/10/2026)
+Não implementar agora; nenhum código muda nesta etapa. Vem depois dos testes de vendas, caixa e permissões.
 
-Regras gerais:
-- Cada unidade aparece só uma vez (uma unidade da primeira linha não se repete na segunda).
-- Tentativa de criar sigla repetida: mostrar mensagem no padrão da interface do Rustinho.
-- Não implementar agora: nenhum código muda nesta etapa. Vem depois dos testes de vendas, caixa e permissões.
+**Linhas** (desktop: 5 unidades por linha; celular: sugestão de 3 por linha — mesma lógica, número diferente por tela):
+1. **Primeira linha:** unidades ordenadas pelo **número de produtos cadastrados** que as usam (maior → menor, mais à esquerda). Empate: sigla A→Z.
+2. **Segunda linha:** unidades ordenadas pelas **vendas das últimas 24 horas**, em itens (maior → menor, mais à esquerda). Empate: sigla A→Z. Só as 5 que mais vendem ficam; a que vendeu menos e não cabe vai para as linhas de baixo.
+3. **Demais linhas:** as restantes em ordem alfabética pela sigla (ex.: BD, CX, KG, LT, UN).
 
-Dúvidas a confirmar com o Renan antes de implementar:
-- "Volume de vendas": **quantidade** vendida (itens) ou **valor** em R$?
-- "Últimas 24 horas": janela deslizante (agora − 24 h) ou o dia de hoje desde 00:00?
-- Sem vendas nas últimas 24 h: a segunda linha fica vazia, ou repete a ordem da primeira?
+**Janela das vendas:** as 24 horas anteriores ao momento em que a pílula "Peças" é aberta (retrato no instante da abertura; o relógio anda, a tela é calculada ao abrir).
+
+**Contagem das vendas (itens vendidos):**
+- Soma dos itens vendidos de produtos de cada unidade.
+- Devolução subtrai a quantidade devolvida (e o estoque volta a aumentar). Cancelamento de venda subtrai os itens daquela venda (10 vendidos, 1 cancelado → 9). Só se descontam devoluções e cancelamentos de vendas feitas dentro da janela, para a conta nunca ficar abaixo de zero.
+- Estorno de recebimento **não** entra (não mexe em itens vendidos).
+- Resultado zero = "sem venda".
+- Ficam fora da contagem: produtos inativos (peça desativada, ainda cadastrada) e serviços (unidade SV). Só conta o que está cadastrado no sistema.
+
+**Segunda linha sem vendas (ou com poucas):**
+- Enquanto não há vendas, a segunda linha é uma continuação da primeira, em ordem alfabética pela sigla, sem repetir nenhuma unidade. Ex.: 1ª linha a,b,c,d,e; 2ª linha f,g,h,i,j.
+- Conforme as unidades vendem, elas entram na segunda linha pela direita, em ordem de volume (maior à esquerda do grupo vendido), substituindo f..j da direita para a esquerda: 1..9,a → 1..8,a,b → 1..7,a,b,c → ... até 1ª linha 1..5 e 2ª linha a,b,c,d,e (todas com vendas).
+
+**Duplicidade:** uma unidade aparece só uma vez na tela. Se ela está nas duas listas (por cadastro e por vendas), **prevalece a linha das vendas**: vai para a segunda linha e a primeira pega a próxima por número de produtos.
+- Tentativa de criar uma sigla repetida: mensagem de aviso no padrão da interface do Rustinho.
 
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
