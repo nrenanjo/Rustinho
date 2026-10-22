@@ -78,6 +78,12 @@ Só um conjunto pequeno de operações atrás de uma interface do Rustinho: mont
 - Consequências: a ACBrLib (DLL) seria forma diferente de integração; a versão x86 sugere 32 bits no Sintec — decidir 32 ou 64 bits se a ACBrLib for escolhida.
 - A confirmar com Rogério ou contador: versão do ACBr, configuração do certificado (A3), pasta dos arquivos ENT.TXT e SAI.TXT.
 
+## Sintec na loja (tela "Sobre", 22/10/2026; dados de clientes não foram copiados)
+- Sintec NFe 4 v4.26.10-02, executável x32 (32 bits), Windows 11 64 bits.
+- Versão válida até 15/12/2026: prazo da assinatura atual; a migração precisa estar pronta e testada antes disso, ou a assinatura precisa ser renovada.
+- A loja emite NF-e modelo 55 em produção (com venda a prazo). O fiscal é obrigatório, não opcional.
+- Consequência técnica: se a ACBrLib for escolhida, o build de 32 bits pode ser necessário se for carregada no mesmo processo do Sintec; o Rustinho é 64 bits, então a integração por arquivo (como o Sintec faz) costuma ser mais simples. A verificar.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
