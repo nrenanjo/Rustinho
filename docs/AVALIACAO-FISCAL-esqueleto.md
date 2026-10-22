@@ -73,6 +73,11 @@ Só um conjunto pequeno de operações atrás de uma interface do Rustinho: mont
 - Confirmar: (a) ícone do ACBrMonitor na bandeja do Windows; (b) arquivos de configuração do ACBr na pasta do Sintec; (c) com o Rogério ou o contador, como a emissão é feita hoje.
 - Se confirmado: a loja já tem ACBr, certificados e configurações prontos, o que favorece a opção ACBrLib; e indica que o A3 já é lido nesse computador (a verificar).
 
+## Confirmação do ACBr na loja (22/10/2026)
+- Bandeja do Windows: ACBrMonitorPLUS 1.4.0.207 (x86), "Monitorando Arq.: ENT.TXT". O Sintec usa o ACBr por troca de arquivos (ENT.TXT para entrada; saída provavelmente SAI.TXT — a confirmar).
+- Consequências: a ACBrLib (DLL) seria forma diferente de integração; a versão x86 sugere 32 bits no Sintec — decidir 32 ou 64 bits se a ACBrLib for escolhida.
+- A confirmar com Rogério ou contador: versão do ACBr, configuração do certificado (A3), pasta dos arquivos ENT.TXT e SAI.TXT.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
