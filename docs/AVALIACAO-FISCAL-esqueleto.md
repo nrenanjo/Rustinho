@@ -134,9 +134,12 @@ Resumo provisório: a ACBrLib parece mais adequada ao Rustinho (sem disputa de a
 - Ainda **incompleto**: a tabela comparativa dos 4 projetos (fiscal-rs, ACBrLib, sped-nfe, @brasil-fiscal/nfe) está vazia e depende da leitura dos repositórios (etapa do Opus).
 
 ## Pendência: tela de unidades de medida (22/10/2026)
-- Primeira linha: as unidades mais usadas, pela **contagem real de uso da loja** (não uma lista fixa).
-- Demais unidades: em **ordem alfabética pela sigla** (decisão do Renan; sobrepõe a sugestão anterior de ordenar pelo nome).
-- Não implementar agora: a tela de cadastro de produtos vem depois dos testes de vendas, caixa e permissões.
+Critério objetivo, sem lista fixa de unidades populares:
+1. Para cada unidade, contar quantos produtos cadastrados a usam.
+2. Unidades com contagem maior aparecem primeiro, em ordem decrescente.
+3. Em caso de empate, ordenar pela sigla.
+4. Unidades sem uso ficam depois, em ordem alfabética pela sigla.
+- Não implementar agora: a alteração fica como pendência; nenhum código muda nesta etapa. A tela de cadastro de produtos vem depois dos testes de vendas, caixa e permissões.
 
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
