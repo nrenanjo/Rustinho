@@ -151,8 +151,8 @@ Não implementar agora; nenhum código muda nesta etapa. Vem depois dos testes d
 - Ficam fora da contagem: produtos inativos (peça desativada, ainda cadastrada) e serviços (unidade SV). Só conta o que está cadastrado no sistema.
 
 **Segunda linha sem vendas (ou com poucas):**
-- Enquanto não há vendas, a segunda linha é uma continuação da primeira, em ordem alfabética pela sigla, sem repetir nenhuma unidade. Ex.: 1ª linha a,b,c,d,e; 2ª linha f,g,h,i,j.
-- Conforme as unidades vendem, elas entram na segunda linha pela direita, em ordem de volume (maior à esquerda do grupo vendido), substituindo f..j da direita para a esquerda: 1..9,a → 1..8,a,b → 1..7,a,b,c → ... até 1ª linha 1..5 e 2ª linha a,b,c,d,e (todas com vendas).
+- Enquanto não há vendas, a segunda linha é a continuação da primeira **pelo número de produtos cadastrados**: a 1ª linha tem as 5 unidades com mais produtos (1º ao 5º lugar) e a 2ª linha tem as do 6º ao 10º lugar, em ordem decrescente, sem repetir nenhuma unidade. Ex.: 1ª linha a,b,c,d,e; 2ª linha f,g,h,i,j (da mais usada à menos usada).
+- Conforme as unidades vendem, elas entram na segunda linha pela direita, em ordem de volume (maior à esquerda do grupo vendido), substituindo f..j (6º ao 10º por produtos) da direita para a esquerda; as unidades que saem da segunda linha voltam para as linhas de baixo (ordem alfabética pela sigla): 1..9,a → 1..8,a,b → 1..7,a,b,c → ... até 1ª linha 1..5 e 2ª linha a,b,c,d,e (todas com vendas).
 
 **Duplicidade:** uma unidade aparece só uma vez na tela. Se ela está nas duas listas (por cadastro e por vendas), **prevalece a linha das vendas**: vai para a segunda linha e a primeira pega a próxima por número de produtos.
 - Tentativa de criar uma sigla repetida: mensagem de aviso no padrão da interface do Rustinho.
