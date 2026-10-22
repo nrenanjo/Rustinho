@@ -60,6 +60,14 @@ Licenças tiradas do Packagist e do site do ACBr; os arquivos de licença no Git
 Opinião: não transcrever o sped-nfe (muita regra que muda todo ano); usá-lo como referência de esquemas e regras. Caminho mais realista: ACBrLib como motor fiscal chamado pelo Rust (LGPL por ligação dinâmica em programa MIT). Escrever tudo em Rust só se quiser um binário único, e é o mais caro.
 A confirmar na etapa fiscal: suporte ao A3 (cartão com leitor USB) na ACBrLib; conversa com o contador.
 
+### Ordem decidida (22/10/2026)
+1. Concluir a etapa atual: duplo clique em Receber, soma das parcelas, troco, regras de autorização do gerente.
+2. Avaliação fiscal comparativa em documento, sem modificar o código principal: fiscal-rs, ACBrLib, sped-nfe e @brasil-fiscal/nfe. Critérios: licença (código e dependências), manutenção e testes, NF-e 55 e NFC-e 65, regras por empresa/produto/operação, A3 sem guardar PIN nem chave privada, eventos (autorização, consulta, cancelamento, inutilização, contingência), IBS/CBS e CNPJ alfanumérico, integração com Rust, SQLite, Windows 10/11 e Linux. O que não for comprovado fica "não verificado". A avaliação não autoriza implementar.
+3. Só se aprovar uma opção: protótipo separado.
+- A3: ver documentação e código primeiro; depois testar com o cartão e o leitor reais. O Rustinho nunca guarda o PIN.
+- Licenças: registrar as obrigações de cada projeto e dependência; revisão jurídica antes de distribuir.
+- Interface do motor fiscal trocável: simples e proporcional, sem infraestrutura complexa antes de escolher.
+
 ## Próxima etapa (Opus 5.5, esforço alto)
 1. Teste na tela do duplo clique no receber; se confirmar, correção.
 2. Testes da soma das parcelas e do crediário com troco.
