@@ -47,6 +47,19 @@ Defeitos confirmados: **0** (confirmar exige sonda que falha; fica para a etapa 
 - Fim do SAT em São Paulo desde 01/01/2026: o Rustinho não terá SAT; o foco de balcão é a NFC-e.
 - Pendente: certificado A3 (e-CNPJ em cartão com leitor USB) e conversa com o contador.
 
+### Código aberto para a parte fiscal (pesquisa de 22/10/2026)
+Licenças tiradas do Packagist e do site do ACBr; os arquivos de licença no GitHub não puderam ser abertos. Conferir o texto antes de copiar qualquer código.
+
+| Projeto | Linguagem | Licença | Cobre | Observação |
+|---|---|---|---|---|
+| sped-nfe (nfephp-org) | PHP | LGPL-3, GPL-3 ou MIT (à escolha) | NF-e 55, NFC-e 65, assinatura, SEFAZ, contingência, eventos | v5.2.8 (27/07/2026), mais de 2 milhões de instalações |
+| ACBr / ACBrLib | Delphi/Lazarus; DLL (Windows) e .so (Linux) | LGPL | NF-e, NFC-e, NFS-e, MDF-e, boleto, Pix | Chamável de qualquer linguagem; ACBrMonitor por TCP |
+| fiscal-core (fiscal-rs) | Rust | não confirmada | Tipos, XML, impostos, QR Code, contingência | Sem assinatura, certificado nem SEFAZ |
+| dfe | Rust | MIT | Emite/cancela NF-e, consulta SEFAZ | Parado desde 01/2025, usa OpenSSL, "não usar em produção" |
+
+Opinião: não transcrever o sped-nfe (muita regra que muda todo ano); usá-lo como referência de esquemas e regras. Caminho mais realista: ACBrLib como motor fiscal chamado pelo Rust (LGPL por ligação dinâmica em programa MIT). Escrever tudo em Rust só se quiser um binário único, e é o mais caro.
+A confirmar na etapa fiscal: suporte ao A3 (cartão com leitor USB) na ACBrLib; conversa com o contador.
+
 ## Próxima etapa (Opus 5.5, esforço alto)
 1. Teste na tela do duplo clique no receber; se confirmar, correção.
 2. Testes da soma das parcelas e do crediário com troco.
