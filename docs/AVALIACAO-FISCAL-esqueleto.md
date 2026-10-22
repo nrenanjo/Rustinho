@@ -68,6 +68,11 @@ Só um conjunto pequeno de operações atrás de uma interface do Rustinho: mont
 ## Recomendação
 (preencher no fim, com evidências e limitações; indicar o que depende de teste real com o cartão A3 e o leitor da loja)
 
+## Pergunta em aberto (22/10/2026)
+- A loja já usa o ACBr no computador? Na tela do Windows apareceu "O programa ACBrMonitor já está em execução", o que indica que o ACBrMonitor roda em segundo plano para o Sintec.
+- Confirmar: (a) ícone do ACBrMonitor na bandeja do Windows; (b) arquivos de configuração do ACBr na pasta do Sintec; (c) com o Rogério ou o contador, como a emissão é feita hoje.
+- Se confirmado: a loja já tem ACBr, certificados e configurações prontos, o que favorece a opção ACBrLib; e indica que o A3 já é lido nesse computador (a verificar).
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
