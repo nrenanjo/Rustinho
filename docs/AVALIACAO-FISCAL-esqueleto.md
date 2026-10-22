@@ -84,6 +84,48 @@ Só um conjunto pequeno de operações atrás de uma interface do Rustinho: mont
 - A loja emite NF-e modelo 55 em produção (com venda a prazo). O fiscal é obrigatório, não opcional.
 - Consequência técnica: se a ACBrLib for escolhida, o build de 32 bits pode ser necessário se for carregada no mesmo processo do Sintec; o Rustinho é 64 bits, então a integração por arquivo (como o Sintec faz) costuma ser mais simples. A verificar.
 
+## Evidências do ambiente da loja e ACBrMonitor × ACBrLib (22/10/2026)
+Nenhum dado fiscal real (CNPJ, clientes, documentos, senhas) foi copiado para o repositório.
+
+### Fatos observados (por capturas de tela do Renan)
+1. Bandeja do Windows: **ACBrMonitorPLUS 1.4.0.207 – x86**, dica "Monitorando Arq.: ENT.TXT".
+2. Ao tentar abrir outra cópia: "O programa ACBrMonitor já está em execução" (só uma instância por vez).
+3. Sintec NFe 4 v4.26.10-02, **x32 (32 bits)**, Windows 11 de 64 bits.
+4. Tela "Controle de Notas Fiscais – Ambiente de Produção", modelo **55 – NF-e**, com botão "Emitir NF-e F6".
+5. "Versão válida até **15/12/2026**".
+
+### Hipóteses (não verificadas)
+- H1. O Sintec usa esse ACBrMonitor para emitir. Só há coincidência de computador e de arquivo monitorado; **não foi comprovado** que o Sintec escreve no ENT.TXT dele.
+- H2. A resposta volta por arquivo de saída (SAI.TXT ou arquivo de resposta). **Não verificado**: as páginas consultadas do fórum do ACBr só mostram o ENT.TXT em formato INI (por exemplo `NFE.CriarNFe`); não há descrição do arquivo de resposta.
+- H3. O A3 funciona porque o ACBrMonitor está ativo. **Não presumir.** Estar em execução não prova que o certificado assina neste computador.
+- Como confirmar H1/H2 sem o Sintec: ver, no computador da loja, a pasta do ACBrMonitor (arquivos ENT.TXT, SAI.TXT e de resposta, datas de modificação) logo depois de emitir uma nota em homologação, e o INI de configuração (somente a estrutura; sem copiar senha nem número de série).
+
+### Comparação das duas alternativas
+| Critério | Integração por arquivos (ACBrMonitor) | ACBrLib (biblioteca) |
+|---|---|---|
+| Como o Rustinho fala | Escreve comandos em arquivo INI e lê a resposta | Chama funções da DLL/.so |
+| Já presente na loja | Sim (observado), mas só em 32 bits | Não observado |
+| Arquitetura | Processo separado de 32 bits: independe de o Rustinho ser 64 bits | Precisa do build igual ao do processo (64 bits para o Rustinho); há builds de 32 e 64 bits (site do ACBr) |
+| Conflito de arquivos | Alto risco: o Sintec e o Rustinho disputariam o mesmo ENT.TXT se usassem a mesma pasta ou o mesmo monitor | Sem arquivo compartilhado; instância própria por processo |
+| Concorrência (5 caixas) | Um monitor por computador consumindo um arquivo; duas notas seguidas podem se sobrescrever sem fila própria. **A confirmar**: como o monitor trata um novo arquivo enquanto processa o anterior | Chamadas dentro do processo; o Rustinho controla a fila |
+| Identificação da resposta | Depende de o arquivo de resposta trazer o identificador do pedido. **Não verificado** | Retorno direto da chamada, associado ao pedido |
+| Linux | O ACBrMonitor PLUS tem versão para Linux (**não verificado** nesta pesquisa) | Há .so para Linux (site do ACBr) |
+| Manutenção | Atualizar o monitor separado em cada computador; mistura com o Sintec durante a transição | Biblioteca distribuída junto com o Rustinho; atualização com as versões dele |
+| Licença | LGPL | LGPL (ligação dinâmica em programa MIT; revisão jurídica antes de distribuir) |
+| Certificado A3 | Mesmo problema da outra opção | Mesmo problema da outra opção |
+
+Resumo provisório: a ACBrLib parece mais adequada ao Rustinho (sem disputa de arquivos, retorno direto, controle da fila). A integração por arquivos só se justifica se a ACBrLib não conseguir usar o A3 da loja. Isto é uma inclinação, **não uma decisão**.
+
+### Certificado A3, leitor, driver, Windows e Linux
+- O que se sabe (fórum do ACBr, tópico de 2017 sobre guardar a senha do A3): o A3 costuma exigir o PIN por segurança do token ou do leitor; a tela do próprio token pede a senha; guardar o PIN no sistema é um risco. O Rustinho **não guardará PIN nem chave privada**.
+- Não verificado: qual biblioteca criptográfica a ACBrLib usa para o A3 em cada sistema, se aceita PKCS#11 no Linux, se o driver do cartão da loja é compatível, se o leitor USB funciona com o Rustinho num computador específico.
+- Teste real obrigatório (Renan, com o cartão e o leitor, em homologação): assinar e transmitir uma nota de teste no computador onde o cartão fica ligado; anotar o modelo do leitor, o fabricante do cartão e do driver.
+- Windows 10/11: o certificado costuma ser lido pelo repositório do Windows (a verificar). Linux: requer driver PKCS#11 do fabricante (a verificar).
+
+### Riscos a registrar
+- Mexer na pasta do ACBrMonitor da loja pode atrapalhar o Sintec em produção; qualquer teste com ele deve ser feito com cópia ou em horário combinado.
+- Substituir o Sintec exige tratar a transição: mesmo certificado, mesma numeração de série de notas (não repetir número), e nenhum cancelamento ou inutilização duplicado.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
