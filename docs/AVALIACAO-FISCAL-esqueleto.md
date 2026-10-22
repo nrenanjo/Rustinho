@@ -133,13 +133,21 @@ Resumo provisório: a ACBrLib parece mais adequada ao Rustinho (sem disputa de a
 - O protótipo fiscal, se vier, fica separado do Rustinho principal até validar a solução.
 - Ainda **incompleto**: a tabela comparativa dos 4 projetos (fiscal-rs, ACBrLib, sped-nfe, @brasil-fiscal/nfe) está vazia e depende da leitura dos repositórios (etapa do Opus).
 
-## Pendência: tela de unidades de medida (22/10/2026)
-Critério objetivo, sem lista fixa de unidades populares:
-1. Para cada unidade, contar quantos produtos cadastrados a usam.
-2. Unidades com contagem maior aparecem primeiro, em ordem decrescente.
-3. Em caso de empate, ordenar pela sigla.
-4. Unidades sem uso ficam depois, em ordem alfabética pela sigla.
-- Não implementar agora: a alteração fica como pendência; nenhum código muda nesta etapa. A tela de cadastro de produtos vem depois dos testes de vendas, caixa e permissões.
+## Pendência: tela de unidades de medida (22/10/2026, versão 3 grupos)
+Três grupos, nesta ordem:
+1. **Primeira linha:** unidades por quantidade de produtos cadastrados que as usam (maior → menor); empate: sigla A→Z.
+2. **Segunda linha:** unidades dos produtos com maior volume de vendas nas últimas 24 horas (maior → menor); empate: sigla A→Z. Recalculada conforme as vendas. Sem vendas no período: a segunda linha não é preenchida por vendas (ver dúvidas).
+3. **Demais linhas:** restantes em ordem alfabética pela sigla (ex.: BD, CX, KG, LT, UN).
+
+Regras gerais:
+- Cada unidade aparece só uma vez (uma unidade da primeira linha não se repete na segunda).
+- Tentativa de criar sigla repetida: mostrar mensagem no padrão da interface do Rustinho.
+- Não implementar agora: nenhum código muda nesta etapa. Vem depois dos testes de vendas, caixa e permissões.
+
+Dúvidas a confirmar com o Renan antes de implementar:
+- "Volume de vendas": **quantidade** vendida (itens) ou **valor** em R$?
+- "Últimas 24 horas": janela deslizante (agora − 24 h) ou o dia de hoje desde 00:00?
+- Sem vendas nas últimas 24 h: a segunda linha fica vazia, ou repete a ordem da primeira?
 
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
