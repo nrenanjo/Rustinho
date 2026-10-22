@@ -68,6 +68,12 @@ A confirmar na etapa fiscal: suporte ao A3 (cartão com leitor USB) na ACBrLib; 
 - Licenças: registrar as obrigações de cada projeto e dependência; revisão jurídica antes de distribuir.
 - Interface do motor fiscal trocável: simples e proporcional, sem infraestrutura complexa antes de escolher.
 
+### Duplo clique / operação duplicada (decisão de 22/10/2026)
+- Se o duplo clique não for reproduzido na tela virtual, o risco continua **aberto**.
+- Já verificado na leitura do código: o servidor (`api.rs`, `receber_baixar`, `venda_concluir`) **não tem proteção** contra a mesma operação enviada duas vezes (sem chave de operação).
+- Portanto: propor e implementar uma proteção no núcleo, com testes de regressão, mesmo sem reproduzir na tela. Vale para outros caminhos (rede, repetição de pedido), não só para cliques.
+- Não declarar resolvido só porque o teste de interface passou.
+
 ## Próxima etapa (Opus 5.5, esforço alto)
 1. Teste na tela do duplo clique no receber; se confirmar, correção.
 2. Testes da soma das parcelas e do crediário com troco.
