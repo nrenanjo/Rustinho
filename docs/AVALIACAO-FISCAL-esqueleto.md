@@ -157,6 +157,36 @@ Não implementar agora; nenhum código muda nesta etapa. Vem depois dos testes d
 **Duplicidade:** uma unidade aparece só uma vez na tela. Se ela está nas duas listas (por cadastro e por vendas), **prevalece a linha das vendas**: vai para a segunda linha e a primeira pega a próxima por número de produtos.
 - Tentativa de criar uma sigla repetida: mensagem de aviso no padrão da interface do Rustinho.
 
+## REGRA DEFINITIVA — unidades de medida (23/10/2026, opção A confirmada pelo Renan)
+Prevalece sobre qualquer redação anterior. Não há fila por ordem de chegada.
+
+**Primeira linha:** as 5 unidades com mais produtos **ativos** cadastrados (serviços sem estoque e inativos fora). Empate: sigla A→Z.
+
+**Segunda linha:** as 5 unidades com maior **quantidade líquida de itens vendidos** nas últimas 24 horas, em ordem decrescente de quantidade; empate: sigla A→Z.
+- Sem vendas: começa com as unidades do 6º ao 10º lugar do cadastro.
+- Preenchimento da direita para a esquerda conforme vendem:
+  - 1 unidade vendida: ocupa a posição da extrema direita (substitui o 10º).
+  - 2 unidades: ocupam as 2 posições da direita, da maior para a menor quantidade.
+  - 3 unidades: as 3 da direita, mesmo critério. E assim por diante até 5.
+- A ordem é sempre pela **quantidade**, não pela ordem de chegada.
+- Com mais de 5 unidades vendendo: ficam as 5 mais vendidas; as demais vão para as linhas inferiores (alfabético pela sigla).
+
+**Prevalência de vendas (sem duplicar):** se uma unidade está entre as 5 mais cadastradas e também entre as 5 mais vendidas, ela aparece na **segunda** linha, e a primeira recebe a próxima unidade elegível do ranking de cadastro. Se está só entre as mais cadastradas (não entre as mais vendidas), permanece na primeira.
+- Nenhuma sigla aparece duas vezes.
+
+**Janela e recálculo:** 24 horas anteriores ao instante em que a pílula "Peças" é aberta; recalcula a cada abertura.
+
+**Vendas:** quantidade líquida (vendido − devolvido − cancelado, só dentro da janela). Estorno financeiro não conta. Zero = sem venda.
+
+**Testes obrigatórios (opção A):**
+- Unidade que vendeu mais ultrapassa outra que começou a vender antes.
+- Com mais de 5 vendendo, sai a de menor venda, mesmo que tenha entrado antes.
+- Empate na quantidade → ordem alfabética.
+- Unidade da primeira linha que vende vai para a segunda e a primeira é reposta pelo cadastro, sem duplicar.
+- Nenhuma fila por ordem de chegada.
+
+**Pendente:** implementação só após "começar" do Renan, na etapa do Opus (terça). Pesquisa fiscal: mesma etapa, com fontes oficiais comparadas às enviadas; SAT, MFE e outros modelos estaduais diferenciados, sem descartar outras UFs.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
