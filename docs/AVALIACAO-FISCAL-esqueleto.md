@@ -187,6 +187,20 @@ Prevalece sobre qualquer redação anterior. Não há fila por ordem de chegada.
 
 **Pendente:** implementação só após "começar" do Renan, na etapa do Opus (terça). Pesquisa fiscal: mesma etapa, com fontes oficiais comparadas às enviadas; SAT, MFE e outros modelos estaduais diferenciados, sem descartar outras UFs.
 
+## Princípio central (23/10/2026, Renan)
+- O Rustinho deve exigir o **mínimo de esforço** para executar uma operação corretamente. O que puder ser preenchido, relacionado, validado ou calculado com segurança fica a cargo do sistema.
+- Mostrar primeiro o essencial; detalhes só quando necessários; sem perguntas repetitivas.
+- Simplificar nunca compromete segurança, integridade dos dados ou conformidade fiscal. Validação, registro, permissões e rastreabilidade funcionam nos bastidores e interrompem o usuário só quando há motivo real.
+- O mesmo padrão vale para tela inicial, pílulas, abas, mensagens e diálogos, no desktop e no Android.
+- O Sintec é referência de funções e cenários, não modelo visual nem operacional.
+
+## Evidências da emissão no Sintec (telas de 23/10/2026; sem dados de clientes)
+- NF-e modelo 55, série 1, em Ambiente de Produção, com status **APROVADA** e protocolo de uso preenchido (emissão normal).
+- Campos automáticos vistos: CFOP 5102 (natureza VENDA), tipo de operação interna, presença do consumidor "0 – Não se aplica", indicador de IE "Contribuinte", forma de pagamento "A PRAZO (30 DIAS)" com vencimento gerado.
+- Abas da nota: dados da nota; transporte; dados adicionais (vencimentos, pedido, OS, marketplace); impostos/observação (valores aproximados IBPT federal, estadual e municipal; campos EC 87/2015, FCP, DIFAL, Suframa, ISSQN, poder público, PIS/COFINS diferenciado); dados de autorização.
+- Implicação: a loja já emite NF-e autorizada no ambiente de produção pelo Sintec. Qualquer migração precisa manter a numeração, a série e os protocolos sem sobreposição.
+- Nenhum dado de cliente, CNPJ, endereço ou protocolo real foi copiado para o repositório.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
