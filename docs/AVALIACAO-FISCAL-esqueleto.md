@@ -201,6 +201,14 @@ Prevalece sobre qualquer redação anterior. Não há fila por ordem de chegada.
 - Implicação: a loja já emite NF-e autorizada no ambiente de produção pelo Sintec. Qualquer migração precisa manter a numeração, a série e os protocolos sem sobreposição.
 - Nenhum dado de cliente, CNPJ, endereço ou protocolo real foi copiado para o repositório.
 
+## Critérios testáveis de praticidade (23/10/2026, versão ajustada pelo Renan)
+1. **Automático com transparência:** o que o sistema preencheu é identificável, sobretudo em fiscal e financeiro. O valor pode ser corrigido quando a legislação e a operação permitirem; se não puder, a tela explica o motivo. Sem confirmação para cada cálculo: mostrar o resultado, permitir conferir os detalhes e pedir intervenção só quando necessário.
+2. **Desfazer em vez de perguntar:** para ações reversíveis (remover item antes de concluir), oferecer desfazer. Ações com efeito legal, financeiro ou irreversível têm proteção apropriada. Se o usuário já clicou explicitamente em "Emitir nota", não acrescentar outra pergunta por hábito; confirmação adicional só com risco ou ambiguidade concreta, ou quando exigida pelo fluxo fiscal.
+3. **Resposta imediata:** a interface reage ao clique, mostra o estado da operação e impede acionamento duplicado enquanto a primeira execução está em andamento. A proteção existe na interface e no núcleo (bloquear o botão não basta). Não travar a tela inteira durante o processamento. Informar se cancelar é seguro; se não for, o estado permanece claro.
+4. **Medir a praticidade:** começar pelas tarefas mais frequentes da loja. Para cada uma registrar número de ações, tempo até concluir, erros e interrupções. Só então definir metas realistas. Não fixar números arbitrários antes de medir. Etapa extra só se for exigência fiscal ou decisão comercial indispensável; pergunta repetitiva não justifica.
+5. **Preservar contexto:** em erro, configuração pendente ou necessidade de outra pílula, preservar os dados preenchidos, levar ao lugar certo e permitir retomar sem recomeçar.
+6. **Toda melhoria de praticidade é testada** para verificar que não prejudicou integridade dos dados, segurança ou conformidade fiscal.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
