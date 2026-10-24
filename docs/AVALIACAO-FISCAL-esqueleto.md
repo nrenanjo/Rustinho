@@ -209,6 +209,21 @@ Prevalece sobre qualquer redação anterior. Não há fila por ordem de chegada.
 5. **Preservar contexto:** em erro, configuração pendente ou necessidade de outra pílula, preservar os dados preenchidos, levar ao lugar certo e permitir retomar sem recomeçar.
 6. **Toda melhoria de praticidade é testada** para verificar que não prejudicou integridade dos dados, segurança ou conformidade fiscal.
 
+## PRIORIDADE DE SEGURANÇA — papel de gerente na entrada em loja existente (23/10/2026)
+Achado: na VM, o primeiro usuário criado localmente (Operador-virt) virou gerente automaticamente. A sincronização com o computador principal o tirou do papel, como esperado. O problema está na janela entre criar o banco local e entrar na loja: enquanto isso, o gerente local pode executar ações de gerente.
+
+Regra definitiva (acordada entre Renan e Mário):
+1. **Instalação independente:** o primeiro usuário vira gerente automaticamente, para o Rustinho funcionar sozinho.
+2. **Entrada em loja existente:** ao escolher juntar o computador a uma loja que já existe, a **primeira ação** é remover o privilégio de gerente criado localmente.
+3. **Depois:** sincronizar o banco e as permissões da loja. Operador-virt passa a operador comum; Renan mantém o gerente conforme o cadastro autorizado do computador principal.
+4. **Novos gerentes:** só são autorizados por um gerente existente.
+5. **Falha na sincronização:** permitir tentar de novo **sem devolver** o privilégio de gerente local.
+
+Pontos a definir antes de implementar:
+- Como a escolha "juntar a uma loja existente" aparece na primeira configuração (tela e texto).
+- O que acontece com ações de gerente feitas localmente antes de juntar: conferir se ficam na auditoria e se entram na sincronização (risco de a loja herdar ações não autorizadas).
+- Teste de regressão obrigatório: um computador novo com um usuário não pode executar ações de gerente antes de juntar-se à loja, e não pode manter o privilégio depois de juntar-se.
+
 ## Testes reais necessários (feitos pelo Renan)
 - Assinar e transmitir em homologação com o e-CNPJ A3 (cartão com leitor USB), sem o Rustinho guardar PIN nem chave privada.
 - Conversa com o contador sobre regime, CSOSN, CClasTrib e CSC.
