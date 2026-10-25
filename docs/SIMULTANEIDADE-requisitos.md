@@ -34,3 +34,48 @@ Status: requisitos aprovados pelo dono. Nenhum código implementado. Implementa�
 9. Crítico: não pode ser descartado até resolvido.
 10. Resolução preserva o trabalho em andamento e não exige troca de usuário.
 11. Nome do caixa conforme a regra; nenhuma tela usa "PC principal".
+
+## Decisões que fecham a especificação (24/10/2026)
+
+### D1. Entrada de novo dispositivo
+- Aprovado: um gerente autorizado confirma a entrada com a própria senha.
+- A autorização é autenticada e registrada na auditoria.
+- Só depois o novo dispositivo recebe as credenciais criptográficas.
+- A entrada não exige computador principal.
+
+### D2. Recuperação das chaves
+- Código de recuperação gerado na criação da loja, impresso e guardado fora da loja.
+- Permite recuperar as chaves sem depender de um computador ou de um único gerente.
+- Chaves nunca em texto aberto.
+- Perda do código é tratada explicitamente: o sistema informa a limitação, sem prometer recuperação impossível.
+
+### D3. Réplicas
+- O Google Drive conta como réplica independente.
+- Só vale após o Rustinho confirmar que a operação criptografada foi armazenada e registrar essa confirmação. Notificação de alteração não basta.
+- Drive fora do ar com dois caixas: a venda continua permitida e fica pendente até o outro caixa confirmar.
+- Nenhuma réplica disponível: registro local com estado explícito de proteção pendente.
+
+### D4. Chaves no Linux
+- Usar o serviço de senhas do sistema (Secret Service, GNOME Keyring ou KWallet) quando disponível.
+- Sem serviço: avisar o gerente e oferecer alternativa, como armazenamento criptografado protegido por senha.
+- Nunca guardar chave privada desprotegida silenciosamente.
+- Operação local continua quando possível, com limitações de sincronização explícitas até as chaves serem usadas com segurança.
+
+### Diretriz
+Nenhum computador principal obrigatório; nenhuma concessão indevida de privilégios; nenhum dado declarado protegido sem confirmação; nenhuma perda silenciosa de operações.
+
+### Tarefas adicionais
+- [ ] Fluxo de entrada de dispositivo com senha de gerente e auditoria (D1).
+- [ ] Geração, impressão e validação do código de recuperação na criação da loja (D2).
+- [ ] Registro de confirmação de armazenamento no Drive antes de marcar a operação como protegida (D3).
+- [ ] Integração com o serviço de senhas do Linux e alternativa protegida por senha (D4).
+
+### Testes de aceitação adicionais
+12. Entrada de dispositivo sem senha de gerente válida é recusada e não recebe credenciais.
+13. Entrada autorizada aparece na auditoria.
+14. Recuperação de chaves com o código funciona sem o computador original.
+15. Perda do código: o sistema informa a limitação e não declara recuperação.
+16. Upload no Drive sem confirmação verificada não marca a operação como protegida.
+17. Drive indisponível com dois caixas: venda permitida, pendente até replicação confirmada.
+18. Sem nenhuma réplica: estado "proteção pendente" visível.
+19. Linux sem serviço de senhas: aviso ao gerente e nenhuma chave privada em texto aberto.
