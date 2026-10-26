@@ -27,7 +27,10 @@ O Rustinho **não incorpora nem distribui** o binário do ACBrMonitorPLUS em seu
 - não armazena a fonte oficial das operações comerciais;
 - não participa do protocolo de replicação entre caixas e Google Drive.
 
-Se o ACBrMonitorPLUS estiver indisponível, vendas continuam, o banco não é corrompido e a sincronização não para. O tratamento de operações fiscais pendentes ou de contingência deve respeitar as regras aplicáveis à operação.
+Se o ACBrMonitorPLUS estiver indisponível:
+- o núcleo Rust, o banco local e a sincronização entre os caixas e o Google Drive continuam funcionando;
+- a conclusão de operações comerciais e a emissão fiscal precisam respeitar as obrigações legais aplicáveis;
+- não há garantia de que toda venda poderá ser concluída sem o ACBrMonitorPLUS. Se a legislação permitir emitir o documento depois, por contingência, o Rustinho seguirá as regras desse procedimento. Se não permitir, o Rustinho informará o problema e orientará o operador, sem realizar operação fiscal irregular.
 
 **Decisão arquitetural — isolamento:** a integração fiscal fica atrás de uma interface própria no núcleo Rust. Assim, trocar de fornecedor (por exemplo, para a ACBrLibNFe) não exige reescrever vendas, estoque, financeiro ou interface.
 
@@ -61,16 +64,22 @@ Ainda não implementados. Planejamento:
 - **Linux:** o usuário instala separadamente, seguindo as instruções oficiais. A integração no AppImage fica para depois de validada.
 - O Rustinho detecta se o programa está instalado e em execução. Quando não estiver, informa o usuário sem encerrar as demais funções.
 
-## 6. Comunicação e segurança (planejados)
+## 6. Comunicação e segurança
 
-- O Rustinho se comunica com o ACBrMonitorPLUS por arquivos TXT ou TCP/IP.
-- Quando a integração for local, a comunicação TCP deve ficar restrita a `localhost`, sem expor a interface de comandos à rede da loja.
-- Dados fiscais e certificados não são guardados em texto aberto pelo Rustinho. Segredos e senhas seguem o modelo de segurança do projeto.
+**Estado atual:** nenhuma integração fiscal e nenhuma proteção descrita abaixo está implementada. O conteúdo desta seção é requisito planejado, a ser verificado na implementação e nos testes.
+
+**Requisitos planejados:**
+- Comunicação com o ACBrMonitorPLUS por arquivos TXT ou TCP/IP.
+- Quando a integração for local, comunicação TCP restrita a `localhost`, sem expor a interface de comandos à rede da loja.
+- Certificados, senhas e outros segredos não serão guardados em texto aberto pelo Rustinho.
+
+**Garantias ainda não comprovadas:** a ausência de armazenamento de certificados, senhas ou outros segredos em texto aberto é um requisito a verificar, não uma garantia já comprovada. Só poderá ser declarada após inspeção do código e testes específicos.
 
 ## 7. Limitações conhecidas
 
 - O ACBrMonitorPLUS não gerencia sozinho toda a contingência fiscal. O Rustinho deve fornecer dados tributários corretos e tratar erros e retomadas.
 - Atualizações do ACBr não significam que o Rustinho esteja atualizado automaticamente. Cada versão precisa de integração e testes de regressão antes de ser indicada.
+- Enquanto a integração não for implementada e testada, o Rustinho não emite documentos fiscais por meio do ACBrMonitorPLUS.
 - A palavra "gratuito" aplica-se ao Rustinho. O acesso à versão profissional atualizada do ACBrMonitorPLUS depende das condições comerciais do ACBr.
 
 ## 8. Responsabilidade e revisão
