@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
+import QtQuick.Layouts
 import rustinho
 
 // Janela principal: controla qual tela aparece (pilha de telas).
@@ -57,7 +58,8 @@ ApplicationWindow {
         "fornecedores": ["TelaPessoas", { papel: "fornecedor" }],
         "compras": ["TelaCompras", {}],
         "estoque": ["TelaEstoque", {}],
-        "fiscal": ["TelaFiscal", {}],
+        // A conferência fiscal fica em Configurações › Fiscal (0.9.15).
+        "fiscal": ["TelaConfiguracoes", { secao: "fiscal" }],
         "painel": ["TelaPainel", {}],
         "usuarios": ["TelaUsuarios", {}],
         "configuracoes": ["TelaConfiguracoes", {}]
@@ -88,6 +90,13 @@ ApplicationWindow {
     function voltar() {
         if (pilha.depth > 1)
             pilha.pop()
+    }
+
+    // Troca a tela de cima por outra (subpílulas das pílulas unidas:
+    // Vender / Receber e Estoque / Fornecedores). "Voltar" continua indo
+    // para onde ia antes.
+    function substituir(tela, propriedades) {
+        pilha.replace(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
     }
 
     function inicio() {
@@ -153,6 +162,7 @@ ApplicationWindow {
         cancelar_venda: "Cancelar venda", estornar: "Estornar", ajustar_estoque: "Ajustar estoque",
         backup: "Backup", configuracoes: "Configurações da loja", usuarios: "Usuários",
         financeiro: "Financeiro", resultados: "Resultados (lucro e DRE)", gerente: "Gerente",
+        simultaneidade: "Simultaneidade",
         precos: "Mudar o preço de venda"
     })
     function podeGerente(acao, consulta) {
@@ -166,7 +176,40 @@ ApplicationWindow {
         }
         pedirGerente.consultar(acao, nomesDasAcoes[acao] || "", depois)
     }
-    function chamarGerente(comando, dados, depois) {
+    // Várias consultas de uma vez (Configurações › Simultaneidade): pede a
+    // senha só se faltar alguma.
+    function comGerenteVarias(acoes, oQue, depois) {
+        const faltam = acoes.filter(a => !podeGerente(a, true))
+        if (faltam.length === 0) {
+            depois()
+            return
+        }
+        pedirGerente.consultarVarias(faltam, oQue, depois)
+    }
+    // O mesmo, para uma função demorada (roda à parte, com a tela de espera).
+    // `chave`: a chave da operação da tela (FALHA-04); a mesma vai na
+    // tentativa e na repetição com a senha do gerente (a senha fica presa a
+    // estes dados exatos, com a chave).
+    function chamarGerenteDemorado(comando, dados, texto, depois, chave) {
+        dados = Api.comChave(dados, chave)
+        Api.chamarDemorado(comando, dados, texto, r => {
+            const pedeSenha = !r.ok && (r.campo === "gerente" || r.campo === "precos")
+                              && !(estado.usuario && estado.usuario.gerente)
+            if (!pedeSenha) {
+                if (depois)
+                    depois(r)
+                return
+            }
+            pedirGerente.paraChamada(comando, dados, r.erro, () => {
+                Api.chamarDemorado(comando, dados, texto, r2 => { if (depois) depois(r2) })
+            }, () => {
+                if (depois)
+                    depois(r)
+            })
+        })
+    }
+    function chamarGerente(comando, dados, depois, chave) {
+        dados = Api.comChave(dados, chave)
         const r = Api.chamar(comando, dados)
         const pedeSenha = !r.ok && (r.campo === "gerente" || r.campo === "precos")
                           && !(estado.usuario && estado.usuario.gerente)
@@ -211,9 +254,31 @@ ApplicationWindow {
         dialogo.perguntar(titulo, mensagem, textoBotao, funcao, tipo)
     }
 
+    // A3 (0.9.15): banco com defeito de integridade — modo seguro. A faixa
+    // fica sempre à vista, em todas as telas; o núcleo recusa toda gravação.
+    Rectangle {
+        id: faixaModoSeguro
+        visible: !!janela.estado.modoSeguro
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: visible ? textoModoSeguro.implicitHeight + 16 : 0
+        color: Tema.critico
+        border.color: Tema.bordaCritico
+        z: 1500
+        Text {
+            id: textoModoSeguro
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 12 }
+            text: "Modo seguro: o banco de dados deste caixa tem defeito e nada é gravado (vendas, recebimentos, estoque, caixa, troca de dados). Não continue a operar: restaure um backup bom em Configurações › Backup ou chame o suporte."
+            wrapMode: Text.WordWrap
+            color: Tema.vermelho
+            font.family: Tema.serifa
+            font.pixelSize: 15
+            font.bold: true
+        }
+    }
+
     StackView {
         id: pilha
-        anchors.fill: parent
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: faixaModoSeguro.bottom }
         focus: true
 
         pushEnter: Transition {
@@ -360,6 +425,90 @@ ApplicationWindow {
 
     Dialogo { id: dialogo }
 
+    // Espera de uma função demorada (0.9.15): cobre a janela na hora (nada
+    // recebe clique, nem o segundo de um duplo clique) e mostra o que está
+    // sendo feito com a barra andando. A operação roda à parte: a janela não
+    // trava.
+    Connections {
+        target: Api
+        function onEsperaComecou(texto) {
+            espera.texto = texto
+            espera.visible = true
+        }
+        function onEsperaTerminou() {
+            espera.visible = false
+        }
+    }
+    Rectangle {
+        id: espera
+        property string texto: ""
+        property string detalhe: ""
+        visible: false
+        anchors.fill: parent
+        z: 1800
+        color: Tema.veu
+        // Aparece aos poucos: uma operação rápida nem chega a piscar.
+        opacity: visible ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InQuad } }
+        onVisibleChanged: if (visible) forceActiveFocus()
+        focus: visible
+        Keys.onPressed: (evento) => evento.accepted = true
+        MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (r) => r.accepted = true }
+        Timer {
+            interval: 300
+            repeat: true
+            running: espera.visible
+            onTriggered: espera.detalhe = Sistema.fazendo()
+        }
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(460, parent.width - 40)
+            height: colunaEspera.implicitHeight + 48
+            radius: Tema.raio + 3
+            color: Tema.pergaminho
+            ColumnLayout {
+                id: colunaEspera
+                x: 24
+                y: 24
+                width: parent.width - 48
+                spacing: 12
+                Titulo {
+                    text: espera.texto
+                    font.pixelSize: 26
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    text: espera.detalhe !== "" ? espera.detalhe : "Não feche o Rustinho: isto pode levar alguns minutos."
+                    font.pixelSize: 15
+                    Layout.fillWidth: true
+                }
+                // Barra andando (o tempo que falta não é conhecido).
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 8
+                    radius: 4
+                    color: Tema.sombra(0.1)
+                    clip: true
+                    Rectangle {
+                        id: faixaEspera
+                        width: parent.width * 0.32
+                        height: parent.height
+                        radius: 4
+                        color: Tema.azulEscuro
+                        NumberAnimation on x {
+                            running: espera.visible
+                            loops: Animation.Infinite
+                            from: -faixaEspera.width
+                            to: faixaEspera.parent.width
+                            duration: 1300
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Se o banco de dados não abrir, mostra o motivo.
     Rectangle {
         anchors.fill: parent
@@ -380,12 +529,27 @@ ApplicationWindow {
                 font.pixelSize: 16
             }
             Botao { text: "Tentar de novo"; onClicked: if (janela.atualizarEstado()) janela.iniciar() }
+            // A atualização da estrutura falhou e o banco de antes voltou: só
+            // tenta de novo quando alguém pede (0.9.15).
+            Botao {
+                visible: janela.erroGeral.indexOf("Tentar a atualização de novo") >= 0
+                text: "Tentar a atualização de novo"
+                tipo: "secundario"
+                onClicked: {
+                    if (Sistema.tentar_atualizacao_de_novo()) {
+                        janela.erroGeral = ""
+                        janela.abrirBanco()
+                    }
+                }
+            }
         }
     }
 
     function iniciar() {
+        // FALHA-01: no meio de uma entrada numa loja, volta para ela (para
+        // continuar ou desistir); a loja nova só depois de desistir.
         if (estado.primeiraVez)
-            trocarPara("TelaBoasVindas")
+            trocarPara(estado.juntando ? "TelaJuntar" : "TelaBoasVindas")
         else
             trocarPara("TelaEntrar")
     }
@@ -427,11 +591,31 @@ ApplicationWindow {
         }
     }
 
+    // Abre o banco à parte (0.9.15): um banco antigo é atualizado com cópia
+    // e conferência, com a tela de espera, sem travar a janela.
+    function abrirBanco() {
+        espera.texto = "Abrindo o Rustinho…"
+        espera.visible = true
+        Sistema.abrir_em_segundo_plano()
+    }
+    Connections {
+        target: Sistema
+        function onAberto(erro) {
+            espera.visible = false
+            if (erro !== "") {
+                janela.erroGeral = erro
+                marcarDiagnostico("Main.qml: estado COM ERRO")
+                return
+            }
+            if (janela.atualizarEstado())
+                janela.iniciar()
+            marcarDiagnostico("Main.qml: estado " + (janela.erroGeral === "" ? "lido" : "COM ERRO"))
+        }
+    }
+
     Component.onCompleted: {
         marcarDiagnostico("Main.qml: início")
-        if (atualizarEstado())
-            iniciar()
-        marcarDiagnostico("Main.qml: estado " + (erroGeral === "" ? "lido" : "COM ERRO"))
         janela.showMaximized()
+        abrirBanco()
     }
 }

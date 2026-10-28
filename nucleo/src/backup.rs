@@ -385,7 +385,11 @@ pub fn ler_nome(nome: &str) -> Option<NomeBackup> {
     Some(NomeBackup { nome: nome.to_string(), dia: dia.into(), hora: hora.into(), caixa: caixa.into(), antes })
 }
 
-fn montar_nome(conn: &Connection, antes: bool) -> Resultado<String> {
+/// Nome do arquivo de um backup. `defeito`: cópia de um banco com defeito de
+/// integridade (A3) — "rustinho-defeito-...", que não é um nome de backup
+/// (`ler_nome` não reconhece): não aparece para restaurar, não conta nem é
+/// apagada pela retenção e não vai para o Drive. Fica para o suporte.
+fn montar_nome(conn: &Connection, antes: bool, defeito: bool) -> Resultado<String> {
     let (dia, hora): (String, String) = conn.query_row(
         "SELECT strftime('%Y%m%d', 'now', 'localtime'), strftime('%H%M%S', 'now', 'localtime')",
         [],
@@ -395,7 +399,11 @@ fn montar_nome(conn: &Connection, antes: bool) -> Resultado<String> {
     if caixa.is_empty() {
         caixa = "caixa".into();
     }
-    Ok(format!("rustinho-{dia}-{hora}-{caixa}{}.{EXTENSAO}", if antes { "-antes" } else { "" }))
+    Ok(format!(
+        "rustinho-{}{dia}-{hora}-{caixa}{}.{EXTENSAO}",
+        if defeito { "defeito-" } else { "" },
+        if antes { "-antes" } else { "" }
+    ))
 }
 
 /// Quais cópias apagar: de cada caixa, guarda todas de hoje, a mais nova de
@@ -850,7 +858,10 @@ fn erro_pasta(pasta: &Path, e: std::io::Error) -> Erro {
 pub fn fazer(caminho_db: &Path, antes: bool) -> Resultado<Feito> {
     let conn = abrir_conexao(caminho_db)?;
     let r = fazer_com(&conn, caminho_db, antes);
-    anotar(&conn, &r)?;
+    // A3: no banco com defeito nada é gravado (nem a situação do backup).
+    if banco::defeito(caminho_db).is_none() {
+        anotar(&conn, &r)?;
+    }
     r
 }
 
@@ -886,9 +897,22 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     }
     let tmp = Temporaria::nova(&a.pasta)?;
 
+    // FALHA-06: o banco de origem também é conferido. Com defeito, o backup
+    // é feito assim mesmo (pode ser o que sobrou de bom), mas sai como erro
+    // ("não íntegro") e os backups antigos não são apagados.
+    let defeito_na_origem = banco::conferir_integridade(conn).err().map(|e| e.to_string());
+
     // 1. Foto do banco.
     let foto = tmp.0.join("rustinho.db");
-    conn.execute("VACUUM INTO ?1", [foto.display().to_string()])?;
+    if let Err(e) = conn.execute("VACUUM INTO ?1", [foto.display().to_string()]) {
+        return Err(match &defeito_na_origem {
+            Some(d) => Erro::validacao(format!(
+                "O banco deste caixa tem um defeito de integridade ({d}) e não deu para fazer o backup dele ({e}). \
+                 Os backups antigos foram mantidos. Chame o suporte antes de restaurar."
+            )),
+            None => e.into(),
+        });
+    }
     let estrutura: i64 = conn.query_row("PRAGMA user_version", [], |l| l.get(0))?;
     let info = Info {
         versao: crate::VERSAO.into(),
@@ -919,7 +943,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
 
     // 3. Criptografia e gravação (primeiro com outro nome, para não deixar meio arquivo).
     let acessos = acessos_da_loja(conn)?;
-    let nome = montar_nome(conn, antes)?;
+    let nome = montar_nome(conn, antes, defeito_na_origem.is_some())?;
     let destino = a.pasta.join(&nome);
     let parcial = a.pasta.join(format!(".{nome}.parcial"));
     let chave_do_arquivo;
@@ -942,6 +966,21 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     if let Err(e) = conferir_com(&destino, &como) {
         let _ = std::fs::remove_file(&destino);
         return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
+    }
+
+    if let Some(d) = &defeito_na_origem {
+        crate::registro::anotar(&format!("backup de um banco com defeito de integridade: {d}"));
+        // A cópia de antes de restaurar continua: restaurar é justamente o
+        // que se faz com um banco estragado (nada apagado, a cópia fica).
+        if antes {
+            return Ok(Feito { arquivo: destino.display().to_string(), tamanho });
+        }
+        return Err(Erro::validacao(format!(
+            "O banco deste caixa tem um defeito de integridade ({d}). Foi feita só uma cópia para o suporte, em {} \
+             (pode estar incompleta: não é um backup confiável e não aparece para restaurar). Os backups antigos \
+             foram mantidos. Restaure um backup bom ou chame o suporte.",
+            destino.display()
+        )));
     }
 
     // 5. Apagar as antigas.
@@ -1112,6 +1151,10 @@ pub fn esta_na_hora(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<b
 /// Faz o que estiver pendente: o backup do dia e o envio para o Google
 /// Drive. Roda em segundo plano (a tela chama de tempos em tempos).
 pub fn automatico(caminho_db: PathBuf) {
+    // A3: banco com defeito (modo seguro): nada automático.
+    if banco::defeito(&caminho_db).is_some() {
+        return;
+    }
     std::thread::spawn(move || {
         let Some(_vez) = Vez::pegar("Fazendo o backup…") else { return };
         let Ok(conn) = abrir_conexao(&caminho_db) else { return };
@@ -1134,7 +1177,10 @@ pub fn agora(caminho_db: PathBuf) -> Resultado<()> {
         let _vez = vez;
         let Ok(conn) = abrir_conexao(&caminho_db) else { return };
         let r = fazer_com(&conn, &caminho_db, false);
-        let _ = anotar(&conn, &r);
+        // A3: no banco com defeito, só a cópia para o suporte; nada gravado nele.
+        if banco::defeito(&caminho_db).is_none() {
+            let _ = anotar(&conn, &r);
+        }
         if r.is_ok() {
             let _ = enviar_pendentes(&conn, &caminho_db);
         }
@@ -1145,6 +1191,10 @@ pub fn agora(caminho_db: PathBuf) -> Resultado<()> {
 /// Ao fechar o Rustinho: cópia no computador (espera terminar), se a última
 /// tem mais de meia hora. O Drive fica para a próxima vez que abrir.
 pub fn ao_fechar(caminho_db: &Path) -> Resultado<bool> {
+    // A3: banco com defeito (modo seguro): não faz cópia ao fechar.
+    if banco::defeito(caminho_db).is_some() {
+        return Ok(false);
+    }
     // Se um backup está no meio, espera ele acabar (até 2 minutos).
     let inicio = Instant::now();
     let _vez = loop {
@@ -1472,7 +1522,9 @@ pub fn restaurar(
     if let Some(c) = caminho_db {
         dizer("Guardando uma cópia de agora…");
         let r = fazer_com(conn, c, true);
-        anotar(conn, &r)?;
+        if banco::defeito(c).is_none() {
+            anotar(conn, &r)?;
+        }
         r.map_err(|e| Erro::validacao(format!("Não deu para guardar a cópia de antes, então nada foi mudado. {e}")))?;
     }
 
@@ -1523,6 +1575,10 @@ pub struct Pendente {
     pares: Vec<(String, String, String)>,
     caminhos: Vec<(String, String, i64, i64)>,
     seq: i64,
+    /// Identidade da loja de antes (FALHA-01): um backup de antes da
+    /// identidade não deixa a loja sem ela (marcas de versões antigas não têm).
+    #[serde(default)]
+    loja: String,
 }
 
 impl Pendente {
@@ -1553,7 +1609,8 @@ impl Pendente {
             .query_row("SELECT seq FROM sqlite_sequence WHERE name = 'alteracao'", [], |l| l.get(0))
             .optional()?
             .unwrap_or(0);
-        Ok(Pendente { locais, pares, caminhos, seq })
+        let loja = crate::loja::id(conn)?;
+        Ok(Pendente { locais, pares, caminhos, seq, loja })
     }
 
     /// Grava a marca e garante que chegou ao disco antes de seguir.
@@ -1596,6 +1653,11 @@ impl Pendente {
         // caixa recomeça do zero com os outros e ganha geração nova (os outros
         // também recomeçam com ele).
         sync::depois_de_restaurar(&tx, self.seq)?;
+        // Backup de antes da identidade da loja: a loja continua com a dela.
+        // (Backup de outra loja traz a identidade dela: é outra loja.)
+        if !self.loja.is_empty() && crate::loja::id(&tx)?.is_empty() {
+            config::gravar(&tx, crate::loja::CHAVE, &self.loja)?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -1814,8 +1876,11 @@ mod testes {
         let arquivo = backup_com_banco_de(&pasta, 5000, Some(100));
         limites_de_teste::BANCO.with(|c| c.set(1000));
         let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
-        // O que importa: não grava 5000 bytes como se coubessem em 1000.
-        assert!(e.contains("grande demais"), "{e}");
+        // O que importa: não grava 5000 bytes como se coubessem em 1000. Com a
+        // `zip` 9 (R-07, C8), a própria biblioteca já recusa o tamanho que
+        // mente ("estragado"); com a 2.4 era o limite daqui ("grande demais").
+        // As duas recusas valem; aceitar o backup, não.
+        assert!(e.contains("grande demais") || e.contains("estragado"), "{e}");
         let temp = std::fs::read_dir(&pasta).unwrap().filter_map(|x| x.ok()).count();
         assert_eq!(temp, 1, "a pasta temporária foi apagada (sobrou só o backup)");
         let _ = std::fs::remove_dir_all(&pasta);

@@ -31,6 +31,15 @@ QtObject {
     readonly property color vermelhoSobre: escuro ? "#8E2B20" : "#F2B8AE"
     readonly property color rosaSobre: escuro ? "#432C27" : "#E4CFC7"
     readonly property color dica: escuro ? "#958B7F" : "#9A9086"          // texto de exemplo nos campos
+    // Pílulas da tela inicial e notificações (0.9.15).
+    readonly property color cartao: escuro ? "#1A1814" : "#F2EFE9"       // fundo da pílula
+    readonly property color bordaCartao: escuro ? "#3A342D" : "#D9D3C8"  // contorno fino
+    readonly property color atencao: escuro ? "#2E2714" : "#FCF1DA"      // notificação de atenção
+    readonly property color bordaAtencao: escuro ? "#5A4A22" : "#EAD3A2"
+    readonly property color critico: escuro ? "#3A1F1B" : "#F6DDD7"      // notificação crítica
+    readonly property color bordaCritico: escuro ? "#6B3A33" : "#E2B3A9"
+    readonly property color informativo: escuro ? "#1C2629" : "#E6ECEC"  // notificação informativa
+    readonly property color bordaInformativo: escuro ? "#34474C" : "#C9D6D8"
 
     // Botão secundário (normal, mouse em cima, apertado).
     readonly property color botao: escuro ? "#3A332B" : "#E6DAC2"

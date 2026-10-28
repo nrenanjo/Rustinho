@@ -10,6 +10,8 @@ Popup {
     property string produtoId: ""
     property string estoqueAtual: "0"
     property string unidade: "UN"
+    // FALHA-04: chave deste ajuste (nova a cada vez que a janela abre).
+    property string chave: ""
 
     signal ajustado(var ficha)
 
@@ -24,6 +26,7 @@ Popup {
     background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
     function abrirCom(id, atual, unidadePeca) {
+        chave = Api.novaChave()
         produtoId = id
         estoqueAtual = atual
         unidade = unidadePeca
@@ -37,7 +40,7 @@ Popup {
     function confirmar() {
         // D-09: a senha do gerente vale para este ajuste, com estes números.
         ApplicationWindow.window.chamarGerente("estoque_ajustar",
-                { produtoId: produtoId, quantidade: quantidade.texto, motivo: motivo.texto }, r => ajuste.depoisDeAjustar(r))
+                { produtoId: produtoId, quantidade: quantidade.texto, motivo: motivo.texto }, r => ajuste.depoisDeAjustar(r), chave)
     }
     function depoisDeAjustar(r) {
         if (r.ok) {

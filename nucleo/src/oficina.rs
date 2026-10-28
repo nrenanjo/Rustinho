@@ -1,5 +1,12 @@
 //! Ordem de serviço da oficina.
 //!
+//! Rascunho (0.9.15): ao sair da Nova OS sem terminar, "Salvar rascunho"
+//! guarda o que foi preenchido e os itens, sem número e sem exigir cliente
+//! ou carro. O rascunho aparece em "Abertas" e "Todas" e, ao salvar de
+//! verdade, vira orçamento com número (o mesmo registro, sem duplicar).
+//! Rascunho novo só quando todos os caixas da loja confirmaram uma versão
+//! que entende rascunho (veja `sync::bloqueios_de_rascunho`).
+//!
 //! A OS tem o cliente, o carro (placa, modelo e km), o que o cliente
 //! reclamou, as peças e os serviços (mão de obra). Caminho:
 //! **orçamento → aprovada (em serviço) → pronta → entregue**.
@@ -16,6 +23,7 @@ use crate::vendas::ItemEntrada;
 use crate::{auditoria, config, documento, estoque, fiscal, numeros, tempo, texto};
 
 pub const SITUACOES: &[(&str, &str)] = &[
+    ("rascunho", "Rascunho"),
     ("orcamento", "Orçamento"),
     ("aprovada", "Em serviço"),
     ("pronta", "Pronta"),
@@ -340,6 +348,30 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
         if situacao == "entregue" || situacao == "cancelada" {
             return Err(Erro::validacao("Esta OS já foi entregue ou cancelada; não dá para mudar."));
         }
+        // O rascunho salvo de verdade vira orçamento, com número (o mesmo
+        // registro: nada é duplicado).
+        if situacao == "rascunho" {
+            let numero: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(numero), 0) + 1 FROM ordem_servico WHERE dispositivo = ?1",
+                [dispositivo],
+                |l| l.get(0),
+            )?;
+            conn.execute(
+                "UPDATE ordem_servico SET situacao = 'orcamento', numero = ?2, dispositivo = ?3, caixa_nome = ?4,
+                        criado_por = COALESCE(criado_por, ?5)
+                  WHERE id = ?1 AND situacao = 'rascunho'",
+                params![id, numero, dispositivo, config::nome_caixa(conn)?, usuario_id],
+            )?;
+            auditoria::registrar(
+                conn,
+                dispositivo,
+                Some(usuario_id),
+                "os.criar",
+                "ordem_servico",
+                &id,
+                &[format!("OS {numero} aberta (era rascunho)")],
+            )?;
+        }
         conn.execute(
             "UPDATE ordem_servico SET cliente_id = ?2, cliente_nome = ?3, telefone = ?4, placa = ?5, veiculo = ?6, km = ?7,
                     defeito = ?8, diagnostico = ?9, observacoes = ?10, mecanico_id = ?11, previsao = ?12, desconto = ?13,
@@ -410,9 +442,166 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
     Ok(id)
 }
 
+/// Placa do rascunho: a lida, se já estiver completa; senão o que foi
+/// digitado (letras e números, até 8), para continuar depois.
+fn placa_do_rascunho(texto: &str) -> String {
+    match documento::ler_placa(texto) {
+        Ok(p) => p,
+        Err(_) => texto.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).take(8).collect(),
+    }
+}
+
+/// Guarda o que foi preenchido como rascunho (novo ou o mesmo rascunho de
+/// antes). Não pede cliente nem carro. Devolve o id.
+pub fn salvar_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<String> {
+    let c = calcular(conn, e)?;
+    if !c.erro.is_empty() {
+        return Err(Erro::campo(&c.campo, c.erro));
+    }
+    let novo = e.id.is_empty();
+    if novo {
+        let bloqueios = crate::sync::bloqueios_de_rascunho(conn)?;
+        if !bloqueios.is_empty() {
+            let nomes = bloqueios.iter().map(|b| b.nome.clone()).collect::<Vec<_>>().join(", ");
+            return Err(Erro::campo(
+                "rascunho",
+                format!(
+                    "Rascunho novo está bloqueado: {nomes} ainda não confirmou uma versão do Rustinho que entende \
+                     rascunho. Atualize o Rustinho nesse caixa e deixe trocar dados, ou retire-o da loja em \
+                     Configurações › Caixas da loja. Você pode salvar a OS normalmente."
+                ),
+            ));
+        }
+    } else {
+        let (situacao, _) = situacao_de(conn, &e.id)?;
+        if situacao != "rascunho" {
+            return Err(Erro::validacao("Esta OS já foi salva; use Salvar."));
+        }
+    }
+    let mut cliente_id = if e.cliente_id.is_empty() { None } else { Some(e.cliente_id.clone()) };
+    let mut cliente_nome = texto::limpar(&e.cliente_nome);
+    if let Some(id) = &cliente_id {
+        match conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [id], |l| l.get::<_, String>(0)).optional()? {
+            Some(n) => cliente_nome = n,
+            None => cliente_id = None,
+        }
+    }
+    let placa = placa_do_rascunho(&e.placa);
+    let veiculo: String = texto::limpar(&e.veiculo).chars().take(60).collect();
+    let previsao = fiscal::ler_data(&e.previsao)
+        .map_err(|m| Erro::campo("previsao", format!("{m} Corrija ou apague a previsão para salvar o rascunho.")))?;
+    let corta = |t: &str, n: usize| -> String { t.trim().chars().take(n).collect() };
+    let mecanico = if e.mecanico_id.is_empty() { None } else { Some(e.mecanico_id.clone()) };
+    let agora = tempo::agora();
+    let id = if novo { tempo::novo_id() } else { e.id.clone() };
+    if novo {
+        conn.execute(
+            "INSERT INTO ordem_servico (id, numero, dispositivo, caixa_nome, situacao, cliente_id, cliente_nome, telefone, placa,
+                                        veiculo, km, defeito, diagnostico, observacoes, mecanico_id, previsao, desconto,
+                                        criado_em, criado_por, atualizado_em)
+             VALUES (?1, 0, ?2, ?3, 'rascunho', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?16)",
+            params![
+                id,
+                dispositivo,
+                config::nome_caixa(conn)?,
+                cliente_id,
+                cliente_nome,
+                corta(&e.telefone, 40),
+                placa,
+                veiculo,
+                corta(&e.km, 12),
+                corta(&e.defeito, 1000),
+                corta(&e.diagnostico, 1000),
+                corta(&e.observacoes, 1000),
+                mecanico,
+                previsao,
+                c.v_desconto,
+                agora,
+                usuario_id
+            ],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE ordem_servico SET cliente_id = ?2, cliente_nome = ?3, telefone = ?4, placa = ?5, veiculo = ?6, km = ?7,
+                    defeito = ?8, diagnostico = ?9, observacoes = ?10, mecanico_id = ?11, previsao = ?12, desconto = ?13,
+                    atualizado_em = ?14
+              WHERE id = ?1 AND situacao = 'rascunho'",
+            params![
+                id,
+                cliente_id,
+                cliente_nome,
+                corta(&e.telefone, 40),
+                placa,
+                veiculo,
+                corta(&e.km, 12),
+                corta(&e.defeito, 1000),
+                corta(&e.diagnostico, 1000),
+                corta(&e.observacoes, 1000),
+                mecanico,
+                previsao,
+                c.v_desconto,
+                agora
+            ],
+        )?;
+        conn.execute("DELETE FROM ordem_servico_item WHERE ordem_id = ?1", [&id])?;
+    }
+    for (ordem, it) in c.itens.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO ordem_servico_item (id, ordem_id, ordem, tipo, produto_id, codigo, descricao, unidade, quantidade, preco, desconto)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                tempo::novo_id(),
+                id,
+                ordem as i64,
+                it.tipo,
+                if it.produto_id.is_empty() { None } else { Some(&it.produto_id) },
+                it.codigo,
+                it.descricao,
+                it.unidade,
+                it.v_quantidade,
+                it.v_preco,
+                it.v_desconto
+            ],
+        )?;
+    }
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "os.rascunho",
+        "ordem_servico",
+        &id,
+        &[format!("Rascunho de OS guardado ({} itens)", c.itens.len())],
+    )?;
+    Ok(id)
+}
+
+/// Apaga um rascunho (só rascunho; OS de verdade se cancela com motivo).
+pub fn excluir_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
+    let (situacao, _) = situacao_de(conn, id)?;
+    if situacao != "rascunho" {
+        return Err(Erro::validacao("Só um rascunho pode ser excluído. Uma OS salva se cancela, com o motivo."));
+    }
+    conn.execute("DELETE FROM ordem_servico_item WHERE ordem_id = ?1", [id])?;
+    conn.execute("DELETE FROM ordem_servico WHERE id = ?1 AND situacao = 'rascunho'", [id])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "os.rascunho_excluir",
+        "ordem_servico",
+        id,
+        &["Rascunho de OS excluído".into()],
+    )?;
+    Ok(())
+}
+
 /// Muda a situação: aprovada (o cliente autorizou), pronta, ou volta.
 pub fn mudar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, nova: &str) -> Resultado<()> {
     let (atual, numero) = situacao_de(conn, id)?;
+    if atual == "rascunho" {
+        return Err(Erro::validacao("É um rascunho: salve a OS antes de mudar a situação."));
+    }
     let pode = matches!(
         (atual.as_str(), nova),
         ("orcamento", "aprovada") | ("aprovada", "pronta") | ("aprovada", "orcamento") | ("pronta", "aprovada")
@@ -453,6 +642,9 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     }
     if atual == "cancelada" {
         return Err(Erro::validacao("Esta OS já foi cancelada."));
+    }
+    if atual == "rascunho" {
+        return Err(Erro::validacao("Rascunho não se cancela: use Excluir rascunho."));
     }
     let motivo = texto::limpar(motivo);
     if motivo.is_empty() {
@@ -644,7 +836,8 @@ fn listar_onde(conn: &Connection, filtro: &str, a: &str, b: &str, limite: i64) -
                 COALESCE(o.previsao, ''), strftime('%d/%m/%Y', o.criado_em, 'localtime')
            FROM ordem_servico o LEFT JOIN usuario m ON m.id = o.mecanico_id
           WHERE {filtro}
-          ORDER BY CASE o.situacao WHEN 'pronta' THEN 0 WHEN 'aprovada' THEN 1 WHEN 'orcamento' THEN 2 ELSE 3 END, o.criado_em DESC
+          ORDER BY CASE o.situacao WHEN 'pronta' THEN 0 WHEN 'aprovada' THEN 1 WHEN 'orcamento' THEN 2 WHEN 'rascunho' THEN 3 ELSE 4 END,
+                   o.criado_em DESC
           LIMIT {limite}"
     );
     let mut c = conn.prepare(&sql)?;
@@ -676,7 +869,8 @@ fn listar_onde(conn: &Connection, filtro: &str, a: &str, b: &str, limite: i64) -
 /// entregues ou todas. A busca procura no número, placa, cliente e carro.
 pub fn listar(conn: &Connection, quais: &str, busca: &str) -> Resultado<Vec<Resumo>> {
     let situacao = match quais {
-        "abertas" => "o.situacao IN ('orcamento', 'aprovada')",
+        // O rascunho aparece em Abertas (e em Todas), com a situação "Rascunho".
+        "abertas" => "o.situacao IN ('rascunho', 'orcamento', 'aprovada')",
         "prontas" => "o.situacao = 'pronta'",
         "entregues" => "o.situacao = 'entregue'",
         _ => "1 = 1",
@@ -701,7 +895,7 @@ pub fn listar(conn: &Connection, quais: &str, busca: &str) -> Resultado<Vec<Resu
 /// Quantas OS em cada situação (para as pílulas e o Início).
 pub fn contagem(conn: &Connection) -> Resultado<serde_json::Value> {
     let (abertas, prontas, atrasadas): (i64, i64, i64) = conn.query_row(
-        "SELECT COALESCE(SUM(situacao IN ('orcamento', 'aprovada')), 0), COALESCE(SUM(situacao = 'pronta'), 0),
+        "SELECT COALESCE(SUM(situacao IN ('rascunho', 'orcamento', 'aprovada')), 0), COALESCE(SUM(situacao = 'pronta'), 0),
                 COALESCE(SUM(situacao IN ('orcamento', 'aprovada') AND previsao IS NOT NULL AND previsao < date('now', 'localtime')), 0)
            FROM ordem_servico",
         [],
@@ -718,6 +912,8 @@ pub fn contagem(conn: &Connection) -> Resultado<serde_json::Value> {
 #[serde(rename_all = "camelCase")]
 pub struct ParaVenda {
     pub numero: i64,
+    /// O caixa da OS (FALHA-02: o número é por caixa).
+    pub caixa: String,
     pub os_id: String,
     pub cliente_id: String,
     pub cliente_nome: String,
@@ -727,6 +923,9 @@ pub struct ParaVenda {
 
 pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
     let f = ficha(conn, id)?;
+    if f.situacao == "rascunho" {
+        return Err(Erro::validacao("É um rascunho: salve a OS antes de entregar."));
+    }
     if f.situacao == "entregue" {
         return Err(Erro::validacao("Esta OS já foi entregue."));
     }
@@ -751,6 +950,7 @@ pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
         .collect();
     Ok(ParaVenda {
         numero: f.numero,
+        caixa: f.caixa,
         os_id: id.to_string(),
         cliente_id: f.cliente_id,
         cliente_nome: f.cliente,
@@ -768,7 +968,7 @@ pub fn entregue_na_venda(
     venda_id: &str,
 ) -> Resultado<()> {
     let (atual, numero) = situacao_de(conn, os_id)?;
-    if atual == "entregue" || atual == "cancelada" {
+    if atual == "entregue" || atual == "cancelada" || atual == "rascunho" {
         return Err(Erro::validacao("Esta OS já foi entregue ou cancelada."));
     }
     let agora = tempo::agora();
@@ -820,7 +1020,8 @@ pub fn por_placa(conn: &Connection, placa: &str) -> Resultado<Option<serde_json:
     // Sem cadastro: a última OS desse carro.
     let o: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT cliente_nome, telefone, veiculo FROM ordem_servico WHERE placa = ?1 ORDER BY criado_em DESC LIMIT 1",
+            "SELECT cliente_nome, telefone, veiculo FROM ordem_servico WHERE placa = ?1 AND situacao <> 'rascunho'
+              ORDER BY criado_em DESC LIMIT 1",
             [&p],
             |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
         )

@@ -85,3 +85,9 @@ Ainda não implementados. Planejamento:
 ## 8. Responsabilidade e revisão
 
 Este documento não substitui orientação jurídica. Antes de qualquer distribuição de binários de terceiros, as questões da seção 4 devem estar resolvidas e documentadas.
+
+## Situação na 0.9.15 (27/10/2026)
+
+- Na tela Fiscal, "Ver opções de integração" **só avisa** que a integração ainda está em planejamento: não existe emissor ligado (pendência 4.3 do relatório da entrega da 0.9.15). As fichas NFS-e e MDF-e "em breve" saíram da tela (pendência 4.7).
+- O contrato de integração com o componente fiscal externo está na versão **v0.1, sujeita a revisão** (documento à parte, entregue ao Sunda). As decisões DF-1 a DF-6 (regime tributário, certificado, estação de assinatura, séries e as demais) **continuam abertas**: dependem do contador, dos certificados e da configuração real da loja. A escolha do provedor (ACBrLib, ACBrMonitorPLUS ou outro) também está aberta e tem de considerar Windows, Linux e Android.
+- Nada desta seção foi implementado; nenhuma emissão real foi feita.

@@ -46,6 +46,7 @@ FocusScope {
     }
 
     readonly property var cores: ({
+        rascunho: [Tema.amarelo, Tema.tinta],
         orcamento: [Tema.papel, Tema.tintaSuave],
         aprovada: [Tema.azul, Tema.azulEscuro],
         pronta: [Tema.verde, Tema.verdeEscuro],
@@ -127,14 +128,31 @@ FocusScope {
                     anchors.leftMargin: Tema.estreito ? 10 : 16
                     anchors.rightMargin: Tema.estreito ? 12 : 18
                     spacing: Tema.estreito ? 8 : 14
-                    Text {
-                        text: linha.o.numero
-                        color: Tema.dourado
-                        font.family: Tema.titulo
-                        font.weight: Font.Bold
-                        font.pixelSize: Tema.estreito ? 22 : 26
-                        horizontalAlignment: Text.AlignRight
-                        Layout.preferredWidth: Tema.estreito ? 22 : 44
+                    // FALHA-02: o número é por caixa; o caixa vai junto (duas
+                    // OS nº 1 de caixas diferentes não se confundem).
+                    ColumnLayout {
+                        spacing: 0
+                        Layout.preferredWidth: Tema.estreito ? 44 : 64
+                        Text {
+                            // Rascunho ainda não tem número.
+                            text: linha.o.situacao === "rascunho" ? "—" : linha.o.numero
+                            color: Tema.dourado
+                            font.family: Tema.titulo
+                            font.weight: Font.Bold
+                            font.pixelSize: Tema.estreito ? 22 : 26
+                            horizontalAlignment: Text.AlignRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: linha.o.caixa
+                            visible: text !== ""
+                            color: Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
                     }
                     Rectangle {
                         visible: linha.o.placa !== ""

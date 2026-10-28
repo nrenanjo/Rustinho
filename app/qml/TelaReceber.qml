@@ -99,7 +99,7 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            titulo: "Receber"
+            titulo: "Vender / Receber"
             subtitulo: "Crediário e convênio: quem deve, quanto e quando vence"
             Layout.fillWidth: true
             onVoltar: tela.janela.voltar()
@@ -109,6 +109,13 @@ FocusScope {
                 tipo: "secundario"
                 onClicked: lancar.abrirCom()
             }
+        }
+
+        // Pílula unida "Vender / Receber" (0.9.15).
+        Pilulas {
+            modelo: [{ id: "vender", nome: "Vender" }, { id: "receber", nome: "Receber" }]
+            atual: "receber"
+            onEscolhido: id => { if (id === "vender") tela.janela.substituir("TelaVender", {}) }
         }
 
         // Números do crediário
@@ -139,7 +146,7 @@ FocusScope {
                         spacing: 0
                         Rotulo { text: modelData[0] }
                         Text {
-                            text: "R$ " + modelData[1]
+                            text: Tema.sigiloTexto("R$ " + modelData[1])
                             color: modelData[3]
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -273,7 +280,7 @@ FocusScope {
                             }
                             Nota {
                                 text: !tela.conta ? "" : [tela.conta.telefone, Tema.sigilo(tela.conta.documento),
-                                      tela.conta.situacao.limite ? "limite R$ " + tela.conta.situacao.limite + " (livre R$ " + tela.conta.situacao.disponivel + ")" : "sem limite de crédito",
+                                      tela.conta.situacao.limite ? Tema.sigiloTexto("limite R$ " + tela.conta.situacao.limite + " (livre R$ " + tela.conta.situacao.disponivel + ")") : "sem limite de crédito",
                                       tela.conta.situacao.diaVencimento ? "convênio: vence dia " + tela.conta.situacao.diaVencimento : ""].filter(x => !!x).join("  ·  ")
                                 font.pixelSize: 14
                                 Layout.fillWidth: true
@@ -283,7 +290,7 @@ FocusScope {
                             spacing: 0
                             Rotulo { text: "Deve"; Layout.alignment: Qt.AlignRight }
                             Text {
-                                text: tela.conta ? "R$ " + tela.conta.situacao.emAberto : ""
+                                text: tela.conta ? Tema.sigiloTexto("R$ " + tela.conta.situacao.emAberto) : ""
                                 color: tela.conta && tela.conta.situacao.vencido !== "0,00" ? Tema.vermelho : Tema.tinta
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -342,7 +349,7 @@ FocusScope {
                             marcada: tela.marcadas.includes(modelData.id)
                             onMarcar: sim => tela.marcar(modelData.id, sim)
                             onAbrirVenda: tela.janela.abrir("TelaVenda", { vendaId: modelData.vendaId })
-                            onCancelar: motivo.perguntar("Tirar esta dívida?", modelData.descricao + " · R$ " + modelData.valor,
+                            onCancelar: motivo.perguntar("Tirar esta dívida?", Tema.sigiloTexto(modelData.descricao + " · R$ " + modelData.valor),
                                                          "Tirar", (m, pronto) => tela.janela.chamarGerente("conta_cancelar", { id: modelData.id, motivo: m }, pronto))
                         }
                         Nota {
@@ -382,7 +389,7 @@ FocusScope {
                                             Layout.fillWidth: true
                                         }
                                         Text {
-                                            text: "R$ " + modelData.valor
+                                            text: Tema.sigiloTexto("R$ " + modelData.valor)
                                             color: Tema.tinta
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
@@ -401,7 +408,7 @@ FocusScope {
                                             tipo: "discreto"
                                             implicitHeight: 32
                                             onClicked: motivo.perguntar("Estornar o pagamento?",
-                                                "R$ " + modelData.valor + " de " + modelData.quando + ". As parcelas voltam a ficar em aberto.",
+                                                Tema.sigiloTexto("R$ " + modelData.valor + " de " + modelData.quando + ". As parcelas voltam a ficar em aberto."),
                                                 "Estornar", (m, pronto) => tela.janela.chamarGerente("recebimento_estornar", { id: modelData.id, motivo: m }, pronto))
                                         }
                                     }
@@ -437,6 +444,8 @@ FocusScope {
         property var calc: null
         property string forma: "dinheiro"
         property string erro: ""
+        // FALHA-04: chave deste recebimento (nova a cada vez que a janela abre).
+        property string chave: ""
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
@@ -451,6 +460,7 @@ FocusScope {
                      desconto: desconto.texto, forma: forma, observacoes: "", cheques: chequesReceber.dados() }
         }
         function abrirCom() {
+            chave = Api.novaChave()
             erro = ""
             forma = "dinheiro"
             chequesReceber.limpar()
@@ -473,7 +483,7 @@ FocusScope {
                 calc = r.dados
         }
         function concluir() {
-            const r = Api.chamar("receber_baixar", entrada())
+            const r = Api.gravar("receber_baixar", entrada(), chave)
             if (!r.ok) {
                 erro = r.erro
                 return
@@ -493,7 +503,7 @@ FocusScope {
                 Layout.fillWidth: true
             }
             Nota {
-                text: pagar.calc ? "Deve R$ " + pagar.calc.saldo + (pagar.calc.jurosSugerido !== "0,00" ? " · juros e multa até hoje R$ " + pagar.calc.jurosSugerido : "") : ""
+                text: pagar.calc ? Tema.sigiloTexto("Deve R$ " + pagar.calc.saldo + (pagar.calc.jurosSugerido !== "0,00" ? " · juros e multa até hoje R$ " + pagar.calc.jurosSugerido : "")) : ""
                 font.pixelSize: 15
                 Layout.fillWidth: true
             }
@@ -521,7 +531,7 @@ FocusScope {
             }
             Campo {
                 id: valor
-                rotulo: "Valor pago" + (pagar.calc ? " (total R$ " + pagar.calc.total + ")" : "")
+                rotulo: "Valor pago" + (pagar.calc ? Tema.sigiloTexto(" (total R$ " + pagar.calc.total + ")") : "")
                 prefixo: "R$"
                 numerico: true
                 maximo: 14
@@ -560,8 +570,8 @@ FocusScope {
                 model: pagar.calc ? pagar.calc.abates : []
                 delegate: Text {
                     required property var modelData
-                    text: modelData.descricao + " · " + modelData.parcela + " (vence " + modelData.vencimento + "): R$ " + modelData.valor
-                          + (modelData.resta === "0,00" ? "  → quitada" : "  → ainda falta R$ " + modelData.resta)
+                    text: Tema.sigiloTexto(modelData.descricao + " · " + modelData.parcela + " (vence " + modelData.vencimento + "): R$ " + modelData.valor
+                          + (modelData.resta === "0,00" ? "  → quitada" : "  → ainda falta R$ " + modelData.resta))
                     color: Tema.tintaSuave
                     font.family: Tema.texto
                     font.pixelSize: 13
@@ -573,8 +583,8 @@ FocusScope {
                 readonly property bool sobra: !!pagar.calc && pagar.calc.troco !== "0,00"
                 readonly property bool resta: !!pagar.calc && pagar.calc.continuaDevendo !== "0,00"
                 text: !pagar.calc ? "" : pagar.calc.erro ? pagar.calc.erro
-                      : sobra ? "Troco R$ " + pagar.calc.troco
-                      : resta ? "Continua devendo R$ " + pagar.calc.continuaDevendo
+                      : sobra ? Tema.sigiloTexto("Troco R$ " + pagar.calc.troco)
+                      : resta ? Tema.sigiloTexto("Continua devendo R$ " + pagar.calc.continuaDevendo)
                       : tela.marcadas.length > 0 ? "Quita as parcelas escolhidas" : "Quita tudo"
                 color: !pagar.calc || pagar.calc.erro ? Tema.vermelho : resta ? Tema.dourado : Tema.verdeEscuro
                 font.family: Tema.texto
@@ -618,20 +628,20 @@ FocusScope {
         contentItem: ColumnLayout {
             spacing: 12
             Titulo {
-                text: feito.recibo ? "Recebido R$ " + feito.recibo.valor : ""
+                text: feito.recibo ? Tema.sigiloTexto("Recebido R$ " + feito.recibo.valor) : ""
                 font.pixelSize: 34
                 Layout.fillWidth: true
             }
             Text {
                 visible: !!feito.recibo && feito.recibo.troco !== "0,00"
-                text: feito.recibo ? "Troco R$ " + feito.recibo.troco : ""
+                text: feito.recibo ? Tema.sigiloTexto("Troco R$ " + feito.recibo.troco) : ""
                 color: Tema.verdeEscuro
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: 40
             }
             Nota {
-                text: feito.recibo ? feito.recibo.cliente + (feito.recibo.emAberto === "0,00" ? " não deve mais nada." : " ainda deve R$ " + feito.recibo.emAberto + ".") : ""
+                text: feito.recibo ? feito.recibo.cliente + (feito.recibo.emAberto === "0,00" ? " não deve mais nada." : Tema.sigiloTexto(" ainda deve R$ " + feito.recibo.emAberto + ".")) : ""
                 font.pixelSize: 16
                 Layout.fillWidth: true
             }
@@ -659,6 +669,8 @@ FocusScope {
     // ---------- Lançar dívida ----------
     Popup {
         id: lancar
+        // FALHA-04: chave deste lançamento (nova a cada vez que a janela abre).
+        property string chave: ""
         property string cliente: ""
         property string clienteNome: ""
         property var achados: []
@@ -674,6 +686,7 @@ FocusScope {
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(conta) {
+            chave = Api.novaChave()
             erro = ""
             cliente = conta ? conta.clienteId : ""
             clienteNome = conta ? conta.nome : ""
@@ -710,7 +723,7 @@ FocusScope {
             achados = r.ok ? r.dados.itens : []
         }
         function salvar() {
-            const r = Api.chamar("receber_lancar", entrada())
+            const r = Api.gravar("receber_lancar", entrada(), chave)
             if (!r.ok) {
                 erro = r.erro
                 return
@@ -813,7 +826,7 @@ FocusScope {
                     model: lancar.previa
                     delegate: Text {
                         required property var modelData
-                        text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
+                        text: Tema.sigiloTexto(modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor)
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14

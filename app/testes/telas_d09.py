@@ -263,7 +263,9 @@ def main():
         finally:
             r.fechar()
 
-        # Configurações: a senha abre só para consultar; o Backup pede a dele.
+        # Configurações: a senha abre só para consultar. 0.9.15: Backup fica em
+        # Simultaneidade, que pede uma senha ao entrar (vale para Duplicatas,
+        # Histórico, Caixas, Backup e Fiscal); a pílula Gerente pede a dela.
         r = Rustinho(pasta, "TelaConfiguracoes", {}, fotos, "caixa-configuracoes")
         try:
             r.entrar("Bia")
@@ -275,18 +277,40 @@ def main():
             xdo("type", "--delay", "80", SENHA["Ana"])
             xdo("key", "Return")
             time.sleep(2)
-            if not r.clicar("Backup"):
-                raise RuntimeError(f"a pílula Backup não apareceu (veja {r.saida})")
-            time.sleep(1.5)
-            tudo_certo &= conferir("caixa-configuracoes: o Backup pede a senha dele", r.foto("-2"), r.textos(),
-                                   tem=["Backup: só o gerente pode", "Liberar"])
-            r.clicar("Voltar")
-            time.sleep(1)
             if not r.clicar("Gerente"):
                 raise RuntimeError(f"a pílula Gerente não apareceu (veja {r.saida})")
             time.sleep(1.5)
             tudo_certo &= conferir("caixa-configuracoes: a pílula Gerente pede a senha dela", r.foto("-3"), r.textos(),
                                    tem=["Gerente: só o gerente pode", "Liberar"])
+            r.clicar("Voltar")
+            time.sleep(1)
+            if not r.clicar("Simultaneidade"):
+                raise RuntimeError(f"a pílula Simultaneidade não apareceu (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: Simultaneidade pede a senha", r.foto("-2"), r.textos(),
+                                   tem=["Simultaneidade: só o gerente pode", "estas telas", "Liberar"])
+            xdo("type", "--delay", "80", SENHA["Ana"])
+            xdo("key", "Return")
+            time.sleep(2)
+            if not r.clicar("Backup"):
+                raise RuntimeError(f"a subpílula Backup não apareceu (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: o Backup abre sem pedir de novo", r.foto("-2b"), r.textos(),
+                                   tem=["Duplicatas", "Histórico", "Caixas", "Fiscal", "Fazer backup agora"],
+                                   nao_tem=["Backup: só o gerente pode"])
+            # FALHA-05: com a mesma senha, Duplicatas e Histórico abrem sem
+            # pedir de novo; a pílula Gerente continua pedindo a dela.
+            for parte, texto in [("Duplicatas", "Diferenças entre caixas"), ("Histórico", "Histórico")]:
+                if not r.clicar(parte):
+                    raise RuntimeError(f"a subpílula {parte} não apareceu (veja {r.saida})")
+                time.sleep(1.5)
+                tudo_certo &= conferir(f"caixa-configuracoes: {parte} abre sem pedir de novo", r.foto("-2" + parte[0]), r.textos(),
+                                       tem=[texto], nao_tem=["só o gerente pode", "Liberar"])
+            if not r.clicar("Gerente"):
+                raise RuntimeError(f"a pílula Gerente não apareceu (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("caixa-configuracoes: depois da Simultaneidade, a pílula Gerente ainda pede a senha dela",
+                                   r.foto("-4"), r.textos(), tem=["Gerente: só o gerente pode", "Liberar"])
         finally:
             r.fechar()
     finally:

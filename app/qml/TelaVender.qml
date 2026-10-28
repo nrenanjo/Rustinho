@@ -19,15 +19,23 @@ FocusScope {
     property string osId: ""
     property string osCarregada: ""
     property int osNumero: 0
+    // FALHA-02: o caixa da OS (o número é por caixa).
+    property string osCaixa: ""
     // Vale-troca que veio da troca (Trocas e devoluções → Trocar agora).
     property string valeId: ""
     property var valeTroca: null
     // Vales com saldo (aparecem no Receber).
     property var vales: []
     property int encomendaNumero: 0
+    // 0915-M: o caixa da encomenda (o número pode repetir entre caixas sem rede).
+    property string encomendaCaixa: ""
     property int encomendasNaVenda: 0
 
     property var carrinho: []        // [{produtoId, quantidade, preco, desconto}]
+    // FALHA-04: chave da venda (e do orçamento) que está sendo montada; a
+    // mesma em cada nova tentativa; nova quando começa outra (limparVenda).
+    property string chaveVenda: Api.novaChave()
+    property string chaveOrcamento: Api.novaChave()
     property var calculo: null
     property var resultados: []
     property var caixaEstado: null
@@ -197,6 +205,8 @@ FocusScope {
     }
 
     function limparVenda() {
+        chaveVenda = Api.novaChave()
+        chaveOrcamento = Api.novaChave()
         carrinho = []
         calculo = null
         clienteId = ""
@@ -206,8 +216,10 @@ FocusScope {
         orcamentoCarregado = ""
         encomendaCarregada = ""
         encomendaNumero = 0
+        encomendaCaixa = ""
         osCarregada = ""
         osNumero = 0
+        osCaixa = ""
         valeTroca = null
         itemAtual = -1
         limparBusca()
@@ -296,7 +308,7 @@ FocusScope {
 
     function concluir(pagamentos) {
         const encomendas = calculo ? calculo.encomendas : 0
-        const r = Api.chamar("venda_concluir", entrada(pagamentos))
+        const r = Api.gravar("venda_concluir", entrada(pagamentos), chaveVenda)
         if (!r.ok) {
             receber.erro = r.erro
             return
@@ -313,7 +325,7 @@ FocusScope {
         const e = entrada()
         e.validadeDias = dias
         e.observacoes = observacoes
-        const r = Api.chamar("orcamento_salvar", e)
+        const r = Api.gravar("orcamento_salvar", e, chaveOrcamento)
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
             return
@@ -366,64 +378,93 @@ FocusScope {
         anchors.topMargin: Tema.margem - 16
         spacing: 12
 
-        RowLayout {
-            spacing: 14
+        // Topo igual ao do Receber (pílula unida "Vender / Receber"): o
+        // "Mostrar valores" no canto de cima e o botão "Caixa" no lugar do
+        // "Lançar dívida" (abrir e fechar o caixa é por ele).
+        ColumnLayout {
+            spacing: 2
             Layout.fillWidth: true
-            ColumnLayout {
-                spacing: 0
+            RowLayout {
+                spacing: 10
                 Layout.fillWidth: true
                 Botao {
                     tipo: "discreto"
                     icone: "voltar"
                     text: "Início"
-                    implicitHeight: 32
+                    implicitHeight: 34
                     font.pixelSize: 14
                     Layout.leftMargin: -10
                     onClicked: tela.aoEsc()
                 }
-                RowLayout {
-                    spacing: 16
-                    Titulo {
-                        text: tela.osCarregada ? "Entregar OS nº " + tela.osNumero
-                              : tela.encomendaCarregada ? "Vender encomenda nº " + tela.encomendaNumero
-                              : tela.orcamentoCarregado ? "Vender orçamento" : "Vender"
-                        font.pixelSize: Tema.estreito ? 32 : 42
-                    }
-                    Rectangle {
-                        visible: !!tela.valeTroca
-                        radius: height / 2
-                        color: Tema.verde
-                        implicitHeight: 30
-                        implicitWidth: textoVale.implicitWidth + 24
-                        Layout.alignment: Qt.AlignVCenter
-                        Text {
-                            id: textoVale
-                            anchors.centerIn: parent
-                            text: tela.valeTroca ? "Vale-troca nº " + tela.valeTroca.numero + " · R$ " + tela.valeTroca.saldo + " (vai no Receber)" : ""
-                            color: Tema.verdeEscuro
-                            font.family: Tema.texto
-                            font.weight: Font.DemiBold
-                            font.pixelSize: 14
+                Item { Layout.fillWidth: true; implicitHeight: 34 }
+                Olho {}
+            }
+            GridLayout {
+                columns: Tema.fino ? 1 : 2
+                columnSpacing: 16
+                rowSpacing: 10
+                Layout.fillWidth: true
+                ColumnLayout {
+                    spacing: 0
+                    Layout.fillWidth: true
+                    RowLayout {
+                        spacing: 16
+                        Titulo {
+                            text: tela.osCarregada ? "Entregar OS nº " + tela.osNumero + (tela.osCaixa ? " (" + tela.osCaixa + ")" : "")
+                                  : tela.encomendaCarregada ? "Vender encomenda nº " + tela.encomendaNumero + (tela.encomendaCaixa ? " (" + tela.encomendaCaixa + ")" : "")
+                                  : tela.orcamentoCarregado ? "Vender orçamento" : "Vender / Receber"
+                            font.pixelSize: Tema.baixo ? 30 : Tema.estreito ? 34 : 44
+                        }
+                        Rectangle {
+                            visible: !!tela.valeTroca
+                            radius: height / 2
+                            color: Tema.verde
+                            implicitHeight: 30
+                            implicitWidth: textoVale.implicitWidth + 24
+                            Layout.alignment: Qt.AlignVCenter
+                            Text {
+                                id: textoVale
+                                anchors.centerIn: parent
+                                text: tela.valeTroca ? "Vale-troca nº " + tela.valeTroca.numero + " · R$ " + tela.valeTroca.saldo + " (vai no Receber)" : ""
+                                color: Tema.verdeEscuro
+                                font.family: Tema.texto
+                                font.weight: Font.DemiBold
+                                font.pixelSize: 14
+                            }
                         }
                     }
                     Nota {
                         text: !tela.caixaEstado ? "" : tela.caixaAberto
                               ? tela.caixaEstado.caixa + " · aberto por " + tela.caixaEstado.resumo.sessao.abertoPor
                                 + " às " + Qt.formatTime(new Date(tela.caixaEstado.resumo.sessao.abertoEm), "HH:mm")
-                              : tela.caixaEstado.caixa + " · caixa fechado"
-                        visible: !Tema.estreito
-                        font.pixelSize: 16
-                        Layout.alignment: Qt.AlignBaseline
+                              : tela.caixaEstado.caixa + " · caixa fechado: abra pelo botão Caixa para finalizar vendas"
+                        font.pixelSize: Tema.estreito ? 15 : 16
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                 }
+                Botao {
+                    text: "Caixa"
+                    icone: "caixa"
+                    tipo: "secundario"
+                    Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignBottom | Qt.AlignRight
+                    onClicked: tela.janela.abrir("TelaCaixa")
+                }
             }
-            Olho { Layout.alignment: Qt.AlignBottom; Layout.bottomMargin: 4 }
-            Botao {
-                text: "Caixa"
-                tipo: "discreto"
-                icone: "caixa"
-                Layout.alignment: Qt.AlignBottom
-                onClicked: tela.janela.abrir("TelaCaixa")
+        }
+
+        Pilulas {
+            visible: !tela.osCarregada && !tela.encomendaCarregada && !tela.orcamentoCarregado
+            modelo: [{ id: "vender", nome: "Vender" }, { id: "receber", nome: "Receber" }]
+            atual: "vender"
+            onEscolhido: id => {
+                if (id !== "receber")
+                    return
+                if (tela.carrinho.length > 0)
+                    tela.janela.confirmar("Ir para Receber?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
+                                          "Ir para Receber", () => tela.janela.substituir("TelaReceber", {}), "perigo")
+                else
+                    tela.janela.substituir("TelaReceber", {})
             }
         }
 
@@ -500,62 +541,8 @@ FocusScope {
                                 onEncomendar: tela.alternarEncomenda(index)
                             }
 
-                            ColumnLayout {
-                                anchors.centerIn: parent
-                                width: Math.min(520, parent.width - 40)
-                                visible: tela.carrinho.length === 0
-                                spacing: 10
-                                Icone {
-                                    nome: "caixa"
-                                    tamanho: 56
-                                    cor: Tema.dourado
-                                    Layout.alignment: Qt.AlignHCenter
-                                }
-                                Titulo {
-                                    text: !tela.caixaAberto ? "O caixa está fechado" : Tema.celular ? "Busque a peça ou use a câmera" : "Passe o leitor ou busque a peça"
-                                    font.pixelSize: 30
-                                    horizontalAlignment: Text.AlignHCenter
-                                    Layout.fillWidth: true
-                                }
-                                Nota {
-                                    text: tela.caixaAberto
-                                          ? (Tema.celular ? "A busca mostra o estoque e o preço de cada peça. Toque na peça para pôr no carrinho." : "A busca mostra o estoque e o preço de cada peça. Enter põe no carrinho; F2 recebe.")
-                                          : "Abra o caixa com o troco que está na gaveta para começar a vender. Dá para montar um orçamento mesmo com o caixa fechado."
-                                    font.pixelSize: 16
-                                    horizontalAlignment: Text.AlignHCenter
-                                    Layout.fillWidth: true
-                                }
-                                Linha {
-                                    visible: !!tela.caixaEstado && !tela.caixaAberto
-                                    spacing: 10
-                                    Layout.alignment: Qt.AlignHCenter
-                                    Layout.topMargin: 6
-                                    Campo {
-                                        id: trocoInicial
-                                        rotulo: "Troco na gaveta"
-                                        prefixo: "R$"
-                                        numerico: true
-                                        dica: "0,00"
-                                        Layout.preferredWidth: 180
-                                        onConfirmado: botaoAbrir.clicked()
-                                    }
-                                    Botao {
-                                        id: botaoAbrir
-                                        text: "Abrir caixa"
-                                        Layout.alignment: Qt.AlignBottom
-                                        onClicked: {
-                                            const r = Api.chamar("caixa_abrir", { valor: trocoInicial.texto })
-                                            if (r.ok) {
-                                                tela.carregarCaixa()
-                                                tela.janela.avisar("Caixa aberto.", "ok")
-                                                busca.focar()
-                                            } else {
-                                                trocoInicial.erro = r.erro
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            // Meio da tela limpo, sem mensagem nem ícone (0.9.15): o
+                            // caixa abre e fecha pelo botão "Caixa" lá em cima.
                         }
                     }
 
@@ -1356,6 +1343,7 @@ FocusScope {
                 clienteNome = r.dados.clienteNome
                 encomendaCarregada = r.dados.encomendaId
                 encomendaNumero = r.dados.numero
+                encomendaCaixa = r.dados.caixa || ""
                 orcamentoCarregado = ""
             } else {
                 janela.avisar(r.erro, "erro")
@@ -1384,6 +1372,7 @@ FocusScope {
                 descontoTotal.texto = r.dados.desconto
                 osCarregada = r.dados.osId
                 osNumero = r.dados.numero
+                osCaixa = r.dados.caixa || ""
                 orcamentoCarregado = ""
                 encomendaCarregada = ""
             } else {

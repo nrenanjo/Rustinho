@@ -8,10 +8,13 @@ Painel {
     id: escolher
     property var lista: []
     property string atual: ""
+    // FALHA-04: chave da unidade nova (nova a cada vez que a janela abre).
+    property string chave: ""
     signal escolhida(string sigla)
     width: Math.min(620, Tema.largura - 24)
 
     function abrirCom(sigla) {
+        chave = Api.novaChave()
         atual = sigla
         carregar()
         sigla_.texto = ""
@@ -29,7 +32,7 @@ Painel {
     function criar() {
         sigla_.erro = ""
         descricao.erro = ""
-        const r = Api.chamar("unidade_salvar", { sigla: sigla_.texto, descricao: descricao.texto, fracionada: fracionada.checked })
+        const r = Api.gravar("unidade_salvar", { sigla: sigla_.texto, descricao: descricao.texto, fracionada: fracionada.checked }, chave)
         if (!r.ok) {
             (r.campo === "descricao" ? descricao : sigla_).erro = r.erro
             return

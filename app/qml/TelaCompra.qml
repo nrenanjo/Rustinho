@@ -10,10 +10,13 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string compraId: ""
     property var compra: null
+    // FALHA-04: chave do lançamento desta compra (nova ao carregar de novo).
+    property string chaveLancar: Api.novaChave()
     property int itemEscolhendo: -1
     readonly property bool rascunho: !!compra && compra.situacao === "rascunho"
 
     function carregar() {
+        chaveLancar = Api.novaChave()
         const r = Api.chamar("compra_abrir", { id: compraId })
         if (r.ok)
             compra = r.dados
@@ -80,17 +83,20 @@ FocusScope {
             partes.push(compra.novas + (compra.novas === 1 ? " peça nova será cadastrada" : " peças novas serão cadastradas"))
         partes.push(atualizar.checked ? "os preços de revenda seguem o % de lucro de cada peça" : "os preços de revenda não mudam")
         janela.confirmar("Lançar a NF " + compra.numero + "?", partes.join("; ") + ".", "Lançar no estoque", () => {
-            const r = Api.chamar("compra_lancar", entrada(-1, {}))
-            if (r.ok) {
-                compra = r.dados.compra
-                const s = r.dados.resumo
-                janela.avisar("Compra lançada: " + s.itensEstoque + " itens no estoque"
-                              + (s.pecasNovas > 0 ? ", " + s.pecasNovas + " peças novas" : "")
-                              + (s.precosAtualizados > 0 ? ", " + s.precosAtualizados + " preços atualizados" : "")
-                              + (s.parcelasPagar > 0 ? ", " + s.parcelasPagar + (s.parcelasPagar === 1 ? " parcela" : " parcelas") + " no A pagar" : "") + ".", "ok")
-            } else {
-                mostrarErro(r)
-            }
+            // 0915-N / D-09: se a compra muda o preço de venda de uma peça
+            // cadastrada, pede a senha do gerente (com estes dados).
+            janela.chamarGerente("compra_lancar", entrada(-1, {}), r => {
+                if (r.ok) {
+                    compra = r.dados.compra
+                    const s = r.dados.resumo
+                    janela.avisar("Compra lançada: " + s.itensEstoque + " itens no estoque"
+                                  + (s.pecasNovas > 0 ? ", " + s.pecasNovas + " peças novas" : "")
+                                  + (s.precosAtualizados > 0 ? ", " + s.precosAtualizados + " preços atualizados" : "")
+                                  + (s.parcelasPagar > 0 ? ", " + s.parcelasPagar + (s.parcelasPagar === 1 ? " parcela" : " parcelas") + " no A pagar" : "") + ".", "ok")
+                } else {
+                    mostrarErro(r)
+                }
+            }, chaveLancar)
         })
     }
 

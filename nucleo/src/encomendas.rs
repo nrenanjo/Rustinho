@@ -511,6 +511,9 @@ pub fn whatsapp(conn: &Connection, id: &str) -> Resultado<String> {
 pub struct Linha {
     pub id: String,
     pub numero: i64,
+    /// 0915-M: o caixa que fez a encomenda (o número é da tabela; dois caixas
+    /// sem rede podem dar o mesmo). Como na OS (FALHA-02).
+    pub caixa: String,
     pub cliente_id: String,
     pub cliente: String,
     pub telefone: String,
@@ -583,7 +586,8 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
                 COALESCE(v.numero, 0), COALESCE(v.situacao, ''), COALESCE(f.nome, ''), e.observacoes, e.motivo,
                 COALESCE((SELECT SUM(valor - pago) FROM conta_receber_saldo r
                            WHERE r.venda_id = e.venda_id AND r.cancelado_em IS NULL), 0),
-                (SELECT COALESCE(SUM(quantidade), 0) FROM estoque_movimento m WHERE m.produto_id = e.produto_id)
+                (SELECT COALESCE(SUM(quantidade), 0) FROM estoque_movimento m WHERE m.produto_id = e.produto_id),
+                e.dispositivo
            FROM encomenda e
            LEFT JOIN produto p ON p.id = e.produto_id
            LEFT JOIN venda v ON v.id = e.venda_id
@@ -594,7 +598,8 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
                    e.criado_em DESC
           LIMIT 300",
     )?;
-    let encomendas = c
+    let mut nomes = NomesDosCaixas::default();
+    let linhas: Vec<(Linha, String)> = c
         .query_map(params![quais, filtro], |l| {
             let situacao: String = l.get(10)?;
             let criado: String = l.get(11)?;
@@ -613,47 +618,84 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
                 ("pago", "Paga".to_string())
             };
             let aberta = situacao != "entregue" && situacao != "cancelada";
-            Ok(Linha {
-                id: l.get(0)?,
-                numero: l.get(1)?,
-                cliente_id: l.get(2)?,
-                cliente: l.get(3)?,
-                tem_whatsapp: numero_whatsapp(&telefone).is_some(),
-                telefone,
-                pode_vender: aberta && venda_id.is_empty(),
-                pode_entregar: aberta && (!venda_id.is_empty() || produto_id.is_empty()),
-                estoque: if produto_id.is_empty() { String::new() } else { numeros::escrever_quantidade(estoque) },
-                produto_id,
-                codigo: l.get(6)?,
-                descricao: l.get(7)?,
-                quantidade: numeros::escrever_quantidade(l.get(8)?),
-                unidade: l.get(9)?,
-                nome_situacao: nome_situacao(&situacao).to_string(),
-                situacao,
-                desde: desde(dias),
-                dias,
-                criado_em: fiscal::data_br(&criado),
-                chegou_em: {
-                    let c: String = l.get(12)?;
-                    if c.is_empty() {
-                        c
-                    } else {
-                        fiscal::data_br(&c)
-                    }
+            Ok((
+                Linha {
+                    id: l.get(0)?,
+                    numero: l.get(1)?,
+                    caixa: String::new(),
+                    cliente_id: l.get(2)?,
+                    cliente: l.get(3)?,
+                    tem_whatsapp: numero_whatsapp(&telefone).is_some(),
+                    telefone,
+                    pode_vender: aberta && venda_id.is_empty(),
+                    pode_entregar: aberta && (!venda_id.is_empty() || produto_id.is_empty()),
+                    estoque: if produto_id.is_empty() { String::new() } else { numeros::escrever_quantidade(estoque) },
+                    produto_id,
+                    codigo: l.get(6)?,
+                    descricao: l.get(7)?,
+                    quantidade: numeros::escrever_quantidade(l.get(8)?),
+                    unidade: l.get(9)?,
+                    nome_situacao: nome_situacao(&situacao).to_string(),
+                    situacao,
+                    desde: desde(dias),
+                    dias,
+                    criado_em: fiscal::data_br(&criado),
+                    chegou_em: {
+                        let c: String = l.get(12)?;
+                        if c.is_empty() {
+                            c
+                        } else {
+                            fiscal::data_br(&c)
+                        }
+                    },
+                    avisado: l.get(13)?,
+                    avisado_em: l.get(14)?,
+                    pagamento: pagamento.into(),
+                    nome_pagamento,
+                    venda_id,
+                    venda_numero: l.get(16)?,
+                    fornecedor: l.get(18)?,
+                    observacoes: l.get(19)?,
+                    motivo: l.get(20)?,
                 },
-                avisado: l.get(13)?,
-                avisado_em: l.get(14)?,
-                pagamento: pagamento.into(),
-                nome_pagamento,
-                venda_id,
-                venda_numero: l.get(16)?,
-                fornecedor: l.get(18)?,
-                observacoes: l.get(19)?,
-                motivo: l.get(20)?,
-            })
+                l.get(23)?,
+            ))
         })?
         .collect::<Result<_, _>>()?;
+    let mut encomendas = Vec::with_capacity(linhas.len());
+    for (mut linha, dispositivo) in linhas {
+        linha.caixa = nomes.nome(conn, &dispositivo)?;
+        encomendas.push(linha);
+    }
     Ok(Painel { a_pedir, pedidas, chegaram, sem_aviso, encomendas })
+}
+
+/// 0915-M: o nome do caixa de cada encomenda, lido uma vez por caixa.
+#[derive(Default)]
+pub(crate) struct NomesDosCaixas(std::collections::HashMap<String, String>);
+
+impl NomesDosCaixas {
+    pub(crate) fn nome(&mut self, conn: &Connection, dispositivo: &str) -> Resultado<String> {
+        if let Some(n) = self.0.get(dispositivo) {
+            return Ok(n.clone());
+        }
+        let n = nome_do_caixa(conn, dispositivo)?;
+        self.0.insert(dispositivo.to_string(), n.clone());
+        Ok(n)
+    }
+}
+
+/// O nome do caixa, como na OS ("Caixa 2"; "outro caixa" se este computador
+/// ainda não o conhece pelo nome).
+fn nome_do_caixa(conn: &Connection, dispositivo: &str) -> Resultado<String> {
+    if config::ler(conn, "dispositivo_id")?.as_deref() == Some(dispositivo) {
+        return config::nome_caixa(conn);
+    }
+    Ok(conn
+        .query_row("SELECT nome FROM sync_par WHERE dispositivo = ?1", [dispositivo], |l| l.get::<_, String>(0))
+        .optional()?
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "outro caixa".into()))
 }
 
 /// O que a tela de vender precisa para vender a encomenda na entrega.
@@ -662,13 +704,16 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
 pub struct ParaVenda {
     pub encomenda_id: String,
     pub numero: i64,
+    /// 0915-M: o caixa que fez a encomenda.
+    pub caixa: String,
     pub cliente_id: String,
     pub cliente_nome: String,
     pub itens: Vec<serde_json::Value>,
 }
 
 pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
-    let (numero, cliente_id, cliente_nome, produto_id, quantidade, situacao, venda_id): (
+    #[allow(clippy::type_complexity)]
+    let (numero, cliente_id, cliente_nome, produto_id, quantidade, situacao, venda_id, dispositivo): (
         i64,
         Option<String>,
         String,
@@ -676,11 +721,13 @@ pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
         i64,
         String,
         Option<String>,
+        String,
     ) = conn
         .query_row(
-            "SELECT numero, cliente_id, cliente_nome, produto_id, quantidade, situacao, venda_id FROM encomenda WHERE id = ?1",
+            "SELECT numero, cliente_id, cliente_nome, produto_id, quantidade, situacao, venda_id, dispositivo
+               FROM encomenda WHERE id = ?1",
             [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?)),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Encomenda".into()))?;
@@ -703,6 +750,7 @@ pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
     Ok(ParaVenda {
         encomenda_id: id.to_string(),
         numero,
+        caixa: nome_do_caixa(conn, &dispositivo)?,
         cliente_id: cliente_id.unwrap_or_default(),
         cliente_nome,
         itens,
@@ -747,6 +795,64 @@ mod testes {
         f.custo = "50".into();
         f.codigo_barras = barras.into();
         produtos::salvar(&b.conn, &b.dispositivo, u, &f).unwrap()
+    }
+
+    /// 0915-M: dois caixas sem rede dão o mesmo número a encomendas
+    /// diferentes (o número é da tabela, não por caixa). Depois da troca de
+    /// dados, as listas (encomendas, o que comprar) e a venda da encomenda
+    /// mostram o caixa junto do número, como na OS (FALHA-02). Nenhum número
+    /// muda e nada é recusado.
+    #[test]
+    fn m0915_mesmo_numero_de_dois_caixas_mostra_o_caixa() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        crate::config::gravar(c, "caixa_nome", "Caixa 1").unwrap();
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        let pastilha = peca(&b, &u, "Pastilha", "");
+        let e = EncomendaEntrada {
+            cliente_nome: "Ana Souza".into(),
+            telefone: "(15) 91234-0000".into(),
+            produto_id: pastilha.clone(),
+            descricao: "Pastilha".into(),
+            quantidade: "1".into(),
+            ..Default::default()
+        };
+        let minha = criar(c, d, &u, &e).unwrap();
+        // A do outro caixa, feita sem rede com o mesmo número, chegou pela troca.
+        c.execute(
+            "INSERT INTO sync_par (dispositivo, nome, endereco, visto_em) VALUES ('disp-caixa-2', 'Caixa 2', '', '2026-10-28')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO encomenda (id, numero, cliente_nome, telefone, produto_id, descricao, quantidade, situacao,
+                                    criado_em, atualizado_em, dispositivo)
+             SELECT 'enc-caixa-2', numero, 'Beto Lima', '(15) 98888-0000', produto_id, 'Pastilha', 1000, 'aberta',
+                    criado_em, atualizado_em, 'disp-caixa-2' FROM encomenda WHERE id = ?1",
+            [&minha],
+        )
+        .unwrap();
+        let v = serde_json::to_value(painel(c, "", "abertas").unwrap()).unwrap();
+        let linhas = v["encomendas"].as_array().unwrap();
+        assert_eq!(linhas.len(), 2);
+        assert_eq!(linhas[0]["numero"], linhas[1]["numero"], "o mesmo número (nada renumerado)");
+        let caixas: Vec<&str> = linhas.iter().map(|l| l["caixa"].as_str().unwrap_or("")).collect();
+        assert!(caixas.iter().all(|c| !c.is_empty()), "cada linha diz o caixa: {caixas:?}");
+        assert_ne!(caixas[0], caixas[1], "os dois caixas aparecem diferentes: {caixas:?}");
+        assert!(caixas.iter().any(|c| c.starts_with("Caixa 2")), "{caixas:?}");
+        // A busca pelo número traz as duas, cada uma com o caixa.
+        let v = serde_json::to_value(painel(c, "1", "abertas").unwrap()).unwrap();
+        assert!(v["encomendas"].as_array().unwrap().iter().all(|l| !l["caixa"].as_str().unwrap_or("").is_empty()));
+        // O que comprar (reposição) e a venda da encomenda também dizem o caixa.
+        let r = serde_json::to_value(crate::reposicao::sugestao(c, "").unwrap()).unwrap();
+        let enc = r["encomendas"].as_array().unwrap();
+        assert_eq!(enc.len(), 2, "{r}");
+        assert!(enc.iter().all(|l| !l["caixa"].as_str().unwrap_or("").is_empty()), "{r}");
+        let pv = serde_json::to_value(para_venda(c, "enc-caixa-2").unwrap()).unwrap();
+        assert!(pv["caixa"].as_str().unwrap_or("").starts_with("Caixa 2"), "{pv}");
+        // A lista de compra impressa também.
+        let html = crate::reposicao::lista_compra_html(c).unwrap();
+        assert!(html.contains("Caixa 2") && html.contains("Caixa 1"), "{html}");
     }
 
     #[test]

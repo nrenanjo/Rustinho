@@ -9,6 +9,10 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string produtoId: ""
     property var ficha: null
+    // FALHA-04: chave do salvar e da variação (novas ao abrir e depois de
+    // dar certo: o próximo salvar já é uma alteração da mesma peça).
+    property string chave: Api.novaChave()
+    property string chaveVariacao: Api.novaChave()
     property var precos: []
     property var sugestoes: ({ marcas: [], categorias: [], montadoras: [], modelos: [], locais: [], unidades: [], origens: [], csosns: [] })
     property var tributacao: null
@@ -30,6 +34,8 @@ FocusScope {
     // ---------- Carregar e salvar ----------
 
     function carregar() {
+        chave = Api.novaChave()
+        chaveVariacao = Api.novaChave()
         carregando = true
         const s = Api.chamar("produto_sugestoes")
         if (s.ok)
@@ -197,7 +203,7 @@ FocusScope {
     function criarVariacao() {
         varAtual.erro = ""
         varNova.erro = ""
-        const r = Api.chamar("produto_variacao_criar", { id: ficha.id, atual: varAtual.texto, nova: varNova.texto })
+        const r = Api.gravar("produto_variacao_criar", { id: ficha.id, atual: varAtual.texto, nova: varNova.texto }, chaveVariacao)
         if (!r.ok) {
             (r.campo === "atual" ? varAtual : varNova).erro = r.erro
             return
@@ -226,6 +232,7 @@ FocusScope {
         // outra coisa).
         janela.chamarGerente("produto_salvar", coletar(), r => {
             if (r.ok) {
+                tela.chave = Api.novaChave()
                 const s = Api.chamar("produto_sugestoes")
                 if (s.ok)
                     sugestoes = s.dados
@@ -235,7 +242,7 @@ FocusScope {
             } else {
                 mostrarErro(r.campo, r.erro)
             }
-        })
+        }, chave)
     }
 
     function limparErros() {

@@ -5,6 +5,7 @@ import rustinho
 
 // Estoque que orienta: o que comprar (e quanto), as encomendas de clientes,
 // o que mais vende e o que está parado. Uma parte de cada vez, nas pílulas.
+// Faz parte da pílula unida "Estoque / Fornecedores" (0.9.15).
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
@@ -32,7 +33,7 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            titulo: "Estoque"
+            titulo: "Estoque / Fornecedores"
             subtitulo: "O que comprar, o que o cliente encomendou, o que vende e o que está parado"
             Layout.fillWidth: true
             onVoltar: tela.janela.voltar()
@@ -52,7 +53,15 @@ FocusScope {
             }
         }
 
+        // Pílula unida "Estoque / Fornecedores": a linha de cima troca entre as duas.
         Pilulas {
+            modelo: [{ id: "estoque", nome: "Estoque" }, { id: "fornecedores", nome: "Fornecedores" }]
+            atual: "estoque"
+            onEscolhido: id => { if (id === "fornecedores") tela.janela.substituir("TelaPessoas", { papel: "fornecedor" }) }
+        }
+
+        Pilulas {
+            pequenas: true
             modelo: [
                 { id: "comprar", nome: "O que comprar" },
                 { id: "encomendas", nome: "Encomendas" },

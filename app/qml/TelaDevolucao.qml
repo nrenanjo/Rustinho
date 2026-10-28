@@ -19,10 +19,13 @@ FocusScope {
     property string resto: "vale"
     property string erro: ""
     property var feita: null
+    // FALHA-04: chave desta devolução (a mesma se repetir; nova ao carregar de novo).
+    property string chaveDevolucao: Api.novaChave()
 
     readonly property var motivos: ["Peça errada", "Não serviu no carro", "Veio com defeito", "Desistiu da compra", "Comprou a mais"]
 
     function carregar() {
+        chaveDevolucao = Api.novaChave()
         const r = Api.chamar("devolucao_venda", { id: vendaId })
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
@@ -72,7 +75,7 @@ FocusScope {
 
     function devolver(trocar) {
         erro = ""
-        const r = Api.chamar("devolucao_gravar", entrada())
+        const r = Api.gravar("devolucao_gravar", entrada(), chaveDevolucao)
         if (!r.ok) {
             erro = r.erro
             if (r.campo === "motivo")

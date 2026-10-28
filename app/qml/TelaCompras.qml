@@ -29,33 +29,48 @@ FocusScope {
     }
 
     // Cada arquivo pode ser um XML, um .zip/.rar com várias notas ou uma pasta.
+    // Um de cada vez, à parte, com a tela de espera (0.9.15).
     function importar(arquivos) {
+        const lista = Array.from(arquivos)
         const novas = []
-        let deOutra = 0
         const erros = []
-        for (const arquivo of arquivos) {
-            const r = Api.chamar("compra_importar", { caminho: Api.caminho(arquivo.toString()) })
-            if (r.ok) {
-                for (const c of r.dados.compras) {
-                    novas.push(c)
-                    if (c.avisoDestinatario.indexOf("não é") >= 0)
-                        deOutra++
-                }
-                for (const e of r.dados.erros)
-                    erros.push(e)
-            } else {
-                erros.push(nomeArquivo(arquivo) + ": " + r.erro)
+        let deOutra = 0
+        function proximo(i) {
+            if (i >= lista.length) {
+                terminar()
+                return
             }
+            const arquivo = lista[i]
+            // FALHA-04: uma chave para a importação deste arquivo.
+            const chaveArquivo = Api.novaChave()
+            Api.gravarDemorado("compra_importar", { caminho: Api.caminho(arquivo.toString()) },
+                               lista.length > 1 ? "Importando " + (i + 1) + " de " + lista.length + "…" : "Importando o XML…", r => {
+                if (r.ok) {
+                    for (const c of r.dados.compras) {
+                        novas.push(c)
+                        if (c.avisoDestinatario.indexOf("não é") >= 0)
+                            deOutra++
+                    }
+                    for (const e of r.dados.erros)
+                        erros.push(e)
+                } else {
+                    erros.push(nomeArquivo(arquivo) + ": " + r.erro)
+                }
+                proximo(i + 1)
+            }, chaveArquivo)
         }
-        buscar()
-        if (erros.length > 0)
-            janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
-        if (novas.length === 1)
-            janela.abrir("TelaCompra", { compraId: novas[0].id })
-        else if (novas.length > 1)
-            janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar. O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ."
-                          + (deOutra > 0 ? " Atenção: " + deOutra + (deOutra === 1 ? " nota não é" : " notas não são") + " da loja (outro CNPJ)." : ""),
-                          deOutra > 0 ? "info" : "ok")
+        function terminar() {
+            buscar()
+            if (erros.length > 0)
+                janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
+            if (novas.length === 1)
+                janela.abrir("TelaCompra", { compraId: novas[0].id })
+            else if (novas.length > 1)
+                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar. O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ."
+                              + (deOutra > 0 ? " Atenção: " + deOutra + (deOutra === 1 ? " nota não é" : " notas não são") + " da loja (outro CNPJ)." : ""),
+                              deOutra > 0 ? "info" : "ok")
+        }
+        proximo(0)
     }
 
     function nomeArquivo(url) {
@@ -110,7 +125,7 @@ FocusScope {
         Cabecalho {
             sensivel: true
             titulo: "Compras"
-            subtitulo: "Notas de entrada: importe o XML que o fornecedor manda por e-mail"
+            subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
             Layout.fillWidth: true
             onVoltar: tela.janela.voltar()
             Botao {
@@ -168,32 +183,16 @@ FocusScope {
                 onAbrir: tela.abrirCompra(index)
             }
 
-            ColumnLayout {
+            // Sem compras: o meio fica limpo (a orientação está embaixo do
+            // título e o único botão de importar fica em cima). Numa busca
+            // sem resultado, só o aviso curto.
+            Nota {
                 anchors.centerIn: parent
                 width: Math.min(600, parent.width - 40)
-                visible: tela.buscou && tela.itens.length === 0
-                spacing: 14
-                Titulo {
-                    text: busca.texto === "" ? "Nenhuma compra ainda" : "Nada encontrado"
-                    font.pixelSize: 32
-                    horizontalAlignment: Text.AlignHCenter
-                    Layout.fillWidth: true
-                }
-                Nota {
-                    text: busca.texto === ""
-                          ? "Importe o XML da nota do fornecedor. O Rustinho cadastra o fornecedor, liga cada item à peça certa, divide o frete e põe tudo no estoque com o custo novo."
-                          : "Nenhuma compra combina com “" + busca.texto + "”."
-                    font.pixelSize: 16
-                    horizontalAlignment: Text.AlignHCenter
-                    Layout.fillWidth: true
-                }
-                Botao {
-                    visible: busca.texto === ""
-                    text: "Importar o primeiro XML"
-                    icone: "mais"
-                    Layout.alignment: Qt.AlignHCenter
-                    onClicked: seletor.open()
-                }
+                visible: tela.buscou && tela.itens.length === 0 && busca.texto !== ""
+                text: "Nenhuma compra combina com “" + busca.texto + "”."
+                font.pixelSize: 16
+                horizontalAlignment: Text.AlignHCenter
             }
         }
     }

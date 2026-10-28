@@ -301,10 +301,12 @@ FocusScope {
     // ---------- Cadastro da conta ----------
     Painel {
         id: cadastro
+        property string chave: ""
         property string id_: ""
         property string erro: ""
         width: Math.min(520, Tema.largura - 24)
         function abrirCom(c) {
+            chave = Api.novaChave()
             id_ = c ? c.id : ""
             erro = ""
             cNome.texto = c ? c.nome : ""
@@ -324,7 +326,7 @@ FocusScope {
                 close()
                 secao.contaId = r.dados
                 secao.carregar()
-            })
+            }, cadastro.chave)
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -363,11 +365,13 @@ FocusScope {
     // ---------- Entrada ou saída ----------
     Painel {
         id: movimento
+        property string chave: ""
         property string tipo: "entrada"
         property string erro: ""
         readonly property var cats: secao.categorias.filter(c => c.tipo === (tipo === "entrada" ? "receita" : "despesa"))
         width: Math.min(560, Tema.largura - 24)
         function abrirCom(t) {
+            chave = Api.novaChave()
             tipo = t
             erro = ""
             mValor.texto = ""
@@ -388,7 +392,7 @@ FocusScope {
                 }
                 close()
                 secao.carregar()
-            })
+            }, movimento.chave)
         }
         contentItem: ColumnLayout {
             spacing: 12
@@ -430,10 +434,12 @@ FocusScope {
     // ---------- Transferir ----------
     Painel {
         id: transferencia
+        property string chave: ""
         property string erro: ""
         readonly property var outras: secao.contas.filter(c => c.ativo && c.id !== secao.contaId)
         width: Math.min(560, Tema.largura - 24)
         function abrirCom() {
+            chave = Api.novaChave()
             erro = ""
             tValor.texto = ""
             tData.texto = secao.hoje()
@@ -452,7 +458,7 @@ FocusScope {
                 }
                 close()
                 secao.carregar()
-            })
+            }, transferencia.chave)
         }
         contentItem: ColumnLayout {
             spacing: 12

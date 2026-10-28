@@ -10,6 +10,7 @@ import rustinho
 Painel {
     id: pedido
     property string acao: ""
+    property var acoes: []
     property string comando: ""
     property var dados: null
     property string oQue: ""
@@ -24,7 +25,14 @@ Painel {
         open()
         senha.focar()
     }
+    // Várias ações de uma vez (Configurações › Simultaneidade): uma senha
+    // abre a consulta de todas; gravar continua pedindo a senha.
+    function consultarVarias(acoes, oQue, depois) {
+        consultar("", oQue, depois)
+        pedido.acoes = acoes
+    }
     function consultar(acao, oQue, depois) {
+        pedido.acoes = []
         pedido.acao = acao
         pedido.comando = ""
         pedido.dados = null
@@ -35,6 +43,7 @@ Painel {
         abrirPedido()
     }
     function paraChamada(comando, dados, mensagem, depois, desistiu) {
+        pedido.acoes = []
         pedido.acao = ""
         pedido.comando = comando
         pedido.dados = dados
@@ -47,6 +56,7 @@ Painel {
     function liberar() {
         const r = Api.chamar("gerente_liberar", pedido.comando !== ""
                              ? { senha: senha.texto, comando: pedido.comando, dados: pedido.dados }
+                             : pedido.acoes.length > 0 ? { senha: senha.texto, acoes: pedido.acoes }
                              : { senha: senha.texto, acao: pedido.acao })
         senha.texto = ""
         if (!r.ok) {
@@ -76,7 +86,8 @@ Painel {
         Nota {
             text: pedido.comando !== ""
                   ? (pedido.mensagem || "Só o gerente pode.") + " A senha vale só para isto, uma vez; você continua no seu usuário."
-                  : (pedido.oQue ? pedido.oQue + ": s" : "S") + "ó o gerente pode. Com a senha você só consulta esta tela; para gravar, ela é pedida de novo."
+                  : (pedido.oQue ? pedido.oQue + ": s" : "S") + "ó o gerente pode. Com a senha você só consulta "
+                    + (pedido.acoes.length > 0 ? "estas telas" : "esta tela") + "; para gravar, ela é pedida de novo."
             font.pixelSize: 15
             Layout.fillWidth: true
         }

@@ -43,11 +43,6 @@ fn vender(b: &mut Banco, usuario: &str, peca: &str, n: usize) {
     }
 }
 
-/// Uma porta livre agora (o sistema escolhe).
-fn porta_livre() -> u16 {
-    std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
-}
-
 /// Puxa como o Rustinho faz: se o outro caixa disser que está ocupado
 /// (ainda atendendo a conexão que caiu, ou esperando depois de senha errada),
 /// tenta de novo em instantes.
@@ -104,7 +99,6 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
-    let (pt_a, pu_a) = (porta_livre(), porta_livre());
     let pa = pasta_nova("t8-a");
     let pb = pasta_nova("t8-b");
     let mut a = caixa_novo(&pa, "Caixa A");
@@ -124,8 +118,10 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
     vender(&mut a, &ana, &peca, 40);
     // A responde com 1 alteração por vez (para a queda de B cair no meio).
     config::gravar(&a.conn, "sync_lote_teste", "1").unwrap();
-    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), pt_a, pu_a);
-    std::thread::sleep(Duration::from_millis(400));
+    // Portas escolhidas pelo sistema na hora de abrir (C8: sem intervalo
+    // entre reservar e usar).
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
     assert!(motor_a.problemas().is_empty(), "{:?}", motor_a.problemas());
     assert!(std::net::TcpStream::connect(("127.0.0.1", pt_a)).is_ok(), "A não está ouvindo");
     let endereco = format!("127.0.0.1:{pt_a}");
@@ -172,9 +168,8 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
     assert_eq!(novas, 0, "puxar de novo repetiu alterações");
 
     // Os dois vendem e trocam (B também atende): ficam iguais.
-    let pt_b = porta_livre();
-    let mut motor_b = sync::Motor::iniciar(pb.join("rustinho.db"), pt_b, porta_livre());
-    std::thread::sleep(Duration::from_millis(400));
+    let mut motor_b = sync::Motor::iniciar(pb.join("rustinho.db"), 0, 0);
+    let (pt_b, _) = motor_b.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
     caixa::abrir(&b.conn, &b.dispositivo, &ana, "Caixa B", "0").unwrap();
     vender(&mut b, &ana, &peca, 7);
     vender(&mut a, &ana, &peca, 5);
@@ -213,19 +208,22 @@ fn t8_2_senha_da_rede_errada_nao_troca() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
-    let (pt_a, pu_a) = (porta_livre(), porta_livre());
     let pa = pasta_nova("t8-2a");
     let pb = pasta_nova("t8-2b");
     let a = caixa_novo(&pa, "Caixa A");
     let ana = usuarios::criar(&a.conn, &a.dispositivo, "Ana", SENHA_ANA, true).unwrap().id;
     usuarios::definir_gerente(&a.conn, &ana, true).unwrap();
-    let mut motor = sync::Motor::iniciar(pa.join("rustinho.db"), pt_a, pu_a);
-    std::thread::sleep(Duration::from_millis(400));
+    let mut motor = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
     let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
     config::gravar(&b.conn, "caixa_nome", "Caixa B").unwrap();
     sync::salvar_ajustes(&b.conn, true, "outra-senha", "").unwrap();
     let r = sync::puxar(&pb.join("rustinho.db"), &format!("127.0.0.1:{pt_a}"), 48686);
-    assert!(r.is_err(), "{r:?}");
+    // C8: recusado pela senha, com A no ar (não "Connection refused").
+    assert!(
+        matches!(&r, Err(e) if !e.to_string().contains("Connection refused") && !e.to_string().contains("os error 111")),
+        "{r:?}"
+    );
     assert_eq!(contar(&b, "SELECT COUNT(*) FROM usuario"), 0, "nada passou com a senha errada");
     sync::salvar_ajustes(&b.conn, true, SENHA_REDE, "").unwrap();
     puxar(&pb.join("rustinho.db"), &format!("127.0.0.1:{pt_a}"), 48686);

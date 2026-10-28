@@ -45,6 +45,19 @@ fn main() {
             })
         };
     }
+    // No Windows (MSVC), sem /utf-8 o compilador lê os .cpp como a página de
+    // código do sistema (CP-1252). Os textos das telas que o qmlcachegen
+    // transforma em C++ (QStringLiteral, que é u"...") saíam com os acentos
+    // trocados: "Ninguém" virava "NinguÃ©m". Os arquivos são UTF-8; aqui só se
+    // diz isso ao compilador (Linux e Android já leem UTF-8).
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // SAFETY: só acrescenta uma opção ao compilador.
+        construtor = unsafe {
+            construtor.cc_builder(|cc| {
+                cc.flag("/utf-8");
+            })
+        };
+    }
     // No Windows, imprime direto na impressora padrão (QPrinter).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         construtor = construtor.qt_module("PrintSupport");

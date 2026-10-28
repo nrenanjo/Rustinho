@@ -48,7 +48,7 @@ FocusScope {
             carregar()
     }
     function pedidas(ids) {
-        const r = Api.chamar("encomenda_pedir", { ids: ids })
+        const r = Api.gravar("encomenda_pedir", { ids: ids })
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
             return
@@ -234,7 +234,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Text {
-                        text: ["Nº " + le.e.numero + " · " + le.e.cliente, le.e.desde, le.e.codigo ? "cód. " + le.e.codigo : "",
+                        text: ["Nº " + le.e.numero + (le.e.caixa ? " (" + le.e.caixa + ")" : "") + " · " + le.e.cliente, le.e.desde, le.e.codigo ? "cód. " + le.e.codigo : "",
                                le.e.fornecedor ? le.e.fornecedor + (le.e.codigoFornecedor ? " (" + le.e.codigoFornecedor + ")" : "") : ""]
                               .filter(x => !!x).join("  ·  ")
                         color: Tema.tintaSuave

@@ -53,7 +53,7 @@ Rectangle {
         ColumnLayout {
             spacing: 0
             Text {
-                text: "R$ " + linha.item.emAberto
+                text: Tema.sigiloTexto("R$ " + linha.item.emAberto)
                 color: linha.corTexto
                 font.family: Tema.texto
                 font.weight: Font.Bold

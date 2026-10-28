@@ -81,7 +81,11 @@ impl Loja {
     }
 
     pub fn chamar(&mut self, comando: &str, dados: Value) -> Value {
-        let r = self.servico().chamar(comando, &dados.to_string());
+        let texto = dados.to_string();
+        let servico = self.servico();
+        let r = crate::apoio_chave::chamar(rustinho_nucleo::api::NAO_REPETIR, comando, &texto, |d| {
+            servico.chamar(comando, d)
+        });
         serde_json::from_str(&r).expect("resposta em JSON")
     }
 

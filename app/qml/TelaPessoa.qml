@@ -10,6 +10,9 @@ FocusScope {
     property string pessoaId: ""
     property string papel: "cliente"
     property var ficha: null
+    // FALHA-04: chave deste salvar (nova ao abrir e depois de salvar: o
+    // próximo salvar já é uma alteração do mesmo cadastro).
+    property string chave: Api.novaChave()
     property var ufs: []
     property bool alterado: false
     property bool carregando: true
@@ -19,6 +22,7 @@ FocusScope {
     ListModel { id: veiculos }
 
     function carregar() {
+        chave = Api.novaChave()
         carregando = true
         const c = Api.chamar("config_ler")
         if (c.ok)
@@ -110,8 +114,9 @@ FocusScope {
 
     function salvar() {
         const eraNova = nova
-        const r = Api.chamar("pessoa_salvar", coletar())
+        const r = Api.gravar("pessoa_salvar", coletar(), chave)
         if (r.ok) {
+            chave = Api.novaChave()
             preencher(r.dados)
             pessoaId = r.dados.id
             janela.avisar(eraNova ? "Cadastro feito." : "Alterações salvas.", "ok")

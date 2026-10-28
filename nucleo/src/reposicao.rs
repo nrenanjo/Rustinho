@@ -140,6 +140,8 @@ pub struct ItemCompra {
 pub struct EncomendaPedir {
     pub id: String,
     pub numero: i64,
+    /// 0915-M: o caixa que fez a encomenda.
+    pub caixa: String,
     pub cliente: String,
     pub produto_id: String,
     pub codigo: String,
@@ -332,7 +334,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     // Encomendas que falta pedir
     let mut c = conn.prepare(
         "SELECT e.id, e.numero, e.cliente_nome, COALESCE(e.produto_id, ''), COALESCE(p.codigo, ''), e.descricao,
-                e.quantidade, COALESCE(p.unidade, 'UN'), date(e.criado_em, 'localtime')
+                e.quantidade, COALESCE(p.unidade, 'UN'), date(e.criado_em, 'localtime'), e.dispositivo
            FROM encomenda e LEFT JOIN produto p ON p.id = e.produto_id
           WHERE e.situacao = 'aberta' ORDER BY e.criado_em",
     )?;
@@ -349,10 +351,12 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
             l.get::<_, i64>(6)?,
             l.get::<_, String>(7)?,
             l.get::<_, String>(8)?,
+            l.get::<_, String>(9)?,
         ))
     })?;
+    let mut nomes = encomendas::NomesDosCaixas::default();
     for linha in linhas {
-        let (id, numero, cliente, pid, codigo, descricao, q, unidade, criado) = linha?;
+        let (id, numero, cliente, pid, codigo, descricao, q, unidade, criado, dispositivo) = linha?;
         let (_, fornecedor, codigo_fornecedor) = forn.get(&pid).cloned().unwrap_or_default();
         if !filtro.is_empty()
             && !texto::normalizar(&format!("{codigo} {descricao} {cliente} {fornecedor}")).contains(&filtro)
@@ -363,6 +367,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
         lista_enc.push(EncomendaPedir {
             id,
             numero,
+            caixa: nomes.nome(conn, &dispositivo)?,
             cliente,
             produto_id: pid,
             codigo,
@@ -691,11 +696,12 @@ pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
         add(
             &e.fornecedor,
             format!(
-                "<tr><td>{}</td><td>{}</td><td><b>{}</b><br/><span class=\"nota\">Encomenda nº {} · {}</span></td><td class=\"num\"><b>{} {}</b></td><td class=\"num\">—</td></tr>",
+                "<tr><td>{}</td><td>{}</td><td><b>{}</b><br/><span class=\"nota\">Encomenda nº {} ({}) · {}</span></td><td class=\"num\"><b>{} {}</b></td><td class=\"num\">—</td></tr>",
                 escapar(&e.codigo),
                 escapar(&e.codigo_fornecedor),
                 escapar(&e.descricao),
                 e.numero,
+                escapar(&e.caixa),
                 escapar(&e.cliente),
                 e.quantidade,
                 escapar(&e.unidade)

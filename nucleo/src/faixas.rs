@@ -2172,6 +2172,10 @@ mod testes {
             let u = u.clone();
             tarefas.push(std::thread::spawn(move || {
                 let a = Banco::abrir(&caminho).unwrap();
+                // O-6: a mesma espera pela vez de gravar das outras 8 conexões
+                // (o que se testa aqui é que as faixas nunca se cruzam, não o
+                // tempo de espera, que depende da carga da máquina).
+                a.conn.busy_timeout(Duration::from_secs(30)).unwrap();
                 for i in 0..250 {
                     peca(&a, &u, &format!("A{i}"));
                 }

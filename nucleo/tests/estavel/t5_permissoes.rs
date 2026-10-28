@@ -205,3 +205,99 @@ fn t5_6_mudanca_feita_em_outro_caixa_vale_na_hora() {
     let r = l.chamar("produtos_buscar", json!({ "texto": "" }));
     assert_eq!(r["ok"], false, "usuário desativado continuou usando: {r}");
 }
+
+/// T5.9 (0.9.15) — Simultaneidade: uma senha do gerente abre só a consulta
+/// das partes juntas ali (configurações da loja, backup e Gerente); gravar
+/// continua pedindo a senha para cada gravação. O Histórico (troca de dados e
+/// auditoria geral) é só do gerente.
+#[test]
+fn t5_9_simultaneidade_uma_senha_so_para_consultar() {
+    let (mut l, p) = loja_com_bia();
+    for c in ["troca_historico", "auditoria_listar", "conflitos_listar", "codigos_situacao", "backup_ler"] {
+        let m = l.erro(c, json!({}));
+        assert!(m.contains("Só o gerente"), "{c}: {m}");
+    }
+    // Ação desconhecida na lista: recusa sem liberar nada.
+    let m = l.erro("gerente_liberar", json!({ "senha": SENHA_ANA, "acoes": ["configuracoes", "inventada"] }));
+    assert!(m.contains("para que"), "{m}");
+    assert!(l.erro("conflitos_listar", json!({})).contains("Só o gerente"));
+    // FALHA-05: a Simultaneidade tem consulta própria; a pílula Gerente não abre.
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "acoes": ["configuracoes", "backup", "simultaneidade"] }));
+    for c in ["troca_historico", "auditoria_listar", "conflitos_listar", "codigos_situacao", "backup_ler"] {
+        l.ok(c, json!({}));
+    }
+    for a in ["configuracoes", "backup", "simultaneidade"] {
+        assert_eq!(l.ok("permissao", json!({ "acao": a, "consulta": true }))["pode"], true, "{a}");
+    }
+    assert_eq!(l.ok("permissao", json!({ "acao": "gerente", "consulta": true }))["pode"], false);
+    // Só leitura: gravar ainda pede a senha para a gravação.
+    let m = l.erro("conflitos_manter_todos", json!({}));
+    assert!(m.contains("Só o gerente"), "{m}");
+    let m = l.erro("estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "1", "motivo": "x" }));
+    assert!(m.contains("Só o gerente"), "{m}");
+    // Uma linha na auditoria, com as três partes.
+    let d: String = l
+        .conexao()
+        .query_row(
+            "SELECT detalhes FROM auditoria WHERE acao = 'gerente.liberar' ORDER BY quando DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        d.contains("consultar configurações da loja; backup e restaurar; a Simultaneidade (duplicatas, histórico e caixas da loja) (só leitura"),
+        "{d}"
+    );
+    // A auditoria geral mostra quem, onde e o quê, do mais novo para o mais velho.
+    let a = l.ok("auditoria_listar", json!({}));
+    let primeiro = &a[0];
+    assert_eq!(primeiro["acao"], "gerente.liberar", "{a}");
+    assert_eq!(primeiro["descricao"], "digitou a senha do gerente");
+    assert_eq!(primeiro["usuario"], "Bia");
+    assert_eq!(primeiro["caixa"], "Caixa 1", "o nome configurado deste caixa: {primeiro}");
+    let h = l.ok("troca_historico", json!({}));
+    assert!(h["caixas"].is_array() && h["encerradas"].is_array(), "{h}");
+    // Ao sair da tela, acaba.
+    l.ok("gerente_encerrar", json!({}));
+    assert!(l.erro("troca_historico", json!({})).contains("Só o gerente"));
+}
+
+/// FALHA-05 (auditoria da 0.9.15): a senha da Simultaneidade abre só a
+/// consulta da Simultaneidade (Duplicatas, Histórico e Caixas da loja, mais
+/// as Configurações e o Backup que ficam ali), uma vez só para tudo isso; a
+/// pílula Gerente continua pedindo a senha dela, e mexer nas permissões
+/// também.
+#[test]
+fn t5_10_simultaneidade_nao_abre_a_pilula_gerente() {
+    let (mut l, _p) = loja_com_bia();
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "acoes": ["configuracoes", "backup", "simultaneidade"] }));
+    // Uma senha só: tudo o que a Simultaneidade mostra abre.
+    for c in [
+        "troca_historico",
+        "auditoria_listar",
+        "conflitos_listar",
+        "codigos_situacao",
+        "pendencias_listar",
+        "backup_ler",
+    ] {
+        l.ok(c, json!({}));
+    }
+    assert_eq!(l.ok("permissao", json!({ "acao": "simultaneidade", "consulta": true }))["pode"], true);
+    // A pílula Gerente, não.
+    assert_eq!(l.ok("permissao", json!({ "acao": "gerente", "consulta": true }))["pode"], false);
+    let m = l.erro("gerente_ler", json!({}));
+    assert!(m.contains("Só o gerente"), "{m}");
+    // Mudar as permissões continua pedindo a senha para a gravação.
+    let m = l.erro("gerente_salvar", json!({ "acoes": { "usuarios": false } }));
+    assert!(m.contains("Só o gerente"), "{m}");
+    // E a pílula Gerente sozinha não abre a Simultaneidade.
+    l.ok("gerente_encerrar", json!({}));
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "acao": "gerente" }));
+    l.ok("gerente_ler", json!({}));
+    let m = l.erro("troca_historico", json!({}));
+    assert!(m.contains("Só o gerente"), "{m}");
+    // "simultaneidade" nunca fica liberada para todos (não tem marca na pílula).
+    l.entrar("Ana", SENHA_ANA);
+    let g = l.ok("gerente_ler", json!({}));
+    assert!(g["acoes"].as_array().unwrap().iter().all(|a| a["id"] != "simultaneidade"), "{g}");
+}

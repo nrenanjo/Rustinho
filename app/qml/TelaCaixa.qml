@@ -11,10 +11,14 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property var estado: null
     property var vendas: []
+    // FALHA-04: chave de cada operação do caixa (abrir; o movimento e o
+    // fechamento ganham chave nova ao abrir a janela deles).
+    property string chaveAbrir: Api.novaChave()
     readonly property bool aberto: !!estado && estado.aberto
     readonly property var r: aberto ? estado.resumo : null
 
     function carregar() {
+        chaveAbrir = Api.novaChave()
         const e = Api.chamar("caixa_estado")
         if (!e.ok) {
             janela.avisar(e.erro, "erro")
@@ -132,7 +136,7 @@ FocusScope {
                             text: "Abrir caixa"
                             icone: "check"
                             onClicked: {
-                                const x = Api.chamar("caixa_abrir", { valor: trocoInicial.texto })
+                                const x = Api.gravar("caixa_abrir", { valor: trocoInicial.texto }, tela.chaveAbrir)
                                 if (x.ok) {
                                     tela.carregar()
                                     tela.janela.avisar("Caixa aberto.", "ok")
@@ -288,6 +292,7 @@ FocusScope {
         id: movimento
         property string tipo: "sangria"
         property var contas: []
+        property string chave: ""
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
@@ -296,6 +301,7 @@ FocusScope {
         T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         function abrirCom(t) {
+            chave = Api.novaChave()
             tipo = t
             valorMov.texto = ""
             valorMov.erro = ""
@@ -331,8 +337,9 @@ FocusScope {
                     text: "Confirmar"
                     icone: "check"
                     onClicked: {
-                        const x = Api.chamar("caixa_movimentar", { tipo: movimento.tipo, valor: valorMov.texto, motivo: motivoMov.texto,
-                                                                conta: (movimento.contas[contaMov.indice] || {}).id || "" })
+                        const x = Api.gravar("caixa_movimentar", { tipo: movimento.tipo, valor: valorMov.texto, motivo: motivoMov.texto,
+                                                                conta: (movimento.contas[contaMov.indice] || {}).id || "" },
+                                             movimento.chave)
                         if (x.ok) {
                             movimento.close()
                             tela.carregar()
@@ -358,7 +365,9 @@ FocusScope {
         padding: Tema.estreito ? 18 : 30
         T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
+        property string chave: ""
         function abrirCom() {
+            chave = Api.novaChave()
             contado.texto = ""
             contado.erro = ""
             obs.texto = ""
@@ -382,7 +391,7 @@ FocusScope {
                     text: "Fechar e imprimir"
                     icone: "check"
                     onClicked: {
-                        const x = Api.chamar("caixa_fechar", { valor: contado.texto, motivo: obs.texto })
+                        const x = Api.gravar("caixa_fechar", { valor: contado.texto, motivo: obs.texto }, fechar.chave)
                         if (!x.ok) {
                             contado.erro = x.erro
                             return

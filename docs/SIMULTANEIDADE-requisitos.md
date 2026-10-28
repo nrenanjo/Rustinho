@@ -79,3 +79,18 @@ Nenhum computador principal obrigatório; nenhuma concessão indevida de privil�
 17. Drive indisponível com dois caixas: venda permitida, pendente até replicação confirmada.
 18. Sem nenhuma réplica: estado "proteção pendente" visível.
 19. Linux sem serviço de senhas: aviso ao gerente e nenhuma chave privada em texto aberto.
+
+## Situação em 27/10/2026 (revisão da 0.9.15, FALHA-01)
+
+**D1 continua sem código** e não foi declarada concluída. O que a 0.9.15 passou a fazer (é proteção contra a fusão de lojas, não a D1):
+
+- **Identidade da loja** (`loja_id`, configuração da loja replicada; `nucleo/src/loja.rs`). Cada pedido e resposta da troca levam `loja` e `novo` (sem usuários) a mais; o protocolo continua o 3, com o recurso `loja-v1`. Antes de entregar ou aplicar qualquer coisa, cada lado aceita: a mesma loja; um caixa novo (sem usuários) entrando, que só recebe; ou um caixa com quem já trocou dados de verdade (banco de antes da identidade). Senão recusa, com o aviso "Troca de dados recusada" no Início. Banco copiado (registrado como caixa novo) e banco restaurado levam a mesma identidade.
+- **Desistir de entrar numa loja** desfaz a tentativa inteira (troca desligada, senha e endereços, caixas conhecidos e tudo o que chegou); a primeira tela não cria loja em cima de uma junção pela metade.
+- **Ligar a troca de dados ou trocar a senha da rede** passou a ser sempre do gerente.
+
+### D1 como etapa própria (o que falta)
+
+- **Requisito:** o caixa novo só recebe as credenciais da loja depois que um gerente autorizado da loja existente aprova, com a senha dele, registrada na auditoria (testes de aceitação 12 e 13 acima).
+- **Por que não coube agora:** hoje a única credencial da troca é a senha da rede, comum a todos os caixas. Uma aprovação que valha de verdade precisa de credencial por computador (par de chaves de cada caixa, aprovado e assinado), que é a arquitetura do anexo "chaves de dispositivo e assinatura" e mexe no protocolo (versão nova, com convivência). Um "gerente confirma" sem isso seria só uma tela, sem impedir quem tem a senha da rede.
+- **Limite que fica até lá:** quem tem a senha da rede e um banco vazio recebe os dados da loja (como antes). Ele não consegue introduzir um gerente nem dados na loja enquanto não tiver usuários (o que um caixa novo tem não é aplicado por ninguém); depois de receber a loja, fica sendo um caixa dela.
+- **Critérios de conclusão:** testes de aceitação 12 e 13; caixa sem aprovação não recebe nada; aprovação revogável ("retirar caixa"); convivência com caixas da versão anterior documentada; a proposta R-01 (`docs/R-01-proposta-senha-da-rede.md`, alternativas 5 e 6) avaliada junto.

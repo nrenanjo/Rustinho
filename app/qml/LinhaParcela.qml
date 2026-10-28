@@ -60,7 +60,7 @@ Rectangle {
             }
             Text {
                 text: [Tema.estreito ? (linha.nomes[linha.item.situacao] || "") : "", "vence " + linha.item.vencimento,
-                       linha.item.pago !== "0,00" ? "pago R$ " + linha.item.pago + " de R$ " + linha.item.valor : "",
+                       linha.item.pago !== "0,00" ? Tema.sigiloTexto("pago R$ " + linha.item.pago + " de R$ " + linha.item.valor) : "",
                        linha.item.diasAtraso > 0 ? linha.item.diasAtraso + " dias de atraso" : ""].filter(x => !!x).join("  ·  ")
                 color: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
                 font.family: Tema.texto
@@ -89,7 +89,7 @@ Rectangle {
             spacing: 0
             Layout.preferredWidth: Tema.estreito ? 77 : 110
             Text {
-                text: "R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo)
+                text: Tema.sigiloTexto("R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo))
                 color: Tema.tinta
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -98,7 +98,7 @@ Rectangle {
             }
             Text {
                 visible: linha.item.juros !== ""
-                text: "+ R$ " + linha.item.juros + " juros"
+                text: Tema.sigiloTexto("+ R$ " + linha.item.juros + " juros")
                 color: Tema.vermelho
                 font.family: Tema.texto
                 font.pixelSize: 12

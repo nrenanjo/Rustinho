@@ -81,7 +81,7 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            titulo: tela.fornecedores ? "Fornecedores" : "Clientes"
+            titulo: tela.fornecedores ? "Estoque / Fornecedores" : "Clientes"
             subtitulo: {
                 const n = tela.total
                 const nome = tela.fornecedores ? (n === 1 ? "fornecedor" : "fornecedores") : (n === 1 ? "cliente" : "clientes")
@@ -100,6 +100,14 @@ FocusScope {
                 atalho: "F2"
                 onClicked: tela.nova()
             }
+        }
+
+        // Fornecedores faz parte da pílula unida "Estoque / Fornecedores".
+        Pilulas {
+            visible: tela.fornecedores
+            modelo: [{ id: "estoque", nome: "Estoque" }, { id: "fornecedores", nome: "Fornecedores" }]
+            atual: "fornecedores"
+            onEscolhido: id => { if (id === "estoque") tela.janela.substituir("TelaEstoque", {}) }
         }
 
         Linha {

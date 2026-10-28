@@ -155,6 +155,7 @@ FocusScope {
     // ---------- Lançar conta ----------
     Painel {
         id: lancamento
+        property string chave: ""
         property string fornecedor: ""
         property var achados: []
         property var previa: []
@@ -162,6 +163,7 @@ FocusScope {
         width: Math.min(620, Tema.largura - 24)
 
         function abrirCom() {
+            chave = Api.novaChave()
             erro = ""
             fornecedor = ""
             campoFornecedor.texto = ""
@@ -206,7 +208,7 @@ FocusScope {
                 close()
                 janela.avisar(r.dados.length > 1 ? r.dados.length + " parcelas lançadas." : "Conta lançada.", "ok")
                 secao.carregar()
-            })
+            }, lancamento.chave)
         }
 
         Timer { id: esperaFornecedor; interval: 200; onTriggered: lancamento.buscarFornecedor() }
@@ -347,6 +349,7 @@ FocusScope {
     // ---------- Pagar ----------
     Painel {
         id: pagamento
+        property string chave: ""
         property var conta: null
         property string forma: "boleto"
         property string erro: ""
@@ -355,6 +358,7 @@ FocusScope {
         width: Math.min(700, Tema.largura - 24)
 
         function abrirCom(c) {
+            chave = Api.novaChave()
             conta = c
             erro = ""
             const lista = []
@@ -412,7 +416,7 @@ FocusScope {
                 janela.avisar("Pago R$ " + total + ".", "ok")
                 secao.carregar()
                 ficha.recarregar()
-            })
+            }, pagamento.chave)
         }
 
         contentItem: ColumnLayout {
@@ -726,10 +730,13 @@ FocusScope {
     // ---------- Categorias ----------
     Painel {
         id: categorias
+        // FALHA-04: chave da categoria nova (renovada ao abrir e depois de criar).
+        property string chaveNova: ""
         property var itens: []
         property string erro: ""
         width: Math.min(560, Tema.largura - 24)
         function abrirCom() {
+            chaveNova = Api.novaChave()
             erro = ""
             nova.texto = ""
             recarregar()
@@ -746,12 +753,14 @@ FocusScope {
             secao.janela.chamarGerente("categoria_salvar", { id: c ? c.id : "", nome: nome, tipo: "despesa", ativo: ativo }, r => {
                 erro = r.ok ? "" : r.erro
                 if (r.ok) {
+                    if (!c)
+                        categorias.chaveNova = Api.novaChave()
                     recarregar()
                     secao.carregar()
                     if (depois)
                         depois()
                 }
-            })
+            }, c ? undefined : categorias.chaveNova)
         }
         contentItem: ColumnLayout {
             spacing: 10

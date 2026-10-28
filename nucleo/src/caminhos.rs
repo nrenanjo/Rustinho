@@ -857,6 +857,13 @@ mod testes {
     /// T-35 · CA-B3: durante um ciclo cheio de mortos, uma gravação feita por
     /// outra conexão ao mesmo arquivo conclui rápido: o ciclo não segura o banco
     /// enquanto espera a rede.
+    ///
+    /// O-6 (auditoria da 0.9.15): a prova principal não depende mais do relógio.
+    /// Enquanto o ciclo "espera a rede" (dentro de cada tentativa), outra
+    /// conexão tenta pegar a gravação do banco SEM esperar nada (`BEGIN
+    /// IMMEDIATE` com espera zero): se o ciclo segurasse o banco, ela falharia
+    /// na hora, com a máquina livre ou carregada. O tempo de cada gravação
+    /// continua medido e anotado na saída, para diagnóstico.
     #[test]
     fn t35_operacoes_locais_continuam_durante_o_ciclo() {
         let pasta = std::env::temp_dir().join(format!("rustinho-caminhos-{}", crate::tempo::novo_id()));
@@ -868,13 +875,21 @@ mod testes {
         let ciclo_lento = thread::spawn(move || {
             let conn = Connection::open(&caminho).unwrap();
             conn.busy_timeout(Duration::from_secs(10)).unwrap();
-            let mut puxar = |_e: &str, _s: Option<&Saida>| -> Resultado<Puxada> {
+            let sonda = Connection::open(&caminho).unwrap();
+            sonda.busy_timeout(Duration::ZERO).unwrap();
+            let mut presos = Vec::new();
+            let mut puxar = |e: &str, _s: Option<&Saida>| -> Resultado<Puxada> {
+                // No meio da "espera da rede": o banco tem de estar livre.
+                if let Err(x) = sonda.execute_batch("BEGIN IMMEDIATE; ROLLBACK;") {
+                    presos.push(format!("{e}: {x}"));
+                }
                 thread::sleep(Duration::from_millis(250));
                 Err(Erro::validacao("Falha na rede: tempo esgotado"))
             };
             let mut a = Ambiente::novo("eu", T0);
             a.orcamento = Duration::from_secs(2);
-            ciclo(&conn, &a, &|| false, &mut puxar)
+            let r = ciclo(&conn, &a, &|| false, &mut puxar);
+            (r, presos)
         });
         thread::sleep(Duration::from_millis(100));
         let mut piores = Duration::ZERO;
@@ -884,9 +899,11 @@ mod testes {
             piores = piores.max(inicio.elapsed());
             thread::sleep(Duration::from_millis(100));
         }
-        let r = ciclo_lento.join().unwrap();
+        let (r, presos) = ciclo_lento.join().unwrap();
         assert!(!r.tentativas.is_empty(), "o ciclo estava de fato rodando");
-        assert!(piores < Duration::from_millis(200), "gravação local demorou {piores:?}");
+        assert!(presos.is_empty(), "o ciclo segurou o banco enquanto esperava a rede: {presos:?}");
+        // Diagnóstico (não reprova): com a máquina livre fica bem abaixo de 200 ms.
+        println!("T-35: a gravação local mais lenta durante o ciclo levou {piores:?}");
         std::fs::remove_dir_all(pasta).ok();
     }
 
@@ -960,8 +977,11 @@ mod testes {
     struct Caixa {
         caminho: PathBuf,
         banco: Banco,
+        /// A porta que este caixa informa (e, depois de `servir`, a que ele
+        /// abriu de verdade).
         pt: u16,
         pu: u16,
+        servido: bool,
         motor: Option<Motor>,
     }
 
@@ -972,13 +992,19 @@ mod testes {
         let banco = Banco::abrir(&caminho).unwrap();
         config::gravar(&banco.conn, "caixa_nome", nome).unwrap();
         sync::salvar_ajustes(&banco.conn, true, SENHA, "").unwrap();
-        Caixa { caminho, banco, pt: porta_livre(), pu: porta_livre(), motor: None }
+        Caixa { caminho, banco, pt: porta_livre(), pu: porta_livre(), servido: false, motor: None }
     }
 
     impl Caixa {
+        /// Liga o servidor deste caixa. A primeira vez com portas escolhidas
+        /// pelo sistema na hora de abrir (C8: sem intervalo entre reservar e
+        /// usar); depois, de novo nas mesmas (os outros já conhecem o endereço).
         fn servir(&mut self) {
-            self.motor = Some(Motor::iniciar(self.caminho.clone(), self.pt, self.pu));
-            thread::sleep(Duration::from_millis(400));
+            let (pt, pu) = if self.servido { (self.pt, self.pu) } else { (0, 0) };
+            let m = Motor::iniciar(self.caminho.clone(), pt, pu);
+            let (pt, pu) = m.portas(Duration::from_secs(10)).expect("as portas do caixa abriram");
+            (self.pt, self.pu, self.servido) = (pt, pu, true);
+            self.motor = Some(m);
         }
         fn conexao(&self) -> Connection {
             let c = Connection::open(&self.caminho).unwrap();
@@ -1144,6 +1170,9 @@ mod testes {
         let (lista, _) = sync::alteracoes_desde(&a.banco.conn, 0, 100_000).unwrap();
         let ultima = lista.iter().map(|x| x.seq).max().unwrap();
         sync::aplicar(&mut b.banco.conn, &lista).unwrap(); // aplicou; contador continua 0
+                                                           // Na vida real B recebeu esse lote puxando de A, e A aceitou B como
+                                                           // caixa da loja naquela hora (FALHA-01: `loja::confirmar`).
+        crate::loja::confirmar(&a.banco.conn, &b.dispositivo()).unwrap();
         let cursor0: i64 =
             b.banco.conn.query_row("SELECT COALESCE(MAX(cursor), 0) FROM sync_par", [], |x| x.get(0)).unwrap();
         assert_eq!(cursor0, 0);

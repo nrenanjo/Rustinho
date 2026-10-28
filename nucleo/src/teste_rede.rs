@@ -47,7 +47,9 @@ pub fn porta_livre() -> u16 {
 
 impl Encaminhador {
     pub fn novo(ip: [u8; 4], destino: SocketAddr) -> Encaminhador {
-        let escuta = SocketAddr::from((ip, porta_livre()));
+        // Porta escolhida pelo sistema ao abrir (C8: sem intervalo entre
+        // reservar e usar); "cabo de volta" abre de novo a mesma.
+        let escuta = SocketAddr::from((ip, 0));
         let mut e = Encaminhador {
             escuta,
             destino,
@@ -90,6 +92,9 @@ impl Encaminhador {
         for _ in 0..50 {
             match TcpListener::bind(self.escuta) {
                 Ok(o) => {
+                    if self.escuta.port() == 0 {
+                        self.escuta = o.local_addr().expect("endereço do encaminhador");
+                    }
                     ouvinte = Some(o);
                     break;
                 }

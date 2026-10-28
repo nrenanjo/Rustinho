@@ -10,6 +10,7 @@ import rustinho
 // cadastrado; nada que já existe é mudado.
 Painel {
     id: painel
+    property string chave: ""
     readonly property var janela: ApplicationWindow.window
     width: Math.min(640, Tema.largura - 24)
     property var arquivos: []
@@ -25,6 +26,7 @@ Painel {
     signal importou()
 
     function abrirCom() {
+        chave = Api.novaChave()
         arquivos = []
         previa = null
         erro = ""
@@ -37,8 +39,7 @@ Painel {
         previa = null
         trabalhando = true
         // Deixa a tela mostrar "Lendo..." antes de começar.
-        Qt.callLater(() => {
-            const r = Api.chamar("importar_previa", { arquivos: painel.arquivos })
+        Api.chamarDemorado("importar_previa", { arquivos: painel.arquivos }, "Lendo os arquivos…", r => {
             painel.trabalhando = false
             if (r.ok) {
                 painel.previa = r.dados
@@ -59,10 +60,10 @@ Painel {
         trabalhando = true
         Qt.callLater(() => {
             // D-09: a senha do gerente vale para esta importação, com estes arquivos.
-            painel.janela.chamarGerente("importar_cadastros", {
+            painel.janela.chamarGerenteDemorado("importar_cadastros", {
                 arquivos: painel.arquivos, clientes: painel.qClientes, fornecedores: painel.qFornecedores,
                 pecasLoja: painel.qPecasLoja, pecasFornecedor: painel.qPecasFornecedor
-            }, r => painel.depoisDeImportar(r))
+            }, "Cadastrando…", r => painel.depoisDeImportar(r), painel.chave)
         })
     }
     function depoisDeImportar(r) {

@@ -457,6 +457,10 @@ fn d09_8_consulta_so_le_a_propria_tela() {
     so_o_gerente(&mut l, "gerente_ler", json!({}));
     consultar(&mut l, "gerente");
     l.ok("gerente_ler", json!({}));
+    // FALHA-05: as diferenças entre caixas são da Simultaneidade, com
+    // consulta própria; a da pílula Gerente não abre, e vice-versa.
+    so_o_gerente(&mut l, "conflitos_listar", json!({}));
+    consultar(&mut l, "simultaneidade");
     l.ok("conflitos_listar", json!({}));
     so_o_gerente(&mut l, "gerente_salvar", json!({ "acoes": { "cancelar_venda": false } }));
     so_o_gerente(&mut l, "codigos_definir_pendentes", json!({}));
@@ -480,7 +484,8 @@ fn d09_8_consulta_so_le_a_propria_tela() {
 
     // A auditoria diz que foi só consulta.
     let n = l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.liberar' AND detalhes LIKE '%só leitura%'");
-    assert_eq!(n, 6);
+    // 7: as 6 de antes e a da Simultaneidade (FALHA-05).
+    assert_eq!(n, 7);
 }
 
 /// D-09 — Preço padrão de venda: qualquer mudança numa peça cadastrada (com
@@ -598,5 +603,76 @@ fn d09_6_relatorios_de_custo_continuam_fechados() {
     for c in ["dre_apurar", "dre_indicadores", "dre_serie", "dre_resumo", "dre_detalhe", "dre_metas"] {
         let m = l.erro(c, json!({ "filtro": { "periodo": "mes" }, "periodo": "mes", "linha": "receita_bruta" }));
         assert!(m.contains("Só o gerente"), "{c}: {m}");
+    }
+}
+
+/// Nota de exemplo lançada pelo gerente e estornada; a mesma nota importada de
+/// novo pela caixa Bia liga sozinha às peças da primeira. Devolve a compra
+/// nova (já conferida pelo gerente), os itens para lançar e as peças.
+fn segunda_compra_das_mesmas_pecas(l: &mut Loja) -> (String, Vec<Value>, Vec<String>) {
+    let primeira = crate::comum::lancar_compra_de_exemplo(l);
+    l.ok("compra_estornar", json!({ "id": primeira, "motivo": "teste" }));
+    l.usuario_caixa("Bia", SENHA_BIA);
+    l.entrar("Bia", SENHA_BIA);
+    let caminho = l.pasta.join("nota-de-novo.xml");
+    std::fs::write(&caminho, XML_COMPRA).unwrap();
+    let r = l.ok("compra_importar", json!({ "caminho": caminho.display().to_string() }));
+    let compra = r["compras"][0]["id"].as_str().unwrap().to_string();
+    let c = l.ok("compra_abrir", json!({ "id": compra }));
+    let itens = c["itens"].as_array().unwrap().clone();
+    assert!(itens.iter().all(|i| i["acao"] == "ligar"), "os itens ligam às peças da primeira compra: {c}");
+    let pecas: Vec<String> = itens.iter().map(|i| i["peca"]["id"].as_str().unwrap().to_string()).collect();
+    l.ok(
+        "compra_conferir_autorizacao",
+        json!({ "id": compra, "situacao": "autorizada", "protocolo": "135260000000001",
+                "conferidoEm": "08/10/2026 11:00", "senha": SENHA_ANA }),
+    );
+    let escolhas: Vec<Value> = itens
+        .iter()
+        .zip(&pecas)
+        .map(|(it, p)| json!({ "id": it["id"], "acao": "ligar", "produtoId": p, "fator": "1", "baixarPreco": false }))
+        .collect();
+    (compra, escolhas, pecas)
+}
+
+/// 0915-N (revisão dirigida): lançar uma compra com "os preços seguem o % de
+/// lucro" muda o preço de venda de peças já cadastradas. Pela D-09, isso é do
+/// gerente: a caixa sozinha é recusada (nada lançado, preços iguais); com a
+/// senha do gerente para esta gravação, lança e os preços seguem o custo.
+#[test]
+fn d09_11_compra_que_muda_o_preco_pede_o_gerente() {
+    let mut l = Loja::nova("d09-11");
+    let (compra, escolhas, pecas) = segunda_compra_das_mesmas_pecas(&mut l);
+    let antes: Vec<_> = pecas.iter().map(|p| gravado(&l, p)).collect();
+    let dados = json!({ "id": compra, "itens": escolhas, "freteExtra": "90,00", "atualizarPrecos": true });
+    let r = l.chamar("compra_lancar", dados.clone());
+    assert_eq!(r["ok"], false, "a caixa mudou o preço de venda pela compra: {r}");
+    assert_eq!(r["campo"], "precos", "{r}");
+    let depois: Vec<_> = pecas.iter().map(|p| gravado(&l, p)).collect();
+    assert_eq!(antes, depois, "nada mudou nas peças");
+    assert_eq!(l.ok("compra_abrir", json!({ "id": compra }))["situacao"], "rascunho", "nada foi lançado");
+    liberar(&mut l, "compra_lancar", &dados);
+    let r = l.ok("compra_lancar", dados);
+    assert!(r["resumo"]["precosAtualizados"].as_i64().unwrap() > 0, "{r}");
+    let depois: Vec<_> = pecas.iter().map(|p| gravado(&l, p)).collect();
+    assert!(antes.iter().zip(&depois).any(|(a, d)| d.1 > a.1), "com o gerente, os preços seguiram o custo");
+}
+
+/// Controle: sem mudar o preço, a caixa lança a compra sozinha (o custo muda,
+/// o preço de venda fica), como sempre (D-09: o caixa lança compras).
+#[test]
+fn d09_12_compra_sem_mudar_o_preco_continua_com_o_caixa() {
+    let mut l = Loja::nova("d09-12");
+    let (compra, escolhas, pecas) = segunda_compra_das_mesmas_pecas(&mut l);
+    let antes: Vec<_> = pecas.iter().map(|p| gravado(&l, p)).collect();
+    let r = l.ok(
+        "compra_lancar",
+        json!({ "id": compra, "itens": escolhas, "freteExtra": "90,00", "atualizarPrecos": false }),
+    );
+    assert_eq!(r["resumo"]["precosAtualizados"], 0, "{r}");
+    let depois: Vec<_> = pecas.iter().map(|p| gravado(&l, p)).collect();
+    for (a, d) in antes.iter().zip(&depois) {
+        assert_eq!(a.1, d.1, "o preço de venda ficou");
+        assert!(d.0 > a.0, "o custo subiu com o frete");
     }
 }

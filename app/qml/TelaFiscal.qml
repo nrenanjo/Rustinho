@@ -11,6 +11,12 @@ FocusScope {
     property var dados: null
     property var ufs: []
     property bool regrasAlteradas: false
+    // 0.9.15: a conferência fiscal fica dentro de Configurações › Fiscal
+    // (sem cabeçalho próprio); a tela sozinha continua existindo.
+    property bool embutida: false
+    // Embutida: pede para Configurações mostrar outra parte (em vez de abrir
+    // outra tela de Configurações por cima).
+    signal irPara(string secao)
 
     ListModel { id: regras }
 
@@ -152,12 +158,21 @@ FocusScope {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Tema.margem
-        anchors.topMargin: Tema.margem - 12
+        anchors.margins: tela.embutida ? 0 : Tema.margem
+        anchors.topMargin: tela.embutida ? 0 : Tema.margem - 12
         anchors.bottomMargin: 0
         spacing: 12
 
+        Nota {
+            visible: tela.embutida && !!tela.dados
+            text: !tela.dados ? "" : (tela.dados.uf ? "Loja em " + tela.dados.uf : "Estado da loja não informado")
+                                     + " · regras válidas em " + tela.dados.data.split("-").reverse().join("/")
+                                     + " · " + tela.dados.totalPecas + " peças ativas"
+            Layout.fillWidth: true
+        }
+
         Cabecalho {
+            visible: !tela.embutida
             titulo: "Fiscal"
             subtitulo: !tela.dados ? "" : (tela.dados.uf ? "Loja em " + tela.dados.uf : "Estado da loja não informado")
                                          + " · regras válidas em " + tela.dados.data.split("-").reverse().join("/")
@@ -172,56 +187,28 @@ FocusScope {
             Layout.fillHeight: true
             clip: true
             contentWidth: width
-            contentHeight: corpo.implicitHeight + Tema.margem
+            contentHeight: tudo.implicitHeight + 6 + Tema.margem
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            Linha {
-                id: corpo
+            ColumnLayout {
+                id: tudo
                 width: rolagem.width - 14
                 y: 6
+                spacing: 14
+
+            // A emissão de notas (0.9.15: o estado real, sem nada inventado).
+            EmissaoFiscal { Layout.fillWidth: true }
+
+            Linha {
+                id: corpo
+                Layout.fillWidth: true
                 spacing: 18
 
                 ColumnLayout {
                     spacing: 14
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
-
-                    Faixa {
-                        titulo: "Notas fiscais"
-                        subtitulo: "emitir pelo Rustinho"
-                        color: Tema.verde
-                        corTitulo: Tema.verdeEscuro
-                        Layout.fillWidth: true
-                        Flow {
-                            spacing: 8
-                            Layout.fillWidth: true
-                            Repeater {
-                                model: ["NF-e · modelo 55", "NFC-e · cupom, modelo 65", "NFS-e · serviço", "MDF-e · transporte"]
-                                delegate: Rectangle {
-                                    required property string modelData
-                                    radius: height / 2
-                                    color: Tema.papel
-                                    implicitWidth: textoNota.implicitWidth + 30
-                                    implicitHeight: textoNota.implicitHeight + 16
-                                    Text {
-                                        id: textoNota
-                                        anchors.centerIn: parent
-                                        text: "<b>" + parent.modelData + "</b>  · em breve"
-                                        textFormat: Text.StyledText
-                                        color: Tema.tinta
-                                        font.family: Tema.texto
-                                        font.pixelSize: 15
-                                    }
-                                }
-                            }
-                        }
-                        Nota {
-                            text: "Por enquanto, as notas continuam no sistema de hoje. O cadastro das peças já guarda o que a nota vai pedir (NCM, CEST, CSOSN, PIS/Cofins, IPI, ANP e ISS)."
-                            font.pixelSize: 14
-                            Layout.fillWidth: true
-                        }
-                    }
 
                     Faixa {
                         visible: !!tela.dados && tela.dados.uf === ""
@@ -234,9 +221,9 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Botao {
-                            text: "Abrir configurações"
+                            text: tela.embutida ? "Ir para Loja" : "Abrir configurações"
                             tipo: "secundario"
-                            onClicked: tela.janela.abrir("TelaConfiguracoes")
+                            onClicked: tela.embutida ? tela.irPara("loja") : tela.janela.abrir("TelaConfiguracoes")
                         }
                     }
 
@@ -367,6 +354,7 @@ FocusScope {
                         }
                     }
                 }
+            }
             }
         }
     }

@@ -46,12 +46,15 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
 
 /// Nunca ficam livres para todos (a pílula Gerente não tem marca para elas).
 /// "precos": mudar as regras de formação de preço (D-09).
-const SEMPRE_DO_GERENTE: &[&str] = &["gerente", "precos"];
+/// "simultaneidade" (FALHA-05): consultar Configurações › Simultaneidade
+/// (Duplicatas, Histórico e Caixas da loja), separada da pílula Gerente.
+const SEMPRE_DO_GERENTE: &[&str] = &["gerente", "precos", "simultaneidade"];
 
 /// Nome da ação para as mensagens.
 fn nome_da_acao(acao: &str) -> String {
     match acao {
         "gerente" => "a pílula Gerente".into(),
+        "simultaneidade" => "a Simultaneidade (duplicatas, histórico e caixas da loja)".into(),
         "precos" => "mudar o preço de venda ou a regra de preço (% de lucro)".into(),
         _ => ACOES_DO_GERENTE
             .iter()
@@ -67,7 +70,7 @@ fn acao_de_consulta(acao: &str) -> Resultado<&'static str> {
     ACOES_DO_GERENTE
         .iter()
         .map(|(id, _)| *id)
-        .chain(std::iter::once("gerente"))
+        .chain(["gerente", "simultaneidade"])
         .find(|a| *a == acao.trim())
         .ok_or_else(|| Erro::validacao("Diga para que é a senha do gerente."))
 }
@@ -75,7 +78,9 @@ fn acao_de_consulta(acao: &str) -> Resultado<&'static str> {
 /// O comando pode pedir a senha do gerente? (os do gerente e salvar a peça,
 /// que pede quando muda o preço.)
 fn comando_do_gerente(comando: &str) -> bool {
-    acao_do_comando(comando).is_some() || comando == "produto_salvar"
+    // produto_salvar e compra_lancar: só pedem o gerente quando mudam o preço
+    // de venda de uma peça cadastrada (D-09; 0915-N na compra).
+    acao_do_comando(comando).is_some() || comando == "produto_salvar" || comando == "compra_lancar"
 }
 
 /// Resumo (SHA-256) de um comando com os seus dados, com as chaves em ordem:
@@ -177,23 +182,154 @@ fn acao_do_comando(comando: &str) -> Option<&'static str> {
         | "dre_classificacao_salvar"
         | "dre_metas"
         | "dre_meta_salvar" => "resultados",
+        // FALHA-05: o que a Simultaneidade só lê tem consulta própria (a senha
+        // dela não abre a pílula Gerente). Gravar continua sendo "gerente".
+        "conflitos_listar" | "codigos_situacao" | "pendencias_listar" | "troca_historico" | "auditoria_listar" => {
+            "simultaneidade"
+        }
         // A própria pílula Gerente: sempre só o gerente.
         "gerente_ler"
         | "gerente_salvar"
-        | "conflitos_listar"
         | "conflito_resolver"
         | "referencia_aceitar"
         | "conflitos_manter_todos"
-        | "codigos_situacao"
         | "codigos_assumir"
         | "codigos_definir_pendentes"
         | "codigos_dar_novo"
         | "codigos_pessoa_dar_novo"
         | "codigos_confirmar_computador"
-        | "codigos_registrar_caixa_novo" => "gerente",
+        | "codigos_registrar_caixa_novo"
+        // Pendências da troca de dados e retirada de caixa (0.9.15).
+        | "pendencia_arquivar"
+        | "pendencias_reaplicar"
+        | "caixa_retirar"
+        | "caixa_readmitir" => "gerente",
         _ => return None,
     })
 }
+
+/// Comandos que criam ou mudam registros e aceitam a chave da operação
+/// (`chaveOperacao`): a tela gera uma chave para cada operação (uma venda,
+/// um recebimento) e manda junto. A mesma chave chegando de novo (duplo
+/// clique, Enter apertado duas vezes, a tela mandando de novo) é recusada em
+/// vez de gravar duas vezes.
+/// A3: comandos que gravam fora de `NAO_REPETIR` (configurações, códigos,
+/// conflitos, avisos, menu, troca de dados...). No modo seguro, recusados.
+const GRAVAM_TAMBEM: &[&str] = &[
+    "aparencia_salvar",
+    "aviso_esconder",
+    "aviso_minimizar",
+    "backup_conectar_drive",
+    "backup_desligar_drive",
+    "backup_salvar",
+    "codigos_assumir",
+    "codigos_confirmar_computador",
+    "codigos_dar_novo",
+    "codigos_definir_pendentes",
+    "codigos_pessoa_dar_novo",
+    "codigos_registrar_caixa_novo",
+    "compra_atualizar",
+    "compra_conferir_autorizacao",
+    "compra_descartar",
+    "computador_salvar",
+    "config_salvar",
+    "configurar_inicio",
+    "conflito_resolver",
+    "conflitos_manter_todos",
+    "conta_loja_conferir",
+    "dre_classificacao_salvar",
+    "dre_meta_salvar",
+    "encomenda_whatsapp",
+    "estoque_dias",
+    "fiscal_automatico",
+    "fiscal_regras_salvar",
+    "gerente_salvar",
+    "menu_fixar",
+    "menu_usar",
+    "pagar_alterar",
+    "pendencias_reaplicar",
+    "referencia_aceitar",
+    "senha_trocar",
+    "sync_desistir_juntar",
+    "sync_juntar",
+    "sync_salvar",
+];
+
+/// A3: no modo seguro só passam consultas, entrar/sair, a senha do gerente,
+/// restaurar um backup e a cópia para o suporte.
+fn bloqueado_no_modo_seguro(comando: &str) -> bool {
+    match comando {
+        "backup_restaurar" | "backup_agora" => false,
+        c => NAO_REPETIR.contains(&c) || GRAVAM_TAMBEM.contains(&c),
+    }
+}
+
+/// A3: o motivo, igual em toda gravação recusada.
+pub const TEXTO_MODO_SEGURO: &str = "O banco de dados deste caixa está com defeito (a conferência de integridade \
+     falhou) e o Rustinho está em modo seguro: dá para consultar, mas nada é gravado — venda, recebimento, \
+     estoque, caixa, cadastros e troca de dados ficam parados. Não continue a operar neste computador: o \
+     arquivo do banco fica como está; restaure um backup bom em Configurações › Backup ou chame o suporte.";
+
+fn erro_modo_seguro() -> Erro {
+    Erro::campo("modoSeguro", TEXTO_MODO_SEGURO)
+}
+
+pub const NAO_REPETIR: &[&str] = &[
+    "venda_concluir",
+    "venda_cancelar",
+    "orcamento_salvar",
+    "os_salvar",
+    "os_rascunho_salvar",
+    "os_rascunho_excluir",
+    "os_situacao",
+    "os_cancelar",
+    "devolucao_gravar",
+    "devolucao_desfazer",
+    "caixa_abrir",
+    "caixa_fechar",
+    "caixa_movimentar",
+    "receber_lancar",
+    "receber_baixar",
+    "recebimento_estornar",
+    "encomenda_criar",
+    "encomenda_pedir",
+    "encomenda_chegou",
+    "encomenda_entregar",
+    "encomenda_cancelar",
+    "compra_importar",
+    "compra_lancar",
+    "compra_estornar",
+    "pessoa_salvar",
+    "produto_salvar",
+    "produto_variacao_criar",
+    "unidade_salvar",
+    "estoque_ajustar",
+    "pagar_lancar",
+    "pagar_pagar",
+    "pagar_cancelar",
+    "pagamento_estornar",
+    "movimento_lancar",
+    "movimento_estornar",
+    "transferir",
+    "conta_loja_salvar",
+    "conta_cancelar",
+    "categoria_salvar",
+    "cheque_depositar",
+    "cheque_repassar",
+    "cheque_devolver",
+    "cheque_desfazer",
+    "comissao_fechar",
+    "comissao_reabrir",
+    "usuario_salvar",
+    "backup_restaurar",
+    "importar_cadastros",
+    "caixa_retirar",
+    "caixa_readmitir",
+    "pendencia_arquivar",
+];
+
+/// Quantas chaves de operação já feitas ficam guardadas (as mais antigas saem).
+const CHAVES_GUARDADAS: usize = 2000;
 
 /// Comandos que funcionam sem ninguém conectado.
 pub const SEM_SESSAO: &[&str] = &[
@@ -202,6 +338,7 @@ pub const SEM_SESSAO: &[&str] = &[
     "usuarios_entrada",
     "entrar",
     "sync_juntar",
+    "sync_desistir_juntar",
     "sync_ler",
     "aparencia_salvar",
     "codigo_ler_foto",
@@ -224,6 +361,11 @@ pub const SO_LEITURA: &[&str] = &[
     "permissao",
     "gerente_ler",
     "conflitos_listar",
+    "pendencias_listar",
+    "troca_historico",
+    "auditoria_listar",
+    "caixas_conhecidos",
+    "os_rascunho_pode",
     "codigos_situacao",
     "menu",
     "produtos_buscar",
@@ -282,7 +424,6 @@ pub const SO_LEITURA: &[&str] = &[
     "etiquetas_da_compra",
     "etiquetas_opcoes",
     "encomendas_painel",
-    "encomenda_whatsapp",
     "encomenda_para_venda",
     "financeiro_resumo",
     "pagar_painel",
@@ -330,6 +471,8 @@ pub const DO_CAIXA: &[&str] = &[
     "venda_concluir",
     "orcamento_salvar",
     "os_salvar",
+    "os_rascunho_salvar",
+    "os_rascunho_excluir",
     "os_situacao",
     "os_cancelar",
     "devolucao_gravar",
@@ -337,6 +480,7 @@ pub const DO_CAIXA: &[&str] = &[
     "caixa_fechar",
     "caixa_movimentar",
     "aviso_esconder",
+    "aviso_minimizar",
     "receber_lancar",
     "receber_baixar",
     "encomenda_criar",
@@ -344,7 +488,18 @@ pub const DO_CAIXA: &[&str] = &[
     "encomenda_chegou",
     "encomenda_entregar",
     "encomenda_cancelar",
+    // RVI-01: marca o cliente como avisado quando a encomenda chegou.
+    "encomenda_whatsapp",
 ];
+
+/// Resposta a uma gravação depois de um erro interno grave (pânico).
+const TEXTO_COMPROMETIDO: &str =
+    "O Rustinho teve um erro interno. Feche e abra de novo para continuar; até lá nada é gravado.";
+
+/// RVI-01: nos testes, toda consulta de `SO_LEITURA` roda com o banco só
+/// para leitura, para a suíte acusar um comando de leitura que grave. No
+/// programa, isso vale depois de um pânico (veja `Servico::chamar`).
+const LEITURA_ESTRITA: bool = cfg!(any(test, feature = "ancoras-de-teste"));
 
 /// O que podemos fazer depois de um erro interno grave: ler, sair e fazer o
 /// backup ao fechar.
@@ -415,6 +570,9 @@ pub struct Servico {
     _trava: Option<std::fs::File>,
     /// Quanto esperar as tarefas da sincronização ao fechar.
     prazo_encerrar: Duration,
+    /// Chaves das operações já gravadas (comando + chave + usuário), para
+    /// recusar a mesma repetida (duplo clique).
+    feitas: std::collections::VecDeque<[u8; 32]>,
 }
 
 /// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
@@ -476,6 +634,22 @@ impl Servico {
     /// um segundo, aberto sem querer, é recusado (restaurar um backup com
     /// outro aberto estragaria o que ele estivesse gravando).
     pub fn abrir(caminho: &Path) -> Resultado<Servico> {
+        Self::abrir_com(caminho, true)
+    }
+
+    /// Só nos testes: abre como o programa, com ou sem a troca de dados.
+    #[cfg(test)]
+    pub(crate) fn abrir_para_teste(caminho: &Path, com_motor: bool) -> Resultado<Servico> {
+        Self::abrir_com(caminho, com_motor)
+    }
+
+    /// Só nos testes: a troca de dados está rodando?
+    #[cfg(test)]
+    pub(crate) fn tem_motor(&self) -> bool {
+        self._motor.is_some()
+    }
+
+    fn abrir_com(caminho: &Path, com_motor: bool) -> Resultado<Servico> {
         if let Some(pasta) = caminho.parent() {
             std::fs::create_dir_all(pasta).ok();
             crate::arquivos::so_do_usuario(pasta, "pasta dos dados");
@@ -493,15 +667,24 @@ impl Servico {
             }
         }
         s._trava = Some(trava);
-        // O portátil usa outras portas (não conversa com um caixa instalado).
-        let (tcp, udp) = crate::portatil::portas();
-        s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), tcp, udp));
+        // A3: banco com defeito (modo seguro): a troca de dados não liga.
+        if com_motor && !s.banco.em_modo_seguro() {
+            // O portátil usa outras portas (não conversa com um caixa instalado).
+            let (tcp, udp) = crate::portatil::portas();
+            s._motor = Some(sync::Motor::iniciar(caminho.to_path_buf(), tcp, udp));
+        }
         Ok(s)
     }
 
     /// Banco em memória (testes).
     pub fn em_memoria() -> Resultado<Servico> {
         Ok(Self::com_banco(Banco::em_memoria()?))
+    }
+
+    /// Só nos testes: o banco por baixo do serviço.
+    #[cfg(test)]
+    pub(crate) fn banco_para_teste(&mut self) -> &mut Banco {
+        &mut self.banco
     }
 
     fn com_banco(banco: Banco) -> Servico {
@@ -515,6 +698,7 @@ impl Servico {
             segredo_backup: None,
             _trava: None,
             prazo_encerrar: PRAZO_PARA_ENCERRAR,
+            feitas: std::collections::VecDeque::new(),
         }
     }
 
@@ -529,17 +713,42 @@ impl Servico {
     /// o padrão; com `abort` o programa fecharia na hora.)
     pub fn chamar(&mut self, comando: &str, dados: &str) -> String {
         if self.comprometido && !pode_depois_de_erro(comando) {
-            return json!({
-                "ok": false,
-                "erro": "O Rustinho teve um erro interno. Feche e abra de novo para continuar; até lá nada é gravado.",
-                "campo": null
-            })
-            .to_string();
+            return json!({ "ok": false, "erro": TEXTO_COMPROMETIDO, "campo": null }).to_string();
+        }
+        // RVI-01: depois de um pânico, uma consulta roda com o banco só para
+        // leitura (`query_only`): se algum comando da lista de leituras
+        // gravasse, o próprio SQLite recusaria. Nos testes vale sempre, para
+        // que a suíte inteira acuse um comando de leitura que grava.
+        let travar_leitura =
+            SO_LEITURA.contains(&comando) && (self.comprometido || LEITURA_ESTRITA) && !self.banco.em_modo_seguro();
+        if travar_leitura {
+            if let Err(e) = self.banco.conn.pragma_update(None, "query_only", true) {
+                crate::registro::anotar(&format!("{comando}: não foi possível travar a leitura: {e}"));
+                if self.comprometido {
+                    return json!({ "ok": false, "erro": TEXTO_COMPROMETIDO, "campo": null }).to_string();
+                }
+            }
         }
         let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let dados: Value = if dados.trim().is_empty() { json!({}) } else { serde_json::from_str(dados)? };
             self.executar(comando, dados)
         }));
+        if travar_leitura {
+            if let Err(e) = self.banco.conn.pragma_update(None, "query_only", false) {
+                crate::registro::anotar(&format!("{comando}: não foi possível destravar a leitura: {e}"));
+            }
+        }
+        let resultado = match resultado {
+            Ok(Err(e)) if travar_leitura && crate::banco::erro_de_somente_leitura(&e) => {
+                crate::registro::anotar(&format!("{comando}: comando de leitura tentou gravar (recusado)"));
+                Ok(Err(if self.comprometido {
+                    Erro::validacao(TEXTO_COMPROMETIDO)
+                } else {
+                    Erro::Interno(format!("\"{comando}\" está em SO_LEITURA mas tentou gravar no banco"))
+                }))
+            }
+            outro => outro,
+        };
         let resposta = match resultado {
             Ok(Ok(valor)) => json!({ "ok": true, "dados": valor }),
             Ok(Err(erro)) => {
@@ -573,7 +782,35 @@ impl Servico {
         self.sessao.as_ref().ok_or(Erro::SemSessao)
     }
 
+    /// A3: em modo seguro (banco com defeito) as gravações são recusadas
+    /// com o motivo antes de começar; e qualquer gravação que escape (o banco
+    /// está só para leitura) volta com o mesmo motivo.
     fn executar(&mut self, comando: &str, dados: Value) -> Resultado<Value> {
+        if !self.banco.em_modo_seguro() {
+            return self.executar_livre(comando, dados);
+        }
+        if bloqueado_no_modo_seguro(comando) {
+            return Err(erro_modo_seguro());
+        }
+        self.executar_livre(comando, dados).map_err(|e| {
+            if crate::banco::erro_de_somente_leitura(&e) {
+                erro_modo_seguro()
+            } else {
+                e
+            }
+        })
+    }
+
+    /// No modo seguro, entrar, sair e a senha do gerente funcionam, mas nada
+    /// do que eles gravariam (acesso, tentativas, histórico) é gravado.
+    fn gravar_se_der(&self, r: Resultado<()>) -> Resultado<()> {
+        match r {
+            Err(e) if self.banco.em_modo_seguro() && crate::banco::erro_de_somente_leitura(&e) => Ok(()),
+            outro => outro,
+        }
+    }
+
+    fn executar_livre(&mut self, comando: &str, dados: Value) -> Resultado<Value> {
         match comando {
             // Sem precisar estar conectado.
             "estado" => self.estado(),
@@ -594,7 +831,16 @@ impl Servico {
                 config::validar_nome_caixa(&caixa)?;
                 sync::salvar_ajustes(&self.banco.conn, true, &d.senha, &d.enderecos)?;
                 config::gravar(&self.banco.conn, "caixa_nome", &caixa)?;
+                // FALHA-01: a tentativa fica marcada até chegar um usuário
+                // da loja ou até desistir (veja `loja::desistir_da_juncao`).
+                crate::loja::comecar_juncao(&self.banco.conn)?;
                 self.sync_ler()
+            }
+            // FALHA-01 (V01a): desistir de entrar numa loja. Sai tudo o que a
+            // tentativa deixou; a rede de uma loja configurada não é tocada.
+            "sync_desistir_juntar" => {
+                let n = crate::loja::desistir_da_juncao(&mut self.banco.conn)?;
+                Ok(json!({ "saiu": n }))
             }
             "sync_ler" => self.sync_ler(),
             // Modo escuro: vale só para este aparelho (não vai para os outros caixas).
@@ -624,7 +870,7 @@ impl Servico {
             "sair" => {
                 self.liberacoes.clear();
                 if let Some(s) = self.sessao.take() {
-                    auditoria::registrar(
+                    self.gravar_se_der(auditoria::registrar(
                         &self.banco.conn,
                         &self.banco.dispositivo,
                         Some(&s.usuario_id),
@@ -632,7 +878,7 @@ impl Servico {
                         "usuario",
                         &s.usuario_id,
                         &[],
-                    )?;
+                    ))?;
                 }
                 Ok(Value::Null)
             }
@@ -724,9 +970,46 @@ impl Servico {
     /// (mesmos dados) acaba: não fica aberta para outra coisa (D-09).
     fn executar_conectado(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let resumo = resumo_da_chamada(comando, &dados);
+        // Duplo clique: a mesma operação (a mesma chave) chegando de novo.
+        let repeticao = match dados["chaveOperacao"].as_str().map(str::trim) {
+            Some(k) if !k.is_empty() && NAO_REPETIR.contains(&comando) => {
+                use sha2::Digest;
+                let mut h = sha2::Sha256::new();
+                h.update(comando.as_bytes());
+                h.update([0u8]);
+                h.update(k.as_bytes());
+                h.update([0u8]);
+                h.update(sessao.usuario_id.as_bytes());
+                let chave: [u8; 32] = h.finalize().into();
+                Some(chave)
+            }
+            _ => None,
+        };
+        // FALHA-04: todas as telas mandam a chave nestes comandos; sem ela
+        // não dá para saber se é a mesma operação de novo, então nada é gravado.
+        if repeticao.is_none() && NAO_REPETIR.contains(&comando) {
+            return Err(Erro::campo(
+                "chave",
+                "Operação sem identificação (chave da operação): nada foi gravado. Feche e abra a tela e tente de novo.",
+            ));
+        }
+        if let Some(chave) = repeticao {
+            if self.feitas.contains(&chave) {
+                return Err(Erro::campo(
+                    "repetida",
+                    "Esta operação já foi feita (clique repetido): nada foi gravado de novo.",
+                ));
+            }
+        }
         self.chamada = Some((comando.to_string(), resumo));
         let r = self.executar_comando(comando, dados, sessao);
         self.chamada = None;
+        if let (Some(chave), Ok(_)) = (repeticao, &r) {
+            self.feitas.push_back(chave);
+            while self.feitas.len() > CHAVES_GUARDADAS {
+                self.feitas.pop_front();
+            }
+        }
         if r.is_ok() {
             self.liberacoes.retain(|l| {
                 !matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: d, .. }
@@ -761,28 +1044,42 @@ impl Servico {
                     }
                     let dados = d.dados.clone().unwrap_or_else(|| json!({}));
                     Err((d.comando.clone(), resumo_da_chamada(&d.comando, &dados)))
+                } else if !d.acoes.is_empty() {
+                    // Simultaneidade (0.9.15): uma senha abre a consulta das
+                    // partes que ficam juntas ali (só leitura; cada gravação
+                    // continua pedindo a senha para ela).
+                    let mut lista: Vec<&'static str> = Vec::new();
+                    for a in &d.acoes {
+                        let a = acao_de_consulta(a)?;
+                        if !lista.contains(&a) {
+                            lista.push(a);
+                        }
+                    }
+                    Ok(lista)
                 } else {
-                    Ok(acao_de_consulta(&d.acao)?)
+                    Ok(vec![acao_de_consulta(&d.acao)?])
                 };
                 self.esperar_se_errou("gerente")?;
                 match usuarios::conferir_gerente(&self.banco.conn, &d.senha)? {
                     Some(g) => {
-                        usuarios::limpar_falhas(&self.banco.conn, "gerente")?;
-                        self.segredo_backup =
-                            backup::gerente_conferido(&self.banco.conn, &g.id, &d.senha, self.segredo_backup)?;
+                        self.gravar_se_der(usuarios::limpar_falhas(&self.banco.conn, "gerente"))?;
+                        self.segredo_backup = self.segredo_conferido(&g.id, &d.senha)?;
                         let usuario_id = sessao.usuario_id.clone();
                         let o_que = match &pedido {
-                            Ok(acao) => {
-                                self.liberacoes.retain(|l| {
-                                    !matches!(l, Liberacao::Consulta { acao: a, usuario_id: u, .. }
-                                        if a == acao && *u == usuario_id)
-                                });
-                                self.liberacoes.push(Liberacao::Consulta {
-                                    usuario_id,
-                                    acao,
-                                    ate: Instant::now() + LIBERACAO,
-                                });
-                                format!("consultar {} (só leitura, nesta tela)", nome_da_acao(acao))
+                            Ok(acoes) => {
+                                for &acao in acoes.iter() {
+                                    self.liberacoes.retain(|l| {
+                                        !matches!(l, Liberacao::Consulta { acao: a, usuario_id: u, .. }
+                                            if *a == acao && *u == usuario_id)
+                                    });
+                                    self.liberacoes.push(Liberacao::Consulta {
+                                        usuario_id: usuario_id.clone(),
+                                        acao,
+                                        ate: Instant::now() + LIBERACAO,
+                                    });
+                                }
+                                let nomes: Vec<String> = acoes.iter().map(|a| nome_da_acao(a)).collect();
+                                format!("consultar {} (só leitura, nesta tela)", nomes.join("; "))
                             }
                             Err((comando, resumo)) => {
                                 self.liberacoes.retain(|l| {
@@ -801,7 +1098,7 @@ impl Servico {
                                 )
                             }
                         };
-                        auditoria::registrar(
+                        self.gravar_se_der(auditoria::registrar(
                             &self.banco.conn,
                             &disp,
                             Some(&sessao.usuario_id),
@@ -809,11 +1106,11 @@ impl Servico {
                             "usuario",
                             &g.id,
                             &[format!("{} liberou para {}: {o_que}", g.nome, sessao.nome)],
-                        )?;
+                        ))?;
                         Ok(json!({ "nome": g.nome }))
                     }
                     None => {
-                        usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS)?;
+                        self.gravar_se_der(usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS))?;
                         Err(Erro::campo("senha", "Senha do gerente errada."))
                     }
                 }
@@ -1025,13 +1322,25 @@ impl Servico {
                 let d: Computador = ler(dados)?;
                 let caixa = texto::limpar(&d.caixa);
                 config::validar_nome_caixa(&caixa)?;
-                config::gravar(&self.banco.conn, "caixa_nome", &caixa)?;
-                config::gravar(&self.banco.conn, "imprimir_direto", if d.imprimir_direto { "1" } else { "0" })?;
+                // M-04: tudo ou nada.
+                let tx = self.banco.conn.transaction()?;
+                config::gravar(&tx, "caixa_nome", &caixa)?;
+                config::gravar(&tx, "imprimir_direto", if d.imprimir_direto { "1" } else { "0" })?;
+                tx.commit()?;
                 let ve = self.ve_custos(sessao)?;
                 self.config_ler(ve)
             }
 
-            "menu" => Ok(json!(menu::menu(&self.banco.conn, &sessao.usuario_id)?)),
+            "menu" => match menu::menu(&self.banco.conn, &sessao.usuario_id) {
+                Ok(m) => Ok(json!(m)),
+                // RVI-03: banco antigo em modo seguro: o menu sem as fixadas
+                // (o Início precisa dele para mostrar o aviso do modo seguro).
+                Err(e) if self.banco.em_modo_seguro() => {
+                    crate::registro::anotar(&format!("menu no modo seguro: {e}"));
+                    Ok(json!(menu::sem_fixadas()))
+                }
+                Err(e) => Err(e),
+            },
             "menu_usar" => {
                 let d: ItemMenu = ler(dados)?;
                 menu::registrar_uso(&self.banco.conn, &sessao.usuario_id, &d.id)?;
@@ -1143,9 +1452,9 @@ impl Servico {
                 usuarios::alterar(&tx, &u.id, &u.nome, u.ativo, Some(&d.nova))
                     .map_err(renomear_campo("senha", "nova"))?;
                 backup::senha_trocada(&tx, &u.id, &d.nova, self.segredo_backup)?;
-                tx.commit()?;
+                // M-04: o histórico vai na mesma transação (sem ele, nada muda).
                 auditoria::registrar(
-                    &self.banco.conn,
+                    &tx,
                     &disp,
                     Some(&sessao.usuario_id),
                     "usuario.alterar",
@@ -1153,6 +1462,7 @@ impl Servico {
                     &u.id,
                     &["Senha trocada".into()],
                 )?;
+                tx.commit()?;
                 Ok(Value::Null)
             }
 
@@ -1234,9 +1544,20 @@ impl Servico {
             }
             "compra_lancar" => {
                 let d: compras::CompraEntrada = ler(dados)?;
+                // 0915-N / D-09: a compra que muda o preço de venda de uma
+                // peça já cadastrada ("os preços seguem o % de lucro") é do
+                // gerente, como no cadastro. Confere antes (sem efeito) e
+                // decide depois de saber se algum preço mudou: sem a senha,
+                // nada é lançado (a transação volta inteira).
+                let sem_precos = self.exigir("precos", sessao).err();
                 let tx = self.banco.conn.transaction()?;
                 compras::atualizar(&tx, &d)?;
                 let r = compras::lancar(&tx, &disp, &sessao.usuario_id, &d.id)?;
+                if r.precos_atualizados > 0 {
+                    if let Some(e) = sem_precos {
+                        return Err(e);
+                    }
+                }
                 tx.commit()?;
                 Ok(json!({ "resumo": r, "compra": compras::ficha(&self.banco.conn, &d.id)? }))
             }
@@ -1268,7 +1589,7 @@ impl Servico {
             "compra_descartar" => {
                 let d: Id = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
-                compras::excluir_rascunho(&tx, &d.id)?;
+                compras::excluir_rascunho(&tx, &disp, &sessao.usuario_id, &d.id)?;
                 tx.commit()?;
                 Ok(Value::Null)
             }
@@ -1389,6 +1710,99 @@ impl Servico {
                 tx.commit()?;
                 Ok(json!(oficina::ficha(&self.banco.conn, &id)?))
             }
+            "os_rascunho_salvar" => {
+                let d: oficina::Entrada = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let id = oficina::salvar_rascunho(&tx, &disp, &sessao.usuario_id, &d)?;
+                tx.commit()?;
+                Ok(json!(oficina::ficha(&self.banco.conn, &id)?))
+            }
+            "os_rascunho_excluir" => {
+                let d: Id = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                oficina::excluir_rascunho(&tx, &disp, &sessao.usuario_id, &d.id)?;
+                tx.commit()?;
+                Ok(Value::Null)
+            }
+            "os_rascunho_pode" => {
+                let caixas = sync::bloqueios_de_rascunho(&self.banco.conn)?;
+                Ok(json!({ "pode": caixas.is_empty(), "caixas": caixas }))
+            }
+            "caixas_conhecidos" => Ok(json!({
+                "caixas": sync::caixas_conhecidos(&self.banco.conn)?,
+                "prazoDias": sync::PRAZO_COMPATIBILIDADE_DIAS,
+            })),
+            "caixa_retirar" => {
+                let d: CaixaDaLoja = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                sync::retirar_caixa(&tx, &d.dispositivo, &d.motivo, &sessao.nome)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "caixa.retirar",
+                    "sync_par",
+                    &d.dispositivo,
+                    &[format!("Caixa retirado da loja · {}", texto::limpar(&d.motivo))],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::caixas_conhecidos(&self.banco.conn)?))
+            }
+            "caixa_readmitir" => {
+                let d: CaixaDaLoja = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                sync::readmitir_caixa(&tx, &d.dispositivo)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "caixa.readmitir",
+                    "sync_par",
+                    &d.dispositivo,
+                    &["Caixa readmitido na loja".into()],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::caixas_conhecidos(&self.banco.conn)?))
+            }
+            "pendencias_listar" => Ok(json!(sync::pendencias_da_troca(&self.banco.conn)?)),
+            // Simultaneidade › Histórico (0.9.15): só leitura.
+            "troca_historico" => Ok(json!(sync::historico_da_troca(&self.banco.conn, 200)?)),
+            "auditoria_listar" => {
+                let eu = config::ler(&self.banco.conn, "dispositivo_id")?.unwrap_or_default();
+                let mut nomes: std::collections::HashMap<String, String> =
+                    sync::caixas_conhecidos(&self.banco.conn)?.into_iter().map(|c| (c.dispositivo, c.nome)).collect();
+                nomes.insert(eu, config::nome_caixa(&self.banco.conn)?);
+                let lista: Vec<Value> = auditoria::recentes(&self.banco.conn, 300)?
+                    .into_iter()
+                    .map(|r| {
+                        let caixa = nomes.get(&r.dispositivo).cloned().unwrap_or_default();
+                        let mut v = json!(r);
+                        v["caixa"] = json!(caixa);
+                        v
+                    })
+                    .collect();
+                Ok(json!(lista))
+            }
+            "pendencia_arquivar" => {
+                let d: Estorno = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                sync::arquivar_pendencia(&tx, &d.id, &d.motivo, &sessao.usuario_id)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "pendencia.arquivar",
+                    "sync_pendencia",
+                    &d.id,
+                    &[format!("Pendência da troca de dados arquivada · {}", texto::limpar(&d.motivo))],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::pendencias_da_troca(&self.banco.conn)?))
+            }
+            "pendencias_reaplicar" => {
+                let n = sync::reaplicar_pendencias(&mut self.banco.conn)?;
+                Ok(json!({ "aplicadas": n, "pendencias": sync::pendencias_da_troca(&self.banco.conn)? }))
+            }
             "os_situacao" => {
                 let d: Situacao = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
@@ -1504,7 +1918,19 @@ impl Servico {
 
             // Crediário e contas a receber
             "avisos_do_dia" => {
-                let mut avisos = crate::avisos::do_dia(&self.banco.conn)?;
+                let mut avisos = match crate::avisos::do_dia(&self.banco.conn) {
+                    Ok(a) => a,
+                    // RVI-03: banco antigo em modo seguro (estrutura sem
+                    // atualizar): pelo menos o aviso do modo seguro.
+                    Err(e) if self.banco.em_modo_seguro() => {
+                        crate::registro::anotar(&format!("avisos no modo seguro: {e}"));
+                        crate::avisos::so_do_modo_seguro(
+                            &self.banco.conn,
+                            self.banco.defeito.as_deref().unwrap_or_default(),
+                        )
+                    }
+                    Err(e) => return Err(e),
+                };
                 // D-03: os avisos de contas a pagar e cheques têm valores do
                 // financeiro: só para quem pode ver o financeiro.
                 if !self.pode_sem_senha("financeiro", sessao)? {
@@ -1514,6 +1940,15 @@ impl Servico {
                     avisos.push(a);
                 }
                 Ok(json!(avisos))
+            }
+            "aviso_minimizar" => {
+                let d: Value = ler(dados)?;
+                crate::avisos::minimizar(
+                    &self.banco.conn,
+                    d["id"].as_str().unwrap_or_default(),
+                    d["minimizado"].as_bool().unwrap_or(true),
+                )?;
+                Ok(json!(true))
             }
             "aviso_esconder" => {
                 let d: Value = ler(dados)?;
@@ -1663,7 +2098,11 @@ impl Servico {
             }
             "estoque_dias" => {
                 let d: Dias = ler(dados)?;
-                Ok(json!(reposicao::salvar_dias(&self.banco.conn, &disp, &sessao.usuario_id, &d.qual, &d.dias)?))
+                // C8: os dias e o histórico, numa transação só.
+                let tx = self.banco.conn.transaction()?;
+                let n = reposicao::salvar_dias(&tx, &disp, &sessao.usuario_id, &d.qual, &d.dias)?;
+                tx.commit()?;
+                Ok(json!(n))
             }
             "estoque_mais_vendidos" => {
                 let d: MaisVendidos = ler(dados)?;
@@ -1740,8 +2179,12 @@ impl Servico {
                 Ok(Value::Null)
             }
             "encomenda_whatsapp" => {
+                // RVI-01: grava (avisado_em) quando a encomenda chegou.
                 let d: Id = ler(dados)?;
-                Ok(json!({ "url": encomendas::whatsapp(&self.banco.conn, &d.id)? }))
+                let tx = self.banco.conn.transaction()?;
+                let url = encomendas::whatsapp(&tx, &d.id)?;
+                tx.commit()?;
+                Ok(json!({ "url": url }))
             }
             "encomenda_para_venda" => {
                 let d: Id = ler(dados)?;
@@ -2044,11 +2487,33 @@ impl Servico {
             // Sincronização
             "sync_salvar" => {
                 let d: AjustesSync = ler(dados)?;
-                let senha = if d.senha.is_empty() { sync::ajustes(&self.banco.conn)?.senha } else { d.senha };
-                if let Some(nomes) = &d.interfaces {
-                    sync::salvar_interfaces(&self.banco.conn, nomes)?;
+                // FALHA-01 / A2: ligar a troca de dados ou trocar a senha da
+                // rede é sempre do gerente, com a rede ligada ou desligada (o
+                // primeiro caixa liga sozinho, com o gerente dele). Só os
+                // endereços continuam em Configurações. Campo vazio (ou só
+                // espaços) = manter a senha gravada.
+                let atual = sync::ajustes(&self.banco.conn)?;
+                let entrada = d.senha.trim();
+                let senha_nova = !entrada.is_empty() && entrada != atual.senha;
+                let muda_rede = (d.ligado && !atual.ligado) || senha_nova;
+                if muda_rede && !sessao.gerente && !self.liberada_esta_chamada(sessao) {
+                    return Err(Erro::campo(
+                        "gerente",
+                        "Só o gerente pode ligar a troca de dados ou trocar a senha da rede. Peça para o gerente digitar a senha.",
+                    ));
                 }
-                sync::salvar_ajustes(&self.banco.conn, d.ligado, &senha, &d.enderecos)?;
+                let senha = if entrada.is_empty() { atual.senha.clone() } else { entrada.to_string() };
+                // 0915-K: tudo numa transação (endereço inválido não deixa as
+                // interfaces gravadas pela metade).
+                let tx = self.banco.conn.transaction()?;
+                if senha_nova {
+                    crate::loja::esquecer_recusa(&tx)?;
+                }
+                if let Some(nomes) = &d.interfaces {
+                    sync::salvar_interfaces(&tx, nomes)?;
+                }
+                sync::salvar_ajustes(&tx, d.ligado, &senha, &d.enderecos)?;
+                tx.commit()?;
                 self.sync_ler()
             }
 
@@ -2079,19 +2544,40 @@ impl Servico {
             "backup_restaurar" => {
                 let d: Restaurar = ler(dados)?;
                 let caminho = self.banco.caminho.clone();
-                let info = backup::restaurar(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, d.nuvem, &d.senha)?;
-                auditoria::registrar(
-                    &self.banco.conn,
-                    &disp,
-                    Some(&sessao.usuario_id),
-                    "backup.restaurar",
-                    "config",
-                    &info.quando,
-                    &[],
-                )?;
+                // A3: no modo seguro, restaurar é a saída. Só para isso o banco
+                // deixa de ser só leitura (a cópia de antes sai como cópia para
+                // o suporte); depois volta a ser, até fechar e abrir de novo,
+                // quando o banco restaurado é conferido.
+                let seguro = self.banco.em_modo_seguro();
+                if seguro {
+                    self.banco.conn.pragma_update(None, "query_only", false)?;
+                }
+                let r = backup::restaurar(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, d.nuvem, &d.senha)
+                    .and_then(|info| {
+                        auditoria::registrar(
+                            &self.banco.conn,
+                            &disp,
+                            Some(&sessao.usuario_id),
+                            "backup.restaurar",
+                            "config",
+                            &info.quando,
+                            &[],
+                        )?;
+                        Ok(info)
+                    });
+                let conferido = seguro && r.is_ok() && crate::banco::conferir_integridade(&self.banco.conn).is_ok();
+                if seguro {
+                    self.banco.conn.pragma_update(None, "query_only", true)?;
+                }
+                let info = r?;
                 // Os usuários podem ser outros agora: entra de novo.
                 self.sessao = None;
-                Ok(json!(info))
+                let mut v = json!(info);
+                if seguro {
+                    v["reabrir"] = json!(true);
+                    v["conferido"] = json!(conferido);
+                }
+                Ok(v)
             }
 
             "config_ler" => {
@@ -2138,6 +2624,8 @@ impl Servico {
     fn sync_ler(&self) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let a = sync::ajustes(conn)?;
+        // O-3 / RVI-02: tarefas da troca de dados que não estão rodando.
+        let situacao = self.banco.caminho.as_deref().map(crate::supervisao::situacao).unwrap_or_default();
         Ok(json!({
             "ligado": a.ligado,
             "temSenha": !a.senha.is_empty(),
@@ -2154,6 +2642,21 @@ impl Servico {
             "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "atrasadas": config::ler(conn, "sync_atrasadas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "referencias": sync::referencias(conn)?,
+            // O-3: tarefas da troca de dados que caíram (a tela não diz que
+            // está tudo bem com o motor parado).
+            "tarefasParadas": situacao.paradas.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            // RVI-02: o que não está rodando agora, com o motivo.
+            "tarefasComFalha": situacao
+                .paradas
+                .iter()
+                .map(|t| (t, "parada"))
+                .chain(situacao.tentando.iter().map(|t| (t, "tentando")))
+                .map(|((n, motivo), qual)| json!({
+                    "tarefa": crate::supervisao::nome_para_tela(n),
+                    "situacao": qual,
+                    "motivo": motivo,
+                }))
+                .collect::<Vec<_>>(),
         }))
     }
 
@@ -2161,6 +2664,8 @@ impl Servico {
         let conn = &self.banco.conn;
         Ok(json!({
             "primeiraVez": usuarios::quantidade(conn)? == 0,
+            // FALHA-01: no meio de uma entrada numa loja (a tela volta para ela).
+            "juntando": crate::loja::juntando(conn)?,
             "loja": config::nome_loja(conn)?,
             "caixa": config::nome_caixa(conn)?,
             "usuario": self.sessao.as_ref().map(|s| json!({ "id": s.usuario_id, "nome": s.nome, "gerente": s.gerente })),
@@ -2168,12 +2673,24 @@ impl Servico {
             "etapa": menu::ETAPA_ATUAL,
             "validadeOrcamento": config::validade_orcamento(conn)?,
             "escuro": config::ler(conn, "tela_escura")?.as_deref() == Some("1"),
+            // A3: banco com defeito de integridade: modo seguro (o defeito; null = normal).
+            "modoSeguro": self.banco.defeito,
         }))
     }
 
     fn configurar_inicio(&mut self, d: Inicio) -> Resultado<Value> {
         if usuarios::quantidade(&self.banco.conn)? > 0 {
             return Err(Erro::validacao("O Rustinho já foi configurado neste computador."));
+        }
+        // FALHA-01 (V01a): uma loja nova não nasce em cima de uma entrada pela
+        // metade numa loja que já existe (troca ligada, senha da rede, dados
+        // de outro caixa). Primeiro desiste dela.
+        if crate::loja::juntando(&self.banco.conn)? {
+            return Err(Erro::campo(
+                "juntar",
+                "Este computador começou a entrar numa loja que já existe. Para criar uma loja nova, volte e toque \
+                 em \"Voltar\" na tela de entrar na loja (isso desfaz a tentativa).",
+            ));
         }
         let loja = texto::limpar(&d.loja);
         let caixa = texto::limpar(&d.caixa);
@@ -2188,7 +2705,7 @@ impl Servico {
         let tx = self.banco.conn.transaction()?;
         config::gravar(&tx, "loja_nome", &loja)?;
         config::gravar(&tx, "caixa_nome", &caixa)?;
-        // Quem configura a loja é gerente: vale a regra do gerente (12).
+        // Quem configura a loja é gerente; a regra é a mesma para todos (pelo menos 4 caracteres).
         usuarios::exigir_politica(&tx, &d.senha, &d.nome, true, "senha")?;
         let u = usuarios::criar(&tx, &disp, &d.nome, &d.senha, true)?;
         // Quem configura a loja é o gerente.
@@ -2196,6 +2713,8 @@ impl Servico {
         // Loja nova: este caixa distribui as faixas de códigos das peças e
         // fica com a primeira (1 a 99.999).
         faixas::comecar_loja(&tx)?;
+        // Identidade da loja (FALHA-01): vai para os caixas que entrarem nela.
+        crate::loja::criar(&tx)?;
         self.segredo_backup = backup::gerente_conferido(&tx, &u.id, &d.senha, self.segredo_backup)?;
         auditoria::registrar(&tx, &disp, Some(&u.id), "usuario.criar", "usuario", &u.id, &[])?;
         usuarios::registrar_acesso(&tx, &u.id)?;
@@ -2224,8 +2743,8 @@ impl Servico {
         self.esperar_se_errou(&d.id)?;
         match usuarios::conferir_senha(&self.banco.conn, &d.id, &d.senha) {
             Ok(u) => {
-                usuarios::limpar_falhas(&self.banco.conn, &d.id)?;
-                usuarios::registrar_acesso(&self.banco.conn, &u.id)?;
+                self.gravar_se_der(usuarios::limpar_falhas(&self.banco.conn, &d.id))?;
+                self.gravar_se_der(usuarios::registrar_acesso(&self.banco.conn, &u.id))?;
                 // F-17: senha antiga fora da política só gera aviso e marcador;
                 // nunca impede a entrada nem muda nada na senha ou nos backups.
                 if let Ok(a) = usuarios::avaliar_no_login(&self.banco.conn, &u, &d.senha) {
@@ -2242,10 +2761,9 @@ impl Servico {
                     }
                 }
                 if u.gerente {
-                    self.segredo_backup =
-                        backup::gerente_conferido(&self.banco.conn, &u.id, &d.senha, self.segredo_backup)?;
+                    self.segredo_backup = self.segredo_conferido(&u.id, &d.senha)?;
                 }
-                auditoria::registrar(
+                self.gravar_se_der(auditoria::registrar(
                     &self.banco.conn,
                     &self.banco.dispositivo,
                     Some(&u.id),
@@ -2253,17 +2771,28 @@ impl Servico {
                     "usuario",
                     &u.id,
                     &[],
-                )?;
+                ))?;
                 self.liberacoes.clear();
                 self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: u.gerente });
                 self.estado()
             }
             Err(e) => {
                 if e.nome_do_campo() == Some("senha") {
-                    usuarios::anotar_falha(&self.banco.conn, &d.id, ESPERA_APOS_ERROS)?;
+                    self.gravar_se_der(usuarios::anotar_falha(&self.banco.conn, &d.id, ESPERA_APOS_ERROS))?;
                 }
                 Err(e)
             }
+        }
+    }
+
+    /// O segredo dos backups com a senha de um gerente. No modo seguro, sem
+    /// gravar nada: se precisaria gravar (cadeado novo), fica o que já havia.
+    fn segredo_conferido(&self, usuario_id: &str, senha: &str) -> Resultado<Option<[u8; 32]>> {
+        match backup::gerente_conferido(&self.banco.conn, usuario_id, senha, self.segredo_backup) {
+            Err(e) if self.banco.em_modo_seguro() && crate::banco::erro_de_somente_leitura(&e) => {
+                Ok(self.segredo_backup)
+            }
+            outro => outro,
         }
     }
 
@@ -2466,6 +2995,9 @@ struct SenhaGerente {
     /// Consultar a tela desta ação (só leitura).
     #[serde(default)]
     acao: String,
+    /// Ou de várias ações de uma vez (Simultaneidade), também só leitura.
+    #[serde(default)]
+    acoes: Vec<String>,
     /// Ou: fazer esta gravação, com estes dados exatos (uma vez).
     #[serde(default)]
     comando: String,
@@ -2827,6 +3359,13 @@ struct Desfazer {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
+struct CaixaDaLoja {
+    dispositivo: String,
+    motivo: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
 struct Estorno {
     id: String,
     motivo: String,
@@ -2889,7 +3428,8 @@ mod testes {
         let u = s.sessao.as_ref().unwrap().usuario_id.clone();
         let p = peca(&s.banco, &u, "Filtro de óleo");
         let chamar = |s: &mut Servico, c: &str, d: Value| -> Value {
-            serde_json::from_str(&s.chamar(c, &d.to_string())).unwrap()
+            serde_json::from_str(&crate::apoio_chave::chamar(NAO_REPETIR, c, &d.to_string(), |x| s.chamar(c, x)))
+                .unwrap()
         };
         let r = chamar(&mut s, "produto_por_codigo", json!({ "texto": "1" }));
         assert_eq!(r["dados"]["id"], json!(p), "código de uma peça só: entra direto");
@@ -3007,7 +3547,7 @@ mod testes {
     }
 
     fn chamar(s: &mut Servico, c: &str, d: &str) -> Value {
-        serde_json::from_str(&s.chamar(c, d)).unwrap()
+        serde_json::from_str(&crate::apoio_chave::chamar(NAO_REPETIR, c, d, |x| s.chamar(c, x))).unwrap()
     }
 
     fn categorias_teste(s: &Servico) -> i64 {
@@ -3080,8 +3620,11 @@ mod testes {
             "venda_concluir",
             json!({ "itens": itens, "tabela": 1, "pagamentos": [{ "forma": "dinheiro", "valor": "100" }] }),
         );
+        // RVI-01: uma encomenda que chegou (o aviso dela grava).
+        let eid = encomenda_que_chegou(&mut s);
         let entradas = [
             json!({}),
+            json!({ "id": eid }),
             json!({ "id": pid, "produtoId": pid, "pessoaId": cid, "clienteId": cid, "texto": "", "codigo": "1",
                     "dias": "30", "qual": "compra", "ordem": "valor", "itens": itens, "tabela": 1,
                     "quantidade": "1", "valor": "1", "acao": "backup", "placa": "ABC1D23" }),
@@ -3091,9 +3634,13 @@ mod testes {
         for c in SO_LEITURA {
             for d in &entradas {
                 let antes = s.banco.conn.total_changes();
-                let _ = s.chamar(c, &d.to_string());
+                let r = s.chamar(c, &d.to_string());
                 let depois = s.banco.conn.total_changes();
                 assert_eq!(antes, depois, "\"{c}\" é só leitura mas gravou no banco (entrada {d})");
+                // RVI-01: nos testes a leitura roda travada; uma tentativa de
+                // gravar volta como erro (e não muda o banco), então o erro
+                // também acusa.
+                assert!(!r.contains("tentou gravar"), "\"{c}\" é só leitura mas tentou gravar (entrada {d}): {r}");
             }
         }
         // Depois de um pânico: estoque_dias e as outras gravações recusadas,
@@ -3106,6 +3653,143 @@ mod testes {
             assert_eq!(r["ok"], false, "{c} gravou depois do pânico");
         }
         assert_eq!(antes, s.banco.conn.total_changes());
+    }
+
+    /// Encomenda de um cliente sem cadastro, já na situação "chegou".
+    fn encomenda_que_chegou(s: &mut Servico) -> String {
+        let r = chamar(
+            s,
+            "encomenda_criar",
+            r#"{"clienteNome":"Maria Souza","telefone":"(15) 99808-0000","descricao":"Pastilha dianteira","quantidade":"1"}"#,
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let id = r["dados"].as_str().unwrap().to_string();
+        let r = chamar(s, "encomenda_chegou", &json!({ "id": id }).to_string());
+        assert_eq!(r["ok"], true, "{r}");
+        id
+    }
+
+    fn aviso_da_encomenda(s: &Servico, id: &str) -> (Option<String>, String) {
+        s.banco
+            .conn
+            .query_row("SELECT avisado_em, atualizado_em FROM encomenda WHERE id = ?1", [id], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap()
+    }
+
+    /// RVI-01: o aviso pelo WhatsApp de uma encomenda que chegou marca o
+    /// cliente como avisado (grava). Depois de um pânico (serviço
+    /// comprometido, só consultas), ele é recusado e nada muda no banco; as
+    /// consultas de verdade continuam.
+    #[test]
+    fn rvi01_whatsapp_depois_do_panico_nao_grava() {
+        let mut s = conectado();
+        let id = encomenda_que_chegou(&mut s);
+        let antes = aviso_da_encomenda(&s, &id);
+        assert_eq!(antes.0, None, "ainda não foi avisado");
+        assert_eq!(chamar(&mut s, "__teste_panico", r#"{"onde":"antes_do_commit"}"#)["ok"], false);
+        assert!(s.comprometido);
+        let mudancas = s.banco.conn.total_changes();
+        let r = chamar(&mut s, "encomenda_whatsapp", &json!({ "id": id }).to_string());
+        assert_eq!(r["ok"], false, "gravou depois do pânico: {r}");
+        assert!(r["erro"].as_str().unwrap().contains("Feche e abra"), "{r}");
+        assert_eq!(aviso_da_encomenda(&s, &id), antes, "avisado_em/atualizado_em mudaram");
+        assert_eq!(s.banco.conn.total_changes(), mudancas);
+        // Consultas que só leem continuam (a política do C-15).
+        for (c, d) in [
+            ("estado", json!({})),
+            ("encomendas_painel", json!({})),
+            ("encomenda_para_venda", json!({ "id": id })),
+            ("produtos_buscar", json!({ "texto": "" })),
+        ] {
+            let r = chamar(&mut s, c, &d.to_string());
+            assert_eq!(r["ok"], true, "{c}: {r}");
+        }
+        assert_eq!(s.banco.conn.total_changes(), mudancas);
+    }
+
+    /// RVI-01: sem pânico, o aviso continua funcionando e marca o cliente
+    /// como avisado (a regra da tela de encomendas não mudou).
+    #[test]
+    fn rvi01_whatsapp_marca_avisado_sem_panico() {
+        let mut s = conectado();
+        let id = encomenda_que_chegou(&mut s);
+        let r = chamar(&mut s, "encomenda_whatsapp", &json!({ "id": id }).to_string());
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(r["dados"]["url"].as_str().unwrap().starts_with("https://wa.me/5515998080000?text="), "{r}");
+        assert!(aviso_da_encomenda(&s, &id).0.is_some(), "marcou como avisado");
+    }
+
+    /// RVI-01: as listas de comandos não se contradizem. Quem grava (está na
+    /// lista do modo seguro, `NAO_REPETIR` + `GRAVAM_TAMBEM`, ou em
+    /// `DO_CAIXA`) não pode estar em `SO_LEITURA`, que é o que continua
+    /// depois de um pânico e o que a consulta do gerente libera.
+    #[test]
+    fn rvi01_quem_grava_nao_e_so_leitura() {
+        let mut contradicoes = Vec::new();
+        for c in SO_LEITURA {
+            if NAO_REPETIR.contains(c) || GRAVAM_TAMBEM.contains(c) || DO_CAIXA.contains(c) {
+                contradicoes.push(*c);
+            }
+            if bloqueado_no_modo_seguro(c) {
+                contradicoes.push(*c);
+            }
+        }
+        contradicoes.sort();
+        contradicoes.dedup();
+        assert!(contradicoes.is_empty(), "comandos que gravam e estão em SO_LEITURA: {contradicoes:?}");
+    }
+
+    /// Uma falha de gravação de propósito (gatilho temporário, só nesta
+    /// conexão) quando `quando` for verdade para a linha nova da `tabela`.
+    fn falhar_ao_gravar(s: &Servico, tabela: &str, quando: &str) {
+        s.banco
+            .conn
+            .execute_batch(&format!(
+                "CREATE TEMP TRIGGER falha_de_teste BEFORE INSERT ON main.{tabela} WHEN {quando}
+                 BEGIN SELECT RAISE(ABORT, 'falha de teste'); END;"
+            ))
+            .unwrap();
+    }
+
+    /// M-04 (auditoria da 0.9.14, O-8): trocar a senha e o histórico disso
+    /// são uma coisa só — se o histórico não grava, a senha não muda.
+    #[test]
+    fn m04_senha_trocar_e_o_historico_juntos() {
+        let mut s = conectado();
+        falhar_ao_gravar(&s, "auditoria", "NEW.acao = 'usuario.alterar'");
+        let r = chamar(
+            &mut s,
+            "senha_trocar",
+            r#"{"atual":"balcao-azul-2026","nova":"outra-senha-2026","nova2":"outra-senha-2026"}"#,
+        );
+        assert_eq!(r["ok"], false, "{r}");
+        let ana: String = s.banco.conn.query_row("SELECT id FROM usuario", [], |l| l.get(0)).unwrap();
+        assert!(usuarios::conferir_senha(&s.banco.conn, &ana, "balcao-azul-2026").is_ok(), "a senha antiga continua");
+        assert!(usuarios::conferir_senha(&s.banco.conn, &ana, "outra-senha-2026").is_err(), "a nova não entrou");
+    }
+
+    /// M-04: o nome do caixa e "imprimir direto" são salvos juntos (tudo ou nada).
+    #[test]
+    fn m04_computador_salvar_tudo_ou_nada() {
+        let mut s = conectado();
+        falhar_ao_gravar(&s, "config", "NEW.chave = 'imprimir_direto'");
+        let r = chamar(&mut s, "computador_salvar", r#"{"caixa":"Caixa Novo","imprimirDireto":true}"#);
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(config::nome_caixa(&s.banco.conn).unwrap(), "Caixa 1", "o nome do caixa não mudou pela metade");
+    }
+
+    /// C8: os dias da reposição e o histórico disso são uma coisa só.
+    #[test]
+    fn c8_estoque_dias_e_o_historico_juntos() {
+        let mut s = conectado();
+        let antes = crate::reposicao::dias_compra(&s.banco.conn).unwrap();
+        let novo = if antes == 45 { 60 } else { 45 };
+        falhar_ao_gravar(&s, "auditoria", "1");
+        let r = chamar(&mut s, "estoque_dias", &json!({ "qual": "compra", "dias": novo.to_string() }).to_string());
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(crate::reposicao::dias_compra(&s.banco.conn).unwrap(), antes, "os dias não mudaram sem o histórico");
     }
 
     /// C-12: um segundo Rustinho no mesmo banco é recusado; ao fechar o
@@ -3551,7 +4235,7 @@ mod testes {
         assert_eq!(r["ok"], true, "{r}");
     }
 
-    /// F17-A2: usuários — operador 8, gerente 12, triviais recusados, Unicode e espaços valem.
+    /// F17-A2: usuários — mínimo de 4 caracteres para todos (regra da 0.9.13), Unicode e espaços valem.
     #[test]
     fn f17_a2_usuario_salvar() {
         let mut s = conectado();
@@ -3618,7 +4302,7 @@ mod testes {
         assert!(usuarios::conferir_senha(&s.banco.conn, &id, "balcao-azul-2026").is_ok(), "a antiga continua valendo");
         assert_eq!(trocar(&mut s, "x".repeat(129).as_str())["ok"], false, "129 caracteres");
         assert_eq!(trocar(&mut s, "chuva de manhã na oficina")["ok"], true);
-        // Operador: 8 basta.
+        // Outro usuário: a mesma regra (o que importa é o tamanho).
         let bia = usuarios::criar(&s.banco.conn, &s.banco.dispositivo, "Bia", "balcao-bia-1", true).unwrap();
         assert_eq!(f17_entrar(&mut s, &bia.id, "balcao-bia-1")["ok"], true);
         let r = chamar(

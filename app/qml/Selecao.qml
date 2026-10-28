@@ -69,6 +69,16 @@ ColumnLayout {
             text: modelData
             font: combo.font
             highlighted: combo.highlightedIndex === index
+            // Texto sempre em tinta: o "realçado" do estilo usava letra clara
+            // sobre o azul claro, sem contraste (Nova OS › Serviço, 0.9.15).
+            contentItem: Text {
+                text: parent.text
+                font: parent.font
+                color: Tema.tinta
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: 4
+            }
             background: Rectangle {
                 radius: 6
                 color: parent.highlighted ? Tema.azul : "transparent"

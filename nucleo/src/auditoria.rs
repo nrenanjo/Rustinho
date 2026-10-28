@@ -69,6 +69,44 @@ pub fn historico(conn: &Connection, entidade: &str, entidade_id: &str, limite: i
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
+/// Um item da auditoria geral (Configurações › Simultaneidade › Histórico).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistroGeral {
+    /// "27/10/2026 08:18" no horário daqui.
+    pub quando: String,
+    pub usuario: String,
+    pub dispositivo: String,
+    pub acao: String,
+    pub descricao: String,
+    pub detalhes: Vec<String>,
+}
+
+/// Os últimos registros da loja toda (de todos os caixas que já trocaram
+/// dados com este), do mais novo para o mais velho.
+pub fn recentes(conn: &Connection, limite: i64) -> Resultado<Vec<RegistroGeral>> {
+    let mut consulta = conn.prepare_cached(
+        "SELECT COALESCE(strftime('%d/%m/%Y %H:%M', a.quando, 'localtime'), a.quando),
+                COALESCE(u.nome, ''), a.dispositivo, a.acao, a.detalhes
+           FROM auditoria a LEFT JOIN usuario u ON u.id = a.usuario_id
+          ORDER BY a.quando DESC, a.id DESC
+          LIMIT ?1",
+    )?;
+    let linhas = consulta.query_map(params![limite], |l| {
+        let acao: String = l.get(3)?;
+        let detalhes: String = l.get(4)?;
+        Ok(RegistroGeral {
+            quando: l.get(0)?,
+            usuario: l.get(1)?,
+            dispositivo: l.get(2)?,
+            descricao: descrever(&acao).to_string(),
+            acao,
+            detalhes: serde_json::from_str(&detalhes).unwrap_or_default(),
+        })
+    })?;
+    Ok(linhas.collect::<Result<_, _>>()?)
+}
+
 fn descrever(acao: &str) -> &'static str {
     match acao {
         "produto.criar" => "cadastrou a peça",
@@ -110,6 +148,38 @@ fn descrever(acao: &str) -> &'static str {
         "encomenda.entregar" => "entregou a encomenda",
         "encomenda.cancelar" => "cancelou a encomenda",
         "estoque.dias" => "mudou os dias da sugestão de compra",
+        "backup.restaurar" => "restaurou um backup",
+        "caixa.abrir" => "abriu o caixa",
+        "caixa.fechar" => "fechou o caixa",
+        "caixa.caixa_fechado" => "lançou no Caixa geral (caixa fechado)",
+        "caixa.retirar" => "retirou um caixa da loja",
+        "caixa.readmitir" => "readmitiu um caixa na loja",
+        "codigos.assumir" => "passou a distribuir as faixas de códigos",
+        "codigos.caixa_novo" => "registrou este banco como caixa novo",
+        "codigos.computador" => "confirmou o computador deste caixa",
+        "codigos.definir" => "deu código aos cadastros a definir",
+        "compra.autorizacao" => "conferiu a nota no portal da NF-e",
+        "conflito.resolver" => "resolveu uma diferença entre caixas",
+        "conflito.manter_todos" => "deixou as diferenças entre caixas como estão",
+        "dre.classificacao" => "classificou as categorias do resultado",
+        "dre.meta" => "mudou uma meta do resultado",
+        "gerente.liberar" => "digitou a senha do gerente",
+        "gerente.salvar" => "mudou quem é gerente ou o que só o gerente pode",
+        "os.criar" => "abriu a OS",
+        "os.situacao" => "mudou a etapa da OS",
+        "os.entregar" => "entregou a OS",
+        "os.cancelar" => "cancelou a OS",
+        "os.rascunho" => "salvou um rascunho de OS",
+        "os.rascunho_excluir" => "excluiu um rascunho de OS",
+        "pendencia.arquivar" => "arquivou uma pendência da troca de dados",
+        "pessoa.codigo" => "deu código novo ao cadastro",
+        "precos.regras" => "mudou a regra de preço",
+        "produto.codigo" => "deu código novo à peça",
+        "produto.defeito" => "registrou peça com defeito",
+        "produto.importar" => "importou cadastros",
+        "referencia.aceitar" => "aceitou um registro incompleto como está",
+        "venda.devolucao" => "registrou troca ou devolução",
+        "venda.devolucao_desfeita" => "desfez a troca ou devolução",
         "entrar" => "entrou",
         "sair" => "saiu",
         _ => "registrou",

@@ -5,6 +5,9 @@
 //! nenhuma janela (`cargo test`).
 
 pub mod api;
+#[cfg(test)]
+#[path = "../tests/apoio/chave.rs"]
+pub(crate) mod apoio_chave;
 pub mod arquivos;
 pub mod auditoria;
 pub mod avisos;
@@ -32,7 +35,9 @@ pub mod fiscal;
 pub mod gtin;
 pub mod importar;
 pub mod impressao;
+pub mod loja;
 pub mod menu;
+pub mod migracao;
 pub mod nfe_assinatura;
 pub mod nfe_xml;
 pub mod numeros;
@@ -47,10 +52,25 @@ pub mod rede_local;
 pub mod registro;
 pub mod reposicao;
 pub mod senhas;
+pub mod supervisao;
 pub mod sync;
 pub mod tempo;
 #[cfg(test)]
 pub(crate) mod teste_rede;
+#[cfg(test)]
+mod testes_0915;
+#[cfg(test)]
+mod testes_chave;
+#[cfg(test)]
+mod testes_loja;
+#[cfg(test)]
+mod testes_modo_seguro;
+#[cfg(test)]
+mod testes_r03;
+#[cfg(test)]
+mod testes_rvi03;
+#[cfg(test)]
+mod testes_supervisao;
 pub mod texto;
 pub mod unidades;
 pub mod usuarios;

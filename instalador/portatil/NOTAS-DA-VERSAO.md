@@ -58,6 +58,16 @@ Linux: `sha256sum {{APPIMAGE}}`
 - Importação de uma cópia da exportação real do SINTEC.
 - Decisões pendentes da auditoria: R-01 (senha da rede curta), R-02 (cancelar venda de um caixa aberto em outro computador), R-03 (parcela paga a mais por dois caixas sem rede).
 
+### O que mudou na 0.9.15
+
+- **Atualização do banco com cópia de segurança:** antes de atualizar, o Rustinho guarda uma cópia conferida (SHA-256); se a atualização falhar ou o computador desligar no meio, a cópia volta e nada se perde.
+- **Rascunho de OS:** ao sair de uma OS nova com algo preenchido, dá para "Salvar rascunho", "Cancelar" ou "Sair sem salvar". O rascunho fica em Abertas e Todas, sem número, e vira orçamento (com número) ao salvar. Só é permitido quando todos os caixas da loja confirmaram, nos últimos 7 dias, uma versão que entende rascunho.
+- **Troca de dados mais segura:** o que não pode ser aplicado fica guardado inteiro como pendência (nunca é jogado fora) e é tentado de novo sozinho; o gerente vê, arquiva com motivo ou retira da loja um caixa que não existe mais.
+- **Tela inicial nova:** notificações por gravidade (informativa, atenção, crítica), que minimizam com um clique e levam ao lugar de resolver; pílulas na horizontal, com ícone; "Vender / Receber" e "Estoque / Fornecedores" juntos.
+- **Configurações › Simultaneidade:** Duplicatas, Histórico (troca de dados e quem fez o quê), Caixas, Backup e Fiscal, com uma senha do gerente ao entrar.
+- **Clique duplo:** a mesma gravação não é feita duas vezes; funções demoradas mostram uma barra de espera.
+- **Windows:** corrigida a causa dos acentos trocados nas telas (ex.: "NinguÃ©m"): o compilador do Windows passa a ler os arquivos como UTF-8. Ainda precisa ser conferido num Windows de verdade.
+
 ### O que mudou na 0.9.14
 
 - **Caixa já fechado não muda mais (D-14):** cancelar uma venda, estornar um recebimento ou desfazer uma devolução de um caixa já fechado não mexe no fechamento dele; o dinheiro sai (ou entra) na gaveta aberta deste computador ou, sem caixa aberto, no Caixa geral.

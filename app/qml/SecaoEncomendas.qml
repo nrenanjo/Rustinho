@@ -23,8 +23,9 @@ FocusScope {
     function nova() {
         nova_.abrir()
     }
+    // Ações sobre uma encomenda que já existe (FALHA-04: com chave).
     function acao(comando, dados, mensagem) {
-        const r = Api.chamar(comando, dados)
+        const r = Api.gravar(comando, dados)
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
             return false
@@ -164,7 +165,7 @@ FocusScope {
                         }
                         Text {
                             text: [Tema.estreito ? linha.e.nomeSituacao : "", Tema.estreito && linha.aberta ? linha.e.nomePagamento : "",
-                                   "Nº " + linha.e.numero + " · " + linha.e.cliente, linha.e.telefone, linha.e.desde,
+                                   "Nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + " · " + linha.e.cliente, linha.e.telefone, linha.e.desde,
                                    linha.e.avisado ? "avisado " + linha.e.avisadoEm : "",
                                    linha.e.situacao === "cancelada" ? linha.e.motivo : linha.e.observacoes]
                                   .filter(x => !!x).join("  ·  ")
@@ -226,7 +227,7 @@ FocusScope {
                         tipo: "secundario"
                         implicitHeight: 36
                         onClicked: secao.janela.confirmar("Entregar ao cliente?",
-                            linha.e.pagamento === "falta" ? linha.e.nomePagamento + " no Receber. Receba antes ou depois, pelo Receber." : "A encomenda nº " + linha.e.numero + " sai da lista.",
+                            linha.e.pagamento === "falta" ? linha.e.nomePagamento + " no Receber. Receba antes ou depois, pelo Receber." : "A encomenda nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + " sai da lista.",
                             "Entregar", () => secao.acao("encomenda_entregar", { id: linha.e.id }, "Encomenda entregue."))
                     }
                     Botao {
@@ -267,9 +268,9 @@ FocusScope {
                         text: "Cancelar"
                         tipo: "discreto"
                         implicitHeight: 36
-                        onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + "?",
+                        onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + "?",
                                                     linha.e.descricao + " · " + linha.e.cliente, "Cancelar encomenda",
-                                                    m => Api.chamar("encomenda_cancelar", { id: linha.e.id, motivo: m }))
+                                                    m => Api.gravar("encomenda_cancelar", { id: linha.e.id, motivo: m }))
                     }
                 }
             }
@@ -302,10 +303,13 @@ FocusScope {
         property string clienteId: ""
         property var achados: []
         property string produtoId: ""
+        // FALHA-04: chave desta encomenda (nova a cada vez que a janela abre).
+        property string chave: ""
         property string erro: ""
         property string campoErro: ""
 
         function abrir() {
+            chave = Api.novaChave()
             clienteId = ""
             achados = []
             produtoId = ""
@@ -345,7 +349,7 @@ FocusScope {
             nQtd.focar()
         }
         function salvar() {
-            const r = Api.chamar("encomenda_criar", {
+            const r = Api.gravar("encomenda_criar", {
                 clienteId: clienteId,
                 clienteNome: clienteId ? "" : nCliente.texto,
                 telefone: nTelefone.texto,
@@ -353,7 +357,7 @@ FocusScope {
                 descricao: produtoId ? "" : nPeca.texto,
                 quantidade: nQtd.texto,
                 observacoes: nObs.texto
-            })
+            }, chave)
             if (!r.ok) {
                 erro = r.erro
                 campoErro = r.campo || ""

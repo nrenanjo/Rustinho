@@ -11,6 +11,26 @@ FocusScope {
     property var sync: null
     property bool procurando: false
 
+    // FALHA-01 (V01a): voltar desfaz a tentativa inteira (troca de dados
+    // desligada, senha e endereços da rede, o que já tinha chegado da loja).
+    function desistir() {
+        tela.procurando = false
+        const r = Api.chamar("sync_desistir_juntar")
+        if (!r.ok) {
+            tela.janela.avisar(r.erro, "erro")
+            return
+        }
+        tela.janela.atualizarEstado()
+        tela.janela.trocarPara("TelaBoasVindas")
+    }
+
+    // Aberta de novo no meio de uma tentativa (o programa fechou): continua
+    // esperando os dados da loja.
+    Component.onCompleted: {
+        if (janela && janela.estado && janela.estado.juntando)
+            procurando = true
+    }
+
     function juntar() {
         for (const c of [caixa, senha, enderecos])
             c.erro = ""
@@ -133,7 +153,7 @@ FocusScope {
                 Botao {
                     text: "Voltar"
                     tipo: "discreto"
-                    onClicked: tela.janela.trocarPara("TelaBoasVindas")
+                    onClicked: tela.desistir()
                 }
                 Item { Layout.fillWidth: true }
                 Botao {

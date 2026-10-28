@@ -331,7 +331,9 @@ fn de_zip<R: Read + std::io::Seek>(
         if !f.is_file() {
             continue;
         }
-        let interno = f.name().rsplit('/').next().unwrap_or_default().to_string();
+        // zip 9: o nome pode não ser lido (fica de fora, como uma entrada estragada).
+        let Ok(nome_no_zip) = f.name() else { continue };
+        let interno = nome_no_zip.rsplit('/').next().unwrap_or_default().to_string();
         let baixo = interno.to_lowercase();
         let nome = format!("{pacote} › {interno}");
         let limite = if baixo.ends_with(".xml") {

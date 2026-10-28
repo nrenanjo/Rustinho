@@ -4,6 +4,8 @@
 //! `docs/TESTES-estabilidade.md`; os defeitos achados, em `docs/DEFEITOS.md`.
 
 mod a1_auditoria;
+#[path = "../apoio/chave.rs"]
+mod apoio_chave;
 mod comum;
 mod d09_custos;
 mod t1_backup;
@@ -29,6 +31,10 @@ fn montar_loja_de_teste() {
                             "senha": comum::SENHA_ANA, "senha2": comum::SENHA_ANA }),
     );
     comum::povoar(&mut l);
+    // RVI-02 (app/testes/telas_rvi02.py): a mesma loja com a troca de dados ligada.
+    if std::env::var_os("RUSTINHO_LOJA_TROCA").is_some() {
+        l.ok("sync_salvar", serde_json::json!({ "ligado": true, "senha": "rede-da-loja-teste", "enderecos": "" }));
+    }
 }
 
 /// Só à mão: desativa um usuário da loja de teste por fora, como se a

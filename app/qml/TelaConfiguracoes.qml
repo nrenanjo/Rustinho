@@ -4,24 +4,41 @@ import QtQuick.Layouts
 import rustinho
 
 // Configurações, uma parte de cada vez nas pílulas: a loja, vendas,
-// crediário, impressão, backup, os caixas da loja e "sobre".
+// crediário, impressão, Simultaneidade, Gerente e "sobre". Simultaneidade
+// (0.9.15) junta o que é dos caixas trabalhando juntos: Duplicatas,
+// Histórico, Caixas, Backup e Fiscal (que saiu da tela inicial); uma senha do
+// gerente ao entrar abre a consulta de todas (gravar pede a senha de novo).
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
     property var config: null
     property bool alterado: false
     property string secao: "loja"
+    readonly property var partesSimultaneidade: ["duplicatas", "historico", "caixas", "backup", "fiscal"]
+    readonly property string grupo: partesSimultaneidade.includes(secao) ? "simultaneidade" : secao
+    property string ultimaSimultaneidade: "duplicatas"
+    onSecaoChanged: if (partesSimultaneidade.includes(secao)) ultimaSimultaneidade = secao
+    // Simultaneidade › Histórico (0.9.15).
+    property var historicoTroca: null
+    property var auditoria: []
     readonly property bool temSalvar: ["loja", "vendas", "receber", "impressao", "gerente"].includes(secao)
     // Gerente (ou senha do gerente digitada agora): vê as configurações da
     // loja toda. O caixa vê só as deste computador.
     property bool completo: false
     property bool verBackup: false
     property bool verGerente: false
+    // FALHA-05: consulta da Simultaneidade (Duplicatas, Histórico, Caixas),
+    // separada da pílula Gerente.
+    property bool verSimultaneidade: false
     property var gerente: null       // pílula Gerente: { acoes, usuarios }
     property var conflitos: []       // pílula Gerente: diferenças entre caixas
     property var codigos: null       // pílula Gerente: faixas e códigos repetidos
     property bool confirmarAssumir: false
     property bool confirmarCaixaNovo: false
+    // Caixas da loja (0.9.15): a versão de cada um e as pendências da troca.
+    property var caixasConhecidos: []
+    property int prazoCompatibilidade: 7
+    property var pendencias: []
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
     Component.onDestruction: Api.chamar("gerente_encerrar")
 
@@ -68,6 +85,8 @@ FocusScope {
         tabelas.model = config.tabelas
         if (verGerente)
             carregarGerente()
+        if (verSimultaneidade)
+            carregarDuplicatas()
         alterado = false
     }
 
@@ -80,7 +99,35 @@ FocusScope {
             carregar()
         })
     }
+    // Simultaneidade: uma senha do gerente abre a consulta das partes que
+    // ficam ali (configurações da loja, backup e a própria Simultaneidade:
+    // duplicatas, histórico e caixas). A pílula Gerente pede a senha dela
+    // (FALHA-05, D-09).
+    function entrarSimultaneidade(destino) {
+        janela.comGerenteVarias(["configuracoes", "backup", "simultaneidade"], "Simultaneidade", () => {
+            const recarregar = !tela.completo || !tela.verSimultaneidade
+            tela.completo = true
+            tela.verBackup = true
+            tela.verSimultaneidade = true
+            if (recarregar)
+                carregar()
+            carregarHistorico()
+            tela.secao = destino
+        })
+    }
+
+    function carregarHistorico() {
+        const h = Api.chamar("troca_historico")
+        historicoTroca = h.ok ? h.dados : null
+        const a = Api.chamar("auditoria_listar")
+        auditoria = a.ok ? a.dados : []
+    }
+
     function escolherSecao(id) {
+        if (id === "simultaneidade") {
+            entrarSimultaneidade(ultimaSimultaneidade)
+            return
+        }
         if (id === "backup" && !verBackup) {
             janela.comGerente("backup", () => {
                 tela.verBackup = true
@@ -102,6 +149,10 @@ FocusScope {
     function carregarGerente() {
         const r = Api.chamar("gerente_ler")
         gerente = r.ok ? r.dados : null
+    }
+
+    // Simultaneidade › Duplicatas: diferenças entre caixas e códigos repetidos.
+    function carregarDuplicatas() {
         const k = Api.chamar("conflitos_listar")
         conflitos = k.ok ? k.dados : []
         const c = Api.chamar("codigos_situacao")
@@ -242,7 +293,72 @@ FocusScope {
 
     property var sync: null
 
+    function carregarCaixas() {
+        const c = Api.chamar("caixas_conhecidos")
+        if (c.ok) {
+            caixasConhecidos = c.dados.caixas
+            prazoCompatibilidade = c.dados.prazoDias
+        }
+        if (verSimultaneidade) {
+            const p = Api.chamar("pendencias_listar")
+            pendencias = p.ok ? p.dados : []
+        }
+    }
+
+    function retirarCaixa(c) {
+        motivoReferencia.perguntar(
+            "Retirar " + c.nome + " da loja?",
+            "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas; "
+            + "se voltar à rede, não entra sozinho: o gerente precisa readmiti-lo. Fica no histórico com o seu nome e o motivo.",
+            "Retirar da loja", (m, pronto) => janela.chamarGerente("caixa_retirar", { dispositivo: c.dispositivo, motivo: m }, r => {
+                pronto(r)
+                if (r.ok) {
+                    carregarCaixas()
+                    janela.avisar(c.nome + " foi retirado da loja.", "ok")
+                }
+            }),
+            "Motivo (por que sai da loja?)", "perigo")
+    }
+
+    function readmitirCaixa(c) {
+        janela.confirmar("Readmitir " + c.nome + "?", "Ele volta a trocar dados com os caixas da loja.", "Readmitir", () => {
+            janela.chamarGerente("caixa_readmitir", { dispositivo: c.dispositivo }, r => {
+                if (r.ok) {
+                    carregarCaixas()
+                    janela.avisar(c.nome + " foi readmitido.", "ok")
+                } else {
+                    janela.avisar(r.erro, "erro")
+                }
+            })
+        })
+    }
+
+    function arquivarPendencia(p) {
+        motivoReferencia.perguntar(
+            "Arquivar esta pendência?",
+            "Ela não é aplicada nem apagada: a cópia inteira continua guardada e fica no histórico com o seu nome e o motivo.",
+            "Arquivar", (m, pronto) => janela.chamarGerente("pendencia_arquivar", { id: p.alteracaoId, motivo: m }, r => {
+                pronto(r)
+                if (r.ok)
+                    pendencias = r.dados
+            }),
+            "Motivo (por que não tem como aplicar?)", "secundario")
+    }
+
+    function reaplicarPendencias() {
+        janela.chamarGerente("pendencias_reaplicar", {}, r => {
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            pendencias = r.dados.pendencias
+            janela.avisar(r.dados.aplicadas > 0 ? r.dados.aplicadas + " pendência(s) aplicada(s)." : "Nenhuma pendência pôde ser aplicada ainda.",
+                          r.dados.aplicadas > 0 ? "ok" : "info")
+        })
+    }
+
     function carregarSync() {
+        carregarCaixas()
         const r = Api.chamar("sync_ler")
         if (r.ok) {
             sync = r.dados
@@ -320,7 +436,10 @@ FocusScope {
     }
 
     function aoEsc() {
-        if (alterado)
+        if (secao === "fiscal" && fiscal.item && fiscal.item.regrasAlteradas)
+            janela.confirmar("Descartar as regras alteradas?", "As mudanças nas regras de ST ainda não foram salvas.",
+                             "Descartar", () => janela.voltar(), "perigo")
+        else if (alterado)
             janela.confirmar("Descartar alterações?", "As configurações mudadas ainda não foram salvas.",
                              "Descartar", () => janela.voltar(), "perigo")
         else
@@ -349,8 +468,11 @@ FocusScope {
                 vendas: "Tabelas de preço e orçamentos",
                 receber: "Multa e juros de quem paga atrasado",
                 impressao: "Comprovante, orçamento e impressora",
+                duplicatas: "Diferenças entre caixas e códigos repetidos",
+                historico: "A troca de dados entre os caixas e quem fez o quê",
                 backup: "Cópias dos dados no computador e no Google Drive",
                 caixas: "Os computadores da loja trocando dados pela rede",
+                fiscal: "Emissão fiscal, CSOSN, regras de ST, NCM e PIS/Cofins das peças",
                 sobre: "Versão e onde ficam os dados"
             })[tela.secao]
             Layout.fillWidth: true
@@ -384,21 +506,66 @@ FocusScope {
                 { id: "vendas", nome: "Vendas" },
                 { id: "receber", nome: "Crediário" },
                 { id: "impressao", nome: "Impressão" },
-                { id: "backup", nome: "Backup" },
-                { id: "caixas", nome: "Caixas da loja" },
+                { id: "simultaneidade", nome: "Simultaneidade" },
                 { id: "gerente", nome: "Gerente" },
                 { id: "sobre", nome: "Sobre" }
             ] : [
                 { id: "loja", nome: "Este computador" },
                 { id: "impressao", nome: "Impressão" },
+                { id: "simultaneidade", nome: "Simultaneidade" },
                 { id: "sobre", nome: "Sobre" }
             ]
-            atual: tela.secao
+            atual: tela.grupo
             onEscolhido: id => tela.escolherSecao(id)
+        }
+
+        // Subpílulas de Simultaneidade, numa faixa clara.
+        Rectangle {
+            visible: tela.grupo === "simultaneidade"
+            color: Tema.sombra(0.06)
+            radius: 14
+            Layout.preferredWidth: Math.min(subpilulas.implicitWidth + 8, parent.width)
+            implicitHeight: subpilulas.implicitHeight + 8
+            Layout.topMargin: -6
+            Pilulas {
+                id: subpilulas
+                x: 4
+                y: 4
+                width: parent.width - 8
+                modelo: [
+                    { id: "duplicatas", nome: "Duplicatas" },
+                    { id: "historico", nome: "Histórico" },
+                    { id: "caixas", nome: "Caixas" },
+                    { id: "backup", nome: "Backup" },
+                    { id: "fiscal", nome: "Fiscal" }
+                ]
+                atual: tela.secao
+                onEscolhido: id => {
+                    if (id === "historico")
+                        tela.carregarHistorico()
+                    tela.secao = id
+                }
+            }
+        }
+
+        // Fiscal: a conferência fiscal inteira (a mesma da tela Fiscal).
+        Loader {
+            id: fiscal
+            visible: tela.secao === "fiscal"
+            active: tela.secao === "fiscal"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            source: "TelaFiscal.qml"
+            onLoaded: {
+                item.embutida = true
+                item.irPara.connect(s => tela.secao = s)
+                item.carregar()
+            }
         }
 
         Flickable {
             id: rolagem
+            visible: tela.secao !== "fiscal"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -803,6 +970,20 @@ FocusScope {
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
+                    // O-3 / RVI-02: não mostra a troca como funcionando com uma
+                    // tarefa parada ou esperando para tentar de novo (com o motivo).
+                    Nota {
+                        readonly property var falhas: tela.sync && tela.sync.tarefasComFalha ? tela.sync.tarefasComFalha : []
+                        visible: falhas.length > 0
+                        text: "A troca de dados não está funcionando neste caixa: "
+                              + falhas.map(f => f.tarefa + " — " + f.motivo
+                                                + (f.situacao === "parada" ? " (parou)" : " (tentando de novo)")).join("; ")
+                              + (falhas.some(f => f.situacao === "parada")
+                                 ? ". Feche e abra o Rustinho; se continuar, chame o suporte." : ".")
+                        color: Tema.vermelho
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
                     Nota {
                         visible: !!tela.sync && tela.sync.senhaFraca
                         text: "A senha da rede tem menos de 4 caracteres. Quando puder, troque-a em todos os caixas."
@@ -896,6 +1077,135 @@ FocusScope {
                     }
                 }
 
+                // ---------------- Caixas da loja: versão de cada um (0.9.15) ----------------
+                Faixa {
+                    visible: tela.secao === "caixas" && tela.caixasConhecidos.length > 0
+                    titulo: "Versão dos caixas"
+                    subtitulo: "rascunho de OS novo só quando todos confirmam a versão nos últimos " + tela.prazoCompatibilidade + " dias"
+                    color: Tema.pergaminho
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: tela.caixasConhecidos
+                        delegate: RowLayout {
+                            id: linhaCaixa
+                            required property var modelData
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Rectangle {
+                                Layout.preferredWidth: 10
+                                Layout.preferredHeight: 10
+                                Layout.alignment: Qt.AlignVCenter
+                                radius: 5
+                                color: linhaCaixa.modelData.situacao === "compativel" ? Tema.verdeEscuro
+                                       : linhaCaixa.modelData.situacao === "retirado" ? Tema.apagado : Tema.vermelho
+                            }
+                            ColumnLayout {
+                                spacing: 1
+                                Layout.fillWidth: true
+                                Text {
+                                    text: linhaCaixa.modelData.nome
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: linhaCaixa.modelData.texto
+                                          + (linhaCaixa.modelData.compativelEmTexto ? " Última confirmação: " + linhaCaixa.modelData.compativelEmTexto + "." : "")
+                                          + (linhaCaixa.modelData.naoEnviadas > 0 ? " A troca de dados com ele parou: " + linhaCaixa.modelData.naoEnviadas
+                                             + " alteração(ões) esperam a atualização dele." : "")
+                                          + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
+                                             + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
+                                    color: linhaCaixa.modelData.bloqueia ? Tema.vermelho : Tema.tintaSuave
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            Botao {
+                                visible: linhaCaixa.modelData.situacao !== "retirado"
+                                text: "Retirar da loja"
+                                tipo: "discreto"
+                                onClicked: tela.retirarCaixa(linhaCaixa.modelData)
+                            }
+                            Botao {
+                                visible: linhaCaixa.modelData.situacao === "retirado"
+                                text: "Readmitir"
+                                tipo: "secundario"
+                                onClicked: tela.readmitirCaixa(linhaCaixa.modelData)
+                            }
+                        }
+                    }
+                }
+
+                // ---------------- Caixas da loja: pendências da troca (0.9.15) ----------------
+                Faixa {
+                    visible: tela.secao === "caixas"
+                    titulo: "Pendências da troca de dados"
+                    subtitulo: "alterações guardadas inteiras, sem aplicar"
+                    color: Tema.azul
+                    corTitulo: Tema.azulEscuro
+                    Layout.fillWidth: true
+                    Nota {
+                        visible: !tela.verSimultaneidade
+                        text: "Só o gerente vê as pendências."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: !tela.verSimultaneidade
+                        text: "Ver pendências"
+                        tipo: "secundario"
+                        onClicked: janela.comGerente("simultaneidade", () => {
+                            tela.verSimultaneidade = true
+                            tela.carregarCaixas()
+                        })
+                    }
+                    Nota {
+                        visible: tela.verSimultaneidade && tela.pendencias.length === 0
+                        text: "Nenhuma pendência: tudo o que chegou dos outros caixas foi aplicado."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.verSimultaneidade ? tela.pendencias : []
+                        delegate: RowLayout {
+                            id: linhaPend
+                            required property var modelData
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Text {
+                                text: "<b>" + linhaPend.modelData.textoMotivo + "</b> · " + linhaPend.modelData.oQue + " · "
+                                      + (linhaPend.modelData.lado === "nao_enviada" ? "não vai para " : "veio de ") + linhaPend.modelData.caixa
+                                      + (linhaPend.modelData.detalhe ? " · " + linhaPend.modelData.detalhe : "")
+                                      + (linhaPend.modelData.ultimoErro ? " · " + linhaPend.modelData.ultimoErro : "")
+                                      + (linhaPend.modelData.estado === "arquivada_manual"
+                                         ? " · arquivada por " + linhaPend.modelData.arquivadaPor + ": " + linhaPend.modelData.arquivadaMotivo : "")
+                                textFormat: Text.StyledText
+                                color: linhaPend.modelData.estado === "arquivada_manual" ? Tema.tintaSuave : Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Botao {
+                                visible: linhaPend.modelData.podeArquivar
+                                text: "Arquivar"
+                                tipo: "discreto"
+                                onClicked: tela.arquivarPendencia(linhaPend.modelData)
+                            }
+                        }
+                    }
+                    Botao {
+                        visible: tela.verSimultaneidade && tela.pendencias.some(p => p.estado === "pendente" && p.lado === "recebida")
+                        text: "Tentar aplicar de novo"
+                        tipo: "secundario"
+                        onClicked: tela.reaplicarPendencias()
+                    }
+                }
+
                 // ---------------- Gerente ----------------
                 Faixa {
                     visible: tela.secao === "gerente"
@@ -964,7 +1274,7 @@ FocusScope {
                 }
 
                 Faixa {
-                    visible: tela.secao === "gerente"
+                    visible: tela.secao === "duplicatas"
                     titulo: "Diferenças entre caixas"
                     subtitulo: tela.conflitos.filter(c => !c.resolvido).length > 0
                                ? tela.conflitos.filter(c => !c.resolvido).length + " para ver"
@@ -1062,7 +1372,7 @@ FocusScope {
                 }
 
                 Faixa {
-                    visible: tela.secao === "gerente" && !!tela.codigos
+                    visible: tela.secao === "duplicatas" && !!tela.codigos
                     titulo: "Códigos das peças"
                     subtitulo: tela.codigosParaVer > 0 ? tela.codigosParaVer + " para ver" : "nenhum repetido"
                     color: tela.codigosParaVer > 0 ? Tema.rosa : Tema.pergaminho
@@ -1428,6 +1738,143 @@ FocusScope {
                     }
                 }
 
+                // ---------------- Simultaneidade › Histórico (0.9.15) ----------------
+                Faixa {
+                    visible: tela.secao === "historico"
+                    titulo: "Troca de dados"
+                    subtitulo: "como foi a última troca com cada caixa"
+                    color: Tema.verde
+                    corTitulo: Tema.verdeEscuro
+                    Layout.fillWidth: true
+                    Nota {
+                        visible: !!tela.historicoTroca && tela.historicoTroca.caixas.length === 0
+                        text: "Este computador ainda não trocou dados com nenhum outro caixa."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.historicoTroca ? tela.historicoTroca.caixas : []
+                        delegate: RowLayout {
+                            id: linhaTroca
+                            required property var modelData
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Rectangle {
+                                Layout.preferredWidth: 10
+                                Layout.preferredHeight: 10
+                                Layout.alignment: Qt.AlignVCenter
+                                radius: 5
+                                color: linhaTroca.modelData.situacao === "retirado" ? Tema.apagado
+                                       : linhaTroca.modelData.erro ? Tema.vermelho
+                                       : linhaTroca.modelData.sincronizadoEm ? Tema.verdeEscuro : Tema.apagado
+                            }
+                            ColumnLayout {
+                                spacing: 1
+                                Layout.fillWidth: true
+                                Text {
+                                    text: linhaTroca.modelData.nome + (linhaTroca.modelData.situacao === "retirado" ? " (retirado da loja)" : "")
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: "Última troca: " + (linhaTroca.modelData.sincronizadoEm || "nunca")
+                                          + " · visto na rede: " + (linhaTroca.modelData.vistoEm || "nunca")
+                                          + (linhaTroca.modelData.erro ? " · último erro: " + linhaTroca.modelData.erro : "")
+                                    color: linhaTroca.modelData.erro ? Tema.vermelho : Tema.tintaSuave
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                    }
+                    Rotulo {
+                        text: "Pendências encerradas"
+                        Layout.topMargin: 6
+                    }
+                    Nota {
+                        visible: !tela.historicoTroca || tela.historicoTroca.encerradas.length === 0
+                        text: "Nenhuma pendência da troca de dados foi encerrada ainda. As que estão abertas ficam em Caixas."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.historicoTroca ? tela.historicoTroca.encerradas : []
+                        delegate: Text {
+                            required property var modelData
+                            text: "<b>" + modelData.oQue + "</b> · " + (modelData.lado === "nao_enviada" ? "não ia para " : "veio de ") + modelData.caixa
+                                  + " · " + modelData.textoMotivo + " · desde " + modelData.criadoEm + " · "
+                                  + (modelData.estado === "arquivada_manual"
+                                     ? "arquivada em " + modelData.encerradaEm + " por " + (modelData.arquivadaPor || "gerente") + ": " + modelData.arquivadaMotivo
+                                     : "resolvida em " + modelData.encerradaEm)
+                                  + (modelData.tentativas > 0 ? " · " + modelData.tentativas + (modelData.tentativas === 1 ? " tentativa" : " tentativas") : "")
+                            textFormat: Text.StyledText
+                            color: modelData.estado === "arquivada_manual" ? Tema.tintaSuave : Tema.tinta
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                Faixa {
+                    visible: tela.secao === "historico"
+                    titulo: "Quem fez o quê"
+                    subtitulo: "auditoria da loja: os " + tela.auditoria.length + " registros mais recentes"
+                    color: Tema.pergaminho
+                    Layout.fillWidth: true
+                    Campo {
+                        id: filtroAuditoria
+                        dica: "Filtrar por usuário, caixa ou o que foi feito"
+                        icone: "busca"
+                        Layout.fillWidth: true
+                    }
+                    Nota {
+                        visible: tela.auditoria.length === 0
+                        text: "Nada registrado ainda."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: {
+                            const f = filtroAuditoria.texto.trim().toLowerCase()
+                            if (!f)
+                                return tela.auditoria
+                            return tela.auditoria.filter(r => (r.usuario + " " + r.caixa + " " + r.descricao + " " + r.detalhes.join(" ")).toLowerCase().indexOf(f) >= 0)
+                        }
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            spacing: 1
+                            Layout.fillWidth: true
+                            Text {
+                                text: "<b>" + modelData.quando + "</b> · " + (modelData.usuario || "Sistema")
+                                      + (modelData.caixa ? " (" + modelData.caixa + ")" : "") + " " + modelData.descricao
+                                textFormat: Text.StyledText
+                                color: Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                visible: modelData.detalhes.length > 0
+                                text: modelData.detalhes.join(" · ")
+                                textFormat: Text.PlainText
+                                color: Tema.tintaSuave
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+
                 // ---------------- Backup ----------------
                 Loader {
                     active: tela.secao === "backup"
@@ -1494,6 +1941,27 @@ FocusScope {
         completo = janela.podeGerente("configuracoes", true)
         verBackup = janela.podeGerente("backup", true)
         verGerente = janela.podeGerente("gerente", true)
+        verSimultaneidade = janela.podeGerente("simultaneidade", true)
         carregar()
+        // Aberta por uma notificação numa parte que só aparece com a senha do
+        // gerente: pede a senha ali mesmo, sem trocar de usuário.
+        const soComGerente = !["loja", "impressao", "sobre"].includes(secao)
+        if (partesSimultaneidade.includes(secao)) {
+            const destino = secao
+            secao = "loja"
+            entrarSimultaneidade(destino)
+        } else if (soComGerente && !completo) {
+            const destino = secao
+            secao = "loja"
+            janela.comGerente("configuracoes", () => {
+                tela.completo = true
+                carregar()
+                tela.escolherSecao(destino)
+            })
+        } else if (secao === "backup" || secao === "gerente") {
+            const destino = secao
+            secao = "loja"
+            escolherSecao(destino)
+        }
     }
 }

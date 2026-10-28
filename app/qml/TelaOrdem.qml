@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Templates as T
 import QtQuick.Layouts
 import rustinho
 
@@ -23,6 +24,11 @@ FocusScope {
 
     readonly property bool nova: osId === ""
     readonly property string situacao: ficha ? ficha.situacao : "orcamento"
+    // Rascunho (0.9.15): guardado ao sair, sem número; "Salvar" o torna orçamento.
+    readonly property bool rascunho: situacao === "rascunho"
+    // Chave da operação: a mesma gravação repetida (duplo clique) é recusada
+    // pelo núcleo. Muda a cada gravação que deu certo.
+    property string chave: Api.novaChave()
     readonly property bool travada: situacao === "entregue" || situacao === "cancelada"
     readonly property var servicosComuns: ["Mão de obra", "Troca de óleo e filtro", "Troca de pastilhas", "Alinhamento", "Balanceamento",
                                            "Revisão", "Diagnóstico", "Troca de correia dentada", "Troca de amortecedores", "Limpeza de bicos"]
@@ -136,7 +142,8 @@ FocusScope {
     function salvar() {
         erro = ""
         campoErro = ""
-        const r = Api.chamar("os_salvar", entrada())
+        const era = nova || rascunho
+        const r = Api.gravar("os_salvar", entrada(), chave)
         if (!r.ok) {
             erro = r.erro
             campoErro = r.campo || ""
@@ -146,16 +153,47 @@ FocusScope {
                 cliente.focar()
             return false
         }
-        const era = nova
+        chave = Api.novaChave()
         preencher(r.dados)
-        janela.avisar(era ? "OS " + r.dados.numero + " aberta." : "OS salva.", "ok")
+        janela.avisar(era ? "OS " + r.dados.numero + (r.dados.caixa ? " (" + r.dados.caixa + ")" : "") + " aberta." : "OS salva.", "ok")
         return true
+    }
+
+    // Guarda os campos preenchidos e os itens para continuar depois (a OS
+    // aparece em Abertas como "Rascunho"). Não exige cliente nem carro.
+    function salvarRascunho() {
+        erro = ""
+        campoErro = ""
+        const r = Api.gravar("os_rascunho_salvar", entrada(), chave)
+        if (!r.ok) {
+            if (r.campo === "previsao")
+                previsao.focar()
+            janela.avisar(r.erro, "erro")
+            return false
+        }
+        chave = Api.novaChave()
+        preencher(r.dados)
+        janela.avisar("Rascunho guardado. Ele fica em Ordens de serviço › Abertas para continuar depois.", "ok")
+        return true
+    }
+
+    function excluirRascunho() {
+        janela.confirmar("Excluir este rascunho?", "O que foi preenchido e os itens serão apagados.", "Excluir rascunho", () => {
+            const r = Api.gravar("os_rascunho_excluir", { id: osId })
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            alterado = false
+            janela.avisar("Rascunho excluído.", "ok")
+            janela.voltar()
+        }, "perigo")
     }
 
     function passar(nova_) {
         if (alterado && !salvar())
             return
-        const r = Api.chamar("os_situacao", { id: osId, situacao: nova_ })
+        const r = Api.gravar("os_situacao", { id: osId, situacao: nova_ })
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
             return
@@ -228,8 +266,15 @@ FocusScope {
         }
     }
 
+    // Ao sair da Nova OS (ou de um rascunho) com algo preenchido: três
+    // opções. "Salvar rascunho" guarda tudo; "Cancelar" volta ao formulário
+    // sem perder nada; "Sair sem salvar" descarta o que não foi salvo.
     function aoEsc() {
-        if (alterado && !travada)
+        if (saida.opened)
+            return
+        if (alterado && (nova || rascunho))
+            saida.open()
+        else if (alterado && !travada)
             janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair", () => janela.voltar(), "perigo")
         else
             janela.voltar()
@@ -253,7 +298,8 @@ FocusScope {
 
         Cabecalho {
             textoVoltar: "Ordens de serviço"
-            titulo: tela.nova ? "Nova OS" : "OS " + tela.ficha.numero + (tela.ficha.placa ? " · " + tela.ficha.placa : "")
+            titulo: tela.nova ? "Nova OS" : tela.rascunho ? "Rascunho de OS" + (tela.ficha.placa ? " · " + tela.ficha.placa : "")
+                    : "OS " + tela.ficha.numero + (tela.ficha.caixa ? " · " + tela.ficha.caixa : "") + (tela.ficha.placa ? " · " + tela.ficha.placa : "")
             subtitulo: !tela.ficha ? "Comece pela placa: se o carro já veio antes, o Rustinho preenche o resto."
                        : [tela.ficha.veiculo, tela.ficha.cliente, "aberta " + tela.ficha.criadoEm + (tela.ficha.criadoPor ? " por " + tela.ficha.criadoPor : ""),
                           tela.ficha.vendaNumero ? "venda " + tela.ficha.vendaNumero : ""].filter(x => !!x).join(" · ")
@@ -267,11 +313,17 @@ FocusScope {
                 Layout.rightMargin: 6
             }
             Botao {
-                visible: !tela.nova && !tela.travada
+                visible: tela.rascunho
+                text: "Excluir rascunho"
+                tipo: "discreto"
+                onClicked: tela.excluirRascunho()
+            }
+            Botao {
+                visible: !tela.nova && !tela.travada && !tela.rascunho
                 text: "Cancelar OS"
                 tipo: "discreto"
-                onClicked: pergunta.perguntar("Cancelar a OS " + tela.ficha.numero + "?", "Nada sai do estoque. A OS fica na lista como cancelada.",
-                                              "Cancelar OS", (m) => Api.chamar("os_cancelar", { id: tela.osId, motivo: m }))
+                onClicked: pergunta.perguntar("Cancelar a OS " + tela.ficha.numero + (tela.ficha.caixa ? " (" + tela.ficha.caixa + ")" : "") + "?", "Nada sai do estoque. A OS fica na lista como cancelada.",
+                                              "Cancelar OS", (m) => Api.gravar("os_cancelar", { id: tela.osId, motivo: m }))
             }
             Botao {
                 text: "Imprimir"
@@ -301,8 +353,16 @@ FocusScope {
                 width: parent.width - 26
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 12
+                Text {
+                    visible: tela.rascunho
+                    text: "Rascunho: salve para virar orçamento com número"
+                    color: Tema.tinta
+                    font.family: Tema.texto
+                    font.weight: Font.DemiBold
+                    font.pixelSize: 16
+                }
                 Etapas {
-                    visible: tela.situacao !== "cancelada"
+                    visible: tela.situacao !== "cancelada" && !tela.rascunho
                     modelo: [{ id: "orcamento", nome: "Orçamento" }, { id: "aprovada", nome: "Em serviço" },
                              { id: "pronta", nome: "Pronta" }, { id: "entregue", nome: "Entregue" }]
                     atual: tela.situacao
@@ -341,14 +401,15 @@ FocusScope {
                 }
                 Botao {
                     visible: !tela.travada
-                    text: tela.situacao === "orcamento" ? "Cliente aprovou" : tela.situacao === "aprovada" ? "Ficou pronta" : "Entregar e receber"
+                    // Rascunho: o mesmo que a Nova OS (salva com número e aprova).
+                    text: tela.situacao === "orcamento" || tela.rascunho ? "Cliente aprovou" : tela.situacao === "aprovada" ? "Ficou pronta" : "Entregar e receber"
                     icone: tela.situacao === "pronta" ? "check" : "direita"
                     implicitHeight: 40
-                    enabled: tela.situacao === "pronta" || !tela.nova || tela.itens.length > 0
+                    enabled: tela.situacao === "pronta" || (!tela.nova && !tela.rascunho) || tela.itens.length > 0
                     onClicked: {
                         if (tela.situacao === "pronta")
                             tela.entregar()
-                        else if (tela.nova) {
+                        else if (tela.nova || tela.rascunho) {
                             if (tela.salvar())
                                 tela.passar("aprovada")
                         } else
@@ -811,7 +872,7 @@ FocusScope {
                 // Outras vezes que o carro veio
                 Text {
                     visible: !!tela.ficha && tela.ficha.historico.length > 0
-                    text: tela.ficha ? "Este carro já veio: " + tela.ficha.historico.slice(0, 4).map(h => "OS " + h.numero + " (" + h.quando + ")").join(", ") : ""
+                    text: tela.ficha ? "Este carro já veio: " + tela.ficha.historico.slice(0, 4).map(h => "OS " + h.numero + " (" + (h.caixa ? h.caixa + ", " : "") + h.quando + ")").join(", ") : ""
                     color: Tema.tintaSuave
                     font.family: Tema.serifa
                     font.italic: true
@@ -826,6 +887,66 @@ FocusScope {
     EscolherPeca {
         id: escolher
         onEscolhida: id => tela.addPeca(id)
+    }
+
+    // Janela de saída da Nova OS: exatamente três opções.
+    Popup {
+        id: saida
+        modal: true
+        focus: true
+        anchors.centerIn: T.Overlay.overlay
+        width: Math.min(560, Tema.largura - 24)
+        padding: Tema.estreito ? 18 : 28
+        closePolicy: Popup.CloseOnEscape
+        T.Overlay.modal: Rectangle { color: Tema.veu }
+        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
+        contentItem: ColumnLayout {
+            spacing: 14
+            Titulo {
+                text: "Sair da OS?"
+                font.pixelSize: 30
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "Os campos preenchidos e os itens ainda não foram salvos. Salve como rascunho para continuar depois."
+                color: Tema.tinta
+                font.family: Tema.serifa
+                font.pixelSize: 16
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Flow {
+                spacing: 10
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                layoutDirection: Qt.RightToLeft
+                Botao {
+                    text: "Salvar rascunho"
+                    icone: "check"
+                    tipo: "principal"
+                    onClicked: {
+                        if (tela.salvarRascunho()) {
+                            saida.close()
+                            tela.janela.voltar()
+                        }
+                    }
+                }
+                Botao {
+                    text: "Cancelar"
+                    tipo: "discreto"
+                    onClicked: saida.close()
+                }
+                Botao {
+                    text: "Sair sem salvar"
+                    tipo: "perigo"
+                    onClicked: {
+                        saida.close()
+                        tela.alterado = false
+                        tela.janela.voltar()
+                    }
+                }
+            }
+        }
     }
 
     PerguntaMotivo {

@@ -222,10 +222,12 @@ FocusScope {
     // ---------- Fechar ----------
     Painel {
         id: fechamento
+        property string chave: ""
         property var vendedor: null
         property string erro: ""
         width: Math.min(520, Tema.largura - 24)
         function abrirCom(v) {
+            chave = Api.novaChave()
             vendedor = v
             erro = ""
             vencimento.texto = Qt.formatDate(new Date(), "dd/MM/yyyy")
@@ -241,7 +243,7 @@ FocusScope {
                 close()
                 secao.dados = r.dados
                 janela.avisar("Comissão lançada no A pagar.", "ok")
-            })
+            }, fechamento.chave)
         }
         contentItem: ColumnLayout {
             spacing: 12

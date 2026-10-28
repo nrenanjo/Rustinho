@@ -7,6 +7,8 @@
 //! sempre" (HOME, XDG_DATA_HOME, LOCALAPPDATA, RUSTINHO_DADOS) apontam para
 //! uma "instalação de verdade" de mentira, com um banco que não pode mudar.
 
+#[path = "apoio/chave.rs"]
+mod apoio_chave;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -91,7 +93,10 @@ fn portatil_fica_na_propria_pasta_e_nao_mexe_na_instalacao() {
 }
 
 fn chamar(s: &mut rustinho_nucleo::Servico, comando: &str, dados: Value) -> Value {
-    serde_json::from_str(&s.chamar(comando, &dados.to_string())).unwrap()
+    serde_json::from_str(&apoio_chave::chamar(rustinho_nucleo::api::NAO_REPETIR, comando, &dados.to_string(), |d| {
+        s.chamar(comando, d)
+    }))
+    .unwrap()
 }
 
 /// Roda dentro da cópia (o processo portátil).

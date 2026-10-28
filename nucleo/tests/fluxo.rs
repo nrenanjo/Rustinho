@@ -2,11 +2,14 @@
 //! comandos com JSON, respostas em JSON.
 
 use rustinho_nucleo::Servico;
+#[path = "apoio/chave.rs"]
+mod apoio_chave;
 use serde_json::{json, Value};
 
 /// Chama um comando e devolve a resposta inteira.
 fn chamar(s: &mut Servico, comando: &str, dados: Value) -> Value {
-    let resposta = s.chamar(comando, &dados.to_string());
+    let resposta =
+        apoio_chave::chamar(rustinho_nucleo::api::NAO_REPETIR, comando, &dados.to_string(), |d| s.chamar(comando, d));
     serde_json::from_str(&resposta).expect("resposta em JSON")
 }
 
@@ -223,14 +226,19 @@ fn fluxo_completo() {
     let c = ok(&mut s, "preco_calcular", json!({ "custo": "58", "lucro": "", "preco": "85", "de": "preco" }));
     assert_eq!(c["lucro"], "46,55");
 
-    // Menu: mais usados.
+    // Menu (0.9.15): uma grade só, na ordem fixa; usar não muda a ordem e
+    // fixar põe a pílula na frente.
     ok(&mut s, "menu_usar", json!({ "id": "pecas" }));
     ok(&mut s, "menu_usar", json!({ "id": "usuarios" }));
     ok(&mut s, "menu_usar", json!({ "id": "usuarios" }));
     let m = ok(&mut s, "menu", json!({}));
-    assert_eq!(m["maisUsados"][0]["id"], "usuarios");
-    assert_eq!(m["maisUsados"][1]["id"], "pecas");
+    assert!(m.get("maisUsados").is_none(), "sem a linha Mais usados");
     assert_eq!(m["todos"][0]["id"], "vender");
+    assert_eq!(m["todos"][1]["id"], "pecas");
+    assert_eq!(m["todos"].as_array().unwrap().len(), 14);
+    let m = ok(&mut s, "menu_fixar", json!({ "id": "usuarios", "fixo": true }));
+    assert_eq!(m["todos"][0]["id"], "usuarios");
+    assert_eq!(m["todos"][0]["fixo"], true);
 
     // Tabelas de preço.
     let mut cfg = ok(&mut s, "config_ler", json!({}));

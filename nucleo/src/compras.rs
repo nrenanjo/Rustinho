@@ -1358,14 +1358,24 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     Ok(())
 }
 
-/// Apaga uma compra em rascunho (nada foi para o estoque).
-pub fn excluir_rascunho(conn: &Connection, id: &str) -> Resultado<()> {
+/// Apaga uma compra em rascunho (nada foi para o estoque). O-4: a auditoria
+/// dela fica (quem importou e quando) e ganha uma linha dizendo que o
+/// rascunho foi descartado; o rascunho não vira compra lançada.
+pub fn excluir_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
     let cab = cabecalho(conn, id)?;
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Só dá para descartar uma compra que ainda não foi lançada."));
     }
     conn.execute("DELETE FROM compra WHERE id = ?1", [id])?;
-    conn.execute("DELETE FROM auditoria WHERE entidade = 'compra' AND entidade_id = ?1", [id])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "compra.descartar",
+        "compra",
+        id,
+        &[format!("Rascunho da NF {} descartado (nada foi para o estoque)", cab.numero)],
+    )?;
     Ok(())
 }
 
@@ -1817,6 +1827,37 @@ mod testes {
         }
     }
 
+    /// O-4 (R-12 da 0.9.14): descartar um rascunho de compra guarda a
+    /// auditoria dele (e mais uma linha dizendo que foi descartado), e o
+    /// descartado não conta como compra lançada.
+    #[test]
+    fn o4_descartar_rascunho_preserva_a_auditoria() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        let contar = |sql: &str| -> i64 { c.query_row(sql, [&id], |l| l.get(0)).unwrap() };
+        let antes = contar("SELECT COUNT(*) FROM auditoria WHERE entidade = 'compra' AND entidade_id = ?1");
+        assert!(antes >= 1, "a importação deixou auditoria");
+        excluir_rascunho(c, &b.dispositivo, &u, &id).unwrap();
+        assert_eq!(
+            contar("SELECT COUNT(*) FROM auditoria WHERE entidade = 'compra' AND entidade_id = ?1 AND acao = 'compra.importar'"),
+            1,
+            "a auditoria da importação continua"
+        );
+        assert_eq!(
+            contar("SELECT COUNT(*) FROM auditoria WHERE entidade = 'compra' AND entidade_id = ?1 AND acao = 'compra.descartar'"),
+            1,
+            "o descarte fica registrado"
+        );
+        assert_eq!(contar("SELECT COUNT(*) FROM compra WHERE id = ?1"), 0, "o rascunho saiu");
+        assert!(listar(c, "", 50).unwrap().is_empty(), "não aparece como compra");
+        let lancadas: i64 =
+            c.query_row("SELECT COUNT(*) FROM compra WHERE situacao <> 'rascunho'", [], |l| l.get(0)).unwrap();
+        assert_eq!(lancadas, 0, "nada virou compra lançada");
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM estoque_movimento", [], |l| l.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(c.query_row("SELECT COUNT(*) FROM conta_pagar", [], |l| l.get::<_, i64>(0)).unwrap(), 0);
+    }
+
     #[test]
     fn importa_liga_lanca_e_estorna() {
         let (b, u) = base();
@@ -1955,7 +1996,7 @@ mod testes {
         assert_eq!(f2.itens[1].fator, "2");
         assert_eq!(listar(c, "", 50).unwrap().len(), 2);
         assert_eq!(listar(c, "pastilha", 50).unwrap().len(), 2);
-        excluir_rascunho(c, &id2).unwrap();
+        excluir_rascunho(c, &b.dispositivo, &u, &id2).unwrap();
         assert_eq!(listar(c, "", 50).unwrap().len(), 1);
     }
 

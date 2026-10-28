@@ -40,7 +40,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -75,6 +75,29 @@ const MAGICA: &[u8; 4] = b"RST3";
 pub const PROTOCOLO: i64 = 3;
 const PROTOCOLO_DIFERENTE: &str =
     "O outro caixa está com outra versão do Rustinho. Atualize todos os caixas para a mesma versão.";
+/// Recursos da troca de dados que este Rustinho entende. Vão no pedido e na
+/// resposta (campo novo: um caixa de antes da 0.9.15 não manda e ignora).
+/// "pendencias-v1": o caixa guarda inteira, em `sync_pendencia`, a alteração
+/// que não consegue aplicar, e a numeração dele avança sem perdê-la.
+/// "loja-v1" (FALHA-01): o caixa manda a identidade da loja e confere a do
+/// outro antes de entregar ou aplicar qualquer coisa (veja `loja`).
+pub const RECURSOS: &[&str] = &["pendencias-v1", crate::loja::RECURSO];
+pub const RECURSO_PENDENCIAS: &str = "pendencias-v1";
+/// Estrutura do banco (user_version) que entende o rascunho de OS (0.9.15).
+pub const ESQUEMA_RASCUNHO: i64 = 23;
+/// Caixa que não informa a estrutura é de antes da 0.9.15: tratado como a
+/// 0.9.14 (estrutura 22).
+pub const ESQUEMA_LEGADO: i64 = 22;
+/// Depois de quantos dias sem confirmar a versão um caixa deixa de contar como
+/// compatível (bloqueia rascunhos de OS novos até confirmar de novo).
+pub const PRAZO_COMPATIBILIDADE_DIAS: i64 = 7;
+/// Pendências recebidas guardadas de um mesmo caixa, no máximo. Passou disso,
+/// a troca com ele para (sem avançar a numeração) até alguém olhar.
+pub const PENDENCIAS_MAXIMAS: i64 = 1000;
+/// Prefixo da configuração que diz que um caixa foi retirado da loja (vai
+/// para todos os caixas; um caixa antigo ignora).
+pub const PREFIXO_RETIRADO: &str = "caixa_retirado:";
+
 /// Quantas versões anteriores cada alteração leva na história. É só um
 /// atalho: a relação certa entre versões vem da cadeia de bases no log (as
 /// versões compactadas continuam lá). Pouca coisa para não pesar no banco
@@ -146,6 +169,19 @@ pub(crate) fn travar() -> RwLockReadGuard<'static, ()> {
 
 /// Quantas alterações vão em cada resposta. Só os testes mudam isso, por banco
 /// (chave `sync_lote_teste`), para provar a troca de caminho entre lotes.
+/// Só nos testes: no máximo N lotes por puxada (a troca que para no meio e
+/// continua depois, inclusive com outra origem no intervalo). O programa
+/// final nunca tem isso.
+fn lotes_maximos(_conn: &Connection) -> Option<usize> {
+    #[cfg(any(test, feature = "ancoras-de-teste"))]
+    if let Ok(Some(v)) = config::ler(_conn, "sync_lotes_teste") {
+        if let Ok(n) = v.parse::<usize>() {
+            return Some(n.max(1));
+        }
+    }
+    None
+}
+
 fn lote(_conn: &Connection) -> i64 {
     // Também nos testes de fora do núcleo (tests/estavel, T8), que ligam o
     // recurso de teste; o programa final nunca tem isso.
@@ -236,11 +272,18 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "codigos_distribuidor",
     // O gerente confirmou a classificação das categorias na DRE.
     "dre_classificacao_confirmada",
+    // Identidade da loja (FALHA-01, veja `loja`).
+    "loja_id",
 ];
 
 // ---------------------------------------------------------------------------
 // Gatilhos e registro das alterações.
 // ---------------------------------------------------------------------------
+
+/// (todas as colunas, colunas da chave primária) de uma tabela compartilhada.
+pub(crate) fn colunas_da_tabela(conn: &Connection, tabela: &str) -> Resultado<(Vec<String>, Vec<String>)> {
+    colunas(conn, tabela)
+}
 
 fn colunas(conn: &Connection, tabela: &str) -> Resultado<(Vec<String>, Vec<String>)> {
     let mut c = conn.prepare(&format!("PRAGMA table_info(\"{tabela}\")"))?;
@@ -264,13 +307,26 @@ fn expressoes(tabela: &str, todas: &[String], chave: &[String], prefixo: &str) -
 
 fn filtro_config(prefixo: &str) -> String {
     format!(
-        " AND {prefixo}.chave IN ({})",
+        " AND ({prefixo}.chave IN ({}) OR {prefixo}.chave LIKE '{PREFIXO_RETIRADO}%')",
         CONFIG_DA_LOJA.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ")
     )
 }
 
+/// A configuração é da loja (vai para todos os caixas)?
+pub fn chave_da_loja(chave: &str) -> bool {
+    CONFIG_DA_LOJA.contains(&chave) || chave.starts_with(PREFIXO_RETIRADO)
+}
+
 /// (Re)cria os gatilhos que registram as alterações. Roda ao abrir o banco.
 pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
+    // 0.9.15: cada alteração leva a operação comercial (a transação) em que
+    // foi feita. Banco de estrutura antiga (só nos testes) não tem a coluna.
+    let com_operacao: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('alteracao') WHERE name = 'operacao_id'",
+        [],
+        |l| l.get(0),
+    )?;
+    let (col_op, val_op) = if com_operacao { (", operacao_id", ", rustinho_operacao()") } else { ("", "") };
     for tabela in TABELAS {
         let (todas, chave) = colunas(conn, tabela)?;
         if chave.is_empty() {
@@ -298,9 +354,9 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
                 "DROP TRIGGER IF EXISTS sync_{tabela}_{sufixo};
                  CREATE TRIGGER sync_{tabela}_{sufixo} AFTER {evento} ON \"{tabela}\" {quando}{extra}
                  BEGIN
-                   INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia)
+                   INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia{col_op})
                    VALUES (rustinho_id(), '{tabela}', {k}, '{operacao}', {dados}, {disp}, rustinho_agora(),
-                           {base}, COALESCE({ordem}, 0) + 1, rustinho_historia({base}, {historia}, {base_da_base}));
+                           {base}, COALESCE({ordem}, 0) + 1, rustinho_historia({base}, {historia}, {base_da_base}){val_op});
                  END;"
             ));
         }
@@ -367,10 +423,20 @@ pub struct Alteracao {
     /// cadeia de versões; nunca é aplicada.
     #[serde(default)]
     pub compactada: bool,
+    /// A operação comercial (transação) em que foi feita: as alterações de
+    /// uma mesma venda, com itens e pagamentos, têm o mesmo. Vazio nas de
+    /// antes da 0.9.15. Caixa antigo ignora o campo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operacao_id: Option<String>,
+    /// Posto por quem manda: o caixa que vai receber não consegue gravar
+    /// esta alteração (versão antiga). Ele a guarda em `sync_pendencia`, sem
+    /// aplicar. Nunca vem de um caixa antigo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incompativel: Option<String>,
 }
 
 const COLUNAS_ALTERACAO: &str =
-    "seq, id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada";
+    "seq, id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada, operacao_id";
 
 fn ler_alteracao(l: &rusqlite::Row) -> rusqlite::Result<Alteracao> {
     Ok(Alteracao {
@@ -386,6 +452,8 @@ fn ler_alteracao(l: &rusqlite::Row) -> rusqlite::Result<Alteracao> {
         ordem: l.get(9)?,
         historia: l.get(10)?,
         compactada: l.get::<_, i64>(11)? != 0,
+        operacao_id: l.get(12)?,
+        incompativel: None,
     })
 }
 
@@ -465,13 +533,75 @@ fn para_sql(v: &Value) -> SqlValor {
 
 /// Aplica alterações vindas de outro caixa. Devolve quantas eram novas.
 pub fn aplicar(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
+    Ok(aplicar_de(conn, lista, "", None)?.novas)
+}
+
+/// Onde a numeração do outro caixa vai parar depois deste lote (atualizada
+/// na mesma transação que grava o lote).
+pub struct AvancoCursor<'a> {
+    pub dispositivo: &'a str,
+    /// O contador lido antes de pedir (só avança se ninguém o zerou no meio).
+    pub de: i64,
+    pub para: i64,
+    pub marca: &'a str,
+    pub geracao: &'a str,
+}
+
+/// O que aconteceu com um lote.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Aplicacao {
+    /// Alterações novas gravadas no log deste caixa.
+    pub novas: usize,
+    /// Alterações guardadas em `sync_pendencia` (não entraram nas tabelas).
+    pub pendentes: usize,
+    /// A numeração do outro caixa avançou.
+    pub avancou: bool,
+    /// O lote todo foi desfeito e guardado como pendência (erro ao aplicar).
+    pub suspenso: bool,
+}
+
+/// Aplica um lote vindo do caixa `origem`. Regras (0.9.15):
+/// - o lote inteiro numa transação, com a numeração do outro caixa (`cursor`)
+///   avançada **dentro** dela: ou fica tudo, ou nada;
+/// - alteração que este caixa não consegue gravar (tabela que não conhece,
+///   marcada incompatível por quem mandou, dados estragados) não é jogada
+///   fora: fica inteira em `sync_pendencia`, e a numeração avança sem perdê-la;
+/// - alteração que depende de outra pendente (o mesmo registro, a mesma
+///   operação comercial ou um registro pai pendente) também fica pendente;
+/// - erro ao gravar (regra do banco): o lote inteiro é desfeito; depois, numa
+///   transação nova, o lote todo é guardado como pendência e a numeração
+///   avança. A troca continua com os lotes seguintes (os que dependem do
+///   suspenso ficam pendentes também). Nada é aplicado pela metade.
+/// - registro cujo pai ainda não chegou continua gravado e acompanhado como
+///   antes (R-05).
+pub fn aplicar_de(
+    conn: &mut Connection,
+    lista: &[Alteracao],
+    origem: &str,
+    cursor: Option<AvancoCursor>,
+) -> Resultado<Aplicacao> {
     // Na ordem em que chegam, um item pode vir antes da peça (ou a peça ter
     // sido apagada depois). As chaves estrangeiras ficam desligadas aqui e
     // são conferidas no fim da troca (veja `pendencias`).
     conn.pragma_update(None, "foreign_keys", false)?;
-    let resultado = aplicar_dentro(conn, lista);
-    conn.pragma_update(None, "foreign_keys", true)?;
-    resultado
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match aplicar_dentro(conn, lista, origem, cursor.as_ref(), Modo::Normal) {
+            Ok(a) => Ok(a),
+            Err(Falha::Lote { indice, erro }) => suspender_lote(conn, lista, origem, indice, &erro, cursor.as_ref()),
+            Err(Falha::Outra(e)) => Err(e),
+        }
+    }));
+    // Religa em qualquer caminho (deu certo, deu erro ou pânico).
+    if !conn.is_autocommit() {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    let religou = conn.pragma_update(None, "foreign_keys", true);
+    let r = match r {
+        Ok(r) => r,
+        Err(p) => std::panic::resume_unwind(p),
+    };
+    religou?;
+    r
 }
 
 /// Quantos registros apontam para outro que ainda não chegou (ou foi
@@ -653,12 +783,21 @@ pub fn registrar_referencias(conn: &Connection) -> Resultado<Referencias> {
     )?;
     // Prova dos pares: todos os caixas conhecidos já entregaram tudo (troca
     // completa) DEPOIS de a referência aparecer, e o registro não veio.
+    // FALHA-03: não vale enquanto o registro que falta estiver guardado aqui,
+    // numa pendência recebida ainda não resolvida (ele chegou, só não pôde
+    // ser aplicado): a referência continua esperando. Resolvida a pendência,
+    // a referência é conferida de novo (some, ou a prova volta a valer).
     conn.execute(
         "UPDATE sync_referencia SET estado = 'inconsistente', motivo = 'pares'
           WHERE estado = 'esperando'
             AND EXISTS (SELECT 1 FROM sync_par)
             AND NOT EXISTS (SELECT 1 FROM sync_par p
-                             WHERE p.completo_em IS NULL OR p.completo_em <= sync_referencia.desde)",
+                             WHERE p.completo_em IS NULL OR p.completo_em <= sync_referencia.desde)
+            AND NOT EXISTS (SELECT 1 FROM sync_pendencia g
+                             WHERE g.lado = 'recebida' AND g.estado = 'pendente'
+                               AND g.tabela = sync_referencia.pai
+                               AND json_valid(g.chave) AND json_valid(sync_referencia.falta)
+                               AND json(g.chave) = json(sync_referencia.falta))",
         [],
     )?;
     let (esperando, atrasadas, quebradas): (i64, i64, i64) = conn.query_row(
@@ -1236,22 +1375,295 @@ fn limpar_conflitos(conn: &Connection) -> Resultado<()> {
 /// A chave (`["loja_nome"]`) é de uma configuração da loja?
 fn config_da_loja(chave: &str) -> bool {
     match serde_json::from_str::<Vec<Value>>(chave).ok().as_deref() {
-        Some([Value::String(c)]) => CONFIG_DA_LOJA.contains(&c.as_str()),
+        Some([Value::String(c)]) => chave_da_loja(c),
         _ => false,
     }
 }
 
-fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Modo {
+    /// Lote que acabou de chegar de outro caixa.
+    Normal,
+    /// Pendências guardadas sendo tentadas de novo (da cópia guardada).
+    Reaplicar,
+}
+
+enum Falha {
+    /// A regra do banco recusou uma alteração do lote (índice na lista): o
+    /// lote inteiro é desfeito.
+    Lote { indice: usize, erro: String },
+    /// Outro problema (disco, banco ocupado...): nada muda, tenta depois.
+    Outra(Erro),
+}
+
+impl From<Erro> for Falha {
+    fn from(e: Erro) -> Self {
+        Falha::Outra(e)
+    }
+}
+
+impl From<rusqlite::Error> for Falha {
+    fn from(e: rusqlite::Error) -> Self {
+        Falha::Outra(e.into())
+    }
+}
+
+/// O erro veio dos dados da alteração (uma regra do banco recusou), não do
+/// disco ou do banco ocupado?
+fn erro_dos_dados(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(f, _)
+        if matches!(f.code, rusqlite::ErrorCode::ConstraintViolation | rusqlite::ErrorCode::TypeMismatch))
+}
+
+/// O que está pendente agora: registros, operações e motivos (para decidir
+/// se uma alteração que chega depende de algo pendente).
+#[derive(Default)]
+struct Pendentes {
+    registros: std::collections::HashSet<(String, String)>,
+    operacoes: std::collections::HashSet<String>,
+}
+
+impl Pendentes {
+    fn carregar(conn: &Connection) -> Resultado<Pendentes> {
+        let mut p = Pendentes::default();
+        let mut c = conn.prepare(
+            "SELECT tabela, chave, operacao_id FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+        )?;
+        for l in
+            c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, Option<String>>(2)?)))?
+        {
+            let (t, k, o) = l?;
+            p.registros.insert((t, k));
+            if let Some(o) = o {
+                p.operacoes.insert(o);
+            }
+        }
+        Ok(p)
+    }
+
+    fn juntar(&mut self, a: &Alteracao) {
+        self.registros.insert((a.tabela.clone(), a.chave.clone()));
+        if let Some(o) = &a.operacao_id {
+            self.operacoes.insert(o.clone());
+        }
+    }
+
+    fn vazio(&self) -> bool {
+        self.registros.is_empty() && self.operacoes.is_empty()
+    }
+}
+
+/// Ligações (chaves estrangeiras) de uma tabela: (tabela pai, colunas daqui
+/// na ordem da chave do pai).
+type Ligacoes = Vec<(String, Vec<String>)>;
+
+fn ligacoes(conn: &Connection, tabela: &str) -> Resultado<Ligacoes> {
+    let mut c = conn.prepare(&format!("PRAGMA foreign_key_list(\"{tabela}\")"))?;
+    let linhas: Vec<(i64, i64, String, String)> =
+        c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?.collect::<Result<_, _>>()?;
+    let mut por_id: std::collections::BTreeMap<i64, (String, Vec<(i64, String)>)> = Default::default();
+    for (id, seq, pai, de) in linhas {
+        por_id.entry(id).or_insert_with(|| (pai, Vec::new())).1.push((seq, de));
+    }
+    Ok(por_id
+        .into_values()
+        .map(|(pai, mut cols)| {
+            cols.sort();
+            (pai, cols.into_iter().map(|c| c.1).collect())
+        })
+        .collect())
+}
+
+/// A alteração depende de algo pendente? (o mesmo registro, a mesma
+/// operação comercial ou um registro pai pendente.)
+fn depende_de_pendente(
+    p: &Pendentes,
+    a: &Alteracao,
+    dados: Option<&serde_json::Map<String, Value>>,
+    lig: &Ligacoes,
+) -> Option<String> {
+    if p.vazio() {
+        return None;
+    }
+    if p.registros.contains(&(a.tabela.clone(), a.chave.clone())) {
+        return Some("outra versão deste registro está pendente".into());
+    }
+    if a.operacao_id.as_ref().is_some_and(|o| p.operacoes.contains(o)) {
+        return Some("outra parte da mesma operação está pendente".into());
+    }
+    if let Some(d) = dados {
+        for (pai, cols) in lig {
+            let valores: Option<Vec<Value>> = cols.iter().map(|c| d.get(c).filter(|v| !v.is_null()).cloned()).collect();
+            if let Some(v) = valores {
+                let chave = serde_json::to_string(&v).unwrap_or_default();
+                if p.registros.contains(&(pai.clone(), chave)) {
+                    return Some(format!("o registro de {pai} de que ela depende está pendente"));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Dados estragados: a alteração não pode ser aplicada como veio.
+fn invalida(a: &Alteracao, chave_cols: &[String]) -> Option<String> {
+    let valores: Vec<Value> = match serde_json::from_str::<Value>(&a.chave) {
+        Ok(Value::Array(v)) => v,
+        _ => return Some("a chave do registro não é uma lista".into()),
+    };
+    if valores.len() != chave_cols.len() {
+        return Some(format!("a chave tem {} partes e a tabela {} pede {}", valores.len(), a.tabela, chave_cols.len()));
+    }
+    if a.operacao != "gravar" && a.operacao != "apagar" {
+        return Some(format!("operação desconhecida: {}", a.operacao));
+    }
+    if a.operacao == "gravar" && !a.compactada {
+        match a.dados.as_deref().map(serde_json::from_str::<Value>) {
+            Some(Ok(Value::Object(m))) => {
+                if let Some(k) = chave_cols.iter().find(|k| !m.contains_key(k.as_str())) {
+                    return Some(format!("os dados não têm a coluna {k} da chave"));
+                }
+            }
+            _ => return Some("os dados não são um registro (objeto JSON)".into()),
+        }
+    }
+    None
+}
+
+/// O que o caixa de estrutura `esquema` não consegue gravar (matriz de
+/// compatibilidade por versão). `None` = pode mandar.
+pub fn incompatibilidade(esquema: i64, a: &Alteracao) -> Option<String> {
+    if a.compactada {
+        // Versão velha sem dados: só entra na cadeia de versões, nunca é aplicada.
+        return None;
+    }
+    if !TABELAS.contains(&a.tabela.as_str()) {
+        return Some(format!("a tabela {} não existe na versão dele", a.tabela));
+    }
+    // 0.9.15 (estrutura 23): rascunho de OS. Na estrutura 22 o CHECK de
+    // ordem_servico.situacao recusa 'rascunho'.
+    if esquema < ESQUEMA_RASCUNHO && a.tabela == "ordem_servico" && a.operacao == "gravar" {
+        let situacao = a
+            .dados
+            .as_deref()
+            .and_then(|d| serde_json::from_str::<Value>(d).ok())
+            .and_then(|v| v["situacao"].as_str().map(str::to_string));
+        if situacao.as_deref() == Some("rascunho") {
+            return Some("rascunho de ordem de serviço: o caixa precisa da versão 0.9.15 ou mais nova".into());
+        }
+    }
+    None
+}
+
+/// Guarda (ou atualiza) uma alteração recebida em `sync_pendencia`, inteira.
+fn guardar_pendencia(conn: &Connection, origem: &str, a: &Alteracao, motivo: &str, detalhe: &str) -> Resultado<()> {
+    let agora = tempo::agora();
+    conn.execute(
+        "INSERT INTO sync_pendencia (lado, par, alteracao_id, origem, seq, tabela, chave, operacao, dados, dispositivo, quando,
+                                     base, ordem, historia, compactada, operacao_id, motivo, detalhe, estado, criado_em, atualizado_em)
+         VALUES ('recebida', '', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, 'pendente', ?17, ?17)
+         ON CONFLICT (lado, par, alteracao_id) DO UPDATE SET
+             motivo = excluded.motivo, detalhe = excluded.detalhe, atualizado_em = excluded.atualizado_em,
+             tentativas = sync_pendencia.tentativas + (sync_pendencia.estado = 'pendente')
+           WHERE sync_pendencia.estado = 'pendente'",
+        params![
+            a.id,
+            origem,
+            a.seq,
+            a.tabela,
+            a.chave,
+            a.operacao,
+            a.dados,
+            a.dispositivo,
+            a.quando,
+            a.base,
+            a.ordem,
+            a.historia,
+            a.compactada as i64,
+            a.operacao_id,
+            motivo,
+            detalhe,
+            agora
+        ],
+    )?;
+    Ok(())
+}
+
+fn ja_pendente(conn: &Connection, id: &str) -> Resultado<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sync_pendencia WHERE lado = 'recebida' AND alteracao_id = ?1 AND estado IN ('pendente', 'arquivada_manual')",
+            [id],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+fn avancar_cursor(tx: &Connection, cursor: Option<&AvancoCursor>) -> Resultado<bool> {
+    let Some(c) = cursor else { return Ok(false) };
+    if c.para == c.de && c.marca.is_empty() {
+        tx.execute(
+            "UPDATE sync_par SET geracao = ?2 WHERE dispositivo = ?1 AND (geracao IS NULL OR geracao = '')",
+            params![c.dispositivo, c.geracao],
+        )?;
+        return Ok(true);
+    }
+    // Só avança se ninguém zerou o cursor no meio (restauração de backup).
+    Ok(tx.execute(
+        "UPDATE sync_par SET cursor = ?2, marca = ?4, geracao = ?5 WHERE dispositivo = ?1 AND cursor = ?3",
+        params![c.dispositivo, c.para, c.de, c.marca, c.geracao],
+    )? > 0)
+}
+
+fn aplicar_dentro(
+    conn: &mut Connection,
+    lista: &[Alteracao],
+    origem: &str,
+    cursor: Option<&AvancoCursor>,
+    modo: Modo,
+) -> Result<Aplicacao, Falha> {
     let tx = conn.transaction()?;
     tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
     let mut novas = 0;
+    let mut pendentes_agora = 0;
     let mut colunas_cache: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
-    for a in lista {
+    let mut ligacoes_cache: HashMap<String, Ligacoes> = HashMap::new();
+    // No lote novo, o que já está pendente; ao reaplicar, começa vazio (as
+    // próprias pendências estão sendo tentadas, na ordem em que chegaram).
+    let mut pend = if modo == Modo::Normal { Pendentes::carregar(&tx)? } else { Pendentes::default() };
+    let mut gravados_no_lote: std::collections::HashSet<(String, String)> = Default::default();
+    let mut tabelas_tocadas: std::collections::BTreeSet<String> = Default::default();
+    let ja_guardadas: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente' AND origem = ?1",
+        [origem],
+        |l| l.get(0),
+    )?;
+    let mut guardar = |tx: &Connection, a: &Alteracao, motivo: &str, detalhe: &str| -> Result<(), Falha> {
+        if modo == Modo::Normal && ja_guardadas + pendentes_agora as i64 >= PENDENCIAS_MAXIMAS {
+            return Err(Falha::Outra(Erro::validacao(format!(
+                "Há {PENDENCIAS_MAXIMAS} alterações deste caixa guardadas sem conseguir aplicar. A troca com ele parou até \
+                 o gerente olhar as pendências em Configurações › Caixas da loja."
+            ))));
+        }
+        guardar_pendencia(tx, origem, a, motivo, detalhe)?;
+        pendentes_agora += 1;
+        Ok(())
+    };
+    for (indice, a) in lista.iter().enumerate() {
         if !TABELAS.contains(&a.tabela.as_str()) {
+            guardar(
+                &tx,
+                a,
+                "incompativel_esquema",
+                &format!("a tabela {} não existe nesta versão do Rustinho", a.tabela),
+            )?;
+            pend.juntar(a);
             continue;
         }
         // D-16: da tabela de configurações só chegam as da loja (as mesmas
         // que os gatilhos mandam); as deste computador nunca vêm da rede.
+        // Descarte de propósito: não vira pendência.
         if a.tabela == "config" && !config_da_loja(&a.chave) {
             continue;
         }
@@ -1263,15 +1675,61 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         let ja: bool =
             tx.query_row("SELECT 1 FROM alteracao WHERE id = ?1", [&a.id], |_| Ok(true)).optional()?.unwrap_or(false);
         if ja {
+            if modo == Modo::Reaplicar {
+                marcar_resolvida(&tx, &a.id)?;
+            }
             continue;
+        }
+        // Já guardada como pendência (o mesmo lote chegando de novo).
+        if modo == Modo::Normal && ja_pendente(&tx, &a.id)? {
+            continue;
+        }
+        if let Some(m) = &a.incompativel {
+            guardar(&tx, a, "incompativel_esquema", m)?;
+            pend.juntar(a);
+            continue;
+        }
+        if !colunas_cache.iter().any(|c| c.0 == a.tabela) {
+            let (todas, chave) = colunas(&tx, &a.tabela)?;
+            colunas_cache.push((a.tabela.clone(), todas, chave));
+        }
+        let Some((_, todas, chave)) = colunas_cache.iter().find(|c| c.0 == a.tabela) else { continue };
+        if let Some(m) = invalida(a, chave) {
+            guardar(&tx, a, "invalida", &m)?;
+            pend.juntar(a);
+            continue;
+        }
+        let dados: Option<serde_json::Map<String, Value>> = if a.operacao == "gravar" && !a.compactada {
+            match a.dados.as_deref().map(serde_json::from_str::<Value>) {
+                Some(Ok(Value::Object(m))) => Some(m),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if !ligacoes_cache.contains_key(&a.tabela) {
+            let l = ligacoes(&tx, &a.tabela)?;
+            ligacoes_cache.insert(a.tabela.clone(), l);
+        }
+        if let Some(m) = depende_de_pendente(&pend, a, dados.as_ref(), &ligacoes_cache[&a.tabela]) {
+            guardar(&tx, a, "dependencia_suspensa", &m)?;
+            pend.juntar(a);
+            continue;
+        }
+        if modo == Modo::Reaplicar {
+            marcar_resolvida(&tx, &a.id)?;
+        }
+        tabelas_tocadas.insert(a.tabela.clone());
+        if a.operacao == "gravar" && !a.compactada {
+            gravados_no_lote.insert((a.tabela.clone(), a.chave.clone()));
         }
         // Versão velha sem dados (o outro caixa compactou): entra só para a
         // cadeia de versões. Já perdeu lá para outra, que também vem.
         if a.compactada {
             tx.execute(
-                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada)
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, NULL, 1)",
-                params![a.id, a.tabela, a.chave, a.operacao, a.dispositivo, a.quando, a.base, a.ordem],
+                "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, compactada, operacao_id)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, NULL, 1, ?9)",
+                params![a.id, a.tabela, a.chave, a.operacao, a.dispositivo, a.quando, a.base, a.ordem, a.operacao_id],
             )?;
             novas += 1;
             continue;
@@ -1279,9 +1737,9 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
         // A versão que vale agora deste registro, neste caixa.
         let ultima = versao_atual(&tx, &a.tabela, &a.chave)?;
         tx.execute(
-            "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando, a.base, a.ordem, a.historia],
+            "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia, operacao_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![a.id, a.tabela, a.chave, a.operacao, a.dados, a.dispositivo, a.quando, a.base, a.ordem, a.historia, a.operacao_id],
         )?;
         novas += 1;
         let chegou = Versao {
@@ -1308,15 +1766,14 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
                 continue;
             }
         }
-        if !colunas_cache.iter().any(|c| c.0 == a.tabela) {
-            let (todas, chave) = colunas(&tx, &a.tabela)?;
-            colunas_cache.push((a.tabela.clone(), todas, chave));
-        }
-        let Some((_, todas, chave)) = colunas_cache.iter().find(|c| c.0 == a.tabela) else { continue };
-        let valores_chave: Vec<Value> = serde_json::from_str(&a.chave)?;
-        if valores_chave.len() != chave.len() {
-            continue;
-        }
+        let valores_chave: Vec<Value> = serde_json::from_str(&a.chave).map_err(Erro::from)?;
+        let falha = |e: rusqlite::Error| -> Falha {
+            if erro_dos_dados(&e) {
+                Falha::Lote { indice, erro: e.to_string() }
+            } else {
+                Falha::Outra(e.into())
+            }
+        };
         if a.operacao == "apagar" {
             let onde = chave
                 .iter()
@@ -1327,18 +1784,13 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
             tx.execute(
                 &format!("DELETE FROM \"{}\" WHERE {onde}", a.tabela),
                 params_from_iter(valores_chave.iter().map(para_sql)),
-            )?;
+            )
+            .map_err(falha)?;
             continue;
         }
-        let dados: serde_json::Map<String, Value> = match a.dados.as_deref().map(serde_json::from_str::<Value>) {
-            Some(Ok(Value::Object(m))) => m,
-            _ => continue,
-        };
+        let Some(dados) = dados else { continue };
         // Só as colunas que existem aqui (um caixa com versão mais nova pode ter mais).
         let cols: Vec<&String> = todas.iter().filter(|c| dados.contains_key(c.as_str())).collect();
-        if chave.iter().any(|k| !dados.contains_key(k.as_str())) {
-            continue;
-        }
         let nomes = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
         let marcas = (1..=cols.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
         let atualizar: Vec<String> =
@@ -1353,12 +1805,194 @@ fn aplicar_dentro(conn: &mut Connection, lista: &[Alteracao]) -> Resultado<usize
             a.tabela,
             chave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
         );
-        tx.execute(&sql, params_from_iter(cols.iter().map(|c| para_sql(&dados[c.as_str()]))))?;
+        tx.execute(&sql, params_from_iter(cols.iter().map(|c| para_sql(&dados[c.as_str()])))).map_err(falha)?;
     }
+    // Antes do COMMIT: um registro que aponta para outro gravado neste mesmo
+    // lote tem de encontrá-lo (o pai que ainda não chegou é normal: R-05).
+    for tabela in &tabelas_tocadas {
+        let mut c = tx.prepare(&format!("PRAGMA foreign_key_check(\"{tabela}\")"))?;
+        let violacoes: Vec<(String, Option<i64>, String, i64)> =
+            c.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?.collect::<Result<_, _>>()?;
+        drop(c);
+        for (_, linha, pai, fk) in violacoes {
+            let Some(linha) = linha else { continue };
+            let lig = ligacoes(&tx, tabela)?;
+            let Some((_, cols)) = lig.get(fk as usize).or_else(|| lig.iter().find(|(p, _)| *p == pai)) else {
+                continue;
+            };
+            let sel = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+            let falta: String =
+                tx.query_row(&format!("SELECT json_array({sel}) FROM \"{tabela}\" WHERE rowid = ?1"), [linha], |l| {
+                    l.get(0)
+                })?;
+            if gravados_no_lote.contains(&(pai.clone(), falta.clone())) {
+                let indice = lista.iter().position(|a| a.tabela == *tabela).unwrap_or(0);
+                return Err(Falha::Lote {
+                    indice,
+                    erro: format!("{tabela} aponta para {pai} {falta}, gravado neste lote, e não o encontra"),
+                });
+            }
+        }
+    }
+    let avancou = avancar_cursor(&tx, cursor)?;
     limpar_conflitos(&tx)?;
     tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
     tx.commit()?;
-    Ok(novas)
+    Ok(Aplicacao { novas, pendentes: pendentes_agora, avancou, suspenso: false })
+}
+
+fn marcar_resolvida(conn: &Connection, id: &str) -> Resultado<()> {
+    conn.execute(
+        "UPDATE sync_pendencia SET estado = 'resolvida', resolvido_em = ?2, atualizado_em = ?2
+          WHERE lado = 'recebida' AND alteracao_id = ?1 AND estado = 'pendente'",
+        params![id, tempo::agora()],
+    )?;
+    Ok(())
+}
+
+/// O lote foi desfeito (uma regra do banco recusou a alteração `indice`).
+/// Numa transação nova: o lote inteiro vai para as pendências (a que falhou
+/// com o erro; as outras como suspensas junto) e a numeração avança, para a
+/// troca seguir com os lotes seguintes. Nada do lote entra nas tabelas.
+fn suspender_lote(
+    conn: &mut Connection,
+    lista: &[Alteracao],
+    origem: &str,
+    indice: usize,
+    erro: &str,
+    cursor: Option<&AvancoCursor>,
+) -> Resultado<Aplicacao> {
+    crate::registro::anotar(&format!("troca de dados: lote de {} alterações suspenso: {erro}", lista.len()));
+    let tx = conn.transaction()?;
+    let mut pendentes = 0;
+    for (i, a) in lista.iter().enumerate() {
+        if a.tabela == "config" && !config_da_loja(&a.chave) {
+            continue;
+        }
+        let ja: bool =
+            tx.query_row("SELECT 1 FROM alteracao WHERE id = ?1", [&a.id], |_| Ok(true)).optional()?.unwrap_or(false);
+        if ja || ja_pendente(&tx, &a.id)? {
+            continue;
+        }
+        if i == indice {
+            guardar_pendencia(&tx, origem, a, "erro_aplicacao", erro)?;
+            tx.execute(
+                "UPDATE sync_pendencia SET ultimo_erro = ?2 WHERE lado = 'recebida' AND alteracao_id = ?1",
+                params![a.id, erro],
+            )?;
+        } else {
+            guardar_pendencia(
+                &tx,
+                origem,
+                a,
+                "dependencia_suspensa",
+                "suspensa junto com o lote em que outra alteração falhou",
+            )?;
+        }
+        pendentes += 1;
+    }
+    let avancou = avancar_cursor(&tx, cursor)?;
+    if !origem.is_empty() {
+        tx.execute(
+            "UPDATE sync_par SET erro = ?2 WHERE dispositivo = ?1",
+            params![
+                origem,
+                format!(
+                    "Uma alteração vinda deste caixa não pôde ser aplicada ({erro}). O lote ficou guardado nas pendências; \
+                     a troca continua com o resto."
+                )
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(Aplicacao { novas: 0, pendentes, avancou, suspenso: true })
+}
+
+/// Tenta de novo, a partir da cópia guardada, as pendências recebidas (na
+/// ordem em que chegaram). Tudo numa transação: se uma regra do banco ainda
+/// recusar alguma, nada muda e cada uma ganha uma tentativa a mais. As que
+/// continuam sem poder (dados estragados, dependência) seguem pendentes.
+/// Devolve quantas foram aplicadas.
+pub fn reaplicar_pendencias(conn: &mut Connection) -> Resultado<usize> {
+    let lista: Vec<(String, Alteracao)> = {
+        let mut c = conn.prepare(
+            "SELECT origem, seq, alteracao_id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia,
+                    compactada, operacao_id
+               FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente' ORDER BY criado_em, seq",
+        )?;
+        let l = c.query_map([], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                Alteracao {
+                    seq: l.get(1)?,
+                    id: l.get(2)?,
+                    tabela: l.get(3)?,
+                    chave: l.get(4)?,
+                    operacao: l.get(5)?,
+                    dados: l.get(6)?,
+                    dispositivo: l.get(7)?,
+                    quando: l.get(8)?,
+                    base: l.get(9)?,
+                    ordem: l.get(10)?,
+                    historia: l.get(11)?,
+                    compactada: l.get::<_, i64>(12)? != 0,
+                    operacao_id: l.get(13)?,
+                    incompativel: None,
+                },
+            ))
+        })?;
+        l.collect::<Result<_, _>>()?
+    };
+    if lista.is_empty() {
+        return Ok(0);
+    }
+    let antes: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+        [],
+        |l| l.get(0),
+    )?;
+    let alteracoes: Vec<Alteracao> = lista.iter().map(|(_, a)| a.clone()).collect();
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        aplicar_dentro(conn, &alteracoes, "", None, Modo::Reaplicar)
+    }));
+    if !conn.is_autocommit() {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    let religou = conn.pragma_update(None, "foreign_keys", true);
+    let r = match r {
+        Ok(r) => r,
+        Err(p) => std::panic::resume_unwind(p),
+    };
+    religou?;
+    match r {
+        Ok(_) => {
+            let depois: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+                [],
+                |l| l.get(0),
+            )?;
+            Ok((antes - depois).max(0) as usize)
+        }
+        Err(Falha::Lote { indice, erro }) => {
+            let agora = tempo::agora();
+            let tx = conn.transaction()?;
+            tx.execute(
+                "UPDATE sync_pendencia SET tentativas = tentativas + 1, atualizado_em = ?1
+                  WHERE lado = 'recebida' AND estado = 'pendente'",
+                [&agora],
+            )?;
+            if let Some(a) = alteracoes.get(indice) {
+                tx.execute(
+                    "UPDATE sync_pendencia SET ultimo_erro = ?2 WHERE lado = 'recebida' AND alteracao_id = ?1",
+                    params![a.id, erro],
+                )?;
+            }
+            tx.commit()?;
+            Ok(0)
+        }
+        Err(Falha::Outra(e)) => Err(e),
+    }
 }
 
 /// Depois de juntar os dados dos caixas, confere o que nenhuma alteração
@@ -1397,6 +2031,9 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
             )?;
         }
     }
+    // R-03: parcela recebida (ou conta paga) mais de uma vez e vale-troca usado
+    // além do valor, por caixas sem rede.
+    detectar_pago_a_mais(conn)?;
     let (usuarios, gerentes): (i64, i64) =
         conn.query_row("SELECT COUNT(*), COALESCE(SUM(gerente = 1), 0) FROM usuario WHERE ativo = 1", [], |l| {
             Ok((l.get(0)?, l.get(1)?))
@@ -1412,6 +2049,190 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
         )?;
     }
     Ok(())
+}
+
+/// R-03: o que só aparece depois de juntar os dados de caixas que ficaram sem
+/// rede — cada um conferiu o saldo com o que sabia:
+/// - parcela a receber recebida mais de uma vez (o pago passa do valor);
+/// - conta a pagar paga mais de uma vez;
+/// - vale-troca usado além do valor.
+///
+/// Vira um conflito para o gerente, com as operações envolvidas (nada é
+/// apagado nem estornado sozinho: os pagamentos de cada caixa ficam). O
+/// gerente corrige pela tela de cada coisa (estorno no Receber ou no Pagar,
+/// cancelamento da venda), o que já fica no histórico; quando a conta deixa
+/// de passar do valor, o conflito é dado por corrigido.
+fn detectar_pago_a_mais(conn: &Connection) -> Resultado<()> {
+    let agora = tempo::agora();
+    for (tabela, tipo, achar, operacoes) in CONTAS_A_MAIS {
+        let ids: Vec<String> = conn.prepare(achar)?.query_map([], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        for id in ids {
+            let ja: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sync_conflito WHERE tipo = ?1 AND tabela = ?2 AND chave = ?3 AND resolvido_em IS NULL",
+                    params![tipo, tabela, id],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if ja {
+                continue;
+            }
+            let ops: String = conn.query_row(operacoes, [&id], |l| l.get::<_, Option<String>>(0))?.unwrap_or_default();
+            conn.execute(
+                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+                 VALUES (?1, ?2, '', ?3, '', ?4, ?5)",
+                params![tabela, id, ops, agora, tipo],
+            )?;
+        }
+    }
+    // Os que o gerente já corrigiu (a conta não passa mais do valor).
+    let abertos: Vec<(i64, String, String, String)> = conn
+        .prepare("SELECT id, tipo, tabela, chave FROM sync_conflito WHERE tipo IN ('pago_a_mais', 'vale_a_mais') AND resolvido_em IS NULL")?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, tipo, tabela, chave) in abertos {
+        if !ainda_a_mais(conn, &tipo, &tabela, &chave)? {
+            conn.execute(
+                "UPDATE sync_conflito SET resolvido_em = ?2, resolvido_por = NULL, resolucao = ?3 WHERE id = ?1",
+                params![id, agora, TEXTO_CORRIGIDO],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+const TEXTO_CORRIGIDO: &str = "Corrigido: o que foi pago (ou usado) não passa mais do valor";
+
+/// (tabela, tipo do conflito, as que passam do valor, as operações de uma).
+const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
+    (
+        "conta_receber",
+        "pago_a_mais",
+        "SELECT id FROM conta_receber_saldo WHERE cancelado_em IS NULL AND pago > valor",
+        "SELECT group_concat(id, ',') FROM (SELECT r.id FROM recebimento_parcela rp JOIN recebimento r ON r.id = rp.recebimento_id
+          WHERE rp.conta_id = ?1 AND r.estornado_em IS NULL ORDER BY r.criado_em, r.id)",
+    ),
+    (
+        "conta_pagar",
+        "pago_a_mais",
+        "SELECT id FROM conta_pagar_saldo WHERE cancelado_em IS NULL AND pago > valor",
+        "SELECT group_concat(id, ',') FROM (SELECT id FROM pagamento WHERE conta_pagar_id = ?1 AND estornado_em IS NULL
+          ORDER BY criado_em, id)",
+    ),
+    (
+        "vale",
+        "vale_a_mais",
+        "SELECT id FROM vale_saldo WHERE cancelado_em IS NULL AND saldo < 0",
+        "SELECT group_concat(id, ',') FROM (SELECT DISTINCT x.id FROM venda_pagamento p JOIN venda x ON x.id = p.venda_id
+          WHERE p.vale_id = ?1 AND x.situacao = 'concluida' ORDER BY x.criado_em, x.id)",
+    ),
+];
+
+/// R-03: a conta (ou o vale) continua passando do valor? (Só lê.)
+fn ainda_a_mais(conn: &Connection, tipo: &str, tabela: &str, chave: &str) -> Resultado<bool> {
+    let sql = match (tipo, tabela) {
+        ("pago_a_mais", "conta_receber") => {
+            "SELECT EXISTS (SELECT 1 FROM conta_receber_saldo WHERE id = ?1 AND cancelado_em IS NULL AND pago > valor)"
+        }
+        ("pago_a_mais", "conta_pagar") => {
+            "SELECT EXISTS (SELECT 1 FROM conta_pagar_saldo WHERE id = ?1 AND cancelado_em IS NULL AND pago > valor)"
+        }
+        ("vale_a_mais", _) => {
+            "SELECT EXISTS (SELECT 1 FROM vale_saldo WHERE id = ?1 AND cancelado_em IS NULL AND saldo < 0)"
+        }
+        _ => return Ok(true),
+    };
+    Ok(conn.query_row(sql, [chave], |l| l.get(0))?)
+}
+
+/// R-03: o texto do conflito, com o que o gerente precisa para achar as
+/// operações (quem, quanto, em que caixas).
+fn texto_a_mais(conn: &Connection, tipo: &str, tabela: &str, chave: &str, perdeu: &str) -> Resultado<String> {
+    let ops: Vec<&str> = perdeu.split(',').filter(|x| !x.is_empty()).collect();
+    let dinheiro = |v: i64| format!("R$ {}", crate::numeros::escrever_dinheiro(v));
+    let lista = |sql: &str| -> Resultado<Vec<String>> {
+        let mut v = Vec::new();
+        for id in &ops {
+            if let Some((numero, valor, disp, estornado)) = conn
+                .query_row(sql, [id], |l| {
+                    Ok((l.get::<_, i64>(0)?, l.get::<_, i64>(1)?, l.get::<_, String>(2)?, l.get::<_, bool>(3)?))
+                })
+                .optional()?
+            {
+                let caixa = nome_do_caixa(conn, &disp)?;
+                let quem = if caixa.is_empty() { "outro caixa".to_string() } else { caixa };
+                let n = if numero > 0 { format!("Nº {numero} ") } else { String::new() };
+                v.push(format!("{n}no {quem}: {}{}", dinheiro(valor), if estornado { " (já estornado)" } else { "" }));
+            }
+        }
+        Ok(v)
+    };
+    Ok(match (tipo, tabela) {
+        ("pago_a_mais", "conta_receber") => {
+            let (cliente, valor, pago, venc, parcela, parcelas): (String, i64, i64, String, i64, i64) = conn
+                .query_row(
+                    "SELECT COALESCE(p.nome, ''), s.valor, s.pago, s.vencimento, s.parcela, s.parcelas
+                   FROM conta_receber_saldo s LEFT JOIN pessoa p ON p.id = s.cliente_id WHERE s.id = ?1",
+                    [chave],
+                    |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)),
+                )?;
+            let recebimentos = lista(
+                "SELECT r.numero, rp.valor, r.dispositivo, r.estornado_em IS NOT NULL
+                   FROM recebimento r JOIN recebimento_parcela rp ON rp.recebimento_id = r.id WHERE r.id = ?1",
+            )?;
+            format!(
+                "A parcela {parcela}/{parcelas} de {cliente} ({}, vencimento {}) foi recebida mais de uma vez em caixas \
+                 sem rede: {}. Recebido no total: {}. Confira com o cliente e estorne o recebimento que sobrou em \
+                 Receber (o estorno fica no histórico). Nada foi apagado sozinho.",
+                dinheiro(valor),
+                crate::fiscal::data_br(&venc),
+                recebimentos.join(" e "),
+                dinheiro(pago)
+            )
+        }
+        ("pago_a_mais", "conta_pagar") => {
+            let (fornecedor, descricao, valor, pago, venc): (String, String, i64, i64, String) = conn.query_row(
+                "SELECT COALESCE(p.nome, ''), s.descricao, s.valor, s.pago, s.vencimento
+                   FROM conta_pagar_saldo s LEFT JOIN pessoa p ON p.id = s.fornecedor_id WHERE s.id = ?1",
+                [chave],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+            )?;
+            let pagamentos =
+                lista("SELECT 0, valor, dispositivo, estornado_em IS NOT NULL FROM pagamento WHERE id = ?1")?;
+            format!(
+                "A conta de {fornecedor}{} ({}, vencimento {}) foi paga mais de uma vez em caixas sem rede: {}. Pago no \
+                 total: {}. Confira com o fornecedor e estorne o pagamento que sobrou em Pagar (o estorno fica no \
+                 histórico). Nada foi apagado sozinho.",
+                if descricao.is_empty() { String::new() } else { format!(" — {descricao}") },
+                dinheiro(valor),
+                crate::fiscal::data_br(&venc),
+                pagamentos.join(" e "),
+                dinheiro(pago)
+            )
+        }
+        _ => {
+            let (numero, cliente, valor, saldo): (i64, String, i64, i64) = conn.query_row(
+                "SELECT numero, cliente_nome, valor, saldo FROM vale_saldo WHERE id = ?1",
+                [chave],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+            )?;
+            let vendas = lista(
+                "SELECT x.numero, COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = x.id AND vale_id IS NOT NULL), 0),
+                        x.dispositivo, x.situacao <> 'concluida'
+                   FROM venda x WHERE x.id = ?1",
+            )?;
+            format!(
+                "O vale-troca Nº {numero}{} ({}) foi usado além do valor em caixas sem rede: vendas {}. Usado no total: \
+                 {}. Confira com o cliente e corrija pela venda que sobrou (o cancelamento fica no histórico). Nada foi \
+                 apagado sozinho.",
+                if cliente.is_empty() { String::new() } else { format!(" de {cliente}") },
+                dinheiro(valor),
+                vendas.join(" e "),
+                dinheiro(valor - saldo)
+            )
+        }
+    })
 }
 
 /// Tabelas em que o gerente pode escolher "usar a versão que perdeu"
@@ -1610,6 +2431,20 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     vendas.join(" e ")
                 );
             }
+            "pago_a_mais" | "vale_a_mais" => {
+                k.o_que = match tabela.as_str() {
+                    "conta_receber" => "Parcela recebida a mais",
+                    "conta_pagar" => "Conta paga a mais",
+                    _ => "Vale-troca usado a mais",
+                }
+                .into();
+                k.texto = texto_a_mais(conn, &tipo, &tabela, &chave, &perdeu)?;
+                // Já corrigido pelo gerente (estorno, cancelamento): sai da lista
+                // de abertos na hora, sem esperar a próxima troca de dados.
+                if k.resolvido.is_empty() && !ainda_a_mais(conn, &tipo, &tabela, &chave)? {
+                    k.resolvido = TEXTO_CORRIGIDO.into();
+                }
+            }
             "gerente" => {
                 let nome: String = conn
                     .query_row("SELECT nome FROM usuario WHERE id = ?1", [&chave], |l| l.get(0))
@@ -1676,7 +2511,23 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
 
 /// Quantos conflitos estão esperando o gerente.
 pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL", [], |l| l.get(0))?)
+    let outros: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL AND tipo NOT IN ('pago_a_mais', 'vale_a_mais')",
+        [],
+        |l| l.get(0),
+    )?;
+    // R-03: os de valor pago a mais que o gerente já corrigiu não contam.
+    let a_mais: Vec<(String, String, String)> = conn
+        .prepare("SELECT tipo, tabela, chave FROM sync_conflito WHERE resolvido_em IS NULL AND tipo IN ('pago_a_mais', 'vale_a_mais')")?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut abertos = outros;
+    for (tipo, tabela, chave) in a_mais {
+        if ainda_a_mais(conn, &tipo, &tabela, &chave)? {
+            abertos += 1;
+        }
+    }
+    Ok(abertos)
 }
 
 /// O gerente decidiu: `usar` = volta a versão que tinha perdido (vira uma
@@ -2154,11 +3005,16 @@ pub fn senha_fora_da_politica(conn: &Connection) -> Resultado<bool> {
 /// Grava as configurações da sincronização (só deste computador).
 pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &str) -> Resultado<()> {
     let senha = senha.trim();
-    // Senha da rede nova ou trocada segue a política (F-17: só o tamanho).
-    // Manter a que já estava gravada (o campo vazio da tela) não exige nada:
-    // nada é forçado.
+    // Senha da rede nova ou trocada segue a política (F-17: só o tamanho),
+    // com a rede ligada ou desligada (A2: uma senha curta gravada com a rede
+    // desligada valeria depois, ao ligar). Ligar a rede também confere a
+    // senha que vai valer, mesmo já gravada. Com a rede já ligada, manter a
+    // senha gravada (o campo vazio da tela) não exige nada: nada é forçado.
     let gravada = config::ler(conn, "sync_senha")?.unwrap_or_default();
-    if ligado && (senha != gravada || senha.is_empty()) {
+    let estava_ligado = config::ler(conn, "sync_ligado")?.as_deref() == Some("1");
+    let troca = !senha.is_empty() && senha != gravada;
+    let liga = ligado && !estava_ligado;
+    if troca || liga || (ligado && senha.is_empty()) {
         if senha.chars().count() < 4 {
             return Err(Erro::campo(
                 "senha",
@@ -2240,11 +3096,19 @@ pub(crate) fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, en
 pub(crate) fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
     let mut conn = Connection::open(caminho)?;
     conn.busy_timeout(Duration::from_secs(10))?;
+    // A3: banco com defeito de integridade (modo seguro): só leitura.
+    if banco::defeito(caminho).is_some() {
+        conn.pragma_update(None, "query_only", true)?;
+    }
     // D-05: espera a vez de gravar em vez de falhar (veja `Banco::preparar`).
     conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
     banco::registrar_funcoes(&conn)?;
     Ok(conn)
 }
+
+/// A3: este caixa está em modo seguro (banco com defeito): não troca dados.
+const TEXTO_MODO_SEGURO: &str = "O banco de dados deste caixa está com defeito (modo seguro): a troca de dados \
+     está parada até restaurar um backup bom.";
 
 /// Atende um pedido de outro caixa.
 fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultado<()> {
@@ -2252,6 +3116,10 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
     fluxo.set_read_timeout(Some(PRAZO_DO_PEDIDO)).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+    // A3: banco com defeito (modo seguro): não entrega nada a ninguém.
+    if banco::defeito(caminho).is_some() {
+        return Ok(());
+    }
     let mut conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
     if !a.ligado || a.senha.is_empty() {
@@ -2271,6 +3139,30 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
     if pedido["protocolo"].as_i64() != Some(PROTOCOLO) {
         return Err(Erro::validacao(PROTOCOLO_DIFERENTE));
     }
+    // FALHA-01: é da mesma loja? Antes de entregar qualquer coisa (e antes de
+    // conhecê-lo como caixa da loja).
+    let quem_pede = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
+    if !quem_pede.is_empty() && quem_pede != a.dispositivo {
+        match crate::loja::decidir(&conn, &quem_pede, &pedido, false)? {
+            crate::loja::Decisao::Recusa => {
+                let origem = fluxo.peer_addr().map(|e| e.ip().to_string()).unwrap_or_default();
+                crate::loja::anotar_outra_loja(&conn, pedido["nome"].as_str().unwrap_or(""), &origem)?;
+                let (loja, novo) = crate::loja::campos(&conn)?;
+                return enviar(
+                    &mut fluxo,
+                    &k,
+                    &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                             "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                             "loja": loja, "novo": novo, "outraLoja": true,
+                             "recusado": crate::loja::TEXTO_RECUSA_LA }),
+                );
+            }
+            crate::loja::Decisao::Aceita => crate::loja::confirmar(&conn, &quem_pede)?,
+            // Este caixa ainda não tem usuários (está entrando numa loja):
+            // não confirma ninguém e não entrega nada (logo abaixo).
+            crate::loja::Decisao::NadaAReceber => {}
+        }
+    }
     // Pedido de faixa de códigos das peças: só o distribuidor atende, numa
     // gravação só (veja `faixas::atender_pedido`).
     if pedido["tipo"] == "faixa" {
@@ -2282,10 +3174,23 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
         let porta = pedido["porta"].as_u64().unwrap_or(crate::portatil::portas().0 as u64);
         if d != a.dispositivo {
             registrar_par(&conn, d, pedido["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()))?;
+            registrar_versao(&conn, d, &pedido)?;
         }
+    }
+    let quem = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
+    // Caixa retirado da loja: não recebe nada até o gerente readmitir.
+    if !quem.is_empty() && retirado(&conn, &quem)? {
+        return enviar(
+            &mut fluxo,
+            &k,
+            &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                     "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                     "recusado": TEXTO_RETIRADO_LA }),
+        );
     }
     let desde = pedido["desde"].as_i64().unwrap_or(0).max(0);
     let geracao = geracao(&conn)?;
+    let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
     let seq_maxima = seq_maxima(&conn)?;
     // O contador de quem pediu ainda vale neste banco? A alteração número
     // `desde` aqui tem de ser a mesma que ele recebeu (a "marca"). Se não é
@@ -2300,17 +3205,541 @@ fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultad
                 &k,
                 &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": [],
                          "temMais": false, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
-                         "recomecar": true }),
+                         "recomecar": true, "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                         "loja": minha_loja, "novo": sou_novo }),
             );
         }
     }
-    let (lista, tem_mais) = alteracoes_desde(&conn, desde, lote(&conn))?;
+    // Caixa sem usuários (entrando numa loja): não tem dado próprio e não é a
+    // fonte de loja nenhuma; o que recebeu de outro caixa não é repassado.
+    let (lista, tem_mais) = if sou_novo { (Vec::new(), false) } else { alteracoes_desde(&conn, desde, lote(&conn))? };
+    let (lista, tem_mais) = preparar_para(&conn, &quem, &pedido, lista, tem_mais)?;
     enviar(
         &mut fluxo,
         &k,
         &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista,
-                 "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima }),
+                 "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
+                 "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                 "loja": minha_loja, "novo": sou_novo }),
     )
+}
+
+const TEXTO_RETIRADO_AQUI: &str =
+    "Este caixa foi retirado da loja. Para ele voltar a trocar dados, o gerente precisa readmiti-lo em \
+     Configurações › Caixas da loja.";
+const TEXTO_RETIRADO_LA: &str = "Este caixa foi retirado da loja pelo gerente. Para voltar a trocar dados, o gerente \
+     precisa readmiti-lo em Configurações › Caixas da loja, num caixa da loja.";
+
+/// Guarda a versão que o outro caixa informou (estrutura do banco e
+/// recursos). Caixa que não informa é de antes da 0.9.15: fica sem
+/// compatibilidade confirmada (um caixa que voltou a uma versão antiga perde
+/// a confirmação na hora).
+pub(crate) fn registrar_versao(conn: &Connection, dispositivo: &str, mensagem: &Value) -> Resultado<()> {
+    let esquema = mensagem["esquema"].as_i64();
+    let recursos: Vec<String> = mensagem["recursos"]
+        .as_array()
+        .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_string)).take(32).collect())
+        .unwrap_or_default();
+    let compativel = esquema.is_some_and(|e| e >= ESQUEMA_RASCUNHO);
+    conn.execute(
+        "UPDATE sync_par SET esquema = ?2, recursos = ?3,
+                compativel_em = CASE WHEN ?4 THEN ?5 ELSE NULL END
+          WHERE dispositivo = ?1",
+        params![dispositivo, esquema, recursos.join(","), compativel, tempo::agora()],
+    )?;
+    if compativel {
+        // O que não ia para ele por ser de versão antiga agora vai (a
+        // numeração dele ficou antes dessas alterações).
+        conn.execute(
+            "UPDATE sync_pendencia SET estado = 'resolvida', resolvido_em = ?2, atualizado_em = ?2
+              WHERE lado = 'nao_enviada' AND par = ?1 AND estado = 'pendente'",
+            params![dispositivo, tempo::agora()],
+        )?;
+    }
+    Ok(())
+}
+
+/// O caixa foi retirado da loja (configuração da loja, vale em todos)?
+pub fn retirado(conn: &Connection, dispositivo: &str) -> Resultado<bool> {
+    Ok(config::ler(conn, &format!("{PREFIXO_RETIRADO}{dispositivo}"))?.is_some_and(|v| !v.trim().is_empty()))
+}
+
+/// Prepara o lote para o caixa `quem`:
+/// - caixa que entende pendências (0.9.15+): o que a versão dele não
+///   consegue gravar vai marcado ("incompativel") e ele guarda sem aplicar;
+/// - caixa antigo (não informa recursos): o lote **para** na primeira
+///   alteração que ele não consegue gravar com segurança (incompatível ou
+///   com dados estragados). Ele não pode pular nada: a numeração dele
+///   avançaria e a alteração se perderia para ele. Fica anotado aqui (lado
+///   "nao_enviada") e o gerente vê o motivo.
+pub(crate) fn preparar_para(
+    conn: &Connection,
+    quem: &str,
+    pedido: &Value,
+    mut lista: Vec<Alteracao>,
+    tem_mais: bool,
+) -> Resultado<(Vec<Alteracao>, bool)> {
+    let recursos: Vec<&str> =
+        pedido["recursos"].as_array().map(|l| l.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+    let esquema = pedido["esquema"].as_i64().unwrap_or(ESQUEMA_LEGADO);
+    if recursos.contains(&RECURSO_PENDENCIAS) {
+        for a in &mut lista {
+            a.incompativel = incompatibilidade(esquema, a);
+        }
+        return Ok((lista, tem_mais));
+    }
+    let mut cache: Vec<(String, Vec<String>)> = Vec::new();
+    let mut corte = None;
+    for (i, a) in lista.iter().enumerate() {
+        let motivo = if let Some(m) = incompatibilidade(esquema, a) {
+            Some(m)
+        } else if a.tabela == "config" && !config_da_loja(&a.chave) {
+            None
+        } else {
+            if !cache.iter().any(|c| c.0 == a.tabela) {
+                let (_, chave) = colunas(conn, &a.tabela)?;
+                cache.push((a.tabela.clone(), chave));
+            }
+            let chave = &cache.iter().find(|c| c.0 == a.tabela).expect("acabou de entrar").1;
+            invalida(a, chave)
+        };
+        if let Some(m) = motivo {
+            corte = Some((i, m));
+            break;
+        }
+    }
+    let Some((i, motivo)) = corte else {
+        if let Some(ultima) = lista.last() {
+            conn.execute(
+                "UPDATE sync_pendencia SET estado = 'resolvida', resolvido_em = ?3, atualizado_em = ?3
+                  WHERE lado = 'nao_enviada' AND par = ?1 AND seq <= ?2 AND estado = 'pendente'",
+                params![quem, ultima.seq, tempo::agora()],
+            )?;
+        }
+        return Ok((lista, tem_mais));
+    };
+    let a = &lista[i];
+    if !quem.is_empty() {
+        let agora = tempo::agora();
+        conn.execute(
+            "INSERT INTO sync_pendencia (lado, par, alteracao_id, origem, seq, tabela, chave, operacao, dispositivo, quando,
+                                         motivo, detalhe, criado_em, atualizado_em)
+             VALUES ('nao_enviada', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8, 'incompativel_esquema', ?9, ?10, ?10)
+             ON CONFLICT (lado, par, alteracao_id) DO UPDATE SET atualizado_em = excluded.atualizado_em,
+                 tentativas = sync_pendencia.tentativas + 1
+               WHERE sync_pendencia.estado = 'pendente'",
+            params![quem, a.id, a.dispositivo, a.seq, a.tabela, a.chave, a.operacao, a.quando, motivo, agora],
+        )?;
+    }
+    lista.truncate(i);
+    // `temMais` falso: ele não pede de novo na hora (pediria o mesmo).
+    Ok((lista, false))
+}
+
+/// Um caixa que esta loja conhece, com a situação da versão dele.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaixaConhecido {
+    pub dispositivo: String,
+    pub nome: String,
+    /// Estrutura do banco que ele informou (None = não informou: versão
+    /// antiga ou nunca conversou direto com este caixa).
+    pub esquema: Option<i64>,
+    pub compativel_em: String,
+    /// A mesma data no horário daqui ("19/10/2026 10:32").
+    pub compativel_em_texto: String,
+    pub dias_sem_confirmar: Option<i64>,
+    /// "compativel", "vencido" (passou o prazo), "antigo", "desconhecido" ou "retirado".
+    pub situacao: String,
+    pub texto: String,
+    /// Impede rascunhos de OS novos.
+    pub bloqueia: bool,
+    /// Pendências recebidas dele (impedem a retirada) e não enviadas a ele.
+    pub pendencias_recebidas: i64,
+    pub nao_enviadas: i64,
+    pub retirado_em: String,
+    pub retirado_motivo: String,
+    pub retirado_por: String,
+}
+
+/// Todos os caixas que esta loja conhece: os que já conversaram com este
+/// (`sync_par`), os que aparecem no log de alterações (algum caixa os
+/// repassou) e os retirados. Este computador não entra.
+pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
+    let eu = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    let ids: Vec<String> = conn
+        .prepare(&format!(
+            "SELECT dispositivo FROM sync_par
+             UNION SELECT DISTINCT dispositivo FROM alteracao WHERE dispositivo <> ''
+             UNION SELECT substr(chave, {}) FROM config WHERE chave LIKE '{PREFIXO_RETIRADO}%'",
+            PREFIXO_RETIRADO.len() + 1
+        ))?
+        .query_map([], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut lista = Vec::new();
+    for id in ids.into_iter().filter(|d| !d.is_empty() && *d != eu) {
+        #[allow(clippy::type_complexity)]
+        let par: Option<(String, Option<i64>, Option<String>, Option<f64>, Option<String>)> = conn
+            .query_row(
+                "SELECT nome, esquema, compativel_em, julianday('now') - julianday(compativel_em),
+                        strftime('%d/%m/%Y %H:%M', compativel_em, 'localtime')
+                   FROM sync_par WHERE dispositivo = ?1",
+                [&id],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+            )
+            .optional()?;
+        let mut nome = par.as_ref().map(|p| p.0.clone()).unwrap_or_default();
+        if nome.is_empty() {
+            for sql in [
+                "SELECT caixa_nome FROM caixa_sessao WHERE dispositivo = ?1 ORDER BY aberto_em DESC LIMIT 1",
+                "SELECT caixa_nome FROM ordem_servico WHERE dispositivo = ?1 ORDER BY criado_em DESC LIMIT 1",
+            ] {
+                if let Some(n) = conn.query_row(sql, [&id], |l| l.get::<_, String>(0)).optional()? {
+                    if !n.is_empty() {
+                        nome = n;
+                        break;
+                    }
+                }
+            }
+        }
+        if nome.is_empty() {
+            nome = format!(
+                "Caixa sem nome ({})",
+                id.chars().rev().take(6).collect::<String>().chars().rev().collect::<String>()
+            );
+        }
+        let retirada: Option<Value> = config::ler(conn, &format!("{PREFIXO_RETIRADO}{id}"))?
+            .filter(|v| !v.trim().is_empty())
+            .map(|v| serde_json::from_str(&v).unwrap_or(json!({})));
+        let (esquema, compativel_em, dias, compativel_em_texto) = match &par {
+            Some((_, e, c, d, t)) => {
+                (*e, c.clone().unwrap_or_default(), d.map(|d| d.floor() as i64), t.clone().unwrap_or_default())
+            }
+            None => (None, String::new(), None, String::new()),
+        };
+        let pendencias_recebidas: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND origem = ?1 AND estado = 'pendente'",
+            [&id],
+            |l| l.get(0),
+        )?;
+        let nao_enviadas: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'nao_enviada' AND par = ?1 AND estado = 'pendente'",
+            [&id],
+            |l| l.get(0),
+        )?;
+        let (situacao, texto) = if retirada.is_some() {
+            ("retirado", "Retirado da loja: não troca dados nem conta para a compatibilidade.".to_string())
+        } else if par.is_none() {
+            ("desconhecido", "Nunca conversou direto com este caixa: a versão dele não é conhecida.".to_string())
+        } else if esquema.is_none_or(|e| e < ESQUEMA_RASCUNHO) {
+            ("antigo", "Está com uma versão antiga do Rustinho (antes da 0.9.15).".to_string())
+        } else if dias.is_none_or(|d| d >= PRAZO_COMPATIBILIDADE_DIAS) {
+            (
+                "vencido",
+                format!(
+                    "Não confirma a versão há {} dias (o prazo é de {PRAZO_COMPATIBILIDADE_DIAS}).",
+                    dias.unwrap_or(0)
+                ),
+            )
+        } else {
+            ("compativel", "Versão compatível, confirmada na última troca de dados.".to_string())
+        };
+        let txt = |k: &str| retirada.as_ref().and_then(|r| r[k].as_str().map(str::to_string)).unwrap_or_default();
+        lista.push(CaixaConhecido {
+            dispositivo: id,
+            nome,
+            esquema,
+            compativel_em,
+            compativel_em_texto,
+            dias_sem_confirmar: dias,
+            bloqueia: situacao != "compativel" && situacao != "retirado",
+            situacao: situacao.into(),
+            texto,
+            pendencias_recebidas,
+            nao_enviadas,
+            retirado_em: txt("em"),
+            retirado_motivo: txt("motivo"),
+            retirado_por: txt("por"),
+        });
+    }
+    lista.sort_by(|a, b| a.nome.cmp(&b.nome));
+    Ok(lista)
+}
+
+/// Os caixas que impedem rascunhos de OS novos agora (vazio = pode).
+pub fn bloqueios_de_rascunho(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
+    Ok(caixas_conhecidos(conn)?.into_iter().filter(|c| c.bloqueia).collect())
+}
+
+/// Retira da loja um caixa que deixou de pertencer a ela (gerente, com
+/// motivo). Não conclui com alterações recebidas dele ainda pendentes (elas
+/// ficariam sem dono). As que não iam para ele (versão antiga) deixam de
+/// valer: ele não recebe mais nada. Vai para todos os caixas.
+pub fn retirar_caixa(conn: &Connection, dispositivo: &str, motivo: &str, quem: &str) -> Resultado<()> {
+    let eu = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    if dispositivo.is_empty() {
+        return Err(Erro::validacao("Escolha o caixa."));
+    }
+    if dispositivo == eu {
+        return Err(Erro::validacao("Este computador não pode retirar a si mesmo da loja."));
+    }
+    let motivo = crate::texto::limpar(motivo);
+    if motivo.is_empty() {
+        return Err(Erro::campo("motivo", "Diga por que o caixa está saindo da loja."));
+    }
+    let caixa = caixas_conhecidos(conn)?
+        .into_iter()
+        .find(|c| c.dispositivo == dispositivo)
+        .ok_or_else(|| Erro::NaoEncontrado("Caixa".into()))?;
+    if caixa.situacao == "retirado" {
+        return Err(Erro::validacao("Este caixa já foi retirado da loja."));
+    }
+    if caixa.pendencias_recebidas > 0 {
+        return Err(Erro::validacao(format!(
+            "{} tem {} alteração(ões) recebida(s) e ainda pendente(s) neste caixa. Resolva ou arquive cada uma \
+             (em Pendências da troca de dados) antes de retirá-lo.",
+            caixa.nome, caixa.pendencias_recebidas
+        )));
+    }
+    let agora = tempo::agora();
+    let valor = json!({ "nome": caixa.nome, "motivo": motivo, "por": quem, "em": agora }).to_string();
+    config::gravar(conn, &format!("{PREFIXO_RETIRADO}{dispositivo}"), &valor)?;
+    conn.execute(
+        "UPDATE sync_pendencia SET estado = 'resolvida', resolvido_em = ?2, atualizado_em = ?2,
+                detalhe = detalhe || ' (caixa retirado da loja)'
+          WHERE lado = 'nao_enviada' AND par = ?1 AND estado = 'pendente'",
+        params![dispositivo, agora],
+    )?;
+    Ok(())
+}
+
+/// O gerente aceita de volta um caixa retirado.
+pub fn readmitir_caixa(conn: &Connection, dispositivo: &str) -> Resultado<()> {
+    if !retirado(conn, dispositivo)? {
+        return Err(Erro::validacao("Este caixa não está retirado."));
+    }
+    conn.execute("DELETE FROM config WHERE chave = ?1", [format!("{PREFIXO_RETIRADO}{dispositivo}")])?;
+    Ok(())
+}
+
+/// Uma pendência da troca de dados, para a tela.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pendencia {
+    pub lado: String,
+    pub par: String,
+    pub alteracao_id: String,
+    pub origem: String,
+    pub caixa: String,
+    pub tabela: String,
+    pub o_que: String,
+    pub motivo: String,
+    pub texto_motivo: String,
+    pub detalhe: String,
+    pub estado: String,
+    pub tentativas: i64,
+    pub ultimo_erro: String,
+    pub criado_em: String,
+    pub pode_arquivar: bool,
+    pub arquivada_por: String,
+    pub arquivada_motivo: String,
+}
+
+pub fn texto_do_motivo(motivo: &str) -> &'static str {
+    match motivo {
+        "incompativel_esquema" => "Versão incompatível",
+        "invalida" => "Dados estragados",
+        "erro_aplicacao" => "Recusada ao gravar",
+        "dependencia_suspensa" => "Depende de outra pendente",
+        _ => "Pendente",
+    }
+}
+
+/// Pendências (as pendentes e as arquivadas; até 300, as mais antigas primeiro).
+pub fn pendencias_da_troca(conn: &Connection) -> Resultado<Vec<Pendencia>> {
+    let caixas: HashMap<String, String> =
+        caixas_conhecidos(conn)?.into_iter().map(|c| (c.dispositivo, c.nome)).collect();
+    let mut c = conn.prepare(
+        "SELECT lado, par, alteracao_id, origem, tabela, motivo, detalhe, estado, tentativas, ultimo_erro, criado_em,
+                COALESCE((SELECT nome FROM usuario WHERE id = arquivada_por), ''), arquivada_motivo
+           FROM sync_pendencia WHERE estado IN ('pendente', 'arquivada_manual')
+          ORDER BY estado = 'arquivada_manual', criado_em LIMIT 300",
+    )?;
+    let lista = c
+        .query_map([], |l| {
+            let lado: String = l.get(0)?;
+            let par: String = l.get(1)?;
+            let origem: String = l.get(3)?;
+            let tabela: String = l.get(4)?;
+            let motivo: String = l.get(5)?;
+            let estado: String = l.get(7)?;
+            let quem = if lado == "nao_enviada" { &par } else { &origem };
+            Ok(Pendencia {
+                caixa: caixas.get(quem).cloned().unwrap_or_else(|| {
+                    if quem.is_empty() {
+                        "Este caixa".into()
+                    } else {
+                        quem.clone()
+                    }
+                }),
+                o_que: nome_da_tabela(&tabela).to_string(),
+                texto_motivo: texto_do_motivo(&motivo).into(),
+                pode_arquivar: estado == "pendente" && lado == "recebida" && motivo != "incompativel_esquema",
+                lado,
+                par,
+                alteracao_id: l.get(2)?,
+                origem,
+                tabela,
+                motivo,
+                detalhe: l.get(6)?,
+                estado,
+                tentativas: l.get(8)?,
+                ultimo_erro: l.get(9)?,
+                criado_em: l.get(10)?,
+                arquivada_por: l.get(11)?,
+                arquivada_motivo: l.get(12)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(lista)
+}
+
+/// Histórico da troca de dados (Configurações › Simultaneidade › Histórico):
+/// como foi a última troca com cada caixa e as pendências que já saíram da
+/// lista (aplicadas depois ou arquivadas pelo gerente). Só leitura.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoricoDaTroca {
+    pub caixas: Vec<TrocaComCaixa>,
+    pub encerradas: Vec<PendenciaEncerrada>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrocaComCaixa {
+    pub dispositivo: String,
+    pub nome: String,
+    /// "19/10/2026 10:32" no horário daqui; vazio = nunca.
+    pub sincronizado_em: String,
+    pub visto_em: String,
+    pub erro: String,
+    pub situacao: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendenciaEncerrada {
+    pub alteracao_id: String,
+    pub lado: String,
+    pub caixa: String,
+    pub o_que: String,
+    pub texto_motivo: String,
+    /// "resolvida" (aplicada ou não precisou mais) ou "arquivada_manual".
+    pub estado: String,
+    pub criado_em: String,
+    pub encerrada_em: String,
+    pub tentativas: i64,
+    pub arquivada_por: String,
+    pub arquivada_motivo: String,
+}
+
+pub fn historico_da_troca(conn: &Connection, limite: i64) -> Resultado<HistoricoDaTroca> {
+    let conhecidos = caixas_conhecidos(conn)?;
+    let nomes: HashMap<String, String> = conhecidos.iter().map(|c| (c.dispositivo.clone(), c.nome.clone())).collect();
+    let mut caixas = Vec::new();
+    for c in &conhecidos {
+        let linha: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT COALESCE(strftime('%d/%m/%Y %H:%M', sincronizado_em, 'localtime'), ''),
+                        COALESCE(strftime('%d/%m/%Y %H:%M', visto_em, 'localtime'), ''),
+                        erro
+                   FROM sync_par WHERE dispositivo = ?1",
+                [&c.dispositivo],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .optional()?;
+        let (sincronizado_em, visto_em, erro) = linha.unwrap_or_default();
+        caixas.push(TrocaComCaixa {
+            dispositivo: c.dispositivo.clone(),
+            nome: c.nome.clone(),
+            sincronizado_em,
+            visto_em,
+            erro,
+            situacao: c.situacao.clone(),
+        });
+    }
+    let mut consulta = conn.prepare(
+        "SELECT alteracao_id, lado, par, origem, tabela, motivo, estado,
+                COALESCE(strftime('%d/%m/%Y %H:%M', criado_em, 'localtime'), ''),
+                COALESCE(strftime('%d/%m/%Y %H:%M', COALESCE(resolvido_em, atualizado_em), 'localtime'), ''),
+                tentativas,
+                COALESCE((SELECT nome FROM usuario WHERE id = arquivada_por), ''), arquivada_motivo
+           FROM sync_pendencia WHERE estado IN ('resolvida', 'arquivada_manual')
+          ORDER BY COALESCE(resolvido_em, atualizado_em) DESC LIMIT ?1",
+    )?;
+    let encerradas = consulta
+        .query_map([limite], |l| {
+            let lado: String = l.get(1)?;
+            let par: String = l.get(2)?;
+            let origem: String = l.get(3)?;
+            let tabela: String = l.get(4)?;
+            let motivo: String = l.get(5)?;
+            let quem = if lado == "nao_enviada" { &par } else { &origem };
+            Ok(PendenciaEncerrada {
+                alteracao_id: l.get(0)?,
+                caixa: nomes.get(quem).cloned().unwrap_or_else(|| {
+                    if quem.is_empty() {
+                        "Este caixa".into()
+                    } else {
+                        quem.clone()
+                    }
+                }),
+                o_que: nome_da_tabela(&tabela).to_string(),
+                texto_motivo: texto_do_motivo(&motivo).into(),
+                lado,
+                estado: l.get(6)?,
+                criado_em: l.get(7)?,
+                encerrada_em: l.get(8)?,
+                tentativas: l.get(9)?,
+                arquivada_por: l.get(10)?,
+                arquivada_motivo: l.get(11)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(HistoricoDaTroca { caixas, encerradas })
+}
+
+/// O gerente arquiva uma pendência recebida que não tem como ser aplicada
+/// (com motivo). A cópia inteira continua guardada; nunca aparece como
+/// aplicada. Incompatibilidade de versão não se arquiva: só sai com a
+/// atualização do caixa.
+pub fn arquivar_pendencia(conn: &Connection, alteracao_id: &str, motivo: &str, quem: &str) -> Resultado<()> {
+    let motivo = crate::texto::limpar(motivo);
+    if motivo.is_empty() {
+        return Err(Erro::campo("motivo", "Diga por que esta pendência vai ser arquivada."));
+    }
+    let atual: Option<(String, String)> = conn
+        .query_row(
+            "SELECT motivo, estado FROM sync_pendencia WHERE lado = 'recebida' AND alteracao_id = ?1",
+            [alteracao_id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    let Some((tipo, estado)) = atual else { return Err(Erro::NaoEncontrado("Pendência".into())) };
+    if estado != "pendente" {
+        return Err(Erro::validacao("Esta pendência não está mais pendente."));
+    }
+    if tipo == "incompativel_esquema" {
+        return Err(Erro::validacao(
+            "Incompatibilidade de versão não se arquiva: ela sai sozinha quando o caixa for atualizado.",
+        ));
+    }
+    conn.execute(
+        "UPDATE sync_pendencia SET estado = 'arquivada_manual', arquivada_por = ?2, arquivada_motivo = ?3, atualizado_em = ?4
+          WHERE lado = 'recebida' AND alteracao_id = ?1",
+        params![alteracao_id, quem, motivo, tempo::agora()],
+    )?;
+    Ok(())
 }
 
 /// Geração deste banco: muda quando ele volta de um backup (veja
@@ -2389,6 +3818,10 @@ pub(crate) fn puxar_por(
     saida: Option<&Saida>,
 ) -> Resultado<Puxada> {
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+    // A3: banco com defeito (modo seguro): não aplica nada de ninguém.
+    if banco::defeito(caminho).is_some() {
+        return Err(Erro::validacao(TEXTO_MODO_SEGURO));
+    }
     let mut conn = abrir_conexao(caminho)?;
     if crate::faixas::copia_detectada(&conn)? {
         return Err(Erro::validacao(crate::faixas::texto_do_bloqueio(crate::faixas::BLOQUEIO_COPIA)));
@@ -2400,6 +3833,7 @@ pub(crate) fn puxar_por(
     let mut dispositivo = String::new();
     let mut recomecos = 0;
     let mut sondou = false;
+    let mut lotes = 0usize;
     let mut confirmacao: Option<rede_local::Confirmacao>;
     loop {
         // Contador, marca e geração guardados deste outro caixa. Na primeira
@@ -2447,12 +3881,15 @@ pub(crate) fn puxar_por(
         fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
         fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
         let saiu = agora_ms();
+        let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
         enviar(
             &mut fluxo,
             &k,
             &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": if sonda { i64::MAX } else { cursor },
                      "marca": if sonda { Some("sonda".to_string()) } else { marca },
-                     "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local }),
+                     "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local,
+                     "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                     "loja": minha_loja, "novo": sou_novo }),
         )?;
         let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
         // Outro protocolo: recusa antes de ler qualquer alteração.
@@ -2464,7 +3901,39 @@ pub(crate) fn puxar_por(
         if dispositivo.is_empty() || dispositivo == a.dispositivo {
             return Err(Erro::validacao(caminhos::ESTE_MESMO_CAIXA));
         }
+        // FALHA-01: é da mesma loja? Antes de conhecê-lo como caixa da loja e
+        // de aplicar qualquer alteração dele.
+        let decisao = if resposta["outraLoja"].as_bool() == Some(true) {
+            crate::loja::Decisao::Recusa
+        } else {
+            crate::loja::decidir(&conn, &dispositivo, &resposta, true)?
+        };
+        match decisao {
+            crate::loja::Decisao::Recusa => {
+                crate::loja::anotar_outra_loja(&conn, resposta["nome"].as_str().unwrap_or(""), &alvo.ip().to_string())?;
+                return Err(Erro::validacao(crate::loja::TEXTO_RECUSA_AQUI));
+            }
+            crate::loja::Decisao::NadaAReceber => {
+                // Caixa novo entrando na loja: ele é que recebe daqui.
+                registrar_par(&conn, &dispositivo, resposta["nome"].as_str().unwrap_or(""), &alvo.to_string())?;
+                let confirmacao = confirmacao.unwrap_or(rede_local::Confirmacao {
+                    preso_ao_ip: false,
+                    preso_a_interface: None,
+                    local: None,
+                });
+                return Ok(Puxada { dispositivo, total: 0, confirmacao });
+            }
+            crate::loja::Decisao::Aceita => crate::loja::confirmar(&conn, &dispositivo)?,
+        }
         registrar_par(&conn, &dispositivo, resposta["nome"].as_str().unwrap_or(""), &alvo.to_string())?;
+        registrar_versao(&conn, &dispositivo, &resposta)?;
+        // Caixa retirado da loja: não troca dados até o gerente readmitir.
+        if let Some(m) = resposta["recusado"].as_str() {
+            return Err(Erro::validacao(m));
+        }
+        if retirado(&conn, &dispositivo)? {
+            return Err(Erro::validacao(TEXTO_RETIRADO_AQUI));
+        }
         if sonda {
             // Só queria saber quem é; a resposta (sem alterações) não se aplica.
             sondou = true;
@@ -2507,22 +3976,23 @@ pub(crate) fn puxar_por(
         let lista: Vec<Alteracao> = serde_json::from_value(resposta["alteracoes"].clone())?;
         let ultima = lista.iter().max_by_key(|x| x.seq).map(|x| (x.seq, x.id.clone()));
         let novo_cursor = ultima.as_ref().map_or(cursor, |(m, _)| *m);
-        total += aplicar(&mut conn, &lista)?;
-        let avancou =
-            match ultima {
-                // Só avança se ninguém zerou o cursor no meio (restauração de backup).
-                Some((m, id)) => conn.execute(
-                    "UPDATE sync_par SET cursor = ?2, marca = ?4, geracao = ?5 WHERE dispositivo = ?1 AND cursor = ?3",
-                    params![dispositivo, m, cursor, id, geracao_dele],
-                )? > 0,
-                None => {
-                    conn.execute(
-                        "UPDATE sync_par SET geracao = ?2 WHERE dispositivo = ?1 AND (geracao IS NULL OR geracao = '')",
-                        params![dispositivo, geracao_dele],
-                    )?;
-                    true
-                }
-            };
+        // O lote e o novo contador numa transação só (marca d'água: tudo até
+        // o contador está gravado ou guardado em `sync_pendencia`).
+        let marca_nova = ultima.as_ref().map(|(_, id)| id.clone()).unwrap_or_default();
+        let r = aplicar_de(
+            &mut conn,
+            &lista,
+            &dispositivo,
+            Some(AvancoCursor {
+                dispositivo: &dispositivo,
+                de: cursor,
+                para: novo_cursor,
+                marca: &marca_nova,
+                geracao: &geracao_dele,
+            }),
+        )?;
+        total += r.novas;
+        let avancou = r.avancou;
         // Troca COMPLETA com este caixa (R-05): não há mais nada a receber e o
         // contador chegou ao máximo dele. É a prova de que ele já entregou tudo.
         if avancou && !resposta["temMais"].as_bool().unwrap_or(false) && novo_cursor >= seq_dele {
@@ -2551,7 +4021,11 @@ pub(crate) fn puxar_por(
             "UPDATE sync_par SET sincronizado_em = ?2, erro = ?3 WHERE dispositivo = ?1",
             params![dispositivo, tempo::agora(), aviso],
         )?;
-        if !resposta["temMais"].as_bool().unwrap_or(false) || parar.is_some_and(|p| p.load(Ordering::SeqCst)) {
+        lotes += 1;
+        if !resposta["temMais"].as_bool().unwrap_or(false)
+            || parar.is_some_and(|p| p.load(Ordering::SeqCst))
+            || lotes_maximos(&conn).is_some_and(|n| lotes >= n)
+        {
             break;
         }
     }
@@ -2590,6 +4064,9 @@ fn pedir_faixa(conn: &mut Connection, k: &Chaves, alvo: &SocketAddr, saida: Opti
     let mut pedido = crate::faixas::pedido(conn)?;
     pedido["tipo"] = json!("faixa");
     pedido["protocolo"] = json!(PROTOCOLO);
+    let (loja, novo) = crate::loja::campos(conn)?;
+    pedido["loja"] = json!(loja);
+    pedido["novo"] = json!(novo);
     let (mut fluxo, _) = rede_local::conectar(*alvo, saida, Duration::from_secs(3)).map_err(rede)?;
     fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
@@ -2617,9 +4094,22 @@ fn aceitar_anuncio(dispositivo: &str, a: &Ajustes, interfaces: Option<&[Interfac
     dispositivo != a.dispositivo && rede_local::caminho_aprendido_vale(interfaces, endereco, &a.interfaces)
 }
 
+/// O motivo, para a tela, de uma porta da troca de dados que não abre.
+fn motivo_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
+    format!("não foi possível abrir a porta {protocolo} {porta} ({erro}); outro programa pode estar usando essa porta")
+}
+
 /// O que vai para o registro quando uma porta da troca de dados não abre.
 fn texto_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
-    format!("troca de dados: não foi possível abrir a porta {protocolo} {porta} ({erro}); outro programa pode estar usando essa porta")
+    format!("troca de dados: {}", motivo_da_porta(protocolo, porta, erro))
+}
+
+/// Guarda o problema do motor uma vez só (as tentativas repetem o mesmo).
+fn guardar_problema(problemas: &Mutex<Vec<String>>, texto: String) {
+    let mut p = problemas.lock().unwrap_or_else(|e| e.into_inner());
+    if !p.contains(&texto) {
+        p.push(texto);
+    }
 }
 
 /// O motor da sincronização: três tarefas em segundo plano (servidor,
@@ -2631,6 +4121,10 @@ fn texto_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
 pub struct Motor {
     parar: Arc<AtomicBool>,
     tarefas: Vec<thread::JoinHandle<()>>,
+    /// As portas em uso de verdade (TCP, UDP); 0 = ainda não abriu. Pedir a
+    /// porta 0 deixa o sistema escolher uma livre na hora de abrir (testes):
+    /// sem intervalo entre reservar e usar.
+    portas: Arc<(AtomicU16, AtomicU16)>,
     /// O que impediu o motor de funcionar por inteiro (ex.: porta ocupada).
     problemas: Arc<Mutex<Vec<String>>>,
     /// Já pediram para encerrar com um prazo (quem pediu decide o que fazer
@@ -2674,6 +4168,22 @@ impl Motor {
         ok
     }
 
+    /// As portas (TCP, UDP) que o motor abriu de verdade, esperando até
+    /// `prazo` que as duas abram. None = não abriram nesse prazo.
+    pub fn portas(&self, prazo: Duration) -> Option<(u16, u16)> {
+        let fim = Instant::now() + prazo;
+        loop {
+            let (t, u) = (self.portas.0.load(Ordering::SeqCst), self.portas.1.load(Ordering::SeqCst));
+            if t != 0 && u != 0 {
+                return Some((t, u));
+            }
+            if Instant::now() >= fim {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// O que está impedindo o motor de funcionar (ex.: porta ocupada). Também
     /// vai para o registro, uma vez.
     pub fn problemas(&self) -> Vec<String> {
@@ -2691,22 +4201,43 @@ impl Motor {
         let parar = Arc::new(AtomicBool::new(false));
         let mut tarefas = Vec::new();
         let problemas: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        // Com a porta 0, a de verdade só se sabe depois de abrir; quem anuncia
+        // e quem puxa usam a de verdade. Depois de uma queda, a tarefa abre a
+        // mesma porta de novo (os outros caixas já a conhecem).
+        let portas: Arc<(AtomicU16, AtomicU16)> = Arc::new((AtomicU16::new(0), AtomicU16::new(0)));
+        let porta_tcp_de = move |p: &Arc<(AtomicU16, AtomicU16)>| match p.0.load(Ordering::SeqCst) {
+            0 => porta_tcp,
+            aberta => aberta,
+        };
+        let porta_udp_de = move |p: &Arc<(AtomicU16, AtomicU16)>| match p.1.load(Ordering::SeqCst) {
+            0 => porta_udp,
+            aberta => aberta,
+        };
 
-        // 1. Servidor: atende os outros caixas.
+        // 1. Servidor: atende os outros caixas. (O-3: cada tarefa roda
+        // supervisionada e volta sozinha depois de um erro interno; veja
+        // `supervisao`.)
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
             let problemas = problemas.clone();
-            tarefas.push(thread::spawn(move || {
+            let parar_tarefa = parar.clone();
+            let portas = portas.clone();
+            tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "servidor", parar_tarefa, move || {
+                // RVI-02: porta ocupada é falha da tarefa (o supervisor tenta de
+                // novo, com limite, e a situação mostra o motivo); o registro
+                // recebe a falha pelo supervisor.
+                let porta_tcp = porta_tcp_de(&portas);
                 let ouvinte = match TcpListener::bind(("0.0.0.0", porta_tcp)) {
                     Ok(o) => o,
                     Err(e) => {
-                        let texto = texto_da_porta("TCP", porta_tcp, &e.to_string());
-                        crate::registro::anotar(&texto);
-                        problemas.lock().unwrap_or_else(|e| e.into_inner()).push(texto);
-                        return;
+                        guardar_problema(&problemas, texto_da_porta("TCP", porta_tcp, &e.to_string()));
+                        return Err(motivo_da_porta("TCP", porta_tcp, &e.to_string()));
                     }
                 };
+                if let Ok(a) = ouvinte.local_addr() {
+                    portas.0.store(a.port(), Ordering::SeqCst);
+                }
                 ouvinte.set_nonblocking(true).ok();
                 let vagas = Arc::new(AtomicUsize::new(0));
                 let mut atendendo: Vec<Atendimento> = Vec::new();
@@ -2715,6 +4246,7 @@ impl Motor {
                 // pedido na hora e passa logo para o atendimento.
                 let mut fila: Vec<NaFila> = Vec::new();
                 while !parar.load(Ordering::SeqCst) {
+                    crate::supervisao::ponto_de_queda(&caminho, "servidor");
                     atendendo.retain(|a| !a.tarefa.is_finished());
                     let mut mexeu = false;
                     // 1. Aceita quem chegou.
@@ -2798,6 +4330,7 @@ impl Motor {
                 for a in atendendo {
                     let _ = a.tarefa.join();
                 }
+                Ok(())
             }));
         }
 
@@ -2806,16 +4339,21 @@ impl Motor {
             let caminho = caminho.clone();
             let parar = parar.clone();
             let problemas = problemas.clone();
-            tarefas.push(thread::spawn(move || {
+            let parar_tarefa = parar.clone();
+            let portas = portas.clone();
+            tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "anuncio", parar_tarefa, move || {
+                let porta_udp = porta_udp_de(&portas);
                 let socket = match UdpSocket::bind(("0.0.0.0", porta_udp)) {
                     Ok(s) => s,
                     Err(e) => {
-                        let texto = texto_da_porta("UDP", porta_udp, &e.to_string());
-                        crate::registro::anotar(&texto);
-                        problemas.lock().unwrap_or_else(|e| e.into_inner()).push(texto);
-                        return;
+                        guardar_problema(&problemas, texto_da_porta("UDP", porta_udp, &e.to_string()));
+                        return Err(motivo_da_porta("UDP", porta_udp, &e.to_string()));
                     }
                 };
+                if let Ok(a) = socket.local_addr() {
+                    portas.1.store(a.port(), Ordering::SeqCst);
+                }
+                let porta_udp = porta_udp_de(&portas);
                 socket.set_broadcast(true).ok();
                 socket.set_read_timeout(Some(Duration::from_secs(1))).ok();
                 let mut ultimo_anuncio = Instant::now() - Duration::from_secs(60);
@@ -2827,6 +4365,7 @@ impl Motor {
                 let mut erros_de_envio: Vec<(std::net::Ipv4Addr, String)> = Vec::new();
                 let mut buf = vec![0u8; 2048];
                 while !parar.load(Ordering::SeqCst) {
+                    crate::supervisao::ponto_de_queda(&caminho, "anuncio");
                     let Ok(conn) = abrir_conexao(&caminho) else {
                         cochilar(&parar, Duration::from_secs(5));
                         continue;
@@ -2860,7 +4399,7 @@ impl Motor {
                         false
                     };
                     if mudou || ultimo_anuncio.elapsed() > Duration::from_secs(10) {
-                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp);
+                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp_de(&portas));
                         if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
                             // Um anúncio por interface apropriada (um broadcast só
                             // sai por uma), mais o limitado de sempre. Se o sistema
@@ -2891,6 +4430,7 @@ impl Motor {
                         }
                     }
                 }
+                Ok(())
             }));
         }
 
@@ -2898,13 +4438,17 @@ impl Motor {
         // pelo melhor caminho de cada um (veja `caminhos::ciclo`).
         {
             let parar = parar.clone();
-            tarefas.push(thread::spawn(move || {
+            let parar_tarefa = parar.clone();
+            let portas = portas.clone();
+            tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "puxada", parar_tarefa, move || {
                 let mut ultima_limpeza = Instant::now() - Duration::from_secs(50 * 60);
+                let mut ultima_reaplicacao = Instant::now() - Duration::from_secs(60);
                 while !parar.load(Ordering::SeqCst) {
                     cochilar(&parar, Duration::from_secs(4));
                     if parar.load(Ordering::SeqCst) {
                         break;
                     }
+                    crate::supervisao::ponto_de_queda(&caminho, "puxada");
                     let Ok(mut conn) = abrir_conexao(&caminho) else { continue };
                     if ultima_limpeza.elapsed() > Duration::from_secs(60 * 60) {
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
@@ -2921,6 +4465,15 @@ impl Motor {
                                 crate::registro::anotar(&format!("códigos das peças: {e}"));
                             }
                         }
+                    }
+                    // Pendências guardadas: tenta de novo, da cópia guardada, a
+                    // cada minuto (depois de uma atualização, na primeira volta).
+                    if ultima_reaplicacao.elapsed() >= Duration::from_secs(60) {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        if let Err(e) = reaplicar_pendencias(&mut conn) {
+                            crate::registro::anotar(&format!("troca de dados: pendências: {e}"));
+                        }
+                        ultima_reaplicacao = Instant::now();
                     }
                     let Ok(a) = ajustes(&conn) else { continue };
                     if !a.ligado || a.senha.is_empty() {
@@ -2940,15 +4493,17 @@ impl Motor {
                         orcamento: caminhos::ORCAMENTO,
                     };
                     let (caminho_banco, parar_ciclo) = (caminho.clone(), parar.clone());
+                    let porta_tcp = porta_tcp_de(&portas);
                     let mut puxar = |endereco: &str, saida: Option<&Saida>| {
                         puxar_por(&caminho_banco, endereco, porta_tcp, Some(&parar_ciclo), saida)
                     };
                     caminhos::ciclo(&conn, &ambiente, &|| parar.load(Ordering::SeqCst), &mut puxar);
                 }
+                Ok(())
             }));
         }
 
-        Motor { parar, tarefas, problemas, encerrado: false }
+        Motor { parar, tarefas, portas, problemas, encerrado: false }
     }
 }
 
@@ -2977,6 +4532,8 @@ mod testes {
             ordem: 1,
             historia: None,
             compactada: false,
+            operacao_id: None,
+            incompativel: None,
         };
         let lista = [
             alteracao("dispositivo_id", "invasor"),
@@ -3009,13 +4566,12 @@ mod testes {
     #[test]
     fn faixa_de_codigos_pela_rede() {
         thread::spawn(|| {
-            let (pt_a, pu_a) = (48210, 48211);
             let ca = temp("faixa-a");
             let a = Banco::abrir(&ca).unwrap();
             let u = crate::faixas::para_testes::configurar(&a, "Caixa A", 0);
             salvar_ajustes(&a.conn, true, "senha-da-loja", "").unwrap();
-            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
-            thread::sleep(Duration::from_millis(400));
+            let mut ma = Motor::iniciar(ca.clone(), 0, 0);
+            let (pt_a, _) = ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
             let para_a = format!("127.0.0.1:{pt_a}");
             let mut tarefas = Vec::new();
             for (i, nome) in ["Caixa B", "Caixa C"].into_iter().enumerate() {
@@ -3052,7 +4608,6 @@ mod testes {
     #[test]
     fn banco_copiado_nao_troca_dados_pela_rede_ate_ser_registrado() {
         thread::spawn(|| {
-            let (pt_a, pu_a) = (48300, 48301);
             let (ca, cb) = (temp("copia-rede-a"), temp("copia-rede-b"));
             let a = Banco::abrir(&ca).unwrap();
             let u = crate::faixas::para_testes::configurar(&a, "Caixa A", 0);
@@ -3065,12 +4620,16 @@ mod testes {
             config::gravar(&a.conn, "computador_id", &crate::computador::impressao("outro-pc")).unwrap();
             crate::faixas::conferir_computador(&a.conn, crate::computador::atual().as_deref()).unwrap();
             assert!(crate::faixas::copia_detectada(&a.conn).unwrap());
-            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
-            thread::sleep(Duration::from_millis(400));
+            let mut ma = Motor::iniciar(ca.clone(), 0, 0);
+            let (pt_a, _) = ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
             let para_a = format!("127.0.0.1:{pt_a}");
-            // Quem pede a ela não recebe nada.
+            // Quem pede a ela não recebe nada (C8: recusado por ela, com o
+            // servidor no ar — não "Connection refused").
             let r = puxar(&cb, &para_a, 48302);
-            assert!(r.is_err(), "{r:?}");
+            assert!(
+                matches!(&r, Err(e) if !e.to_string().contains("Connection refused") && !e.to_string().contains("os error 111")),
+                "{r:?}"
+            );
             let produtos_b: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
             assert_eq!(produtos_b, 0);
             // Ela também não puxa de ninguém.
@@ -3106,8 +4665,6 @@ mod testes {
 
     fn recuo_um_cenario(n: usize, cenario: &str) {
         {
-            let (pt_a, pu_a, pt_b, pu_b) =
-                (48010 + 10 * n as u16, 48011 + 10 * n as u16, 48012 + 10 * n as u16, 48013 + 10 * n as u16);
             let ca = temp(&format!("recuo-a-{n}"));
             let cb = temp(&format!("recuo-b-{n}"));
             let a = Banco::abrir(&ca).unwrap();
@@ -3118,9 +4675,12 @@ mod testes {
             let b = Banco::abrir(&cb).unwrap();
             config::gravar(&b.conn, "caixa_nome", "Caixa B").unwrap();
             salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
-            let mut ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
-            let _mb = Motor::iniciar(cb.clone(), pt_b, pu_b);
-            thread::sleep(Duration::from_millis(400));
+            // Portas escolhidas pelo sistema (C8); depois A abre de novo na
+            // mesma porta (os outros caixas a conhecem: "mesmo endereço").
+            let mut ma = Motor::iniciar(ca.clone(), 0, 0);
+            let _mb = Motor::iniciar(cb.clone(), 0, 0);
+            let (pt_a, pu_a) = ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+            let (pt_b, _) = _mb.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
             let (para_a, para_b) = (format!("127.0.0.1:{pt_a}"), format!("127.0.0.1:{pt_b}"));
             let trocar_rede = || {
                 for _ in 0..3 {
@@ -3205,8 +4765,19 @@ mod testes {
             }
             let mut a = Banco::abrir(&ca).unwrap();
             let _ma = Motor::iniciar(ca.clone(), pt_a, pu_a);
-            thread::sleep(Duration::from_millis(400));
-            // A, antes de qualquer troca, faz uma alteração nova.
+            assert_eq!(
+                _ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram"),
+                (pt_a, pu_a),
+                "A abriu de novo no mesmo endereço"
+            );
+            if cenario == "computador novo" {
+                // FALHA-01: o computador novo entra na loja pelo caminho da
+                // junção (banco vazio, recebe tudo primeiro). Antes ele criava
+                // um usuário próprio e só depois trocava dados, que é o que a
+                // proteção contra a fusão de lojas independentes recusa.
+                puxar(&ca, &para_b, pt_a).unwrap();
+            }
+            // A, antes de qualquer troca de volta, faz uma alteração nova.
             let mut g = produtos::ficha_nova(&a.conn).unwrap();
             g.nome = format!("Feita depois de voltar ({cenario})");
             g.custo = "5".into();
@@ -3302,11 +4873,13 @@ mod testes {
         config::gravar(&b2.conn, "caixa_nome", "Caixa 2").unwrap();
         salvar_ajustes(&b2.conn, true, "senha-da-loja", "").unwrap();
 
-        let (pt1, pu1) = (47910, 47911);
-        let (pt2, pu2) = (47920, 47921);
-        let _m1 = Motor::iniciar(c1.clone(), pt1, pu1);
-        let _m2 = Motor::iniciar(c2.clone(), pt2, pu2);
-        thread::sleep(Duration::from_millis(400));
+        // Portas escolhidas pelo sistema na hora de abrir (C8): as fixas de
+        // antes (47910/47920) ficam na faixa de portas de saída do sistema e
+        // podem estar ocupadas por uma conexão qualquer.
+        let _m1 = Motor::iniciar(c1.clone(), 0, 0);
+        let _m2 = Motor::iniciar(c2.clone(), 0, 0);
+        let (pt1, _) = _m1.portas(Duration::from_secs(10)).expect("o motor do caixa 1 abriu as portas");
+        let (pt2, _) = _m2.portas(Duration::from_secs(10)).expect("o motor do caixa 2 abriu as portas");
 
         // 2 puxa de 1
         let (_, novas) = puxar(&c2, &format!("127.0.0.1:{pt1}"), pt2).unwrap();
@@ -3351,8 +4924,14 @@ mod testes {
         let c3 = temp("c3");
         let b3 = Banco::abrir(&c3).unwrap();
         salvar_ajustes(&b3.conn, true, "outra-senha-qualquer", "").unwrap();
-        let e = puxar(&c3, &format!("127.0.0.1:{pt1}"), 1).unwrap_err();
-        assert!(e.to_string().contains("Falha na rede") || e.to_string().contains("senha"), "{e}");
+        let e = puxar(&c3, &format!("127.0.0.1:{pt1}"), 1).unwrap_err().to_string();
+        // C8: "Connection refused" quer dizer que o servidor nem estava no ar:
+        // aí o teste não provaria a recusa da senha.
+        assert!(
+            !e.contains("Connection refused") && !e.contains("os error 111"),
+            "o servidor do caixa 1 tem de estar no ar para este teste valer: {e}"
+        );
+        assert!(e.contains("Falha na rede") || e.contains("senha"), "{e}");
         assert_eq!(usuarios::quantidade(&b3.conn).unwrap(), 0);
 
         // o caixa 1 conheceu o caixa 2 quando foi procurado por ele
@@ -3490,9 +5069,8 @@ mod testes {
         let cb = temp("mudas-b");
         let b = Banco::abrir(&cb).unwrap();
         salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
-        let (pt, pu) = (48110, 48111);
-        let _m = Motor::iniciar(ca.clone(), pt, pu);
-        thread::sleep(Duration::from_millis(400));
+        let _m = Motor::iniciar(ca.clone(), 0, 0);
+        let (pt, _) = _m.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
         // Um endereço só abre 10 conexões mudas: só 2 ficam abertas.
         let mut de_um: Vec<TcpStream> = (0..10).filter_map(|_| conectar_de([127, 0, 0, 66], pt).ok()).collect();
         thread::sleep(Duration::from_millis(200));
@@ -3540,14 +5118,35 @@ mod testes {
     /// encerra logo, sem esperar os 30 s de prazo da rede.
     #[test]
     fn encerrar_com_rede_lenta_ou_com_erro() {
-        // "Caixa" que aceita a conexão e fica mudo.
+        // "Caixa" que aceita a conexão e fica mudo. O-5 (auditoria da 0.9.15):
+        // a espera pela conexão tem prazo (antes, `incoming().take(1)` podia
+        // esperar para sempre se o motor nunca chegasse a ele), e o teste
+        // espera a conexão acontecer de fato, em vez de um tempo fixo.
         let mudo = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        mudo.set_nonblocking(true).unwrap();
         let porta_muda = mudo.local_addr().unwrap().port();
-        let segura = thread::spawn(move || {
-            let conexoes: Vec<_> = mudo.incoming().take(1).flatten().collect();
-            thread::sleep(Duration::from_secs(8));
-            drop(conexoes);
-        });
+        let conectou = Arc::new(AtomicBool::new(false));
+        let terminou = Arc::new(AtomicBool::new(false));
+        let segura = {
+            let (conectou, terminou) = (conectou.clone(), terminou.clone());
+            thread::spawn(move || {
+                let fim = Instant::now() + Duration::from_secs(60);
+                let mut conexoes = Vec::new();
+                while conexoes.is_empty() && Instant::now() < fim {
+                    match mudo.accept() {
+                        Ok((f, _)) => conexoes.push(f),
+                        Err(_) => thread::sleep(Duration::from_millis(20)),
+                    }
+                }
+                conectou.store(!conexoes.is_empty(), Ordering::SeqCst);
+                // Fica mudo até o teste acabar (no máximo 30 s).
+                let fim = Instant::now() + Duration::from_secs(30);
+                while !terminou.load(Ordering::SeqCst) && Instant::now() < fim {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                drop(conexoes);
+            })
+        };
         // Porta sem ninguém (erro de rede).
         let porta_fechada = TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
         let c = temp("rede-lenta");
@@ -3555,13 +5154,22 @@ mod testes {
         salvar_ajustes(&b.conn, true, "senha-da-loja", &format!("127.0.0.1:{porta_fechada}, 127.0.0.1:{porta_muda}"))
             .unwrap();
         drop(b);
-        let mut m = Motor::iniciar(c.clone(), 47950, 47951);
-        // A puxada roda a cada 4 s: espera ela ficar presa no caixa mudo.
-        thread::sleep(Duration::from_millis(5500));
+        let mut m = Motor::iniciar(c.clone(), 0, 0);
+        // A puxada roda a cada 4 s: espera ela ficar presa no caixa mudo (com prazo).
+        let fim = Instant::now() + Duration::from_secs(60);
+        while !conectou.load(Ordering::SeqCst) && Instant::now() < fim {
+            thread::sleep(Duration::from_millis(50));
+        }
+        let chegou = conectou.load(Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(300));
         let t = Instant::now();
-        assert!(m.encerrar(Duration::from_secs(20)));
-        assert!(t.elapsed() < Duration::from_secs(3), "parou logo: {:?}", t.elapsed());
+        let parou = m.encerrar(Duration::from_secs(20));
+        let levou = t.elapsed();
+        terminou.store(true, Ordering::SeqCst);
         segura.join().unwrap();
+        assert!(chegou, "o motor não chegou ao caixa mudo em 60 s (o teste não provou nada)");
+        assert!(parou, "o motor não parou no prazo");
+        assert!(levou < Duration::from_secs(3), "parou logo: {levou:?}");
     }
 
     /// R-06: ao encerrar, o motor espera a conexão que está sendo atendida
@@ -3573,10 +5181,9 @@ mod testes {
         let b = Banco::abrir(&c).unwrap();
         salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
         drop(b);
-        let (pt, pu) = (47940, 47941);
-        // Sem nenhuma conexão: encerra logo.
-        let mut m = Motor::iniciar(c.clone(), pt, pu);
-        thread::sleep(Duration::from_millis(300));
+        // Sem nenhuma conexão: encerra logo. (Portas escolhidas pelo sistema, C8.)
+        let mut m = Motor::iniciar(c.clone(), 0, 0);
+        m.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
         let t = Instant::now();
         assert!(m.encerrar(Duration::from_secs(10)));
         assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
@@ -3585,8 +5192,8 @@ mod testes {
         // Com um caixa lento conectado (não manda nada): o atendimento para
         // logo ao pedir para encerrar (não espera os 5 s de prazo dele), e só
         // então o motor devolve. Nenhuma tarefa fica para trás.
-        let mut m = Motor::iniciar(c.clone(), pt, pu);
-        thread::sleep(Duration::from_millis(400));
+        let mut m = Motor::iniciar(c.clone(), 0, 0);
+        let (pt, _) = m.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
         let lento = TcpStream::connect(("127.0.0.1", pt)).unwrap();
         thread::sleep(Duration::from_millis(500));
         let t = Instant::now();
@@ -3595,7 +5202,7 @@ mod testes {
         assert!(m.tarefas.is_empty());
         // Com uma tarefa que não termina: prazo curto devolve "não deu",
         // e a tarefa continua guardada (quem chamou segura a trava do banco).
-        let mut m = Motor::iniciar(c.clone(), pt, pu);
+        let mut m = Motor::iniciar(c.clone(), 0, 0);
         let (solta, espera) = std::sync::mpsc::channel::<()>();
         m.esperar_tambem(thread::spawn(move || {
             let _ = espera.recv();
@@ -4006,9 +5613,8 @@ mod testes {
         let c2 = temp("r5-c2");
         let b2 = Banco::abrir(&c2).unwrap();
         salvar_ajustes(&b2.conn, true, "senha-da-loja", "").unwrap();
-        let (pt1, pu1) = (48300, 48301);
-        let _m1 = Motor::iniciar(c1.clone(), pt1, pu1);
-        thread::sleep(Duration::from_millis(400));
+        let _m1 = Motor::iniciar(c1.clone(), 0, 0);
+        let (pt1, _) = _m1.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
         let completo = |b: &Banco| -> Option<String> {
             b.conn
                 .query_row("SELECT completo_em FROM sync_par WHERE dispositivo = ?1", [&b1.dispositivo], |l| l.get(0))
@@ -4406,6 +6012,8 @@ mod testes {
             ordem: 0,
             historia: None,
             compactada: false,
+            operacao_id: None,
+            incompativel: None,
         };
         aplicar(&mut a.conn, std::slice::from_ref(&estranha)).unwrap();
         let k = abertos(&a);
@@ -4667,6 +6275,8 @@ mod testes {
             ordem: 1,
             historia: Some("[]".into()),
             compactada: false,
+            operacao_id: None,
+            incompativel: None,
         };
         aplicar(&mut b.conn, std::slice::from_ref(&velha)).unwrap();
         assert_eq!(usuarios::buscar(&b.conn, &u.id).unwrap().nome, "Maria C");
@@ -4775,9 +6385,8 @@ mod testes {
         let c = temp("descoberta");
         let b = Banco::abrir(&c).unwrap();
         salvar_ajustes(&b.conn, true, "balcao-azul-2026", "").unwrap();
-        let (pt, pu) = (49310, 49311);
-        let mut m = Motor::iniciar(c.clone(), pt, pu);
-        thread::sleep(Duration::from_millis(500));
+        let mut m = Motor::iniciar(c.clone(), 0, 0);
+        let (_, pu) = m.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
         let sal = [9u8; 16];
         let boa = Chaves { senha: "balcao-azul-2026".into(), sal, propria: derivar("balcao-azul-2026", &sal).unwrap() };
         let errada =

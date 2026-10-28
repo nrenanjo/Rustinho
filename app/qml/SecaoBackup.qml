@@ -172,12 +172,19 @@ ColumnLayout {
         interval: 120
         onTriggered: {
             const c = esperaRestaurar.copia
-            janela.chamarGerente("backup_restaurar", { arquivo: c.nuvem ? c.nome : c.caminho, nuvem: !!c.nuvem,
-                                                       senha: esperaRestaurar.senhaUsada }, r => {
+            // Demorada (baixar do Drive, conferir, restaurar): roda à parte,
+            // com a tela de espera (0.9.15).
+            janela.chamarGerenteDemorado("backup_restaurar", { arquivo: c.nuvem ? c.nome : c.caminho, nuvem: !!c.nuvem,
+                                                               senha: esperaRestaurar.senhaUsada }, "Restaurando o backup…", r => {
                 secao.restaurando = false
                 if (r.ok) {
                     secao.pedirSenhaDe = null
-                    janela.avisar("Backup de " + c.quando + " restaurado. Entre de novo.", "ok")
+                    // A3: saindo do modo seguro, o banco restaurado é
+                    // conferido de novo ao abrir; até lá nada é gravado.
+                    if (r.dados && r.dados.reabrir)
+                        janela.avisar("Backup de " + c.quando + " restaurado" + (r.dados.conferido ? " e conferido" : "") + ". Feche e abra o Rustinho para voltar a usar este caixa.", "ok")
+                    else
+                        janela.avisar("Backup de " + c.quando + " restaurado. Entre de novo.", "ok")
                     janela.atualizarEstado()
                     janela.trocarPara("TelaEntrar")
                     return

@@ -10,10 +10,13 @@
 //! um campo novo na tela pede uma linha nova aqui.
 
 use rustinho_nucleo::Servico;
+#[path = "apoio/chave.rs"]
+mod apoio_chave;
 use serde_json::{json, Value};
 
 fn chamar(s: &mut Servico, comando: &str, dados: Value) -> Value {
-    let texto = s.chamar(comando, &dados.to_string());
+    let texto =
+        apoio_chave::chamar(rustinho_nucleo::api::NAO_REPETIR, comando, &dados.to_string(), |d| s.chamar(comando, d));
     serde_json::from_str(&texto).expect("a resposta é JSON")
 }
 

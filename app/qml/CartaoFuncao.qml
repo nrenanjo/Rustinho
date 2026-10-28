@@ -3,70 +3,89 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
-// Cartão de uma função no início (Vender, Peças...), com a letra grande
-// como a capitular do livro.
+// Pílula de uma função na tela inicial (0.9.15): retângulo horizontal de
+// cantos arredondados, ícone num quadrado de fundo pastel à esquerda e o
+// nome à direita. O alfinete fica no canto: nas fixadas sempre (para
+// soltar); nas outras só ao passar o mouse e enquanto houver vaga (até 4).
 Rectangle {
     id: cartao
     property var item: ({})
-    property bool grande: false
     property int indice: 0
 
     signal abrir()
     signal fixar()
 
-    readonly property bool par: (indice + 1) % 2 === 0
-    readonly property color corBase: par ? Tema.azul : Tema.pergaminho
+    // Fundo do quadrado e cor do ícone, por função (claro, escuro).
+    readonly property var cores: ({
+        vender: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
+        pecas: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
+        orcamentos: ["#FBE0C7", "#D06D17", "#35261A", "#F0AE70"],
+        caixa: ["#E6DDF5", "#7E52BF", "#2A2238", "#C1A6EE"],
+        trocas: ["#F6D9D6", "#B84E43", "#3A2220", "#EE9F95"],
+        notas: ["#F4E6C4", "#A67E25", "#342B17", "#E1C27A"],
+        clientes: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
+        compras: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
+        estoque: ["#FBE0C7", "#D06D17", "#35261A", "#F0AE70"],
+        financeiro: ["#E6DDF5", "#7E52BF", "#2A2238", "#C1A6EE"],
+        oficina: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
+        painel: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
+        usuarios: ["#F6D9D6", "#B84E43", "#3A2220", "#EE9F95"],
+        configuracoes: ["#E3E1DD", "#5F5A54", "#2A2826", "#BDB7AF"]
+    })
+    readonly property var cor: cores[item.id] || ["#E3E1DD", "#5F5A54", "#2A2826", "#BDB7AF"]
+    readonly property bool mostraPino: cartao.item.fixo === true || (cartao.item.podeFixar !== false && sobre.hovered && !Tema.celular)
 
     radius: Tema.raio
-    opacity: item.disponivel ? 1 : 0.72
-    color: sobre.hovered && item.disponivel ? Qt.darker(corBase, 1.045) : corBase
-    implicitHeight: grande ? 156 : 88
-    border.width: foco.activeFocus ? 2 : 0
-    border.color: Tema.azulEscuro
+    opacity: item.disponivel ? 1 : 0.78
+    color: sobre.hovered && item.disponivel ? Qt.darker(Tema.cartao, Tema.escuro ? 0.85 : 1.03) : Tema.cartao
+    border.width: foco.activeFocus ? 2 : 1
+    border.color: foco.activeFocus ? Tema.azulEscuro : Tema.bordaCartao
+    implicitHeight: Tema.estreito ? 64 : 72
 
-    Text {
-        id: letra
-        x: cartao.grande ? 20 : 16
-        y: cartao.grande ? 4 : 2
-        text: cartao.item.letra || ""
-        font.family: Tema.titulo
-        font.italic: true
-        font.weight: Font.DemiBold
-        font.pixelSize: cartao.grande ? 92 : 54
-        color: Tema.dourado
-        opacity: cartao.item.disponivel ? 0.9 : 0.55
-    }
+    RowLayout {
+        anchors.fill: parent
+        anchors.leftMargin: Tema.estreito ? 10 : 12
+        anchors.rightMargin: 34
+        spacing: Tema.estreito ? 12 : 16
 
-    ColumnLayout {
-        anchors.left: parent.left
-        anchors.leftMargin: cartao.grande ? 90 : 66
-        anchors.right: parent.right
-        anchors.rightMargin: 16
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: cartao.grande ? 4 : 1
-
-        Titulo {
-            text: cartao.item.titulo || ""
-            font.pixelSize: cartao.grande ? 30 : 24
-            font.weight: Font.Bold
-            color: cartao.item.disponivel ? Tema.tinta : Tema.tintaSuave
-            // Nome comprido (ex.: Conferência fiscal) diminui em vez de cortar.
-            fontSizeMode: Text.HorizontalFit
-            minimumPixelSize: cartao.grande ? 22 : 18
-            Layout.fillWidth: true
+        Rectangle {
+            implicitWidth: Tema.estreito ? 42 : 48
+            implicitHeight: implicitWidth
+            radius: 8
+            color: Tema.escuro ? cartao.cor[2] : cartao.cor[0]
+            Layout.alignment: Qt.AlignVCenter
+            Icone {
+                anchors.centerIn: parent
+                nome: cartao.item.icone || "caixa"
+                tamanho: Tema.estreito ? 24 : 27
+                espessura: 2.1
+                cor: Tema.escuro ? cartao.cor[3] : cartao.cor[1]
+            }
         }
-        Nota {
-            text: cartao.item.descricao || ""
-            font.pixelSize: cartao.grande ? 15 : 14
-            maximumLineCount: cartao.grande ? 2 : 1
-            elide: Text.ElideRight
+
+        ColumnLayout {
+            spacing: 0
             Layout.fillWidth: true
-        }
-        Rotulo {
-            visible: !cartao.item.disponivel
-            text: "Em breve · etapa " + cartao.item.etapa
-            font.pixelSize: 11
-            Layout.topMargin: cartao.grande ? 4 : 1
+            Layout.alignment: Qt.AlignVCenter
+            Text {
+                text: cartao.item.titulo || ""
+                color: cartao.item.disponivel ? Tema.tinta : Tema.tintaSuave
+                font.family: Tema.texto
+                font.weight: Font.DemiBold
+                font.pixelSize: Tema.estreito ? 16 : 18
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Text {
+                visible: !cartao.item.disponivel
+                text: "em breve"
+                color: Tema.apagado
+                font.family: Tema.serifa
+                font.italic: true
+                font.pixelSize: 13
+            }
         }
     }
 
@@ -74,21 +93,19 @@ Rectangle {
         id: pino
         tipo: "discreto"
         icone: "pino"
-        tamanhoIcone: 17
-        implicitHeight: 32
-        implicitWidth: 34
+        tamanhoIcone: 15
+        implicitHeight: 28
+        implicitWidth: 30
         leftPadding: 0
         rightPadding: 0
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 6
-        // No celular não tem "passar o mouse": o alfinete aparece só nas
-        // fixadas, e segurar o dedo no cartão fixa ou solta.
-        visible: (sobre.hovered && !Tema.celular) || cartao.item.fixo === true
+        anchors.margins: 4
+        visible: cartao.mostraPino
         opacity: cartao.item.fixo ? 1 : 0.55
         ToolTip.visible: hovered && !Tema.celular
         ToolTip.delay: 500
-        ToolTip.text: cartao.item.fixo ? "Soltar de Mais usados" : "Fixar em Mais usados"
+        ToolTip.text: cartao.item.fixo ? "Soltar" : "Fixar no começo da tela"
         onClicked: cartao.fixar()
     }
 
@@ -107,6 +124,7 @@ Rectangle {
     }
     TapHandler {
         onTapped: cartao.abrir()
-        onLongPressed: cartao.fixar()
+        // No celular: segurar o dedo fixa ou solta (se houver vaga).
+        onLongPressed: if (cartao.item.fixo || cartao.item.podeFixar !== false) cartao.fixar()
     }
 }

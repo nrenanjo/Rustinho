@@ -20,7 +20,11 @@ FocusScope {
             usuarios = r.dados
     }
 
+    // FALHA-04: chave do salvar (nova ao começar um usuário novo ou editar um).
+    property string chave: Api.novaChave()
+
     function novo() {
+        chave = Api.novaChave()
         mostrarFicha = true
         editando = null
         nome.texto = ""
@@ -33,6 +37,7 @@ FocusScope {
     }
 
     function editar(u) {
+        chave = Api.novaChave()
         mostrarFicha = true
         editando = u
         nome.texto = u.nome
@@ -80,7 +85,7 @@ FocusScope {
                     janela.avisar(r.erro, "erro")
                 }
             }
-        })
+        }, chave)
     }
 
     function quando(iso) {
