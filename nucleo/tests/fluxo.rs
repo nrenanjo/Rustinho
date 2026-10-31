@@ -4,6 +4,8 @@
 use rustinho_nucleo::Servico;
 #[path = "apoio/chave.rs"]
 mod apoio_chave;
+#[path = "apoio/cnpj.rs"]
+mod apoio_cnpj;
 use serde_json::{json, Value};
 
 /// Chama um comando e devolve a resposta inteira.
@@ -313,6 +315,7 @@ fn compra_por_zip() {
         "configurar_inicio",
         json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
     );
+    apoio_cnpj::salvar(&mut |c, d| ok(&mut s, c, d));
     let nota = include_str!("nfe_exemplo.xml");
     let pasta = std::env::temp_dir().join(format!("rustinho-compra-zip-{}", std::process::id()));
     std::fs::create_dir_all(&pasta).unwrap();

@@ -51,6 +51,7 @@ pub mod receber;
 pub mod rede_local;
 pub mod registro;
 pub mod reposicao;
+pub mod requisitos;
 pub mod senhas;
 pub mod supervisao;
 pub mod sync;
@@ -60,11 +61,15 @@ pub(crate) mod teste_rede;
 #[cfg(test)]
 mod testes_0915;
 #[cfg(test)]
+mod testes_avisos;
+#[cfg(test)]
 mod testes_chave;
 #[cfg(test)]
 mod testes_loja;
 #[cfg(test)]
 mod testes_modo_seguro;
+#[cfg(test)]
+mod testes_nav;
 #[cfg(test)]
 mod testes_r03;
 #[cfg(test)]

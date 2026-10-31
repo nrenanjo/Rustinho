@@ -82,11 +82,79 @@ pub fn conferir_nota(conn: &Connection, nota: &NotaXml) -> Resultado<()> {
     if !loja.is_empty() && !destinatario.is_empty() && destinatario != loja {
         let nome = config::nome_loja(conn)?;
         let nome = if nome.is_empty() { "da loja".to_string() } else { format!("da {nome}") };
-        return Err(Erro::validacao(format!(
-            "Esta nota não é {nome}: foi emitida para outro CNPJ. Confira o CNPJ em Configurações ou peça a nota certa ao fornecedor."
-        )));
+        return Err(Erro::campo(
+            CAMPO_OUTRO_CNPJ,
+            format!(
+                "Esta nota não é {nome}: foi emitida para outro CNPJ. Confira o CNPJ em Configurações ou peça a nota certa ao fornecedor."
+            ),
+        ));
     }
     Ok(())
+}
+
+/// `campo` da recusa de uma nota emitida para outro CNPJ: a tela mostra a
+/// janela de conflito com os dois documentos (`conflito_cnpj`). Nada é gravado.
+pub const CAMPO_OUTRO_CNPJ: &str = "nota.outro_cnpj";
+
+/// O que a janela de conflito mostra de uma nota emitida para outro CNPJ:
+/// os documentos para comparar e a nota para conferir. Só leitura.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflitoCnpj {
+    /// O nome do arquivo (dentro de um .zip: "pacote.zip › nota.xml").
+    pub arquivo: String,
+    pub loja_nome: String,
+    pub loja_documento: String,
+    pub emitente_nome: String,
+    pub emitente_documento: String,
+    pub destinatario_nome: String,
+    pub destinatario_documento: String,
+    pub numero: String,
+    pub serie: String,
+    /// "dd/mm/aaaa"
+    pub emissao: String,
+    pub total: String,
+    pub itens: Vec<ItemConflito>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemConflito {
+    pub codigo: String,
+    pub descricao: String,
+    pub quantidade: String,
+    pub unidade: String,
+    pub total: String,
+}
+
+/// A nota recusada por ser de outro CNPJ, para a janela de conflito. Não
+/// muda o cadastro da loja nem grava nada.
+pub fn conflito_cnpj(conn: &Connection, arquivo: &str, xml: &str) -> Resultado<ConflitoCnpj> {
+    let nota = nfe_xml::ler(xml).map_err(Erro::validacao)?;
+    Ok(ConflitoCnpj {
+        arquivo: arquivo.to_string(),
+        loja_nome: config::nome_loja(conn)?,
+        loja_documento: documento::escrever(&config::ler(conn, "loja_cnpj")?.unwrap_or_default()),
+        emitente_nome: nota.emitente.nome.clone(),
+        emitente_documento: documento::escrever(&nota.emitente.documento),
+        destinatario_nome: nota.destinatario_dados.nome.clone(),
+        destinatario_documento: documento::escrever(&nota.destinatario),
+        numero: nota.numero.clone(),
+        serie: nota.serie.clone(),
+        emissao: fiscal::data_br(&nota.emissao),
+        total: numeros::escrever_dinheiro(nota.total),
+        itens: nota
+            .itens
+            .iter()
+            .map(|i| ItemConflito {
+                codigo: i.codigo.clone(),
+                descricao: i.descricao.clone(),
+                quantidade: numeros::escrever_quantidade(i.quantidade),
+                unidade: i.unidade.clone(),
+                total: numeros::escrever_dinheiro(i.valor_produtos),
+            })
+            .collect(),
+    })
 }
 
 /// Importa a NF-e como rascunho de compra. PEND-09: a assinatura do emitente

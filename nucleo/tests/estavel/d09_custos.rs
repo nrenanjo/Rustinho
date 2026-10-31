@@ -166,6 +166,7 @@ fn d09_3_compra_mostra_custo_sem_margem() {
     l.entrar("Bia", SENHA_BIA);
     let caminho = l.pasta.join("nota.xml");
     std::fs::write(&caminho, XML_COMPRA).unwrap();
+    let _ = crate::comum::cnpj_da_nota_de_exemplo(&l);
     let r = l.ok("compra_importar", json!({ "caminho": caminho.display().to_string() }));
     let compra = r["compras"][0]["id"].as_str().unwrap().to_string();
     let c = l.ok("compra_abrir", json!({ "id": compra }));
@@ -616,6 +617,7 @@ fn segunda_compra_das_mesmas_pecas(l: &mut Loja) -> (String, Vec<Value>, Vec<Str
     l.entrar("Bia", SENHA_BIA);
     let caminho = l.pasta.join("nota-de-novo.xml");
     std::fs::write(&caminho, XML_COMPRA).unwrap();
+    let _ = crate::comum::cnpj_da_nota_de_exemplo(l);
     let r = l.ok("compra_importar", json!({ "caminho": caminho.display().to_string() }));
     let compra = r["compras"][0]["id"].as_str().unwrap().to_string();
     let c = l.ok("compra_abrir", json!({ "id": compra }));

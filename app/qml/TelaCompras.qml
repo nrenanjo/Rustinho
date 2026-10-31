@@ -9,8 +9,16 @@ import rustinho
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
+    readonly property string nomeNaNavegacao: "Compras"
     property var itens: []
     property bool buscou: false
+    // 0.9.17: arquivos que esperam a importação (faltava o CNPJ da loja). Ficam
+    // aqui enquanto a pessoa resolve o requisito; nada é importado sozinho.
+    property var pendentes: []
+    property string avisoPendentes: ""
+    // Notas de outro CNPJ: não entraram (nada foi gravado). Ficam à vista até
+    // a pessoa descartar ou sair de Compras.
+    property var naoImportadas: []
 
     function buscar() {
         const r = Api.chamar("compras_listar", { texto: busca.texto, limite: 300 })
@@ -31,10 +39,14 @@ FocusScope {
     // Cada arquivo pode ser um XML, um .zip/.rar com várias notas ou uma pasta.
     // Um de cada vez, à parte, com a tela de espera (0.9.15).
     function importar(arquivos) {
-        const lista = Array.from(arquivos)
+        // Caminhos (os arquivos que esperavam o requisito já vêm assim).
+        const lista = Array.from(arquivos).map(a => /^(file|content):/.test(a.toString()) ? Api.caminho(a.toString()) : a.toString())
         const novas = []
         const erros = []
+        const conflitos = []
         let deOutra = 0
+        pendentes = []
+        avisoPendentes = ""
         function proximo(i) {
             if (i >= lista.length) {
                 terminar()
@@ -43,7 +55,7 @@ FocusScope {
             const arquivo = lista[i]
             // FALHA-04: uma chave para a importação deste arquivo.
             const chaveArquivo = Api.novaChave()
-            Api.gravarDemorado("compra_importar", { caminho: Api.caminho(arquivo.toString()) },
+            Api.gravarDemorado("compra_importar", { caminho: arquivo },
                                lista.length > 1 ? "Importando " + (i + 1) + " de " + lista.length + "…" : "Importando o XML…", r => {
                 if (r.ok) {
                     for (const c of r.dados.compras) {
@@ -53,6 +65,16 @@ FocusScope {
                     }
                     for (const e of r.dados.erros)
                         erros.push(e)
+                    for (const c of r.dados.conflitos)
+                        conflitos.push(c)
+                } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
+                    // Falta o CNPJ da loja: a navegação guiada leva a
+                    // Configurações › Loja; este arquivo e os que faltam ficam
+                    // esperando aqui.
+                    tela.pendentes = lista.slice(i)
+                    if (novas.length > 0 || erros.length > 0 || conflitos.length > 0)
+                        terminar()
+                    return
                 } else {
                     erros.push(nomeArquivo(arquivo) + ": " + r.erro)
                 }
@@ -61,6 +83,7 @@ FocusScope {
         }
         function terminar() {
             buscar()
+            tela.guardarNaoImportadas(conflitos)
             if (erros.length > 0)
                 janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
             if (novas.length === 1)
@@ -73,9 +96,42 @@ FocusScope {
         proximo(0)
     }
 
+    // Volta da navegação guiada: os arquivos continuam esperando. Com o
+    // requisito satisfeito, confere se eles continuam no lugar; a pessoa
+    // manda importar (nada é importado sozinho).
+    function voltouDaGuia(satisfeito) {
+        if (!satisfeito || pendentes.length === 0)
+            return
+        const c = Api.chamar("arquivos_conferir", { arquivos: pendentes })
+        if (c.ok && c.dados.faltam.length > 0) {
+            pendentes = c.dados.existem
+            avisoPendentes = "Não estão mais no lugar e ficaram de fora: "
+                    + c.dados.faltam.map(a => nomeArquivo(a)).join(", ") + "."
+        }
+    }
+
+    // Notas de outro CNPJ desta importação: entram na lista (sem repetir a
+    // mesma) e a janela de conflito abre na primeira nova.
+    // A mesma nota (o Qt copia os objetos entre a lista e a janela: compara
+    // pelo que identifica a nota, não pelo objeto).
+    function chaveDaNota(c) {
+        return c.arquivo + "|" + c.numero + "|" + c.serie + "|" + c.emitenteDocumento
+    }
+    function guardarNaoImportadas(conflitos) {
+        const ja = naoImportadas.map(chaveDaNota)
+        const novas = conflitos.filter(c => ja.indexOf(chaveDaNota(c)) < 0)
+        if (novas.length === 0)
+            return
+        naoImportadas = naoImportadas.concat(novas)
+        conflitoCnpj.mostrar(novas[0])
+    }
+    function descartarNaoImportada(c) {
+        naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))
+    }
+
     function nomeArquivo(url) {
         const t = decodeURIComponent(url.toString())
-        return t.substring(t.lastIndexOf("/") + 1)
+        return t.substring(Math.max(t.lastIndexOf("/"), t.lastIndexOf("\\")) + 1)
     }
 
     function focarBusca() {
@@ -116,6 +172,11 @@ FocusScope {
         onAccepted: tela.importar(selectedFiles)
     }
 
+    ConflitoCnpj {
+        id: conflitoCnpj
+        onDescartar: (c) => tela.descartarNaoImportada(c)
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Tema.margem
@@ -133,6 +194,76 @@ FocusScope {
                 icone: "mais"
                 atalho: "F2"
                 onClicked: seletor.open()
+            }
+        }
+
+        // Arquivos esperando o CNPJ da loja (navegação guiada).
+        Faixa {
+            visible: tela.pendentes.length > 0
+            titulo: "Esperando para importar"
+            corTitulo: Tema.apagado
+            color: Tema.atencao
+            Layout.fillWidth: true
+            Nota {
+                text: tela.pendentes.map(a => tela.nomeArquivo(a)).join(" · ")
+                Layout.fillWidth: true
+            }
+            Nota {
+                visible: tela.avisoPendentes !== ""
+                text: tela.avisoPendentes
+                color: Tema.vermelho
+                Layout.fillWidth: true
+            }
+            Flow {
+                spacing: 12
+                Layout.fillWidth: true
+                Botao {
+                    text: "Importar agora"
+                    icone: "mais"
+                    onClicked: tela.importar(tela.pendentes)
+                }
+                Botao {
+                    text: "Desistir"
+                    tipo: "secundario"
+                    onClicked: {
+                        tela.pendentes = []
+                        tela.avisoPendentes = ""
+                    }
+                }
+            }
+        }
+
+        // Notas de outro CNPJ: não entraram; dá para ver de novo ou descartar.
+        Faixa {
+            visible: tela.naoImportadas.length > 0
+            titulo: tela.naoImportadas.length === 1 ? "Não importada: nota de outro CNPJ"
+                                                     : "Não importadas: " + tela.naoImportadas.length + " notas de outro CNPJ"
+            corTitulo: Tema.vermelho
+            color: Tema.rosa
+            Layout.fillWidth: true
+            Repeater {
+                model: tela.naoImportadas
+                delegate: RowLayout {
+                    required property var modelData
+                    spacing: 12
+                    Layout.fillWidth: true
+                    Nota {
+                        text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
+                        elide: Text.ElideMiddle
+                        wrapMode: Text.NoWrap
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        text: "Ver"
+                        tipo: "secundario"
+                        onClicked: conflitoCnpj.mostrar(modelData)
+                    }
+                    Botao {
+                        text: "Descartar"
+                        tipo: "discreto"
+                        onClicked: tela.descartarNaoImportada(modelData)
+                    }
+                }
             }
         }
 

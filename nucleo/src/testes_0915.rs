@@ -395,9 +395,12 @@ fn prazo_de_sete_dias_e_caixa_antigo_bloqueiam_rascunho_novo() {
     assert!(a.descricao.contains("Caixa 2") && a.descricao.contains("8 dias"), "{}", a.descricao);
     assert_eq!(a.acao, "Ver caixas");
     assert_eq!(a.secao, "caixas");
-    assert!(!a.minimizado, "atenção começa expandida");
-    assert!(avisos::esconder(c, &a.id).is_err(), "atenção não se esconde");
-    avisos::minimizar(c, &a.id, true).unwrap();
+    // 0.9.16: informativa e atenção começam minimizadas (o quadrado).
+    assert!(a.minimizado, "atenção começa minimizada");
+    assert!(avisos::esconder(c, &lista, &a.id).is_err(), "atenção não se esconde");
+    avisos::minimizar(c, &lista, &a.id, false).unwrap();
+    assert!(!avisos::do_dia(c).unwrap().iter().find(|x| x.id == a.id).unwrap().minimizado, "expandir persiste");
+    avisos::minimizar(c, &lista, &a.id, true).unwrap();
     assert!(avisos::do_dia(c).unwrap().iter().find(|x| x.id == a.id).unwrap().minimizado, "minimizar persiste");
     assert!(!sync::bloqueios_de_rascunho(c).unwrap().is_empty(), "minimizar não libera nada");
     // Caixa que volta numa versão antiga perde a confirmação na hora.

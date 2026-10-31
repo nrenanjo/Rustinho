@@ -7,6 +7,8 @@ import rustinho
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
+    // Nome desta tela no "voltar" de uma tela aberta pela navegação guiada.
+    readonly property string nomeNaNavegacao: "Peças"
     property string buscaInicial: ""
     property var itens: []
     property int total: 0
@@ -212,5 +214,8 @@ FocusScope {
     ImportarCadastros {
         id: importador
         onImportou: tela.buscar()
+        // O cursor volta à busca só se Peças for a tela de cima (a importação
+        // também fecha quando a navegação guiada leva a outra tela).
+        onClosed: if (tela.StackView.status === StackView.Active) busca.focarCursor()
     }
 }

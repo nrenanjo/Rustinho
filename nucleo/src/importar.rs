@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::erro::{Erro, Resultado};
 use crate::nfe_xml::{self, ItemXml, NotaXml};
 use crate::pessoas::{self, Emitente};
-use crate::{arquivos, auditoria, config, documento, gtin, numeros, produtos, tempo, texto};
+use crate::{arquivos, auditoria, documento, gtin, numeros, produtos, tempo, texto};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -157,14 +157,9 @@ fn cada_xml(entradas: &[String], mut cada: impl FnMut(&str, &str)) -> Resultado<
     Ok(lidos)
 }
 
+/// Vazio ou inválido: recusa com o requisito (a tela leva a Configurações › Loja).
 fn cnpj_loja(conn: &Connection) -> Resultado<String> {
-    let cnpj = documento::limpar(&config::ler(conn, "loja_cnpj")?.unwrap_or_default());
-    if cnpj.is_empty() {
-        return Err(Erro::validacao(
-            "Informe o CNPJ da loja em Configurações → Loja. É por ele que o Rustinho separa as notas da loja das notas de fornecedores.",
-        ));
-    }
-    Ok(cnpj)
+    crate::requisitos::exigir_cnpj_da_loja(conn, crate::requisitos::PARA_CADASTROS)
 }
 
 fn guardar_mais_nova<K: Ord + std::hash::Hash + Eq, V>(
@@ -627,7 +622,7 @@ fn salvar_peca(
 mod testes {
     use super::*;
     use crate::banco::Banco;
-    use crate::usuarios;
+    use crate::{config, usuarios};
 
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).

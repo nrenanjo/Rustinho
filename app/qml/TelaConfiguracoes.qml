@@ -39,8 +39,68 @@ FocusScope {
     property var caixasConhecidos: []
     property int prazoCompatibilidade: 7
     property var pendencias: []
+    // Navegação guiada (0.9.16): aberta por janela.guiar para resolver um
+    // requisito de outra tela. Sem guia, tudo funciona como sempre.
+    property var guia: null
+    // Como esta tela aparece no "voltar" de outra (navegação guiada).
+    readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
-    Component.onDestruction: Api.chamar("gerente_encerrar")
+    Component.onDestruction: {
+        Api.chamar("gerente_encerrar")
+        if (guia)
+            janela.abandonarGuia(guia)
+    }
+
+    // Os campos da loja e a parte onde ficam (usado ao mostrar o erro de um
+    // campo depois de salvar e na navegação guiada).
+    function campoChamado(nome) {
+        return ({ loja: [loja, "loja"], caixa: [caixa, "loja"], cnpj: [cnpjLoja, "loja"], uf: [ufLoja, "loja"],
+                  uf_cnpj: [linhaDocumentos, "loja"],
+                  crediarioMulta: [multa, "receber"], crediarioJuros: [jurosMes, "receber"], crediarioCarencia: [carencia, "receber"],
+                  orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
+                  rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] })[nome] || null
+    }
+    // Guia: abre a parte do requisito e destaca o primeiro campo que falta.
+    // Os campos da loja só aparecem com a senha do gerente: sem ela, pede a
+    // senha primeiro (a guia continua apontando para o botão da senha).
+    function comecarGuia() {
+        if (!completo) {
+            janela.guiaDestacar(botaoSenhaGerente, null)
+            janela.guiaOrientar("Esta parte das configurações pede a senha do gerente.")
+            janela.comGerente("configuracoes", () => {
+                tela.completo = true
+                carregar()
+                janela.guiaOrientar("")
+                Qt.callLater(tela.mostrarCampoDaGuia)
+            })
+            return
+        }
+        Qt.callLater(mostrarCampoDaGuia)
+    }
+    function mostrarCampoDaGuia() {
+        if (!guia)
+            return
+        const c = campoChamado(guia.requisito.campos[0])
+        if (!c)
+            return
+        secao = c[1]
+        Qt.callLater(() => {
+            janela.guiaDestacar(c[0], rolagem)
+            // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
+            const foco = c[0] === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : c[0]
+            if (typeof foco.focarSempre === "function")
+                foco.focarSempre()
+            else if (foco.combo)
+                foco.combo.forceActiveFocus()
+        })
+    }
+    // Sair: com guia, volta à tela de origem sem marcar nada.
+    function sair() {
+        if (guia)
+            janela.concluirGuia(false)
+        else
+            janela.voltar()
+    }
 
     // Exemplo do crediário: parcela de R$ 100,00 com 10 dias de atraso.
     function numero(t) {
@@ -263,14 +323,16 @@ FocusScope {
                 janela.atualizarEstado()
                 carregar()
                 janela.avisar("Configurações salvas.", "ok")
+                // Guia: volta à origem só se o núcleo confirmar o requisito.
+                if (tela.guia)
+                    janela.concluirGuia(true)
                 return
             }
-            const campos = { loja: [loja, "loja"], caixa: [caixa, "loja"], cnpj: [cnpjLoja, "loja"], uf: [ufLoja, "loja"],
-                             crediarioMulta: [multa, "receber"], crediarioJuros: [jurosMes, "receber"], crediarioCarencia: [carencia, "receber"],
-                             orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
-                             rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] }
-            if (campos[r.campo]) {
-                const [alvo, onde] = campos[r.campo]
+            if (tela.guia)
+                janela.guiaFalhou(r.erro)
+            const campo = campoChamado(r.campo)
+            if (campo) {
+                const [alvo, onde] = campo
                 secao = onde
                 alvo.erro = r.erro
                 if (typeof alvo.focar === "function")
@@ -438,12 +500,12 @@ FocusScope {
     function aoEsc() {
         if (secao === "fiscal" && fiscal.item && fiscal.item.regrasAlteradas)
             janela.confirmar("Descartar as regras alteradas?", "As mudanças nas regras de ST ainda não foram salvas.",
-                             "Descartar", () => janela.voltar(), "perigo")
+                             "Descartar", () => tela.sair(), "perigo")
         else if (alterado)
             janela.confirmar("Descartar alterações?", "As configurações mudadas ainda não foram salvas.",
-                             "Descartar", () => janela.voltar(), "perigo")
+                             "Descartar", () => tela.sair(), "perigo")
         else
-            janela.voltar()
+            tela.sair()
     }
 
     Shortcut {
@@ -462,6 +524,8 @@ FocusScope {
         Cabecalho {
             sensivel: true
             titulo: "Configurações"
+            // Aberta pela navegação guiada: o "voltar" diz para onde volta.
+            textoVoltar: tela.guia ? tela.guia.origemNome : "Início"
             subtitulo: ({
                 loja: tela.completo ? "A loja, este computador e a sua senha" : "Este computador e a sua senha",
                 gerente: "Quem é gerente e o que só o gerente pode fazer",
@@ -485,6 +549,7 @@ FocusScope {
                 Layout.rightMargin: 6
             }
             Botao {
+                id: botaoSenhaGerente
                 visible: !tela.completo
                 text: "Senha do gerente"
                 tipo: "discreto"
@@ -558,7 +623,6 @@ FocusScope {
             source: "TelaFiscal.qml"
             onLoaded: {
                 item.embutida = true
-                item.irPara.connect(s => tela.secao = s)
                 item.carregar()
             }
         }
@@ -605,6 +669,7 @@ FocusScope {
                         }
                     }
                     Linha {
+                        id: linhaDocumentos
                         visible: tela.completo
                         spacing: 12
                         Layout.fillWidth: true
@@ -1963,5 +2028,7 @@ FocusScope {
             secao = "loja"
             escolherSecao(destino)
         }
+        if (guia)
+            comecarGuia()
     }
 }

@@ -11,12 +11,13 @@ FocusScope {
     property var dados: null
     property var ufs: []
     property bool regrasAlteradas: false
+    readonly property string nomeNaNavegacao: "Fiscal"
+    // 0.9.17: o estado (UF) e o CNPJ da loja, conferidos pelo núcleo
+    // (requisito "loja.uf_cnpj"); o que falta aparece na faixa.
+    property var dadosDaLoja: null
     // 0.9.15: a conferência fiscal fica dentro de Configurações › Fiscal
     // (sem cabeçalho próprio); a tela sozinha continua existindo.
     property bool embutida: false
-    // Embutida: pede para Configurações mostrar outra parte (em vez de abrir
-    // outra tela de Configurações por cima).
-    signal irPara(string secao)
 
     ListModel { id: regras }
 
@@ -24,6 +25,8 @@ FocusScope {
         const c = Api.chamar("config_ler")
         if (c.ok)
             ufs = c.dados.ufs
+        const q = Api.chamar("requisito_conferir", { id: "loja.uf_cnpj" })
+        dadosDaLoja = q.ok ? q.dados : null
         const r = Api.chamar("fiscal_conferir")
         if (r.ok)
             preencher(r.dados)
@@ -197,6 +200,27 @@ FocusScope {
                 y: 6
                 spacing: 14
 
+            // Navegação guiada (0.9.17): leva aos campos do estado e do
+            // CNPJ em Configurações › Loja e volta aqui quando o
+            // núcleo confirmar os dois salvos.
+            Faixa {
+                visible: !!tela.dados && !!tela.dadosDaLoja && !tela.dadosDaLoja.satisfeito
+                titulo: "Para continuar, informe a UF e o CNPJ da loja"
+                color: Tema.rosa
+                corTitulo: Tema.vermelho
+                Layout.fillWidth: true
+                Nota {
+                    text: (tela.dadosDaLoja ? tela.dadosDaLoja.falta + " " : "")
+                          + "A substituição tributária muda de estado para estado, e o CNPJ confere se a nota de compra é mesmo para a loja."
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: "Ir para Loja"
+                    tipo: "secundario"
+                    onClicked: tela.janela.guiar("requisito:loja.uf_cnpj", "", ok => tela.carregar())
+                }
+            }
+
             // A emissão de notas (0.9.15: o estado real, sem nada inventado).
             EmissaoFiscal { Layout.fillWidth: true }
 
@@ -209,23 +233,6 @@ FocusScope {
                     spacing: 14
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
-
-                    Faixa {
-                        visible: !!tela.dados && tela.dados.uf === ""
-                        titulo: "Falta o estado da loja"
-                        color: Tema.rosa
-                        corTitulo: Tema.vermelho
-                        Layout.fillWidth: true
-                        Nota {
-                            text: "A substituição tributária muda de estado para estado. Informe o estado (e o CNPJ) da loja em Configurações."
-                            Layout.fillWidth: true
-                        }
-                        Botao {
-                            text: tela.embutida ? "Ir para Loja" : "Abrir configurações"
-                            tipo: "secundario"
-                            onClicked: tela.embutida ? tela.irPara("loja") : tela.janela.abrir("TelaConfiguracoes")
-                        }
-                    }
 
                     Faixa {
                         id: faixaConflitos

@@ -359,12 +359,37 @@ pub struct Povo {
 
 pub const XML_COMPRA: &str = include_str!("../nfe_exemplo.xml");
 
+/// Desde a 0.9.17, Compras só importa com o CNPJ da loja salvo e válido:
+/// grava o do destinatário da nota de exemplo, se a loja ainda não tem um.
+/// Devolve se gravou (para tirar depois e a loja ficar como antes).
+pub fn cnpj_da_nota_de_exemplo(l: &Loja) -> bool {
+    if l.numero("SELECT COUNT(*) FROM config WHERE chave = 'loja_cnpj' AND valor <> ''") > 0 {
+        return false;
+    }
+    l.executar(
+        "INSERT INTO config (chave, valor) VALUES ('loja_cnpj', '11444777000161')
+         ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor",
+    );
+    true
+}
+
+/// Tira o CNPJ gravado por `cnpj_da_nota_de_exemplo`: a loja de teste
+/// continua sem CNPJ, como era antes da 0.9.17 (as telas da navegação guiada
+/// partem dela).
+pub fn tirar_cnpj_da_nota_de_exemplo(l: &Loja, gravou: bool) {
+    if gravou {
+        l.executar("UPDATE config SET valor = '' WHERE chave = 'loja_cnpj'");
+    }
+}
+
 /// Importa e lança a nota de exemplo (3 itens, peças novas), com a
 /// conferência do gerente. Devolve o id da compra.
 pub fn lancar_compra_de_exemplo(l: &mut Loja) -> String {
     let caminho = l.pasta.join("nota-de-teste.xml");
     std::fs::write(&caminho, XML_COMPRA).unwrap();
+    let gravou = cnpj_da_nota_de_exemplo(l);
     let r = l.ok("compra_importar", json!({ "caminho": caminho.display().to_string() }));
+    tirar_cnpj_da_nota_de_exemplo(l, gravou);
     let id = r["compras"][0]["id"].as_str().unwrap_or_else(|| panic!("sem compra: {r}")).to_string();
     let c = l.ok("compra_abrir", json!({ "id": id }));
     let escolhas: Vec<Value> = c["itens"]

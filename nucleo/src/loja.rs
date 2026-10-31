@@ -48,7 +48,8 @@ const MARCA_ALVO: &str = "juntar_alvo";
 /// Marca deste computador: com este caixa a troca já foi aceita.
 const PREFIXO_PAR: &str = "loja_par:";
 /// Última recusa por ser de outra loja (JSON), para o aviso do Início.
-const OUTRA_LOJA: &str = "sync_outra_loja";
+/// Chave da última recusa de um computador de outra loja (aviso crítico do Início).
+pub const OUTRA_LOJA: &str = "sync_outra_loja";
 /// Por quantos dias o aviso continua depois da última tentativa.
 const DIAS_DO_AVISO: f64 = 7.0;
 

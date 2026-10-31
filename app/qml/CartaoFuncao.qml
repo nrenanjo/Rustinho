@@ -15,24 +15,6 @@ Rectangle {
     signal abrir()
     signal fixar()
 
-    // Fundo do quadrado e cor do ícone, por função (claro, escuro).
-    readonly property var cores: ({
-        vender: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
-        pecas: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
-        orcamentos: ["#FBE0C7", "#D06D17", "#35261A", "#F0AE70"],
-        caixa: ["#E6DDF5", "#7E52BF", "#2A2238", "#C1A6EE"],
-        trocas: ["#F6D9D6", "#B84E43", "#3A2220", "#EE9F95"],
-        notas: ["#F4E6C4", "#A67E25", "#342B17", "#E1C27A"],
-        clientes: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
-        compras: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
-        estoque: ["#FBE0C7", "#D06D17", "#35261A", "#F0AE70"],
-        financeiro: ["#E6DDF5", "#7E52BF", "#2A2238", "#C1A6EE"],
-        oficina: ["#DDEBD8", "#4D8A3E", "#1E2A1B", "#9CCB8E"],
-        painel: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
-        usuarios: ["#F6D9D6", "#B84E43", "#3A2220", "#EE9F95"],
-        configuracoes: ["#E3E1DD", "#5F5A54", "#2A2826", "#BDB7AF"]
-    })
-    readonly property var cor: cores[item.id] || ["#E3E1DD", "#5F5A54", "#2A2826", "#BDB7AF"]
     readonly property bool mostraPino: cartao.item.fixo === true || (cartao.item.podeFixar !== false && sobre.hovered && !Tema.celular)
 
     radius: Tema.raio
@@ -48,19 +30,10 @@ Rectangle {
         anchors.rightMargin: 34
         spacing: Tema.estreito ? 12 : 16
 
-        Rectangle {
-            implicitWidth: Tema.estreito ? 42 : 48
-            implicitHeight: implicitWidth
-            radius: 8
-            color: Tema.escuro ? cartao.cor[2] : cartao.cor[0]
+        IconeFuncao {
+            funcao: cartao.item.id || ""
+            nome: cartao.item.icone || "caixa"
             Layout.alignment: Qt.AlignVCenter
-            Icone {
-                anchors.centerIn: parent
-                nome: cartao.item.icone || "caixa"
-                tamanho: Tema.estreito ? 24 : 27
-                espessura: 2.1
-                cor: Tema.escuro ? cartao.cor[3] : cartao.cor[1]
-            }
         }
 
         ColumnLayout {

@@ -254,6 +254,126 @@ ApplicationWindow {
         dialogo.perguntar(titulo, mensagem, textoBotao, funcao, tipo)
     }
 
+    // ---------------------------------------------------------------------
+    // Navegação guiada (0.9.16). Quando uma operação não pode seguir porque
+    // falta um cadastro ou uma configuração, o núcleo recusa com
+    // campo = "requisito:<id>". guiar() leva ao lugar de resolver, pela mesma
+    // pilha de telas; a tela de origem continua viva embaixo, com tudo o que
+    // estava nela. A tela de destino avisa quando salvou (concluirGuia(true));
+    // a volta só acontece quando o núcleo confirma que o requisito foi
+    // satisfeito. Desistir (concluirGuia(false)) volta sem marcar nada.
+    // Uma guia de cada vez; a operação original nunca é repetida sozinha.
+    //
+    // Cada requisito diz onde se resolve (a tela, a parte dela e os campos).
+    readonly property var requisitos: ({
+        "loja.cnpj": {
+            tela: "TelaConfiguracoes", propriedades: { secao: "loja" }, campos: ["cnpj"],
+            nome: "o CNPJ da loja",
+            titulo: "Falta o CNPJ da loja",
+            texto: "Preencha o CNPJ e salve (F2). Depois o Rustinho volta para %1 e você continua de onde parou."
+        },
+        "loja.uf_cnpj": {
+            tela: "TelaConfiguracoes", propriedades: { secao: "loja" }, campos: ["uf_cnpj"],
+            nome: "o estado (UF) e o CNPJ da loja",
+            titulo: "Para continuar, informe a UF e o CNPJ da loja",
+            texto: "Escolha o estado, preencha o CNPJ e salve (F2). Depois o Rustinho volta para %1 e você continua de onde parou."
+        }
+    })
+    property var guiaAtiva: null
+    // Chamada pela tela de origem com a resposta recusada do núcleo. Devolve
+    // true se a guia começou (ou já estava em andamento): a tela não precisa
+    // fazer mais nada além de guardar o próprio estado.
+    function guiar(campo, motivo, aoVoltar) {
+        if (typeof campo !== "string" || campo.indexOf("requisito:") !== 0)
+            return false
+        const id = campo.slice("requisito:".length)
+        const req = requisitos[id]
+        if (!req)
+            return false
+        if (guiaAtiva)
+            return true
+        const origem = pilha.currentItem
+        const g = {
+            id: id, requisito: req, origem: origem, motivo: motivo || "", aoVoltar: aoVoltar,
+            origemNome: (origem && origem.nomeNaNavegacao) ? origem.nomeNaNavegacao : "Voltar"
+        }
+        guiaAtiva = g
+        guia.mostrar("pendente", req.titulo, req.texto.arg(g.origemNome))
+        abrir(req.tela, Object.assign({}, req.propriedades, { guia: g }))
+        return true
+    }
+    // A tela de destino mostra qual campo destacar (e a rolagem dele).
+    function guiaDestacar(item, rolagem) {
+        if (guiaAtiva)
+            guia.destacar(item, rolagem)
+    }
+    // O destino muda a orientação (vazio = a de sempre do requisito).
+    function guiaOrientar(texto) {
+        if (guiaAtiva)
+            guia.mostrar("pendente", guiaAtiva.requisito.titulo,
+                         texto || guiaAtiva.requisito.texto.arg(guiaAtiva.origemNome))
+    }
+    // O destino tentou salvar e não deu: continua lá, com o que foi digitado.
+    function guiaFalhou(mensagem) {
+        if (guiaAtiva)
+            guia.mostrar("erro", "Não foi salvo", mensagem)
+    }
+    // O destino salvou (satisfeito = true) ou a pessoa desistiu (false).
+    function concluirGuia(satisfeito) {
+        const g = guiaAtiva
+        if (!g)
+            return false
+        if (satisfeito) {
+            const r = Api.chamar("requisito_conferir", { id: g.id })
+            if (!r.ok || !r.dados.satisfeito) {
+                guia.mostrar("erro", g.requisito.titulo, r.ok ? r.dados.falta : r.erro)
+                return false
+            }
+        }
+        guiaAtiva = null
+        guia.semDestaque()
+        guia.esconder()
+        const naPilha = g.origem && pilha.find(item => item === g.origem) !== null
+        if (!naPilha)
+            return true
+        pilha.pop(g.origem)
+        // Só depois que a tela de origem voltou de vez (ela se atualiza ao
+        // ficar ativa; a retomada vem em seguida, sem disputar com isso).
+        depoisDaTroca(() => {
+            if (satisfeito)
+                guia.mostrar("satisfeito", "Requisito satisfeito — conclua a operação.", "")
+            else
+                guia.mostrar("pendente", "A operação ainda não foi concluída",
+                             "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true)
+            if (g.aoVoltar)
+                g.aoVoltar(satisfeito)
+        })
+        return true
+    }
+    // Roda f quando a pilha terminar a troca de telas em andamento.
+    function depoisDaTroca(f) {
+        if (!pilha.busy) {
+            Qt.callLater(f)
+            return
+        }
+        const quandoParar = () => {
+            if (pilha.busy)
+                return
+            pilha.busyChanged.disconnect(quandoParar)
+            Qt.callLater(f)
+        }
+        pilha.busyChanged.connect(quandoParar)
+    }
+    // A tela de destino saiu por outro caminho (Início, trocar de usuário):
+    // a guia acaba sem voltar e sem marcar nada.
+    function abandonarGuia(g) {
+        if (!guiaAtiva || guiaAtiva !== g)
+            return
+        guiaAtiva = null
+        guia.semDestaque()
+        guia.esconder()
+    }
+
     // A3 (0.9.15): banco com defeito de integridade — modo seguro. A faixa
     // fica sempre à vista, em todas as telas; o núcleo recusa toda gravação.
     Rectangle {
@@ -279,6 +399,9 @@ ApplicationWindow {
     StackView {
         id: pilha
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: faixaModoSeguro.bottom }
+        // A orientação da navegação guiada fica no alto, no espaço dela.
+        anchors.topMargin: guia.alturaNoAlto
+        Behavior on anchors.topMargin { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         focus: true
 
         pushEnter: Transition {
@@ -408,7 +531,9 @@ ApplicationWindow {
         function andar(item) {
             if (!item || !item.visible || item.opacity === 0)
                 return
-            const t = item.displayText !== undefined ? item.displayText : item.text
+            // Sem texto (o quadrado de uma notificação): o nome acessível.
+            const t = item.displayText !== undefined ? item.displayText
+                    : item.text !== undefined ? item.text : item.nomeAcessivel
             if (typeof t === "string" && t.trim() !== "") {
                 const p = item.mapToItem(null, item.width / 2, item.height / 2)
                 linhas.push(Math.round(p.x) + "\t" + Math.round(p.y) + "\t" + t.replace(/\s+/g, " ").trim())
@@ -422,6 +547,11 @@ ApplicationWindow {
     }
 
     Aviso { id: aviso }
+
+    Guia {
+        id: guia
+        topo: faixaModoSeguro.height
+    }
 
     Dialogo { id: dialogo }
 
@@ -450,7 +580,20 @@ ApplicationWindow {
         // Aparece aos poucos: uma operação rápida nem chega a piscar.
         opacity: visible ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InQuad } }
-        onVisibleChanged: if (visible) forceActiveFocus()
+        // Segura o teclado enquanto espera e, no fim, devolve o foco a quem
+        // tinha (uma janelinha aberta continua respondendo ao Esc).
+        property Item focoAntes: null
+        onVisibleChanged: {
+            if (visible) {
+                focoAntes = janela.activeFocusItem
+                forceActiveFocus()
+            } else if (focoAntes) {
+                const anterior = focoAntes
+                focoAntes = null
+                if (anterior.visible)
+                    anterior.forceActiveFocus()
+            }
+        }
         focus: visible
         Keys.onPressed: (evento) => evento.accepted = true
         MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (r) => r.accepted = true }

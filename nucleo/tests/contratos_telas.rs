@@ -12,6 +12,8 @@
 use rustinho_nucleo::Servico;
 #[path = "apoio/chave.rs"]
 mod apoio_chave;
+#[path = "apoio/cnpj.rs"]
+mod apoio_cnpj;
 use serde_json::{json, Value};
 
 fn chamar(s: &mut Servico, comando: &str, dados: Value) -> Value {
@@ -72,10 +74,11 @@ fn arquivo_xml(nome: &str) -> String {
 #[test]
 fn compra_por_xml() {
     let mut s = loja();
+    apoio_cnpj::salvar(&mut |c, d| ok(&mut s, c, d));
     let caminho = arquivo_xml("compra");
     let r = ok(&mut s, "compra_importar", json!({ "caminho": caminho }));
     let _ = std::fs::remove_file(&caminho);
-    tem("compra_importar", &r, &[("compras", "lista"), ("erros", "lista")]);
+    tem("compra_importar", &r, &[("compras", "lista"), ("erros", "lista"), ("conflitos", "lista")]);
     assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
     let id = r["compras"][0]["id"].as_str().unwrap().to_string();
 

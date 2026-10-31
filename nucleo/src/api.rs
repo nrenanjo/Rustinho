@@ -16,7 +16,7 @@ use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
     encomendas, estoque, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar,
-    painel, pessoas, produtos, receber, reposicao, sync, texto, unidades, usuarios, vendas,
+    painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho.
@@ -443,6 +443,9 @@ pub const SO_LEITURA: &[&str] = &[
     "backup_conferir",
     "importar_previa",
     "impressao",
+    // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
+    "requisito_conferir",
+    "arquivos_conferir",
 ];
 
 /// Comandos que gravam e que qualquer usuário conectado pode usar (os do
@@ -1501,10 +1504,16 @@ impl Servico {
                 if d.caminho.trim().is_empty() {
                     return Err(Erro::validacao("Escolha o arquivo XML da nota."));
                 }
+                // 0.9.17: sem o CNPJ da loja (ou com um inválido) não importa:
+                // a tela leva a Configurações › Loja e volta com os arquivos.
+                crate::requisitos::exigir_cnpj_da_loja(&self.banco.conn, crate::requisitos::PARA_COMPRAS)?;
                 let lista = arquivos::xmls(std::slice::from_ref(&d.caminho))?;
                 let pacote = lista.len() > 1 || lista.iter().any(|x| x.nome.contains(" › "));
                 let mut fichas = Vec::new();
                 let mut erros = Vec::new();
+                // Notas emitidas para outro CNPJ: não entram; a tela mostra a
+                // janela de conflito para conferir ou descartar.
+                let mut conflitos = Vec::new();
                 for x in lista {
                     if !x.erro.is_empty() {
                         erros.push(format!("{}: {}", x.nome, x.erro));
@@ -1523,13 +1532,16 @@ impl Servico {
                                 && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"]
                                     .iter()
                                     .any(|t| e.to_string().contains(t)) => {}
+                        Err(e) if e.nome_do_campo() == Some(compras::CAMPO_OUTRO_CNPJ) => {
+                            conflitos.push(compras::conflito_cnpj(&tx, &x.nome, &x.texto)?);
+                        }
                         Err(e) => erros.push(format!("{}: {e}", x.nome)),
                     }
                 }
-                if fichas.is_empty() && erros.is_empty() {
+                if fichas.is_empty() && erros.is_empty() && conflitos.is_empty() {
                     return Err(Erro::validacao("Não achei nenhuma NF-e nesse arquivo."));
                 }
-                Ok(json!({ "compras": fichas, "erros": erros }))
+                Ok(json!({ "compras": fichas, "erros": erros, "conflitos": conflitos }))
             }
             "compra_abrir" => {
                 let d: Id = ler(dados)?;
@@ -1917,42 +1929,25 @@ impl Servico {
             }
 
             // Crediário e contas a receber
-            "avisos_do_dia" => {
-                let mut avisos = match crate::avisos::do_dia(&self.banco.conn) {
-                    Ok(a) => a,
-                    // RVI-03: banco antigo em modo seguro (estrutura sem
-                    // atualizar): pelo menos o aviso do modo seguro.
-                    Err(e) if self.banco.em_modo_seguro() => {
-                        crate::registro::anotar(&format!("avisos no modo seguro: {e}"));
-                        crate::avisos::so_do_modo_seguro(
-                            &self.banco.conn,
-                            self.banco.defeito.as_deref().unwrap_or_default(),
-                        )
-                    }
-                    Err(e) => return Err(e),
-                };
-                // D-03: os avisos de contas a pagar e cheques têm valores do
-                // financeiro: só para quem pode ver o financeiro.
-                if !self.pode_sem_senha("financeiro", sessao)? {
-                    avisos.retain(|a| a.funcao != "financeiro");
-                }
-                if let Some(a) = crate::avisos::da_senha(&self.banco.conn, &sessao.usuario_id)? {
-                    avisos.push(a);
-                }
-                Ok(json!(avisos))
-            }
+            "avisos_do_dia" => Ok(json!(self.avisos_de(sessao)?)),
             "aviso_minimizar" => {
                 let d: Value = ler(dados)?;
+                let atuais = self.avisos_de(sessao)?;
+                let tx = self.banco.conn.transaction()?;
                 crate::avisos::minimizar(
-                    &self.banco.conn,
+                    &tx,
+                    &atuais,
                     d["id"].as_str().unwrap_or_default(),
                     d["minimizado"].as_bool().unwrap_or(true),
                 )?;
+                tx.commit()?;
                 Ok(json!(true))
             }
             "aviso_esconder" => {
                 let d: Value = ler(dados)?;
-                crate::avisos::esconder(&self.banco.conn, d["id"].as_str().unwrap_or_default())?;
+                // A categoria da notificação que esta pessoa está vendo decide.
+                let atuais = self.avisos_de(sessao)?;
+                crate::avisos::esconder(&self.banco.conn, &atuais, d["id"].as_str().unwrap_or_default())?;
                 Ok(json!(true))
             }
             "receber_painel" => {
@@ -2011,6 +2006,15 @@ impl Servico {
             "importar_previa" => {
                 let d: importar::Entrada = ler(dados)?;
                 Ok(json!(importar::previa(&self.banco.conn, &d.arquivos)?))
+            }
+            // Navegação guiada (piloto 0.9.16): só leitura.
+            "requisito_conferir" => {
+                let d: Requisito = ler(dados)?;
+                Ok(json!(requisitos::conferir(&self.banco.conn, &d.id)?))
+            }
+            "arquivos_conferir" => {
+                let d: importar::Entrada = ler(dados)?;
+                Ok(json!(requisitos::arquivos(&d.arquivos)))
             }
             "importar_cadastros" => {
                 let d: importar::Entrada = ler(dados)?;
@@ -2924,6 +2928,31 @@ impl Servico {
         Ok(json!(f))
     }
 
+    /// As notificações do Início para quem está conectado (as mesmas que a
+    /// tela mostra e que `aviso_esconder` confere).
+    fn avisos_de(&self, sessao: &Sessao) -> Resultado<Vec<crate::avisos::Aviso>> {
+        let mut avisos = match crate::avisos::do_dia(&self.banco.conn) {
+            Ok(a) => a,
+            // RVI-03: banco antigo em modo seguro (estrutura sem atualizar):
+            // pelo menos o aviso do modo seguro.
+            Err(e) if self.banco.em_modo_seguro() => {
+                crate::registro::anotar(&format!("avisos no modo seguro: {e}"));
+                crate::avisos::so_do_modo_seguro(&self.banco.conn, self.banco.defeito.as_deref().unwrap_or_default())
+            }
+            Err(e) => return Err(e),
+        };
+        // D-03: os avisos de contas a pagar e cheques têm valores do
+        // financeiro: só para quem pode ver o financeiro.
+        if !self.pode_sem_senha("financeiro", sessao)? {
+            avisos.retain(|a| a.funcao != "financeiro");
+        }
+        if let Some(a) = crate::avisos::da_senha(&self.banco.conn, &sessao.usuario_id)? {
+            avisos.push(a);
+        }
+        crate::avisos::uma_aberta(&mut avisos);
+        Ok(avisos)
+    }
+
     fn config_ler(&self, ve_custos: bool) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let taxas = receber::taxas_texto(conn)?;
@@ -2959,6 +2988,12 @@ impl Servico {
             "pecas": busca::total(conn, true)?,
         }))
     }
+}
+
+#[derive(Deserialize)]
+struct Requisito {
+    #[serde(default)]
+    id: String,
 }
 
 #[derive(Deserialize)]

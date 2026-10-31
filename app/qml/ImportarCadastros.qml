@@ -17,6 +17,10 @@ Painel {
     property var previa: null
     property string erro: ""
     property bool trabalhando: false
+    // Escolhas guardadas para quando os arquivos são lidos de novo.
+    property var escolhas: null
+    // Arquivos que sumiram enquanto a pessoa resolvia um requisito.
+    property string avisoArquivos: ""
     // O que cadastrar (marcado na prévia).
     property bool qClientes: false
     property bool qFornecedores: false
@@ -30,11 +34,20 @@ Painel {
         arquivos = []
         previa = null
         erro = ""
+        escolhas = null
+        avisoArquivos = ""
         open()
     }
 
     function ler(lista) {
         arquivos = lista.map(u => Api.caminho(u.toString()))
+        escolhas = null
+        avisoArquivos = ""
+        lerArquivos()
+    }
+    // Lê (ou lê de novo) os arquivos já escolhidos: só mostra a prévia, não
+    // cadastra nada.
+    function lerArquivos() {
         erro = ""
         previa = null
         trabalhando = true
@@ -43,14 +56,41 @@ Painel {
             painel.trabalhando = false
             if (r.ok) {
                 painel.previa = r.dados
-                painel.qClientes = r.dados.clientesNovos > 0
-                painel.qFornecedores = r.dados.fornecedoresNovos > 0
-                painel.qPecasLoja = r.dados.pecasLojaNovas > 0
-                painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0
-            } else {
-                painel.erro = r.erro
+                const e = painel.escolhas
+                painel.qClientes = r.dados.clientesNovos > 0 && (!e || e.qClientes)
+                painel.qFornecedores = r.dados.fornecedoresNovos > 0 && (!e || e.qFornecedores)
+                painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
+                painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
+                return
             }
+            painel.erro = r.erro
+            // Falta um requisito (ex.: o CNPJ da loja): a navegação guiada
+            // leva ao lugar de resolver. Os arquivos e as escolhas ficam aqui;
+            // a janela volta igual quando a pessoa voltar.
+            if (painel.janela.guiar(r.campo, r.erro, ok => painel.voltouDaGuia(ok)))
+                painel.close()
         })
+    }
+    // Volta da navegação guiada: reabre como estava. Com o requisito
+    // satisfeito, confere se os arquivos continuam no lugar e lê de novo
+    // (a pessoa decide se cadastra).
+    function voltouDaGuia(satisfeito) {
+        open()
+        if (!satisfeito)
+            return
+        const c = Api.chamar("arquivos_conferir", { arquivos: painel.arquivos })
+        if (c.ok && c.dados.faltam.length > 0) {
+            const nomes = c.dados.faltam.map(a => a.split(/[\\/]/).pop()).join(", ")
+            painel.arquivos = c.dados.existem
+            if (c.dados.existem.length === 0) {
+                painel.erro = "Os arquivos escolhidos não estão mais no lugar (" + nomes + "). Escolha de novo."
+                return
+            }
+            painel.lerArquivos()
+            painel.avisoArquivos = "Não estão mais no lugar e ficaram de fora: " + nomes + ". Os outros continuam escolhidos."
+            return
+        }
+        painel.lerArquivos()
     }
 
     function cadastrar() {
@@ -168,6 +208,33 @@ Painel {
                 font.pixelSize: 16
             }
             TextoErro { text: painel.erro; Layout.fillWidth: true }
+            // Os arquivos já escolhidos (continuam escolhidos quando a leitura
+            // não deu: dá para tentar de novo sem escolher outra vez).
+            Linha {
+                visible: painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
+                spacing: 10
+                Layout.fillWidth: true
+                Nota {
+                    text: painel.texto(painel.arquivos.length, "arquivo escolhido", "arquivos escolhidos") + ": "
+                          + painel.arquivos.map(a => a.split(/[\\/]/).pop()).join(", ")
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                    maximumLineCount: 2
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: "Tentar de novo"
+                    tipo: "secundario"
+                    onClicked: painel.lerArquivos()
+                }
+            }
+            Nota {
+                visible: painel.avisoArquivos !== ""
+                text: painel.avisoArquivos
+                color: Tema.vermelho
+                font.pixelSize: 13
+                Layout.fillWidth: true
+            }
 
             // Prévia
             ColumnLayout {
@@ -213,7 +280,11 @@ Painel {
                                 Marcar {
                                     visible: linha.modelData.novos > 0
                                     checked: painel[linha.modelData.chave]
-                                    onToggled: painel[linha.modelData.chave] = checked
+                                    onToggled: {
+                                        painel[linha.modelData.chave] = checked
+                                        painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
+                                                            qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
+                                    }
                                     leftPadding: 0
                                 }
                                 Text {

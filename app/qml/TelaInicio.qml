@@ -10,6 +10,10 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property var menu: ({ todos: [] })
     property var avisos: []
+    // Faixas (as críticas primeiro, depois a expandida) e quadrados (as
+    // informativas e de atenção minimizadas), na ordem que vem do núcleo.
+    readonly property var faixas: avisos.filter(a => !(a.minimizado && a.categoria !== "critica"))
+    readonly property var quadrados: avisos.filter(a => a.minimizado && a.categoria !== "critica")
 
     function carregar() {
         const r = Api.chamar("menu")
@@ -33,9 +37,18 @@ FocusScope {
     }
 
     // Minimizar/expandir é só apresentação (fica anotado neste computador).
+    // Uma faixa não crítica aberta por vez: abrir uma fecha a outra.
+    // O núcleo grava tudo de uma vez: as outras não críticas ficam minimizadas.
     function minimizarAviso(aviso, minimizado) {
-        Api.chamar("aviso_minimizar", { id: aviso.id, minimizado: minimizado })
-        avisos = avisos.map(a => a.id === aviso.id ? Object.assign({}, a, { minimizado: minimizado }) : a)
+        const r = Api.chamar("aviso_minimizar", { id: aviso.id, minimizado: minimizado })
+        if (!r.ok) {
+            janela.avisar(r.erro, "info")
+            carregar()
+            return
+        }
+        avisos = avisos.map(a => a.id === aviso.id ? Object.assign({}, a, { minimizado: minimizado })
+                                 : a.categoria !== "critica" && !a.minimizado
+                                   ? Object.assign({}, a, { minimizado: true }) : a)
     }
 
     // Linkagem: leva direto ao lugar de resolver.
@@ -176,20 +189,42 @@ FocusScope {
                 width: rolagem.width - 2 * Tema.margem
                 spacing: 14
 
+                // Notificações: as faixas (largura toda, uma embaixo da outra) e,
+                // depois, os quadrados das minimizadas, em fila que quebra linha.
                 ColumnLayout {
                     visible: tela.avisos.length > 0
                     spacing: 8
                     Layout.fillWidth: true
                     Layout.bottomMargin: 6
                     Repeater {
-                        model: tela.avisos
+                        model: tela.faixas
                         delegate: Notificacao {
                             required property var modelData
                             aviso: modelData
+                            funcao: modelData.funcao
+                            icone: tela.funcao(modelData.funcao) ? tela.funcao(modelData.funcao).icone : ""
                             Layout.fillWidth: true
                             onAbrir: tela.abrirAviso(modelData)
                             onMinimizar: (m) => tela.minimizarAviso(modelData, m)
                             onEsconder: tela.esconderAviso(modelData)
+                        }
+                    }
+                    Flow {
+                        visible: tela.quadrados.length > 0
+                        spacing: Tema.estreito ? 10 : 14
+                        Layout.fillWidth: true
+                        Repeater {
+                            model: tela.quadrados
+                            delegate: Notificacao {
+                                required property var modelData
+                                aviso: modelData
+                                funcao: modelData.funcao
+                                icone: tela.funcao(modelData.funcao) ? tela.funcao(modelData.funcao).icone : ""
+                                width: lado
+                                onAbrir: tela.abrirAviso(modelData)
+                                onMinimizar: (m) => tela.minimizarAviso(modelData, m)
+                                onEsconder: tela.esconderAviso(modelData)
+                            }
                         }
                     }
                 }

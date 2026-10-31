@@ -9,6 +9,8 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     // "cliente" ou "fornecedor"
     property string papel: "cliente"
+    // Nome desta tela no "voltar" de uma tela aberta pela navegação guiada.
+    readonly property string nomeNaNavegacao: tela.fornecedores ? "Fornecedores" : "Clientes"
     property var itens: []
     property int total: 0
     property bool buscou: false

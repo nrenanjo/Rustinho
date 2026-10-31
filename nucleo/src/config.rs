@@ -59,6 +59,12 @@ pub fn tabelas_preco(conn: &Connection) -> Resultado<Vec<TabelaPreco>> {
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
+/// O CNPJ (ou CPF) da loja é válido? A mesma regra para salvar as
+/// configurações e para conferir o requisito "CNPJ da loja" (`requisitos`).
+pub fn documento_da_loja_valido(limpo: &str) -> bool {
+    documento::cnpj_valido(limpo) || documento::cpf_valido(limpo)
+}
+
 /// O que vem da tela de configurações.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -155,7 +161,7 @@ pub fn salvar(conn: &Connection, entrada: &ConfigEntrada) -> Resultado<()> {
         return Err(Erro::campo("uf", "Escolha o estado da loja."));
     }
     let cnpj = documento::limpar(&entrada.cnpj);
-    if !cnpj.is_empty() && !documento::cnpj_valido(&cnpj) && !documento::cpf_valido(&cnpj) {
+    if !cnpj.is_empty() && !documento_da_loja_valido(&cnpj) {
         return Err(Erro::campo("cnpj", "CNPJ inválido. Confira os números e as letras."));
     }
 

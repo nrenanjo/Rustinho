@@ -5,9 +5,12 @@
 //!   o estado de agora; o que perdeu a validade não volta);
 //! - **atenção**: pode ser minimizada, nunca escondida nem descartada: fica
 //!   até a condição acabar (vale depois de fechar e abrir o Rustinho);
-//! - **crítica**: não se esconde de jeito nenhum; fica até ser resolvida.
+//! - **crítica**: não se esconde nem se minimiza; fica expandida até ser
+//!   resolvida.
 //!
-//! Minimizar ou expandir é só apresentação (fica anotado neste computador):
+//! Informativa e atenção começam minimizadas (o quadrado com o ícone da
+//! função, 0.9.16). Minimizar ou expandir é só apresentação (fica anotado
+//! neste computador):
 //! nunca resolve, apaga ou libera nada. Uma notificação some sozinha quando
 //! a condição real que a gerou acaba. Cada condição tem um id: a mesma
 //! condição atualiza a notificação, não cria outra.
@@ -93,14 +96,9 @@ impl Aviso {
     }
 }
 
-/// Os avisos que podem ser escondidos até a meia-noite (os informativos).
-fn pode_esconder(id: &str) -> bool {
-    matches!(id, "receber" | "pagar" | "cheques" | "encomendas" | "oficina" | "referencias_atrasadas")
-        || id.starts_with("senha.")
-}
-
-/// Completa o que a tela precisa (título, resumo, estado minimizado). Atenção
-/// e crítica começam expandidas; informativa, minimizada.
+/// Completa o que a tela precisa (título, resumo, estado minimizado).
+/// Informativa e atenção começam minimizadas; a crítica fica sempre expandida
+/// (nem uma marca antiga de "minimizada" muda isso).
 fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
     if a.titulo_longo.is_empty() {
         a.titulo_longo = match a.categoria.as_str() {
@@ -132,32 +130,54 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "oficina" => "Ver ordens de serviço",
             "backup" | "backup_nuvem" => "Ver backup",
             "conflitos" | "codigos" | "codigos_bloqueio" => "Resolver no Gerente",
-            "referencias" | "referencias_atrasadas" => "Ver caixas",
+            "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
             id if id.starts_with("senha.") => "Trocar senha",
             _ => "Abrir",
         }
         .to_string();
     }
-    a.minimizado = match config::ler(conn, &format!("aviso_minimizado.{}", a.id))?.as_deref() {
-        Some("1") => true,
-        Some("0") => false,
-        _ => a.categoria == INFORMATIVA,
-    };
+    a.minimizado =
+        a.categoria != CRITICA && config::ler(conn, &format!("aviso_minimizado.{}", a.id))?.as_deref() != Some("0");
     Ok(a)
 }
 
-/// Minimiza ou expande a notificação neste computador. É só apresentação.
-pub fn minimizar(conn: &Connection, id: &str, minimizado: bool) -> Resultado<()> {
-    if id.trim().is_empty() {
-        return Err(Erro::validacao("Aviso sem identificação."));
+/// Só uma não crítica aberta (em faixa) por vez. Uma base de outra versão
+/// pode ter guardado várias como abertas: fica aberta a primeira, na ordem em
+/// que aparecem. Só apresentação: nada é gravado aqui.
+pub fn uma_aberta(avisos: &mut [Aviso]) {
+    let mut aberta = false;
+    for a in avisos.iter_mut().filter(|a| a.categoria != CRITICA && !a.minimizado) {
+        a.minimizado = aberta;
+        aberta = true;
+    }
+}
+
+/// Minimiza ou expande neste computador uma das notificações que estão
+/// aparecendo (`atuais`). É só apresentação. A crítica não se minimiza. As
+/// outras não críticas ficam gravadas como minimizadas: abrir uma fecha a
+/// outra, e uma marca antiga de "aberta" não reabre nada depois. Quem chama
+/// passa uma transação, para gravar tudo ou nada.
+pub fn minimizar(conn: &Connection, atuais: &[Aviso], id: &str, minimizado: bool) -> Resultado<()> {
+    let Some(aviso) = atuais.iter().find(|a| a.id == id) else {
+        return Err(Erro::validacao("Esta notificação já não está aparecendo."));
+    };
+    if minimizado && aviso.categoria == CRITICA {
+        return Err(Erro::validacao("A notificação crítica fica aberta até o problema ser resolvido."));
+    }
+    for outra in atuais.iter().filter(|a| a.id != id && a.categoria != CRITICA) {
+        config::gravar(conn, &format!("aviso_minimizado.{}", outra.id), "1")?;
     }
     config::gravar(conn, &format!("aviso_minimizado.{id}"), if minimizado { "1" } else { "0" })
 }
 
-/// Esconde o aviso neste computador até o dia seguinte (meia-noite). Só os
-/// informativos: atenção e crítica ficam até a condição acabar.
-pub fn esconder(conn: &Connection, id: &str) -> Resultado<()> {
-    if !pode_esconder(id) {
+/// Esconde neste computador, até a meia-noite, uma das notificações que
+/// estão aparecendo (`atuais`). Quem decide é a categoria: só a informativa;
+/// atenção e crítica ficam até a condição acabar.
+pub fn esconder(conn: &Connection, atuais: &[Aviso], id: &str) -> Resultado<()> {
+    let Some(aviso) = atuais.iter().find(|a| a.id == id) else {
+        return Err(Erro::validacao("Esta notificação já não está aparecendo."));
+    };
+    if aviso.categoria != INFORMATIVA {
         return Err(Erro::validacao(
             "Este aviso não pode ser escondido: ele some quando o problema for resolvido. Você pode minimizá-lo.",
         ));
@@ -165,8 +185,11 @@ pub fn esconder(conn: &Connection, id: &str) -> Resultado<()> {
     config::gravar(conn, &format!("aviso_escondido.{id}"), &fiscal::hoje(conn)?)
 }
 
-fn escondido(conn: &Connection, id: &str, hoje: &str) -> Resultado<bool> {
-    Ok(config::ler(conn, &format!("aviso_escondido.{id}"))?.as_deref() == Some(hoje))
+/// A notificação foi escondida hoje? Só vale para a informativa: uma marca
+/// de "escondida" numa atenção ou numa crítica (de outra versão, de um backup
+/// restaurado) não esconde nada.
+fn escondida_hoje(conn: &Connection, a: &Aviso, hoje: &str) -> Resultado<bool> {
+    Ok(a.categoria == INFORMATIVA && config::ler(conn, &format!("aviso_escondido.{}", a.id))?.as_deref() == Some(hoje))
 }
 
 fn plural(n: i64, um: &str, varios: &str) -> String {
@@ -183,9 +206,6 @@ pub fn da_senha(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>>
     };
     let id = format!("senha.{usuario_id}");
     let hoje = fiscal::hoje(conn)?;
-    if escondido(conn, &id, &hoje)? {
-        return Ok(None);
-    }
     let gerente = crate::usuarios::buscar(conn, usuario_id)?.gerente;
     let a = Aviso::simples(
         &id,
@@ -196,6 +216,9 @@ pub fn da_senha(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>>
         "configuracoes",
     )
     .secao("loja");
+    if escondida_hoje(conn, &a, &hoje)? {
+        return Ok(None);
+    }
     Ok(Some(completar(conn, a)?))
 }
 
@@ -213,7 +236,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         params![hoje],
         |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
     )?;
-    if (hoje_qtd > 0 || venc_valor > 0) && !escondido(conn, "receber", &hoje)? {
+    if hoje_qtd > 0 || venc_valor > 0 {
         let atraso = if venc_valor > 0 {
             format!(
                 "vencido R$ {} de {}",
@@ -240,7 +263,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
 
     // Contas a pagar
     let (p_qtd, p_valor, p_venc, p_venc_qtd) = crate::pagar::do_dia(conn)?;
-    if (p_qtd > 0 || p_venc > 0) && !escondido(conn, "pagar", &hoje)? {
+    if p_qtd > 0 || p_venc > 0 {
         let atraso = if p_venc > 0 {
             format!(
                 "{} vencida{} R$ {}",
@@ -264,7 +287,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
 
     // Cheques para depositar
     let (c_qtd, c_valor) = crate::cheques::do_dia(conn)?;
-    if c_qtd > 0 && !escondido(conn, "cheques", &hoje)? {
+    if c_qtd > 0 {
         avisos.push(Aviso::simples(
             "cheques",
             &hoje,
@@ -281,7 +304,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
 
     // Encomendas que chegaram (falta avisar o cliente) e que falta pedir
     let (chegaram, a_pedir) = crate::encomendas::do_dia(conn)?;
-    if (chegaram > 0 || a_pedir > 0) && !escondido(conn, "encomendas", &hoje)? {
+    if chegaram > 0 || a_pedir > 0 {
         let mut partes = Vec::new();
         if chegaram > 0 {
             partes.push(format!("{} · avise o cliente", plural(chegaram, "chegou", "chegaram")));
@@ -307,7 +330,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         [&hoje],
         |l| Ok((l.get(0)?, l.get(1)?)),
     )?;
-    if (prontas > 0 || atrasadas > 0) && !escondido(conn, "oficina", &hoje)? {
+    if prontas > 0 || atrasadas > 0 {
         avisos.push(Aviso::simples(
             "oficina",
             &hoje,
@@ -453,7 +476,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 lista(&tentando)
             );
             avisos.push(a);
-        } else if !voltaram.is_empty() && !escondido(conn, "troca_voltou", &hoje)? {
+        } else if !voltaram.is_empty() {
             let mut a = Aviso::simples(
                 "troca_voltou",
                 &hoje,
@@ -476,29 +499,27 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     // FALHA-01: um computador de outra loja (configurada separadamente) tentou
     // trocar dados com este, com a mesma senha da rede. Nada foi misturado.
     if let Some((nome, endereco, _)) = crate::loja::ultima_recusa(conn)? {
-        if !escondido(conn, "outra_loja", &hoje)? {
-            let mut a = Aviso::simples(
-                "outra_loja",
-                &hoje,
-                "Troca de dados recusada".into(),
-                format!(
-                    "{} é de outra loja",
-                    if nome.trim().is_empty() { format!("O computador {endereco}") } else { nome.clone() }
-                ),
-                "nada foi misturado; confira a senha da rede".into(),
-                "configuracoes",
-            )
-            .categoria(CRITICA)
-            .secao("caixas");
-            a.descricao = format!(
-                "Um computador{} usa a mesma senha da rede, mas foi configurado como outra loja. Para não misturar \
-                 as duas lojas (gerentes, cadastros e códigos), a troca de dados com ele foi recusada. Se ele devia \
-                 ser um caixa desta loja, ele precisa entrar pela opção \"Entrar numa loja que já existe\", com o \
-                 banco vazio. Se é de outra loja, troque a senha da rede de uma das duas.",
-                if endereco.is_empty() { String::new() } else { format!(" ({endereco})") }
-            );
-            avisos.push(a);
-        }
+        let mut a = Aviso::simples(
+            "outra_loja",
+            &hoje,
+            "Troca de dados recusada".into(),
+            format!(
+                "{} é de outra loja",
+                if nome.trim().is_empty() { format!("O computador {endereco}") } else { nome.clone() }
+            ),
+            "nada foi misturado; confira a senha da rede".into(),
+            "configuracoes",
+        )
+        .categoria(CRITICA)
+        .secao("caixas");
+        a.descricao = format!(
+            "Um computador{} usa a mesma senha da rede, mas foi configurado como outra loja. Para não misturar \
+             as duas lojas (gerentes, cadastros e códigos), a troca de dados com ele foi recusada. Se ele devia \
+             ser um caixa desta loja, ele precisa entrar pela opção \"Entrar numa loja que já existe\", com o \
+             banco vazio. Se é de outra loja, troque a senha da rede de uma das duas.",
+            if endereco.is_empty() { String::new() } else { format!(" ({endereco})") }
+        );
+        avisos.push(a);
     }
 
     // R-05: registros que apontam para algo apagado (ou que não chegou em
@@ -518,7 +539,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             .categoria(ATENCAO)
             .secao("caixas"),
         );
-    } else if atrasadas > 0 && !escondido(conn, "referencias_atrasadas", &hoje)? {
+    } else if atrasadas > 0 {
         // Atraso não é erro: só pede para olhar se os outros caixas estão ligados.
         avisos.push(
             Aviso::simples(
@@ -641,7 +662,15 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         _ => 2,
     };
     avisos.sort_by_key(|a| peso(&a.categoria));
-    avisos.into_iter().map(|a| completar(conn, a)).collect()
+    // A informativa escondida hoje fica de fora (volta à meia-noite, se a
+    // condição ainda existir). A regra é a categoria, só aqui.
+    let mut visiveis = Vec::with_capacity(avisos.len());
+    for a in avisos {
+        if !escondida_hoje(conn, &a, &hoje)? {
+            visiveis.push(completar(conn, a)?);
+        }
+    }
+    Ok(visiveis)
 }
 
 /// A notificação de um caixa sem compatibilidade confirmada (Atenção). Os
@@ -797,10 +826,162 @@ mod testes {
         assert_eq!(v[0].titulo, "A receber");
         assert_eq!(v[0].atraso, "vencido R$ 341,89 de 1 cliente");
 
-        esconder(c, "receber").unwrap();
+        esconder(c, &do_dia(c).unwrap(), "receber").unwrap();
         assert!(do_dia(c).unwrap().is_empty(), "escondido hoje");
         config::gravar(c, "aviso_escondido.receber", "2026-01-01").unwrap();
         assert_eq!(do_dia(c).unwrap().len(), 1, "volta no outro dia");
+    }
+
+    /// Uma loja com uma notificação de cada categoria: informativa (parcela
+    /// vencida), atenção (backup atrasado) e crítica (outra loja recusada).
+    fn loja_com_as_tres(b: &Banco) {
+        let c = &b.conn;
+        let d = &b.dispositivo;
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        let mut cli = pessoas::ficha_nova(c, "cliente").unwrap();
+        cli.nome = "Oficina do Zé".into();
+        let ze = pessoas::salvar(c, d, &u, &cli).unwrap();
+        receber::lancar(
+            c,
+            d,
+            &u,
+            &LancamentoEntrada {
+                cliente_id: ze,
+                descricao: "Caderno".into(),
+                valor: "50".into(),
+                parcelas: 1,
+                primeiro_vencimento: String::new(),
+            },
+        )
+        .unwrap();
+        c.execute("UPDATE conta_receber SET vencimento = date('now', '-3 days')", []).unwrap();
+        config::gravar(c, "backup_desde", &crate::tempo::dias_atras(3)).unwrap();
+        config::gravar(
+            c,
+            crate::loja::OUTRA_LOJA,
+            &serde_json::json!({ "nome": "Caixa da outra loja", "endereco": "192.168.0.9", "quando": crate::tempo::agora() })
+                .to_string(),
+        )
+        .unwrap();
+    }
+
+    fn categoria_de<'a>(lista: &'a [Aviso], id: &str) -> Option<&'a str> {
+        lista.iter().find(|a| a.id == id).map(|a| a.categoria.as_str())
+    }
+
+    /// N-01: só a informativa pode ser escondida, e quem decide é a
+    /// categoria. Atenção e crítica recusam e continuam na lista.
+    #[test]
+    fn n01_esconder_segue_a_categoria() {
+        let b = Banco::em_memoria().unwrap();
+        loja_com_as_tres(&b);
+        let c = &b.conn;
+        let antes = do_dia(c).unwrap();
+        assert_eq!(categoria_de(&antes, "receber"), Some(INFORMATIVA), "{antes:?}");
+        assert_eq!(categoria_de(&antes, "backup"), Some(ATENCAO));
+        assert_eq!(categoria_de(&antes, "outra_loja"), Some(CRITICA));
+        for a in &antes {
+            let r = esconder(c, &antes, &a.id);
+            assert_eq!(r.is_ok(), a.categoria == INFORMATIVA, "{} ({}): {r:?}", a.id, a.categoria);
+        }
+        let depois = do_dia(c).unwrap();
+        assert_eq!(categoria_de(&depois, "receber"), None, "a informativa saiu até a meia-noite");
+        assert_eq!(categoria_de(&depois, "backup"), Some(ATENCAO), "atenção continua");
+        assert_eq!(categoria_de(&depois, "outra_loja"), Some(CRITICA), "crítica continua");
+    }
+
+    /// N-02: nada esconde uma atenção ou uma crítica, nem uma marca de
+    /// "escondida" que esteja no banco (de outra versão, de um backup
+    /// restaurado): a regra é a categoria, num lugar só.
+    #[test]
+    fn n02_marca_de_escondida_nao_some_com_atencao_nem_critica() {
+        let b = Banco::em_memoria().unwrap();
+        loja_com_as_tres(&b);
+        let c = &b.conn;
+        let hoje = fiscal::hoje(c).unwrap();
+        for id in ["backup", "outra_loja", "troca_voltou"] {
+            config::gravar(c, &format!("aviso_escondido.{id}"), &hoje).unwrap();
+        }
+        let v = do_dia(c).unwrap();
+        assert_eq!(categoria_de(&v, "backup"), Some(ATENCAO), "{v:?}");
+        assert_eq!(categoria_de(&v, "outra_loja"), Some(CRITICA), "{v:?}");
+    }
+
+    /// N-03: a informativa escondida volta no outro dia (meia-noite) só se a
+    /// condição ainda existir.
+    #[test]
+    fn n03_escondida_volta_no_outro_dia_so_se_ainda_vale() {
+        let b = Banco::em_memoria().unwrap();
+        loja_com_as_tres(&b);
+        let c = &b.conn;
+        esconder(c, &do_dia(c).unwrap(), "receber").unwrap();
+        assert_eq!(categoria_de(&do_dia(c).unwrap(), "receber"), None, "hoje, escondida");
+        // Ontem pelo relógio da loja (a mesma data de `fiscal::hoje`), não em
+        // UTC: das 21h à meia-noite de Brasília, o "ontem" UTC já é hoje.
+        let ontem: String = c.query_row("SELECT date('now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
+        config::gravar(c, "aviso_escondido.receber", &ontem).unwrap();
+        assert_eq!(categoria_de(&do_dia(c).unwrap(), "receber"), Some(INFORMATIVA), "outro dia: volta");
+        // Resolvida (a parcela foi cancelada): não volta mais.
+        c.execute("UPDATE conta_receber SET cancelado_em = datetime('now')", []).unwrap();
+        config::gravar(c, "aviso_escondido.receber", &ontem).unwrap();
+        assert_eq!(categoria_de(&do_dia(c).unwrap(), "receber"), None, "sem a condição, não volta");
+    }
+
+    /// N-04: minimizar é só apresentação: a notificação continua, nada de
+    /// fora das marcas deste computador muda e esconder não acontece.
+    /// Informativa e atenção começam minimizadas (o quadrado); a crítica não
+    /// se minimiza — nem pelo comando, nem por uma marca antiga no banco.
+    #[test]
+    fn n04_minimizar_e_so_apresentacao() {
+        let b = Banco::em_memoria().unwrap();
+        loja_com_as_tres(&b);
+        let c = &b.conn;
+        let contas: i64 =
+            c.query_row("SELECT COUNT(*) FROM conta_receber WHERE cancelado_em IS NULL", [], |l| l.get(0)).unwrap();
+        let minimizada = |id: &str| do_dia(c).unwrap().iter().find(|a| a.id == id).map(|a| a.minimizado);
+        assert_eq!(minimizada("receber"), Some(true), "informativa começa minimizada");
+        assert_eq!(minimizada("backup"), Some(true), "atenção começa minimizada");
+        assert_eq!(minimizada("outra_loja"), Some(false), "crítica sempre expandida");
+        for id in ["receber", "backup"] {
+            minimizar(c, &do_dia(c).unwrap(), id, false).unwrap();
+            assert_eq!(minimizada(id), Some(false), "{id} expandida");
+            minimizar(c, &do_dia(c).unwrap(), id, true).unwrap();
+            assert_eq!(minimizada(id), Some(true), "{id} minimizada de novo");
+        }
+        assert!(minimizar(c, &do_dia(c).unwrap(), "outra_loja", true).is_err(), "crítica não minimiza");
+        config::gravar(c, "aviso_minimizado.outra_loja", "1").unwrap();
+        assert_eq!(minimizada("outra_loja"), Some(false), "marca antiga não minimiza a crítica");
+        let depois: i64 =
+            c.query_row("SELECT COUNT(*) FROM conta_receber WHERE cancelado_em IS NULL", [], |l| l.get(0)).unwrap();
+        assert_eq!(contas, depois, "minimizar não mexe na condição");
+        let marcas: i64 =
+            c.query_row("SELECT COUNT(*) FROM config WHERE chave LIKE 'aviso_escondido.%'", [], |l| l.get(0)).unwrap();
+        assert_eq!(marcas, 0, "minimizar não esconde");
+    }
+
+    /// N-05: uma notificação por condição (o id é da condição: atualizar muda
+    /// a mesma, não cria outra).
+    #[test]
+    fn n05_uma_notificacao_por_condicao() {
+        let b = Banco::em_memoria().unwrap();
+        loja_com_as_tres(&b);
+        let c = &b.conn;
+        let ids = |v: &[Aviso]| v.iter().map(|a| a.id.clone()).collect::<Vec<_>>();
+        let primeira = ids(&do_dia(c).unwrap());
+        let mut unicos = primeira.clone();
+        unicos.sort();
+        unicos.dedup();
+        assert_eq!(primeira.len(), unicos.len(), "{primeira:?}");
+        // A condição piora (mais uma parcela vencida): a mesma notificação muda.
+        c.execute(
+            "INSERT INTO conta_receber (id, cliente_id, descricao, valor, vencimento, parcela, parcelas, dispositivo, criado_em)
+             SELECT 'outra', cliente_id, descricao, valor, vencimento, 1, 1, dispositivo, criado_em FROM conta_receber LIMIT 1",
+            [],
+        )
+        .unwrap();
+        let segunda = do_dia(c).unwrap();
+        assert_eq!(ids(&segunda), primeira, "mesmas notificações");
+        assert!(segunda.iter().find(|a| a.id == "receber").unwrap().atraso.contains("R$ 100,00"));
     }
 
     #[test]
