@@ -1,0 +1,84 @@
+//! Compila a parte em C++/Qt e junta as telas (QML) e as fontes no programa.
+
+use cxx_qt_build::{CxxQtBuilder, QmlFile, QmlModule};
+
+/// Lista os arquivos de uma pasta com a extensão pedida, em ordem.
+fn arquivos(pasta: &str, extensoes: &[&str]) -> Vec<String> {
+    println!("cargo::rerun-if-changed={pasta}");
+    let mut lista: Vec<String> = std::fs::read_dir(pasta)
+        .unwrap_or_else(|e| panic!("não achei a pasta {pasta}: {e}"))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()).map(|x| extensoes.contains(&x)).unwrap_or(false))
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect();
+    lista.sort();
+    lista
+}
+
+fn main() {
+    // Telas e componentes (pasta qml) + Tema e Api, que são únicos (pasta base).
+    let mut qml: Vec<QmlFile> = arquivos("qml", &["qml"]).into_iter().map(QmlFile::from).collect();
+    qml.push(QmlFile::from("base/Tema.qml").singleton(true));
+    qml.push(QmlFile::from("base/Api.qml").singleton(true));
+    // Só no celular: a câmera como leitor de código de barras (QtMultimedia).
+    let android = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android");
+    if android {
+        qml.extend(arquivos("qml_android", &["qml"]).into_iter().map(QmlFile::from));
+    }
+
+    let mut construtor = CxxQtBuilder::new_qml_module(QmlModule::new("rustinho").qml_files(qml))
+        .qrc_resources(arquivos("fontes", &["ttf", "woff2"]))
+        .qrc_resources(arquivos("icone", &["png"]))
+        .files(["src/ponte.rs"])
+        // Impressão em PDF (QTextDocument + QPdfWriter, do QtGui).
+        .cpp_file("cpp/pdf.cpp")
+        .cpp_file("cpp/janela.cpp");
+    // Montagem do Android (android/rust): os cabeçalhos "rustinho/cpp/..."
+    // ficam numa pasta à parte, porque lá o pacote tem outro nome.
+    if std::path::Path::new("include").is_dir() {
+        let pasta = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("include");
+        // SAFETY: só acrescenta uma pasta de cabeçalhos ao compilador.
+        construtor = unsafe {
+            construtor.cc_builder(move |cc| {
+                cc.include(&pasta);
+            })
+        };
+    }
+    // No Windows (MSVC), sem /utf-8 o compilador lê os .cpp como a página de
+    // código do sistema (CP-1252). Os textos das telas que o qmlcachegen
+    // transforma em C++ (QStringLiteral, que é u"...") saíam com os acentos
+    // trocados: "Ninguém" virava "NinguÃ©m". Os arquivos são UTF-8; aqui só se
+    // diz isso ao compilador (Linux e Android já leem UTF-8).
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        // SAFETY: só acrescenta uma opção ao compilador.
+        construtor = unsafe {
+            construtor.cc_builder(|cc| {
+                cc.flag("/utf-8");
+            })
+        };
+    }
+    // No Windows, imprime direto na impressora padrão (QPrinter).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        construtor = construtor.qt_module("PrintSupport");
+    }
+    if android {
+        construtor = construtor.qt_module("Multimedia");
+        // O rcc do computador comprime com zstd, que o Qt for Android não lê.
+        if std::env::var_os("CXX_QT_AUTORCC_OPTIONS").is_none() {
+            std::env::set_var("CXX_QT_AUTORCC_OPTIONS", "--no-zstd");
+        }
+    }
+    construtor.build();
+
+    // Ícone do programa no Windows (o .exe e a barra de tarefas).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let mut r = winresource::WindowsResource::new();
+        r.set_icon("../instalador/rustinho.ico");
+        r.set("FileDescription", "Rustinho");
+        r.set("ProductName", "Rustinho");
+        if let Err(e) = r.compile() {
+            println!("cargo::warning=sem ícone no .exe: {e}");
+        }
+    }
+}

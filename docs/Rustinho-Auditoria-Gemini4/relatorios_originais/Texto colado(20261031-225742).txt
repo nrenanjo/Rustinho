@@ -1,0 +1,290 @@
+Parte 1 — Ajuste Final do Bloco 5C (Seção 12.13 e Fechamento do Bloco 5C)
+
+Abaixo está a retificação aplicada à Seção 12.13 do relatório técnico consolidado e ao registro de fechamento do Bloco 5C:
+
+    Na Seção 12.13 (docs/MATRIZ-PROVEDORES.md — Conflito Arquitetural Desktop vs. Android e Requisitos Gráficos no Linux):
+
+        A afirmação de que o ACBrMonitorPLUS é um binário exclusivo para Desktop (Windows/Linux x86_64) e não é suportado nativamente no Android (ARM64/ARMv7), a afirmação de que os builds Android parciais da ACBrLib são incompatíveis com token/cartão A3 físico padrão desktop, e a afirmação de que o ACBrMonitorPLUS no Linux requer Xvfb ou ambiente gráfico (GTK2/Qt conforme o build) passam a ser classificadas estritamente como DOCUMENTADO, MAS NÃO VERIFICADO.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Essas informações provêm exclusivamente da tabela comparativa de docs/MATRIZ-PROVEDORES.md, sem que tenha sido realizado teste prático ou verificação binária independente sobre o ACBrMonitorPLUS ou a ACBrLib nesta auditoria.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    No Fechamento do Bloco 5C (Itens 2 e 3):
+
+        Tanto a incompatibilidade do ACBrMonitorPLUS com o Android quanto a dependência de Xvfb/GTK2/Qt no Linux ficam registradas como DOCUMENTADO, MAS NÃO VERIFICADO.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+Parte 2 — Atualização do Relatório Técnico Único (docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md — Execução do BLOCO 5D1: Seções 12.14 a 12.17)
+
+Análise elaborada exclusivamente a partir dos três relatórios autorizados para o Bloco 5D1 (preservando integralmente os Capítulos 1 a 11, as Seções 12.1 a 12.13 e a Seção 13.1 já consolidados nos blocos anteriores):
+
+    docs/RELATORIO_FINAL_E_EVIDENCIAS.md (Página 64);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    docs/RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md (Páginas 65–66);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Páginas 67–68).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+12.14. Comparação dos Três Relatórios Fiscais com os Blocos 5A, 5B e 5C e Evolução de Escopo (v0.2.2 → v0.2.3)
+
+A leitura cruzada dos três relatórios com os documentos analisados nos Blocos 5A, 5B e 5C demonstra que o pacote rustinho-fiscal-v0.2.3/docs/ conserva relatórios de duas etapas distintas de revisão, cujos escopos e regras mudaram entre os dias 27/10/2026 e 29/10/2026:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Aspecto Comparado	RELATORIO_FINAL_E_EVIDENCIAS.md (Etapa v0.2.2 — pág. 64)	RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md e RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Etapa v0.2.3 — págs. 65–68)	Impacto e Classificação na Auditoria
+Inspeção do código-fonte do núcleo do Rustinho	
+
+Declara que o código principal do núcleo do Rustinho 0.9.15 não foi anexado naquela sessão.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Declaram que o arquivo rustinho-codigo-fonte-0.9.16(1).zip (além de seu-desenvolvimento.odt e Consolidação do padrão Rustinho.docx) foi anexado e inspecionado apenas para leitura como referência arquitetural, enquanto o código 0.9.17 não foi recebido.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Explica a diferença entre os documentos de v0.2.2 (DIAGNOSTICO_BASE.md e RELATORIO_FINAL_E_EVIDENCIAS.md) e os documentos de v0.2.3 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+Regra de filtragem de CFOP e tributação	
+
+Na v0.2.2 (cujo histórico no CHANGELOG.md do Bloco 5A citava bloquear "CFOP com prefixo diferente de 5"), o relatório descreve apenas um bloqueio de destino fora da UF e de CST/CSOSN sem suporte integral.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Na v0.2.3, substitui o filtro amplo "CFOP começa com 5" por uma allowlist técnica estrita de apenas 4 combinações:
+
+1. Simples Nacional / CSOSN 102 / CFOP 5102;
+
+2. Simples Nacional / CSOSN 500 / CFOP 5405;
+
+3. Regime Normal / CST 00 / CFOP 5102;
+
+4. Excesso de sublimite / CST 00 / CFOP 5102.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Mudança importante de escopo: detalha exatamente quais são as 4 únicas combinações mencionadas de forma genérica nos Blocos 5A e 5C (DOCUMENTADO, MAS NÃO VERIFICADO no código .rs).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Meios de pagamento (tPag) e dados de cartão	
+
+Restringe pagamentos a dinheiro, Pix, cartões e outros (tPag=99), recusando campos de cartão em dinheiro/Pix/outros.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Adiciona cheque (02_CHEQUE), crédito da loja (05_CREDITO_LOJA) e boleto bancário (15_BOLETO_BANCARIO), e remove a exigência artificial de bandeira (tBand) e CNPJ do adquirente quando não informados, proibindo inventar tBand=99 e mantendo tpIntegra explícito.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Amplia o contrato visto no Bloco 5B e corrige rigidez anterior em cartões (DOCUMENTADO, MAS NÃO VERIFICADO no código .rs).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Fatura, duplicatas e rateio de desconto	
+
+Ausentes no relatório da v0.2.2.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Adiciona FiscalBillingSnapshot e FiscalInstallmentSnapshot (1 a 24 parcelas, datas Gregorianas AAAA-MM-DD, soma exata sem troco, restrito a NF-e 55 a prazo com 05_CREDITO_LOJA ou 15_BOLETO_BANCARIO) e a função apportion_sale_discount_cents.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Explicita os limites numéricos (1–24 parcelas e meios 05/15) que fundamentam as restrições vistas no Bloco 5B (DOCUMENTADO, MAS NÃO VERIFICADO).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+12.15. Correções Documentadas, Verificações Realmente Executadas Segundo os Registros e Testes Pendentes
+
+Os relatórios RELATORIO_FINAL_E_EVIDENCIAS.md (Seção 4, pág. 64) e RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Seções 3 e 4, págs. 67–68) separam o que foi verificado por inspeção manual ou scripts auxiliares em Python daquilo que foi apenas escrito nos arquivos .rs sem compilação ou execução:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+A. Verificações Registradas como Executadas no Ambiente de Geração do Pacote
+
+    Leitura e inspeção estática/manual: Inspeção manual dos arquivos reconstruídos da crate v0.2.2/v0.2.3 e leitura arquitetural do código-fonte do Rustinho 0.9.16.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Parsing das fixtures JSON com Python: Validação sintática das fixtures JSON usando Python durante o empacotamento.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Validação estática via script Python na etapa v0.2.2 (RELATORIO_FINAL_E_EVIDENCIAS.md, Seção 4): O relatório da v0.2.2 declara que passaram em validação estática Python a checagem do manifesto/árvore, o algoritmo independente de CNPJ e dígito verificador (DV) de chave de acesso, o balanceamento de delimitadores Rust e a ausência de blocos unsafe — ressalvando expressamente que "não é compilação Rust".   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Simulação exaustiva em modelo Python independente para o rateio de desconto na etapa v0.2.3 (RELATORIO_REVISAO...v0.2.3.md, Seção 3): Para verificar a lógica matemática de apportion_sale_discount_cents (incluindo redistribuição de centavos quando itens de baixo valor atingem o teto de desconto), um modelo independente em Python foi exercitado exaustivamente em 5.659.572 combinações (com até 4 itens e valores unitários de 1 a 7 centavos), preservando soma total, limites por item e distribuição — com a ressalva expressa: "Isso não executa o código Rust nem substitui os testes da crate."   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Integridade de pacote e SHA-256: Checagem de integridade do arquivo ZIP fiscal e cálculo de hashes SHA-256 na preparação do pacote.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Classificação dessas verificações: DOCUMENTADO, MAS NÃO VERIFICADO quanto à execução e ao código (são verificações auxiliares relatadas nos documentos, que não executaram o código Rust da crate).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+B. Casos de Teste Adicionados ao Código-Fonte .rs, mas NÃO Executados no Processo Documentado
+
+Os relatórios registram que foram escritos no código-fonte da crate (em v0.2.2 e v0.2.3) testes para:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Preâmbulo NFe criada em: do ACBr antes de OK:/ERRO:;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Bloqueio de endereço TCP remoto fora de loopback;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Prova XML falsa injetada dentro de comentário XML;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Bloqueio de IPI e de destino interestadual;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Rejeição de campos de cartão quando o pagamento é em dinheiro;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Rateio de desconto global, limite de desconto não alocável e redistribuição de centavos quando itens de baixo valor atingem o limite;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Validação de calendário real (AAAA-MM-DD), incluindo 29/02 em ano bissexto;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Cartão sem bandeira conhecida e exigência de tpIntegra explícito;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Fatura/duplicatas com valores conferidos e falha quando a soma diverge;   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Mapeamento explícito de cheque (02), crédito da loja (05) e boleto (15);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Recusa de CFOP iniciado por 5 quando a combinação não pertence à allowlist técnica de 4 combinações.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Status de execução declarado nos próprios relatórios: "A presença dos testes nos arquivos não significa que compilaram ou passaram". No ambiente de geração do pacote, cargo fmt --all -- --check, cargo clippy --all-targets -- -D warnings, cargo test --all-targets e cargo build --release não foram executados por indisponibilidade de cargo, rustc e rustfmt, assim como não houve teste com ACBrMonitorPLUS real, homologação SEFAZ, validação XSD/assinatura/certificado, revisão contábil por UF ou integração com o Rustinho 0.9.17.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+12.16. Contradições, Mudanças de Escopo, Conclusões Cautelares e Riscos Abertos Identificados no Bloco 5D1
+
+    Tensão entre a eliminação de serviços de inutilização citada na pesquisa (NT 2023.002 v1.02) e a reserva prévia de numeração na Fase A da integração:
+
+        Na Seção 2 de RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md (pág. 65), o relatório registra que, na data da pesquisa (29/10/2026), o Portal Nacional da NF-e listava a NT 2023.002 v1.02 publicada em 27/10/2026, "cujo título informa eliminação da autorização assíncrona e dos serviços de inutilização".   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Ao mesmo tempo, nos Blocos 5A e 5C (CHANGELOG.md v0.2.0 e LEIAUTE-E-LACUNAS-FISCAIS.md), a inutilização era tratada como uma funcionalidade apenas desabilitada/não implementada até verificar a NT aplicável, e o plano de integração do Bloco 5B (INTEGRACAO-POSTERIOR-RUSTINHO.md) exige reservar (serie, numero) no SQLite na Fase A antes do envio.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Classificação e impacto: A existência, o teor exato e a vigência da NT 2023.002 v1.02 permanecem como informação extraída da documentação histórica, com validação legal/técnica independente NÃO VERIFICADA. Isso reforça que o tratamento de numeração reservada e não autorizada (DF-6) não pode ser codificado por suposição sem antes verificar o texto normativo vigente no Portal Nacional da NF-e.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Assimetria entre TaxRegime no Contrato (MEI presente) e a Allowlist Técnica de 4 Combinações (MEI ausente):
+
+        No Bloco 5B (CONTRATO-FISCAL.md), a enumeração TaxRegime define 4 variantes: "SIMPLES_NACIONAL", "SIMPLES_EXCESSO_SUBLIMITE", "REGIME_NORMAL" e "MEI".   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Entretanto, RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Seção 2, pág. 67) revela que a allowlist técnica do adaptador contempla apenas combinações para Simples Nacional (CSOSN 102/CFOP 5102 e CSOSN 500/CFOP 5405), Regime Normal (CST 00/CFOP 5102) e Excesso de sublimite (CST 00/CFOP 5102) — não incluindo nenhuma combinação para TaxRegime::Mei nem para CST 00 com substituição tributária (CFOP 5405 / CST 60) no Regime Normal.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Impacto: Qualquer tentativa de emissão configurada com a variante MEI do contrato ou com outros códigos comuns de autopeças fora das 4 combinações será recusada pelo adaptador até que o perfil tributário seja validado e expandido (DOCUMENTADO, MAS NÃO VERIFICADO no código .rs).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Diferença de grafia do identificador comercial de vale-troca no núcleo (vale vs. vale-troca):
+
+        Em RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md (Seção 5, pág. 66), as formas comerciais do núcleo são listadas com seus identificadores internos sem acento: dinheiro, pix, debito, credito, cheque, crediario, vale e outro, enquanto em ARQUITETURA_REAL_0.9.16...md (Bloco 5B, pág. 58) o texto descritivo grafava "vale-troca". Na futura auditoria de nucleo/src/caixa.rs, deve-se verificar a string literal exata usada no banco e na API.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Riscos operacionais de API fiscal hospedada (Focus NFe) e de conflito de processo no ACBrMonitorPLUS:
+
+        RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md (Seção 2, pág. 65) documenta que uma API REST como a Focus NFe processa NF-e de forma assíncrona por padrão e realiza retentativas de webhooks caso não receba HTTP 2xx, o que exigiria idempotência persistente, tratamento de notificações duplicadas/fora de ordem e gestão de segredos/custos/SLA não cobertos pelo adaptador síncrono atual.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Ambos os relatórios de v0.2.3 alertam para o risco de conflito de instância do ACBrMonitorPLUS: caso a máquina da loja já execute um ACBrMonitorPLUS utilizado por outro sistema PDV legado, os testes ou a operação do Rustinho não devem reutilizar aquela instância sem isolamento de processo, porta, configuração e diretório de XML.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+12.17. Consolidação das Decisões Humanas e Gates Obrigatórios Antes de Qualquer Integração Fiscal
+
+De acordo com a Seção 6 de RELATORIO_FINAL_E_EVIDENCIAS.md, a Seção 6 de RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md e as Seções 5 e 6 de RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md, permanecem bloqueados e pendentes de decisão humana e validação técnica os seguintes 8 gates:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Compilação e execução real da suíte Rust (./verify_package.sh): Executar cargo fmt --all -- --check, cargo clippy --all-targets -- -D warnings, cargo test --all-targets e cargo build --release em estação com toolchain Rust instalada e corrigir eventuais erros apontados pelo compilador.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Definição e modelagem dos grupos da Reforma Tributária do Consumo (RTC — IBS, CBS e IS): Atualizar o contrato e o gerador INI conforme as Notas Técnicas vigentes (como a NT 2025.002 v1.52 citada no relatório), mantendo a emissão em produção bloqueada até a conclusão e validação.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Expansão estruturada do cadastro fiscal do emitente no núcleo: Definir migração e tela para coletar razão social, nome fantasia, IE, CRT e endereço estruturado separado (logradouro, número, complemento, bairro, código IBGE, município, UF e CEP), inexistentes em config.rs da 0.9.16.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Decisão contábil e de negócio sobre meios de pagamento e parcelamento: Aprovar a tabela de correspondência entre as formas comerciais do Rustinho (crediario, vale, outro) e os códigos tPag (05_CREDITO_LOJA, 15_BOLETO_BANCARIO, 99_OUTROS), a semântica de payments.amount_cents e o tratamento de vendas a prazo com entrada/sinal ou pagamentos mistos.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Revisão contábil por UF das regras de CFOP/CST/CSOSN e Substituição Tributária (ST): Substituir ou expandir a allowlist técnica de 4 combinações com base na validação de contador para os produtos de autopeças e UFs reais (incluindo verificação da Portaria SRE-SP 34/2026), sem tratar "sem CEST = sem ST" como regra universal.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Escolha da arquitetura de provedor para Desktop e Android (DF-3 / DF-4): Decidir entre ACBrMonitorPLUS local isolado, ACBrLib em processo auxiliar, API REST hospedada ou Estação Fiscal Local autenticada (HTTPS/mTLS) para atender Android e múltiplos caixas.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Teste de protocolo e homologação com ACBrMonitorPLUS real e SEFAZ: Executar testes em ambiente isolado (sem conflitar com outro PDV) cobrindo banner, preâmbulo, respostas multisseção, timeout pós-envio, validação XSD, assinatura digital, certificado de homologação, pagamentos, fatura/duplicatas, consulta e cancelamento.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Comparação de diff 0.9.16 ↔ 0.9.17 e implementação de outbox no núcleo: Só iniciar integração após auditar o código 0.9.17 e especificar a persistência pré-envio, controle de (serie, numero) por caixa (DF-6), worker thread, reconciliação de estados incertos e sincronização sem efeitos colaterais.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+Parte 3 — Fechamento do BLOCO 5D1
+
+    O que foi analisado:
+
+        Aplicação do ajuste final do Bloco 5C na Seção 12.13 e no fechamento (reclassificando a incompatibilidade do ACBrMonitorPLUS com Android e os requisitos gráficos no Linux como DOCUMENTADO, MAS NÃO VERIFICADO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Análise exclusiva dos 3 relatórios finais da crate fiscal:
+
+            docs/RELATORIO_FINAL_E_EVIDENCIAS.md (Página 64);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md (Páginas 65–66);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+            docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Páginas 67–68).   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    O que foi confirmado (no escopo documental):
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA: O veredito oficial dos relatórios de revisão é taxativo em declarar que a rustinho-fiscal v0.2.3 permanece em estado de desenvolvimento, com produção bloqueada, sem compilação Rust executada no ambiente de geração do pacote e sem homologação em ACBrMonitorPLUS ou SEFAZ reais.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        DOCUMENTADO, MAS NÃO VERIFICADO: Identificadas com precisão as 4 únicas combinações da allowlist técnica de CFOP/CST/CSOSN na v0.2.3 (Simples/102/5102, Simples/500/5405, Normal/00/5102, Sublimite/00/5102), os limites de FiscalBillingSnapshot (1 a 24 parcelas, datas Gregorianas AAAA-MM-DD, sem troco, apenas meios 05 ou 15) e a remoção da invenção de tBand=99 quando a bandeira do cartão não é informada.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        DOCUMENTADO, MAS NÃO VERIFICADO (Testes registrados como executados vs. não executados): As únicas verificações automatizadas executadas na geração do pacote foram scripts Python auxiliares (parsing das fixtures JSON, checagem estática de delimitadores/ausência de unsafe/algoritmo CNPJ-DV na v0.2.2, validação de hashes/ZIP e simulação de um modelo Python independente de rateio com 5.659.572 combinações na v0.2.3), enquanto todos os testes escritos em Rust (cargo test), o linter (cargo clippy), o formatador (cargo fmt) e o build (cargo build --release) permaneceram sem execução naquele ambiente.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Problemas, Riscos e Limitações Encontrados:
+
+        A allowlist técnica de 4 combinações bloqueia qualquer emissão para TaxRegime::Mei (apesar de MEI existir no contrato) e bloqueia operações com substituição tributária no Regime Normal (CFOP 5405).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Risco de conflito caso o ACBrMonitorPLUS de teste compartilhe porta/configuração/diretório com instância já usada por outro PDV na máquina.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        A simulação Python de 5.659.572 combinações de rateio de desconto testou um modelo Python separado e não executou a função Rust apportion_sale_discount_cents.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Contradições e Mudanças de Escopo entre os Documentos:
+
+        Coexistência de relatórios de versões diferentes (v0.2.2 vs. v0.2.3) na mesma pasta docs/: RELATORIO_FINAL_E_EVIDENCIAS.md (pág. 64) descreve a v0.2.2 e afirma que nenhum código do núcleo do Rustinho foi anexado, ao passo que RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md e RELATORIO_REVISAO...v0.2.3.md (págs. 65–68) descrevem a v0.2.3 com inspeção de leitura do rustinho-codigo-fonte-0.9.16(1).zip e substituição da regra de CFOP.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Mudança de premissa regulatória sobre Inutilização: Enquanto documentos anteriores tratavam a inutilização como pendente de implementação, RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md cita a publicação da NT 2023.002 v1.02 (27/10/2026) com título indicando a eliminação dos serviços de inutilização e autorização assíncrona (informação histórica com validade legal/técnica NÃO VERIFICADA).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Variação de nomenclatura da forma comercial: "vale" (em RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md, pág. 66) vs. "vale-troca" (em ARQUITETURA_REAL_0.9.16...md, pág. 58).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    O que permanece NÃO VERIFICADO:
+
+        Inspeção direta dos 8 arquivos .rs e 2 fixtures .json da crate rustinho-fiscal v0.2.3 (Apêndice H do PDF, páginas 96–257, NÃO ACESSÍVEIS NESTA SESSÃO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Execução real de ./verify_package.sh (cargo fmt, clippy, test, build --release), testes com ACBrMonitorPLUS real e homologação SEFAZ.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Validação jurídica e contábil independente das normas e Notas Técnicas citadas (NT 2025.002 v1.52, NT 2023.002 v1.02, NT 2026.007 v1.10, NT 2026.008 v1.00, Portaria SRE-SP 34/2026 e regras de CNPJ alfanumérico).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Próximo bloco recomendado:
+
+        BLOCO 5D2 — Fechamento da Análise Documental: Auditoria de Modularidade e Monólitos Internos (Relatório Técnico Sun Rustinho v0.9.17.md, Seção 2), Leitura Crítica dos Logs de Regressão (Capítulo 12 do Dossiê) e Síntese de Contradições e Continuidade (Capítulos 13, 14 e 15 do Dossiê): Analisar as seções documentais restantes do PDF (páginas 16 a 21 e página 51), concluindo 100% da etapa documental (Capítulos 2, 11, 13, 14 e 15 do relatório consolidado) antes de planejar a transição para a auditoria dos módulos de código-fonte.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+Aguardo sua autorização explícita para iniciar o BLOCO 5D2.

@@ -1,0 +1,46 @@
+[package]
+name = "rustinho-nucleo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+argon2 = "0.6"
+chacha20poly1305 = "0.11.0"
+getrandom = "0.3"
+roxmltree = "0.21.1"
+rusqlite = { version = "0.40", features = ["backup", "bundled", "functions", "hooks"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+time = { version = "0.3.55", features = ["formatting", "parsing", "macros"] }
+unicode-normalization = "0.1.25"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+uuid = { version = "1.28.0", features = ["v7"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+rars = { version = "0.11", default-features = false }
+rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs"] }
+if-addrs = "0.15.0"
+socket2 = { version = "0.6", features = ["all"] }
+# PEND-09: verificação da assinatura das NF-e recebidas. Nenhuma criptografia
+# própria: RSA/SHA-1 legado e SHA-2 vêm do `ring`; a cadeia X.509 do
+# `rustls-webpki`; a leitura dos certificados do `x509-parser` (sem o recurso
+# `verify`, que não usamos).
+ring = "0.17"
+rustls-webpki = { version = "0.103", default-features = false, features = ["ring", "std", "alloc"] }
+rustls-pki-types = "1"
+x509-parser = { version = "0.18", default-features = false }
+base64 = "0.22"
+
+[features]
+# Só para os testes de integração (tests/*.rs): troca as raízes da ICP-Brasil
+# pela raiz FICTÍCIA de teste (nucleo/tests/pki). Nunca ligar no programa: o
+# aplicativo se recusa a abrir se este recurso estiver compilado.
+ancoras-de-teste = []
+
+[dev-dependencies]
+rustinho-nucleo = { path = ".", features = ["ancoras-de-teste"] }
+# Só nos testes: conectar de endereços diferentes (127.0.0.x) para testar o
+# limite por endereço do servidor da troca de dados.
+libc = "0.2"
+rxing = { version = "0.9", default-features = false, features = ["decoders", "oned", "qrcode", "encoding_rs", "encoders"] }

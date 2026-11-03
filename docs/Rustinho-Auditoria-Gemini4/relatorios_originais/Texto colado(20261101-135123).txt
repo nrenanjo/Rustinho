@@ -1,0 +1,130 @@
+Atualização Final do Relatório Consolidado (docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md — Revisão Final do BLOCO 8B2)6.6. Auditoria da Interface de Busca, Unidades e Estoque (0.9.17 — BLOCO 8B2 Revisado)6.6.1. Fechamento de B8B1-06 — Funcionamento Real do Seletor de Unidades e Verificação Integral das Regras AprovadasRegras aprovadas de referência para ordenação e exibição de unidades (Capítulo 8 / Seção 6 do padrão consolidado):Primeira linha: 5 unidades mais utilizadas no cadastro de produtos ativos, ordenadas de forma decrescente pela quantidade de produtos cadastrados (excluindo produtos inativos e serviços sem estoque).   Segunda linha: unidades ordenadas de forma decrescente pelas vendas líquidas das últimas 24 horas (janela móvel de 24 horas).   Substituição progressiva no desktop: ocorre da direita para a esquerda na segunda linha, começando pela posição 10 (mais à direita) e terminando na posição 6 (mais à esquerda).Limite na segunda linha: se houver mais de cinco unidades com vendas líquidas positivas nas últimas 24 horas, permanecem apenas as cinco unidades mais vendidas.Tratamento de devoluções na janela de 24 horas: devoluções reduzem as vendas da venda original somente quando essa venda original pertence à janela móvel de 24 horas.Demais linhas: todas as unidades restantes ficam organizadas em ordem alfabética por sigla.Comportamento real verificado no código (nucleo/src/unidades.rs e app/qml/EscolherUnidade.qml):Em nucleo/src/unidades.rs (listar, linhas 20–31), o banco executa apenas uma consulta única ordenada pela contagem bruta de produtos (ORDER BY n DESC, u.sigla), sem filtrar ativos/serviços, sem calcular vendas ou devoluções na janela de 24 horas e sem separar grupos de linhas:   Rustpub fn listar(conn: &Connection) -> Resultado<Vec<Unidade>> {
+    let mut c = conn.prepare(
+        "SELECT u.sigla, u.descricao, u.fracionada, (SELECT COUNT(*) FROM produto p WHERE p.unidade = u.sigla) AS n
+           FROM unidade u ORDER BY n DESC, u.sigla",
+    )?;
+Em app/qml/EscolherUnidade.qml (função carregar nas linhas 26–30 e componente Flickable / Flow nas linhas 49–89), a interface recebe r.dados de "unidades_listar" e renderiza diretamente escolher.lista em um único Flow contínuo, sem qualquer lógica de particionamento entre 1ª linha (posições 1–5), 2ª linha com substituição da direita para a esquerda (posições 10 $\rightarrow$ 6) ou ordenação alfabética a partir da 11ª posição:   QMLfunction carregar() {
+    const r = Api.chamar("unidades_listar")
+    if (r.ok)
+        lista = r.dados
+}
+QML        Flow {
+            id: fluxo
+            width: parent.width
+            spacing: 6
+            Repeater {
+                model: escolher.lista
+                delegate: Rectangle {
+                    id: pilula
+                    required property var modelData
+Classificação final de B8B1-06: REQUISITO APROVADO NÃO IMPLEMENTADO (CONFIRMADO NO CÓDIGO tanto no núcleo unidades.rs quanto na interface EscolherUnidade.qml).   6.6.2. Fechamento de B8B1-09 — Rastreamento Completo de Estoque Fracionário em Unidades Indivisíveis (estoque.rs, TelaPeca.qml e produtos.rs)A ausência de validação da propriedade fracionada da unidade de medida ao gravar ou ajustar quantidades de estoque está comprovada de ponta a ponta nas três camadas analisadas:1. Camada de Domínio de Estoque (nucleo/src/estoque.rs, linhas 1–102)O módulo nucleo/src/estoque.rs nem sequer importa crate::unidades (linhas 7–10):   Rustuse rusqlite::{params, Connection, OptionalExtension};
+use crate::erro::{Erro, Resultado};
+use crate::{auditoria, numeros, tempo, texto};
+Em estoque::lancar (linhas 22–41): A função recebe quantidade: i64 (em milésimos) e insere diretamente em estoque_movimento, verificando apenas se o item não é 'servico', sem consultar a unidade do produto nem unidade.fracionada:   Rustpub fn lancar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: Option<&str>,
+    produto_id: &str,
+    quantidade: i64,
+    tipo: &str,
+    motivo: &str,
+) -> Resultado<()> {
+    conn.execute(
+        "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+          WHERE NOT EXISTS (SELECT 1 FROM produto WHERE id = ?2 AND tipo = 'servico')",
+        params![tempo::novo_id(), produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, tempo::agora()],
+    )?;
+    Ok(())
+}
+Em estoque::ajustar (linhas 45–102): A função converte a string contado em milésimos via numeros::ler_quantidade(contado) (linhas 53–55), valida se não é negativa (linhas 56–58), valida o motivo (linhas 59–65) e consulta a tabela produto exclusivamente para checar SELECT tipo = 'servico' FROM produto WHERE id = ?1 (linhas 66–72), calculando let diferenca = contado - atual; e chamando lancar(...) (linhas 73–79) sem verificar se a unidade da peça aceita frações (contado % 1000 != 0 quando !unidades::fracionada):   Rustpub fn ajustar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    produto_id: &str,
+    contado: &str,
+    motivo: &str,
+) -> Resultado<i64> {
+    let contado = numeros::ler_quantidade(contado)
+        .map_err(|m| Erro::campo("quantidade", m))?
+        .ok_or_else(|| Erro::campo("quantidade", "Digite a quantidade contada."))?;
+    if contado < 0 {
+        return Err(Erro::campo("quantidade", "A quantidade não pode ser negativa."));
+    }
+    let motivo = texto::limpar(motivo);
+    if motivo.is_empty() {
+        return Err(Erro::campo("motivo", "Diga o motivo do ajuste."));
+    }
+    if texto::tamanho(&motivo) > 120 {
+        return Err(Erro::campo("motivo", "Use no máximo 120 letras."));
+    }
+    let servico: bool = conn
+        .query_row("SELECT tipo = 'servico' FROM produto WHERE id = ?1", [produto_id], |l| l.get(0))
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Peça".into()))?;
+    if servico {
+        return Err(Erro::validacao("Serviço não tem estoque."));
+    }
+    let atual = saldo(conn, produto_id)?;
+    let diferenca = contado - atual;
+    if diferenca == 0 {
+        return Err(Erro::campo("quantidade", "O estoque já está com essa quantidade."));
+    }
+    lancar(conn, dispositivo, Some(usuario_id), produto_id, diferenca, "ajuste", &motivo)?;
+2. Camada de Interface (app/qml/TelaPeca.qml) — Fluxo Completo da Entrada ao SalvamentoSeleção/digitação da unidade (Campo { id: unidade }, linhas 465–475, e EscolherUnidade, linhas 1042–1053):Quando o usuário digita ou escolhe uma nova unidade (ex.: "UN" ou "PC"), unidade.texto é atualizado, mas a tela não consulta nem atualiza o booleano ficha.fracionada antes de salvar:   QMLEscolherUnidade {
+    id: escolherUnidade
+    onEscolhida: (sigla) => {
+        if (unidade.texto !== sigla) {
+            unidade.texto = sigla
+            tela.marcarAlterado()
+        }
+        unidade.erro = ""
+        const s = Api.chamar("produto_sugestoes")
+        if (s.ok)
+            tela.sugestoes = s.dados
+    }
+}
+Entrada de estoqueInicial e estoqueMinimo (linhas 779–804) e formatação ao sair do campo (formatarCampo, linhas 281–285):Ambos os campos usam onSaiu: tela.formatarCampo(..., "quantidade"), que chama "numero_formatar" passando apenas { tipo: "quantidade", texto: campo.texto } (api.rs, linhas 3091–3102), formatando qualquer decimal sem conhecer a unidade da peça:   QMLfunction formatarCampo(campo, tipo) {
+    const r = Api.chamar("numero_formatar", { tipo: tipo, texto: campo.texto })
+    if (r.ok && r.dados.texto !== campo.texto)
+        campo.texto = r.dados.texto
+}
+QML                    Linha {
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            id: estoqueInicial
+                            visible: tela.nova
+                            rotulo: "Estoque inicial"
+                            sufixo: unidade.texto
+                            numerico: true
+                            maximo: 14
+                            Layout.fillWidth: true
+                            onEditado: tela.marcarAlterado()
+                            onSaiu: tela.formatarCampo(estoqueInicial, "quantidade")
+                        }
+                        Campo {
+                            id: estoqueMinimo
+                            rotulo: "Estoque mínimo"
+                            sufixo: unidade.texto
+                            numerico: true
+                            maximo: 14
+                            Layout.fillWidth: true
+                            onEditado: tela.marcarAlterado()
+                            onSaiu: tela.formatarCampo(estoqueMinimo, "quantidade")
+                        }
+                    }
+Coleta dos dados (coletar, linhas 90–144) e envio para gravação (salvar, linhas 195–213):coletar() empacota unidade: unidade.texto, estoqueInicial: estoqueInicial.texto e estoqueMinimo: estoqueMinimo.texto (linhas 111, 118 e 119) e salvar() envia o objeto para janela.chamarGerente("produto_salvar", coletar(), ...) (linha 201):   QML    return {
+        id: ficha ? ficha.id : "",
+        codigo: codigo.texto,
+        nome: nome.texto,
+        marca: marca.texto,
+        unidade: unidade.texto,
+        ...
+        estoqueInicial: estoqueInicial.texto,
+        estoqueMinimo: estoqueMinimo.texto,
+QMLfunction salvar() {
+    limparErros()
+    const eraNova = nova
+    janela.chamarGerente("produto_salvar", coletar(), r => {
+Persistência sem bloqueio no núcleo (nucleo/src/produtos.rs, linhas 243–328, 552–568 e 781–783):produtos::salvar chama validar(ficha)? (linha 555), que converte estoque_inicial e estoque_minimo em milésimos sem verificar unidades::fracionada (linhas 319–328), garante a unidade no banco via unidades::garantir(conn, &dados.unidade)? (linha 567, onde unidades novas nascem com fracionada = 0 por padrão) e grava estoque_minimo na tabela produto e estoque_inicial via estoque::lancar (linhas 781–783).   Conclusão de B8B1-09: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO) — O fluxo completo (TelaPeca.qml $\rightarrow$ api.rs $\rightarrow$ produtos::validar/salvar $\rightarrow$ estoque::lancar, bem como "estoque_ajustar" $\rightarrow$ estoque::ajustar) permite gravar estoque inicial, estoque mínimo e ajustes de estoque fracionários em produtos cuja unidade é indivisível (fracionada == false).   6.6.3. Separação Rigorosa de Classificações entre B8B1-10, B8B1-11 e B8B1-12IDClassificação IndividualizadaLocal Exato (Arquivo, Função e Linhas)Justificativa TécnicaB8B1-10MELHORIA PROPOSTA (Otimização de escrita e redução de volume na fila de sincronização)nucleo/src/produtos.rs, função salvar, linhas 746–748 e 760–779.   Ao editar qualquer campo simples de uma peça (ex.: local), salvar executa DELETE FROM em produto_preco (746), produto_aplicacao (747) e produto_equivalente (748) e reinsere todas as linhas gerando novos UUIDs (tempo::novo_id() nas linhas 770 e 777). Como api.rs executa "produto_salvar" dentro de uma transação (api.rs, linhas 1386–1388), não há perda de dados, mas há reescrita desnecessária quando essas coleções não mudaram.   B8B1-11RISCO DE DESEMPENHO (Queries N+1 e função de string em filtro SQL)nucleo/src/busca.rs, função buscar, linhas 117–120 e 196–209 (chamando carros_da_peca em 264–298 e achou_por em 215–248).   A consulta principal usa replace(p.busca, ' ', '') LIKE ? (linha 118) e, para cada produto candidato no laço das linhas 196–209, executa 1 consulta SQL em carros_da_peca (linha 197) mais até 3 consultas SQL em achou_por (linha 203 $\rightarrow$ linhas 221, 229 e 240).   B8B1-12RISCO DE CONSISTÊNCIA TRANSACIONAL (Operações multi-step sem SAVEPOINT/transação no próprio método)nucleo/src/produtos.rs, função criar_variacao (linhas 1085–1134); nucleo/src/unidades.rs, função salvar (linhas 46–62) chamada em nucleo/src/api.rs ("unidade_salvar", linhas 1405–1409).   As funções de escrita recebem &Connection sem abrir SAVEPOINT próprio. Em criar_variacao, há duas chamadas a salvar(...) (linhas 1105 e 1131) e dois UPDATE produto SET grade (linhas 1109 e 1132) que dependem inteiramente de o chamador externo abrir transação; já em "unidade_salvar" (api.rs, linha 1407), unidades::salvar é chamado fora de transação explícita.   6.6.4. Tabela Consolidada Final de B8B1-01 a B8B1-12IDClassificação FinalResumo e Referências ExatasB8B1-01DEFEITO COMPROVADOproduto_fornecedor e produto_codigo_antigo fora de p.busca e comparados apenas por igualdade exata da busca inteira (?1) (produtos.rs:1252–1287; busca.rs:81, 87–91, 132–142).   B8B1-02DEFEITO COMPROVADOTokens colados/hifenizados ("rg08", "rg-08") não são separados nas fronteiras letra/número (busca.rs:77–81, 108–120).   B8B1-03DEFEITO COMPROVADONúmeros de 4 dígitos (1900..=2100) tratados como ano (como_ano), descartando no pós-filtro serve_no_ano peças achadas por código de fornecedor, antigo ou substring sem veículo cadastrado (busca.rs:59–67, 79, 196–200, 252–262).   B8B1-04DEFEITO COMPROVADOparece_codigo exige compacto.len() >= 3 e dígito numérico, omitindo achou para códigos curtos ou só de letras (busca.rs:193, 202–204).   B8B1-05DEFEITO COMPROVADOContagem de produtos por unidade inclui inativos e serviços (unidades.rs:22–23; produtos.rs:1219–1221).   B8B1-06REQUISITO APROVADO NÃO IMPLEMENTADOAusência da ordenação em 1ª linha (Top 5 ativos sem serviços), 2ª linha (Top 5 vendas líquidas nas últimas 24h com substituição direita $\rightarrow$ esquerda das posições 10 a 6 e abatimento de devoluções de vendas da janela de 24h) e demais linhas em ordem alfabética (unidades.rs:20–31; EscolherUnidade.qml:26–30, 49–89).   B8B1-07DEFEITO COMPROVADOunidades::salvar faz ON CONFLICT (sigla) DO UPDATE (unidades.rs:56–60) e EscolherUnidade.qml (32–42) chama "unidade_salvar" sob o rótulo "Nova unidade" / "Criar e usar" sem impedir sobrescrita de sigla existente.   B8B1-08DEFEITO COMPROVADOprodutos::salvar grava código anterior em produto_codigo_antigo sem checar se estava confirmado (!faixas::esperando_confirmacao) (produtos.rs:749–757 vs. 494, 508).   B8B1-09DEFEITO COMPROVADOAusência de validação da unidade (unidades::fracionada) para impedir estoque fracionário em unidades indivisíveis no cadastro (TelaPeca.qml:90–144, 195–213, 281–285, 779–804; produtos.rs:319–328, 781–783) e nas movimentações/ajustes (estoque.rs:22–102).   B8B1-10MELHORIA PROPOSTADELETE + INSERT incondicional de preços, aplicações e equivalentes com novos UUIDs a cada produtos::salvar (produtos.rs:746–748, 760–779).   B8B1-11RISCO DE DESEMPENHOConsultas N+1 por candidato (carros_da_peca e achou_por) e replace(p.busca, ' ', '') em busca::buscar (busca.rs:117–120, 196–209).   B8B1-12RISCO DE CONSISTÊNCIA TRANSACIONALprodutos::criar_variacao (produtos.rs:1085–1134) e unidades::salvar (unidades.rs:46–62 / api.rs:1405–1409) não abrem SAVEPOINT/transação própria.   14.8. Testes Existentes nos Quatro Arquivos do Bloco 8B2, Status de Execução e LacunasTestes escritos nos 4 arquivos do Bloco 8B2 (CONFIRMADO NO CÓDIGO):nucleo/src/estoque.rs (1–102): 0 funções #[test] escritas no arquivo (não há bloco #[cfg(test)] mod testes em estoque.rs; suas funções são chamadas indiretamente por testes escritos em outros módulos, como compras.rs e api.rs).   app/qml/EscolherUnidade.qml: 0 testes escritos no arquivo.   app/qml/TelaPecas.qml: 0 testes escritos no arquivo.   app/qml/TelaPeca.qml: 0 testes escritos no arquivo.   Status explícito de execução de testes nesta sessão:Testes efetivamente executados nesta sessão: 0 (NENHUM TESTE EXECUTADO EM RUNTIME NESTA SESSÃO). Toda a verificação dos Blocos 8B1 e 8B2 foi realizada por auditoria estática integral do código-fonte.Lacunas de testes identificadas para o escopo do Bloco 8B2:Em nucleo/src/estoque.rs: Criar bloco #[cfg(test)] mod testes cobrindo diretamente saldo, lancar (incluindo ignorar tipo = 'servico') e ajustar (rejeição de quantidade negativa, motivo vazio, motivo $> 120$ caracteres, tentativa de ajuste em serviço, diferença zero e rejeição de quantidade fracionária quando unidade.fracionada == false).   Em nucleo/src/unidades.rs e app/qml/EscolherUnidade.qml: Implementar os 19 testes determinísticos obrigatórios do seletor de unidades (1ª linha com Top 5 de produtos ativos sem serviços; 2ª linha com Top 5 de vendas líquidas nas últimas 24h; substituição da direita para a esquerda nas posições 10 a 6; corte em 5 unidades quando mais de 5 tiveram vendas; abatimento de devoluções restrito a vendas dentro da janela de 24h; demais linhas em ordem alfabética; e rejeição de sigla duplicada ao criar nova unidade).   Em app/qml/TelaPecas.qml e app/qml/TelaPeca.qml: Testes de interface cobrindo a busca incremental (Timer de 160 ms), preservação de seleção ao voltar de TelaPeca, validação de erro de estoque fracionário em unidade inteira nos campos estoqueInicial e estoqueMinimo e criação de variação de grade.   Revisão final do Bloco 8B2 concluída. O Bloco 9A não foi iniciado. Aguardo sua autorização explícita para prosseguir.

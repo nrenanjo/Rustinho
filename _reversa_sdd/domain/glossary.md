@@ -1,0 +1,29 @@
+# Glossário Ubiquitous Language — Rustinho 0.9.17
+
+> Gerado pelo Reversa em 2026-11-02
+> Vocabulário de domínio extraído do código (`nucleo/src/`, `app/qml/`) e da documentação oficial (`MANUAL.md`, `docs/`).
+
+---
+
+| Termo no Domínio / UI | Termo no Código / Banco | Definição Exata no Sistema |
+|---|---|---|
+| **Peça / Produto** | `produto`, `Peca`, `TelaPecas`, `TelaPeca` | Item comercializado pela autopeças. Identificado por `id` (UUIDv7), `codigo_interno` (6 dígitos ou código do fabricante), `gtin`, `unidade` principal, `marca`, `localizacao` e vínculos de equivalência (`grupo_equivalencia_id`) e aplicações veiculares (`produto_aplicacao`). |
+| **Grupo de Equivalência (Intercâmbio)** | `grupo_equivalencia`, `produto_equivalente` | Conjunto transitivo de peças intercambiáveis de marcas diferentes que atendem à mesma aplicação mecânica. |
+| **Unidade (10 unidades em 2 linhas)** | `UNIDADES_PADRAO` (`unidades.rs`), `EscolherUnidade.qml` | Seletor de até 10 unidades de medida em 2 linhas de 5 chips: 5 mais frequentes no cadastro ativo (`top_produtos`) + 5 mais vendidas nas últimas 24h líquidas de devoluções (`top_vendas_24h`), completadas por ordem de `UNIDADES_PADRAO`, ordenadas alfabeticamente e sem repetição. |
+| **Venda / Balcão** | `venda`, `venda_item`, `venda_pagamento`, `TelaVender` | Operação de saída comercial concluída no PDV (`situacao = 'concluida'` ou `'cancelada'`). Pode gerar movimentos de caixa (`dinheiro`), parcelas de crediário (`crediario`), cheques (`cheque`) ou lançamentos financeiros (`pix`, `debito`, `credito`). |
+| **Orçamento** | `orcamento`, `orcamento_item`, `TelaOrcamentos` | Cotação prévia sem baixa de estoque nem efeito financeiro (`situacao = 'aberto'`, `'convertido'`, `'vencido'`, `'cancelado'`). |
+| **Troca / Devolução** | `devolucao`, `devolucao_item`, `credito_cliente`, `TelaTrocas` | Retorno total ou parcial de itens de uma venda concluída, gerando reentrada no estoque (quando `volta_estoque = 1`) e reembolso em dinheiro, abatimento de crediário ou vale-crédito (`credito_cliente`). |
+| **Sessão de Caixa (Gaveta)** | `caixa_sessao`, `caixa_movimento`, `TelaCaixa` | Período entre abertura (`suprimento` inicial) e fechamento (`esperado`, `contado`, `diferenca`) do caixa físico. |
+| **Cancelamento pós-fechamento (D-14)** | `venda.cancelado_apos_fechar = 1`, `origem_tipo = 'venda_cancelada'` | Quando uma venda paga em dinheiro de um caixa já fechado é cancelada, o fechamento histórico daquele caixa permanece imutável e a saída de dinheiro é lançada como `sangria` na sessão de caixa aberta no momento do cancelamento. |
+| **Crediário (Fiado / A Receber)** | `parcela`, `recebimento`, `TelaReceber` | Venda a prazo vinculada a um cliente (`pessoa`), dividida em parcelas com vencimento e baixa parcial ou total (`recebimento`). |
+| **Olho (Privacidade de Valores)** | `Olho.qml`, `esconderValores`, `F12` | Controle visual que oculta valores monetários (`R$ ••••`) e documentos sensíveis nas telas de Receber, Financeiro, Estoque e Compras para evitar exposição a terceiros no balcão. |
+| **DRE Gerencial** | `dre.rs`, `SecaoDre.qml`, `DetalheDre.qml` | Demonstrativo do Resultado do Exercício por regime de competência (vendas brutas, devoluções, impostos estimados, CMV congelado na venda, despesas operacionais classificadas por categoria e resultado líquido). |
+| **Ordem de Serviço (Oficina)** | `ordem_servico`, `ordem_item`, `veiculo`, `TelaOrdens` | Atendimento de oficina mecânica vinculado a cliente e veículo, contendo peças e mão de obra (`situacao`: `aberta`, `em_andamento`, `aguardando_peca`, `pronta`, `entregue`, `cancelada`). |
+| **Navegação Contextual Guiada** | `requisitos.rs`, `Guia.qml`, `Main.qml` (`irParaRequisito`) | Fluxo introduzido na 0.9.16/0.9.17 que intercepta operações bloqueadas por falta de configuração (ex.: CNPJ ou UF da loja), conduz o operador até o campo exato em Configurações com foco/escurecimento e retorna à tela de origem sem executar a operação automaticamente. |
+| **Aviso / Notificação do Início** | `avisos.rs`, `Notificacao.qml`, `TelaInicio.qml` | Cartões exibidos na tela inicial em três níveis de gravidade: `informativa` (minimiza em quadrado e pode ser escondida até meia-noite), `atencao` (minimiza em quadrado, não pode ser escondida) e `critica` (sempre expandida em faixa, não minimiza nem esconde). |
+| **Supervisão do Gerente (D-09)** | `supervisao.rs`, `PedirGerente.qml`, `gerente_liberar` | Token de autorização em memória, assinado por escopo (`acao`), usuário e expiração de 120 segundos, consumido em uso único para permitir que um operador `caixa` realize uma operação restrita mediante senha presencial do `gerente`. |
+| **Chave de Operação (FALHA-04)** | `chaveOperacao`, `operacao_feita`, `NAO_REPETIR` | Identificador de idempotência enviado pelo cliente em todos os 52 comandos mutáveis críticos (`NAO_REPETIR`) para impedir duplicação por duplo clique ou reenvio assíncrono. |
+| **Troca de Dados (Sincronização LAN)** | `sync.rs`, `rede_local.rs`, `historia`, `conflito_sync` | Replicação peer-to-peer entre múltiplos computadores da mesma loja via descoberta UDP (`47811`) e transporte TCP (`47810`) autenticado com X25519 + ChaCha20-Poly1305 derivados da senha da rede via Argon2id. |
+| **Modo Seguro (A3 / RVI-03)** | `Sessao::somente_leitura`, `testes_modo_seguro.rs` | Estado de contingência acionado quando `PRAGMA quick_check` detecta falha estrutural no `rustinho.db`: abre o banco em modo somente-leitura, bloqueia qualquer escrita/migração/backup comum e exibe faixa vermelha em todas as telas. |
+| **Modo Portátil** | `portatil.rs`, `rustinho-portatil.txt` | Execução autocontida ativada pela presença do arquivo `rustinho-portatil.txt` ao lado do binário, isolando banco, backups e chaves dentro da subpasta `./dados/` sem tocar em `$HOME` ou `$XDG_DATA_HOME`. |
+

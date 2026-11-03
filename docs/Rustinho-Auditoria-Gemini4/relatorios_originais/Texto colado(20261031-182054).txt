@@ -1,0 +1,979 @@
+1. Limitações de Acesso e de Geração de Arquivo para Download
+
+Em cumprimento às regras do protocolo contra alucinações, informo:
+
+    Impossibilidade de escrita direta em repositório local / disponibilização integral no corpo da resposta: Nesta execução, o ambiente não possui acesso de escrita direta ao diretório docs/ de um sistema de arquivos persistente local e não foi acionada ferramenta externa de geração de arquivo para download a fim de não atrasar ou truncar a resposta. Por esse motivo, não foi gerado um arquivo .md separado para download, e o conteúdo integral de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md é entregue sem marcadores ou resumos substitutivos, mantendo todos os capítulos anteriores completos junto com as Seções 12.7 e 12.9 corrigidas.
+
+    Conferência da fórmula original de gross_amount_cents na Página 59 (docs/CONTRATO-FISCAL.md): No texto extraído da página 59 do PDF, a camada de OCR corrompeu dois caracteres de chaves LaTeX (\text{gross\_amount\_cents) = \left\lfloor \frac{\text(quantity\_millis} \times \text{unit\_price\_cents) + 500}{1000} \right\rfloor), e a página 59 foi ingerida como camada de texto sem imagem rasterizada anexada ao contexto visual. Tanto a transcrição literal extraída da página 59 quanto a expressão legível com parênteses, numerador e denominador explícitos estão registradas na Seção 12.7.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+2. Documento Técnico Único Consolidado (Sem Omissões ou Marcadores) — docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md
+RELATÓRIO TÉCNICO CONSOLIDADO — RUSTINHO 0.9.17
+
+Caminho de referência: docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.mdStatus: Atualizado até o Bloco 5B (Corrigidas as Seções 12.7 e 12.9; Bloco 5C aguardando autorização)
+1. Escopo, Fontes, Ambiente e Método de Auditoria
+
+    Fontes primárias recebidas nesta sessão:
+
+        Log_Consolidado_Rustinho_0.9.17.pdf (Fonte documental e histórica): Documento de continuidade gerado a partir do acervo rus-rus.zip (6.759.579 bytes compactados, 7.902.759 bytes descompactados, 138 entradas, SHA-256 5ee4045a032a398aadeb3b02f78bd6470a5735a5cc8768da4b7d7160daf9c87d). O PDF original possui 257 páginas, das quais somente as primeiras 95 páginas (Página 1 a Página 95) foram acessíveis nesta sessão. As páginas 96 a 257 (abrangendo o restante do Apêndice G e o Apêndice H) permanecem classificadas como NÃO ACESSÍVEIS NESTA SESSÃO.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        rustinho-codigo-fonte-0.9.17.zip (Fonte da árvore do código principal 0.9.17): Pacote contendo a árvore oficial do núcleo (nucleo/), aplicação desktop (app/), camada mobile (android/), instaladores (instalador/) e workflows (.github/). Como o fluxo do arquivo foi injetado no contexto com os blocos internos comprimidos em Deflate e truncado ao final em android/rust/fontes/source-serif-4-latin-600-normal.ttf, toda evidência extraída apenas dos cabeçalhos do ZIP recebe a classificação ESTRUTURA DO PACOTE IDENTIFICADA.   
+        rustinho-codigo-fonte-0.9.17.zip+ 1
+
+        Crate independente rustinho-fiscal v0.2.3: Material independente que existe fora da árvore do código-fonte principal do Rustinho (por decisão arquitetural explícita de isolamento). Seus 11 documentos técnicos Markdown estão integralmente transcritos nas páginas 54 a 69 do PDF acessível, enquanto seus 8 arquivos de código-fonte .rs e 2 fixtures .json constam no Apêndice H do PDF (páginas 96–257, NÃO ACESSÍVEIS NESTA SESSÃO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    Ferramentas disponíveis e ausentes no ambiente:
+
+        Disponíveis: Leitura textual das páginas 1 a 95 do PDF e inspeção visual das 34 imagens únicas da galeria (Apêndice C, páginas 24 a 40); leitura dos cabeçalhos locais do arquivo rustinho-codigo-fonte-0.9.17.zip e de pequenos arquivos armazenados sem compressão (Stored).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        Ausentes: Shell/sistema de arquivos local para descompactar fluxos Deflate, compilador Rust (cargo, rustc, clippy, rustfmt), servidor X11/Wayland/Qt6 e ACBrMonitorPLUS.
+
+    Classificações obrigatórias de auditoria:
+
+        CONFIRMADO NO CÓDIGO (reservado exclusivamente para leitura direta de código-fonte descompactado e legível);
+
+        ESTRUTURA DO PACOTE IDENTIFICADA (caminhos e arquivos comprovados pelos cabeçalhos do rustinho-codigo-fonte-0.9.17.zip);   
+        rustinho-codigo-fonte-0.9.17.zip
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA (comprovado por transcrições, logs ou imagens acessíveis no PDF);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        DOCUMENTADO, MAS NÃO VERIFICADO (relatado nos documentos sem inspeção direta do código ou log bruto nesta sessão);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        NÃO ACESSÍVEL NESTA SESSÃO (conteúdo nas páginas 96 a 257 do PDF original ou comprimido em Deflate no ZIP);
+
+        NÃO VERIFICADO | DEFEITO COMPROVADO | HIPÓTESE | PROPOSTA | DECISÃO HUMANA PENDENTE.
+
+2. Visão Geral e Arquitetura do Sistema (Desktop, Android e Núcleo)
+
+(Em preenchimento progressivo conforme avanço dos blocos documentais e de código. Estrutura de diretórios identificada nos cabeçalhos do pacote 0.9.17):
+
+    Raiz do workspace (ESTRUTURA DO PACOTE IDENTIFICADA): .gitattributes, .gitignore, Cargo.toml, Cargo.lock, PENDENCIAS.md, README.md, LICENSE.   
+    rustinho-codigo-fonte-0.9.17.zip
+
+    Domínio central (nucleo/ — ESTRUTURA DO PACOTE IDENTIFICADA): Contém Cargo.toml, 67 arquivos .rs em nucleo/src/ (incluindo submódulos em dre/ e nfe_assinatura/), 23 migrações SQL (0001_inicial.sql a 0023_rascunho_e_pendencias.sql), cadeia de certificados ICP-Brasil em nucleo/dados/icp-brasil/, exemplos em nucleo/examples/ e suítes de integração em nucleo/tests/.   
+    rustinho-codigo-fonte-0.9.17.zip
+
+    Aplicação Desktop (app/ — ESTRUTURA DO PACOTE IDENTIFICADA): Contém Cargo.toml, build.rs, ponte Rust/Qt em app/src/ (main.rs, ponte.rs), utilitários C++ em app/cpp/ (janela.cpp, janela.h, pdf.cpp, pdf.h), singletons em app/base/ (Api.qml, Tema.qml), 60 componentes QML em app/qml/, câmera Android em app/qml_android/LeitorCamera.qml, ícones, fontes e 8 scripts Python de testes de interface em app/testes/.   
+    rustinho-codigo-fonte-0.9.17.zip
+
+    Camada Android (android/ — ESTRUTURA DO PACOTE IDENTIFICADA): Contém CMakeLists.txt, diagnostico.cpp, vistacamera.cpp/.h, testar.sh, pacote/AndroidManifest.xml, recursos gráficos e crate ponte android/rust/.   
+    rustinho-codigo-fonte-0.9.17.zip
+
+3. Inventário e Cobertura Documental (BLOCO 1)
+3.1. Distinção entre os 19 Materiais Originais e as 138 Entradas de rus-rus.zip
+
+O acervo histórico rus-rus.zip (6.759.579 bytes, SHA-256 5ee4045a032a398aadeb3b02f78bd6470a5735a5cc8768da4b7d7160daf9c87d) reúne 19 materiais originais que se desdobram em 138 entradas de arquivos (61 PNG, 39 LOG, 21 Markdown, 8 Rust .rs da crate fiscal, 2 DOCX, 1 ODT, 1 PATCH, 2 JSON e 3 TOML/TXT/SH).   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+3.2. Matriz Completa dos 19 Materiais Originais
+#	Material Original	Situação em rus-rus.zip	Disponibilidade Efetiva no PDF (Págs. 1–95 Acessíveis vs. 96–257)	Localização no PDF Acessível	Classificação da Evidência
+01	AUDITORIA-notificacoes-0.9.16.md	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Cap. 4 (pág. 6) e Apêndice (pág. 47).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+02	evidencias.zip → pasta evidencias/	
+
+Expandido em pasta (56 PNGs e 39 LOGs).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+PARCIALMENTE REPRESENTADO NESTA SESSÃO:
+
+• 23 imagens únicas (de 56 PNGs): 100% acessíveis.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+• 37 logs únicos (de 39 LOGs): 1-inicio.log integral; 2-reabrir.log parcial (truncado na pág. 95); demais 35 logs sintetizados no corpo do PDF, mas brutos nas págs. 96–257 (NÃO ACESSÍVEIS NESTA SESSÃO).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Cap. 4, 5 e 12 (págs. 6, 8, 17); Imagens 06 a 28 (págs. 26–37); Apêndice G (págs. 71–95).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Imagens e 2 primeiros logs: CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15).
+
+Demais 35 logs brutos: NÃO ACESSÍVEIS NESTA SESSÃO.
+03	mudancas-piloto-e-notificacoes.patch	
+
+Presente na raiz (1 arquivo .patch).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+NÃO ACESSÍVEL INTEGRALMENTE NESTA SESSÃO: Diff bruto localizado nas págs. 96–257.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Cap. 1 (pág. 3) e Apêndice A (pág. 22).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Existência: CONFIRMADO POR EVIDÊNCIA HISTÓRICA.
+
+Diff bruto: NÃO ACESSÍVEL NESTA SESSÃO.
+04	NAVEGACAO-CONTEXTUAL-matriz.md	
+
+Presente na raiz (uma cópia).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Cap. 5 (pág. 7) e Apêndice (págs. 48–49).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+05	RELATORIO-piloto-navegacao-guiada.md	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Cap. 5.3 (pág. 7) e Apêndice (pág. 50).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+06	rustinho-fiscal-v0.2.3.zip → pasta rustinho-fiscal-v0.2.3/	
+
+Expandido em pasta (material independente fora da árvore principal).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+PARCIALMENTE REPRESENTADO NESTA SESSÃO:
+
+• 11 documentos .md da crate: 100% integralmente transcritos (págs. 54–69).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• 8 arquivos .rs, 2 .json, Cargo.toml e verify_package.sh: Apêndice H nas págs. 96–257 (NÃO ACESSÍVEIS NESTA SESSÃO).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Cap. 10 (págs. 14–15) e Apêndices (págs. 54–69).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Documentos .md: CONFIRMADO POR EVIDÊNCIA HISTÓRICA.
+
+Código .rs e fixtures: NÃO ACESSÍVEIS NESTA SESSÃO.
+07	rustinho-fiscal-v0.2.3-arquitetura.md	
+
+Presente na raiz (duplicata exata de docs/ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Apêndice B (pág. 23) e Apêndice (pág. 58).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+08	rustinho-fiscal-v0.2.3-pesquisa.md	
+
+Presente na raiz (duplicata exata de docs/RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Apêndice B (pág. 23) e Apêndice (págs. 65–66).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+09	rustinho-fiscal-v0.2.3-revisao.md	
+
+Presente na raiz (duplicata exata de docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Apêndice B (pág. 23) e Apêndice (págs. 67–68).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+10	seu-desenvolvimento-atualizado-v0.2.3.odt	
+
+Presente na raiz (1 arquivo .odt).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+PARCIALMENTE REPRESENTADO (Apenas diagnóstico C-07): Contém referências internas a v0.2.2/v0.2.1; bruto NÃO ACESSÍVEL NESTA SESSÃO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Cap. 1 (pág. 3), Cap. 13 C-07 (pág. 19) e Apêndice A (pág. 22).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Diagnóstico C-07: CONFIRMADO POR EVIDÊNCIA HISTÓRICA.
+
+Bruto: NÃO ACESSÍVEL NESTA SESSÃO.
+11	Consolidação do padrão Rustinho.docx (no ZIP: Consolidaç to do padr to Rustinho.docx)	
+
+Presente na raiz (nome com acento corrompido no ZIP).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+INTEGRALMENTE TRANSCRITO (texto e 2 tabelas).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Cap. 7–9 (págs. 10–13) e Apêndice D (págs. 41–46).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+12	Dashboard com alertas financeiros.png	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+IMAGEM INTEGRALMENTE ACESSÍVEL (512 x 389 px, referência "antes").
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Apêndice C, Imagem 01 (pág. 24).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+13	Dashboard inicial Tema Creme Minimalista.png	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+IMAGEM INTEGRALMENTE ACESSÍVEL (512 x 186 px, referência aprovada "depois").
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Apêndice C, Imagem 02 (pág. 24).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+14	erro-notificação_embaixo.png (legenda: erro-notificaçfo_embaixo.png)	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+IMAGEM INTEGRALMENTE ACESSÍVEL (512 x 390 px, evidência de aviso rápido no rodapé).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Cap. 4.4 (pág. 6) e Apêndice C, Imagem 03 (pág. 25).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+CONFIRMADO POR EVIDÊNCIA HISTÓRICA (implementação na 0.9.17: NÃO VERIFICADA).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+15	Ícone de alerta preto transparente.png (no ZIP: cone de alerta preto transparente.png)	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+IMAGEM INTEGRALMENTE ACESSÍVEL (512 x 486 px).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Apêndice C, Imagem 04 (pág. 25).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+16	icone_alerta_branco_transparente.png	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+IMAGEM INTEGRALMENTE ACESSÍVEL (512 x 486 px).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Apêndice C, Imagem 05 (pág. 26).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+17	Segunda cópia de NAVEGACAO-CONTEXTUAL-matriz.md	
+
+Não localizada em rus-rus.zip.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+LACUNA DOCUMENTADA NA ORIGEM (C-06): Texto único transcrito em #04.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Cap. 13 C-06 (pág. 19) e Apêndice A (pág. 22).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+18	omtimizar_campo_de_busca.docx	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+INTEGRALMENTE REPRESENTADO (6 imagens acessíveis, image1.png a image6.png).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Cap. 6 (pág. 9), Imagens 29 a 34 (págs. 38–40) e Apêndice F (pág. 70).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+CONFIRMADO POR EVIDÊNCIA HISTÓRICA (implementação na 0.9.17: NÃO VERIFICADA).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+19	Relatório Técnico Sun Rustinho v0.9.17.md	
+
+Presente na raiz.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+INTEGRALMENTE TRANSCRITO.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Cap. 11 (pág. 16) e Apêndice (págs. 51–53).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+CONFIRMADO POR EVIDÊNCIA HISTÓRICA (código 0.9.17: NÃO VERIFICADO).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+3.3. Reconciliação Exata dos 21 Arquivos Markdown (18 Conteúdos Únicos)
+
+Todos os 21 caminhos .md e todos os 18 conteúdos únicos de rus-rus.zip estão identificados e integralmente transcritos nas páginas 47 a 69 do PDF:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    4 relatórios na raiz do pacote (4 únicos): AUDITORIA-notificacoes-0.9.16.md, NAVEGACAO-CONTEXTUAL-matriz.md, RELATORIO-piloto-navegacao-guiada.md e Relatório Técnico Sun Rustinho v0.9.17.md.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    6 entradas formando 3 pares duplicados entre a raiz e rustinho-fiscal-v0.2.3/docs/ (3 únicos): rustinho-fiscal-v0.2.3-arquitetura.md = docs/ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md; rustinho-fiscal-v0.2.3-pesquisa.md = docs/RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md; rustinho-fiscal-v0.2.3-revisao.md = docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    11 arquivos exclusivos da pasta rustinho-fiscal-v0.2.3/ (11 únicos): CHANGELOG.md, ORIGEM_E_STATUS.md, README.md, docs/ARQUITETURA.md, docs/CONTRATO-FISCAL.md, docs/DIAGNOSTICO_BASE.md, docs/INTEGRACAO-POSTERIOR-RUSTINHO.md, docs/LEIAUTE-E-LACUNAS-FISCAIS.md, docs/MATRIZ-PROVEDORES.md, docs/RELATORIO_FINAL_E_EVIDENCIAS.md e docs/SEGURANCA.md.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+3.4. Relação Individual dos 39 Arquivos LOG (37 Conteúdos Únicos e 2 Pares Duplicados)
+
+    evidencias/inicio/fotos3/1-inicio.log (Único #01 — texto bruto integral nas págs. 72–88);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    evidencias/regressao2/fotos-notificacoes/1-inicio.log (Duplicata byte a byte de #01);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    evidencias/inicio/fotos3/2-reabrir.log (Único #02 — texto bruto parcial nas págs. 89–95);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    evidencias/regressao2/fotos-notificacoes/2-reabrir.log (Duplicata byte a byte de #02);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    notif/logs/01-antes.log (Único #03 — citado na pág. 47; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    piloto-nav/logs/01-nucleo-antes.log (Único #04 — sintetizado nas págs. 8, 17 e 50; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    02-nucleo-depois.log (Único #05 — sintetizado na pág. 8; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    03-build.log (Único #06 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    04-telas-1a-rodada.log (Único #07 — sintetizado nas págs. 8 e 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    05-telas-2a-rodada.log (Único #08 — sintetizado nas págs. 8 e 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    06-telas-3a-rodada.log (Único #09 — sintetizado na pág. 8; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    07-telas-4a-rodada.log (Único #10 — sintetizado nas págs. 8 e 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    regressao2/logs/suite.log (Único #11 — sintetizado na pág. 17: 487 passaram, 0 falharam, 9 ignorados em v0.9.15; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    regressao2/logs/telas-navegacao_guiada-2.log (Único #12 — sintetizado nas págs. 8, 17 e 50: 32/32 itens; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    telas-notificacoes.log (Único #13 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    telas-d09.log (Único #14 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    telas-d14_portatil.log (Único #15 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    telas-falha07.log (Único #16 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    telas-modo_seguro.log (Único #17 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    telas-rvi02.log (Único #18 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    build.log (Único #19 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    clippy.log (Único #20 — sintetizado na pág. 17; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    fmt.log (Único #21 — sintetizado na pág. 17, 0 bytes; bruto NÃO ACESSÍVEL NESTA SESSÃO);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Entradas 24 a 39 (Únicos #22 a #37 — Lacuna de nomes identificada): 16 arquivos .log adicionais (incluindo os logs de captura em evidencias/regressao2/fotos-nav2/ citados na pág. 17) cujos nomes individuais e conteúdos brutos constam nas páginas 96 a 257 (NÃO ACESSÍVEIS NESTA SESSÃO).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+4. Sistema de Notificações e Tela Inicial (BLOCO 3)
+4.1. Distinção Estrita entre Notificações Persistentes e Avisos Rápidos/Passageiros
+
+    Notificações Persistentes de Condição (CRITICA, ATENCAO, INFORMATIVA — nucleo/src/avisos.rs, app/qml/Notificacao.qml, app/qml/TelaInicio.qml): Governadas pelo estado do banco/rede (avisos_do_dia, da_senha), atualizadas a cada 20s na Tela Inicial, com marcas locais (aviso_escondido.<id> e aviso_minimizado.<id>) não sincronizadas entre caixas (CONFIG_DA_LOJA) e posicionadas no topo da Tela Inicial logo abaixo da busca.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Orientação Passageira da Navegação Guiada (app/qml/Guia.qml reutilizando Notificacao.qml): Sempre em faixa aberta no topo da janela (relatada na v0.9.17 em parent: T.Overlay.overlay, z: 1000), durando apenas enquanto a sessão de guia está ativa, sem gravar marcas aviso_* no banco.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Avisos Rápidos / Feedback Efêmero (app/qml/Aviso.qml): Avisos temporários de operação que também devem respeitar o posicionamento superior aprovado; a captura erro-notificação_embaixo.png (Imagem 03) é evidência histórica de falha visual no rodapé (CONFIRMADO POR EVIDÊNCIA HISTÓRICA), com estado na v0.9.17 NÃO VERIFICADO.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+4.2. Regras Aprovadas das Três Categorias de Notificações Persistentes
+
+    Disposição na TelaInicio.qml: Busca → faixas críticas (primeiro) → faixa não crítica aberta (no máximo uma por vez) → quadrados minimizados em Flow (que quebram linha sem sobrepor cabeçalho, busca ou grade) → grade das 14 funções.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Crítica (CRITICA): Sempre em faixa expandida; múltiplas críticas empilham-se em coluna; imutável enquanto a condição persistir (não pode ser minimizada, escondida ou descartada por clique ou arrasto; avisos::minimizar recusa no núcleo e escondida_hoje / completar ignoram marcas residuais no banco); papel Accessible.AlertMessage.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Atenção (ATENCAO): Começa minimizada em quadrado (fundo/borda das pílulas, IconeFuncao central e triângulo PNG preto no tema claro / branco no escuro); clique alterna quadrado ↔ faixa (fechando outra não crítica aberta via minimizarAviso); arrasto para a direita minimiza; arrasto para a esquerda não esconde (permanece visível); marca aviso_minimizado.<id> persiste ao reabrir; papel Accessible.Button.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Informativa (INFORMATIVA): Começa minimizada em quadrado; clique alterna quadrado ↔ faixa; arrasto para a direita minimiza; arrasto para a esquerda esconde até a meia-noite (aviso_escondido.<id>), voltando no dia seguinte (Timer de 20s) somente se a condição ainda valer.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Geometria e Botão Interno: Limiar de arrasto Math.max(raiz.width, 400) * 0.18 (relatado na v0.9.17) impede micro-arrasto involuntário; clique no botão interno executa apenas a ação sem inverter o estado da faixa.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+4.3. Evidências Históricas (v0.9.15) e Divergências/Pendências (NOTIF-01 a NOTIF-03)
+
+    Atribuição dos logs: 1-inicio.log, 2-reabrir.log e telas-notificacoes.log são evidências históricas da versão 0.9.15 e não comprovam a versão 0.9.17.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    [NOTIF-01]: Em avisos.rs (completar), "conflitos" | "codigos" | "codigos_bloqueio" exibiria "Resolver no Gerente" embora o destino seja Simultaneidade > Duplicatas (DOCUMENTADO, MAS NÃO VERIFICADO na 0.9.17).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    [NOTIF-02] (Divergência registrada): O relatório histórico aponta o rótulo genérico "Abrir" para a crítica outra_loja, enquanto a análise anterior do código 0.9.17 identificou o tratamento "Ver caixas" para outra_loja. Não se declara esse defeito como existente na 0.9.17 (NÃO VERIFICADO diretamente no código nesta sessão).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    [NOTIF-03]: Operador Caixa que cancela PedirGerente ao abrir notificação de Simultaneidade ficaria na aba Loja (Este computador) de TelaConfiguracoes em vez de voltar à TelaInicio (DOCUMENTADO, MAS NÃO VERIFICADO na 0.9.17).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+5. Navegação Contextual Guiada e Linkagem (BLOCO 4)
+5.1. Mecanismo Único, Preservação de Origem e Validação pelo Núcleo
+
+    Pilha e estado vivo (Main.qml): guiar / concluirGuia / abandonarGuia empilham a tela de destino mantendo a tela de origem viva embaixo na StackView com arquivos selecionados, filtros e edições intactos.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Validação no núcleo (requisitos.rs): O retorno só ocorre quando requisito_conferir confirma no banco a gravação válida (ex.: config::documento_da_loja_valido); requisito_conferir e arquivos_conferir são SO_LEITURA.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Retomada segura: Aguarda o término da transição de telas antes de chamar aoVoltar; exibe "Requisito satisfeito — conclua a operação." e nunca executa cadastros, importações ou operações financeiras automaticamente.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Três modos de decisão: Auto (requisito obrigatório com solução única e sem operação aberta), Opções (múltiplos caminhos) e Decisão (exclusivo do gerente, sem redirecionamento automático).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+5.2. Contagem Exata da Matriz C8 (17 Entradas = 16 Situações de Navegação + 10c Excluído)
+
+A tabela original de NAVEGACAO-CONTEXTUAL-matriz.md (página 48) possui 8 casos numerados de 1 a 8 (sendo que o caso 2 possui o subcaso 2b), 5 subcasos 9a–9e e 3 subcasos 10a–10c, somando 17 entradas:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+    16 situações de navegação: Caso 1 (Importar cadastros XML sem CNPJ — relatado concluído), Caso 2 (Importar compras sem CNPJ — relatado concluído na 0.9.17), Subcaso 2b (Nota de compra para outro CNPJ — modo Decisão em ConflitoCnpj.qml sem redirecionar — relatado concluído na 0.9.17), Caso 3 (Conferência fiscal sem UF/CNPJ — loja.uf_cnpj — relatado concluído na 0.9.17 com ressalva NAV-01), Caso 4 (Etiquetas com código ambíguo — relatado pendente), Caso 5 (Transferência sem conta destino — relatado pendente), Caso 6 (Rascunho de OS bloqueado por caixa incompatível — relatado pendente), Caso 7 (Operação financeira bloqueada por referência — relatado pendente), Caso 8 (Modo seguro → Backup — relatado parcial), Subcasos 9a–9e (Notificações do Início — relatados concluídos com ajustes NOTIF-01/02/03) e Subcasos 10a e 10b (Encomenda de outro caixa e Comissão finalizada — propostas na matriz).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    1 entrada excluída da navegação (10c): Conta a receber com pagamento parcial em várias contas — registrada pela própria matriz como hipótese de bug financeiro a verificar em receber.rs, fora da navegação.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Testes históricos e Imagens 16 a 28: Todos os logs (01-nucleo-antes.log a 07-telas-4a-rodada.log, telas-navegacao_guiada-2.log com 32/32 checks) e capturas (Imagens 16 a 28, cobrindo Cenários A a E, inclusive dupla senha D-09 do operador Caixa) pertencem às versões anteriores (0.9.15 / piloto 0.9.16) e não atribuem aprovação à versão 0.9.17.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+5.3. Achados NAV-01 a NAV-04 (Relatados na Auditoria 0.9.17 — DOCUMENTADO, MAS NÃO VERIFICADO)
+
+    [NAV-01]: Clicar em "Ir para Loja" a partir de TelaFiscal.qml (embutida via Loader em TelaConfiguracoes.qml) empilha uma 2ª instância completa de TelaConfiguracoes e, ao voltar, recarrega apenas TelaFiscal, deixando a 1ª instância de TelaConfiguracoes com config.uf/config.cnpj desatualizados.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    [NAV-02]: Trocar manualmente de pílula em TelaConfiguracoes durante uma guia esconde o recorte escuro de Guia.qml, mas mantém a faixa de aviso presa no topo e não restaura foco/rolagem ao voltar para Loja.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    [NAV-03]: Variável let deOutra = 0 em TelaCompras.qml (linhas 26, 46–48 e 74–76) teria ficado como código morto após ConflitoCnpj.qml separar r.dados.conflitos.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    [NAV-04]: Confirmar se importar::cnpj_loja e compras.rs usam config::documento_da_loja_valido(&cnpj) além de !cnpj.is_empty().   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+6. Busca de Peças: Evidências Visuais, Hipótese Documentada e Requisitos (BLOCO 2)
+
+    Seis capturas históricas em omtimizar_campo_de_busca.docx (#18, Imagens 29 a 34 — CONFIRMADO POR EVIDÊNCIA HISTÓRICA, estado na 0.9.17 NÃO VERIFICADO):
+
+        Imagem 29 ("TCF"): Nada encontrado;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Imagem 30 ("TCF 01"): Encontra a peça código 2967 (TERMINAL FG 3/4" UNF 20 FIOS X 3/8", Fornecedor: HIDRAFLUX INDUSTRIAL, 0 PC, R$ 9,44);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Imagem 31 ("01 TCF"): Nada encontrado (apesar dos mesmos termos invertidos);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Imagem 32 ("rg08"): Nada encontrado;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Imagem 33 ("rg-08"): Nada encontrado;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Imagem 34 ("rg 08"): Lista 5 peças, iniciando por 5432 (02530BRG RETENTOR CAIXA MUDANCA - SAB).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Hipótese técnica documentada (HIPÓTESE, NÃO VERIFICADA no código 0.9.17): Códigos de produto_fornecedor não entrariam no texto agregado produto.busca (exigindo igualdade exata na consulta separada) e tokens alfanuméricos colados (rg08) não seriam separados nas fronteiras letra/número.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Requisitos aprovados para a busca: (1) Palavras em qualquer ordem; (2) Fragmentos de palavras e códigos parciais de fornecedor; (3) Normalização consistente de tokens alfanuméricos (rg08, rg-08, rg 08); (4) Tolerância controlada a erros de digitação com ranking de relevância; (5) Preservação de todos os campos pesquisáveis (código interno, barras, original, equivalentes, fornecedores, nomes, modelos, carros); (6) Proibição de alterar cadastros para compensar defeito da busca; (7) Testes automatizados.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+7. Padrão Geral de Produto, Interface, Operação e Seletor Nativo (BLOCO 2)
+
+    Três prioridades permanentes (Consolidação do padrão Rustinho.docx): Rapidez, estabilidade/confiabilidade (código explícito em Rust sem sacrificar integridade) e interface minimalista autoexplicativa transversal a todo o sistema (Desktop e Android).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Regras visuais e operacionais: Proibição de truncar textos/rótulos (ex.: "Enquadramento...", "Metro quadrado quebrado"); agrupamento contextual de campos avançados/fiscais; vedação a modais desnecessários; toda operação essencial concluível por clique ou toque (atalhos como Tab, Esc, Enter, F2 são opcionais); mensagens de erro curtas, em vermelho junto ao campo, informando problema e ação necessária sem apagar dados digitados; validação dupla na UI e no núcleo.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Identidade visual exata aprovada para o campo de busca da Tela Inicial (Dashboard inicial Tema Creme Minimalista.png — Imagem 02):
+
+        Esquerda (dentro do campo): Ícone de prancheta com sinal de + (colar).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Direita (dentro do campo): Ícone de dois retângulos sobrepostos (copiar).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Fora do campo, imediatamente à direita: Indicador do atalho F11.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        (Não substituir esses desenhos na descrição do padrão aprovado por ícones genéricos de lupa ou código de barras; registra-se que nas capturas de teste Imagens 06 a 15 e 29 a 34 da base histórica ainda aparecia lupa à esquerda e F11 interno, estando a implementação na 0.9.17 NÃO VERIFICADA).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Seletor de arquivos e pastas nativo da plataforma (Seção 5 do DOCX): Obrigatório usar o diálogo nativo do sistema operacional (KDE/portal no Linux AppImage, diálogo padrão no Windows e Storage Access Framework / SAF com URIs content:// no Android) em vez de navegador de pastas próprio. Implementação e testes reais nas plataformas: NÃO VERIFICADOS.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+8. Unidades de Medida: Regra Determinística Completa (BLOCO 2)
+
+Especificação integral obrigatória extraída da Seção 6 de Consolidação do padrão Rustinho.docx (páginas 42–45):   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    Dados considerados para o ranking do cadastro (Seção 6.1): Contar apenas produtos ativos cadastrados que utilizam cada unidade (cada cadastro de produto ativo conta uma única vez para sua unidade associada). Excluir serviços sem estoque e excluir produtos inativos. Não utilizar saldo físico de estoque, número de vendas ou faturamento para ordenar a primeira linha.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Primeira linha lógica — unidades mais representativas do cadastro (Seção 6.2): Ordenar pelo número de produtos ativos cadastrados (do maior para o menor) e exibir inicialmente as 5 primeiras unidades (1º ao 5º lugar, ex.: UN, PC, CX, KG, LT). Em caso de empate na contagem de produtos, ordenar pela sigla em ordem alfabética.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Segunda linha lógica antes de existirem vendas relevantes (Seção 6.3): Na ausência de unidades com vendas líquidas positivas nas últimas 24 horas, a segunda linha exibe do 6º ao 10º lugar do ranking de cadastro, da esquerda para a direita (ex.: F, G, H, I, J). As duas primeiras linhas começam representando as 10 unidades mais usadas no cadastro, cada uma aparecendo uma única vez (se houver menos de 10 siglas válidas, exibir apenas as disponíveis, sem criar unidades fictícias nem duplicar siglas).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Janela móvel de vendas das últimas 24 horas (Seção 6.4): O instante de referência T é o momento em que o usuário abre a pílula "Peças". Consideram-se os movimentos de venda ocorridos depois de T−24 horas e até T, inclusive (não é dia civil desde a meia-noite). Ao sair e abrir "Peças" novamente, recalcular com base no novo instante T (não é exigido recálculo contínuo enquanto a tela permanece aberta).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Significado de "vender mais" (Seção 6.5): Classificar pela quantidade líquida de itens vendidos em cada unidade dentro da janela de 24h (incluindo valores fracionários quando permitidos pelo cadastro, como 0,350 kg ou 1,5 m), da maior para a menor quantidade. Não usar valor financeiro em reais, preço unitário nem número de transações/cupons. Em caso de empate na quantidade líquida vendida, ordenar pela sigla em ordem alfabética.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Substituição progressiva da segunda linha (Seção 6.6):
+
+        O grupo começa com as unidades do 6º ao 10º lugar do ranking de cadastro (F, G, H, I, J).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Basta uma quantidade líquida positiva de 1 item vendido (ou fração >0) para tornar a sigla elegível, sem exigir limite mínimo de vendas.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Entrada pela extrema direita e expansão para a esquerda: A primeira unidade com venda líquida positiva (A) ocupa o espaço da extrema direita (substituindo o 10º lugar J → F, G, H, I, A). A entrada de novas unidades vendidas amplia progressivamente a área ocupada pelas unidades vendidas da direita para a esquerda, enquanto as unidades do cadastro deslocadas deixam o grupo.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Ordenação interna das unidades vendidas: As unidades que vendem são ordenadas entre si pela quantidade líquida vendida, da maior para a menor (ex.: se B vendeu 100 e A vendeu 1, B fica à esquerda de A → F, G, H, B, A), com desempate alfabético por sigla.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Limite de 5 unidades no grupo de vendas: Quando mais de 5 unidades têm vendas líquidas positivas na janela, somente as 5 mais vendidas ocupam o grupo dedicado às vendas (2ª linha lógica); as demais seguem para as linhas inferiores em ordem alfabética pela sigla.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Unicidade e recomposição da 1ª linha: Cada unidade aparece apenas uma vez em toda a lista. Quando uma unidade que pertence à 1ª linha lógica também tiver prioridade para o grupo de vendas (2ª linha), prevalece a posição no grupo de vendas, e a 1ª linha é recomposta com as próximas unidades do ranking de cadastro que ainda não estejam alocadas em outro grupo.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Cancelamentos, devoluções e estornos (Seção 6.7):
+
+        Uma venda cancelada ou devolução reduz a quantidade efetivamente vendida somente se a venda original estiver dentro da janela de 24 horas (ex.: vendeu 10 e cancelou 1 → quantidade líquida = 9).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        É obrigatório vincular cancelamentos e devoluções às vendas originais para não descontar a mesma quantidade duas vezes (um cancelamento integral seguido de devolução não pode gerar abatimento duplicado).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Uma devolução referente a uma venda anterior à janela de 24 horas produz os efeitos normais comerciais, financeiros e de estoque, mas não diminui a quantidade contabilizada no ranking da janela atual.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Estornos financeiros que não representem cancelamento da venda ou reversão física da mercadoria não devem ser tratados como itens devolvidos.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Quantidade líquida igual a zero não conta como unidade vendida, e o cálculo jamais deve produzir quantidades negativas artificiais no ranking.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Siglas duplicadas (Seção 6.8): Impedir a criação de unidade com sigla já existente exibindo mensagem curta no padrão visual (ex.: "Já existe uma unidade com a sigla 'UN'. Escolha outra sigla."), desconsiderando espaços excedentes no início/fim (trim) e sem diferenciar maiúsculas de minúsculas ("kg", "KG" e " KG " são a mesma sigla). Descrições iguais com siglas diferentes não configuram duplicidade de sigla.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Linhas inferiores e layout responsivo (Seções 6.9 e 6.10): As unidades fora dos dois grupos prioritários ficam nas linhas inferiores em ordem alfabética estrita pela sigla (BD, CX, KG, LT, UN), sem ordenar por descrição ou categoria fiscal e sem ocultar unidades menos usadas. No Desktop, exibir até 5 unidades por linha visual; no Smartphone, exibir até 3 unidades por linha visual, mantendo exatamente os mesmos grupos e sequência lógica e preservando siglas e descrições completas acessíveis.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Os 19 Testes Obrigatórios para as Unidades (Seção 6.11): (1) Ordenação inicial do cadastro por número de produtos ativos; (2) Desempate alfabético no cadastro; (3) Exclusão de serviços sem estoque; (4) Exclusão de produtos inativos; (5) Independência em relação ao saldo físico de estoque; (6) Segunda linha inicialmente formada pelo 6º ao 10º lugar; (7) Substituição do 10º lugar quando uma unidade registra seu 1º item líquido vendido; (8) Expansão progressiva do grupo de vendas da direita para a esquerda; (9) Ordenação das unidades vendidas pela quantidade, da maior para a menor; (10) Desempate por sigla entre unidades com a mesma quantidade vendida; (11) Substituição de unidades da 1ª linha pela regra de prioridade das vendas, com reposição por unidades do cadastro; (12) Limite de 5 unidades no grupo de vendas; (13) Posicionamento das unidades restantes nas linhas inferiores em ordem alfabética; (14) Ausência de duplicatas em todos os grupos; (15) Reversão correta de quantidades canceladas e devolvidas dentro da janela; (16) Ausência de impacto de vendas anteriores à janela na classificação das vendas recentes; (17) Ausência de quantidades negativas artificiais no ranking; (18) Recálculo no instante de abertura da pílula; (19) Adaptação visual Desktop e Android sem alteração da sequência lógica.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Status na v0.9.17: Requisito CONFIRMADO POR EVIDÊNCIA HISTÓRICA; implementação e testes em nucleo/src/unidades.rs e app/qml/EscolherUnidade.qml classificados como NÃO VERIFICADOS.   
+    rustinho-codigo-fonte-0.9.17.zip+ 2
+
+9. Cadastro de Produtos, Diretrizes Fiscais Gerais, Integridade Comercial e Critérios de Aceitação (BLOCO 2)
+
+    Cadastro de produtos (TelaPeca — Seção 7 do DOCX): Grupos claros (identificação, unidade, categoria, aplicações, equivalências, preços, estoque, detalhes, fiscal); "Adicionar carro" e "Adicionar equivalente" vinculados aos seus grupos; opções avançadas recolhidas; respeito integral a quantidades decimais em unidades fracionáveis.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Diretrizes fiscais na documentação histórica (Seção 8 do DOCX): Exemplos de tela (CSOSN 102, CFOP 5102, "Sem CEST: tratada como peça sem ST") não são regras universais; proibido inventar dados fiscais ausentes; alterações em configurações fiscais não podem reescrever documentos históricos já emitidos.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Classificação obrigatória sobre legislação e modelos fiscais: Todas as afirmações relativas a SAT-CF-e, MFE do Ceará, NF-e 55, NFC-e 65, Reforma Tributária do Consumo (RTC — IBS, CBS, IS) e legislação estadual (como Portaria SRE-SP 34/2026) são registradas estritamente como informações extraídas da documentação histórica, com validação legal independente NÃO VERIFICADA (não constituindo decisões de implementação).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Integridade comercial e 11 critérios de aceitação (Seções 9 e 10 do DOCX): Proibido indicar conclusão antes da gravação efetiva; vínculo obrigatório em cancelamentos/devoluções contra duplicidade; preservação de dados preenchidos em caso de erro; e verificação obrigatória dos 11 critérios de aceitação (fluxo normal, dados inválidos, interrupções, persistência, consistência entre módulos, tamanhos de tela, mouse/toque, teclado, mensagens padronizadas em vermelho, não duplicação e regressão/plataformas).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+10. Banco de Dados SQLite, Migrações (0001 a 0023), Backup e Modo Seguro
+
+(Aguardando blocos de auditoria do banco de dados e migrações).
+11. Sincronização em Rede Local (sync.rs), Faixas de Código e Simultaneidade
+
+(Aguardando blocos de auditoria de modularidade e código de sincronização/faixas).
+12. Camada Fiscal (rustinho-fiscal v0.2.3 — BLOCOS 5A e 5B)
+
+    Regra de Governança: A crate rustinho-fiscal v0.2.3 é material de estudo e proposta técnica independente. Sua documentação não autoriza implementar nem ativar emissão fiscal no Rustinho.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+12.1. Origem, Procedência e Evolução Documentada (0.2.0 a 0.2.3)
+
+    Documentada em CHANGELOG.md (pág. 54), ORIGEM_E_STATUS.md (pág. 55) e README.md (pág. 56) como uma reconstrução evoluída a partir dos blocos Markdown de rustinho-fiscal v0.2.1 Base 0.9.15.md, passando pelas versões 0.2.0, 0.2.1, 0.2.2 (27/10/2026) e 0.2.3 (29/10/2026, quando o código do Rustinho 0.9.16 foi inspecionado apenas para leitura como referência arquitetural).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.2. Finalidade e Princípios Documentados da Crate
+
+    Padronizar a comunicação futura do Rustinho com provedores externos de DF-e (NF-e 55 e NFC-e 65) sob 5 princípios documentados (DOCUMENTADO, MAS NÃO VERIFICADO nos arquivos .rs):   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Isolamento total do núcleo (sem acesso a SQLite, api.rs, sync.rs ou CXX-Qt/QML);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Sem motor tributário duplicado (recebe fotografia imutável FiscalDocumentRequest e valida aritmética, estrutura e protocolo);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Zero código unsafe (unsafe_code = "forbid");   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Sem falsos positivos (MockFiscalAdapter com simulated: true e environment: Mock; distinção entre adapter_online e sefaz_online; falha pós-envio gerando obrigatoriamente UnknownRequiresQuery / UnknownOutcomeAfterSend);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Validador de CNPJ alfanumérico (vigência julho/2026, Módulo 11 sobre ASCII - 48 — informação documentada, sem validação técnica ou jurídica independente).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+12.3. Relação com o Rustinho Principal
+
+    A crate existe fora da árvore principal do Rustinho (ESTRUTURA DO PACOTE IDENTIFICADA nos cabeçalhos do ZIP 0.9.17 e CONFIRMADO POR EVIDÊNCIA HISTÓRICA nos relatórios). O Rustinho 0.9.16 não foi modificado e nenhuma integração com o 0.9.17 foi realizada.   
+    rustinho-codigo-fonte-0.9.17.zip+ 4
+
+12.4. Funcionalidades e Bloqueios Documentados na Crate (DOCUMENTADO, MAS NÃO VERIFICADO)
+
+    Módulos e recursos descritos na documentação (sem inspeção dos arquivos .rs nesta sessão): src/contract.rs (CONTRACT_VERSION = 1, centavos i64, milésimos u64, CNPJ alfanumérico, cheque 02, crédito loja 05, boleto 15, fatura/duplicatas para NF-e 55 a prazo e rateio de desconto global), src/security.rs (SecretString com zeroize redigida como "[REDACTED]", sanitizador de logs, bloqueio de CR/LF/NUL/ETX/aspas e safe_join_path), src/error.rs (FiscalError), src/adapter/mod.rs (FiscalProvider), src/adapter/mock.rs (MockFiscalAdapter) e src/adapter/acbr.rs (AcbrMonitorAdapter em loopback TCP com ETX 0x03, preâmbulo NFe criada em:, parser XML roxmltree e allowlist estreita de CFOP/CST/CSOSN).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Bloqueios operacionais documentados (DOCUMENTADO, MAS NÃO VERIFICADO no código .rs): Bloqueio de emissão em ambiente de produção (lacunas da RTC — IBS/CBS/IS — e ausência de homologação); restrição do perfil de emissão a venda normal presencial de saída dentro da UF (bloqueando vendas interestaduais/DIFAL, exportação, entrada, devolução, frete, seguro, outras despesas, IPI, contingência e tPag=90); ausência de inutilização e de importação de XML de compras; consulta NFe.ConsultarNFe condicionada a XML local em raiz autorizada; bloqueio de conexões TCP fora de loopback; e limpeza de arquivos INI temporários (>72h) apenas oportunista durante nova emissão.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.5. Estado de Maturidade e Validação no Processo de Geração do Pacote
+
+    No processo e ambiente de geração do pacote v0.2.3 descritos na documentação, foram executadas apenas inspeção estática/manual e verificações via scripts Python (fixtures JSON, estrutura ZIP e hashes SHA-256), não tendo sido executados naquele processo cargo fmt, cargo clippy, cargo test, cargo build --release, teste com ACBrMonitorPLUS real ou homologação SEFAZ por ausência de toolchain Rust e do processo ACBr naquele ambiente. A ocorrência ou não de execuções posteriores fora daquele ambiente permanece classificada como NÃO VERIFICADA.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.6. Arquitetura Fiscal Proposta e Divisão de Responsabilidades (BLOCO 5B)
+
+Com base em docs/ARQUITETURA.md (pág. 57), docs/ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md (pág. 58), docs/CONTRATO-FISCAL.md (pág. 59) e docs/INTEGRACAO-POSTERIOR-RUSTINHO.md (pág. 61):   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Três camadas propostas: (1) Núcleo do Rustinho (autoridade comercial, tributária, de séries e reserva de numeração; persiste fotografia imutável no SQLite antes do envio; executa chamadas fora de transação SQLite e em worker thread); (2) Crate rustinho-fiscal v0.2.3 (validador de contrato, aritmética segura, sanitizador e trait síncrono FiscalProvider: Send + Sync); e (3) Provedores (AcbrMonitorAdapter em loopback TCP 127.0.0.1 e MockFiscalAdapter determinístico).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Decisão por interface síncrona com timeouts explícitos: FiscalProvider usa std::net::TcpStream síncrono com connect_timeout, write_timeout e read_timeout para não acoplar tokio ao núcleo ou à ponte CXX-Qt, devendo ser invocado pelo núcleo em worker thread dedicada (std::thread::spawn ou chamar_demorado em app/src/ponte.rs).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Classificação: Arquitetura proposta (PROPOSTA) e características da crate (DOCUMENTADO, MAS NÃO VERIFICADO).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.7. Especificação do Contrato Fiscal Neutro e Análise Matemática e Semântica (docs/CONTRATO-FISCAL.md) (Corrigida)
+
+O documento docs/CONTRATO-FISCAL.md (página 59) especifica o contrato JSON versionado (contract_version: 1 obrigatório), as enumerações em CAIXA ALTA e as invariantes aritméticas:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+A. Estruturas, Escalas Numéricas e Reprodução Fiel das Fórmulas da Página 59
+
+    Enums documentadas em CONTRATO-FISCAL.md:
+
+        DocumentModel: "NFE_55", "NFCE_65";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        FiscalEnvironment: "PRODUCTION", "HOMOLOGATION", "MOCK";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        TaxRegime: "SIMPLES_NACIONAL", "SIMPLES_EXCESSO_SUBLIMITE", "REGIME_NORMAL", "MEI";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        PaymentMethodCode: "01_DINHEIRO", "03_CARTAO_CREDITO", "04_CARTAO_DEBITO", "17_PIX", "90_SEM_PAGAMENTO", "99_OUTROS" (na Seção 1), acrescido na seção de extensões v0.2.3 por "02_CHEQUE", "05_CREDITO_LOJA" e "15_BOLETO_BANCARIO";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        FiscalOperationState: "PREPARED_PENDING", "FORWARDED_AWAITING", "AUTHORIZED_CONFIRMED", "REJECTED_CONFIRMED", "CANCELLATION_PENDING", "CANCELLED_CONFIRMED", "CONTINGENCY_ADOPTED", "UNKNOWN_REQUIRES_QUERY", "ADAPTER_UNAVAILABLE", "UNSUPPORTED_OPERATION", "INVALID_RESPONSE".   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Escalas numéricas expressamente definidas (Seção 2 da Página 59):
+
+        Valores monetários (FiscalAmountCents): Inteiros de 64 bits com sinal (i64) representando centavos exatos (1500 = R$ 15,00);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Quantidades (QuantityMillis): Inteiros de 64 bits sem sinal (u64) em milésimos (2000 = 2,000 UN);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Alíquotas (icms_rate_bps): Centésimos de ponto percentual (1800 = 18,00%).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Conferência e reprodução das equações originais da Página 59 (Ajuste 5):
+
+        Nota de conferência da fonte: Na página 59 do PDF, o texto extraído da camada de texto contém uma marcação LaTeX com dois delimitadores corrompidos pelo extrator textual (\$\$\text{gross\_amount\_cents) = \left\lfloor \frac{\text(quantity\_millis} \times \text{unit\_price\_cents) + 500}{1000} \right\rfloor\$\$), e a página 59 não possui imagem rasterizada anexada na galeria visual.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Reprodução clara e legível da Equação do Item (com parênteses, numerador e denominador explícitos conforme a estrutura da página 59):
+
+            Em texto estruturado explícito:
+            gross_amount_cents = floor( ( (quantity_millis * unit_price_cents) + 500 ) / 1000 )
+            net_amount_cents = gross_amount_cents - discount_cents   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            Em notação matemática com numerador e denominador explícitos:
+            gross_amount_cents=⌊1000(quantity_millis×unit_price_cents)+500​⌋
+            net_amount_cents=gross_amount_cents−discount_cents
+
+               
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Reprodução da Equação de Pagamentos (Página 59):
+
+            Em texto estruturado explícito:
+            sum(payments.amount_cents) = total_net_cents + change_cents   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            Em notação matemática:
+            ∑payments.amount_cents=total_net_cents+change_cents
+
+               
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+B. Lacunas Semânticas, Riscos de Versionamento e Questões Matemáticas a Validar na Seção 12.7 (Ajustes 4, 6, 7 e 8)
+
+    Situação semântica de payments.amount_cents (Ajuste 6 — Lacuna Semântica e DECISÃO HUMANA PENDENTE):
+
+        O que está documentado: CONTRATO-FISCAL.md apresenta a igualdade ∑payments.amount_cents=total_net_cents+change_cents, e na seção de extensões da v0.2.3 menciona que o perfil de billing (fatura/duplicatas) exige "apenas pagamento a prazo, sem troco" e que "as parcelas precisam somar ao valor líquido".   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Lacuna semântica identificada: Os documentos analisados até o Bloco 5B não especificam individualmente se, em vendas com múltiplos meios de pagamento ou com troco (change_cents > 0), o campo amount_cents de cada item da lista payments representa o valor bruto entregue/recebido pelo cliente naquele meio específico (incluindo a parcela de troco que será devolvida) ou o valor líquido aplicado à venda, nem como esse campo deve ser preenchido no INI (vPag vs. vTroco) quando combinado com outros meios.
+
+        Classificação: Lacuna semântica documentada e DECISÃO HUMANA PENDENTE (não se escolhe uma interpretação sem verificar src/contract.rs / src/adapter/acbr.rs e a decisão de domínio do núcleo).
+
+    Risco de compatibilidade e versionamento em CONTRACT_VERSION = 1 (Ajuste 4):
+
+        Os documentos ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md (Seção 4) e CONTRATO-FISCAL.md ("Extensões na implementação v0.2.3") registram que a v0.2.3 manteve CONTRACT_VERSION = 1 ao adicionar o campo opcional billing (retrocompatível via #[serde(default)]) e as novas variantes de enum 02_CHEQUE, 05_CREDITO_LOJA e 15_BOLETO_BANCARIO em PaymentMethodCode, ressaltando que adicionar variantes de enum é uma extensão de contrato que requer testes de compatibilidade e revisão de CONTRACT_VERSION antes de publicação/integração com consumidores externos.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Classificação: Risco de compatibilidade e versionamento e DECISÃO HUMANA PENDENTE (sem classificar como inconsistência interna e sem determinar obrigatoriedade prévia de incremento da versão).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Separação entre justificativas expressamente documentadas para bloqueios de totalizadores (IPI, frete, seguro, outras despesas) e interpretação técnica da auditoria (Ajuste 8):
+
+        Justificativas expressamente documentadas nos textos da crate (DOCUMENTADO, MAS NÃO VERIFICADO):
+
+            IPI: Os documentos (CHANGELOG.md v0.2.2 e ARQUITETURA.md) declaram expressamente que "IPI foi bloqueado porque o contrato não representa corretamente sua inclusão no total da NF-e".   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+            Frete, seguro e outras despesas: Os documentos (README.md e ARQUITETURA.md) declaram que o perfil emissor está restrito a venda normal presencial de saída dentro da UF sem transporte e sem frete, seguro ou outras despesas porque esses campos e perfis não fazem parte do subconjunto modelado nesta versão, retornando UnsupportedOperation antes do envio.   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Observação técnica da auditoria (Questão a validar no código .rs): O documento CONTRATO-FISCAL.md (página 59) explicita na Seção 2 as equações de item (gross_amount_cents e net_amount_cents) e de pagamentos (∑payments.amount_cents=total_net_cents+change_cents), mas não transcreve naquele resumo a fórmula completa de formação de total_net_cents a partir dos itens. Verificar como src/contract.rs valida o somatório de total_net_cents permanece como questão técnica a validar quando o código .rs for inspecionado, sem atribuir a ausência dessa fórmula no resumo de CONTRATO-FISCAL.md como causa automática de todos os bloqueios de frete, seguro e outras despesas.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Questões matemáticas, de tipagem e de arredondamento a validar no código .rs (Ajuste 7):
+
+        O que o contrato e os documentos declaram expressamente: Os documentos informam que FiscalAmountCents é i64, QuantityMillis é u64, e que a crate utiliza checked_add, checked_sub e checked_mul para impedir overflow, além de apportion_sale_discount_cents com regra determinística de maior resto e redistribuição quando itens pequenos atingem seu limite de desconto.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        O que a auditoria levanta como questões a validar (não expressas como regras textuais em CONTRATO-FISCAL.md):
+
+            Verificar em src/contract.rs como é feita a conversão de tipos entre quantity_millis (u64) e unit_price_cents (i64) antes da multiplicação e da soma + 500 na fórmula de gross_amount_cents;   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            Verificar em src/contract.rs quais restrições de sinal e de limite mínimo/máximo (não negatividade de preços, descontos, totais e troco) estão efetivamente codificadas para garantir que o arredondamento +500/1000 opere sempre sobre valores positivos;   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            Verificar como a variante "90_SEM_PAGAMENTO" (listada em CONTRATO-FISCAL.md, mas documentada no CHANGELOG.md v0.2.2 como bloqueada no perfil de venda normal do adaptador) interage com a validação da equação ∑payments.amount_cents=total_net_cents+change_cents dentro de src/contract.rs.   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+12.8. Separação entre Arquitetura Descrita como Existente (0.9.16), Arquitetura Planejada (0.9.17) e Integração Comprovada
+
+    Arquitetura descrita como existente no Rustinho 0.9.16 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA na inspeção de 29/10/2026; estado na 0.9.17 NÃO VERIFICADO): banco.rs (SQLite com WAL, busy_timeout, transações Deferred e Immediate), ponte.rs (chamar_demorado), config.rs (apenas nome, UF, CNPJ e endereço em texto livre, insuficiente para EmitterSnapshot), vendas.rs (desconto_itens separado do desconto global e vendas::cancelar), caixa.rs (formas comerciais dinheiro, pix, débito, crédito, cheque, crediário, vale-troca, outro), receber.rs (ParcelaPrevia), sync.rs e fiscal.rs.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Arquitetura planejada para integração futura (PROPOSTA): Sequência transacional em 3 fases (Fase A: transação SQLite curta reservando série/número e gravando FiscalDocumentRequest em PREPARED_PENDING + COMMIT; Fase B: provider.issue_document em worker thread fora do lock SQLite; Fase C: nova transação SQLite gravando AUTHORIZED_CONFIRMED ou UNKNOWN_REQUIRES_QUERY), expansão estruturada do cadastro do emitente em config.rs, condicionamento de vendas::cancelar ao evento CancelledConfirmed (CANCELLATION_PENDING), e replicação em sync.rs apenas de fatos fiscais consumados sem chamar o provedor no caixa receptor e sem sincronizar segredos.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Integração efetivamente comprovada: Nenhuma. Os documentos declaram que nenhum arquivo do Rustinho foi alterado e que não há integração com a versão 0.9.17.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+12.9. Comparação do Plano de Integração (Bloco 5B) com as Limitações do Bloco 5A, Riscos Condicionados e Diferenças Contrato vs. Adaptador (Corrigida — Ajustes 1, 2 e 3)
+
+O cruzamento entre os quatro documentos do Bloco 5B e as limitações registradas no Bloco 5A identifica os seguintes pontos técnicos, mantendo todas as referências aos bloqueios do adaptador classificadas como DOCUMENTADO, MAS NÃO VERIFICADO:
+
+    Risco de reconciliação em UNKNOWN_REQUIRES_QUERY condicionado à disponibilidade do XML local (Ajuste 1):
+
+        Como o fluxo é descrito: Em INTEGRACAO-POSTERIOR-RUSTINHO.md (Fase C) e ARQUITETURA_REAL_0.9.16...md (Seção 2, item 5), qualquer falha ou timeout pós-envio (UnknownOutcomeAfterSend) leva ao estado UNKNOWN_REQUIRES_QUERY, bloqueando o reenvio automático e exigindo reconciliação via provider.query_document(...) "ou processo manual controlado".   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Condição documentada no adaptador (DOCUMENTADO, MAS NÃO VERIFICADO): Conforme documentado em ARQUITETURA.md, ARQUITETURA_REAL_0.9.16...md e no Bloco 5A, o comando NFe.ConsultarNFe do ACBrMonitorPLUS recebe o caminho de um arquivo XML local e não apenas a chave de acesso, razão pela qual a consulta pela crate depende de o XML da nota já existir e estar salvo em uma raiz local explicitamente autorizada.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Avaliação precisa do risco: A reconciliação automática via provider.query_document(...) não é impossível, mas apresenta um risco operacional condicionado à disponibilidade do XML local:
+
+            Caso o ACBrMonitorPLUS já tenha gerado e gravado o arquivo XML na pasta monitorada/autorizada antes do timeout ou queda da resposta TCP: o arquivo XML local estará disponível e provider.query_document(...) poderá ser utilizado para consultar a nota.   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            Caso a falha pós-envio ocorra sem que um XML local válido esteja presente no diretório autorizado: a consulta via AcbrMonitorAdapter não poderá ser concluída apenas pela chave, tornando necessário recorrer ao "processo manual controlado" previsto em ARQUITETURA_REAL_0.9.16...md.   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Diferença arquitetural entre os estados/valores representados pelo Contrato Neutro e as capacidades/bloqueios documentados do Adaptador v0.2.3 (Ajustes 2 e 3):
+
+        Distinção entre Contrato e Adaptador: O documento CONTRATO-FISCAL.md define o vocabulário neutro e estável de comunicação entre o núcleo e qualquer provedor fiscal (FiscalEnvironment::Production, PaymentMethodCode::90_SEM_PAGAMENTO, FiscalOperationState::ContingencyAdopted, além dos modelos NFE_55 e NFCE_65), enquanto ARQUITETURA.md e os documentos do Bloco 5A descrevem o subconjunto específico atualmente habilitado na implementação v0.2.3 do adaptador.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Explicação técnica (sem classificar como contradição): É esperado em uma arquitetura baseada em contrato (Trait: FiscalProvider + descritores de capacidade em src/adapter/mod.rs) que o contrato represente todos os estados e códigos do domínio fiscal (como produção, contingência e sem pagamento), enquanto um adaptador específico em estágio de desenvolvimento (v0.2.3) restrinja suas capacidades operacionais e retorne UnsupportedOperation para perfis ainda não homologados ou não modelados (bloqueios de produção, contingência, tPag=90, IPI e operações interestaduais, todos classificados como DOCUMENTADO, MAS NÃO VERIFICADO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Cuidado exigido na integração: O núcleo do Rustinho não deve presumir que toda variante existente nas enums de CONTRATO-FISCAL.md é aceita pelo adaptador ativo; deve consultar os descritores de capacidade e tratar UnsupportedOperation antes da emissão.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Transição de estados em caso de crash durante a Fase B (PREPARED_PENDING vs. FORWARDED_AWAITING):
+
+        CONTRATO-FISCAL.md lista tanto "PREPARED_PENDING" quanto "FORWARDED_AWAITING" e "UNKNOWN_REQUIRES_QUERY", enquanto a sequência de 3 fases em INTEGRACAO-POSTERIOR-RUSTINHO.md descreve a gravação de PREPARED_PENDING na Fase A e a atualização do status na Fase C após o retorno de issue_document.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Isso destaca um requisito importante já apontado em ARQUITETURA_REAL_0.9.16...md (Seção 5: "Testar retomada depois de crash, timeout após envio..."): ao iniciar o sistema ou retomar após encerramento abrupto na Fase B, o núcleo precisará definir como tratar registros que ficaram em PREPARED_PENDING (ou gravar a transição intermediária antes do envio de rede) para não reenviar às cegas uma nota que já possa ter saído pelo socket.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Tratamento da numeração (serie, numero) reservada na Fase A e reconciliação de CANCELLATION_PENDING:
+
+        A Fase A reserva (serie, numero) antes do envio, enquanto a inutilização de numeração é descrita no Bloco 5A como não implementada no adaptador (DOCUMENTADO, MAS NÃO VERIFICADO). Portanto, a regra de negócio do núcleo (DF-6) precisará especificar o que ocorre com o par (serie, numero) quando a Fase B/C resulta em falha pré-envio (UNSUPPORTED_OPERATION, ADAPTER_UNAVAILABLE) ou rejeição definitiva (REJECTED_CONFIRMED).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        Da mesma forma, no fluxo de cancelamento (CANCELLATION_PENDING → provider.cancel_document), como NFe.ConsultarNFe é documentado como não convertendo automaticamente status de consulta em confirmação de evento de cancelamento (DOCUMENTADO, MAS NÃO VERIFICADO), o plano de integração precisará detalhar o procedimento de recuperação caso ocorra falha de rede após o envio do pedido de cancelamento.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Observações de histórico documental entre os textos:
+
+        Em INTEGRACAO-POSTERIOR-RUSTINHO.md, o título e o complemento final referenciam o código 0.9.16, enquanto o título da Seção 3 conservou a redação anterior (sync.rs na 0.9.15).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Em ARQUITETURA.md, o diagrama do MockFiscalAdapter registra "Idempotência c/ SHA-256" (alinhado à v0.2.2/v0.2.3, conforme explicado em DIAGNOSTICO_BASE.md), enquanto a nota histórica da [0.2.0] no CHANGELOG.md registrava o uso inicial de "hash FNV-1a 64-bit".   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.10. Síntese de Dependências, Lacunas e Decisões Humanas Pendentes do Bloco 5B
+
+    Dependências técnicas prévias à integração: Comparação real de diff entre 0.9.16 e 0.9.17; migração do SQLite para adicionar os campos estruturados do emitente em config.rs e a tabela/outbox de documentos fiscais; e validação da crate com toolchain Rust (./verify_package.sh) e ACBrMonitorPLUS real.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Decisões humanas e contábeis pendentes (DECISÃO HUMANA PENDENTE):
+
+        Definição semântica exata de payments.amount_cents (valor recebido vs. valor líquido aplicado quando há troco ou múltiplos meios);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Mapeamento explícito entre as formas comerciais do núcleo (crediário, vale-troca, outro em caixa.rs) e PaymentMethodCode (05_CREDITO_LOJA, 15_BOLETO_BANCARIO, 99_OUTROS);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Regras para vendas a prazo com entrada/sinal, arredondamento e pagamentos mistos antes de gerar FiscalBillingSnapshot;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Regra de reserva, reaproveitamento ou inutilização de (serie, numero) por caixa/estação (DF-6);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Avaliação de compatibilidade e versionamento de CONTRACT_VERSION = 1 diante das extensões da v0.2.3;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Procedimento de reconciliação para UNKNOWN_REQUIRES_QUERY (quando o XML local ainda não estiver disponível), para CANCELLATION_PENDING pós-falha de rede e para cancelamento comercial após expiração do prazo legal da SEFAZ.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+13. Segurança, Permissões (D-09), Criptografia e Sigilo
+
+(Em consolidação progressiva — incluirá análise de docs/SEGURANCA.md no Bloco 5C e auditoria dos módulos senhas.rs, nfe_assinatura/ e D-09).
+14. Testes Comprováveis, Logs Históricos, Defeitos e Contradições
+
+(Em consolidação progressiva — reúne a matriz de logs v0.9.15 da Seção 3.4 e os testes unitários/integração do núcleo e UI).
+15. Riscos Técnicos, Decisões Humanas Pendentes e Plano de Continuidade
+
+(Em consolidação progressiva — reúne as decisões pendentes das Seções 4, 5, 6, 7, 8, 9 e 12).
+3. Resumo de Conclusão da Correção do Bloco 5B
+
+    Todos os 8 pontos solicitados foram aplicados nas Seções 12.7 e 12.9:
+
+        Item 1 (Seção 12.9.1): Reconciliação automática reclassificada como risco condicionado à disponibilidade do XML local (funcionando via provider.query_document se o ACBr já tiver gravado o XML na raiz autorizada antes do timeout, e exigindo reconciliação manual controlada apenas se o XML local não estiver disponível).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Item 2 (Seção 12.9.2): Substituída a classificação de contradição por uma explicação arquitetural da diferença entre os estados/valores representados pelo contrato neutro e as capacidades operacionais documentadas do adaptador v0.2.3.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Item 3 (Seções 12.4, 12.7 e 12.9): Todos os bloqueios do adaptador foram mantidos estritamente como DOCUMENTADO, MAS NÃO VERIFICADO.
+
+        Item 4 (Seção 12.7.B.2): CONTRACT_VERSION = 1 reclassificado como risco de compatibilidade e versionamento e DECISÃO HUMANA PENDENTE.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Item 5 (Seção 12.7.A.3): Registrada a condição do texto extraído da página 59 e reproduzida a fórmula de gross_amount_cents com parênteses, numerador e denominador claramente legíveis.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 6 (Seção 12.7.B.1): payments.amount_cents classificado como lacuna semântica e DECISÃO HUMANA PENDENTE quanto a representar o valor recebido ou o valor líquido aplicado à venda.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 7 (Seção 12.7.B.4): Restrições de domínio, conversão u64/i64 e condições de arredondamento classificadas como questões a validar na futura inspeção do código .rs, separadas do que o contrato declara expressamente.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Item 8 (Seção 12.7.B.3): Separada a justificativa expressamente documentada para o bloqueio do IPI ("porque o contrato não representa corretamente sua inclusão no total da NF-e") e para o bloqueio de frete/seguro/outras despesas (fora do perfil de venda normal sem transporte modelado na v0.2.3) da observação técnica da auditoria sobre as equações da Seção 2.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Próximo bloco recomendado (aguardando autorização):
+
+        BLOCO 5C — Diagnóstico da Base Fiscal, Leiaute e Lacunas Fiscais, Matriz de Provedores e Segurança: Analisar docs/DIAGNOSTICO_BASE.md (pág. 60), docs/LEIAUTE-E-LACUNAS-FISCAIS.md (pág. 62), docs/MATRIZ-PROVEDORES.md (pág. 63) e docs/SEGURANCA.md (pág. 69).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+O Bloco 5C não foi iniciado. Aguardo sua autorização explícita para avançar.

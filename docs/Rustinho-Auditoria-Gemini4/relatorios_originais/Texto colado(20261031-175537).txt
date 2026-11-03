@@ -1,0 +1,263 @@
+ATUALIZAÇÃO DO RELATÓRIO TÉCNICO (AJUSTES DO BLOCO 4) E EXECUÇÃO DO BLOCO 5A
+
+Abaixo apresento a atualização progressiva do documento único docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md, incorporando os dois ajustes obrigatórios do Bloco 4 (Capítulo 5) e executando o BlOCO 5A — Origem e finalidade da crate fiscal independente (rustinho-fiscal v0.2.3) (Capítulo 12, Seção 12.1), com base exclusivamente em CHANGELOG.md, ORIGEM_E_STATUS.md e README.md.   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md (Atualização Progressiva)
+5. Navegação Contextual Guiada e Linkagem (Revisado com os 2 Ajustes do Bloco 4)
+5.2.1. Reconciliação da Contagem e Numeração Original da Matriz C8 (Ajuste 1)
+
+A tabela original da Seção 3 de NAVEGACAO-CONTEXTUAL-matriz.md (#04, página 48) está estruturada em 10 grupos numéricos principais (1 a 10), que se desdobram em 17 linhas/entradas numeradas preservando exatamente a nomenclatura original do documento:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+    7 casos principais sem subdivisão (7 linhas): 1, 2 (acompanhado de seu subcaso 2b), 3, 4, 5, 6, 7 e 8.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    1 subcaso de decisão em Compras (1 linha): 2b (Nota de compra com CNPJ diferente do da loja).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    5 subcasos da Central de Notificações do Início (5 linhas do grupo 9): 9a (Duplicatas), 9b (Histórico), 9c (Caixas), 9d (Backup) e 9e (Fiscal).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    3 subcasos do grupo 10 (3 linhas): 10a (Encomenda com caixa de origem diferente), 10b (Comissão e conta finalizada) e 10c (Conta a receber com pagamento parcial em várias contas).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Distinção entre entradas da tabela e situações efetivas de navegação: Das 17 entradas listadas na tabela original, 16 são situações de navegação/linkagem (1, 2, 2b, 3, 4, 5, 6, 7, 8, 9a, 9b, 9c, 9d, 9e, 10a e 10b), enquanto a entrada 10c é expressamente excluída da navegação pela própria matriz ("não é navegação: é bug a verificar [...] Ficam fora desta matriz"). (Nota documental: a expressão "matriz de 15 situações" usada nos resumos executivos das páginas 5, 7 e 19 decorre de o resumo agrupar 9a-9e em uma única linha ou contabilizar os casos de forma condensada; neste relatório técnico consolidado, preserva-se rigorosamente a numeração original de 1 a 10c sem omitir nem inventar nenhum caso ou subcaso).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+5.4.1. Atribuição Estrita dos Testes Históricos de Navegação às Versões Anteriores (Ajuste 2)
+
+Todos os resultados de testes automatizados de núcleo e de interface da navegação contextual guiada registrados no acervo (01-nucleo-antes.log, 02-nucleo-depois.log com 8/8 testes, 03-build.log, 04-telas-1a-rodada.log a 07-telas-4a-rodada.log, telas-navegacao_guiada-2.log com 32/32 itens aprovados e suite.log com 487 testes) permanecem classificados estritamente como evidências históricas executadas sobre builds anteriores (v0.9.15 / piloto 0.9.16). Nenhum desses testes históricos transfere aprovação automática para a versão 0.9.17, cuja implementação e execução de testes continuam classificadas como NÃO VERIFICADAS.   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+12. Camada Fiscal (BLOCO 5A — Origem, Finalidade e Maturidade de rustinho-fiscal v0.2.3)
+
+Análise elaborada exclusivamente a partir dos documentos rustinho-fiscal-v0.2.3/CHANGELOG.md (página 54), rustinho-fiscal-v0.2.3/ORIGEM_E_STATUS.md (página 55) e rustinho-fiscal-v0.2.3/README.md (página 56).   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Aviso de Governança e Escopo: A crate rustinho-fiscal v0.2.3 é material de estudo, revisão e proposta técnica. A emissão em produção está explicitamente bloqueada pelo código e sua documentação não constitui autorização para implementar ou ativar o emissor fiscal no Rustinho.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+12.1. Origem, Procedência e Histórico de Evolução (0.2.0 a 0.2.3)
+
+    Procedência reconstruída (ORIGEM_E_STATUS.md, README.md):
+
+        A crate não se originou de um arquivo ZIP nativo completo da versão 0.2.1; ela foi reconstruída e versionada a partir dos blocos de código contidos no documento Markdown rustinho-fiscal v0.2.1 Base 0.9.15.md. Por isso, o pacote não é uma cópia byte a byte de uma entrega original externa ("Sunda"), mas uma evolução controlada e auditada em quatro versões documentadas no CHANGELOG.md:   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        [0.2.0] (27/10/2026): Reconstrução inicial com endurecimento de SecretString (remoção de Deserialize e serialização sempre redigida como "[REDACTED]"), reescrita de safe_join_path (verificação de ParentDir, RootDir, Prefix e rejeição de symlinks via symlink_metadata), bloqueio por padrão de IPs não-loopback no AcbrMonitorAdapter, aritmética segura (checked_add, checked_sub, checked_mul em centavos i64 e milésimos u64), correção do MockFiscalAdapter (MockBehavior::AlwaysOffline, flag simulated: bool, FiscalEnvironment::Mock), validador de CNPJ alfanumérico (RFB 2026, Módulo 11 sobre ASCII - 48), adaptador TCP/IP do ACBrMonitorPLUS (terminador ETX 0x03, seções INI [Status], [Consulta], [Envio], [Cancelamento]) e desabilitação explícita de inutilização.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        [0.2.1] (27/10/2026): Remoção de bloco unsafe em SecretString::drop (src/security.rs) para compatibilidade real com #![forbid(unsafe_code)], ajuste de lints (arithmetic_side_effects e permissão de unwrap_used/expect_used restrita ao binário de testes) e inclusão do teste test_golden_json_fixtures_roundtrip sobre fixtures/.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        [0.2.2] (27/10/2026): Adoção da crate zeroize em SecretString, suporte ao preâmbulo oficial NFe criada em: ... antes de OK:/ERRO: no parser ACBr, bloqueio total de conexões TCP fora de loopback (ignorando a flag antiga allow_remote_host), retenção do arquivo INI temporário quando o resultado pós-envio é ambíguo/desconhecido para reconciliação, adoção do parser XML roxmltree (exigindo nós reais nfeProc/NFe/infNFe e nfeProc/protNFe/infProt com Id, chave, protocolo, cStat=100 e tpAmb coincidentes, impedindo falso positivo por tags dentro de comentários), exigência de reconciliação para códigos de lote/serviço/eventos/duplicidade (cStat 204/539), restrição do perfil de emissão a venda normal de saída dentro da UF (prefixo CFOP 5, bloqueando IPI, tPag=90, entradas e operações interestaduais) e vedação de detalhes de cartão em outros meios de pagamento.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        [0.2.3] (29/10/2026): Inspeção somente de leitura do código-fonte do Rustinho 0.9.16 como referência arquitetural (visando integração futura na 0.9.17), adição de variantes contratuais para cheque (tPag=02), crédito da loja (tPag=05) e boleto (tPag=15), adição de fatura/duplicatas ([Fatura], [DuplicataNNN]) para perfil estrito de NF-e 55 a prazo, criação de utilitário de rateio determinístico de desconto global em centavos, substituição do filtro genérico de prefixo CFOP 5 por uma allowlist técnica estreita de combinações CFOP/CST/CSOSN, e remoção da exigência/invenção de tBand e CNPJ de adquirente quando ausentes (mantendo tpIntegra explícito).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+12.2. Finalidade, Problema que Pretende Resolver e Princípios Arquiteturais (README.md)
+
+A crate foi concebida para resolver a comunicação padronizada do Rustinho com provedores externos de Documentos Fiscais Eletrônicos (NF-e modelo 55 e NFC-e modelo 65) sem contaminar o núcleo comercial com detalhes de protocolo, rede ou estado incerto de transmissão. Seus 5 princípios obrigatórios são:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Isolamento Total do Núcleo: A crate rustinho-fiscal não acessa o banco SQLite (banco.rs), não altera o roteador de comandos (api.rs), não participa da sincronização entre caixas (sync.rs) e não possui dependência de CXX-Qt ou QML.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Ausência de Motor Tributário Duplicado: A crate não calcula impostos nem decide tributação; ela recebe uma fotografia imutável (FiscalDocumentRequest) já calculada pelo núcleo e valida apenas a integridade matemática (checked_add, checked_mul, checked_sub), a completude estrutural e a segurança do protocolo.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Zero Código unsafe (unsafe_code = "forbid"): Todo o código da crate — incluindo proteção de segredos (SecretString) e parser de protocolo TCP — é escrito em Rust 100% seguro.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Prevenção Estrita de Falsos Positivos e Duplicidade Fiscal:
+
+        Respostas de simulação (MockFiscalAdapter) carregam obrigatoriamente simulated: true e environment: Mock, impedindo que testes sejam confundidos com autorização real da SEFAZ.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        O indicador adapter_online: true significa apenas que o processo local respondeu ao socket/transporte, enquanto sefaz_online só é preenchido mediante consulta real de status de serviço na SEFAZ.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Qualquer queda de conexão ou timeout após o envio de bytes resulta obrigatoriamente em FiscalOperationState::UnknownRequiresQuery / FiscalError::UnknownOutcomeAfterSend, bloqueando o reenvio automático às cegas e exigindo reconciliação prévia.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Compatibilidade com CNPJ Alfanumérico (Vigência Julho/2026): Inclui validador compatível com a regra oficial Módulo 11 sobre ASCII - 48 da Receita Federal.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+12.3. Relação com o Rustinho Principal
+
+    Desacoplamento físico e lógico: A crate reside fora da árvore principal do Rustinho (rustinho-codigo-fonte-0.9.17.zip).   
+    rustinho-codigo-fonte-0.9.17.zip+ 2
+
+    Relação com as versões 0.9.16 e 0.9.17: O código do Rustinho 0.9.16 foi apenas lido como referência arquitetural na preparação da v0.2.3, sem sofrer nenhuma alteração. A ligação com a versão 0.9.17 é tratada exclusivamente como integração futura planejada, ainda não executada.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    Fronteira de responsabilidade comercial vs. fiscal: O rateio de desconto global em centavos fornecido pela crate serve apenas para montar a fotografia fiscal imutável e não altera nem substitui os registros comerciais persistidos no núcleo. Da mesma forma, o mapeamento das formas comerciais internas do Rustinho ("crediário", "vale-troca") para os códigos fiscais (tPag) não é inferido pela crate, cabendo exclusivamente a uma definição futura no núcleo.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+12.4. O Que Está Implementado na Crate vs. O Que É Proposta ou Bloqueio
+
+Com base estrita nos três documentos analisados neste bloco (CHANGELOG.md, ORIGEM_E_STATUS.md e README.md), distingue-se o que foi escrito nos módulos da crate daquilo que permanece bloqueado ou apenas proposto:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Categoria	Escopo Descrito nos 3 Documentos (CHANGELOG, ORIGEM_E_STATUS, README)	Classificação na Auditoria
+Módulos e funcionalidades escritas na crate rustinho-fiscal v0.2.3	
+
+• src/contract.rs: Contrato neutro (CONTRACT_VERSION = 1), aritmética segura (i64 centavos / u64 milésimos), CNPJ alfanumérico, meios de pagamento explícitos (incluindo cheque 02, crédito loja 05, boleto 15), fatura/duplicatas para NF-e 55 a prazo e função de rateio determinístico de desconto global.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• src/security.rs: SecretString redigida ("[REDACTED]") sem unsafe, sanitizador de logs, validador contra injeção de CR/LF/NUL/delimitadores e safe_join_path contra path traversal e symlinks.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• src/error.rs: Catálogo FiscalError separando falha pré-envio, resultado incerto pós-envio (UnknownOutcomeAfterSend), rejeição SEFAZ e operação não suportada.
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+• src/adapter/mod.rs e src/adapter/mock.rs: Trait FiscalProvider e MockFiscalAdapter determinístico com simulated: true, AlwaysOffline e retenção de estado incerto por chave de idempotência.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• src/adapter/acbr.rs: AcbrMonitorAdapter via TCP estrito em loopback, framing ETX (0x03), suporte a preâmbulo NFe criada em:, geração INI ([Status], [Consulta], [Envio], [Cancelamento], [Fatura], [DuplicataNNN]), preservação de INI em estado incerto, validação XML via roxmltree (nfeProc/NFe/infNFe e protNFe/infProt com cStat=100 e tpAmb) e allowlist restrita de CFOP/CST/CSOSN.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+• Testes escritos: test_golden_json_fixtures_roundtrip, testes de datas, rateio, pagamentos, parcelas, CFOP e harness TCP local.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+DOCUMENTADO, MAS NÃO VERIFICADO (código .rs da crate reside no Apêndice H, páginas 96–257 NÃO ACESSÍVEIS NESTA SESSÃO, e não foi compilado com cargo/rustc).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+Propostas arquiteturais e decisões dependentes do núcleo	
+
+• Integração futura da crate ao núcleo do Rustinho 0.9.17.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• Definição no núcleo da equivalência entre formas comerciais (crediário, vale-troca) e tPag.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• Eventual suporte futuro a estação fiscal dedicada em rede (DF-4) com canal autenticado.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+PROPOSTA / DECISÃO HUMANA PENDENTE.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Funcionalidades não implementadas ou explicitamente bloqueadas	
+
+• Emissão em produção bloqueada no código (ausência dos grupos da Reforma Tributária do Consumo — RTC: IBS, CBS e IS — e de homologação real).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+• Operações bloqueadas no perfil emissor: vendas interestaduais/DIFAL, exportação, entrada, devolução, frete, seguro, outras despesas, IPI, contingência, tPag=90 (sem pagamento) e combinações CFOP/CST/CSOSN fora da allowlist de teste.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+• Inutilização de numeração e importação de XML de compras: não implementadas no adaptador.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• Consulta apenas pela chave de acesso: não implementada (exige arquivo XML salvo em raiz local autorizada).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+• Conexão TCP remota: bloqueada no AcbrMonitorAdapter (aceita somente loopback).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+CONFIRMADO POR EVIDÊNCIA HISTÓRICA (limites e bloqueios declarados nos 3 documentos).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+12.5. Estado Real de Maturidade, Dependências e Limitações de Validação
+
+    Requisitos e Dependências citados nos 3 documentos:
+
+        Toolchain mínima exigida: Rust 1.75+ (sem dependências nativas externas ou OpenSSL).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Bibliotecas citadas nos registros de alteração: roxmltree (validação estrutural de XML), zeroize (limpeza segura de SecretString) e serde (Serialize/Deserialize).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Utilitário de verificação: script ./verify_package.sh.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Maturidade e Validação Efetivamente Executada vs. Pendente:
+
+        O que foi executado na geração do pacote: Apenas revisão estática/manual dos arquivos e verificação via scripts Python das fixtures JSON, da estrutura do ZIP e dos hashes SHA-256.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        O que NÃO foi executado (por ausência de cargo, rustc, rustfmt e ACBrMonitorPLUS no ambiente de geração):
+
+            cargo fmt --all -- --check (NÃO EXECUTADO);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            cargo clippy --all-targets -- -D warnings (NÃO EXECUTADO);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            cargo test (NÃO EXECUTADO);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            cargo build --release (NÃO EXECUTADO);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            Comunicação TCP contra um processo ACBrMonitorPLUS real (NÃO EXECUTADA);   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+            Validação de schema XSD, assinatura digital, cadeia de certificados, homologação na SEFAZ e revisão contábil por UF (NÃO EXECUTADAS).   
+            Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Limitação operacional de segurança em arquivos temporários (README.md):
+
+        Os arquivos INI temporários gerados para emissão podem conter dados pessoais e fiscais e são mantidos no disco quando ocorre resultado incerto para permitir reconciliação; a limpeza de arquivos com mais de 72 horas é apenas oportunista (disparada durante uma emissão seguinte), não garantindo expurgo automático caso não ocorram novas emissões.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+Fechamento do BLOCO 5A
+
+    O que foi analisado:
+
+        Os 2 ajustes obrigatórios do Bloco 4 aplicados ao Capítulo 5 (detalhamento exato das 10 numerações principais desdobradas nas 17 entradas originais 1 a 10c da matriz C8, separando as 16 situações de navegação da hipótese de bug 10c; e manutenção estrita de todos os testes históricos como pertencentes às versões 0.9.15/0.9.16, sem atribuir aprovação à 0.9.17).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Os 3 documentos iniciais da crate fiscal independente: CHANGELOG.md (página 54), ORIGEM_E_STATUS.md (página 55) e README.md (página 56).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    O que foi confirmado:
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA: A crate rustinho-fiscal v0.2.3 é uma reconstrução evoluída a partir de blocos Markdown da v0.2.1, totalmente isolada do núcleo do Rustinho (sem acesso a SQLite, rotas, sync ou QML), projetada para receber uma fotografia imutável (FiscalDocumentRequest) e comunicar-se com provedores externos (como ACBrMonitorPLUS em loopback) ou MockFiscalAdapter sem código unsafe e sem falsos positivos de autorização.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA: A crate encontra-se em estado de desenvolvimento/revisão, com produção bloqueada no código, e nunca foi compilada nem testada com cargo fmt, cargo clippy, cargo test, cargo build --release, ACBrMonitorPLUS real ou SEFAZ por ausência de toolchain Rust e do processo ACBr no ambiente em que foi gerada.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Problemas encontrados (limitações e bloqueios documentados na própria crate):
+
+        Ausência de compilação e execução real da suíte de testes Rust da crate (cargo test / clippy pendentes de execução via ./verify_package.sh).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Cobertura restrita apenas a venda normal presencial de saída dentro da UF (sem RTC/IBS/CBS/IS, sem IPI, sem frete/seguro/outras despesas, sem interestadual/DIFAL, sem contingência, sem inutilização e sem importação de XML de compra).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Consulta por chave limitada à existência prévia do arquivo XML em diretório local autorizado (restrição do comando NFe.ConsultarNFe do ACBr).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Expurgo de arquivos INI temporários (>72h) apenas oportunista durante novas emissões, mantendo dados fiscais/pessoais em disco caso ocorra falha pós-envio sem emissões subsequentes.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Contradições:
+
+        Nenhuma contradição interna entre CHANGELOG.md, ORIGEM_E_STATUS.md e README.md; os três documentos são estritamente consistentes ao declarar a procedência reconstruída da crate, a evolução 0.2.0 → 0.2.3, o isolamento em relação ao Rustinho 0.9.16/0.9.17 e a não execução do compilador Rust.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    O que não pôde ser verificado (NÃO VERIFICADO / NÃO ACESSÍVEL NESTA SESSÃO):
+
+        O código-fonte .rs dos 8 arquivos da crate rustinho-fiscal v0.2.3 (src/contract.rs, src/security.rs, src/error.rs, src/adapter/mod.rs, src/adapter/mock.rs, src/adapter/acbr.rs, src/lib.rs e testes) e as fixtures .json, que estão no Apêndice H do PDF (páginas 96–257, NÃO ACESSÍVEIS NESTA SESSÃO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Compilação real e execução de ./verify_package.sh com cargo/rustc (NÃO VERIFICADO por ausência de toolchain Rust no ambiente).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Próximo bloco recomendado:
+
+        BLOCO 5B — Arquitetura Fiscal, Contrato Neutro e Plano de Integração com o Núcleo: Analisar o próximo grupo pequeno de documentos técnicos da pasta rustinho-fiscal-v0.2.3/docs/:
+
+            docs/ARQUITETURA.md (página 57);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md (página 58);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/CONTRATO-FISCAL.md (página 59);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/INTEGRACAO-POSTERIOR-RUSTINHO.md (página 61).   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+Aguardo sua autorização para iniciar o BLOCO 5B.

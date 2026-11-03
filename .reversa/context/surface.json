@@ -1,0 +1,84 @@
+{
+  "generated_at": "2026-11-02T13:56:00-03:00",
+  "project_root": "/home/renan/Área de trabalho/Rustinh0",
+  "languages": [
+    { "name": "QML", "extensions": [".qml"], "file_count": 210 },
+    { "name": "Rust", "extensions": [".rs"], "file_count": 96 },
+    { "name": "XML", "extensions": [".xml"], "file_count": 76 },
+    { "name": "Markdown", "extensions": [".md"], "file_count": 33 },
+    { "name": "SQL", "extensions": [".sql"], "file_count": 23 },
+    { "name": "Python", "extensions": [".py"], "file_count": 16 },
+    { "name": "C/C++", "extensions": [".cpp", ".h"], "file_count": 18 },
+    { "name": "Shell", "extensions": [".sh"], "file_count": 3 },
+    { "name": "TOML/YAML", "extensions": [".toml", ".yml"], "file_count": 8 }
+  ],
+  "primary_language": "Rust",
+  "frameworks": [
+    { "name": "CXX-Qt", "version": "0.10", "source": "app/Cargo.toml" },
+    { "name": "Rusqlite (SQLite bundled)", "version": "0.40", "source": "nucleo/Cargo.toml" },
+    { "name": "Argon2", "version": "0.6", "source": "nucleo/Cargo.toml" },
+    { "name": "ChaCha20Poly1305", "version": "0.11.0", "source": "nucleo/Cargo.toml" },
+    { "name": "X25519-Dalek", "version": "2", "source": "nucleo/Cargo.toml" },
+    { "name": "Ring / Rustls-WebPKI / X509-Parser", "version": "0.17 / 0.103 / 0.18", "source": "nucleo/Cargo.toml" },
+    { "name": "roxmltree", "version": "0.21.1", "source": "nucleo/Cargo.toml" },
+    { "name": "rxing", "version": "0.9", "source": "nucleo/Cargo.toml" }
+  ],
+  "package_manager": "cargo",
+  "entry_points": [
+    { "path": "nucleo/src/lib.rs", "type": "core_library_entry" },
+    { "path": "nucleo/src/api.rs", "type": "command_dispatcher_entry" },
+    { "path": "app/src/main.rs", "type": "desktop_app_entry" },
+    { "path": "app/src/ponte.rs", "type": "desktop_cxx_qt_bridge" },
+    { "path": "app/qml/Main.qml", "type": "qml_root_entry" },
+    { "path": "android/main.cpp", "type": "android_native_entry" },
+    { "path": "android/rust/src/lib.rs", "type": "android_rust_staticlib_entry" }
+  ],
+  "config_files": [
+    "Cargo.toml",
+    "nucleo/Cargo.toml",
+    "app/Cargo.toml",
+    "android/rust/Cargo.toml",
+    "android/CMakeLists.txt",
+    "rustfmt.toml",
+    "compilar.sh"
+  ],
+  "ci_cd": [
+    ".github/workflows/montar.yml",
+    ".github/workflows/montar-teste-windows.yml",
+    ".github/workflows/android.yml"
+  ],
+  "database_hints": [
+    { "path": "nucleo/src/banco.rs", "type": "sqlite_connection_manager" },
+    { "path": "nucleo/src/migracao.rs", "type": "migration_runner" },
+    { "path": "nucleo/src/migracoes/", "type": "migrations_dir" }
+  ],
+  "test_framework": "cargo test (Rust unit/integration) + Python QML/UI test scripts",
+  "test_file_count": 37,
+  "modules": [
+    "avisos-notificacoes-inicio",
+    "navegacao-requisitos",
+    "config-compras-importacao",
+    "api-permissoes",
+    "busca-produtos-unidades-estoque",
+    "vendas-caixa-devolucoes-encomendas",
+    "financeiro-receber-pagar-dre",
+    "fiscal-nfe-assinatura-impressao",
+    "sync-rede-computador-portatil",
+    "banco-migracoes-backup-arquivos",
+    "seguranca-usuarios-supervisao-auditoria",
+    "pessoas-oficina-painel-base",
+    "ponte-desktop-android",
+    "instalador-cicd-build"
+  ],
+  "total_files": 636,
+  "organization_suggestion": {
+    "granularity": "hybrid",
+    "rationale": "O projeto combina crates/camadas top-level (nucleo/, app/, android/, instalador/) com despacho centralizado em nucleo/src/api.rs e módulos por domínio funcional.",
+    "signals": [
+      { "type": "top_level_domain_folders", "evidence": ["nucleo/src/", "app/qml/", "android/"] },
+      { "type": "centralized_dispatcher", "evidence": ["nucleo/src/api.rs"] }
+    ],
+    "features": []
+  }
+}
+

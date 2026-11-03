@@ -1,0 +1,564 @@
+Parte 1 — Ajustes Finais das Seções 12.7 e 12.9 (Conclusão do Bloco 5B)
+
+Abaixo estão exclusivamente as versões finais corrigidas das Seções 12.7 e 12.9 do documento docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md, contemplando os quatro ajustes determinados (sem repetir os demais capítulos já aprovados):
+12.7. Especificação do Contrato Fiscal Neutro e Análise Matemática e Semântica (docs/CONTRATO-FISCAL.md) (Versão Final Corrigida)
+
+O documento docs/CONTRATO-FISCAL.md (página 59) especifica o contrato JSON versionado (contract_version: 1 obrigatório), as enumerações em CAIXA ALTA e as invariantes aritméticas:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+A. Estruturas, Escalas Numéricas e Reprodução Fiel das Fórmulas da Página 59
+
+    Enums documentadas em CONTRATO-FISCAL.md:
+
+        DocumentModel: "NFE_55", "NFCE_65";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        FiscalEnvironment: "PRODUCTION", "HOMOLOGATION", "MOCK";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        TaxRegime: "SIMPLES_NACIONAL", "SIMPLES_EXCESSO_SUBLIMITE", "REGIME_NORMAL", "MEI";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        PaymentMethodCode: "01_DINHEIRO", "03_CARTAO_CREDITO", "04_CARTAO_DEBITO", "17_PIX", "90_SEM_PAGAMENTO", "99_OUTROS" (na Seção 1), acrescido na seção de extensões v0.2.3 por "02_CHEQUE", "05_CREDITO_LOJA" e "15_BOLETO_BANCARIO";   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        FiscalOperationState: "PREPARED_PENDING", "FORWARDED_AWAITING", "AUTHORIZED_CONFIRMED", "REJECTED_CONFIRMED", "CANCELLATION_PENDING", "CANCELLED_CONFIRMED", "CONTINGENCY_ADOPTED", "UNKNOWN_REQUIRES_QUERY", "ADAPTER_UNAVAILABLE", "UNSUPPORTED_OPERATION", "INVALID_RESPONSE".   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Escalas numéricas expressamente definidas (Seção 2 da Página 59):
+
+        Valores monetários (FiscalAmountCents): Inteiros de 64 bits com sinal (i64) representando centavos exatos (1500 = R$ 15,00);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Quantidades (QuantityMillis): Inteiros de 64 bits sem sinal (u64) em milésimos (2000 = 2,000 UN);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Alíquotas (icms_rate_bps): Centésimos de ponto percentual (1800 = 18,00%).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Conferência e reprodução das equações originais da Página 59 (Ajuste 1):
+
+        Nota de conferência da fonte: Na página 59 do PDF, o texto extraído da camada de texto contém uma marcação LaTeX com dois delimitadores corrompidos pelo extrator textual (\$\$\text{gross\_amount\_cents) = \left\lfloor \frac{\text(quantity\_millis} \times \text{unit\_price\_cents) + 500}{1000} \right\rfloor\$\$), e a página 59 não possui imagem rasterizada anexada na galeria visual.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Reprodução da Equação do Item em texto estruturado explícito:
+        Plaintext
+
+        gross_amount_cents = floor( ( (quantity_millis * unit_price_cents) + 500 ) / 1000 )
+        net_amount_cents   = gross_amount_cents - discount_cents
+
+       
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Reprodução da Equação do Item em notação matemática com parênteses, numerador e divisão por 1000 claramente visíveis:
+        gross_amount_cents=⌊((quantity_millis×unit_price_cents)+500)/1000⌋
+        net_amount_cents=gross_amount_cents−discount_cents
+
+           
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Reprodução da Equação de Pagamentos (Página 59):
+
+            Em texto estruturado explícito:
+            sum(payments.amount_cents) = total_net_cents + change_cents   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            Em notação matemática:
+            ∑payments.amount_cents=total_net_cents+change_cents
+
+               
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+B. Lacunas Semânticas, Riscos de Versionamento e Questões Matemáticas a Validar na Seção 12.7
+
+    Situação semântica de payments.amount_cents (Lacuna Semântica e DECISÃO HUMANA PENDENTE):
+
+        O que está documentado: CONTRATO-FISCAL.md apresenta a igualdade ∑payments.amount_cents=total_net_cents+change_cents e registra que, no perfil estrito de billing (NF-e 55 a prazo), as parcelas precisam somar ao valor líquido.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Lacuna semântica identificada: Os documentos não esclarecem se, quando há troco (change_cents > 0) ou múltiplos meios de pagamento, payments.amount_cents representa o valor bruto recebido naquele meio ou o valor líquido aplicado à venda. Classifica-se como lacuna semântica e DECISÃO HUMANA PENDENTE (sem escolher uma interpretação).
+
+    Risco de compatibilidade e versionamento em CONTRACT_VERSION = 1:
+
+        Os documentos ARQUITETURA_REAL_0.9.16_E_PLANO_INTEGRACAO_0.9.17.md e CONTRATO-FISCAL.md registram que a v0.2.3 manteve CONTRACT_VERSION = 1 ao adicionar o campo opcional billing (#[serde(default)]) e as novas variantes 02_CHEQUE, 05_CREDITO_LOJA e 15_BOLETO_BANCARIO em PaymentMethodCode, apontando que a expansão de variantes requer testes de compatibilidade e revisão de CONTRACT_VERSION antes de integrar consumidores externos. Classifica-se como risco de compatibilidade e versionamento e DECISÃO HUMANA PENDENTE.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Separação entre justificativas expressamente documentadas para bloqueios de totalizadores e observação técnica da auditoria:
+
+        Justificativas expressamente documentadas (DOCUMENTADO, MAS NÃO VERIFICADO): O IPI é declarado como bloqueado "porque o contrato não representa corretamente sua inclusão no total da NF-e", enquanto frete, seguro e outras despesas são declarados fora do perfil de venda normal presencial sem transporte modelado nesta versão.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Observação técnica da auditoria (Questão a validar): Como o resumo da Seção 2 de CONTRATO-FISCAL.md não transcreve a equação de formação de total_net_cents a partir dos itens, verificar como src/contract.rs valida esse somatório permanece como questão a validar quando o código .rs for inspecionado, sem atribuir a ausência dessa equação no resumo como causa automática de todos os bloqueios de IPI, frete, seguro e outras despesas.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Questões matemáticas, de tipagem e de arredondamento a validar no código .rs:
+
+        O que está expressamente documentado: Uso de i64 para FiscalAmountCents, u64 para QuantityMillis, operações checked_add/checked_sub/checked_mul e rateio apportion_sale_discount_cents por maior resto com redistribuição quando itens pequenos atingem seu limite.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Questões a validar na futura inspeção dos arquivos .rs: (a) como src/contract.rs converte quantity_millis (u64) e unit_price_cents (i64) na expressão ((quantity_millis * unit_price_cents) + 500) / 1000; (b) quais restrições de domínio (não negatividade de preços, descontos, totais e troco) estão implementadas para garantir o arredondamento correto; e (c) como a variante "90_SEM_PAGAMENTO" (documentada no CHANGELOG.md v0.2.2 como bloqueada no adaptador) se comporta frente à equação de pagamentos em src/contract.rs.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+12.9. Comparação do Plano de Integração (Bloco 5B) com as Limitações do Bloco 5A, Riscos Condicionados e Diferenças Contrato vs. Adaptador (Versão Final Corrigida)
+
+    Possibilidade de reconciliação automática em UNKNOWN_REQUIRES_QUERY, condicionada à presença do XML local e ainda não verificada na implementação (Ajuste 2):
+
+        Fluxo descrito no plano: Em INTEGRACAO-POSTERIOR-RUSTINHO.md (Fase C) e ARQUITETURA_REAL_0.9.16...md (Seção 2, item 5), falhas pós-envio (UnknownOutcomeAfterSend) levam ao estado UNKNOWN_REQUIRES_QUERY, bloqueando o reenvio automático e prevendo reconciliação por provider.query_document(...) ou processo manual controlado.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Condição documentada no adaptador (DOCUMENTADO, MAS NÃO VERIFICADO): Conforme ARQUITETURA.md, ARQUITETURA_REAL_0.9.16...md e o Bloco 5A, o comando NFe.ConsultarNFe do ACBrMonitorPLUS exige o caminho de um arquivo XML local em diretório autorizado, não consultando apenas pela chave de acesso.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Síntese do risco: Existe possibilidade de reconciliação automática, condicionada à presença do XML local e ainda não verificada na implementação; caso o arquivo XML local não esteja disponível no diretório autorizado após a falha de envio, a consulta via AcbrMonitorAdapter não poderá ser concluída apenas pela chave, exigindo o processo manual controlado previsto no plano.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Diferença entre os estados e valores representados pelo contrato e as capacidades documentadas do adaptador (Ajustes 2 e 3):
+
+        O documento CONTRATO-FISCAL.md define os estados e valores do protocolo neutro (PRODUCTION, 90_SEM_PAGAMENTO, CONTINGENCY_ADOPTED), enquanto ARQUITETURA.md e os documentos do Bloco 5A descrevem que o adaptador v0.2.3 restringe suas capacidades ao perfil de venda normal dentro da UF em homologação e recusa perfis não modelados com UnsupportedOperation (bloqueios classificados como DOCUMENTADO, MAS NÃO VERIFICADO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Quanto à menção documental a descritores de capacidade em src/adapter/mod.rs, a existência e a implementação efetiva desses descritores permanecem classificadas como NÃO VERIFICADAS, pois os arquivos .rs não foram inspecionados nesta sessão.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Transição de estados em caso de crash durante a Fase B (PREPARED_PENDING vs. FORWARDED_AWAITING):
+
+        CONTRATO-FISCAL.md define "PREPARED_PENDING", "FORWARDED_AWAITING" e "UNKNOWN_REQUIRES_QUERY", enquanto INTEGRACAO-POSTERIOR-RUSTINHO.md descreve a gravação de PREPARED_PENDING na Fase A e a gravação do retorno na Fase C. Na futura integração (ARQUITETURA_REAL_0.9.16...md, Seção 5), será necessário definir e testar como o núcleo recupera registros que permaneceram em PREPARED_PENDING após um crash ocorrido durante a Fase B.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Tratamento da numeração (serie, numero) reservada na Fase A e reconciliação de CANCELLATION_PENDING:
+
+        Como a Fase A reserva (serie, numero) antes do envio e a inutilização é descrita como não implementada no adaptador (DOCUMENTADO, MAS NÃO VERIFICADO), a decisão DF-6 precisará definir o destino da numeração reservada quando houver falha pré-envio ou rejeição definitiva.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        De igual modo, como NFe.ConsultarNFe é documentado como não convertendo automaticamente status de consulta em confirmação de evento de cancelamento (DOCUMENTADO, MAS NÃO VERIFICADO), o plano precisará definir a reconciliação caso ocorra falha de rede após o envio de NFe.CancelarNFe (CANCELLATION_PENDING).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Observações de histórico documental restritas aos documentos dos Blocos 5A e 5B (Ajuste 4):
+
+        Em INTEGRACAO-POSTERIOR-RUSTINHO.md, o título e o complemento final referenciam o código 0.9.16, mas o título da Seção 3 conservou a redação (sync.rs na 0.9.15).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Em ARQUITETURA.md, o diagrama do MockFiscalAdapter registra "Idempotência c/ SHA-256", enquanto a nota histórica da versão [0.2.0] em CHANGELOG.md registrava "hash FNV-1a 64-bit".   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+Parte 2 — Execução do BLOCO 5C: Diagnóstico da Base Fiscal, Leiaute e Lacunas, Matriz de Provedores e Segurança
+
+Análise realizada exclusivamente sobre os quatro documentos autorizados para o Bloco 5C:
+
+    docs/DIAGNOSTICO_BASE.md (Página 60);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    docs/LEIAUTE-E-LACUNAS-FISCAIS.md (Página 62);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    docs/MATRIZ-PROVEDORES.md (Página 63);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    docs/SEGURANCA.md (Página 69).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+Abaixo estão as novas seções (Seções 12.11 a 12.14 do Capítulo 12 e Seção 13.1 do Capítulo 13) incorporadas progressivamente ao documento técnico único docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md:
+12.11. Diagnóstico Histórico da Base Fiscal Recebida (docs/DIAGNOSTICO_BASE.md — Página 60)
+
+O documento docs/DIAGNOSTICO_BASE.md registra a auditoria inicial que deu origem à reconstrução da crate fiscal até a revisão v0.2.2:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Artefatos históricos de origem identificados no documento (CONFIRMADO POR EVIDÊNCIA HISTÓRICA):
+
+        Briefing Técnico: BRIEFING COMPLETO SUNDA INTEGRACAO FISCAL RUSTINHO 0.9.15.md;   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Pacote Parcial Inicial (v0.1.0): Rustinho-Fiscal-Sunda-reconstruido-v2.zip, contendo 11 arquivos originais da árvore rustinho-fiscal/;   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Pacote Reconstruído Preliminar (v0.2.0): rustinho-fiscal-sunda-v0.2.0-from-markdown.zip (24 arquivos), no qual havia sido detectada a incompatibilidade entre unsafe_code = "forbid" em Cargo.toml e o bloco unsafe em src/security.rs;   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Declaração de escopo sobre o núcleo 0.9.15 naquela revisão: O documento registra expressamente que, naquela etapa (v0.2.2), o repositório principal do núcleo do Rustinho 0.9.15 (nucleo/src/fiscal.rs, api.rs, sync.rs, banco.rs, app/qml/*) não havia sido anexado, baseando-se nas especificações transcritas na Seção 3 do Briefing Técnico. (Nota de evolução documental: posteriormente, na v0.2.3, o código-fonte do Rustinho 0.9.16 foi inspecionado apenas para leitura, conforme registrado em ORIGEM_E_STATUS.md e ARQUITETURA_REAL_0.9.16...md, mas DIAGNOSTICO_BASE.md permaneceu com seu texto estacionado na revisão v0.2.2, sem seção de atualização para a v0.2.3).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Seis defeitos da base preliminar (v0.1.0/v0.2.0) documentados como corrigidos na revisão (DOCUMENTADO, MAS NÃO VERIFICADO nos arquivos .rs):
+
+        Item 1 (src/adapter/acbr.rs era placeholder no v0.1.0): Documentado como substituído por transporte TCP/IP com framing ETX (0x03) e parser INI.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 2 (Conflito unsafe_code = "forbid" vs. SecretString::drop na v0.2.0): Documentado que na v0.2.2 o bloco unsafe em src/security.rs foi eliminado mediante adoção da crate zeroize.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 3 (SecretString vulnerável a vazamento no v0.1.0): Documentada a remoção de Deserialize e a serialização sempre redigida como "[REDACTED]".   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 4 (MockFiscalAdapter produzia falsos positivos no v0.1.0): Documentada a correção para respeitar AlwaysOffline, marcar simulated: true e FiscalEnvironment::Mock, e substituir na v0.2.2 o hash FNV-1a (que era histórico da v0.2.0) por SHA-256 no cálculo de impressão digital de conflito de idempotência.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 5 (Risco de overflow aritmético): Documentado o uso de checked_add, checked_sub e checked_mul nos totalizadores fiscais.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Item 6 (Validação de CNPJ Alfanumérico — Vigência Julho/2026): Documentada a implementação do algoritmo Módulo 11 sobre ASCII - 48 (informação documentada, com implementação .rs e validade jurídica/regulatória NÃO VERIFICADAS).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+12.12. Leiaute NF-e/NFC-e 4.00, Subconjunto Suportado e 12 Lacunas Bloqueadas (docs/LEIAUTE-E-LACUNAS-FISCAIS.md — Página 62)
+
+O documento docs/LEIAUTE-E-LACUNAS-FISCAIS.md detalha o subconjunto estrito aceito pelo gerador INI na v0.2.3 e lista 12 lacunas intencionalmente bloqueadas. Como os arquivos .rs não foram inspecionados nesta sessão, todos os comportamentos de código abaixo são classificados como DOCUMENTADO, MAS NÃO VERIFICADO:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+A. Subconjunto Fiscal Documentado como Suportado no Gerador INI (Apenas Homologação)
+
+    Perfil de operação: Exclusivamente venda normal, presencial, de saída e dentro da mesma UF (sem transporte e sem cálculo tributário próprio pela crate).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Regimes e ICMS aceitos:
+
+        CRT Simples Nacional: Apenas CSOSN 102 ou CSOSN 500 (exigindo dados explícitos de ICMS retido anteriormente por ST quando 500);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        CRT Regime Normal ou Simples com excesso de sublimite: Apenas CST 00 (com base de cálculo, modalidade, alíquota e valor próprio informados; isenção, não incidência e demais CSTs são bloqueados).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    PIS/COFINS aceitos: CST 01, 02, 04, 06, 07, 08, 09, 49 ou 99, com validação de campos conforme o CST.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Allowlist técnica de CFOP/CST/CSOSN introduzida na v0.2.3: O filtro genérico "CFOP começa com 5" foi substituído por uma allowlist técnica mínima no adaptador (bloqueio técnico conservador, que não constitui mapeamento fiscal geral nem prova que uma operação real esteja correta).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Pagamentos e Cobrança (v0.2.3): Dinheiro (01), cheque (02), cartões (03/04 com dados exigidos pelo contrato e recusa de dados de cartão em outros meios), crédito da loja (05), boleto (15), Pix (17) e outros (99), além de [Fatura] e [DuplicataNNN] restritas à NF-e 55 a prazo com valores conferidos (sem converter "vale-troca" automaticamente em 05).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+B. As 12 Lacunas Fiscalmente Bloqueadas ou Não Implementadas (DOCUMENTADO, MAS NÃO VERIFICADO)
+Nº	Lacuna Documentada em LEIAUTE-E-LACUNAS-FISCAIS.md	Justificativa e Comportamento Documentados	Classificação
+1	RTC / IBS, CBS e IS	
+
+A estrutura não representa todos os novos grupos e regras de transição da Reforma Tributária do Consumo; emissão em produção bloqueada.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+2	CNPJ alfanumérico em ACBr/SEFAZ	
+
+A crate valida o algoritmo do CNPJ, mas não comprova que a versão instalada do ACBrMonitorPLUS, o XSD ou a SEFAZ estadual aceitem o documento em homologação.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+3	CST/CSOSN não suportados	
+
+Não há inferência; qualquer código fora do subconjunto permitido retorna UnsupportedOperation antes de transmitir.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+4	IPI	
+
+Bloqueado porque o contrato não representa corretamente como o IPI entra nos totais do documento; o gerador não escreve o grupo IPI e recusa pedidos com IPI preenchido.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+5	Frete, seguro e outras despesas	
+
+Não são modelados (perfil sem transporte e sem acréscimos); registros comerciais que dependam deles não podem usar este adaptador.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+6	Interestadual/DIFAL, exterior, entrada, devolução, ajuste e nota complementar	
+
+Bloqueados por ausência de grupos e regras completas no contrato/gerador.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+7	Contingência	
+
+Tipo de emissão diferente de normal é recusado; não há armazenamento, reimpressão ou finalização automática de contingência.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+8	Cancelamento	
+
+Comando separado implementado, mas sem teste real de evento; o núcleo deve manter CANCELLATION_PENDING até retorno inequívoco com protocolo.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+9	Consulta por chave (NFe.ConsultarNFe)	
+
+Recebe caminho de arquivo XML; só executa a consulta se encontrar um XML com a chave esperada numa raiz local explicitamente autorizada e não afirma que uma nota inexiste quando o arquivo não está disponível.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+10	Inutilização e importação de XML de compras	
+
+Não implementadas no adaptador; capacidades retornam falso / não suportado.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+11	Schema XSD, assinatura digital e certificado	
+
+A verificação estrutural local do XML (roxmltree) não substitui validação XSD, assinatura digital, cadeia de certificados ou autorização SEFAZ.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+12	Benefício fiscal (cBenef), monofásicos e grupos especiais	
+
+Sem representação completa no contrato; casos que os exijam devem ser bloqueados pelo núcleo/contador até extensão do contrato.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+
+    Nota sobre referências normativas externas no documento: As menções à Portaria SRE 34/2026 (SP), à NT 2025.002 v1.52 (01/10/2026) e à NT 2023.002 v1.02 (27/10/2026) são registradas como informações extraídas da documentação histórica, com validação jurídica/regulatória independente NÃO VERIFICADA.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+12.13. Matriz Comparativa de Provedores e Conflito Arquitetural Android (docs/MATRIZ-PROVEDORES.md — Página 63)
+
+O documento docs/MATRIZ-PROVEDORES.md compara quatro arquiteturas de emissão fiscal más uma quinta alternativa (API hospedada) adicionada na atualização de 29/10/2026, destacando um conflito arquitetural direto com a meta multiplataforma do Rustinho:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+A. Comparação Documentada entre as Alternativas de Provedor Fiscal
+Critério Avaliado	1. ACBrMonitorPLUS (Processo Externo)	2. ACBrLib (Biblioteca Nativa C ABI)	3. Estação Assinadora / Serviço Local	4. Emissão Própria 100% Rust	5. API Hospedada (ex.: Focus NFe — Atualização 29/10/2026)
+Windows x86_64	
+
+Suportado oficialmente (instalador maduro, suporte A1/A3).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Suportado (.dll).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Suportado.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Viável para A1; complexo para A3 (PKCS#11 / CryptoAPI).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Consumível via HTTP/REST (exige internet e avaliação contratual).
+Log_Consolidado_Rustinho_0.9.17.pdf
+Linux x86_64	
+
+Suportado (DEB/RPM/binário; requer Xvfb ou ambiente gráfico GTK2/Qt conforme build).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Suportado (.so), exigindo empacotamento cuidadoso de libxml2/openssl.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Suportado nativamente em modo headless.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Viável para A1.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Consumível via HTTP/REST.
+Log_Consolidado_Rustinho_0.9.17.pdf
+Android (ARM64 / ARMv7)	
+
+NÃO SUPORTADO (binário Desktop x86_64).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Possui builds Android para parte das libs, mas incompatível com token/cartão A3 físico padrão desktop.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Arquitetura recomendada pelo documento para Android: PDV Android envia pedido para Estação Fiscal Local na LAN via HTTPS/mTLS.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Exigiria manter todas as regras de XSD, QR Code e SOAP SEFAZ por UF dentro do APK.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Depende de conectividade, gestão de segredos e contrato externo.
+Log_Consolidado_Rustinho_0.9.17.pdf
+Isolamento de Falhas	
+
+Alto: crash no Monitor não derruba o processo do Rustinho.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Baixo se carregada no processo principal: segfault na .dll/.so derruba o Rustinho (recomenda-se isolar em processo auxiliar).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Alto: isolado em processo ou serviço separado.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Alto: memória segura em Rust.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Alto no processo local, mas sujeito a indisponibilidade de rede/terceiro.
+Log_Consolidado_Rustinho_0.9.17.pdf
+Manutenção de Leiaute (NTs / RTC)	
+
+Delegada ao projeto/comunidade ACBr.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Delegada ao ACBr.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Depende do motor usado na estação.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Custo altíssimo para a equipe do núcleo acompanhar cada NT nacional e estadual.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Delegada ao fornecedor comercial, mas exige fluxo assíncrono durável e webhooks com idempotência.
+Log_Consolidado_Rustinho_0.9.17.pdf
+B. Conflito Arquitetural Desktop vs. Android e Decisões Pendentes (DF-3 / DF-4)
+
+    Conflito identificado (CONFIRMADO POR EVIDÊNCIA HISTÓRICA): O Rustinho possui alvos Desktop (Windows/Linux x86_64) e Android, porém o ACBrMonitorPLUS não executa nativamente no Android, e no Linux Desktop exige servidor gráfico ou Xvfb (GTK2/Qt).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Proposta arquitetural (PROPOSTA / DECISÃO HUMANA PENDENTE — DF-3 e DF-4):
+
+        Manter o trait FiscalProvider neutro para que caixas Desktop usem AcbrMonitorAdapter em 127.0.0.1:3434 e dispositivos Android (ou caixas secundários sem certificado próprio) utilizem futuramente um RemoteStationFiscalAdapter comunicando-se com uma estação fiscal local na LAN por canal autenticado e criptografado (HTTPS/mTLS), ou avaliar ACBrLib em processo auxiliar / API hospedada.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Nenhuma dessas alternativas foi homologada, e o RemoteStationFiscalAdapter não existe na v0.2.3 (PROPOSTA).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+13. Segurança, Permissões (D-09), Criptografia e Sigilo (Adição do BLOCO 5C)
+13.1. Arquitetura de Segurança e Limites Operacionais de rustinho-fiscal (docs/SEGURANCA.md — Página 69)
+
+O documento docs/SEGURANCA.md descreve seis controles de segurança projetados para a crate rustinho-fiscal e registra expressamente quatro limitações técnicas/operacionais que não podem ser ignoradas. Como os arquivos .rs (src/security.rs e src/adapter/acbr.rs) não foram inspecionados nesta sessão, a implementação desses controles é classificada como DOCUMENTADO, MAS NÃO VERIFICADO:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+Controle Documentado em SEGURANCA.md	Mecanismo Descrito	Limitação Técnica ou Risco Residual Expressamente Documentado	Classificação
+1. Proteção de segredos (SecretString) e exclusão do contrato	
+
+• SecretString não implementa Deserialize; Serialize, Debug e Display emitem apenas "[REDACTED]".
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+• Usa zeroize para limpar o buffer próprio sem bloco unsafe (#![forbid(unsafe_code)]).
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+• Senhas de certificado A1/A3, PINs e CSC não entram em FiscalDocumentRequest; segredos listados em AcbrConfig::known_secrets são filtrados de erros/logs por sanitize_diagnostic_text.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• Limite de memória: O uso de zeroize reduz a exposição do buffer da crate, mas não garante apagar cópias prévias criadas por alocadores de memória, bibliotecas externas ou pelo sistema operacional.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+2. Prevenção de injeção de comandos no protocolo ACBr	
+
+• Como o ACBrMonitorPLUS interpreta comandos orientados a linha terminados em \r\n.\r\n (o que permitiria injetar \r\n.\r\nNFe.CancelarNFe(...) dentro de uma descrição ou justificativa), validate_protocol_token bloqueia \r, \n, \0, \x03 (ETX), caracteres de controle ASCII e aspas duplas (") em todos os campos textuais antes de montar o payload.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• Depende de que todos os campos textuais passem sem exceção pelo validador em src/security.rs / src/contract.rs (implementação .rs NÃO VERIFICADA nesta sessão).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+3. Restrição de rede a Loopback (127.0.0.1 / ::1)	
+
+• Como a porta TCP 3434 do ACBrMonitorPLUS não possui autenticação forte nem TLS nativo, AcbrMonitorAdapter::new recusa em tempo de construção qualquer IP fora de loopback, mesmo que a flag legada allow_remote_host seja ativada.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• Impede que caixas secundários ou dispositivos Android usem o AcbrMonitorAdapter diretamente pela rede local sem que antes seja projetado um protocolo dedicado com autenticação forte e TLS/mTLS.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	DOCUMENTADO, MAS NÃO VERIFICADO
+4. Proteção de caminhos (safe_join_path)	
+
+• Rejeita caminhos absolutos, prefixos de volume (C:), caminhos UNC (\\) e componentes .. (ParentDir); inspeciona fs::symlink_metadata no diretório base e em cada segmento existente, canoniza a base e rejeita symlinks observáveis.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• Limite de condição de corrida (TOCTOU): Uma função que devolve apenas PathBuf não mantém validação atômica até a abertura posterior do arquivo; lidar com arquivos não confiáveis exige revalidação no ato de abrir ou uso de openat / O_NOFOLLOW, além de revisão de segurança independente.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+5. Validação estrutural de XML (roxmltree)	
+
+• Verifica se as tags de autorização são nós reais do XML e não sequências textuais escondidas dentro de comentários XML.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• Limite de escopo: O módulo não é validador de schema XSD, não verifica assinatura criptográfica XMLDSig nem valida a cadeia de certificados ICP-Brasil ou a veracidade junto à SEFAZ.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	DOCUMENTADO, MAS NÃO VERIFICADO
+6. Proteção e expurgo de INIs temporários com dados pessoais/fiscais	
+
+• O INI de NFe.CriarEnviarNFe contém CNPJ/CPF, endereço, itens, preços e pagamento.
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+• Em sistemas Unix, tenta criar o diretório com permissão 0700 e arquivos com 0600.
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+• Em caso de resultado incerto pós-envio, preserva o INI em disco para reconciliação e remove arquivos com mais de 72 horas durante uma nova emissão.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+• três limites operacionais críticos:
+
+1. No Windows, as APIs utilizadas não configuram ACLs restritivas próprias, deixando a proteção do diretório dependente do instalador/ambiente;
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+2. O expurgo de 72 horas é apenas oportunista (só roda quando ocorre uma nova emissão; se não houver novas emissões, os arquivos permanecem no disco indefinidamente);
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+3. Apagar o INI local não apaga cópias gravadas pelo próprio ACBrMonitorPLUS, por backups ou pelo sistema operacional.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	DOCUMENTADO, MAS NÃO VERIFICADO
+Parte 3 — Fechamento do BLOCO 5C
+
+    O que foi analisado:
+
+        Aplicação dos 4 ajustes finais nas Seções 12.7 e 12.9 do Bloco 5B.
+
+        Análise exclusiva dos 4 documentos do Bloco 5C:
+
+            docs/DIAGNOSTICO_BASE.md (Página 60);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/LEIAUTE-E-LACUNAS-FISCAIS.md (Página 62);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/MATRIZ-PROVEDORES.md (Página 63);   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+            docs/SEGURANCA.md (Página 69).   
+            Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Achados Confirmados nos Documentos (CONFIRMADO POR EVIDÊNCIA HISTÓRICA / DOCUMENTADO, MAS NÃO VERIFICADO):
+
+        Histórico de origem (DIAGNOSTICO_BASE.md): Documenta a evolução desde os pacotes preliminares (v0.1.0 com 11 arquivos onde acbr.rs era placeholder, e v0.2.0 com 24 arquivos e conflito de unsafe em SecretString::drop) até a v0.2.2, esclarecendo a adoção de zeroize e a troca do hash FNV-1a (da v0.2.0) por SHA-256 (na v0.2.2) no controle de idempotência do MockFiscalAdapter.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Subconjunto e 12 lacunas fiscais (LEIAUTE-E-LACUNAS-FISCAIS.md): Documenta que apenas vendas normais presenciais dentro da UF (CSOSN 102/500 no Simples; CST 00 no Regime Normal; PIS/COFINS 01, 02, 04, 06, 07, 08, 09, 49, 99 e allowlist mínima de CFOP) são aceitas em homologação, mantendo 12 frentes bloqueadas ou não implementadas (RTC/IBS/CBS/IS, CNPJ alfanumérico na ponta ACBr/SEFAZ, demais CST/CSOSN, IPI, frete/seguro/outras despesas, interestadual/DIFAL/devolução/entrada, contingência, teste real de cancelamento, consulta sem XML local, inutilização/importação de compras, validação XSD/assinatura e cBenef/monofásicos).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Incompatibilidade do ACBrMonitorPLUS com Android (MATRIZ-PROVEDORES.md): Confirmado documentalmente que o ACBrMonitorPLUS é exclusivo para Desktop x86_64 (e no Linux exige Xvfb ou ambiente gráfico GTK2/Qt), não rodando no Android (ARM64/ARMv7), enquanto a ACBrLib tem isolamento de falhas baixo se carregada no mesmo processo e não suporta token/cartão A3 físico padrão desktop no Android.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Controles e limites de segurança (SEGURANCA.md): Documentados os 6 mecanismos (SecretString com zeroize, validate_protocol_token contra \r\n.\r\n, bloqueio de IP fora de loopback na porta 3434, safe_join_path, roxmltree e permissões Unix 0700/0600 para INIs temporários) e suas limitações explícitas.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Problemas, Riscos e Limitações Técnicas Encontrados:
+
+        Janela TOCTOU em safe_join_path (SEGURANCA.md): O próprio documento reconhece que retornar PathBuf não garante atomicidade até a abertura do arquivo (openat / O_NOFOLLOW ausentes).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Ausência de ACLs restritivas no Windows para INIs temporários (SEGURANCA.md): Enquanto no Unix aplicam-se 0700/0600, no Windows as APIs usadas pela crate não restringem as ACLs dos arquivos INI temporários, que contêm CPF/CNPJ, endereço, itens e valores.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Retenção indefinida de INIs com dados pessoais se não houver novas emissões (SEGURANCA.md): O expurgo de arquivos com mais de 72h só dispara durante uma nova emissão; se a loja parar de tentar emitir após um erro incerto, o INI com dados pessoais permanece no disco até remoção manual.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Dependência gráfica do ACBrMonitorPLUS no Linux (MATRIZ-PROVEDORES.md): Em instalações Linux, o processo externo do Monitor requer Xvfb ou bibliotecas gráficas (GTK2/Qt).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Contradições e Defasagens Documentais:
+
+        Defasagem de DIAGNOSTICO_BASE.md em relação à v0.2.3: Diferentemente de ARQUITETURA.md, CONTRATO-FISCAL.md, INTEGRACAO-POSTERIOR-RUSTINHO.md, LEIAUTE-E-LACUNAS-FISCAIS.md, MATRIZ-PROVEDORES.md e SEGURANCA.md (que receberam seções de atualização da v0.2.3 em 29/10/2026), o arquivo DIAGNOSTICO_BASE.md terminou na Seção 3 (Revisão v0.2.2) e declara que o código-fonte do Rustinho principal não havia sido anexado, enquanto os documentos da v0.2.3 registram que na etapa 0.2.3 o código-fonte 0.9.16 foi anexado e inspecionado para leitura.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Decisões Humanas Pendentes (DECISÃO HUMANA PENDENTE):
+
+        DF-3 / DF-4 (Arquitetura de Provedor para Desktop e Android): Decidir se o Desktop utilizará ACBrMonitorPLUS local, ACBrLib isolada em processo auxiliar ou API hospedada, e se o suporte ao Android (e caixas secundários) será feito por uma Estação Fiscal Local autenticada (HTTPS/mTLS via futuro RemoteStationFiscalAdapter).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Política de proteção de ACLs no instalador Windows e rotina de limpeza de INIs temporários: Definir como o instalador Windows protegerá a pasta de trabalho fiscal e como expurgar INIs retidos sem depender exclusivamente de uma nova tentativa de emissão.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    O que permanece NÃO VERIFICADO:
+
+        Inspeção direta dos arquivos .rs da crate rustinho-fiscal v0.2.3 (src/security.rs, src/contract.rs, src/adapter/acbr.rs, src/adapter/mock.rs, src/adapter/mod.rs — localizados no Apêndice H, páginas 96–257, NÃO ACESSÍVEIS NESTA SESSÃO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Compilação Rust, testes contra ACBrMonitorPLUS real, homologação SEFAZ e validação jurídica/contábil independente das normas citadas (Portaria SRE 34/2026, NT 2025.002 v1.52, NT 2023.002 v1.02, CNPJ alfanumérico).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Próximo bloco recomendado:
+
+        BLOCO 5D — Fechamento da Análise Documental Fiscal e de Modularidade / Monólitos Internos: Analisar os 3 últimos relatórios da crate fiscal (docs/RELATORIO_FINAL_E_EVIDENCIAS.md na pág. 64, docs/RELATORIO_PESQUISA_E_COMPARACAO_TECNICA.md nas págs. 65–66 e docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md nas págs. 67–68) em conjunto com a Seção 2 do Relatório Técnico Sun Rustinho v0.9.17.md (avaliação de modularidade e diagnóstico dos monólitos internos sync.rs, api.rs, faixas.rs, TelaConfiguracoes.qml, TelaPeca.qml e TelaVender.qml na pág. 51) e a Seção 12 do dossiê (leitura crítica dos logs de regressão na pág. 17).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+Aguardo sua autorização explícita para iniciar o BLOCO 5D.

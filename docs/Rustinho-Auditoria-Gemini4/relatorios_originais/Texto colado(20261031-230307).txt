@@ -1,0 +1,730 @@
+Parte 1 — Limitação de Escrita em Arquivo Local e Ajuste Final do Bloco 5D1 (Seção 12.16)
+
+    Declaração sobre atualização e geração do arquivo Markdown (docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md):
+
+        Nesta sessão, não há acesso de escrita a um sistema de arquivos local persistente para gravar diretamente no caminho docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md, nem foi gerado arquivo externo para download. As seções atualizadas e concluídas neste bloco são entregues de forma estruturada no corpo desta resposta, preservando integralmente o histórico dos capítulos construídos nos Blocos 0 a 5D1.
+
+    Ajuste Obrigatório na Seção 12.16 (Ressalva de Aprovação do Bloco 5D1):
+
+        Item 2 da Seção 12.16 (TaxRegime::Mei no Contrato vs. Allowlist Técnica de 4 Combinações no Adaptador): A presença da variante "MEI" na enumeração TaxRegime de docs/CONTRATO-FISCAL.md e a ausência de combinações para MEI na allowlist técnica de 4 combinações descrita em docs/RELATORIO_REVISAO_CORRECOES_TESTES_E_PENDENCIAS_v0.2.3.md (Simples Nacional/CSOSN 102/CFOP 5102, Simples Nacional/CSOSN 500/CFOP 5405, Regime Normal/CST 00/CFOP 5102 e Excesso de sublimite/CST 00/CFOP 5102) ficam reclassificadas como diferença entre o vocabulário amplo do contrato neutro e o subconjunto operacional restrito documentado para o adaptador na v0.2.3, e não como contradição.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Toda referência a esse comportamento e à allowlist do adaptador mantém a classificação DOCUMENTADO, MAS NÃO VERIFICADO, visto que os arquivos .rs da crate fiscal não foram inspecionados nesta sessão.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+Parte 2 — Atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md (Execução do BLOCO 5D2: Conclusão dos Capítulos 2, 11, 13, 14 e 15)
+
+Análise elaborada exclusivamente a partir da Seção 2 (e cruzamentos das Seções 1 e 6) de Relatório Técnico Sun Rustinho v0.9.17.md (página 51 do PDF) e dos Capítulos 11, 12, 13, 14 e 15 do Dossiê (páginas 16 a 21 do PDF), utilizando os achados dos blocos anteriores apenas para cruzamento e verificação de consistência.   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+2. Visão Geral e Arquitetura do Sistema (Desktop, Android e Núcleo) (Concluído na Etapa Documental — BLOCO 5D2)
+2.1. Organização de Pacotes e Alvos de Plataforma
+
+    Estrutura de diretórios no pacote de código-fonte (ESTRUTURA DO PACOTE IDENTIFICADA): Os cabeçalhos de rustinho-codigo-fonte-0.9.17.zip demonstram a separação física entre o domínio (nucleo/), a aplicação desktop (app/), a camada mobile (android/), os artefatos de empacotamento (instalador/) e as esteiras de integração contínua (.github/workflows/android.yml, montar.yml, montar-teste-windows.yml).   
+    rustinho-codigo-fonte-0.9.17.zip
+
+    Artefato binário analisado no histórico (CONFIRMADO POR EVIDÊNCIA HISTÓRICA como relato documental; DOCUMENTADO, MAS NÃO VERIFICADO na presente sessão): O Relatório Técnico Sun Rustinho v0.9.17.md (datado de 29/10/2026) declara ter inspecionado estaticamente o binário ELF usr/bin/rustinho (20.380.792 bytes) e 54 fluxos QRC comprimidos via Zstandard dentro de Rustinho-0.9.17-Linux-x86_64.appimage. O dossiê consolidado ressalta que essa inspeção binária pertence ao relatório histórico fornecido no pacote e não foi reexecutada.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+2.2. Quatro Pilares Arquiteturais Descritos na Documentação Técnica (DOCUMENTADO, MAS NÃO VERIFICADO no código 0.9.17)
+
+A Seção 2.1 do Relatório Técnico Sun Rustinho v0.9.17.md (página 51) e o Capítulo 11.1 do dossiê (página 16) descrevem quatro pontos fortes da arquitetura entre Rust, C++, Qt6 e QML:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Fronteira limpa entre Domínio e UI (rustinho-nucleo ↔ app): A comunicação entre a interface e o núcleo ocorre exclusivamente por comandos JSON através de Servico::chamar (nucleo/src/api.rs) e Sistema (app/src/ponte.rs). O relatório destaca que não há vazamento de tipos SQL (rusqlite) para a camada C++/QML, o que permite testes de integração determinísticos sem necessidade de interface gráfica.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Execução assíncrona protegida na ponte FFI (app/src/ponte.rs): O relatório descreve o uso de AtomicBool (ocupado) combinado com std::panic::catch_unwind e qt_thread().queue(...) nas funções chamar_demorado e abrir_em_segundo_plano, com a finalidade de impedir o congelamento da thread de renderização do Qt (GUI thread) e prevenir undefined behavior causado por stack unwinding através da fronteira FFI C++/Rust.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Aritmética financeira segura: O relatório afirma que o perfil de release mantém overflow-checks = true no Cargo.toml e que os cálculos de rateio (compras::ratear) utilizam inteiros intermediários i128 com saturação explícita (numeros::saturar) para evitar estouro de inteiros.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Componentização QML de Base (Design System): Os componentes visuais reutilizáveis (Faixa.qml, Painel.qml, Campo.qml, Botao.qml, IconeFuncao.qml, Notificacao.qml, Guia.qml, ConflitoCnpj.qml) são descritos como integrantes de um design system centralizado no singleton Tema.qml. A presença desses 9 arquivos .qml na árvore do projeto é confirmada pelos cabeçalhos do ZIP (ESTRUTURA DO PACOTE IDENTIFICADA), enquanto sua implementação interna permanece DOCUMENTADO, MAS NÃO VERIFICADO nesta etapa documental.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+2.3. Evoluções Binárias e Estruturais Relatadas para a v0.9.17 (DOCUMENTADO, MAS NÃO VERIFICADO)
+
+A Seção 1 do Relatório Técnico Sun Rustinho v0.9.17.md (página 51) relata seis mudanças observadas no AppImage 0.9.17 frente às versões 0.9.15/0.9.16:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Inclusão do plugin Qt.labs.folderlistmodel no squashfs-root do AppImage (usr/lib/libQt6LabsFolderListModel.so.6 e usr/qml/Qt/labs/folderlistmodel/libqmlfolderlistmodelplugin.so, junto com qmldir e plugins.qmltypes);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Alinhamento da constante VERSAO e dos metadados internos do binário usr/bin/rustinho para "0.9.17" (RNI-03), restando pendente sincronizar a versão no android/rust/Cargo.toml (apontado na Seção 6 da página 53);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Ajustes de acessibilidade em Notificacao.qml (RNI-06: Accessible.role, Accessible.name e Accessible.description);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Manutenção do Caso 1 (ImportarCadastros.qml + requisito:loja.cnpj) e inclusão dos Casos 2 (TelaCompras.qml + tela.pendentes), 2b (ConflitoCnpj.qml + naoImportadas) e 3 (requisitos.rs com "loja.uf_cnpj" + TelaFiscal.qml + linhaDocumentos em TelaConfiguracoes.qml);   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Anexação do container do Loader da orientação em Guia.qml a parent: T.Overlay.overlay (z: 1000) para sobrepor modais.   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+11. Modularidade, Acoplamento e Monólitos Internos (BLOCO 5D2)
+11.1. Distinção Metodológica: Acoplamento Estrutural vs. Defeito Funcional
+
+A Seção 2.2 do Relatório Técnico Sun Rustinho v0.9.17.md (página 51) e a Seção 11.2 do dossiê (página 16) apontam que, apesar da separação limpa entre os pacotes nucleo e app, a modularidade interna apresenta arquivos monolíticos (God-Files) que concentram múltiplas responsabilidades (violação do Single Responsibility Principle).   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Regra de classificação obrigatória nesta auditoria:
+
+        A concentração de responsabilidades e o tamanho elevado desses arquivos não constituem, por si sós, defeitos funcionais comprovados na versão 0.9.17.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Os tamanhos em KB, estimativas de linhas e responsabilidades internas descritos no relatório Sun são classificados como DOCUMENTADO, MAS NÃO VERIFICADO (pois o conteúdo interno dos arquivos .rs e .qml não foi descompactado/inspecionado nesta sessão).   
+        rustinho-codigo-fonte-0.9.17.zip+ 3
+
+        As divisões em submódulos e extrações de componentes QML sugeridas pelo relatório Sun são classificadas estritamente como PROPOSTA de refatoração, que não foram executadas e não devem ser assumidas como existentes no código.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Comprova-se pelos cabeçalhos do rustinho-codigo-fonte-0.9.17.zip (ESTRUTURA DO PACOTE IDENTIFICADA) que, na versão 0.9.17, nucleo/src/sync.rs, nucleo/src/api.rs e nucleo/src/faixas.rs continuam sendo arquivos únicos (apenas nucleo/src/nfe_assinatura/ e nucleo/src/dre/ possuem subdiretórios em nucleo/src/), e que os componentes propostos SecaoLoja.qml, SecaoCaixas.qml, SecaoDuplicatas.qml, SecaoHistorico.qml, SecaoGerente.qml e SecaoFiscalPeca.qml não existem em app/qml/.   
+        rustinho-codigo-fonte-0.9.17.zip+ 1
+
+11.2. Matriz de Monólitos Internos Documentados e Propostas de Refatoração
+Arquivo Alvo	Tamanho e Linhas Relatados (Sun v0.9.17)	Responsabilidades Concentradas Descritas no Relatório	Refatoração Recomendada no Relatório (PROPOSTA)	Evidência nos Cabeçalhos do ZIP 0.9.17 (ESTRUTURA DO PACOTE IDENTIFICADA)	Classificação na Auditoria
+nucleo/src/sync.rs	
+
+301 KB (~7.500 linhas) — Nível: Crítico.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Mistura descoberta de rede, transporte, criptografia/autenticação de pares, aplicação de deltas, fila de pendências, resolução de conflitos, verificação de integridade referencial e regras de compatibilidade de versão.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Converter em diretório nucleo/src/sync/ com mod.rs, transporte.rs, conflitos.rs, pendencias.rs, referencias.rs e compatibilidade.rs (espelhando nucleo/src/nfe_assinatura/).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Continua como arquivo único nucleo/src/sync.rs; não existe diretório nucleo/src/sync/ (enquanto nucleo/src/nfe_assinatura/ existe com mod.rs, ancoras.rs, c14n.rs, testes.rs).
+rustinho-codigo-fonte-0.9.17.zip
+	
+
+Diagnóstico: DOCUMENTADO, MAS NÃO VERIFICADO.
+
+Divisão: PROPOSTA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+nucleo/src/api.rs	
+
+197 KB (~5.000 linhas) — Nível: Alto.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Concentra o roteador de todos os comandos JSON, verificação de permissões de gerente (D-09), controle de chaves de idempotência (NAO_REPETIR), modo seguro (SO_LEITURA) e dezenas de structs de entrada/saída.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Separar em api/mod.rs (infraestrutura, permissões, idempotência) e submódulos de despacho por domínio: api/comercial.rs, api/financeiro.rs, api/sincronizacao.rs e api/config.rs.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Continua como arquivo único nucleo/src/api.rs; não existe diretório nucleo/src/api/.
+rustinho-codigo-fonte-0.9.17.zip
+	
+
+Diagnóstico: DOCUMENTADO, MAS NÃO VERIFICADO.
+
+Divisão: PROPOSTA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+nucleo/src/faixas.rs	
+
+166 KB — Nível: Alto.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Mistura alocação de faixas numéricas distribuídas entre caixas, validação de códigos alfanuméricos, inventário legado e resolução de duplicatas de peças e pessoas.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Dividir em faixas/alocacao.rs, faixas/duplicatas.rs e faixas/identidade.rs.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Continua como arquivo único nucleo/src/faixas.rs; não existe diretório nucleo/src/faixas/.
+rustinho-codigo-fonte-0.9.17.zip
+	
+
+Diagnóstico: DOCUMENTADO, MAS NÃO VERIFICADO.
+
+Divisão: PROPOSTA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+app/qml/TelaConfiguracoes.qml	
+
+102 KB (~2.180 linhas) — Nível: Crítico na UI.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Enquanto Fiscal (TelaFiscal.qml) e Backup (SecaoBackup.qml) usam Loader, as demais 8 abas (Loja, Vendas, Crediário, Impressão, Caixas, Duplicatas, Histórico e Gerente) estão escritas inline no mesmo arquivo (além de possuir Timer de sincronização de 3s citado em NAV-01).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Extrair SecaoLoja.qml, SecaoCaixas.qml, SecaoDuplicatas.qml, SecaoHistorico.qml e SecaoGerente.qml carregados sob demanda via Loader (para reduzir o arquivo principal a ~12 KB e melhorar o tempo de instanciação QML).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Em app/qml/, existem TelaFiscal.qml e SecaoBackup.qml, mas não existem SecaoLoja.qml, SecaoCaixas.qml, SecaoDuplicatas.qml, SecaoHistorico.qml nem SecaoGerente.qml.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+	
+
+Diagnóstico: DOCUMENTADO, MAS NÃO VERIFICADO.
+
+Extração: PROPOSTA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+app/qml/TelaPeca.qml e app/qml/TelaVender.qml	
+
+65 KB e 59 KB — Nível: Médio.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+TelaPeca.qml acumula os grupos cadastrais e toda a seção de impostos/tributação da peça; TelaVender.qml acumula o PDV e o fechamento/pagamento.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Extrair a seção de impostos de TelaPeca.qml para SecaoFiscalPeca.qml e o fechamento/pagamento de TelaVender.qml para um subpainel dedicado.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Em app/qml/, existem TelaPeca.qml e TelaVender.qml, mas não existe SecaoFiscalPeca.qml.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+	
+
+Diagnóstico: DOCUMENTADO, MAS NÃO VERIFICADO.
+
+Extração: PROPOSTA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+13. Segurança, Permissões (D-09), Criptografia e Sigilo (Consolidado na Etapa Documental — BLOCO 5D2)
+
+Além da arquitetura de segurança da crate independente rustinho-fiscal já registrada na Seção 13.1 (Bloco 5C), os documentos e logs do acervo registram cinco mecanismos de segurança, controle de acesso e integridade no núcleo e na interface do Rustinho principal:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Controle de Permissões de Gerente (D-09):
+
+        No núcleo (nucleo/src/api.rs): O roteador JSON verifica permissões de gerente antes de executar operações restritas (DOCUMENTADO, MAS NÃO VERIFICADO no código 0.9.17).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Na interface (PedirGerente.qml / comGerente / comGerenteVarias): Operadores com perfil Caixa precisam de autorização por senha do gerente tanto para abrir seções restritas de Configurações (Loja, Simultaneidade) quanto, novamente, no momento de gravar a alteração ("A senha vale só para isto; uma vez você continua no seu usuário").   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        Evidência histórica: Testado nos logs telas-d09.log e telas-navegacao_guiada-2.log e comprovado visualmente nas Imagens 20 e 22 (sobre base histórica v0.9.15/0.9.16). Na v0.9.17, permanece pendente de verificação no código o achado NOTIF-03 (cancelamento da senha inicial deixando o operador Caixa na aba Loja).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    Proteção de Modo Seguro (SO_LEITURA) e Restauração de Backup:
+
+        Quando o banco de dados apresenta defeito de integridade, o sistema entra em Modo Seguro, restringindo o roteador de nucleo/src/api.rs aos comandos marcados como SO_LEITURA (lista que inclui requisito_conferir e arquivos_conferir) e impedindo mutações comerciais.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        A restauração de backup em Simultaneidade > Backup exige confirmação com senha do gerente, preserva intocados o banco defeituoso e as cópias boas, e reinicia sem retomar automaticamente operações comerciais antigas.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Evidência histórica e estrutura: Testado em telas-modo_seguro.log (v0.9.15), com suíte nucleo/src/testes_modo_seguro.rs presente nos cabeçalhos do ZIP 0.9.17 (ESTRUTURA DO PACOTE IDENTIFICADA).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Controle de Idempotência de Comandos (NAO_REPETIR):
+
+        Documentado em Relatório Técnico Sun Rustinho v0.9.17.md (Seção 2.2) como mecanismo centralizado em nucleo/src/api.rs para impedir execução duplicada de comandos mutáveis (DOCUMENTADO, MAS NÃO VERIFICADO no código 0.9.17).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Modo de Sigilo Visual (Tema.sigilo / Olho.qml / F12 — falha07):
+
+        Oculta valores financeiros e documentos sensíveis na interface (ex.: R$ ••• na Imagem 11 e CNPJ mascarado ••.•••.•••/••••-•• na Imagem 23, além de suporte relatado em ConflitoCnpj.qml), sendo alternável pelo botão "Mostrar valores" no cabeçalho ou pelo atalho F12.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Evidência histórica: Registro de aprovação em telas-falha07.log na base v0.9.15 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA, com a ressalva do dossiê de que se trata de teste automatizado local e não auditoria física externa).   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+    Validação Criptográfica de Assinatura XML e Cadeia ICP-Brasil (nucleo/src/nfe_assinatura/):
+
+        Os cabeçalhos do pacote 0.9.17 (ESTRUTURA DO PACOTE IDENTIFICADA) comprovam a existência do submódulo modularizado nucleo/src/nfe_assinatura/ (mod.rs, ancoras.rs, c14n.rs, testes.rs), do pacote de certificados nucleo/dados/icp-brasil/ACcompactadox.zip (com hashsha512x.txt) e de uma ampla bateria de casos de teste PKI e canonicalização C14N em nucleo/tests/pki/ (incluindo certificados expirados, autoassinados, sem BasicConstraints, sem keyCertSign, eku inválido, rsa1024, CNPJ de filial/outra raiz e CNPJ alfanumérico). A implementação interna desses validadores será auditada nos blocos de código.   
+        rustinho-codigo-fonte-0.9.17.zip+ 1
+
+14. Testes Comprováveis, Leitura Crítica dos Logs Históricos, Defeitos e Contradições (BLOCO 5D2)
+
+Consolidação integral dos Capítulos 12, 13 e 14 do Dossiê (páginas 17 a 20 do PDF):   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+14.1. Leitura Crítica da Suíte de Regressão do Núcleo (regressao2/logs/suite.log)
+
+O arquivo regressao2/logs/suite.log registra a execução de 7 binários de teste do Rustinho, totalizando 487 testes aprovados, 0 falhas e 9 ignorados:   
+Log_Consolidado_Rustinho_0.9.17.pdf
+Binário / Suíte Executada em suite.log	Passaram	Falharam	Ignorados	Escopo Observado no Dossiê e nos Cabeçalhos do ZIP
+1. Suíte principal de testes unitários (nucleo)	403	0	5	
+
+Testes internos dos módulos em nucleo/src/.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+2. nucleo/tests/caixas.rs	9	0	0	
+
+Testes de operações de caixa.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+3. nucleo/tests/contratos.rs	4	0	0	
+
+Testes de contratos da API do núcleo.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+4. nucleo/tests/contratos_telas.rs	8	0	0	
+
+Testes de contratos entre núcleo e telas.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+5. nucleo/tests/estavel/ (auditoria, recuperacao, sincronizacao, backup, estoque, crediario, dre, permissoes, importacao, d09_custos)	57	0	3	
+
+Suíte de estabilidade (a1_auditoria.rs, d09_custos.rs, t1_backup.rs a t8_sincronizacao.rs).
+rustinho-codigo-fonte-0.9.17.zip+ 1
+6. nucleo/tests/fluxo.rs	5	0	0	
+
+Testes de fluxo comercial integrado.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+7. nucleo/tests/portatil.rs	1	0	1	
+
+Testes de modo portátil.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+TOTAL ACUMULADO EM suite.log	487	0	9	
+
+Ressalva Crítica Obrigatória: O log de compilação correspondente (build.log / clippy.log) declara explicitamente Compiling rustinho v0.9.15 e rustinho-nucleo v0.9.15 em /home/claude/rustinho. Portanto, esses 487 resultados comprovam uma árvore histórica identificada como v0.9.15 e não comprovam que a versão 0.9.17 foi compilada e validada.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+14.2. Leitura Crítica dos Logs de Interface, Compilação e Formatação
+Arquivo de Log	Resultado Registrado no Dossiê (Pág. 17)	Ressalvas Técnicas, Versão e Limites de Evidência	Classificação
+telas-notificacoes.log	
+
+Todos os checks exibidos com ✓ (2 críticas, quadrados iniciais, uma faixa não crítica por vez, gestos, esconder até o dia seguinte, temas claro/escuro, janela estreita).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Base histórica (v0.9.15/0.9.16); meia-noite real simulada por data no banco; toque físico e Android não cobertos.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+telas-navegacao_guiada-2.log	
+
+32/32 linhas de confirmação com ✓ (gerente, cancelar, pasta ausente, acesso manual, operador caixa e janela pequena).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Outros logs da mesma bateria (fotos-nav2, 1-inicio.log, 2-reabrir.log) registram erros QML de runtime (Overlay is not defined e abandonarGuia of null).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15/0.9.16)
+telas-d09.log	
+
+Checks de perfis caixa/gerente, preço, permissões e acesso a configurações com ✓.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Teste automatizado em X virtual (v0.9.15); não substitui validação na árvore 0.9.17.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+telas-d14_portatil.log	
+
+Venda e cancelamento no caixa fechado e modo portátil com ✓.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Ambiente de teste virtual (v0.9.15); não equivale a operação real em loja.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+telas-falha07.log	
+
+Olho de sigilo, valores financeiros, F12, recebimento e fechamento de janelas com ✓.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Teste automatizado (v0.9.15); não inclui auditoria física externa.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+telas-modo_seguro.log	
+
+Modo seguro, proteção do banco e lista de backup com ✓.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Teste automatizado (v0.9.15); não representa homologação de recuperação em hardware de produção.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+telas-rvi02.log	
+
+Simulação da porta TCP 47810 ocupada; aviso/rede em tentativa, parada e Configurações com ✓.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Simulação local de porta ocupada em base v0.9.15.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+build.log, clippy.log e 03-build.log	
+
+build.log e 03-build.log concluem perfil dev (1m44s); clippy.log executa Checking rustinho-nucleo v0.9.15 e Compiling rustinho v0.9.15 em 1m44s sem warnings visíveis no trecho.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Todos os cabeçalhos mostram explicitamente v0.9.15.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA (v0.9.15)
+fmt.log	
+
+Arquivo com 0 bytes.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Um arquivo vazio, sem cabeçalho ou comando capturado, não comprova por si só que cargo fmt --check foi executado com sucesso.
+Log_Consolidado_Rustinho_0.9.17.pdf
+	NÃO VERIFICADO
+Logs de falhas intermediárias e automação	
+
+• 01-nucleo-antes.log (4 falhas antes do piloto);
+
+• 04-telas-1a-rodada.log e 05-telas-2a-rodada.log (falhas iniciais de UI);
+
+• 07-telas-4a-rodada.log (falha em "pilha sem telas repetidas (Esc vai ao Início)");
+
+• CalledProcessError com xdotool mousemove em 1 log de script.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Demonstra que houve iterações reais de erro e correção; a falha de xdotool mousemove é classificada como falha do script/ambiente de automação, separada de bug de domínio.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	CONFIRMADO POR EVIDÊNCIA HISTÓRICA
+14.3. Testes Explicitamente Não Executados em Nenhuma Etapa do Acervo (Seção 12.5 do Dossiê)
+
+O dossiê (páginas 17–18) confirma que não foram executados em nenhum momento:   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Passagem real do relógio do sistema operacional pela meia-noite (apenas simulação pela data da marca no banco);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Uso de tela sensível ao toque (touchscreen) e testes em dispositivo Android real para gestos de notificação e responsividade;   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Seleção múltipla de arquivos na janela de arquivos em X virtual (limitada a um arquivo por vez na automação do piloto);   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Testes do piloto de navegação contextual nas plataformas Windows e Android;   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Na crate rustinho-fiscal v0.2.3 (no ambiente de geração): cargo fmt, cargo test, cargo clippy, cargo build --release, comunicação TCP contra ACBrMonitorPLUS real, certificado digital, validação XSD, assinatura e homologação SEFAZ;   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Testes da busca inteligente sobre o código e base real de produtos (incluindo acentos, ranking e desempenho).   
+    Log_Consolidado_Rustinho_0.9.17.pdf
+
+14.4. Catálogo Consolidado das 12 Contradições e Lacunas do Acervo (C-01 a C-12 — Capítulo 13 do Dossiê)
+ID	Ponto Registrado no Capítulo 13 do Dossiê (Pág. 19)	Situação Atualizada Após Recepção do ZIP 0.9.17 nesta Sessão
+C-01	
+
+O pacote rus-rus.zip não continha o código-fonte integral do Rustinho 0.9.17 (apenas os 8 .rs da crate fiscal).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Nesta sessão, rustinho-codigo-fonte-0.9.17.zip foi recebido (ESTRUTURA DO PACOTE IDENTIFICADA), porém seus fluxos internos estão comprimidos em Deflate; a leitura linha a linha dos módulos depende de fornecimento em texto puro ou ZIP sem compressão (Stored).
+rustinho-codigo-fonte-0.9.17.zip+ 1
+C-02	
+
+Logs de build e testes (suite.log, build.log, clippy.log, 02-nucleo-depois.log) citam a versão 0.9.15, enquanto os relatórios descrevem 0.9.16 e 0.9.17.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Contradição documental confirmada (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); nenhum resultado de log 0.9.15 é atribuído como prova da 0.9.17.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+C-03	
+
+NOTIF-02 (botão "Abrir" em outra_loja) aparece como pendente no relatório Sun v0.9.17 e na auditoria 0.9.16.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Registrada divergência com análise anterior do código 0.9.17 que identificou "Ver caixas"; permanece NÃO VERIFICADO até leitura direta de nucleo/src/avisos.rs.
+rustinho-codigo-fonte-0.9.17.zip+ 2
+C-04	
+
+NAV-02 e NAV-04 (além de NAV-01 e NAV-03) são achados do relatório Sun sem patch ou log de teste direto no pacote que comprove sua resolução.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Permanece DOCUMENTADO, MAS NÃO VERIFICADO até inspeção direta de Main.qml, Guia.qml, TelaConfiguracoes.qml, TelaFiscal.qml, TelaCompras.qml, importar.rs e compras.rs.
+rustinho-codigo-fonte-0.9.17.zip+ 3
+C-05	
+
+A matriz de navegação contextual (NAVEGACAO-CONTEXTUAL-matriz.md) descreve as situações de navegação, mas declara no próprio cabeçalho ser "somente análise e proposta. Nenhum código foi alterado".
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Separado estritamente o que é proposta da matriz (Casos 4 a 8, 10a, 10b) daquilo que foi relatado como implementado no piloto (1) e na 0.9.17 (2, 2b, 3, 9a–9e), todos ainda NÃO VERIFICADOS no código 0.9.17.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+C-06	
+
+A 19ª entrada do inventário original (segunda cópia de NAVEGACAO-CONTEXTUAL-matriz.md) não existe como segunda entrada no ZIP.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Lacuna histórica confirmada e reconciliada no Bloco 1 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+C-07	
+
+O arquivo seu-desenvolvimento-atualizado-v0.2.3.odt (#10) traz conteúdo interno que se identifica como v0.2.2 reconstruída de v0.2.1, enquanto os relatórios externos são v0.2.3 (e DIAGNOSTICO_BASE.md / RELATORIO_FINAL_E_EVIDENCIAS.md também refletem a etapa v0.2.2).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Contradição histórica confirmada (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); os documentos da etapa 0.2.3 têm precedência sobre os textos de 0.2.2.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+C-08	
+
+O defeito da busca de peças está demonstrado em 6 capturas (omtimizar_campo_de_busca.docx), mas sem código-fonte ou log de correção no pacote histórico.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Defeito visual histórico confirmado (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); causa explicativa mantida como HIPÓTESE e estado de nucleo/src/busca.rs na 0.9.17 classificado como NÃO VERIFICADO.
+rustinho-codigo-fonte-0.9.17.zip+ 2
+C-09	
+
+Logs de runtime registram erros QML Guia.qml:129: ReferenceError: Overlay is not defined (9 ocorrências) e TelaConfiguracoes.qml:49: TypeError: Cannot call method 'abandonarGuia' of null (5 ocorrências).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+	
+
+Sinais técnicos comprovados nos logs históricos (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); verificar em app/qml/Guia.qml e TelaConfiguracoes.qml da 0.9.17 se foram corrigidos.
+rustinho-codigo-fonte-0.9.17.zip+ 3
+C-10	
+
+A camada fiscal v0.2.3 é isolada, sem compilação no ambiente de geração, sem homologação, com perfil limitado e sem cobertura completa da RTC.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Classificada como protótipo isolado em desenvolvimento (DOCUMENTADO, MAS NÃO VERIFICADO nos .rs), com integração e produção bloqueadas.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+C-11	
+
+Nomes de entradas no ZIP com acentos corrompidos (Consolidaç to..., erro-notificaçfo..., cone de alerta...).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Registrado no Bloco 1 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+C-12	
+
+Os 61 caminhos PNG de rus-rus.zip contêm apenas 28 conteúdos binariamente distintos (além das 6 imagens do DOCX, totalizando 34 imagens únicas).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Mapeados todos os 20 grupos de duplicatas SHA-256 no Bloco 1 e utilizadas as igualdades de hash para comprovar estados visuais de retorno nos testes.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+14.5. Quadro de Estado Consolidado por Assunto (Capítulo 14 do Dossiê — Página 20)
+Assunto	Documentação de Origem	Evidência Observável no Dossiê e no ZIP 0.9.17	Status Consolidado ao Final da Etapa Documental
+Notificações do Início	
+
+Auditoria 0.9.16 (#01) e Relatório Sun 0.9.17 (#19).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Imagens 04 a 15, 1-inicio.log, 2-reabrir.log, telas-notificacoes.log (base 0.9.15); cabeçalhos de avisos.rs, Notificacao.qml, IconeFuncao.qml no ZIP 0.9.17.
+rustinho-codigo-fonte-0.9.17.zip+ 4
+	
+
+Regras aprovadas e testadas em base histórica (CONFIRMADO POR EVIDÊNCIA HISTÓRICA v0.9.15); código 0.9.17, aviso de rodapé (Aviso.qml) e achados NOTIF-01/02/03: NÃO VERIFICADOS.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+Navegação Contextual — Caso 1 (Peças → Loja → Peças)	
+
+Matriz C8 (#04), Piloto 0.9.16 (#05) e Relatório Sun (#19).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Rodadas de logs (01 a 07), 32/32 checks em telas-navegacao_guiada-2.log, Imagens 16 a 28; requisitos.rs, Guia.qml, ImportarCadastros.qml presentes no ZIP 0.9.17.
+rustinho-codigo-fonte-0.9.17.zip+ 4
+	
+
+Evidência histórica sólida em v0.9.15/0.9.16 (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); código 0.9.17, warnings QML (Overlay/abandonarGuia) e achado NAV-04: NÃO VERIFICADOS.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+Navegação Contextual — Compras (Casos 2 e 2b) e Fiscal (Caso 3)	
+
+Matriz C8 (#04) e Relatório Sun 0.9.17 (#19).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+ConflitoCnpj.qml, TelaCompras.qml e TelaFiscal.qml presentes nos cabeçalhos do ZIP 0.9.17 (ESTRUTURA DO PACOTE IDENTIFICADA).
+rustinho-codigo-fonte-0.9.17.zip+ 2
+	
+
+Relatados como implementados na 0.9.17 (DOCUMENTADO, MAS NÃO VERIFICADO), com achados NAV-01, NAV-02 e NAV-03 pendentes de verificação no código.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+Navegação Contextual — Casos 4, 5, 6, 7, 8, 10a e 10b	
+
+Matriz C8 (#04) e Relatório Sun 0.9.17 (#19).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Tabela de cobertura da Seção 5 do Relatório Sun (pág. 53).
+Log_Consolidado_Rustinho_0.9.17.pdf
+	
+
+Casos 4 a 7 relatados como Pendentes; Caso 8 relatado como Parcial; 10a/10b como Propostas (PROPOSTA / DOCUMENTADO, MAS NÃO VERIFICADO).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+Busca de Peças	
+
+omtimizar_campo_de_busca.docx (#18) e Cap. 6 do Dossiê.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+6 capturas visuais (Imagens 29 a 34); nucleo/src/busca.rs presente nos cabeçalhos do ZIP 0.9.17.
+rustinho-codigo-fonte-0.9.17.zip+ 4
+	
+
+Falha histórica comprovada nas imagens (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); causa provável é HIPÓTESE; implementação em busca.rs na 0.9.17: NÃO VERIFICADA.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+Unidades de Medida em Peças	
+
+Consolidação do padrão Rustinho.docx (#11, Seção 6).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Especificação determinística e 19 critérios de teste; nucleo/src/unidades.rs e app/qml/EscolherUnidade.qml presentes no ZIP 0.9.17.
+rustinho-codigo-fonte-0.9.17.zip+ 3
+	
+
+Especificado (CONFIRMADO POR EVIDÊNCIA HISTÓRICA); implementação da janela móvel de 24h e execução dos 19 testes na 0.9.17: NÃO VERIFICADAS.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+Camada Fiscal Independente (rustinho-fiscal v0.2.3)	
+
+11 documentos .md em rustinho-fiscal-v0.2.3/ (#06 a #09).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+	
+
+Documentação completa transcrita (págs. 54–69); código .rs no Apêndice H (NÃO ACESSÍVEL NESTA SESSÃO); fora da árvore do ZIP 0.9.17.
+rustinho-codigo-fonte-0.9.17.zip+ 3
+	
+
+Protótipo isolado em desenvolvimento (DOCUMENTADO, MAS NÃO VERIFICADO), sem compilação Rust na geração do pacote, sem homologação e bloqueado para produção e integração.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+Modularidade e Monólitos Internos	
+
+Relatório Técnico Sun Rustinho v0.9.17.md (#19, Seção 2.2).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+	
+
+Cabeçalhos do ZIP 0.9.17 confirmam que sync.rs, api.rs, faixas.rs e TelaConfiguracoes.qml ainda não foram fatiados.
+rustinho-codigo-fonte-0.9.17.zip+ 1
+	
+
+Diagnóstico de acoplamento (DOCUMENTADO, MAS NÃO VERIFICADO) e recomendações de divisão (PROPOSTA, não executadas).
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+15. Riscos Técnicos, Decisões Humanas Pendentes e Plano de Continuidade (BLOCO 5D2)
+
+Consolidação do Capítulo 15 do Dossiê (página 21), da Seção 13.1 do Dossiê (página 19) e da Seção 6 do Relatório Sun v0.9.17 (página 53):   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+15.1. Cinco Riscos Técnicos Prioritários
+
+    Risco de integração ou ativação fiscal indevida: Tratar a crate rustinho-fiscal v0.2.3 ou planos arquiteturais como emissor pronto ou autorizado para produção, sem antes cumprir os 8 gates técnicos/contábeis da Seção 12.17.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Risco de confiança cega em testes históricos (v0.9.15 vs. v0.9.17): Assumir que os 487 testes de núcleo (suite.log) e os testes de tela executados sobre binários v0.9.15 certificam automaticamente o código-fonte 0.9.17 ou ignorar os warnings QML de runtime (Overlay is not defined e abandonarGuia of null).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Risco de regressão na navegação contextual e permissões: Empilhamento duplicado de TelaConfiguracoes quando acionada a partir da aba Fiscal embutida (NAV-01), perda de destaque ao trocar de pílula (NAV-02), operador Caixa retido na aba Loja após cancelar senha (NOTIF-03) ou gravação de CNPJ inválido caso importar::cnpj_loja não utilize o validador completo (NAV-04).   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    Risco de regressão funcional ou de desempenho na busca de peças: Alterar nucleo/src/busca.rs para resolver as 6 consultas das capturas (TCF, 01 TCF, rg08, rg-08) sem antes inspecionar o algoritmo real da 0.9.17, podendo degradar a pesquisa por códigos internos, GTIN, equivalentes, aplicações ou o ranking de resultados.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Risco de incompatibilidade multiplataforma e de empacotamento (Desktop Linux/Windows e Android): Presumir paridade de diálogos nativos de arquivos (KDE/Portal no AppImage, Windows e Android SAF), gestos de toque (TapHandler/DragHandler), layout de unidades (5 vs. 3 botões por linha) e versão do crate Android (android/rust/Cargo.toml) sem verificação no código e testes físicos em cada plataforma.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+15.2. Consolidação Geral das Decisões Humanas Pendentes (DECISÃO HUMANA PENDENTE)
+
+Nenhuma das decisões abaixo pode ser tomada ou implementada por inferência automática:
+
+    Decisões de Produto e Navegação Contextual:
+
+        Aprovação da regra de estado inicial das notificações de categoria ATENCAO (se permanecem iniciando minimizadas em quadrado, conforme implementado na auditoria 0.9.16, ou se devem iniciar abertas — item submetido à revisão humana na Seção 3 de AUDITORIA-notificacoes-0.9.16.md);   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Autorização e priorização para implementar os casos pendentes da Matriz C8: Casos 4 (Etiquetas com código ambíguo), 5 (Transferência sem conta destino), 6 (Rascunho de OS bloqueado por caixa incompatível), 7 (Operação financeira bloqueada por referência) e botão de ação na faixaModoSeguro do Caso 8;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Escolha da abordagem de correção para NAV-01 (recarregar TelaConfiguracoes em StackView.onActivated vs. trocar de seção internamente sem empilhar uma segunda TelaConfiguracoes) e para NAV-02 (bloquear clique nas demais pílulas durante a guia vs. cancelar a guia/reaplicar o destaque ao trocar de aba);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Autorização para executar ou postergar as propostas de refatoração de modularidade dos monólitos internos (sync.rs, api.rs, faixas.rs, TelaConfiguracoes.qml, TelaPeca.qml, TelaVender.qml).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+    Decisões Fiscais, Contábeis e Arquiteturais (Protegidas pelas Restrições do Projeto):
+
+        Autorização expressa antes de qualquer integração da crate rustinho-fiscal ao núcleo ou habilitação de emissão fiscal;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Definição contábil/comercial da tabela de equivalência entre as formas comerciais do núcleo (crediario, vale/vale-troca, outro) e os meios fiscais tPag (05_CREDITO_LOJA, 15_BOLETO_BANCARIO, 99_OUTROS), proibida qualquer conversão automática;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        Definição semântica exata de payments.amount_cents quando há troco ou múltiplos meios de pagamento;   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+        Regras para vendas a prazo com entrada/sinal e pagamentos mistos (ParcelaPrevia → FiscalBillingSnapshot);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Regra de reserva, reutilização ou inutilização de (serie, numero) por caixa/estação (DF-6), considerando a ausência de inutilização no adaptador e a verificação da NT 2023.002 v1.02;   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Escolha da arquitetura de provedor fiscal para Desktop e Android (DF-3 / DF-4: ACBrMonitorPLUS local, ACBrLib em processo auxiliar, API REST hospedada ou Estação Fiscal Local autenticada via HTTPS/mTLS);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        Revisão contábil por UF das regras de CFOP/CST/CSOSN, Substituição Tributária (ST) e grupos da Reforma Tributária do Consumo (RTC — IBS, CBS, IS);   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+        Política de proteção de ACLs para arquivos INI temporários no Windows e rotina de expurgo independente de novas emissões.   
+        Log_Consolidado_Rustinho_0.9.17.pdf
+
+15.3. Ordem Recomendada para a Continuidade da Auditoria (Transição para o Código-Fonte 0.9.17)
+
+Concluída 100% da etapa de análise documental do PDF consolidado, a ordem técnica recomendada para os próximos blocos (Auditoria do Código-Fonte 0.9.17) segue o roteiro da Seção 15.1 do dossiê (página 21) e da Seção 6 do Relatório Sun (página 53):   
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Conferir diretamente no código-fonte 0.9.17 os módulos de Notificações e Navegação Contextual (nucleo/src/avisos.rs, nucleo/src/requisitos.rs, nucleo/src/importar.rs, nucleo/src/compras.rs, app/qml/Main.qml, app/qml/Notificacao.qml, app/qml/Guia.qml, app/qml/TelaInicio.qml, app/qml/TelaConfiguracoes.qml, app/qml/TelaCompras.qml, app/qml/ConflitoCnpj.qml, app/qml/TelaFiscal.qml, app/qml/Aviso.qml) para verificar o estado real dos Casos 1, 2, 2b, 3 e 9a–9e, dos achados NOTIF-01/02/03 e NAV-01/02/03/04 e dos warnings QML de Overlay e abandonarGuia.   
+    rustinho-codigo-fonte-0.9.17.zip+ 3
+
+    Conferir no código-fonte 0.9.17 os módulos de Busca de Peças e Unidades de Medida (nucleo/src/busca.rs, nucleo/src/produtos.rs, nucleo/src/unidades.rs, app/qml/EscolherUnidade.qml, app/qml/TelaPecas.qml, app/qml/TelaPeca.qml) frente às 6 capturas de busca e às 19 regras determinísticas de unidades.   
+    rustinho-codigo-fonte-0.9.17.zip+ 3
+
+    Conferir no código-fonte 0.9.17 a infraestrutura de Ponte/Seletor Nativo, Banco/Migrações, Sincronização/Faixas e Módulos Comerciais/Financeiros/Fiscais Internos (app/src/ponte.rs, app/cpp/janela.cpp, nucleo/src/banco.rs, migracao.rs, migracoes/0001..0023, sync.rs, faixas.rs, api.rs, vendas.rs, caixa.rs, receber.rs, pagar.rs, devolucoes.rs, oficina.rs, encomendas.rs, dre.rs, fiscal.rs, nfe_xml.rs, nfe_assinatura/ e android/rust/Cargo.toml).   
+    rustinho-codigo-fonte-0.9.17.zip+ 3
+
+Parte 3 — Fechamento do BLOCO 5D2 e Síntese Final da Etapa Documental
+
+    O que foi analisado:
+
+        Aplicação da ressalva do Bloco 5D1 na Seção 12.16 (classificando a presença de MEI no contrato e sua ausência na allowlist como diferença entre o vocabulário do contrato e o subconjunto operacional documentado do adaptador, mantida como DOCUMENTADO, MAS NÃO VERIFICADO).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Análise exclusiva da Seção 2 (e cruzamentos das Seções 1 e 6) de Relatório Técnico Sun Rustinho v0.9.17.md (páginas 51 e 53) e dos Capítulos 11 a 15 do Dossiê (páginas 16 a 21), completando os Capítulos 2, 11, 13, 14 e 15 do documento técnico único.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+    O que foi confirmado (Fechamento da Etapa Documental):
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA: Concluído o mapeamento integral das 95 páginas acessíveis do Log_Consolidado_Rustinho_0.9.17.pdf, incluindo os 15 capítulos analíticos do dossiê, o inventário dos 19 materiais originais (138 entradas de rus-rus.zip), os 20 grupos de duplicatas SHA-256, as 34 imagens únicas da galeria visual, todos os 18 conteúdos únicos de arquivos Markdown (21 entradas), o documento Consolidação do padrão Rustinho.docx e os logs 1-inicio.log e 2-reabrir.log.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        CONFIRMADO POR EVIDÊNCIA HISTÓRICA (Atribuição de versão dos testes): Comprovado que a suíte integrada regressao2/logs/suite.log (487 aprovados, 0 falhas, 9 ignorados) e os logs de compilação/linter (build.log, clippy.log, 03-build.log) foram executados sobre binários compilados como rustinho v0.9.15 / rustinho-nucleo v0.9.15, que fmt.log possui 0 bytes, e que diversos logs de tela contêm erros de runtime QML (ReferenceError: Overlay is not defined e TypeError: Cannot call method 'abandonarGuia' of null).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 2
+
+        ESTRUTURA DO PACOTE IDENTIFICADA: Comprovado pelos cabeçalhos de rustinho-codigo-fonte-0.9.17.zip que as propostas de refatoração dos monólitos internos (sync.rs, api.rs, faixas.rs, TelaConfiguracoes.qml, TelaPeca.qml, TelaVender.qml) são apenas recomendações arquiteturais (PROPOSTA) ainda não aplicadas na estrutura de arquivos da versão 0.9.17.   
+        rustinho-codigo-fonte-0.9.17.zip+ 2
+
+    Problemas e Riscos Consolidados:
+
+        Acoplamento e concentração elevada de responsabilidades documentados em nucleo/src/sync.rs (301 KB), nucleo/src/api.rs (197 KB), nucleo/src/faixas.rs (166 KB), app/qml/TelaConfiguracoes.qml (102 KB), app/qml/TelaPeca.qml (65 KB) e app/qml/TelaVender.qml (59 KB) (DOCUMENTADO, MAS NÃO VERIFICADO, sem constituir defeito funcional comprovado).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+        Pendências funcionais e de usabilidade relatadas para verificação no código 0.9.17: NOTIF-01, NOTIF-02 (com divergência registrada), NOTIF-03, NAV-01, NAV-02, NAV-03, NAV-04, aviso rápido no rodapé (Imagem 03), 6 casos de falha visual na busca de peças (Imagens 29 a 34), sincronização de versão em android/rust/Cargo.toml e casos 4 a 8 da matriz de navegação.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 4
+
+        Ausência de testes executados para virada real de meia-noite, toque/Android, múltiplos arquivos no seletor em X virtual, Windows/Android no piloto, busca inteligente e compilação/execução real da crate rustinho-fiscal v0.2.3.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+    Contradições Registradas:
+
+        As 12 contradições e lacunas (C-01 a C-12) estão integralmente catalogadas na Seção 14.4, destacando-se a divergência entre a versão nominal dos relatórios (0.9.16/0.9.17) e a versão nos cabeçalhos dos logs (0.9.15 — C-02), a divergência sobre NOTIF-02 (C-03) e a coexistência de artefatos v0.2.2 e v0.2.3 no pacote fiscal (C-07).   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    O que permanece NÃO VERIFICADO / NÃO ACESSÍVEL NESTA SESSÃO:
+
+        O conteúdo interno de todos os arquivos de código-fonte (.rs, .qml, .sql, .cpp, .h, .toml, .py) dentro de rustinho-codigo-fonte-0.9.17.zip, pois seus blocos estão comprimidos via Deflate no stream recebido.   
+        rustinho-codigo-fonte-0.9.17.zip
+
+        As páginas 96 a 257 do PDF (NÃO ACESSÍVEIS NESTA SESSÃO), que contêm os 35 logs brutos restantes do Apêndice G, o mudancas-piloto-e-notificacoes.patch e o Apêndice H com os 8 arquivos .rs da crate rustinho-fiscal v0.2.3.   
+        Log_Consolidado_Rustinho_0.9.17.pdf+ 3
+
+    Próximo bloco recomendado (Transição para a Auditoria do Código-Fonte 0.9.17):
+
+        BLOCO 6 — Auditoria do Código-Fonte 0.9.17 (Grupo 1: Sistema de Notificações e Avisos — nucleo/src/avisos.rs, nucleo/src/testes_avisos.rs, app/qml/Notificacao.qml, app/qml/IconeFuncao.qml, app/qml/Aviso.qml e app/qml/TelaInicio.qml):
+
+        Nota técnica importante para viabilizar a leitura exata do código no Bloco 6: Como os arquivos internos de rustinho-codigo-fonte-0.9.17.zip estão comprimidos em Deflate no anexo original e o ambiente não possui ferramenta de descompressão, para que eu possa auditar o código linha a linha sem violar o protocolo contra alucinações, peço que ao autorizar o Bloco 6 você anexe ou cole o conteúdo em texto puro dos arquivos desse primeiro grupo (ou envie um arquivo .zip gerado sem compressão: zip -0).
+
+Aguardo sua autorização explícita e o fornecimento legível dos arquivos do primeiro grupo para iniciar o BLOCO 6.

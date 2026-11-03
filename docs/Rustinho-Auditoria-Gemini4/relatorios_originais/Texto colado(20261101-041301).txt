@@ -1,0 +1,139 @@
+1. Nota de Rastreabilidade e Condição de Atualização do RelatórioCorreção integral da contagem de linhas e das referências: Os seis arquivos de Rustinho-Bloco6.zip foram recontados linha a linha diretamente no pacote fornecido, confirmando exatamente as quantidades reais:   nucleo/src/avisos.rs: 1003 linhas   nucleo/src/testes_avisos.rs: 159 linhas   app/qml/Notificacao.qml: 252 linhas   app/qml/IconeFuncao.qml: 42 linhas   app/qml/Aviso.qml: 47 linhas   app/qml/TelaInicio.qml: 276 linhas   Condição de atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md: Como o ambiente desta sessão não possui escrita direta em disco local persistente, a versão revisada do Capítulo 4 do relatório técnico consolidado é entregue na íntegra abaixo, substituindo a versão anterior do Bloco 6 e preservando os demais capítulos já aprovados.2. Versão Revisada do Capítulo 4 de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md (Auditoria de Código — BLOCO 6)4. Sistema de Notificações, Avisos Rápidos e Tela Inicial — Auditoria de Código (0.9.17)4.1. Inventário e Mapeamento de Linhas dos 6 Arquivos Auditados (CONFIRMADO NO CÓDIGO)Arquivo (0.9.17)Total de LinhasMapa Exato de Estruturas, Funções, Componentes e Testes (Linhas Reais)nucleo/src/avisos.rs1003• Comentário de módulo: 1–16   • Imports e constantes INFORMATIVA (24), ATENCAO (25), CRITICA (26): 18–26   • pub struct Detalhe: 29–33   • pub struct Aviso: 35–65   • impl Aviso (simples em 69–86, categoria em 88–91, secao em 93–96): 67–97   • fn completar: 102–142   • pub fn uma_aberta: 147–153   • pub fn minimizar: 160–171   • pub fn esconder: 176–186   • fn escondida_hoje: 191–193   • fn plural: 195–197   • pub fn da_senha: 203–223   • pub fn do_dia: 226–674   • fn aviso_de_compatibilidade: 678–744   • fn curto: 747–750   • fn do_modo_seguro: 753–774   • pub fn so_do_modo_seguro: 780–783   • #[cfg(test)] mod testes (7 testes unitários e 2 helpers): 785–1003   nucleo/src/testes_avisos.rs159• Comentário e import: 1–5   • Helpers chamar (7–12), ok (14–18), aviso (20–22), loja (26–53), pasta (55–57): 7–57   • Teste n06_esconder_pela_api_respeita_a_categoria: 61–80   • Helper abertas: 83–91   • Teste n08_so_uma_nao_critica_aberta_mesmo_com_marcas_antigas: 97–128   • Teste n07_minimizada_continua_depois_de_fechar_e_abrir: 133–159   app/qml/Notificacao.qml252• Imports e comentários: 1–18   • Item { id: raiz }, propriedades e Accessible.* (40–42): 19–55   • function linha(): 58–65   • Rectangle { id: cartao }: 67–236   • IconeFuncao (modo minimizado): 80–85   • ColumnLayout { id: conteudo } (modo expandido, com acaoLarga em 123–130, quadro de detalhes em 134–166 e acaoEstreita em 168–175): 88–176   • Image (triângulo PNG): 180–192   • DragHandler { id: arrasto }: 194–220   • TapHandler: 223–234   • HoverHandler: 235   • Animações volta (238–242) e saida (243–251): 238–252   app/qml/IconeFuncao.qml42• Imports e comentário: 1–6   • Rectangle { id: icone } e propriedades funcao, nome, tamanhoIcone: 7–11   • Mapa cores das 14 funções (vender a configuracoes): 13–28   • Fallback cor, dimensões, raio, cor de fundo e Icone interno (35–41): 29–42   app/qml/Aviso.qml47• Imports e comentário: 1–4   • Rectangle { id: aviso } (com y: parent.height - height - 30 na linha 10): 5–17   • Text { id: mensagem }: 19–29   • Behavior on opacity, Timer { id: tempo } (33–36), TapHandler (38): 31–38   • function mostrar(texto, tipoAviso): 40–46 (fechamento na linha 47)   app/qml/TelaInicio.qml276• Imports, propriedades faixas (15) e quadrados (16): 1–16   • Funções carregar (18–25), funcao (27–29), esconderAviso (31–37), minimizarAviso (42–52), abrirAviso (55–78), fixar (80–86), saudacao (88–91), focarBusca (93–95), buscar (97–102): 18–102   • Cabeçalho fixo e Campo { id: busca } (161–172): 106–173   • Flickable { id: rolagem } com Repeater de faixas (199–211), Flow de quadrados (212–229) e GridLayout de CartaoFuncao (234–252): 176–255   • StackView.onActivated (257–260), Component.onCompleted (261) e Timer de 20s (266–275): 257–276   4.2. Comportamentos Confirmados no Código (CONFIRMADO NO CÓDIGO)Três categorias, estado inicial e ordenação (nucleo/src/avisos.rs):Constantes definidas nas linhas 24–26 (INFORMATIVA, ATENCAO, CRITICA).   Em completar (linhas 139–140), INFORMATIVA e ATENCAO iniciam minimizadas (minimizado = true, salvo se aviso_minimizado.<id> for "0"), enquanto CRITICA é forçada para minimizado = false mesmo que exista marca antiga no banco:   Rusta.minimizado =
+    a.categoria != CRITICA && config::ler(conn, &format!("aviso_minimizado.{}", a.id))?.as_deref() != Some("0");
+Em do_dia (linhas 659–664), a ordenação garante CRITICA (0) primeiro, ATENCAO (1) depois e INFORMATIVA (2) por último.   Apenas uma não crítica aberta por vez (nucleo/src/avisos.rs e app/qml/TelaInicio.qml):uma_aberta (linhas 147–153 de avisos.rs) garante em memória que no máximo a primeira não crítica venha aberta.   minimizar (linhas 160–171 de avisos.rs) recusa minimizar CRITICA (linhas 164–166), grava "1" em aviso_minimizado.<outra.id> para todas as demais não críticas atuais (linhas 167–169) e grava o novo estado do alvo (linha 170).   Ocultação até a meia-noite restrita à categoria INFORMATIVA (nucleo/src/avisos.rs):esconder (linhas 176–186) retorna Erro::validacao se aviso.categoria != INFORMATIVA (linhas 180–184) e grava fiscal::hoje(conn)? em aviso_escondido.<id> (linha 185).   escondida_hoje (linhas 191–193) exige a.categoria == INFORMATIVA antes de comparar a data com hoje, sendo aplicada em da_senha (linha 219) e no laço final de do_dia (linhas 668–672).   Gestos, clique no botão interno, triângulo PNG e Timer de 20s (Notificacao.qml e TelaInicio.qml):Em app/qml/Notificacao.qml, o DragHandler (linhas 194–220) usa const limite = Math.max(raiz.width, 400) * 0.18 (linha 203), minimizando ao arrastar para a direita (cartao.x > limite, linhas 204–208), animando saída e escondendo ao arrastar informativa para a esquerda (cartao.x < -limite, linhas 209–210 e 243–251), apenas minimizando ao arrastar atencao para a esquerda (linhas 211–215) e apenas voltando cartao.x a 0 na critica (linhas 216–218).   O TapHandler (linhas 223–234 de Notificacao.qml) ignora cliques sobre acaoLarga e acaoEstreita (linhas 226–229) e só alterna raiz.minimizar(!raiz.minimizado) se !raiz.critica (linhas 231–232).   O Image do triângulo (linhas 180–192 de Notificacao.qml) alterna entre alerta-branco.png (Tema.escuro) e alerta-preto.png (!Tema.escuro).   Em app/qml/TelaInicio.qml, o Timer (linhas 266–275) recarrega avisos_do_dia a cada 20000 ms enquanto a tela está ativa na StackView.   4.3. Revisão Individual de NOTIF-01, NOTIF-02 e NOTIF-03 com Trechos Literais1. NOTIF-01 — Rótulo "Resolver no Gerente" para avisos cujo destino é Simultaneidade › DuplicatasStatus no código 0.9.17: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Caminho, função e linhas: nucleo/src/avisos.rs, função completar, linhas 124–138 (especificamente linha 132), em conflito com a função do_dia, linhas 355–366, 372–387 e 394–405.   Trechos literais do código:Em nucleo/src/avisos.rs, linhas 124–138:   Rustif a.acao.is_empty() {
+    a.acao = match a.id.as_str() {
+        "receber" => "Ver crediário",
+        "pagar" => "Ver contas a pagar",
+        "cheques" => "Ver cheques",
+        "encomendas" => "Ver encomendas",
+        "oficina" => "Ver ordens de serviço",
+        "backup" | "backup_nuvem" => "Ver backup",
+        "conflitos" | "codigos" | "codigos_bloqueio" => "Resolver no Gerente",
+        "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
+        id if id.starts_with("senha.") => "Trocar senha",
+        _ => "Abrir",
+    }
+    .to_string();
+}
+Em nucleo/src/avisos.rs, linhas 374–386 (e analogamente em 357–365 e 396–404):   Rust            "codigos_bloqueio",
+            &hoje,
+            "Códigos".into(),
+            "Este caixa está sem poder dar códigos de peças".into(),
+            if motivo == crate::faixas::BLOQUEIO_COPIA {
+                "o banco veio de outro computador: o gerente registra em Configurações › Simultaneidade › Duplicatas".into()
+            } else {
+                "o gerente confirma em Configurações › Simultaneidade › Duplicatas".into()
+            },
+            "configuracoes",
+        )
+        .categoria(CRITICA)
+        .secao("duplicatas"),
+Conclusão técnica: O botão exibe "Resolver no Gerente" (linha 132), embora o próprio texto da notificação e a propriedade .secao("duplicatas") (acionada em app/qml/TelaInicio.qml, linhas 61–62) levem à seção Simultaneidade › Duplicatas.   2. NOTIF-02 — Rótulo da notificação crítica outra_lojaStatus no código 0.9.17: CONFIRMADO NO CÓDIGO como JÁ CORRIGIDO (Não é defeito na 0.9.17).Caminho, função e linha: nucleo/src/avisos.rs, função completar, linha 133.   Trecho literal do código:Rust"referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
+Conclusão técnica: Ao contrário do que apontava o relatório histórico Relatório Técnico Sun Rustinho v0.9.17.md, no código-fonte real da versão 0.9.17 o aviso "outra_loja" já está mapeado para o rótulo "Ver caixas" na linha 133.   3. NOTIF-03 — Abertura de seção restrita de TelaConfiguracoes por operador Caixa a partir da Tela InicialStatus no código 0.9.17: CONFIRMADO NO CÓDIGO (na camada TelaInicio.qml) / PENDENTE DE VERIFICAÇÃO EM TelaConfiguracoes.qml (Bloco 7).Caminho, função e linhas: app/qml/TelaInicio.qml, função abrirAviso, linhas 55–63.   Trecho literal do código:QML  function abrirAviso(aviso) {
+      const f = funcao(aviso.funcao)
+      if (!f)
+          return
+      if (aviso.id.indexOf("senha.") === 0) {
+          janela.abrir("TelaConfiguracoes", { secao: "loja" })
+      } else if (aviso.secao) {
+          janela.abrir("TelaConfiguracoes", { secao: aviso.secao })
+      } else if (aviso.id === "receber") {
+Conclusão técnica: Confirma-se nas linhas 61–62 que TelaInicio.qml abre TelaConfiguracoes passando { secao: aviso.secao }. A confirmação completa do efeito ao cancelar o modal PedirGerente depende da inspeção de app/qml/TelaConfiguracoes.qml no Bloco 7.   4.4. Revisão Individual dos Achados B6-01 a B6-08 (Com Trechos Literais e Reclassificação Rigorosa)B6-01 — Posicionamento inferior do componente de avisos rápidos (app/qml/Aviso.qml)Classificação: DEFEITO COMPROVADO (frente ao requisito visual de posicionamento superior documentado a partir de erro-notificação_embaixo.png).Caminho e linhas: app/qml/Aviso.qml, linhas 4–17 (especificamente linhas 4 e 10).   Trecho literal:QML// Mensagem rápida que aparece embaixo e some sozinha.
+Rectangle {
+    id: aviso
+    property string tipo: "info"
+
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: parent.height - height - 30
+    z: 1000
+Sustentação: A linha 10 calcula y: parent.height - height - 30, mantendo o aviso rápido fixado a 30 px da borda inferior do elemento pai na versão 0.9.17.   B6-02 — Ausência de botão de ação e de titulo_longo/resumo na função de fallback so_do_modo_seguroClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Caminho, funções e linhas: nucleo/src/avisos.rs, funções do_modo_seguro (linhas 753–774) e so_do_modo_seguro (linhas 780–783), combinadas com app/qml/Notificacao.qml (linhas 43, 123–130 e 168–175).   Trechos literais:Em nucleo/src/avisos.rs, linhas 753–783:   Rustfn do_modo_seguro(hoje: &str, defeito: &str) -> Aviso {
+    let mut a = Aviso::simples(
+        "banco_defeito",
+        hoje,
+        "Modo seguro: o banco de dados tem defeito".into(),
+        "nada é gravado neste caixa".into(),
+        "restaure um backup bom ou chame o suporte".into(),
+        "configuracoes",
+    )
+    .categoria(CRITICA)
+    .secao("backup");
+    a.descricao = format!(
+        "Ao abrir, o Rustinho conferiu o banco de dados deste caixa e achou um defeito ({defeito})..."
+    );
+    a
+}
+
+pub fn so_do_modo_seguro(conn: &Connection, defeito: &str) -> Vec<Aviso> {
+    let hoje = fiscal::hoje(conn).unwrap_or_else(|_| crate::tempo::agora().chars().take(10).collect());
+    vec![do_modo_seguro(&hoje, defeito)]
+}
+Em app/qml/Notificacao.qml, linha 43 e linhas 123–126:   QMLreadonly property bool temAcao: (aviso.acao || "") !== ""
+QML            Botao {
+                id: acaoLarga
+                visible: raiz.temAcao && !Tema.estreito
+                text: raiz.aviso.acao || ""
+Sustentação: Aviso::simples (linhas 78–82 de avisos.rs) inicializa titulo_longo, resumo e acao como String::new(). Ao contrário de aviso_de_compatibilidade (que preenche manualmente a.titulo_longo, a.resumo e a.acao = "Ver caixas".into() nas linhas 729–742), do_modo_seguro (linhas 753–774) preenche apenas a.descricao. Quando so_do_modo_seguro (linhas 780–783) retorna vec![do_modo_seguro(&hoje, defeito)] sem passar por completar, a.acao permanece "", tornando raiz.temAcao === false em Notificacao.qml (linha 43) e ocultando o botão de ação da notificação crítica do modo seguro.   B6-03 — esconderAviso não atualiza tela.avisos, fazendo a informativa escondida reaparecer se outra notificação for clicada antes do Timer de 20sClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Caminho, funções e linhas: app/qml/TelaInicio.qml, propriedades faixas e quadrados (linhas 15–16), função esconderAviso (linhas 31–37) e função minimizarAviso (linhas 42–52), em conjunto com app/qml/Notificacao.qml (linhas 44 e 250).   Trecho literal (app/qml/TelaInicio.qml, linhas 31–52):QML  function esconderAviso(aviso) {
+      const r = Api.chamar("aviso_esconder", { id: aviso.id })
+      if (!r.ok) {
+          janela.avisar(r.erro, "info")
+          carregar()
+      }
+  }
+
+  function minimizarAviso(aviso, minimizado) {
+      const r = Api.chamar("aviso_minimizar", { id: aviso.id, minimizado: minimizado })
+      if (!r.ok) {
+          janela.avisar(r.erro, "info")
+          carregar()
+          return
+      }
+      avisos = avisos.map(a => a.id === aviso.id ? Object.assign({}, a, { minimizado: minimizado })
+                               : a.categoria !== "critica" && !a.minimizado
+                                 ? Object.assign({}, a, { minimizado: true }) : a)
+  }
+Sustentação: Quando o usuário arrasta uma notificação informativa para a esquerda, o delegate em Notificacao.qml define localmente raiz.saindo = true (linha 250, zerando implicitHeight na linha 47) e emite esconder(), acionando esconderAviso. Quando Api.chamar("aviso_esconder", ...) tem sucesso (r.ok === true), esconderAviso (linhas 31–37) não remove o aviso de tela.avisos. Se em seguida (antes do Timer de 20s da linha 266) o usuário clicar em qualquer quadrado para abri-lo ou fechá-lo, minimizarAviso (linhas 49–51) reatribui avisos = avisos.map(...) mantendo o item escondido no array (e mudando minimizado de false para true caso ele estivesse em faixas), o que recria os delegates nos Repeaters (linhas 199 e 216) com saindo: false e faz a notificação escondida reaparecer na tela.   B6-04 — Escape HTML (&lt;, &gt;, &amp;) aplicado por curto() em avisos de Backup que são renderizados como Text.PlainTextClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Caminho, funções e linhas: nucleo/src/avisos.rs, função completar (linhas 118–121), função do_dia (linhas 627–638 e 645–655), função curto (linhas 747–750) e teste avisa_backup (linhas 996–998), em conjunto com app/qml/Notificacao.qml (linhas 111–121).   Trechos literais:Em nucleo/src/avisos.rs, linhas 627–638 e 746–750:   Rust    let (texto, atraso) = if !b.erro.is_empty() {
+        ("O último backup não deu certo".to_string(), curto(&b.erro))
+    ...
+    avisos.push(
+        Aviso::simples("backup", &hoje, "Backup".into(), texto, atraso, "configuracoes")
+            .categoria(ATENCAO)
+            .secao("backup"),
+    );
+Rust/// Motivo curto e seguro para a faixa (que aceita um pouco de HTML).
+fn curto(t: &str) -> String {
+    let t: String = t.chars().take(90).collect();
+    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+Em app/qml/Notificacao.qml, linhas 111–115:   QML                Text {
+                    visible: text !== ""
+                    text: raiz.categoria === "informativa" ? raiz.linha() : (raiz.aviso.descricao || "")
+                    textFormat: raiz.categoria === "informativa" ? Text.StyledText : Text.PlainText
+                    color: Tema.tinta
+Sustentação: curto() (linhas 747–750) é chamado exclusivamente para b.erro (linha 628, aviso "backup") e b.nuvem_erro (linha 650, aviso "backup_nuvem"). Ambos os avisos recebem .categoria(ATENCAO) (linhas 636 e 653), e completar copia atraso para a.descricao (linhas 118–121). Porém, em Notificacao.qml (linha 114), apenas raiz.categoria === "informativa" utiliza Text.StyledText; para "atencao", o componente utiliza Text.PlainText, fazendo com que &amp;, &lt; e &gt; sejam exibidos literalmente como texto cru na interface.   B6-05 — Instanciação de Campo { id: busca } em app/qml/TelaInicio.qml (Reclassificado)Classificação Corrigida: PENDENTE DE VERIFICAÇÃO EM Campo.qml (Não é defeito comprovado em TelaInicio.qml).Caminho e linhas: app/qml/TelaInicio.qml, linhas 161–172.   Trecho literal:QML          Campo {
+              id: busca
+              dica: Tema.estreito ? "Buscar peça: código, nome ou carro" : "Buscar peça: qualquer código, nome, modelo ou carro (ex.: óleo 5w30, 8PK1515)"
+              icone: "busca"
+              atalho: "F11"
+              tamanhoFonte: 19
+              altura: 56
+              Layout.fillWidth: true
+              Layout.topMargin: 2
+              Layout.bottomMargin: 12
+              onConfirmado: tela.buscar()
+          }
+Correção da conclusão anterior: TelaInicio.qml delega a construção visual do campo ao componente app/qml/Campo.qml, passando icone: "busca" e atalho: "F11" (linhas 164–165). Como Campo.qml não faz parte dos 6 arquivos do Bloco 6, não há sustentação para declarar defeito visual apenas pela leitura de TelaInicio.qml; a verificação dos ícones de colar (+), copiar e posição do F11 dependerá da leitura de app/qml/Campo.qml.   B6-06 — Rótulos genéricos "Abrir" e caminhos textuais sem "Simultaneidade ›" (Reclassificado)Classificação Corrigida: MELHORIA PROPOSTA (separada de NOTIF-01, que permanece DEFEITO COMPROVADO na linha 132).Caminho e linhas: nucleo/src/avisos.rs, função completar (linha 135), função do_dia (linhas 445–496 e 607–610) e função do_modo_seguro (linhas 753–774).   Trechos literais:Linha 135 de nucleo/src/avisos.rs: _ => "Abrir", (aplicado a "troca_parada" linha 446, "troca_tentando" linha 464, "troca_voltou" linha 481 e "banco_defeito" linha 755);   Linhas 608–609 de nucleo/src/avisos.rs: "O gerente vê o motivo de cada uma em Configurações › Caixas da loja.";   Linha 769 de nucleo/src/avisos.rs: "Restaure um backup bom em Configurações › Backup (depois feche e abra o Rustinho)...".   Correção da conclusão anterior: Nos quatro avisos que caem em _ => "Abrir", a propriedade .secao(...) ("caixas" ou "backup") está corretamente preenchida e leva ao destino certo, não havendo requisito explícito violado nem indicação de aba errada (diferentemente de NOTIF-01 na linha 132, que diz "Resolver no Gerente" quando o destino é "duplicatas"). Trata-se, portanto, de MELHORIA PROPOSTA para padronizar os rótulos ("Ver caixas" / "Ver backup") e explicitar "Simultaneidade ›" nos textos das linhas 609 e 769.   B6-07 — Concatenação de aviso.texto e aviso.atraso em Text.StyledText sem escape HTML em Notificacao.qml (Reclassificado)Classificação Corrigida: RISCO de manutenção futura (Sem impacto nos avisos INFORMATIVA atuais).Caminho e linhas: app/qml/Notificacao.qml, função linha() (linhas 58–65) e Text (linhas 113–114).   Trecho literal:QML  function linha() {
+      const partes = []
+      if (aviso.texto)
+          partes.push(aviso.texto)
+      if (aviso.atraso)
+          partes.push("<font color='" + Tema.vermelho + "'>" + aviso.atraso + "</font>")
+      return partes.join("  ·  ")
+  }
+Sustentação: Na implementação atual de nucleo/src/avisos.rs, todos os 7 avisos de categoria INFORMATIVA (da_senha linhas 210–218, "receber" linhas 240–261, "pagar" linhas 267–285, "cheques" linhas 291–302, "encomendas" linhas 308–322, "oficina" linhas 334–349 e "referencias_atrasadas" linhas 545–557) montam texto e atraso apenas com strings fixas, números inteiros (plural) e valores monetários (numeros::escrever_dinheiro), sem interpolar textos livres do usuário. Logo, não há bug ativo hoje, mas apenas um RISCO caso futuros avisos INFORMATIVA passem a incluir nomes cadastrais sem escape HTML.   B6-08 — Cálculo de dias_desde usando julianday('now') em nucleo/src/avisos.rs (Reclassificado)Classificação Corrigida: HIPÓTESE / PONTO A VERIFICAR EM backup.rs E tempo.rs.Caminho e linhas: nucleo/src/avisos.rs, função do_dia, linhas 617–623.   Trecho literal:Rust  let dias_desde = |quando: &str| -> Resultado<i64> {
+      Ok(conn
+          .query_row("SELECT CAST(julianday('now') - julianday(?1) AS INTEGER)", [quando], |l| {
+              l.get::<_, Option<i64>>(0)
+          })?
+          .unwrap_or(0))
+  };
+Sustentação: A consulta usa julianday('now') (UTC no SQLite) sem o modificador 'localtime' (usado na linha 921 do mesmo arquivo). Saber se existe defasagem de fuso horário depende de verificar em nucleo/src/backup.rs e nucleo/src/tempo.rs se as timestamps b.ultimo/b.desde são gravadas em UTC ou em horário local sem offset.   4.5. Conferência Exata dos Testes Escritos e Cobertura (nucleo/src/avisos.rs e nucleo/src/testes_avisos.rs)Existem exatamente 10 funções de teste (#[test]) escritas nos dois arquivos Rust deste bloco (7 em nucleo/src/avisos.rs e 3 em nucleo/src/testes_avisos.rs), além de 8 funções auxiliares de teste:   ArquivoNome da Função #[test] / HelperLinhas ExatasO Que o Teste Cobre no Códigonucleo/src/avisos.rsavisa_o_que_vence_hoje_e_o_vencido (#[test])792–833Sem contas $\rightarrow$ vazio; parcela vencendo hoje ("Hoje", "1 parcela a receber · R$ 341,89"); parcela vencida há 3 dias ("A receber", "vencido R$ 341,89 de 1 cliente"); esconder hoje remove da lista e data antiga "2026-01-01" faz voltar.   nucleo/src/avisos.rsloja_com_as_tres e categoria_de (helpers)837–870Monta cenário com "receber" (INFORMATIVA), "backup" (ATENCAO) e "outra_loja" (CRITICA).   nucleo/src/avisos.rsn01_esconder_segue_a_categoria (#[test])874–891Confirma que esconder só aceita INFORMATIVA ("receber" sai) e recusa ATENCAO ("backup") e CRITICA ("outra_loja").   nucleo/src/avisos.rsn02_marca_de_escondida_nao_some_com_atencao_nem_critica (#[test])896–908Grava aviso_escondido.<id> com a data de hoje para "backup", "outra_loja" e "troca_voltou", comprovando que ATENCAO e CRITICA não somem.   nucleo/src/avisos.rsn03_escondida_volta_no_outro_dia_so_se_ainda_vale (#[test])912–928Grava data de ontem (date('now', 'localtime', '-1 day'), linha 921) e prova que "receber" volta; depois cancela a conta (cancelado_em) e prova que não volta mais.   nucleo/src/avisos.rsn04_minimizar_e_so_apresentacao (#[test])934–960Prova que "receber" e "backup" começam com minimizado == true e "outra_loja" com false; alterna expandir/minimizar; prova que minimizar("outra_loja", true) retorna Err e que aviso_minimizado.outra_loja = "1" no banco é ignorado; verifica que a conta e aviso_escondido.* não mudam.   nucleo/src/avisos.rsn05_uma_notificacao_por_condicao (#[test])964–985Verifica ausência de IDs duplicados e comprova que inserir segunda parcela vencida atualiza o mesmo aviso "receber" para "R$ 100,00".   nucleo/src/avisos.rsavisa_backup (#[test])987–1002Testa "backup" sem cópia há 3 dias, desaparecimento após backup_ultimo, erro com escape &lt;x&gt; (linha 998) e "backup_nuvem" após 2 dias.   nucleo/src/testes_avisos.rschamar, ok, aviso, loja, pasta, abertas (helpers)7–57, 83–91Infraestrutura de chamada JSON via Servico::chamar com chave de idempotência NAO_REPETIR sobre banco SQLite temporário em disco.   nucleo/src/testes_avisos.rsn06_esconder_pela_api_respeita_a_categoria (#[test])61–80Testa o comando aviso_esconder pela API para "backup", "outra_loja", "receber" e "nao_existe".   nucleo/src/testes_avisos.rsn08_so_uma_nao_critica_aberta_mesmo_com_marcas_antigas (#[test])97–128Grava "0" (aberta) para "receber", "backup" e "outra_loja", comprova que avisos_do_dia traz apenas a 1ª não crítica aberta, que minimizar a 1ª não reabre a 2ª, que abrir uma fecha a outra no banco e que o estado persiste após drop(s) e Servico::abrir.   nucleo/src/testes_avisos.rsn07_minimizada_continua_depois_de_fechar_e_abrir (#[test])133–159Testa persistência de aviso_minimizar (false e true) para "backup" entre sessões (drop(s) / Servico::abrir), recusa para "outra_loja" e desaparecimento de "backup" quando backup_ultimo é atualizado.   Lacunas de cobertura de testes confirmadas:Não há teste para so_do_modo_seguro (linhas 780–783 de avisos.rs), razão pela qual o defeito B6-02 (a.acao vazio) não foi detectado pelos testes unitários;   Não há teste em avisos.rs nem em testes_avisos.rs para da_senha (linhas 203–223 de avisos.rs);   Nenhum dos 10 testes verifica o valor de a.acao (rótulo do botão), razão pela qual NOTIF-01 (linha 132 de avisos.rs) passa despercebido pela suíte.   3. Síntese Final da Revisão do Bloco 6Totais de linhas reconciliados: avisos.rs (1003), testes_avisos.rs (159), Notificacao.qml (252), IconeFuncao.qml (42), Aviso.qml (47) e TelaInicio.qml (276).   Defeitos efetivamente confirmados no código (DEFEITO COMPROVADO):NOTIF-01 (nucleo/src/avisos.rs, linha 132 vs. linhas 365, 386, 404): botão "Resolver no Gerente" para avisos cujo destino é duplicatas;   B6-01 (app/qml/Aviso.qml, linhas 4 e 10): posicionamento inferior y: parent.height - height - 30 mantido;   B6-02 (nucleo/src/avisos.rs, linhas 753–783 e app/qml/Notificacao.qml, linhas 43, 125, 170): so_do_modo_seguro retorna do_modo_seguro sem completar, deixando a.acao vazio e ocultando o botão da faixa crítica;   B6-03 (app/qml/TelaInicio.qml, linhas 31–37 e 42–52): esconderAviso não remove o item de tela.avisos, fazendo a informativa escondida reaparecer se minimizarAviso for chamado antes do Timer de 20s;   B6-04 (nucleo/src/avisos.rs, linhas 628, 650, 747–750 e app/qml/Notificacao.qml, linhas 113–114): curto() aplica escape HTML em avisos de categoria ATENCAO, que são exibidos em Text.PlainText.   Itens reclassificados com rigor:NOTIF-02 (nucleo/src/avisos.rs, linha 133): Já corrigido no código 0.9.17 ("outra_loja" => "Ver caixas");   NOTIF-03 (app/qml/TelaInicio.qml, linhas 61–62): Origem confirmada, dependendo da inspeção de TelaConfiguracoes.qml no Bloco 7;   B6-05 (app/qml/TelaInicio.qml, linhas 161–172): Reclassificado como pendente de verificação em Campo.qml;B6-06 (nucleo/src/avisos.rs, linhas 135, 609, 769): Reclassificado como MELHORIA PROPOSTA;B6-07 (app/qml/Notificacao.qml, linhas 58–65 e 113–114): Reclassificado como RISCO de manutenção futura (sem impacto nos 7 avisos INFORMATIVA atuais);   B6-08 (nucleo/src/avisos.rs, linhas 617–623): Reclassificado como HIPÓTESE / ponto a verificar em backup.rs e tempo.rs.   O Bloco 7 não foi iniciado. Aguardo sua autorização explícita para prosseguir.

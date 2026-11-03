@@ -1,0 +1,506 @@
+1. Condição Técnica de Leitura do Bloco 9A1 e de Atualização do Relatório
+
+    Leitura integral dos 7 arquivos de Rustinho 0.9.17:
+
+        Foram lidos e auditados integralmente os sete arquivos fornecidos neste bloco: nucleo/src/caixa.rs, nucleo/src/estoque.rs, nucleo/src/vendas.rs, nucleo/src/devolucoes.rs, nucleo/examples/estoque_teste.rs, nucleo/tests/caixas.rs e nucleo/tests/estavel/t2_estoque.rs.   
+        Rustinho-Bloco9A1.zip
+
+        Nota de rastreabilidade: Para nucleo/src/estoque.rs, utiliza-se a numeração exata já conferida (1–102 linhas de código); para os outros seis arquivos extraídos do stream compactado nesta mensagem (onde quebras de linha em branco e chaves isoladas na coluna 0 foram aglutinadas pelo extrator), cada referência informa o caminho do arquivo, o nome exato da função/estrutura, a faixa de linhas reconstruída pela formatação padrão Rust e o trecho literal do código.   
+        Rustinho-Bloco8B2.zip+ 2
+
+    Condição de atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md e execução de testes:
+
+        O relatório consolidado não foi gravado fisicamente em disco local nesta sessão (ausência de ferramenta de escrita em sistema de arquivos local), e nenhum teste foi executado em runtime (0 testes executados; 22 testes automatizados escritos auditados estaticamente).
+
+2. Atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md — Vendas, Devoluções, Caixa e Estoque (BLOCO 9A1)
+10. Ciclo de Vendas, Devoluções, Caixa, Estoque e Janela Móvel de 24 Horas — Auditoria de Código (0.9.17 — BLOCO 9A1)
+10.1. Mapa Estrutural dos Sete Arquivos Auditados (CONFIRMADO NO CÓDIGO)
+Arquivo (0.9.17)	Linhas (Ref. / Reconstruídas)	Estruturas, Constantes, Funções e Testes Auditados	Papel Confirmado no Código
+nucleo/src/caixa.rs	~1–395	
+
+• pub const FORMAS (10–19), pub fn nome_forma (21–26)
+Rustinho-Bloco9A1.zip
+
+• Structs: Sessao (28–37), PorForma (143–149), Movimento (151–158), Resumo (160–186)
+Rustinho-Bloco9A1.zip
+
+• Funções: sessao_aberta (40–50), ler_sessao (52–61), abrir (64–90), movimentar (93–102), movimentar_com_conta (107–117), movimentar_de (121–195), resumo (201–304), fechar (307–339), sessao_fechada (342–348), compensar_caixa_fechado (357–415), historico (418–426)
+Rustinho-Bloco9A1.zip
+
+• Testes próprios no arquivo: 0 funções #[test].
+Rustinho-Bloco9A1.zip
+	
+
+Controle de sessão de caixa por computador (dispositivo), abertura com troco inicial, sangrias e suprimentos (com vínculo opcional a conta_loja), apuração do dinheiro esperado na gaveta, fechamento e compensação D-14 para operações pós-fechamento.
+Rustinho-Bloco9A1.zip
+nucleo/src/estoque.rs	1–102 (108 c/ brancos)	
+
+• pub fn saldo (14–20)
+Rustinho-Bloco8B2.zip+ 1
+
+• pub fn lancar (24–41)
+Rustinho-Bloco8B2.zip+ 1
+
+• pub fn ajustar (45–102)
+Rustinho-Bloco8B2.zip+ 1
+
+• Testes próprios no arquivo: 0 funções #[test].
+Rustinho-Bloco8B2.zip+ 1
+	
+
+Apuração do saldo de estoque pela soma de estoque_movimento, lançamento de entradas/saídas (ignorando tipo = 'servico') e ajuste por contagem física com auditoria.
+Rustinho-Bloco8B2.zip+ 1
+nucleo/src/vendas.rs	~1–965	
+
+• Constantes: MAX_ITENS (500, 16), QUANTIDADE_MAXIMA (171), PRECO_MAXIMO (172), TOTAL_MAXIMO (173), PAGAMENTOS_MAXIMOS (50, 175)
+Rustinho-Bloco9A1.zip
+
+• Structs: ItemEntrada (22–35), PagamentoEntrada (37–43), VendaEntrada (45–69), ItemCalculado (75–107), Calculo (109–133), Crediario (136–145), ChequesCalculo (148–157), Peca (181–195), VendaFicha (605–631), ItemFicha (633–644), PagamentoFicha (646–651), VendaResumo (761–776)
+Rustinho-Bloco9A1.zip
+
+• Funções: calcular_cheques (159–175), calcular_crediario (177–202), ler_desconto (205–221), multiplicar (228–230), peca (232–267), pub fn calcular (270–415), proximo_numero (417–424), conferir_itens (426–438), pub fn concluir (441–558), gravar_itens (560–581), conferir_cliente (585–594), pub fn salvar_orcamento (596–634), pub fn cancelar (637–708), pub fn ficha (710–809), pub fn cheques_da (812–829), pub fn orcamento_para_venda (832–880), pub fn listar (883–940), pub fn nome_caixa (943–945)
+Rustinho-Bloco9A1.zip
+
+• #[cfg(test)] mod testes: 6 funções #[test] (947–1155).
+Rustinho-Bloco9A1.zip
+	
+
+Cálculo completo do carrinho, validação de descontos, ofertas e pagamentos (Dinheiro, Pix, Cartão, Cheque, Crediário, Vale-troca), conclusão de vendas, emissão e conversão de orçamentos, integração com Encomendas/OS e cancelamento de vendas/orçamentos.
+Rustinho-Bloco9A1.zip
+nucleo/src/devolucoes.rs	~1–730	
+
+• pub const DESTINOS (17–18)
+Rustinho-Bloco9A1.zip
+
+• Structs: ItemEntrada (20–27), Entrada (29–39), ItemVenda (42–67), DevolucaoResumo (69–90), ParaDevolver (92–105), Linha (185–196), Calculo (198–215), Parte (217–222), Vale (531–546)
+Rustinho-Bloco9A1.zip
+
+• Funções: dinheiro (107–109), itens_da_venda (112–160), crediario_aberto (163–170), pub fn da_venda (172–194), quando (196–200), pub fn calcular (228–322), proximo (324–330), pub fn devolver (333–458), pub fn desfazer (462–534), listar_onde (538–610), pub fn listar (614–626), pub fn vales_abertos (629–674), pub fn saldo_vale (677–682), pub fn no_periodo (686–694), pub fn dinheiro_na_sessao (697–704), pub fn tem_devolucao (707–714)
+Rustinho-Bloco9A1.zip
+
+• #[cfg(test)] mod testes: 2 funções #[test] (716–845).
+Rustinho-Bloco9A1.zip
+	
+
+Devoluções parciais e totais de itens de venda (com ou sem defeito), cálculo proporcional de valor líquido com desconto da venda, restituição via Vale-troca, Dinheiro, Pix/Cartão ou abatimento de Crediário (com resto), e desfazimento (desfazer).
+Rustinho-Bloco9A1.zip
+nucleo/examples/estoque_teste.rs	~1–92	
+
+• Helpers ok (5–11), peca (13–16), vender (18–23) e fn main (25–92)
+Rustinho-Bloco9A1.zip
+
+• Testes automatizados: 0 (script de exemplo manual).
+Rustinho-Bloco9A1.zip
+	
+
+Script utilitário local para popular vendas e encomendas em um banco de teste.
+Rustinho-Bloco9A1.zip
+nucleo/tests/caixas.rs	~1–265	
+
+• Helpers levar (10–24), trocar (27–35), contar (37–39), loja (41–50), peca (52–58), renomear (60–64)
+Rustinho-Bloco9A1.zip
+
+• 9 funções #[test] (72–265).
+Rustinho-Bloco9A1.zip
+	
+
+Testes de integração de sincronização entre 2 e 3 caixas (conflitos de cadastro, lotes fora de ordem/repetidos, referências pendentes, compactação, orçamento concorrente, preservação de gerente, nomes de usuários e pausa na restauração).
+Rustinho-Bloco9A1.zip
+nucleo/tests/estavel/t2_estoque.rs	~1–215	
+
+• Helper confere (11–14), levar (195–208), trocar (210–217)
+Rustinho-Bloco9A1.zip
+
+• 5 funções #[test] (17–192: t2_1 a t2_5).
+Rustinho-Bloco9A1.zip
+	
+
+Suíte de estabilidade de Prioridade 1 validando o saldo de estoque após vendas, cancelamentos, devoluções (boas e com defeito), compras, estornos, ajustes e vendas simultâneas com sincronização em thread paralela.
+Rustinho-Bloco9A1.zip
+10.2. Análise dos Fluxos de Vendas, Devoluções/Estornos e Movimentação de Estoque (CONFIRMADO NO CÓDIGO)
+10.2.1. Fluxo Completo de Vendas (nucleo/src/vendas.rs e nucleo/src/caixa.rs)
+
+    Pré-condição de Caixa Aberto: vendas::concluir exige uma sessão ativa na tabela caixa_sessao para o dispositivo atual (caixa::sessao_aberta(conn, dispositivo)?), recusando a venda se o caixa estiver fechado. Orçamentos (salvar_orcamento) não exigem caixa aberto e não movimentam estoque.   
+    Rustinho-Bloco9A1.zip+ 1
+
+    Cálculo e Arredondamento (vendas::calcular):
+
+        Toda aritmética utiliza inteiros de 64 bits (quantidades em milésimos, valores em centavos, percentuais em centésimos de ponto percentual 0..=10_000) com promoção intermediária para i128 e arredondamento half-up ((quantidade as i128 * preco as i128 + 500) / 1000 em multiplicar e (base as i128 * pct as i128 + 5_000) / 10_000 em ler_desconto) e verificação contra overflow via numeros::somar / numeros::saturar.   
+        Rustinho-Bloco9A1.zip
+
+        Se o mesmo produto_id for incluído em mais de uma linha do carrinho, calcular acumula a quantidade total pedida no vetor usado (pedido = ja + quantidade) para acusar falta_estoque (pedido > p.estoque) corretamente.   
+        Rustinho-Bloco9A1.zip
+
+        Para itens cadastrados cuja unidade não é fracionada (!p.fracionada), calcular bloqueia quantidades quebradas (if quantidade % 1000 != 0 && !p.fracionada).   
+        Rustinho-Bloco9A1.zip
+
+    Recebimento e Troco (vendas::concluir):
+
+        Aceita até 50 pagamentos combinados entre dinheiro, pix, debito, credito, cheque, crediario, vale e outro.   
+        Rustinho-Bloco9A1.zip
+
+        Exige c.v_pago >= c.v_total e restringe o pagamento excedente (troco) exclusivamente ao montante pago em espécie (if c.v_troco > dinheiro, o que garante algebricamente que a soma das formas não-dinheiro nunca ultrapasse c.v_total).   
+        Rustinho-Bloco9A1.zip
+
+        No pagamento com vale, soma usos repetidos do mesmo vale_id na própria venda (usado) e exige usado + valor <= devolucoes::saldo_vale(conn, &p.vale_id)?.   
+        Rustinho-Bloco9A1.zip
+
+    Finalização e Baixa de Estoque:
+
+        Na transação aberta por api.rs ("venda_concluir"), vendas::concluir insere o cabeçalho em venda (tipo = 'venda', situacao = 'concluida'), os itens em venda_item, lança uma saída -it.v_quantidade em estoque_movimento (tipo = "venda") para cada item não-serviço, grava venda_pagamento, gera parcelas em conta_receber (receber::criar_da_venda), registra cheques (cheques::criar), baixa o orçamento original (UPDATE venda SET situacao = 'vendido' WHERE id = ?1 AND tipo = 'orcamento' AND situacao = 'aberto', verificando n == 1) e atualiza Encomendas e Ordens de Serviço vinculadas.   
+        api-rs-com-linhas.txt+ 1
+
+    Cancelamento de Venda (vendas::cancelar):
+
+        Exige situacao == "concluida", motivo não vazio e ausência de devoluções ativas (if crate::devolucoes::tem_devolucao(conn, id)? → recusa exigindo desfazer a devolução antes).   
+        Rustinho-Bloco9A1.zip
+
+        Cancela cheques, encomendas, vínculo de OS e contas a receber da venda; devolve as quantidades ao estoque inserindo movimentos positivos +q em estoque_movimento com tipo = "cancelamento"; marca venda.situacao = 'cancelada' e cancelado_apos_fechar = fechado.   
+        Rustinho-Bloco9A1.zip
+
+        Se a sessão de caixa da venda já estava fechada (fechado == true), aciona caixa::compensar_caixa_fechado para retirar o dinheiro líquido (dinheiro - troco) da gaveta aberta atual (como "sangria") ou da conta 'caixa-geral'.   
+        Rustinho-Bloco9A1.zip
+
+10.2.2. Fluxo de Devoluções e Estornos (nucleo/src/devolucoes.rs)
+
+    Vínculo Estrito com a Venda e o Item Original (itens_da_venda e calcular):
+
+        Toda devolução exige venda_id de uma venda com tipo == "venda" e situacao == "concluida".   
+        Rustinho-Bloco9A1.zip
+
+        Cada item devolvido referencia obrigatoriamente venda_item_id (i.id da tabela venda_item). A quantidade já devolvida (v_devolvido_q) é calculada somando di.quantidade de todas as devoluções ativas (d.cancelado_em IS NULL) daquele venda_item_id, impedindo devolver mais do que o saldo restante (pode = v.v_quantidade - v.v_devolvido_q).   
+        Rustinho-Bloco9A1.zip
+
+    Rateio Proporcional do Desconto Geral e Proteção contra Perda de Centavos:
+
+        O valor líquido pago pelo item na venda é calculado proporcionalmente ao desconto global da venda: liquido = (total * total_venda + soma_itens / 2) / soma_itens.   
+        Rustinho-Bloco9A1.zip
+
+        Em devoluções parciais, o valor restituído é proporcional à quantidade devolvida; e, na última parte devolvida do item (if q == pode), o código entrega exatamente o resíduo financeiro exato ((v.v_liquido - v.v_devolvido_valor, v.v_total - v.v_devolvido_item)), eliminando sobras ou perdas de centavos por arredondamento.   
+        Rustinho-Bloco9A1.zip
+
+    Destinos do Valor e Retorno ao Estoque (devolver):
+
+        Suporta "vale" (cria registro em vale), "dinheiro" (exige caixa aberto com esperado_dinheiro >= din), "pix" (estorno externo) e "crediario" (cria recebimento com forma = 'devolucao' abatendo parcelas abertas de conta_receber_saldo daquela venda, e exige e.resto se o valor devolvido superar a dívida aberta da venda).   
+        Rustinho-Bloco9A1.zip
+
+        Se it.defeito == false (volta_estoque = 1), lança entrada +l.quantidade em estoque_movimento com tipo = "devolucao"; se it.defeito == true (volta_estoque = 0), não altera o estoque e registra "produto.defeito" na auditoria.   
+        Rustinho-Bloco9A1.zip
+
+    Desfazimento / Estorno de Devolução (desfazer):
+
+        Verifica sync::exigir_editavel na devolução e nos itens; impede desfazer se o vale-troca gerado já tiver sido utilizado parcial ou totalmente (if saldo < valor em vale_saldo).   
+        Rustinho-Bloco9A1.zip
+
+        Cancela o vale, estorna o recebimento de abatimento de crediário (SET estornado_em = ?2), lança saída -q em estoque_movimento (tipo = "devolucao_desfeita") somente para os itens que tinham volta_estoque = 1, marca devolucao.cancelado_em e executa compensar_caixa_fechado se a sessão original da devolução em dinheiro já estiver fechada.   
+        Rustinho-Bloco9A1.zip
+
+10.3. Verificação da Regra Especial: Janela Móvel de 24 Horas para Vendas Líquidas por Unidade (CONFIRMADO NO CÓDIGO)
+
+    Status da implementação nos 7 arquivos:
+
+        Confirma-se que a apuração de vendas líquidas por unidade dentro da janela móvel das últimas 24 horas não está implementada em nenhum dos 7 arquivos deste bloco (a única função de período em devolucoes.rs, no_periodo nas linhas 686–694, soma valores monetários por data civil local date(d.criado_em, 'localtime') BETWEEN ?1 AND ?2 sem filtrar pela data da venda original e sem agrupar quantidades por unidade).   
+        Rustinho-Bloco9A1.zip
+
+    Viabilidade Técnica Completa com os Dados e Relacionamentos Existentes no Esquema Atual (Sem Inventar Campos):
+
+        A auditoria de vendas.rs, devolucoes.rs e estoque.rs comprova que:
+
+            A tabela estoque_movimento (estoque.rs) NÃO deve ser usada para essa regra, pois não possui chave estrangeira para venda_id/venda_item_id (apenas texto livre em motivo) e não registra devoluções de peças com defeito (volta_estoque = 0).   
+            Rustinho-Bloco9A1.zip
+
+            As tabelas venda, venda_item, devolucao, devolucao_item e produto possuem 100% dos campos e chaves estrangeiras necessários para cumprir todas as cláusulas da regra aprovada com exatidão matemática:   
+            Rustinho-Bloco9A1.zip
+
+                Vendas dentro da janela móvel das últimas 24 horas: venda.criado_em é gravado em UTC ISO-8601 (tempo::agora()) em vendas::concluir, venda.tipo = 'venda' exclui orçamentos, e produto.tipo = 'produto' (via JOIN produto p ON p.id = vi.produto_id) exclui serviços.   
+                Rustinho-Bloco9A1.zip
+
+                Cancelamentos sem dupla contabilização: Em vendas::cancelar, vendas canceladas recebem venda.situacao = 'cancelada' (e o cancelamento só é permitido quando não há devolução ativa, tem_devolucao == false). Portanto, filtrar v.situacao = 'concluida' exclui todas as vendas canceladas sem risco de abater duas vezes uma devolução e um cancelamento.   
+                Rustinho-Bloco9A1.zip
+
+                Devoluções restritas às vendas originais que pertencem à janela de 24 horas (e exclusão de devoluções de vendas antigas): Como devolucao_item.venda_item_id referencia diretamente venda_item.id (e devolucao.venda_id referencia venda.id), basta subtrair de cada vi.quantidade (das vendas v com v.criado_em nas últimas 24h) a soma SUM(di.quantidade) onde di.venda_item_id = vi.id e d.cancelado_em IS NULL. Assim:   
+                Rustinho-Bloco9A1.zip
+
+                    Se uma venda foi feita antes da janela de 24h e devolvida dentro das últimas 24h, a venda original v está fora do filtro de 24h e sua devolução não reduz as vendas recentes;   
+                    Rustinho-Bloco9A1.zip
+
+                    Se a venda foi feita dentro da janela de 24h e teve devolução parcial ou total (com ou sem defeito), di.quantidade reduz exatamente a quantidade daquela venda original;   
+                    Rustinho-Bloco9A1.zip
+
+                    Se a devolução foi estornada/desfeita (devolucoes::desfazer), d.cancelado_em passa a ser NOT NULL, deixando automaticamente de abater a venda original.   
+                    Rustinho-Bloco9A1.zip
+
+10.4. Achados Técnicos Confirmados no Bloco 9A1 (Defeitos, Riscos, Hipóteses e Melhorias)
+1. [B9A1-01] devolucoes::calcular e devolucoes::devolver permitem devolver quantidade fracionária de peça com unidade indivisível (!fracionada)
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivo, funções e linhas: nucleo/src/devolucoes.rs, funções itens_da_venda (~112–160), calcular (~228–322, especificamente no laço for (n, it) in e.itens.iter().enumerate() nas linhas ~245–275) e devolver (~333–458), em contraste direto com nucleo/src/vendas.rs (calcular, linha ~292).   
+    Rustinho-Bloco9A1.zip
+
+    Trecho literal (nucleo/src/devolucoes.rs, linhas ~245–270):
+    Rust
+
+      let itens = itens_da_venda(conn, &e.venda_id)?;
+      for (n, it) in e.itens.iter().enumerate() {
+          let q = match numeros::ler_quantidade(&it.quantidade) {
+              Ok(Some(q)) if q > 0 => q,
+              Ok(_) => continue,
+              Err(m) => {
+                  c.erro = m;
+                  c.campo = format!("itens.{n}");
+                  return Ok(c);
+              }
+          };
+          let Some(v) = itens.iter().find(|x| x.venda_item_id == it.venda_item_id) else {
+              return Err(Erro::Interno("item não é desta venda".into()));
+          };
+          let pode = v.v_quantidade - v.v_devolvido_q;
+          if q > pode {
+
+    Sustentação técnica: Enquanto vendas::calcular bloqueia a venda fracionada em unidades inteiras (if quantidade % 1000 != 0 && !p.fracionada { erro = format!("{} é vendido inteiro (sem vírgula).", p.unidade); }), devolucoes::calcular aceita qualquer valor positivo de numeros::ler_quantidade(&it.quantidade) menor ou igual a pode sem verificar q % 1000 != 0 && !unidades::fracionada(conn, &v.unidade)?. Com isso, o cliente que comprou 1 UN de uma peça indivisível consegue devolver 0,5 UN, gerando entrada de +500 milésimos em estoque_movimento e deixando o estoque da peça com saldo fracionário (0,5 UN).   
+    Rustinho-Bloco9A1.zip+ 1
+
+2. [B9A1-02] Cancelamento de venda paga em dinheiro enquanto a sessão de caixa original ainda está aberta (!fechado) não verifica saldo disponível na gaveta (esperado_dinheiro) nem identidade do computador (dispositivo)
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivos, funções e linhas: nucleo/src/vendas.rs, função cancelar (~637–708, especificamente linhas ~672–700), em confronto com nucleo/src/caixa.rs (movimentar_de nas linhas ~138–147 e resumo nas linhas ~214–265) e nucleo/src/devolucoes.rs (devolver nas linhas ~348–359).   
+    Rustinho-Bloco9A1.zip
+
+    Trecho literal (nucleo/src/vendas.rs, linhas ~672–695):
+    Rust
+
+          // D-14: venda de um caixa já fechado. O fechamento dele não muda; o
+          // dinheiro devolvido sai da gaveta aberta (ou do Caixa geral).
+          let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
+          conn.execute(
+              "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4,
+                                cancelado_apos_fechar = ?5 WHERE id = ?1",
+              params![id, tempo::agora(), usuario_id, motivo, fechado],
+          )?;
+          let mut detalhes = vec![format!("Motivo: {motivo}")];
+          if fechado {
+              let dinheiro: i64 = conn.query_row(
+                  "SELECT COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = ?1 AND forma = 'dinheiro'), 0)
+                          - troco FROM venda WHERE id = ?1",
+                  [id],
+                  |l| l.get(0),
+              )?;
+              let onde = caixa::compensar_caixa_fechado( ... )?;
+
+    Sustentação técnica:
+
+        Quando fechado == false (a sessão de caixa da venda ainda está aberta), vendas::cancelar marca a venda como 'cancelada' com cancelado_apos_fechar = 0, fazendo com que caixa::resumo deixe imediatamente de somar o dinheiro daquela venda em dinheiro_vendas. Porém, se o operador já havia feito uma sangria (ou devolução em dinheiro) usando o dinheiro daquela venda, vendas::cancelar não confere se r.esperado_dinheiro >= dinheiro, permitindo que o saldo esperado de dinheiro físico na gaveta fique negativo.   
+        Rustinho-Bloco9A1.zip+ 1
+
+        Além disso, em ambiente multi-caixa, se a venda foi feita no Caixa 1 (cuja sessão sessao_id continua aberta) e o gerente cancela essa venda a partir do Caixa 2, fechado é false (sessao_fechada olha apenas se fechado_em IS NOT NULL, sem comparar o dispositivo da sessão com o dispositivo atual), abatendo o dinheiro do resumo da gaveta do Caixa 1 sem que o Caixa 1 tenha devolvido o dinheiro.   
+        Rustinho-Bloco9A1.zip
+
+3. [B9A1-03] Desfazer devolução em dinheiro (devolucoes::desfazer) a partir de outro caixa quando a sessão original da devolução ainda está aberta (!fechado)
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivo, função e linhas: nucleo/src/devolucoes.rs, função desfazer (~462–534, especificamente linhas ~511–531).   
+    Rustinho-Bloco9A1.zip
+
+    Trecho literal (nucleo/src/devolucoes.rs, linhas ~511–531):
+    Rust
+
+      let fechado = caixa::sessao_fechada(conn, d.6.as_deref())?;
+      conn.execute(
+          "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4, desfeita_apos_fechar = ?5
+            WHERE id = ?1",
+          params![id, agora, usuario_id, motivo, fechado],
+      )?;
+
+    Sustentação técnica: Pela mesma razão de B9A1-02, desfazer verifica apenas caixa::sessao_fechada(conn, d.6.as_deref())?, sem checar se a sessão d.6 pertence ao dispositivo onde o desfazimento está ocorrendo.   
+    Rustinho-Bloco9A1.zip
+
+4. [B9A1-04] Utilitário nucleo/examples/estoque_teste.rs quebra em panic! na versão 0.9.17 por não enviar chaveOperacao
+
+    Classificação: DEFEITO COMPROVADO (no arquivo de exemplo nucleo/examples/estoque_teste.rs, linhas 5–11 e 18–90).   
+    Rustinho-Bloco9A1.zip
+
+    Trecho literal (nucleo/examples/estoque_teste.rs, linhas 5–11):
+    Rust
+
+    fn ok(s: &mut Servico, c: &str, d: Value) -> Value {
+        let r: Value = serde_json::from_str(&s.chamar(c, &d.to_string())).unwrap();
+        if r["ok"] != true {
+            panic!("{c}: {r}");
+        }
+        r["dados"].clone()
+    }
+
+    Sustentação técnica: Os comandos "caixa_abrir", "venda_concluir", "encomenda_criar", "encomenda_pedir" e "encomenda_chegou" pertencem à lista NAO_REPETIR de nucleo/src/api.rs (linhas 277–329 e 993–998), que recusa qualquer chamada sem "chaveOperacao". Como estoque_teste.rs invoca s.chamar diretamente sem apoio_chave::chamar, o binário de exemplo falha com panic! logo na primeira gravação.   
+    api-rs-com-linhas.txt+ 3
+
+5. Riscos, Hipóteses e Melhorias Identificados no Bloco 9A1 (B9A1-05 a B9A1-09)
+ID	Classificação	Local Exato (Arquivo, Função e Linhas)	Descrição Técnica e Evidência Literal
+B9A1-05	RISCO DE INTEGRIDADE (R-05)	
+
+nucleo/src/vendas.rs (cancelar, linha ~637) e nucleo/src/devolucoes.rs (devolver, linha ~333).
+Rustinho-Bloco9A1.zip
+	
+
+Ausência de sync::exigir_editavel para "venda" ao cancelar venda ou registrar devolução: Enquanto devolucoes::desfazer chama sync::exigir_editavel(conn, "devolucao", id) e exigir_filhos_editaveis, vendas::cancelar e devolucoes::devolver não verificam se o registro "venda" (ou "venda_item") está bloqueado como 'inconsistente' em sync_referencia (R-05) quando a venda não possui crediário nem cheques.
+api-rs-com-linhas.txt+ 1
+B9A1-06	RISCO DE REGRA DE NEGÓCIO	
+
+nucleo/src/vendas.rs, função calcular (~269–276 e ~312–316).
+Rustinho-Bloco9A1.zip
+	
+
+Desconto global da venda (e.desconto) permite ultrapassar o desconto_maximo cadastrado na peça: A trava if let Some(max) = p.desconto_maximo avalia apenas o preço e o desconto da linha do item (dado = cheio - (bruto - desconto)), ignorando o desconto geral e.desconto aplicado sobre o subtotal da venda.
+Rustinho-Bloco9A1.zip
+B9A1-07	HIPÓTESE (A confirmar em receber.rs)	
+
+nucleo/src/devolucoes.rs, funções devolver (~384–411) e desfazer (~492–497).
+Rustinho-Bloco9A1.zip
+	
+
+Interação entre o recebimento gerado por devolução (forma = 'devolucao') e o estorno manual de recebimentos em receber.rs: devolucoes::devolver cria um registro na tabela recebimento com forma = 'devolucao' e valor = 0 para abater parcelas em recebimento_parcela. Deve ser verificado quando nucleo/src/receber.rs for auditado se receber::estornar bloqueia o estorno direto de um recebimento com forma == 'devolucao' (para exigir que seja desfeito por devolucoes::desfazer).
+Rustinho-Bloco9A1.zip
+B9A1-08	MELHORIA PROPOSTA (Auditoria e Histórico da Peça)	
+
+nucleo/src/vendas.rs (concluir, salvar_orcamento, cancelar) e nucleo/src/devolucoes.rs (devolver, linhas ~426–450).
+Rustinho-Bloco9A1.zip
+	
+
+Assimetria na trilha de auditoria: (1) devolucoes::devolver grava auditoria na entidade "produto" quando a peça volta com defeito ("produto.defeito"), mas não grava na entidade "produto" quando a peça boa volta ao estoque (!l.defeito), de modo que a entrada por devolução não aparece na seção Histórico de TelaPeca.qml; (2) vendas::concluir, salvar_orcamento e o cancelamento de orçamento não chamam auditoria::registrar.
+Rustinho-Bloco8B2.zip+ 1
+B9A1-09	MELHORIA PROPOSTA (Consistência Transacional)	
+
+nucleo/src/caixa.rs, estoque.rs, vendas.rs, devolucoes.rs.
+Rustinho-Bloco9A1.zip
+	
+
+Todas as funções públicas de escrita (abrir, movimentar_com_conta, fechar, ajustar, concluir, salvar_orcamento, cancelar, devolver, desfazer) recebem &Connection sem abrir SAVEPOINT interno. Na API (api.rs) todas são chamadas dentro de self.banco.conn.transaction()?, mas chamadores diretos em Rust (como visto em testes) precisam gerenciar a transação manualmente.
+api-rs-com-linhas.txt+ 1
+14.9. Testes Automatizados Escritos nos 7 Arquivos do Bloco 9A1 e Lacunas de Cobertura
+
+    Inventário dos 22 testes automatizados escritos (#[test]) nos arquivos do Bloco 9A1 (CONFIRMADO NO CÓDIGO; 0 executados em runtime nesta sessão):
+
+        nucleo/src/caixa.rs: 0 funções #[test] próprias.   
+        Rustinho-Bloco9A1.zip
+
+        nucleo/src/estoque.rs: 0 funções #[test] próprias.   
+        Rustinho-Bloco9A1.zip
+
+        nucleo/src/vendas.rs (6 funções #[test] em mod testes, linhas ~947–1155):
+
+            calcula_descontos_estoque_e_troco;   
+            Rustinho-Bloco9A1.zip
+
+            valores_extremos_sao_recusados_sem_gravar;   
+            Rustinho-Bloco9A1.zip
+
+            vende_cancela_e_fecha_o_caixa;   
+            Rustinho-Bloco9A1.zip
+
+            orcamento_vira_venda;   
+            Rustinho-Bloco9A1.zip
+
+            servico_oferta_preco_aberto_e_unidade_inteira;   
+            Rustinho-Bloco9A1.zip
+
+            tamanhos_e_cores.   
+            Rustinho-Bloco9A1.zip
+
+        nucleo/src/devolucoes.rs (2 funções #[test] em mod testes, linhas ~716–845):
+
+            devolve_com_vale_dinheiro_e_crediario;   
+            Rustinho-Bloco9A1.zip
+
+            abate_do_crediario_e_o_resto_vira_vale.   
+            Rustinho-Bloco9A1.zip
+
+        nucleo/examples/estoque_teste.rs: 0 funções #[test] (é um exemplo fn main(), não um teste automatizado).   
+        Rustinho-Bloco9A1.zip
+
+        nucleo/tests/caixas.rs (9 funções #[test], linhas ~72–265):
+
+            mesmo_cadastro_em_dois_caixas;   
+            Rustinho-Bloco9A1.zip
+
+            em_sequencia_nao_e_conflito;   
+            Rustinho-Bloco9A1.zip
+
+            lote_repetido_fora_de_ordem_e_cortado;   
+            Rustinho-Bloco9A1.zip
+
+            referencia_que_ainda_nao_chegou;   
+            Rustinho-Bloco9A1.zip
+
+            caixa_atrasado_depois_de_compactar;   
+            Rustinho-Bloco9A1.zip
+
+            mesmo_orcamento_em_dois_caixas;   
+            Rustinho-Bloco9A1.zip
+
+            loja_nunca_fica_sem_gerente;   
+            Rustinho-Bloco9A1.zip
+
+            tres_usuarios_com_o_mesmo_nome;   
+            Rustinho-Bloco9A1.zip
+
+            restaurar_pausa_a_troca.   
+            Rustinho-Bloco9A1.zip
+
+        nucleo/tests/estavel/t2_estoque.rs (5 funções #[test], linhas ~17–192):
+
+            t2_1_venda_cancelamento_e_devolucao;   
+            Rustinho-Bloco9A1.zip
+
+            t2_2_compra_e_estorno;   
+            Rustinho-Bloco9A1.zip
+
+            t2_3_ajuste;   
+            Rustinho-Bloco9A1.zip
+
+            t2_4_vender_mais_do_que_tem;   
+            Rustinho-Bloco9A1.zip
+
+            t2_5_vendas_simultaneas_com_a_troca_de_dados.   
+            Rustinho-Bloco9A1.zip
+
+    Lacunas de cobertura de testes identificadas neste bloco:
+
+        Ausência de teste verificando a recusa de devolução com quantidade fracionária ("0,5") para item de unidade inteira ("UN") em devolucoes.rs (B9A1-01);   
+        Rustinho-Bloco9A1.zip
+
+        Ausência de teste para cancelamento de venda em dinheiro após sangria que esvaziou a gaveta na mesma sessão aberta (B9A1-02) e para cancelamento/desfazimento de devolução em dinheiro a partir de outro caixa enquanto a sessão de origem está aberta (B9A1-02 / B9A1-03);   
+        Rustinho-Bloco9A1.zip
+
+        Ausência dos testes da janela móvel de 24 horas para vendas líquidas por unidade (vendas dentro vs. fora das 24h, devoluções de vendas da janela vs. devoluções de vendas anteriores à janela, vendas canceladas e devoluções desfeitas).   
+        Rustinho-Bloco9A1.zip
+
+3. Correções Recomendadas (Apenas Diagnóstico — Sem Implementação)
+
+    Bloqueio de devolução fracionária em unidade inteira (nucleo/src/devolucoes.rs — B9A1-01):
+
+        Em devolucoes::calcular, consultar crate::unidades::fracionada(conn, &v.unidade)? e, se q % 1000 != 0 && !fracionada, preencher c.erro = format!("{} é vendido inteiro (sem vírgula).", v.unidade) e c.campo = format!("itens.{n}").   
+        Rustinho-Bloco9A1.zip
+
+    Proteção do dinheiro em gaveta no cancelamento de venda e no desfazimento de devolução (nucleo/src/vendas.rs e nucleo/src/devolucoes.rs — B9A1-02 e B9A1-03):
+
+        Em vendas::cancelar, calcular dinheiro antes de concluir o cancelamento; se a sessão da venda estiver aberta no próprio computador (!fechado e mesmo dispositivo), verificar se caixa::resumo(conn, &sessao_id)?.esperado_dinheiro >= dinheiro; se a sessão estiver fechada ou pertencer a outro computador, usar o mecanismo de compensação na gaveta local aberta (ou no Caixa geral). Aplicar a mesma verificação de dispositivo em devolucoes::desfazer.   
+        Rustinho-Bloco9A1.zip+ 1
+
+    Verificação R-05 (sync::exigir_editavel) em vendas::cancelar e devolucoes::devolver (B9A1-05):
+
+        Chamar crate::sync::exigir_editavel(conn, "venda", id)? e crate::sync::exigir_filhos_editaveis(conn, "venda_item", "venda_id", id)? no início de vendas::cancelar e devolucoes::devolver.   
+        Rustinho-Bloco9A1.zip
+
+    Implementação da consulta da janela móvel de 24 horas por unidade (unidades.rs):
+
+        Implementar a apuração de vendas líquidas nas últimas 24 horas consultando venda v JOIN venda_item vi ON vi.venda_id = v.id JOIN produto p ON p.id = vi.produto_id com v.tipo = 'venda' AND v.situacao = 'concluida' AND p.tipo = 'produto' e v.criado_em dentro das últimas 24h, subtraindo COALESCE((SELECT SUM(di.quantidade) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id WHERE di.venda_item_id = vi.id AND d.cancelado_em IS NULL), 0).   
+        Rustinho-Bloco9A1.zip
+
+    Correção de nucleo/examples/estoque_teste.rs (B9A1-04):
+
+        Usar rustinho_nucleo::apoio_chave::chamar (ou injetar "chaveOperacao" com tempo::novo_id()) na função ok() do exemplo.   
+        api-rs-com-linhas.txt+ 1
+
+Encerro o Bloco 9A1 e aguardo sua autorização explícita para iniciar o Bloco 9A2.

@@ -1,0 +1,532 @@
+1. Condição Técnica de Leitura do Bloco 9B e Escopo da Auditoria Android
+
+    Leitura integral e numeração exata (nl -ba) dos 12 arquivos fornecidos:
+
+        Todos os 12 arquivos anexados em Rustinho-Bloco9B.zip foram lidos integralmente, preservando a numeração exata de linhas:   
+        Rustinho-Bloco9B-Android.zip
+
+            TelaVender.qml (1–1401);   
+            Rustinho-Bloco9B-Android.zip
+
+            TelaEstoque.qml (1–93);   
+            Rustinho-Bloco9B-Android.zip
+
+            SecaoEncomendas.qml (1–482);   
+            Rustinho-Bloco9B-Android.zip
+
+            SecaoComprar.qml (1–364);   
+            Rustinho-Bloco9B-Android.zip
+
+            TelaVenda.qml (1–330);   
+            Rustinho-Bloco9B-Android.zip
+
+            SecaoVendidos.qml (1–245);   
+            Rustinho-Bloco9B-Android.zip
+
+            TelaCaixa.qml (1–414);   
+            Rustinho-Bloco9B-Android.zip
+
+            LinhaVenda.qml (1–103);   
+            Rustinho-Bloco9B-Android.zip
+
+            SecaoParados.qml (1–217);   
+            Rustinho-Bloco9B-Android.zip
+
+            TelaTrocas.qml (1–362);   
+            Rustinho-Bloco9B-Android.zip
+
+            TelaDevolucao.qml (1–468);   
+            Rustinho-Bloco9B-Android.zip
+
+            AjusteEstoque.qml (1–122).   
+            Rustinho-Bloco9B-Android.zip
+
+    Constatação Arquitetural Fundamental (Base QML Unificada Desktop + Android):
+
+        O confronto linha a linha entre os 12 arquivos deste bloco e os 12 arquivos auditados nos Blocos 9A2 e 9A2 Complementar comprova que o Rustinho 0.9.17 utiliza exatamente os mesmos arquivos-fonte QML para Desktop e Android, alternando o comportamento visual e operacional em tempo de execução por meio das propriedades responsivas do singleton Tema (Tema.celular, Tema.estreito, Tema.fino e Tema.baixo).   
+        Rustinho-Bloco9A2-Desktop.zip+ 2
+
+    Condição de execução de testes e atualização do relatório consolidado:
+
+        Nenhum teste foi executado em aparelho Android real ou em emulador/runtime nesta sessão (0 testes executados), e o relatório consolidado não foi salvo fisicamente em disco local. As novas seções (Seções 10.16 a 10.22 e Seção 14.10) de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md são entregues integralmente abaixo.
+
+2. Atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md — Capítulo 10 (Seções 10.16 a 10.22: Auditoria Comparativa da Interface Android — BLOCO 9B)
+10.16. Mapa dos 12 Arquivos Auditados e Mecanismos de Adaptação Android (CONFIRMADO NO CÓDIGO)
+Nº	Arquivo (0.9.17)	Linhas	Flags Responsivas / Mobile Utilizadas no Arquivo (Tema.*)	Comportamento Adaptativo Previsto no Código
+01	TelaVender.qml	1.401	
+
+Tema.estreito, Tema.fino, Tema.baixo (11, 403, 416, 441, 450, 478, 487, 490, 506, 586, 593, 621, 635, 641, 658, 660, 679–693, 830, 886, 1282).
+Rustinho-Bloco9B-Android.zip
+	
+
+Ativa camera: true na busca (487), oculta a coluna lateral "Cliente / Total" (679), exibe barra inferior fixa com total e botão "Receber" (829–873) e usa verLateral para alternar entre o carrinho e a página "Cliente e desconto".
+Rustinho-Bloco9B-Android.zip
+02	TelaEstoque.qml	93	
+
+Nenhuma flag direta no arquivo contenedor (delega às subseções via Loader nas linhas 75–86).
+Rustinho-Bloco9B-Android.zip
+	
+
+Mantém cabeçalho, pílulas "Estoque / Fornecedores" (57–61) e subpílulas (63–73).
+Rustinho-Bloco9B-Android.zip
+03	SecaoEncomendas.qml	482	
+
+Tema.estreito, Tema.celular (63, 129, 139, 141, 144, 167, 181, 187, 197–199, 243, 250, 257, 267).
+Rustinho-Bloco9B-Android.zip
+	
+
+Usa colunasEstreito: 2 nos cartões (63), move a barra de botões acoesEnc para uma 2ª linha abaixo do texto (y: 66, 129, 199) e torna visíveis sem hover os botões secundários quando Tema.celular == true (243–267).
+Rustinho-Bloco9B-Android.zip
+04	SecaoComprar.qml	364	
+
+colunasEstreito: 2 (75) e Tema.celular (249); sem Tema.estreito nas linhas cPeca (270–358).
+Rustinho-Bloco9B-Android.zip
+	
+
+Quebra os 4 cartões superiores em 2 colunas (75) e exibe sempre o botão "Já pedi" nas encomendas (249), mantendo as 4 colunas horizontais fixas em cPeca.
+Rustinho-Bloco9B-Android.zip
+05	TelaVenda.qml	330	
+
+Tema.estreito (105, 117, 129, 143, 154, 159, 170, 184, 191, 196, 197, 286).
+Rustinho-Bloco9B-Android.zip
+	
+
+Divide "Peças" e "Total e pagamento" em abas selecionadas por Pilulas (104–109) e empilha quantidade/preço sob a descrição do item (158–167).
+Rustinho-Bloco9B-Android.zip
+06	SecaoVendidos.qml	245	
+
+colunasEstreito: 2 (40) e Tema.estreito (122–124, 132, 168, 189, 208).
+Rustinho-Bloco9B-Android.zip
+	
+
+Oculta as colunas de quantidade/vendas (168) e o chip de estoque (208) em telas estreitas, mantendo posição, nome/barra, curva ABC e valor/lucro.
+Rustinho-Bloco9B-Android.zip
+07	TelaCaixa.qml	414	
+
+Tema.estreito (89, 102–104, 257, 300, 365).
+Rustinho-Bloco9B-Android.zip
+	
+
+Divide "Resumo" e "Vendas (N)" em pílulas (88–93) quando o caixa está aberto e reduz o padding dos modais movimento e fechar para 18 (300, 365).
+Rustinho-Bloco9B-Android.zip
+08	LinhaVenda.qml	103	
+
+Tema.estreito (23, 27–29, 37–38, 41, 61, 95, 97).
+Rustinho-Bloco9B-Android.zip
+	
+
+Oculta a coluna separada de data/hora (41) e concatena a data/hora dentro da linha de subtítulo (61).
+Rustinho-Bloco9B-Android.zip
+09	SecaoParados.qml	217	
+
+colunasEstreito: 2 (50) e Tema.estreito (149, 160, 167).
+Rustinho-Bloco9B-Android.zip
+	
+
+Oculta o Chip lateral de tempo parado (160) e transfere linha.p.ha para o subtítulo do item (149).
+Rustinho-Bloco9B-Android.zip
+10	TelaTrocas.qml	362	
+
+Tema.celular (199, 207, 293, 301); sem Tema.estreito nas listas listaVales e listaFeitas.
+Rustinho-Bloco9B-Android.zip
+	
+
+Torna os botões "Imprimir", "Usar no Vender" e "Desfazer" permanentemente visíveis sem hover quando Tema.celular == true.
+Rustinho-Bloco9B-Android.zip
+11	TelaDevolucao.qml	468	
+
+Tema.estreito (151, 164, 268–270).
+Rustinho-Bloco9B-Android.zip
+	
+
+Divide a tela em duas abas via Pilulas ("Peças" e "Como devolver", 150–155), exibindo apenas uma por vez (164, 268).
+Rustinho-Bloco9B-Android.zip
+12	AjusteEstoque.qml	122	
+
+Tema.largura (21) e Tema.estreito (22).
+Rustinho-Bloco9B-Android.zip
+	
+
+Ajusta width: Math.min(520, Tema.largura - 24) e reduz padding de 30 para 18.
+Rustinho-Bloco9B-Android.zip
+10.17. Confronto Individual Obrigatório dos 14 Achados Anteriores no Código Android (CONFIRMADO NO CÓDIGO)
+
+A verificação direta no código-fonte dos 12 arquivos comprova que todos os 14 achados (B9A1-01 a B9A2C-06) permanecem presentes no Android, com agravamentos específicos na interface móvel:
+Achado	Existe no Android?	Comprovação Direta no Código Android (Arquivo, Componente/Função, Linhas e Trecho Literal)
+B9A1-01 (Devolução fracionária em unidade indivisível)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaDevolucao.qml (linhas 242–254), o Campo { id: quantidade } usa numerico: true e onEditado: tela.mudar(linha.it.vendaItemId, "quantidade", texto) sem filtrar vírgula para unidades inteiras. Ao chamar "devolucao_calcular" (linha 47) e "devolucao_gravar" (linha 78), o núcleo aceita "0,5" para "UN" e soma +0,5 UN no estoque.
+Rustinho-Bloco9B-Android.zip+ 2
+B9A1-02 (Cancelamento de venda em dinheiro e divergência entre gavetas)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaVenda.qml (linhas 312–322), botaoCancelar chama tela.janela.chamarGerente("venda_cancelar", { id: tela.vendaId, motivo: motivo.texto }, ...). Se um gerente no celular Android cancelar uma venda paga em dinheiro feita em um computador Desktop cuja sessão de caixa ainda está aberta (ou se a gaveta atual já sofreu sangria), vendas::cancelar abate o dinheiro da sessão aberta daquele computador sem verificar esperado_dinheiro e sem compensar a gaveta local.
+Rustinho-Bloco9B-Android.zip+ 2
+B9A1-03 (Desfazimento de devolução em outro caixa)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaTrocas.qml (linhas 300–310), o botão "Desfazer" é sempre visível no Android (visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada, linha 301) e chama "devolucao_desfazer" (linha 309). Se acionado no celular Android para uma devolução em dinheiro feita em outro caixa com sessão ainda aberta, altera indevidamente o esperado da gaveta daquele outro caixa.
+Rustinho-Bloco9B-Android.zip+ 2
+B9A1-06 (Desconto global ultrapassando o limite individual sem gerente)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaVender.qml, na subpágina móvel (verLateral == true, linha 679), o operador preenche Campo { id: descontoTotal } (linhas 784–794), que é enviado em entrada() (desconto: descontoTotal.texto, linha 59) para "venda_calcular" (linha 77) e "venda_concluir" (linha 311, via Api.gravar sem chamarGerente), permitindo conceder desconto global que viola p.desconto_maximo sem senha do gerente.
+Rustinho-Bloco9B-Android.zip+ 2
+B9A2-01 (Seleção antecipada de "Veio com defeito")	SIM (DEFEITO COMPROVADO)	
+
+Em TelaDevolucao.qml (linhas 385–400), o TapHandler do chip "Veio com defeito" itera apenas sobre as chaves já existentes em tela.escolha (for (const id in e) e[id] = Object.assign({}, e[id], { defeito: true }), linhas 389–391), e mudar() (linha 56) / tudo() (linha 66) inicializam novos itens com defeito: false.
+Rustinho-Bloco9B-Android.zip
+B9A2-02 (Cancelamento da senha do gerente exibido como erro do campo)	SIM (DEFEITO COMPROVADO)	
+
+Em AjusteEstoque.qml (linhas 49–55), quando r.campo === "gerente", o else executa quantidade.erro = r.erro; quantidade.focar(); e em TelaVenda.qml (linhas 318–320), executa motivo.erro = r.erro.
+Rustinho-Bloco9B-Android.zip
+B9A2-03 (Seleção automática da 1ª conta em sangria/suprimento e erro de conta em valorMov)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaCaixa.qml, movimento.abrirCom define contaMov.indice = 0 (linha 312), pré-selecionando a 1ª conta de movimento.contas antes de "Nenhuma conta" (linha 329), e o else da linha 349–351 joga erros de x.campo === "conta" em valorMov.erro.
+Rustinho-Bloco9B-Android.zip
+B9A2-04 (Ausência de indicação de devoluções na tela da venda)	SIM (RISCO / OMISSÃO VISUAL)	
+
+Em TelaVenda.qml (1–330), tanto na aba "Peças" (linhas 116–188) quanto na aba "Total e pagamento" (linhas 190–276), não há nenhuma indicação de que itens da venda já foram parcial ou totalmente devolvidos.
+Rustinho-Bloco9B-Android.zip
+B9A2C-01 (Preenchimento incorreto "0,00" no botão "Vale-troca" do Receber)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaVender.qml, abrirCom preenche dinheiro.campo.texto = total (linha 915) e completarVale() (linhas 941–949) lê calc.falta ("0,00") sem zerar dinheiro, preenchendo campoVale.texto = "0,00" (linha 946).
+Rustinho-Bloco9B-Android.zip
+B9A2C-02 (Exposição indevida de custos de reposição para operador Caixa)	SIM (DEFEITO COMPROVADO)	
+
+Em SecaoComprar.qml, o cartão "Custo estimado" (valor: secao.dados ? secao.dados.custoTotal : "", linhas 99–105) e o texto "≈ R$ " + Tema.valor(lp.p.custoTotal) (linha 349) exibem custos sem checar permissão "resultados".
+Rustinho-Bloco9B-Android.zip
+B9A2C-03 (Erros de encomenda que ficam invisíveis no modal Nova encomenda)	SIM (DEFEITO COMPROVADO)	
+
+Em SecaoEncomendas.qml, TextoErro (linha 461) usa text: nova_.campoErro === "" ? nova_.erro : "", ocultando qualquer erro cujo campo não seja "", "cliente", "telefone", "peca" ou "quantidade".
+Rustinho-Bloco9B-Android.zip
+B9A2C-04 (Modal Receber abre mesmo com erroDesconto ativo)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaVender.qml, abrirReceber() (linhas 286–307) checa calculo.itens.some(i => i.erro) (297) e calculo.erroEncomenda (301), mas não checa calculo.erroDesconto.
+Rustinho-Bloco9B-Android.zip
+B9A2C-05 (Utilização fixa da tabela de preços 1)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaVender.qml, entrada() fixa tabela: 1 (linha 56) e ignora a tabela original ao carregar orçamento (linhas 1352–1364).
+Rustinho-Bloco9B-Android.zip
+B9A2C-06 (Problemas na aba "Já devolvidas" de TelaTrocas.qml)	SIM (DEFEITO COMPROVADO)	
+
+Em TelaTrocas.qml (linhas 272–310), a linha omite caixa e vendaCaixa, mantém o botão "Desfazer" ativo mesmo quando lf.modelData.valeUsado === true (linha 301) e afirma que peças com defeito saem do estoque (linha 307).
+Rustinho-Bloco9B-Android.zip
+10.18. Defeitos Exclusivos do Android / Modo Estreito (Tema.celular e Tema.estreito)
+1. [B9B-01] limparVenda() em TelaVender.qml não reseta verLateral = false, prendendo o usuário na página lateral vazia no Android após concluir venda, salvar orçamento ou limpar o carrinho
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Exclusivo do modo estreito/Android).
+
+    Arquivo, funções e linhas exatas: app/qml/TelaVender.qml, propriedade verLateral (linha 11), função limparVenda (linhas 207–226), função aoEsc (linhas 237–246), função concluir (linhas 309–322), função salvarOrcamento (linhas 324–337) e colunas condicionalizadas por verLateral (linhas 478, 679 e 830).   
+    Rustinho-Bloco9B-Android.zip
+
+    Trecho literal (app/qml/TelaVender.qml, linhas 11, 207–226, 478 e 679):
+    QML
+
+      // Celular: mostra a parte do cliente e total no lugar do carrinho.
+      property bool verLateral: false
+
+    QML
+
+      function limparVenda() {
+          chaveVenda = Api.novaChave()
+          chaveOrcamento = Api.novaChave()
+          carrinho = []
+          calculo = null
+          clienteId = ""
+          clienteNome = ""
+          campoCliente.texto = ""
+          descontoTotal.texto = ""
+          orcamentoCarregado = ""
+          encomendaCarregada = ""
+          encomendaNumero = 0
+          encomendaCaixa = ""
+          osCarregada = ""
+          osNumero = 0
+          osCaixa = ""
+          valeTroca = null
+          itemAtual = -1
+          limparBusca()
+      }
+
+    QML
+
+              // ---------- Busca e carrinho ----------
+              ColumnLayout {
+                  visible: !Tema.estreito || !tela.verLateral
+    ...
+              // ---------- Cliente e total ----------
+              ColumnLayout {
+                  visible: !Tema.estreito || tela.verLateral
+
+    Sustentação: No celular (Tema.estreito === true), quando o operador toca em "Cliente e desconto ›" (linha 862), tela.verLateral passa a true, ocultando a coluna de busca/carrinho (linha 478) e exibindo a coluna "Cliente e total" (linha 679). Se, a partir dessa tela lateral, o operador tocar em "Receber" (linha 808) e concluir a venda (concluir, linha 319), ou tocar em "Salvar como orçamento" (linha 818 → salvarOrcamento, linha 334), ou pressionar Voltar/Esc e confirmar "Limpar esta venda?" (aoEsc, linha 242), todas essas ações chamam limparVenda(), que esquece de fazer verLateral = false. Como resultado, a nova venda começa presa na tela secundária "Cliente / Total a pagar R$ 0,00" com os botões "Receber" e "Salvar como orçamento" desabilitados (enabled: tela.carrinho.length > 0, linhas 813 e 821) e com o campo busca invisível (limparBusca() tenta focar busca.focar() na linha 178, mas busca está oculto).   
+    Rustinho-Bloco9B-Android.zip+ 2
+
+2. [B9B-02] Modal Popup { id: receber } em TelaVender.qml não possui Flickable nem limite de altura e estoura a largura horizontal em telas estreitas
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Crítico em telas de celular).
+
+    Arquivo, componente e linhas exatas: app/qml/TelaVender.qml, Popup { id: receber }, linhas 877–1206 (especificamente linhas 885–886, 964, 1013–1038 e 1039–1066).   
+    Rustinho-Bloco9B-Android.zip
+
+    Trecho literal (app/qml/TelaVender.qml, linhas 878–889 e 1013–1055):
+    QML
+
+      Popup {
+          id: receber
+          property string total: "0,00"
+          property string erro: ""
+          property var calc: null
+          modal: true
+          focus: true
+          anchors.centerIn: T.Overlay.overlay
+          width: Math.min(660, Tema.largura - 24)
+          padding: Tema.estreito ? 18 : 30
+
+    QML
+
+              // Vale-troca (só quando há vale com saldo)
+              Linha {
+                  visible: tela.vales.length > 0
+                  spacing: 12
+                  Layout.fillWidth: true
+                  Botao {
+                      text: "Vale-troca"
+                      tipo: "secundario"
+                      Layout.preferredWidth: 220
+                      onClicked: receber.completarVale()
+                  }
+                  Selecao {
+                      id: escolhaVale
+                      modelo: tela.vales.map(v => v.rotulo)
+                      Layout.fillWidth: true
+                      onEscolhido: receber.atualizar()
+                  }
+                  Campo {
+                      id: campoVale
+                      prefixo: "R$"
+                      numerico: true
+                      maximo: 14
+                      Layout.preferredWidth: 150
+
+    Sustentação técnica (2 problemas geométricos comprovados):
+
+        Ausência de rolagem vertical (Flickable) e corte de conteúdo: contentItem de receber é um ColumnLayout direto (linha 964) sem Flickable e sem height: Math.min(implicitHeight, Tema.altura - 24). Como lista 7 formas de pagamento (repFormas, linhas 1039–1066) mais título, nota, vale-troca, painelCred (1068–1156), painelCheque (1157–1162), totalizador e botões finais (1187–1203), a altura total ultrapassa a altura útil da tela do celular (especialmente com o teclado virtual aberto), cortando os painéis inferiores e o botão "Concluir venda".   
+        Rustinho-Bloco9B-Android.zip+ 1
+
+        Estouro de largura horizontal na linha de Vale-troca e nas formas de pagamento: Na linha de Vale-troca (1013–1038), o botão exige 220 px (1020) e o campo exige 150 px (1034) na mesma linha horizontal (220 + 12 + Selecao + 12 + 150 = 394 px + Selecao), estourando a largura útil do modal em smartphones (~300–340 px) e esmagando escolhaVale. Nas formas de pagamento (1042–1065), o botão fixo de 220 px (1052) comprime o campo valor (1056) em telas estreitas.   
+        Rustinho-Bloco9B-Android.zip+ 1
+
+3. [B9B-03] Colisão e esmagamento horizontal severo na lista de SecaoComprar.qml (cPeca) por ausência de adaptação a Tema.estreito
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Exclusivo de telas estreitas/Android).
+
+    Arquivo, componente e linhas exatas: app/qml/SecaoComprar.qml, Component { id: cPeca }, linhas 270–358.   
+    Rustinho-Bloco9B-Android.zip
+
+    Trecho literal (app/qml/SecaoComprar.qml, linhas 278–347):
+    QML
+
+              RowLayout {
+                  anchors.fill: parent
+                  anchors.leftMargin: 18
+                  anchors.rightMargin: 16
+                  spacing: 14
+                  Item {
+                      Layout.preferredWidth: 132
+                      implicitHeight: 26
+                      Chip { ... }
+                  }
+                  ColumnLayout {
+                      spacing: 0
+                      Layout.fillWidth: true
+                      Text {
+                          text: lp.p.nome + (lp.p.marca ? " · " + lp.p.marca : "")
+                          ...
+                      }
+                      Text {
+                          text: ["cód. " + lp.p.codigo, ...].filter(x => !!x).join("  ·  ")
+                          ...
+                      }
+                  }
+                  ColumnLayout {
+                      spacing: 0
+                      Layout.preferredWidth: 150
+                      ...
+                  }
+                  ColumnLayout {
+                      spacing: 0
+                      Layout.preferredWidth: 150
+                      ...
+                  }
+              }
+
+    Sustentação: Em cPeca, três colunas laterais têm larguras fixas (132 px na linha 284, 150 px na linha 320 e 150 px na linha 339), somando 18 + 16 + 3*14 + 132 + 150 + 150 = 508 px de largura fixa obrigatória. Em qualquer tela de smartphone em modo retrato (340 px a 430 px de largura), a coluna central com Layout.fillWidth: true (linhas 293–317, que contém o nome da peça, a marca, o código e o fornecedor) fica com largura zero ou negativa, tornando impossível identificar qual peça comprar.   
+    Rustinho-Bloco9B-Android.zip+ 1
+
+4. [B9B-04] Esmagamento horizontal nas listas listaVales e listaFeitas de TelaTrocas.qml quando Tema.celular === true
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Exclusivo do Android Tema.celular).
+
+    Arquivo, componentes e linhas exatas: app/qml/TelaTrocas.qml, ListView { id: listaVales } (linhas 153–223) e ListView { id: listaFeitas } (linhas 254–333).   
+    Rustinho-Bloco9B-Android.zip
+
+    Trecho literal (app/qml/TelaTrocas.qml, linhas 198–221 e 292–331):
+    QML
+
+                      Botao {
+                          visible: (sobreVale.hovered || Tema.celular)
+                          text: "Imprimir"
+                          ...
+                      }
+                      Botao {
+                          visible: (sobreVale.hovered || Tema.celular)
+                          text: "Usar no Vender"
+                          ...
+                      }
+                      Text {
+                          text: "R$ " + lv.modelData.saldo
+                          ...
+                          Layout.preferredWidth: 120
+                      }
+
+    QML
+
+                      Botao {
+                          visible: (sobreFeita.hovered || Tema.celular)
+                          text: "Imprimir"
+                          ...
+                      }
+                      Botao {
+                          visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada
+                          text: "Desfazer"
+                          ...
+                      }
+                      ColumnLayout {
+                          spacing: 0
+                          Layout.preferredWidth: 190
+
+    Sustentação: No Desktop, os botões "Imprimir", "Usar no Vender" e "Desfazer" ficam ocultos até que o mouse passe sobre a linha (sobreVale.hovered / sobreFeita.hovered). No Android (Tema.celular === true), todos esses botões ficam permanentemente visíveis dentro do único RowLayout da linha (junto com as colunas fixas de 70 px + 120 px em listaVales e 190 px em listaFeitas), sem quebrar para uma segunda linha como faz SecaoEncomendas.qml (linha 129), esmagando os textos de cliente, número da devolução e itens em telas estreitas.   
+    Rustinho-Bloco9B-Android.zip
+
+5. [B9B-05] TextoErro e botões de ação ficam invisíveis na aba "Peças" de TelaDevolucao.qml no modo estreito/Android
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Exclusivo do modo estreito/Android).
+
+    Arquivo, componentes e linhas exatas: app/qml/TelaDevolucao.qml, Pilulas (linhas 150–155), coluna "Peças" (linhas 163–264) e coluna "Como devolver" (linhas 267–436, com TextoErro nas linhas 406–409 e botões "Trocar agora"/"Devolver" nas linhas 411–428).   
+    Rustinho-Bloco9B-Android.zip
+
+    Trecho literal (app/qml/TelaDevolucao.qml, linhas 163–168, 267–269 e 406–428):
+    QML
+
+              // ---------- Peças da venda ----------
+              ColumnLayout {
+                  visible: !Tema.estreito || tela.parte === "pecas"
+    ...
+              // ---------- Valor e como devolver ----------
+              Flickable {
+                  visible: !Tema.estreito || tela.parte === "como"
+    ...
+                      TextoErro {
+                          text: tela.erro !== "" ? tela.erro : (tela.calc && tela.calc.erro ? tela.calc.erro : "")
+                          Layout.fillWidth: true
+                      }
+                      Linha {
+                          spacing: 10
+                          Layout.fillWidth: true
+                          Botao {
+                              visible: tela.destino === "vale" || (tela.calc && tela.calc.precisaResto && tela.resto === "vale")
+                              text: "Trocar agora"
+                              ...
+                          }
+                          Item { Layout.fillWidth: true }
+                          Botao {
+                              text: "Devolver"
+
+    Sustentação: Quando Tema.estreito === true, a tela começa na aba tela.parte === "pecas" (linha 11), ocultando inteiramente o Flickable da aba "como" (linha 268). Se o usuário digitar na aba "Peças" uma quantidade inválida (ex.: maior que it.pode), tela.calc.erro é atualizado, mas o único componente TextoErro da tela está dentro da aba "Como devolver" (linha 407, invisível!), deixando o usuário sem feedback visual do erro. Além disso, a aba "Peças" não possui rodapé com o valor calculado nem botão para avançar para a aba "Como devolver".   
+    Rustinho-Bloco9B-Android.zip+ 2
+
+6. [B9B-06] Painel modal nova_ em SecaoEncomendas.qml não possui Flickable e estoura a altura visível no celular ao exibir sugestões de clientes com teclado virtual aberto
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Impacto direto em telas pequenas/Android).
+
+    Arquivo, componente e linhas exatas: app/qml/SecaoEncomendas.qml, Painel { id: nova_ }, linhas 300–469.   
+    Rustinho-Bloco9B-Android.zip
+
+    Sustentação: nova_ contém Titulo (375), Nota (376), nCliente (382), até 5 cartões do Repeater { model: nova_.achados } (linhas 391–412), nTelefone (413), nPeca + "Procurar" (421–440), nQtd + nObs (441–460), TextoErro (461) e botões finais (462–467) dentro de um ColumnLayout sem Flickable e sem limite de height. Em celulares, quando o teclado virtual abre para digitar o nome do cliente e a lista achados aparece, os campos inferiores e o botão "Anotar encomenda" são empurrados para fora da tela sem barra de rolagem.   
+    Rustinho-Bloco9B-Android.zip+ 1
+
+10.19. Diferenças Intencionais e Justificáveis Entre Desktop e Android (CONFIRMADO NO CÓDIGO)
+
+    Botão de câmera no campo de busca de TelaVender.qml (linha 487): Campo { id: busca; camera: true } habilita exclusivamente quando Tema.celular === true (Campo.qml, linha 30: readonly property bool comCamera: camera && Tema.celular) o botão de leitura de código de barras pela câmera (LeitorCamera.qml).   
+    Rustinho-Bloco9B-Android.zip
+
+    Ocultação de rótulos de atalhos de teclado físico (F2, F6, F11, Esc) em campos: Em Campo.qml (linha 196), textoAtalho usa visible: campo.atalho !== "" && !Tema.celular && !Tema.estreito, ocultando "F11" no celular.
+
+    Paginação por Pilulas em telas de duas colunas quando Tema.estreito === true:
+
+        TelaCaixa.qml (linhas 88–93): alterna entre "Resumo" e "Vendas (N)";   
+        Rustinho-Bloco9B-Android.zip
+
+        TelaVenda.qml (linhas 104–109): alterna entre "Peças" e "Total e pagamento";   
+        Rustinho-Bloco9B-Android.zip
+
+        TelaDevolucao.qml (linhas 150–155): alterna entre "Peças" e "Como devolver";   
+        Rustinho-Bloco9B-Android.zip
+
+        TelaVender.qml (linhas 478, 679, 829–873): alterna entre o carrinho (com barra de total no rodapé) e a subpágina "Cliente e desconto".   
+        Rustinho-Bloco9B-Android.zip
+
+    Exibição direta de botões de ação sem depender de mouse (sobre.hovered || Tema.celular): Aplicada em SecaoComprar.qml (linha 249), SecaoEncomendas.qml (linhas 243, 250, 257, 267) e TelaTrocas.qml (linhas 199, 207, 293, 301) para suprir a inexistência de hover em telas sensíveis ao toque.   
+    Rustinho-Bloco9B-Android.zip
+
+10.20. Problemas Adicionais de Usabilidade em Celular (B9B-07 a B9B-09)
+
+    [B9B-07] (PROBLEMA DE USABILIDADE MOBILE — focar() ignorado quando o teclado virtual está fechado): Como Campo.focar() (Campo.qml, linhas 50–56) só foca o campo se !Tema.celular || Qt.inputMethod.visible, todas as chamadas a .focar() ao abrir modais por toque em botão (AjusteEstoque.qml:121, TelaCaixa.qml:33, 314, 375, TelaVenda.qml:326, TelaVender.qml:918, 948, 961, 1291, SecaoEncomendas.qml:324, 341, 349) não colocam o cursor no campo nem abrem o teclado virtual no Android (ao contrário de focarSempre()).   
+    Rustinho-Bloco9B-Android.zip
+
+    [B9B-08] (PROBLEMA DE USABILIDADE MOBILE — Row { id: acoesEnc } sem quebra de linha em SecaoEncomendas.qml, linhas 193–275): Quando Tema.celular === true, até 5 botões ficam visíveis simultaneamente dentro de um Row (que não quebra linha como Flow), podendo ultrapassar a largura de 340–360 px em encomendas no estado "chegou" ou "pedida".   
+    Rustinho-Bloco9B-Android.zip
+
+    [B9B-09] (PROBLEMA DE USABILIDADE MOBILE — Barras de filtros com múltiplos componentes na mesma Linha horizontal): Em SecaoVendidos.qml (linhas 70–100: Campo de busca + 2 grupos de Pilulas na mesma Linha), TelaTrocas.qml (linhas 75–102: Pilulas de 3 abas + Campo de busca na mesma Linha), SecaoComprar.qml (linhas 108–139) e SecaoParados.qml (linhas 78–109), a ausência de colunasEstreito: 1 (ou Flow) comprime o campo busca em telas estreitas.   
+    Rustinho-Bloco9B-Android.zip
+
+14.10. Testes Existentes, Lacunas de Testes Mobile e Recomendações de Correção (BLOCO 9B)
+
+    Testes existentes e status de execução:
+
+        Testes escritos nos 12 arquivos QML: 0.   
+        Rustinho-Bloco9B-Android.zip
+
+        Testes executados em aparelho Android ou emulador nesta sessão: 0 (NENHUM TESTE EXECUTADO EM RUNTIME NESTA SESSÃO).
+
+        Conforme já apurado no Capítulo 14 (Seção 14.3), a bateria histórica de testes de tela (regressao2/logs/) rodou exclusivamente em ambiente Desktop Linux (X virtual) na versão 0.9.15, não existindo nenhum log de teste automatizado com Tema.celular = true ou Tema.estreito = true para estas 12 telas.
+
+    Recomendações de Correção para a Camada Android / Responsiva (Sem Implementação):
+
+        Em TelaVender.qml (B9B-01, B9B-02):
+
+            Incluir verLateral = false dentro de limparVenda() (linha 207) e adicionar um botão "Orçamento" na barra inferior móvel (rodapeLinha, linhas 829–873);   
+            Rustinho-Bloco9B-Android.zip
+
+            Definir height: Math.min(implicitHeight, Tema.altura - 24) e envolver o conteúdo de Popup { id: receber } (linhas 877–1206) em um Flickable, reduzindo Layout.preferredWidth dos botões de formas de pagamento de 220 para Tema.estreito ? 130 : 220 e empilhando escolhaVale em Tema.estreito.   
+            Rustinho-Bloco9B-Android.zip
+
+        Em SecaoComprar.qml (B9B-03):
+
+            Adaptar cPeca (linhas 270–358) para Tema.estreito (ocultando o Chip lateral e a coluna de ritmo ou movendo-os para o subtítulo da peça, como fazem SecaoVendidos.qml e SecaoParados.qml).   
+            Rustinho-Bloco9B-Android.zip
+
+        Em TelaTrocas.qml (B9B-04):
+
+            Em listaVales (linhas 153–223) e listaFeitas (linhas 254–333), posicionar os botões "Imprimir", "Usar no Vender" e "Desfazer" em uma segunda linha abaixo do texto quando Tema.estreito === true (como em SecaoEncomendas.qml).   
+            Rustinho-Bloco9B-Android.zip
+
+        Em TelaDevolucao.qml (B9B-05):
+
+            Exibir TextoErro também na aba "Peças" quando Tema.estreito && tela.parte === "pecas" e incluir na parte inferior da aba "Peças" uma barra com o valor calculado e um botão "Escolher como devolver ›" que alterne tela.parte = "como".   
+            Rustinho-Bloco9B-Android.zip
+
+        Em SecaoEncomendas.qml (B9B-06, B9B-08):
+
+            Envolver o conteúdo de Painel { id: nova_ } (linhas 300–469) em um Flickable limitado a Tema.altura - 24 e trocar Row { id: acoesEnc } (linha 193) por Flow.   
+            Rustinho-Bloco9B-Android.zip
+
+Encerro o Bloco 9B e aguardo sua autorização explícita para o próximo bloco.

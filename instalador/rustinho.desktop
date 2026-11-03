@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Rustinho
+Comment=Sistema para loja de autopeças
+Exec=rustinho
+Icon=rustinho
+Categories=Office;Finance;
+Terminal=false
+StartupWMClass=rustinho

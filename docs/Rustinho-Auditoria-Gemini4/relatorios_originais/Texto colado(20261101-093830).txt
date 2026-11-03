@@ -1,0 +1,130 @@
+1. Confirmação da Quantidade Real de Linhas dos Três Arquivos (0.9.17)Conferência direta nos arquivos numerados extraídos do pacote original:   nucleo/src/busca.rs: 383 linhas (1–383).   nucleo/src/produtos.rs: 1.387 linhas (1–1387).   nucleo/src/unidades.rs: 154 linhas (1–154).   (Nota: O relatório consolidado não foi gravado fisicamente em disco local por ausência de ferramenta de escrita persistente nesta sessão; as seções atualizadas são entregues na íntegra abaixo).2. Atualização Revisada de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md (BLOCO 8B1)6.4. Mapa Estrutural Exato dos Três Módulos Auditados no Bloco 8B1 (CONFIRMADO NO CÓDIGO)Arquivo (0.9.17)Total de LinhasMapa de Estruturas, Constantes, Funções e Testes (Linhas Exatas)nucleo/src/busca.rs383• Comentários e imports: 1–11   • pub struct ProdutoResumo: 14–42   • struct Carro (45–50) e impl Carro::serve_no_ano (52–56)   • fn como_ano: 59–67   • pub fn buscar: 70–211   • fn achou_por: 215–248   • fn serve_no_ano: 252–262   • fn carros_da_peca: 264–298   • fn resumo: 301–308   • pub fn pelo_codigo_exato: 313–318   • pub fn esperando_pelo_codigo: 322–336   • pub fn total: 339–343   • #[cfg(test)] mod testes: 345–383 (1 função #[test]: acha_pelo_codigo_do_fornecedor em 351–382)   nucleo/src/produtos.rs1.387• Imports, ORIGENS (10–20), MAX_PRECO (22), MAX_LINHAS (23): 1–23   • Structs públicas de ficha: ProdutoFicha (31–118), ItemGrade (121–128), CodigoFornecedor (131–137), PrecoFicha (140–147), AplicacaoFicha (150–159), EquivalenteFicha (162–167)   • Structs internas: Dados (173–209), Aplicacao (211–219), Equivalente (221–225)   • Validação: texto_curto (231–237), so_digitos (239–241), validar (243–478)   • Escrita e códigos: pub fn trocar_codigo (488–528), pub fn definir_codigo (532–549), pub fn salvar (552–794), fn manter_lucros (798–807)   • Custos e preços (D-09): pub fn esconder_custos (811–820), pub fn tirar_custos_da_entrada (824–839), pub fn muda_preco (847–858)   • Leitura, SQL e grade: fn carregar (861–935), pub fn ficha (938–1052), pub fn oferta_vale (1055–1057), SQL_PRECO_1 (1060–1063), SQL_EM_OFERTA (1066–1067), fn itens_grade (1069–1080), pub fn criar_variacao (1085–1134), pub fn ficha_nova (1137–1165)   • Ajudantes: pub fn calcular_preco (1175–1198), pub struct Sugestoes (1201–1211), pub fn sugestoes (1213–1240), fn nome_tabela (1242–1249), fn texto_busca (1252–1287), fn diferencas (1290–1369)   • #[cfg(test)] mod testes: 1371–1387 (1 função #[test]: calcula_preco_e_lucro em 1375–1386)   nucleo/src/unidades.rs154• Comentários e imports: 1–8   • pub struct Unidade: 10–18   • pub fn listar: 20–31   • pub fn conferir_sigla: 34–43   • pub fn salvar: 46–62   • pub fn garantir: 66–69   • pub fn fracionada: 72–77   • pub fn normalizar: 80–106   • pub fn de_fora: 110–117   • #[cfg(test)] mod testes: 119–154 (2 funções #[test]: lista_pronta_e_da_loja em 124–137 e junta_repetidas em 139–153)   6.5. Achados Técnicos Revisados (B8B1-01 a B8B1-12) com Linhas Exatas e Trechos Literais1. [B8B1-01] Códigos de fornecedor (produto_fornecedor) e códigos antigos (produto_codigo_antigo) não entram em p.busca e só são buscados por igualdade exata da string inteira compactada (?1)Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Arquivos, funções e linhas exatas:nucleo/src/produtos.rs, função texto_busca, linhas 1252–1287;   nucleo/src/busca.rs, função buscar, linhas 81, 87–91 e 132–142.   Trechos literais:Em nucleo/src/produtos.rs (texto_busca, linhas 1276–1286):   Rust    let mut codigos: Vec<String> = Vec::new();
+    for c in
+        [&d.codigo, &d.codigo_barras, &d.codigo_original].into_iter().chain(d.equivalentes.iter().map(|q| &q.codigo))
+    {
+        let compacto = texto::compactar(c);
+        if !compacto.is_empty() && !codigos.contains(&compacto) {
+            codigos.push(compacto);
+        }
+    }
+    let busca = format!("{} {}", texto::normalizar(&partes.join(" ")), codigos.join(" "));
+    (busca.trim().to_string(), format!(" {} ", codigos.join(" ")))
+Em nucleo/src/busca.rs (buscar, linhas 81 e 132–142):   Rust    let compacto = texto::compactar(texto_busca);
+...
+    if !grupo.is_empty() {
+        // Ou acha pelas palavras, ou pelo código que o fornecedor usa, ou
+        // por um código que a peça já teve (etiqueta velha).
+        sql.push_str(&format!(
+            " AND (({}) OR (?1 <> '' AND (EXISTS (SELECT 1 FROM produto_fornecedor f
+                     WHERE f.produto_id = p.id AND f.codigo_compacto = ?1)
+                  OR EXISTS (SELECT 1 FROM produto_codigo_antigo a
+                     WHERE a.produto_id = p.id AND a.codigo_compacto = ?1))))",
+            grupo.join(" AND ")
+        ));
+    }
+Sustentação: Como produto_fornecedor e produto_codigo_antigo não fazem parte de p.busca e o OR das linhas 136–139 compara f.codigo_compacto = ?1 e a.codigo_compacto = ?1 com a busca inteira compactada (?1), a busca falha para prefixos de código de fornecedor (ex.: "TCF" para "TCF 01"), ordem invertida ("01 TCF") ou combinação de código de fornecedor com palavras do nome/marca da peça.   2. [B8B1-02] Tokens alfanuméricos colados ou hifenizados ("rg08", "rg-08") não são decompostos nas fronteiras letra/númeroClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Arquivo, função e linhas exatas: nucleo/src/busca.rs, função buscar, linhas 77–81 e 108–120.   Trecho literal (nucleo/src/busca.rs, linhas 77–78 e 108–120):Rust    let normalizado = texto::normalizar(texto_busca);
+    let tokens: Vec<&str> = normalizado.split(' ').filter(|t| !t.is_empty()).take(10).collect();
+...
+    for token in &tokens {
+        let mut condicao = format!("p.busca LIKE ?{}", valores.len() + 1);
+        valores.push(Value::Text(format!("%{token}%")));
+        let token_compacto = texto::compactar(token);
+        if token_compacto != *token && !token_compacto.is_empty() {
+            condicao.push_str(&format!(" OR p.busca LIKE ?{}", valores.len() + 1));
+            valores.push(Value::Text(format!("%{token_compacto}%")));
+        }
+        // Modelo escrito junto ("8pk1515") acha o nome escrito separado ("8PK 1515").
+        if token_compacto.len() >= 4 && token_compacto.chars().any(|c| c.is_ascii_digit()) {
+            condicao.push_str(&format!(" OR replace(p.busca, ' ', '') LIKE ?{}", valores.len() + 1));
+            valores.push(Value::Text(format!("%{token_compacto}%")));
+        }
+Sustentação: Enquanto "rg 08" é separado por espaço em dois tokens ("rg" e "08"), casando com partes distintas de p.busca, "rg08" e "rg-08" geram token_compacto = "rg08", exigindo contiguidade entre "rg" e "08" em p.busca ou em replace(p.busca, ' ', '') (linhas 109–119).   3. [B8B1-03] Números de 4 dígitos entre 1900 e 2100 são sempre tratados como ano de veículo (como_ano), descartando no pós-filtro peças encontradas por código de fornecedor, código antigo ou substring numéricaClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Arquivo, funções e linhas exatas: nucleo/src/busca.rs, funções como_ano (linhas 59–67), buscar (linhas 79 e 196–200) e serve_no_ano (linhas 252–262).   Trecho literal (nucleo/src/busca.rs, linhas 59–67, 196–200 e 252–262):Rustfn como_ano(token: &str) -> Option<i64> {
+    if token.len() == 4 && token.chars().all(|c| c.is_ascii_digit()) {
+        let ano: i64 = token.parse().ok()?;
+        if (1900..=2100).contains(&ano) {
+            return Some(ano);
+        }
+    }
+    None
+}
+...
+    for (mut item, busca, codigo_barras) in candidatos {
+        let carros = carros_da_peca(conn, &item.id)?;
+        if !anos.iter().all(|(token, ano)| serve_no_ano(&busca, &carros, &palavras, token, *ano)) {
+            continue;
+        }
+...
+fn serve_no_ano(busca: &str, carros: &[Carro], palavras: &[&str], token: &str, ano: i64) -> bool {
+    // O número pode estar no nome ou num código.
+    if busca.split(' ').any(|p| p == token) {
+        return true;
+    }
+    // Carros que combinam com alguma palavra da busca; se nenhum combina
+    // (ex.: "pastilha 2016"), vale qualquer carro da peça.
+    let combinam: Vec<&Carro> = carros.iter().filter(|c| palavras.iter().any(|p| c.texto.contains(p))).collect();
+    let considerar: Vec<&Carro> = if combinam.is_empty() { carros.iter().collect() } else { combinam };
+    considerar.iter().any(|c| c.serve_no_ano(ano))
+}
+Sustentação: Na linha 254, serve_no_ano só dispensa o filtro de veículo se busca.split(' ').any(|p| p == token) for verdadeiro (palavra isolada idêntica em p.busca). Se um número de 4 dígitos entre 1900 e 2100 (ex.: "2015") for um código de fornecedor (produto_fornecedor), um código antigo (produto_codigo_antigo) ou substring de um código maior em p.busca, busca.split(' ').any(|p| p == token) retorna false e, caso a peça não tenha aplicações de veículos para aquele ano, ela é descartada no continue; da linha 199.   4. [B8B1-04] Condição parece_codigo omite o preenchimento de achou para códigos puramente alfabéticos ou com menos de 3 caracteresClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Arquivo, função e linhas exatas: nucleo/src/busca.rs, função buscar, linhas 193 e 202–204.   Trecho literal (nucleo/src/busca.rs, linhas 193 e 202–204):Rust    let parece_codigo = compacto.len() >= 3 && compacto.chars().any(|c| c.is_ascii_digit());
+...
+        if parece_codigo {
+            item.achou = achou_por(conn, &item, &codigo_barras, &compacto)?;
+        }
+Sustentação: Na linha 193, parece_codigo exige compacto.len() >= 3 e pelo menos um dígito numérico (is_ascii_digit()), impedindo que achou_por (linhas 215–248) preencha item.achou quando um código de fornecedor, similar ou antigo tiver apenas letras ou 1–2 caracteres.   5. [B8B1-05] Contagem de produtos por unidade inclui peças inativas e serviços sem estoqueClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO frente à Regra 6.1 do Capítulo 8).Arquivos, funções e linhas exatas:nucleo/src/unidades.rs, função listar, linhas 20–31 (especificamente linhas 22–23);   nucleo/src/produtos.rs, função sugestoes, linhas 1213–1240 (especificamente linhas 1219–1221).   Trechos literais:Em nucleo/src/unidades.rs (linhas 20–24):   Rustpub fn listar(conn: &Connection) -> Resultado<Vec<Unidade>> {
+    let mut c = conn.prepare(
+        "SELECT u.sigla, u.descricao, u.fracionada, (SELECT COUNT(*) FROM produto p WHERE p.unidade = u.sigla) AS n
+           FROM unidade u ORDER BY n DESC, u.sigla",
+    )?;
+Em nucleo/src/produtos.rs (linhas 1219–1221):   Rust    let unidades = valores(
+        "SELECT u.sigla FROM unidade u ORDER BY (SELECT COUNT(*) FROM produto p WHERE p.unidade = u.sigla) DESC, u.sigla",
+    )?;
+Sustentação: Ambas as subconsultas contam todos os registros de produto com p.unidade = u.sigla, sem filtrar AND p.ativo = 1 AND p.tipo = 'produto'.   6. [B8B1-06] Janela móvel de 24h de vendas líquidas e organização em linhas do seletor de unidades: ausente em unidades.rs/produtos.rs, dependente de verificação na interface (Bloco 8B2) (Reavaliado)Classificação Corrigida: AUSENTE NOS MÓDULOS DO NÚCLEO AUDITADOS (unidades.rs e produtos.rs) / PENDENTE DE AUDITORIA DE EscolherUnidade.qml E TelaPeca.qml NO BLOCO 8B2.Arquivos e linhas exatas: nucleo/src/unidades.rs (linhas 10–31) e nucleo/src/produtos.rs (sugestoes, linhas 1219–1221).   Sustentação e distinção de escopo:Nos arquivos do núcleo analisados neste bloco (unidades.rs e produtos.rs), unidades::listar (linhas 20–31) e produtos::sugestoes (linhas 1219–1221) retornam uma lista simples ordenada por n DESC, u.sigla, sem consultar vendas/devoluções das últimas 24 horas e sem separar 1ª linha, 2ª linha (substituição direita $\rightarrow$ esquerda) e linhas inferiores em ordem alfabética.   Como o componente app/qml/EscolherUnidade.qml (e TelaPeca.qml) pertence ao Bloco 8B2 e ainda não foi auditado, distingue-se rigorosamente a ausência dessa lógica em unidades.rs e produtos.rs (comprovada aqui) da sua existência ou ausência no sistema inteiro (que só poderá ser fechada após a auditoria da interface no Bloco 8B2).7. [B8B1-07] unidades::salvar faz ON CONFLICT (sigla) DO UPDATE no núcleo sem distinguir criação de edição e sem aplicar unidades::normalizar (Reavaliado)Classificação Corrigida: COMPORTAMENTO CONFIRMADO NO NÚCLEO / BLOQUEIO DE DUPLICIDADE NA CRIAÇÃO PENDENTE DE VERIFICAÇÃO EM EscolherUnidade.qml (BLOCO 8B2).Arquivo, funções e linhas exatas: nucleo/src/unidades.rs, funções conferir_sigla (linhas 34–43), salvar (linhas 46–62) e normalizar (linhas 80–106).   Trecho literal (nucleo/src/unidades.rs, linhas 45–62):Rust/// Cria ou muda uma unidade.
+pub fn salvar(conn: &Connection, sigla: &str, descricao: &str, fracionada: bool) -> Resultado<String> {
+    let sigla = conferir_sigla(sigla).map_err(|e| match e {
+        Erro::Validacao { mensagem, .. } => Erro::campo("sigla", mensagem),
+        outro => outro,
+    })?;
+    let descricao = texto::limpar(descricao);
+    if texto::tamanho(&descricao) > 40 {
+        return Err(Erro::campo("descricao", "Use no máximo 40 letras."));
+    }
+    let descricao = if descricao.is_empty() { sigla.clone() } else { descricao };
+    conn.execute(
+        "INSERT INTO unidade (sigla, descricao, fracionada) VALUES (?1, ?2, ?3)
+         ON CONFLICT (sigla) DO UPDATE SET descricao = excluded.descricao, fracionada = excluded.fracionada",
+        params![sigla, descricao, fracionada],
+    )?;
+    Ok(sigla)
+}
+Sustentação: No núcleo, unidades::salvar é projetada simultaneamente para criar ou alterar uma unidade (/// Cria ou muda uma unidade., linha 45), executando ON CONFLICT (sigla) DO UPDATE nas linhas 57–58, e conferir_sigla (linhas 34–43) não aplica normalizar (linhas 80–106). Verificar se a interface impede o cadastro de uma nova unidade com sigla já existente (ou se chama unidade_salvar sobrescrevendo a unidade existente) depende da auditoria de app/qml/EscolherUnidade.qml no Bloco 8B2.   8. [B8B1-08] Código interno não confirmado (codigo_validado == 0) é inserido em produto_codigo_antigo quando trocado manualmente em produtos::salvarClassificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).Arquivo, funções e linhas exatas: nucleo/src/produtos.rs, função trocar_codigo (linhas 488–528, especificamente linhas 491–494 e 508–514) vs. função salvar (linhas 749–757).   Trechos literais (nucleo/src/produtos.rs):Em trocar_codigo (linhas 491–494 e 508–514):   Rust    // Um código que ficou esperando confirmação nunca foi confirmado: não
+    // saiu em etiqueta nem achou a peça no leitor, então não precisa ficar
+    // guardado como código antigo.
+    let confirmado_antes = !faixas::esperando_confirmacao(conn, id)?;
+...
+    if !velho.is_empty() && confirmado_antes {
+        conn.execute(
+            "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![velho, id, texto::compactar(&velho), agora],
+        )?;
+    }
+Em salvar (linhas 749–757):   Rust        // O código de antes fica guardado: etiquetas velhas ainda o têm, e ele
+        // nunca vai para outra peça.
+        if let Some(velho) = codigo_antes.filter(|c| !c.is_empty() && *c != dados.codigo) {
+            conn.execute(
+                "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![velho, id, texto::compactar(&velho), agora],
+            )?;
+        }
+Sustentação: Na linha 751, salvar insere velho em produto_codigo_antigo sem checar se o código anterior estava confirmado (!faixas::esperando_confirmacao(conn, &id)?), contrariando a regra explícita documentada e aplicada em trocar_codigo nas linhas 491–494 e 508.   9. [B8B1-09] produtos::validar e produtos::salvar não verificam unidades::fracionada para estoque_inicial e estoque_minimo (Reclassificado)Classificação Corrigida: RISCO / HIPÓTESE PENDENTE DE VERIFICAÇÃO EM estoque.rs E TelaPeca.qml.Arquivo, funções e linhas exatas: nucleo/src/produtos.rs, função validar (linhas 319–328) e função salvar (linhas 555, 567 e 781–783).   Trecho literal (nucleo/src/produtos.rs, linhas 319–328):Rust    let estoque_inicial =
+        numeros::ler_quantidade(&f.estoque_inicial).map_err(|m| Erro::campo("estoqueInicial", m))?.unwrap_or(0);
+    if estoque_inicial < 0 {
+        return Err(Erro::campo("estoqueInicial", "O estoque inicial não pode ser negativo."));
+    }
+    let estoque_minimo =
+        numeros::ler_quantidade(&f.estoque_minimo).map_err(|m| Erro::campo("estoqueMinimo", m))?.unwrap_or(0);
+    if estoque_minimo < 0 {
+        return Err(Erro::campo("estoqueMinimo", "O estoque mínimo não pode ser negativo."));
+    }
+Sustentação: Em produtos.rs, validar e salvar aceitam qualquer valor retornado por numeros::ler_quantidade (em milésimos) para estoque_inicial e estoque_minimo sem consultar unidades::fracionada(conn, &dados.unidade). A confirmação de se há bloqueio em outra camada depende da inspeção de app/qml/TelaPeca.qml (Bloco 8B2) e nucleo/src/estoque.rs.   10. [B8B1-10], [B8B1-11] e [B8B1-12] — Riscos e Melhorias de Desempenho e Transação (Com Linhas Exatas)[B8B1-10] (MELHORIA PROPOSTA / RISCO de Desempenho em nucleo/src/produtos.rs, função salvar, linhas 746–748 e 760–779): Toda atualização de produto existente executa DELETE FROM em produto_preco (746), produto_aplicacao (747) e produto_equivalente (748) e reinsere todas as linhas com novos tempo::novo_id() (770 e 777), mesmo quando nenhuma dessas coleções foi alterada.   [B8B1-11] (RISCO de Desempenho N+1 em nucleo/src/busca.rs, função buscar, linhas 117–120 e 196–209): Para cada candidato retornado pela query principal, o laço das linhas 196–209 executa carros_da_peca (linha 197) e, se parece_codigo, achou_por (linha 203, que faz até 3 queries adicionais nas linhas 221, 229 e 240).   [B8B1-12] (MELHORIA PROPOSTA de Consistência Transacional em nucleo/src/produtos.rs, criar_variacao nas linhas 1085–1134, e nucleo/src/unidades.rs, salvar nas linhas 46–62): As funções recebem &Connection sem abrir SAVEPOINT interno (dependendo de transação no chamador em api.rs).   14.7. Referências Corrigidas dos Testes Escritos nos Três Módulos (CONFIRMADO NO CÓDIGO)Arquivo (0.9.17)Nome Exato da Função de TesteLinha do #[test]Linha Inicial (fn)Linha Final (})Escopo Testado no Códigonucleo/src/busca.rsacha_pelo_codigo_do_fornecedor351352382Cadastra 1 peça ("Óleo 5W30 sintético") e 1 código de fornecedor ("DY-5530"), testando "DY 5530", "oleo 5w30" e o código interno.   nucleo/src/produtos.rscalcula_preco_e_lucro137513761386Testa 6 chamadas da função pura calcular_preco ("lucro", "preco", "custo", vazio e inválido).   nucleo/src/unidades.rslista_pronta_e_da_loja124125137Testa listar, salvar(" qd ", ...), erro em "MUITO LONGA", garantir("610") e fracionada.   nucleo/src/unidades.rsjunta_repetidas139140153Testa normalizar para 8 pares de siglas ("PCS" $\rightarrow$ "PC", "L" $\rightarrow$ "LT", etc.).   Concluída a revisão corretiva do Bloco 8B1 com todas as referências de linhas e classificações ajustadas segundo os arquivos numerados originais. O Bloco 8B2 não foi iniciado. Aguardo sua autorização explícita para prosseguir.  

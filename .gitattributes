@@ -1,0 +1,14 @@
+# Texto sempre com LF, também no Windows (os testes leem os próprios
+# arquivos e as notas de teste assinadas; um CRLF muda o conteúdo).
+* text=auto eol=lf
+*.der binary
+*.zip binary
+*.rar binary
+*.png binary
+*.ico binary
+*.ttf binary
+*.woff2 binary
+*.jpg binary
+# Estes têm CRLF de propósito (teste da canonicalização) ou vieram assim.
+nucleo/tests/pki/c14n/11_espacos_e_crlf.xml -text
+app/fontes/LICENCAS/OFL-SourceSans3.txt -text

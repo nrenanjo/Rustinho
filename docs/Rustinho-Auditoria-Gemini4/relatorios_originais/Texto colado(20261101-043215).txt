@@ -1,0 +1,520 @@
+1. Condição de Leitura dos 7 Arquivos e de Atualização do Relatório Consolidado
+
+    Integridade e numeração exata de linhas no Bloco 7B:
+
+        Todos os sete arquivos de Rustinho-Bloco7B.zip vieram com suas quebras de linha originais 100% preservadas e foram lidos integralmente:   
+        Rustinho-Bloco7B.zip
+
+            nucleo/src/importar.rs: 584 linhas;   
+            Rustinho-Bloco7B.zip
+
+            nucleo/src/compras.rs: 1255 linhas;   
+            Rustinho-Bloco7B.zip
+
+            app/qml/TelaConfiguracoes.qml: 1319 linhas;   
+            Rustinho-Bloco7B.zip
+
+            app/qml/TelaCompras.qml: 339 linhas;   
+            Rustinho-Bloco7B.zip
+
+            app/qml/TelaFiscal.qml: 357 linhas;   
+            Rustinho-Bloco7B.zip
+
+            app/qml/PedirGerente.qml: 105 linhas;   
+            Rustinho-Bloco7B.zip
+
+            app/qml/Campo.qml: 285 linhas.   
+            Rustinho-Bloco7B.zip
+
+    Condição de atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md:
+
+        O ambiente desta sessão não possui escrita direta em disco local persistente; portanto, o relatório não foi salvo em arquivo físico externo. A atualização progressiva do Capítulo 5 (Seções 5.11 a 5.16) e dos adendos aos Capítulos 4 e 7 é entregue integralmente abaixo, preservando todos os capítulos e achados anteriores.
+
+2. Atualização de docs/RELATORIO-TECNICO-CONSOLIDADO-RUSTINHO.md — Capítulo 5 (Seções 5.11 a 5.16) e Fechamento de NOTIF-03 e B6-05
+5. Navegação Contextual Guiada, Configurações e Compras (Adição do BLOCO 7B — Auditoria de Código 0.9.17)
+5.11. Mapa Estrutural Exato dos 7 Arquivos Auditados no Bloco 7B (CONFIRMADO NO CÓDIGO)
+Arquivo (0.9.17)	Total de Linhas	Funções, Estruturas e Componentes Auditados (Linhas Exatas)
+nucleo/src/importar.rs	584	
+
+• Structs Entrada (28–34), Previa (38–61), Importado (65–70), Lido (74–138)
+Rustinho-Bloco7B.zip
+
+• fn cada_xml (149–156), fn cnpj_loja (159–161), fn ler_tudo (184–245)
+Rustinho-Bloco7B.zip
+
+• Consultas de existência (251–299), pub fn previa (301–376)
+Rustinho-Bloco7B.zip
+
+• fn valor_unitario (384–394), fn ficha_do_item (396–415), fn ligar_fornecedor (417–429), pub fn importar (431–448), fn salvar_peca (451–466)
+Rustinho-Bloco7B.zip
+
+• #[cfg(test)] mod testes (468–584: importa_clientes_pecas_e_fornecedores em 477–543 e a43_cadastro_por_xml_so_com_assinatura_e_sem_efeito_financeiro em 547–583)
+Rustinho-Bloco7B.zip
+nucleo/src/compras.rs	1255	
+
+• pub fn aviso_cnpj (35–50), pub fn conferir_nota (54–88), pub const CAMPO_OUTRO_CNPJ (92)
+Rustinho-Bloco7B.zip
+
+• pub struct ConflitoCnpj (97–111), pub struct ItemConflito (115–121), pub fn conflito_cnpj (125–150)
+Rustinho-Bloco7B.zip
+
+• pub fn importar_xml (156–219), fn ratear_do_cabecalho (223–238), pub fn ratear (242–265), fn codigos_ambiguos (270–278), fn ligar_sozinho (282–319)
+Rustinho-Bloco7B.zip
+
+• pub struct SituacaoFiscal (326–380), pub fn situacao_fiscal (382–392), pub struct Conferencia (418–428), pub fn registrar_conferencia (435–502)
+Rustinho-Bloco7B.zip
+
+• pub struct CompraFicha (509–556), pub fn ficha (665–811), pub fn atualizar (892–952), pub fn lancar (970–1060), pub fn estornar (1151–1194), pub fn excluir_rascunho (1199–1214), pub fn listar (1230–1255)
+Rustinho-Bloco7B.zip
+
+• #[cfg(test)] mod testes (1004–1255 do trecho de testes, com 11 funções #[test])
+Rustinho-Bloco7B.zip
+app/qml/TelaConfiguracoes.qml	1319	
+
+• Propriedades de estado e guia (11–44); Component.onDestruction (45–49)
+Rustinho-Bloco7B.zip
+
+• campoChamado (53–59), comecarGuia (63–76), mostrarCampoDaGuia (77–92), sair (94–99)
+Rustinho-Bloco7B.zip
+
+• carregar (113–138), liberar (143–148), entrarSimultaneidade (154–165), escolherSecao (174–195)
+Rustinho-Bloco7B.zip
+
+• salvarComputador (253–267), salvar (269–327), aoEsc (445–454)
+Rustinho-Bloco7B.zip
+
+• Cabecalho (470–511), Pilulas principais (513–530), subpilulas (540–558), Loader { id: fiscal } (562–572)
+Rustinho-Bloco7B.zip
+
+• Flickable { id: rolagem } (574–1311), incluindo linhaDocumentos (613–637: cnpjLoja e ufLoja)
+Rustinho-Bloco7B.zip
+
+• Component.onCompleted (1290–1318)
+Rustinho-Bloco7B.zip
+app/qml/TelaCompras.qml	339	
+
+• Propriedades pendentes, avisoPendentes, naoImportadas (16–21)
+Rustinho-Bloco7B.zip
+
+• buscar (23–32), abrirCompra (34–37), importar (41–96, com proximo em 49–81 e terminar em 82–94), voltouDaGuia (101–110), chaveDaNota/guardarNaoImportadas/descartarNaoImportada (115–128)
+Rustinho-Bloco7B.zip
+
+• FileDialog { id: seletor } (159–166), ConflitoCnpj { id: conflitoCnpj } (168–171)
+Rustinho-Bloco7B.zip
+
+• Faixa "Esperando para importar" (190–221), Faixa "Não importada: nota de outro CNPJ" (224–255), Campo { id: busca } (257–265), ListView { id: lista } (278–313)
+Rustinho-Bloco7B.zip
+app/qml/TelaFiscal.qml	357	
+
+• Propriedades dados, ufs, regrasAlteradas, nomeNaNavegacao: "Fiscal", dadosDaLoja, embutida (11–20)
+Rustinho-Bloco7B.zip
+
+• carregar (24–35), preencher (37–43), corrigirTodas (45–59), salvarRegrasAgora (64–84), aoEsc (86–92)
+Rustinho-Bloco7B.zip
+
+• Faixa "Para continuar, informe a UF e o CNPJ da loja" com botão "Ir para Loja" (190–206), EmissaoFiscal (209), faixaConflitos (220–250), semNcm (252–259), semCest (261–268), Regras de substituição tributária (292–345)
+Rustinho-Bloco7B.zip
+app/qml/PedirGerente.qml	105	
+
+• Propriedades acao, acoes, comando, dados, depois, desistiu (11–18)
+Rustinho-Bloco7B.zip
+
+• abrirPedido (21–26), consultarVarias (29–32), consultar (33–43), paraChamada (44–54), liberar (55–71), onClosed (72–79)
+Rustinho-Bloco7B.zip
+app/qml/Campo.qml	285	
+
+• Propriedades icone, atalho, camera, comCamera, acao, comBotao (27–34)
+Rustinho-Bloco7B.zip
+
+• focar, focarSempre, focarCursor (52–63)
+Rustinho-Bloco7B.zip
+
+• TextField { id: entrada } (118–244) com Icone esquerdo (151–158), Rectangle direito para câmera/ação (159–193) e Rotulo { id: textoAtalho } interno à direita (194–201)
+Rustinho-Bloco7B.zip
+5.12. Verificação nos Módulos Rust (importar.rs e compras.rs) e Fronteira com api.rs
+
+    importar_previa e importar_cadastros em nucleo/src/importar.rs (CONFIRMADO NO CÓDIGO):
+
+        Na linha 159–161 de nucleo/src/importar.rs, a função cnpj_loja(conn) delega diretamente para crate::requisitos::exigir_cnpj_da_loja(conn, crate::requisitos::PARA_CADASTROS):   
+        Rustinho-Bloco7B.zip
+        Rust
+
+        /// Vazio ou inválido: recusa com o requisito (a tela leva a Configurações › Loja).
+        fn cnpj_loja(conn: &Connection) -> Resultado<String> {
+            crate::requisitos::exigir_cnpj_da_loja(conn, crate::requisitos::PARA_CADASTROS)
+        }
+
+        A função ler_tudo(conn, arquivos) chama let loja = cnpj_loja(conn)?; na linha 188.   
+        Rustinho-Bloco7B.zip
+
+        Como tanto pub fn previa(conn, arquivos) (linha 302: let lido = ler_tudo(conn, arquivos)?;) quanto pub fn importar(conn, dispositivo, usuario_id, e) (linha 432: let lido = ler_tudo(conn, &e.arquivos)?;) começam chamando ler_tudo, ambas as funções exigem que o CNPJ da loja esteja salvo e seja válido (config::documento_da_loja_valido) antes de ler ou gravar qualquer dado, retornando Erro::campo("requisito:loja.cnpj", ...) se estiver vazio ou inválido.   
+        Rustinho-Bloco7A.zip+ 1
+
+    conferir_nota e importar_xml em nucleo/src/compras.rs (CONFIRMADO NO CÓDIGO — Descoberta Importante sobre NAV-04):
+
+        Em nucleo/src/compras.rs, a função conferir_nota(conn, nota) (linhas 54–88) — chamada por importar_xml na linha 160 — contém o seguinte código nas linhas 75–86:   
+        Rustinho-Bloco7B.zip
+        Rust
+
+        let loja = documento::limpar(&config::ler(conn, "loja_cnpj")?.unwrap_or_default());
+        let destinatario = documento::limpar(&nota.destinatario);
+        if !loja.is_empty() && !destinatario.is_empty() && destinatario != loja {
+            let nome = config::nome_loja(conn)?;
+            let nome = if nome.is_empty() { "da loja".to_string() } else { format!("da {nome}") };
+            return Err(Erro::campo(
+                CAMPO_OUTRO_CNPJ,
+                format!(
+                    "Esta nota não é {nome}: foi emitida para outro CNPJ. Confira o CNPJ em Configurações ou peça a nota certa ao fornecedor."
+                ),
+            ));
+        }
+        Ok(())
+
+        Constatado no código: compras::conferir_nota e compras::importar_xml não chamam requisitos::exigir_cnpj_da_loja(conn, PARA_COMPRAS)! Se loja_cnpj estiver vazio no banco (loja.is_empty()), conferir_nota retorna Ok(()) (comprovado pelo próprio teste unitário so_entra_nota_autorizada_de_compra_para_a_loja na linha 1022 de compras.rs, que roda num Banco::em_memoria() sem CNPJ da loja e exige assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());).   
+        Rustinho-Bloco7B.zip
+
+        Como compra_importar passa no teste nav03_compras_sem_cnpj_e_requisito (testes_nav.rs): A chamada requisitos::exigir_cnpj_da_loja(conn, requisitos::PARA_COMPRAS) ocorre no handler do comando "compra_importar" dentro de nucleo/src/api.rs (que também intercepta CAMPO_OUTRO_CNPJ e chama compras::conflito_cnpj), enquanto chamadas diretas a compras::importar_xml em Rust não validam exigir_cnpj_da_loja.   
+        Rustinho-Bloco7A.zip+ 1
+
+5.13. Resolução dos Achados Históricos (NAV-01 a NAV-04, abandonarGuia of null, NOTIF-03 e B6-05)
+1. Causa Exata do Erro Histórico TelaConfiguracoes.qml:49: TypeError: Cannot call method 'abandonarGuia' of null
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivo, componente e linhas: app/qml/TelaConfiguracoes.qml, linha 12 e bloco Component.onDestruction nas linhas 45–49.   
+    Rustinho-Bloco7B.zip
+
+    Trecho literal (app/qml/TelaConfiguracoes.qml, linhas 12 e 45–49):
+    QML
+
+      readonly property var janela: ApplicationWindow.window
+
+    QML
+
+      // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+      Component.onDestruction: {
+          Api.chamar("gerente_encerrar")
+          if (guia)
+              janela.abandonarGuia(guia)
+      }
+
+    Explicação técnica comprovada no código: Na linha 12, janela é uma binding para a propriedade anexada ApplicationWindow.window. Quando TelaConfiguracoes é removida da StackView (pilha.pop ou pilha.clear) ou quando a janela principal se encerra enquanto tela.guia não é nulo (ex.: quando o usuário desistiu da guia ou trocou de tela), o item QML é desanexado da árvore visual da janela antes de Component.onDestruction executar, fazendo ApplicationWindow.window (janela) avaliar para null exatamente na linha 49 (janela.abandonarGuia(guia)), disparando TypeError: Cannot call method 'abandonarGuia' of null! Basta verificar if (guia && janela) na linha 48 (ou guardar a referência da janela).   
+    Rustinho-Bloco7B.zip+ 3
+
+2. NOTIF-03 — Cancelamento da senha do gerente deixa o operador Caixa preso na aba Loja (Este computador) e impede repetir a tentativa nas abas de Simultaneidade
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivos, funções e linhas:
+
+        app/qml/PedirGerente.qml, funções consultarVarias (linhas 29–32), consultar (linhas 33–43) e onClosed (linhas 72–79);   
+        Rustinho-Bloco7B.zip
+
+        app/qml/Main.qml, funções comGerente (linhas 155–161) e comGerenteVarias (linhas 165–172);   
+        Rustinho-Bloco7A.zip
+
+        app/qml/TelaConfiguracoes.qml, funções entrarSimultaneidade (linhas 154–165), escolherSecao (linhas 174–195), subpilulas (linhas 540–558) e Component.onCompleted (linhas 1290–1318).   
+        Rustinho-Bloco7B.zip
+
+    Trechos literais:
+
+        Em app/qml/PedirGerente.qml, linhas 29–43:   
+        Rustinho-Bloco7B.zip
+        QML
+
+        function consultarVarias(acoes, oQue, depois) {
+            consultar("", oQue, depois)
+            pedido.acoes = acoes
+        }
+        function consultar(acao, oQue, depois) {
+            ...
+            pedido.depois = depois
+            pedido.desistiu = null
+            abrirPedido()
+        }
+
+        Em app/qml/TelaConfiguracoes.qml, linhas 1297–1315:   
+        Rustinho-Bloco7B.zip
+        QML
+
+            const soComGerente = !["loja", "impressao", "sobre"].includes(secao)
+            if (partesSimultaneidade.includes(secao)) {
+                const destino = secao
+                secao = "loja"
+                entrarSimultaneidade(destino)
+            } else if (soComGerente && !completo) {
+                const destino = secao
+                secao = "loja"
+                janela.comGerente("configuracoes", () => {
+                    tela.completo = true
+                    carregar()
+                    tela.escolherSecao(destino)
+                })
+            }
+
+    Sustentação técnica (2 problemas encadeados):
+
+        Confirmação de NOTIF-03: PedirGerente.consultar e consultarVarias definem pedido.desistiu = null (linha 41 de PedirGerente.qml) e não aceitam callback de desistência. Quando o operador Caixa clica em uma notificação na TelaInicio que aponta para duplicatas, caixas ou backup, Component.onCompleted de TelaConfiguracoes.qml (linhas 1298–1301) muda secao = "loja" e chama entrarSimultaneidade(destino). Se o operador cancelar a senha (Voltar ou Esc), onClosed de PedirGerente.qml (linhas 72–79) não tem callback desistiu para chamar janela.voltar(), deixando o operador Caixa na aba "Este computador" (secao === "loja") em vez de voltar à TelaInicio.   
+        Rustinho-Bloco7B.zip+ 2
+
+        Agravante na guia para operador Caixa (comecarGuia, linhas 63–76 de TelaConfiguracoes.qml): Quando o operador Caixa entra em TelaConfiguracoes via navegação guiada (comecarGuia), a linha 65 destaca botaoSenhaGerente e a linha 67 abre janela.comGerente("configuracoes", ...). Se o operador Caixa fechar o modal de senha sem digitar, ele fica em TelaConfiguracoes com o botão "Senha do gerente" destacado; porém, se ele clicar nesse botão (onClicked: tela.liberar(), linha 502), liberar() (linhas 143–148) apenas faz tela.completo = true; carregar(), sem chamar mostrarCampoDaGuia(), deixando a faixa da guia presa no topo com a frase "Esta parte das configurações pede a senha do gerente." e sem destacar nem focar cnpjLoja (DEFEITO COMPROVADO — B7B-01)!   
+        Rustinho-Bloco7B.zip+ 1
+
+3. NAV-01 — Empilhamento duplicado de TelaConfiguracoes e estado desatualizado na 1ª instância ao guiar a partir de TelaFiscal.qml embutida
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivos e linhas: app/qml/TelaConfiguracoes.qml (Loader { id: fiscal } nas linhas 562–572, sem StackView.onActivated no arquivo) e app/qml/TelaFiscal.qml (botão "Ir para Loja" nas linhas 201–205).   
+    Rustinho-Bloco7B.zip
+
+    Trechos literais:
+
+        Em app/qml/TelaConfiguracoes.qml, linhas 562–572:   
+        Rustinho-Bloco7B.zip
+        QML
+
+            Loader {
+                id: fiscal
+                visible: tela.secao === "fiscal"
+                active: tela.secao === "fiscal"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                source: "TelaFiscal.qml"
+                onLoaded: {
+                    item.embutida = true
+                    item.carregar()
+                }
+            }
+
+        Em app/qml/TelaFiscal.qml, linhas 201–205:   
+        Rustinho-Bloco7B.zip
+        QML
+
+                    Botao {
+                        text: "Ir para Loja"
+                        tipo: "secundario"
+                        onClicked: tela.janela.guiar("requisito:loja.uf_cnpj", "", ok => tela.carregar())
+                    }
+
+    Sustentação: Confirma-se integralmente o achado NAV-01: quando TelaFiscal está embutida na 1ª instância de TelaConfiguracoes (secao === "fiscal") e o usuário clica em "Ir para Loja", janela.guiar empilha uma 2ª instância completa de TelaConfiguracoes (secao: "loja"). Ao salvar UF e CNPJ na 2ª instância, concluirGuia desempilha a 2ª instância e executa apenas o callback ok => tela.carregar() de TelaFiscal.qml (linha 204). Como TelaConfiguracoes.qml não possui StackView.onActivated para recarregar carregar(), a 1ª instância de TelaConfiguracoes mantém cnpjLoja.texto, ufLoja.indice e tela.config desatualizados se o usuário clicar na pílula "Loja" logo depois.   
+    Rustinho-Bloco7A.zip+ 3
+
+4. NAV-02 — Troca manual de pílula em TelaConfiguracoes.qml durante a navegação guiada
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO).
+
+    Arquivo e linhas: app/qml/TelaConfiguracoes.qml, componente Pilulas nas linhas 513–530 e função escolherSecao nas linhas 174–195.   
+    Rustinho-Bloco7B.zip
+
+    Trecho literal (app/qml/TelaConfiguracoes.qml, linhas 513–530):
+    QML
+
+          Pilulas {
+              modelo: tela.completo ? [
+                  { id: "loja", nome: "Loja" },
+                  { id: "vendas", nome: "Vendas" },
+                  ...
+              ]
+              atual: tela.grupo
+              onEscolhido: id => tela.escolherSecao(id)
+          }
+
+    Sustentação: Pilulas não desabilita a troca de seção enquanto tela.guia !== null, e escolherSecao(id) (linhas 174–195) altera secao = id sem chamar abandonarGuia e sem chamar mostrarCampoDaGuia() quando o usuário retorna à aba "loja", confirmando o comportamento descrito em NAV-02.   
+    Rustinho-Bloco7B.zip
+
+5. NAV-03 — Código morto (let deOutra) e aviso obsoleto de assinatura em app/qml/TelaCompras.qml
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO — Limpeza de código e mensagem desatualizada).
+
+    Arquivo, função e linhas: app/qml/TelaCompras.qml, função importar, linhas 47, 62–63 e 90–92, em confronto com nucleo/src/compras.rs (linhas 75–86 e 156–160).   
+    Rustinho-Bloco7B.zip
+
+    Trecho literal (app/qml/TelaCompras.qml, linhas 47, 59–64 e 89–93):
+    QML
+
+          let deOutra = 0
+          ...
+                      for (const c of r.dados.compras) {
+                          novas.push(c)
+                          if (c.avisoDestinatario.indexOf("não é") >= 0)
+                              deOutra++
+                      }
+          ...
+              else if (novas.length > 1)
+                  janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar. O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ."
+                                + (deOutra > 0 ? " Atenção: " + deOutra + (deOutra === 1 ? " nota não é" : " notas não são") + " da loja (outro CNPJ)." : ""),
+                                deOutra > 0 ? "info" : "ok")
+
+    Sustentação dupla:
+
+        NAV-03 confirmado: Como compra_importar exige loja_cnpj preenchido e conferir_nota (linhas 77–86 de compras.rs) recusa qualquer nota com destinatario != loja desviando-a para r.dados.conflitos, nenhuma compra recém-importada em r.dados.compras pode ter avisoDestinatario contendo "não é". Logo, deOutra é código morto.   
+        Rustinho-Bloco7B.zip
+
+        Texto obsoleto enganoso na linha 90 (DEFEITO COMPROVADO — B7B-02): A mensagem da linha 90 de TelaCompras.qml afirma ao usuário: "O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ." Entretanto, na versão 0.9.17, compras::importar_xml (nucleo/src/compras.rs, linha 157) já verifica obrigatoriamente a assinatura digital ICP-Brasil do XML antes de importar (nfe_xml::ler_verificada(xml, crate::nfe_assinatura::Ancoras::padrao())), conforme provado pelos testes a20, a24 e a26!   
+        Rustinho-Bloco7B.zip
+
+6. Encerramento da Pendência B6-05 — Inspeção de app/qml/Campo.qml
+
+    Classificação: DEFEITO COMPROVADO (CONFIRMADO NO CÓDIGO frente ao padrão visual aprovado na Imagem 02).
+
+    Arquivo e linhas: app/qml/Campo.qml, linhas 27–34 e 151–201.   
+    Rustinho-Bloco7B.zip
+
+    Trecho literal (app/qml/Campo.qml, linhas 151–201):
+    QML
+
+          Icone {
+              visible: campo.icone !== ""
+              nome: campo.icone
+              tamanho: 22
+              cor: Tema.apagado
+              anchors.left: parent.left
+              anchors.leftMargin: 15
+              anchors.verticalCenter: parent.verticalCenter
+          }
+          ...
+          Rotulo {
+              id: textoAtalho
+              visible: campo.atalho !== "" && !Tema.celular && !Tema.estreito
+              text: campo.atalho
+              anchors.right: parent.right
+              anchors.rightMargin: 16
+              anchors.verticalCenter: parent.verticalCenter
+          }
+
+    Sustentação: A leitura de app/qml/Campo.qml comprova que o componente desenha Icone (como "busca") à esquerda dentro do TextField (linhas 151–158) e desenha textoAtalho ("F11") dentro do TextField à direita (anchors.right: parent.right; anchors.rightMargin: 16, linhas 194–201), não possuindo o botão esquerdo de colar (prancheta com +), nem o botão direito de copiar (dois retângulos sobrepostos), nem o posicionamento de F11 fora da caixa à direita aprovados na Imagem 02.   
+    Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+
+5.14. Outros Achados Identificados no Código do Bloco 7B
+ID	Classificação	Local Exato (Arquivo, Função e Linhas)	Descrição Técnica e Evidência
+B7B-03	RISCO / MELHORIA PROPOSTA	
+
+nucleo/src/compras.rs, funções conferir_nota (linhas 75–86) e importar_xml (linhas 156–161)
+Rustinho-Bloco7B.zip
+	
+
+Defesa em profundidade ausente dentro de compras::conferir_nota (NAV-04): Enquanto importar::ler_tudo (nucleo/src/importar.rs, linha 188) chama cnpj_loja(conn) (requisitos::exigir_cnpj_da_loja), compras::conferir_nota (linha 75) faz apenas let loja = documento::limpar(&config::ler(conn, "loja_cnpj")?.unwrap_or_default()); e só compara se !loja.is_empty(). Embora a API (compra_importar) valide o requisito antes, qualquer chamador interno que invoque compras::importar_xml diretamente não passará por exigir_cnpj_da_loja.
+Rustinho-Bloco7B.zip+ 1
+B7B-04	RISCO de UX	
+
+app/qml/TelaConfiguracoes.qml, função salvar (linhas 304–325) e campoChamado (linhas 53–59)
+Rustinho-Bloco7B.zip
+	
+
+Destaque da guia não muda de campo se config_salvar falhar em outro campo durante a navegação guiada: Durante uma guia de "loja.cnpj", guiaDestacar aponta para cnpjLoja (linha 84). Se o usuário editar também Nome da loja (deixando vazio) e clicar em Salvar, config_salvar falha com r.campo === "loja". Nas linhas 304–313, salvar() chama guiaFalhou(r.erro) e foca loja, mas não atualiza janela.guiaDestacar(alvo, rolagem), mantendo o recorte iluminado apenas sobre cnpjLoja enquanto loja está sob o véu escuro.
+Rustinho-Bloco7B.zip+ 1
+5.15. Situação Final dos Casos 1, 2, 2b e 3 e dos Achados NAV-01 a NAV-04 e NOTIF-03
+Item Auditado	Status Final no Código 0.9.17 (CONFIRMADO NO CÓDIGO)	Referências Exatas no Código
+Caso 1 (Peças → Importar Cadastros sem CNPJ)	
+
+Implementado e funcional para Gerente, com ressalva B7B-01 caso operador Caixa feche o 1º modal de senha e clique depois no botão "Senha do gerente".
+Rustinho-Bloco7A.zip+ 1
+	
+
+importar.rs (159–161, 188, 302, 432); requisitos.rs (60–79); ImportarCadastros.qml (66–95); TelaConfiguracoes.qml (63–92, 294–302).
+Rustinho-Bloco7A.zip+ 1
+Caso 2 (Compras → Importar XML sem CNPJ)	
+
+Implementado e funcional: Pausa a fila em tela.pendentes = lista.slice(i), exibe a faixa "Esperando para importar", valida arquivos_conferir em voltouDaGuia e exige clique em "Importar agora".
+Rustinho-Bloco7B.zip
+	
+
+TelaCompras.qml (16–17, 41–110, 190–221); testes_nav.rs (125–146).
+Rustinho-Bloco7A.zip+ 1
+Caso 2b (Compras → Nota para outro CNPJ)	
+
+Implementado e funcional: conferir_nota recusa com CAMPO_OUTRO_CNPJ, conflito_cnpj monta os dados sem gravar nada, e TelaCompras.qml guarda em naoImportadas e abre ConflitoCnpj.qml.
+Rustinho-Bloco7A.zip+ 1
+	
+
+compras.rs (75–150); TelaCompras.qml (20, 67–68, 84, 115–128, 224–255); ConflitoCnpj.qml (1–252).
+Rustinho-Bloco7A.zip+ 1
+Caso 3 (Fiscal → Sem UF ou CNPJ)	
+
+Implementado, mas afetado por NAV-01: TelaFiscal.qml consulta "loja.uf_cnpj", exibe a faixa e chama guiar("requisito:loja.uf_cnpj", ...), destacando linhaDocumentos e focando ufLoja ou cnpjLoja.
+Rustinho-Bloco7B.zip
+	
+
+requisitos.rs (42–51); TelaFiscal.qml (27–28, 190–206); TelaConfiguracoes.qml (55, 85–90).
+Rustinho-Bloco7A.zip+ 1
+NAV-01	
+
+DEFEITO COMPROVADO: Empilha 2ª TelaConfiguracoes e não recarrega a 1ª instância ao retornar.
+Rustinho-Bloco7A.zip+ 1
+	
+
+Main.qml (269); TelaConfiguracoes.qml (562–572); TelaFiscal.qml (204).
+Rustinho-Bloco7A.zip+ 1
+NAV-02	
+
+DEFEITO COMPROVADO: Pilulas permite trocar de seção durante a guia, sumindo com o recorte escuro e mantendo a faixa no topo.
+Rustinho-Bloco7A.zip+ 1
+	
+
+Guia.qml (29, 35, 60–67); TelaConfiguracoes.qml (174–195, 513–530).
+Rustinho-Bloco7A.zip+ 1
+NAV-03	
+
+DEFEITO COMPROVADO: let deOutra é código morto (e a linha 90 ainda exibe aviso obsoleto sobre assinatura XML).
+Rustinho-Bloco7B.zip
+	
+
+TelaCompras.qml (47, 62–63, 90–92).
+Rustinho-Bloco7B.zip
+NAV-04	
+
+Atendido em importar.rs e via API (testes_nav.rs), mas ausente dentro de compras::conferir_nota (B7B-03).
+Rustinho-Bloco7A.zip+ 1
+	
+
+importar.rs (159–161, 188); compras.rs (75–86); testes_nav.rs (103–146).
+Rustinho-Bloco7A.zip+ 1
+NOTIF-03	
+
+DEFEITO COMPROVADO: PedirGerente.consultar/consultarVarias não têm callback desistiu; cancelar a senha mantém o operador Caixa na aba "loja" (Este computador).
+Rustinho-Bloco7B.zip
+	
+
+PedirGerente.qml (29–43, 72–79); TelaConfiguracoes.qml (154–165, 1297–1315).
+Rustinho-Bloco7B.zip
+Erro abandonarGuia of null	
+
+DEFEITO COMPROVADO: ApplicationWindow.window (janela) é null quando Component.onDestruction roda na linha 49.
+Rustinho-Bloco7B.zip
+	
+
+TelaConfiguracoes.qml (12, 45–49).
+Rustinho-Bloco7B.zip
+B6-05 (Campo.qml)	
+
+DEFEITO COMPROVADO: Campo.qml desenha lupa à esquerda e F11 interno à direita, sem botões de colar/copiar e sem F11 externo.
+Log_Consolidado_Rustinho_0.9.17.pdf+ 1
+	
+
+Campo.qml (151–201); TelaInicio.qml (161–172).
+Rustinho-Bloco6.zip+ 1
+5.16. Correções Recomendadas (Apenas Diagnóstico — Sem Implementação Nesta Fase)
+
+    TelaConfiguracoes.qml (linha 48 — abandonarGuia of null): Alterar if (guia) para if (guia && janela).   
+    Rustinho-Bloco7B.zip
+
+    PedirGerente.qml (consultar/consultarVarias, linhas 29–43), Main.qml (comGerente/comGerenteVarias, linhas 155–172) e TelaConfiguracoes.qml (Component.onCompleted, linhas 1297–1315 — NOTIF-03): Adicionar parâmetro opcional desistiu em consultar/consultarVarias e, quando TelaConfiguracoes for aberta inicialmente numa seção restrita e o operador Caixa cancelar a senha, chamar janela.voltar().   
+    Rustinho-Bloco7A.zip+ 1
+
+    TelaConfiguracoes.qml (liberar, linhas 143–148 — B7B-01): No callback de sucesso de liberar(), incluir if (tela.guia) { janela.guiaOrientar(""); Qt.callLater(tela.mostrarCampoDaGuia) }.   
+    Rustinho-Bloco7B.zip
+
+    TelaConfiguracoes.qml (NAV-01 e NAV-02): Adicionar StackView.onActivated: if (!guia) carregar() (ou permitir que guiar troque secao = "loja" na própria instância quando pilha.currentItem já for TelaConfiguracoes) e desabilitar Pilulas (enabled: !tela.guia) ou chamar mostrarCampoDaGuia() ao voltar para "loja".   
+    Rustinho-Bloco7A.zip+ 1
+
+    TelaCompras.qml (linhas 47, 62–63, 90–92 — NAV-03 e B7B-02): Remover let deOutra e remover a frase obsoleta "O Rustinho ainda não verifica a assinatura digital do XML...".   
+    Rustinho-Bloco7B.zip
+
+3. Fechamento do BLOCO 7B
+
+    Testes escritos verificados neste bloco: 2 testes em nucleo/src/importar.rs (importa_clientes_pecas_e_fornecedores e a43_cadastro_por_xml_so_com_assinatura_e_sem_efeito_financeiro, linhas 477–583) e 11 testes em nucleo/src/compras.rs (linhas 1011–1254), todos verificados estaticamente no código (CONFIRMADO NO CÓDIGO como testes escritos; execução em compilador NÃO VERIFICADA NESTA SESSÃO).   
+    Rustinho-Bloco7B.zip
+
+    Pendências que exigem outros arquivos: Verificar em nucleo/src/api.rs o despacho de "compra_importar", e iniciar a auditoria do próximo grupo de módulos (nucleo/src/busca.rs, nucleo/src/produtos.rs, nucleo/src/unidades.rs, app/qml/EscolherUnidade.qml, app/qml/TelaPecas.qml e app/qml/TelaPeca.qml).
+
+Encerro o Bloco 7B e aguardo sua autorização explícita para o próximo bloco.
