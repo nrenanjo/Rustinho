@@ -32,6 +32,7 @@ Item {
     property rect area: Qt.rect(0, 0, 0, 0)
     readonly property bool destacando: alvo !== null && area.width > 0
     readonly property real folga: 8
+    readonly property real alcanceLuz: 58
 
     property string estado: ""      // "" | "pendente" | "erro" | "satisfeito"
     property string titulo: ""
@@ -65,6 +66,7 @@ Item {
         const p = alvo.mapToItem(guia, 0, 0)
         area = Qt.rect(p.x - folga, p.y - folga, alvo.width + 2 * folga, alvo.height + 2 * folga)
     }
+    onAreaChanged: luz.requestPaint()
     Timer {
         interval: 60
         repeat: true
@@ -92,7 +94,7 @@ Item {
         onTriggered: guia.esconder()
     }
 
-    // ---- Destaque (quatro faixas escuras em volta do campo) ----
+    // ---- Destaque: véu suave e luz difusa em volta do campo ----
     readonly property color corVeu: Tema.escuro ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(0.16, 0.15, 0.13, 0.30)
     Rectangle {   // em cima
         visible: guia.destacando
@@ -116,13 +118,48 @@ Item {
         width: Math.max(0, guia.width - x); height: guia.area.height
         color: guia.corVeu
     }
-    Rectangle {   // contorno do campo
+    Canvas {
+        id: luz
         visible: guia.destacando
-        x: guia.area.x; y: guia.area.y; width: guia.area.width; height: guia.area.height
-        radius: Tema.raioCampo + guia.folga
-        color: "transparent"
-        border.width: 2
-        border.color: Tema.azulEscuro
+        x: guia.area.x - guia.alcanceLuz
+        y: guia.area.y - guia.alcanceLuz
+        width: guia.area.width + 2 * guia.alcanceLuz
+        height: guia.area.height + 2 * guia.alcanceLuz
+
+        onPaint: {
+            const ctx = getContext("2d")
+            ctx.clearRect(0, 0, width, height)
+
+            const x = guia.alcanceLuz
+            const y = guia.alcanceLuz
+            const w = guia.area.width
+            const h = guia.area.height
+            const r = Math.min(Tema.raioCampo + guia.folga, Math.min(w, h) / 2)
+
+            ctx.save()
+            ctx.shadowColor = Tema.escuro ? "rgba(232, 194, 126, 0.62)" : "rgba(255, 248, 230, 0.96)"
+            ctx.shadowBlur = 42
+            ctx.shadowOffsetX = 0
+            ctx.shadowOffsetY = 0
+            ctx.fillStyle = Tema.escuro ? "rgba(232, 194, 126, 0.06)" : "rgba(255, 249, 237, 0.16)"
+            ctx.beginPath()
+            ctx.moveTo(x + r, y)
+            ctx.lineTo(x + w - r, y)
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+            ctx.lineTo(x + w, y + h - r)
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+            ctx.lineTo(x + r, y + h)
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+            ctx.lineTo(x, y + r)
+            ctx.quadraticCurveTo(x, y, x + r, y)
+            ctx.closePath()
+            ctx.fill()
+            ctx.restore()
+        }
+    }
+    Connections {
+        target: Tema
+        function onEscuroChanged() { luz.requestPaint() }
     }
 
     // ---- Orientação: a notificação do Início, no alto ----

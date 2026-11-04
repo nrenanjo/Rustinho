@@ -42,6 +42,9 @@ FocusScope {
     // Navegação guiada (0.9.16): aberta por janela.guiar para resolver um
     // requisito de outra tela. Sem guia, tudo funciona como sempre.
     property var guia: null
+    // Fiscal → Loja reutiliza esta instância; guarda a seção para restaurá-la
+    // quando o requisito for salvo ou a pessoa desistir.
+    property string secaoAntesDaGuia: ""
     // Como esta tela aparece no "voltar" de outra (navegação guiada).
     readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
@@ -94,12 +97,47 @@ FocusScope {
                 foco.combo.forceActiveFocus()
         })
     }
+    function iniciarGuiaNaMesmaTela(g) {
+        secaoAntesDaGuia = secao
+        guia = g
+        secao = g.requisito.propriedades.secao
+        comecarGuia()
+    }
+    function restaurarGuiaNaMesmaTela(requisitoConfirmado) {
+        const retorno = secaoAntesDaGuia
+        if (retorno !== "")
+            secao = retorno
+        if (retorno === "fiscal" && fiscal.item) {
+            let situacao = requisitoConfirmado
+            if (!situacao) {
+                const requisito = Api.chamar("requisito_conferir", { id: "loja.uf_cnpj" })
+                situacao = requisito.ok ? requisito.dados : null
+                if (!requisito.ok)
+                    janela.avisar(requisito.erro, "erro")
+            }
+            // Na desistência, reflete o estado atual do núcleo sem concluir a guia.
+            fiscal.item.dadosDaLoja = situacao
+            const conferencia = Api.chamar("fiscal_conferir")
+            if (conferencia.ok)
+                // Não chamar preencher(): regras pode conter alterações de ST pendentes.
+                fiscal.item.dados = conferencia.dados
+            else
+                janela.avisar(conferencia.erro, "erro")
+        }
+        secaoAntesDaGuia = ""
+        guia = null
+    }
     // Sair: com guia, volta à tela de origem sem marcar nada.
     function sair() {
         if (guia)
             janela.concluirGuia(false)
         else
             janela.voltar()
+    }
+    function descartarAlteracoesESair() {
+        if (guia && secaoAntesDaGuia === "fiscal" && !carregar())
+            return
+        sair()
     }
 
     // Exemplo do crediário: parcela de R$ 100,00 com 10 dias de atraso.
@@ -122,7 +160,7 @@ FocusScope {
         const r = Api.chamar("config_ler")
         if (!r.ok) {
             janela.avisar(r.erro, "erro")
-            return
+            return false
         }
         config = r.dados
         loja.texto = config.loja
@@ -148,6 +186,7 @@ FocusScope {
         if (verSimultaneidade)
             carregarDuplicatas()
         alterado = false
+        return true
     }
 
     // D-09: a senha do gerente abre as Configurações só para consultar;
@@ -503,7 +542,7 @@ FocusScope {
                              "Descartar", () => tela.sair(), "perigo")
         else if (alterado)
             janela.confirmar("Descartar alterações?", "As configurações mudadas ainda não foram salvas.",
-                             "Descartar", () => tela.sair(), "perigo")
+                             "Descartar", () => tela.descartarAlteracoesESair(), "perigo")
         else
             tela.sair()
     }
@@ -617,7 +656,8 @@ FocusScope {
         Loader {
             id: fiscal
             visible: tela.secao === "fiscal"
-            active: tela.secao === "fiscal"
+            // Mantém a tela e as regras editadas em memória durante Fiscal → Loja.
+            active: tela.secao === "fiscal" || tela.secaoAntesDaGuia === "fiscal"
             Layout.fillWidth: true
             Layout.fillHeight: true
             source: "TelaFiscal.qml"

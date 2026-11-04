@@ -113,10 +113,16 @@ ApplicationWindow {
         Tema.oculto = true
         atualizarEstado()
         trocarPara("TelaInicio")
-        // Para testes: rustinho --abrir TelaPecas
+        // Para testes: rustinho --textos-da-tela --abrir TelaPecas.
         // (No Android, os do teste vêm em "argumentosExtras", de main.cpp.)
-        const args = Qt.application.arguments.concat(typeof argumentosExtras !== "undefined" ? argumentosExtras : [])
-        const i = args.indexOf("--abrir")
+        const extras = typeof argumentosExtras !== "undefined" ? argumentosExtras : []
+        const args = Qt.application.arguments.concat(extras)
+        // A abertura direta é só para os testes. No computador, vale junto do
+        // modo de captura (--textos-da-tela); no Android, pelo "extra" do
+        // android/testar.sh, que main.cpp já filtra (só "--abrir Tela..." e
+        // "--camera"). A entrada comum sempre permanece em Início.
+        const i = (args.indexOf("--textos-da-tela") >= 0 || extras.indexOf("--abrir") >= 0)
+                  ? args.indexOf("--abrir") : -1
         // Só nomes de tela de verdade; dados quebrados são ignorados (C-13).
         if (i >= 0 && i + 1 < args.length && /^Tela[A-Za-z]{1,40}$/.test(args[i + 1])) {
             const j = args.indexOf("--props")
@@ -274,6 +280,7 @@ ApplicationWindow {
         },
         "loja.uf_cnpj": {
             tela: "TelaConfiguracoes", propriedades: { secao: "loja" }, campos: ["uf_cnpj"],
+            mesmaTela: true,
             nome: "o estado (UF) e o CNPJ da loja",
             titulo: "Para continuar, informe a UF e o CNPJ da loja",
             texto: "Escolha o estado, preencha o CNPJ e salve (F2). Depois o Rustinho volta para %1 e você continua de onde parou."
@@ -293,13 +300,19 @@ ApplicationWindow {
         if (guiaAtiva)
             return true
         const origem = pilha.currentItem
+        const mesmaTela = req.mesmaTela === true && origem
+                          && typeof origem.iniciarGuiaNaMesmaTela === "function"
         const g = {
             id: id, requisito: req, origem: origem, motivo: motivo || "", aoVoltar: aoVoltar,
+            mesmaTela: !!mesmaTela,
             origemNome: (origem && origem.nomeNaNavegacao) ? origem.nomeNaNavegacao : "Voltar"
         }
         guiaAtiva = g
         guia.mostrar("pendente", req.titulo, req.texto.arg(g.origemNome))
-        abrir(req.tela, Object.assign({}, req.propriedades, { guia: g }))
+        if (mesmaTela)
+            origem.iniciarGuiaNaMesmaTela(g)
+        else
+            abrir(req.tela, Object.assign({}, req.propriedades, { guia: g }))
         return true
     }
     // A tela de destino mostra qual campo destacar (e a rolagem dele).
@@ -318,17 +331,30 @@ ApplicationWindow {
         if (guiaAtiva)
             guia.mostrar("erro", "Não foi salvo", mensagem)
     }
+    function finalizarRetornoGuia(g, satisfeito) {
+        if (satisfeito)
+            guia.mostrar("satisfeito", "Requisito satisfeito — conclua a operação.", "")
+        else
+            guia.mostrar("pendente", "A operação ainda não foi concluída",
+                         "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true)
+        // No Fiscal embutido, o retorno na mesma tela atualiza os dados sem
+        // recarregar a lista de regras de ST que pode ter edições pendentes.
+        if (!g.mesmaTela && g.aoVoltar)
+            g.aoVoltar(satisfeito)
+    }
     // O destino salvou (satisfeito = true) ou a pessoa desistiu (false).
     function concluirGuia(satisfeito) {
         const g = guiaAtiva
         if (!g)
             return false
+        let requisitoConfirmado = null
         if (satisfeito) {
             const r = Api.chamar("requisito_conferir", { id: g.id })
             if (!r.ok || !r.dados.satisfeito) {
                 guia.mostrar("erro", g.requisito.titulo, r.ok ? r.dados.falta : r.erro)
                 return false
             }
+            requisitoConfirmado = r.dados
         }
         guiaAtiva = null
         guia.semDestaque()
@@ -336,18 +362,17 @@ ApplicationWindow {
         const naPilha = g.origem && pilha.find(item => item === g.origem) !== null
         if (!naPilha)
             return true
+        if (g.mesmaTela) {
+            depoisDaTroca(() => {
+                g.origem.restaurarGuiaNaMesmaTela(requisitoConfirmado)
+                finalizarRetornoGuia(g, satisfeito)
+            })
+            return true
+        }
         pilha.pop(g.origem)
         // Só depois que a tela de origem voltou de vez (ela se atualiza ao
         // ficar ativa; a retomada vem em seguida, sem disputar com isso).
-        depoisDaTroca(() => {
-            if (satisfeito)
-                guia.mostrar("satisfeito", "Requisito satisfeito — conclua a operação.", "")
-            else
-                guia.mostrar("pendente", "A operação ainda não foi concluída",
-                             "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true)
-            if (g.aoVoltar)
-                g.aoVoltar(satisfeito)
-        })
+        depoisDaTroca(() => finalizarRetornoGuia(g, satisfeito))
         return true
     }
     // Roda f quando a pilha terminar a troca de telas em andamento.
@@ -541,8 +566,17 @@ ApplicationWindow {
             for (let i = 0; i < item.children.length; i++)
                 andar(item.children[i])
         }
-        // A raiz da janela: as telas e, por cima, as janelinhas (senha do gerente...).
-        andar(janela.contentItem.parent || janela.contentItem)
+        // A raiz da janela: as telas e, por cima, as janelinhas (senha do
+        // gerente, painéis, janela de arquivos). Sobe até o topo: no Qt 6.8 é o
+        // pai do contentItem; em versões mais novas (6.12) há um nível a mais,
+        // e sem isto as janelinhas ficavam fora da lista.
+        let raiz = janela.contentItem
+        while (raiz.parent)
+            raiz = raiz.parent
+        andar(raiz)
+        // TESTE_PILHA é consumido pelo teste visual da Etapa 1 (caso F) para
+        // confirmar que Fiscal → Loja reutiliza Configurações sem empilhar outra tela.
+        linhas.push("0\t0\tTESTE_PILHA:" + pilha.depth)
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
 
