@@ -128,6 +128,7 @@ CLASSES = {
     ("TelaDevolucao.qml", "tela.motivos"): ("FORA", ESCOLHA),
     ("TelaEntrar.qml", "tela.usuarios"): ("LISTA", "usuários na entrada"),
     ("TelaEtiquetas.qml", "tela.itens"): ("LISTA", "peças das etiquetas"),
+    ("TelaEtiquetas.qml", "tela.bloqueadas"): ("LISTA", "peças que não saem agora (caso 4 da navegação)"),
     ("TelaEtiquetas.qml", "tela.m ? tela.porFolha"): ("FORA", "prévia de impressão (papel branco)"),
     ("TelaEtiquetas.qml", "previa.e && tela.comBarras"): ("FORA", "prévia de impressão (papel branco)"),
     ("TelaFiscal.qml", "listaPecas.tudo ? listaPecas.pecas"): ("LISTA", "peças da conferência fiscal"),

@@ -369,16 +369,29 @@ FocusScope {
                     clip: true
                     Repeater {
                         model: tela.bloqueadas
-                        delegate: ColumnLayout {
+                        // Linhas alternadas (V-6), como a lista de etiquetas acima.
+                        delegate: Rectangle {
                             id: travada
                             required property var modelData
                             required property int index
-                            spacing: 4
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(travada.par)
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raio
                             Layout.fillWidth: true
+                            implicitHeight: conteudoTravada.implicitHeight + 16
+                            ColumnLayout {
+                            id: conteudoTravada
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 4
                             Text {
                                 text: travada.modelData.etiqueta.nome + " · " + travada.modelData.quantidade
                                       + (travada.modelData.quantidade === 1 ? " etiqueta" : " etiquetas")
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(travada.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
                                 font.pixelSize: 15
@@ -387,7 +400,7 @@ FocusScope {
                             }
                             Text {
                                 text: travada.modelData.etiqueta.bloqueio
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(travada.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
                                 wrapMode: Text.WordWrap
@@ -414,6 +427,7 @@ FocusScope {
                                     implicitHeight: 36
                                     onClicked: tela.tirarBloqueada(travada.index)
                                 }
+                            }
                             }
                         }
                     }
