@@ -1520,8 +1520,6 @@ pub fn restaurar(
 ) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…")
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
-    // A troca de dados com os outros caixas espera a restauração terminar.
-    let _pausa = sync::pausar();
     let tmp = Temporaria::nova(&std::env::temp_dir())?;
 
     let local = if nuvem {
@@ -1554,6 +1552,14 @@ pub fn restaurar(
         return Err(Erro::validacao("Esse backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes."));
     }
 
+    // A troca de dados com os outros caixas para daqui até o fim (0.9.18):
+    // baixar do Drive (até meia hora) e conferir o backup só leem o arquivo
+    // dele e não precisam pará-la. Daqui em diante, nada da troca de dados
+    // grava neste banco: a cópia de antes é exatamente o banco que sai, e o
+    // que é deste computador (contadores da troca, numeração) é lido e posto
+    // de volta sem ninguém mexer no meio.
+    let _pausa = sync::pausar();
+
     // Cópia do que existe agora, por segurança.
     if let Some(c) = caminho_db {
         dizer("Guardando uma cópia de agora…");
@@ -1572,8 +1578,14 @@ pub fn restaurar(
     if let Some(m) = &marca {
         pendente.gravar(m)?;
     }
+    #[cfg(test)]
+    if queda_de_teste::agora("antes_da_troca") {
+        return Err(queda_de_teste::erro());
+    }
 
     dizer("Restaurando…");
+    #[cfg(test)]
+    queda_de_teste::anotar_pausa();
     if let Err(e) = conn.restore(rusqlite::MAIN_DB, &db, None::<fn(rusqlite::backup::Progress)>) {
         // O banco não foi trocado: não há o que terminar depois.
         if let Some(m) = &marca {
@@ -1586,13 +1598,42 @@ pub fn restaurar(
     if std::env::var("RUSTINHO_TESTE_CAIR_RESTAURANDO").is_ok_and(|v| v == "1") {
         std::process::abort();
     }
+    #[cfg(test)]
+    if queda_de_teste::agora("depois_da_troca") || queda_de_teste::agora("falhar_ao_terminar") {
+        return Err(queda_de_teste::erro());
+    }
     banco::migrar(conn)?;
     sync::criar_gatilhos(conn)?;
     pendente.aplicar(conn)?;
+    #[cfg(test)]
+    if queda_de_teste::agora("antes_de_tirar_a_marca") {
+        return Err(queda_de_teste::erro());
+    }
     if let Some(m) = &marca {
         let _ = std::fs::remove_file(m);
     }
     Ok(info)
+}
+
+/// Só nos testes: a restauração "cai" na etapa pedida (sai na hora, sem
+/// arrumar nada, como numa falta de luz) ou falha ao terminar; e se a troca
+/// de dados estava parada na hora de trocar o banco.
+#[cfg(test)]
+pub(crate) mod queda_de_teste {
+    use std::cell::Cell;
+    thread_local! {
+        pub static ETAPA: Cell<&'static str> = const { Cell::new("") };
+        pub static PAUSADA_NA_TROCA: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+    pub fn agora(etapa: &str) -> bool {
+        ETAPA.with(|e| e.get() == etapa)
+    }
+    pub fn erro() -> crate::erro::Erro {
+        crate::erro::Erro::Interno("queda simulada (teste)".into())
+    }
+    pub fn anotar_pausa() {
+        PAUSADA_NA_TROCA.with(|p| p.set(Some(crate::sync::pausada_para_teste())));
+    }
 }
 
 /// Arquivo ao lado do banco que diz "restauração pela metade" (D-08).
@@ -1742,12 +1783,18 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
 }
 
 #[cfg(test)]
-mod testes {
+pub(crate) mod testes {
     use super::*;
     use crate::banco::Banco;
 
     /// Restaurar usa a vez única do backup: um teste desses de cada vez.
     static UM_POR_VEZ: Mutex<()> = Mutex::new(());
+
+    /// A mesma vez, para os testes de outros módulos que restauram ou mexem
+    /// nas variáveis do rclone.
+    pub(crate) fn um_por_vez() -> std::sync::MutexGuard<'static, ()> {
+        UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn pasta_teste(nome: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("rustinho-teste-backup-{nome}-{}", tempo::novo_id()));

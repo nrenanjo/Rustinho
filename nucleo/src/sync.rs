@@ -185,6 +185,12 @@ fn pausar_nos_testes() -> RwLockWriteGuard<'static, ()> {
     }
 }
 
+/// Só nos testes: a troca de dados está parada (alguém segura a pausa)?
+#[cfg(test)]
+pub(crate) fn pausada_para_teste() -> bool {
+    matches!(TRAVA.try_read(), Err(std::sync::TryLockError::WouldBlock))
+}
+
 /// Para quem grava no meio da troca de dados (as tarefas deste módulo e o
 /// ciclo de caminhos): respeita a pausa da restauração de backup.
 pub(crate) fn travar() -> RwLockReadGuard<'static, ()> {
