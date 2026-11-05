@@ -1059,6 +1059,8 @@ fn f06_abertura_confere_a_integridade() {
     let av = avisos::do_dia(&b.conn).unwrap();
     let a = av.iter().find(|a| a.id == "banco_defeito").expect("aviso do defeito");
     assert_eq!(a.categoria, avisos::CRITICA);
+    // Caso 8 (C8, 0.9.18): o botão diz para onde leva (Backup, restaurar).
+    assert_eq!((a.acao.as_str(), a.secao.as_str()), ("Ver backup", "backup"));
     drop(b);
 
     // Backup desse banco: sai como erro (nunca como "íntegro"); se a cópia

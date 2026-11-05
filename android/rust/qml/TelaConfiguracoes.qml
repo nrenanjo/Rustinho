@@ -47,6 +47,10 @@ FocusScope {
     property string secaoAntesDaGuia: ""
     // Como esta tela aparece no "voltar" de outra (navegação guiada).
     readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
+    // O "voltar" desta tela, quando outra tela (não o Início) a abriu para
+    // resolver alguma coisa (navegação contextual, 0.9.18). Com guia, vale o
+    // nome da tela de origem da guia.
+    property string voltarPara: "Início"
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela. A
     // guia que não terminou aqui também acaba (a tela saiu da pilha por outro
     // caminho: sessão encerrada, backup restaurado). Quando a pilha destrói a
@@ -218,6 +222,14 @@ FocusScope {
             carregarHistorico()
             tela.secao = destino
         }, desistiu)
+    }
+
+    // Caso 8 (0.9.18): a faixa do modo seguro pede o Backup com esta tela
+    // aberta. Troca só a parte (pede a senha do gerente, se faltar); desistir
+    // da senha deixa a pessoa onde estava, nesta tela.
+    function mostrarBackup() {
+        if (secao !== "backup")
+            entrarSimultaneidade("backup")
     }
 
     // NOTIF-03 (0.9.18): a tela foi aberta direto numa parte do gerente (por
@@ -577,7 +589,7 @@ FocusScope {
             sensivel: true
             titulo: "Configurações"
             // Aberta pela navegação guiada: o "voltar" diz para onde volta.
-            textoVoltar: tela.guia ? tela.guia.origemNome : "Início"
+            textoVoltar: tela.guia ? tela.guia.origemNome : tela.voltarPara
             subtitulo: ({
                 loja: tela.completo ? "A loja, este computador e a sua senha" : "Este computador e a sua senha",
                 gerente: "Quem é gerente e o que só o gerente pode fazer",
@@ -1995,7 +2007,11 @@ FocusScope {
 
                 // ---------------- Backup ----------------
                 Loader {
-                    active: tela.secao === "backup"
+                    // Só com a consulta do Backup liberada: aberta direto aqui
+                    // (pela faixa do modo seguro ou por uma notificação), a
+                    // parte não carrega antes da senha (antes, o caixa via um
+                    // "Só o gerente pode" por trás do pedido da senha).
+                    active: tela.secao === "backup" && tela.verBackup
                     visible: active
                     Layout.fillWidth: true
                     sourceComponent: SecaoBackup { width: corpo.width }

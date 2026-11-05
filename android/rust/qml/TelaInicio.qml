@@ -8,6 +8,8 @@ import rustinho
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
+    // Como esta tela aparece no "voltar" da tela que ela abriu.
+    readonly property string nomeNaNavegacao: "Início"
     property var menu: ({ todos: [] })
     property var avisos: []
     // Faixas (as críticas primeiro, depois a expandida) e quadrados (as

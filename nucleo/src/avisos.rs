@@ -133,7 +133,8 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "cheques" => "Ver cheques",
             "encomendas" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
-            "backup" | "backup_nuvem" => "Ver backup",
+            // Caso 8 (C8, 0.9.18): o modo seguro leva ao Backup (restaurar).
+            "backup" | "backup_nuvem" | "banco_defeito" => "Ver backup",
             // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
             "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",

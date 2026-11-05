@@ -414,25 +414,61 @@ ApplicationWindow {
         guia.esconder()
     }
 
+    // Caso 8 da navegação contextual (0.9.18): a faixa do modo seguro leva a
+    // Configurações › Simultaneidade › Backup. Só navega: escolher o backup,
+    // confirmar e digitar a senha do gerente continuam lá, como sempre; nada
+    // é restaurado nem apagado por aqui. Com Configurações já aberta (sem
+    // guia em andamento), só troca a parte dela, sem empilhar outra.
+    function irParaBackup() {
+        const atual = pilha.currentItem
+        if (atual && typeof atual.mostrarBackup === "function" && !atual.guia) {
+            atual.mostrarBackup()
+            return
+        }
+        abrir("TelaConfiguracoes", { secao: "backup", voltarPara: nomeDe(atual) })
+    }
+    // Como uma tela aparece no "voltar" da tela que ela abriu.
+    function nomeDe(tela) {
+        return tela && tela.nomeNaNavegacao ? tela.nomeNaNavegacao : "Voltar"
+    }
+
     // A3 (0.9.15): banco com defeito de integridade — modo seguro. A faixa
     // fica sempre à vista, em todas as telas; o núcleo recusa toda gravação.
     Rectangle {
         id: faixaModoSeguro
         visible: !!janela.estado.modoSeguro
         anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: visible ? textoModoSeguro.implicitHeight + 16 : 0
+        height: visible ? conteudoModoSeguro.implicitHeight + 16 : 0
         color: Tema.critico
         border.color: Tema.bordaCritico
         z: 1500
-        Text {
-            id: textoModoSeguro
+        GridLayout {
+            id: conteudoModoSeguro
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 12 }
-            text: "Modo seguro: o banco de dados deste caixa tem defeito e nada é gravado (vendas, recebimentos, estoque, caixa, troca de dados). Não continue a operar: restaure um backup bom em Configurações › Backup ou chame o suporte."
-            wrapMode: Text.WordWrap
-            color: Tema.vermelho
-            font.family: Tema.serifa
-            font.pixelSize: 15
-            font.bold: true
+            // No celular, o botão fica embaixo do texto.
+            columns: Tema.estreito ? 1 : 2
+            columnSpacing: 14
+            rowSpacing: 8
+            Text {
+                id: textoModoSeguro
+                text: "Modo seguro: o banco de dados deste caixa tem defeito e nada é gravado (vendas, recebimentos, estoque, caixa, troca de dados). Não continue a operar: restaure um backup bom em Configurações › Backup ou chame o suporte."
+                wrapMode: Text.WordWrap
+                color: Tema.vermelho
+                font.family: Tema.serifa
+                font.pixelSize: 15
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            // Só com alguém dentro (na tela de entrada não há o que abrir).
+            Botao {
+                visible: !!janela.estado.usuario
+                text: "Restaurar um backup"
+                tipo: "secundario"
+                // Não tira o teclado da tela (o Esc continua voltando).
+                focusPolicy: Qt.NoFocus
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: janela.irParaBackup()
+            }
         }
     }
 
