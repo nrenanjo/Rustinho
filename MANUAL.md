@@ -105,6 +105,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Notificações:** o botão das notificações de diferenças entre caixas e de códigos repetidos agora diz **Ver duplicatas** (antes, "Resolver no Gerente"), que é para onde ele leva (Configurações › Simultaneidade › Duplicatas).
 - **Senha do gerente pedida por uma notificação:** se quem está usando é caixa, abre uma notificação que leva a uma parte do gerente e desiste da senha (Voltar ou Esc), o Rustinho volta para a tela de antes, em vez de deixar a pessoa em Configurações › Loja.
 - **Navegação guiada e sessão encerrada:** se a sessão acaba no meio de uma navegação guiada (usuário desativado em outro caixa, backup restaurado), a faixa de orientação e o escurecimento somem antes de a tela de entrada aparecer.
+- **Backup no Google Drive:** cada computador só apaga no Drive as cópias antigas que ele mesmo mandou. Antes, um computador apagava cópias de outros que tinham o mesmo nome de caixa na mesma conta do Google (outra loja, um Rustinho portátil de teste) ou guardava menos dias que eles. As cópias que já estavam no Drive antes desta versão não são apagadas por ninguém: apague à mão, na pasta "Rustinho Backup", as que não quiser.
 - **Importar várias notas de compra:** a mensagem final não diz mais que a assinatura digital não é conferida: ela é conferida em toda nota importada (nota sem assinatura válida é recusada).
 
 ### Novo na versão 0.9.15 (correções da auditoria)
