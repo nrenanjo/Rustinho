@@ -29,6 +29,33 @@ Rectangle {
         fator.focar()
     }
 
+    // PEND-17 (0.9.18): os botões da decisão. No computador ficam na linha
+    // do "Que peça é esta?", à direita (como sempre); na tela estreita
+    // (celular), numa linha própria embaixo do texto, quebrando a linha se
+    // não couberem. Antes, no celular, ficavam por cima do texto e passavam
+    // da tela.
+    readonly property var botoesDecisao: [
+        { id: "escolher", visivel: editavel, texto: peca || item.acao === "ligar" ? "Trocar peça" : "Escolher peça",
+          tipo: pendente ? "principal" : "secundario" },
+        { id: "nova", visivel: editavel && item.acao !== "nova", texto: "Cadastrar nova",
+          tipo: pendente ? "secundario" : "discreto" },
+        { id: "ignorar", visivel: editavel && !ignorado, texto: "Não lançar", tipo: "discreto" }
+    ].filter(b => b.visivel)
+    function decidir(id) {
+        if (id === "escolher")
+            escolherPeca()
+        else if (id === "nova")
+            cadastrarNova()
+        else
+            naoLancar()
+    }
+    component BotaoDecisao: Botao {
+        required property var modelData
+        text: modelData.texto
+        tipo: modelData.tipo
+        altura: 36
+    }
+
     ColumnLayout {
         id: coluna
         x: 20
@@ -168,26 +195,20 @@ Rectangle {
                             Layout.fillWidth: true
                         }
                     }
-                    Botao {
-                        visible: linha.editavel
-                        text: linha.peca || linha.item.acao === "ligar" ? "Trocar peça" : "Escolher peça"
-                        tipo: linha.pendente ? "principal" : "secundario"
-                        altura: 36
-                        onClicked: linha.escolherPeca()
+                    // No computador: os botões aqui, ao lado do texto.
+                    Repeater {
+                        model: linha.botoesDecisao
+                        delegate: BotaoDecisao { visible: !Tema.estreito; onClicked: linha.decidir(modelData.id) }
                     }
-                    Botao {
-                        visible: linha.editavel && linha.item.acao !== "nova"
-                        text: "Cadastrar nova"
-                        tipo: linha.pendente ? "secundario" : "discreto"
-                        altura: 36
-                        onClicked: linha.cadastrarNova()
-                    }
-                    Botao {
-                        visible: linha.editavel && !linha.ignorado
-                        text: "Não lançar"
-                        tipo: "discreto"
-                        altura: 36
-                        onClicked: linha.naoLancar()
+                }
+                // Na tela estreita: embaixo do texto, quebrando a linha.
+                Flow {
+                    visible: Tema.estreito && linha.botoesDecisao.length > 0
+                    spacing: 8
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: linha.botoesDecisao
+                        delegate: BotaoDecisao { onClicked: linha.decidir(modelData.id) }
                     }
                 }
 

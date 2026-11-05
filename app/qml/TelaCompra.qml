@@ -700,7 +700,15 @@ FocusScope {
             observacoes.texto = compra.observacoes
     }
 
-    Component.onCompleted: carregar()
+    Component.onCompleted: {
+        carregar()
+        // Os avisos do topo (CNPJ, assinatura e autorização) são o cabeçalho
+        // da lista e ganham altura depois dos itens: com uma lista mais alta
+        // que a tela (no celular, com os botões da decisão embaixo do texto,
+        // PEND-17), ela abria rolada, com os avisos escondidos em cima. Na
+        // primeira abertura, a lista começa do começo, com os avisos.
+        Qt.callLater(() => lista.positionViewAtBeginning())
+    }
     StackView.onActivated: {
         if (compra)
             carregar()
