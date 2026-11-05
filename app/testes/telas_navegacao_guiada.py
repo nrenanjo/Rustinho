@@ -78,9 +78,53 @@ def brilho(c):
     return sum(c) / 3
 
 
+def janela_de_arquivos(titulo, segundos=10):
+    """(x, y, largura, altura, id) da janela de arquivos ou de pasta do Qt com esse
+    título, ou None. Desde o Qt 6.8, no X11, ela abre numa janela à parte
+    (QQuickFileDialogImpl e QQuickFolderDialogImpl usam Popup.Window), fora
+    da lista de textos da tela do Rustinho."""
+    fim = time.time() + segundos
+    while True:
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", titulo],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        for janela in s.stdout.split():
+            g = subprocess.run(["xdotool", "getwindowgeometry", "--shell", janela],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            d = dict(x.split("=", 1) for x in g.stdout.split() if "=" in x)
+            if all(k in d for k in ("X", "Y", "WIDTH", "HEIGHT")):
+                return int(d["X"]), int(d["Y"]), int(d["WIDTH"]), int(d["HEIGHT"]), janela
+        if time.time() >= fim:
+            return None
+        time.sleep(0.5)
+
+
+def primeiro_arquivo(casa):
+    """O primeiro arquivo que a janela de arquivos lista em Downloads (pelo
+    filtro: XML, ZIP ou RAR, em ordem alfabética)."""
+    pasta = os.path.join(casa, "Downloads")
+    nomes = sorted((n for n in os.listdir(pasta) if n.lower().endswith((".xml", ".zip", ".rar"))), key=str.lower)
+    if not nomes:
+        raise RuntimeError(f"nenhum XML em {pasta}")
+    return os.path.join(pasta, nomes[0])
+
+
+def devolver_teclado():
+    """Sem gerenciador de janelas (tela virtual), o teclado não volta sozinho
+    para a janela do Rustinho quando a de arquivos fecha: as teclas (CNPJ,
+    Esc, F2) se perderiam. Na área de trabalho, quem devolve é o gerenciador."""
+    for busca in (["--class", "rustinho"], ["--name", "Rustinho"]):
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", *busca],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        if s.stdout.split():
+            xdo("windowfocus", "--sync", s.stdout.split()[0])
+            time.sleep(0.3)
+            return
+
+
 class Rustinho(base.Rustinho):
     def __init__(self, pasta, tela, props, fotos, nome, casa):
         # A pasta pessoal do teste: a janela de arquivos abre em Downloads.
+        self.casa = casa
         antes = os.environ.get("HOME")
         os.environ["HOME"] = casa
         try:
@@ -107,7 +151,11 @@ class Rustinho(base.Rustinho):
                 return x, y
         return None
 
-    def abrir_janela(self, botao):
+    def abrir_janela(self, botao, titulo):
+        """Importar XML › botão. Devolve ("dentro", posição do Open) quando a
+        janela de arquivos fica dentro da tela (Qt anterior ao 6.8) ou
+        ("aparte", (x, y, largura, altura)) quando ela abre numa janela à
+        parte (Qt 6.8 ou mais novo no X11)."""
         if not self.clicar("Importar XML"):
             raise RuntimeError(f"não achei Importar XML (veja {self.saida})")
         time.sleep(1.2)
@@ -115,30 +163,67 @@ class Rustinho(base.Rustinho):
             raise RuntimeError(f"não achei {botao} (veja {self.saida})")
         time.sleep(2)
         aberto = self.posicao("Open")
-        if not aberto:
+        if aberto:
+            return "dentro", aberto
+        janela = janela_de_arquivos(titulo)
+        if not janela:
             raise RuntimeError(f"a janela de arquivos não abriu (veja {self.saida})")
-        return aberto
+        return "aparte", janela
+
+    def fechou(self, titulo):
+        if janela_de_arquivos(titulo, segundos=0):
+            raise RuntimeError(f"a janela de arquivos não fechou (veja {self.saida})")
+        devolver_teclado()
 
     def escolher_arquivo(self):
         """Importar XML › Escolher arquivos › o primeiro da lista › Open."""
-        aberto = self.abrir_janela("Escolher arquivos")
-        # A lista começa 235 px acima do botão Open.
-        xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+        titulo = "Escolha os XMLs das notas"
+        modo, p = self.abrir_janela("Escolher arquivos", titulo)
+        if modo == "dentro":
+            # A lista começa 235 px acima do botão Open.
+            xdo("mousemove", str(p[0] - 257), str(p[1] - 235), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(p[0]), str(p[1]), "click", "1")
+            time.sleep(3)
+            return
+        # Ctrl+L abre o campo do caminho; com o caminho de um arquivo, Enter
+        # escolhe e fecha, como o Abrir (igual no Qt 6.8 e no 6.12; a posição
+        # dos arquivos na lista muda entre eles).
+        xdo("windowfocus", "--sync", p[4])
         time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        xdo("key", "ctrl+l")
+        time.sleep(0.5)
+        xdo("type", "--delay", "20", primeiro_arquivo(self.casa))
+        time.sleep(0.3)
+        xdo("key", "Return")
         time.sleep(3)
+        self.fechou(titulo)
 
     def escolher_pasta(self):
         """Importar XML › Escolher uma pasta › sobe uma pasta › Downloads › Open."""
-        aberto = self.abrir_janela("Escolher uma pasta")
-        # A seta de subir fica 384 px à esquerda e 292 px acima do Open; a
-        # primeira linha da lista, 265 px à esquerda e 230 px acima.
-        xdo("mousemove", str(aberto[0] - 384), str(aberto[1] - 292), "click", "1")
-        time.sleep(1)
-        xdo("mousemove", str(aberto[0] - 265), str(aberto[1] - 230), "click", "1")
-        time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        titulo = "Escolha a pasta com os XMLs"
+        modo, p = self.abrir_janela("Escolher uma pasta", titulo)
+        if modo == "dentro":
+            # A seta de subir fica 384 px à esquerda e 292 px acima do Open; a
+            # primeira linha da lista, 265 px à esquerda e 230 px acima.
+            subir, primeira, abrir = (p[0] - 384, p[1] - 292), (p[0] - 265, p[1] - 230), p
+            xdo("mousemove", str(subir[0]), str(subir[1]), "click", "1")
+            time.sleep(1)
+            xdo("mousemove", str(primeira[0]), str(primeira[1]), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(abrir[0]), str(abrir[1]), "click", "1")
+            time.sleep(3)
+            return
+        # Na janela à parte (Qt 6.8 e 6.12): a seta de subir fica a 41 px do
+        # canto, e subir já marca a pasta de onde se veio (Downloads:
+        # QQuickFolderDialogImpl::updateSelectedFolder). Abrir fica 180 px
+        # antes da borda direita e 30 px acima da de baixo.
+        x, y, largura, altura, _ = p
+        xdo("mousemove", str(x + 41), str(y + 41), "click", "1")
+        time.sleep(1.5)
+        xdo("mousemove", str(x + largura - 180), str(y + altura - 30), "click", "1")
         time.sleep(3)
+        self.fechou(titulo)
 
     def encolher(self, largura, altura):
         ids = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],

@@ -25,6 +25,11 @@ pub const INFORMATIVA: &str = "informativa";
 pub const ATENCAO: &str = "atencao";
 pub const CRITICA: &str = "critica";
 
+/// T-07 (C8): horas sem trocar dados com um caixa da loja até a notificação
+/// de atenção. Um dia inteiro: o caixa desligado à noite ou num feriado não
+/// avisa; o que ficou fora da rede por mais tempo, sim.
+pub const HORAS_SEM_CONTATO: i64 = 24;
+
 /// Uma linha do quadro de detalhes da notificação expandida.
 #[derive(Debug, Clone, Serialize)]
 pub struct Detalhe {
@@ -582,6 +587,14 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         a.acao = "Ver caixas".into();
         avisos.push(a);
     }
+    // T-07 (C8): caixa da loja que não troca dados com este há um dia ou
+    // mais. Só com a troca de dados ligada; o retirado não conta. Some
+    // sozinha na primeira troca que der certo.
+    if crate::sync::ajustes(conn).map(|a| a.ligado).unwrap_or(false) {
+        for c in caixas_sem_contato(conn, HORAS_SEM_CONTATO)? {
+            avisos.push(aviso_sem_contato(&hoje, &c));
+        }
+    }
     // Alterações recebidas guardadas sem aplicar (o gerente olha).
     let (pendentes, origens): (i64, i64) = conn.query_row(
         "SELECT COUNT(*), COUNT(DISTINCT origem) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
@@ -739,6 +752,91 @@ fn aviso_de_compatibilidade(hoje: &str, c: &crate::sync::CaixaConhecido) -> Avis
             valor: "Atualizar o Rustinho nesse caixa e deixar trocar dados, ou retirá-lo da loja.".into(),
         },
     ];
+    a.acao = "Ver caixas".into();
+    a
+}
+
+/// Um caixa da loja que já trocou dados com este e parou (T-07).
+struct SemContato {
+    dispositivo: String,
+    nome: String,
+    horas: i64,
+    /// Última troca que deu certo, no horário daqui ("03/11/2026 10:32").
+    ultima: String,
+    visto: String,
+    erro: String,
+}
+
+/// Os caixas (não retirados) cuja última troca que deu certo passou de
+/// `horas`. O que nunca trocou dados não entra: ele aparece como "nunca"
+/// em Configurações › Caixas da loja e nos avisos da troca.
+fn caixas_sem_contato(conn: &Connection, horas: i64) -> Resultado<Vec<SemContato>> {
+    let mut c = conn.prepare(
+        "SELECT dispositivo, nome, segundos / 3600,
+                COALESCE(strftime('%d/%m/%Y %H:%M', sincronizado_em, 'localtime'), ''),
+                COALESCE(strftime('%d/%m/%Y %H:%M', visto_em, 'localtime'), ''),
+                erro
+           FROM (SELECT *, CAST(strftime('%s', 'now') AS INTEGER) - CAST(strftime('%s', sincronizado_em) AS INTEGER)
+                           AS segundos
+                   FROM sync_par WHERE COALESCE(sincronizado_em, '') <> '')
+          WHERE segundos >= ?1 * 3600
+          ORDER BY nome, dispositivo",
+    )?;
+    let todos: Vec<SemContato> = c
+        .query_map([horas], |l| {
+            Ok(SemContato {
+                dispositivo: l.get(0)?,
+                nome: l.get(1)?,
+                horas: l.get(2)?,
+                ultima: l.get(3)?,
+                visto: l.get(4)?,
+                erro: l.get(5)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    let mut lista = Vec::new();
+    for s in todos {
+        if !crate::sync::retirado(conn, &s.dispositivo)? {
+            lista.push(s);
+        }
+    }
+    Ok(lista)
+}
+
+/// A notificação de um caixa sem trocar dados (Atenção, T-07).
+fn aviso_sem_contato(hoje: &str, c: &SemContato) -> Aviso {
+    let nome = if c.nome.trim().is_empty() { "Um caixa da loja".to_string() } else { c.nome.clone() };
+    let tempo = if c.horas < 48 { plural(c.horas, "hora", "horas") } else { plural(c.horas / 24, "dia", "dias") };
+    let mut a = Aviso::simples(
+        &format!("sem_contato.{}", c.dispositivo),
+        hoje,
+        "caixa sem contato".into(),
+        format!("{nome} sem trocar dados há {tempo}"),
+        String::new(),
+        "configuracoes",
+    )
+    .categoria(ATENCAO)
+    .secao("caixas");
+    a.titulo_longo = format!("Atenção: {nome} sem trocar dados há {tempo}");
+    a.resumo = format!("Atenção: {nome} sem trocar dados há {tempo}.");
+    a.descricao = format!(
+        "{nome} não troca dados com este caixa desde {}. Enquanto isso, o que um vende, cadastra ou muda não \
+         chega ao outro: estoque, preços e contas podem ficar diferentes entre os dois. Confira se ele está \
+         ligado, com o Rustinho aberto e na mesma rede. Se ele não for mais usado, retire-o da loja em \
+         Configurações › Caixas da loja.",
+        c.ultima
+    );
+    a.detalhes = vec![
+        Detalhe { rotulo: "Caixa".into(), valor: nome },
+        Detalhe { rotulo: "Última troca".into(), valor: format!("{} (há {tempo})", c.ultima) },
+        Detalhe {
+            rotulo: "Visto na rede".into(),
+            valor: if c.visto.is_empty() { "não".into() } else { c.visto.clone() },
+        },
+    ];
+    if !c.erro.trim().is_empty() {
+        a.detalhes.push(Detalhe { rotulo: "Último aviso da troca".into(), valor: c.erro.chars().take(120).collect() });
+    }
     a.acao = "Ver caixas".into();
     a
 }
@@ -999,5 +1097,56 @@ mod testes {
         config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
         config::gravar(&b.conn, "backup_nuvem_desde", &crate::tempo::dias_atras(2)).unwrap();
         assert!(do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup_nuvem"));
+    }
+
+    /// T-07 (C8): caixa da loja sem trocar dados há um dia ou mais vira
+    /// atenção, com o nome e a última troca. Some com uma troca que dê certo,
+    /// com a retirada do caixa e com a troca de dados desligada. Menos de um
+    /// dia, ou nunca ter trocado, não avisa.
+    #[test]
+    fn t07_caixa_sem_contato_ha_um_dia() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        let sem_contato = |c: &Connection| -> Vec<String> {
+            do_dia(c).unwrap().into_iter().map(|a| a.id).filter(|i| i.starts_with("sem_contato.")).collect()
+        };
+        c.execute(
+            "INSERT INTO sync_par (dispositivo, nome, sincronizado_em, visto_em) VALUES
+               ('caixa-2', 'Caixa 2', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 hours'),
+                                      strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-29 hours')),
+               ('caixa-3', 'Caixa 3', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-23 hours'), NULL),
+               ('caixa-4', 'Caixa 4', NULL, NULL),
+               ('caixa-5', 'Caixa 5', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 days', '-1 hours'), NULL)",
+            [],
+        )
+        .unwrap();
+        assert!(sem_contato(c).is_empty(), "troca de dados desligada: nada");
+        config::gravar(c, "sync_ligado", "1").unwrap();
+        assert_eq!(sem_contato(c), ["sem_contato.caixa-2", "sem_contato.caixa-5"], "23 h e nunca: sem aviso");
+
+        let v = do_dia(c).unwrap();
+        let a = v.iter().find(|a| a.id == "sem_contato.caixa-2").unwrap();
+        assert_eq!(a.categoria, ATENCAO);
+        assert_eq!(a.titulo_longo, "Atenção: Caixa 2 sem trocar dados há 30 horas");
+        assert_eq!((a.funcao.as_str(), a.secao.as_str(), a.acao.as_str()), ("configuracoes", "caixas", "Ver caixas"));
+        assert!(a.descricao.contains("retire-o da loja"), "{}", a.descricao);
+        assert!(a.detalhes.iter().any(|d| d.rotulo == "Última troca" && d.valor.ends_with("(há 30 horas)")));
+        assert!(a.detalhes.iter().any(|d| d.rotulo == "Visto na rede" && d.valor != "não"));
+        let a = v.iter().find(|a| a.id == "sem_contato.caixa-5").unwrap();
+        assert_eq!(a.titulo_longo, "Atenção: Caixa 5 sem trocar dados há 5 dias");
+        assert!(a.detalhes.iter().any(|d| d.rotulo == "Visto na rede" && d.valor == "não"));
+        // Atenção: não se esconde (some quando o problema acaba).
+        assert!(esconder(c, &v, "sem_contato.caixa-2").is_err());
+
+        // Trocou dados agora: some sozinha.
+        c.execute(
+            "UPDATE sync_par SET sincronizado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE dispositivo = 'caixa-2'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(sem_contato(c), ["sem_contato.caixa-5"]);
+        // Retirado da loja: não avisa mais.
+        config::gravar(c, &format!("{}caixa-5", crate::sync::PREFIXO_RETIRADO), "2026-11-04T10:00:00Z").unwrap();
+        assert!(sem_contato(c).is_empty());
     }
 }

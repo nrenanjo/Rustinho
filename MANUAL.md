@@ -95,6 +95,14 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão junto: copie antes se quiser guardar). No Windows, o desinstalador oferece apagar os dados.
 
+### Novo na versão 0.9.18
+
+- **Fiscal → Loja na mesma tela:** quando Configurações › Fiscal precisa do estado e do CNPJ da loja, o Rustinho leva à aba **Loja** sem abrir outra tela por cima. Desistir (Esc) volta ao Fiscal; uma regra de ST ainda não salva continua lá. Salvar só o estado volta ao Fiscal dizendo o que ainda falta.
+- **Linux (AppImage): janelas de arquivo e de pasta do sistema.** "Importar XML", "Escolher uma pasta" e as outras janelas de escolher arquivo passam a ser as do KDE, do GNOME ou da área de trabalho em uso (pelo portal do sistema, o xdg-desktop-portal). Num Linux sem portal, aparece a janela do próprio Rustinho, como antes. Para ficar sempre com a do Rustinho, abra assim: `QT_QPA_PLATFORMTHEME= ./Rustinho-0.9.18-Linux-x86_64.AppImage`.
+- **Aviso de caixa sem contato:** com a troca de dados ligada, um caixa da loja que não troca dados com este há **24 horas** ou mais aparece no Início como **Atenção**, com a hora da última troca e o que fazer (ver se ele está ligado e na mesma rede, ou retirá-lo da loja). O aviso some sozinho na primeira troca que der certo.
+- **Android 12 ou mais novo:** os dados do Rustinho não entram no backup do Google nem na transferência de um celular para outro. O backup da loja é o do próprio Rustinho (Configurações › Backup).
+- **Operações demoradas:** a trava contra o clique duplo sempre se solta no fim, mesmo quando a operação para com um erro inesperado.
+
 ### Novo na versão 0.9.15 (correções da auditoria)
 
 - **Duas lojas não se misturam mais pela rede:** cada loja tem agora uma identidade própria, criada quando a loja é configurada. Um computador que foi configurado como **outra loja** (mesmo com a mesma senha da rede) não troca dados com esta: os dois recusam e aparece o aviso crítico **"Troca de dados recusada"**, dizendo que nada foi misturado. Para ser caixa desta loja, o computador precisa entrar pela opção **"Entrar numa loja que já existe"**, com o banco vazio; se é de outra loja, troque a senha da rede de uma das duas. Lojas que já trocavam dados antes da 0.9.15 continuam se reconhecendo (cópia e restauração de backup também).
