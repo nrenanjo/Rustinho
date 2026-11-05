@@ -35,11 +35,55 @@ ColumnLayout {
     readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
+    // Busca da Início (0.9.18, D-V6, como nas imagens aprovadas): colar à
+    // esquerda e copiar à direita, dentro do campo (no lugar da lupa); o
+    // atalho F11 fica fora do campo (na Início).
+    property bool colarCopiar: false
+    readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
     // busca escura do Planeta Roxo (campo com a lupa).
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
-    readonly property bool buscaEscura: Tema.roxo && icone === "busca"
+    readonly property bool buscaEscura: Tema.roxo && (icone === "busca" || colarCopiar)
     readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : buscaEscura ? Tema.buscaFundo : Tema.papel
+
+    // Botão redondo dentro do campo (colar e copiar da busca da Início):
+    // área de toque de 40 × 40 px (48 × 48 dp no celular).
+    component BotaoInterno: Rectangle {
+        id: botaoInterno
+        property string nome: ""
+        property string dica: ""
+        property color fundo: Tema.papel
+        property real lado: 40
+        // Para leitores de tela e para os testes das telas (--textos-da-tela).
+        readonly property string nomeAcessivel: dica
+        signal acionado()
+        width: lado
+        height: lado
+        radius: height / 2
+        anchors.verticalCenter: parent.verticalCenter
+        color: toque.pressed ? Tema.sombraNo(0.13, fundo) : toque.containsMouse ? Tema.sombraNo(0.07, fundo) : "transparent"
+        Icone {
+            anchors.centerIn: parent
+            nome: botaoInterno.nome
+            tamanho: 22
+            cor: Tema.tintaSuaveNo(botaoInterno.fundo)
+        }
+        // MouseArea (e não TapHandler): fica com o toque só para si, sem o
+        // campo de texto embaixo roubar o toque para abrir o teclado.
+        MouseArea {
+            id: toque
+            anchors.fill: parent
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: botaoInterno.acionado()
+        }
+        ToolTip.visible: toque.containsMouse && !Tema.celular
+        ToolTip.delay: 600
+        ToolTip.text: dica
+        Accessible.role: Accessible.Button
+        Accessible.name: dica
+    }
 
     signal editado()
     signal confirmado()
@@ -67,6 +111,31 @@ ColumnLayout {
     function focarCursor() {
         if (podeFocar())
             entrada.forceActiveFocus()
+    }
+
+    // Os botões da busca da Início. Colar troca o texto da busca pelo que
+    // foi copiado; copiar leva o texto da busca inteiro.
+    function colar() {
+        entrada.forceActiveFocus()
+        entrada.selectAll()
+        entrada.paste()
+        campo.erro = ""
+        campo.editado()
+    }
+    function copiar() {
+        const janela = ApplicationWindow.window
+        if (entrada.text === "") {
+            if (janela)
+                janela.avisar("A busca está vazia: nada para copiar.", "info")
+            return
+        }
+        const de = entrada.selectionStart
+        const ate = entrada.selectionEnd
+        entrada.selectAll()
+        entrada.copy()
+        entrada.select(de, ate)
+        if (janela)
+            janela.avisar("Copiado: " + entrada.text, "ok")
     }
 
     function semAcento(s) {
@@ -126,7 +195,7 @@ ColumnLayout {
     TextField {
         id: entrada
         // Para os testes das telas (--textos-da-tela): onde está a busca.
-        objectName: campo.icone === "busca" ? "campoDeBusca" : ""
+        objectName: campo.colarCopiar ? "buscaDaInicio" : campo.icone === "busca" ? "campoDeBusca" : ""
         Layout.fillWidth: true
         implicitWidth: 120
         implicitHeight: campo.altura
@@ -144,10 +213,12 @@ ColumnLayout {
         verticalAlignment: TextInput.AlignVCenter
         readOnly: campo.somenteLeitura
         maximumLength: campo.maximo
-        leftPadding: (campo.icone !== "" ? 48 : 12) + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
+        leftPadding: (campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12)
+                     + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
                       + (campo.comBotao ? 44 : 0)
+                      + (campo.colarCopiar ? campo.ladoBotaoInterno : 0)
         selectByMouse: true
         // Celular: sem "texto previsto" (o teclado manda cada letra direto;
         // evita letras trocadas de lugar). Números quando o campo é de número.
@@ -163,13 +234,34 @@ ColumnLayout {
         }
 
         Icone {
-            visible: campo.icone !== ""
+            visible: campo.icone !== "" && !campo.colarCopiar
             nome: campo.icone
             tamanho: 22
             cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado
             anchors.left: parent.left
             anchors.leftMargin: 15
             anchors.verticalCenter: parent.verticalCenter
+        }
+        // Colar (à esquerda) e copiar (à direita), na busca da Início.
+        BotaoInterno {
+            visible: campo.colarCopiar
+            nome: "colar"
+            dica: "Colar na busca"
+            fundo: campo.corDoCampo
+            lado: campo.ladoBotaoInterno
+            anchors.left: parent.left
+            anchors.leftMargin: 6
+            onAcionado: campo.colar()
+        }
+        BotaoInterno {
+            visible: campo.colarCopiar
+            nome: "copiar"
+            dica: "Copiar a busca"
+            fundo: campo.corDoCampo
+            lado: campo.ladoBotaoInterno
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            onAcionado: campo.copiar()
         }
         Rectangle {
             visible: campo.comBotao
@@ -220,7 +312,7 @@ ColumnLayout {
             text: campo.prefixo
             visible: text !== ""
             anchors.left: parent.left
-            anchors.leftMargin: campo.icone !== "" ? 48 : 12
+            anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12
             anchors.verticalCenter: parent.verticalCenter
             color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto

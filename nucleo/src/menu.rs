@@ -50,7 +50,8 @@ pub const FUNCOES: &[Funcao] = &[
         id: "pecas",
         titulo: "Peças",
         descricao: "Buscar, ver estoque e cadastrar",
-        icone: "engrenagem",
+        // A chave inglesa (0.9.18, como nas imagens aprovadas).
+        icone: "chave",
         etapa: 1,
     },
     Funcao {
@@ -101,7 +102,8 @@ pub const FUNCOES: &[Funcao] = &[
         id: "oficina",
         titulo: "Ordens de serviço",
         descricao: "Oficina: carro, peças e mão de obra",
-        icone: "chave",
+        // A prancheta com o visto (0.9.18, como nas imagens aprovadas).
+        icone: "prancheta",
         etapa: 4,
     },
     Funcao { id: "painel", titulo: "Painel", descricao: "Vendas do dia, do mês e do ano", icone: "pizza", etapa: 4 },
