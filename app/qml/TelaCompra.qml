@@ -192,7 +192,6 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.rascunho
                 text: "Descartar"

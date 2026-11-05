@@ -431,7 +431,6 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
@@ -445,12 +444,6 @@ FocusScope {
                 icone: "impressora"
                 tipo: "secundario"
                 onClicked: tela.janela.abrir("TelaEtiquetas", { produtoId: tela.ficha.id })
-            }
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                atalho: "Esc"
-                onClicked: tela.aoEsc()
             }
             Botao {
                 text: "Salvar"

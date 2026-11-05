@@ -234,8 +234,10 @@ FocusScope {
         return (c / 100).toFixed(2).replace(".", ",")
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta não (D-V3). Com
+    // itens no carrinho, os dois perguntam antes de limpar a venda.
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             limparBusca()
         } else if (carrinho.length > 0) {
             janela.confirmar("Limpar esta venda?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
@@ -384,19 +386,20 @@ FocusScope {
         ColumnLayout {
             spacing: 2
             Layout.fillWidth: true
+            // A seta de retorno no mesmo lugar das telas com Cabecalho (esta
+            // coluna começa 4 px mais à esquerda e mais acima) e pelo mesmo
+            // caminho do Esc (V-2/V-3).
             RowLayout {
                 spacing: 10
                 Layout.fillWidth: true
-                Botao {
-                    tipo: "discreto"
-                    icone: "voltar"
-                    text: "Início"
-                    implicitHeight: 34
-                    font.pixelSize: 14
-                    Layout.leftMargin: -10
-                    onClicked: tela.aoEsc()
+                Layout.topMargin: 4
+                Seta {
+                    id: seta
+                    destino: "Início"
+                    Layout.leftMargin: 4 - seta.folga
+                    onClicked: tela.janela.retornar(true)
                 }
-                Item { Layout.fillWidth: true; implicitHeight: 34 }
+                Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }
                 Olho {}
             }
             GridLayout {

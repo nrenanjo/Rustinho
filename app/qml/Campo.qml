@@ -125,6 +125,8 @@ ColumnLayout {
 
     TextField {
         id: entrada
+        // Para os testes das telas (--textos-da-tela): onde está a busca.
+        objectName: campo.icone === "busca" ? "campoDeBusca" : ""
         Layout.fillWidth: true
         implicitWidth: 120
         implicitHeight: campo.altura

@@ -48,7 +48,6 @@ FocusScope {
             titulo: "Painel"
             subtitulo: "Como a loja está indo"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
         }
 
         Linha {

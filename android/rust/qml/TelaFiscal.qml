@@ -185,7 +185,6 @@ FocusScope {
                                          + " · regras válidas em " + tela.dados.data.split("-").reverse().join("/")
                                          + " · " + tela.dados.totalPecas + " peças ativas"
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
         }
 
         Flickable {

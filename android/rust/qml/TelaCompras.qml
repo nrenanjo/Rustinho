@@ -133,8 +133,9 @@ FocusScope {
         busca.focar()
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             buscar()
         } else {
@@ -183,7 +184,6 @@ FocusScope {
             titulo: "Compras"
             subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Importar XML"
                 icone: "mais"

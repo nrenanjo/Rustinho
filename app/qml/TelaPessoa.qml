@@ -205,19 +205,12 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
                 color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
-            }
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                atalho: "Esc"
-                onClicked: tela.aoEsc()
             }
             Botao {
                 text: "Salvar"

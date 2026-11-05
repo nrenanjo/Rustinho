@@ -210,7 +210,6 @@ FocusScope {
             subtitulo: "Preço e código de barras em folha A4 de etiquetas adesivas"
             textoVoltar: "Voltar"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Rotulo {
                 visible: tela.total > 0
                 text: tela.total + (tela.total === 1 ? " etiqueta" : " etiquetas") + " · " + tela.folhas + (tela.folhas === 1 ? " folha" : " folhas")

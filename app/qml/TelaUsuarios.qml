@@ -117,7 +117,6 @@ FocusScope {
                 titulo: "Usuários"
                 subtitulo: "Todos acessam todas as funções. Cada um entra com o próprio nome e senha."
                 Layout.fillWidth: true
-                onVoltar: tela.janela.voltar()
                 Botao {
                     text: "Novo usuário"
                     icone: "mais"

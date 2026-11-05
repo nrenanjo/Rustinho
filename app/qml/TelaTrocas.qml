@@ -39,8 +39,9 @@ FocusScope {
             janela.avisar("Enviado para a impressora.", "ok")
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregar()
         } else {
@@ -69,7 +70,6 @@ FocusScope {
             titulo: "Trocas e devoluções"
             subtitulo: "Peça que o cliente devolve, troca e vale-troca"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
         }
 
         Linha {

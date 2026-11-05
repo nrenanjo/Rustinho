@@ -120,7 +120,6 @@ FocusScope {
             titulo: tela.venda ? "Devolução da venda " + tela.venda.numero : "Devolução"
             subtitulo: !tela.venda ? "" : [tela.venda.quando, tela.venda.caixa, tela.venda.cliente || "Consumidor", "total R$ " + tela.venda.total].join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: !!tela.venda && tela.venda.situacao === "concluida"
                 text: "Devolver tudo"

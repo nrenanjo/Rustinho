@@ -77,8 +77,9 @@ FocusScope {
             janela.avisar("Enviado para a impressora.", "ok")
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregarPainel()
         } else {
@@ -102,7 +103,6 @@ FocusScope {
             titulo: "Vender / Receber"
             subtitulo: "Crediário e convênio: quem deve, quanto e quando vence"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Lançar dívida"
                 icone: "mais"

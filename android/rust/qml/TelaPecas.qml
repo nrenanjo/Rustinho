@@ -49,8 +49,9 @@ FocusScope {
         busca.focar()
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             buscar()
         } else {
@@ -93,7 +94,6 @@ FocusScope {
             titulo: "Peças"
             subtitulo: tela.total === 0 ? "Nenhuma peça cadastrada" : tela.total === 1 ? "1 peça cadastrada" : tela.total + " peças cadastradas"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Etiquetas"
                 icone: "impressora"

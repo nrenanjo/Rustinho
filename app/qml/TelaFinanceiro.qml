@@ -20,8 +20,9 @@ FocusScope {
             resumo = r.dados
     }
 
-    function aoEsc() {
-        if (conteudo.item && typeof conteudo.item.aoEsc === "function" && conteudo.item.aoEsc())
+    // Esc: a seção limpa a busca dela primeiro; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (janela.limparBuscaAntes(daSeta) && conteudo.item && typeof conteudo.item.aoEsc === "function" && conteudo.item.aoEsc())
             return
         janela.voltar()
     }
@@ -37,7 +38,6 @@ FocusScope {
             titulo: "Financeiro"
             subtitulo: "O que a loja deve, onde está o dinheiro e o que vem pela frente"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.secao === "pagar"
                 text: "Lançar conta"

@@ -57,7 +57,6 @@ FocusScope {
                        ? tela.estado.caixa + " · aberto " + tela.hora(tela.r.sessao.abertoEm) + " por " + tela.r.sessao.abertoPor
                        : tela.estado.caixa + " · fechado"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.aberto
                 text: "Sangria"

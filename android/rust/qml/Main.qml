@@ -93,6 +93,26 @@ ApplicationWindow {
             pilha.pop()
     }
 
+    // V-3 (0.9.18): a seta de retorno (Cabecalho) e o Esc (e o "voltar" do
+    // Android) vêm por aqui, pelo mesmo caminho: a tela de cima decide com
+    // aoEsc(daSeta), se tiver (pergunta antes de descartar, limpa a busca...);
+    // senão, volta. daSeta = true quando veio da seta.
+    function retornar(daSeta) {
+        const tela = pilha.currentItem
+        if (tela && typeof tela.aoEsc === "function")
+            tela.aoEsc(daSeta === true)
+        else
+            voltar()
+    }
+    // D-V3 (decisão em aberto; padrão provisório = como hoje): com a busca
+    // preenchida, o Esc limpa a busca primeiro e só o próximo Esc volta; a
+    // seta volta direto. false = o Esc também volta direto (igual à seta).
+    // As telas perguntam por esta função; a regra fica só aqui.
+    readonly property bool escLimpaBuscaAntes: true
+    function limparBuscaAntes(daSeta) {
+        return daSeta !== true && escLimpaBuscaAntes
+    }
+
     // Troca a tela de cima por outra (subpílulas das pílulas unidas:
     // Vender / Receber e Estoque / Fornecedores). "Voltar" continua indo
     // para onde ia antes.
@@ -510,23 +530,18 @@ ApplicationWindow {
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
         }
 
-        // Esc volta (cada tela pode decidir antes, com a função aoEsc).
+        // Esc volta, pelo mesmo caminho da seta (cada tela pode decidir
+        // antes, com a função aoEsc).
         Keys.onEscapePressed: (evento) => {
-            const tela = pilha.currentItem
-            if (tela && typeof tela.aoEsc === "function")
-                tela.aoEsc()
-            else
-                janela.voltar()
+            janela.retornar(false)
             evento.accepted = true
         }
         // Android: o "voltar" do celular faz o mesmo que o Esc. Na primeira
         // tela, deixa o Android fechar o app (o backup é feito antes).
         Keys.onBackPressed: (evento) => {
             const tela = pilha.currentItem
-            if (tela && typeof tela.aoEsc === "function")
-                tela.aoEsc()
-            else if (pilha.depth > 1)
-                janela.voltar()
+            if ((tela && typeof tela.aoEsc === "function") || pilha.depth > 1)
+                janela.retornar(false)
             else {
                 evento.accepted = false
                 return
@@ -618,12 +633,22 @@ ApplicationWindow {
         function andar(item) {
             if (!item || !item.visible || item.opacity === 0)
                 return
-            // Sem texto (o quadrado de uma notificação): o nome acessível.
-            const t = item.displayText !== undefined ? item.displayText
-                    : item.text !== undefined ? item.text : item.nomeAcessivel
+            // Sem texto (o quadrado de uma notificação, a seta sozinha de uma
+            // janelinha): o nome acessível.
+            let t = item.displayText !== undefined ? item.displayText
+                  : item.text !== undefined ? item.text : item.nomeAcessivel
+            if ((typeof t !== "string" || t.trim() === "") && typeof item.nomeAcessivel === "string")
+                t = item.nomeAcessivel
             if (typeof t === "string" && t.trim() !== "") {
                 const p = item.mapToItem(null, item.width / 2, item.height / 2)
                 linhas.push(Math.round(p.x) + "\t" + Math.round(p.y) + "\t" + t.replace(/\s+/g, " ").trim())
+            }
+            // Itens com nome (a seta de retorno, a busca da Início): onde estão
+            // e o tamanho, para os testes conferirem o lugar (0.9.18).
+            if (item.objectName !== "") {
+                const q = item.mapToItem(null, 0, 0)
+                linhas.push(Math.round(q.x + item.width / 2) + "\t" + Math.round(q.y + item.height / 2) + "\tGEO:"
+                            + item.objectName + ":" + [q.x, q.y, item.width, item.height].map(Math.round).join(","))
             }
             for (let i = 0; i < item.children.length; i++)
                 andar(item.children[i])

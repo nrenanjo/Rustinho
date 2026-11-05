@@ -51,7 +51,6 @@ FocusScope {
             subtitulo: !tela.v ? "" : [Qt.formatDateTime(new Date(tela.v.criadoEm), "dd/MM/yyyy 'às' HH:mm"), tela.v.caixa,
                                        "por " + tela.v.vendedor, tela.orcamento ? "válido até " + tela.v.validade : ""].filter(x => !!x).join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: !!tela.v && ((tela.orcamento && tela.v.situacao === "aberto") || (!tela.orcamento && tela.v.situacao === "concluida"))
                 text: tela.orcamento ? "Cancelar orçamento" : "Cancelar venda"

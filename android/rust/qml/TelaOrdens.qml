@@ -24,8 +24,9 @@ FocusScope {
         buscou = true
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregar()
         } else {
@@ -67,7 +68,6 @@ FocusScope {
                          + (tela.contagem.atrasadas > 0 ? " · " + tela.contagem.atrasadas + " passaram da previsão" : "")
                        : "O carro, as peças e a mão de obra, do orçamento à entrega"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Nova OS"
                 icone: "mais"

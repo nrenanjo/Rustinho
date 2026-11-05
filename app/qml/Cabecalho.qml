@@ -1,19 +1,20 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
-// Topo das telas: "← Voltar", título grande e, à direita, os botões.
+// Topo das telas: a seta de retorno ("← Início"), título grande e, à
+// direita, os botões.
 ColumnLayout {
     id: cabecalho
     property string titulo: ""
     property string subtitulo: ""
+    // Para onde a seta volta (o texto ao lado dela, D-V1).
     property string textoVoltar: "Início"
     property bool mostrarVoltar: true
     // Tela com CPF/CNPJ, custo, lucro ou saldos: mostra o olho no canto.
     property bool sensivel: false
     default property alias acoes: linhaAcoes.data
-
-    signal voltar()
 
     spacing: 2
 
@@ -21,17 +22,17 @@ ColumnLayout {
         spacing: 10
         Layout.fillWidth: true
         visible: cabecalho.mostrarVoltar || cabecalho.sensivel
-        Botao {
+        // V-2/V-3 (0.9.18): a seta faz o mesmo que o Esc, pelo mesmo caminho
+        // (janela.retornar): a tela decide com aoEsc, se tiver; senão, volta.
+        // Nenhuma tela trata a seta à parte.
+        Seta {
+            id: seta
             visible: cabecalho.mostrarVoltar
-            tipo: "discreto"
-            icone: "voltar"
-            text: cabecalho.textoVoltar
-            implicitHeight: 34
-            font.pixelSize: 14
-            Layout.leftMargin: -10
-            onClicked: cabecalho.voltar()
+            destino: cabecalho.textoVoltar
+            Layout.leftMargin: -seta.folga
+            onClicked: ApplicationWindow.window.retornar(true)
         }
-        Item { Layout.fillWidth: true; implicitHeight: 34 }
+        Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }
         Olho { visible: cabecalho.sensivel }
     }
 

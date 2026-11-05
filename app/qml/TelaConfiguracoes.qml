@@ -629,7 +629,6 @@ FocusScope {
                 sobre: "Versão e onde ficam os dados"
             })[tela.secao]
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"

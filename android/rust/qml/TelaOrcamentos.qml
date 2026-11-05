@@ -24,8 +24,9 @@ FocusScope {
             janela.abrir("TelaVenda", { vendaId: itens[i].id })
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             buscar()
         } else {
@@ -54,7 +55,6 @@ FocusScope {
             titulo: "Orçamentos"
             subtitulo: "Monte o orçamento na tela Vender e escolha “Orçamento”" + (Tema.celular ? "" : " (F6)")
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Novo orçamento"
                 icone: "mais"

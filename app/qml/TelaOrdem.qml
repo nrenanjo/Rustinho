@@ -331,7 +331,6 @@ FocusScope {
                        : [tela.ficha.veiculo, tela.ficha.cliente, "aberta " + tela.ficha.criadoEm + (tela.ficha.criadoPor ? " por " + tela.ficha.criadoPor : ""),
                           tela.ficha.vendaNumero ? "venda " + tela.ficha.vendaNumero : ""].filter(x => !!x).join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
