@@ -223,6 +223,44 @@ fn estab_queda_depois_de_terminar_nao_refaz() {
     let _ = std::fs::remove_dir_all(&l.pasta);
 }
 
+/// Erro DEPOIS de trocar o banco (atualizar a estrutura, pôr de volta o que
+/// é deste computador): o banco já é o do backup, com o nome, a identidade e
+/// os contadores da troca de dados de quando o backup foi feito. Até fechar e
+/// abrir (quando a restauração termina), nada é gravado e a troca de dados
+/// não roda com esse banco pela metade.
+#[test]
+fn estab_erro_depois_da_troca_nao_deixa_usar_o_banco_pela_metade() {
+    let l = loja("erro-depois-da-troca");
+    {
+        let _vez = backup::testes::um_por_vez();
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        queda_de_teste::ETAPA.with(|e| e.set("falhar_ao_terminar"));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+        queda_de_teste::ETAPA.with(|e| e.set(""));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(marca(&l).exists(), "a marca fica: a restauração termina ao abrir");
+        // A troca de dados não abre o banco pela metade.
+        assert!(crate::sync::abrir_conexao(&l.db).is_err(), "a troca de dados não pode usar o banco pela metade");
+        // Nada é gravado até fechar e abrir (nem entrando de novo).
+        let _ = chamar(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        let r = chamar(&mut s, "caixa_abrir", json!({ "valor": "10" }));
+        assert_eq!(r["ok"], false, "gravou no banco pela metade: {r}");
+        // O backup ao fechar não copia o banco pela metade.
+        let r = chamar(&mut s, "backup_ao_fechar", json!({}));
+        assert_eq!(r["dados"]["feito"], false, "{r}");
+    }
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(!marca(&l).exists());
+    assert!(crate::sync::abrir_conexao(&l.db).is_ok());
+    assert_eq!(ler(&l.db, "caixa_nome").as_deref(), Some("Caixa Nova"));
+    assert_eq!(cursor_do_outro(&l.db), 0);
+    assert_eq!(restauracoes_na_auditoria(&l.db), 1);
+    assert_eq!(numero(&l.db, "SELECT COUNT(*) FROM caixa_sessao WHERE fechado_em IS NULL"), 0);
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// Item 2: restaurar uma cópia do Google Drive. O download (aqui, um rclone
 /// que leva 3 s para "baixar") NÃO para a troca de dados com os outros caixas
 /// (antes, ela ficava parada durante todo o download, que pode levar até meia

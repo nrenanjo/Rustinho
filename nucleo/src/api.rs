@@ -1502,6 +1502,13 @@ impl Servico {
                 if seguro {
                     self.banco.conn.pragma_update(None, "query_only", true)?;
                 }
+                // O banco foi trocado mas a restauração não terminou: até
+                // fechar e abrir (quando ela termina), nada é gravado.
+                if r.is_err() && caminho.as_deref().is_some_and(crate::banco::restauracao_pela_metade) {
+                    self.comprometido = true;
+                    self.sessao = None;
+                    self.liberacoes.clear();
+                }
                 let info = r?;
                 // Os usuários podem ser outros agora: entra de novo.
                 self.sessao = None;

@@ -3124,6 +3124,11 @@ pub(crate) fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, en
 // ---------------------------------------------------------------------------
 
 pub(crate) fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
+    // 0.9.18: banco trocado por uma restauração que não terminou (ela
+    // termina ao abrir o Rustinho de novo): a troca de dados espera.
+    if banco::restauracao_pela_metade(caminho) {
+        return Err(Erro::validacao(banco::RESTAURACAO_PELA_METADE));
+    }
     let mut conn = Connection::open(caminho)?;
     conn.busy_timeout(Duration::from_secs(10))?;
     // A3: banco com defeito de integridade (modo seguro): só leitura.

@@ -1151,8 +1151,9 @@ pub fn esta_na_hora(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<b
 /// Faz o que estiver pendente: o backup do dia e o envio para o Google
 /// Drive. Roda em segundo plano (a tela chama de tempos em tempos).
 pub fn automatico(caminho_db: PathBuf) {
-    // A3: banco com defeito (modo seguro): nada automático.
-    if banco::defeito(&caminho_db).is_some() {
+    // A3: banco com defeito (modo seguro): nada automático. Nem com o banco
+    // trocado por uma restauração que não terminou (0.9.18).
+    if banco::defeito(&caminho_db).is_some() || banco::restauracao_pela_metade(&caminho_db) {
         return;
     }
     std::thread::spawn(move || {
@@ -1191,8 +1192,10 @@ pub fn agora(caminho_db: PathBuf) -> Resultado<()> {
 /// Ao fechar o Rustinho: cópia no computador (espera terminar), se a última
 /// tem mais de meia hora. O Drive fica para a próxima vez que abrir.
 pub fn ao_fechar(caminho_db: &Path) -> Resultado<bool> {
-    // A3: banco com defeito (modo seguro): não faz cópia ao fechar.
-    if banco::defeito(caminho_db).is_some() {
+    // A3: banco com defeito (modo seguro): não faz cópia ao fechar. Nem do
+    // banco trocado por uma restauração que não terminou (0.9.18): ela
+    // termina ao abrir, e só então o banco é o da loja de novo.
+    if banco::defeito(caminho_db).is_some() || banco::restauracao_pela_metade(caminho_db) {
         return Ok(false);
     }
     // Se um backup está no meio, espera ele acabar (até 2 minutos).
@@ -1619,12 +1622,26 @@ pub fn restaurar_por(
         std::process::abort();
     }
     #[cfg(test)]
-    if queda_de_teste::agora("depois_da_troca") || queda_de_teste::agora("falhar_ao_terminar") {
+    if queda_de_teste::agora("depois_da_troca") {
         return Err(queda_de_teste::erro());
     }
-    banco::migrar(conn)?;
-    sync::criar_gatilhos(conn)?;
-    pendente.aplicar(conn)?;
+    let terminar = (|| -> Resultado<()> {
+        #[cfg(test)]
+        if queda_de_teste::agora("falhar_ao_terminar") {
+            return Err(Erro::Interno("falha simulada ao terminar (teste)".into()));
+        }
+        banco::migrar(conn)?;
+        sync::criar_gatilhos(conn)?;
+        pendente.aplicar(conn)
+    })();
+    if let Err(e) = terminar {
+        // O banco já é o do backup, mas o que é deste computador (nome,
+        // identidade, contadores da troca de dados) ainda não voltou. A marca
+        // fica: ao abrir de novo, a restauração termina (D-08). Até lá a troca
+        // de dados não usa este banco (`banco::restauracao_pela_metade`).
+        crate::registro::anotar(&format!("restauração: o banco foi trocado, mas não deu para terminar: {e}"));
+        return Err(Erro::validacao(format!("{} ({e})", banco::RESTAURACAO_PELA_METADE)));
+    }
     #[cfg(test)]
     if queda_de_teste::agora("antes_de_tirar_a_marca") {
         return Err(queda_de_teste::erro());

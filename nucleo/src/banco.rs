@@ -204,6 +204,17 @@ pub fn defeito(caminho: &Path) -> Option<String> {
     defeitos().lock().unwrap_or_else(|e| e.into_inner()).get(caminho).cloned()
 }
 
+/// Uma restauração de backup trocou este banco e não terminou (a marca ao
+/// lado dele, D-08): até ela terminar ao abrir, a troca de dados não usa o
+/// banco e nada é gravado nele (0.9.18).
+pub fn restauracao_pela_metade(caminho: &Path) -> bool {
+    crate::backup::marca_da_restauracao(caminho).exists()
+}
+
+/// O motivo, para a tela e para a troca de dados.
+pub const RESTAURACAO_PELA_METADE: &str = "O backup foi copiado, mas a restauração não terminou. Feche e abra o \
+     Rustinho: ela termina ao abrir. Até lá nada é gravado e a troca de dados fica parada.";
+
 /// A3: a gravação foi recusada porque o banco está só para leitura (modo seguro)?
 pub fn erro_de_somente_leitura(e: &Erro) -> bool {
     matches!(e, Erro::Banco(rusqlite::Error::SqliteFailure(f, _)) if f.code == rusqlite::ErrorCode::ReadOnly)
