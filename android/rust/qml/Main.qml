@@ -127,6 +127,7 @@ ApplicationWindow {
 
     function trocarPara(tela, propriedades) {
         largarGuia()
+        fecharJanelinhas()
         pilha.clear(StackView.Immediate)
         pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
     }
@@ -434,6 +435,18 @@ ApplicationWindow {
     function largarGuia() {
         if (guiaAtiva)
             abandonarGuia(guiaAtiva)
+    }
+    // A pilha inteira vai ser trocada (sessão encerrada, trocar de usuário,
+    // backup restaurado): a pergunta e o pedido da senha do gerente que
+    // estiverem abertos eram da tela (e da sessão) que sai. Fecham sem fazer
+    // nada — sem confirmar e sem o "desistiu" de uma tela que já não existe.
+    // Antes, ficavam abertos por cima da tela de entrada (0.9.18, frente estab).
+    function fecharJanelinhas() {
+        dialogo.aoConfirmar = null
+        dialogo.close()
+        pedirGerente.desistiu = null
+        pedirGerente.depois = null
+        pedirGerente.close()
     }
     // A tela de destino saiu por outro caminho (Início, trocar de usuário):
     // a guia acaba sem voltar e sem marcar nada.
