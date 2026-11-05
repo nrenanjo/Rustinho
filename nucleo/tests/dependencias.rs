@@ -33,6 +33,9 @@ use std::path::{Path, PathBuf};
 /// - Etapa 1: `VERSAO` desceu para a base e `registro → api` e `backup → api`
 ///   sumiram; com elas, 90 setas saíram de ciclo. Ficam 47, em 4 componentes
 ///   (2, 3, 7 e 10 módulos).
+/// - Etapa 4 (ciclo D): o comprovante (`impressao`) recebe pronto o corpo da
+///   DRE e da lista de compra; `impressao → dre` e `impressao → reposicao`
+///   sumiram, e as 4 setas de `dre`/`impressao`/`reposicao` saíram. Ficam 43.
 #[rustfmt::skip]
 const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
     ("arquivos", &["registro"]),
@@ -42,10 +45,8 @@ const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
     ("caminhos", &["sync"]),
     ("cheques", &["receber"]),
     ("devolucoes", &["caixa"]),
-    ("dre", &["impressao"]),
     ("encomendas", &["receber"]),
     ("faixas", &["pessoas", "produtos", "sync"]),
-    ("impressao", &["dre", "reposicao"]),
     ("loja", &["banco", "faixas", "sync"]),
     ("migracao", &["banco"]),
     ("oficina", &["vendas"]),
@@ -54,7 +55,6 @@ const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
     ("produtos", &["faixas"]),
     ("receber", &["caixa", "cheques", "vendas"]),
     ("registro", &["arquivos"]),
-    ("reposicao", &["impressao"]),
     ("sync", &["banco", "caminhos", "faixas", "loja", "portatil"]),
     ("vendas", &["caixa", "cheques", "devolucoes", "encomendas", "oficina", "receber"]),
 ];

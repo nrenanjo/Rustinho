@@ -1383,11 +1383,12 @@ impl Servico {
                         }
                         let f: dre::Filtro =
                             if d.id.trim().is_empty() { dre::Filtro::default() } else { serde_json::from_str(&d.id)? };
-                        (impressao::dre(conn, &f)?, format!("dre-gerencial-{}", fiscal::hoje(conn)?))
+                        (impressao::dre(conn, &dre::html(conn, &f)?)?, format!("dre-gerencial-{}", fiscal::hoje(conn)?))
                     }
-                    "lista_compra" => {
-                        (impressao::lista_compra(conn)?, format!("lista-de-compra-{}", fiscal::hoje(conn)?))
-                    }
+                    "lista_compra" => (
+                        impressao::lista_compra(conn, &reposicao::lista_compra_html(conn)?)?,
+                        format!("lista-de-compra-{}", fiscal::hoje(conn)?),
+                    ),
                     "os" => {
                         let n: (i64, String) = conn.query_row(
                             "SELECT numero, caixa_nome FROM ordem_servico WHERE id = ?1",

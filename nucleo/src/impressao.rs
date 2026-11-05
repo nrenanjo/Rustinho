@@ -377,25 +377,29 @@ pub fn caixa(conn: &Connection, sessao_id: &str) -> Resultado<String> {
     Ok(h)
 }
 
-/// Lista de compra (sugestão), separada por fornecedor.
-pub fn lista_compra(conn: &Connection) -> Resultado<String> {
+/// Lista de compra (sugestão), separada por fornecedor. As tabelas vêm
+/// prontas de quem chama (`reposicao::lista_compra_html`): o comprovante não
+/// consulta o domínio de volta (etapa 4 da modularização).
+pub fn lista_compra(conn: &Connection, tabelas: &str) -> Resultado<String> {
     let quando =
         conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', 'now', 'localtime')", [], |l| l.get::<_, String>(0))?;
     Ok(format!(
         "<html><head>{ESTILO}</head><body>{}{}<p class=\"nota\" style=\"margin-top:14pt\">Feita em {quando}. Confira o estoque antes de pedir.</p></body></html>",
         cabecalho_loja(conn)?,
-        crate::reposicao::lista_compra_html(conn)?
+        tabelas
     ))
 }
 
-/// DRE gerencial (não é a DRE contábil).
-pub fn dre(conn: &Connection, f: &crate::dre::Filtro) -> Resultado<String> {
+/// DRE gerencial (não é a DRE contábil). O corpo vem pronto de quem chama
+/// (`dre::html`): o comprovante não consulta o domínio de volta (etapa 4 da
+/// modularização).
+pub fn dre(conn: &Connection, corpo: &str) -> Resultado<String> {
     let quando =
         conn.query_row("SELECT strftime('%d/%m/%Y às %H:%M', 'now', 'localtime')", [], |l| l.get::<_, String>(0))?;
     Ok(format!(
         "<html><head>{ESTILO}</head><body>{}{}<p class=\"nota\">Impresso em {quando}.</p></body></html>",
         cabecalho_loja(conn)?,
-        crate::dre::html(conn, f)?
+        corpo
     ))
 }
 

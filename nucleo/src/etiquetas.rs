@@ -334,7 +334,7 @@ mod comandos {
     ];
 
     fn etiquetas_opcoes(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
-        Ok(etiquetas::opcoes(p.conn)?)
+        etiquetas::opcoes(p.conn)
     }
 
     fn etiqueta_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
