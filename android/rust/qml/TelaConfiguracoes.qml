@@ -72,10 +72,28 @@ FocusScope {
                   orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
                   rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] })[nome] || null
     }
+    // O que a guia destaca: um campo, ou (caso 6, 0.9.18) a linha do primeiro
+    // caixa que bloqueia o rascunho de OS, em Simultaneidade › Caixas.
+    function alvoDaGuia(nome) {
+        if (nome === "caixa_bloqueando") {
+            for (let i = 0; i < versaoDosCaixas.count; i++) {
+                const linha = versaoDosCaixas.itemAt(i)
+                if (linha && linha.modelData.bloqueia)
+                    return [linha, "caixas"]
+            }
+            return null
+        }
+        return campoChamado(nome)
+    }
     // Guia: abre a parte do requisito e destaca o primeiro campo que falta.
     // Os campos da loja só aparecem com a senha do gerente: sem ela, pede a
-    // senha primeiro (a guia continua apontando para o botão da senha).
+    // senha primeiro (a guia continua apontando para o botão da senha). As
+    // partes da Simultaneidade pedem a senha delas ao abrir (onCompleted).
     function comecarGuia() {
+        if (partesSimultaneidade.includes(guia.requisito.propriedades.secao)) {
+            Qt.callLater(mostrarCampoDaGuia)
+            return
+        }
         if (!completo) {
             janela.guiaDestacar(botaoSenhaGerente, null)
             janela.guiaOrientar("Esta parte das configurações pede a senha do gerente.")
@@ -92,7 +110,7 @@ FocusScope {
     function mostrarCampoDaGuia() {
         if (!guia)
             return
-        const c = campoChamado(guia.requisito.campos[0])
+        const c = alvoDaGuia(guia.requisito.campos[0])
         if (!c)
             return
         secao = c[1]
@@ -211,7 +229,8 @@ FocusScope {
     // ficam ali (configurações da loja, backup e a própria Simultaneidade:
     // duplicatas, histórico e caixas). A pílula Gerente pede a senha dela
     // (FALHA-05, D-09).
-    function entrarSimultaneidade(destino, desistiu) {
+    // depois (opcional): roda com a parte já aberta (a guia destaca ali).
+    function entrarSimultaneidade(destino, desistiu, depois) {
         janela.comGerenteVarias(["configuracoes", "backup", "simultaneidade"], "Simultaneidade", () => {
             const recarregar = !tela.completo || !tela.verSimultaneidade
             tela.completo = true
@@ -221,6 +240,8 @@ FocusScope {
                 carregar()
             carregarHistorico()
             tela.secao = destino
+            if (depois)
+                depois()
         }, desistiu)
     }
 
@@ -441,6 +462,10 @@ FocusScope {
                 if (r.ok) {
                     carregarCaixas()
                     janela.avisar(c.nome + " foi retirado da loja.", "ok")
+                    // Caso 6: a guia volta à OS só se o núcleo confirmar que
+                    // nenhum caixa bloqueia mais; senão destaca o próximo.
+                    if (tela.guia && !janela.concluirGuia(true))
+                        Qt.callLater(tela.mostrarCampoDaGuia)
                 }
             }),
             "Motivo (por que sai da loja?)", "perigo")
@@ -1215,6 +1240,7 @@ FocusScope {
                     color: Tema.pergaminho
                     Layout.fillWidth: true
                     Repeater {
+                        id: versaoDosCaixas
                         model: tela.caixasConhecidos
                         delegate: RowLayout {
                             id: linhaCaixa
@@ -2085,7 +2111,16 @@ FocusScope {
         if (partesSimultaneidade.includes(secao)) {
             const destino = secao
             secao = "loja"
-            entrarSimultaneidade(destino, sairSemGerente)
+            // Com guia (caso 6): desistir da senha acaba a guia e volta à
+            // origem sem marcar nada; com a senha, a guia destaca na parte.
+            if (guia && !janela.podeGerente("simultaneidade", true))
+                janela.guiaOrientar("Esta parte das configurações pede a senha do gerente.")
+            entrarSimultaneidade(destino, guia ? () => janela.concluirGuia(false) : sairSemGerente,
+                                 guia ? () => {
+                                     janela.guiaOrientar("")
+                                     tela.comecarGuia()
+                                 } : null)
+            return
         } else if (soComGerente && !completo) {
             const destino = secao
             secao = "loja"

@@ -17,6 +17,12 @@ pub const CNPJ_DA_LOJA: &str = "loja.cnpj";
 pub const CAMPO_CNPJ_DA_LOJA: &str = "requisito:loja.cnpj";
 /// Estado (UF) e CNPJ da loja (conferência fiscal).
 pub const UF_E_CNPJ_DA_LOJA: &str = "loja.uf_cnpj";
+/// Rascunho de OS novo (caso 6 da C8, 0.9.18): nenhum caixa da loja sem
+/// confirmar uma versão que entende rascunho (veja
+/// `sync::bloqueios_de_rascunho`). Resolve-se em Configurações ›
+/// Simultaneidade › Caixas (atualizar o caixa ou retirá-lo da loja).
+pub const RASCUNHO_DE_OS: &str = "caixas.rascunho";
+pub const CAMPO_RASCUNHO_DE_OS: &str = "requisito:caixas.rascunho";
 
 /// Por que a importação de cadastros (Peças) precisa do CNPJ da loja.
 pub const PARA_CADASTROS: &str = "É por ele que o Rustinho separa as notas da loja das notas de fornecedores.";
@@ -47,6 +53,15 @@ pub fn conferir(conn: &Connection, id: &str) -> Resultado<Situacao> {
                 (false, Ok(_)) => (false, "O estado (UF) da loja ainda não está salvo.".to_string()),
                 (true, Err(falta)) => (false, falta.to_string()),
                 (false, Err(falta)) => (false, format!("O estado (UF) da loja ainda não está salvo. {falta}")),
+            }
+        }
+        RASCUNHO_DE_OS => {
+            let caixas = crate::sync::bloqueios_de_rascunho(conn)?;
+            if caixas.is_empty() {
+                (true, String::new())
+            } else {
+                let nomes = caixas.iter().map(|c| c.nome.clone()).collect::<Vec<_>>().join(", ");
+                (false, format!("{nomes} ainda não confirmou uma versão do Rustinho que entende rascunho."))
             }
         }
         _ => return Err(Erro::validacao(format!("Requisito desconhecido: {id}."))),

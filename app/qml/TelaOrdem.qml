@@ -168,6 +168,14 @@ FocusScope {
         if (!r.ok) {
             if (r.campo === "previsao")
                 previsao.focar()
+            // Caso 6 (0.9.18): bloqueado por um caixa desatualizado. A janela
+            // de saída mostra o motivo e as opções (resolver ou continuar sem
+            // rascunho); nada muda de tela sem a pessoa escolher.
+            if (r.campo === "requisito:caixas.rascunho") {
+                saida.bloqueio = r.erro
+                saida.campoBloqueio = r.campo
+                return false
+            }
             janela.avisar(r.erro, "erro")
             return false
         }
@@ -176,6 +184,25 @@ FocusScope {
         janela.avisar("Rascunho guardado. Ele fica em Ordens de serviço › Abertas para continuar depois.", "ok")
         return true
     }
+
+    // Caso 6: "Ver caixas" leva a Configurações › Simultaneidade › Caixas
+    // (o caixa que bloqueia destacado). Esta OS fica na pilha, inteira, com
+    // os itens. Na volta, o rascunho NÃO é salvo sozinho: com o requisito
+    // satisfeito, a janela de saída abre de novo para a pessoa escolher.
+    function resolverBloqueioDoRascunho() {
+        const campo = saida.campoBloqueio
+        const motivo = saida.bloqueio
+        saida.close()
+        janela.guiar(campo, motivo, satisfeito => {
+            if (satisfeito) {
+                saida.bloqueio = ""
+                saida.open()
+            }
+        })
+    }
+    // Como esta tela aparece no "voltar" da tela que ela abriu.
+    readonly property string nomeNaNavegacao: nova ? "Nova OS" : rascunho ? "Rascunho de OS"
+                                              : ficha && ficha.numero ? "OS " + ficha.numero : "OS"
 
     function excluirRascunho() {
         janela.confirmar("Excluir este rascunho?", "O que foi preenchido e os itens serão apagados.", "Excluir rascunho", () => {
@@ -889,9 +916,15 @@ FocusScope {
         onEscolhida: id => tela.addPeca(id)
     }
 
-    // Janela de saída da Nova OS: exatamente três opções.
+    // Janela de saída da Nova OS: exatamente três opções. Com o rascunho
+    // bloqueado (caso 6), as três são: ver os caixas (resolver), continuar
+    // sem rascunho (volta à OS, para salvar normalmente) ou sair sem salvar.
     Popup {
         id: saida
+        // O motivo do bloqueio do rascunho (vazio = sem bloqueio) e o
+        // requisito que o núcleo mandou.
+        property string bloqueio: ""
+        property string campoBloqueio: ""
         modal: true
         focus: true
         anchors.centerIn: T.Overlay.overlay
@@ -900,6 +933,7 @@ FocusScope {
         closePolicy: Popup.CloseOnEscape
         T.Overlay.modal: Rectangle { color: Tema.veu }
         background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
+        onClosed: bloqueio = ""
         contentItem: ColumnLayout {
             spacing: 14
             Titulo {
@@ -915,12 +949,22 @@ FocusScope {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            Text {
+                visible: saida.bloqueio !== ""
+                text: saida.bloqueio
+                color: Tema.vermelho
+                font.family: Tema.texto
+                font.pixelSize: 15
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
             Flow {
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 layoutDirection: Qt.RightToLeft
                 Botao {
+                    visible: saida.bloqueio === ""
                     text: "Salvar rascunho"
                     icone: "check"
                     tipo: "principal"
@@ -932,7 +976,13 @@ FocusScope {
                     }
                 }
                 Botao {
-                    text: "Cancelar"
+                    visible: saida.bloqueio !== ""
+                    text: "Ver caixas"
+                    tipo: "principal"
+                    onClicked: tela.resolverBloqueioDoRascunho()
+                }
+                Botao {
+                    text: saida.bloqueio !== "" ? "Continuar sem rascunho" : "Cancelar"
                     tipo: "discreto"
                     onClicked: saida.close()
                 }

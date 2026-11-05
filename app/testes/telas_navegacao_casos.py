@@ -18,6 +18,12 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      agora"), com a causa e as opções "Ver duplicatas" e "Abrir a peça"; ir e
      voltar sem resolver não libera nada; resolvida em Duplicatas, volta para
      a lista com a quantidade pedida; nada é impresso sem clique.
+  6. rascunho de OS bloqueado por um caixa desatualizado: a saída da OS
+     mostra o motivo e as opções (Ver caixas / Continuar sem rascunho / Sair
+     sem salvar); "Ver caixas" leva a Simultaneidade › Caixas com a guia e o
+     caixa destacado; desistir (Esc, ou a senha do gerente) volta à OS com
+     tudo; retirar o caixa (decisão do gerente, com motivo) volta à OS só
+     quando o núcleo confirma, e o rascunho só é salvo com o clique.
 
 Abre o Rustinho com o ambiente neutro de telas_d09.py (só X11, sem Wayland,
 sem o tema do desktop) e confere, em /proc, que ele está na tela virtual e
@@ -481,7 +487,117 @@ def caso4(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8, "5": caso5, "4": caso4}
+# ---------------------------------------------------------------------------
+# Caso 6: rascunho de OS bloqueado por um caixa desatualizado.
+# ---------------------------------------------------------------------------
+TITULO_6 = "Rascunho de OS bloqueado por um caixa desatualizado"
+
+
+def caso6(placar, fotos):
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav6-")
+    try:
+        montar_loja(pasta)
+        # Um caixa da loja que nunca confirmou a versão: bloqueia rascunho novo.
+        por_fora(pasta, "INSERT INTO sync_par (dispositivo, nome, endereco) VALUES ('caixa-2', 'Caixa 2', '10.0.0.2:47810')")
+        rascunhos = lambda: ler(pasta, "SELECT COUNT(*) FROM ordem_servico WHERE situacao = 'rascunho'")[0][0]  # noqa: E731
+
+        def preencher_e_sair(r):
+            r.esperar(lambda: r.tem("Nova OS"))
+            time.sleep(0.8)
+            r.digitar("ABC1D23")
+            time.sleep(0.5)
+            xdo("key", "Escape")
+            r.esperar(lambda: r.tem("Sair da OS?"))
+            r.clicar("Salvar rascunho")
+            return r.esperar(lambda: r.tem("Rascunho novo está bloqueado"))
+
+        # 6b. Caixa (Bia): Ver caixas pede a senha; desistir volta à OS.
+        r = placar.abrir(pasta, "TelaOrdem", {}, fotos, "6b-caixa")
+        try:
+            r.entrar("Bia")
+            os_pilha = r.pilha()
+            ok("6b: salvar rascunho bloqueado mostra o motivo na saída", preencher_e_sair(r), r.foto("-1"))
+            r.clicar("Ver caixas")
+            f = r.foto("-2")
+            ok("6b: Ver caixas pede a senha do gerente (Simultaneidade)",
+               r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar")), f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("6b: desistir da senha volta à OS", r.esperar(lambda: r.pilha() == os_pilha and r.tem("Nova OS")), f)
+            ok("6b: com a placa digitada", r.tem("ABC1D23"), f)
+            ok("6b: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
+            ok("6b: nenhum rascunho salvo", rascunhos() == 0)
+        finally:
+            r.fechar()
+
+        # 6a. Gerente (Ana): opções, desistência, resolução e volta.
+        r = placar.abrir(pasta, "TelaOrdem", {}, fotos, "6a-gerente")
+        try:
+            r.entrar("Ana")
+            os_pilha = r.pilha()
+            ok("6a: salvar rascunho bloqueado mostra o motivo na saída", preencher_e_sair(r), r.foto("-1"))
+            f = r.foto("-1")
+            ok("6a: opções: Ver caixas, Continuar sem rascunho, Sair sem salvar",
+               r.tem_igual("Ver caixas") and r.tem_igual("Continuar sem rascunho") and r.tem_igual("Sair sem salvar"), f)
+            ok("6a: o motivo diz o caixa e o lugar", r.tem("Caixa 2") and r.tem("Simultaneidade › Caixas"), f)
+            ok("6a: nada mudou de tela sozinho", r.pilha() == os_pilha, f)
+            r.clicar("Continuar sem rascunho")
+            time.sleep(1)
+            f = r.foto("-2")
+            ok("6a: Continuar sem rascunho volta à OS, com o que foi digitado",
+               not r.tem("Sair da OS?") and r.tem("ABC1D23") and r.pilha() == os_pilha, f)
+            xdo("key", "Escape")
+            r.esperar(lambda: r.tem("Sair da OS?"))
+            r.clicar("Salvar rascunho")
+            r.esperar(lambda: r.tem_igual("Ver caixas"))
+            r.clicar("Ver caixas")
+            f = r.foto("-3")
+            ok("6a: Ver caixas leva a Simultaneidade › Caixas com a orientação",
+               r.esperar(lambda: r.tem(TITULO_6) and r.tem("Versão dos caixas")), f)
+            ok("6a: o caixa que bloqueia aparece (Caixa 2)", r.tem("Caixa 2"), f)
+            ok("6a: o \"voltar\" diz Nova OS", r.tem_igual("Nova OS"), f)
+            ok("6a: uma tela por cima da OS (sem ciclo)", r.pilha() == os_pilha + 1, f)
+            xdo("key", "Escape")
+            f = r.foto("-4")
+            ok("6a: desistir (Esc) volta à OS", r.esperar(lambda: r.pilha() == os_pilha and r.tem("ABC1D23")), f)
+            ok("6a: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
+            ok("6a: nenhum rascunho salvo", rascunhos() == 0)
+            # Resolver: o gerente retira o caixa da loja (com motivo).
+            xdo("key", "Escape")
+            r.esperar(lambda: r.tem("Sair da OS?"))
+            r.clicar("Salvar rascunho")
+            r.esperar(lambda: r.tem_igual("Ver caixas"))
+            r.clicar("Ver caixas")
+            r.esperar(lambda: r.tem(TITULO_6))
+            r.rolar_ate("Retirar da loja")
+            r.clicar_ultimo("Retirar da loja")
+            r.esperar(lambda: r.tem("Retirar Caixa 2 da loja?"))
+            time.sleep(0.5)
+            r.digitar("Computador vendido")
+            time.sleep(0.3)
+            f = r.foto("-5")
+            ok("6a: retirar pede o motivo (decisão do gerente)", r.tem("Computador vendido"), f)
+            ok("6a: ainda nenhum rascunho", rascunhos() == 0)
+            xdo("key", "Return")
+            f = r.foto("-6")
+            ok("6a: resolvido, volta à OS (o núcleo confirmou)",
+               r.esperar(lambda: r.pilha() == os_pilha and r.tem("Sair da OS?"), 12), f)
+            ok("6a: avisa \"Requisito satisfeito — conclua a operação.\"", r.tem("Requisito satisfeito"), f)
+            ok("6a: a saída abre de novo com Salvar rascunho", r.tem_igual("Salvar rascunho") and not r.tem_igual("Ver caixas"), f)
+            ok("6a: o rascunho NÃO foi salvo sozinho", rascunhos() == 0)
+            ok("6a: o caixa foi retirado", len(ler(pasta, "SELECT 1 FROM config WHERE chave = 'caixa_retirado:caixa-2' AND valor <> ''")) == 1)
+            r.clicar("Salvar rascunho")
+            f = r.foto("-7")
+            ok("6a: com o clique, o rascunho é salvo (com a placa)",
+               r.esperar(lambda: rascunhos() == 1) and ler(pasta, "SELECT placa FROM ordem_servico WHERE situacao = 'rascunho'") == [("ABC1D23",)], f)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6}
 
 
 def main():

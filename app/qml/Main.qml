@@ -290,6 +290,16 @@ ApplicationWindow {
             nome: "o estado (UF) e o CNPJ da loja",
             titulo: "Para continuar, informe a UF e o CNPJ da loja",
             texto: "Escolha o estado, preencha o CNPJ e salve (F2). Depois o Rustinho volta para %1 e você continua de onde parou."
+        },
+        // Caso 6 (0.9.18): rascunho de OS novo bloqueado por um caixa sem
+        // versão confirmada. Só a pedido (botão "Ver caixas" na saída da OS);
+        // o gerente decide (atualizar o caixa ou retirá-lo da loja). O
+        // rascunho não é salvo sozinho na volta.
+        "caixas.rascunho": {
+            tela: "TelaConfiguracoes", propriedades: { secao: "caixas" }, campos: ["caixa_bloqueando"],
+            nome: "a confirmação de versão de todos os caixas",
+            titulo: "Rascunho de OS bloqueado por um caixa desatualizado",
+            texto: "Atualize o Rustinho no caixa destacado e deixe trocar dados, ou retire-o da loja (decisão do gerente). Quando nenhum caixa bloquear, o Rustinho volta para %1 e você salva o rascunho."
         }
     })
     property var guiaAtiva: null

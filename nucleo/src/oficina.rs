@@ -463,12 +463,14 @@ pub fn salvar_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, e
         let bloqueios = crate::sync::bloqueios_de_rascunho(conn)?;
         if !bloqueios.is_empty() {
             let nomes = bloqueios.iter().map(|b| b.nome.clone()).collect::<Vec<_>>().join(", ");
+            // Caso 6 (C8, 0.9.18): o campo diz o requisito, para a tela
+            // oferecer o lugar de resolver (sem desviar sozinha).
             return Err(Erro::campo(
-                "rascunho",
+                crate::requisitos::CAMPO_RASCUNHO_DE_OS,
                 format!(
                     "Rascunho novo está bloqueado: {nomes} ainda não confirmou uma versão do Rustinho que entende \
                      rascunho. Atualize o Rustinho nesse caixa e deixe trocar dados, ou retire-o da loja em \
-                     Configurações › Caixas da loja. Você pode salvar a OS normalmente."
+                     Configurações › Simultaneidade › Caixas. Você pode salvar a OS normalmente."
                 ),
             ));
         }
