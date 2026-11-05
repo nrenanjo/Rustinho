@@ -102,6 +102,10 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Aviso de caixa sem contato:** com a troca de dados ligada, um caixa da loja que não troca dados com este há **24 horas** ou mais aparece no Início como **Atenção**, com a hora da última troca e o que fazer (ver se ele está ligado e na mesma rede, ou retirá-lo da loja). O aviso some sozinho na primeira troca que der certo.
 - **Android 12 ou mais novo:** os dados do Rustinho não entram no backup do Google nem na transferência de um celular para outro. O backup da loja é o do próprio Rustinho (Configurações › Backup).
 - **Operações demoradas:** a trava contra o clique duplo sempre se solta no fim, mesmo quando a operação para com um erro inesperado.
+- **Notificações:** o botão das notificações de diferenças entre caixas e de códigos repetidos agora diz **Ver duplicatas** (antes, "Resolver no Gerente"), que é para onde ele leva (Configurações › Simultaneidade › Duplicatas).
+- **Senha do gerente pedida por uma notificação:** se quem está usando é caixa, abre uma notificação que leva a uma parte do gerente e desiste da senha (Voltar ou Esc), o Rustinho volta para a tela de antes, em vez de deixar a pessoa em Configurações › Loja.
+- **Navegação guiada e sessão encerrada:** se a sessão acaba no meio de uma navegação guiada (usuário desativado em outro caixa, backup restaurado), a faixa de orientação e o escurecimento somem antes de a tela de entrada aparecer.
+- **Importar várias notas de compra:** a mensagem final não diz mais que a assinatura digital não é conferida: ela é conferida em toda nota importada (nota sem assinatura válida é recusada).
 
 ### Novo na versão 0.9.15 (correções da auditoria)
 
