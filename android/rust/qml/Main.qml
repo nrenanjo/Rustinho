@@ -622,6 +622,11 @@ ApplicationWindow {
     // Ctrl+Shift+F12 escreve na saída cada texto que está na tela e onde
     // (sem senhas: os campos de senha dão os pontinhos). Sem a opção, nada.
     readonly property bool textosDaTela: Qt.application.arguments.indexOf("--textos-da-tela") >= 0
+    // A15 (0.9.18), também só com a opção dos testes: --celular desenha as
+    // telas como no celular (Tema.celular, numa tela virtual) e --medir-toque
+    // acrescenta a área de toque de cada controle (linhas TOQUE:) e o
+    // retângulo de cada texto (linhas RET:).
+    readonly property bool medirToque: textosDaTela && Qt.application.arguments.indexOf("--medir-toque") >= 0
     Shortcut {
         sequence: "Ctrl+Shift+F12"
         enabled: janela.textosDaTela
@@ -650,6 +655,8 @@ ApplicationWindow {
                 linhas.push(Math.round(q.x + item.width / 2) + "\t" + Math.round(q.y + item.height / 2) + "\tGEO:"
                             + item.objectName + ":" + [q.x, q.y, item.width, item.height].map(Math.round).join(","))
             }
+            if (janela.medirToque)
+                medir(item, linhas)
             for (let i = 0; i < item.children.length; i++)
                 andar(item.children[i])
         }
@@ -665,6 +672,71 @@ ApplicationWindow {
         // confirmar que Fiscal → Loja reutiliza Configurações sem empilhar outra tela.
         linhas.push("0\t0\tTESTE_PILHA:" + pilha.depth)
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
+    }
+    // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas
+    // de marcar e listas (AbstractButton, ComboBox), campos de texto,
+    // MouseArea e TapHandler (com a margem dele). Uma linha por controle:
+    // TOQUE:tipo|componente|classe|nome|x,y,largura,altura|ativo, em pixels
+    // lógicos da janela (no celular, dp). E RET: o retângulo de cada texto
+    // (x,y,largura,altura,largura e altura do desenho,largura natural), para
+    // conferir que nada fica por cima dele nem o espreme.
+    function medir(item, linhas) {
+        function classe(o) {
+            return String(o).split("(")[0].replace(/(_QMLTYPE_\d+|_QML_\d+)+$/, "")
+        }
+        function componente(o) {
+            for (let p = o; p; p = p.parent) {
+                const c = classe(p)
+                if (!c.startsWith("QQuick") && !c.startsWith("QObject"))
+                    return c
+            }
+            return classe(o)
+        }
+        function nome(o, fundo) {
+            let t = typeof o.text === "string" ? o.text : ""
+            if (t.trim() === "" && typeof o.nomeAcessivel === "string")
+                t = o.nomeAcessivel
+            if (t.trim() === "" && typeof o.displayText === "string")
+                t = o.displayText
+            if (t.trim() === "" && fundo > 0)
+                for (let i = 0; i < o.children.length && t.trim() === ""; i++)
+                    if (o.children[i].visible)
+                        t = nome(o.children[i], fundo - 1)
+            return t.replace(/[\s|]+/g, " ").trim()
+        }
+        function linha(tipo, o, dono, margem) {
+            if (o.width <= 0 || o.height <= 0)
+                return
+            const q = o.mapToItem(null, -margem, -margem)
+            const w = o.width + 2 * margem, h = o.height + 2 * margem
+            linhas.push(Math.round(q.x + w / 2) + "\t" + Math.round(q.y + h / 2) + "\tTOQUE:" + tipo + "|"
+                        + componente(dono) + "|" + classe(dono) + "|" + (nome(dono, 4) || "-") + "|"
+                        + [q.x, q.y, w, h].map(v => Math.round(v * 10) / 10).join(",") + "|" + (o.enabled ? 1 : 0))
+        }
+        let tipo = ""
+        if (item.autoRepeat !== undefined && item.checkable !== undefined)
+            tipo = "botao"
+        else if (item.currentIndex !== undefined && item.popup !== undefined && item.displayText !== undefined)
+            tipo = "lista"
+        else if (item.pressAndHoldInterval !== undefined && item.acceptedButtons !== undefined)
+            tipo = item.enabled ? "mousearea" : ""
+        else if (item.cursorPosition !== undefined && item.readOnly === false)
+            tipo = "campo"
+        if (tipo !== "")
+            linha(tipo, item, tipo === "mousearea" && item.parent ? item.parent : item, 0)
+        const rs = item.resources
+        for (let k = 0; rs && k < rs.length; k++) {
+            const h = rs[k]
+            if (h && h.gesturePolicy !== undefined && h.tapCount !== undefined && h.enabled)
+                linha("tap", item, item, h.margin || 0)
+        }
+        if (item.contentWidth !== undefined && item.horizontalAlignment !== undefined && item.font !== undefined
+                && item.cursorPosition === undefined && typeof item.text === "string" && item.text.trim() !== "") {
+            const q = item.mapToItem(null, 0, 0)
+            linhas.push(Math.round(q.x + item.width / 2) + "\t" + Math.round(q.y + item.height / 2) + "\tRET:"
+                        + [q.x, q.y, item.width, item.height, item.contentWidth, item.contentHeight, item.implicitWidth].map(v => Math.round(v * 10) / 10).join(",")
+                        + "|" + item.horizontalAlignment + "|" + componente(item) + "|" + item.text.replace(/[\s|]+/g, " ").trim())
+        }
     }
 
     Aviso { id: aviso }
@@ -882,6 +954,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (textosDaTela && Qt.application.arguments.indexOf("--celular") >= 0)
+            Tema.simularCelular = true
         marcarDiagnostico("Main.qml: início")
         janela.showMaximized()
         abrirBanco()

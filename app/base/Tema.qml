@@ -210,7 +210,11 @@ QtObject {
     readonly property bool estreito: largura < 760 || (baixo && largura < 1100)
     // Só a largura: em pé é fino; deitado não (linhas de campos cabem lado a lado).
     readonly property bool fino: largura < 760
-    readonly property bool celular: Qt.platform.os === "android" || Qt.platform.os === "ios"
+    readonly property bool celular: Qt.platform.os === "android" || Qt.platform.os === "ios" || simularCelular
+    // Só para os testes das telas (A15, 0.9.18): o desenho do celular no
+    // computador, numa tela virtual. A janela principal liga só com as opções
+    // dos testes (--textos-da-tela --celular); no uso normal é sempre false.
+    property bool simularCelular: false
 
     // ---- Medidas ----
     readonly property real raio: 11                 // cantos das faixas (3 mm no livro)
