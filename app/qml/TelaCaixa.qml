@@ -317,18 +317,14 @@ FocusScope {
     }
 
     // Sangria / suprimento
-    Popup {
+    Painel {
         id: movimento
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         property string tipo: "sangria"
         property var contas: []
         property string chave: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(480, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         function abrirCom(t) {
             chave = Api.novaChave()
             tipo = t
@@ -360,7 +356,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: movimento.close() }
                 Botao {
                     id: botaoMov
                     text: "Confirmar"
@@ -385,15 +380,11 @@ FocusScope {
     }
 
     // Fechar
-    Popup {
+    Painel {
         id: fechar
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(520, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         property string chave: ""
         function abrirCom() {
             chave = Api.novaChave()
@@ -414,7 +405,6 @@ FocusScope {
             AreaTexto { id: obs; rotulo: "Observações"; Layout.fillWidth: true }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: fechar.close() }
                 Botao {
                     id: botaoFechar
                     text: "Fechar e imprimir"

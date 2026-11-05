@@ -447,21 +447,14 @@ FocusScope {
     }
 
     // ---------- Receber ----------
-    Popup {
+    Painel {
         id: pagar
         property var calc: null
         property string forma: "dinheiro"
         property string erro: ""
         // FALHA-04: chave deste recebimento (nova a cada vez que a janela abre).
         property string chave: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(660, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function entrada() {
             return { clienteId: tela.clienteId, contas: tela.marcadas, valor: valor.texto, juros: juros.texto,
@@ -614,7 +607,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; atalho: "Esc"; onClicked: pagar.close() }
                 Botao { text: "Receber"; icone: "check"; atalho: "Enter"; onClicked: pagar.concluir() }
             }
         }
@@ -622,17 +614,12 @@ FocusScope {
     }
 
     // ---------- Recebido ----------
-    Popup {
+    Painel {
         id: feito
         property var recibo: null
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
         padding: 32
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
+        cor: Tema.verde
         contentItem: ColumnLayout {
             spacing: 12
             Titulo {
@@ -675,7 +662,7 @@ FocusScope {
     }
 
     // ---------- Lançar dívida ----------
-    Popup {
+    Painel {
         id: lancar
         // FALHA-04: chave deste lançamento (nova a cada vez que a janela abre).
         property string chave: ""
@@ -684,14 +671,7 @@ FocusScope {
         property var achados: []
         property var previa: []
         property string erro: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(580, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(conta) {
             chave = Api.novaChave()
@@ -854,7 +834,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: lancar.close() }
                 Botao { text: "Lançar"; icone: "check"; enabled: lancar.cliente !== ""; onClicked: lancar.salvar() }
             }
         }
@@ -862,21 +841,14 @@ FocusScope {
     }
 
     // ---------- Pergunta com motivo (estornar, tirar dívida) ----------
-    Popup {
+    Painel {
         id: motivo
         property string titulo: ""
         property string mensagem: ""
         property string textoBotao: ""
         property var acao: null
         property string erro: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(500, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function perguntar(titulo, mensagem, textoBotao, acao) {
             motivo.titulo = titulo
@@ -913,7 +885,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: motivo.close() }
                 Botao { text: motivo.textoBotao; tipo: "perigo"; onClicked: motivo.confirmar() }
             }
         }

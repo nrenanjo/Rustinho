@@ -440,10 +440,13 @@ FocusScope {
     }
 
     // ---------- Devolução feita ----------
+    // A seta, o Esc e o imprimir fecham e voltam para a tela de antes (fim
+    // da operação; antes, o "Fechar" fazia isso e o Esc só fechava).
     Painel {
         id: pronto
         cor: Tema.verde
         width: Math.min(520, Tema.largura - 24)
+        onClosed: tela.janela.voltar()
         contentItem: ColumnLayout {
             spacing: 12
             Titulo { text: "Devolução feita"; font.pixelSize: 34; Layout.fillWidth: true }
@@ -456,11 +459,10 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: { pronto.close(); tela.janela.voltar() } }
                 Botao {
                     text: "Imprimir comprovante"
                     icone: "impressora"
-                    onClicked: { tela.imprimir(); pronto.close(); tela.janela.voltar() }
+                    onClicked: { tela.imprimir(); pronto.close() }
                 }
             }
         }

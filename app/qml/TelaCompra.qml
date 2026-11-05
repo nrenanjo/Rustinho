@@ -634,7 +634,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: conferencia.close() }
                 Botao {
                     text: conferencia.bloqueia ? "Registrar e bloquear" : "Registrar"
                     icone: conferencia.bloqueia ? "" : "check"
@@ -645,14 +644,11 @@ FocusScope {
         }
     }
 
-    Popup {
+    Painel {
         id: caixaEstorno
-        modal: true
-        focus: true
-        anchors.centerIn: parent
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(480, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14
             Titulo { text: "Estornar a compra?"; font.pixelSize: 30; Layout.fillWidth: true }
@@ -670,7 +666,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: caixaEstorno.close() }
                 Botao {
                     id: botaoEstornar
                     text: "Estornar"

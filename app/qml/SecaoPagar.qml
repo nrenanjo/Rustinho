@@ -339,7 +339,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: lancamento.close() }
                 Botao { text: "Lançar"; icone: "check"; onClicked: lancamento.salvar() }
             }
         }
@@ -510,7 +509,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; atalho: "Esc"; onClicked: pagamento.close() }
                 Botao { text: "Pagar"; icone: "check"; atalho: "Enter"; onClicked: pagamento.concluir() }
             }
         }
@@ -661,7 +659,6 @@ FocusScope {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: ficha.close() }
                 Botao {
                     visible: ficha.aberta
                     text: "Pagar"
@@ -726,7 +723,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: correcao.close() }
                 Botao { text: "Salvar"; icone: "check"; onClicked: correcao.salvar() }
             }
         }

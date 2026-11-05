@@ -923,20 +923,14 @@ FocusScope {
     // Janela de saída da Nova OS: exatamente três opções. Com o rascunho
     // bloqueado (caso 6), as três são: ver os caixas (resolver), continuar
     // sem rascunho (volta à OS, para salvar normalmente) ou sair sem salvar.
-    Popup {
+    Painel {
         id: saida
         // O motivo do bloqueio do rascunho (vazio = sem bloqueio) e o
         // requisito que o núcleo mandou.
         property string bloqueio: ""
         property string campoBloqueio: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(560, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 28
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         onClosed: bloqueio = ""
         contentItem: ColumnLayout {
             spacing: 14
@@ -984,11 +978,6 @@ FocusScope {
                     text: "Ver caixas"
                     tipo: "principal"
                     onClicked: tela.resolverBloqueioDoRascunho()
-                }
-                Botao {
-                    text: saida.bloqueio !== "" ? "Continuar sem rascunho" : "Cancelar"
-                    tipo: "discreto"
-                    onClicked: saida.close()
                 }
                 Botao {
                     text: "Sair sem salvar"

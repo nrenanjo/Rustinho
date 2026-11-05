@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import rustinho
 
 // Janela para escolher uma peça (usada na compra).
-Popup {
+Painel {
     id: janela
     property string referencia: ""
     property var itens: []
@@ -14,16 +14,11 @@ Popup {
 
     signal escolhida(string produtoId)
 
-    modal: true
-    focus: true
-    anchors.centerIn: T.Overlay.overlay
     width: Math.min(1000, (T.Overlay.overlay ? T.Overlay.overlay.width : 1200) - 80)
     height: Math.min(640, (T.Overlay.overlay ? T.Overlay.overlay.height : 800) - 80)
     padding: 28
-    closePolicy: Popup.CloseOnEscape
 
-    T.Overlay.modal: Rectangle { color: Tema.veu }
-    background: Rectangle { color: Tema.fundo; radius: Tema.raio + 3 }
+    cor: Tema.fundo
 
     function abrirCom(referencia, textoInicial) {
         janela.referencia = referencia
@@ -125,12 +120,6 @@ Popup {
                 text: "↑ ↓ para escolher, Enter para confirmar"
                 font.pixelSize: 14
                 Layout.fillWidth: true
-            }
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                atalho: "Esc"
-                onClicked: janela.close()
             }
             Botao {
                 text: "Usar esta peça"

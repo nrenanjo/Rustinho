@@ -346,7 +346,6 @@ Painel {
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 Item { Layout.fillWidth: true }
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: painel.close() }
                 Botao {
                     visible: !!painel.previa
                     text: "Cadastrar"

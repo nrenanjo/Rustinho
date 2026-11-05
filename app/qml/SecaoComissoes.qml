@@ -266,7 +266,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: fechamento.close() }
                 Botao { text: "Fechar e lançar"; icone: "check"; onClicked: fechamento.salvar() }
             }
         }

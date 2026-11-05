@@ -882,19 +882,12 @@ FocusScope {
     }
 
     // ---------- Receber ----------
-    Popup {
+    Painel {
         id: receber
         property string total: "0,00"
         property string erro: ""
         property var calc: null
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(660, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(total) {
             receber.total = total
@@ -1198,12 +1191,6 @@ FocusScope {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
                 Botao {
-                    text: "Voltar"
-                    tipo: "discreto"
-                    atalho: "Esc"
-                    onClicked: receber.close()
-                }
-                Botao {
                     id: botaoConcluir
                     text: "Concluir venda"
                     icone: "check"
@@ -1216,16 +1203,11 @@ FocusScope {
     }
 
     // ---------- Venda concluída ----------
-    Popup {
+    Painel {
         id: concluida
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
         padding: 32
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
+        cor: Tema.verde
         contentItem: ColumnLayout {
             spacing: 12
             Titulo {
@@ -1283,16 +1265,9 @@ FocusScope {
     }
 
     // ---------- Salvar orçamento ----------
-    Popup {
+    Painel {
         id: caixaOrcamento
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom() {
             validade.texto = String(tela.janela.estado.validadeOrcamento || 7)
@@ -1328,7 +1303,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: caixaOrcamento.close() }
                 Botao {
                     text: "Salvar e imprimir"
                     icone: "check"

@@ -385,7 +385,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: cadastro.close() }
                 Botao { text: "Salvar"; icone: "check"; onClicked: cadastro.salvar() }
             }
         }
@@ -454,7 +453,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: movimento.close() }
                 Botao { text: "Lançar"; icone: "check"; onClicked: movimento.salvar() }
             }
         }
@@ -528,7 +526,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: transferencia.close() }
                 Botao { text: "Transferir"; icone: "check"; enabled: transferencia.outras.length > 0; onClicked: transferencia.salvar() }
             }
         }
@@ -570,7 +567,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: conferencia.close() }
                 Botao { text: "Conferir"; icone: "check"; onClicked: conferencia.salvar() }
             }
         }

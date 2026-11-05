@@ -133,7 +133,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Cancelar"; tipo: "discreto"; onClicked: janelinha.close() }
             Botao { text: "Salvar"; icone: "check"; onClicked: janelinha.salvar() }
         }
     }

@@ -271,12 +271,6 @@ Painel {
                     janelaConflito.descartar(c)
                 }
             }
-            Botao {
-                text: "Cancelar"
-                tipo: "secundario"
-                atalho: "Esc"
-                onClicked: janelaConflito.close()
-            }
         }
     }
 }

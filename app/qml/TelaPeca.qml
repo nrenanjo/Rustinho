@@ -1374,7 +1374,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: painelVariacao.close() }
                 Botao { text: "Criar"; icone: "mais"; onClicked: tela.criarVariacao() }
             }
         }

@@ -107,11 +107,5 @@ Painel {
             font.pixelSize: 13
             Layout.fillWidth: true
         }
-        Botao {
-            text: "Fechar"
-            tipo: "discreto"
-            Layout.alignment: Qt.AlignRight
-            onClicked: janelinha.close()
-        }
     }
 }

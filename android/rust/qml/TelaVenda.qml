@@ -310,15 +310,11 @@ FocusScope {
         }
     }
 
-    Popup {
+    Painel {
         id: caixaCancelar
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(500, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14
             Titulo { text: tela.orcamento ? "Cancelar o orçamento?" : "Cancelar a venda?"; font.pixelSize: 30; Layout.fillWidth: true }
@@ -337,7 +333,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: caixaCancelar.close() }
                 Botao {
                     id: botaoCancelar
                     text: tela.orcamento ? "Cancelar orçamento" : "Cancelar venda"

@@ -298,7 +298,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: deposito.close() }
                 Botao { text: "Depositar"; icone: "check"; onClicked: deposito.salvar() }
             }
         }
@@ -346,7 +345,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: devolucao.close() }
                 Botao { text: "Registrar"; tipo: "perigo"; onClicked: devolucao.salvar() }
             }
         }

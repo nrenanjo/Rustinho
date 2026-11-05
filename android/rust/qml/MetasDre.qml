@@ -166,7 +166,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Fechar"; tipo: "discreto"; onClicked: janelinha.close() }
             Botao {
                 id: salvarBotao
                 text: "Salvar meta"

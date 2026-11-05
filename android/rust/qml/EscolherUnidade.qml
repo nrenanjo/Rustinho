@@ -120,7 +120,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Voltar"; tipo: "discreto"; onClicked: escolher.close() }
             Botao { text: "Criar e usar"; icone: "mais"; onClicked: escolher.criar() }
         }
     }
