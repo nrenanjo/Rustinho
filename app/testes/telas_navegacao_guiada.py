@@ -97,6 +97,30 @@ def brilho(c):
     return sum(c) / 3
 
 
+# Escurecimento da guia (A11), em Configurações › Loja com a faixa no alto:
+# o campo CNPJ (no destaque) e o campo Endereço (fora dele) têm a mesma cor sem
+# o véu; com o véu, o de fora fica mais escuro. Vale nos três temas.
+CAMPO_NO_DESTAQUE = (270, 496)
+CAMPO_FORA = (700, 575)
+FUNDO = (1200, 740)
+
+
+def escurecimento(com_guia, sem_guia):
+    """(passou, detalhe). Mede o campo no destaque contra o campo fora, na
+    mesma foto. Onde o fundo não é preto, confere também o mesmo ponto do
+    fundo com e sem a guia (no AMOLED o fundo é #000000 e não tem como
+    escurecer)."""
+    dentro = brilho(pixel(com_guia, *CAMPO_NO_DESTAQUE))
+    fora = brilho(pixel(com_guia, *CAMPO_FORA))
+    antes = brilho(pixel(sem_guia, *FUNDO))
+    depois = brilho(pixel(com_guia, *FUNDO))
+    fundo_conta = antes > 15
+    passou = dentro - fora > 15 and (not fundo_conta or antes - depois > 15)
+    detalhe = (f"campo {dentro:.0f} no destaque, {fora:.0f} fora; fundo {antes:.0f} → {depois:.0f}"
+               + ("" if fundo_conta else " (preto, não conta)"))
+    return passou, detalhe
+
+
 def janela_de_arquivos(titulo, segundos=10):
     """(x, y, largura, altura, id) da janela de arquivos ou de pasta do Qt com esse
     título, ou None. Desde o Qt 6.8, no X11, ela abre numa janela à parte
@@ -315,9 +339,9 @@ def main():
                               tem=["Falta o CNPJ da loja", "volta para Peças"],
                               igual=["Peças", "Configurações"], sem_igual=["Início"])
             ok("A: uma orientação só", sum(1 for _, _, x in t if simples(x) == simples("Falta o CNPJ da loja")) == 1, f)
-            # Escurecimento: um ponto do fundo longe do campo fica mais escuro
-            # que o mesmo ponto sem guia.
-            ok("A: o resto da tela escurece", brilho(pixel(f, 1200, 740)) < brilho(pixel(sem_guia, 1200, 740)) - 15, f)
+            # Escurecimento: fora do destaque fica mais escuro (ver escurecimento()).
+            passou, detalhe = escurecimento(f, sem_guia)
+            ok(f"A: o resto da tela escurece ({detalhe})", passou, f)
             ok("A: nada gravado ainda", cnpj_gravado(pasta) == "")
             # CNPJ inválido: fica, mostra o erro, mantém o digitado.
             r.digitar_cnpj(CNPJ_RUIM)

@@ -293,7 +293,8 @@ def main():
                 certo &= conferir("A: orientação e origem no voltar", f, r.textos(),
                                   tem=["Falta o CNPJ da loja", "volta para Compras", "CNPJ da loja"],
                                   igual=["Compras", "Configurações"], sem_igual=["Início"])
-                ok("A: o resto da tela escurece", brilho(pixel(f, 1200, 740)) < brilho(pixel(sem_guia, 1200, 740)) - 15, f)
+                passou, detalhe = nav.escurecimento(f, sem_guia)
+                ok(f"A: o resto da tela escurece ({detalhe})", passou, f)
                 ok("A: nada importado", compras(pasta) == antes)
                 r.digitar_cnpj(CNPJ_RUIM)
                 certo &= conferir("A: CNPJ inválido fica", r.foto("-2-invalido"), r.textos(),
