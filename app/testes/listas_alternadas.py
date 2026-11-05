@@ -54,6 +54,7 @@ CLASSES = {
     ("Notificacao.qml", "(raiz.aviso.detalhes"): ("FORA", RESUMO + " (detalhes da notificação)"),
     ("PainelCheques.qml", "painel.calc ? painel.calc.cheques"): ("FORA", PREVIA + " (cheques da conta, em linha)"),
     ("Pilulas.qml", "pilulas.modelo"): ("FORA", ESCOLHA),
+    ("LinhaItemCompra.qml", "linha.botoesDecisao"): ("FORA", ESCOLHA + " (botões da decisão do item da compra, PEND-17)"),
     ("SecaoBackup.qml", "!secao.b ? [] : ["): ("FORA", RESUMO + " (situação do backup)"),
     ("SecaoBackup.qml", "{ const lista"): ("LISTA", "backups guardados"),
     ("SecaoCheques.qml", "secao.painel ? secao.painel.cheques"): ("LISTA", "cheques"),
@@ -181,7 +182,11 @@ CLASSES = {
 }
 
 # Classificações que valem para mais de um delegado do mesmo arquivo, de propósito.
-REPETIDAS = set()
+REPETIDAS = {
+    # PEND-17 (0.9.18): os mesmos botões da decisão em dois lugares (ao lado
+    # do texto no computador, embaixo dele no celular); só um aparece.
+    ("LinhaItemCompra.qml", "linha.botoesDecisao"),
+}
 
 # Os componentes de linha (Linha*.qml): os de lista alternam; os de formulário esperam a D-V5.
 LINHAS = {
