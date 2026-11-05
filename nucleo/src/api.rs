@@ -3478,6 +3478,8 @@ mod testes {
         assert_eq!(r["dados"]["opcoes"].as_array().unwrap().len(), 2);
         let e = chamar(&mut s, "etiqueta_previa", json!({ "id": p }));
         assert!(e["dados"]["bloqueio"].as_str().unwrap().contains("também é da peça"), "{e}");
+        // Caso 4 (C8): diz a parte certa de resolver.
+        assert!(e["dados"]["bloqueio"].as_str().unwrap().contains("Simultaneidade › Duplicatas"), "{e}");
         let pedido = json!({ "itens": [{ "produtoId": p, "quantidade": 1 }], "modelo": "", "inicio": 1,
                              "barras": true, "loja": false, "ajusteX": 0, "ajusteY": 0 });
         let i = chamar(&mut s, "impressao", json!({ "tipo": "etiquetas", "id": pedido.to_string() }));

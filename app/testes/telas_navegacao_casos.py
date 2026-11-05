@@ -14,6 +14,10 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      por cima da transferência; desistir volta a ela com o que foi digitado;
      salvar volta com a conta nova escolhida, sem transferir; só o clique em
      Transferir transfere.
+  4. etiquetas com código ambíguo: a peça bloqueada fica à parte ("Não saem
+     agora"), com a causa e as opções "Ver duplicatas" e "Abrir a peça"; ir e
+     voltar sem resolver não libera nada; resolvida em Duplicatas, volta para
+     a lista com a quantidade pedida; nada é impresso sem clique.
 
 Abre o Rustinho com o ambiente neutro de telas_d09.py (só X11, sem Wayland,
 sem o tema do desktop) e confere, em /proc, que ele está na tela virtual e
@@ -393,7 +397,91 @@ def caso5(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8, "5": caso5}
+# ---------------------------------------------------------------------------
+# Caso 4: etiquetas bloqueadas por código ambíguo.
+# ---------------------------------------------------------------------------
+def caso4(placar, fotos):
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav4-")
+    try:
+        montar_loja(pasta)
+        compra = ler(pasta, "SELECT id FROM compra ORDER BY rowid LIMIT 1")[0][0]
+        itens = ler(pasta, "SELECT DISTINCT i.produto_id, p.nome FROM compra_item i JOIN produto p ON p.id = i.produto_id "
+                           "WHERE i.compra_id = ? ORDER BY i.ordem", compra)
+        travada_id, travada = itens[0]
+        filtro_codigo = ler(pasta, "SELECT codigo FROM produto WHERE nome = 'Filtro de óleo'")[0][0]
+        # O código da primeira peça da compra passa a ser também o do filtro
+        # (como dois caixas que deram o mesmo código).
+        por_fora(pasta, f"UPDATE produto SET codigo = '{filtro_codigo}' WHERE id = '{travada_id}'")
+        codigo = lambda pid: ler(pasta, "SELECT codigo FROM produto WHERE id = ?", pid)[0][0]  # noqa: E731
+        impresso = lambda: ler(pasta, "SELECT COUNT(*) FROM config WHERE chave = 'etiqueta_modelo'")[0][0]  # noqa: E731
+        ok("4: a peça da compra ficou com o código de outra", codigo(travada_id) == filtro_codigo)
+        r = placar.abrir(pasta, "TelaEtiquetas", {"compraId": compra}, fotos, "4-etiquetas")
+        try:
+            r.entrar("Ana")
+            f = r.foto("-0")
+            r.esperar(lambda: r.tem("Não saem agora"))
+            f = r.foto("-1")
+            etiquetas = r.pilha()
+            ok("4: a peça bloqueada fica à parte (Não saem agora), com o nome", r.tem("Não saem agora") and r.tem(travada), f)
+            ok("4: com a causa (o código leva a outra peça)", r.tem("também é da peça") and r.tem("Filtro de óleo"), f)
+            ok("4: e a parte certa (Simultaneidade › Duplicatas)", r.tem("Simultaneidade › Duplicatas"), f)
+            ok("4: as opções Ver duplicatas e Abrir a peça", r.tem_igual("Ver duplicatas") and r.tem_igual("Abrir a peça"), f)
+            outras = [n for _, n in itens[1:]]
+            ok("4: as outras peças da compra estão na lista", all(r.tem(n) for n in outras), f)
+            lista_antes = sorted(t for _, _, t in r.textos() if simples(t).endswith("etiq.") or "etiqueta" in simples(t))
+            # Ver duplicatas e voltar sem resolver: continua bloqueada.
+            r.clicar("Ver duplicatas")
+            f = r.foto("-2")
+            ok("4: Ver duplicatas abre Simultaneidade › Duplicatas (códigos das peças)",
+               r.esperar(lambda: r.tem("Códigos das peças") and r.tem_igual("Dar código novo")), f)
+            ok("4: Configurações por cima das Etiquetas (uma só)", r.pilha() == etiquetas + 1, f)
+            ok("4: o \"voltar\" diz Etiquetas", r.tem_igual("Etiquetas"), f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("4: Esc volta às Etiquetas", r.esperar(lambda: r.pilha() == etiquetas), f)
+            ok("4: sem resolver, continua bloqueada (nada liberado)",
+               r.tem("Não saem agora") and r.tem("também é da peça") and codigo(travada_id) == filtro_codigo, f)
+            lista_depois = sorted(t for _, _, t in r.textos() if simples(t).endswith("etiq.") or "etiqueta" in simples(t))
+            ok("4: a lista de etiquetas continua igual", lista_antes == lista_depois, f)
+            # Abrir a peça e voltar.
+            r.clicar("Abrir a peça")
+            f = r.foto("-4")
+            ok("4: Abrir a peça abre o cadastro da peça", r.esperar(lambda: r.pilha() == etiquetas + 1 and r.tem(travada)), f)
+            ok("4: o \"voltar\" da peça diz Etiquetas", r.tem_igual("Etiquetas"), f)
+            xdo("key", "Escape")
+            f = r.foto("-5")
+            ok("4: Esc volta às Etiquetas, ainda bloqueada",
+               r.esperar(lambda: r.pilha() == etiquetas) and r.tem("Não saem agora"), f)
+            # Resolver em Duplicatas: código novo para a peça da compra.
+            r.clicar("Ver duplicatas")
+            r.esperar(lambda: r.tem_igual("Dar código novo"))
+            r.rolar_ate(travada)
+            nome = [(x, y) for x, y, t in r.textos() if simples(t).startswith(simples(travada))]
+            botoes = r.onde("Dar código novo")
+            if nome and botoes:
+                y = nome[0][1]
+                bx, by = min(botoes, key=lambda b: abs(b[1] - y))
+                r.clicar_em(bx, by)
+            f = r.foto("-6")
+            ok("4: o gerente deu código novo à peça (em Duplicatas)",
+               r.esperar(lambda: codigo(travada_id) != filtro_codigo), f)
+            ok("4: o código do filtro não mudou", codigo(ler(pasta, "SELECT id FROM produto WHERE nome = 'Filtro de óleo'")[0][0]) == filtro_codigo)
+            xdo("key", "Escape")
+            f = r.foto("-7")
+            ok("4: de volta às Etiquetas", r.esperar(lambda: r.pilha() == etiquetas), f)
+            ok("4: resolvida, sai das bloqueadas e volta para a lista",
+               r.esperar(lambda: not r.tem("Não saem agora") and r.tem(travada)), f)
+            ok("4: avisa que já pode sair", r.tem("já pode sair"), f)
+            ok("4: as outras continuam na lista", all(r.tem(n) for n in outras), f)
+            ok("4: nada impresso sem clique", impresso() == 0)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5, "4": caso4}
 
 
 def main():

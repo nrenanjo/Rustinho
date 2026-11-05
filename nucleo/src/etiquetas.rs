@@ -150,7 +150,11 @@ pub fn etiqueta(conn: &Connection, produto_id: &str) -> Resultado<Etiqueta> {
     // peça errada: não sai até o gerente resolver.
     let bloqueio = match crate::faixas::problema_da_peca(conn, produto_id)? {
         Some(p) if codigo.is_empty() => format!("{p} Até lá, não sai etiqueta."),
-        Some(p) => format!("{p} Resolva em Configurações › Gerente › Códigos das peças antes de imprimir."),
+        // Caso 4 (C8, 0.9.18): a parte certa (a pílula Gerente não tem mais os
+        // códigos: eles ficam em Simultaneidade › Duplicatas desde a 0.9.15).
+        Some(p) => {
+            format!("{p} Resolva em Configurações › Simultaneidade › Duplicatas (Códigos das peças) antes de imprimir.")
+        }
         None => String::new(),
     };
     Ok(Etiqueta {
