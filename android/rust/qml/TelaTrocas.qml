@@ -203,14 +203,14 @@ FocusScope {
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: tela.imprimir("vale", lv.modelData.id)
                     }
                     Botao {
                         visible: (sobreVale.hovered || Tema.celular)
                         text: "Usar no Vender"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: tela.janela.abrir("TelaVender", { valeId: lv.modelData.id })
                     }
                     Text {
@@ -300,14 +300,14 @@ FocusScope {
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: tela.imprimir("devolucao", lf.modelData.id)
                     }
                     Botao {
                         visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada
                         text: "Desfazer"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: pergunta.perguntar("Desfazer a devolução " + lf.modelData.numero + "?",
                                                       lf.modelData.valeUsado ? "O vale-troca desta devolução já foi usado: cancele antes a venda que usou o vale."
                                                                              : "As peças saem de novo do estoque" + (lf.modelData.como.indexOf("vale") >= 0 ? " e o vale-troca é cancelado." : "."),

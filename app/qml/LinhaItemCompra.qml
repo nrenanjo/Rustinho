@@ -137,6 +137,10 @@ Rectangle {
                             font.pixelSize: 16
                             elide: Text.ElideRight
                             Layout.fillWidth: true
+                            // A15 (0.9.18): no celular, o nome da peça (que abre a
+                            // peça) ocupa 48 dp de altura, com o texto no meio.
+                            Layout.preferredHeight: Tema.celular && !!linha.peca ? Math.max(implicitHeight, Tema.toqueMinimo) : -1
+                            verticalAlignment: Text.AlignVCenter
                             TapHandler {
                                 enabled: !!linha.peca
                                 onTapped: linha.abrirPeca(linha.peca.id)
@@ -168,21 +172,21 @@ Rectangle {
                         visible: linha.editavel
                         text: linha.peca || linha.item.acao === "ligar" ? "Trocar peça" : "Escolher peça"
                         tipo: linha.pendente ? "principal" : "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: linha.escolherPeca()
                     }
                     Botao {
                         visible: linha.editavel && linha.item.acao !== "nova"
                         text: "Cadastrar nova"
                         tipo: linha.pendente ? "secundario" : "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: linha.cadastrarNova()
                     }
                     Botao {
                         visible: linha.editavel && !linha.ignorado
                         text: "Não lançar"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: linha.naoLancar()
                     }
                 }

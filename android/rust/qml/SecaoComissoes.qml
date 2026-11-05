@@ -212,7 +212,7 @@ FocusScope {
                                 visible: !modelData.cancelado && !modelData.pago
                                 text: "Desfazer"
                                 tipo: "discreto"
-                                implicitHeight: 32
+                                altura: 32
                                 onClicked: janela.confirmar("Desfazer o fechamento?", "A conta da comissão sai do A pagar.", "Desfazer",
                                                             () => janela.chamarGerente("comissao_reabrir", { id: modelData.id }, r => {
                                     if (!r.ok)

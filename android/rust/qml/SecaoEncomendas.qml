@@ -205,14 +205,14 @@ FocusScope {
                         visible: linha.e.situacao === "aberta"
                         text: "Já pedi"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.acao("encomenda_pedir", { id: linha.e.id }, "")
                     }
                     Botao {
                         visible: linha.e.situacao === "pedida"
                         text: "Chegou"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.janela.confirmar("A peça chegou?",
                             "Quando a nota da compra é lançada pelo XML, o Rustinho marca sozinho. Marque aqui se chegou sem nota.",
                             "Chegou", () => secao.acao("encomenda_chegou", { id: linha.e.id }, ""))
@@ -221,14 +221,14 @@ FocusScope {
                         visible: linha.e.situacao === "chegou" && linha.e.podeVender
                         text: "Vender"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.janela.abrir("TelaVender", { encomendaId: linha.e.id })
                     }
                     Botao {
                         visible: linha.e.situacao === "chegou" && linha.e.podeEntregar
                         text: "Entregar"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.janela.confirmar("Entregar ao cliente?",
                             linha.e.pagamento === "falta" ? linha.e.nomePagamento + " no Receber. Receba antes ou depois, pelo Receber." : "A encomenda nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + " sai da lista.",
                             "Entregar", () => secao.acao("encomenda_entregar", { id: linha.e.id }, "Encomenda entregue."))
@@ -238,7 +238,7 @@ FocusScope {
                         text: linha.e.avisado ? "Avisar de novo" : "Avisar"
                         icone: "mensagem"
                         tipo: linha.e.avisado ? "discreto" : "principal"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.avisar(linha.e)
                     }
                     // O resto, só com o mouse em cima
@@ -246,22 +246,22 @@ FocusScope {
                         visible: linha.aberta && linha.e.pagamento === "falta" && (sobre.hovered || Tema.celular)
                         text: "Receber"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.janela.abrir("TelaReceber", { clienteInicial: linha.e.clienteId })
                     }
                     Botao {
                         visible: linha.e.situacao === "pedida" && (sobre.hovered || Tema.celular)
                         text: "Não pedi"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: secao.acao("encomenda_pedir", { id: linha.e.id, desfazer: true }, "")
                     }
                     Botao {
                         visible: linha.aberta && linha.e.situacao !== "chegou" && linha.e.temWhatsapp && (sobre.hovered || Tema.celular)
                         icone: "mensagem"
                         tipo: "discreto"
-                        implicitHeight: 36
-                        implicitWidth: 40
+                        altura: 36
+                        largura: 40
                         leftPadding: 0
                         rightPadding: 0
                         onClicked: secao.avisar(linha.e)
@@ -270,7 +270,7 @@ FocusScope {
                         visible: linha.aberta && (sobre.hovered || Tema.celular)
                         text: "Cancelar"
                         tipo: "discreto"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + "?",
                                                     linha.e.descricao + " · " + linha.e.cliente, "Cancelar encomenda",
                                                     m => Api.gravar("encomenda_cancelar", { id: linha.e.id, motivo: m }))

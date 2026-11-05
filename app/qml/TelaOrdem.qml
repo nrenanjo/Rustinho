@@ -415,7 +415,7 @@ FocusScope {
                     visible: tela.situacao === "aprovada" || tela.situacao === "pronta"
                     text: "Voltar etapa"
                     tipo: "discreto"
-                    implicitHeight: 38
+                    altura: 38
                     onClicked: tela.passar(tela.situacao === "pronta" ? "aprovada" : "orcamento")
                 }
                 Botao {
@@ -423,7 +423,7 @@ FocusScope {
                     text: "Avisar no WhatsApp"
                     icone: "mensagem"
                     tipo: "secundario"
-                    implicitHeight: 38
+                    altura: 38
                     onClicked: tela.whatsapp()
                 }
                 Botao {
@@ -431,7 +431,7 @@ FocusScope {
                     // Rascunho: o mesmo que a Nova OS (salva com número e aprova).
                     text: tela.situacao === "orcamento" || tela.rascunho ? "Cliente aprovou" : tela.situacao === "aprovada" ? "Ficou pronta" : "Entregar e receber"
                     icone: tela.situacao === "pronta" ? "check" : "direita"
-                    implicitHeight: 40
+                    altura: 40
                     enabled: tela.situacao === "pronta" || (!tela.nova && !tela.rascunho) || tela.itens.length > 0
                     onClicked: {
                         if (tela.situacao === "pronta")
@@ -611,19 +611,27 @@ FocusScope {
                             Layout.fillWidth: true
                             Repeater {
                                 model: [["Hoje", 0], ["Amanhã", 1], ["Em 2 dias", 2], ["Em 1 semana", 7]]
-                                delegate: Rectangle {
+                                // A15 (0.9.18): a célula é a área de toque (no celular,
+                                // 48 × 48 dp); o atalho fica do tamanho de sempre, no meio.
+                                delegate: Item {
+                                    id: celulaPrev
                                     required property var modelData
-                                    radius: height / 2
-                                    height: 28
-                                    width: rotuloPrev.implicitWidth + 22
-                                    color: sobrePrev.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
-                                    Text {
-                                        id: rotuloPrev
+                                    height: Math.max(28, Tema.toqueMinimo)
+                                    width: Math.max(rotuloPrev.implicitWidth + 22, Tema.toqueMinimo)
+                                    Rectangle {
                                         anchors.centerIn: parent
-                                        text: modelData[0]
-                                        color: Tema.tintaSuave
-                                        font.family: Tema.texto
-                                        font.pixelSize: 13
+                                        radius: height / 2
+                                        height: 28
+                                        width: rotuloPrev.implicitWidth + 22
+                                        color: sobrePrev.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
+                                        Text {
+                                            id: rotuloPrev
+                                            anchors.centerIn: parent
+                                            text: celulaPrev.modelData[0]
+                                            color: Tema.tintaSuave
+                                            font.family: Tema.texto
+                                            font.pixelSize: 13
+                                        }
                                     }
                                     HoverHandler { id: sobrePrev; cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
@@ -664,7 +672,7 @@ FocusScope {
                         text: "Peça"
                         icone: "mais"
                         tipo: "secundario"
-                        implicitHeight: 38
+                        altura: 38
                         onClicked: escolher.abrirCom("", "")
                     }
                     Botao {
@@ -672,7 +680,7 @@ FocusScope {
                         text: "Serviço"
                         icone: "mais"
                         tipo: "secundario"
-                        implicitHeight: 38
+                        altura: 38
                         onClicked: tela.addServico("")
                     }
                 }
@@ -801,7 +809,7 @@ FocusScope {
                                 tipo: "discreto"
                                 icone: "lixeira"
                                 text: ""
-                                implicitHeight: 36
+                                altura: 36
                                 onClicked: tela.tirar(li.index)
                             }
                         }

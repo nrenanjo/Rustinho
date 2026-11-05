@@ -198,7 +198,12 @@ ColumnLayout {
         objectName: campo.colarCopiar ? "buscaDaInicio" : campo.icone === "busca" ? "campoDeBusca" : ""
         Layout.fillWidth: true
         implicitWidth: 120
-        implicitHeight: campo.altura
+        // A15 (0.9.18): no celular, a área de toque do campo tem pelo menos
+        // 48 dp de altura (Tema.toqueMinimo); o desenho do campo fica da
+        // altura de sempre (campo.altura), no meio. No computador, igual.
+        implicitHeight: Math.max(campo.altura, Tema.toqueMinimo)
+        topInset: (implicitHeight - campo.altura) / 2
+        bottomInset: topInset
         font.family: Tema.texto
         font.pixelSize: campo.tamanhoFonte
         color: Tema.tintaNo(campo.corDoCampo)
@@ -396,7 +401,8 @@ ColumnLayout {
 
     Popup {
         id: lista
-        y: entrada.y + entrada.height + 4
+        // Logo abaixo do desenho do campo (no celular, a área de toque é maior).
+        y: entrada.y + (entrada.height + campo.altura) / 2 + 4
         x: entrada.x
         width: Math.max(entrada.width, 220)
         padding: 4
@@ -417,7 +423,8 @@ ColumnLayout {
                 required property var modelData
                 required property int index
                 width: vista.width
-                height: 34
+                // A15: no celular, cada sugestão com 48 dp de altura.
+                height: Math.max(34, Tema.toqueMinimo)
                 text: modelData
                 font.family: Tema.texto
                 font.pixelSize: 15

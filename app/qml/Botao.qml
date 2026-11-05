@@ -10,8 +10,21 @@ Button {
     property string atalho: ""
     property string icone: ""
     property real tamanhoIcone: 18
+    // A altura do desenho do botão (o fundo). A15 (0.9.18): no celular, a
+    // área de toque tem pelo menos 48 × 48 dp (Tema.toqueMinimo) e o desenho
+    // fica do tamanho de sempre, no meio dela (as margens de dentro, insets).
+    // No computador, a área de toque é o próprio desenho, como antes.
+    property real altura: 42
+    // A largura do desenho, quando quem usa fixa uma (-1 = a do conteúdo).
+    property real largura: -1
+    readonly property real larguraDesenho: largura >= 0 ? largura : implicitContentWidth + leftPadding + rightPadding
 
-    implicitHeight: 42
+    implicitWidth: Math.max(larguraDesenho, Tema.toqueMinimo)
+    implicitHeight: Math.max(altura, Tema.toqueMinimo)
+    leftInset: (implicitWidth - larguraDesenho) / 2
+    rightInset: leftInset
+    topInset: (implicitHeight - altura) / 2
+    bottomInset: topInset
     leftPadding: tipo === "discreto" ? 10 : 18
     rightPadding: tipo === "discreto" ? 12 : 18
     font.family: Tema.texto

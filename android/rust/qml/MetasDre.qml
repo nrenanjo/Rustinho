@@ -105,7 +105,7 @@ Painel {
                         Botao {
                             text: "Tirar"
                             tipo: "discreto"
-                            implicitHeight: 30
+                            altura: 30
                             font.pixelSize: 13
                             onClicked: janelinha.salvar(meta.modelData.periodo, meta.modelData.indicador, meta.modelData.vendedorId, "")
                         }

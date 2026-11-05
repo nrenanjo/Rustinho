@@ -203,21 +203,21 @@ FocusScope {
                             visible: linha.ch.situacao === "carteira"
                             text: "Depositar"
                             tipo: "secundario"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: deposito.abrirCom(linha.ch)
                         }
                         Botao {
                             visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && (sobreLinha.hovered || Tema.celular)
                             text: "Devolvido"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: devolucao.abrirCom(linha.ch)
                         }
                         Botao {
                             visible: linha.ch.situacao === "carteira" && (sobreLinha.hovered || Tema.celular)
                             text: "Repassar"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: motivo.perguntar("Repassar o cheque nº " + linha.ch.numero + "?",
                                                         "R$ " + linha.ch.valor + ". Ex.: pagou o fornecedor com ele.", "Repassar",
                                                         (m, pronto) => secao.janela.chamarGerente("cheque_repassar", { id: linha.ch.id, motivo: m }, pronto), "Para quem", "principal")
@@ -226,7 +226,7 @@ FocusScope {
                             visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular)
                             text: "Desfazer"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             // D-09: a senha da consulta do Financeiro não vale para desfazer.
                             onClicked: janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
                                                         "Voltar", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {

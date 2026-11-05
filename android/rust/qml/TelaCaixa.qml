@@ -270,7 +270,7 @@ FocusScope {
                                     Botao {
                                         text: "Imprimir"
                                         tipo: "discreto"
-                                        implicitHeight: 30
+                                        altura: 30
                                         font.pixelSize: 13
                                         onClicked: tela.imprimir(modelData.id)
                                     }

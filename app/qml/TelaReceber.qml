@@ -407,14 +407,14 @@ FocusScope {
                                         Botao {
                                             text: "Recibo"
                                             tipo: "discreto"
-                                            implicitHeight: 32
+                                            altura: 32
                                             onClicked: tela.imprimir("recibo", modelData.id)
                                         }
                                         Botao {
                                             visible: !modelData.estornado
                                             text: "Estornar"
                                             tipo: "discreto"
-                                            implicitHeight: 32
+                                            altura: 32
                                             onClicked: motivo.perguntar("Estornar o pagamento?",
                                                 Tema.sigiloTexto("R$ " + modelData.valor + " de " + modelData.quando + ". As parcelas voltam a ficar em aberto."),
                                                 "Estornar", (m, pronto) => tela.janela.chamarGerente("recebimento_estornar", { id: modelData.id, motivo: m }, pronto))

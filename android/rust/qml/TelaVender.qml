@@ -815,7 +815,7 @@ FocusScope {
                         text: "Receber"
                         icone: "check"
                         atalho: "F2"
-                        implicitHeight: 52
+                        altura: 52
                         font.pixelSize: 18
                         enabled: tela.carrinho.length > 0 && tela.caixaAberto
                         Layout.fillWidth: true
@@ -849,6 +849,10 @@ FocusScope {
                 ColumnLayout {
                     spacing: 0
                     Layout.fillWidth: true
+                    // A15 (0.9.18): o total e o "Cliente e desconto ›" juntos
+                    // abrem o cliente e o desconto (antes, só o texto de baixo:
+                    // 20 dp de altura para o dedo).
+                    TapHandler { onTapped: tela.verLateral = true }
                     Text {
                         text: "R$ " + (tela.calculo ? tela.calculo.total : "0,00")
                         color: Tema.tinta
@@ -867,13 +871,12 @@ FocusScope {
                         font.pixelSize: 14
                         elide: Text.ElideRight
                         Layout.fillWidth: true
-                        TapHandler { onTapped: tela.verLateral = true }
                     }
                 }
                 Botao {
                     text: "Receber"
                     icone: "check"
-                    implicitHeight: 48
+                    altura: 48
                     enabled: tela.carrinho.length > 0 && tela.caixaAberto
                     onClicked: tela.abrirReceber()
                 }
@@ -995,7 +998,7 @@ FocusScope {
                     Botao {
                         text: "Resto na entrega"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: {
                             for (let i = 0; i < repFormas.count; i++) {
                                 const l = repFormas.itemAt(i)

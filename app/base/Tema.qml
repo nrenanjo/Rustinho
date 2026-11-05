@@ -223,6 +223,11 @@ QtObject {
     readonly property int espaco: 16
     // Altura mínima de um botão ou campo para o dedo.
     readonly property int toque: celular ? 44 : 40
+    // A15 (0.9.18): área de toque mínima de tudo o que se toca no celular,
+    // 48 × 48 dp. Os componentes (Botao, Campo, Selecao, Marcar, Pilulas,
+    // Olho, Aparencia) crescem a área de toque até aqui e deixam o desenho do
+    // tamanho de sempre, no meio. No computador é 0: nada muda.
+    readonly property int toqueMinimo: celular ? 48 : 0
     // "computador" no PC, "aparelho" no celular (nos textos).
     readonly property string aparelho: celular ? "aparelho" : "computador"
 

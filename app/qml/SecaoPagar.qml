@@ -622,7 +622,7 @@ FocusScope {
                             visible: !modelData.estornado
                             text: "Estornar"
                             tipo: "discreto"
-                            implicitHeight: 32
+                            altura: 32
                             // D-09: a senha da consulta do Financeiro não vale para estornar.
                             onClicked: motivo.perguntar("Estornar o pagamento?",
                                 "R$ " + modelData.total + " de " + modelData.data + ". A conta volta a ficar em aberto.",

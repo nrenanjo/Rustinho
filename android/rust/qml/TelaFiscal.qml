@@ -106,7 +106,8 @@ FocusScope {
                 required property var modelData
                 required property int index
                 Layout.fillWidth: true
-                implicitHeight: 40
+                // A15 (0.9.18): no celular, cada linha com 48 dp (Tema.toqueMinimo).
+                implicitHeight: Math.max(40, Tema.toqueMinimo)
                 radius: Tema.raioCampo
                 // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
                 readonly property bool par: (index + 1) % 2 === 0

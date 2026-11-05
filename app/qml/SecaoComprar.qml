@@ -199,7 +199,7 @@ FocusScope {
                     visible: !!d && d.acao && secao.dados && secao.dados.encomendas.length > 1
                     text: "Marcar todas como pedidas"
                     tipo: "discreto"
-                    implicitHeight: 32
+                    altura: 32
                     font.pixelSize: 14
                     onClicked: secao.pedidas(secao.dados.encomendas.map(e => e.id))
                 }
@@ -251,7 +251,7 @@ FocusScope {
                     text: "Já pedi"
                     icone: "check"
                     tipo: "discreto"
-                    implicitHeight: 36
+                    altura: 36
                     onClicked: secao.pedidas([le.e.id])
                 }
                 Text {

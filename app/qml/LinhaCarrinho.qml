@@ -191,7 +191,7 @@ Rectangle {
             Botao {
                 tipo: "discreto"
                 icone: "lixeira"
-                implicitWidth: 36
+                largura: 36
                 leftPadding: 0
                 rightPadding: 0
                 Layout.row: parent.e ? 1 : 0

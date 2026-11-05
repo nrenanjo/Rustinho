@@ -40,29 +40,41 @@ Item {
         Repeater {
             id: repetidor
             model: pilulas.modelo
-            delegate: Rectangle {
-                id: pilula
+            // A15 (0.9.18): cada pílula numa célula que é a área de toque. No
+            // celular, a célula tem pelo menos 48 × 48 dp (Tema.toqueMinimo) e
+            // a pílula fica do tamanho de sempre, no meio (só o espaço entre
+            // as linhas de pílulas cresce). No computador, célula = pílula.
+            delegate: Item {
+                id: celula
                 required property var modelData
                 readonly property bool ativa: pilulas.atual === modelData.id
-                radius: height / 2
-                height: pilulas.pequenas ? 32 : (Tema.celular ? 42 : 40)
-                width: rotulo.implicitWidth + (pilulas.pequenas ? 26 : 36)
-                color: ativa ? (pilulas.noFundo ? Tema.pilulaAtiva : Tema.subpilulaAtiva)
-                             : sobre.hovered ? Tema.sombraNo(0.07, pilulas.superficie) : "transparent"
-                Behavior on color { ColorAnimation { duration: 120 } }
-                Text {
-                    id: rotulo
+                readonly property real alturaDesenho: pilulas.pequenas ? 32 : (Tema.celular ? 42 : 40)
+                readonly property real larguraDesenho: rotulo.implicitWidth + (pilulas.pequenas ? 26 : 36)
+                height: Math.max(alturaDesenho, Tema.toqueMinimo)
+                width: Math.max(larguraDesenho, Tema.toqueMinimo)
+                Rectangle {
+                    id: pilula
                     anchors.centerIn: parent
-                    text: pilula.modelData.nome
-                    color: pilula.ativa ? (pilulas.noFundo ? Tema.sobrePilulaAtiva : Tema.sobreSubpilulaAtiva)
-                                        : Tema.tintaNo(pilulas.superficie)
-                    font.family: Tema.texto
-                    font.weight: Font.DemiBold
-                    font.pixelSize: pilulas.pequenas ? 14 : 16
+                    width: celula.larguraDesenho
+                    height: celula.alturaDesenho
+                    radius: height / 2
+                    color: celula.ativa ? (pilulas.noFundo ? Tema.pilulaAtiva : Tema.subpilulaAtiva)
+                                        : sobre.hovered ? Tema.sombraNo(0.07, pilulas.superficie) : "transparent"
+                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Text {
+                        id: rotulo
+                        anchors.centerIn: parent
+                        text: celula.modelData.nome
+                        color: celula.ativa ? (pilulas.noFundo ? Tema.sobrePilulaAtiva : Tema.sobreSubpilulaAtiva)
+                                            : Tema.tintaNo(pilulas.superficie)
+                        font.family: Tema.texto
+                        font.weight: Font.DemiBold
+                        font.pixelSize: pilulas.pequenas ? 14 : 16
+                    }
                 }
                 HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
                 TapHandler {
-                    onTapped: pilulas.escolhido(pilula.modelData.id)
+                    onTapped: pilulas.escolhido(celula.modelData.id)
                 }
             }
         }

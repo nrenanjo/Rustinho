@@ -329,7 +329,7 @@ FocusScope {
                                 tipo: "discreto"
                                 icone: "lixeira"
                                 text: ""
-                                implicitHeight: 36
+                                altura: 36
                                 onClicked: tela.tirar(linha.index)
                             }
                         }
@@ -411,19 +411,19 @@ FocusScope {
                                 Botao {
                                     text: "Ver duplicatas"
                                     tipo: "secundario"
-                                    implicitHeight: 36
+                                    altura: 36
                                     onClicked: tela.verDuplicatas()
                                 }
                                 Botao {
                                     text: "Abrir a peça"
                                     tipo: "secundario"
-                                    implicitHeight: 36
+                                    altura: 36
                                     onClicked: tela.abrirPeca(travada.modelData.etiqueta.produtoId)
                                 }
                                 Botao {
                                     text: "Tirar"
                                     tipo: "discreto"
-                                    implicitHeight: 36
+                                    altura: 36
                                     onClicked: tela.tirarBloqueada(travada.index)
                                 }
                             }

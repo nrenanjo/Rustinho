@@ -72,7 +72,7 @@ Linha {
         property bool manterLargura: true
         tipo: "discreto"
         icone: "lixeira"
-        implicitWidth: 40
+        largura: 40
         leftPadding: 0
         rightPadding: 0
         Layout.alignment: Qt.AlignTop

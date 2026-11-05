@@ -76,8 +76,8 @@ Rectangle {
         tipo: "discreto"
         icone: "pino"
         tamanhoIcone: 15
-        implicitHeight: 28
-        implicitWidth: 30
+        altura: 28
+        largura: 30
         leftPadding: 0
         rightPadding: 0
         anchors.top: parent.top

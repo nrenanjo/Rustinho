@@ -116,6 +116,9 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 64
                 radius: Tema.raio
+                // A15 (0.9.18): a linha inteira (64 dp) abre a peça; antes, só o
+                // nome (25 dp de altura para o dedo).
+                TapHandler { onTapped: secao.janela.abrir("TelaPeca", { produtoId: linha.v.produtoId }) }
                 // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
                 readonly property bool par: (index + 1) % 2 === 0
                 color: Tema.faixa(linha.par)
@@ -145,7 +148,6 @@ FocusScope {
                             font.pixelSize: 20
                             elide: Text.ElideRight
                             Layout.fillWidth: true
-                            TapHandler { onTapped: secao.janela.abrir("TelaPeca", { produtoId: linha.v.produtoId }) }
                             HoverHandler { cursorShape: Qt.PointingHandCursor }
                         }
                         // barrinha do quanto vendeu (perto do 1º)

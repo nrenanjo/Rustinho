@@ -308,7 +308,7 @@ FocusScope {
                             text: "Ver todos no Estoque"
                             tipo: "discreto"
                             icone: "direita"
-                            implicitHeight: 32
+                            altura: 32
                             font.pixelSize: 14
                             Layout.leftMargin: -10
                             onClicked: secao.abrir("estoque", { secao: "vendidos" }, "TelaEstoque")
