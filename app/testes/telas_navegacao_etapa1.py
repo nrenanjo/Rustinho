@@ -78,19 +78,83 @@ def compras(pasta):
     return banco(pasta, "SELECT COUNT(*) FROM compra")[0][0]
 
 
+def janela_de_arquivos(titulo, segundos=10):
+    """(x, y, id) da janela de arquivos do Qt com esse título, ou None.
+
+    Desde o Qt 6.8, no X11, a janela de arquivos do próprio Qt abre numa
+    janela à parte (QQuickFileDialogImpl usa Popup.Window), fora da lista de
+    textos da tela do Rustinho. O título é o da tela (FileDialog.title)."""
+    fim = time.time() + segundos
+    while True:
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", titulo],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        for janela in s.stdout.split():
+            g = subprocess.run(["xdotool", "getwindowgeometry", "--shell", janela],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            d = dict(x.split("=", 1) for x in g.stdout.split() if "=" in x)
+            if "X" in d and "Y" in d:
+                return int(d["X"]), int(d["Y"]), janela
+        if time.time() >= fim:
+            return None
+        time.sleep(0.5)
+
+
+def primeiro_xml(casa):
+    """O primeiro arquivo que a janela de arquivos lista em Downloads (pelo
+    filtro de Compras: XML, ZIP ou RAR, em ordem alfabética)."""
+    pasta = os.path.join(casa, "Downloads")
+    nomes = sorted((n for n in os.listdir(pasta) if n.lower().endswith((".xml", ".zip", ".rar"))), key=str.lower)
+    if not nomes:
+        raise RuntimeError(f"nenhum XML em {pasta}")
+    return os.path.join(pasta, nomes[0])
+
+
 class Rustinho(nav.Rustinho):
+    def __init__(self, pasta, tela, props, fotos, nome, casa):
+        self.casa = casa
+        super().__init__(pasta, tela, props, fotos, nome, casa)
+
     def escolher_xml_de_compra(self):
-        """Compras › Importar XML › o primeiro da lista › Open."""
+        """Compras › Importar XML › o primeiro da lista."""
         if not self.clicar("Importar XML"):
             raise RuntimeError(f"não achei Importar XML (veja {self.saida})")
         time.sleep(2)
         aberto = self.posicao("Open")
-        if not aberto:
+        if aberto:
+            # Qt anterior ao 6.8: a janela de arquivos fica dentro da tela.
+            xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+            time.sleep(3)
+            return
+        titulo = "Escolha o XML da nota de compra"
+        janela = janela_de_arquivos(titulo)
+        if not janela:
             raise RuntimeError(f"a janela de arquivos não abriu (veja {self.saida})")
-        xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+        # Ctrl+L abre o campo do caminho; com o caminho de um arquivo, Enter
+        # escolhe e fecha, como o Abrir (QQuickFolderBreadcrumbBar, igual no
+        # Qt 6.8 e no 6.12; a posição dos arquivos na lista muda entre eles).
+        xdo("windowfocus", "--sync", janela[2])
         time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        xdo("key", "ctrl+l")
+        time.sleep(0.5)
+        xdo("type", "--delay", "20", primeiro_xml(self.casa))
+        time.sleep(0.3)
+        xdo("key", "Return")
         time.sleep(3)
+        if janela_de_arquivos(titulo, segundos=0):
+            raise RuntimeError(f"a janela de arquivos não fechou com o caminho do arquivo (veja {self.saida})")
+        # Sem gerenciador de janelas (tela virtual), o teclado não volta
+        # sozinho para a janela do Rustinho quando a de arquivos fecha: as
+        # teclas (CNPJ, Esc, F2) se perderiam. Na área de trabalho, quem
+        # devolve é o gerenciador de janelas.
+        for busca in (["--class", "rustinho"], ["--name", "Rustinho"]):
+            s = subprocess.run(["xdotool", "search", "--onlyvisible", *busca],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            if s.stdout.split():
+                xdo("windowfocus", "--sync", s.stdout.split()[0])
+                time.sleep(0.3)
+                break
 
     def clicar_campo(self, rotulo):
         """O campo fica logo abaixo do rótulo."""
@@ -165,8 +229,8 @@ def main():
     # tem journald, manda as mensagens para o journal se a saída não é um
     # terminal; isto as mantém na saída de erro.
     os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
-    # Ambiente neutro, como o da CI: sem o tema do desktop (KDE, GNOME...),
-    # a janela de arquivos é a padrão do Qt, com "Open" onde o teste clica.
+    # Ambiente neutro: sem o tema do desktop (KDE, GNOME...), a janela de
+    # arquivos é a do próprio Qt, que o teste sabe usar.
     for v in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION", "KDE_FULL_SESSION",
               "KDE_SESSION_VERSION", "KDE_SESSION_UID", "GNOME_DESKTOP_SESSION_ID",
               "QT_QPA_PLATFORMTHEME", "QT_STYLE_OVERRIDE"):
@@ -183,9 +247,7 @@ def main():
     modelo = os.path.join(raiz, "loja-modelo")
     os.makedirs(modelo)
     certo = True
-    # Casos a rodar: RUSTINHO_CASOS=F roda só o F. Os casos A a E usam a janela
-    # de arquivos do Qt; no Qt 6.12 ela abre numa janela à parte e em
-    # português, fora do que o teste lê: rode-os com o Qt da CI (6.8).
+    # Casos a rodar: RUSTINHO_CASOS=F roda só o F.
     casos = os.environ.get("RUSTINHO_CASOS", "ABCDEF").upper()
 
     def quer(caso):

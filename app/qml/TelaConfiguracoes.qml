@@ -47,11 +47,16 @@ FocusScope {
     property string secaoAntesDaGuia: ""
     // Como esta tela aparece no "voltar" de outra (navegação guiada).
     readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
-    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela. A
+    // guia que não terminou aqui também acaba (a tela saiu da pilha por outro
+    // caminho: sessão encerrada, backup restaurado). Quando a pilha destrói a
+    // tela, ela já saiu da janela e "janela" vale null; por isso a janela fica
+    // guardada desde a criação (Component.onCompleted).
+    property var janelaAoSair: null
     Component.onDestruction: {
         Api.chamar("gerente_encerrar")
         if (guia)
-            janela.abandonarGuia(guia)
+            janelaAoSair.abandonarGuia(guia)
     }
 
     // Os campos da loja e a parte onde ficam (usado ao mostrar o erro de um
@@ -2043,6 +2048,7 @@ FocusScope {
     PerguntaMotivo { id: motivoReferencia; onFeito: tela.recarregarReferencias() }
 
     Component.onCompleted: {
+        janelaAoSair = janela
         completo = janela.podeGerente("configuracoes", true)
         verBackup = janela.podeGerente("backup", true)
         verGerente = janela.podeGerente("gerente", true)
