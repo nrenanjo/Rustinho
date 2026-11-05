@@ -1116,8 +1116,19 @@ mod testes {
             let a = completar(&b.conn, a).unwrap();
             assert_eq!((a.secao.as_str(), a.acao.as_str()), ("duplicatas", "Ver duplicatas"), "{id}");
         }
-        for id in ["receber", "pagar", "cheques", "encomendas", "oficina", "backup", "backup_nuvem", "referencias",
-                   "outra_loja", "senha.ana", "qualquer"] {
+        for id in [
+            "receber",
+            "pagar",
+            "cheques",
+            "encomendas",
+            "oficina",
+            "backup",
+            "backup_nuvem",
+            "referencias",
+            "outra_loja",
+            "senha.ana",
+            "qualquer",
+        ] {
             let a = Aviso::simples(id, "2026-11-05", "Teste".into(), "texto".into(), String::new(), "configuracoes");
             let a = completar(&b.conn, a).unwrap();
             assert!(!a.acao.to_lowercase().contains("gerente") || a.secao == "gerente", "{id}: {}", a.acao);

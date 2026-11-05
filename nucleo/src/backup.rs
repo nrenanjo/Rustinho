@@ -1402,8 +1402,32 @@ fn nomes_na_nuvem() -> Resultado<Vec<(String, i64)>> {
     }
 }
 
+/// Cópias que ESTE computador mandou para o Drive e ainda estão lá (0.9.18),
+/// uma por linha. Configuração local: não vai para a troca de dados (não está
+/// em `sync::CONFIG_DA_LOJA`) e fica como está ao restaurar um backup.
+const ENVIADAS_AO_DRIVE: &str = "backup_nuvem_enviadas";
+
+fn enviadas_ao_drive(conn: &Connection) -> Resultado<Vec<String>> {
+    Ok(config::ler(conn, ENVIADAS_AO_DRIVE)?
+        .map(|t| t.lines().filter(|l| ler_nome(l).is_some()).map(String::from).collect())
+        .unwrap_or_default())
+}
+
+/// Quais cópias do Drive este computador apaga (0.9.18): só as que ele mesmo
+/// mandou (`minhas`), pela regra de `para_apagar`. A pasta do Drive é a mesma
+/// para todos os computadores da conta do Google — os outros caixas da loja,
+/// outra loja na mesma conta, um Rustinho portátil de teste — e o nome do
+/// caixa no arquivo pode se repetir ("Caixa 1"): antes, cada computador
+/// aplicava a sua retenção a tudo o que estava lá e apagava cópias dos
+/// outros. Cópia que não se sabe de quem é fica.
+pub fn apagar_no_drive(la: &[String], minhas: &[String], hoje: &str, dias: i64) -> Vec<String> {
+    let minhas_la: Vec<String> = la.iter().filter(|n| minhas.contains(n)).cloned().collect();
+    para_apagar(&minhas_la, hoje, dias)
+}
+
 /// Manda para o Drive a cópia mais nova que ainda não está lá e apaga as
-/// antigas de lá. Só cópias com senha vão para a nuvem.
+/// antigas de lá que este computador mandou. Só cópias com senha vão para a
+/// nuvem.
 fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
     let a = ajustes(conn, Some(caminho_db))?;
     if !a.nuvem {
@@ -1430,9 +1454,21 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         if !nomes.contains(&c.nome) {
             nomes.push(c.nome.clone());
         }
-        for velho in para_apagar(&nomes, &hoje, a.dias) {
-            let _ = rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60));
+        // A cópia mais nova daqui é deste computador (mandada agora ou antes).
+        let mut minhas = enviadas_ao_drive(conn)?;
+        if !minhas.contains(&c.nome) {
+            minhas.push(c.nome.clone());
         }
+        for velho in apagar_no_drive(&nomes, &minhas, &hoje, a.dias) {
+            // Se não deu para apagar agora, continua na lista: tenta de novo
+            // no próximo envio.
+            if rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60)).is_ok() {
+                minhas.retain(|n| *n != velho);
+            }
+        }
+        // Só as que continuam lá (as apagadas por outro caminho saem da lista).
+        minhas.retain(|n| nomes.contains(n));
+        config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
         Ok(())
     })();
     match &r {
@@ -2185,6 +2221,76 @@ mod testes {
         config::gravar(&b.conn, "loja_nome", "Mudou").unwrap();
         restaurar(&mut b.conn, Some(&caminho), &la[0].nome, true, "1111").unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Na Nuvem");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// 0.9.18: a retenção do Drive só vale para o que este computador mandou.
+    #[test]
+    fn retencao_do_drive_so_nas_proprias_copias() {
+        let la: Vec<String> = ["20260101", "20260102", "20260103", "20260104", "20261015"]
+            .iter()
+            .map(|d| format!("rustinho-{d}-120000-caixa1.{EXTENSAO}"))
+            .collect();
+        // Antes (até a 0.9.17) a regra valia para tudo o que estava lá:
+        // apagava 2 cópias que podiam ser de outro computador "Caixa 1".
+        assert_eq!(para_apagar(&la, "20261015", 30).len(), 2);
+        // Nenhuma é minha: nada se apaga, mesmo com o mesmo nome de caixa.
+        assert!(apagar_no_drive(&la, &[], "20261015", 30).is_empty());
+        // Todas minhas: a regra de sempre (as 3 mais novas e as do prazo).
+        let mut v = apagar_no_drive(&la, &la, "20261015", 30);
+        v.sort();
+        assert_eq!(v, la[..2].to_vec());
+        // Só uma minha: só ela pode sair, e não sai (é uma das 3 mais novas).
+        assert!(apagar_no_drive(&la, &la[..1], "20261015", 30).is_empty());
+    }
+
+    /// 0.9.18: dois computadores com o mesmo nome de caixa ("Caixa 1") na
+    /// mesma conta do Google (outra loja, um portátil de teste...). O envio
+    /// de um não apaga as cópias do outro; as próprias antigas saem.
+    #[test]
+    fn drive_nao_apaga_copias_de_outro_computador() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let pasta = pasta_teste("nuvem-outro");
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Loja A").unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", "7").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        // Lá já estão 5 cópias antigas de OUTRO computador chamado "Caixa 1"
+        // e 5 antigas deste (anotadas como enviadas por ele).
+        let antigo = |d: u32, h: &str| format!("rustinho-202601{d:02}-{h}-caixa1.{EXTENSAO}");
+        let dele: Vec<String> = (1..=5).map(|d| antigo(d, "080000")).collect();
+        let minhas: Vec<String> = (1..=5).map(|d| antigo(d, "180000")).collect();
+        for n in dele.iter().chain(&minhas) {
+            std::fs::write(nuvem.join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_AO_DRIVE, &minhas.join("\n")).unwrap();
+
+        fazer(&caminho, false).unwrap();
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        let ficaram: Vec<String> = nomes_na_nuvem().unwrap().into_iter().map(|x| x.0).collect();
+        for n in &dele {
+            assert!(ficaram.contains(n), "apagou a cópia do outro computador: {n}");
+        }
+        // Das minhas antigas (fora do prazo de 7 dias) ficam só as 2 mais
+        // novas: com a de hoje, as 3 mais novas deste computador.
+        let minhas_ficaram: Vec<&String> = minhas.iter().filter(|n| ficaram.contains(n)).collect();
+        assert_eq!(minhas_ficaram, vec![&minhas[3], &minhas[4]]);
+        let lista = enviadas_ao_drive(&b.conn).unwrap();
+        assert_eq!(lista.len(), 3, "{lista:?}");
+        assert!(lista.iter().all(|n| ficaram.contains(n)));
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
     }
