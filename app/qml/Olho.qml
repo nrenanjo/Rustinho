@@ -12,9 +12,12 @@ Item {
     implicitHeight: Math.max(34, Tema.toqueMinimo)
     implicitWidth: Math.max(linha.implicitWidth + 28, Tema.toqueMinimo)
 
+    // A pílula ocupa a largura toda do item (no computador, exatamente o
+    // lugar de antes: centralizar uma largura fracionária a deslocava 1 px).
     Rectangle {
-        anchors.centerIn: parent
-        width: linha.implicitWidth + 28
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
         height: 34
         radius: height / 2
         color: Tema.oculto ? (sobre.hovered ? Tema.pilulaClaraSobre : Tema.pilulaClara) : (sobre.hovered ? Tema.rosaSobre : Tema.rosa)
