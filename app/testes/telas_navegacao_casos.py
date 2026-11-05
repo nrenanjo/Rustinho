@@ -24,6 +24,11 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      caixa destacado; desistir (Esc, ou a senha do gerente) volta à OS com
      tudo; retirar o caixa (decisão do gerente, com motivo) volta à OS só
      quando o núcleo confirma, e o rascunho só é salvo com o clique.
+  9. conferência (9a, 9c, 9d, já feitos na 0.9.17): do Início, "Ver
+     duplicatas", "Ver caixas" e "Ver backup" levam à parte certa da
+     Simultaneidade, e o "voltar" (Esc) devolve ao Início; o caixa que
+     desiste da senha volta ao Início, sem o "Só o gerente pode" espúrio do
+     Backup por trás do pedido da senha.
 
 Abre o Rustinho com o ambiente neutro de telas_d09.py (só X11, sem Wayland,
 sem o tema do desktop) e confere, em /proc, que ele está na tela virtual e
@@ -597,7 +602,71 @@ def caso6(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6}
+# ---------------------------------------------------------------------------
+# Caso 9 (conferência): os links das notificações do Início.
+# ---------------------------------------------------------------------------
+def caso9(placar, fotos):
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav9-")
+    try:
+        montar_loja(pasta, avisos=True)
+        # Backup: começou há 10 dias e nunca teve um (notificação de atenção).
+        por_fora(pasta, "INSERT OR REPLACE INTO config (chave, valor) VALUES "
+                        "('backup_desde', strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 days'))")
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, "9-gerente")
+        try:
+            r.entrar("Ana")
+            inicio = r.pilha()
+            f = r.foto("-0")
+            ok("9: Início com as notificações (Ver duplicatas, Ver caixas)",
+               r.tem_igual("Ver duplicatas") and r.tem_igual("Ver caixas"), f)
+            for botao, parte, texto in [("Ver duplicatas", "9a", "Diferenças entre caixas"),
+                                        ("Ver caixas", "9c", "Caixas da loja")]:
+                r.clicar(botao)
+                f = r.foto("-" + parte)
+                ok(f"{parte}: {botao} abre a parte certa ({texto})",
+                   r.esperar(lambda: r.tem(texto) and r.pilha() == inicio + 1), f)
+                ok(f"{parte}: o \"voltar\" diz Início", r.tem_igual("Início"), f)
+                xdo("key", "Escape")
+                ok(f"{parte}: Esc volta ao Início", r.esperar(lambda: r.pilha() == inicio), r.foto("-" + parte + "v"))
+            # A marca "aberta/minimizada" é deste computador: só abre o
+            # quadrado se a faixa ainda não estiver aberta.
+            if not r.tem_igual("Ver backup"):
+                r.clicar("Atenção: Backup")
+            r.esperar(lambda: r.tem_igual("Ver backup"))
+            time.sleep(1.2)  # a faixa termina de abrir (animação) antes do clique
+            r.clicar("Ver backup")
+            f = r.foto("-9d")
+            ok("9d: Ver backup abre a parte Backup",
+               r.esperar(lambda: r.tem("Fazer backup agora") and r.pilha() == inicio + 1), f)
+            xdo("key", "Escape")
+            ok("9d: Esc volta ao Início", r.esperar(lambda: r.pilha() == inicio), r.foto("-9dv"))
+        finally:
+            r.fechar()
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, "9-caixa")
+        try:
+            r.entrar("Bia")
+            inicio = r.pilha()
+            # A marca "aberta/minimizada" é deste computador: só abre o
+            # quadrado se a faixa ainda não estiver aberta.
+            if not r.tem_igual("Ver backup"):
+                r.clicar("Atenção: Backup")
+            r.esperar(lambda: r.tem_igual("Ver backup"))
+            time.sleep(1.2)  # a faixa termina de abrir (animação) antes do clique
+            r.clicar("Ver backup")
+            f = r.foto("-1")
+            ok("9d (caixa): pede a senha do gerente", r.esperar(lambda: r.tem(PEDIDO)), f)
+            ok("9d (caixa): sem o \"Só o gerente pode: backup\" por trás da senha",
+               not r.tem("Só o gerente pode: backup"), f)
+            xdo("key", "Escape")
+            ok("9d (caixa): desistir volta ao Início", r.esperar(lambda: r.pilha() == inicio), r.foto("-2"))
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "9": caso9}
 
 
 def main():
