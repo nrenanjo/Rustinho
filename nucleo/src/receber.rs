@@ -1109,6 +1109,98 @@ pub fn por_forma_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<(i64
     Ok((qtd, somas))
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do crediário e das contas a receber (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::erro::{Erro, Resultado};
+    use crate::{numeros, receber};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "receber_painel", classe: Classe::Leitura, funcao: receber_painel },
+        Comando { nome: "receber_cliente", classe: Classe::Leitura, funcao: receber_cliente },
+        Comando { nome: "receber_calcular", classe: Classe::Leitura, funcao: receber_calcular },
+        Comando { nome: "receber_baixar", classe: Classe::Caixa, funcao: receber_baixar },
+        Comando { nome: "recebimento_estornar", classe: Classe::Gerente("estornar"), funcao: recebimento_estornar },
+        Comando { nome: "receber_previa", classe: Classe::Leitura, funcao: receber_previa },
+        Comando { nome: "receber_lancar", classe: Classe::Caixa, funcao: receber_lancar },
+        Comando { nome: "conta_cancelar", classe: Classe::Gerente("estornar"), funcao: conta_cancelar },
+        Comando { nome: "situacao_cliente", classe: Classe::Leitura, funcao: situacao_cliente },
+    ];
+
+    fn receber_painel(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: BuscaProdutos = ler(dados)?;
+        Ok(json!(receber::painel(p.conn, &d.texto)?))
+    }
+
+    fn receber_cliente(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ContaCliente = ler(dados)?;
+        Ok(json!(receber::cliente(p.conn, &d.id, d.todas)?))
+    }
+
+    fn receber_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: receber::ReceberEntrada = ler(dados)?;
+        Ok(json!(receber::calcular(p.conn, &d)?))
+    }
+
+    fn receber_baixar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: receber::ReceberEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = receber::receber(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(receber::recibo(p.conn, &id)?))
+    }
+
+    fn recebimento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        receber::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn receber_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: receber::LancamentoEntrada = ler(dados)?;
+        let valor = numeros::ler_dinheiro(&d.valor).map_err(|m| Erro::campo("valor", m))?.unwrap_or(0);
+        Ok(json!(receber::previa(p.conn, &d.cliente_id, valor, d.parcelas, &d.primeiro_vencimento)?))
+    }
+
+    fn receber_lancar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: receber::LancamentoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        receber::lancar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn conta_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        receber::cancelar_conta(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn situacao_cliente(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(receber::situacao(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ContaCliente {
+        id: String,
+        todas: bool,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

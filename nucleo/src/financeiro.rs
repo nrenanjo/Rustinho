@@ -889,7 +889,6 @@ mod comandos {
         Ok(json!(financeiro::resumo(p.conn)?))
     }
 
-    // Financeiro: contas da loja e categorias
     fn contas_loja(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Filtro = ler(dados)?;
         let mut v = json!(financeiro::contas(p.conn, d.quais == "todas")?);

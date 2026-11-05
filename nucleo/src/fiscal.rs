@@ -687,7 +687,6 @@ mod comandos {
         Comando { nome: "fiscal_tributacao", classe: Classe::Leitura, funcao: fiscal_tributacao },
     ];
 
-    // Fiscal
     fn fiscal_conferir(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
         Ok(json!(fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)?))
     }

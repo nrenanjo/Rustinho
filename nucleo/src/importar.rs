@@ -637,9 +637,6 @@ mod comandos {
         Comando { nome: "arquivos_conferir", classe: Classe::Leitura, funcao: arquivos_conferir },
     ];
 
-    // Financeiro: contas a pagar
-    // Estoque: o que comprar, encomendas, mais vendidos e parados
-    // Cadastros pelo XML das notas (da loja e de fornecedores)
     fn importar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: importar::Entrada = ler(dados)?;
         Ok(json!(importar::previa(p.conn, &d.arquivos)?))

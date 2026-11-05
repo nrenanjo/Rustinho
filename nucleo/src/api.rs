@@ -11,12 +11,12 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::banco::Banco;
-use crate::despacho::{ler, Acesso, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Filtro, Id, Pedido};
+use crate::despacho::{ler, Acesso, Arquivo, Classe, Comando, Estorno, Id, Pedido};
 use crate::erro::{Erro, Resultado};
 use crate::{
-    arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
-    encomendas, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar, painel,
-    pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
+    arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes,
+    documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina,
+    pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
@@ -324,93 +324,36 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("backup_nuvem_lista", Classe::ConsultaDoGerente("backup")),
     ("backup_conferir", Classe::ConsultaDoGerente("backup")),
     ("backup_restaurar", Classe::Gerente("backup")),
-    // Domínio `vendas` (passa para a tabela dele).
-    ("venda_calcular", Classe::Leitura),
-    ("venda_concluir", Classe::Caixa),
-    ("orcamento_salvar", Classe::Caixa),
-    ("orcamento_carregar", Classe::Leitura),
-    ("venda_abrir", Classe::Leitura),
-    ("vendas_listar", Classe::Leitura),
-    ("venda_cancelar", Classe::Gerente("cancelar_venda")),
-    // Domínio `caixa` (passa para a tabela dele).
-    ("caixa_estado", Classe::Leitura),
-    ("caixa_abrir", Classe::Caixa),
-    ("caixa_movimentar", Classe::Caixa),
-    ("caixa_fechar", Classe::Caixa),
-    ("caixa_resumo", Classe::Leitura),
-    ("formas_pagamento", Classe::Leitura),
-    // Domínio `oficina` (passa para a tabela dele).
-    ("os_listar", Classe::Leitura),
-    ("os_abrir", Classe::Leitura),
-    ("os_calcular", Classe::Leitura),
-    ("os_salvar", Classe::Caixa),
-    ("os_rascunho_salvar", Classe::Caixa),
-    ("os_rascunho_excluir", Classe::Caixa),
-    ("os_rascunho_pode", Classe::Leitura),
-    ("os_situacao", Classe::Caixa),
-    ("os_cancelar", Classe::Caixa),
-    ("os_para_venda", Classe::Leitura),
-    ("os_placa", Classe::Leitura),
-    // Domínio `devolucoes` (passa para a tabela dele).
-    ("devolucao_venda", Classe::Leitura),
-    ("devolucao_calcular", Classe::Leitura),
-    ("devolucao_gravar", Classe::Caixa),
-    ("devolucao_desfazer", Classe::Gerente("estornar")),
-    ("devolucoes_listar", Classe::Leitura),
-    ("vales_abertos", Classe::Leitura),
-    // Domínio `avisos` (passa para a tabela dele).
-    ("avisos_do_dia", Classe::Leitura),
-    ("aviso_minimizar", Classe::Caixa),
-    ("aviso_esconder", Classe::Caixa),
-    // Domínio `receber` (passa para a tabela dele).
-    ("receber_painel", Classe::Leitura),
-    ("receber_cliente", Classe::Leitura),
-    ("receber_calcular", Classe::Leitura),
-    ("receber_baixar", Classe::Caixa),
-    ("recebimento_estornar", Classe::Gerente("estornar")),
-    ("receber_previa", Classe::Leitura),
-    ("receber_lancar", Classe::Caixa),
-    ("conta_cancelar", Classe::Gerente("estornar")),
-    ("situacao_cliente", Classe::Leitura),
-    // Domínio `encomendas` (passa para a tabela dele).
-    ("encomendas_painel", Classe::Leitura),
-    ("encomenda_criar", Classe::Caixa),
-    ("encomenda_pedir", Classe::Caixa),
-    ("encomenda_chegou", Classe::Caixa),
-    ("encomenda_entregar", Classe::Caixa),
-    ("encomenda_cancelar", Classe::Caixa),
-    // RVI-01: marca o cliente como avisado quando a encomenda chegou.
-    ("encomenda_whatsapp", Classe::Caixa),
-    ("encomenda_para_venda", Classe::Leitura),
-    // Domínio `cheques` (passa para a tabela dele).
-    ("cheques_painel", Classe::ConsultaDoGerente("financeiro")),
-    ("cheques_previa", Classe::Leitura),
-    ("cheque_depositar", Classe::Gerente("financeiro")),
-    ("cheque_repassar", Classe::Gerente("financeiro")),
-    ("cheque_devolver", Classe::Gerente("financeiro")),
-    ("cheque_desfazer", Classe::Gerente("estornar")),
 ];
 
 /// As tabelas de comandos dos domínios (cada domínio declara a sua no
 /// próprio módulo; veja `despacho`).
 const TABELAS: &[&[Comando]] = &[
+    avisos::COMANDOS,
     busca::COMANDOS,
+    caixa::COMANDOS,
+    cheques::COMANDOS,
     comissoes::COMANDOS,
     compras::COMANDOS,
+    devolucoes::COMANDOS,
     dre::COMANDOS,
+    encomendas::COMANDOS,
     etiquetas::COMANDOS,
     financeiro::COMANDOS,
     fiscal::COMANDOS,
     importar::COMANDOS,
     menu::COMANDOS,
+    oficina::COMANDOS,
     pagar::COMANDOS,
     painel::COMANDOS,
     pessoas::COMANDOS,
     produtos::COMANDOS,
+    receber::COMANDOS,
     reposicao::COMANDOS,
     requisitos::COMANDOS,
     unidades::COMANDOS,
     usuarios::COMANDOS,
+    vendas::COMANDOS,
 ];
 
 /// O comando de um domínio, se é de algum.
@@ -1317,93 +1260,6 @@ impl Servico {
                 Ok(json!(compras::ficha(&self.banco.conn, &d.conferencia.id)?))
             }
 
-            // Vendas e orçamentos
-            "venda_calcular" => {
-                let d: vendas::VendaEntrada = ler(dados)?;
-                Ok(json!(vendas::calcular(&self.banco.conn, &d)?))
-            }
-            "venda_concluir" => {
-                let d: vendas::VendaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = vendas::concluir(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(vendas::ficha(&self.banco.conn, &id)?))
-            }
-            "orcamento_salvar" => {
-                let d: vendas::VendaEntrada = ler(dados)?;
-                let caixa_nome = config::nome_caixa(&self.banco.conn)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = vendas::salvar_orcamento(&tx, &disp, &sessao.usuario_id, &caixa_nome, &d)?;
-                tx.commit()?;
-                Ok(json!(vendas::ficha(&self.banco.conn, &id)?))
-            }
-            "orcamento_carregar" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(vendas::orcamento_para_venda(&self.banco.conn, &d.id)?))
-            }
-            "venda_abrir" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(vendas::ficha(&self.banco.conn, &d.id)?))
-            }
-            "vendas_listar" => {
-                let d: ListaVendas = ler(dados)?;
-                Ok(json!(vendas::listar(&self.banco.conn, &d.tipo, &d.texto, &d.sessao, d.limite.unwrap_or(300))?))
-            }
-            "venda_cancelar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                vendas::cancelar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(json!(vendas::ficha(&self.banco.conn, &d.id)?))
-            }
-            // O vale-troca aparece à parte no Receber (só quando há vale).
-            "formas_pagamento" => Ok(json!(caixa::FORMAS
-                .iter()
-                .filter(|(f, ..)| *f != "vale")
-                .map(|(f, n, ok)| json!({ "forma": f, "nome": n, "disponivel": ok }))
-                .collect::<Vec<_>>())),
-
-            // Oficina: ordens de serviço
-            "os_listar" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!({
-                    "itens": oficina::listar(&self.banco.conn, &d.quais, &d.texto)?,
-                    "contagem": oficina::contagem(&self.banco.conn)?,
-                }))
-            }
-            "os_abrir" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(oficina::ficha(&self.banco.conn, &d.id)?))
-            }
-            "os_calcular" => {
-                let d: oficina::Entrada = ler(dados)?;
-                Ok(json!(oficina::calcular(&self.banco.conn, &d)?))
-            }
-            "os_salvar" => {
-                let d: oficina::Entrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = oficina::salvar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(oficina::ficha(&self.banco.conn, &id)?))
-            }
-            "os_rascunho_salvar" => {
-                let d: oficina::Entrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = oficina::salvar_rascunho(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(oficina::ficha(&self.banco.conn, &id)?))
-            }
-            "os_rascunho_excluir" => {
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                oficina::excluir_rascunho(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "os_rascunho_pode" => {
-                let caixas = sync::bloqueios_de_rascunho(&self.banco.conn)?;
-                Ok(json!({ "pode": caixas.is_empty(), "caixas": caixas }))
-            }
             "caixas_conhecidos" => Ok(json!({
                 "caixas": sync::caixas_conhecidos(&self.banco.conn)?,
                 "prazoDias": sync::PRAZO_COMPATIBILIDADE_DIAS,
@@ -1478,277 +1334,6 @@ impl Servico {
             "pendencias_reaplicar" => {
                 let n = sync::reaplicar_pendencias(&mut self.banco.conn)?;
                 Ok(json!({ "aplicadas": n, "pendencias": sync::pendencias_da_troca(&self.banco.conn)? }))
-            }
-            "os_situacao" => {
-                let d: Situacao = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                oficina::mudar(&tx, &disp, &sessao.usuario_id, &d.id, &d.situacao)?;
-                tx.commit()?;
-                Ok(json!(oficina::ficha(&self.banco.conn, &d.id)?))
-            }
-            "os_cancelar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                oficina::cancelar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "os_para_venda" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(oficina::para_venda(&self.banco.conn, &d.id)?))
-            }
-            "os_placa" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(oficina::por_placa(&self.banco.conn, &d.texto)?))
-            }
-
-            // Trocas e devoluções
-            "devolucao_venda" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(devolucoes::da_venda(&self.banco.conn, &d.id)?))
-            }
-            "devolucao_calcular" => {
-                let d: devolucoes::Entrada = ler(dados)?;
-                Ok(json!(devolucoes::calcular(&self.banco.conn, &d)?))
-            }
-            "devolucao_gravar" => {
-                let d: devolucoes::Entrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = devolucoes::devolver(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                let conn = &self.banco.conn;
-                let vale: Option<String> =
-                    conn.query_row("SELECT vale_id FROM devolucao WHERE id = ?1", [&id], |l| l.get(0))?;
-                Ok(json!({ "id": id, "valeId": vale, "venda": devolucoes::da_venda(conn, &d.venda_id)? }))
-            }
-            "devolucao_desfazer" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                devolucoes::desfazer(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "devolucoes_listar" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(devolucoes::listar(&self.banco.conn, &d.texto)?))
-            }
-            "vales_abertos" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(devolucoes::vales_abertos(&self.banco.conn, &d.id)?))
-            }
-
-            // Caixa
-            "caixa_estado" => {
-                let s = caixa::sessao_aberta(&self.banco.conn, &disp)?;
-                let resumo = match &s {
-                    Some(s) => Some(caixa::resumo(&self.banco.conn, &s.id)?),
-                    None => None,
-                };
-                Ok(json!({
-                    "aberto": s.is_some(),
-                    "resumo": resumo,
-                    "caixa": config::nome_caixa(&self.banco.conn)?,
-                    "historico": caixa::historico(&self.banco.conn, &disp, 30)?,
-                }))
-            }
-            "caixa_abrir" => {
-                let d: Valor = ler(dados)?;
-                let nome = config::nome_caixa(&self.banco.conn)?;
-                let tx = self.banco.conn.transaction()?;
-                caixa::abrir(&tx, &disp, &sessao.usuario_id, &nome, &d.valor)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "caixa_movimentar" => {
-                let d: Valor = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                caixa::movimentar_com_conta(
-                    &tx,
-                    &disp,
-                    &sessao.usuario_id,
-                    &d.tipo,
-                    &d.valor,
-                    &d.motivo,
-                    Some(&d.conta),
-                )?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "caixa_fechar" => {
-                let d: Valor = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = caixa::fechar(&tx, &disp, &sessao.usuario_id, &d.valor, &d.motivo)?;
-                tx.commit()?;
-                Ok(json!(caixa::resumo(&self.banco.conn, &id)?))
-            }
-            "caixa_resumo" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(caixa::resumo(&self.banco.conn, &d.id)?))
-            }
-
-            // Crediário e contas a receber
-            "avisos_do_dia" => Ok(json!(self.avisos_de(sessao)?)),
-            "aviso_minimizar" => {
-                let d: Value = ler(dados)?;
-                let atuais = self.avisos_de(sessao)?;
-                let tx = self.banco.conn.transaction()?;
-                crate::avisos::minimizar(
-                    &tx,
-                    &atuais,
-                    d["id"].as_str().unwrap_or_default(),
-                    d["minimizado"].as_bool().unwrap_or(true),
-                )?;
-                tx.commit()?;
-                Ok(json!(true))
-            }
-            "aviso_esconder" => {
-                let d: Value = ler(dados)?;
-                // A categoria da notificação que esta pessoa está vendo decide.
-                let atuais = self.avisos_de(sessao)?;
-                crate::avisos::esconder(&self.banco.conn, &atuais, d["id"].as_str().unwrap_or_default())?;
-                Ok(json!(true))
-            }
-            "receber_painel" => {
-                let d: BuscaProdutos = ler(dados)?;
-                Ok(json!(receber::painel(&self.banco.conn, &d.texto)?))
-            }
-            "receber_cliente" => {
-                let d: ContaCliente = ler(dados)?;
-                Ok(json!(receber::cliente(&self.banco.conn, &d.id, d.todas)?))
-            }
-            "receber_calcular" => {
-                let d: receber::ReceberEntrada = ler(dados)?;
-                Ok(json!(receber::calcular(&self.banco.conn, &d)?))
-            }
-            "receber_baixar" => {
-                let d: receber::ReceberEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = receber::receber(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(receber::recibo(&self.banco.conn, &id)?))
-            }
-            "recebimento_estornar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                receber::estornar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "receber_previa" => {
-                let d: receber::LancamentoEntrada = ler(dados)?;
-                let valor = numeros::ler_dinheiro(&d.valor).map_err(|m| Erro::campo("valor", m))?.unwrap_or(0);
-                Ok(json!(receber::previa(&self.banco.conn, &d.cliente_id, valor, d.parcelas, &d.primeiro_vencimento)?))
-            }
-            "receber_lancar" => {
-                let d: receber::LancamentoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                receber::lancar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "conta_cancelar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                receber::cancelar_conta(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "situacao_cliente" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(receber::situacao(&self.banco.conn, &d.id)?))
-            }
-
-            "encomendas_painel" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(encomendas::painel(&self.banco.conn, &d.texto, &d.quais)?))
-            }
-            "encomenda_criar" => {
-                let d: encomendas::EncomendaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = encomendas::criar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(id))
-            }
-            "encomenda_pedir" => {
-                let d: Desfazer = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                for id in d.ids.iter().chain(std::iter::once(&d.id)).filter(|i| !i.is_empty()) {
-                    encomendas::pedir(&tx, &disp, &sessao.usuario_id, id, d.desfazer)?;
-                }
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "encomenda_chegou" => {
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                encomendas::chegou(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "encomenda_entregar" => {
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                encomendas::entregar(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "encomenda_cancelar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                encomendas::cancelar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "encomenda_whatsapp" => {
-                // RVI-01: grava (avisado_em) quando a encomenda chegou.
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let url = encomendas::whatsapp(&tx, &d.id)?;
-                tx.commit()?;
-                Ok(json!({ "url": url }))
-            }
-            "encomenda_para_venda" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(encomendas::para_venda(&self.banco.conn, &d.id)?))
-            }
-
-            // Cheques
-            "cheques_painel" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(cheques::painel(&self.banco.conn, &d.texto, &d.quais)?))
-            }
-            "cheques_previa" => {
-                let d: ChequesPrevia = ler(dados)?;
-                let valor = numeros::ler_dinheiro(&d.valor).map_err(|m| Erro::campo("valor", m))?.unwrap_or(0);
-                Ok(json!(cheques::previa(&self.banco.conn, valor, &d.cheques)?))
-            }
-            "cheque_depositar" => {
-                let d: ChequeAcao = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                cheques::depositar(&tx, &disp, &sessao.usuario_id, &d.id, &d.conta)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "cheque_repassar" => {
-                let d: ChequeAcao = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                cheques::repassar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "cheque_devolver" => {
-                let d: ChequeAcao = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                cheques::devolver(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo, d.divida)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "cheque_desfazer" => {
-                let d: ChequeAcao = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                cheques::desfazer(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
             }
 
             "impressao" => {
@@ -2266,31 +1851,6 @@ impl Servico {
         self.pode_sem_senha("resultados", sessao)
     }
 
-    /// As notificações do Início para quem está conectado (as mesmas que a
-    /// tela mostra e que `aviso_esconder` confere).
-    fn avisos_de(&self, sessao: &Sessao) -> Resultado<Vec<crate::avisos::Aviso>> {
-        let mut avisos = match crate::avisos::do_dia(&self.banco.conn) {
-            Ok(a) => a,
-            // RVI-03: banco antigo em modo seguro (estrutura sem atualizar):
-            // pelo menos o aviso do modo seguro.
-            Err(e) if self.banco.em_modo_seguro() => {
-                crate::registro::anotar(&format!("avisos no modo seguro: {e}"));
-                crate::avisos::so_do_modo_seguro(&self.banco.conn, self.banco.defeito.as_deref().unwrap_or_default())
-            }
-            Err(e) => return Err(e),
-        };
-        // D-03: os avisos de contas a pagar e cheques têm valores do
-        // financeiro: só para quem pode ver o financeiro.
-        if !self.pode_sem_senha("financeiro", sessao)? {
-            avisos.retain(|a| a.funcao != "financeiro");
-        }
-        if let Some(a) = crate::avisos::da_senha(&self.banco.conn, &sessao.usuario_id)? {
-            avisos.push(a);
-        }
-        crate::avisos::uma_aberta(&mut avisos);
-        Ok(avisos)
-    }
-
     fn config_ler(&self, ve_custos: bool) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let taxas = receber::taxas_texto(conn)?;
@@ -2640,41 +2200,6 @@ struct AjustesSync {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
-struct ListaVendas {
-    tipo: String,
-    texto: String,
-    sessao: String,
-    limite: Option<i64>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Valor {
-    tipo: String,
-    valor: String,
-    motivo: String,
-    conta: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct ChequeAcao {
-    id: String,
-    conta: String,
-    motivo: String,
-    divida: bool,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct ChequesPrevia {
-    valor: String,
-    #[serde(flatten)]
-    cheques: crate::cheques::ChequesEntrada,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
 struct Impressao {
     tipo: String,
     id: String,
@@ -2692,31 +2217,9 @@ fn endereco_local() -> String {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
-struct Situacao {
-    id: String,
-    situacao: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Desfazer {
-    id: String,
-    ids: Vec<String>,
-    desfazer: bool,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
 struct CaixaDaLoja {
     dispositivo: String,
     motivo: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct ContaCliente {
-    id: String,
-    todas: bool,
 }
 
 /// Resposta de erro no mesmo formato do `Servico::chamar`.

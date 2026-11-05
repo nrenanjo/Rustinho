@@ -521,3 +521,89 @@ pub fn historico(conn: &Connection, dispositivo: &str, limite: i64) -> Resultado
     let linhas = c.query_map(params![dispositivo, limite], ler_sessao)?;
     Ok(linhas.collect::<Result<_, _>>()?)
 }
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do caixa (a gaveta deste computador) (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{caixa, config};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "caixa_estado", classe: Classe::Leitura, funcao: caixa_estado },
+        Comando { nome: "caixa_abrir", classe: Classe::Caixa, funcao: caixa_abrir },
+        Comando { nome: "caixa_movimentar", classe: Classe::Caixa, funcao: caixa_movimentar },
+        Comando { nome: "caixa_fechar", classe: Classe::Caixa, funcao: caixa_fechar },
+        Comando { nome: "caixa_resumo", classe: Classe::Leitura, funcao: caixa_resumo },
+        Comando { nome: "formas_pagamento", classe: Classe::Leitura, funcao: formas_pagamento },
+    ];
+
+    fn caixa_estado(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let s = caixa::sessao_aberta(p.conn, p.disp)?;
+        let resumo = match &s {
+            Some(s) => Some(caixa::resumo(p.conn, &s.id)?),
+            None => None,
+        };
+        Ok(json!({
+            "aberto": s.is_some(),
+            "resumo": resumo,
+            "caixa": config::nome_caixa(p.conn)?,
+            "historico": caixa::historico(p.conn, p.disp, 30)?,
+        }))
+    }
+
+    fn caixa_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let nome = config::nome_caixa(p.conn)?;
+        let tx = p.conn.transaction()?;
+        caixa::abrir(&tx, p.disp, p.usuario_id, &nome, &d.valor)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn caixa_movimentar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        caixa::movimentar_com_conta(&tx, p.disp, p.usuario_id, &d.tipo, &d.valor, &d.motivo, Some(&d.conta))?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn caixa_fechar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = caixa::fechar(&tx, p.disp, p.usuario_id, &d.valor, &d.motivo)?;
+        tx.commit()?;
+        Ok(json!(caixa::resumo(p.conn, &id)?))
+    }
+
+    fn caixa_resumo(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(caixa::resumo(p.conn, &d.id)?))
+    }
+
+    // O vale-troca aparece à parte no Receber (só quando há vale).
+    fn formas_pagamento(_p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(caixa::FORMAS
+            .iter()
+            .filter(|(f, ..)| *f != "vale")
+            .map(|(f, n, ok)| json!({ "forma": f, "nome": n, "disponivel": ok }))
+            .collect::<Vec<_>>()))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Valor {
+        tipo: String,
+        valor: String,
+        motivo: String,
+        conta: String,
+    }
+}

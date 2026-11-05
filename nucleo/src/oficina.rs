@@ -1033,6 +1033,115 @@ pub fn por_placa(conn: &Connection, placa: &str) -> Resultado<Option<serde_json:
     }))
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da oficina: ordens de serviço (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{oficina, sync};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "os_listar", classe: Classe::Leitura, funcao: os_listar },
+        Comando { nome: "os_abrir", classe: Classe::Leitura, funcao: os_abrir },
+        Comando { nome: "os_calcular", classe: Classe::Leitura, funcao: os_calcular },
+        Comando { nome: "os_salvar", classe: Classe::Caixa, funcao: os_salvar },
+        Comando { nome: "os_rascunho_salvar", classe: Classe::Caixa, funcao: os_rascunho_salvar },
+        Comando { nome: "os_rascunho_excluir", classe: Classe::Caixa, funcao: os_rascunho_excluir },
+        Comando { nome: "os_rascunho_pode", classe: Classe::Leitura, funcao: os_rascunho_pode },
+        Comando { nome: "os_situacao", classe: Classe::Caixa, funcao: os_situacao },
+        Comando { nome: "os_cancelar", classe: Classe::Caixa, funcao: os_cancelar },
+        Comando { nome: "os_para_venda", classe: Classe::Leitura, funcao: os_para_venda },
+        Comando { nome: "os_placa", classe: Classe::Leitura, funcao: os_placa },
+    ];
+
+    fn os_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!({
+            "itens": oficina::listar(p.conn, &d.quais, &d.texto)?,
+            "contagem": oficina::contagem(p.conn)?,
+        }))
+    }
+
+    fn os_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(oficina::ficha(p.conn, &d.id)?))
+    }
+
+    fn os_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        Ok(json!(oficina::calcular(p.conn, &d)?))
+    }
+
+    fn os_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = oficina::salvar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &id)?))
+    }
+
+    fn os_rascunho_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = oficina::salvar_rascunho(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &id)?))
+    }
+
+    fn os_rascunho_excluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::excluir_rascunho(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn os_rascunho_pode(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let caixas = sync::bloqueios_de_rascunho(p.conn)?;
+        Ok(json!({ "pode": caixas.is_empty(), "caixas": caixas }))
+    }
+
+    fn os_situacao(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Situacao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::mudar(&tx, p.disp, p.usuario_id, &d.id, &d.situacao)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &d.id)?))
+    }
+
+    fn os_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn os_para_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(oficina::para_venda(p.conn, &d.id)?))
+    }
+
+    fn os_placa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(oficina::por_placa(p.conn, &d.texto)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Situacao {
+        id: String,
+        situacao: String,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

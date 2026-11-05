@@ -971,7 +971,6 @@ mod comandos {
         Comando { nome: "pessoa_salvar", classe: Classe::Caixa, funcao: pessoa_salvar },
     ];
 
-    // Clientes e fornecedores
     fn pessoas_buscar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: BuscaPessoas = ler(dados)?;
         let itens = pessoas::buscar(p.conn, &d.texto, &d.papel, d.inativos, d.limite.unwrap_or(200))?;

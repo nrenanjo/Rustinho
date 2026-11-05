@@ -706,7 +706,6 @@ mod comandos {
         Comando { nome: "painel_pagamentos", classe: Classe::Leitura, funcao: painel_pagamentos },
     ];
 
-    // Painel: como a loja está indo
     fn painel_resumo(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
         // Lucro e custos só para quem pode ver os resultados (gerente,
         // ou ação liberada para todos na pílula Gerente).

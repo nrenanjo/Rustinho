@@ -875,6 +875,68 @@ pub fn tem_devolucao(conn: &Connection, venda_id: &str) -> Resultado<bool> {
         .is_some())
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das trocas e devoluções (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::devolucoes;
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "devolucao_venda", classe: Classe::Leitura, funcao: devolucao_venda },
+        Comando { nome: "devolucao_calcular", classe: Classe::Leitura, funcao: devolucao_calcular },
+        Comando { nome: "devolucao_gravar", classe: Classe::Caixa, funcao: devolucao_gravar },
+        Comando { nome: "devolucao_desfazer", classe: Classe::Gerente("estornar"), funcao: devolucao_desfazer },
+        Comando { nome: "devolucoes_listar", classe: Classe::Leitura, funcao: devolucoes_listar },
+        Comando { nome: "vales_abertos", classe: Classe::Leitura, funcao: vales_abertos },
+    ];
+
+    fn devolucao_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(devolucoes::da_venda(p.conn, &d.id)?))
+    }
+
+    fn devolucao_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: devolucoes::Entrada = ler(dados)?;
+        Ok(json!(devolucoes::calcular(p.conn, &d)?))
+    }
+
+    fn devolucao_gravar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: devolucoes::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = devolucoes::devolver(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        let conn = &*p.conn;
+        let vale: Option<String> =
+            conn.query_row("SELECT vale_id FROM devolucao WHERE id = ?1", [&id], |l| l.get(0))?;
+        Ok(json!({ "id": id, "valeId": vale, "venda": devolucoes::da_venda(conn, &d.venda_id)? }))
+    }
+
+    fn devolucao_desfazer(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        devolucoes::desfazer(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn devolucoes_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(devolucoes::listar(p.conn, &d.texto)?))
+    }
+
+    fn vales_abertos(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(devolucoes::vales_abertos(p.conn, &d.id)?))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

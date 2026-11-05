@@ -333,7 +333,6 @@ mod comandos {
         Comando { nome: "etiquetas_da_compra", classe: Classe::Leitura, funcao: etiquetas_da_compra },
     ];
 
-    // Impressão (o PDF é feito na janela)
     fn etiquetas_opcoes(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
         Ok(etiquetas::opcoes(p.conn)?)
     }

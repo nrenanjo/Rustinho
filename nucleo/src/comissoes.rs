@@ -302,7 +302,6 @@ mod comandos {
         Comando { nome: "comissao_reabrir", classe: Classe::Gerente("financeiro"), funcao: comissao_reabrir },
     ];
 
-    // Comissões
     fn comissoes(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Periodo = ler(dados)?;
         Ok(json!(comissoes::relatorio(p.conn, &d.de, &d.ate)?))

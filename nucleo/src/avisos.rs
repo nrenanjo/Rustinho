@@ -882,6 +882,76 @@ pub fn so_do_modo_seguro(conn: &Connection, defeito: &str) -> Vec<Aviso> {
     vec![do_modo_seguro(&hoje, defeito)]
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das notificações do Início (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "avisos_do_dia", classe: Classe::Leitura, funcao: avisos_do_dia },
+        Comando { nome: "aviso_minimizar", classe: Classe::Caixa, funcao: aviso_minimizar },
+        Comando { nome: "aviso_esconder", classe: Classe::Caixa, funcao: aviso_esconder },
+    ];
+
+    fn avisos_do_dia(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(avisos_de(p)?))
+    }
+
+    fn aviso_minimizar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Value = ler(dados)?;
+        let atuais = avisos_de(p)?;
+        let tx = p.conn.transaction()?;
+        crate::avisos::minimizar(
+            &tx,
+            &atuais,
+            d["id"].as_str().unwrap_or_default(),
+            d["minimizado"].as_bool().unwrap_or(true),
+        )?;
+        tx.commit()?;
+        Ok(json!(true))
+    }
+
+    fn aviso_esconder(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Value = ler(dados)?;
+        // A categoria da notificação que esta pessoa está vendo decide.
+        let atuais = avisos_de(p)?;
+        crate::avisos::esconder(p.conn, &atuais, d["id"].as_str().unwrap_or_default())?;
+        Ok(json!(true))
+    }
+
+    /// As notificações do Início para quem está conectado (as mesmas que a
+    /// tela mostra e que `aviso_esconder` confere).
+    fn avisos_de(p: &mut Pedido) -> Resultado<Vec<crate::avisos::Aviso>> {
+        let mut avisos = match crate::avisos::do_dia(p.conn) {
+            Ok(a) => a,
+            // RVI-03: banco antigo em modo seguro (estrutura sem atualizar):
+            // pelo menos o aviso do modo seguro.
+            Err(e) if p.modo_seguro => {
+                crate::registro::anotar(&format!("avisos no modo seguro: {e}"));
+                crate::avisos::so_do_modo_seguro(p.conn, p.defeito.unwrap_or_default())
+            }
+            Err(e) => return Err(e),
+        };
+        // D-03: os avisos de contas a pagar e cheques têm valores do
+        // financeiro: só para quem pode ver o financeiro.
+        if !p.pode_sem_senha("financeiro")? {
+            avisos.retain(|a| a.funcao != "financeiro");
+        }
+        if let Some(a) = crate::avisos::da_senha(p.conn, p.usuario_id)? {
+            avisos.push(a);
+        }
+        crate::avisos::uma_aberta(&mut avisos);
+        Ok(avisos)
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

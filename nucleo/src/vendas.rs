@@ -1196,6 +1196,85 @@ pub fn nome_caixa(conn: &Connection) -> Resultado<String> {
     config::nome_caixa(conn)
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das vendas e orçamentos (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{config, vendas};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "venda_calcular", classe: Classe::Leitura, funcao: venda_calcular },
+        Comando { nome: "venda_concluir", classe: Classe::Caixa, funcao: venda_concluir },
+        Comando { nome: "orcamento_salvar", classe: Classe::Caixa, funcao: orcamento_salvar },
+        Comando { nome: "orcamento_carregar", classe: Classe::Leitura, funcao: orcamento_carregar },
+        Comando { nome: "venda_abrir", classe: Classe::Leitura, funcao: venda_abrir },
+        Comando { nome: "vendas_listar", classe: Classe::Leitura, funcao: vendas_listar },
+        Comando { nome: "venda_cancelar", classe: Classe::Gerente("cancelar_venda"), funcao: venda_cancelar },
+    ];
+
+    fn venda_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        Ok(json!(vendas::calcular(p.conn, &d)?))
+    }
+
+    fn venda_concluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = vendas::concluir(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &id)?))
+    }
+
+    fn orcamento_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        let caixa_nome = config::nome_caixa(p.conn)?;
+        let tx = p.conn.transaction()?;
+        let id = vendas::salvar_orcamento(&tx, p.disp, p.usuario_id, &caixa_nome, &d)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &id)?))
+    }
+
+    fn orcamento_carregar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(vendas::orcamento_para_venda(p.conn, &d.id)?))
+    }
+
+    fn venda_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(vendas::ficha(p.conn, &d.id)?))
+    }
+
+    fn vendas_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ListaVendas = ler(dados)?;
+        Ok(json!(vendas::listar(p.conn, &d.tipo, &d.texto, &d.sessao, d.limite.unwrap_or(300))?))
+    }
+
+    fn venda_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        vendas::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ListaVendas {
+        tipo: String,
+        texto: String,
+        sessao: String,
+        limite: Option<i64>,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

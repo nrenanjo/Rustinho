@@ -1541,7 +1541,6 @@ mod comandos {
         Comando { nome: "compra_descartar", classe: Classe::Caixa, funcao: compra_descartar },
     ];
 
-    // Compras
     fn compras_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: BuscaProdutos = ler(dados)?;
         Ok(json!(compras::listar(p.conn, &d.texto, d.limite.unwrap_or(300))?))
