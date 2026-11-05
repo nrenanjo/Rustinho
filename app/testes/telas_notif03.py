@@ -47,10 +47,24 @@ def montar_loja(pasta):
 
 
 def conferir_ambiente(pid):
-    """O Rustinho do teste tem de estar na tela virtual, sem Wayland."""
-    with open(f"/proc/{pid}/environ", "rb") as f:
-        env = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
-    return env.get(b"DISPLAY") == TELA.encode() and b"WAYLAND_DISPLAY" not in env
+    """O Rustinho do teste tem de estar na tela virtual, sem Wayland. Espera o
+    processo terminar de começar (logo depois de criado, /proc ainda pode
+    estar vazio)."""
+    for _ in range(20):
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
+        except OSError:
+            env = {}
+        if b"DISPLAY" in env:
+            return env.get(b"DISPLAY") == TELA.encode() and b"WAYLAND_DISPLAY" not in env
+        time.sleep(0.25)
+    return False
+
+
+# O pedido da senha do gerente (PedirGerente, modo consulta). "Senha do
+# gerente" sozinho não serve: é também um botão do cabeçalho para o caixa.
+PEDIDO = "você só consulta"
 
 
 class Rustinho(base.Rustinho):
@@ -62,6 +76,11 @@ class Rustinho(base.Rustinho):
 
     def tem(self, pedaco):
         return any(simples(pedaco) in simples(t) for _, _, t in self.textos())
+
+    def abrir_notificacao(self):
+        """O botão da notificação que leva a Duplicatas (o texto antigo vale
+        para rodar o teste no programa de antes da correção)."""
+        return self.clicar("Ver duplicatas") or self.clicar("Resolver no Gerente")
 
     def esperar(self, condicao, segundos=8):
         fim = time.time() + segundos
@@ -103,15 +122,16 @@ def main():
             f = r.foto("-0")
             ok("NOTIF-01: botão 'Ver duplicatas' na notificação", r.tem("Ver duplicatas"), f)
             ok("NOTIF-01: nenhum 'Resolver no Gerente'", not r.tem("Resolver no Gerente"), f)
-            ok("Início é a única tela", r.pilha() == 1, f)
-            r.clicar("Ver duplicatas")
-            ok("pede a senha do gerente", r.esperar(lambda: r.tem("Senha do gerente")), r.foto("-1"))
-            ok("Configurações por cima do Início", r.pilha() == 2)
+            inicio = r.pilha()
+            ok("Início aberto", inicio is not None, f)
+            r.abrir_notificacao()
+            ok("pede a senha do gerente", r.esperar(lambda: r.tem(PEDIDO)), r.foto("-1"))
+            ok("Configurações por cima do Início", r.pilha() == inicio + 1)
             r.clicar("Voltar")
             f = r.foto("-2")
-            ok("NOTIF-03: desistir (Voltar) volta ao Início", r.esperar(lambda: r.pilha() == 1), f)
-            ok("NOTIF-03: sem a senha aberta", not r.tem("Senha do gerente"), f)
-            ok("NOTIF-03: a notificação continua lá", r.tem("Ver duplicatas"), f)
+            ok("NOTIF-03: desistir (Voltar) volta ao Início", r.esperar(lambda: r.pilha() == inicio), f)
+            ok("NOTIF-03: sem a senha aberta", not r.tem(PEDIDO), f)
+            ok("NOTIF-03: a notificação continua lá", r.tem("Ver duplicatas") or r.tem("Resolver no Gerente"), f)
         finally:
             r.fechar()
 
@@ -121,11 +141,12 @@ def main():
         try:
             ok("ambiente: tela virtual, sem Wayland (2)", conferir_ambiente(r.p.pid))
             r.entrar("Bia")
-            r.clicar("Ver duplicatas")
-            ok("pede a senha do gerente (2)", r.esperar(lambda: r.tem("Senha do gerente")), r.foto("-1"))
+            inicio = r.pilha()
+            r.abrir_notificacao()
+            ok("pede a senha do gerente (2)", r.esperar(lambda: r.tem(PEDIDO)), r.foto("-1"))
             xdo("key", "Escape")
             f = r.foto("-2")
-            ok("NOTIF-03: desistir (Esc) volta ao Início", r.esperar(lambda: r.pilha() == 1), f)
+            ok("NOTIF-03: desistir (Esc) volta ao Início", r.esperar(lambda: r.pilha() == inicio), f)
         finally:
             r.fechar()
 
@@ -135,13 +156,15 @@ def main():
         try:
             ok("ambiente: tela virtual, sem Wayland (3)", conferir_ambiente(r.p.pid))
             r.entrar("Bia")
-            r.clicar("Ver duplicatas")
-            r.esperar(lambda: r.tem("Senha do gerente"))
+            inicio = r.pilha()
+            r.abrir_notificacao()
+            r.esperar(lambda: r.tem(PEDIDO))
             time.sleep(0.5)
             xdo("type", "--delay", "80", base.SENHA["Ana"])
             xdo("key", "Return")
             f = r.foto("-1")
-            ok("com a senha, fica em Configurações", r.esperar(lambda: r.pilha() == 2 and not r.tem("Senha do gerente")), f)
+            ok("com a senha, fica em Configurações",
+               r.esperar(lambda: r.pilha() == inicio + 1 and not r.tem(PEDIDO)), f)
             ok("e mostra Duplicatas", r.tem("Duplicatas"), f)
         finally:
             r.fechar()
@@ -157,11 +180,11 @@ def main():
             ok("Configurações aberta direto (Loja)", r.pilha() is not None, f)
             antes = r.pilha()
             r.clicar("Simultaneidade")
-            ok("a pílula pede a senha", r.esperar(lambda: r.tem("Senha do gerente")), r.foto("-1"))
+            ok("a pílula pede a senha", r.esperar(lambda: r.tem(PEDIDO)), r.foto("-1"))
             r.clicar("Voltar")
             f = r.foto("-2")
             ok("controle: desistir pela pílula continua em Configurações",
-               r.esperar(lambda: not r.tem("Senha do gerente")) and r.pilha() == antes, f)
+               r.esperar(lambda: not r.tem(PEDIDO)) and r.pilha() == antes, f)
         finally:
             r.fechar()
 

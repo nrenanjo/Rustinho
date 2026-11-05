@@ -100,10 +100,12 @@ ApplicationWindow {
     }
 
     function inicio() {
+        largarGuia()
         pilha.pop(null)
     }
 
     function trocarPara(tela, propriedades) {
+        largarGuia()
         pilha.clear(StackView.Immediate)
         pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
     }
@@ -392,6 +394,15 @@ ApplicationWindow {
             Qt.callLater(f)
         }
         pilha.busyChanged.connect(quandoParar)
+    }
+    // As telas da guia vão sair da pilha (Início, tela de entrada, sessão
+    // encerrada, backup restaurado): a guia acaba agora, antes da troca. Sem
+    // isso, a faixa, o véu e o destaque apareciam por cima da tela seguinte
+    // até a tela de destino ser destruída (0.9.18). O mesmo abandono que o
+    // destino faz ao sair (que então não encontra mais nada a fazer).
+    function largarGuia() {
+        if (guiaAtiva)
+            abandonarGuia(guiaAtiva)
     }
     // A tela de destino saiu por outro caminho (Início, trocar de usuário):
     // a guia acaba sem voltar e sem marcar nada.
@@ -762,6 +773,9 @@ ApplicationWindow {
             if (atual.startsWith("TelaEntrar") || atual.startsWith("TelaBoasVindas"))
                 return
             janela.voltandoParaEntrada = true
+            // A guia acaba já: a tela que recebeu a recusa não mostra mais
+            // "Não foi salvo" na faixa, que iria junto para a entrada.
+            janela.largarGuia()
             Qt.callLater(() => {
                 Tema.oculto = true
                 janela.atualizarEstado()
