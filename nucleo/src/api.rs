@@ -1488,19 +1488,16 @@ impl Servico {
                 if seguro {
                     self.banco.conn.pragma_update(None, "query_only", false)?;
                 }
-                let r = backup::restaurar(&mut self.banco.conn, caminho.as_deref(), &d.arquivo, d.nuvem, &d.senha)
-                    .and_then(|info| {
-                        auditoria::registrar(
-                            &self.banco.conn,
-                            &disp,
-                            Some(&sessao.usuario_id),
-                            "backup.restaurar",
-                            "config",
-                            &info.quando,
-                            &[],
-                        )?;
-                        Ok(info)
-                    });
+                // M-04: o registro na auditoria vai na transação que termina
+                // a restauração (também se ela terminar ao abrir).
+                let r = backup::restaurar_por(
+                    &mut self.banco.conn,
+                    caminho.as_deref(),
+                    &d.arquivo,
+                    d.nuvem,
+                    &d.senha,
+                    Some(&sessao.usuario_id),
+                );
                 let conferido = seguro && r.is_ok() && crate::banco::conferir_integridade(&self.banco.conn).is_ok();
                 if seguro {
                     self.banco.conn.pragma_update(None, "query_only", true)?;

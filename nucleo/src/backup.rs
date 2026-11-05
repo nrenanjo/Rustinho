@@ -1518,6 +1518,20 @@ pub fn restaurar(
     nuvem: bool,
     senha: &str,
 ) -> Resultado<Info> {
+    restaurar_por(conn, caminho_db, arquivo, nuvem, senha, None)
+}
+
+/// Como `restaurar`, registrando na auditoria quem restaurou (M-04, 0.9.18):
+/// o registro vai na mesma transação que termina a restauração — também
+/// quando ela termina ao abrir, depois de uma queda —, nunca depois dela.
+pub fn restaurar_por(
+    conn: &mut Connection,
+    caminho_db: Option<&Path>,
+    arquivo: &str,
+    nuvem: bool,
+    senha: &str,
+    usuario_id: Option<&str>,
+) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…")
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
     let tmp = Temporaria::nova(&std::env::temp_dir())?;
@@ -1571,7 +1585,13 @@ pub fn restaurar(
     }
 
     // O que é deste computador fica como está.
-    let pendente = Pendente::ler(conn)?;
+    let mut pendente = Pendente::ler(conn)?;
+    // Marca dentro do banco que vai entrar (chave deste computador, que não
+    // vai para os outros caixas e sai ao terminar): depois de uma queda, ela
+    // diz se o banco chegou a ser trocado.
+    pendente.troca = tempo::novo_id();
+    pendente.auditoria = usuario_id.map(|u| (u.to_string(), info.quando.clone()));
+    marcar_banco_que_entra(&db, &pendente.troca)?;
     // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
     // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
     let marca = caminho_db.map(marca_da_restauracao);
@@ -1615,6 +1635,35 @@ pub fn restaurar(
     Ok(info)
 }
 
+/// Chave deste computador (não vai para os outros caixas: não é da loja)
+/// gravada no banco que vai entrar, com a marca da restauração (0.9.18).
+/// Só existe no banco trocado até `Pendente::aplicar`, que a tira.
+const CHAVE_DA_TROCA: &str = "restauracao_troca";
+
+/// Grava a marca da troca no banco tirado do backup (o arquivo temporário),
+/// antes de ele entrar no lugar do banco. Sem registrar alteração para a
+/// troca de dados (a chave é deste computador; e, num banco de versão mais
+/// antiga, os gatilhos ficam parados enquanto grava).
+fn marcar_banco_que_entra(db: &Path, troca: &str) -> Resultado<()> {
+    let c = Connection::open(db)?;
+    banco::registrar_funcoes(&c)?;
+    let tem_estado: bool = c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_estado')",
+        [],
+        |l| l.get(0),
+    )?;
+    let tx = c.unchecked_transaction()?;
+    if tem_estado {
+        tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
+    }
+    config::gravar(&tx, CHAVE_DA_TROCA, troca)?;
+    if tem_estado {
+        tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Só nos testes: a restauração "cai" na etapa pedida (sai na hora, sem
 /// arrumar nada, como numa falta de luz) ou falha ao terminar; e se a troca
 /// de dados estava parada na hora de trocar o banco.
@@ -1656,6 +1705,14 @@ pub struct Pendente {
     /// identidade não deixa a loja sem ela (marcas de versões antigas não têm).
     #[serde(default)]
     loja: String,
+    /// A marca gravada no banco que entra (`CHAVE_DA_TROCA`, 0.9.18). Vazia
+    /// numa marca de versão antiga.
+    #[serde(default)]
+    troca: String,
+    /// Quem restaurou e de quando é o backup (M-04, 0.9.18): o registro na
+    /// auditoria vai na transação que termina a restauração.
+    #[serde(default)]
+    auditoria: Option<(String, String)>,
 }
 
 impl Pendente {
@@ -1687,7 +1744,17 @@ impl Pendente {
             .optional()?
             .unwrap_or(0);
         let loja = crate::loja::id(conn)?;
-        Ok(Pendente { locais, pares, caminhos, seq, loja })
+        Ok(Pendente { locais, pares, caminhos, seq, loja, troca: String::new(), auditoria: None })
+    }
+
+    /// Depois de uma queda: o banco chegou a ser trocado (a marca de dentro
+    /// dele é a desta restauração)? None = marca de uma versão antiga (não
+    /// dá para saber).
+    fn banco_trocado(&self, conn: &Connection) -> Resultado<Option<bool>> {
+        if self.troca.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(config::ler(conn, CHAVE_DA_TROCA)?.as_deref() == Some(self.troca.as_str())))
     }
 
     /// Grava a marca e garante que chegou ao disco antes de seguir.
@@ -1735,6 +1802,12 @@ impl Pendente {
         if !self.loja.is_empty() && crate::loja::id(&tx)?.is_empty() {
             config::gravar(&tx, crate::loja::CHAVE, &self.loja)?;
         }
+        // M-04: o registro de quem restaurou, junto (depois da numeração das
+        // alterações ter voltado: o registro vai para os outros caixas).
+        if let Some((usuario, quando)) = &self.auditoria {
+            let dispositivo = config::ler(&tx, "dispositivo_id")?.unwrap_or_default();
+            crate::auditoria::registrar(&tx, &dispositivo, Some(usuario), "backup.restaurar", "config", quando, &[])?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -1746,6 +1819,16 @@ pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path
     let marca = marca_da_restauracao(caminho_db);
     let Ok(texto) = std::fs::read_to_string(&marca) else { return Ok(false) };
     match serde_json::from_str::<Pendente>(&texto) {
+        // 0.9.18: a marca de dentro do banco não é a desta restauração — ou
+        // ele não chegou a ser trocado (o banco é o de antes, inteiro), ou a
+        // restauração já tinha terminado (a marca de dentro sai ao terminar,
+        // na mesma transação). Nos dois casos não há nada a terminar: antes,
+        // o banco de antes "terminava" uma restauração que não houve (a troca
+        // de dados recomeçava do zero e a faixa de códigos deste caixa era
+        // abandonada).
+        Ok(p) if p.banco_trocado(conn)? == Some(false) => crate::registro::anotar(
+            "restauração interrompida: o banco não chegou a ser trocado (ou ela já tinha terminado); nada a terminar",
+        ),
         Ok(p) => {
             sync::criar_gatilhos(conn)?;
             p.aplicar(conn)?;

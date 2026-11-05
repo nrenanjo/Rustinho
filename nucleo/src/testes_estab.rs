@@ -109,6 +109,120 @@ fn conferir_banco(db: &Path) {
     assert_eq!(chaves, 0, "referência quebrada");
 }
 
+fn restauracoes_na_auditoria(db: &Path) -> i64 {
+    numero(db, "SELECT COUNT(*) FROM auditoria WHERE acao = 'backup.restaurar'")
+}
+
+fn cursor_do_outro(db: &Path) -> i64 {
+    numero(db, "SELECT cursor FROM sync_par WHERE dispositivo = 'outro'")
+}
+
+fn marca(l: &Loja) -> PathBuf {
+    backup::marca_da_restauracao(&l.db)
+}
+
+/// Restaura pelo serviço (como a tela), "caindo" na etapa pedida: a
+/// restauração sai dali na hora, sem arrumar nada, como numa falta de luz.
+/// Depois o serviço some (o programa "morreu") e o banco é aberto de novo.
+fn restaurar_caindo(l: &Loja, etapa: &'static str) -> Value {
+    let _vez = backup::testes::um_por_vez();
+    let r = {
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        queda_de_teste::ETAPA.with(|e| e.set(etapa));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+        queda_de_teste::ETAPA.with(|e| e.set(""));
+        r
+    };
+    assert_eq!(r["ok"], false, "a queda simulada não aconteceu: {r}");
+    assert!(marca(l).exists(), "a marca da restauração fica (a queda foi depois de gravá-la)");
+    r
+}
+
+/// Sem queda: um registro na auditoria, no banco restaurado, de quem restaurou.
+#[test]
+fn m04_restaurar_registra_na_auditoria_uma_vez() {
+    let l = loja("m04-normal");
+    {
+        let _vez = backup::testes::um_por_vez();
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        ok(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+    }
+    assert!(!tem_peca(&l.db, "Depois do backup") && tem_peca(&l.db, "Antes do backup"));
+    assert_eq!(restauracoes_na_auditoria(&l.db), 1);
+    let quem: String = Connection::open(&l.db)
+        .unwrap()
+        .query_row("SELECT usuario_id FROM auditoria WHERE acao = 'backup.restaurar'", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(quem, l.ana);
+    assert!(!marca(&l).exists());
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
+/// Queda ANTES de trocar o banco (a marca já estava gravada): o banco é o de
+/// antes, inteiro. Ao abrir, nada é "terminado": a troca de dados não
+/// recomeça do zero, a geração dos códigos das peças não muda (a faixa deste
+/// caixa continua valendo) e nada vai para a auditoria como restaurado.
+#[test]
+fn estab_queda_antes_da_troca_nao_finge_restauracao() {
+    let l = loja("antes-da-troca");
+    let geracao = ler(&l.db, "sync_geracao");
+    let codigos = ler(&l.db, "codigos_geracao");
+    restaurar_caindo(&l, "antes_da_troca");
+    // Abre de novo (como o programa: termina o que estava pela metade).
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(!marca(&l).exists(), "a marca saiu");
+    assert!(tem_peca(&l.db, "Depois do backup"), "o banco não foi trocado");
+    assert_eq!(ler(&l.db, "caixa_nome").as_deref(), Some("Caixa Nova"));
+    assert_eq!(cursor_do_outro(&l.db), 7, "a troca de dados não recomeçou do zero");
+    assert_eq!(ler(&l.db, "sync_geracao"), geracao, "a geração da troca de dados não mudou");
+    assert_eq!(ler(&l.db, "codigos_geracao"), codigos, "a faixa de códigos deste caixa continua valendo");
+    assert_eq!(restauracoes_na_auditoria(&l.db), 0, "não houve restauração");
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
+/// Queda DEPOIS de trocar o banco, antes de pôr de volta o que é deste
+/// computador: ao abrir, a restauração termina (o nome deste caixa volta, a
+/// troca de dados recomeça) e fica UM registro na auditoria (M-04: antes,
+/// o registro era gravado depois e se perdia).
+#[test]
+fn m04_queda_depois_da_troca_termina_e_registra_ao_abrir() {
+    let l = loja("depois-da-troca");
+    let geracao = ler(&l.db, "sync_geracao");
+    restaurar_caindo(&l, "depois_da_troca");
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(!marca(&l).exists());
+    assert!(!tem_peca(&l.db, "Depois do backup") && tem_peca(&l.db, "Antes do backup"), "o banco é o do backup");
+    assert_eq!(ler(&l.db, "caixa_nome").as_deref(), Some("Caixa Nova"), "o nome deste caixa voltou");
+    assert_eq!(cursor_do_outro(&l.db), 0, "a troca de dados recomeça");
+    assert_ne!(ler(&l.db, "sync_geracao"), geracao);
+    assert_eq!(restauracoes_na_auditoria(&l.db), 1, "a restauração ficou registrada (uma vez)");
+    assert!(ler(&l.db, "restauracao_troca").is_none(), "a marca de dentro do banco saiu");
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
+/// Queda depois de TERMINAR (o que é deste computador já voltou), antes de
+/// tirar a marca: ao abrir, nada é refeito (a troca de dados não ganha outra
+/// geração) e o registro na auditoria é um só.
+#[test]
+fn estab_queda_depois_de_terminar_nao_refaz() {
+    let l = loja("antes-de-tirar-a-marca");
+    restaurar_caindo(&l, "antes_de_tirar_a_marca");
+    let geracao_restaurada = ler(&l.db, "sync_geracao");
+    drop(crate::banco::Banco::abrir(&l.db).unwrap());
+    assert!(!marca(&l).exists());
+    assert!(!tem_peca(&l.db, "Depois do backup"));
+    assert_eq!(ler(&l.db, "caixa_nome").as_deref(), Some("Caixa Nova"));
+    assert_eq!(ler(&l.db, "sync_geracao"), geracao_restaurada, "nada foi refeito ao abrir");
+    assert_eq!(restauracoes_na_auditoria(&l.db), 1);
+    conferir_banco(&l.db);
+    let _ = std::fs::remove_dir_all(&l.pasta);
+}
+
 /// Item 2: restaurar uma cópia do Google Drive. O download (aqui, um rclone
 /// que leva 3 s para "baixar") NÃO para a troca de dados com os outros caixas
 /// (antes, ela ficava parada durante todo o download, que pode levar até meia
