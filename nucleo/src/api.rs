@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::banco::Banco;
-use crate::despacho::{ler, Acesso, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Filtro, Id, Pedido, Periodo};
+use crate::despacho::{ler, Acesso, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Filtro, Id, Pedido};
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
@@ -324,19 +324,6 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("backup_nuvem_lista", Classe::ConsultaDoGerente("backup")),
     ("backup_conferir", Classe::ConsultaDoGerente("backup")),
     ("backup_restaurar", Classe::Gerente("backup")),
-    // Domínio `compras` (passa para a tabela dele).
-    ("compras_listar", Classe::Leitura),
-    ("compra_importar", Classe::Caixa),
-    ("compra_abrir", Classe::Leitura),
-    ("compra_atualizar", Classe::Caixa),
-    ("compra_lancar", Classe::Caixa),
-    ("compra_estornar", Classe::Gerente("estornar")),
-    ("compra_descartar", Classe::Caixa),
-    // Domínio `fiscal` (passa para a tabela dele).
-    ("fiscal_conferir", Classe::Leitura),
-    ("fiscal_automatico", Classe::Caixa),
-    ("fiscal_regras_salvar", Classe::Gerente("configuracoes")),
-    ("fiscal_tributacao", Classe::Leitura),
     // Domínio `vendas` (passa para a tabela dele).
     ("venda_calcular", Classe::Leitura),
     ("venda_concluir", Classe::Caixa),
@@ -385,35 +372,6 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("receber_lancar", Classe::Caixa),
     ("conta_cancelar", Classe::Gerente("estornar")),
     ("situacao_cliente", Classe::Leitura),
-    // Domínio `importar` (passa para a tabela dele).
-    ("importar_previa", Classe::Leitura),
-    ("importar_cadastros", Classe::Gerente("configuracoes")),
-    ("arquivos_conferir", Classe::Leitura),
-    // Domínio `requisitos` (passa para a tabela dele).
-    // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
-    ("requisito_conferir", Classe::Leitura),
-    // Domínio `painel` (passa para a tabela dele).
-    ("painel_resumo", Classe::Leitura),
-    ("painel_clientes", Classe::Leitura),
-    ("painel_fornecedores", Classe::Leitura),
-    ("painel_pagamentos", Classe::Leitura),
-    // Domínio `dre` (passa para a tabela dele).
-    ("dre_apurar", Classe::ConsultaDoGerente("resultados")),
-    ("dre_detalhe", Classe::ConsultaDoGerente("resultados")),
-    ("dre_despesas", Classe::ConsultaDoGerente("resultados")),
-    ("dre_indicadores", Classe::ConsultaDoGerente("resultados")),
-    ("dre_serie", Classe::ConsultaDoGerente("resultados")),
-    ("dre_resumo", Classe::ConsultaDoGerente("resultados")),
-    ("dre_classificacao", Classe::ConsultaDoGerente("resultados")),
-    ("dre_classificacao_salvar", Classe::Gerente("resultados")),
-    ("dre_metas", Classe::ConsultaDoGerente("resultados")),
-    ("dre_meta_salvar", Classe::Gerente("resultados")),
-    // Domínio `reposicao` (passa para a tabela dele).
-    ("estoque_sugestao", Classe::Leitura),
-    // R-04: grava os dias escolhidos na tela de reposição.
-    ("estoque_dias", Classe::Caixa),
-    ("estoque_mais_vendidos", Classe::Leitura),
-    ("estoque_parados", Classe::Leitura),
     // Domínio `encomendas` (passa para a tabela dele).
     ("encomendas_painel", Classe::Leitura),
     ("encomenda_criar", Classe::Caixa),
@@ -424,28 +382,6 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     // RVI-01: marca o cliente como avisado quando a encomenda chegou.
     ("encomenda_whatsapp", Classe::Caixa),
     ("encomenda_para_venda", Classe::Leitura),
-    // Domínio `financeiro` (passa para a tabela dele).
-    ("financeiro_resumo", Classe::ConsultaDoGerente("financeiro")),
-    ("contas_loja", Classe::Leitura),
-    ("conta_loja_salvar", Classe::Gerente("financeiro")),
-    ("conta_loja_extrato", Classe::ConsultaDoGerente("financeiro")),
-    ("movimento_lancar", Classe::Gerente("financeiro")),
-    ("movimento_estornar", Classe::Gerente("estornar")),
-    ("transferir", Classe::Gerente("financeiro")),
-    ("conta_loja_conferir", Classe::Gerente("financeiro")),
-    ("categorias", Classe::ConsultaDoGerente("financeiro")),
-    ("categoria_salvar", Classe::Gerente("financeiro")),
-    ("fluxo_caixa", Classe::ConsultaDoGerente("financeiro")),
-    ("pagar_formas", Classe::ConsultaDoGerente("financeiro")),
-    // Domínio `pagar` (passa para a tabela dele).
-    ("pagar_painel", Classe::ConsultaDoGerente("financeiro")),
-    ("pagar_ficha", Classe::ConsultaDoGerente("financeiro")),
-    ("pagar_previa", Classe::ConsultaDoGerente("financeiro")),
-    ("pagar_lancar", Classe::Gerente("financeiro")),
-    ("pagar_alterar", Classe::Gerente("financeiro")),
-    ("pagar_cancelar", Classe::Gerente("financeiro")),
-    ("pagar_pagar", Classe::Gerente("financeiro")),
-    ("pagamento_estornar", Classe::Gerente("estornar")),
     // Domínio `cheques` (passa para a tabela dele).
     ("cheques_painel", Classe::ConsultaDoGerente("financeiro")),
     ("cheques_previa", Classe::Leitura),
@@ -453,20 +389,29 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("cheque_repassar", Classe::Gerente("financeiro")),
     ("cheque_devolver", Classe::Gerente("financeiro")),
     ("cheque_desfazer", Classe::Gerente("estornar")),
-    // Domínio `comissoes` (passa para a tabela dele).
-    ("comissoes", Classe::ConsultaDoGerente("financeiro")),
-    ("comissao_fechar", Classe::Gerente("financeiro")),
-    ("comissao_reabrir", Classe::Gerente("financeiro")),
-    // Domínio `etiquetas` (passa para a tabela dele).
-    ("etiquetas_opcoes", Classe::Leitura),
-    ("etiqueta_previa", Classe::Leitura),
-    ("etiquetas_da_compra", Classe::Leitura),
 ];
 
 /// As tabelas de comandos dos domínios (cada domínio declara a sua no
 /// próprio módulo; veja `despacho`).
-const TABELAS: &[&[Comando]] =
-    &[busca::COMANDOS, menu::COMANDOS, pessoas::COMANDOS, produtos::COMANDOS, unidades::COMANDOS, usuarios::COMANDOS];
+const TABELAS: &[&[Comando]] = &[
+    busca::COMANDOS,
+    comissoes::COMANDOS,
+    compras::COMANDOS,
+    dre::COMANDOS,
+    etiquetas::COMANDOS,
+    financeiro::COMANDOS,
+    fiscal::COMANDOS,
+    importar::COMANDOS,
+    menu::COMANDOS,
+    pagar::COMANDOS,
+    painel::COMANDOS,
+    pessoas::COMANDOS,
+    produtos::COMANDOS,
+    reposicao::COMANDOS,
+    requisitos::COMANDOS,
+    unidades::COMANDOS,
+    usuarios::COMANDOS,
+];
 
 /// O comando de um domínio, se é de algum.
 fn do_dominio(comando: &str) -> Option<&'static Comando> {
@@ -1353,94 +1298,6 @@ impl Servico {
                 Ok(Value::Null)
             }
 
-            // Compras
-            "compras_listar" => {
-                let d: BuscaProdutos = ler(dados)?;
-                Ok(json!(compras::listar(&self.banco.conn, &d.texto, d.limite.unwrap_or(300))?))
-            }
-            // Um arquivo escolhido: um XML, um .zip ou .rar com várias notas,
-            // ou uma pasta. Cada nota vira uma compra; o que falhar vem em "erros".
-            "compra_importar" => {
-                let d: Arquivo = ler(dados)?;
-                if d.caminho.trim().is_empty() {
-                    return Err(Erro::validacao("Escolha o arquivo XML da nota."));
-                }
-                // 0.9.17: sem o CNPJ da loja (ou com um inválido) não importa:
-                // a tela leva a Configurações › Loja e volta com os arquivos.
-                crate::requisitos::exigir_cnpj_da_loja(&self.banco.conn, crate::requisitos::PARA_COMPRAS)?;
-                let lista = arquivos::xmls(std::slice::from_ref(&d.caminho))?;
-                let pacote = lista.len() > 1 || lista.iter().any(|x| x.nome.contains(" › "));
-                let mut fichas = Vec::new();
-                let mut erros = Vec::new();
-                // Notas emitidas para outro CNPJ: não entram; a tela mostra a
-                // janela de conflito para conferir ou descartar.
-                let mut conflitos = Vec::new();
-                for x in lista {
-                    if !x.erro.is_empty() {
-                        erros.push(format!("{}: {}", x.nome, x.erro));
-                        continue;
-                    }
-                    let tx = self.banco.conn.transaction()?;
-                    match compras::importar_xml(&tx, &disp, &sessao.usuario_id, &x.texto) {
-                        Ok(id) => {
-                            tx.commit()?;
-                            fichas.push(compras::ficha(&self.banco.conn, &id)?);
-                        }
-                        // Dentro de um pacote, eventos (cancelamento, carta de
-                        // correção) e outros XMLs que não são nota são pulados.
-                        Err(e)
-                            if pacote
-                                && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"]
-                                    .iter()
-                                    .any(|t| e.to_string().contains(t)) => {}
-                        Err(e) if e.nome_do_campo() == Some(compras::CAMPO_OUTRO_CNPJ) => {
-                            conflitos.push(compras::conflito_cnpj(&tx, &x.nome, &x.texto)?);
-                        }
-                        Err(e) => erros.push(format!("{}: {e}", x.nome)),
-                    }
-                }
-                if fichas.is_empty() && erros.is_empty() && conflitos.is_empty() {
-                    return Err(Erro::validacao("Não achei nenhuma NF-e nesse arquivo."));
-                }
-                Ok(json!({ "compras": fichas, "erros": erros, "conflitos": conflitos }))
-            }
-            "compra_abrir" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(compras::ficha(&self.banco.conn, &d.id)?))
-            }
-            "compra_atualizar" => {
-                let d: compras::CompraEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                compras::atualizar(&tx, &d)?;
-                tx.commit()?;
-                Ok(json!(compras::ficha(&self.banco.conn, &d.id)?))
-            }
-            "compra_lancar" => {
-                let d: compras::CompraEntrada = ler(dados)?;
-                // 0915-N / D-09: a compra que muda o preço de venda de uma
-                // peça já cadastrada ("os preços seguem o % de lucro") é do
-                // gerente, como no cadastro. Confere antes (sem efeito) e
-                // decide depois de saber se algum preço mudou: sem a senha,
-                // nada é lançado (a transação volta inteira).
-                let sem_precos = self.exigir("precos", sessao).err();
-                let tx = self.banco.conn.transaction()?;
-                compras::atualizar(&tx, &d)?;
-                let r = compras::lancar(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                if r.precos_atualizados > 0 {
-                    if let Some(e) = sem_precos {
-                        return Err(e);
-                    }
-                }
-                tx.commit()?;
-                Ok(json!({ "resumo": r, "compra": compras::ficha(&self.banco.conn, &d.id)? }))
-            }
-            "compra_estornar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                compras::estornar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(json!(compras::ficha(&self.banco.conn, &d.id)?))
-            }
             "compra_conferir_autorizacao" => {
                 let d: ConferenciaDoGerente = ler(dados)?;
                 self.esperar_se_errou("gerente")?;
@@ -1458,43 +1315,6 @@ impl Servico {
                 compras::registrar_conferencia(&tx, &disp, &g.id, &d.conferencia)?;
                 tx.commit()?;
                 Ok(json!(compras::ficha(&self.banco.conn, &d.conferencia.id)?))
-            }
-            "compra_descartar" => {
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                compras::excluir_rascunho(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-
-            // Fiscal
-            "fiscal_conferir" => Ok(json!(fiscal::conferir(&self.banco.conn, &fiscal::hoje(&self.banco.conn)?)?)),
-            "fiscal_automatico" => {
-                let d: Ids = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let n = fiscal::usar_automatico(&tx, &disp, &sessao.usuario_id, &d.ids)?;
-                tx.commit()?;
-                Ok(
-                    json!({ "alteradas": n, "conferencia": fiscal::conferir(&self.banco.conn, &fiscal::hoje(&self.banco.conn)?)? }),
-                )
-            }
-            "fiscal_regras_salvar" => {
-                let d: Regras = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                fiscal::salvar_regras(&tx, &disp, &sessao.usuario_id, &d.regras)?;
-                tx.commit()?;
-                Ok(json!(fiscal::conferir(&self.banco.conn, &fiscal::hoje(&self.banco.conn)?)?))
-            }
-            "fiscal_tributacao" => {
-                let d: Tributacao = ler(dados)?;
-                let uf = fiscal::uf_loja(&self.banco.conn)?;
-                Ok(json!(fiscal::tributacao(
-                    &self.banco.conn,
-                    &uf,
-                    &d.cest,
-                    &d.csosn,
-                    &fiscal::hoje(&self.banco.conn)?
-                )?))
             }
 
             // Vendas e orçamentos
@@ -1838,147 +1658,6 @@ impl Servico {
                 Ok(json!(receber::situacao(&self.banco.conn, &d.id)?))
             }
 
-            // Financeiro: contas a pagar
-            // Estoque: o que comprar, encomendas, mais vendidos e parados
-            // Cadastros pelo XML das notas (da loja e de fornecedores)
-            "importar_previa" => {
-                let d: importar::Entrada = ler(dados)?;
-                Ok(json!(importar::previa(&self.banco.conn, &d.arquivos)?))
-            }
-            // Navegação guiada (piloto 0.9.16): só leitura.
-            "requisito_conferir" => {
-                let d: Requisito = ler(dados)?;
-                Ok(json!(requisitos::conferir(&self.banco.conn, &d.id)?))
-            }
-            "arquivos_conferir" => {
-                let d: importar::Entrada = ler(dados)?;
-                Ok(json!(requisitos::arquivos(&d.arquivos)))
-            }
-            "importar_cadastros" => {
-                let d: importar::Entrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let r = importar::importar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(r))
-            }
-
-            // Painel: como a loja está indo
-            "painel_resumo" => {
-                // Lucro e custos só para quem pode ver os resultados (gerente,
-                // ou ação liberada para todos na pílula Gerente).
-                // Na tela do Painel vale a consulta dos resultados; o financeiro
-                // é de outra tela.
-                let pode = self.pode_ler("resultados", sessao)?;
-                let financeiro = self.pode_sem_senha("financeiro", sessao)?;
-                let mut v = json!(painel::resumo(&self.banco.conn)?);
-                if !pode {
-                    v["lucroMes"] = json!("");
-                    v["margemMes"] = json!("");
-                    v["semCusto"] = json!(0);
-                }
-                // D-04: o que a loja tem a pagar é do financeiro.
-                if !financeiro {
-                    v["pagar7Dias"] = json!("");
-                    v["pagarVencido"] = json!("");
-                }
-                v["resultados"] = json!(pode);
-                v["financeiro"] = json!(financeiro);
-                Ok(v)
-            }
-
-            // DRE gerencial (docs/DRE-gerencial.md)
-            "dre_apurar" => {
-                let d: dre::Filtro = ler(dados)?;
-                Ok(json!(dre::apurar_dre(&self.banco.conn, &d)?))
-            }
-            "dre_detalhe" => {
-                let d: DreLinha = ler(dados)?;
-                Ok(json!(dre::detalhe(&self.banco.conn, &d.filtro, &d.linha)?))
-            }
-            "dre_despesas" => {
-                let d: DreLinha = ler(dados)?;
-                Ok(json!(dre::despesas(&self.banco.conn, &d.filtro, &d.categoria)?))
-            }
-            "dre_indicadores" => {
-                let d: DreLinha = ler(dados)?;
-                Ok(json!(dre::indicadores(&self.banco.conn, &d.filtro, &d.busca, 10)?))
-            }
-            "dre_serie" => Ok(json!(dre::serie(&self.banco.conn)?)),
-            "dre_resumo" => Ok(json!(dre::resumo_painel(&self.banco.conn)?)),
-            "dre_classificacao" => Ok(json!(dre::classificacao(&self.banco.conn)?)),
-            "dre_classificacao_salvar" => {
-                let d: dre::ClassificacaoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                dre::salvar_classificacao(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(dre::classificacao(&self.banco.conn)?))
-            }
-            "dre_metas" => Ok(json!(dre::metas(&self.banco.conn)?)),
-            "dre_meta_salvar" => {
-                let d: dre::MetaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                dre::salvar_meta(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(dre::metas(&self.banco.conn)?))
-            }
-            "painel_clientes" => {
-                let d: Dias90 = ler(dados)?;
-                Ok(json!(painel::clientes(&self.banco.conn, d.dias.max(1))?))
-            }
-            "painel_fornecedores" => {
-                let d: Dias90 = ler(dados)?;
-                Ok(json!(painel::fornecedores(&self.banco.conn, d.dias.max(1))?))
-            }
-            "painel_pagamentos" => {
-                let d: Dias90 = ler(dados)?;
-                Ok(json!(painel::pagamentos(&self.banco.conn, d.dias.max(1))?))
-            }
-
-            "estoque_sugestao" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(reposicao::sugestao(&self.banco.conn, &d.texto)?))
-            }
-            "estoque_dias" => {
-                let d: Dias = ler(dados)?;
-                // C8: os dias e o histórico, numa transação só.
-                let tx = self.banco.conn.transaction()?;
-                let n = reposicao::salvar_dias(&tx, &disp, &sessao.usuario_id, &d.qual, &d.dias)?;
-                tx.commit()?;
-                Ok(json!(n))
-            }
-            "estoque_mais_vendidos" => {
-                let d: MaisVendidos = ler(dados)?;
-                let pode = self.pode_sem_senha("resultados", sessao)?;
-                let mut v = json!(reposicao::mais_vendidos(&self.banco.conn, d.dias, &d.ordem, &d.texto)?);
-                // D-01: lucro e margem só para quem pode ver os resultados.
-                if !pode {
-                    v["lucro"] = json!("");
-                    if let Some(itens) = v["itens"].as_array_mut() {
-                        for it in itens {
-                            it["lucro"] = json!("");
-                            it["margem"] = json!("");
-                        }
-                    }
-                }
-                v["resultados"] = json!(pode);
-                Ok(v)
-            }
-            "estoque_parados" => {
-                let d: Filtro = ler(dados)?;
-                let pode = self.pode_sem_senha("resultados", sessao)?;
-                let mut v = json!(reposicao::parados(&self.banco.conn, &d.texto)?);
-                // D-09: o valor parado é pelo custo (estoque × custo de cada peça).
-                if !pode {
-                    v["valor"] = json!("");
-                    if let Some(itens) = v["itens"].as_array_mut() {
-                        for it in itens {
-                            it["valor"] = json!("");
-                        }
-                    }
-                }
-                v["resultados"] = json!(pode);
-                Ok(v)
-            }
             "encomendas_painel" => {
                 let d: Filtro = ler(dados)?;
                 Ok(json!(encomendas::painel(&self.banco.conn, &d.texto, &d.quais)?))
@@ -2033,134 +1712,6 @@ impl Servico {
                 Ok(json!(encomendas::para_venda(&self.banco.conn, &d.id)?))
             }
 
-            "financeiro_resumo" => Ok(json!(financeiro::resumo(&self.banco.conn)?)),
-            "pagar_painel" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(pagar::painel(&self.banco.conn, &d.texto, &d.quais)?))
-            }
-            "pagar_ficha" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(pagar::ficha(&self.banco.conn, &d.id)?))
-            }
-            "pagar_previa" => {
-                let d: pagar::LancamentoEntrada = ler(dados)?;
-                Ok(json!(pagar::previa_texto(&self.banco.conn, &d)?))
-            }
-            "pagar_lancar" => {
-                let d: pagar::LancamentoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let ids = pagar::lancar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(ids))
-            }
-            "pagar_alterar" => {
-                let d: pagar::AlteracaoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                pagar::alterar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(pagar::ficha(&self.banco.conn, &d.id)?))
-            }
-            "pagar_cancelar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                pagar::cancelar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "pagar_pagar" => {
-                let d: pagar::PagamentoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                pagar::pagar(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(pagar::ficha(&self.banco.conn, &d.conta_id)?))
-            }
-            "pagamento_estornar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                pagar::estornar(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "pagar_formas" => {
-                let gaveta = caixa::sessao_aberta(&self.banco.conn, &disp)?;
-                Ok(json!({
-                    "formas": pagar::FORMAS.iter().map(|(f, n)| json!({ "forma": f, "nome": n })).collect::<Vec<_>>(),
-                    "contas": financeiro::contas(&self.banco.conn, false)?,
-                    "gaveta": gaveta.map(|s| s.caixa_nome),
-                    "categorias": financeiro::categorias(&self.banco.conn, false)?,
-                }))
-            }
-
-            // Financeiro: contas da loja e categorias
-            "contas_loja" => {
-                let d: Filtro = ler(dados)?;
-                let mut v = json!(financeiro::contas(&self.banco.conn, d.quais == "todas")?);
-                // D-02: o caixa usa só o nome (para escolher a conta); o saldo é do financeiro.
-                if !self.pode_ler("financeiro", sessao)? {
-                    if let Some(lista) = v.as_array_mut() {
-                        for c in lista.iter_mut().filter_map(|c| c.as_object_mut()) {
-                            c.remove("saldo");
-                            c.remove("saldoInicial");
-                        }
-                    }
-                }
-                Ok(v)
-            }
-            "conta_loja_salvar" => {
-                let d: financeiro::ContaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = financeiro::salvar_conta(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(json!(id))
-            }
-            "conta_loja_extrato" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(financeiro::extrato(&self.banco.conn, &d.id, 500)?))
-            }
-            "movimento_lancar" => {
-                let d: financeiro::MovimentoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                financeiro::lancar_movimento(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "movimento_estornar" => {
-                let d: Estorno = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                financeiro::estornar_movimento(&tx, &disp, &sessao.usuario_id, &d.id, &d.motivo)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "transferir" => {
-                let d: financeiro::TransferenciaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                financeiro::transferir(&tx, &disp, &sessao.usuario_id, &d)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-            "conta_loja_conferir" => {
-                let d: Conferencia = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let diferenca = financeiro::conferir(&tx, &disp, &sessao.usuario_id, &d.conta_id, &d.saldo)?;
-                tx.commit()?;
-                Ok(json!(numeros::escrever_dinheiro(diferenca)))
-            }
-            "categorias" => {
-                let d: Filtro = ler(dados)?;
-                Ok(json!(financeiro::categorias(&self.banco.conn, d.quais == "todas")?))
-            }
-            "categoria_salvar" => {
-                let d: financeiro::CategoriaEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = financeiro::salvar_categoria(&tx, &d)?;
-                tx.commit()?;
-                Ok(json!(id))
-            }
-            "fluxo_caixa" => {
-                let d: Periodo = ler(dados)?;
-                Ok(json!(financeiro::fluxo(&self.banco.conn, &d.de, &d.ate, d.dias.unwrap_or(30))?))
-            }
-
             // Cheques
             "cheques_painel" => {
                 let d: Filtro = ler(dados)?;
@@ -2198,49 +1749,6 @@ impl Servico {
                 cheques::desfazer(&tx, &disp, &sessao.usuario_id, &d.id)?;
                 tx.commit()?;
                 Ok(Value::Null)
-            }
-
-            // Comissões
-            "comissoes" => {
-                let d: Periodo = ler(dados)?;
-                Ok(json!(comissoes::relatorio(&self.banco.conn, &d.de, &d.ate)?))
-            }
-            "comissao_fechar" => {
-                let d: Periodo = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                comissoes::fechar(&tx, &disp, &sessao.usuario_id, &d.usuario_id, &d.de, &d.ate, &d.vencimento)?;
-                tx.commit()?;
-                Ok(json!(comissoes::relatorio(&self.banco.conn, &d.de, &d.ate)?))
-            }
-            "comissao_reabrir" => {
-                let d: Id = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                comissoes::reabrir(&tx, &disp, &sessao.usuario_id, &d.id)?;
-                tx.commit()?;
-                Ok(Value::Null)
-            }
-
-            // Impressão (o PDF é feito na janela)
-            "etiquetas_opcoes" => Ok(etiquetas::opcoes(&self.banco.conn)?),
-            "etiqueta_previa" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(etiquetas::etiqueta(&self.banco.conn, &d.id)?))
-            }
-            "etiquetas_da_compra" => {
-                let d: Id = ler(dados)?;
-                let conn = &self.banco.conn;
-                let mut c = conn.prepare(
-                    "SELECT produto_id, SUM((quantidade * fator + 500000) / 1000000) FROM compra_item
-                      WHERE compra_id = ?1 AND produto_id IS NOT NULL AND acao <> 'ignorar' GROUP BY produto_id ORDER BY MIN(ordem)",
-                )?;
-                let itens: Vec<(String, i64)> =
-                    c.query_map([&d.id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
-                let mut lista = Vec::new();
-                for (pid, q) in itens {
-                    let e = etiquetas::etiqueta(conn, &pid)?;
-                    lista.push(json!({ "etiqueta": e, "quantidade": q.max(1) }));
-                }
-                Ok(json!(lista))
             }
 
             "impressao" => {
@@ -2821,12 +2329,6 @@ impl Servico {
 }
 
 #[derive(Deserialize)]
-struct Requisito {
-    #[serde(default)]
-    id: String,
-}
-
-#[derive(Deserialize)]
 struct Acao {
     acao: String,
     #[serde(default)]
@@ -3039,17 +2541,6 @@ fn formatar(tipo: &str, texto: &str) -> String {
     }
 }
 
-/// Uma linha (ou categoria, ou busca) da DRE, com o período.
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct DreLinha {
-    #[serde(flatten)]
-    filtro: dre::Filtro,
-    linha: String,
-    categoria: String,
-    busca: String,
-}
-
 /// Troca o nome do campo de um erro (ex.: "senha" → "nova").
 fn renomear_campo(de: &'static str, para: &'static str) -> impl Fn(Erro) -> Erro {
     move |e| match e {
@@ -3176,13 +2667,6 @@ struct ChequeAcao {
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
-struct Conferencia {
-    conta_id: String,
-    saldo: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
 struct ChequesPrevia {
     valor: String,
     #[serde(flatten)]
@@ -3208,30 +2692,9 @@ fn endereco_local() -> String {
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
-struct Dias {
-    qual: String,
-    dias: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
 struct Situacao {
     id: String,
     situacao: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Dias90 {
-    dias: i64,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct MaisVendidos {
-    dias: i64,
-    ordem: String,
-    texto: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -3254,25 +2717,6 @@ struct CaixaDaLoja {
 struct ContaCliente {
     id: String,
     todas: bool,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Ids {
-    ids: Vec<String>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Regras {
-    regras: Vec<fiscal::RegraSt>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Tributacao {
-    cest: String,
-    csosn: String,
 }
 
 /// Resposta de erro no mesmo formato do `Servico::chamar`.

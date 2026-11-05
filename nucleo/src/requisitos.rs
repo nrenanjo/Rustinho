@@ -104,3 +104,35 @@ pub fn arquivos(lista: &[String]) -> Arquivos {
     let (existem, faltam) = lista.iter().cloned().partition(|c| std::path::Path::new(c).exists());
     Arquivos { existem, faltam }
 }
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da navegação guiada (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::requisitos;
+
+    pub const COMANDOS: &[Comando] = &[
+        // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
+        Comando { nome: "requisito_conferir", classe: Classe::Leitura, funcao: requisito_conferir },
+    ];
+
+    // Navegação guiada (piloto 0.9.16): só leitura.
+    fn requisito_conferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Requisito = ler(dados)?;
+        Ok(json!(requisitos::conferir(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize)]
+    struct Requisito {
+        #[serde(default)]
+        id: String,
+    }
+}

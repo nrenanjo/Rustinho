@@ -314,6 +314,53 @@ pub fn code128(texto: &str) -> Option<String> {
     Some(s)
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das etiquetas (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::etiquetas;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "etiquetas_opcoes", classe: Classe::Leitura, funcao: etiquetas_opcoes },
+        Comando { nome: "etiqueta_previa", classe: Classe::Leitura, funcao: etiqueta_previa },
+        Comando { nome: "etiquetas_da_compra", classe: Classe::Leitura, funcao: etiquetas_da_compra },
+    ];
+
+    // Impressão (o PDF é feito na janela)
+    fn etiquetas_opcoes(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(etiquetas::opcoes(p.conn)?)
+    }
+
+    fn etiqueta_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(etiquetas::etiqueta(p.conn, &d.id)?))
+    }
+
+    fn etiquetas_da_compra(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let conn = &*p.conn;
+        let mut c = conn.prepare(
+            "SELECT produto_id, SUM((quantidade * fator + 500000) / 1000000) FROM compra_item
+              WHERE compra_id = ?1 AND produto_id IS NOT NULL AND acao <> 'ignorar' GROUP BY produto_id ORDER BY MIN(ordem)",
+        )?;
+        let itens: Vec<(String, i64)> =
+            c.query_map([&d.id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut lista = Vec::new();
+        for (pid, q) in itens {
+            let e = etiquetas::etiqueta(conn, &pid)?;
+            lista.push(json!({ "etiqueta": e, "quantidade": q.max(1) }));
+        }
+        Ok(json!(lista))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

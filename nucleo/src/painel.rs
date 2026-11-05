@@ -685,6 +685,73 @@ pub fn pagamentos(conn: &Connection, dias: i64) -> Resultado<Pagamentos> {
     })
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do Painel (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::painel;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "painel_resumo", classe: Classe::Leitura, funcao: painel_resumo },
+        Comando { nome: "painel_clientes", classe: Classe::Leitura, funcao: painel_clientes },
+        Comando { nome: "painel_fornecedores", classe: Classe::Leitura, funcao: painel_fornecedores },
+        Comando { nome: "painel_pagamentos", classe: Classe::Leitura, funcao: painel_pagamentos },
+    ];
+
+    // Painel: como a loja está indo
+    fn painel_resumo(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        // Lucro e custos só para quem pode ver os resultados (gerente,
+        // ou ação liberada para todos na pílula Gerente).
+        // Na tela do Painel vale a consulta dos resultados; o financeiro
+        // é de outra tela.
+        let pode = p.pode_ler("resultados")?;
+        let financeiro = p.pode_sem_senha("financeiro")?;
+        let mut v = json!(painel::resumo(p.conn)?);
+        if !pode {
+            v["lucroMes"] = json!("");
+            v["margemMes"] = json!("");
+            v["semCusto"] = json!(0);
+        }
+        // D-04: o que a loja tem a pagar é do financeiro.
+        if !financeiro {
+            v["pagar7Dias"] = json!("");
+            v["pagarVencido"] = json!("");
+        }
+        v["resultados"] = json!(pode);
+        v["financeiro"] = json!(financeiro);
+        Ok(v)
+    }
+
+    fn painel_clientes(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Dias90 = ler(dados)?;
+        Ok(json!(painel::clientes(p.conn, d.dias.max(1))?))
+    }
+
+    fn painel_fornecedores(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Dias90 = ler(dados)?;
+        Ok(json!(painel::fornecedores(p.conn, d.dias.max(1))?))
+    }
+
+    fn painel_pagamentos(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Dias90 = ler(dados)?;
+        Ok(json!(painel::pagamentos(p.conn, d.dias.max(1))?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Dias90 {
+        dias: i64,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

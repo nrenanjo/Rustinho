@@ -2346,5 +2346,105 @@ pub fn html(conn: &Connection, f: &Filtro) -> Resultado<String> {
     Ok(h)
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da DRE gerencial (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::dre;
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "dre_apurar", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_apurar },
+        Comando { nome: "dre_detalhe", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_detalhe },
+        Comando { nome: "dre_despesas", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_despesas },
+        Comando { nome: "dre_indicadores", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_indicadores },
+        Comando { nome: "dre_serie", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_serie },
+        Comando { nome: "dre_resumo", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_resumo },
+        Comando {
+            nome: "dre_classificacao",
+            classe: Classe::ConsultaDoGerente("resultados"),
+            funcao: dre_classificacao,
+        },
+        Comando {
+            nome: "dre_classificacao_salvar",
+            classe: Classe::Gerente("resultados"),
+            funcao: dre_classificacao_salvar,
+        },
+        Comando { nome: "dre_metas", classe: Classe::ConsultaDoGerente("resultados"), funcao: dre_metas },
+        Comando { nome: "dre_meta_salvar", classe: Classe::Gerente("resultados"), funcao: dre_meta_salvar },
+    ];
+
+    // DRE gerencial (docs/DRE-gerencial.md)
+    fn dre_apurar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: dre::Filtro = ler(dados)?;
+        Ok(json!(dre::apurar_dre(p.conn, &d)?))
+    }
+
+    fn dre_detalhe(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: DreLinha = ler(dados)?;
+        Ok(json!(dre::detalhe(p.conn, &d.filtro, &d.linha)?))
+    }
+
+    fn dre_despesas(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: DreLinha = ler(dados)?;
+        Ok(json!(dre::despesas(p.conn, &d.filtro, &d.categoria)?))
+    }
+
+    fn dre_indicadores(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: DreLinha = ler(dados)?;
+        Ok(json!(dre::indicadores(p.conn, &d.filtro, &d.busca, 10)?))
+    }
+
+    fn dre_serie(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(dre::serie(p.conn)?))
+    }
+
+    fn dre_resumo(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(dre::resumo_painel(p.conn)?))
+    }
+
+    fn dre_classificacao(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(dre::classificacao(p.conn)?))
+    }
+
+    fn dre_classificacao_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: dre::ClassificacaoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        dre::salvar_classificacao(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(dre::classificacao(p.conn)?))
+    }
+
+    fn dre_metas(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(dre::metas(p.conn)?))
+    }
+
+    fn dre_meta_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: dre::MetaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        dre::salvar_meta(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(dre::metas(p.conn)?))
+    }
+
+    /// Uma linha (ou categoria, ou busca) da DRE, com o período.
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct DreLinha {
+        #[serde(flatten)]
+        filtro: dre::Filtro,
+        linha: String,
+        categoria: String,
+        busca: String,
+    }
+}
+
 #[cfg(test)]
 mod testes;
