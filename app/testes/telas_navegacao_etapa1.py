@@ -187,13 +187,14 @@ class Rustinho(nav.Rustinho):
                 return min(max(alturas), 1000)
         return 760
 
-    def clicar_visivel(self, texto, topo=300, tentativas=40):
+    def clicar_visivel(self, texto, topo=330, tentativas=40):
         """Rola com a roda do mouse até o texto ficar dentro da área que rola e
         clica. Na seção Fiscal, "Adicionar regra" fica bem abaixo e "Ir para
         Loja" no alto: clicar pela posição sem rolar cairia fora da janela ou
         atrás do cabeçalho fixo das Configurações (título e abas, até uns
-        300 px: "topo"). Só clica com a tela parada: um clique durante o
-        deslize só para a rolagem."""
+        300 px; "topo" com folga: na 0.9.18 a linha da seta ficou 6 px mais
+        alta e um botão em y = 301 ficava escondido). Só clica com a tela
+        parada: um clique durante o deslize só para a rolagem."""
         altura = self.altura_da_janela()
         anterior = None
         for _ in range(tentativas):
@@ -386,11 +387,15 @@ def main():
                 f = r.foto("-1-janela")
                 certo &= conferir("D: os dois documentos, sem os números com o olho fechado", f, r.textos(),
                                   tem=["CNPJ da loja", "CNPJ no XML (destinatário)", "Conferir nota", "Descartar nota",
-                                       "Cancelar", "A nota não foi importada e nada foi gravado", "a-nota.xml",
+                                       "A nota não foi importada e nada foi gravado", "a-nota.xml",
                                        "DISTRIBUIDORA DE AUTOPECAS EXEMPLO LTDA", "AUTO PECAS EXEMPLO"],
                                   nao_tem=["11.222.333", "11.444.777", "1.245,67"])
+                # 0.9.18 (V-4): a janela não tem mais "Cancelar"; a seta dela
+                # (nome "Voltar") fecha, igual ao Esc.
+                certo &= conferir("D: a janela tem a seta e não tem Cancelar", f, r.textos(),
+                                  igual=["Voltar"], sem_igual=["Cancelar"])
                 # O olho fica atrás da janela (modal): fecha, abre o olho, reabre.
-                r.clicar("Cancelar")
+                r.clicar("Voltar")
                 time.sleep(0.8)
                 r.clicar("Mostrar valores")
                 time.sleep(0.8)
@@ -402,9 +407,9 @@ def main():
                 time.sleep(1)
                 certo &= conferir("D: Conferir mostra os itens da nota", r.foto("-2-conferir"), r.textos(),
                                   tem=["Itens da nota (1)", "CORREIA POLY V", "Esconder os itens"])
-                r.clicar("Cancelar")
+                r.clicar("Voltar")
                 time.sleep(1)
-                certo &= conferir("D: Cancelar só fecha; a nota continua em Não importada", r.foto("-3-cancelar"),
+                certo &= conferir("D: a seta só fecha; a nota continua em Não importada", r.foto("-3-cancelar"),
                                   r.textos(), tem=["Não importada: nota de outro CNPJ"],
                                   nao_tem=["CNPJ da nota é diferente"])
                 r.clicar("Ver")

@@ -19,7 +19,8 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      voltar sem resolver não libera nada; resolvida em Duplicatas, volta para
      a lista com a quantidade pedida; nada é impresso sem clique.
   6. rascunho de OS bloqueado por um caixa desatualizado: a saída da OS
-     mostra o motivo e as opções (Ver caixas / Continuar sem rascunho / Sair
+     mostra o motivo e as opções (Ver caixas / a seta, que continua sem
+     rascunho, como o Esc — 0.9.18, V-4 / Sair
      sem salvar); "Ver caixas" leva a Simultaneidade › Caixas com a guia e o
      caixa destacado; desistir (Esc, ou a senha do gerente) volta à OS com
      tudo; retirar o caixa (decisão do gerente, com motivo) volta à OS só
@@ -298,10 +299,12 @@ def caso8(placar, fotos):
             f = r.foto("-3")
             ok("8b: restaurar pede confirmação antes", r.esperar(lambda: r.tem("Restaurar o backup de")), f)
             ok("8b: ainda nada restaurado", sha(db) == antes, f)
-            r.clicar("Cancelar")
+            # 0.9.18 (V-4): a confirmação não tem mais "Cancelar"; a seta
+            # dela (nome "Voltar") desiste, igual ao Esc.
+            r.clicar("Voltar")
             time.sleep(1)
             f = r.foto("-4")
-            ok("8b: cancelar a confirmação não restaura", not r.tem("Restaurar o backup de") and sha(db) == antes, f)
+            ok("8b: desistir da confirmação (seta) não restaura", not r.tem("Restaurar o backup de") and sha(db) == antes, f)
             r.rolar_ate("Restaurar")
             r.clicar_ultimo("Restaurar")
             r.esperar(lambda: r.tem("Restaurar o backup de"))
@@ -543,14 +546,16 @@ def caso6(placar, fotos):
             os_pilha = r.pilha()
             ok("6a: salvar rascunho bloqueado mostra o motivo na saída", preencher_e_sair(r), r.foto("-1"))
             f = r.foto("-1")
-            ok("6a: opções: Ver caixas, Continuar sem rascunho, Sair sem salvar",
-               r.tem_igual("Ver caixas") and r.tem_igual("Continuar sem rascunho") and r.tem_igual("Sair sem salvar"), f)
+            # 0.9.18 (V-4): o "Continuar sem rascunho" (só fechava) virou a
+            # seta da janelinha (nome "Voltar"), igual ao Esc.
+            ok("6a: opções: Ver caixas, a seta (continuar sem rascunho), Sair sem salvar",
+               r.tem_igual("Ver caixas") and r.tem_igual("Voltar") and r.tem_igual("Sair sem salvar"), f)
             ok("6a: o motivo diz o caixa e o lugar", r.tem("Caixa 2") and r.tem("Simultaneidade › Caixas"), f)
             ok("6a: nada mudou de tela sozinho", r.pilha() == os_pilha, f)
-            r.clicar("Continuar sem rascunho")
+            r.clicar("Voltar")
             time.sleep(1)
             f = r.foto("-2")
-            ok("6a: Continuar sem rascunho volta à OS, com o que foi digitado",
+            ok("6a: a seta da janelinha volta à OS, com o que foi digitado",
                not r.tem("Sair da OS?") and r.tem("ABC1D23") and r.pilha() == os_pilha, f)
             xdo("key", "Escape")
             r.esperar(lambda: r.tem("Sair da OS?"))
@@ -675,8 +680,10 @@ def main():
             sys.exit(f"falta o programa {p}")
     if not os.path.exists(PROGRAMA):
         sys.exit(f"compile antes: cargo build -p rustinho ({PROGRAMA})")
-    if TELA not in (":88", ":89"):
-        sys.exit(f"use RUSTINHO_TELA=:88 ou :89 (pedida: {TELA})")
+    # Só telas virtuais conhecidas (0.9.18: também :91 a :93, as das frentes
+    # do visual); nunca a área de trabalho de verdade.
+    if TELA not in (":88", ":89", ":91", ":92", ":93"):
+        sys.exit(f"use RUSTINHO_TELA=:88, :89, :91, :92 ou :93 (pedida: {TELA})")
     args = [a for a in sys.argv[1:]]
     escolhidos = list(CASOS)
     if "--casos" in args:

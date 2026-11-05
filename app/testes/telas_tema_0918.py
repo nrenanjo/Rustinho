@@ -408,7 +408,13 @@ def a3_cores_do_roxo(res, fotos, modelo, cores):
             amostra(res, "A3 Início: cartão escuro (linha 0, coluna 0)", foto, x, y - 22, cores["roxoFaixaEscura"])
             x, y = onde(r, "Peças")
             amostra(res, "A3 Início: cartão claro (linha 0, coluna 1)", foto, x, y - 22, cores["roxoFaixaClara"])
-            x, y = onde(r, "F11")
+            # 0.9.18 (D-V6): o F11 saiu do campo; o ponto de referência é o
+            # botão de copiar, dentro da busca (o F11 no programa de antes).
+            if r.posicao("Copiar a busca"):
+                x, y = onde(r, "Copiar a busca")
+                x += 10
+            else:
+                x, y = onde(r, "F11")
             amostra(res, "A3 Início: fundo da busca", foto, x - 70, y, cores["buscaFundo"])
             amostra(res, "A3 Início: borda da busca", foto, x - 70, y + 27, cores["buscaBorda"], r=0)
             x, y = onde(r, "Planeta Roxo")
