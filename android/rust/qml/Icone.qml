@@ -62,7 +62,10 @@ Item {
 
     Shape {
         anchors.fill: parent
-        layer.enabled: true
+        // A camada (para suavizar as linhas) fica só no desenho normal: no
+        // desenho por processador ("software"), com a tela em escala diferente
+        // de 100%, o ícone com camada sai cortado (150%) ou some (200%).
+        layer.enabled: GraphicsInfo.api !== GraphicsInfo.Software
         layer.samples: 4
         layer.smooth: true
 
