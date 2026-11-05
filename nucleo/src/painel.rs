@@ -11,7 +11,7 @@ use serde::Serialize;
 use time::{Date, Month};
 
 use crate::erro::Resultado;
-use crate::{caixa, devolucoes, fiscal, numeros, receber, tempo};
+use crate::{caixa, devolucoes, fiscal, numeros, tempo};
 
 const MESES: [&str; 12] = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const MESES_NOME: [&str; 12] = [
@@ -96,7 +96,7 @@ pub struct Resumo {
 }
 
 fn data(iso: &str) -> Option<Date> {
-    receber::ler_iso(iso).ok()
+    tempo::ler_iso(iso).ok()
 }
 
 fn iso(d: Date) -> String {

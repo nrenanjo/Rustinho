@@ -855,16 +855,6 @@ pub fn no_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(i64, i64
     )?)
 }
 
-/// Dinheiro devolvido (saiu da gaveta) numa sessão de caixa.
-pub fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> {
-    Ok(conn.query_row(
-        "SELECT COALESCE(SUM(dinheiro), 0) FROM devolucao
-          WHERE sessao_id = ?1 AND (cancelado_em IS NULL OR desfeita_apos_fechar = 1)",
-        [sessao_id],
-        |l| l.get(0),
-    )?)
-}
-
 /// A venda tem devolução que vale (não desfeita)?
 pub fn tem_devolucao(conn: &Connection, venda_id: &str) -> Resultado<bool> {
     Ok(conn

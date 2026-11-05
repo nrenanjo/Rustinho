@@ -322,7 +322,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         }
     }
     let dinheiro_vendas: i64 = somas.iter().find(|s| s.0 == "dinheiro").map(|s| s.1).unwrap_or(0) - troco;
-    let (recebimentos, recebido) = crate::receber::por_forma_na_sessao(conn, sessao_id)?;
+    let (recebimentos, recebido) = por_forma_na_sessao(conn, sessao_id)?;
     let mut recebido_por_forma = Vec::new();
     for (forma, nome, _) in FORMAS {
         if let Some((_, v)) = recebido.iter().find(|s| s.0 == *forma) {
@@ -348,7 +348,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         numeros::somar(movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
     let suprimentos =
         numeros::somar(movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
-    let devolvido = crate::devolucoes::dinheiro_na_sessao(conn, sessao_id)?;
+    let devolvido = dinheiro_na_sessao(conn, sessao_id)?;
     let esperado =
         numeros::somar([sessao.valor_inicial, dinheiro_vendas, dinheiro_recebido, suprimentos, -sangrias, -devolvido])
             .ok_or_else(numeros::grande_demais)?;
@@ -387,6 +387,35 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         diferenca_centavos: diferenca,
         fechado_por,
     })
+}
+
+// As duas consultas do resumo que leem os recebimentos e as devoluções da
+// sessão (vieram do `receber` e das `devolucoes` na etapa 4 da modularização,
+// iguais: o caixa já lia as vendas da sessão do mesmo jeito; só leitura).
+
+/// Recebimentos de uma sessão de caixa, por forma: (forma, soma).
+fn por_forma_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<(i64, Vec<(String, i64)>)> {
+    let qtd: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1)",
+        [sessao_id],
+        |l| l.get(0),
+    )?;
+    let mut c = conn.prepare_cached(
+        "SELECT forma, SUM(valor) FROM recebimento
+          WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1) GROUP BY forma",
+    )?;
+    let somas = c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok((qtd, somas))
+}
+
+/// Dinheiro devolvido (saiu da gaveta) numa sessão de caixa.
+fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(dinheiro), 0) FROM devolucao
+          WHERE sessao_id = ?1 AND (cancelado_em IS NULL OR desfeita_apos_fechar = 1)",
+        [sessao_id],
+        |l| l.get(0),
+    )?)
 }
 
 /// Fecha o caixa com o dinheiro contado na gaveta. Devolve o id da sessão.

@@ -609,7 +609,7 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
             let telefone: String = l.get(4)?;
             let produto_id: String = l.get(5)?;
             let estoque: i64 = l.get(22)?;
-            let dias = crate::receber::dias_entre(&criado, &hoje);
+            let dias = crate::tempo::dias_entre(&criado, &hoje);
             let (pagamento, nome_pagamento) = if venda_id.is_empty() || venda_situacao != "concluida" {
                 ("entrega", "Paga na entrega".to_string())
             } else if falta > 0 {

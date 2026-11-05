@@ -363,7 +363,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
         {
             continue;
         }
-        let d = crate::receber::dias_entre(&criado, &hoje);
+        let d = crate::tempo::dias_entre(&criado, &hoje);
         lista_enc.push(EncomendaPedir {
             id,
             numero,
@@ -649,7 +649,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
             continue;
         }
         let valor = numeros::saturar((custo as i128 * q as i128 + 500) / 1000);
-        let ha = crate::receber::dias_entre(&referencia, &hoje);
+        let ha = crate::tempo::dias_entre(&referencia, &hoje);
         itens.push(Parado {
             produto_id: id,
             codigo,

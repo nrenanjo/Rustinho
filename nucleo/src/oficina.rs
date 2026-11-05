@@ -19,7 +19,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::vendas::ItemEntrada;
 use crate::{auditoria, config, documento, estoque, fiscal, numeros, tempo, texto};
 
 pub const SITUACOES: &[(&str, &str)] = &[
@@ -910,57 +909,6 @@ pub fn contagem(conn: &Connection) -> Resultado<serde_json::Value> {
 // Entrega (vira venda)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParaVenda {
-    pub numero: i64,
-    /// O caixa da OS (FALHA-02: o número é por caixa).
-    pub caixa: String,
-    pub os_id: String,
-    pub cliente_id: String,
-    pub cliente_nome: String,
-    pub desconto: String,
-    pub itens: Vec<ItemEntrada>,
-}
-
-pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
-    let f = ficha(conn, id)?;
-    if f.situacao == "rascunho" {
-        return Err(Erro::validacao("É um rascunho: salve a OS antes de entregar."));
-    }
-    if f.situacao == "entregue" {
-        return Err(Erro::validacao("Esta OS já foi entregue."));
-    }
-    if f.situacao == "cancelada" {
-        return Err(Erro::validacao("Esta OS foi cancelada."));
-    }
-    if f.calculo.itens.is_empty() {
-        return Err(Erro::validacao("A OS não tem peças nem serviços."));
-    }
-    let itens = f
-        .calculo
-        .itens
-        .iter()
-        .map(|i| ItemEntrada {
-            produto_id: i.produto_id.clone(),
-            descricao: if i.tipo == "servico" { i.descricao.clone() } else { String::new() },
-            quantidade: i.quantidade.clone(),
-            preco: i.preco.clone(),
-            desconto: i.desconto.clone(),
-            encomendar: false,
-        })
-        .collect();
-    Ok(ParaVenda {
-        numero: f.numero,
-        caixa: f.caixa,
-        os_id: id.to_string(),
-        cliente_id: f.cliente_id,
-        cliente_nome: f.cliente,
-        desconto: f.desconto_texto,
-        itens,
-    })
-}
-
 /// A venda da OS foi concluída: OS entregue.
 pub fn entregue_na_venda(
     conn: &Connection,
@@ -1057,7 +1005,6 @@ mod comandos {
         Comando { nome: "os_rascunho_pode", classe: Classe::Leitura, funcao: os_rascunho_pode },
         Comando { nome: "os_situacao", classe: Classe::Caixa, funcao: os_situacao },
         Comando { nome: "os_cancelar", classe: Classe::Caixa, funcao: os_cancelar },
-        Comando { nome: "os_para_venda", classe: Classe::Leitura, funcao: os_para_venda },
         Comando { nome: "os_placa", classe: Classe::Leitura, funcao: os_placa },
     ];
 
@@ -1122,11 +1069,6 @@ mod comandos {
         oficina::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
         tx.commit()?;
         Ok(Value::Null)
-    }
-
-    fn os_para_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        let d: Id = ler(dados)?;
-        Ok(json!(oficina::para_venda(p.conn, &d.id)?))
     }
 
     fn os_placa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1219,7 +1161,7 @@ mod testes {
         assert_eq!(listar(c, "todas", "carlos").unwrap().len(), 1);
 
         // Entrega: vira venda (peças saem do estoque, o serviço não).
-        let pv = para_venda(c, &id).unwrap();
+        let pv = crate::vendas::os_para_venda(c, &id).unwrap();
         assert_eq!(pv.itens.len(), 2);
         let venda = VendaEntrada {
             itens: pv.itens,
@@ -1245,6 +1187,6 @@ mod testes {
         assert_eq!(ficha(c, &id).unwrap().situacao, "pronta");
         assert_eq!(crate::estoque::saldo(c, &pastilha).unwrap(), 4_000);
         cancelar(c, d, &u, &id, "cliente desistiu").unwrap();
-        assert!(para_venda(c, &id).is_err());
+        assert!(crate::vendas::os_para_venda(c, &id).is_err());
     }
 }

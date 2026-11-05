@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use time::Duration;
 
 use crate::erro::{Erro, Resultado};
-use crate::receber::{dias_entre, iso, ler_iso, parcelar, MAX_PARCELAS};
+use crate::receber::MAX_PARCELAS;
+use crate::tempo::{dias_entre, iso, ler_iso, parcelar};
 use crate::{auditoria, caixa, fiscal, nfe_xml, numeros, tempo, texto};
 
 /// Formas de pagar uma conta: (código, nome).

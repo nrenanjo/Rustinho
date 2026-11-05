@@ -36,27 +36,26 @@ use std::path::{Path, PathBuf};
 /// - Etapa 4 (ciclo D): o comprovante (`impressao`) recebe pronto o corpo da
 ///   DRE e da lista de compra; `impressao → dre` e `impressao → reposicao`
 ///   sumiram, e as 4 setas de `dre`/`impressao`/`reposicao` saíram. Ficam 43.
+/// - Etapa 4 (ciclo C): as datas do `receber` foram para `tempo`, o cálculo
+///   dos cheques de `vendas` para `cheques`, as duas consultas do resumo do
+///   caixa para `caixa` e a OS que vira venda para `vendas`; 13 setas saíram.
+///   Ficam 30; do componente C, só `cheques ↔ receber` (decisão do dono).
 #[rustfmt::skip]
 const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
     ("arquivos", &["registro"]),
     ("backup", &["banco", "loja", "portatil", "sync"]),
     ("banco", &["backup", "faixas", "loja", "migracao", "portatil", "sync"]),
-    ("caixa", &["devolucoes", "receber"]),
     ("caminhos", &["sync"]),
     ("cheques", &["receber"]),
-    ("devolucoes", &["caixa"]),
-    ("encomendas", &["receber"]),
     ("faixas", &["pessoas", "produtos", "sync"]),
     ("loja", &["banco", "faixas", "sync"]),
     ("migracao", &["banco"]),
-    ("oficina", &["vendas"]),
     ("pessoas", &["faixas"]),
     ("portatil", &["sync"]),
     ("produtos", &["faixas"]),
-    ("receber", &["caixa", "cheques", "vendas"]),
+    ("receber", &["cheques"]),
     ("registro", &["arquivos"]),
     ("sync", &["banco", "caminhos", "faixas", "loja", "portatil"]),
-    ("vendas", &["caixa", "cheques", "devolucoes", "encomendas", "oficina", "receber"]),
 ];
 
 fn raiz() -> PathBuf {

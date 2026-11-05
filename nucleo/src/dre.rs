@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use time::{Date, Duration, Month, Weekday};
 
 use crate::erro::{Erro, Resultado};
-use crate::{auditoria, config, fiscal, numeros, receber, tempo};
+use crate::{auditoria, config, fiscal, numeros, tempo};
 
 // ---------------------------------------------------------------------------
 // Linhas e grupos.
@@ -140,7 +140,7 @@ fn iso(d: Date) -> String {
 }
 
 fn data(iso: &str) -> Resultado<Date> {
-    receber::ler_iso(iso)
+    tempo::ler_iso(iso)
 }
 
 fn br(d: Date) -> String {

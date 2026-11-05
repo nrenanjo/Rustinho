@@ -8,7 +8,7 @@ use super::*;
 use crate::banco::Banco;
 use crate::devolucoes::{self, ItemEntrada as ItemDev};
 use crate::vendas::{self, ItemEntrada, PagamentoEntrada, VendaEntrada};
-use crate::{caixa, financeiro, pagar, pessoas, produtos, usuarios};
+use crate::{caixa, financeiro, pagar, pessoas, produtos, receber, usuarios};
 
 struct Loja {
     b: Banco,

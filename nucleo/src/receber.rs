@@ -11,50 +11,14 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use time::{Date, Duration, Month};
+use time::Duration;
 
 use crate::erro::{Erro, Resultado};
+use crate::tempo::{dias_entre, iso, ler_iso, mais_meses, parcelar};
 use crate::{auditoria, caixa, config, fiscal, numeros, tempo, texto};
 
 /// Máximo de parcelas numa venda ou lançamento.
 pub const MAX_PARCELAS: i64 = 24;
-
-// ---------------------------------------------------------------------------
-// Datas.
-// ---------------------------------------------------------------------------
-
-pub(crate) fn ler_iso(iso: &str) -> Resultado<Date> {
-    let p: Vec<&str> = iso.get(..10).unwrap_or(iso).split('-').collect();
-    let erro = || Erro::Interno(format!("data inválida: {iso}"));
-    if p.len() != 3 {
-        return Err(erro());
-    }
-    let ano: i32 = p[0].parse().map_err(|_| erro())?;
-    let mes: u8 = p[1].parse().map_err(|_| erro())?;
-    let dia: u8 = p[2].parse().map_err(|_| erro())?;
-    Date::from_calendar_date(ano, Month::try_from(mes).map_err(|_| erro())?, dia).map_err(|_| erro())
-}
-
-pub(crate) fn iso(d: Date) -> String {
-    format!("{:04}-{:02}-{:02}", d.year(), d.month() as u8, d.day())
-}
-
-/// Soma meses mantendo o dia (31/01 + 1 mês = 28 ou 29/02).
-pub(crate) fn mais_meses(d: Date, meses: i64, dia: u8) -> Date {
-    let total = d.year() as i64 * 12 + (d.month() as i64 - 1) + meses;
-    let ano = total.div_euclid(12) as i32;
-    let mes = Month::try_from((total.rem_euclid(12) + 1) as u8).unwrap_or(Month::January);
-    let dia = dia.clamp(1, time::util::days_in_month(mes, ano));
-    Date::from_calendar_date(ano, mes, dia).unwrap_or(d)
-}
-
-/// Dias entre duas datas "AAAA-MM-DD" (positivo se `ate` for depois).
-pub(crate) fn dias_entre(de: &str, ate: &str) -> i64 {
-    match (ler_iso(de), ler_iso(ate)) {
-        (Ok(a), Ok(b)) => (b - a).whole_days(),
-        _ => 0,
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Parcelas de uma venda.
@@ -129,15 +93,6 @@ pub fn previa(
             }
         })
         .collect())
-}
-
-/// Divide o valor em `n` parcelas mensais a partir de `inicio`, sempre no
-/// `dia` do mês. O centavo que sobra vai na primeira. (vencimento, valor)
-pub(crate) fn parcelar(inicio: Date, dia: u8, valor: i64, n: i64) -> Vec<(String, i64)> {
-    let n = n.max(1);
-    let base = valor / n;
-    let resto = valor - base * n;
-    (0..n).map(|i| (iso(mais_meses(inicio, i, dia)), base + if i == 0 { resto } else { 0 })).collect()
 }
 
 fn gravar_parcelas(
@@ -745,7 +700,7 @@ pub struct ReceberCalculo {
     /// Quanto continua devendo das parcelas escolhidas.
     pub continua_devendo: String,
     pub abates: Vec<Abate>,
-    pub cheques: crate::vendas::ChequesCalculo,
+    pub cheques: crate::cheques::ChequesCalculo,
     pub erro: String,
     pub campo: String,
     #[serde(skip)]
@@ -849,7 +804,7 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
         falhou(&mut falha, "contas", "Escolha pelo menos uma parcela em aberto.".into());
     }
     let cheques =
-        crate::vendas::calcular_cheques(conn, if e.forma == "cheque" { recebido.min(total) } else { 0 }, &e.cheques)?;
+        crate::cheques::calcular_cheques(conn, if e.forma == "cheque" { recebido.min(total) } else { 0 }, &e.cheques)?;
     let (campo, erro) = falha.map(|(c, m)| (c.to_string(), m)).unwrap_or_default();
     Ok(ReceberCalculo {
         cheques,
@@ -1094,21 +1049,6 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
     Ok(r)
 }
 
-/// Recebimentos de uma sessão de caixa, por forma: (forma, soma).
-pub fn por_forma_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<(i64, Vec<(String, i64)>)> {
-    let qtd: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1)",
-        [sessao_id],
-        |l| l.get(0),
-    )?;
-    let mut c = conn.prepare_cached(
-        "SELECT forma, SUM(valor) FROM recebimento
-          WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1) GROUP BY forma",
-    )?;
-    let somas = c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
-    Ok((qtd, somas))
-}
-
 // ------------------------------------------------------------- comandos das telas
 
 pub use comandos::COMANDOS;
@@ -1204,6 +1144,8 @@ mod comandos {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use time::{Date, Month};
+
     use crate::banco::Banco;
     use crate::vendas::{self, ItemEntrada, PagamentoEntrada, VendaEntrada};
     use crate::{pessoas, produtos, usuarios};

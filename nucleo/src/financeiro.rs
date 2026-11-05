@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use time::Duration;
 
 use crate::erro::{Erro, Resultado};
-use crate::receber::{iso, ler_iso};
+use crate::tempo::{iso, ler_iso};
 use crate::{auditoria, fiscal, numeros, pagar, tempo, texto};
 
 // ---------------------------------------------------------------------------
@@ -668,7 +668,7 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     if ate < de {
         return Err(Erro::campo("ate", "A data final é antes da inicial."));
     }
-    if crate::receber::dias_entre(&de, &ate) > 400 {
+    if crate::tempo::dias_entre(&de, &ate) > 400 {
         return Err(Erro::campo("de", "Escolha no máximo um ano."));
     }
 
