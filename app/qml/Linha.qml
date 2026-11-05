@@ -24,7 +24,9 @@ GridLayout {
             if (!c || c.Layout === undefined)
                 continue
             // Espaçador vazio (Item {}) some na coluna.
-            const vazio = c.children.length === 0 && String(c).indexOf("QQuickItem") === 0
+            // (toString e não String(c): dentro de um delegado, "String" pode
+            // ser lido como um campo do modelo e dava TypeError na tela estreita.)
+            const vazio = c.children.length === 0 && c.toString().indexOf("QQuickItem") === 0
             if (dobrar) {
                 if (!_antes.has(c))
                     _antes.set(c, { f: c.Layout.fillWidth, w: c.Layout.preferredWidth, m: c.Layout.maximumWidth, n: c.Layout.minimumWidth, v: c.visible })
