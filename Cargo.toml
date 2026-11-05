@@ -9,6 +9,17 @@ version = "0.9.18"
 edition = "2021"
 authors = ["Renan Galvão"]
 
+# Testes em depuração (0.9.18, causas C2 e C3 dos testes de rede em paralelo):
+# a derivação da chave (Argon2id, mesmos parâmetros) e o SQLite compilados
+# otimizados também no perfil de depuração. Só muda a velocidade dos testes e
+# das compilações de depuração; o programa final (release) não muda.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
+
 [profile.release]
 strip = true
 # Conta que passaria do tamanho do número para a operação (vira erro e nada

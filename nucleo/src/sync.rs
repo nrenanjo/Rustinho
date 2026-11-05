@@ -158,7 +158,31 @@ impl Drop for Vaga {
 
 /// Para a troca de dados enquanto a guarda existir (restaurar backup).
 pub fn pausar() -> RwLockWriteGuard<'static, ()> {
+    #[cfg(test)]
+    return pausar_nos_testes();
+    #[cfg(not(test))]
     TRAVA.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Só nos testes (0.9.18, C1): no programa há um banco por processo e o
+/// outro caixa é outro processo. Nos testes, um teste que restaura backup e
+/// outro que troca dados com um servidor do MESMO processo dividem esta
+/// trava. A `RwLock` dá a vez a quem espera para escrever: com a restauração
+/// esperando, o servidor do próprio processo não consegue ler, o cliente que
+/// segura a leitura espera por ele, e os dois ficam parados até o prazo de
+/// 30 s do cliente (os "os error 11" dos testes em paralelo). Aqui a
+/// restauração tenta sem bloquear quem lê; ela entra no primeiro intervalo
+/// sem leitores. Depois de pegar a trava, o efeito é o mesmo do programa:
+/// ninguém troca dados até a restauração terminar.
+#[cfg(test)]
+fn pausar_nos_testes() -> RwLockWriteGuard<'static, ()> {
+    loop {
+        match TRAVA.try_write() {
+            Ok(g) => return g,
+            Err(std::sync::TryLockError::Poisoned(e)) => return e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+        }
+    }
 }
 
 /// Para quem grava no meio da troca de dados (as tarefas deste módulo e o
