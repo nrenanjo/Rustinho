@@ -116,6 +116,44 @@ pub fn de_fora(sigla: &str) -> String {
     }
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das unidades de medida (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::unidades;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "unidades_listar", classe: Classe::Leitura, funcao: unidades_listar },
+        Comando { nome: "unidade_salvar", classe: Classe::Caixa, funcao: unidade_salvar },
+    ];
+
+    fn unidades_listar(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(unidades::listar(p.conn)?))
+    }
+
+    fn unidade_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: UnidadeEntrada = ler(dados)?;
+        let sigla = unidades::salvar(p.conn, &d.sigla, &d.descricao, d.fracionada)?;
+        Ok(json!({ "sigla": sigla, "lista": unidades::listar(p.conn)? }))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct UnidadeEntrada {
+        sigla: String,
+        descricao: String,
+        fracionada: bool,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

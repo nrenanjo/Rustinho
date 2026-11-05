@@ -263,6 +263,59 @@ fn garantir_funcao(item: &str) -> Resultado<&'static str> {
         .ok_or_else(|| Erro::Interno(format!("função desconhecida: {item}")))
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do menu do Início (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::menu;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "menu", classe: Classe::Leitura, funcao: menu },
+        Comando { nome: "menu_usar", classe: Classe::Caixa, funcao: menu_usar },
+        Comando { nome: "menu_fixar", classe: Classe::Caixa, funcao: menu_fixar },
+    ];
+
+    fn menu(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        match menu::menu(p.conn, p.usuario_id) {
+            Ok(m) => Ok(json!(m)),
+            // RVI-03: banco antigo em modo seguro: o menu sem as fixadas
+            // (o Início precisa dele para mostrar o aviso do modo seguro).
+            Err(e) if p.modo_seguro => {
+                crate::registro::anotar(&format!("menu no modo seguro: {e}"));
+                Ok(json!(menu::sem_fixadas()))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn menu_usar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ItemMenu = ler(dados)?;
+        menu::registrar_uso(p.conn, p.usuario_id, &d.id)?;
+        Ok(Value::Null)
+    }
+
+    fn menu_fixar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ItemMenu = ler(dados)?;
+        menu::fixar(p.conn, p.usuario_id, &d.id, d.fixo)?;
+        Ok(json!(menu::menu(p.conn, p.usuario_id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ItemMenu {
+        id: String,
+        fixo: bool,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

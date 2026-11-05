@@ -370,6 +370,49 @@ fn gerar_hash(senha: &str) -> Resultado<String> {
         .map_err(|e| Erro::Interno(format!("não foi possível proteger a senha: {e}")))
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das telas de usuários, a lista e os mecânicos da OS (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::usuarios;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "usuarios_listar", classe: Classe::Leitura, funcao: usuarios_listar },
+        Comando { nome: "mecanicos", classe: Classe::Leitura, funcao: mecanicos },
+    ];
+
+    fn usuarios_listar(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let lista = usuarios::listar(p.conn, false)?;
+        Ok(json!(lista
+            .into_iter()
+            .map(|u| {
+                let voce = u.id == p.usuario_id;
+                let mut v = json!(u);
+                v["voce"] = json!(voce);
+                // Só o gerente vê quem está com senha fora da política.
+                let fraca = p.gerente && matches!(usuarios::situacao_senha(p.conn, &u.id), Ok(Some(Some(_))));
+                v["senhaFraca"] = json!(fraca);
+                v
+            })
+            .collect::<Vec<_>>()))
+    }
+
+    fn mecanicos(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(p
+            .conn
+            .prepare("SELECT id, nome FROM usuario WHERE ativo = 1 ORDER BY nome COLLATE NOCASE")?
+            .query_map([], |l| Ok(json!({ "id": l.get::<_, String>(0)?, "nome": l.get::<_, String>(1)? })))?
+            .collect::<Result<Vec<_>, _>>()?))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

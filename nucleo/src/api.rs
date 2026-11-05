@@ -7,17 +7,16 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::banco::Banco;
-use crate::despacho::Classe;
+use crate::despacho::{ler, Acesso, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Filtro, Id, Pedido, Periodo};
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
-    encomendas, estoque, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar,
-    painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
+    encomendas, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina, pagar, painel,
+    pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
@@ -325,31 +324,6 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("backup_nuvem_lista", Classe::ConsultaDoGerente("backup")),
     ("backup_conferir", Classe::ConsultaDoGerente("backup")),
     ("backup_restaurar", Classe::Gerente("backup")),
-    // Domínio `usuarios` (passa para a tabela dele).
-    ("usuarios_listar", Classe::Leitura),
-    ("mecanicos", Classe::Leitura),
-    // Domínio `menu` (passa para a tabela dele).
-    ("menu", Classe::Leitura),
-    ("menu_usar", Classe::Caixa),
-    ("menu_fixar", Classe::Caixa),
-    // Domínio `busca` (passa para a tabela dele).
-    ("produtos_buscar", Classe::Leitura),
-    ("produto_por_codigo", Classe::Leitura),
-    // Domínio `produtos` (passa para a tabela dele).
-    ("produto_novo", Classe::Leitura),
-    ("produto_abrir", Classe::Leitura),
-    ("produto_salvar", Classe::Caixa),
-    ("produto_sugestoes", Classe::Leitura),
-    ("produto_variacao_criar", Classe::Caixa),
-    ("estoque_ajustar", Classe::Gerente("ajustar_estoque")),
-    // Domínio `unidades` (passa para a tabela dele).
-    ("unidades_listar", Classe::Leitura),
-    ("unidade_salvar", Classe::Caixa),
-    // Domínio `pessoas` (passa para a tabela dele).
-    ("pessoas_buscar", Classe::Leitura),
-    ("pessoa_nova", Classe::Leitura),
-    ("pessoa_abrir", Classe::Leitura),
-    ("pessoa_salvar", Classe::Caixa),
     // Domínio `compras` (passa para a tabela dele).
     ("compras_listar", Classe::Leitura),
     ("compra_importar", Classe::Caixa),
@@ -489,14 +463,28 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("etiquetas_da_compra", Classe::Leitura),
 ];
 
-/// A classe de permissão de um comando.
-pub fn classe(comando: &str) -> Option<Classe> {
-    DO_SERVICO.iter().find(|(nome, _)| *nome == comando).map(|(_, c)| *c)
+/// As tabelas de comandos dos domínios (cada domínio declara a sua no
+/// próprio módulo; veja `despacho`).
+const TABELAS: &[&[Comando]] =
+    &[busca::COMANDOS, menu::COMANDOS, pessoas::COMANDOS, produtos::COMANDOS, unidades::COMANDOS, usuarios::COMANDOS];
+
+/// O comando de um domínio, se é de algum.
+fn do_dominio(comando: &str) -> Option<&'static Comando> {
+    TABELAS.iter().flat_map(|t| t.iter()).find(|c| c.nome == comando)
 }
 
-/// Todos os comandos que o núcleo atende.
+/// A classe de permissão de um comando.
+pub fn classe(comando: &str) -> Option<Classe> {
+    DO_SERVICO
+        .iter()
+        .find(|(nome, _)| *nome == comando)
+        .map(|(_, c)| *c)
+        .or_else(|| do_dominio(comando).map(|c| c.classe))
+}
+
+/// Todos os comandos que o núcleo atende (os do serviço e os dos domínios).
 pub fn comandos() -> Vec<&'static str> {
-    DO_SERVICO.iter().map(|(nome, _)| *nome).collect()
+    DO_SERVICO.iter().map(|(nome, _)| *nome).chain(TABELAS.iter().flat_map(|t| t.iter().map(|c| c.nome))).collect()
 }
 
 /// Comandos que só leem (não gravam nada no banco). Depois de um erro
@@ -923,62 +911,30 @@ impl Servico {
     /// Pode fazer esta ação do gerente sem senha? (é gerente, ou a loja
     /// liberou a ação para todos na pílula Gerente.)
     fn pode_sem_senha(&self, acao: &str, sessao: &Sessao) -> Resultado<bool> {
-        Ok(sessao.gerente
-            || (!SEMPRE_DO_GERENTE.contains(&acao) && acoes_livres(&self.banco.conn)?.iter().any(|a| a == acao)))
+        pode_sem_senha(&self.banco.conn, acao, sessao)
     }
 
-    /// Pode ler o que é desta ação? Sem senha, ou com a senha do gerente
-    /// digitada para consultar a tela dela (renova a cada leitura).
+    /// As permissões desta chamada (as senhas do gerente digitadas e o
+    /// comando em curso) e o banco, para as perguntas de permissão.
+    fn permissoes<'a>(&'a mut self, sessao: &'a Sessao) -> (Permissoes<'a>, &'a rusqlite::Connection) {
+        (Permissoes { liberacoes: &mut self.liberacoes, chamada: self.chamada.as_ref(), sessao }, &self.banco.conn)
+    }
+
+    /// Veja `Permissoes::pode_ler`.
     fn pode_ler(&mut self, acao: &str, sessao: &Sessao) -> Resultado<bool> {
-        if self.pode_sem_senha(acao, sessao)? {
-            return Ok(true);
-        }
-        Ok(self.consulta_aberta(acao, sessao))
+        let (mut p, conn) = self.permissoes(sessao);
+        p.pode_ler(conn, acao)
     }
 
-    fn consulta_aberta(&mut self, acao: &str, sessao: &Sessao) -> bool {
-        let agora = Instant::now();
-        self.liberacoes.retain(|l| agora < l.ate());
-        for l in &mut self.liberacoes {
-            if let Liberacao::Consulta { usuario_id, acao: a, ate } = l {
-                if *a == acao && *usuario_id == sessao.usuario_id {
-                    *ate = agora + LIBERACAO;
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// A senha do gerente foi digitada para esta chamada (o mesmo comando,
-    /// com os mesmos dados, pelo mesmo usuário)?
+    /// Veja `Permissoes::liberada_esta_chamada`.
     fn liberada_esta_chamada(&mut self, sessao: &Sessao) -> bool {
-        let agora = Instant::now();
-        self.liberacoes.retain(|l| agora < l.ate());
-        let Some((comando, resumo)) = &self.chamada else { return false };
-        self.liberacoes.iter().any(|l| {
-            matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: r, .. }
-                if usuario_id == &sessao.usuario_id && c == comando && r == resumo)
-        })
+        self.permissoes(sessao).0.liberada_esta_chamada()
     }
 
-    /// Esta chamada pode fazer esta ação do gerente? Uma leitura vale com a
-    /// consulta da tela; qualquer outra coisa precisa da senha para ela.
+    /// Veja `Permissoes::exigir`.
     fn exigir(&mut self, acao: &str, sessao: &Sessao) -> Resultado<()> {
-        if self.pode_sem_senha(acao, sessao)? || self.liberada_esta_chamada(sessao) {
-            return Ok(());
-        }
-        let leitura =
-            self.chamada.as_ref().map(|(c, _)| so_leitura(c) && acao_do_comando(c) == Some(acao)).unwrap_or(false);
-        if leitura && self.consulta_aberta(acao, sessao) {
-            return Ok(());
-        }
-        // "precos" tem campo próprio: a tela sabe que é o preço da peça que
-        // pede a senha.
-        Err(Erro::campo(
-            if acao == "precos" { "precos" } else { "gerente" },
-            format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
-        ))
+        let (mut p, conn) = self.permissoes(sessao);
+        p.exigir(conn, acao)
     }
 
     /// Roda o comando. Se deu certo, a senha do gerente digitada para ele
@@ -1046,6 +1002,21 @@ impl Servico {
             // Só nos testes: o defeito de propósito (C-15) não tem classe.
             None if cfg!(test) && comando == "__teste_panico" => {}
             None => return Err(Erro::Interno(format!("comando desconhecido: {comando}"))),
+        }
+        // Os comandos dos domínios: a função da tabela do domínio.
+        if let Some(c) = do_dominio(comando) {
+            let modo_seguro = self.banco.em_modo_seguro();
+            let mut acesso = Permissoes { liberacoes: &mut self.liberacoes, chamada: self.chamada.as_ref(), sessao };
+            let mut pedido = Pedido::novo(
+                &mut self.banco.conn,
+                &disp,
+                &sessao.usuario_id,
+                sessao.gerente,
+                modo_seguro,
+                self.banco.defeito.as_deref(),
+                &mut acesso,
+            );
+            return (c.funcao)(&mut pedido, dados);
         }
         match comando {
             // ---- Gerente ----
@@ -1354,113 +1325,6 @@ impl Servico {
                 self.config_ler(ve)
             }
 
-            "menu" => match menu::menu(&self.banco.conn, &sessao.usuario_id) {
-                Ok(m) => Ok(json!(m)),
-                // RVI-03: banco antigo em modo seguro: o menu sem as fixadas
-                // (o Início precisa dele para mostrar o aviso do modo seguro).
-                Err(e) if self.banco.em_modo_seguro() => {
-                    crate::registro::anotar(&format!("menu no modo seguro: {e}"));
-                    Ok(json!(menu::sem_fixadas()))
-                }
-                Err(e) => Err(e),
-            },
-            "menu_usar" => {
-                let d: ItemMenu = ler(dados)?;
-                menu::registrar_uso(&self.banco.conn, &sessao.usuario_id, &d.id)?;
-                Ok(Value::Null)
-            }
-            "menu_fixar" => {
-                let d: ItemMenu = ler(dados)?;
-                menu::fixar(&self.banco.conn, &sessao.usuario_id, &d.id, d.fixo)?;
-                Ok(json!(menu::menu(&self.banco.conn, &sessao.usuario_id)?))
-            }
-
-            "produtos_buscar" => {
-                let d: BuscaProdutos = ler(dados)?;
-                let lista = busca::buscar(&self.banco.conn, &d.texto, d.inativas, d.limite.unwrap_or(200))?;
-                let total = busca::total(&self.banco.conn, d.inativas)?;
-                Ok(json!({ "itens": lista, "total": total }))
-            }
-            "produto_novo" => {
-                let f = produtos::ficha_nova(&self.banco.conn)?;
-                self.peca_para_tela(f, sessao)
-            }
-            "produto_abrir" => {
-                let d: Id = ler(dados)?;
-                let f = produtos::ficha(&self.banco.conn, &d.id)?;
-                self.peca_para_tela(f, sessao)
-            }
-            "produto_salvar" => {
-                let mut ficha: produtos::ProdutoFicha = ler(dados)?;
-                // D-09: quem não vê custo e lucro não mexe neles (o custo
-                // gravado fica; o % segue o preço).
-                if !self.ve_custos(sessao)? {
-                    produtos::tirar_custos_da_entrada(&self.banco.conn, &mut ficha)?;
-                }
-                // Mudar o preço de venda (com custo ou sem) ou o % de lucro
-                // de uma peça cadastrada: só com o gerente, para esta
-                // gravação com estes dados (D-09).
-                if produtos::muda_preco(&self.banco.conn, &ficha)? {
-                    self.exigir("precos", sessao)?;
-                }
-                let tx = self.banco.conn.transaction()?;
-                let id = produtos::salvar(&tx, &disp, &sessao.usuario_id, &ficha)?;
-                tx.commit()?;
-                let f = produtos::ficha(&self.banco.conn, &id)?;
-                self.peca_para_tela(f, sessao)
-            }
-            "produto_sugestoes" => {
-                let mut v = json!(produtos::sugestoes(&self.banco.conn)?);
-                let lista = |l: &[(&str, &str)]| {
-                    json!(l.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>())
-                };
-                v["csosns"] = lista(fiscal::CSOSNS);
-                v["cstIpi"] = lista(fiscal::CST_IPI);
-                v["cstPis"] = lista(fiscal::CST_PIS);
-                v["exigibilidades"] = lista(fiscal::EXIGIBILIDADE_ISS);
-                v["ufs"] = json!(crate::documento::UFS);
-                Ok(v)
-            }
-            "unidades_listar" => Ok(json!(unidades::listar(&self.banco.conn)?)),
-            "unidade_salvar" => {
-                let d: UnidadeEntrada = ler(dados)?;
-                let sigla = unidades::salvar(&self.banco.conn, &d.sigla, &d.descricao, d.fracionada)?;
-                Ok(json!({ "sigla": sigla, "lista": unidades::listar(&self.banco.conn)? }))
-            }
-            "produto_variacao_criar" => {
-                let d: VariacaoEntrada = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = produtos::criar_variacao(&tx, &disp, &sessao.usuario_id, &d.id, &d.atual, &d.nova)?;
-                tx.commit()?;
-                let f = produtos::ficha(&self.banco.conn, &id)?;
-                self.peca_para_tela(f, sessao)
-            }
-            "estoque_ajustar" => {
-                let d: AjusteEstoque = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                produtos::ficha(&tx, &d.produto_id)?; // confere se a peça existe
-                estoque::ajustar(&tx, &disp, &sessao.usuario_id, &d.produto_id, &d.quantidade, &d.motivo)?;
-                tx.commit()?;
-                let f = produtos::ficha(&self.banco.conn, &d.produto_id)?;
-                self.peca_para_tela(f, sessao)
-            }
-
-            "usuarios_listar" => {
-                let lista = usuarios::listar(&self.banco.conn, false)?;
-                Ok(json!(lista
-                    .into_iter()
-                    .map(|u| {
-                        let voce = u.id == sessao.usuario_id;
-                        let mut v = json!(u);
-                        v["voce"] = json!(voce);
-                        // Só o gerente vê quem está com senha fora da política.
-                        let fraca = sessao.gerente
-                            && matches!(usuarios::situacao_senha(&self.banco.conn, &u.id), Ok(Some(Some(_))));
-                        v["senhaFraca"] = json!(fraca);
-                        v
-                    })
-                    .collect::<Vec<_>>()))
-            }
             "usuario_salvar" => self.usuario_salvar(ler(dados)?, sessao),
             "senha_trocar" => {
                 let d: TrocaSenha = ler(dados)?;
@@ -1487,29 +1351,6 @@ impl Servico {
                 )?;
                 tx.commit()?;
                 Ok(Value::Null)
-            }
-
-            // Clientes e fornecedores
-            "pessoas_buscar" => {
-                let d: BuscaPessoas = ler(dados)?;
-                let itens = pessoas::buscar(&self.banco.conn, &d.texto, &d.papel, d.inativos, d.limite.unwrap_or(200))?;
-                let total = pessoas::total(&self.banco.conn, &d.papel)?;
-                Ok(json!({ "itens": itens, "total": total }))
-            }
-            "pessoa_nova" => {
-                let d: Papel = ler(dados)?;
-                Ok(json!(pessoas::ficha_nova(&self.banco.conn, &d.papel)?))
-            }
-            "pessoa_abrir" => {
-                let d: Id = ler(dados)?;
-                Ok(json!(pessoas::ficha(&self.banco.conn, &d.id)?))
-            }
-            "pessoa_salvar" => {
-                let ficha: pessoas::PessoaFicha = ler(dados)?;
-                let tx = self.banco.conn.transaction()?;
-                let id = pessoas::salvar(&tx, &disp, &sessao.usuario_id, &ficha)?;
-                tx.commit()?;
-                Ok(json!(pessoas::ficha(&self.banco.conn, &id)?))
             }
 
             // Compras
@@ -1695,23 +1536,6 @@ impl Servico {
                 tx.commit()?;
                 Ok(json!(vendas::ficha(&self.banco.conn, &d.id)?))
             }
-            "produto_por_codigo" => {
-                // Leitor de código de barras: só o código exato, e só se for
-                // de uma peça. Duas ou mais com o mesmo código: a tela mostra
-                // as peças e a pessoa escolhe (nunca entra uma sozinha).
-                let d: BuscaProdutos = ler(dados)?;
-                let lista = busca::pelo_codigo_exato(&self.banco.conn, &d.texto)?;
-                // Peças com este código que ainda esperam a confirmação do
-                // caixa que distribui as faixas: o leitor não as acha.
-                let esperando = busca::esperando_pelo_codigo(&self.banco.conn, &d.texto)?;
-                Ok(match lista.as_slice() {
-                    [p] => json!({ "id": p.id, "repetidos": 1, "esperando": esperando }),
-                    [] => json!({ "id": null, "repetidos": 0, "esperando": esperando }),
-                    varias => {
-                        json!({ "id": null, "repetidos": varias.len(), "opcoes": varias, "esperando": esperando })
-                    }
-                })
-            }
             // O vale-troca aparece à parte no Receber (só quando há vale).
             "formas_pagamento" => Ok(json!(caixa::FORMAS
                 .iter()
@@ -1857,12 +1681,6 @@ impl Servico {
                 let d: Filtro = ler(dados)?;
                 Ok(json!(oficina::por_placa(&self.banco.conn, &d.texto)?))
             }
-            "mecanicos" => Ok(json!(self
-                .banco
-                .conn
-                .prepare("SELECT id, nome FROM usuario WHERE ativo = 1 ORDER BY nome COLLATE NOCASE")?
-                .query_map([], |l| Ok(json!({ "id": l.get::<_, String>(0)?, "nome": l.get::<_, String>(1)? })))?
-                .collect::<Result<Vec<_>, _>>()?)),
 
             // Trocas e devoluções
             "devolucao_venda" => {
@@ -2940,16 +2758,6 @@ impl Servico {
         self.pode_sem_senha("resultados", sessao)
     }
 
-    /// Ficha da peça para a tela: sem custo, % de lucro e histórico do
-    /// custo para quem não vê os resultados (D-09).
-    fn peca_para_tela(&mut self, mut f: produtos::ProdutoFicha, sessao: &Sessao) -> Resultado<Value> {
-        f.ver_custos = self.ve_custos(sessao)?;
-        if !f.ver_custos {
-            produtos::esconder_custos(&mut f);
-        }
-        Ok(json!(f))
-    }
-
     /// As notificações do Início para quem está conectado (as mesmas que a
     /// tela mostra e que `aviso_esconder` confere).
     fn avisos_de(&self, sessao: &Sessao) -> Resultado<Vec<crate::avisos::Aviso>> {
@@ -3078,6 +2886,82 @@ struct Computador {
     imprimir_direto: bool,
 }
 
+/// Pode fazer esta ação do gerente sem senha? (é gerente, ou a loja
+/// liberou a ação para todos na pílula Gerente.)
+fn pode_sem_senha(conn: &rusqlite::Connection, acao: &str, sessao: &Sessao) -> Resultado<bool> {
+    Ok(sessao.gerente || (!SEMPRE_DO_GERENTE.contains(&acao) && acoes_livres(conn)?.iter().any(|a| a == acao)))
+}
+
+/// As perguntas de permissão de uma chamada: as senhas do gerente digitadas
+/// no aperto (`Liberacao`), o comando em curso e quem está conectado. É a
+/// regra de sempre; os comandos dos domínios a usam pelo `despacho::Acesso`.
+struct Permissoes<'a> {
+    liberacoes: &'a mut Vec<Liberacao>,
+    chamada: Option<&'a (String, [u8; 32])>,
+    sessao: &'a Sessao,
+}
+
+impl Permissoes<'_> {
+    fn consulta_aberta(&mut self, acao: &str) -> bool {
+        let agora = Instant::now();
+        self.liberacoes.retain(|l| agora < l.ate());
+        for l in self.liberacoes.iter_mut() {
+            if let Liberacao::Consulta { usuario_id, acao: a, ate } = l {
+                if *a == acao && *usuario_id == self.sessao.usuario_id {
+                    *ate = agora + LIBERACAO;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// A senha do gerente foi digitada para esta chamada (o mesmo comando,
+    /// com os mesmos dados, pelo mesmo usuário)?
+    fn liberada_esta_chamada(&mut self) -> bool {
+        let agora = Instant::now();
+        self.liberacoes.retain(|l| agora < l.ate());
+        let Some((comando, resumo)) = self.chamada else { return false };
+        self.liberacoes.iter().any(|l| {
+            matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: r, .. }
+                if usuario_id == &self.sessao.usuario_id && c == comando && r == resumo)
+        })
+    }
+}
+
+impl Acesso for Permissoes<'_> {
+    fn pode_sem_senha(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+        pode_sem_senha(conn, acao, self.sessao)
+    }
+
+    /// Pode ler o que é desta ação? Sem senha, ou com a senha do gerente
+    /// digitada para consultar a tela dela (renova a cada leitura).
+    fn pode_ler(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+        if pode_sem_senha(conn, acao, self.sessao)? {
+            return Ok(true);
+        }
+        Ok(self.consulta_aberta(acao))
+    }
+
+    /// Esta chamada pode fazer esta ação do gerente? Uma leitura vale com a
+    /// consulta da tela; qualquer outra coisa precisa da senha para ela.
+    fn exigir(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<()> {
+        if pode_sem_senha(conn, acao, self.sessao)? || self.liberada_esta_chamada() {
+            return Ok(());
+        }
+        let leitura = self.chamada.map(|(c, _)| so_leitura(c) && acao_do_comando(c) == Some(acao)).unwrap_or(false);
+        if leitura && self.consulta_aberta(acao) {
+            return Ok(());
+        }
+        // "precos" tem campo próprio: a tela sabe que é o preço da peça que
+        // pede a senha.
+        Err(Erro::campo(
+            if acao == "precos" { "precos" } else { "gerente" },
+            format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
+        ))
+    }
+}
+
 /// Ações que a loja liberou para todos (as outras são só do gerente).
 fn acoes_livres(conn: &rusqlite::Connection) -> Resultado<Vec<String>> {
     Ok(config::ler(conn, "gerente_livres")?
@@ -3155,7 +3039,6 @@ fn formatar(tipo: &str, texto: &str) -> String {
     }
 }
 
-/// Converte os dados JSON no tipo esperado pelo comando.
 /// Uma linha (ou categoria, ou busca) da DRE, com o período.
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -3165,10 +3048,6 @@ struct DreLinha {
     linha: String,
     categoria: String,
     busca: String,
-}
-
-fn ler<T: DeserializeOwned>(dados: Value) -> Resultado<T> {
-    Ok(serde_json::from_value(dados)?)
 }
 
 /// Troca o nome do campo de um erro (ex.: "senha" → "nova").
@@ -3196,51 +3075,6 @@ struct Inicio {
 struct Entrada {
     id: String,
     senha: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Id {
-    id: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct ItemMenu {
-    id: String,
-    fixo: bool,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct BuscaProdutos {
-    texto: String,
-    inativas: bool,
-    limite: Option<i64>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct UnidadeEntrada {
-    sigla: String,
-    descricao: String,
-    fracionada: bool,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct VariacaoEntrada {
-    id: String,
-    atual: String,
-    nova: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct AjusteEstoque {
-    produto_id: String,
-    quantidade: String,
-    motivo: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -3333,23 +3167,6 @@ struct Valor {
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
-struct Filtro {
-    texto: String,
-    quais: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
-struct Periodo {
-    de: String,
-    ate: String,
-    dias: Option<i64>,
-    usuario_id: String,
-    vencimento: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, rename_all = "camelCase")]
 struct ChequeAcao {
     id: String,
     conta: String,
@@ -3387,27 +3204,6 @@ fn endereco_local() -> String {
         .and_then(|s| s.local_addr())
         .map(|a| a.ip().to_string())
         .unwrap_or_default()
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct BuscaPessoas {
-    texto: String,
-    papel: String,
-    inativos: bool,
-    limite: Option<i64>,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Papel {
-    papel: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Arquivo {
-    caminho: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -3450,13 +3246,6 @@ struct Desfazer {
 #[serde(default)]
 struct CaixaDaLoja {
     dispositivo: String,
-    motivo: String,
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default)]
-struct Estorno {
-    id: String,
     motivo: String,
 }
 

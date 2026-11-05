@@ -950,6 +950,69 @@ fn diferencas(a: &Dados, b: &Dados) -> Vec<String> {
     v
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do cadastro de clientes e fornecedores (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::pessoas;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "pessoas_buscar", classe: Classe::Leitura, funcao: pessoas_buscar },
+        Comando { nome: "pessoa_nova", classe: Classe::Leitura, funcao: pessoa_nova },
+        Comando { nome: "pessoa_abrir", classe: Classe::Leitura, funcao: pessoa_abrir },
+        Comando { nome: "pessoa_salvar", classe: Classe::Caixa, funcao: pessoa_salvar },
+    ];
+
+    // Clientes e fornecedores
+    fn pessoas_buscar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: BuscaPessoas = ler(dados)?;
+        let itens = pessoas::buscar(p.conn, &d.texto, &d.papel, d.inativos, d.limite.unwrap_or(200))?;
+        let total = pessoas::total(p.conn, &d.papel)?;
+        Ok(json!({ "itens": itens, "total": total }))
+    }
+
+    fn pessoa_nova(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Papel = ler(dados)?;
+        Ok(json!(pessoas::ficha_nova(p.conn, &d.papel)?))
+    }
+
+    fn pessoa_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(pessoas::ficha(p.conn, &d.id)?))
+    }
+
+    fn pessoa_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let ficha: pessoas::PessoaFicha = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = pessoas::salvar(&tx, p.disp, p.usuario_id, &ficha)?;
+        tx.commit()?;
+        Ok(json!(pessoas::ficha(p.conn, &id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct BuscaPessoas {
+        texto: String,
+        papel: String,
+        inativos: bool,
+        limite: Option<i64>,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Papel {
+        papel: String,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

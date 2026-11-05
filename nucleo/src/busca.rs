@@ -839,6 +839,50 @@ pub fn total(conn: &Connection, incluir_inativas: bool) -> Resultado<i64> {
     Ok(conn.query_row(sql, [], |l| l.get(0))?)
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da busca de peças e do leitor de código de barras (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::busca;
+    use crate::despacho::{ler, BuscaProdutos, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "produtos_buscar", classe: Classe::Leitura, funcao: produtos_buscar },
+        Comando { nome: "produto_por_codigo", classe: Classe::Leitura, funcao: produto_por_codigo },
+    ];
+
+    fn produtos_buscar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: BuscaProdutos = ler(dados)?;
+        let lista = busca::buscar(p.conn, &d.texto, d.inativas, d.limite.unwrap_or(200))?;
+        let total = busca::total(p.conn, d.inativas)?;
+        Ok(json!({ "itens": lista, "total": total }))
+    }
+
+    fn produto_por_codigo(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        // Leitor de código de barras: só o código exato, e só se for
+        // de uma peça. Duas ou mais com o mesmo código: a tela mostra
+        // as peças e a pessoa escolhe (nunca entra uma sozinha).
+        let d: BuscaProdutos = ler(dados)?;
+        let lista = busca::pelo_codigo_exato(p.conn, &d.texto)?;
+        // Peças com este código que ainda esperam a confirmação do
+        // caixa que distribui as faixas: o leitor não as acha.
+        let esperando = busca::esperando_pelo_codigo(p.conn, &d.texto)?;
+        Ok(match lista.as_slice() {
+            [p] => json!({ "id": p.id, "repetidos": 1, "esperando": esperando }),
+            [] => json!({ "id": null, "repetidos": 0, "esperando": esperando }),
+            varias => {
+                json!({ "id": null, "repetidos": varias.len(), "opcoes": varias, "esperando": esperando })
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
