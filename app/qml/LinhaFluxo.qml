@@ -10,7 +10,11 @@ Rectangle {
     property bool mostrarSaldo: false
 
     radius: Tema.raioCampo
-    color: dia.hoje ? Tema.papel : (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+    // Faixas alternadas (V-6); "hoje" fica destacado no papel (claro).
+    readonly property bool par: (indice + 1) % 2 === 0
+    readonly property bool escura: !dia.hoje && par
+    color: dia.hoje ? Tema.papel : Tema.faixa(par)
+    palette.window: Tema.superficie(color)
     implicitHeight: coluna.implicitHeight + 16
 
     ColumnLayout {
@@ -24,7 +28,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.dia.data
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
@@ -32,7 +36,7 @@ Rectangle {
             }
             Text {
                 text: linha.dia.hoje ? "hoje" : linha.dia.diaSemana
-                color: Tema.apagado
+                color: Tema.apagadoDaFaixa(linha.escura)
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 13
@@ -49,7 +53,7 @@ Rectangle {
                     radius: 3
                     height: 6
                     width: Math.max(6, barras.width * linha.dia.barraEntrada)
-                    color: Tema.verdeEscuro
+                    color: Tema.verdeEscuroDaFaixa(linha.escura)
                     opacity: 0.55
                 }
                 Rectangle {
@@ -58,13 +62,13 @@ Rectangle {
                     radius: 3
                     height: 6
                     width: Math.max(6, barras.width * linha.dia.barraSaida)
-                    color: Tema.vermelho
+                    color: Tema.vermelhoDaFaixa(linha.escura)
                     opacity: 0.5
                 }
             }
             Text {
                 text: linha.dia.entradas !== "0,00" ? "+ " + Tema.valor(linha.dia.entradas) : ""
-                color: Tema.verdeEscuro
+                color: Tema.verdeEscuroDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
@@ -73,7 +77,7 @@ Rectangle {
             }
             Text {
                 text: linha.dia.saidas !== "0,00" ? "− " + Tema.valor(linha.dia.saidas) : ""
-                color: Tema.vermelho
+                color: Tema.vermelhoDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 14
@@ -83,7 +87,7 @@ Rectangle {
             Text {
                 visible: linha.mostrarSaldo
                 text: "R$ " + Tema.valor(linha.dia.saldo)
-                color: linha.dia.negativo ? Tema.vermelho : Tema.tinta
+                color: linha.dia.negativo ? Tema.vermelhoDaFaixa(linha.escura) : Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: 14
@@ -94,7 +98,7 @@ Rectangle {
         Text {
             text: (linha.dia.detalhes || []).join("  ·  ")
             visible: text !== ""
-            color: Tema.tintaSuave
+            color: Tema.tintaSuaveDaFaixa(linha.escura)
             font.family: Tema.serifa
             font.italic: true
             font.pixelSize: 12

@@ -136,6 +136,7 @@ FocusScope {
                     required property var modelData
                     radius: Tema.raio
                     color: modelData[2]
+                    palette.window: Tema.superficie(color)
                     implicitHeight: 72
                     Layout.fillWidth: true
                     ColumnLayout {
@@ -228,7 +229,9 @@ FocusScope {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Tema.raio
-                color: Tema.vela(0.28)
+                color: Tema.roxo ? Tema.pergaminho : Tema.vela(0.28)
+                // No roxo, um véu claro sobre o fundo roxo ficaria rosado: painel claro (0.9.18).
+                palette.window: Tema.superficie(color)
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -368,10 +371,15 @@ FocusScope {
                             Repeater {
                                 model: tela.conta ? tela.conta.recebimentos : []
                                 delegate: Rectangle {
+                                    id: faixaDaLista
+                                    required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
                                     radius: Tema.raioCampo
-                                    color: Tema.vela(0.45)
+                                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                    readonly property bool par: (index + 1) % 2 === 0
+                                    color: Tema.faixa(faixaDaLista.par, Tema.vela(0.45), "transparent")
+                                    palette.window: Tema.superficie(color)
                                     implicitHeight: 46
                                     RowLayout {
                                         anchors.fill: parent
@@ -382,7 +390,7 @@ FocusScope {
                                         Text {
                                             text: modelData.quando + "  ·  " + modelData.forma + "  ·  " + modelData.caixa + " nº " + modelData.numero
                                                   + (modelData.estornado ? "  ·  ESTORNADO: " + modelData.motivoEstorno : "")
-                                            color: Tema.tintaSuave
+                                            color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 13
                                             elide: Text.ElideRight
@@ -390,7 +398,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: Tema.sigiloTexto("R$ " + modelData.valor)
-                                            color: Tema.tinta
+                                            color: Tema.tintaDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
                                             font.pixelSize: 15

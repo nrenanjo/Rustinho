@@ -119,7 +119,7 @@ FocusScope {
             }
             Text {
                 text: "Comprar para"
-                color: Tema.tintaSuave
+                color: Tema.tintaSuaveNo(palette.window)
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 15
@@ -215,6 +215,7 @@ FocusScope {
             implicitHeight: 62
             radius: Tema.raio
             color: Tema.verde
+            palette.window: Tema.superficie(color)
             HoverHandler { id: sobreE }
             RowLayout {
                 anchors.fill: parent
@@ -274,7 +275,10 @@ FocusScope {
             readonly property int i: parent ? parent.dado.i : 0
             implicitHeight: 64
             radius: Tema.raio
-            color: (i + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+            readonly property bool par: (i + 1) % 2 === 0
+            color: Tema.faixa(lp.par)
+            palette.window: Tema.superficie(color)
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 18
@@ -295,7 +299,7 @@ FocusScope {
                     Layout.fillWidth: true
                     Text {
                         text: lp.p.nome + (lp.p.marca ? " · " + lp.p.marca : "")
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
                         font.pixelSize: 20
@@ -307,7 +311,7 @@ FocusScope {
                     Text {
                         text: ["cód. " + lp.p.codigo, lp.p.fornecedor ? lp.p.fornecedor + (lp.p.codigoFornecedor ? " (" + lp.p.codigoFornecedor + ")" : "") : "",
                                lp.p.observacao].filter(x => !!x).join("  ·  ")
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.serifa
                         font.italic: true
                         font.pixelSize: 13
@@ -320,7 +324,7 @@ FocusScope {
                     Layout.preferredWidth: 150
                     Text {
                         text: lp.p.tem
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
                         font.pixelSize: 14
@@ -328,7 +332,7 @@ FocusScope {
                     }
                     Text {
                         text: lp.p.ritmo
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignRight
@@ -339,7 +343,7 @@ FocusScope {
                     Layout.preferredWidth: 150
                     Text {
                         text: "Comprar " + lp.p.sugerido + " " + lp.p.unidade
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: 17
@@ -347,7 +351,7 @@ FocusScope {
                     }
                     Text {
                         text: lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : "sem custo"
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignRight

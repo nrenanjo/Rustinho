@@ -19,6 +19,8 @@ Popup {
     width: Math.min(480, Tema.largura - 24)
     padding: Tema.estreito ? 18 : 30
     closePolicy: Popup.CloseOnEscape
+    // O pop-up herda as cores da janela, não da tela: diz a sua superfície.
+    palette.window: Tema.superficie(Tema.pergaminho)
 
     T.Overlay.modal: Rectangle { color: Tema.veu }
     background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }

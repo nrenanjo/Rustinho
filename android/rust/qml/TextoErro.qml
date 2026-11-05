@@ -5,7 +5,7 @@ import rustinho
 // Mensagem de erro (some quando vazia).
 Text {
     visible: text !== ""
-    color: Tema.vermelho
+    color: Tema.roxo ? Tema.vermelhoNo(palette.window) : Tema.vermelho
     font.family: Tema.texto
     font.weight: Font.DemiBold
     font.pixelSize: 15

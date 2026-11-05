@@ -26,6 +26,8 @@ conferido no núcleo (testes_nav::nav01_arquivos_conferir_separa_os_que_faltam).
      fica à vista (rolagem) e o fluxo termina igual.
 
     python3 app/testes/telas_navegacao_guiada.py [pasta para as fotos]
+    RUSTINHO_TELA=:92 python3 app/testes/telas_navegacao_guiada.py   (outra tela virtual)
+    RUSTINHO_TEMA=roxo python3 app/testes/telas_navegacao_guiada.py  (no Planeta Roxo; 0.9.18)
 """
 
 import os
@@ -44,6 +46,8 @@ from telas_d09 import PROGRAMA, RAIZ, conferir, simples  # noqa: E402
 # ocupada (por exemplo, por outro teste rodando ao mesmo tempo).
 base.TELA = os.environ.get("RUSTINHO_TELA", ":83")
 TELA = base.TELA
+# Tema da loja de teste (0.9.18): vazio = o de sempre (cinza); "amoled" ou "roxo".
+TEMA = os.environ.get("RUSTINHO_TEMA", "")
 CNPJ_BOM = "11.444.777/0001-61"
 CNPJ_RUIM = "11.444.777/0001-00"
 EXEMPLO = os.path.join(RAIZ, "nucleo", "tests", "nfe_exemplo.xml")
@@ -51,6 +55,19 @@ EXEMPLO = os.path.join(RAIZ, "nucleo", "tests", "nfe_exemplo.xml")
 
 def xdo(*args):
     subprocess.run(["xdotool", *args], env=dict(os.environ, DISPLAY=TELA), check=True)
+
+
+def tema_por_fora(pasta):
+    """Grava o tema pedido (RUSTINHO_TEMA) na loja de teste, pelo núcleo (os
+    gatilhos da troca de dados precisam das funções do Rustinho)."""
+    if not TEMA:
+        return
+    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta,
+               RUSTINHO_SQL=f"INSERT INTO config (chave, valor) VALUES ('tela_tema', '{TEMA}') "
+                            "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;")
+    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
+                    "--ignored", "--exact", "executar_por_fora"],
+                   cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
 
 
 def banco(pasta, sql, *p):
@@ -274,6 +291,7 @@ def main():
     try:
         # A loja de teste vem sem o CNPJ. Cada cenário começa de uma cópia dela.
         base.montar_loja(modelo)
+        tema_por_fora(modelo)
 
         def loja_nova():
             shutil.rmtree(pasta, ignore_errors=True)

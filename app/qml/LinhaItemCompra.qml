@@ -22,6 +22,7 @@ Rectangle {
 
     radius: Tema.raio
     color: pendente ? Tema.rosa : ignorado ? Tema.vela(0.25) : (item.ordem % 2 === 0 ? Tema.azul : Tema.pergaminho)
+    palette.window: Tema.superficie(color)
     implicitHeight: coluna.implicitHeight + 32
 
     function focarFator() {
@@ -99,6 +100,7 @@ Rectangle {
             Layout.leftMargin: Tema.estreito ? 0 : 44
             radius: Tema.raioCampo
             color: Tema.vela(0.42)
+            palette.window: Tema.superficie(color)
             implicitHeight: decisao.implicitHeight + 20
 
             ColumnLayout {
@@ -268,6 +270,7 @@ Rectangle {
                     Layout.leftMargin: Tema.estreito ? 0 : 30
                     radius: Tema.raioCampo
                     color: Tema.verde
+                    palette.window: Tema.superficie(color)
                     implicitHeight: perguntaPreco.implicitHeight + 16
                     Linha {
                         id: perguntaPreco

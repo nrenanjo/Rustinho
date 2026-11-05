@@ -116,7 +116,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 64
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: Tema.estreito ? 10 : 16
@@ -124,7 +127,7 @@ FocusScope {
                     spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.v.posicao
-                        color: Tema.dourado
+                        color: Tema.douradoDaFaixa(linha.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
                         font.pixelSize: 24
@@ -136,7 +139,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.v.nome + (linha.v.marca ? " · " + linha.v.marca : "")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -170,7 +173,7 @@ FocusScope {
                         Layout.preferredWidth: 130
                         Text {
                             text: linha.v.quantidade + " " + linha.v.unidade
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 15
@@ -178,7 +181,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.v.vendas + (linha.v.vendas === 1 ? " venda" : " vendas")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight
@@ -189,7 +192,7 @@ FocusScope {
                         Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + linha.v.total
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 17
@@ -198,7 +201,7 @@ FocusScope {
                         Text {
                             visible: linha.v.lucro !== ""
                             text: "lucro R$ " + Tema.valor(linha.v.lucro) + (linha.v.margem && !Tema.oculto ? " (" + linha.v.margem + ")" : "")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight

@@ -550,6 +550,7 @@ ColumnLayout {
         Rectangle {
             visible: secao.pedirSenhaDe !== null
             color: Tema.rosa
+            palette.window: Tema.superficie(color)
             radius: Tema.raio
             Layout.fillWidth: true
             implicitHeight: linhaSenha.implicitHeight + 28
@@ -605,9 +606,13 @@ ColumnLayout {
                 return secao.todas ? lista : lista.slice(0, 6)
             }
             delegate: Rectangle {
+                id: faixaDaLista
                 required property var modelData
                 required property int index
-                color: index % 2 === 0 ? Tema.papel : "transparent"
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(faixaDaLista.par, Tema.papel, "transparent")
+                palette.window: Tema.superficie(color)
                 radius: Tema.raioCampo
                 Layout.fillWidth: true
                 implicitHeight: 48
@@ -618,7 +623,7 @@ ColumnLayout {
                     spacing: 12
                     Text {
                         text: modelData.quando
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
                         font.pixelSize: 16
@@ -630,7 +635,7 @@ ColumnLayout {
                     }
                     Text {
                         text: secao.nomeCaixa(modelData.caixa) + " · " + secao.tamanho(modelData.tamanho) + (modelData.temSenha ? " · trancado" : " · sem trancar")
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.pixelSize: 15
                         elide: Text.ElideRight

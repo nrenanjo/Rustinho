@@ -13,12 +13,15 @@ Rectangle {
 
     readonly property bool fechada: item.situacao === "paga" || item.situacao === "cancelada"
     readonly property var cores: ({ vencida: Tema.rosa, hoje: Tema.amarelo, aberta: Tema.papel,
-                                    paga: Tema.verde, cancelada: Tema.sombra(0.08) })
+                                    paga: Tema.verde, cancelada: Tema.roxo ? Tema.papel : Tema.sombra(0.08) })
     readonly property var nomes: ({ vencida: "Vencida", hoje: "Vence hoje", aberta: "Em aberto", paga: "Paga", cancelada: "Tirada" })
 
     radius: Tema.raio
     color: sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
-    readonly property color corBase: (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+    palette.window: Tema.superficie(color)
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property bool par: (indice + 1) % 2 === 0
+    readonly property color corBase: Tema.faixa(par)
     implicitHeight: 64
 
     RowLayout {
@@ -34,7 +37,7 @@ Rectangle {
             Layout.preferredWidth: 96
             Text {
                 text: linha.item.vencimento || ""
-                color: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tinta
+                color: linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 15
@@ -42,7 +45,7 @@ Rectangle {
             Text {
                 text: linha.item.diasAtraso > 0 ? linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " atrasada" : (linha.item.parcela !== "1/1" ? "parcela " + linha.item.parcela : "")
                 visible: text !== ""
-                color: linha.item.diasAtraso > 0 ? Tema.vermelho : Tema.tintaSuave
+                color: linha.item.diasAtraso > 0 ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12
             }
@@ -53,7 +56,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.descricao || ""
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.titulo
                 font.weight: Font.Bold
                 font.pixelSize: 20
@@ -65,7 +68,7 @@ Rectangle {
                        linha.item.fornecedor && linha.item.descricao.indexOf(linha.item.fornecedor) < 0 ? linha.item.fornecedor : "",
                        linha.item.categoria, linha.item.documento].filter(x => !!x).join("  ·  ")
                 visible: text !== ""
-                color: Tema.estreito && linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
+                color: Tema.estreito && linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 13
@@ -86,7 +89,7 @@ Rectangle {
             Layout.preferredWidth: Tema.estreito ? -1 : 120
             Text {
                 text: "R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo)
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: 17
@@ -95,7 +98,7 @@ Rectangle {
             Text {
                 visible: !linha.fechada && linha.item.pago !== "0,00"
                 text: "de R$ " + linha.item.valor
-                color: Tema.tintaSuave
+                color: Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12
                 Layout.alignment: Qt.AlignRight

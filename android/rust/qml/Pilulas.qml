@@ -11,6 +11,11 @@ Item {
     property string atual: ""
     property bool pequenas: false
     signal escolhido(string id)
+    // A superfície embaixo (0.9.18): no roxo, no fundo da tela a escolhida é
+    // rosa com texto escuro; numa faixa (subpílulas, painel), roxo-escura com
+    // texto branco. Nos outros temas, sempre a cor da tinta.
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
+    readonly property bool noFundo: Tema.escura(superficie)
 
     // Dentro de um Layout, ocupa a largura toda (para poder quebrar a linha).
     Layout.fillWidth: true
@@ -42,13 +47,15 @@ Item {
                 radius: height / 2
                 height: pilulas.pequenas ? 32 : (Tema.celular ? 42 : 40)
                 width: rotulo.implicitWidth + (pilulas.pequenas ? 26 : 36)
-                color: ativa ? Tema.tinta : sobre.hovered ? Tema.sombra(0.07) : "transparent"
+                color: ativa ? (pilulas.noFundo ? Tema.pilulaAtiva : Tema.subpilulaAtiva)
+                             : sobre.hovered ? Tema.sombraNo(0.07, pilulas.superficie) : "transparent"
                 Behavior on color { ColorAnimation { duration: 120 } }
                 Text {
                     id: rotulo
                     anchors.centerIn: parent
                     text: pilula.modelData.nome
-                    color: pilula.ativa ? Tema.claro : Tema.tinta
+                    color: pilula.ativa ? (pilulas.noFundo ? Tema.sobrePilulaAtiva : Tema.sobreSubpilulaAtiva)
+                                        : Tema.tintaNo(pilulas.superficie)
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
                     font.pixelSize: pilulas.pequenas ? 14 : 16

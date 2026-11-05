@@ -93,6 +93,7 @@ FocusScope {
                 implicitHeight: estado.implicitHeight + 28
                 radius: Tema.raio
                 color: secao.corEstado
+                palette.window: Tema.superficie(color)
                 Linha {
                     id: estado
                     anchors.fill: parent
@@ -142,10 +143,18 @@ FocusScope {
                         delegate: Rectangle {
                             id: linhaDre
                             required property var modelData
+                            required property int index
                             Layout.fillWidth: true
                             implicitHeight: modelData.subtotal ? 40 : 32
                             radius: Tema.raioCampo
-                            color: sobre.hovered && modelData.detalhavel ? Tema.vela(0.5) : modelData.subtotal ? Tema.vela(0.28) : "transparent"
+                            // Faixas alternadas (V-6): no cinza e no AMOLED, o subtotal
+                            // continua com o véu dele e as outras linhas alternam com um
+                            // véu leve; no roxo, faixa clara e escura (o subtotal em negrito).
+                            readonly property bool par: (index + 1) % 2 === 0
+                            readonly property color base: modelData.subtotal && !Tema.roxo ? Tema.vela(0.28)
+                                                          : Tema.faixa(linhaDre.par, "transparent", Tema.vela(0.16))
+                            color: sobre.hovered && modelData.detalhavel ? (Tema.roxo ? Qt.darker(base, 1.06) : Tema.vela(0.5)) : base
+                            palette.window: Tema.superficie(color)
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: linhaDre.modelData.subtotal ? 10 : 22
@@ -153,7 +162,7 @@ FocusScope {
                                 spacing: 10
                                 Text {
                                     text: linhaDre.modelData.nome
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(linhaDre.par)
                                     font.family: linhaDre.modelData.subtotal ? Tema.titulo : Tema.texto
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
                                     font.pixelSize: linhaDre.modelData.subtotal ? 18 : 14
@@ -162,7 +171,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto ? "" : linhaDre.modelData.percentual
-                                    color: Tema.apagado
+                                    color: Tema.apagadoDaFaixa(linhaDre.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 12
                                     horizontalAlignment: Text.AlignRight
@@ -170,7 +179,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(linhaDre.modelData.valor)
-                                    color: linhaDre.modelData.subtotal && linhaDre.modelData.v < 0 && !Tema.oculto ? Tema.vermelho : Tema.tinta
+                                    color: linhaDre.modelData.subtotal && linhaDre.modelData.v < 0 && !Tema.oculto ? Tema.vermelhoDaFaixa(linhaDre.par) : Tema.tintaDaFaixa(linhaDre.par)
                                     font.family: Tema.texto
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
                                     font.pixelSize: linhaDre.modelData.subtotal ? 16 : 14
@@ -180,7 +189,7 @@ FocusScope {
                                 Icone {
                                     nome: "direita"
                                     tamanho: 14
-                                    cor: Tema.apagado
+                                    cor: Tema.apagadoDaFaixa(linhaDre.par)
                                     opacity: linhaDre.modelData.detalhavel ? 1 : 0
                                 }
                             }
@@ -351,26 +360,40 @@ FocusScope {
                     }
                     Repeater {
                         model: secao.serie.slice().reverse()
-                        delegate: RowLayout {
+                        delegate: Rectangle {
                             id: mes
                             required property var modelData
-                            spacing: 8
                             Layout.fillWidth: true
                             visible: modelData.estado !== "antes"
-                            Text { text: mes.modelData.rotulo; color: Tema.apagado; font.family: Tema.texto; font.pixelSize: 13; Layout.preferredWidth: 56 }
-                            Text {
-                                text: mes.modelData.estado === "sem_dados" ? "sem dados" : "vendas R$ " + Tema.valor(mes.modelData.vendas)
-                                color: Tema.tinta; font.family: Tema.texto; font.pixelSize: 13; Layout.fillWidth: true
-                            }
-                            Text {
-                                visible: mes.modelData.estado !== "sem_dados"
-                                text: "resultado R$ " + Tema.valor(mes.modelData.resultado)
-                                color: mes.modelData.vResultado < 0 && !Tema.oculto ? Tema.vermelho : Tema.tinta
-                                font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 13
-                            }
-                            Chip {
-                                visible: mes.modelData.estado === "incompleto" || mes.modelData.parcial
-                                texto: mes.modelData.parcial ? "em andamento" : "incompleto"
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(mes.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa.implicitHeight + 6
+                            implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                            RowLayout {
+                                id: conteudoDaFaixa
+                                x: 8
+                                y: 3
+                                width: mes.width - 16
+                                spacing: 8
+                                Text { text: mes.modelData.rotulo; color: Tema.apagadoDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.preferredWidth: 56 }
+                                Text {
+                                    text: mes.modelData.estado === "sem_dados" ? "sem dados" : "vendas R$ " + Tema.valor(mes.modelData.vendas)
+                                    color: Tema.tintaDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: mes.modelData.estado !== "sem_dados"
+                                    text: "resultado R$ " + Tema.valor(mes.modelData.resultado)
+                                    color: mes.modelData.vResultado < 0 && !Tema.oculto ? Tema.vermelhoDaFaixa(mes.par) : Tema.tintaDaFaixa(mes.par)
+                                    font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 13
+                                }
+                                Chip {
+                                    visible: mes.modelData.estado === "incompleto" || mes.modelData.parcial
+                                    texto: mes.modelData.parcial ? "em andamento" : "incompleto"
+                                }
                             }
                         }
                     }
@@ -388,6 +411,8 @@ FocusScope {
                         model: secao.desp ? secao.desp.categorias : []
                         delegate: LinhaRanking {
                             required property var modelData
+                            required property int index
+                            indice: index
                             item: ({ nome: modelData.categoria, detalhe: modelData.grupo, valor: modelData.valor, parte: modelData.parte, percentual: "" })
                             cor: Tema.vermelho
                             HoverHandler { cursorShape: Qt.PointingHandCursor }

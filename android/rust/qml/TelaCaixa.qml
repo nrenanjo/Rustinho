@@ -211,12 +211,27 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.r ? tela.r.movimentos : []
-                            delegate: Nota {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                text: Qt.formatTime(new Date(modelData.quando), "HH:mm") + " · " + (modelData.tipo === "sangria" ? "Sangria" : "Suprimento")
-                                      + " R$ " + modelData.valor + " · " + modelData.motivo + " · " + modelData.usuario
-                                font.pixelSize: 14
                                 Layout.fillWidth: true
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                Nota {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    text: Qt.formatTime(new Date(modelData.quando), "HH:mm") + " · " + (modelData.tipo === "sangria" ? "Sangria" : "Suprimento")
+                                          + " R$ " + modelData.valor + " · " + modelData.motivo + " · " + modelData.usuario
+                                    font.pixelSize: 14
+                                }
                             }
                         }
                     }
@@ -229,22 +244,37 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.estado ? tela.estado.historico.slice(0, 12) : []
-                            delegate: RowLayout {
+                            delegate: Rectangle {
+                                id: faixaDaLista2
                                 required property var modelData
                                 Layout.fillWidth: true
-                                Text {
-                                    text: tela.hora(modelData.abertoEm) + " · " + modelData.abertoPor
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.pixelSize: 14
-                                    Layout.fillWidth: true
-                                }
-                                Botao {
-                                    text: "Imprimir"
-                                    tipo: "discreto"
-                                    implicitHeight: 30
-                                    font.pixelSize: 13
-                                    onClicked: tela.imprimir(modelData.id)
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista2.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa2.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa2.implicitWidth + 16
+                                RowLayout {
+                                    id: conteudoDaFaixa2
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista2.width - 16
+                                    Text {
+                                        text: tela.hora(modelData.abertoEm) + " · " + modelData.abertoPor
+                                        color: Tema.tintaDaFaixa(faixaDaLista2.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 14
+                                        Layout.fillWidth: true
+                                    }
+                                    Botao {
+                                        text: "Imprimir"
+                                        tipo: "discreto"
+                                        implicitHeight: 30
+                                        font.pixelSize: 13
+                                        onClicked: tela.imprimir(modelData.id)
+                                    }
                                 }
                             }
                         }

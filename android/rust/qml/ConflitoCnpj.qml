@@ -187,41 +187,56 @@ Painel {
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
                         model: janelaConflito.conflito ? janelaConflito.conflito.itens : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
+                            id: faixaDaLista
                             required property var modelData
                             width: itens.width
-                            spacing: 12
-                            Text {
-                                text: modelData.codigo
-                                color: Tema.tintaSuave
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                Layout.preferredWidth: 90
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                text: modelData.descricao
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                text: modelData.quantidade + " " + modelData.unidade
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                horizontalAlignment: Text.AlignRight
-                                Layout.preferredWidth: 90
-                            }
-                            Text {
-                                text: "R$ " + Tema.valor(modelData.total)
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                horizontalAlignment: Text.AlignRight
-                                Layout.preferredWidth: 100
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                            implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                            RowLayout {
+                                id: conteudoDaFaixa
+                                x: 8
+                                y: 4
+                                width: faixaDaLista.width - 16
+                                spacing: 12
+                                Text {
+                                    text: modelData.codigo
+                                    color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    Layout.preferredWidth: 90
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    text: modelData.descricao
+                                    color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    text: modelData.quantidade + " " + modelData.unidade
+                                    color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: 90
+                                }
+                                Text {
+                                    text: "R$ " + Tema.valor(modelData.total)
+                                    color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    horizontalAlignment: Text.AlignRight
+                                    Layout.preferredWidth: 100
+                                }
                             }
                         }
                     }

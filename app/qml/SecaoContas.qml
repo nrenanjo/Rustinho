@@ -80,11 +80,14 @@ FocusScope {
                     required property var modelData
                     required property int index
                     readonly property bool escolhida: modelData.id === secao.contaId
-                    readonly property color base: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    readonly property color base: Tema.faixa(par)
                     width: lista.width
                     implicitHeight: 82
                     radius: Tema.raio
-                    color: escolhida ? Tema.tinta : sobre.hovered ? Qt.darker(base, 1.04) : base
+                    color: escolhida ? Tema.atual : sobre.hovered ? Qt.darker(base, 1.04) : base
+                    palette.window: Tema.superficie(color)
                     opacity: modelData.ativo ? 1 : 0.6
                     ColumnLayout {
                         anchors.fill: parent
@@ -98,7 +101,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: cartao.modelData.nome
-                                color: cartao.escolhida ? Tema.claro : Tema.tinta
+                                color: cartao.escolhida ? Tema.tintaAtual : Tema.tintaDaFaixa(cartao.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
                                 font.pixelSize: 22
@@ -107,7 +110,7 @@ FocusScope {
                             }
                             Text {
                                 text: cartao.modelData.ativo ? (cartao.modelData.tipo === "banco" ? "banco" : "dinheiro") : "desativada"
-                                color: cartao.escolhida ? Tema.claroSuave(0.7) : Tema.apagado
+                                color: cartao.escolhida ? Tema.claroSuave(0.7) : Tema.apagadoDaFaixa(cartao.par)
                                 font.family: Tema.serifa
                                 font.italic: true
                                 font.pixelSize: 13
@@ -115,8 +118,8 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + Tema.valor(cartao.modelData.saldo)
-                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.claro)
-                                                    : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelho : Tema.tinta)
+                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.tintaAtual)
+                                                    : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoDaFaixa(cartao.par) : Tema.tintaDaFaixa(cartao.par))
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -152,7 +155,9 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: Tema.raio
-            color: Tema.vela(0.28)
+            color: Tema.roxo ? Tema.pergaminho : Tema.vela(0.28)
+            // No roxo, um véu claro sobre o fundo roxo ficaria rosado: painel claro (0.9.18).
+            palette.window: Tema.superficie(color)
 
             ColumnLayout {
                 anchors.fill: parent
@@ -211,12 +216,16 @@ FocusScope {
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Rectangle {
+                        required property int index
                         id: mov
                         required property var modelData
                         width: listaExtrato.width - 10
                         implicitHeight: 52
                         radius: Tema.raioCampo
-                        color: modelData.futuro ? Tema.vela(0.25) : Tema.vela(0.5)
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(mov.par, modelData.futuro ? Tema.vela(0.25) : Tema.vela(0.5), "transparent")
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14
@@ -225,7 +234,7 @@ FocusScope {
                             opacity: mov.modelData.estornado ? 0.5 : 1
                             Text {
                                 text: mov.modelData.data
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
                                 font.pixelSize: 14
@@ -236,7 +245,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: mov.modelData.descricao
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(mov.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 15
@@ -246,7 +255,7 @@ FocusScope {
                                 Text {
                                     text: [mov.modelData.tipo, mov.modelData.categoria, mov.modelData.futuro ? "ainda não saiu" : "",
                                            mov.modelData.estornado ? "ESTORNADO: " + mov.modelData.motivoEstorno : ""].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(mov.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 12
@@ -256,7 +265,7 @@ FocusScope {
                             }
                             Text {
                                 text: (mov.modelData.entrada ? "+ " : "− ") + "R$ " + mov.modelData.valor
-                                color: mov.modelData.entrada ? Tema.verdeEscuro : Tema.vermelho
+                                color: mov.modelData.entrada ? Tema.verdeEscuroDaFaixa(mov.par) : Tema.vermelhoDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 15
@@ -266,7 +275,7 @@ FocusScope {
                             }
                             Text {
                                 text: mov.modelData.estornado ? "" : "R$ " + Tema.valor(mov.modelData.saldo)
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignRight

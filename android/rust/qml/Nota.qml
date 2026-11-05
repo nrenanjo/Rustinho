@@ -3,7 +3,7 @@ import rustinho
 
 // Texto de apoio em itálico com serifa, como as frases-chave do livro.
 Text {
-    color: Tema.tintaSuave
+    color: Tema.roxo ? Tema.tintaSuaveNo(palette.window) : Tema.tintaSuave
     font.family: Tema.serifa
     font.italic: true
     font.pixelSize: 15

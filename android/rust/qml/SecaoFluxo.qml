@@ -151,7 +151,9 @@ FocusScope {
                 Layout.fillHeight: true
                 Layout.preferredWidth: Tema.estreito ? -1 : 1
                 radius: Tema.raio
-                color: Tema.vela(0.28)
+                color: Tema.roxo ? Tema.pergaminho : Tema.vela(0.28)
+                // No roxo, um véu claro sobre o fundo roxo ficaria rosado: painel claro (0.9.18).
+                palette.window: Tema.superficie(color)
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 16

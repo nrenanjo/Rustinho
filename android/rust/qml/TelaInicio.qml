@@ -245,6 +245,7 @@ FocusScope {
                             required property int index
                             item: modelData
                             indice: index
+                            colunas: tela.colunas
                             Layout.fillWidth: true
                             Layout.preferredWidth: 100
                             onAbrir: tela.janela.abrirFuncao(modelData)

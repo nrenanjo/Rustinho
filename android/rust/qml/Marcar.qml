@@ -11,6 +11,8 @@ CheckBox {
     spacing: 10
     // No celular, o texto comprido quebra a linha em vez de passar da tela.
     Layout.fillWidth: Tema.fino
+    // A superfície embaixo (0.9.18; veja Tema.superficie).
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
 
     indicator: Rectangle {
         implicitWidth: 22
@@ -18,13 +20,13 @@ CheckBox {
         x: caixa.leftPadding
         y: (caixa.height - height) / 2
         radius: 5
-        color: caixa.checked ? Tema.tinta : Tema.papel
+        color: caixa.checked ? Tema.principal : Tema.papel
         border.width: caixa.visualFocus ? 2 : 0
-        border.color: Tema.azulEscuro
+        border.color: Tema.azulEscuroNo(caixa.superficie)
         Icone {
             anchors.centerIn: parent
             nome: "check"
-            cor: Tema.claro
+            cor: Tema.sobrePrincipal
             tamanho: 16
             espessura: 2.2
             visible: caixa.checked
@@ -35,7 +37,7 @@ CheckBox {
         leftPadding: caixa.indicator.width + caixa.spacing
         text: caixa.text
         font: caixa.font
-        color: Tema.tinta
+        color: Tema.tintaNo(caixa.superficie)
         verticalAlignment: Text.AlignVCenter
         wrapMode: Text.WordWrap
     }

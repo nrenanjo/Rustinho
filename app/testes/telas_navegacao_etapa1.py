@@ -26,6 +26,7 @@ pela cor dos pixels (o escurecimento). Usa as peças do teste do piloto
     python3 app/testes/telas_navegacao_etapa1.py [pasta para as fotos]
     RUSTINHO_TELA=:88 python3 app/testes/telas_navegacao_etapa1.py   (se a :84 estiver ocupada)
     RUSTINHO_CASOS=F python3 app/testes/telas_navegacao_etapa1.py    (só alguns casos)
+    RUSTINHO_TEMA=roxo python3 app/testes/telas_navegacao_etapa1.py  (no Planeta Roxo; 0.9.18)
 """
 
 import os
@@ -260,6 +261,7 @@ def main():
 
     try:
         base.montar_loja(modelo)
+        nav.tema_por_fora(modelo)
 
         def loja_nova(**config):
             shutil.rmtree(pasta, ignore_errors=True)

@@ -78,7 +78,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 64
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: Tema.estreito ? 14 : 20
@@ -89,7 +92,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.modelData.nome
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 22
@@ -99,7 +102,7 @@ FocusScope {
                         Text {
                             text: linha.modelData.percentual ? Tema.pct(linha.modelData.percentual) + "% nas peças sem comissão própria"
                                                              : "sem % no cadastro (só as peças com comissão própria)"
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -111,7 +114,7 @@ FocusScope {
                         Layout.preferredWidth: 150
                         Text {
                             text: "R$ " + linha.modelData.vendido
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 15
@@ -119,7 +122,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.modelData.vendas + (linha.modelData.vendas === 1 ? " venda" : " vendas")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight
@@ -127,7 +130,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + Tema.valor(linha.modelData.comissao)
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: 19
@@ -172,10 +175,15 @@ FocusScope {
                 Repeater {
                     model: secao.dados ? secao.dados.fechamentos : []
                     delegate: Rectangle {
+                        id: faixaDaLista
+                        required property int index
                         required property var modelData
                         Layout.fillWidth: true
                         radius: Tema.raioCampo
-                        color: Tema.vela(0.45)
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(faixaDaLista.par, Tema.vela(0.45), "transparent")
+                        palette.window: Tema.superficie(color)
                         implicitHeight: 44
                         RowLayout {
                             anchors.fill: parent
@@ -186,7 +194,7 @@ FocusScope {
                             Text {
                                 text: [modelData.nome, modelData.periodo, modelData.vendas + " vendas · R$ " + modelData.vendido,
                                        "fechada em " + modelData.criadoEm, modelData.cancelado ? "DESFEITA" : modelData.pago ? "paga" : "no A pagar"].join("  ·  ")
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
@@ -194,7 +202,7 @@ FocusScope {
                             }
                             Text {
                                 text: "R$ " + Tema.valor(modelData.valor)
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 15

@@ -335,7 +335,7 @@ FocusScope {
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
-                color: Tema.vermelho
+                color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
             }
@@ -373,6 +373,7 @@ FocusScope {
             Layout.fillWidth: true
             radius: Tema.raio
             color: tela.situacao === "pronta" ? Tema.verde : tela.situacao === "cancelada" ? Tema.rosa : Tema.pergaminho
+            palette.window: Tema.superficie(color)
             implicitHeight: Tema.estreito ? caminhoOs.implicitHeight + 20 : 58
             Linha {
                 id: caminhoOs
@@ -701,7 +702,10 @@ FocusScope {
                         width: listaItens.width
                         implicitHeight: 74
                         radius: Tema.raio
-                        color: c.erro ? Tema.rosa : servico ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0 && !c.erro && !servico
+                        color: c.erro ? Tema.rosa : servico ? Tema.verde : Tema.faixa(li.par)
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14
@@ -720,7 +724,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: li.c.descricao || ""
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(li.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 19
@@ -730,7 +734,7 @@ FocusScope {
                                 Text {
                                     text: ["cód. " + (li.c.codigo || ""), li.c.estoque !== undefined && li.c.estoque !== "" ? "tem " + li.c.estoque + " " + (li.c.unidade || "") : ""]
                                           .filter(x => !!x).join("  ·  ")
-                                    color: li.c.falta ? Tema.vermelho : Tema.tintaSuave
+                                    color: li.c.falta ? Tema.vermelhoDaFaixa(li.par) : Tema.tintaSuaveDaFaixa(li.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -786,7 +790,7 @@ FocusScope {
                             }
                             Text {
                                 text: li.c.total ? "R$ " + li.c.total : ""
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(li.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 16
@@ -854,6 +858,7 @@ FocusScope {
                     Layout.fillWidth: true
                     radius: Tema.raio
                     color: Tema.pergaminho
+                    palette.window: Tema.superficie(color)
                     implicitHeight: 76
                     RowLayout {
                         anchors.fill: parent
@@ -900,7 +905,7 @@ FocusScope {
                 Text {
                     visible: !!tela.ficha && tela.ficha.historico.length > 0
                     text: tela.ficha ? "Este carro já veio: " + tela.ficha.historico.slice(0, 4).map(h => "OS " + h.numero + " (" + (h.caixa ? h.caixa + ", " : "") + h.quando + ")").join(", ") : ""
-                    color: Tema.tintaSuave
+                    color: Tema.tintaSuaveNo(palette.window)
                     font.family: Tema.serifa
                     font.italic: true
                     font.pixelSize: 13

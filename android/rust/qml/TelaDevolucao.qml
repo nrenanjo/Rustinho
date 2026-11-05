@@ -193,7 +193,10 @@ FocusScope {
                         width: lista.width
                         implicitHeight: 72
                         radius: Tema.raio
-                        color: escolhida ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0 && !escolhida
+                        color: escolhida ? Tema.verde : Tema.faixa(linha.par)
+                        palette.window: Tema.superficie(color)
                         opacity: podeVoltar ? 1 : 0.55
                         Behavior on color { ColorAnimation { duration: 120 } }
                         RowLayout {
@@ -206,7 +209,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.it.descricao
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 20
@@ -217,7 +220,7 @@ FocusScope {
                                     text: ["cód. " + linha.it.codigo, "vendeu " + linha.it.vendido + " " + linha.it.unidade,
                                            linha.it.devolvido ? "já voltou " + linha.it.devolvido : "",
                                            "R$ " + linha.it.valorUnitario + " cada"].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -234,7 +237,7 @@ FocusScope {
                             Text {
                                 visible: !linha.podeVoltar
                                 text: "já voltou tudo"
-                                color: Tema.apagado
+                                color: Tema.apagadoDaFaixa(linha.par)
                                 font.family: Tema.serifa
                                 font.italic: true
                                 font.pixelSize: 14

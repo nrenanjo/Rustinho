@@ -12,12 +12,14 @@ Rectangle {
     signal abrir()
 
     readonly property bool par: (indice + 1) % 2 === 0
-    readonly property color corBase: par ? Tema.azul : Tema.pergaminho
-    readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property color corBase: Tema.faixa(par)
+    readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
 
     radius: Tema.raio
-    color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    palette.window: Tema.superficie(color)
     implicitHeight: Tema.estreito ? compacto.implicitHeight + 20 : Math.max(64, conteudo.implicitHeight + 22)
 
     // Celular: nome e preço em cima; código, local e estoque embaixo.

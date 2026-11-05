@@ -234,6 +234,7 @@ FocusScope {
                             implicitHeight: 64
                             radius: Tema.raio
                             color: sobreConta.hovered ? Qt.lighter(modelData.cor, 1.04) : modelData.cor
+                            palette.window: Tema.superficie(color)
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: 18
@@ -275,7 +276,9 @@ FocusScope {
                             model: secao.r ? secao.r.formas : []
                             delegate: LinhaRanking {
                                 required property var modelData
+                                required property int index
                                 item: modelData
+                                indice: index
                             }
                         }
                         Nota {
@@ -297,6 +300,7 @@ FocusScope {
                                 required property int index
                                 item: modelData
                                 posicao: index + 1
+                                indice: index
                             }
                         }
                         Botao {
@@ -327,7 +331,9 @@ FocusScope {
                             model: secao.r ? secao.r.vendedores : []
                             delegate: LinhaRanking {
                                 required property var modelData
+                                required property int index
                                 item: modelData
+                                indice: index
                                 cor: Tema.verdeEscuro
                             }
                         }

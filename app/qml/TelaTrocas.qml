@@ -157,7 +157,10 @@ FocusScope {
                 width: listaVales.width
                 implicitHeight: 62
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.verde
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(lv.par, Tema.verde, Tema.azul)
+                palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreVale }
                 RowLayout {
                     anchors.fill: parent
@@ -166,7 +169,7 @@ FocusScope {
                     spacing: 14
                     Text {
                         text: "nº " + lv.modelData.numero
-                        color: Tema.dourado
+                        color: Tema.douradoDaFaixa(lv.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
                         font.pixelSize: 22
@@ -177,7 +180,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: lv.modelData.cliente || "Sem cliente"
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(lv.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -187,7 +190,7 @@ FocusScope {
                         Text {
                             text: [lv.modelData.quando, lv.modelData.caixa, lv.modelData.vendaNumero ? "da venda " + lv.modelData.vendaNumero : "",
                                    lv.modelData.valor !== lv.modelData.saldo ? "era R$ " + lv.modelData.valor : ""].filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(lv.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -212,7 +215,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + lv.modelData.saldo
-                        color: Tema.verdeEscuro
+                        color: Tema.verdeEscuroDaFaixa(lv.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: 18
@@ -258,7 +261,10 @@ FocusScope {
                 width: listaFeitas.width
                 implicitHeight: 66
                 radius: Tema.raio
-                color: lf.modelData.cancelada ? Tema.vela(0.3) : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0 && !modelData.cancelada
+                color: lf.modelData.cancelada ? (Tema.roxo ? Tema.campoFixo : Tema.vela(0.3)) : Tema.faixa(lf.par)
+                palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreFeita }
                 RowLayout {
                     anchors.fill: parent
@@ -271,7 +277,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: "Devolução " + lf.modelData.numero + " · venda " + lf.modelData.vendaNumero + (lf.modelData.cliente ? " · " + lf.modelData.cliente : "")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(lf.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -281,7 +287,7 @@ FocusScope {
                         }
                         Text {
                             text: [lf.modelData.quando, lf.modelData.itens, lf.modelData.motivo, lf.modelData.cancelada ? "desfeita" : ""].filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(lf.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -313,7 +319,7 @@ FocusScope {
                         Layout.preferredWidth: 190
                         Text {
                             text: "R$ " + lf.modelData.valor
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(lf.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 17
@@ -321,7 +327,7 @@ FocusScope {
                         }
                         Text {
                             text: lf.modelData.como
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(lf.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             elide: Text.ElideRight

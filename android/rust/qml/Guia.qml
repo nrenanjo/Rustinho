@@ -95,7 +95,10 @@ Item {
     }
 
     // ---- Destaque: véu suave e luz difusa em volta do campo ----
-    readonly property color corVeu: Tema.escuro ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(0.16, 0.15, 0.13, 0.30)
+    // No roxo (0.9.18): véu roxo-escuro e luz rosada; o fundo roxo já é
+    // escuro, então o véu é um pouco mais forte para o destaque aparecer.
+    readonly property color corVeu: Tema.roxo ? Qt.rgba(0.09, 0, 0.09, 0.5)
+                                    : Tema.escuro ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(0.16, 0.15, 0.13, 0.30)
     Rectangle {   // em cima
         visible: guia.destacando
         x: 0; y: 0; width: guia.width; height: Math.max(0, guia.area.y)
@@ -137,11 +140,13 @@ Item {
             const r = Math.min(Tema.raioCampo + guia.folga, Math.min(w, h) / 2)
 
             ctx.save()
-            ctx.shadowColor = Tema.escuro ? "rgba(232, 194, 126, 0.62)" : "rgba(255, 248, 230, 0.96)"
+            ctx.shadowColor = Tema.roxo ? "rgba(255, 214, 246, 0.92)"
+                            : Tema.escuro ? "rgba(232, 194, 126, 0.62)" : "rgba(255, 248, 230, 0.96)"
             ctx.shadowBlur = 42
             ctx.shadowOffsetX = 0
             ctx.shadowOffsetY = 0
-            ctx.fillStyle = Tema.escuro ? "rgba(232, 194, 126, 0.06)" : "rgba(255, 249, 237, 0.16)"
+            ctx.fillStyle = Tema.roxo ? "rgba(255, 230, 250, 0.14)"
+                          : Tema.escuro ? "rgba(232, 194, 126, 0.06)" : "rgba(255, 249, 237, 0.16)"
             ctx.beginPath()
             ctx.moveTo(x + r, y)
             ctx.lineTo(x + w - r, y)
@@ -159,7 +164,7 @@ Item {
     }
     Connections {
         target: Tema
-        function onEscuroChanged() { luz.requestPaint() }
+        function onTemaChanged() { luz.requestPaint() }
     }
 
     // ---- Orientação: a notificação do Início, no alto ----

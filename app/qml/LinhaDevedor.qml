@@ -12,12 +12,15 @@ Rectangle {
     signal abrir()
 
     readonly property bool atrasado: item.vencido !== "0,00"
-    readonly property color corBase: (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
-    readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
+    readonly property bool par: (indice + 1) % 2 === 0
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property color corBase: Tema.faixa(par)
+    readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
 
     radius: Tema.raio
-    color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    palette.window: Tema.superficie(color)
     implicitHeight: 64
 
     RowLayout {
@@ -63,7 +66,7 @@ Rectangle {
             Text {
                 visible: linha.atrasado
                 text: linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " de atraso"
-                color: linha.atual ? Tema.vermelhoSobre : Tema.vermelho
+                color: linha.atual ? Tema.vermelhoSobre : Tema.vermelhoDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 13

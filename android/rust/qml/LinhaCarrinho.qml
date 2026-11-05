@@ -17,10 +17,13 @@ Rectangle {
     signal encomendar()
 
     readonly property bool par: (indice + 1) % 2 === 0
+    // Faixas alternadas (V-6); com erro, a faixa rosa (clara).
+    readonly property bool escura: !item.erro && par
     radius: Tema.raio
-    color: item.erro ? Tema.rosa : atual ? Qt.darker(par ? Tema.azul : Tema.pergaminho, 1.05) : (par ? Tema.azul : Tema.pergaminho)
+    color: item.erro ? Tema.rosa : atual ? Qt.darker(Tema.faixa(par), 1.05) : Tema.faixa(par)
+    palette.window: Tema.superficie(color)
     border.width: atual ? 2 : 0
-    border.color: Tema.azulEscuro
+    border.color: Tema.azulEscuroDaFaixa(escura)
     implicitHeight: coluna.implicitHeight + 18
 
     function focarQuantidade() {
@@ -48,7 +51,7 @@ Rectangle {
                 Layout.row: 0
                 Layout.column: 0
                 text: linha.indice + 1
-                color: Tema.dourado
+                color: Tema.douradoDaFaixa(linha.escura)
                 font.family: Tema.titulo
                 font.weight: Font.Bold
                 font.pixelSize: 24
@@ -62,7 +65,7 @@ Rectangle {
                 Layout.columnSpan: parent.e ? 3 : 1
                 Text {
                     text: linha.item.descricao || ""
-                    color: Tema.tinta
+                    color: Tema.tintaDaFaixa(linha.escura)
                     font.family: Tema.titulo
                     font.weight: Font.Bold
                     font.pixelSize: 20
@@ -77,7 +80,7 @@ Rectangle {
                     Text {
                         width: Math.min(implicitWidth, Tema.estreito ? parent.width : 320)
                         text: [linha.item.codigo, linha.item.marca, linha.item.local ? "local " + linha.item.local : ""].filter(x => !!x).join("  ·  ")
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(linha.escura)
                         font.family: Tema.serifa
                         font.italic: true
                         font.pixelSize: 13
@@ -85,7 +88,7 @@ Rectangle {
                     }
                     Rectangle {
                         radius: height / 2
-                        color: linha.item.servico ? Tema.verde : linha.item.faltaEstoque ? Tema.rosa : Tema.vela(0.45)
+                        color: linha.item.servico ? Tema.verde : linha.item.faltaEstoque ? Tema.rosa : (Tema.roxo ? Tema.papel : Tema.vela(0.45))
                         implicitWidth: textoEstoque.implicitWidth + 14
                         implicitHeight: textoEstoque.implicitHeight + 4
                         Text {
@@ -105,7 +108,7 @@ Rectangle {
                     Rectangle {
                         visible: !!linha.item.faltaEstoque
                         radius: height / 2
-                        color: linha.item.encomendar ? Tema.verde : sobreEnc.hovered ? Tema.papel : Tema.vela(0.45)
+                        color: linha.item.encomendar ? Tema.verde : sobreEnc.hovered ? Tema.papel : (Tema.roxo ? Tema.papel : Tema.vela(0.45))
                         implicitWidth: linhaEnc.implicitWidth + 16
                         implicitHeight: textoEstoque.implicitHeight + 4
                         Row {
@@ -175,7 +178,7 @@ Rectangle {
             }
             Text {
                 text: "R$ " + (linha.item.total || "0,00")
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: parent.e ? 16 : 18
@@ -199,7 +202,7 @@ Rectangle {
         Text {
             visible: !!linha.item.erro
             text: linha.item.erro || ""
-            color: Tema.vermelho
+            color: Tema.vermelhoDaFaixa(linha.escura)
             font.family: Tema.texto
             font.weight: Font.DemiBold
             font.pixelSize: 13

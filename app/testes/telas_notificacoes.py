@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import telas_d09 as base  # noqa: E402
 from telas_d09 import PROGRAMA, RAIZ, simples  # noqa: E402
 
-base.TELA = ":85"
+# A tela virtual pode ser trocada (RUSTINHO_TELA=:92) quando a :85 estiver ocupada.
+base.TELA = os.environ.get("RUSTINHO_TELA", ":85")
 TELA = base.TELA
 
 
@@ -248,13 +249,15 @@ def main():
             ok("arrasto curto não muda nada", marca(pasta, "minimizado", "conflitos") == antes
                and not r.tem(TEXTO_ATENCAO), f)
             # 12. Tema escuro: o triângulo vira o PNG branco, sem reiniciar.
-            sair = r.achar("Trocar usuário")
-            xdo("mousemove", str(sair[0] - 112), str(sair[1]), "click", "1")
+            # (0.9.18: três botões — sol, lua, planeta —, achados pelo nome.)
+            lua = r.achar("Fundo preto")
+            xdo("mousemove", str(lua[0]), str(lua[1]), "click", "1")
             time.sleep(1.5)
             f = r.foto("-12-escuro")
             canto = canto_do_triangulo(f, r.achar(PAGAR))
             ok("12: tema escuro, triângulo branco no quadrado", max(canto) > 190, f"{f} brilho máximo {max(canto)}")
-            xdo("mousemove", str(sair[0] - 142), str(sair[1]), "click", "1")
+            sol = r.achar("Fundo cinza")
+            xdo("mousemove", str(sol[0]), str(sol[1]), "click", "1")
             time.sleep(1)
         finally:
             r.fechar()

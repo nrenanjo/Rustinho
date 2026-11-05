@@ -35,6 +35,11 @@ ColumnLayout {
     readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
+    // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
+    // busca escura do Planeta Roxo (campo com a lupa).
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
+    readonly property bool buscaEscura: Tema.roxo && icone === "busca"
+    readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : buscaEscura ? Tema.buscaFundo : Tema.papel
 
     signal editado()
     signal confirmado()
@@ -113,7 +118,7 @@ ColumnLayout {
     Rotulo {
         text: campo.rotulo
         visible: text !== ""
-        color: campo.erro !== "" ? Tema.vermelho : Tema.apagado
+        color: campo.erro !== "" ? Tema.vermelhoNo(campo.superficie) : Tema.apagadoNo(campo.superficie)
         Layout.fillWidth: true
         Layout.preferredWidth: 1
     }
@@ -125,8 +130,10 @@ ColumnLayout {
         implicitHeight: campo.altura
         font.family: Tema.texto
         font.pixelSize: campo.tamanhoFonte
-        color: Tema.tinta
-        placeholderTextColor: Tema.dica
+        color: Tema.tintaNo(campo.corDoCampo)
+        placeholderTextColor: campo.buscaEscura ? Tema.roxoTintaSuaveClara : Tema.dica
+        // O que fica dentro do campo (o atalho "F11") sabe a cor embaixo.
+        palette.window: Tema.superficie(campo.corDoCampo)
         selectionColor: Tema.azulEscuro
         selectedTextColor: Tema.claro
         echoMode: campo.senha || campo.escondido ? TextInput.Password : TextInput.Normal
@@ -148,16 +155,16 @@ ColumnLayout {
 
         background: Rectangle {
             radius: Tema.raioCampo
-            color: campo.somenteLeitura ? Tema.vela(0.28) : Tema.papel
-            border.width: campo.erro !== "" || entrada.activeFocus ? 2 : 0
-            border.color: campo.erro !== "" ? Tema.vermelho : Tema.azulEscuro
+            color: campo.corDoCampo
+            border.width: campo.erro !== "" || entrada.activeFocus || campo.buscaEscura ? 2 : 0
+            border.color: campo.erro !== "" ? Tema.vermelhoNo(campo.corDoCampo) : campo.buscaEscura ? Tema.buscaBorda : Tema.azulEscuro
         }
 
         Icone {
             visible: campo.icone !== ""
             nome: campo.icone
             tamanho: 22
-            cor: Tema.apagado
+            cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado
             anchors.left: parent.left
             anchors.leftMargin: 15
             anchors.verticalCenter: parent.verticalCenter
@@ -175,7 +182,7 @@ ColumnLayout {
                 anchors.centerIn: parent
                 nome: campo.comCamera ? "camera" : campo.acao
                 tamanho: 24
-                cor: Tema.tinta
+                cor: Tema.tintaNo(campo.corDoCampo)
             }
             // MouseArea (e não TapHandler): fica com o toque só para si, sem o
             // campo de texto embaixo roubar o toque para abrir o teclado.
@@ -213,7 +220,7 @@ ColumnLayout {
             anchors.left: parent.left
             anchors.leftMargin: campo.icone !== "" ? 48 : 12
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagado
+            color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }
@@ -224,7 +231,7 @@ ColumnLayout {
             anchors.right: parent.right
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagado
+            color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }
@@ -285,7 +292,7 @@ ColumnLayout {
     Text {
         text: campo.erro
         visible: text !== ""
-        color: Tema.vermelho
+        color: Tema.vermelhoNo(campo.superficie)
         font.family: Tema.texto
         font.pixelSize: 14
         wrapMode: Text.WordWrap

@@ -572,13 +572,17 @@ FocusScope {
                             ScrollBar.vertical: ScrollBar {}
                             onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
                             delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
                                 required property int index
                                 readonly property bool atual: listaResultados.currentIndex === index
                                 width: listaResultados.width
                                 height: 54
                                 radius: Tema.raioCampo
-                                color: atual ? Tema.tinta : sobre.hovered ? Tema.azul : "transparent"
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: atual ? Tema.atual : sobre.hovered ? (Tema.roxo ? Qt.darker(Tema.faixa(faixaDaLista.par), 1.05) : Tema.azul) : Tema.faixa(faixaDaLista.par, "transparent", Tema.vela(0.35))
+                                palette.window: Tema.superficie(color)
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 12
@@ -586,7 +590,7 @@ FocusScope {
                                     spacing: Tema.estreito ? 8 : 14
                                     Text {
                                         text: modelData.codigo
-                                        color: atual ? Tema.claro : Tema.tintaSuave
+                                        color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
                                         font.pixelSize: 14
@@ -603,7 +607,7 @@ FocusScope {
                                                 id: nomeVenda
                                                 width: Math.min(implicitWidth, parent.width - (achouVenda.visible ? achouVenda.implicitWidth + 8 : 0))
                                                 text: modelData.nome
-                                                color: atual ? Tema.claro : Tema.tinta
+                                                color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                                 font.family: Tema.titulo
                                                 font.weight: Font.Bold
                                                 font.pixelSize: 19
@@ -619,7 +623,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: [Tema.estreito ? modelData.codigo : "", Tema.estreito ? modelData.local : "", modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
-                                            color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuave
+                                            color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.serifa
                                             font.italic: true
                                             font.pixelSize: 13
@@ -629,7 +633,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: modelData.local
-                                        color: atual ? Tema.claro : Tema.tintaSuave
+                                        color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14
                                         visible: !Tema.estreito
@@ -644,7 +648,7 @@ FocusScope {
                                             id: txtEst
                                             anchors.centerIn: parent
                                             text: modelData.servico ? "serviço" : modelData.estoque + " " + modelData.unidade
-                                            color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.claro : Tema.tinta)
+                                            color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.tintaAtual : Tema.tinta)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
                                             font.pixelSize: 15
@@ -652,7 +656,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: (modelData.oferta ? "oferta  " : "") + (modelData.preco ? "R$ " + modelData.preco : "—")
-                                        color: atual ? Tema.claro : Tema.tinta
+                                        color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
                                         font.pixelSize: Tema.estreito ? 16 : 18
@@ -829,6 +833,7 @@ FocusScope {
         Rectangle {
             visible: Tema.estreito && !tela.verLateral
             color: Tema.verde
+            palette.window: Tema.superficie(color)
             radius: Tema.raio
             Layout.fillWidth: true
             implicitHeight: rodapeLinha.implicitHeight + 20
@@ -978,6 +983,7 @@ FocusScope {
                 Layout.fillWidth: true
                 radius: Tema.raioCampo
                 color: Tema.verde
+                palette.window: Tema.superficie(color)
                 implicitHeight: linhaSinal.implicitHeight + 16
                 RowLayout {
                     id: linhaSinal
@@ -1072,6 +1078,7 @@ FocusScope {
                 Layout.fillWidth: true
                 radius: Tema.raioCampo
                 color: Tema.azul
+                palette.window: Tema.superficie(color)
                 implicitHeight: colunaCred.implicitHeight + 24
                 ColumnLayout {
                     id: colunaCred

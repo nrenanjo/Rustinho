@@ -238,25 +238,40 @@ FocusScope {
             Layout.fillWidth: true
             Repeater {
                 model: tela.naoImportadas
-                delegate: RowLayout {
+                delegate: Rectangle {
+                    id: faixaDaLista
                     required property var modelData
-                    spacing: 12
                     Layout.fillWidth: true
-                    Nota {
-                        text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
-                        elide: Text.ElideMiddle
-                        wrapMode: Text.NoWrap
-                        Layout.fillWidth: true
-                    }
-                    Botao {
-                        text: "Ver"
-                        tipo: "secundario"
-                        onClicked: conflitoCnpj.mostrar(modelData)
-                    }
-                    Botao {
-                        text: "Descartar"
-                        tipo: "discreto"
-                        onClicked: tela.descartarNaoImportada(modelData)
+                    required property int index
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                    palette.window: Tema.superficie(color)
+                    radius: Tema.raioCampo
+                    implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                    implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                    RowLayout {
+                        id: conteudoDaFaixa
+                        x: 8
+                        y: 4
+                        width: faixaDaLista.width - 16
+                        spacing: 12
+                        Nota {
+                            text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
+                            elide: Text.ElideMiddle
+                            wrapMode: Text.NoWrap
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            text: "Ver"
+                            tipo: "secundario"
+                            onClicked: conflitoCnpj.mostrar(modelData)
+                        }
+                        Botao {
+                            text: "Descartar"
+                            tipo: "discreto"
+                            onClicked: tela.descartarNaoImportada(modelData)
+                        }
                     }
                 }
             }

@@ -847,11 +847,17 @@ impl Servico {
                 Ok(json!({ "saiu": n }))
             }
             "sync_ler" => self.sync_ler(),
-            // Modo escuro: vale só para este aparelho (não vai para os outros caixas).
+            // Tema da tela (cinza, AMOLED ou Planeta Roxo): vale só para este
+            // aparelho (não vai para os outros caixas nem vem do backup).
+            // Aceita também `{ escuro }`, das telas de antes da 0.9.18.
             "aparencia_salvar" => {
                 let d: Aparencia = ler(dados)?;
-                config::gravar(&self.banco.conn, "tela_escura", if d.escuro { "1" } else { "0" })?;
-                Ok(json!({ "escuro": d.escuro }))
+                let tema = d.tema()?;
+                config::gravar(&self.banco.conn, "tela_tema", tema)?;
+                // A chave antiga continua certa para quem volta a uma versão
+                // anterior (lá o roxo vira o cinza).
+                config::gravar(&self.banco.conn, "tela_escura", if tema == "amoled" { "1" } else { "0" })?;
+                Ok(json!({ "tema": tema, "escuro": tema == "amoled" }))
             }
             // Câmera do celular como leitor de código de barras.
             "codigo_ler_foto" => {
@@ -2667,6 +2673,7 @@ impl Servico {
 
     fn estado(&self) -> Resultado<Value> {
         let conn = &self.banco.conn;
+        let tema = tema_da_tela(conn)?;
         Ok(json!({
             "primeiraVez": usuarios::quantidade(conn)? == 0,
             // FALHA-01: no meio de uma entrada numa loja (a tela volta para ela).
@@ -2677,7 +2684,8 @@ impl Servico {
             "versao": VERSAO,
             "etapa": menu::ETAPA_ATUAL,
             "validadeOrcamento": config::validade_orcamento(conn)?,
-            "escuro": config::ler(conn, "tela_escura")?.as_deref() == Some("1"),
+            "tema": tema,
+            "escuro": tema == "amoled",
             // A3: banco com defeito de integridade: modo seguro (o defeito; null = normal).
             "modoSeguro": self.banco.defeito,
         }))
@@ -3067,9 +3075,41 @@ fn acoes_livres(conn: &rusqlite::Connection) -> Resultado<Vec<String>> {
         .collect())
 }
 
+/// Os temas da tela (0.9.18): cinza claro, preto AMOLED e Planeta Roxo.
+const TEMAS: [&str; 3] = ["cinza", "amoled", "roxo"];
+
+/// O tema deste aparelho: `tela_tema`; num banco de antes da 0.9.18, o
+/// `tela_escura` ("1" = AMOLED; "0" ou nada = cinza).
+fn tema_da_tela(conn: &rusqlite::Connection) -> Resultado<&'static str> {
+    if let Some(t) = config::ler(conn, "tela_tema")? {
+        if let Some(tema) = TEMAS.iter().find(|x| **x == t) {
+            return Ok(tema);
+        }
+    }
+    Ok(if config::ler(conn, "tela_escura")?.as_deref() == Some("1") { "amoled" } else { "cinza" })
+}
+
 #[derive(Deserialize)]
 struct Aparencia {
-    escuro: bool,
+    #[serde(default)]
+    tema: Option<String>,
+    /// Das telas de antes da 0.9.18: lua (true) ou sol (false).
+    #[serde(default)]
+    escuro: Option<bool>,
+}
+
+impl Aparencia {
+    fn tema(&self) -> Resultado<&'static str> {
+        match (&self.tema, self.escuro) {
+            (Some(t), _) => TEMAS
+                .iter()
+                .find(|x| **x == t.as_str())
+                .copied()
+                .ok_or_else(|| Erro::validacao("Tema desconhecido: escolha cinza, AMOLED ou Planeta Roxo.")),
+            (None, Some(escuro)) => Ok(if escuro { "amoled" } else { "cinza" }),
+            (None, None) => Err(Erro::validacao("Escolha um tema.")),
+        }
+    }
 }
 
 #[derive(Deserialize)]

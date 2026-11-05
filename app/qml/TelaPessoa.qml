@@ -209,7 +209,7 @@ FocusScope {
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
-                color: Tema.vermelho
+                color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
             }
@@ -575,26 +575,41 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.ficha ? tela.ficha.historico : []
-                            delegate: ColumnLayout {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                spacing: 1
                                 Layout.fillWidth: true
-                                Text {
-                                    text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.weight: Font.DemiBold
-                                    font.pixelSize: 14
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                }
-                                Repeater {
-                                    model: modelData.detalhes
-                                    delegate: Nota {
-                                        required property string modelData
-                                        text: modelData
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                ColumnLayout {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    spacing: 1
+                                    Text {
+                                        text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
+                                        color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
                                         font.pixelSize: 14
+                                        wrapMode: Text.WordWrap
                                         Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: modelData.detalhes
+                                        delegate: Nota {
+                                            required property string modelData
+                                            text: modelData
+                                            font.pixelSize: 14
+                                            Layout.fillWidth: true
+                                        }
                                     }
                                 }
                             }

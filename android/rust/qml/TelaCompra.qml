@@ -257,6 +257,7 @@ FocusScope {
                         height: faixaNota.implicitHeight + 20
                         radius: Tema.raioCampo
                         color: Tema.pergaminho
+                        palette.window: Tema.superficie(color)
                         readonly property bool aguardando: !!tela.compra && tela.compra.autorizacao === "aguardando"
                         readonly property bool negada: !!tela.compra && tela.compra.autorizacao === "negada"
                         GridLayout {
@@ -435,13 +436,28 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.compra ? tela.compra.duplicatas : []
-                            delegate: Text {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                text: modelData
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
                                 Layout.fillWidth: true
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                Text {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    text: modelData
+                                    color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                }
                             }
                         }
                         Nota {

@@ -272,7 +272,10 @@ FocusScope {
                         width: lista.width
                         implicitHeight: 62
                         radius: Tema.raio
-                        color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(linha.par)
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: Tema.estreito ? 12 : 18
@@ -283,7 +286,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.e.nome
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 19
@@ -292,7 +295,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: ["cód. " + linha.e.codigo, linha.e.textoBarras !== linha.e.codigo ? "barras " + linha.e.textoBarras : ""].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -307,7 +310,7 @@ FocusScope {
                             }
                             Text {
                                 text: linha.e.semPreco ? "" : "R$ " + linha.e.preco
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(linha.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 16

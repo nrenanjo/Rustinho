@@ -111,6 +111,8 @@ fn estado_e_entrar() {
             ("versao", "texto"),
             ("etapa", "numero"),
             ("validadeOrcamento", "numero"),
+            // 0.9.18: o tema da tela ("cinza", "amoled", "roxo") e o `escuro` de antes.
+            ("tema", "texto"),
             ("escuro", "sim/nao"),
         ],
     );

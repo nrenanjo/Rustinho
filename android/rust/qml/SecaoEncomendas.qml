@@ -128,7 +128,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: Tema.estreito ? 66 + (acoesEnc.width > 0 ? acoesEnc.height + 10 : 0) : 66
                 radius: Tema.raio
-                color: e.situacao === "chegou" ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0 && modelData.situacao !== "chegou"
+                color: e.situacao === "chegou" ? Tema.verde : Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 HoverHandler { id: sobre }
                 RowLayout {
                     id: conteudoEnc
@@ -156,7 +159,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: (linha.e.quantidade !== "1" ? linha.e.quantidade + " × " : "") + linha.e.descricao
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -169,7 +172,7 @@ FocusScope {
                                    linha.e.avisado ? "avisado " + linha.e.avisadoEm : "",
                                    linha.e.situacao === "cancelada" ? linha.e.motivo : linha.e.observacoes]
                                   .filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13

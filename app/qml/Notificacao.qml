@@ -71,6 +71,7 @@ Item {
         radius: Tema.raio
         // O quadrado tem o fundo das pílulas; a faixa, o da categoria.
         color: raiz.minimizado ? Tema.cartao : raiz.corFundo
+        palette.window: Tema.superficie(color)
         border.width: 1
         border.color: raiz.minimizado ? Tema.bordaCartao : raiz.corBorda
         opacity: 1 - Math.min(Math.abs(x) / (raiz.width * 0.6), 0.75)

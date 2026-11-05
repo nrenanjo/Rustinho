@@ -36,8 +36,8 @@ ApplicationWindow {
     palette.toolTipText: Tema.claro
     palette.light: Tema.papel
     palette.midlight: Tema.pergaminho
-    palette.mid: Tema.escuro ? "#4A4239" : "#B9AE9F"
-    palette.dark: Tema.escuro ? "#6A6156" : "#8C8074"
+    palette.mid: Tema.roxo ? "#C49BC0" : Tema.escuro ? "#4A4239" : "#B9AE9F"
+    palette.dark: Tema.roxo ? "#E2BEDD" : Tema.escuro ? "#6A6156" : "#8C8074"
     palette.shadow: Tema.tinta
     palette.link: Tema.azulEscuro
 
@@ -69,7 +69,8 @@ ApplicationWindow {
         const r = Api.chamar("estado")
         if (r.ok) {
             estado = r.dados
-            Tema.escuro = !!r.dados.escuro
+            // 0.9.18: "tema" (cinza, amoled, roxo); um núcleo de antes só manda "escuro".
+            Tema.tema = r.dados.tema || (r.dados.escuro ? "amoled" : "cinza")
             erroGeral = ""
         } else {
             erroGeral = r.erro
@@ -704,6 +705,7 @@ ApplicationWindow {
             height: colunaEspera.implicitHeight + 48
             radius: Tema.raio + 3
             color: Tema.pergaminho
+            palette.window: Tema.superficie(color)
             ColumnLayout {
                 id: colunaEspera
                 x: 24
