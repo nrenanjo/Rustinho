@@ -25,46 +25,38 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-/// Setas de produção que já estavam dentro de um ciclo no commit `f4ddbb5`
-/// (base da etapa 0). Formato: módulo de origem e os destinos que fecham ciclo.
-/// Uma etapa que desfaz um ciclo tira as setas dele daqui; nunca se acrescenta
-/// uma seta (isso seria aceitar um ciclo novo).
+/// Setas de produção que estão dentro de um ciclo. Formato: módulo de origem e
+/// os destinos que fecham ciclo. Uma etapa que desfaz um ciclo tira as setas
+/// dele daqui; nunca se acrescenta uma seta (isso seria aceitar um ciclo novo).
+///
+/// - Etapa 0 (commit `f4ddbb5`): 137 setas, um componente de 34 módulos.
+/// - Etapa 1: `VERSAO` desceu para a base e `registro → api` e `backup → api`
+///   sumiram; com elas, 90 setas saíram de ciclo. Ficam 47, em 4 componentes
+///   (2, 3, 7 e 10 módulos).
 #[rustfmt::skip]
 const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
-    ("api", &["arquivos", "avisos", "backup", "banco", "busca", "caixa", "cheques", "comissoes", "compras", "devolucoes", "dre", "encomendas", "etiquetas", "faixas", "financeiro", "importar", "impressao", "loja", "oficina", "pagar", "painel", "pessoas", "portatil", "produtos", "receber", "registro", "reposicao", "supervisao", "sync", "vendas"]),
     ("arquivos", &["registro"]),
-    ("avisos", &["backup", "banco", "cheques", "encomendas", "faixas", "loja", "pagar", "supervisao", "sync"]),
-    ("backup", &["api", "arquivos", "banco", "loja", "portatil", "registro", "sync"]),
-    ("banco", &["backup", "faixas", "loja", "migracao", "portatil", "registro", "sync"]),
-    ("busca", &["produtos"]),
+    ("backup", &["banco", "loja", "portatil", "sync"]),
+    ("banco", &["backup", "faixas", "loja", "migracao", "portatil", "sync"]),
     ("caixa", &["devolucoes", "receber"]),
-    ("caminhos", &["registro", "sync"]),
-    ("cheques", &["receber", "sync"]),
-    ("comissoes", &["pagar"]),
-    ("compras", &["encomendas", "nfe_xml", "pagar", "pessoas", "produtos", "sync"]),
-    ("devolucoes", &["caixa", "sync"]),
-    ("dre", &["impressao", "receber"]),
+    ("caminhos", &["sync"]),
+    ("cheques", &["receber"]),
+    ("devolucoes", &["caixa"]),
+    ("dre", &["impressao"]),
     ("encomendas", &["receber"]),
-    ("etiquetas", &["faixas"]),
-    ("faixas", &["arquivos", "pessoas", "produtos", "registro", "sync"]),
-    ("financeiro", &["pagar", "receber", "sync"]),
-    ("importar", &["arquivos", "nfe_xml", "pessoas", "produtos"]),
-    ("impressao", &["caixa", "dre", "oficina", "receber", "reposicao", "vendas"]),
-    ("loja", &["banco", "faixas", "registro", "sync"]),
-    ("migracao", &["banco", "registro"]),
-    ("nfe_xml", &["pessoas"]),
-    ("oficina", &["sync", "vendas"]),
-    ("pagar", &["caixa", "nfe_xml", "receber", "sync"]),
-    ("painel", &["caixa", "devolucoes", "dre", "pagar", "receber"]),
+    ("faixas", &["pessoas", "produtos", "sync"]),
+    ("impressao", &["dre", "reposicao"]),
+    ("loja", &["banco", "faixas", "sync"]),
+    ("migracao", &["banco"]),
+    ("oficina", &["vendas"]),
     ("pessoas", &["faixas"]),
     ("portatil", &["sync"]),
     ("produtos", &["faixas"]),
-    ("receber", &["caixa", "cheques", "sync", "vendas"]),
-    ("registro", &["api", "arquivos"]),
-    ("reposicao", &["encomendas", "impressao", "receber"]),
-    ("supervisao", &["registro"]),
-    ("sync", &["banco", "caminhos", "faixas", "loja", "portatil", "registro", "supervisao"]),
-    ("vendas", &["caixa", "cheques", "devolucoes", "encomendas", "oficina", "produtos", "receber"]),
+    ("receber", &["caixa", "cheques", "vendas"]),
+    ("registro", &["arquivos"]),
+    ("reposicao", &["impressao"]),
+    ("sync", &["banco", "caminhos", "faixas", "loja", "portatil"]),
+    ("vendas", &["caixa", "cheques", "devolucoes", "encomendas", "oficina", "receber"]),
 ];
 
 fn raiz() -> PathBuf {
@@ -644,14 +636,22 @@ fn ler_crate(src: &Path) -> Grafo {
         let Some(de) = r.de.first().cloned() else { continue };
         let so_teste = g.modulos.get(&de).copied().unwrap_or(false);
         let teste = r.teste || so_teste;
-        let (para, externa) = if g.modulos.contains_key(&r.alvo) {
-            (r.alvo.clone(), false)
-        } else if let Some(origem) = reexp.get(&r.alvo) {
-            (origem.clone(), !g.modulos.contains_key(origem))
-        } else {
+        // Segue as reexportações do lib.rs até um módulo daqui ou outra crate:
+        // `crate::Erro` → `erro` → `rustinho_base`.
+        let mut para = r.alvo.clone();
+        let mut passos = 0;
+        while !g.modulos.contains_key(&para) && passos < 8 {
+            match reexp.get(&para) {
+                Some(origem) if *origem != para => para = origem.clone(),
+                _ => break,
+            }
+            passos += 1;
+        }
+        let externa = !g.modulos.contains_key(&para);
+        if externa && passos == 0 {
             g.problemas.push(format!("{onde}:{}: crate::{} não é módulo nem reexportação do lib.rs", r.linha, r.alvo));
             continue;
-        };
+        }
         if para == de {
             continue;
         }
@@ -882,6 +882,59 @@ fn nenhum_ciclo_novo_entre_os_modulos_do_nucleo() {
         ));
     }
     assert!(erros.is_empty(), "{}", erros.join("\n"));
+}
+
+/// A base (`rustinho-base`, etapa 1) fica embaixo de tudo: sem ciclo entre os
+/// seus módulos, sem depender de nenhuma crate do Rustinho e sem SQL (do
+/// SQLite só aparece o tipo `rusqlite::Error`, em `erro.rs`, que o núcleo
+/// examina em `Erro::Banco`). E a versão que ela dá é a do núcleo.
+#[test]
+fn base_fica_embaixo_sem_sql_e_sem_ciclos() {
+    let pasta = raiz().join("base");
+    let g = ler_crate(&pasta.join("src"));
+    assert!(g.problemas.is_empty(), "o leitor de fontes não entendeu a base: {:#?}", g.problemas);
+    let setas: BTreeSet<_> = g.producao.keys().cloned().collect();
+    let em_ciclo = setas_em_ciclo(&setas);
+    assert!(em_ciclo.is_empty(), "ciclo dentro da base: {em_ciclo:?}");
+    println!("base: {} módulos, {} setas de produção: {setas:?}", g.modulos.len(), setas.len());
+
+    let manifesto = std::fs::read_to_string(pasta.join("Cargo.toml")).unwrap();
+    let mut secao = String::new();
+    for linha in manifesto.lines().map(str::trim) {
+        if linha.starts_with('[') {
+            secao = linha.to_string();
+        } else if secao.contains("dependencies") {
+            assert!(!linha.starts_with("rustinho"), "a base não pode depender do Rustinho ({secao}: {linha})");
+        }
+    }
+
+    let mut pendentes = vec![pasta.join("src")];
+    while let Some(p) = pendentes.pop() {
+        for item in std::fs::read_dir(&p).unwrap() {
+            let c = item.unwrap().path();
+            if c.is_dir() {
+                pendentes.push(c);
+                continue;
+            }
+            if c.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let t = tokens(&std::fs::read_to_string(&c).unwrap(), &c.display().to_string());
+            for (i, k) in t.iter().enumerate() {
+                if k.tipo == Tipo::Nome && k.texto == "rusqlite" {
+                    let so_o_tipo = simbolo(&t, i + 1, "::") && nome(&t, i + 2, "Error") && !simbolo(&t, i + 3, "::");
+                    assert!(
+                        c.ends_with("erro.rs") && so_o_tipo,
+                        "{}:{}: a base só pode citar o tipo rusqlite::Error, em erro.rs",
+                        c.display(),
+                        k.linha
+                    );
+                }
+            }
+        }
+    }
+
+    assert_eq!(rustinho_nucleo::VERSAO, env!("CARGO_PKG_VERSION"), "a versão da base é a do núcleo");
 }
 
 // ------------------------------------------------- conferência do leitor

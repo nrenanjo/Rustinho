@@ -40,7 +40,7 @@ O [**Manual**](MANUAL.md) explica cada parte.
 Precisa de Rust (stable) e Qt 6 (qtbase e qtdeclarative).
 
     ./compilar.sh      # Linux: mostra o que falta instalar, compila e deixa ./rustinho
-    cargo test -p rustinho-nucleo
+    cargo test -p rustinho-base -p rustinho-nucleo
 
 A cada envio para a `main`, o GitHub monta o instalador do Windows, o AppImage (`.github/workflows/montar.yml`) e o APK do Android (`.github/workflows/android.yml`, Qt for Android + CMake). Quando a versão do `Cargo.toml` é nova, os três vão para Releases.
 

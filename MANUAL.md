@@ -331,8 +331,9 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 
 ## Organização do código
 
+- `base/`: o que todo o resto usa, sem regra da loja: `erro.rs`, `numeros.rs` dinheiro e quantidades, `texto.rs` texto para busca, `documento.rs` CPF/CNPJ/placa, `gtin.rs` código de barras. Conferir com `cargo test -p rustinho-base`.
 - `nucleo/`: regras da loja e banco de dados (SQLite), sem interface. Conferir com `cargo test -p rustinho-nucleo`.
-  - `pessoas.rs` clientes e fornecedores, `documento.rs` CPF/CNPJ/placa, `compras.rs` e `nfe_xml.rs` compras pelo XML, `fiscal.rs` regras de ST e CSOSN.
+  - `pessoas.rs` clientes e fornecedores, `compras.rs` e `nfe_xml.rs` compras pelo XML, `fiscal.rs` regras de ST e CSOSN.
   - `oficina.rs` ordens de serviço, `painel.rs` o Painel, `devolucoes.rs` trocas, devoluções e vale-troca, `etiquetas.rs` etiquetas e códigos de barras (EAN-13 e Code 128), `importar.rs` cadastros pelo XML.
   - `vendas.rs` vendas e orçamentos, `caixa.rs` abertura e fechamento, `impressao.rs` comprovantes em A4, `receber.rs` crediário e contas a receber, `pagar.rs` contas a pagar, `financeiro.rs` contas da loja e fluxo de caixa, `cheques.rs`, `comissoes.rs`, `avisos.rs` faixas do Início, `encomendas.rs` encomendas de clientes, `reposicao.rs` sugestão de compra, mais vendidos e parados, `sync.rs` sincronização entre os caixas.
 - `app/cpp/pdf.cpp`: transforma o comprovante em PDF A4 (Qt).

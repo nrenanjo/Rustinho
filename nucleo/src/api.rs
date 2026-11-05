@@ -19,8 +19,9 @@ use crate::{
     painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
-/// Versão do Rustinho.
-pub const VERSAO: &str = env!("CARGO_PKG_VERSION");
+/// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
+/// a versão (registro, backup) não depender do serviço; continua aqui também.
+pub use rustinho_base::VERSAO;
 
 const TENTATIVAS_MAXIMAS: u32 = 5;
 /// Segundos de espera depois de muitas senhas erradas seguidas.

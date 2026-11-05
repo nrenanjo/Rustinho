@@ -39,12 +39,12 @@ jobs:
       - name: Formatação
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy -p rustinho-nucleo --all-targets -- -D clippy::correctness -D clippy::suspicious
+        run: cargo clippy -p rustinho-base -p rustinho-nucleo --all-targets -- -D clippy::correctness -D clippy::suspicious
       - name: Testes do núcleo
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
+          cargo test -p rustinho-base -p rustinho-nucleo 2>&1 | tee testes-linux.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()
@@ -135,7 +135,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
+          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()
