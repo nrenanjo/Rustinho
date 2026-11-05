@@ -2624,4 +2624,87 @@ pub(crate) mod testes {
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
     }
+
+    /// Item 8 (frente estab): restaurar e fazer backup não andam juntos. Com
+    /// um backup em andamento (a vez do backup ocupada), restaurar é recusado
+    /// sem mexer em nada (nem a marca de restauração é gravada); com outra
+    /// operação em andamento (uma restauração usa a mesma vez), "fazer backup
+    /// agora" é recusado e o backup automático não começa. Sem nada em
+    /// andamento, a mesma restauração funciona.
+    #[test]
+    fn estab_restaurar_e_backup_nao_andam_juntos() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("juntos");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Antes").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let feito = fazer(&caminho, false).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Depois").unwrap();
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        let quantas = listar(&backups).len();
+
+        let vez = Vez::pegar("Fazendo o backup…").expect("ninguém mais estava fazendo backup");
+        let e = restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap_err();
+        assert!(e.to_string().contains("backup em andamento"), "{e}");
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Depois", "nada mudou");
+        assert!(!marca_da_restauracao(&caminho).exists());
+        let e = agora(caminho.clone()).unwrap_err();
+        assert!(e.to_string().contains("em andamento"), "{e}");
+        config::gravar(&b.conn, "backup_ultimo", "").unwrap();
+        automatico(caminho.clone());
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(listar(&backups).len(), quantas, "o backup automático começou durante outra operação");
+        drop(vez);
+
+        let inicio = Instant::now();
+        while ocupado() {
+            assert!(inicio.elapsed() < Duration::from_secs(60));
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Antes");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Item 3 (frente estab): um backup estragado na pasta (um byte trocado
+    /// no meio, ou o fim cortado) é recusado na conferência, antes de
+    /// qualquer mudança: o banco fica como está, a marca da restauração não é
+    /// gravada e nem a cópia de antes é feita.
+    #[test]
+    fn estab_backup_estragado_nao_muda_nada() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("estragado");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Antes").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let feito = fazer(&caminho, false).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Depois").unwrap();
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        let bytes = std::fs::read(&feito.arquivo).unwrap();
+        let mut trocado = bytes.clone();
+        let meio = trocado.len() / 2;
+        trocado[meio] ^= 0x40;
+        let com_byte_trocado = pasta.join("trocado.rbk");
+        std::fs::write(&com_byte_trocado, &trocado).unwrap();
+        let cortado = pasta.join("cortado.rbk");
+        std::fs::write(&cortado, &bytes[..bytes.len() - 100]).unwrap();
+        for ruim in [&com_byte_trocado, &cortado] {
+            let quantas = listar(&backups).len();
+            let e = restaurar(&mut b.conn, Some(&caminho), &ruim.display().to_string(), false, "1111").unwrap_err();
+            assert!(e.to_string().contains("estragado") || e.to_string().contains("incompleto"), "{e}");
+            assert_eq!(config::nome_loja(&b.conn).unwrap(), "Depois", "nada mudou");
+            assert!(!marca_da_restauracao(&caminho).exists());
+            assert_eq!(listar(&backups).len(), quantas, "nem a cópia de antes foi feita");
+        }
+        // O backup bom continua restaurando.
+        restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Antes");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
 }
