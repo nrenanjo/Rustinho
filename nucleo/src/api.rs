@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::banco::Banco;
+use crate::despacho::Classe;
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes, documento, dre,
@@ -127,86 +128,9 @@ fn resumo_da_chamada(comando: &str, dados: &Value) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// Qual ação do gerente cada comando precisa.
+/// Qual ação do gerente cada comando precisa (a classe dele diz).
 fn acao_do_comando(comando: &str) -> Option<&'static str> {
-    Some(match comando {
-        "venda_cancelar" => "cancelar_venda",
-        "compra_estornar"
-        | "recebimento_estornar"
-        | "pagamento_estornar"
-        | "movimento_estornar"
-        | "devolucao_desfazer"
-        | "cheque_desfazer"
-        | "conta_cancelar" => "estornar",
-        "estoque_ajustar" => "ajustar_estoque",
-        "backup_ler"
-        | "backup_salvar"
-        | "backup_agora"
-        | "backup_conectar_drive"
-        | "backup_desligar_drive"
-        | "backup_nuvem_lista"
-        | "backup_conferir"
-        | "backup_restaurar" => "backup",
-        "config_salvar" | "sync_salvar" | "fiscal_regras_salvar" | "importar_cadastros" => "configuracoes",
-        "usuario_salvar" => "usuarios",
-        "financeiro_resumo"
-        | "pagar_painel"
-        | "pagar_ficha"
-        | "pagar_previa"
-        | "pagar_lancar"
-        | "pagar_alterar"
-        | "pagar_cancelar"
-        | "pagar_pagar"
-        | "pagar_formas"
-        | "conta_loja_salvar"
-        | "conta_loja_extrato"
-        | "movimento_lancar"
-        | "transferir"
-        | "conta_loja_conferir"
-        | "categorias"
-        | "categoria_salvar"
-        | "fluxo_caixa"
-        | "cheques_painel"
-        | "cheque_depositar"
-        | "cheque_repassar"
-        | "cheque_devolver"
-        | "comissoes"
-        | "comissao_fechar"
-        | "comissao_reabrir" => "financeiro",
-        "dre_apurar"
-        | "dre_detalhe"
-        | "dre_despesas"
-        | "dre_indicadores"
-        | "dre_serie"
-        | "dre_resumo"
-        | "dre_classificacao"
-        | "dre_classificacao_salvar"
-        | "dre_metas"
-        | "dre_meta_salvar" => "resultados",
-        // FALHA-05: o que a Simultaneidade só lê tem consulta própria (a senha
-        // dela não abre a pílula Gerente). Gravar continua sendo "gerente".
-        "conflitos_listar" | "codigos_situacao" | "pendencias_listar" | "troca_historico" | "auditoria_listar" => {
-            "simultaneidade"
-        }
-        // A própria pílula Gerente: sempre só o gerente.
-        "gerente_ler"
-        | "gerente_salvar"
-        | "conflito_resolver"
-        | "referencia_aceitar"
-        | "conflitos_manter_todos"
-        | "codigos_assumir"
-        | "codigos_definir_pendentes"
-        | "codigos_dar_novo"
-        | "codigos_pessoa_dar_novo"
-        | "codigos_confirmar_computador"
-        | "codigos_registrar_caixa_novo"
-        // Pendências da troca de dados e retirada de caixa (0.9.15).
-        | "pendencia_arquivar"
-        | "pendencias_reaplicar"
-        | "caixa_retirar"
-        | "caixa_readmitir" => "gerente",
-        _ => return None,
-    })
+    classe(comando).and_then(Classe::acao)
 }
 
 /// Comandos que criam ou mudam registros e aceitam a chave da operação
@@ -332,175 +256,265 @@ pub const NAO_REPETIR: &[&str] = &[
 /// Quantas chaves de operação já feitas ficam guardadas (as mais antigas saem).
 const CHAVES_GUARDADAS: usize = 2000;
 
-/// Comandos que funcionam sem ninguém conectado.
-pub const SEM_SESSAO: &[&str] = &[
-    "estado",
-    "configurar_inicio",
-    "usuarios_entrada",
-    "entrar",
-    "sync_juntar",
-    "sync_desistir_juntar",
-    "sync_ler",
-    "aparencia_salvar",
-    "codigo_ler_foto",
-    "backup_automatico",
-    "backup_ao_fechar",
-    "sair",
-    "numero_formatar",
-    "preco_calcular",
+/// Os comandos que o próprio serviço atende (no `match` de `executar_livre` e
+/// no de `executar_comando`), com a classe de permissão de cada um (veja
+/// `despacho::Classe`). Um comando sem classe não roda: o serviço o trata
+/// como desconhecido. Um comando novo também entra na lista congelada de
+/// `tests/contratos_comandos.rs`.
+const DO_SERVICO: &[(&str, Classe)] = &[
+    // Sem ninguém conectado (o `match` de `executar_livre`).
+    ("estado", Classe::LeituraSemSessao),
+    ("configurar_inicio", Classe::SemSessao),
+    ("usuarios_entrada", Classe::LeituraSemSessao),
+    ("entrar", Classe::SemSessao),
+    ("sync_juntar", Classe::SemSessao),
+    ("sync_desistir_juntar", Classe::SemSessao),
+    ("sync_ler", Classe::LeituraSemSessao),
+    ("aparencia_salvar", Classe::SemSessao),
+    ("codigo_ler_foto", Classe::LeituraSemSessao),
+    ("backup_automatico", Classe::SemSessao),
+    ("backup_ao_fechar", Classe::SemSessao),
+    ("sair", Classe::SemSessao),
+    ("numero_formatar", Classe::LeituraSemSessao),
+    ("preco_calcular", Classe::LeituraSemSessao),
+    // Permissões, senha do gerente e usuários (pílula Gerente).
+    ("permissao", Classe::Leitura),
+    ("gerente_liberar", Classe::Caixa),
+    ("gerente_encerrar", Classe::Caixa),
+    ("gerente_ler", Classe::ConsultaDoGerente("gerente")),
+    ("gerente_salvar", Classe::Gerente("gerente")),
+    ("usuario_salvar", Classe::Gerente("usuarios")),
+    ("senha_trocar", Classe::Caixa),
+    // D7: a senha do gerente é pedida e conferida no próprio comando.
+    ("compra_conferir_autorizacao", Classe::Caixa),
+    // Configurações e impressão (juntam vários domínios).
+    ("computador_salvar", Classe::Caixa),
+    ("config_ler", Classe::Leitura),
+    ("config_salvar", Classe::Gerente("configuracoes")),
+    ("impressao", Classe::Leitura),
+    // Troca de dados (vão para o domínio na etapa 5). FALHA-05: o que a Simultaneidade só lê tem consulta própria (a
+    // senha dela não abre a pílula Gerente); gravar continua sendo "gerente". Pendências da troca de dados e
+    // retirada de caixa: 0.9.15.
+    ("sync_salvar", Classe::Gerente("configuracoes")),
+    ("conflitos_listar", Classe::ConsultaDoGerente("simultaneidade")),
+    ("conflito_resolver", Classe::Gerente("gerente")),
+    ("referencia_aceitar", Classe::Gerente("gerente")),
+    ("conflitos_manter_todos", Classe::Gerente("gerente")),
+    ("caixas_conhecidos", Classe::Leitura),
+    ("caixa_retirar", Classe::Gerente("gerente")),
+    ("caixa_readmitir", Classe::Gerente("gerente")),
+    ("pendencias_listar", Classe::ConsultaDoGerente("simultaneidade")),
+    ("troca_historico", Classe::ConsultaDoGerente("simultaneidade")),
+    ("auditoria_listar", Classe::ConsultaDoGerente("simultaneidade")),
+    ("pendencia_arquivar", Classe::Gerente("gerente")),
+    ("pendencias_reaplicar", Classe::Gerente("gerente")),
+    // Códigos das peças, Gerente › Códigos (faixas: etapa 5).
+    ("codigos_situacao", Classe::ConsultaDoGerente("simultaneidade")),
+    ("codigos_assumir", Classe::Gerente("gerente")),
+    ("codigos_definir_pendentes", Classe::Gerente("gerente")),
+    ("codigos_confirmar_computador", Classe::Gerente("gerente")),
+    ("codigos_registrar_caixa_novo", Classe::Gerente("gerente")),
+    ("codigos_pessoa_dar_novo", Classe::Gerente("gerente")),
+    ("codigos_dar_novo", Classe::Gerente("gerente")),
+    // Backup (etapa 6).
+    ("backup_ler", Classe::ConsultaDoGerente("backup")),
+    ("backup_salvar", Classe::Gerente("backup")),
+    ("backup_agora", Classe::Gerente("backup")),
+    ("backup_conectar_drive", Classe::Gerente("backup")),
+    ("backup_desligar_drive", Classe::Gerente("backup")),
+    ("backup_nuvem_lista", Classe::ConsultaDoGerente("backup")),
+    ("backup_conferir", Classe::ConsultaDoGerente("backup")),
+    ("backup_restaurar", Classe::Gerente("backup")),
+    // Domínio `usuarios` (passa para a tabela dele).
+    ("usuarios_listar", Classe::Leitura),
+    ("mecanicos", Classe::Leitura),
+    // Domínio `menu` (passa para a tabela dele).
+    ("menu", Classe::Leitura),
+    ("menu_usar", Classe::Caixa),
+    ("menu_fixar", Classe::Caixa),
+    // Domínio `busca` (passa para a tabela dele).
+    ("produtos_buscar", Classe::Leitura),
+    ("produto_por_codigo", Classe::Leitura),
+    // Domínio `produtos` (passa para a tabela dele).
+    ("produto_novo", Classe::Leitura),
+    ("produto_abrir", Classe::Leitura),
+    ("produto_salvar", Classe::Caixa),
+    ("produto_sugestoes", Classe::Leitura),
+    ("produto_variacao_criar", Classe::Caixa),
+    ("estoque_ajustar", Classe::Gerente("ajustar_estoque")),
+    // Domínio `unidades` (passa para a tabela dele).
+    ("unidades_listar", Classe::Leitura),
+    ("unidade_salvar", Classe::Caixa),
+    // Domínio `pessoas` (passa para a tabela dele).
+    ("pessoas_buscar", Classe::Leitura),
+    ("pessoa_nova", Classe::Leitura),
+    ("pessoa_abrir", Classe::Leitura),
+    ("pessoa_salvar", Classe::Caixa),
+    // Domínio `compras` (passa para a tabela dele).
+    ("compras_listar", Classe::Leitura),
+    ("compra_importar", Classe::Caixa),
+    ("compra_abrir", Classe::Leitura),
+    ("compra_atualizar", Classe::Caixa),
+    ("compra_lancar", Classe::Caixa),
+    ("compra_estornar", Classe::Gerente("estornar")),
+    ("compra_descartar", Classe::Caixa),
+    // Domínio `fiscal` (passa para a tabela dele).
+    ("fiscal_conferir", Classe::Leitura),
+    ("fiscal_automatico", Classe::Caixa),
+    ("fiscal_regras_salvar", Classe::Gerente("configuracoes")),
+    ("fiscal_tributacao", Classe::Leitura),
+    // Domínio `vendas` (passa para a tabela dele).
+    ("venda_calcular", Classe::Leitura),
+    ("venda_concluir", Classe::Caixa),
+    ("orcamento_salvar", Classe::Caixa),
+    ("orcamento_carregar", Classe::Leitura),
+    ("venda_abrir", Classe::Leitura),
+    ("vendas_listar", Classe::Leitura),
+    ("venda_cancelar", Classe::Gerente("cancelar_venda")),
+    // Domínio `caixa` (passa para a tabela dele).
+    ("caixa_estado", Classe::Leitura),
+    ("caixa_abrir", Classe::Caixa),
+    ("caixa_movimentar", Classe::Caixa),
+    ("caixa_fechar", Classe::Caixa),
+    ("caixa_resumo", Classe::Leitura),
+    ("formas_pagamento", Classe::Leitura),
+    // Domínio `oficina` (passa para a tabela dele).
+    ("os_listar", Classe::Leitura),
+    ("os_abrir", Classe::Leitura),
+    ("os_calcular", Classe::Leitura),
+    ("os_salvar", Classe::Caixa),
+    ("os_rascunho_salvar", Classe::Caixa),
+    ("os_rascunho_excluir", Classe::Caixa),
+    ("os_rascunho_pode", Classe::Leitura),
+    ("os_situacao", Classe::Caixa),
+    ("os_cancelar", Classe::Caixa),
+    ("os_para_venda", Classe::Leitura),
+    ("os_placa", Classe::Leitura),
+    // Domínio `devolucoes` (passa para a tabela dele).
+    ("devolucao_venda", Classe::Leitura),
+    ("devolucao_calcular", Classe::Leitura),
+    ("devolucao_gravar", Classe::Caixa),
+    ("devolucao_desfazer", Classe::Gerente("estornar")),
+    ("devolucoes_listar", Classe::Leitura),
+    ("vales_abertos", Classe::Leitura),
+    // Domínio `avisos` (passa para a tabela dele).
+    ("avisos_do_dia", Classe::Leitura),
+    ("aviso_minimizar", Classe::Caixa),
+    ("aviso_esconder", Classe::Caixa),
+    // Domínio `receber` (passa para a tabela dele).
+    ("receber_painel", Classe::Leitura),
+    ("receber_cliente", Classe::Leitura),
+    ("receber_calcular", Classe::Leitura),
+    ("receber_baixar", Classe::Caixa),
+    ("recebimento_estornar", Classe::Gerente("estornar")),
+    ("receber_previa", Classe::Leitura),
+    ("receber_lancar", Classe::Caixa),
+    ("conta_cancelar", Classe::Gerente("estornar")),
+    ("situacao_cliente", Classe::Leitura),
+    // Domínio `importar` (passa para a tabela dele).
+    ("importar_previa", Classe::Leitura),
+    ("importar_cadastros", Classe::Gerente("configuracoes")),
+    ("arquivos_conferir", Classe::Leitura),
+    // Domínio `requisitos` (passa para a tabela dele).
+    // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
+    ("requisito_conferir", Classe::Leitura),
+    // Domínio `painel` (passa para a tabela dele).
+    ("painel_resumo", Classe::Leitura),
+    ("painel_clientes", Classe::Leitura),
+    ("painel_fornecedores", Classe::Leitura),
+    ("painel_pagamentos", Classe::Leitura),
+    // Domínio `dre` (passa para a tabela dele).
+    ("dre_apurar", Classe::ConsultaDoGerente("resultados")),
+    ("dre_detalhe", Classe::ConsultaDoGerente("resultados")),
+    ("dre_despesas", Classe::ConsultaDoGerente("resultados")),
+    ("dre_indicadores", Classe::ConsultaDoGerente("resultados")),
+    ("dre_serie", Classe::ConsultaDoGerente("resultados")),
+    ("dre_resumo", Classe::ConsultaDoGerente("resultados")),
+    ("dre_classificacao", Classe::ConsultaDoGerente("resultados")),
+    ("dre_classificacao_salvar", Classe::Gerente("resultados")),
+    ("dre_metas", Classe::ConsultaDoGerente("resultados")),
+    ("dre_meta_salvar", Classe::Gerente("resultados")),
+    // Domínio `reposicao` (passa para a tabela dele).
+    ("estoque_sugestao", Classe::Leitura),
+    // R-04: grava os dias escolhidos na tela de reposição.
+    ("estoque_dias", Classe::Caixa),
+    ("estoque_mais_vendidos", Classe::Leitura),
+    ("estoque_parados", Classe::Leitura),
+    // Domínio `encomendas` (passa para a tabela dele).
+    ("encomendas_painel", Classe::Leitura),
+    ("encomenda_criar", Classe::Caixa),
+    ("encomenda_pedir", Classe::Caixa),
+    ("encomenda_chegou", Classe::Caixa),
+    ("encomenda_entregar", Classe::Caixa),
+    ("encomenda_cancelar", Classe::Caixa),
+    // RVI-01: marca o cliente como avisado quando a encomenda chegou.
+    ("encomenda_whatsapp", Classe::Caixa),
+    ("encomenda_para_venda", Classe::Leitura),
+    // Domínio `financeiro` (passa para a tabela dele).
+    ("financeiro_resumo", Classe::ConsultaDoGerente("financeiro")),
+    ("contas_loja", Classe::Leitura),
+    ("conta_loja_salvar", Classe::Gerente("financeiro")),
+    ("conta_loja_extrato", Classe::ConsultaDoGerente("financeiro")),
+    ("movimento_lancar", Classe::Gerente("financeiro")),
+    ("movimento_estornar", Classe::Gerente("estornar")),
+    ("transferir", Classe::Gerente("financeiro")),
+    ("conta_loja_conferir", Classe::Gerente("financeiro")),
+    ("categorias", Classe::ConsultaDoGerente("financeiro")),
+    ("categoria_salvar", Classe::Gerente("financeiro")),
+    ("fluxo_caixa", Classe::ConsultaDoGerente("financeiro")),
+    ("pagar_formas", Classe::ConsultaDoGerente("financeiro")),
+    // Domínio `pagar` (passa para a tabela dele).
+    ("pagar_painel", Classe::ConsultaDoGerente("financeiro")),
+    ("pagar_ficha", Classe::ConsultaDoGerente("financeiro")),
+    ("pagar_previa", Classe::ConsultaDoGerente("financeiro")),
+    ("pagar_lancar", Classe::Gerente("financeiro")),
+    ("pagar_alterar", Classe::Gerente("financeiro")),
+    ("pagar_cancelar", Classe::Gerente("financeiro")),
+    ("pagar_pagar", Classe::Gerente("financeiro")),
+    ("pagamento_estornar", Classe::Gerente("estornar")),
+    // Domínio `cheques` (passa para a tabela dele).
+    ("cheques_painel", Classe::ConsultaDoGerente("financeiro")),
+    ("cheques_previa", Classe::Leitura),
+    ("cheque_depositar", Classe::Gerente("financeiro")),
+    ("cheque_repassar", Classe::Gerente("financeiro")),
+    ("cheque_devolver", Classe::Gerente("financeiro")),
+    ("cheque_desfazer", Classe::Gerente("estornar")),
+    // Domínio `comissoes` (passa para a tabela dele).
+    ("comissoes", Classe::ConsultaDoGerente("financeiro")),
+    ("comissao_fechar", Classe::Gerente("financeiro")),
+    ("comissao_reabrir", Classe::Gerente("financeiro")),
+    // Domínio `etiquetas` (passa para a tabela dele).
+    ("etiquetas_opcoes", Classe::Leitura),
+    ("etiqueta_previa", Classe::Leitura),
+    ("etiquetas_da_compra", Classe::Leitura),
 ];
+
+/// A classe de permissão de um comando.
+pub fn classe(comando: &str) -> Option<Classe> {
+    DO_SERVICO.iter().find(|(nome, _)| *nome == comando).map(|(_, c)| *c)
+}
+
+/// Todos os comandos que o núcleo atende.
+pub fn comandos() -> Vec<&'static str> {
+    DO_SERVICO.iter().map(|(nome, _)| *nome).collect()
+}
 
 /// Comandos que só leem (não gravam nada no banco). Depois de um erro
 /// interno grave, só estes continuam (veja `Servico::chamar`).
-pub const SO_LEITURA: &[&str] = &[
-    "estado",
-    "usuarios_entrada",
-    "sync_ler",
-    "codigo_ler_foto",
-    "numero_formatar",
-    "preco_calcular",
-    "permissao",
-    "gerente_ler",
-    "conflitos_listar",
-    "pendencias_listar",
-    "troca_historico",
-    "auditoria_listar",
-    "caixas_conhecidos",
-    "os_rascunho_pode",
-    "codigos_situacao",
-    "menu",
-    "produtos_buscar",
-    "produto_novo",
-    "produto_abrir",
-    "produto_por_codigo",
-    "produto_sugestoes",
-    "unidades_listar",
-    "usuarios_listar",
-    "pessoas_buscar",
-    "pessoa_abrir",
-    "pessoa_nova",
-    "situacao_cliente",
-    "compras_listar",
-    "compra_abrir",
-    "fiscal_conferir",
-    "fiscal_tributacao",
-    "venda_calcular",
-    "venda_abrir",
-    "vendas_listar",
-    "orcamento_carregar",
-    "formas_pagamento",
-    "os_abrir",
-    "os_calcular",
-    "os_listar",
-    "os_placa",
-    "os_para_venda",
-    "mecanicos",
-    "devolucao_venda",
-    "devolucao_calcular",
-    "devolucoes_listar",
-    "vales_abertos",
-    "caixa_estado",
-    "caixa_resumo",
-    "avisos_do_dia",
-    "receber_painel",
-    "receber_cliente",
-    "receber_calcular",
-    "receber_previa",
-    "painel_resumo",
-    "dre_apurar",
-    "dre_detalhe",
-    "dre_despesas",
-    "dre_indicadores",
-    "dre_serie",
-    "dre_resumo",
-    "dre_classificacao",
-    "dre_metas",
-    "painel_clientes",
-    "painel_fornecedores",
-    "painel_pagamentos",
-    "estoque_mais_vendidos",
-    "estoque_parados",
-    "estoque_sugestao",
-    "etiqueta_previa",
-    "etiquetas_da_compra",
-    "etiquetas_opcoes",
-    "encomendas_painel",
-    "encomenda_para_venda",
-    "financeiro_resumo",
-    "pagar_painel",
-    "pagar_ficha",
-    "pagar_previa",
-    "pagar_formas",
-    "contas_loja",
-    "conta_loja_extrato",
-    "categorias",
-    "fluxo_caixa",
-    "cheques_painel",
-    "cheques_previa",
-    "comissoes",
-    "config_ler",
-    "backup_ler",
-    "backup_nuvem_lista",
-    "backup_conferir",
-    "importar_previa",
-    "impressao",
-    // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
-    "requisito_conferir",
-    "arquivos_conferir",
-];
+pub fn so_leitura(comando: &str) -> bool {
+    classe(comando).is_some_and(Classe::leitura)
+}
 
-/// Comandos que gravam e que qualquer usuário conectado pode usar (os do
-/// gerente estão em `acao_do_comando`). Um comando novo que não esteja em
-/// nenhuma lista faz o teste `todo_comando_tem_permissao` falhar.
-pub const DO_CAIXA: &[&str] = &[
-    // R-04: grava os dias escolhidos na tela de reposição.
-    "estoque_dias",
-    "gerente_liberar",
-    "gerente_encerrar",
-    "computador_salvar",
-    "menu_usar",
-    "menu_fixar",
-    "produto_salvar",
-    "produto_variacao_criar",
-    "unidade_salvar",
-    "senha_trocar",
-    "pessoa_salvar",
-    "compra_importar",
-    "compra_atualizar",
-    "compra_lancar",
-    "compra_descartar",
-    // D7: a senha do gerente é pedida e conferida no próprio comando.
-    "compra_conferir_autorizacao",
-    "fiscal_automatico",
-    "venda_concluir",
-    "orcamento_salvar",
-    "os_salvar",
-    "os_rascunho_salvar",
-    "os_rascunho_excluir",
-    "os_situacao",
-    "os_cancelar",
-    "devolucao_gravar",
-    "caixa_abrir",
-    "caixa_fechar",
-    "caixa_movimentar",
-    "aviso_esconder",
-    "aviso_minimizar",
-    "receber_lancar",
-    "receber_baixar",
-    "encomenda_criar",
-    "encomenda_pedir",
-    "encomenda_chegou",
-    "encomenda_entregar",
-    "encomenda_cancelar",
-    // RVI-01: marca o cliente como avisado quando a encomenda chegou.
-    "encomenda_whatsapp",
-];
+/// Comandos que funcionam sem ninguém conectado.
+pub fn sem_sessao(comando: &str) -> bool {
+    classe(comando).is_some_and(Classe::sem_sessao)
+}
 
 /// Resposta a uma gravação depois de um erro interno grave (pânico).
 const TEXTO_COMPROMETIDO: &str =
     "O Rustinho teve um erro interno. Feche e abra de novo para continuar; até lá nada é gravado.";
 
-/// RVI-01: nos testes, toda consulta de `SO_LEITURA` roda com o banco só
+/// RVI-01: nos testes, toda consulta (classe que só lê) roda com o banco só
 /// para leitura, para a suíte acusar um comando de leitura que grave. No
 /// programa, isso vale depois de um pânico (veja `Servico::chamar`).
 const LEITURA_ESTRITA: bool = cfg!(any(test, feature = "ancoras-de-teste"));
@@ -508,21 +522,13 @@ const LEITURA_ESTRITA: bool = cfg!(any(test, feature = "ancoras-de-teste"));
 /// O que podemos fazer depois de um erro interno grave: ler, sair e fazer o
 /// backup ao fechar.
 fn pode_depois_de_erro(comando: &str) -> bool {
-    SO_LEITURA.contains(&comando) || matches!(comando, "sair" | "backup_ao_fechar" | "gerente_encerrar")
+    so_leitura(comando) || matches!(comando, "sair" | "backup_ao_fechar" | "gerente_encerrar")
 }
 
-/// Classificação de um comando (para os testes de permissão).
+/// Classificação de um comando (para os testes de permissão): a ação do
+/// gerente, "leitura" ou "caixa".
 pub fn classe_do_comando(comando: &str) -> Option<&'static str> {
-    if let Some(a) = acao_do_comando(comando) {
-        return Some(a);
-    }
-    if SO_LEITURA.contains(&comando) {
-        return Some("leitura");
-    }
-    if DO_CAIXA.contains(&comando) || SEM_SESSAO.contains(&comando) {
-        return Some("caixa");
-    }
-    None
+    classe(comando).map(Classe::nome)
 }
 
 /// Quem está usando o Rustinho agora.
@@ -724,7 +730,7 @@ impl Servico {
         // gravasse, o próprio SQLite recusaria. Nos testes vale sempre, para
         // que a suíte inteira acuse um comando de leitura que grava.
         let travar_leitura =
-            SO_LEITURA.contains(&comando) && (self.comprometido || LEITURA_ESTRITA) && !self.banco.em_modo_seguro();
+            so_leitura(comando) && (self.comprometido || LEITURA_ESTRITA) && !self.banco.em_modo_seguro();
         if travar_leitura {
             if let Err(e) = self.banco.conn.pragma_update(None, "query_only", true) {
                 crate::registro::anotar(&format!("{comando}: não foi possível travar a leitura: {e}"));
@@ -815,6 +821,15 @@ impl Servico {
     }
 
     fn executar_livre(&mut self, comando: &str, dados: Value) -> Resultado<Value> {
+        // Só com alguém conectado: o que a classe do comando não diz que
+        // funciona sem sessão (inclusive um comando desconhecido).
+        if !sem_sessao(comando) {
+            self.sessao()?;
+            // O papel pode ter mudado em outro caixa.
+            self.atualizar_sessao()?;
+            let sessao = self.sessao()?.clone();
+            return self.executar_conectado(comando, dados, &sessao);
+        }
         match comando {
             // Sem precisar estar conectado.
             "estado" => self.estado(),
@@ -901,14 +916,7 @@ impl Servico {
                 let (lucro, preco) = produtos::calcular_preco(&d.custo, &d.lucro, &d.preco, &d.de);
                 Ok(json!({ "lucro": lucro, "preco": preco }))
             }
-            // Daqui para baixo, só com alguém conectado.
-            _ => {
-                self.sessao()?;
-                // O papel pode ter mudado em outro caixa.
-                self.atualizar_sessao()?;
-                let sessao = self.sessao()?.clone();
-                self.executar_conectado(comando, dados, &sessao)
-            }
+            _ => Err(Erro::Interno(format!("comando desconhecido: {comando}"))),
         }
     }
 
@@ -960,11 +968,8 @@ impl Servico {
         if self.pode_sem_senha(acao, sessao)? || self.liberada_esta_chamada(sessao) {
             return Ok(());
         }
-        let leitura = self
-            .chamada
-            .as_ref()
-            .map(|(c, _)| SO_LEITURA.contains(&c.as_str()) && acao_do_comando(c) == Some(acao))
-            .unwrap_or(false);
+        let leitura =
+            self.chamada.as_ref().map(|(c, _)| so_leitura(c) && acao_do_comando(c) == Some(acao)).unwrap_or(false);
         if leitura && self.consulta_aberta(acao, sessao) {
             return Ok(());
         }
@@ -1031,8 +1036,16 @@ impl Servico {
 
     fn executar_comando(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let disp = self.banco.dispositivo.clone();
-        if let Some(acao) = acao_do_comando(comando) {
-            self.exigir(acao, sessao)?;
+        // A permissão vem da classe do comando; sem classe, não roda.
+        match classe(comando) {
+            Some(c) => {
+                if let Some(acao) = c.acao() {
+                    self.exigir(acao, sessao)?;
+                }
+            }
+            // Só nos testes: o defeito de propósito (C-15) não tem classe.
+            None if cfg!(test) && comando == "__teste_panico" => {}
+            None => return Err(Erro::Interno(format!("comando desconhecido: {comando}"))),
         }
         match comando {
             // ---- Gerente ----
@@ -3709,7 +3722,7 @@ mod testes {
             json!({ "id": cid, "texto": "Pas", "dias": "90", "qual": "parado", "pagina": 1 }),
             json!({ "id": "nao-existe", "dias": "x", "qual": "?", "itens": "não é lista" }),
         ];
-        for c in SO_LEITURA {
+        for c in comandos().into_iter().filter(|c| so_leitura(c)) {
             for d in &entradas {
                 let antes = s.banco.conn.total_changes();
                 let r = s.chamar(c, &d.to_string());
@@ -3726,7 +3739,7 @@ mod testes {
         assert_eq!(chamar(&mut s, "__teste_panico", r#"{"onde":"antes_do_commit"}"#)["ok"], false);
         assert!(s.comprometido);
         let antes = s.banco.conn.total_changes();
-        for c in DO_CAIXA.iter().filter(|c| !matches!(**c, "gerente_encerrar")) {
+        for c in comandos().into_iter().filter(|c| classe(c) == Some(Classe::Caixa) && *c != "gerente_encerrar") {
             let r = chamar(&mut s, c, r#"{"qual":"compra","dias":"45"}"#);
             assert_eq!(r["ok"], false, "{c} gravou depois do pânico");
         }
@@ -3800,18 +3813,20 @@ mod testes {
     }
 
     /// RVI-01: as listas de comandos não se contradizem. Quem grava (está na
-    /// lista do modo seguro, `NAO_REPETIR` + `GRAVAM_TAMBEM`, ou em
-    /// `DO_CAIXA`) não pode estar em `SO_LEITURA`, que é o que continua
-    /// depois de um pânico e o que a consulta do gerente libera.
+    /// lista do modo seguro, `NAO_REPETIR` + `GRAVAM_TAMBEM`) não pode ter
+    /// classe que só lê, que é o que continua depois de um pânico e o que a
+    /// consulta do gerente libera. (Ler e gravar sem ser do gerente —
+    /// `Classe::Leitura` e `Classe::Caixa` — são classes diferentes: um
+    /// comando não tem as duas.)
     #[test]
     fn rvi01_quem_grava_nao_e_so_leitura() {
         let mut contradicoes = Vec::new();
-        for c in SO_LEITURA {
-            if NAO_REPETIR.contains(c) || GRAVAM_TAMBEM.contains(c) || DO_CAIXA.contains(c) {
-                contradicoes.push(*c);
+        for c in comandos().into_iter().filter(|c| so_leitura(c)) {
+            if NAO_REPETIR.contains(&c) || GRAVAM_TAMBEM.contains(&c) {
+                contradicoes.push(c);
             }
             if bloqueado_no_modo_seguro(c) {
-                contradicoes.push(*c);
+                contradicoes.push(c);
             }
         }
         contradicoes.sort();
@@ -3987,43 +4002,39 @@ mod testes {
         travar(caminho).unwrap()
     }
 
-    /// C-07: todo comando que a API atende tem uma classe de permissão, e
-    /// todo comando que as telas chamam existe na API.
+    /// C-07: todo comando que a API atende tem uma classe de permissão (a
+    /// tabela do serviço e as dos domínios), cada nome numa tabela só; o
+    /// serviço atende cada comando da tabela dele; e todo comando que as telas
+    /// chamam existe na API.
     #[test]
     fn todo_comando_tem_permissao() {
+        let comandos = comandos();
+        assert!(comandos.len() > 130, "{}", comandos.len());
+        let mut vistos = std::collections::BTreeSet::new();
+        for c in &comandos {
+            assert!(vistos.insert(*c), "{c} está em duas tabelas");
+            assert!(classe_do_comando(c).is_some(), "{c} sem classe");
+        }
+        // Os braços dos dois `match` do serviço (`executar_livre` e
+        // `executar_comando`) são os comandos da tabela dele: sem classe um
+        // braço não rodaria; sem braço, o comando seria desconhecido.
         let fonte = include_str!("api.rs");
         let fim = fonte.find("#[cfg(test)]\nmod testes").unwrap();
-        let mut comandos = Vec::new();
+        let mut bracos = std::collections::BTreeSet::new();
         for linha in fonte[..fim].lines() {
-            let t = linha.trim_start();
-            if !(linha.starts_with("            \"") || linha.starts_with("        | \"")) || !t.contains('"') {
-                continue;
-            }
-            if !(t.ends_with("=> {") || t.contains("\" =>") || t.starts_with("| \"")) {
-                continue;
-            }
-            for parte in t.split('|') {
-                let p = parte.trim();
-                if let Some(nome) = p.strip_prefix('"').and_then(|r| r.split('"').next()) {
-                    if nome.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !nome.starts_with("__") {
-                        comandos.push(nome.to_string());
-                    }
-                }
+            let Some(resto) = linha.strip_prefix("            \"") else { continue };
+            let (nome, depois) = resto.split_once('"').unwrap_or_default();
+            if depois.trim_start().starts_with("=>") && !nome.starts_with("__") {
+                bracos.insert(nome);
             }
         }
-        comandos.sort();
-        comandos.dedup();
-        assert!(comandos.len() > 130, "{}", comandos.len());
-        let sem: Vec<&String> = comandos.iter().filter(|c| classe_do_comando(c).is_none()).collect();
-        assert!(sem.is_empty(), "comandos sem permissão definida: {sem:?}");
-        // Um comando não pode ser "só leitura" e "grava" ao mesmo tempo.
-        for c in SO_LEITURA {
-            assert!(!DO_CAIXA.contains(c), "{c} está em duas listas");
-            assert!(comandos.iter().any(|x| x == c), "{c} não existe mais");
-        }
-        for c in DO_CAIXA {
-            assert!(comandos.iter().any(|x| x == c), "{c} não existe mais");
-        }
+        let da_tabela: std::collections::BTreeSet<&str> = DO_SERVICO.iter().map(|(n, _)| *n).collect();
+        let sem_classe: Vec<_> = bracos.difference(&da_tabela).collect();
+        let sem_braco: Vec<_> = da_tabela.difference(&bracos).collect();
+        assert!(
+            sem_classe.is_empty() && sem_braco.is_empty(),
+            "braços do serviço sem classe em DO_SERVICO: {sem_classe:?}; comandos de DO_SERVICO sem braço: {sem_braco:?}"
+        );
         // As telas só chamam comandos que existem.
         let pasta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app");
         let mut faltam = Vec::new();
@@ -4033,7 +4044,7 @@ mod testes {
                 let texto = std::fs::read_to_string(arq.path()).unwrap_or_default();
                 for pedaco in texto.split("Api.chamar(\"").skip(1) {
                     let nome = pedaco.split('"').next().unwrap_or_default();
-                    if !comandos.iter().any(|c| c == nome) {
+                    if !comandos.contains(&nome) {
                         faltam.push(format!("{}: {nome}", arq.file_name().to_string_lossy()));
                     }
                 }

@@ -9,19 +9,23 @@
 //!   testes e depois de um pânico), `sem_sessao` (funciona sem ninguém
 //!   conectado: `SEM_SESSAO`), `do_caixa` (grava e qualquer conectado usa:
 //!   `DO_CAIXA`) e `nao_repetir` (exige a chave da operação: `NAO_REPETIR`).
+//!   Desde o passo 2 da etapa 3, `SO_LEITURA`, `SEM_SESSAO` e `DO_CAIXA` não
+//!   são mais listas: são as classes `despacho::Classe` das tabelas
+//!   (leitura, sem sessão e `Classe::Caixa`).
 //!
 //! Mudar qualquer um destes é mudar a regra de permissão: o teste falha. Um
 //! comando novo (ou um que sumiu) também faz o teste falhar até a lista ser
 //! acertada — de propósito, como `SETAS_EM_CICLO` em `dependencias.rs`.
 //!
 //! Como a lista foi gerada (reprodutível): no commit `5b580c9` com este
-//! arquivo e `CONGELADA` vazia,
+//! arquivo como no commit `1f99993` (passo 1) e `CONGELADA` vazia,
 //! `RUSTINHO_COMANDOS_MOSTRAR=1 cargo test -p rustinho-nucleo --test contratos_comandos -- --nocapture`
 //! imprime a lista no formato de `CONGELADA` (comandos em ordem alfabética).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustinho_nucleo::api;
+use rustinho_nucleo::despacho::Classe;
 
 /// (comando, classe, marcas) — tirado do `api.rs` em `5b580c9`.
 #[rustfmt::skip]
@@ -216,42 +220,25 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("vendas_listar", "leitura", &["leitura"]),
 ];
 
-/// Os comandos que a API atende hoje, lidos do próprio `api.rs` (a mesma
-/// regra do teste `api::testes::todo_comando_tem_permissao` em `5b580c9`).
+/// Os comandos que a API atende hoje: as tabelas de comandos (a do serviço e
+/// as dos domínios). No passo 1 da etapa 3 (commit que criou este teste, sobre
+/// `5b580c9`) eles eram lidos do texto do `api.rs`, pela regra de
+/// `todo_comando_tem_permissao`, e a comparação passou do mesmo jeito.
 fn comandos_atuais() -> BTreeSet<String> {
-    let fonte = include_str!("../src/api.rs");
-    let fim = fonte.find("#[cfg(test)]\nmod testes").unwrap();
-    let mut v = BTreeSet::new();
-    for linha in fonte[..fim].lines() {
-        let t = linha.trim_start();
-        if !(linha.starts_with("            \"") || linha.starts_with("        | \"")) || !t.contains('"') {
-            continue;
-        }
-        if !(t.ends_with("=> {") || t.contains("\" =>") || t.starts_with("| \"")) {
-            continue;
-        }
-        for parte in t.split('|') {
-            if let Some(nome) = parte.trim().strip_prefix('"').and_then(|r| r.split('"').next()) {
-                if nome.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !nome.starts_with("__") {
-                    v.insert(nome.to_string());
-                }
-            }
-        }
-    }
-    v
+    api::comandos().into_iter().map(String::from).collect()
 }
 
-/// A permissão de um comando como o núcleo a aplica hoje.
+/// A permissão de um comando como o núcleo a aplica hoje (a classe da tabela).
 fn permissao_atual(c: &str) -> (String, Vec<&'static str>) {
     let classe = api::classe_do_comando(c).unwrap_or("SEM CLASSE").to_string();
     let mut marcas = Vec::new();
-    if api::SO_LEITURA.contains(&c) {
+    if api::so_leitura(c) {
         marcas.push("leitura");
     }
-    if api::SEM_SESSAO.contains(&c) {
+    if api::sem_sessao(c) {
         marcas.push("sem_sessao");
     }
-    if api::DO_CAIXA.contains(&c) {
+    if api::classe(c) == Some(Classe::Caixa) {
         marcas.push("do_caixa");
     }
     if api::NAO_REPETIR.contains(&c) {

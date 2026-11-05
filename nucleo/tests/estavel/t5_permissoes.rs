@@ -9,28 +9,10 @@ use serde_json::{json, Value};
 
 use crate::comum::*;
 
-/// Todos os comandos que a API atende (lidos do próprio `api.rs`, como o
+/// Todos os comandos que a API atende (as tabelas de comandos, como o
 /// teste `todo_comando_tem_permissao`).
 fn comandos() -> Vec<String> {
-    let fonte = include_str!("../../src/api.rs");
-    let fim = fonte.find("#[cfg(test)]\nmod testes").unwrap();
-    let mut v = BTreeSet::new();
-    for linha in fonte[..fim].lines() {
-        let t = linha.trim_start();
-        if !(linha.starts_with("            \"") || linha.starts_with("        | \"")) || !t.contains('"') {
-            continue;
-        }
-        if !(t.ends_with("=> {") || t.contains("\" =>") || t.starts_with("| \"")) {
-            continue;
-        }
-        for parte in t.split('|') {
-            if let Some(nome) = parte.trim().strip_prefix('"').and_then(|r| r.split('"').next()) {
-                if nome.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !nome.starts_with("__") {
-                    v.insert(nome.to_string());
-                }
-            }
-        }
-    }
+    let v: BTreeSet<String> = api::comandos().into_iter().map(String::from).collect();
     assert!(v.len() > 130);
     v.into_iter().collect()
 }
@@ -99,7 +81,7 @@ fn t5_2_sem_entrar_nada_funciona() {
     let antes = foto_do_negocio(&l.conexao());
     let mut passaram = Vec::new();
     for c in comandos() {
-        if api::SEM_SESSAO.contains(&c.as_str()) {
+        if api::sem_sessao(&c) {
             continue;
         }
         let r = l.chamar(&c, dados_para(&c, &p));

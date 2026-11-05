@@ -221,7 +221,7 @@ fn nav01_arquivos_conferir_separa_os_que_faltam() {
 #[test]
 fn nav01_comandos_novos_sao_so_leitura() {
     for c in ["requisito_conferir", "arquivos_conferir"] {
-        assert!(crate::api::SO_LEITURA.contains(&c), "{c} fora de SO_LEITURA");
+        assert!(crate::api::so_leitura(c), "{c} não é só leitura");
     }
 }
 

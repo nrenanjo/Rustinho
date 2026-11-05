@@ -22,6 +22,7 @@ pub mod comissoes;
 pub mod compras;
 pub mod computador;
 pub mod config;
+pub mod despacho;
 pub mod devolucoes;
 pub mod dre;
 pub mod encomendas;
