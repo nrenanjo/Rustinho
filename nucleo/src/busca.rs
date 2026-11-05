@@ -249,20 +249,22 @@ impl Casamento {
 }
 
 /// O texto de uma peça preparado para casar os termos: só letras e números,
-/// com as palavras coladas (para "8pk1515" achar "8PK 1515") e a marca de
-/// onde cada palavra ou pedaço de palavra começa.
+/// com as palavras coladas (para "8pk1515" achar "8PK 1515"), e onde cada
+/// palavra ou pedaço de palavra começa (posições em bytes de `letras`, em
+/// ordem; listas curtas, para não marcar byte a byte em milhares de peças).
 #[derive(Default)]
 struct TextoDaPeca {
     letras: String,
-    /// Por byte de `letras`: ali começa uma palavra, ou um pedaço dela
-    /// (depois de pontuação, ou na passagem de letra para número e vice-versa).
-    comeco: Vec<bool>,
-    /// Por byte de `letras`: ali havia espaço ou pontuação entre duas letras
-    /// ou dois números ("1.6", "3/4", "11 14"). O termo só passa por um corte
-    /// se tiver o mesmo corte.
-    corte: Vec<bool>,
-    /// Por byte de `letras`: de qual palavra é.
-    palavra: Vec<u32>,
+    /// Onde começa cada palavra (separada por espaço). Cada código de
+    /// fornecedor ou antigo conta como uma palavra.
+    palavras: Vec<u32>,
+    /// Onde começa cada pedaço separado por espaço ou pontuação. Também é
+    /// começo a passagem de letra para número e vice-versa (`comeco`).
+    pedacos: Vec<u32>,
+    /// Onde havia espaço ou pontuação entre duas letras ou dois números
+    /// ("1.6", "3/4", "11 14"). O termo só passa por um corte se tiver o
+    /// mesmo corte.
+    cortes: Vec<u32>,
     /// `letras[..fim_do_texto]` vem do texto de busca; o resto, dos códigos
     /// de fornecedor e antigos (cada um isolado, sem colar com o vizinho).
     fim_do_texto: usize,
@@ -272,54 +274,58 @@ impl TextoDaPeca {
     /// Prepara o texto de uma peça (reaproveita a memória da anterior).
     fn preencher(&mut self, busca: &str, de_fora: &[String]) {
         self.letras.clear();
-        self.comeco.clear();
-        self.corte.clear();
-        self.palavra.clear();
-        let mut n = 0;
+        self.palavras.clear();
+        self.pedacos.clear();
+        self.cortes.clear();
         let mut ultimo_numero = None;
         for palavra in busca.split(' ') {
-            if self.juntar(palavra, n, &mut ultimo_numero) {
-                n += 1;
-            }
+            self.juntar(palavra, &mut ultimo_numero);
         }
         self.fim_do_texto = self.letras.len();
         for codigo in de_fora {
             // O espaço nunca está num termo: nada casa atravessando de um código para outro.
             self.letras.push(' ');
-            self.comeco.push(false);
-            self.corte.push(false);
-            self.palavra.push(u32::MAX);
-            self.juntar(codigo, n, &mut None);
-            n += 1;
+            self.juntar(codigo, &mut None);
         }
     }
 
-    /// Acrescenta as letras e números de uma palavra. Falso se não tinha
-    /// nenhum. `ultimo_numero`: o último caractere acrescentado era número?
-    fn juntar(&mut self, palavra: &str, n: u32, ultimo_numero: &mut Option<bool>) -> bool {
+    /// Acrescenta as letras e números de uma palavra. `ultimo_numero`: o
+    /// último caractere acrescentado era número?
+    fn juntar(&mut self, palavra: &str, ultimo_numero: &mut Option<bool>) {
         let mut separado = true; // começo da palavra ou depois de pontuação
-        let mut algum = false;
+        let mut primeiro = true;
         for c in palavra.chars() {
             if !c.is_alphanumeric() {
                 separado = true;
                 continue;
             }
             let numero = c.is_numeric();
-            let mesma_classe = *ultimo_numero == Some(numero);
-            let comeco = separado || !mesma_classe;
-            let corte = separado && mesma_classe;
-            let inicio = self.letras.len();
-            self.letras.push(c);
-            for i in inicio..self.letras.len() {
-                self.comeco.push(i == inicio && comeco);
-                self.corte.push(i == inicio && corte);
-                self.palavra.push(n);
+            let i = self.letras.len() as u32;
+            if primeiro {
+                self.palavras.push(i);
+                primeiro = false;
             }
+            if separado {
+                self.pedacos.push(i);
+                if *ultimo_numero == Some(numero) {
+                    self.cortes.push(i);
+                }
+            }
+            self.letras.push(c);
             *ultimo_numero = Some(numero);
             separado = false;
-            algum = true;
         }
-        algum
+    }
+
+    /// Começa ali uma palavra ou um pedaço dela?
+    fn comeco(&self, i: usize) -> bool {
+        if self.pedacos.binary_search(&(i as u32)).is_ok() {
+            return true;
+        }
+        match (self.letras[..i].chars().next_back(), self.letras[i..].chars().next()) {
+            (Some(antes), Some(c)) => antes != ' ' && antes.is_numeric() != c.is_numeric(),
+            _ => true,
+        }
     }
 
     fn casar(&self, termo: &Termo) -> Casamento {
@@ -327,13 +333,21 @@ impl TextoDaPeca {
         for i in posicoes(&self.letras, &termo.compacto) {
             let fim = i + termo.compacto.len();
             // Os cortes do texto dentro do trecho têm que ser os do termo.
-            if !(i + 1..fim).all(|p| self.corte[p] == termo.cortes.contains(&(p - i))) {
+            let de = self.cortes.partition_point(|&c| c as usize <= i);
+            let ate = self.cortes.partition_point(|&c| (c as usize) < fim);
+            let no_trecho = &self.cortes[de..ate];
+            if no_trecho.len() != termo.cortes.len()
+                || !no_trecho.iter().zip(&termo.cortes).all(|(&c, &o)| c as usize - i == o)
+            {
                 continue;
             }
-            let lugar = if self.palavra[i] != self.palavra[fim - 1] {
+            let primeira_palavra = self.palavras.partition_point(|&p| p as usize <= i);
+            let atravessa = self.palavras.get(primeira_palavra).is_some_and(|&p| (p as usize) < fim);
+            let comeco = self.comeco(i);
+            let lugar = if atravessa {
                 // Atravessa o espaço entre palavras: só o modelo escrito junto.
-                (termo.junta && self.comeco[i]).then_some(Lugar::Comeco)
-            } else if self.comeco[i] {
+                (termo.junta && comeco).then_some(Lugar::Comeco)
+            } else if comeco {
                 Some(Lugar::Comeco)
             } else if !termo.curto {
                 Some(Lugar::Meio)
@@ -534,21 +548,20 @@ fn classificar(
     texto_da_peca.preencher(&l.busca, de_fora);
     let casamentos: Vec<Casamento> = termos.iter().map(|t| texto_da_peca.casar(t)).collect();
     // Ano que não está no texto: casou pelo carro (o filtro fino confere).
-    let lugares: Vec<Option<Lugar>> =
-        termos.iter().zip(&casamentos).map(|(t, c)| c.lugar().or(t.ano.map(|_| Lugar::Comeco))).collect();
+    let lugar = |k: usize| casamentos[k].lugar().or(termos[k].ano.map(|_| Lugar::Comeco));
 
-    let dentro: Vec<&str> = l.codigos.split(' ').filter(|c| !c.is_empty()).collect();
+    let dentro = || l.codigos.split(' ').filter(|c| !c.is_empty());
     let fora = || de_fora.iter().map(String::as_str);
     let mesmo_codigo = |c: &str| termos.len() > 1 && termos.iter().all(|t| t.no_codigo(c));
-    let exato_dentro = dentro.contains(&compacto);
+    let exato_dentro = dentro().any(|c| c == compacto);
     let exato_fora = fora().any(|c| c == compacto);
-    let codigo_dentro = dentro.iter().any(|c| c.starts_with(compacto) || mesmo_codigo(c));
+    let codigo_dentro = dentro().any(|c| c.starts_with(compacto) || mesmo_codigo(c));
     let codigo_fora = fora().any(|c| c.starts_with(compacto) || mesmo_codigo(c));
 
     // Começo de código só passa à frente do nome com 3 ou mais letras/números
     // (ou com número): com "pa", as "PASTILHA..." vêm antes dos códigos "PA...".
     let codigo_forte = compacto.chars().count() >= 3 || compacto.chars().any(char::is_numeric);
-    let termos_casaram = lugares.iter().all(Option::is_some);
+    let termos_casaram = (0..termos.len()).all(|k| lugar(k).is_some());
 
     let (nivel, pelo_codigo_de_fora) = if exato_dentro || exato_fora {
         (0, !exato_dentro)
@@ -556,7 +569,7 @@ fn classificar(
         (if codigo_forte { 1 } else { 3 }, !codigo_dentro)
     } else if !termos_casaram {
         return None;
-    } else if lugares.iter().all(|l| *l == Some(Lugar::Comeco)) {
+    } else if (0..termos.len()).all(|k| lugar(k) == Some(Lugar::Comeco)) {
         (if casamentos[0].no_comeco { 2 } else { 3 }, false)
     } else {
         (4, false)
@@ -574,7 +587,7 @@ fn classificar(
             || termos.iter().all(|t| t.no_codigo(c))
             || termos_de_fora.iter().any(|i| c.contains(termos[*i].compacto.as_str()))
     };
-    let tem_balao = dentro.iter().any(|c| balao(c)) || fora().any(balao);
+    let tem_balao = dentro().any(balao) || fora().any(balao);
     Some(Achada {
         nome: l.nome,
         id: l.id,
