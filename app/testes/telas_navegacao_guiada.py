@@ -40,7 +40,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import telas_d09 as base  # noqa: E402
 from telas_d09 import PROGRAMA, RAIZ, conferir, simples  # noqa: E402
 
-base.TELA = ":83"
+# A tela virtual pode ser trocada (RUSTINHO_TELA=:88) quando a :83 estiver
+# ocupada (por exemplo, por outro teste rodando ao mesmo tempo).
+base.TELA = os.environ.get("RUSTINHO_TELA", ":83")
 TELA = base.TELA
 CNPJ_BOM = "11.444.777/0001-61"
 CNPJ_RUIM = "11.444.777/0001-00"
