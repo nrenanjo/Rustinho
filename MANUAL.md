@@ -117,6 +117,8 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 - **Transferência entre contas sem conta de destino:** a janela da transferência tem **Cadastrar conta**. Ao salvar a conta nova, a transferência volta com ela escolhida e com o que já estava digitado; nada é transferido sem o clique.
 - **Nova OS que não pode virar rascunho** (um caixa da loja impede, pela troca de dados): ao sair da OS, a janela mostra o motivo e as opções **Ver caixas** (leva a Configurações › Simultaneidade › Caixas, pede a senha do gerente uma vez e destaca o caixa que impede) e **Sair sem salvar**; a seta volta para a OS, que pode ser salva normalmente. Resolvido em Caixas, a janela de saída abre de novo e o rascunho só é salvo com o clique em "Salvar rascunho".
 - **Modo seguro:** a faixa vermelha tem o botão **Restaurar um backup** (quando há alguém dentro). Ele leva a Configurações › Backup, que pede a senha do gerente antes de abrir.
+- **Celular, toque com o dedo:** botões, campos, caixas de marcar, pílulas e o olho da senha respondem ao toque numa área de pelo menos 48 dp (o tamanho recomendado para o dedo), mesmo os que parecem menores. O desenho é o de sempre; mudam só o seletor de tema (um pouco mais comprido) e as linhas do Fiscal e da DRE (mais altas). No computador nada muda.
+- **Celular, compra:** na linha do item ainda sem peça, os botões (Escolher peça, Cadastrar nova, Não lançar) ficam numa linha própria, embaixo do texto, em vez de por cima dele; a lista da compra abre do começo, com os avisos do topo à vista.
 
 ### Novo na versão 0.9.15 (correções da auditoria)
 
