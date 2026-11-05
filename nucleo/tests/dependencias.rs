@@ -412,6 +412,16 @@ struct Analise {
     refs: Vec<Referencia>,
     mods: Vec<Declaracao>,
     inclusoes: Vec<Inclusao>,
+    /// Tabelas em que um texto de SQL grava (veja `escritas_sql`).
+    escritas: Vec<Escrita>,
+}
+
+#[derive(Debug)]
+struct Escrita {
+    de: Vec<String>,
+    tabela: String,
+    teste: bool,
+    linha: usize,
 }
 
 /// Lê um arquivo que está no módulo `base`; `teste_inicial` quando o arquivo
@@ -508,6 +518,11 @@ fn analisar(fonte: &str, onde: &str, base: &[String], teste_inicial: bool) -> An
             i = j;
             continue;
         }
+        if t[i].tipo == Tipo::Texto {
+            for tabela in escritas_sql(&t[i].texto) {
+                a.escritas.push(Escrita { de: caminho.clone(), tabela, teste, linha: t[i].linha });
+            }
+        }
         i += 1;
     }
     a
@@ -558,6 +573,64 @@ fn reexportes(fonte: &str, onde: &str) -> BTreeMap<String, String> {
     mapa
 }
 
+// ----------------------------------------------------- um dono por tabela
+
+/// As tabelas em que cada texto de SQL grava (INSERT, REPLACE, UPDATE,
+/// DELETE). Nome montado na hora (`{tabela}`, `{}`) vira "*". Eventos de
+/// gatilho (`AFTER UPDATE ON t`) e `ON CONFLICT … DO UPDATE SET` não gravam
+/// por si (o corpo do gatilho, sim). Só palavras-chave em maiúsculas: o SQL
+/// do projeto é todo assim, e texto comum ("update depois") não conta.
+fn escritas_sql(texto: &str) -> Vec<String> {
+    let p: Vec<String> = texto
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ',' || c == ';')
+        .filter(|x| !x.is_empty())
+        .map(String::from)
+        .collect();
+    let maiusc = |k: usize| p.get(k).cloned().unwrap_or_default();
+    let tabela = |k: usize| -> Option<String> {
+        let t = p.get(k)?;
+        if t.starts_with('{') {
+            return Some("*".into());
+        }
+        let t = t.strip_prefix("main.").or_else(|| t.strip_prefix("temp.")).unwrap_or(t);
+        let t = t.trim_matches('"');
+        (t.chars().next()?.is_ascii_alphabetic() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            .then(|| t.to_string())
+    };
+    let mut v = Vec::new();
+    for k in 0..p.len() {
+        let mut j = k + 1;
+        let alvo = match maiusc(k).as_str() {
+            // "INSERT OR REPLACE INTO": o REPLACE não é outra gravação.
+            "REPLACE" if k > 0 && p[k - 1] == "OR" => continue,
+            "INSERT" | "REPLACE" => {
+                if maiusc(j) == "OR" {
+                    j += 2;
+                }
+                if maiusc(j) != "INTO" {
+                    continue;
+                }
+                tabela(j + 1)
+            }
+            "UPDATE" => {
+                if maiusc(j) == "OR" {
+                    j += 2;
+                }
+                if ["SET", "ON", "OF"].contains(&maiusc(j).as_str()) {
+                    continue;
+                }
+                tabela(j)
+            }
+            "DELETE" if maiusc(j) == "FROM" => tabela(j + 1),
+            _ => continue,
+        };
+        if let Some(t) = alvo {
+            v.push(t);
+        }
+    }
+    v
+}
+
 // ----------------------------------------------------------------- grafo
 
 #[derive(Debug, Default)]
@@ -571,6 +644,8 @@ struct Grafo {
     externas: BTreeMap<(String, String), usize>,
     /// Primeiro lugar de cada seta de produção (para as mensagens).
     exemplo: BTreeMap<(String, String), String>,
+    /// (tabela, módulo) que grava nela no código de produção, com o primeiro lugar.
+    escritores: BTreeMap<(String, String), String>,
     /// Problemas de leitura (o teste falha se houver).
     problemas: Vec<String>,
 }
@@ -582,6 +657,7 @@ fn ler_crate(src: &Path) -> Grafo {
     let mut g = Grafo::default();
     let mut lidos = BTreeSet::new();
     let mut refs: Vec<(Referencia, String)> = Vec::new();
+    let mut escritas: Vec<(Escrita, String)> = Vec::new();
     let mut fila: VecDeque<(PathBuf, Vec<String>, bool)> = VecDeque::from([(lib.clone(), Vec::new(), false)]);
     while let Some((arq, caminho, teste)) = fila.pop_front() {
         let real = arq.canonicalize().unwrap_or_else(|e| panic!("{}: {e}", arq.display()));
@@ -619,6 +695,7 @@ fn ler_crate(src: &Path) -> Grafo {
             fila.push_back((pasta.join(&inc.arquivo), inc.caminho, inc.teste));
         }
         refs.extend(a.refs.into_iter().map(|r| (r, onde.clone())));
+        escritas.extend(a.escritas.into_iter().map(|e| (e, onde.clone())));
     }
     // Todo arquivo .rs da pasta tem de ter sido lido (senão o leitor perdeu algum).
     let mut pendentes = vec![src.to_path_buf()];
@@ -669,6 +746,13 @@ fn ler_crate(src: &Path) -> Grafo {
             g.exemplo.entry(chave.clone()).or_insert_with(|| format!("{onde}:{}", r.linha));
             *g.producao.entry(chave).or_default() += 1;
         }
+    }
+    for (e, onde) in escritas {
+        let Some(de) = e.de.first().cloned() else { continue };
+        if e.teste || g.modulos.get(&de).copied().unwrap_or(false) {
+            continue;
+        }
+        g.escritores.entry((e.tabela, de)).or_insert_with(|| format!("{onde}:{}", e.linha));
     }
     g
 }
@@ -937,6 +1021,119 @@ fn base_fica_embaixo_sem_sql_e_sem_ciclos() {
     assert_eq!(rustinho_nucleo::VERSAO, env!("CARGO_PKG_VERSION"), "a versão da base é a do núcleo");
 }
 
+/// Quem grava em cada tabela no código de produção (etapa 4 da
+/// modularização: "um dono por tabela"). Formato: tabela e os módulos que
+/// gravam nela (INSERT, REPLACE, UPDATE ou DELETE num texto de SQL; ler não
+/// conta). Por enquanto só registra o que existe: um módulo que passe a
+/// gravar numa tabela em que não gravava faz o teste falhar — a gravação
+/// nova vai pela função do dono, como `pagar::criar_da_compra` —, e um
+/// escritor que deixou de gravar tem de sair da lista (para não voltar).
+/// `*` = nome de tabela montado na hora (a troca de dados e o backup gravam
+/// qualquer tabela). As tabelas com mais de um escritor são as que ainda
+/// precisam de um dono só (relatório da frente modular2).
+///
+/// Gerada com `RUSTINHO_DEPENDENCIAS_MOSTRAR=1 cargo test -p rustinho-nucleo
+/// --test dependencias -- --nocapture nenhum_escritor_novo`.
+#[rustfmt::skip]
+const ESCRITORES: &[(&str, &[&str])] = &[
+    ("*", &["loja"]),
+    ("alteracao", &["loja", "sync"]),
+    ("auditoria", &["auditoria"]),
+    ("caixa_movimento", &["caixa"]),
+    ("caixa_sessao", &["caixa"]),
+    ("categoria", &["dre", "financeiro"]),
+    ("cheque", &["cheques"]),
+    ("comissao_fechamento", &["comissoes"]),
+    ("compra", &["compras"]),
+    ("compra_item", &["compras"]),
+    ("config", &["backup", "banco", "config", "faixas", "loja", "sync"]),
+    ("conta_loja", &["financeiro"]),
+    ("conta_pagar", &["pagar"]),
+    ("conta_receber", &["receber"]),
+    ("devolucao", &["devolucoes"]),
+    ("devolucao_item", &["devolucoes"]),
+    ("encomenda", &["encomendas"]),
+    ("entrada_falha", &["usuarios"]),
+    ("estoque_movimento", &["estoque"]),
+    ("faixa_codigo", &["faixas"]),
+    ("menu_uso", &["menu"]),
+    ("meta", &["dre"]),
+    ("movimento_conta", &["caixa", "cheques", "financeiro", "pagar"]),
+    ("ordem_servico", &["oficina"]),
+    ("ordem_servico_item", &["oficina"]),
+    ("pagamento", &["pagar"]),
+    ("pessoa", &["faixas", "pessoas"]),
+    ("pessoa_veiculo", &["oficina", "pessoas"]),
+    ("produto", &["compras", "faixas", "fiscal", "produtos"]),
+    ("produto_aplicacao", &["produtos"]),
+    ("produto_codigo_antigo", &["importar", "produtos"]),
+    ("produto_equivalente", &["produtos"]),
+    ("produto_fornecedor", &["compras", "importar"]),
+    ("produto_preco", &["compras", "produtos"]),
+    ("recebimento", &["devolucoes", "receber"]),
+    ("recebimento_parcela", &["devolucoes", "receber"]),
+    ("ref_atual", &["sync"]),
+    ("regra_st", &["fiscal"]),
+    ("senha_situacao", &["usuarios"]),
+    ("sqlite_sequence", &["sync"]),
+    ("sync_conflito", &["sync"]),
+    ("sync_endereco", &["backup", "caminhos"]),
+    ("sync_estado", &["backup", "loja", "sync"]),
+    ("sync_par", &["backup", "caminhos", "sync"]),
+    ("sync_pendencia", &["sync"]),
+    ("sync_referencia", &["sync"]),
+    ("sync_resolucao", &["sync"]),
+    ("tabela_preco", &["config"]),
+    ("unidade", &["unidades"]),
+    ("usuario", &["backup", "sync", "usuarios"]),
+    ("vale", &["devolucoes"]),
+    ("venda", &["vendas"]),
+    ("venda_item", &["vendas"]),
+    ("venda_pagamento", &["vendas"]),
+];
+
+#[test]
+fn nenhum_escritor_novo_por_tabela() {
+    let g = ler_crate(&raiz().join("nucleo/src"));
+    assert!(g.problemas.is_empty(), "o leitor de fontes não entendeu tudo: {:#?}", g.problemas);
+    let atuais: BTreeSet<(String, String)> = g.escritores.keys().cloned().collect();
+    let mut por_tabela: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (t, m) in &atuais {
+        por_tabela.entry(t).or_default().push(m);
+    }
+    if std::env::var_os("RUSTINHO_DEPENDENCIAS_MOSTRAR").is_some() {
+        println!("== ESCRITORES como está hoje ({} tabelas, {} pares):", por_tabela.len(), atuais.len());
+        for (t, ms) in &por_tabela {
+            let v: Vec<String> = ms.iter().map(|m| format!("\"{m}\"")).collect();
+            println!("    (\"{t}\", &[{}]),", v.join(", "));
+        }
+        println!("== tabelas com mais de um escritor:");
+        for (t, ms) in por_tabela.iter().filter(|(_, ms)| ms.len() > 1) {
+            println!("E {t}: {}", ms.join(", "));
+        }
+    }
+    let mut registrados = BTreeSet::new();
+    for (t, ms) in ESCRITORES {
+        for m in *ms {
+            assert!(registrados.insert((t.to_string(), m.to_string())), "repetido na lista: {t} ← {m}");
+        }
+    }
+    let mut erros = Vec::new();
+    for (t, m) in atuais.difference(&registrados) {
+        let outros: Vec<&str> =
+            ESCRITORES.iter().filter(|(x, _)| x == t).flat_map(|(_, ms)| ms.iter().copied()).collect();
+        erros.push(format!(
+            "escritor NOVO: {m} grava a tabela {t} (primeiro em {}); quem já gravava: {outros:?}",
+            g.escritores[&(t.clone(), m.clone())]
+        ));
+    }
+    for (t, m) in registrados.difference(&atuais) {
+        erros.push(format!("{m} não grava mais a tabela {t}: tire-o de ESCRITORES (assim não volta)"));
+    }
+    assert!(erros.is_empty(), "{}", erros.join("\n"));
+    assert!(atuais.len() > 40, "o leitor achou poucas gravações: {}", atuais.len());
+}
+
 // ------------------------------------------------- conferência do leitor
 
 fn refs(fonte: &str) -> Vec<(String, bool)> {
@@ -1010,4 +1207,24 @@ fn leitor_acha_ciclos() {
     let setas = s(&[("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e", "d"), ("f", "a")]);
     assert_eq!(setas_em_ciclo(&setas), s(&[("a", "b"), ("b", "c"), ("c", "a"), ("d", "e"), ("e", "d")]));
     assert_eq!(caminho(&setas, "b", "a"), ["b", "c", "a"]);
+}
+
+#[test]
+fn leitor_acha_escritas_sql() {
+    assert_eq!(escritas_sql("INSERT INTO venda (id) VALUES (?1)"), ["venda"]);
+    assert_eq!(escritas_sql("INSERT OR REPLACE INTO config(chave, valor) VALUES (?1, ?2)"), ["config"]);
+    assert!(escritas_sql("insert into config values (1)").is_empty());
+    assert_eq!(escritas_sql("UPDATE OR IGNORE produto SET x = 1"), ["produto"]);
+    assert_eq!(escritas_sql("DELETE FROM main.sync_par WHERE id = ?1"), ["sync_par"]);
+    assert_eq!(escritas_sql("REPLACE INTO a (x) VALUES (1); UPDATE b SET y = 2;"), ["a", "b"]);
+    assert_eq!(escritas_sql("INSERT INTO {tabela} ({colunas}) VALUES ({marcas})"), ["*"]);
+    assert_eq!(escritas_sql("INSERT INTO x (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET y = 2"), ["x"]);
+    assert!(escritas_sql("CREATE TRIGGER t AFTER UPDATE OF x ON venda BEGIN SELECT 1; END").is_empty());
+    assert!(escritas_sql("CREATE TRIGGER t BEFORE DELETE ON venda BEGIN SELECT 1; END").is_empty());
+    assert_eq!(
+        escritas_sql("CREATE TRIGGER t AFTER INSERT ON venda BEGIN INSERT INTO alteracao (t) VALUES (1); END"),
+        ["alteracao"]
+    );
+    assert!(escritas_sql("SELECT * FROM venda WHERE situacao = 'atualizar'").is_empty());
+    assert!(escritas_sql("Não deu para apagar (delete) o arquivo; update depois").is_empty());
 }
