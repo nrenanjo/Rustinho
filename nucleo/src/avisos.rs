@@ -134,7 +134,8 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "encomendas" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
             "backup" | "backup_nuvem" => "Ver backup",
-            "conflitos" | "codigos" | "codigos_bloqueio" => "Resolver no Gerente",
+            // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
+            "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
             id if id.starts_with("senha.") => "Trocar senha",
             _ => "Abrir",
@@ -1102,6 +1103,27 @@ mod testes {
     /// T-07 (C8): caixa da loja sem trocar dados há um dia ou mais vira
     /// atenção, com o nome e a última troca. Some com uma troca que dê certo,
     /// com a retirada do caixa e com a troca de dados desligada. Menos de um
+    /// NOTIF-01 (0.9.18): o texto do botão diz o que ele faz. Os avisos de
+    /// diferenças entre caixas e de códigos abrem Simultaneidade ›
+    /// Duplicatas: o botão é "Ver duplicatas" (antes: "Resolver no Gerente").
+    /// Nenhum botão fala em "Gerente" sem levar à parte do gerente.
+    #[test]
+    fn notif01_botao_diz_para_onde_leva() {
+        let b = Banco::em_memoria().unwrap();
+        for id in ["conflitos", "codigos", "codigos_bloqueio"] {
+            let a = Aviso::simples(id, "2026-11-05", "Teste".into(), "texto".into(), String::new(), "configuracoes")
+                .secao("duplicatas");
+            let a = completar(&b.conn, a).unwrap();
+            assert_eq!((a.secao.as_str(), a.acao.as_str()), ("duplicatas", "Ver duplicatas"), "{id}");
+        }
+        for id in ["receber", "pagar", "cheques", "encomendas", "oficina", "backup", "backup_nuvem", "referencias",
+                   "outra_loja", "senha.ana", "qualquer"] {
+            let a = Aviso::simples(id, "2026-11-05", "Teste".into(), "texto".into(), String::new(), "configuracoes");
+            let a = completar(&b.conn, a).unwrap();
+            assert!(!a.acao.to_lowercase().contains("gerente") || a.secao == "gerente", "{id}: {}", a.acao);
+        }
+    }
+
     /// dia, ou nunca ter trocado, não avisa.
     #[test]
     fn t07_caixa_sem_contato_ha_um_dia() {

@@ -175,22 +175,26 @@ ApplicationWindow {
         const r = Api.chamar("permissao", { acao: acao, consulta: !!consulta })
         return r.ok && r.dados.pode
     }
-    function comGerente(acao, depois) {
+    // desistiu (opcional): chamada se a pessoa fechar o pedido da senha sem
+    // liberar (Voltar ou Esc). NOTIF-03 (0.9.18).
+    function comGerente(acao, depois, desistiu) {
         if (podeGerente(acao, true)) {
             depois()
             return
         }
         pedirGerente.consultar(acao, nomesDasAcoes[acao] || "", depois)
+        pedirGerente.desistiu = desistiu || null
     }
     // Várias consultas de uma vez (Configurações › Simultaneidade): pede a
     // senha só se faltar alguma.
-    function comGerenteVarias(acoes, oQue, depois) {
+    function comGerenteVarias(acoes, oQue, depois, desistiu) {
         const faltam = acoes.filter(a => !podeGerente(a, true))
         if (faltam.length === 0) {
             depois()
             return
         }
         pedirGerente.consultarVarias(faltam, oQue, depois)
+        pedirGerente.desistiu = desistiu || null
     }
     // O mesmo, para uma função demorada (roda à parte, com a tela de espera).
     // `chave`: a chave da operação da tela (FALHA-04); a mesma vai na

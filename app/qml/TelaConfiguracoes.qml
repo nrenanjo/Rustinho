@@ -207,7 +207,7 @@ FocusScope {
     // ficam ali (configurações da loja, backup e a própria Simultaneidade:
     // duplicatas, histórico e caixas). A pílula Gerente pede a senha dela
     // (FALHA-05, D-09).
-    function entrarSimultaneidade(destino) {
+    function entrarSimultaneidade(destino, desistiu) {
         janela.comGerenteVarias(["configuracoes", "backup", "simultaneidade"], "Simultaneidade", () => {
             const recarregar = !tela.completo || !tela.verSimultaneidade
             tela.completo = true
@@ -217,7 +217,15 @@ FocusScope {
                 carregar()
             carregarHistorico()
             tela.secao = destino
-        })
+        }, desistiu)
+    }
+
+    // NOTIF-03 (0.9.18): a tela foi aberta direto numa parte do gerente (por
+    // uma notificação, por exemplo) e a pessoa desistiu da senha. Ela não
+    // pediu a Loja: volta para onde estava. Só se esta tela ainda é a de cima.
+    function sairSemGerente() {
+        if (tela.StackView.view && tela.StackView.view.currentItem === tela)
+            janela.voltar()
     }
 
     function carregarHistorico() {
@@ -227,16 +235,16 @@ FocusScope {
         auditoria = a.ok ? a.dados : []
     }
 
-    function escolherSecao(id) {
+    function escolherSecao(id, desistiu) {
         if (id === "simultaneidade") {
-            entrarSimultaneidade(ultimaSimultaneidade)
+            entrarSimultaneidade(ultimaSimultaneidade, desistiu)
             return
         }
         if (id === "backup" && !verBackup) {
             janela.comGerente("backup", () => {
                 tela.verBackup = true
                 tela.secao = id
-            })
+            }, desistiu)
             return
         }
         if (id === "gerente" && !verGerente) {
@@ -244,7 +252,7 @@ FocusScope {
                 tela.verGerente = true
                 carregarGerente()
                 tela.secao = id
-            })
+            }, desistiu)
             return
         }
         secao = id
@@ -2056,23 +2064,24 @@ FocusScope {
         carregar()
         // Aberta por uma notificação numa parte que só aparece com a senha do
         // gerente: pede a senha ali mesmo, sem trocar de usuário.
+        // Desistir da senha aqui volta para a tela de antes (NOTIF-03).
         const soComGerente = !["loja", "impressao", "sobre"].includes(secao)
         if (partesSimultaneidade.includes(secao)) {
             const destino = secao
             secao = "loja"
-            entrarSimultaneidade(destino)
+            entrarSimultaneidade(destino, sairSemGerente)
         } else if (soComGerente && !completo) {
             const destino = secao
             secao = "loja"
             janela.comGerente("configuracoes", () => {
                 tela.completo = true
                 carregar()
-                tela.escolherSecao(destino)
-            })
+                tela.escolherSecao(destino, sairSemGerente)
+            }, sairSemGerente)
         } else if (secao === "backup" || secao === "gerente") {
             const destino = secao
             secao = "loja"
-            escolherSecao(destino)
+            escolherSecao(destino, sairSemGerente)
         }
         if (guia)
             comecarGuia()
