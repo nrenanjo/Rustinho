@@ -5226,13 +5226,25 @@ mod testes {
         assert!(m.tarefas.is_empty());
         // Com uma tarefa que não termina: prazo curto devolve "não deu",
         // e a tarefa continua guardada (quem chamou segura a trava do banco).
+        // O anúncio do próprio motor também pode passar de 300 ms (espera
+        // pacote até 1 s); quando as do motor terminam, só a travada fica.
         let mut m = Motor::iniciar(c.clone(), 0, 0);
         let (solta, espera) = std::sync::mpsc::channel::<()>();
-        m.esperar_tambem(thread::spawn(move || {
+        let travada = thread::spawn(move || {
             let _ = espera.recv();
-        }));
+        });
+        let id_travada = travada.thread().id();
+        m.esperar_tambem(travada);
         assert!(!m.encerrar(Duration::from_millis(300)));
-        assert_eq!(m.tarefas.len(), 1);
+        assert!(m.tarefas.iter().any(|t| t.thread().id() == id_travada));
+        let fim = Instant::now() + Duration::from_secs(10);
+        while m.tarefas.iter().filter(|t| !t.is_finished()).count() > 1 && Instant::now() < fim {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!m.encerrar(Duration::from_millis(300)));
+        let vivas: Vec<_> = m.tarefas.iter().map(|t| t.thread().name().map(String::from)).collect();
+        assert_eq!(m.tarefas.len(), 1, "tarefas que ficaram: {vivas:?}");
+        assert_eq!(m.tarefas[0].thread().id(), id_travada);
         solta.send(()).unwrap();
         assert!(m.encerrar(Duration::from_secs(5)));
         drop(lento);
