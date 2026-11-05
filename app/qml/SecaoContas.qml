@@ -304,11 +304,17 @@ FocusScope {
         property string chave: ""
         property string id_: ""
         property string erro: ""
+        // Caso 5 da navegação contextual (0.9.18): aberto pela transferência
+        // sem conta de destino. A transferência fica aberta embaixo, com o que
+        // já foi digitado; ao salvar, volta a ela com a conta nova escolhida
+        // (sem transferir: quem transfere é o clique em "Transferir").
+        property bool paraTransferencia: false
         width: Math.min(520, Tema.largura - 24)
         function abrirCom(c) {
             chave = Api.novaChave()
             id_ = c ? c.id : ""
             erro = ""
+            paraTransferencia = false
             cNome.texto = c ? c.nome : ""
             cTipo.indice = c && c.tipo === "caixa" ? 1 : 0
             cInicial.texto = c ? c.saldoInicial : ""
@@ -316,6 +322,13 @@ FocusScope {
             open()
             cNome.focar()
         }
+        function abrirParaTransferencia() {
+            abrirCom(null)
+            paraTransferencia = true
+        }
+        // Desistir (Cancelar ou Esc) só fecha o cadastro: a transferência
+        // continua aberta, como estava.
+        onClosed: paraTransferencia = false
         function salvar() {
             secao.janela.chamarGerente("conta_loja_salvar", { id: id_, nome: cNome.texto, tipo: cTipo.indice === 1 ? "caixa" : "banco",
                                                         saldoInicial: cInicial.texto, ativo: cAtiva.checked }, r => {
@@ -323,7 +336,14 @@ FocusScope {
                     erro = r.erro
                     return
                 }
+                const destino = paraTransferencia && transferencia.opened
                 close()
+                if (destino) {
+                    // A conta de origem (a escolhida) não muda.
+                    secao.carregar()
+                    transferencia.escolherDestino(r.dados)
+                    return
+                }
                 secao.contaId = r.dados
                 secao.carregar()
             }, cadastro.chave)
@@ -448,6 +468,14 @@ FocusScope {
             open()
             tValor.focar()
         }
+        // Caso 5 (0.9.18): de volta do cadastro da conta nova. O valor, a data
+        // e a observação continuam como estavam; só o destino é escolhido.
+        function escolherDestino(id) {
+            const i = outras.findIndex(c => c.id === id)
+            if (i >= 0)
+                tPara.indice = i
+            tValor.focar()
+        }
         function salvar() {
             const para = outras[tPara.indice]
             secao.janela.chamarGerente("transferir", { de: secao.contaId, para: para ? para.id : "", valor: tValor.texto,
@@ -464,9 +492,20 @@ FocusScope {
             spacing: 12
             Titulo { text: "Transferir de " + (secao.atual ? secao.atual.nome : ""); font.pixelSize: 30; elide: Text.ElideRight; Layout.fillWidth: true }
             Nota {
-                text: transferencia.outras.length === 0 ? "Cadastre outra conta antes (“Nova conta”)." : "Ex.: depósito do dinheiro do cofre no banco."
+                text: transferencia.outras.length === 0
+                      ? "Ainda não há outra conta para receber a transferência. Cadastre a conta de destino: o que você já digitou aqui continua."
+                      : "Ex.: depósito do dinheiro do cofre no banco."
                 font.pixelSize: 14
                 Layout.fillWidth: true
+            }
+            // Caso 5 da navegação contextual: leva ao cadastro sem fechar a
+            // transferência.
+            Botao {
+                visible: transferencia.outras.length === 0
+                text: "Cadastrar conta"
+                icone: "mais"
+                tipo: "secundario"
+                onClicked: cadastro.abrirParaTransferencia()
             }
             Selecao { id: tPara; rotulo: "Para"; modelo: transferencia.outras.map(c => c.nome); Layout.fillWidth: true }
             RowLayout {

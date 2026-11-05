@@ -10,6 +10,10 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      senha do gerente ao caixa; desistir volta; restaurar continua pedindo a
      confirmação e a senha; nenhum backup é apagado; depois de restaurar, vai
      para a entrada (não retoma a operação de antes).
+  5. transferência sem conta de destino: "Cadastrar conta" abre o cadastro
+     por cima da transferência; desistir volta a ela com o que foi digitado;
+     salvar volta com a conta nova escolhida, sem transferir; só o clique em
+     Transferir transfere.
 
 Abre o Rustinho com o ambiente neutro de telas_d09.py (só X11, sem Wayland,
 sem o tema do desktop) e confere, em /proc, que ele está na tela virtual e
@@ -308,7 +312,88 @@ def caso8(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8}
+# ---------------------------------------------------------------------------
+# Caso 5: transferência entre contas sem conta de destino.
+# ---------------------------------------------------------------------------
+def campo_com(r, texto):
+    """O campo (texto mostrado) existe com este conteúdo."""
+    return r.tem_igual(texto)
+
+
+def caso5(placar, fotos):
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav5-")
+    try:
+        montar_loja(pasta)
+        ativas = ler(pasta, "SELECT nome FROM conta_loja WHERE ativo = 1")
+        if len(ativas) > 1:
+            por_fora(pasta, "UPDATE conta_loja SET ativo = 0 WHERE id <> 'caixa-geral'")
+        ok("5: a loja começa com uma conta só", len(ler(pasta, "SELECT 1 FROM conta_loja WHERE ativo = 1")) == 1)
+        movimentos = lambda: ler(pasta, "SELECT COUNT(*) FROM movimento_conta")[0][0]  # noqa: E731
+        antes = movimentos()
+        r = placar.abrir(pasta, "TelaFinanceiro", {"secao": "contas"}, fotos, "5-transferir")
+        try:
+            r.entrar("Ana")
+            r.esperar(lambda: r.tem_igual("Transferir"))
+            pilha = r.pilha()
+            r.clicar("Transferir")
+            f = r.foto("-1")
+            ok("5: sem outra conta, a transferência mostra o botão Cadastrar conta",
+               r.esperar(lambda: r.tem_igual("Cadastrar conta")), f)
+            ok("5: e diz que o que foi digitado continua", r.tem("o que você já digitou aqui continua"), f)
+            ok("5: o botão Transferir fica desligado (não há destino)", r.tem("Transferir de Caixa geral"), f)
+            # O que a pessoa já digitou: valor e observação.
+            r.digitar("123,45")
+            xdo("key", "Tab")
+            xdo("key", "Tab")
+            time.sleep(0.3)
+            r.digitar("Deposito do cofre")
+            time.sleep(0.5)
+            f = r.foto("-2")
+            ok("5: valor e observação digitados", campo_com(r, "123,45") and campo_com(r, "Deposito do cofre"), f)
+            # Desistir do cadastro (Esc): volta à transferência como estava.
+            r.clicar("Cadastrar conta")
+            f = r.foto("-3")
+            ok("5: abre o cadastro da conta nova por cima da transferência",
+               r.esperar(lambda: r.tem("Nova conta da loja")) and r.tem("Transferir de Caixa geral"), f)
+            xdo("key", "Escape")
+            time.sleep(1)
+            f = r.foto("-4")
+            ok("5: desistir do cadastro (Esc) volta à transferência, sem perder nada",
+               not r.tem("Nova conta da loja") and r.tem("Transferir de Caixa geral")
+               and campo_com(r, "123,45") and campo_com(r, "Deposito do cofre"), f)
+            ok("5: nada cadastrado ao desistir", len(ler(pasta, "SELECT 1 FROM conta_loja")) == len(ler(pasta, "SELECT 1 FROM conta_loja WHERE id = 'caixa-geral'")) + max(0, len(ativas) - 1))
+            # Cadastrar de verdade.
+            r.clicar("Cadastrar conta")
+            r.esperar(lambda: r.tem("Nova conta da loja"))
+            time.sleep(0.5)
+            r.digitar("Banco Teste")
+            time.sleep(0.3)
+            r.clicar("Salvar")
+            f = r.foto("-5")
+            ok("5: salvou a conta nova e voltou à transferência",
+               r.esperar(lambda: not r.tem("Nova conta da loja") and r.tem("Transferir de Caixa geral")), f)
+            ok("5: a conta nova já está escolhida como destino", r.tem_igual("Banco Teste"), f)
+            ok("5: valor e observação continuam", campo_com(r, "123,45") and campo_com(r, "Deposito do cofre"), f)
+            ok("5: a origem não mudou (Caixa geral)", r.tem("Transferir de Caixa geral"), f)
+            ok("5: o botão Cadastrar conta sumiu (já há destino)", not r.tem_igual("Cadastrar conta"), f)
+            ok("5: a conta nova está gravada", len(ler(pasta, "SELECT 1 FROM conta_loja WHERE nome = 'Banco Teste'")) == 1)
+            ok("5: nada transferido sozinho depois de cadastrar", movimentos() == antes)
+            ok("5: nenhuma tela empilhada (sem ciclo)", r.pilha() == pilha, f)
+            r.clicar_ultimo("Transferir")
+            f = r.foto("-6")
+            ok("5: só o clique em Transferir transfere",
+               r.esperar(lambda: movimentos() > antes and not r.tem("Transferir de Caixa geral")), f)
+            destino = ler(pasta, "SELECT m.valor FROM movimento_conta m JOIN conta_loja c ON c.id = m.conta_id "
+                                 "WHERE c.nome = 'Banco Teste'")
+            ok("5: R$ 123,45 na conta nova", destino == [(12345,)], str(destino))
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5}
 
 
 def main():
