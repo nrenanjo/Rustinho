@@ -956,6 +956,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         saida.sync_all().map_err(|e| erro_pasta(&a.pasta, e))?;
     }
     std::fs::rename(&parcial, &destino).map_err(|e| erro_pasta(&a.pasta, e))?;
+    gravar_pasta(&a.pasta);
     let tamanho = std::fs::metadata(&destino).map(|m| m.len() as i64).unwrap_or(0);
 
     // 4. Conferir lendo de volta do disco.
@@ -990,6 +991,19 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     }
 
     Ok(Feito { arquivo: destino.display().to_string(), tamanho })
+}
+
+/// Garante que o nome de um arquivo criado ou renomeado na pasta chegou ao
+/// disco (0.9.18): o `sync_all` do arquivo guarda o conteúdo, mas, em vários
+/// sistemas de arquivos, a entrada da pasta só com o da pasta. No Windows a
+/// pasta não abre assim; fica o que o sistema garante.
+fn gravar_pasta(pasta: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(pasta) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = pasta;
 }
 
 fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
@@ -1781,6 +1795,10 @@ impl Pendente {
         crate::arquivos::so_do_usuario(marca, "restauração");
         f.write_all(serde_json::to_string(self)?.as_bytes()).map_err(erro)?;
         f.sync_all().map_err(erro)?;
+        // A marca tem de existir no disco antes de o banco ser trocado.
+        if let Some(pasta) = marca.parent() {
+            gravar_pasta(pasta);
+        }
         Ok(())
     }
 
