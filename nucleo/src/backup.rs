@@ -1442,9 +1442,38 @@ pub fn apagar_no_drive(la: &[String], minhas: &[String], hoje: &str, dias: i64) 
     para_apagar(&minhas_la, hoje, dias)
 }
 
+/// Tamanho e resumo MD5 de um arquivo, pelo rclone (D3, 0.9.18): no
+/// computador, o rclone lê o arquivo; no Google Drive, é o resumo que o
+/// próprio Drive calculou do que guardou.
+fn tamanho_e_md5(caminho: &str) -> Resultado<(i64, String)> {
+    let saida = rclone(
+        &["lsf", "--files-only", "--format", "sh", "--hash", "MD5", "--separator", "|", caminho],
+        Duration::from_secs(600),
+    )?;
+    saida
+        .lines()
+        .find_map(|l| {
+            let (t, h) = l.split_once('|')?;
+            Some((t.trim().parse().ok()?, h.trim().to_ascii_lowercase()))
+        })
+        .ok_or_else(|| Erro::validacao("Não deu para conferir a cópia no Google Drive."))
+}
+
+/// Configuração local com a última cópia conferida no Drive (D3, 0.9.18):
+/// nome, tamanho, MD5 e quando. Como `ENVIADAS_AO_DRIVE`, é deste computador.
+const CONFERIDA_NO_DRIVE: &str = "backup_nuvem_confirmada";
+
 /// Manda para o Drive a cópia mais nova que ainda não está lá e apaga as
 /// antigas de lá que este computador mandou. Só cópias com senha vão para a
 /// nuvem.
+///
+/// D3 (aprovada em 24/10/2026): a cópia só conta como guardada depois de o
+/// Rustinho conferir a que ficou lá — o tamanho e o MD5 (calculado pelo
+/// Drive) iguais aos da cópia daqui — e anotar a conferência. Uma cópia com
+/// o mesmo nome e outro conteúdo (um envio que parou no meio, uma cópia
+/// estragada) é mandada de novo. Sem a conferência, nada conta: fica o erro
+/// na tela, a hora do último envio não muda e as cópias antigas de lá não
+/// são apagadas.
 fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
     let a = ajustes(conn, Some(caminho_db))?;
     if !a.nuvem {
@@ -1458,23 +1487,53 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
                 "Um gerente precisa entrar no Rustinho antes: sem a chave da loja nada vai para o Google Drive.",
             ));
         }
+        let daqui = tamanho_e_md5(&c.caminho)?;
+        let remoto = format!("{}/{}", base_nuvem(), c.nome);
         let la = nomes_na_nuvem()?;
-        if !la.iter().any(|(n, _)| *n == c.nome) {
+        let mut minhas = enviadas_ao_drive(conn)?;
+        let enviar = || -> Resultado<()> {
             dizer("Enviando para o Google Drive…");
-            rclone(
-                &["copyto", "--retries", "3", &c.caminho, &format!("{}/{}", base_nuvem(), c.nome)],
-                Duration::from_secs(1800),
-            )?;
+            // Pelo resumo (não pela data): uma cópia de lá com o mesmo
+            // tamanho e a mesma data, mas estragada, também é trocada.
+            rclone(&["copyto", "--checksum", "--retries", "3", &c.caminho, &remoto], Duration::from_secs(1800))
+                .map(|_| ())
+        };
+        // Lá só com o mesmo nome e o mesmo tamanho não precisa mandar agora;
+        // a conferência abaixo decide se é a mesma cópia.
+        let mut enviou = false;
+        if !la.iter().any(|(n, t)| *n == c.nome && *t == daqui.0) {
+            enviar()?;
+            enviou = true;
         }
+        // A de lá, pelo que o próprio Drive diz dela (falta de internet aqui
+        // é erro, não "diferente").
+        let conferir = || -> Resultado<bool> { Ok(!daqui.1.is_empty() && tamanho_e_md5(&remoto)? == daqui) };
+        let mut conferida = conferir()?;
+        if !conferida && !enviou {
+            enviar()?;
+            conferida = conferir()?;
+        }
+        // Mandada por este computador (conferida ou não): é dele para a
+        // retenção apagar um dia.
+        if !minhas.contains(&c.nome) {
+            minhas.push(c.nome.clone());
+        }
+        if !conferida {
+            config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
+            return Err(Erro::validacao(
+                "A cópia no Google Drive não confere com a deste computador (tamanho ou conteúdo diferente): ela \
+                 não conta como guardada. O Rustinho manda de novo no próximo envio.",
+            ));
+        }
+        config::gravar(
+            conn,
+            CONFERIDA_NO_DRIVE,
+            &json!({ "nome": c.nome, "tamanho": daqui.0, "md5": daqui.1, "quando": tempo::agora() }).to_string(),
+        )?;
         let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
         let mut nomes: Vec<String> = la.into_iter().map(|x| x.0).collect();
         if !nomes.contains(&c.nome) {
             nomes.push(c.nome.clone());
-        }
-        // A cópia mais nova daqui é deste computador (mandada agora ou antes).
-        let mut minhas = enviadas_ao_drive(conn)?;
-        if !minhas.contains(&c.nome) {
-            minhas.push(c.nome.clone());
         }
         for velho in apagar_no_drive(&nomes, &minhas, &hoje, a.dias) {
             // Se não deu para apagar agora, continua na lista: tenta de novo
@@ -2456,6 +2515,112 @@ pub(crate) mod testes {
         let lista = enviadas_ao_drive(&b.conn).unwrap();
         assert_eq!(lista.len(), 3, "{lista:?}");
         assert!(lista.iter().all(|n| ficaram.contains(n)));
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Loja de teste com a cópia no "Drive" (uma pasta comum, pelo rclone):
+    /// gerente Ana (chave da loja criada), envio ligado, `dias` de retenção.
+    fn loja_com_drive(nome: &str, dias: i64) -> (PathBuf, PathBuf, PathBuf, Banco) {
+        let pasta = pasta_teste(nome);
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Loja D3").unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", &dias.to_string()).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        (pasta, nuvem, caminho, b)
+    }
+
+    /// D3 (aprovada em 24/10): a cópia no Drive só conta como guardada depois
+    /// de o Rustinho conferir a de lá (tamanho e MD5 iguais aos da daqui) e
+    /// anotar a conferência. Lá já havia um arquivo com o mesmo nome e outro
+    /// conteúdo (um envio que parou no meio; uma cópia estragada): antes, o
+    /// nome igual bastava, nada era enviado e a cópia ruim contava como feita.
+    #[test]
+    fn d3_copia_ruim_no_drive_e_enviada_de_novo_e_conferida() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let (pasta, nuvem, caminho, b) = loja_com_drive("d3-ruim", 30);
+        let feito = fazer(&caminho, false).unwrap();
+        let nome = Path::new(&feito.arquivo).file_name().unwrap().to_string_lossy().to_string();
+        let certo = std::fs::read(&feito.arquivo).unwrap();
+        // 1. Metade do arquivo (envio que parou no meio).
+        std::fs::write(nuvem.join(&nome), &certo[..certo.len() / 2]).unwrap();
+        let r = enviar_pendentes(&b.conn, &caminho);
+        let la = std::fs::read(nuvem.join(&nome)).unwrap();
+        assert!(r.is_ok(), "{r:?}");
+        assert!(la == certo, "a cópia pela metade no Drive contou como guardada");
+        let confirmada = config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().unwrap_or_default();
+        assert!(confirmada.contains(&nome), "a conferência foi anotada: {confirmada}");
+        // 2. Mesmo tamanho, um byte trocado (cópia estragada lá).
+        let mut ruim = certo.clone();
+        let fim = ruim.len() - 1;
+        ruim[fim] ^= 1;
+        std::fs::write(nuvem.join(&nome), &ruim).unwrap();
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        assert!(std::fs::read(nuvem.join(&nome)).unwrap() == certo, "a cópia estragada no Drive contou como guardada");
+        assert!(situacao(&b.conn).unwrap().nuvem_erro.is_empty());
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// D3: o rclone diz que enviou, mas a cópia que ficou lá é menor (envio
+    /// cortado). Não conta como guardada: fica o erro na tela, a hora do
+    /// último envio não muda, a conferência não é anotada e as cópias antigas
+    /// deste computador que estão lá NÃO são apagadas (só depois de uma nova
+    /// conferida).
+    #[cfg(unix)]
+    #[test]
+    fn d3_envio_cortado_nao_conta_como_guardado() {
+        use std::os::unix::fs::PermissionsExt;
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let (pasta, nuvem, caminho, b) = loja_com_drive("d3-cortado", 7);
+        let antigas: Vec<String> = (1..=5).map(|d| format!("rustinho-202601{d:02}-180000-caixa1.{EXTENSAO}")).collect();
+        for n in &antigas {
+            std::fs::write(nuvem.join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_AO_DRIVE, &antigas.join("\n")).unwrap();
+        // "copyto ... ORIGEM DESTINO": envia e corta o que ficou lá (o
+        // destino é o último argumento).
+        let cortador = pasta.join("rclone-cortado.sh");
+        std::fs::write(
+            &cortador,
+            "#!/bin/sh\nif [ \"$1\" = copyto ]; then rclone \"$@\" || exit $?; for a; do d=$a; done; \
+             truncate -s 100 \"$d\"; exit 0; fi\nexec rclone \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&cortador, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fazer(&caminho, false).unwrap();
+        std::env::set_var("RUSTINHO_RCLONE", cortador.display().to_string());
+        let r = enviar_pendentes(&b.conn, &caminho);
+        std::env::remove_var("RUSTINHO_RCLONE");
+        let s = situacao(&b.conn).unwrap();
+        assert!(r.is_err(), "o envio cortado contou como guardado");
+        assert!(!s.nuvem_erro.is_empty(), "o erro aparece na tela");
+        assert!(s.nuvem_ultimo.is_empty(), "a hora do último envio não muda");
+        assert!(config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().is_none());
+        for n in &antigas {
+            assert!(nuvem.join(n).exists(), "apagou uma cópia antiga sem ter a nova conferida: {n}");
+        }
+        // Com o envio normal de novo, a nova é conferida e as antigas saem.
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        assert!(config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().is_some());
+        assert!(!situacao(&b.conn).unwrap().nuvem_ultimo.is_empty());
+        assert!(antigas.iter().filter(|n| nuvem.join(n).exists()).count() < antigas.len());
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
     }
