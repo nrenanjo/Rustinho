@@ -681,9 +681,11 @@ def main():
     if not os.path.exists(PROGRAMA):
         sys.exit(f"compile antes: cargo build -p rustinho ({PROGRAMA})")
     # Só telas virtuais conhecidas (0.9.18: também :91 a :93, as das frentes
-    # do visual); nunca a área de trabalho de verdade.
-    if TELA not in (":88", ":89", ":91", ":92", ":93"):
-        sys.exit(f"use RUSTINHO_TELA=:88, :89, :91, :92 ou :93 (pedida: {TELA})")
+    # do visual, e :60 a :74, as reservadas às frentes de trabalho); nunca a
+    # área de trabalho de verdade.
+    aceitas = [":88", ":89", ":91", ":92", ":93"] + [f":{n}" for n in range(60, 75)]
+    if TELA not in aceitas:
+        sys.exit(f"use RUSTINHO_TELA=:88, :89, :91 a :93 ou :60 a :74 (pedida: {TELA})")
     args = [a for a in sys.argv[1:]]
     escolhidos = list(CASOS)
     if "--casos" in args:
