@@ -1,0 +1,960 @@
+//! Quem pode depender de quem (modularização, etapa 0).
+//!
+//! Lê os fontes do núcleo seguindo as declarações `mod` a partir do
+//! `nucleo/src/lib.rs` (com `#[path]` e `include!`), monta o grafo entre os
+//! módulos de primeiro nível pelas referências `crate::modulo` e
+//! `super::modulo` (inclusive em grupos: `use crate::{a::X, b}`) e separa o
+//! código de produção do código de teste: módulos declarados sob
+//! `#[cfg(test)]`, itens e trechos sob `#[cfg(test)]` e o recurso
+//! `ancoras-de-teste`, que só os testes ligam.
+//!
+//! Os ciclos de produção que já existiam ficam REGISTRADOS em
+//! [`SETAS_EM_CICLO`]: cada entrada é uma seta `de → para` que está dentro de
+//! um ciclo. O teste falha se aparecer uma seta nova dentro de um ciclo
+//! (dependência circular nova) e também se uma seta registrada deixar de estar
+//! em ciclo: aí ela tem de sair da lista, para o ciclo não poder voltar. Cada
+//! etapa da modularização tira da lista os ciclos que desfez.
+//!
+//! Para ver o grafo inteiro (setas, contagens, componentes e pares):
+//! `RUSTINHO_DEPENDENCIAS_MOSTRAR=1 cargo test -p rustinho-nucleo --test dependencias -- --nocapture`.
+//!
+//! Sem dependências novas: um leitor de fontes simples (comentários, textos,
+//! textos crus, caracteres e tempos de vida) basta para achar os caminhos; os
+//! testes `leitor_*` do fim do arquivo conferem o leitor.
+
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::{Path, PathBuf};
+
+/// Setas de produção que já estavam dentro de um ciclo no commit `f4ddbb5`
+/// (base da etapa 0). Formato: módulo de origem e os destinos que fecham ciclo.
+/// Uma etapa que desfaz um ciclo tira as setas dele daqui; nunca se acrescenta
+/// uma seta (isso seria aceitar um ciclo novo).
+#[rustfmt::skip]
+const SETAS_EM_CICLO: &[(&str, &[&str])] = &[
+    ("api", &["arquivos", "avisos", "backup", "banco", "busca", "caixa", "cheques", "comissoes", "compras", "devolucoes", "dre", "encomendas", "etiquetas", "faixas", "financeiro", "importar", "impressao", "loja", "oficina", "pagar", "painel", "pessoas", "portatil", "produtos", "receber", "registro", "reposicao", "supervisao", "sync", "vendas"]),
+    ("arquivos", &["registro"]),
+    ("avisos", &["backup", "banco", "cheques", "encomendas", "faixas", "loja", "pagar", "supervisao", "sync"]),
+    ("backup", &["api", "arquivos", "banco", "loja", "portatil", "registro", "sync"]),
+    ("banco", &["backup", "faixas", "loja", "migracao", "portatil", "registro", "sync"]),
+    ("busca", &["produtos"]),
+    ("caixa", &["devolucoes", "receber"]),
+    ("caminhos", &["registro", "sync"]),
+    ("cheques", &["receber", "sync"]),
+    ("comissoes", &["pagar"]),
+    ("compras", &["encomendas", "nfe_xml", "pagar", "pessoas", "produtos", "sync"]),
+    ("devolucoes", &["caixa", "sync"]),
+    ("dre", &["impressao", "receber"]),
+    ("encomendas", &["receber"]),
+    ("etiquetas", &["faixas"]),
+    ("faixas", &["arquivos", "pessoas", "produtos", "registro", "sync"]),
+    ("financeiro", &["pagar", "receber", "sync"]),
+    ("importar", &["arquivos", "nfe_xml", "pessoas", "produtos"]),
+    ("impressao", &["caixa", "dre", "oficina", "receber", "reposicao", "vendas"]),
+    ("loja", &["banco", "faixas", "registro", "sync"]),
+    ("migracao", &["banco", "registro"]),
+    ("nfe_xml", &["pessoas"]),
+    ("oficina", &["sync", "vendas"]),
+    ("pagar", &["caixa", "nfe_xml", "receber", "sync"]),
+    ("painel", &["caixa", "devolucoes", "dre", "pagar", "receber"]),
+    ("pessoas", &["faixas"]),
+    ("portatil", &["sync"]),
+    ("produtos", &["faixas"]),
+    ("receber", &["caixa", "cheques", "sync", "vendas"]),
+    ("registro", &["api", "arquivos"]),
+    ("reposicao", &["encomendas", "impressao", "receber"]),
+    ("supervisao", &["registro"]),
+    ("sync", &["banco", "caminhos", "faixas", "loja", "portatil", "registro", "supervisao"]),
+    ("vendas", &["caixa", "cheques", "devolucoes", "encomendas", "oficina", "produtos", "receber"]),
+];
+
+fn raiz() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+
+// ---------------------------------------------------------------- leitor
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tipo {
+    Nome,
+    Simbolo,
+    Texto,
+    Outro,
+}
+
+#[derive(Clone, Debug)]
+struct Token {
+    tipo: Tipo,
+    texto: String,
+    linha: usize,
+}
+
+fn letra(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Divide o fonte em nomes, símbolos (`::` junto) e textos; comentários somem.
+fn tokens(fonte: &str, onde: &str) -> Vec<Token> {
+    let c: Vec<char> = fonte.chars().collect();
+    let n = c.len();
+    let em = |k: usize| if k < n { c[k] } else { '\0' };
+    let mut v = Vec::new();
+    let mut i = 0;
+    let mut linha = 1;
+    while i < n {
+        let ch = c[i];
+        let linha_do_token = linha;
+        let mut por = |tipo: Tipo, texto: String| v.push(Token { tipo, texto, linha: linha_do_token });
+        if ch == '\n' {
+            linha += 1;
+            i += 1;
+            continue;
+        }
+        if ch.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if ch == '/' && em(i + 1) == '/' {
+            while i < n && c[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if ch == '/' && em(i + 1) == '*' {
+            let mut nivel = 0;
+            while i < n {
+                if c[i] == '/' && em(i + 1) == '*' {
+                    nivel += 1;
+                    i += 2;
+                } else if c[i] == '*' && em(i + 1) == '/' {
+                    nivel -= 1;
+                    i += 2;
+                    if nivel == 0 {
+                        break;
+                    }
+                } else {
+                    if c[i] == '\n' {
+                        linha += 1;
+                    }
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        // Texto cru: r"…", r#"…"#, br"…", cr#"…"#.
+        let cru = match ch {
+            'r' => Some(i + 1),
+            'b' | 'c' if em(i + 1) == 'r' => Some(i + 2),
+            _ => None,
+        };
+        if let Some(mut j) = cru {
+            let mut cercas = 0;
+            while em(j) == '#' {
+                cercas += 1;
+                j += 1;
+            }
+            if em(j) == '"' {
+                j += 1;
+                let comeco = j;
+                loop {
+                    assert!(j < n, "{onde}:{linha_do_token}: texto cru sem fim");
+                    if c[j] == '"' && (0..cercas).all(|k| em(j + 1 + k) == '#') {
+                        break;
+                    }
+                    if c[j] == '\n' {
+                        linha += 1;
+                    }
+                    j += 1;
+                }
+                por(Tipo::Texto, c[comeco..j].iter().collect());
+                i = j + 1 + cercas;
+                continue;
+            }
+        }
+        // Texto: "…", b"…", c"…".
+        let aspas = match ch {
+            '"' => Some(i),
+            'b' | 'c' if em(i + 1) == '"' => Some(i + 1),
+            _ => None,
+        };
+        if let Some(a) = aspas {
+            let mut j = a + 1;
+            while j < n && c[j] != '"' {
+                if c[j] == '\\' {
+                    j += 1;
+                }
+                if j < n && c[j] == '\n' {
+                    linha += 1;
+                }
+                j += 1;
+            }
+            assert!(j < n, "{onde}:{linha_do_token}: texto sem fim");
+            por(Tipo::Texto, c[a + 1..j].iter().collect());
+            i = j + 1;
+            continue;
+        }
+        // Caractere ('a', '\n', '\'', b'x') ou tempo de vida ('a, 'static).
+        let apostrofo = match ch {
+            '\'' => Some(i),
+            'b' if em(i + 1) == '\'' => Some(i + 1),
+            _ => None,
+        };
+        if let Some(a) = apostrofo {
+            if em(a + 1) == '\\' {
+                let mut j = a + 3;
+                while j < n && c[j] != '\'' {
+                    j += 1;
+                }
+                i = j + 1;
+            } else if em(a + 2) == '\'' {
+                i = a + 3;
+            } else {
+                let mut j = a + 1;
+                while j < n && letra(c[j]) {
+                    j += 1;
+                }
+                i = j;
+            }
+            por(Tipo::Outro, String::new());
+            continue;
+        }
+        if letra(ch) {
+            let mut j = i;
+            while j < n && letra(c[j]) {
+                j += 1;
+            }
+            let tipo = if ch.is_ascii_digit() { Tipo::Outro } else { Tipo::Nome };
+            por(tipo, c[i..j].iter().collect());
+            i = j;
+            continue;
+        }
+        if ch == ':' && em(i + 1) == ':' {
+            por(Tipo::Simbolo, "::".into());
+            i += 2;
+            continue;
+        }
+        por(Tipo::Simbolo, ch.to_string());
+        i += 1;
+    }
+    v
+}
+
+/// Para cada `(`, `[` e `{`, onde ele fecha (e vice-versa).
+fn pares(t: &[Token], onde: &str) -> Vec<usize> {
+    let mut par = vec![usize::MAX; t.len()];
+    let mut pilha: Vec<usize> = Vec::new();
+    for (i, k) in t.iter().enumerate() {
+        if k.tipo != Tipo::Simbolo {
+            continue;
+        }
+        let fecha = match k.texto.as_str() {
+            "(" | "[" | "{" => {
+                pilha.push(i);
+                continue;
+            }
+            ")" => "(",
+            "]" => "[",
+            "}" => "{",
+            _ => continue,
+        };
+        let a = pilha.pop().unwrap_or_else(|| panic!("{onde}:{}: '{}' sem abrir", k.linha, k.texto));
+        assert_eq!(t[a].texto, fecha, "{onde}: '{}' da linha {} fechado na linha {}", t[a].texto, t[a].linha, k.linha);
+        par[a] = i;
+        par[i] = a;
+    }
+    if let Some(&a) = pilha.last() {
+        panic!("{onde}:{}: '{}' sem fechar", t[a].linha, t[a].texto);
+    }
+    par
+}
+
+fn simbolo(t: &[Token], k: usize, s: &str) -> bool {
+    t.get(k).is_some_and(|x| x.tipo == Tipo::Simbolo && x.texto == s)
+}
+
+fn nome(t: &[Token], k: usize, s: &str) -> bool {
+    t.get(k).is_some_and(|x| x.tipo == Tipo::Nome && x.texto == s)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tri {
+    Sim,
+    Nao,
+    Talvez,
+}
+
+/// Avalia um predicado de `cfg` sem saber a plataforma: `test` e o recurso
+/// `ancoras-de-teste` valem "não"; o resto (windows, unix, target_os…) "talvez".
+fn predicado(t: &[Token], p: &mut usize, onde: &str) -> Tri {
+    let rotulo = t[*p].texto.clone();
+    *p += 1;
+    if simbolo(t, *p, "(") {
+        *p += 1;
+        let mut itens = Vec::new();
+        while !simbolo(t, *p, ")") {
+            itens.push(predicado(t, p, onde));
+            if simbolo(t, *p, ",") {
+                *p += 1;
+            }
+        }
+        *p += 1;
+        match rotulo.as_str() {
+            "any" if itens.contains(&Tri::Sim) => Tri::Sim,
+            "any" if itens.iter().all(|x| *x == Tri::Nao) => Tri::Nao,
+            "all" if itens.contains(&Tri::Nao) => Tri::Nao,
+            "all" if itens.iter().all(|x| *x == Tri::Sim) => Tri::Sim,
+            "any" | "all" => Tri::Talvez,
+            "not" => match itens.first() {
+                Some(Tri::Sim) => Tri::Nao,
+                Some(Tri::Nao) => Tri::Sim,
+                _ => Tri::Talvez,
+            },
+            outro => panic!("{onde}: cfg({outro}…) desconhecido; ensine o leitor"),
+        }
+    } else if simbolo(t, *p, "=") {
+        let valor = t[*p + 1].texto.clone();
+        *p += 2;
+        if rotulo == "feature" && valor == "ancoras-de-teste" {
+            Tri::Nao
+        } else {
+            Tri::Talvez
+        }
+    } else if rotulo == "test" {
+        Tri::Nao
+    } else {
+        Tri::Talvez
+    }
+}
+
+/// Onde termina o item (ou a instrução) que começa em `inicio`: no `;`, no fim
+/// do bloco `{…}` (a não ser que siga `else`, `.` ou `?`), na vírgula de um
+/// braço de `match`, ou antes do fechamento do grupo de fora.
+fn extensao(t: &[Token], par: &[usize], inicio: usize) -> usize {
+    let mut j = inicio;
+    let mut braco = false;
+    while j < t.len() {
+        if t[j].tipo == Tipo::Simbolo {
+            match t[j].texto.as_str() {
+                "(" | "[" => {
+                    j = par[j] + 1;
+                    continue;
+                }
+                "{" => {
+                    j = par[j] + 1;
+                    if nome(t, j, "else") || simbolo(t, j, ".") || simbolo(t, j, "?") {
+                        continue;
+                    }
+                    return j;
+                }
+                ";" => return j + 1,
+                "," if braco => return j + 1,
+                ")" | "]" | "}" => return j,
+                "=" if simbolo(t, j + 1, ">") => {
+                    braco = true;
+                    j += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        j += 1;
+    }
+    t.len()
+}
+
+/// Os primeiros nomes depois de `crate::` (ou de `super::` até a raiz):
+/// `crate::a::X` dá `a`; `crate::{a::X, b}` dá `a` e `b`.
+fn alvos(t: &[Token], par: &[usize], j: usize) -> Vec<String> {
+    if t.get(j).is_some_and(|x| x.tipo == Tipo::Nome) {
+        return vec![t[j].texto.clone()];
+    }
+    if !simbolo(t, j, "{") {
+        return vec!["?".into()];
+    }
+    let mut v = Vec::new();
+    let mut k = j + 1;
+    let mut comeco = true;
+    while k < par[j] {
+        if comeco {
+            match t[k].tipo {
+                Tipo::Nome if t[k].texto != "self" => v.push(t[k].texto.clone()),
+                Tipo::Nome => {}
+                _ => v.push("?".into()),
+            }
+            comeco = false;
+        }
+        if simbolo(t, k, "(") || simbolo(t, k, "[") || simbolo(t, k, "{") {
+            k = par[k];
+        } else if simbolo(t, k, ",") {
+            comeco = true;
+        }
+        k += 1;
+    }
+    v
+}
+
+#[derive(Debug)]
+struct Referencia {
+    /// Caminho do módulo de onde sai a referência (vazio = raiz da crate).
+    de: Vec<String>,
+    alvo: String,
+    teste: bool,
+    linha: usize,
+}
+
+#[derive(Debug)]
+struct Declaracao {
+    caminho: Vec<String>,
+    arquivo: Option<String>,
+    teste: bool,
+}
+
+#[derive(Debug)]
+struct Inclusao {
+    arquivo: String,
+    caminho: Vec<String>,
+    teste: bool,
+}
+
+#[derive(Debug, Default)]
+struct Analise {
+    refs: Vec<Referencia>,
+    mods: Vec<Declaracao>,
+    inclusoes: Vec<Inclusao>,
+}
+
+/// Lê um arquivo que está no módulo `base`; `teste_inicial` quando o arquivo
+/// inteiro é de teste.
+fn analisar(fonte: &str, onde: &str, base: &[String], teste_inicial: bool) -> Analise {
+    let t = tokens(fonte, onde);
+    let par = pares(&t, onde);
+    let n = t.len();
+    let mut a = Analise::default();
+    let mut fim_teste = if teste_inicial { usize::MAX } else { 0 };
+    let mut blocos: Vec<(String, usize)> = Vec::new();
+    let mut arquivo_pendente: Option<String> = None;
+    let mut i = 0;
+    while i < n {
+        while blocos.last().is_some_and(|b| i > b.1) {
+            blocos.pop();
+        }
+        let caminho: Vec<String> = base.iter().cloned().chain(blocos.iter().map(|b| b.0.clone())).collect();
+        let teste = i < fim_teste;
+        if simbolo(&t, i, "#") && (simbolo(&t, i + 1, "[") || (simbolo(&t, i + 1, "!") && simbolo(&t, i + 2, "["))) {
+            let interno = simbolo(&t, i + 1, "!");
+            let abre = if interno { i + 2 } else { i + 1 };
+            let fecha = par[abre];
+            let corpo = &t[abre + 1..fecha];
+            if nome(corpo, 0, "cfg") && simbolo(corpo, 1, "(") {
+                let mut p = 2;
+                if predicado(corpo, &mut p, onde) == Tri::Nao {
+                    let fim = if interno {
+                        blocos.last().map_or(n, |b| b.1)
+                    } else {
+                        let mut s = fecha + 1;
+                        while simbolo(&t, s, "#") && simbolo(&t, s + 1, "[") {
+                            s = par[s + 1] + 1;
+                        }
+                        extensao(&t, &par, s)
+                    };
+                    fim_teste = fim_teste.max(fim);
+                }
+            } else if nome(corpo, 0, "path")
+                && simbolo(corpo, 1, "=")
+                && corpo.get(2).is_some_and(|x| x.tipo == Tipo::Texto)
+            {
+                arquivo_pendente = Some(corpo[2].texto.clone());
+            }
+            i = fecha + 1;
+            continue;
+        }
+        if nome(&t, i, "mod") && t.get(i + 1).is_some_and(|x| x.tipo == Tipo::Nome) {
+            let m = t[i + 1].texto.clone();
+            if simbolo(&t, i + 2, ";") {
+                let mut c = caminho.clone();
+                c.push(m);
+                a.mods.push(Declaracao { caminho: c, arquivo: arquivo_pendente.take(), teste });
+                i += 3;
+                continue;
+            }
+            if simbolo(&t, i + 2, "{") {
+                blocos.push((m, par[i + 2]));
+                arquivo_pendente = None;
+                i += 3;
+                continue;
+            }
+        }
+        if nome(&t, i, "include")
+            && simbolo(&t, i + 1, "!")
+            && simbolo(&t, i + 2, "(")
+            && t.get(i + 3).is_some_and(|x| x.tipo == Tipo::Texto)
+            && simbolo(&t, i + 4, ")")
+        {
+            a.inclusoes.push(Inclusao { arquivo: t[i + 3].texto.clone(), caminho, teste });
+            i += 5;
+            continue;
+        }
+        if nome(&t, i, "crate") && simbolo(&t, i + 1, "::") && !(i > 0 && simbolo(&t, i - 1, "$")) {
+            for alvo in alvos(&t, &par, i + 2) {
+                a.refs.push(Referencia { de: caminho.clone(), alvo, teste, linha: t[i].linha });
+            }
+            i += 2;
+            continue;
+        }
+        if nome(&t, i, "super") && simbolo(&t, i + 1, "::") && !(i > 0 && simbolo(&t, i - 1, "::")) {
+            let mut subidas = 0;
+            let mut j = i;
+            while nome(&t, j, "super") && simbolo(&t, j + 1, "::") {
+                subidas += 1;
+                j += 2;
+            }
+            assert!(subidas <= caminho.len(), "{onde}:{}: super:: acima da raiz", t[i].linha);
+            if subidas == caminho.len() {
+                for alvo in alvos(&t, &par, j) {
+                    a.refs.push(Referencia { de: caminho.clone(), alvo, teste, linha: t[i].linha });
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    a
+}
+
+/// Os nomes que o `lib.rs` reexporta e de onde vêm (`pub use erro::{Erro,
+/// Resultado};` dá Erro → erro e Resultado → erro).
+fn reexportes(fonte: &str, onde: &str) -> BTreeMap<String, String> {
+    fn nomes(t: &[Token], par: &[usize], de: usize, ate: usize, v: &mut Vec<String>) {
+        if ate > de && simbolo(t, ate - 1, "}") {
+            let abre = par[ate - 1];
+            let mut comeco = abre + 1;
+            let mut k = abre + 1;
+            while k < ate {
+                if simbolo(t, k, "{") {
+                    k = par[k];
+                } else if simbolo(t, k, ",") || k == ate - 1 {
+                    nomes(t, par, comeco, k, v);
+                    comeco = k + 1;
+                }
+                k += 1;
+            }
+        } else if let Some(x) = t[de..ate].iter().rev().find(|x| x.tipo == Tipo::Nome && x.texto != "self") {
+            v.push(x.texto.clone());
+        }
+    }
+    let t = tokens(fonte, onde);
+    let par = pares(&t, onde);
+    let mut mapa = BTreeMap::new();
+    let mut i = 0;
+    while i < t.len() {
+        if nome(&t, i, "pub") && nome(&t, i + 1, "use") {
+            let fim = (i..t.len()).find(|&k| simbolo(&t, k, ";")).unwrap();
+            let mut k = i + 2;
+            if nome(&t, k, "crate") || nome(&t, k, "self") {
+                k += 2;
+            }
+            let origem = t[k].texto.clone();
+            let mut v = Vec::new();
+            nomes(&t, &par, k + 1, fim, &mut v);
+            for x in v {
+                mapa.insert(x, origem.clone());
+            }
+            i = fim;
+        }
+        i += 1;
+    }
+    mapa
+}
+
+// ----------------------------------------------------------------- grafo
+
+#[derive(Debug, Default)]
+struct Grafo {
+    /// Módulos de primeiro nível e se são só de teste.
+    modulos: BTreeMap<String, bool>,
+    /// Setas entre módulos de primeiro nível, com quantas referências.
+    producao: BTreeMap<(String, String), usize>,
+    teste: BTreeMap<(String, String), usize>,
+    /// Setas para nomes que o `lib.rs` reexporta de outra crate.
+    externas: BTreeMap<(String, String), usize>,
+    /// Primeiro lugar de cada seta de produção (para as mensagens).
+    exemplo: BTreeMap<(String, String), String>,
+    /// Problemas de leitura (o teste falha se houver).
+    problemas: Vec<String>,
+}
+
+fn ler_crate(src: &Path) -> Grafo {
+    let ler = |p: &Path| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+    let lib = src.join("lib.rs");
+    let reexp = reexportes(&ler(&lib), &lib.display().to_string());
+    let mut g = Grafo::default();
+    let mut lidos = BTreeSet::new();
+    let mut refs: Vec<(Referencia, String)> = Vec::new();
+    let mut fila: VecDeque<(PathBuf, Vec<String>, bool)> = VecDeque::from([(lib.clone(), Vec::new(), false)]);
+    while let Some((arq, caminho, teste)) = fila.pop_front() {
+        let real = arq.canonicalize().unwrap_or_else(|e| panic!("{}: {e}", arq.display()));
+        if !lidos.insert(real) {
+            continue;
+        }
+        let onde = arq.strip_prefix(src).unwrap_or(&arq).display().to_string();
+        let a = analisar(&ler(&arq), &onde, &caminho, teste);
+        let pasta = arq.parent().unwrap().to_path_buf();
+        let haste = arq.file_stem().unwrap().to_string_lossy().to_string();
+        let filhos = if ["lib", "mod", "main"].contains(&haste.as_str()) { pasta.clone() } else { pasta.join(&haste) };
+        for d in a.mods {
+            let m = d.caminho.last().unwrap().clone();
+            if d.caminho.len() == 1 {
+                g.modulos.insert(m.clone(), d.teste);
+            }
+            let arquivo = match d.arquivo {
+                Some(p) => pasta.join(p),
+                None => {
+                    let mut base = filhos.clone();
+                    for b in &d.caminho[caminho.len()..d.caminho.len() - 1] {
+                        base.push(b);
+                    }
+                    let plano = base.join(format!("{m}.rs"));
+                    if plano.exists() {
+                        plano
+                    } else {
+                        base.join(&m).join("mod.rs")
+                    }
+                }
+            };
+            fila.push_back((arquivo, d.caminho, d.teste));
+        }
+        for inc in a.inclusoes {
+            fila.push_back((pasta.join(&inc.arquivo), inc.caminho, inc.teste));
+        }
+        refs.extend(a.refs.into_iter().map(|r| (r, onde.clone())));
+    }
+    // Todo arquivo .rs da pasta tem de ter sido lido (senão o leitor perdeu algum).
+    let mut pendentes = vec![src.to_path_buf()];
+    while let Some(p) = pendentes.pop() {
+        for item in std::fs::read_dir(&p).unwrap() {
+            let c = item.unwrap().path();
+            if c.is_dir() {
+                pendentes.push(c);
+            } else if c.extension().is_some_and(|e| e == "rs") && !lidos.contains(&c.canonicalize().unwrap()) {
+                g.problemas.push(format!("arquivo não alcançado pelas declarações mod: {}", c.display()));
+            }
+        }
+    }
+    for (r, onde) in refs {
+        let Some(de) = r.de.first().cloned() else { continue };
+        let so_teste = g.modulos.get(&de).copied().unwrap_or(false);
+        let teste = r.teste || so_teste;
+        let (para, externa) = if g.modulos.contains_key(&r.alvo) {
+            (r.alvo.clone(), false)
+        } else if let Some(origem) = reexp.get(&r.alvo) {
+            (origem.clone(), !g.modulos.contains_key(origem))
+        } else {
+            g.problemas.push(format!("{onde}:{}: crate::{} não é módulo nem reexportação do lib.rs", r.linha, r.alvo));
+            continue;
+        };
+        if para == de {
+            continue;
+        }
+        let chave = (de, para);
+        if externa {
+            if !teste {
+                *g.externas.entry(chave).or_default() += 1;
+            }
+        } else if teste {
+            *g.teste.entry(chave).or_default() += 1;
+        } else {
+            if g.modulos[&chave.1] {
+                g.problemas.push(format!("{onde}:{}: código de produção usa o módulo de teste {}", r.linha, chave.1));
+            }
+            g.exemplo.entry(chave.clone()).or_insert_with(|| format!("{onde}:{}", r.linha));
+            *g.producao.entry(chave).or_default() += 1;
+        }
+    }
+    g
+}
+
+/// Componentes fortemente conexos (Tarjan): módulo → número do componente.
+fn componentes(setas: &BTreeSet<(String, String)>) -> BTreeMap<String, usize> {
+    struct Estado<'a> {
+        vizinhos: BTreeMap<&'a str, Vec<&'a str>>,
+        indice: BTreeMap<&'a str, usize>,
+        baixo: BTreeMap<&'a str, usize>,
+        pilha: Vec<&'a str>,
+        na_pilha: BTreeSet<&'a str>,
+        proximo: usize,
+        comp: BTreeMap<String, usize>,
+        ncomp: usize,
+    }
+    fn visitar<'a>(e: &mut Estado<'a>, v: &'a str) {
+        e.indice.insert(v, e.proximo);
+        e.baixo.insert(v, e.proximo);
+        e.proximo += 1;
+        e.pilha.push(v);
+        e.na_pilha.insert(v);
+        for w in e.vizinhos.get(v).cloned().unwrap_or_default() {
+            if !e.indice.contains_key(w) {
+                visitar(e, w);
+                let b = e.baixo[v].min(e.baixo[w]);
+                e.baixo.insert(v, b);
+            } else if e.na_pilha.contains(w) {
+                let b = e.baixo[v].min(e.indice[w]);
+                e.baixo.insert(v, b);
+            }
+        }
+        if e.baixo[v] == e.indice[v] {
+            loop {
+                let w = e.pilha.pop().unwrap();
+                e.na_pilha.remove(w);
+                e.comp.insert(w.to_string(), e.ncomp);
+                if w == v {
+                    break;
+                }
+            }
+            e.ncomp += 1;
+        }
+    }
+    let mut e = Estado {
+        vizinhos: BTreeMap::new(),
+        indice: BTreeMap::new(),
+        baixo: BTreeMap::new(),
+        pilha: Vec::new(),
+        na_pilha: BTreeSet::new(),
+        proximo: 0,
+        comp: BTreeMap::new(),
+        ncomp: 0,
+    };
+    let mut nos = BTreeSet::new();
+    for (a, b) in setas {
+        e.vizinhos.entry(a.as_str()).or_default().push(b.as_str());
+        nos.insert(a.as_str());
+        nos.insert(b.as_str());
+    }
+    for v in nos {
+        if !e.indice.contains_key(v) {
+            visitar(&mut e, v);
+        }
+    }
+    e.comp
+}
+
+/// As setas que estão dentro de algum ciclo.
+fn setas_em_ciclo(setas: &BTreeSet<(String, String)>) -> BTreeSet<(String, String)> {
+    let comp = componentes(setas);
+    setas.iter().filter(|(a, b)| comp[a] == comp[b]).cloned().collect()
+}
+
+/// Um caminho de `de` até `ate` (o mais curto), para mostrar o ciclo.
+fn caminho(setas: &BTreeSet<(String, String)>, de: &str, ate: &str) -> Vec<String> {
+    let mut veio: BTreeMap<String, String> = BTreeMap::new();
+    let mut fila = VecDeque::from([de.to_string()]);
+    while let Some(v) = fila.pop_front() {
+        if v == ate {
+            let mut c = vec![v.clone()];
+            let mut x = v;
+            while let Some(p) = veio.get(&x) {
+                c.push(p.clone());
+                x = p.clone();
+            }
+            c.reverse();
+            return c;
+        }
+        for (_, b) in setas.range((v.clone(), String::new())..).take_while(|(a, _)| *a == v) {
+            if b != de && !veio.contains_key(b) {
+                veio.insert(b.clone(), v.clone());
+                fila.push_back(b.clone());
+            }
+        }
+    }
+    Vec::new()
+}
+
+fn mostrar(g: &Grafo) {
+    let setas: BTreeSet<_> = g.producao.keys().cloned().collect();
+    let comp = componentes(&setas);
+    let prod: Vec<_> = g.modulos.iter().filter(|(_, t)| !**t).map(|(m, _)| m.as_str()).collect();
+    let test: Vec<_> = g.modulos.iter().filter(|(_, t)| **t).map(|(m, _)| m.as_str()).collect();
+    println!("== módulos de produção ({}): {}", prod.len(), prod.join(" "));
+    println!("== módulos só de teste ({}): {}", test.len(), test.join(" "));
+    println!("== setas de produção: {} ({} referências)", g.producao.len(), g.producao.values().sum::<usize>());
+    for ((a, b), n) in &g.producao {
+        println!("P {a} -> {b} {n}");
+    }
+    println!("== setas só de teste: {} ({} referências)", g.teste.len(), g.teste.values().sum::<usize>());
+    for ((a, b), n) in &g.teste {
+        println!("T {a} -> {b} {n}");
+    }
+    println!("== setas para outra crate (reexportadas no lib.rs): {}", g.externas.len());
+    for ((a, b), n) in &g.externas {
+        println!("X {a} -> {b} {n}");
+    }
+    let mut grupos: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
+    for (m, c) in &comp {
+        grupos.entry(*c).or_default().push(m);
+    }
+    let ciclicos: Vec<_> = grupos.values().filter(|v| v.len() > 1).collect();
+    println!("== componentes com ciclo (produção): {}", ciclicos.len());
+    for v in &ciclicos {
+        println!("C {} módulos: {}", v.len(), v.join(" "));
+    }
+    let em_ciclo = setas_em_ciclo(&setas);
+    println!("== setas em ciclo (produção): {}", em_ciclo.len());
+    println!("== pares mútuos (produção; ida/volta; entre parênteses contando os testes):");
+    for ((a, b), n) in &g.producao {
+        if a < b {
+            if let Some(m) = g.producao.get(&(b.clone(), a.clone())) {
+                let ta = n + g.teste.get(&(a.clone(), b.clone())).unwrap_or(&0);
+                let tb = m + g.teste.get(&(b.clone(), a.clone())).unwrap_or(&0);
+                println!("M {a} <-> {b} {n}/{m} ({ta}/{tb})");
+            }
+        }
+    }
+    println!("== pares mútuos só ao contar os testes (produção ida/volta; teste ida/volta):");
+    let conta = |m: &BTreeMap<(String, String), usize>, a: &str, b: &str| {
+        m.get(&(a.to_string(), b.to_string())).copied().unwrap_or(0)
+    };
+    let todas: BTreeSet<_> = g.producao.keys().chain(g.teste.keys()).cloned().collect();
+    for (a, b) in &todas {
+        if a < b && todas.contains(&(b.clone(), a.clone())) {
+            let (pi, pv) = (conta(&g.producao, a, b), conta(&g.producao, b, a));
+            if pi == 0 || pv == 0 {
+                println!("MT {a} <-> {b} {pi}/{pv} {}/{}", conta(&g.teste, a, b), conta(&g.teste, b, a));
+            }
+        }
+    }
+    println!("== por módulo (produção): saídas / entradas");
+    for m in &prod {
+        let s = g.producao.keys().filter(|(a, _)| a == m).count();
+        let e = g.producao.keys().filter(|(_, b)| b == m).count();
+        println!("F {m} {s} {e}");
+    }
+    println!("== SETAS_EM_CICLO como está hoje:");
+    let mut por: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (a, b) in &em_ciclo {
+        por.entry(a).or_default().push(format!("\"{b}\""));
+    }
+    for (a, bs) in por {
+        println!("    (\"{a}\", &[{}]),", bs.join(", "));
+    }
+}
+
+fn setas_registradas() -> BTreeSet<(String, String)> {
+    let mut v = BTreeSet::new();
+    for (a, bs) in SETAS_EM_CICLO {
+        for b in *bs {
+            assert!(v.insert((a.to_string(), b.to_string())), "seta repetida na lista: {a} → {b}");
+        }
+    }
+    v
+}
+
+#[test]
+fn nenhum_ciclo_novo_entre_os_modulos_do_nucleo() {
+    let src = raiz().join("nucleo/src");
+    let g = ler_crate(&src);
+    assert!(g.problemas.is_empty(), "o leitor de fontes não entendeu tudo: {:#?}", g.problemas);
+    assert!(g.modulos.len() > 40 && !g.producao.is_empty(), "o leitor achou pouco: {:?}", g.modulos.keys());
+    if std::env::var_os("RUSTINHO_DEPENDENCIAS_MOSTRAR").is_some() {
+        mostrar(&g);
+    }
+    let setas: BTreeSet<_> = g.producao.keys().cloned().collect();
+    let em_ciclo = setas_em_ciclo(&setas);
+    let registradas = setas_registradas();
+    println!(
+        "{} módulos, {} setas de produção, {} em ciclo ({} registradas)",
+        g.modulos.len(),
+        setas.len(),
+        em_ciclo.len(),
+        registradas.len()
+    );
+    let mut erros = Vec::new();
+    for (a, b) in em_ciclo.difference(&registradas) {
+        let volta = caminho(&setas, b, a);
+        erros.push(format!(
+            "dependência circular NOVA: {a} → {b} ({} referência(s), a primeira em {}); fecha o ciclo {a} → {}",
+            g.producao[&(a.clone(), b.clone())],
+            g.exemplo[&(a.clone(), b.clone())],
+            volta.join(" → ")
+        ));
+    }
+    for (a, b) in registradas.difference(&em_ciclo) {
+        erros.push(format!(
+            "{a} → {b} não está mais em ciclo: tire-a de SETAS_EM_CICLO (assim o ciclo não pode voltar)"
+        ));
+    }
+    assert!(erros.is_empty(), "{}", erros.join("\n"));
+}
+
+// ------------------------------------------------- conferência do leitor
+
+fn refs(fonte: &str) -> Vec<(String, bool)> {
+    analisar(fonte, "trecho", &["m".to_string()], false).refs.into_iter().map(|r| (r.alvo, r.teste)).collect()
+}
+
+#[test]
+fn leitor_ignora_comentarios_textos_e_caracteres() {
+    let fonte = r##"
+        // crate::a
+        /* crate::b /* crate::c */ crate::d */
+        /// [`crate::e`]
+        const T: &str = "crate::f \" crate::g";
+        const U: &str = r#"crate::h "  crate::i"#;
+        const C: char = '"';
+        const D: char = '\'';
+        fn f<'a>(x: &'a str) -> &'a str { x }
+        use crate::certo::X;
+    "##;
+    assert_eq!(refs(fonte), vec![("certo".to_string(), false)]);
+}
+
+#[test]
+fn leitor_separa_producao_de_teste() {
+    let fonte = r#"
+        #[cfg(test)]
+        mod testes { use crate::a; fn f() { crate::b::g(); } }
+        #[cfg(not(test))]
+        use crate::c;
+        #[cfg(any(windows, test))]
+        use crate::d;
+        #[cfg(any(test, feature = "ancoras-de-teste"))]
+        pub fn de_teste() { crate::e::x() }
+        fn h() {
+            #[cfg(test)]
+            if crate::f::y() { crate::g::z() } else { crate::h::w() }
+            crate::i::v();
+            match k {
+                #[cfg(test)]
+                "teste" => crate::j::u(),
+                _ => crate::k::t(),
+            }
+        }
+    "#;
+    let r = refs(fonte);
+    let teste: Vec<_> = r.iter().filter(|x| x.1).map(|x| x.0.as_str()).collect();
+    let producao: Vec<_> = r.iter().filter(|x| !x.1).map(|x| x.0.as_str()).collect();
+    assert_eq!(teste, ["a", "b", "e", "f", "g", "h", "j"]);
+    assert_eq!(producao, ["c", "d", "i", "k"]);
+}
+
+#[test]
+fn leitor_entende_grupos_super_e_modulos_em_bloco() {
+    let fonte = r#"
+        use crate::{a::X, b::{Y, Z}, self as raiz};
+        use super::c::W;
+        pub(crate) fn f() {}
+        pub(super) fn g() {}
+        mod dentro { use super::*; use super::super::d; }
+        macro_rules! m { () => { $crate::e::f() } }
+    "#;
+    let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
+    assert_eq!(r, ["a", "b", "c", "d"]);
+}
+
+#[test]
+fn leitor_acha_ciclos() {
+    let s = |v: &[(&str, &str)]| -> BTreeSet<(String, String)> {
+        v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+    };
+    let setas = s(&[("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e", "d"), ("f", "a")]);
+    assert_eq!(setas_em_ciclo(&setas), s(&[("a", "b"), ("b", "c"), ("c", "a"), ("d", "e"), ("e", "d")]));
+    assert_eq!(caminho(&setas, "b", "a"), ["b", "c", "a"]);
+}
