@@ -249,8 +249,8 @@ jobs:
           done
 
   # Abre o APK num Android de mentira (emulador) e tira fotos da tela.
-  # As fotos e o registro vão para o ramo "testes-android" (64 bits) e
-  # "testes-android-32bits" (32 bits, desenho pela CPU; teste mais curto).
+  # As fotos e o registro saem como artefatos (fotos, fotos-32bits). Nenhum
+  # passo empurra código ou fotos para outro ramo (desde a 0.9.18-dev).
   testar:
     needs: apk
     if: ${{ !cancelled() }}
@@ -310,34 +310,3 @@ jobs:
           t = t.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
           print(f"::warning title=registro do app::{t}")
           PY
-
-  # Guarda as fotos nos ramos testes-android e testes-android-32bits (para
-  # ver no celular). Separado do teste: só este passo pode gravar.
-  fotos:
-    needs: testar
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        sufixo: ["", "-32bits"]
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        continue-on-error: true
-        with:
-          name: fotos${{ matrix.sufixo }}
-          path: fotos
-      - name: Guardar no ramo
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          [ -d fotos ] || exit 0
-          mkdir -p r && cp -r fotos r/ && cd r
-          git init -q -b testes-android${{ matrix.sufixo }}
-          git config user.name "montagem" && git config user.email "montagem@users.noreply.github.com"
-          git add -A && git commit -qm "Fotos do teste ${GITHUB_SHA::7}" || exit 0
-          # A chave vai no cabeçalho, não no endereço (não aparece em registro nenhum).
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)" \
-            push -q -f "https://github.com/${{ github.repository }}.git" testes-android${{ matrix.sufixo }}
