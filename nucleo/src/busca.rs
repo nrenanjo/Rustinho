@@ -1314,29 +1314,30 @@ mod testes_regressao {
         cadastrar(c, d, &u, "CD-400", "Correia dentada", "Gates", "5PK1234");
         cadastrar(c, d, &u, "AM-500", "Amortecedor traseiro", "Cofap", "");
         let esperado: &[(&str, &str)] = &[
-        ("pastilha", "PF-100=Pastilha de freio dianteira"),
-        ("pastilha freio", "PF-100=Pastilha de freio dianteira"),
-        ("freio pastilha", "PF-100=Pastilha de freio dianteira"),
-        ("filtro oleo", "FO-200=Filtro de óleo"),
-        ("oleo 5w30", "OL-300=Óleo 5W30 sintético"),
-        ("5w30", "OL-300=Óleo 5W30 sintético"),
-        ("PF-100", "PF-100=Pastilha de freio dianteira"),
-        ("pf 100", "PF-100=Pastilha de freio dianteira"),
-        ("GDB1330", "PF-100=Pastilha de freio dianteira!"),
-        ("OC-263", "FO-200=Filtro de óleo!"),
-        ("Gates", "CD-400=Correia dentada"),
-        ("gates correia", "CD-400=Correia dentada"),
-        ("amort", "AM-500=Amortecedor traseiro"),
-        ("traseiro", "AM-500=Amortecedor traseiro"),
-        ("fras", "PF-100=Pastilha de freio dianteira"),
-        ("xyzzy", ""),
-        ("Mahle filtro", "FO-200=Filtro de óleo"),
-        ("ol", "OL-300=Óleo 5W30 sintético ; FO-200=Filtro de óleo"),
-        ("CD-400", "CD-400=Correia dentada"),
+            ("pastilha", "PF-100=Pastilha de freio dianteira"),
+            ("pastilha freio", "PF-100=Pastilha de freio dianteira"),
+            ("freio pastilha", "PF-100=Pastilha de freio dianteira"),
+            ("filtro oleo", "FO-200=Filtro de óleo"),
+            ("oleo 5w30", "OL-300=Óleo 5W30 sintético"),
+            ("5w30", "OL-300=Óleo 5W30 sintético"),
+            ("PF-100", "PF-100=Pastilha de freio dianteira"),
+            ("pf 100", "PF-100=Pastilha de freio dianteira"),
+            ("GDB1330", "PF-100=Pastilha de freio dianteira!"),
+            ("OC-263", "FO-200=Filtro de óleo!"),
+            ("Gates", "CD-400=Correia dentada"),
+            ("gates correia", "CD-400=Correia dentada"),
+            ("amort", "AM-500=Amortecedor traseiro"),
+            ("traseiro", "AM-500=Amortecedor traseiro"),
+            ("fras", "PF-100=Pastilha de freio dianteira"),
+            ("xyzzy", ""),
+            ("Mahle filtro", "FO-200=Filtro de óleo"),
+            ("ol", "OL-300=Óleo 5W30 sintético ; FO-200=Filtro de óleo"),
+            ("CD-400", "CD-400=Correia dentada"),
         ];
         for (consulta, linha) in esperado {
             let r = buscar(c, consulta, false, 50).unwrap();
-            let obtido: Vec<String> = r.iter().map(|p| format!("{}={}{}", p.codigo, p.nome, if p.codigo_exato { "!" } else { "" })).collect();
+            let obtido: Vec<String> =
+                r.iter().map(|p| format!("{}={}{}", p.codigo, p.nome, if p.codigo_exato { "!" } else { "" })).collect();
             assert_eq!(obtido.join(" ; "), *linha, "consulta {:?}", consulta);
         }
     }
