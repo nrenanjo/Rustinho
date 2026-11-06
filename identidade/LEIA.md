@@ -1,3 +1,5 @@
+> **0.9.18-dev (experimental):** a fonte oficial dos ícones passou a ser `identidade/planeta-roxo-crescente.png` (PNG original com transparência, SHA-256 `b971216718df9bfd…`). Os ícones são gerados por `identidade/gerar_icones_planeta.py`. O `gerar_icones.py` e a `rustinho-icone-original.png` (engrenagem) ficam como histórico da 0.9.17.
+
 # Identidade visual do Rustinho — ícone
 
 **Fonte única:** `identidade/rustinho-icone-original.png` (1254 × 1254, RGBA, opaca; enviada pelo dono do projeto em 20/10/2026).
