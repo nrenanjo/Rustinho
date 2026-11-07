@@ -365,17 +365,23 @@ fn copia_registrada_e_banco_restaurado_continuam_na_loja() {
     .unwrap();
 }
 
-/// As telas: "Voltar" na entrada da loja desfaz a tentativa, e o programa
+/// As telas: voltar da entrada da loja desfaz a tentativa, e o programa
 /// aberto no meio de uma tentativa volta para ela (não para a loja nova).
+/// Desde a correção definitiva do botão de retorno (0.9.18, dono, 07/11/2026)
+/// quem volta é a seta (sem texto), pelo mesmo caminho do Esc: retornar(true)
+/// → aoEsc → desistir(); o botão "Voltar" saiu.
 #[test]
 fn telas_desfazem_e_retomam_a_juncao() {
     let qml = |nome: &str| {
         std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/qml").join(nome)).unwrap()
     };
     let juntar = qml("TelaJuntar.qml");
-    let voltar = juntar.split("text: \"Voltar\"").nth(1).expect("botão Voltar");
-    let clique = voltar.lines().find(|l| l.contains("onClicked")).unwrap();
-    assert!(clique.contains("tela.desistir()"), "Voltar desfaz a tentativa: {clique}");
+    assert!(!juntar.contains("text: \"Voltar\""), "o botão de texto Voltar saiu (a seta faz o retorno)");
+    let seta = juntar.split("Seta {").nth(1).expect("a seta de retorno");
+    let clique = seta.lines().find(|l| l.contains("onClicked")).unwrap();
+    assert!(clique.contains("retornar(true)"), "a seta vai pelo caminho do Esc: {clique}");
+    let esc = juntar.split("function aoEsc(").nth(1).expect("função aoEsc").split("function ").next().unwrap();
+    assert!(esc.contains("desistir()"), "a seta e o Esc desfazem a tentativa: {esc}");
     let desistir = juntar.split("function desistir()").nth(1).expect("função desistir");
     assert!(desistir.split("function ").next().unwrap().contains("Api.chamar(\"sync_desistir_juntar\")"));
     let main = qml("Main.qml");

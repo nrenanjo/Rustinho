@@ -111,20 +111,77 @@ fn montar_loja_de_validacao() {
         json!({ "loja": "Loja Teste Auto Peças", "caixa": "Caixa 1", "nome": "Ana",
                 "senha": comum::SENHA_ANA, "senha2": comum::SENHA_ANA }),
     );
-    comum::povoar(&mut l);
-    // (código, nome, marca, código original, equivalentes, carros)
+    let povo = comum::povoar(&mut l);
+    // Listas com linhas bastantes para conferir as faixas claras e escuras na
+    // tela (a 1ª fica com a cor da linha escolhida): clientes, fornecedores,
+    // usuários e orçamentos.
+    for nome in ["Maria Souza", "Oficina do Pedro", "Transportes Rio Claro", "Paula Lima", "Auto Center Sul"] {
+        l.pessoa("cliente", nome);
+    }
+    for nome in ["Auto Peças Atacado", "Distribuidora Norte", "Freios Brasil", "Importadora Sul"] {
+        l.pessoa("fornecedor", nome);
+    }
+    for (nome, senha) in [("Carla", "2222"), ("Davi", "3333"), ("Elisa", "4444")] {
+        l.usuario_caixa(nome, senha);
+    }
+    for quantidade in ["1", "3", "4", "6"] {
+        l.ok(
+            "orcamento_salvar",
+            json!({ "itens": [{ "produtoId": povo.pastilha, "quantidade": quantidade }], "tabela": 1, "validadeDias": 7 }),
+        );
+    }
+    // (montadora, modelo, motor, ano inicial, ano final)
     type Carro = (&'static str, &'static str, &'static str, &'static str, &'static str);
-    let catalogo: &[(&str, &str, &str, &str, &[(&str, &str)], &[Carro])] = &[
-        ("PF-100", "Pastilha de freio dianteira", "Fras-le", "GDB1330", &[("Cobreq", "N-560"), ("Bosch", "BB1330")],
-         &[("Volkswagen", "Gol", "1.6", "2010", "2016"), ("Volkswagen", "Voyage", "1.6", "2012", "2016")]),
-        ("FO-200", "Filtro de óleo do motor", "Mahle", "OC-263", &[("Tecfil", "PSL55"), ("Fram", "PH5548")],
-         &[("Fiat", "Palio", "1.0", "2005", "2014"), ("Fiat", "Uno", "1.0", "2011", "2018")]),
-        ("CD-400", "Correia dentada", "Gates", "5PK1234", &[("Dayco", "102RSF"), ("Contitech", "CT1028")],
-         &[("Chevrolet", "Onix", "1.0", "2013", "2019")]),
-        ("AM-500", "Amortecedor traseiro", "Cofap", "", &[],
-         &[("Volkswagen", "Gol", "1.0", "2008", "2014"), ("Chevrolet", "Celta", "1.0", "2006", "2015")]),
-        ("RD-600", "Rolamento de roda dianteiro", "FAG", "32206", &[("SKF", "VKBA3525")],
-         &[("Renault", "Sandero", "1.6", "2012", "2020")]),
+    // (código, nome, marca, código original, equivalentes, carros)
+    type Peca = (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static [(&'static str, &'static str)],
+        &'static [Carro],
+    );
+    let catalogo: &[Peca] = &[
+        (
+            "PF-100",
+            "Pastilha de freio dianteira",
+            "Fras-le",
+            "GDB1330",
+            &[("Cobreq", "N-560"), ("Bosch", "BB1330")],
+            &[("Volkswagen", "Gol", "1.6", "2010", "2016"), ("Volkswagen", "Voyage", "1.6", "2012", "2016")],
+        ),
+        (
+            "FO-200",
+            "Filtro de óleo do motor",
+            "Mahle",
+            "OC-263",
+            &[("Tecfil", "PSL55"), ("Fram", "PH5548")],
+            &[("Fiat", "Palio", "1.0", "2005", "2014"), ("Fiat", "Uno", "1.0", "2011", "2018")],
+        ),
+        (
+            "CD-400",
+            "Correia dentada",
+            "Gates",
+            "5PK1234",
+            &[("Dayco", "102RSF"), ("Contitech", "CT1028")],
+            &[("Chevrolet", "Onix", "1.0", "2013", "2019")],
+        ),
+        (
+            "AM-500",
+            "Amortecedor traseiro",
+            "Cofap",
+            "",
+            &[],
+            &[("Volkswagen", "Gol", "1.0", "2008", "2014"), ("Chevrolet", "Celta", "1.0", "2006", "2015")],
+        ),
+        (
+            "RD-600",
+            "Rolamento de roda dianteiro",
+            "FAG",
+            "32206",
+            &[("SKF", "VKBA3525")],
+            &[("Renault", "Sandero", "1.6", "2012", "2020")],
+        ),
     ];
     for (codigo, nome, marca, original, equivalentes, carros) in catalogo {
         let mut f = l.ok("produto_novo", json!({}));
@@ -136,10 +193,8 @@ fn montar_loja_de_validacao() {
         f["estoqueInicial"] = json!("5");
         f["precos"][0]["preco"] = json!("50");
         f["precos"][0]["lucro"] = json!("");
-        f["equivalentes"] = json!(equivalentes
-            .iter()
-            .map(|(m, c)| json!({ "marca": m, "codigo": c }))
-            .collect::<Vec<_>>());
+        f["equivalentes"] =
+            json!(equivalentes.iter().map(|(m, c)| json!({ "marca": m, "codigo": c })).collect::<Vec<_>>());
         f["aplicacoes"] = json!(carros
             .iter()
             .map(|(montadora, modelo, motor, inicio, fim)| json!({ "montadora": montadora, "modelo": modelo,
