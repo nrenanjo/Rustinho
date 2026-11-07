@@ -32,7 +32,13 @@ FocusScope {
 
     readonly property var m: opcoes ? (opcoes.modelos.find(x => x.id === modelo) || opcoes.modelos[1]) : null
     readonly property int porFolha: m ? m.colunas * m.linhas : 33
-    readonly property int total: itens.reduce((s, i) => s + (i.quantidade || 0), 0)
+    // A quantidade digitada muda o item no lugar (mudarQuantidade) e soma 1
+    // aqui, para o total refazer a conta sem trocar a lista.
+    property int versaoDasQuantidades: 0
+    readonly property int total: {
+        versaoDasQuantidades
+        return itens.reduce((s, i) => s + (i.quantidade || 0), 0)
+    }
     readonly property int folhas: total > 0 ? Math.ceil((inicio - 1 + total) / porFolha) : 0
 
     function carregar() {
@@ -139,10 +145,14 @@ FocusScope {
         janela.abrir("TelaPeca", { produtoId: id, voltarPara: nomeNaNavegacao })
     }
 
+    // B8B1-09 (auditoria, 0.9.18): trocar `itens` a cada tecla recriava as
+    // linhas da lista e o campo que estava sendo digitado perdia o foco
+    // (digitar "12" ficava "1"). Agora a quantidade muda no próprio item.
     function mudarQuantidade(indice, texto) {
-        const lista = itens.slice()
-        lista[indice] = { etiqueta: lista[indice].etiqueta, quantidade: Math.max(0, Math.min(999, parseInt(texto) || 0)) }
-        itens = lista
+        if (indice < 0 || indice >= itens.length)
+            return
+        itens[indice].quantidade = Math.max(0, Math.min(999, parseInt(texto) || 0))
+        versaoDasQuantidades++
     }
 
     function tirar(indice) {
@@ -319,6 +329,7 @@ FocusScope {
                                 horizontalAlignment: Text.AlignRight
                             }
                             Campo {
+                                objectName: "campoQuantidadeEtiqueta"
                                 numerico: true
                                 maximo: 3
                                 sufixo: "etiq."
