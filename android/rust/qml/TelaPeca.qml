@@ -124,6 +124,11 @@ FocusScope {
             const q = equivalentes.get(i)
             listaEquivalentes.push({ marca: q.marca, codigo: q.codigo })
         }
+        // NEW-B8B2-02 (0.9.18): só vai o fiscal do tipo escolhido. Serviço não
+        // tem NCM, CEST, ANP, IPI nem combustível; produto não tem ISS. O que
+        // foi digitado no outro tipo continua na tela (voltar o tipo antes de
+        // salvar devolve tudo), mas não é conferido nem gravado.
+        const deServico = tela.servico
         return {
             id: ficha ? ficha.id : "",
             codigo: codigo.texto,
@@ -139,13 +144,13 @@ FocusScope {
             estoqueInicial: estoqueInicial.texto,
             estoqueMinimo: estoqueMinimo.texto,
             local: local.texto,
-            ncm: ncm.texto,
-            cest: cest.texto,
+            ncm: deServico ? "" : ncm.texto,
+            cest: deServico ? "" : cest.texto,
             origem: Math.max(0, origem.indice),
             csosn: tela.csosnEscolhido(),
             monofasico: monofasico.checked,
-            anpCodigo: anpCodigo.texto,
-            anpDescricao: anpDescricao.texto,
+            anpCodigo: deServico ? "" : anpCodigo.texto,
+            anpDescricao: deServico ? "" : anpDescricao.texto,
             tipo: tela.tipo,
             variacao: variacao.texto,
             precoAberto: precoAberto.checked,
@@ -195,10 +200,18 @@ FocusScope {
                 c.texto = fi[k] || ""
         }
     }
+    // Os blocos do fiscal de cada tipo (as pílulas que a tela mostra).
+    function blocosDoTipo() {
+        return servico ? ["servico", "pis"] : ["icms", "pis", "ipi", "combustivel"]
+    }
     function coletarFiscal() {
         const fi = {}
-        for (const [c, k, , lista] of camposFiscais()) {
-            if (lista === "marcar")
+        const blocos = blocosDoTipo()
+        for (const [c, k, bloco, lista] of camposFiscais()) {
+            // NEW-B8B2-02: bloco de fora do tipo vai vazio (veja coletar()).
+            if (blocos.indexOf(bloco) < 0)
+                fi[k] = lista === "marcar" ? false : ""
+            else if (lista === "marcar")
                 fi[k] = c.checked
             else if (lista === "uf")
                 fi[k] = ufsComVazio()[Math.max(0, c.indice)] || ""
@@ -295,6 +308,11 @@ FocusScope {
             blocoFiscal = "combustivel"
         if (campo === "ncm" || campo === "cest" || campo === "origem" || campo === "csosn")
             blocoFiscal = "icms"
+        // NEW-B8B2-02: um erro de bloco que este tipo não mostra (ex.: ICMS num
+        // serviço) não abre um bloco sem pílula; fica no primeiro bloco do tipo
+        // e o aviso abaixo diz o problema.
+        if (blocosDoTipo().indexOf(blocoFiscal) < 0)
+            blocoFiscal = blocosDoTipo()[0]
         if (!alvo && campo) {
             const p = campo.match(/^(preco|lucro)(\d)$/)
             const a = campo.match(/^aplicacoes\.(\d+)\.(\w+)$/)
