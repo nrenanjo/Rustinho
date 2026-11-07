@@ -42,6 +42,18 @@ def saidas(base):
     densidades = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
     for d, n in densidades.items():
         out[f"android/pacote/res/mipmap-{d}/ic_launcher.png"] = redim(base, n)
+    # O planeta da pílula dos temas (Aparencia.qml), no programa e no Android.
+    out["app/icone/planeta.png"] = redim(base, 96)
+    out["android/rust/icone/planeta.png"] = redim(base, 96)
+    # Ícone adaptativo do Android (res/mipmap-anydpi-v26/ic_launcher.xml): as
+    # duas camadas de 108 dp (432 px). Fundo: #24002F liso (camada separada,
+    # a fonte continua sem fundo). Primeiro plano: o planeta com 264 px no
+    # meio (61%, dentro da área segura de 66 dp), o resto transparente.
+    out["android/pacote/res/drawable-nodpi/ic_launcher_background.png"] = Image.new(
+        "RGBA", (432, 432), (0x24, 0x00, 0x2F, 255))
+    frente = Image.new("RGBA", (432, 432), (0, 0, 0, 0))
+    frente.paste(redim(base, 264), (84, 84))
+    out["android/pacote/res/drawable-nodpi/ic_launcher_foreground.png"] = frente
     return out
 
 
