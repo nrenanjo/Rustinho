@@ -29,7 +29,8 @@ ColumnLayout {
             id: seta
             visible: cabecalho.mostrarVoltar
             destino: cabecalho.textoVoltar
-            Layout.leftMargin: -seta.folga
+            // O vidro alinhado com o conteúdo e um pouco mais abaixo (Seta.descida).
+            Layout.topMargin: seta.descida
             onClicked: ApplicationWindow.window.retornar(true)
         }
         Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }

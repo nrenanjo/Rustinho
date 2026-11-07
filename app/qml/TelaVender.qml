@@ -396,7 +396,8 @@ FocusScope {
                 Seta {
                     id: seta
                     destino: "Início"
-                    Layout.leftMargin: 4 - seta.folga
+                    Layout.leftMargin: 4
+                    Layout.topMargin: seta.descida
                     onClicked: tela.janela.retornar(true)
                 }
                 Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }

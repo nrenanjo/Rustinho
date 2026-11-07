@@ -37,7 +37,7 @@ Rectangle {
             Text {
                 text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativa)")
                 color: linha.corTexto
-                font.family: Tema.titulo
+                font.family: Tema.fonteLinha
                 font.weight: Font.Bold
                 font.pixelSize: 20
                 wrapMode: Text.WordWrap
@@ -128,7 +128,7 @@ Rectangle {
                     width: Math.min(implicitWidth, parent.width - (achou.visible ? achou.implicitWidth + 10 : 0))
                     text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativa)")
                     color: linha.corTexto
-                    font.family: Tema.titulo
+                    font.family: Tema.fonteLinha
                     font.weight: Font.Bold
                     font.pixelSize: 22
                     elide: Text.ElideRight

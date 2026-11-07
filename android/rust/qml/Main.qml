@@ -36,8 +36,8 @@ ApplicationWindow {
     palette.toolTipText: Tema.claro
     palette.light: Tema.papel
     palette.midlight: Tema.pergaminho
-    palette.mid: Tema.roxo ? "#C49BC0" : Tema.escuro ? "#4A4239" : "#B9AE9F"
-    palette.dark: Tema.roxo ? "#E2BEDD" : Tema.escuro ? "#6A6156" : "#8C8074"
+    palette.mid: Tema.roxo ? "#C49BC0" : Tema.escuro ? "#4A3F4E" : "#C9B8CF"
+    palette.dark: Tema.roxo ? "#E2BEDD" : Tema.escuro ? "#6E5F74" : "#8E7A95"
     palette.shadow: Tema.tinta
     palette.link: Tema.azulEscuro
 

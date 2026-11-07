@@ -57,7 +57,7 @@ Rectangle {
             Text {
                 text: linha.item.descricao || ""
                 color: Tema.tintaDaFaixa(linha.par)
-                font.family: Tema.titulo
+                font.family: Tema.fonteLinha
                 font.weight: Font.Bold
                 font.pixelSize: 20
                 elide: Text.ElideRight

@@ -82,17 +82,99 @@ def gravar_tema(pasta, chave, valor):
 
 # ---- Cores do tema, lidas do próprio Tema.qml ----
 
-def tokens_do_roxo():
-    """{nome: "#RRGGBB"} das cores do Planeta Roxo no Tema.qml (as linhas
-    `readonly property color nome: roxo ? "#..." : ...` e as do bloco
-    `// ---- Planeta Roxo`)."""
+def cores_do_tema(tema):
+    """{nome: "#RRGGBB"} das cores de um tema ("cinza", "amoled" ou "roxo")
+    no Tema.qml: cada `readonly property color nome: <expressão>` é avaliada
+    com roxo/escuro/roxoFiel do tema (o operador ?: do QML, &&, ||, !,
+    parênteses, cores "#..." e outros nomes de cor do próprio Tema). As que
+    dependem de funções (Qt.rgba, sombra...) ficam de fora."""
     texto = open(TEMA_QML, encoding="utf-8").read()
+    exprs = dict(re.findall(r"readonly property color (\w+):\s*(.+?)\s*(?://.*)?$", texto, re.M))
+    roxo_fiel = re.search(r"readonly property bool roxoFiel:\s*(true|false)", texto).group(1) == "true"
+    valores = {"roxo": tema == "roxo", "escuro": tema == "amoled", "roxoFiel": roxo_fiel}
     cores = {}
-    for nome, valor in re.findall(r"property color (\w+):\s*roxo\s*\?\s*\(?\s*(?:roxoFiel\s*\?\s*\"#[0-9A-Fa-f]{6}\"\s*:\s*)?\"(#[0-9A-Fa-f]{6})\"", texto):
-        cores[nome] = valor.upper()
-    for nome, valor in re.findall(r"readonly property color (roxo\w+):\s*\"(#[0-9A-Fa-f]{6})\"", texto):
-        cores[nome] = valor.upper()
-    return cores
+
+    def valor(nome, pilha=()):
+        if nome in valores:
+            return valores[nome]
+        if nome in cores:
+            return cores[nome]
+        if nome not in exprs or nome in pilha:
+            raise ValueError(nome)
+        cores[nome] = avaliar(exprs[nome], pilha + (nome,))
+        return cores[nome]
+
+    def avaliar(expr, pilha):
+        fichas = re.findall(r'"#[0-9A-Fa-f]{6}"|&&|\|\||[?:()!]|\w+', expr)
+        if len("".join(fichas)) != len(re.sub(r"\s", "", expr)):
+            raise ValueError(expr)   # função (Qt.rgba, sombra...): fora
+        pos = [0]
+
+        def olhar():
+            return fichas[pos[0]] if pos[0] < len(fichas) else None
+
+        def comer():
+            pos[0] += 1
+            return fichas[pos[0] - 1]
+
+        def condicional():
+            c = ou()
+            if olhar() == "?":
+                comer()
+                a = condicional()
+                assert comer() == ":"
+                b = condicional()
+                return a if c else b
+            return c
+
+        def ou():
+            v = e()
+            while olhar() == "||":
+                comer()
+                w = e()
+                v = v or w
+            return v
+
+        def e():
+            v = nao()
+            while olhar() == "&&":
+                comer()
+                w = nao()
+                v = v and w
+            return v
+
+        def nao():
+            if olhar() == "!":
+                comer()
+                return not nao()
+            return atomo()
+
+        def atomo():
+            f = comer()
+            if f == "(":
+                v = condicional()
+                assert comer() == ")"
+                return v
+            if f.startswith('"#'):
+                return f.strip('"').upper()
+            return valor(f, pilha)
+
+        v = condicional()
+        if olhar() is not None:
+            raise ValueError(expr)
+        return v
+
+    for nome in exprs:
+        try:
+            valor(nome)
+        except (ValueError, AssertionError, IndexError, TypeError):
+            cores.pop(nome, None)
+    return {k: v for k, v in cores.items() if isinstance(v, str)}
+
+
+def tokens_do_roxo():
+    """{nome: "#RRGGBB"} das cores do Planeta Roxo no Tema.qml."""
+    return cores_do_tema("roxo")
 
 
 def rgb(h):
@@ -354,14 +436,16 @@ def onde(r, texto):
 def a1_trocar_e_persistir(res, fotos, modelo, cores):
     """A1: sol/lua/planeta na Início mudam na hora e ficam gravados (só aqui)."""
     pasta = nova_loja(modelo)
-    fundo_cinza, fundo_amoled = "#D6D3CD", "#000000"
+    # 0.9.18: o claro (sol, "cinza" no banco) e o escuro (lua, "amoled") na
+    # identidade roxa; as cores vêm do próprio Tema.qml.
+    fundo_cinza, fundo_amoled = cores_do_tema("cinza")["fundo"], cores_do_tema("amoled")["fundo"]
     try:
         r = abrir(res, pasta, "Nenhuma", {}, fotos, "a1-inicio")
         try:
             foto = r.foto_janela("-1-cinza")
-            amostra(res, "A1 começa no cinza (nada gravado)", foto, 640, 740, fundo_cinza)
-            for dica, tema, fundo in [("Planeta Roxo", "roxo", cores["fundo"]), ("Fundo preto", "amoled", fundo_amoled),
-                                      ("Fundo cinza", "cinza", fundo_cinza), ("Planeta Roxo", "roxo", cores["fundo"])]:
+            amostra(res, "A1 começa no claro (nada gravado)", foto, 640, 740, fundo_cinza)
+            for dica, tema, fundo in [("Planeta Roxo", "roxo", cores["fundo"]), ("Tema escuro", "amoled", fundo_amoled),
+                                      ("Tema claro", "cinza", fundo_cinza), ("Planeta Roxo", "roxo", cores["fundo"])]:
                 x, y = onde(r, dica)
                 xdo("mousemove", str(x), str(y), "click", "1")
                 time.sleep(0.8)

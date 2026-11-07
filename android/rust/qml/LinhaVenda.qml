@@ -53,7 +53,7 @@ Rectangle {
             Text {
                 text: linha.item.cliente || (linha.orcamento ? "Sem cliente" : "Consumidor")
                 color: linha.corTexto
-                font.family: Tema.titulo
+                font.family: Tema.fonteLinha
                 font.weight: Font.Bold
                 font.pixelSize: 20
                 elide: Text.ElideRight

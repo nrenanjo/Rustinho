@@ -6,8 +6,11 @@ QtObject {
     // O id não pode ser "tema": no QML o id vence a propriedade "tema" (0.9.18).
     id: raizDoTema
 
-    // ---- Tema (0.9.18): sol = cinza de sempre, lua = preto AMOLED,
-    // planeta = Planeta Roxo ----
+    // ---- Tema (0.9.18): sol = claro, lua = escuro (AMOLED), planeta =
+    // Planeta Roxo. Os três na mesma identidade (ordem visual da 0.9.18, §10):
+    // o claro com painéis claros e detalhes roxos e magenta; o escuro com
+    // fundo profundo, grafite e destaques magenta. Os nomes guardados no banco
+    // continuam "cinza" e "amoled" (a escolha de cada aparelho não se perde).
     // Vale só para este aparelho; a janela principal lê e guarda a escolha.
     property string tema: "cinza"
     // O "escuro" de antes continua (só leitura): é o AMOLED.
@@ -20,33 +23,36 @@ QtObject {
     readonly property bool roxoFiel: false
 
     // ---- Cores ----
-    // No escuro: fundo preto absoluto, faixas com as mesmas cores bem
-    // escuras e letras claras, sempre com muito contraste para ler sem esforço.
+    // No escuro: fundo quase preto (bom para AMOLED), faixas em grafite e
+    // letras claras, sempre com muito contraste para ler sem esforço.
     // No roxo: fundo roxo com letras claras; painéis, campos e faixas claras
     // com letras escuras (as cores abaixo são as dos painéis; o texto direto
     // no fundo roxo usa as funções "...No(superfície)", mais abaixo).
-    readonly property color fundo: roxo ? "#770273" : escuro ? "#000000" : "#D6D3CD"        // cinza da página do livro
-    readonly property color pergaminho: roxo ? "#DDDCDF" : escuro ? "#28231D" : "#EFE5D1"   // faixa ímpar
-    readonly property color azul: roxo ? "#D6D0DC" : escuro ? "#1C2629" : "#D9E2E4"         // faixa par
-    readonly property color verde: roxo ? "#D9DED8" : escuro ? "#1E271B" : "#DFE4D6"        // faixa das palavras positivas
-    readonly property color rosa: roxo ? "#EDD5E3" : escuro ? "#33221E" : "#EBDCD6"         // faixa das palavras negativas
-    readonly property color amarelo: roxo ? "#F1E2BE" : escuro ? "#332B14" : "#EFE0B8"      // "vence hoje"
-    readonly property color papel: roxo ? "#F5F5F5" : escuro ? "#0F0D0B" : "#F8F4EB"        // dentro dos campos
-    readonly property color tinta: roxo ? "#231A26" : escuro ? "#F4EFE6" : "#2A2622"        // texto principal
-    readonly property color tintaSuave: roxo ? "#4A3F4E" : escuro ? "#D6CEC2" : "#5C534A"   // texto secundário
-    readonly property color apagado: roxo ? "#5A2D63" : escuro ? "#ADA397" : "#857B70"      // rótulos
-    readonly property color dourado: roxo ? "#744679" : escuro ? "#A8977F" : "#A3927E"      // capitulares e detalhes
-    readonly property color verdeEscuro: roxo ? "#3E5A39" : escuro ? "#A6CC9B" : "#4F6B4A"  // deu certo
-    readonly property color vermelho: roxo ? "#8C3530" : escuro ? "#F4A498" : "#94443A"     // erro
-    readonly property color azulEscuro: roxo ? "#8A1679" : escuro ? "#9CC6D0" : "#3E5F67"   // foco e destaques
-    readonly property color claro: roxo ? "#FFFFFF" : escuro ? "#0F0D0B" : "#F3EDE1"        // texto sobre fundo "tinta"
-    // Vermelho sobre fundo "tinta" (linha escolhida com estoque baixo).
-    readonly property color vermelhoSobre: roxo ? "#FFFFFF" : escuro ? "#8E2B20" : "#F2B8AE"
-    readonly property color rosaSobre: roxo ? "#E5C6D8" : escuro ? "#432C27" : "#E4CFC7"
-    readonly property color dica: roxo ? "#6E6472" : escuro ? "#958B7F" : "#9A9086"          // texto de exemplo nos campos
+    // No claro: fundo lilás bem claro, painéis e campos claros, letras escuras.
+    // Contraste conferido (texto 4,5:1; bordas 3:1) em
+    // Desenvolvimento_0.9.18/estabilizacao_0.9.18/paletas/conferir_contraste.py.
+    readonly property color fundo: roxo ? "#770273" : escuro ? "#0A070C" : "#E9E3ED"
+    readonly property color pergaminho: roxo ? "#DDDCDF" : escuro ? "#1C1820" : "#F8F5FA"   // faixa ímpar e painéis
+    readonly property color azul: roxo ? "#D6D0DC" : escuro ? "#28232B" : "#ECE5F0"         // faixa par
+    readonly property color verde: roxo ? "#D9DED8" : escuro ? "#1C2619" : "#E3EBE1"        // faixa das palavras positivas
+    readonly property color rosa: roxo ? "#EDD5E3" : escuro ? "#33212C" : "#F5E4EE"         // faixa das palavras negativas
+    readonly property color amarelo: roxo ? "#F1E2BE" : escuro ? "#332B14" : "#F6EBCB"      // "vence hoje"
+    readonly property color papel: roxo ? "#F5F5F5" : escuro ? "#141017" : "#FFFFFF"        // dentro dos campos
+    readonly property color tinta: roxo ? "#231A26" : escuro ? "#F4EEF6" : "#231A26"        // texto principal
+    readonly property color tintaSuave: roxo ? "#4A3F4E" : escuro ? "#DCD2E0" : "#4A3F4E"   // texto secundário
+    readonly property color apagado: roxo ? "#5A2D63" : escuro ? "#C9AECF" : "#674A6D"      // rótulos
+    readonly property color dourado: roxo ? "#744679" : escuro ? "#D9BBDE" : "#744679"      // capitulares e detalhes
+    readonly property color verdeEscuro: roxo ? "#3E5A39" : escuro ? "#A6CC9B" : "#3E5A39"  // deu certo
+    readonly property color vermelho: roxo ? "#8C3530" : escuro ? "#FFA7B9" : "#8C3530"     // erro
+    readonly property color azulEscuro: roxo ? "#8A1679" : escuro ? "#F38BDA" : "#8A1679"   // foco e destaques
+    readonly property color claro: roxo ? "#FFFFFF" : escuro ? "#141017" : "#FFFFFF"        // texto sobre fundo "tinta"
+    // Vermelho sobre a linha escolhida (magenta nos três temas: branco).
+    readonly property color vermelhoSobre: "#FFFFFF"
+    readonly property color rosaSobre: roxo ? "#E5C6D8" : escuro ? "#4A2D3F" : "#F0DCE8"
+    readonly property color dica: roxo ? "#6E6472" : escuro ? "#A396A8" : "#6E6472"          // texto de exemplo nos campos
     // Pílulas da tela inicial e notificações (0.9.15).
-    readonly property color cartao: roxo ? "#DDDBDE" : escuro ? "#1A1814" : "#F2EFE9"       // fundo da pílula
-    readonly property color bordaCartao: roxo ? "#5A0257" : escuro ? "#3A342D" : "#D9D3C8"  // contorno fino
+    readonly property color cartao: roxo ? "#DDDBDE" : escuro ? "#1C1820" : "#FFFFFF"       // fundo da pílula
+    readonly property color bordaCartao: roxo ? "#5A0257" : escuro ? "#3B2F40" : "#D3C4DA"  // contorno fino
     readonly property color atencao: escuro ? "#2E2714" : "#FCF1DA"      // notificação de atenção
     readonly property color bordaAtencao: escuro ? "#5A4A22" : "#EAD3A2"
     readonly property color critico: escuro ? "#3A1F1B" : "#F6DDD7"      // notificação crítica
@@ -55,43 +61,66 @@ QtObject {
     readonly property color bordaInformativo: escuro ? "#34474C" : "#C9D6D8"
 
     // Botão secundário (normal, mouse em cima, apertado) e o texto dele.
-    readonly property color botao: roxo ? "#FACBE3" : escuro ? "#3A332B" : "#E6DAC2"
-    readonly property color botaoSobre: roxo ? "#F3BCD9" : escuro ? "#463E34" : "#DDD0B5"
-    readonly property color botaoBaixo: roxo ? "#EBADCF" : escuro ? "#51483D" : "#D3C5A8"
-    readonly property color tintaBotao: roxo ? "#3A0B45" : tinta
-    // Botão principal (cor da tinta; no roxo, magenta) com mouse em cima e
-    // apertado, e o texto dele.
-    readonly property color principal: roxo ? (roxoFiel ? "#FB2ACD" : "#D123AB") : tinta
-    readonly property color sobrePrincipal: roxo ? "#FFFFFF" : claro
-    readonly property color principalSobre: roxo ? (roxoFiel ? "#F04BCF" : "#C21E9E") : escuro ? "#E0D9CE" : "#3B352F"
-    readonly property color principalBaixo: roxo ? "#A8198A" : escuro ? "#C9C1B5" : "#1A1714"
-    readonly property color perigoSobre: escuro ? "#F7B8AE" : "#A34D42"
-    readonly property color perigoBaixo: escuro ? "#E58F82" : "#7E3930"
+    readonly property color botao: roxo ? "#FACBE3" : escuro ? "#3A2A3E" : "#F3DCEB"
+    readonly property color botaoSobre: roxo ? "#F3BCD9" : escuro ? "#47344C" : "#EDCDE2"
+    readonly property color botaoBaixo: roxo ? "#EBADCF" : escuro ? "#553F5A" : "#E4BDD6"
+    readonly property color tintaBotao: roxo ? "#3A0B45" : escuro ? tinta : "#3A0B45"
+    // Botão principal (magenta, a cor da identidade, nos três temas) com
+    // mouse em cima e apertado, e o texto dele.
+    readonly property color principal: roxo && roxoFiel ? "#FB2ACD" : "#D123AB"
+    readonly property color sobrePrincipal: "#FFFFFF"
+    readonly property color principalSobre: roxo && roxoFiel ? "#F04BCF" : "#C21E9E"
+    readonly property color principalBaixo: "#A8198A"
+    readonly property color perigoSobre: escuro ? "#FFC1CE" : "#A34D42"
+    readonly property color perigoBaixo: escuro ? "#F58FA6" : "#7E3930"
 
-    // Linha escolhida numa lista (cor da tinta; no roxo, magenta) e o texto.
-    readonly property color atual: roxo ? (roxoFiel ? "#FA26C9" : "#D123AB") : tinta
-    readonly property color tintaAtual: roxo ? "#FFFFFF" : claro
-    // Selo (chip) dentro da linha escolhida: no roxo, um véu escuro deixa o
-    // texto branco legível sobre o magenta.
-    readonly property color chipAtual: roxo ? Qt.rgba(0.2, 0, 0.2, 0.35) : vela(0.12)
+    // Linha escolhida numa lista (magenta nos três temas) e o texto.
+    readonly property color atual: roxo && roxoFiel ? "#FA26C9" : "#D123AB"
+    readonly property color tintaAtual: "#FFFFFF"
+    // Selo (chip) dentro da linha escolhida: um véu escuro deixa o texto
+    // branco legível sobre o magenta.
+    readonly property color chipAtual: Qt.rgba(0.2, 0, 0.2, 0.35)
     // Pílulas: a escolhida no fundo da tela e a escolhida dentro de uma faixa
     // (subpílulas, pílulas num painel), com o texto de cada uma.
-    readonly property color pilulaAtiva: roxo ? "#F94BBF" : tinta
-    readonly property color sobrePilulaAtiva: roxo ? "#1E0B1D" : claro
-    readonly property color subpilulaAtiva: roxo ? "#610161" : tinta
-    readonly property color sobreSubpilulaAtiva: roxo ? "#FFFFFF" : claro
+    readonly property color pilulaAtiva: roxo ? "#F94BBF" : "#D123AB"
+    readonly property color sobrePilulaAtiva: roxo ? "#1E0B1D" : "#FFFFFF"
+    readonly property color subpilulaAtiva: roxo ? "#610161" : escuro ? "#F38BDA" : "#610161"
+    readonly property color sobreSubpilulaAtiva: roxo ? "#FFFFFF" : escuro ? "#1E0B1D" : "#FFFFFF"
     // A faixa das subpílulas (Configurações › Simultaneidade).
-    readonly property color faixaSubpilulas: roxo ? "#F22EB6" : sombra(0.06)
-    // Busca das telas (campo com a lupa): no roxo, escura com borda magenta.
+    readonly property color faixaSubpilulas: roxo ? "#F22EB6" : escuro ? "#2C1F31" : "#F1DDEC"
+    // Busca das telas (campo com a lupa): borda magenta nos três temas; no
+    // roxo, o campo escuro.
     readonly property color buscaFundo: roxo ? "#4E114B" : papel
-    readonly property color buscaBorda: roxo ? "#F038D0" : azulEscuro
+    readonly property color buscaBorda: escuro || roxo ? "#F038D0" : "#D123AB"
     // Pílula do olho ("Mostrar valores") e do tema (sol, lua, planeta).
-    readonly property color pilulaClara: roxo ? "#E4D1E5" : vela(0.45)
-    readonly property color pilulaClaraSobre: roxo ? "#ECDDED" : vela(0.7)
-    readonly property color seletorFundo: roxo ? "#3C223B" : vela(0.45)
-    readonly property color seletorAtivo: roxo ? "#FD2BD1" : tinta
+    readonly property color pilulaClara: roxo ? "#E4D1E5" : escuro ? "#28232B" : "#F1E6F2"
+    readonly property color pilulaClaraSobre: roxo ? "#ECDDED" : escuro ? "#352E39" : "#F7EFF8"
+    readonly property color seletorFundo: roxo ? "#3C223B" : escuro ? "#28232B" : "#E4DCE8"
+    readonly property color seletorAtivo: roxo ? "#FD2BD1" : escuro ? "#F038D0" : "#D123AB"
     // Campo só de leitura.
-    readonly property color campoFixo: roxo ? "#E6E1E8" : vela(0.28)
+    readonly property color campoFixo: roxo ? "#E6E1E8" : escuro ? "#19151C" : "#EFEAF2"
+
+    // ---- Estados dos campos (0.9.18, ordem visual §6) ----
+    // Normal (contorno fino), focado (contorno magenta com brilho), preenchido
+    // (contorno um pouco mais forte), inválido (vermelho com brilho),
+    // desabilitado (apagado) e validado (verde). Contraste das bordas: 3:1.
+    readonly property color foco: escuro || roxo && roxoFiel ? "#F038D0" : "#D123AB"
+    readonly property color focoBrilho: Qt.rgba(foco.r, foco.g, foco.b, 0.28)
+    function erroBrilhoNo(sup) { const c = vermelhoNo(sup); return Qt.rgba(c.r, c.g, c.b, 0.24) }
+    readonly property color bordaCampo: sombra(0.16)
+    readonly property color bordaPreenchido: sombra(0.34)
+    readonly property real opacidadeDesabilitado: 0.5
+
+    // ---- Vidro roxo (0.9.18, ordem visual §9: a seta de retorno) ----
+    // Um roxo translúcido, com contorno fino claro e um brilho em cima: sobre o
+    // fundo roxo ou escuro, um vidro claro; sobre um painel claro, um vidro
+    // roxo. A cor da seta continua a de maior contraste (setaNo).
+    function _vidroEscuro(sup) { return luminancia(sup) < 0.18 }
+    function vidroNo(sup) { return _vidroEscuro(sup) ? Qt.rgba(0.98, 0.78, 0.96, 0.16) : Qt.rgba(0.47, 0.01, 0.45, 0.10) }
+    function vidroSobreNo(sup) { return _vidroEscuro(sup) ? Qt.rgba(0.98, 0.78, 0.96, 0.26) : Qt.rgba(0.47, 0.01, 0.45, 0.17) }
+    function vidroBaixoNo(sup) { return _vidroEscuro(sup) ? Qt.rgba(0.98, 0.78, 0.96, 0.34) : Qt.rgba(0.47, 0.01, 0.45, 0.24) }
+    function vidroBordaNo(sup) { return _vidroEscuro(sup) ? Qt.rgba(1, 0.86, 0.98, 0.42) : Qt.rgba(0.47, 0.01, 0.45, 0.32) }
+    function vidroBrilhoNo(sup) { return _vidroEscuro(sup) ? Qt.rgba(1, 1, 1, 0.20) : Qt.rgba(1, 1, 1, 0.55) }
 
     // ---- Planeta Roxo: as faixas das listas e o texto claro ----
     readonly property color roxoFaixaClara: "#DDDBDE"
@@ -108,12 +137,13 @@ QtObject {
     function vela(a) { return escuro ? Qt.rgba(1, 1, 1, a * 0.16) : Qt.rgba(1, 1, 1, a) }
     // Tinta por cima (bordas, mouse em cima): no escuro, vira claro.
     function sombra(a) { return escuro ? Qt.rgba(0.96, 0.94, 0.9, a * 1.4) : roxo ? Qt.rgba(0.14, 0.1, 0.15, a) : Qt.rgba(0.16, 0.15, 0.13, a) }
-    // Texto "claro" um pouco apagado (sobre fundo "tinta"). No roxo, o texto
-    // (a ≥ 0,5) fica inteiro: sobre o magenta, qualquer transparência fica
-    // abaixo de 4,5:1; o fundo leve (a < 0,5) continua transparente.
-    function claroSuave(a) { return roxo && a >= 0.5 ? claro : Qt.rgba(claro.r, claro.g, claro.b, a) }
+    // Texto secundário na linha escolhida (o magenta, nos três temas): o
+    // texto (a ≥ 0,5) fica inteiro, porque sobre o magenta qualquer
+    // transparência fica abaixo de 4,5:1; o fundo leve (a < 0,5) continua
+    // transparente.
+    function claroSuave(a) { return a >= 0.5 ? tintaAtual : Qt.rgba(tintaAtual.r, tintaAtual.g, tintaAtual.b, a) }
     // Véu atrás das janelas que abrem por cima.
-    readonly property color veu: roxo ? Qt.rgba(0.12, 0, 0.12, 0.55) : escuro ? Qt.rgba(0, 0, 0, 0.7) : Qt.rgba(0.16, 0.15, 0.13, 0.35)
+    readonly property color veu: roxo ? Qt.rgba(0.12, 0, 0.12, 0.55) : escuro ? Qt.rgba(0, 0, 0, 0.7) : Qt.rgba(0.16, 0.04, 0.18, 0.35)
 
     // ---- Superfícies (0.9.18) ----
     // No roxo há fundo escuro (a janela, a faixa escura das listas) e
@@ -255,4 +285,11 @@ QtObject {
 
     // Texto com serifa (Source Serif 4), para descrições e notas.
     readonly property string serifa: _serif400.name
+
+    // Nome do registro nas linhas das listas (0.9.18, ordem visual §3: texto
+    // funcional sem serifa, como na imagem aprovada de Peças): Source Sans 3
+    // em negrito, nos três temas. Os números de ordem (as capitulares
+    // douradas: nº da venda, posição no carrinho e no ranking) continuam com
+    // a fonte dos títulos.
+    readonly property string fonteLinha: texto
 }

@@ -765,6 +765,9 @@ FocusScope {
                         Layout.fillWidth: true
                         Campo {
                             id: cnpjLoja
+                            objectName: "campoCnpjLoja"
+                            // Verde quando o CNPJ (ou CPF) está completo e certo (0.9.18).
+                            conferir: "documento"
                             rotulo: "CNPJ da loja"
                             dica: "00.000.000/0000-00"
                             maximo: 20
@@ -900,6 +903,7 @@ FocusScope {
                             }
                             Campo {
                                 id: nomeTabela
+                                objectName: "campoNomeTabela"
                                 texto: linhaTabela.modelData.nome
                                 maximo: 30
                                 Layout.fillWidth: true
@@ -909,6 +913,7 @@ FocusScope {
                             // (o campo fica, sem esconder: veja D-10).
                             Campo {
                                 id: lucroTabela
+                                objectName: "campoLucroTabela"
                                 texto: linhaTabela.modelData.lucroPadrao
                                 enabled: !!tela.config && tela.config.verLucro
                                 sufixo: "%"

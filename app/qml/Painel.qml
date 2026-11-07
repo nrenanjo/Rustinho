@@ -30,9 +30,10 @@ Popup {
         Seta {
             id: setaDoPainel
             visible: painel.comSeta
-            // O desenho da seta um pouco à esquerda do conteúdo, como no print.
-            x: Math.max(2, painel.leftPadding - setaDoPainel.folga - 10)
-            y: 2
+            // O vidro da seta um pouco à esquerda do conteúdo, como no print,
+            // com folga das bordas da janelinha (0.9.18: a seta tem vidro).
+            x: Math.max(8, painel.leftPadding - 12)
+            y: Tema.estreito ? 8 : 12
             onClicked: painel.close()
         }
     }

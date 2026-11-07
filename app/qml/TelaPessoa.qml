@@ -281,6 +281,8 @@ FocusScope {
                             Campo {
                                 id: documento
                                 sensivel: true
+                                // Verde quando o documento está completo e certo (0.9.18).
+                                conferir: tela.juridica ? "cnpj" : "cpf"
                                 rotulo: tela.juridica ? "CNPJ" : "CPF"
                                 dica: tela.juridica ? "00.000.000/0000-00" : "000.000.000-00"
                                 maximo: 20

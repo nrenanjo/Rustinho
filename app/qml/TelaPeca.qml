@@ -545,7 +545,10 @@ FocusScope {
                             }
                             Campo {
                                 id: codigoBarras
+                                objectName: "campoCodigoBarras"
                                 visible: !tela.servico
+                                // Verde quando o código de barras confere (dígito final certo, 0.9.18).
+                                conferir: "gtin"
                                 rotulo: "Código de barras"
                                 dica: "Passe o leitor aqui"
                                 maximo: 14

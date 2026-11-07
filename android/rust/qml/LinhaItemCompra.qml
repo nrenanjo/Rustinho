@@ -82,7 +82,7 @@ Rectangle {
                 Text {
                     text: linha.item.descricao
                     color: Tema.tinta
-                    font.family: Tema.titulo
+                    font.family: Tema.fonteLinha
                     font.weight: Font.Bold
                     font.pixelSize: Tema.estreito ? 18 : 21
                     elide: Text.ElideRight

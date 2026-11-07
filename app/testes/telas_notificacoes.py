@@ -250,13 +250,13 @@ def main():
                and not r.tem(TEXTO_ATENCAO), f)
             # 12. Tema escuro: o triângulo vira o PNG branco, sem reiniciar.
             # (0.9.18: três botões — sol, lua, planeta —, achados pelo nome.)
-            lua = r.achar("Fundo preto")
+            lua = r.achar("Tema escuro")
             xdo("mousemove", str(lua[0]), str(lua[1]), "click", "1")
             time.sleep(1.5)
             f = r.foto("-12-escuro")
             canto = canto_do_triangulo(f, r.achar(PAGAR))
             ok("12: tema escuro, triângulo branco no quadrado", max(canto) > 190, f"{f} brilho máximo {max(canto)}")
-            sol = r.achar("Fundo cinza")
+            sol = r.achar("Tema claro")
             xdo("mousemove", str(sol[0]), str(sol[1]), "click", "1")
             time.sleep(1)
         finally:

@@ -20,9 +20,14 @@ Button {
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
     readonly property color cor: Tema.setaNo(superficie)
     readonly property real tamanhoIcone: 18
-    // Do canto da área de toque até o desenho da seta: quem põe a seta usa
-    // -folga na margem para o desenho ficar alinhado com o conteúdo.
+    // Do canto da área de toque até o desenho da seta.
     readonly property real folga: (Tema.toqueSeta - tamanhoIcone) / 2
+    // Ordem visual §9 (0.9.18): a seta fica no canto de cima, à esquerda, a
+    // cerca de 1 cm das bordas da janela. Com o vidro à mostra, a borda do
+    // vidro fica alinhada com o conteúdo (Tema.margem, 32 px) e, no
+    // computador, 10 px mais abaixo do que o topo do conteúdo: 32 × 30 px,
+    // ≈ 0,85 × 0,8 cm numa tela de 96 dpi. No celular, as margens de sempre.
+    readonly property real descida: Tema.estreito ? 0 : 10
 
     // Os testes acham a seta (e onde ela está) por este nome.
     objectName: "setaDeRetorno"
@@ -62,12 +67,29 @@ Button {
         }
     }
 
+    // Vidro roxo (ordem visual §9): um roxo translúcido em forma de pílula,
+    // com contorno fino e um brilho na metade de cima; claro sobre o fundo
+    // roxo ou escuro, roxo sobre um painel claro (Tema.vidroNo). Mouse em
+    // cima e apertado deixam o vidro mais denso; o foco do teclado, o
+    // contorno de destaque.
     background: Rectangle {
-        radius: 8
-        color: seta.down ? Tema.sombraNo(0.13, seta.superficie)
-                         : seta.hovered ? Tema.sombraNo(0.07, seta.superficie) : "transparent"
-        border.width: seta.visualFocus ? 2 : 0
-        border.color: Tema.azulEscuroNo(seta.superficie)
+        radius: height / 2
+        color: seta.down ? Tema.vidroBaixoNo(seta.superficie)
+                         : seta.hovered ? Tema.vidroSobreNo(seta.superficie) : Tema.vidroNo(seta.superficie)
+        border.width: seta.visualFocus ? 2 : 1
+        border.color: seta.visualFocus ? Tema.azulEscuroNo(seta.superficie) : Tema.vidroBordaNo(seta.superficie)
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 1
+            height: parent.height / 2
+            radius: height
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Tema.vidroBrilhoNo(seta.superficie) }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+        }
     }
 
     // Enter também aperta (no Qt, só a barra de espaço apertava).

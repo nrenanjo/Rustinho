@@ -155,7 +155,7 @@ FocusScope {
                         font.italic: true
                         font.weight: Font.DemiBold
                         font.pixelSize: 56
-                        color: linha.aberto && Tema.roxo ? Tema.tintaAtual : Tema.douradoDaFaixa(linha.par)
+                        color: linha.aberto ? Tema.tintaAtual : Tema.douradoDaFaixa(linha.par)
                     }
                     ColumnLayout {
                         anchors.left: parent.left

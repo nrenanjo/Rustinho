@@ -1,9 +1,9 @@
 import QtQuick
 import rustinho
 
-// Pílula pequena dos temas (0.9.18): sol = fundo cinza de sempre,
-// lua = fundo preto (AMOLED), planeta = Planeta Roxo. A escolha fica
-// guardada só neste aparelho.
+// Pílula pequena dos temas (0.9.18): sol = tema claro, lua = tema escuro
+// (AMOLED), planeta = Planeta Roxo; os três na identidade roxa. A escolha
+// fica guardada só neste aparelho.
 Rectangle {
     id: pilula
     // O círculo de cada tema (o desenho).
@@ -32,8 +32,8 @@ Rectangle {
         anchors.centerIn: parent
         spacing: 0
         Repeater {
-            model: [{ nome: "sol", tema: "cinza", dica: "Fundo cinza" },
-                    { nome: "lua", tema: "amoled", dica: "Fundo preto" },
+            model: [{ nome: "sol", tema: "cinza", dica: "Tema claro" },
+                    { nome: "lua", tema: "amoled", dica: "Tema escuro" },
                     { nome: "planeta", tema: "roxo", dica: "Planeta Roxo" }]
             delegate: Item {
                 id: celula

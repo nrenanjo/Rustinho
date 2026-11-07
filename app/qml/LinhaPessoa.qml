@@ -32,7 +32,7 @@ Rectangle {
 
         Text {
             text: (linha.item.codigo || "") + (linha.item.codigoPendente ? " (?)" : "")
-            color: linha.item.codigoPendente ? (Tema.roxo && linha.atual ? Tema.tintaAtual : Tema.vermelhoDaFaixa(linha.par)) : linha.corSuave
+            color: linha.item.codigoPendente ? (linha.atual ? Tema.tintaAtual : Tema.vermelhoDaFaixa(linha.par)) : linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold
             font.pixelSize: 15
@@ -47,7 +47,7 @@ Rectangle {
             Text {
                 text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativo)")
                 color: linha.corTexto
-                font.family: Tema.titulo
+                font.family: Tema.fonteLinha
                 font.weight: Font.Bold
                 font.pixelSize: Tema.estreito ? 20 : 22
                 elide: Text.ElideRight

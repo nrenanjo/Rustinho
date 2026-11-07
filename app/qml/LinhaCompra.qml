@@ -46,7 +46,7 @@ Rectangle {
             Text {
                 text: linha.item.fornecedor || "Fornecedor não identificado"
                 color: linha.corTexto
-                font.family: Tema.titulo
+                font.family: Tema.fonteLinha
                 font.weight: Font.Bold
                 font.pixelSize: 22
                 elide: Text.ElideRight

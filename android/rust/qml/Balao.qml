@@ -10,9 +10,9 @@ Rectangle {
 
     visible: texto !== ""
     radius: height / 2
-    // Na linha escolhida: no roxo (magenta), um véu escuro deixa o texto
-    // branco legível; nos outros, um véu claro.
-    color: escuro ? (Tema.roxo ? Qt.rgba(0.2, 0, 0.2, 0.35) : Tema.claroSuave(0.16)) : Tema.papel
+    // Na linha escolhida (magenta nos três temas): um véu escuro deixa o
+    // texto branco legível.
+    color: escuro ? Tema.chipAtual : Tema.papel
     implicitWidth: Math.min(rotulo.implicitWidth + 18, 220)
     implicitHeight: rotulo.implicitHeight + 6
 
@@ -21,7 +21,7 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(implicitWidth, balao.width - 18)
         text: balao.texto
-        color: balao.escuro ? Tema.claro : Tema.azulEscuro
+        color: balao.escuro ? Tema.tintaAtual : Tema.azulEscuro
         font.family: Tema.texto
         font.weight: Font.DemiBold
         font.pixelSize: 12

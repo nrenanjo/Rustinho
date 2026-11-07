@@ -94,7 +94,7 @@ FocusScope {
                         font.italic: true
                         font.weight: Font.DemiBold
                         font.pixelSize: 64
-                        color: cartao.marcado ? (Tema.roxo ? Tema.tintaAtual : Tema.dourado) : Tema.douradoDaFaixa(cartao.par)
+                        color: cartao.marcado ? Tema.tintaAtual : Tema.douradoDaFaixa(cartao.par)
                         opacity: 0.85
                     }
                     Text {

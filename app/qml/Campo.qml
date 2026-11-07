@@ -43,8 +43,76 @@ ColumnLayout {
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
     // busca escura do Planeta Roxo (campo com a lupa).
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
-    readonly property bool buscaEscura: Tema.roxo && (icone === "busca" || colarCopiar)
+    readonly property bool busca: icone === "busca" || colarCopiar
+    readonly property bool buscaEscura: Tema.roxo && busca
     readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : buscaEscura ? Tema.buscaFundo : Tema.papel
+
+    // ---- Os seis estados do campo (0.9.18, ordem visual §6) ----
+    // normal, focado, preenchido, inválido, desabilitado e validado. Validado:
+    // a tela diz (valido: true) ou o campo confere sozinho o que dá para
+    // conferir sem o núcleo (conferir: "documento" = CPF ou CNPJ, "cpf",
+    // "cnpj", "gtin" = código de barras), com as mesmas contas do núcleo
+    // (base/src/documento.rs e gtin.rs, CNPJ alfanumérico incluído). Fica
+    // verde só quando o número está completo e certo; o núcleo continua
+    // conferindo ao salvar (o erro dele aparece como sempre).
+    property bool valido: false
+    property string conferir: ""
+    readonly property bool validoAgora: valido || (conferir !== "" && confere(entrada.text))
+    readonly property string estado: !enabled ? "desabilitado"
+        : erro !== "" ? "invalido"
+        : entrada.activeFocus ? "focado"
+        : validoAgora ? "valido"
+        : entrada.text !== "" ? "preenchido" : "normal"
+    opacity: enabled ? 1 : Tema.opacidadeDesabilitado
+
+    function _limpo(t) { return String(t).replace(/[^0-9A-Za-z]/g, "").toUpperCase() }
+    function _todosIguais(s) { return s.split("").every(c => c === s[0]) }
+    function cpfValido(t) {
+        const s = _limpo(t)
+        if (!/^[0-9]{11}$/.test(s) || _todosIguais(s))
+            return false
+        const d = s.split("").map(Number)
+        const dv = n => {
+            let soma = 0
+            for (let i = 0; i < n; i++)
+                soma += d[i] * (n + 1 - i)
+            const resto = (soma * 10) % 11
+            return resto === 10 ? 0 : resto
+        }
+        return dv(9) === d[9] && dv(10) === d[10]
+    }
+    function cnpjValido(t) {
+        const s = _limpo(t)
+        if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(s) || _todosIguais(s))
+            return false
+        const v = c => c.charCodeAt(0) - 48
+        const dv = n => {
+            let soma = 0
+            for (let i = 0; i < n; i++)
+                soma += v(s[i]) * ((n - 1 - i) % 8 + 2)
+            const resto = soma % 11
+            return resto < 2 ? 0 : 11 - resto
+        }
+        return dv(12) === v(s[12]) && dv(13) === v(s[13])
+    }
+    function gtinValido(t) {
+        const s = String(t).replace(/\s/g, "")
+        if (!/^[0-9]+$/.test(s) || [8, 12, 13, 14].indexOf(s.length) < 0)
+            return false
+        let soma = 0
+        for (let i = s.length - 2, k = 0; i >= 0; i--, k++)
+            soma += Number(s[i]) * (k % 2 === 0 ? 3 : 1)
+        return (10 - soma % 10) % 10 === Number(s[s.length - 1])
+    }
+    function confere(t) {
+        switch (conferir) {
+        case "documento": return cpfValido(t) || cnpjValido(t)
+        case "cpf": return cpfValido(t)
+        case "cnpj": return cnpjValido(t)
+        case "gtin": return gtinValido(t)
+        }
+        return false
+    }
 
     // Botão redondo dentro do campo (colar e copiar da busca da Início):
     // área de toque de 40 × 40 px (48 × 48 dp no celular).
@@ -210,8 +278,8 @@ ColumnLayout {
         placeholderTextColor: campo.buscaEscura ? Tema.roxoTintaSuaveClara : Tema.dica
         // O que fica dentro do campo (o atalho "F11") sabe a cor embaixo.
         palette.window: Tema.superficie(campo.corDoCampo)
-        selectionColor: Tema.azulEscuro
-        selectedTextColor: Tema.claro
+        selectionColor: Tema.atual
+        selectedTextColor: Tema.tintaAtual
         echoMode: campo.senha || campo.escondido ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"
         horizontalAlignment: campo.numerico ? TextInput.AlignRight : TextInput.AlignLeft
@@ -224,6 +292,7 @@ ColumnLayout {
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
                       + (campo.comBotao ? 44 : 0)
                       + (campo.colarCopiar ? campo.ladoBotaoInterno : 0)
+                      + (marcaValido.visible ? 26 : 0)
         selectByMouse: true
         // Celular: sem "texto previsto" (o teclado manda cada letra direto;
         // evita letras trocadas de lugar). Números quando o campo é de número.
@@ -231,11 +300,50 @@ ColumnLayout {
                           | (campo.numerico ? Qt.ImhPreferNumbers : Qt.ImhNone)
                           | (campo.maiusculas ? Qt.ImhPreferUppercase : Qt.ImhNone)
 
-        background: Rectangle {
-            radius: Tema.raioCampo
-            color: campo.corDoCampo
-            border.width: campo.erro !== "" || entrada.activeFocus || campo.buscaEscura ? 2 : 0
-            border.color: campo.erro !== "" ? Tema.vermelhoNo(campo.corDoCampo) : campo.buscaEscura ? Tema.buscaBorda : Tema.azulEscuro
+        background: Item {
+            // O brilho em volta (foco magenta, erro vermelho), como na
+            // referência aprovada do CNPJ: fora do campo, sem cobrir o texto.
+            Rectangle {
+                objectName: campo.objectName !== "" ? campo.objectName + "Brilho" : ""
+                anchors.fill: parent
+                anchors.margins: -4
+                radius: Tema.raioCampo + 4
+                color: "transparent"
+                border.width: 4
+                border.color: campo.estado === "invalido" ? Tema.erroBrilhoNo(campo.corDoCampo) : Tema.focoBrilho
+                visible: campo.estado === "invalido" || campo.estado === "focado"
+            }
+            Rectangle {
+                objectName: campo.objectName !== "" ? campo.objectName + "Caixa" : ""
+                anchors.fill: parent
+                radius: Tema.raioCampo
+                color: campo.corDoCampo
+                border.width: campo.estado === "normal" || campo.estado === "preenchido" || campo.estado === "desabilitado"
+                              ? (campo.busca ? 2 : 1) : 2
+                border.color: {
+                    switch (campo.estado) {
+                    case "invalido": return Tema.vermelhoNo(campo.corDoCampo)
+                    case "focado": return campo.busca ? Tema.buscaBorda : Tema.foco
+                    case "valido": return Tema.verdeEscuroNo(campo.corDoCampo)
+                    }
+                    if (campo.busca)
+                        return Tema.buscaBorda
+                    return campo.estado === "preenchido" ? Tema.bordaPreenchido : Tema.bordaCampo
+                }
+            }
+        }
+        // Validado: a marca verde no fim do campo (onde não tem outro botão).
+        Icone {
+            id: marcaValido
+            objectName: campo.objectName !== "" ? campo.objectName + "Valido" : ""
+            visible: campo.estado === "valido" && !campo.comBotao && campo.sufixo === "" && !textoAtalho.visible
+                     && !campo.colarCopiar
+            nome: "check"
+            tamanho: 18
+            cor: Tema.verdeEscuroNo(campo.corDoCampo)
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
         }
 
         Icone {
