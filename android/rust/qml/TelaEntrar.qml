@@ -6,6 +6,9 @@ import rustinho
 // Entrada: cada pessoa clica no próprio nome e digita a senha.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Entrada"
     readonly property var janela: ApplicationWindow.window
     property var usuarios: []
     property int escolhido: -1

@@ -268,7 +268,7 @@ FocusScope {
                     }
                     Botao {
                         visible: linha.aberta && (sobre.hovered || Tema.celular)
-                        text: "Cancelar"
+                        text: "Cancelar encomenda"
                         tipo: "discreto"
                         altura: 36
                         onClicked: motivo.perguntar("Cancelar a encomenda nº " + linha.e.numero + (linha.e.caixa ? " (" + linha.e.caixa + ")" : "") + "?",

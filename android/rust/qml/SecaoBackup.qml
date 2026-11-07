@@ -158,6 +158,18 @@ ColumnLayout {
         }, "perigo")
     }
 
+    // A seta e o Esc das Configurações desistem primeiro da restauração que
+    // espera a senha (o botão "Cancelar" saiu na correção definitiva do
+    // botão de retorno, 07/11/2026). true = desistiu (fica na tela).
+    function aoEsc() {
+        if (secao.pedirSenhaDe === null || secao.restaurando)
+            return false
+        secao.pedirSenhaDe = null
+        senhaOutra.texto = ""
+        senhaOutra.erro = ""
+        return true
+    }
+
     function restaurar(c, senhaDigitada) {
         restaurando = true
         esperaRestaurar.copia = c
@@ -572,12 +584,6 @@ ColumnLayout {
                     tipo: "perigo"
                     Layout.alignment: Qt.AlignBottom
                     onClicked: secao.restaurar(secao.pedirSenhaDe, senhaOutra.texto)
-                }
-                Botao {
-                    text: "Cancelar"
-                    tipo: "secundario"
-                    Layout.alignment: Qt.AlignBottom
-                    onClicked: { secao.pedirSenhaDe = null; senhaOutra.texto = "" }
                 }
             }
         }

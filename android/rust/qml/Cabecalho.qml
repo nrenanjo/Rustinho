@@ -3,14 +3,12 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
-// Topo das telas: a seta de retorno ("← Início"), título grande e, à
-// direita, os botões.
+// Topo das telas: a seta de retorno (só a seta, no vidro roxo), título
+// grande e, à direita, os botões.
 ColumnLayout {
     id: cabecalho
     property string titulo: ""
     property string subtitulo: ""
-    // Para onde a seta volta (o texto ao lado dela, D-V1).
-    property string textoVoltar: "Início"
     property bool mostrarVoltar: true
     // Tela com CPF/CNPJ, custo, lucro ou saldos: mostra o olho no canto.
     property bool sensivel: false
@@ -28,7 +26,6 @@ ColumnLayout {
         Seta {
             id: seta
             visible: cabecalho.mostrarVoltar
-            destino: cabecalho.textoVoltar
             // O vidro alinhado com o conteúdo e um pouco mais abaixo (Seta.descida).
             Layout.topMargin: seta.descida
             onClicked: ApplicationWindow.window.retornar(true)

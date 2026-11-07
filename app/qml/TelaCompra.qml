@@ -10,6 +10,9 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string compraId: ""
     property var compra: null
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: compra ? "NF " + compra.numero : "Compra"
     // FALHA-04: chave do lançamento desta compra (nova ao carregar de novo).
     property string chaveLancar: Api.novaChave()
     property int itemEscolhendo: -1
@@ -178,7 +181,6 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            textoVoltar: "Compras"
             titulo: tela.compra ? "NF " + tela.compra.numero + " · " + tela.compra.fornecedor : ""
             subtitulo: {
                 if (!tela.compra)

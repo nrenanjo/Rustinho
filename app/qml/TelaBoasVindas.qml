@@ -6,6 +6,9 @@ import rustinho
 // Primeira vez que o Rustinho abre neste computador.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Boas-vindas"
     readonly property var janela: ApplicationWindow.window
 
     function comecar() {

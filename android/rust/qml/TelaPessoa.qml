@@ -10,6 +10,11 @@ FocusScope {
     property string pessoaId: ""
     property string papel: "cliente"
     property var ficha: null
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: nova ? (papel === "fornecedor" ? "Novo fornecedor" : "Novo cliente")
+                                              : ficha && ficha.nome ? ficha.nome
+                                              : papel === "fornecedor" ? "Fornecedor" : "Cliente"
     // FALHA-04: chave deste salvar (nova ao abrir e depois de salvar: o
     // próximo salvar já é uma alteração do mesmo cadastro).
     property string chave: Api.novaChave()
@@ -189,7 +194,6 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            textoVoltar: tela.papel === "fornecedor" ? "Fornecedores" : "Clientes"
             titulo: tela.nova ? (tela.papel === "fornecedor" ? "Novo fornecedor" : "Novo cliente") : tela.ficha.nome
             subtitulo: {
                 if (!tela.ficha)

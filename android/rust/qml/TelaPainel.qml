@@ -7,6 +7,9 @@ import rustinho
 // compra, de quem a loja compra e como os clientes pagam.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Painel"
     readonly property var janela: ApplicationWindow.window
     property string secao: "resumo"
     property int dias: 30

@@ -11,6 +11,9 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string vendaId: ""
     property var v: null
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: !v ? "Venda" : (v.tipo === "orcamento" ? "Orçamento " : "Venda ") + v.numero
     readonly property bool orcamento: !!v && v.tipo === "orcamento"
 
     function carregar() {
@@ -45,7 +48,6 @@ FocusScope {
         spacing: 12
 
         Cabecalho {
-            textoVoltar: "Voltar"
             titulo: !tela.v ? "" : (tela.orcamento ? "Orçamento " : "Venda ") + tela.v.numero
                                    + " · " + (tela.v.cliente || (tela.orcamento ? "sem cliente" : "Consumidor"))
             subtitulo: !tela.v ? "" : [Qt.formatDateTime(new Date(tela.v.criadoEm), "dd/MM/yyyy 'às' HH:mm"), tela.v.caixa,

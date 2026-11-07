@@ -45,12 +45,9 @@ FocusScope {
     // Fiscal → Loja reutiliza esta instância; guarda a seção para restaurá-la
     // quando o requisito for salvo ou a pessoa desistir.
     property string secaoAntesDaGuia: ""
-    // Como esta tela aparece no "voltar" de outra (navegação guiada).
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
     readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
-    // O "voltar" desta tela, quando outra tela (não o Início) a abriu para
-    // resolver alguma coisa (navegação contextual, 0.9.18). Com guia, vale o
-    // nome da tela de origem da guia.
-    property string voltarPara: "Início"
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela. A
     // guia que não terminou aqui também acaba (a tela saiu da pilha por outro
     // caminho: sessão encerrada, backup restaurado). Quando a pilha destrói a
@@ -587,6 +584,19 @@ FocusScope {
     }
 
     function aoEsc() {
+        // A seta e o Esc desistem primeiro do que está pela metade dentro
+        // desta tela, as confirmações que tinham um botão "Cancelar" (saíram
+        // na correção definitiva do botão de retorno, 07/11/2026).
+        if (secao === "duplicatas" && confirmarCaixaNovo) {
+            confirmarCaixaNovo = false
+            return
+        }
+        if (secao === "duplicatas" && confirmarAssumir) {
+            confirmarAssumir = false
+            return
+        }
+        if (secao === "backup" && parteBackup.item && parteBackup.item.aoEsc())
+            return
         if (secao === "fiscal" && fiscal.item && fiscal.item.regrasAlteradas)
             janela.confirmar("Descartar as regras alteradas?", "As mudanças nas regras de ST ainda não foram salvas.",
                              "Descartar", () => tela.sair(), "perigo")
@@ -613,8 +623,6 @@ FocusScope {
         Cabecalho {
             sensivel: true
             titulo: "Configurações"
-            // Aberta pela navegação guiada: o "voltar" diz para onde volta.
-            textoVoltar: tela.guia ? tela.guia.origemNome : tela.voltarPara
             subtitulo: ({
                 loja: tela.completo ? "A loja, este computador e a sua senha" : "Este computador e a sua senha",
                 gerente: "Quem é gerente e o que só o gerente pode fazer",
@@ -1653,11 +1661,6 @@ FocusScope {
                             onClicked: tela.comandoCodigos("codigos_registrar_caixa_novo", { nome: nomeCaixaNovo.texto },
                                                            "Este banco foi registrado como caixa novo.")
                         }
-                        Botao {
-                            text: "Cancelar"
-                            tipo: "secundario"
-                            onClicked: tela.confirmarCaixaNovo = false
-                        }
                     }
                     Text {
                         text: {
@@ -1991,11 +1994,6 @@ FocusScope {
                             text: "Confirmar"
                             onClicked: tela.comandoCodigos("codigos_assumir", {}, "Este caixa passou a distribuir as faixas de códigos.")
                         }
-                        Botao {
-                            text: "Cancelar"
-                            tipo: "secundario"
-                            onClicked: tela.confirmarAssumir = false
-                        }
                     }
                 }
 
@@ -2182,6 +2180,7 @@ FocusScope {
 
                 // ---------------- Backup ----------------
                 Loader {
+                    id: parteBackup
                     // Só com a consulta do Backup liberada: aberta direto aqui
                     // (pela faixa do modo seguro ou por uma notificação), a
                     // parte não carrega antes da senha (antes, o caixa via um

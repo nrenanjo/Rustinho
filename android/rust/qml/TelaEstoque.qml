@@ -8,10 +8,15 @@ import rustinho
 // Faz parte da pílula unida "Estoque / Fornecedores" (0.9.15).
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Estoque"
     readonly property var janela: ApplicationWindow.window
     property string secao: "comprar"
 
-    // Esc: a seção limpa a busca dela primeiro; a seta volta direto (D-V3).
+    // O Esc e a seta fazem o mesmo (D-V3, decidida pelo dono em 07/11/2026:
+    // os dois voltam direto). limparBuscaAntes só deixaria a seção limpar a
+    // busca antes se a regra mudasse em Main.
     function aoEsc(daSeta) {
         if (janela.limparBuscaAntes(daSeta) && conteudo.item && typeof conteudo.item.aoEsc === "function" && conteudo.item.aoEsc())
             return

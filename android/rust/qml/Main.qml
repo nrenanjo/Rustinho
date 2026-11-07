@@ -104,17 +104,18 @@ ApplicationWindow {
         else
             voltar()
     }
-    // D-V3 (decisão em aberto; padrão provisório = como hoje): com a busca
-    // preenchida, o Esc limpa a busca primeiro e só o próximo Esc volta; a
-    // seta volta direto. false = o Esc também volta direto (igual à seta).
-    // As telas perguntam por esta função; a regra fica só aqui.
-    readonly property bool escLimpaBuscaAntes: true
+    // D-V3, decidida pelo dono na correção definitiva do botão de retorno
+    // (07/11/2026): o Esc faz exatamente o mesmo que a seta. Com a busca
+    // preenchida, o Esc também volta direto (antes ele limpava a busca
+    // primeiro). true = o Esc limpa a busca antes de voltar. As telas
+    // perguntam por esta função; a regra fica só aqui.
+    readonly property bool escLimpaBuscaAntes: false
     function limparBuscaAntes(daSeta) {
         return daSeta !== true && escLimpaBuscaAntes
     }
 
     // Troca a tela de cima por outra (subpílulas das pílulas unidas:
-    // Vender / Receber e Estoque / Fornecedores). "Voltar" continua indo
+    // Vender / Receber e Estoque / Fornecedores). A seta continua voltando
     // para onde ia antes.
     function substituir(tela, propriedades) {
         pilha.replace(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
@@ -343,7 +344,9 @@ ApplicationWindow {
         const g = {
             id: id, requisito: req, origem: origem, motivo: motivo || "", aoVoltar: aoVoltar,
             mesmaTela: !!mesmaTela,
-            origemNome: (origem && origem.nomeNaNavegacao) ? origem.nomeNaNavegacao : "Voltar"
+            // Para a orientação ("Depois o Rustinho volta para Compras"): toda
+            // tela tem nomeNaNavegacao.
+            origemNome: (origem && origem.nomeNaNavegacao) ? origem.nomeNaNavegacao : "a tela de antes"
         }
         guiaAtiva = g
         guia.mostrar("pendente", req.titulo, req.texto.arg(g.origemNome))
@@ -469,11 +472,7 @@ ApplicationWindow {
             atual.mostrarBackup()
             return
         }
-        abrir("TelaConfiguracoes", { secao: "backup", voltarPara: nomeDe(atual) })
-    }
-    // Como uma tela aparece no "voltar" da tela que ela abriu.
-    function nomeDe(tela) {
-        return tela && tela.nomeNaNavegacao ? tela.nomeNaNavegacao : "Voltar"
+        abrir("TelaConfiguracoes", { secao: "backup" })
     }
 
     // A3 (0.9.15): banco com defeito de integridade — modo seguro. A faixa

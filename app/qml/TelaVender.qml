@@ -7,6 +7,9 @@ import rustinho
 // Vender: leitor de código de barras ou busca, carrinho, cliente e receber.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Vender"
     // Celular: mostra a parte do cliente e total no lugar do carrinho.
     property bool verLateral: false
     readonly property var janela: ApplicationWindow.window
@@ -234,9 +237,16 @@ FocusScope {
         return (c / 100).toFixed(2).replace(".", ",")
     }
 
-    // Esc com a busca preenchida limpa a busca; a seta não (D-V3). Com
-    // itens no carrinho, os dois perguntam antes de limpar a venda.
+    // A seta e o Esc fazem o mesmo (D-V3: limparBuscaAntes só limparia a
+    // busca antes se a regra mudasse em Main). No celular, com o cliente e
+    // o total na tela, os dois voltam ao carrinho (o botão "Voltar ao
+    // carrinho" saiu na correção definitiva do botão de retorno). Com itens
+    // no carrinho, os dois perguntam antes de limpar a venda.
     function aoEsc(daSeta) {
+        if (Tema.estreito && verLateral) {
+            verLateral = false
+            return
+        }
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             limparBusca()
         } else if (carrinho.length > 0) {
@@ -395,7 +405,6 @@ FocusScope {
                 Layout.topMargin: 4
                 Seta {
                     id: seta
-                    destino: "Início"
                     Layout.leftMargin: 4
                     Layout.topMargin: seta.descida
                     onClicked: tela.janela.retornar(true)
@@ -690,15 +699,6 @@ FocusScope {
                 Layout.maximumWidth: Tema.estreito ? Number.POSITIVE_INFINITY : 340
                 Layout.fillWidth: Tema.estreito
                 Layout.fillHeight: true
-
-                Botao {
-                    visible: Tema.estreito
-                    tipo: "discreto"
-                    icone: "voltar"
-                    text: "Voltar ao carrinho"
-                    Layout.leftMargin: -10
-                    onClicked: tela.verLateral = false
-                }
 
                 Faixa {
                     titulo: "Cliente"

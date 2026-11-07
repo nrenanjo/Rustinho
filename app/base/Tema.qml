@@ -194,12 +194,9 @@ QtObject {
     // ---- Seta de retorno (V-2 e V-4, 0.9.18; componente Seta.qml) ----
     // Área de toque: 40 × 40 px no computador, 48 × 48 dp no celular.
     readonly property int toqueSeta: celular ? 48 : 40
-    // D-V1 (decisão em aberto; padrão provisório): o nome do destino ao lado
-    // da seta ("← Início", "← Compras"), como hoje. A navegação guiada usa
-    // esse texto para dizer para onde a seta volta, e os testes conferem.
-    // false = só a seta, como em comoficará.png (o nome do destino continua
-    // como nome acessível do botão).
-    readonly property bool setaComTexto: true
+    // D-V1, decidida pelo dono na correção definitiva do botão de retorno
+    // (07/11/2026): só a seta, como em comoficará.png, sem texto, legenda ou
+    // nome de destino ao lado (Seta.qml).
     // D-V2 (decisão em aberto; padrão provisório): a cor da seta é a de
     // maior contraste em cada tema, a do texto sobre a superfície: tinta
     // escura no cinza, clara no AMOLED, clara no fundo roxo (como no print

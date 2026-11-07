@@ -127,7 +127,7 @@ def main():
             r.abrir_notificacao()
             ok("pede a senha do gerente", r.esperar(lambda: r.tem(PEDIDO)), r.foto("-1"))
             ok("Configurações por cima do Início", r.pilha() == inicio + 1)
-            r.clicar("Voltar")
+            r.clicar_seta_de_cima()
             f = r.foto("-2")
             ok("NOTIF-03: desistir (Voltar) volta ao Início", r.esperar(lambda: r.pilha() == inicio), f)
             ok("NOTIF-03: sem a senha aberta", not r.tem(PEDIDO), f)
@@ -181,7 +181,7 @@ def main():
             antes = r.pilha()
             r.clicar("Simultaneidade")
             ok("a pílula pede a senha", r.esperar(lambda: r.tem(PEDIDO)), r.foto("-1"))
-            r.clicar("Voltar")
+            r.clicar_seta_de_cima()
             f = r.foto("-2")
             ok("controle: desistir pela pílula continua em Configurações",
                r.esperar(lambda: not r.tem(PEDIDO)) and r.pilha() == antes, f)

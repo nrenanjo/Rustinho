@@ -9,14 +9,16 @@
             ícones da Início (Peças = chave inglesa, Ordens = prancheta);
             cópias do Android iguais.
   A6   Em cada tema: a seta no mesmo lugar (x, y) e com a mesma altura nas 21
-       telas e na TelaVender, com área de toque ≥ 40 × 40 px; nenhum
-       "Cancelar", "Voltar" ou "Fechar" de texto na tela (fora a própria seta);
-       uma foto de cada tela.
+       telas e na TelaVender, a cerca de 1 cm do canto (28 a 40 px), só a
+       seta (área de toque quadrada, ≥ 40 × 40 px, sem texto ao lado: D-V1,
+       correção definitiva do dono, 07/11/2026); nenhum "Cancelar", "Voltar"
+       ou "Fechar" de texto na tela (fora a própria seta); uma foto de cada tela.
   A7   Seta × Esc: para cada tela, abre e aciona a seta; abre de novo e aperta
        Esc; os dois dão no mesmo (quantas telas na pilha e qual janelinha
        abriu). Também com alteração por salvar (Peça, Pessoa, Configurações,
-       OS nova): os dois abrem a mesma pergunta e ficam na tela. D-V3 (padrão provisório): com a busca preenchida, o Esc limpa a
-       busca e fica; a seta volta direto (conferido e registrado à parte).
+       OS nova): os dois abrem a mesma pergunta e ficam na tela. D-V3
+       (decidida pelo dono, 07/11/2026): com a busca preenchida, o Esc faz o
+       mesmo que a seta, os dois voltam direto (conferido à parte).
   A8   Janelinhas: na peça alterada, a seta e o Esc da tela abrem "Descartar
        alterações?" (sem "Cancelar"); a seta da janelinha e o Esc fecham sem
        efeito (continua alterada, nada gravado); "Descartar" descarta. Mais
@@ -88,7 +90,7 @@ TELAS = [
     ("TelaTrocas", {}), ("TelaUsuarios", {}), ("TelaVenda", {"vendaId": "VENDA"}), ("TelaVender", {}),
 ]
 
-# D-V3: telas em que o Esc limpa a busca antes de voltar (a seta volta direto).
+# D-V3: telas com busca; com ela preenchida, o Esc e a seta voltam direto (iguais).
 TELAS_BUSCA = [("TelaPecas", {}), ("TelaPessoas", {"papel": "cliente"}), ("TelaCompras", {}), ("TelaOrcamentos", {}),
                ("TelaOrdens", {}), ("TelaTrocas", {}), ("TelaReceber", {}), ("TelaFinanceiro", {"secao": "pagar"}),
                ("TelaEstoque", {"secao": "comprar"}), ("TelaVender", {})]
@@ -181,14 +183,14 @@ def resolver(props, ids):
 # A tabela final dos botões de texto que ficam (V-5 e o resto do inventário):
 # (arquivo, um texto do botão, um pedaço do onClicked, por quê).
 FICAM = [
-    ("SecaoBackup.qml", "Cancelar", "secao.pedirSenhaDe = null", "cancela a restauração pedida (operação em andamento)"),
-    ("TelaConfiguracoes.qml", "Cancelar", "tela.confirmarCaixaNovo = false", "cancela o registro de caixa novo (operação)"),
-    ("TelaConfiguracoes.qml", "Cancelar", "tela.confirmarAssumir = false", "cancela assumir as faixas de códigos (operação)"),
-    ("SecaoEncomendas.qml", "Cancelar", "motivo.perguntar(\"Cancelar a encomenda", "cancela a encomenda (negócio)"),
+    # Correção definitiva do botão de retorno (dono, 07/11/2026): saíram o
+    # "Cancelar" da restauração do backup, os dois das Configurações (caixa
+    # novo, assumir as faixas), o "Voltar" do Juntar, os "Voltar à lista" e o
+    # "Voltar ao carrinho" do celular; a seta e o Esc fazem esse retorno.
+    ("SecaoEncomendas.qml", "Cancelar encomenda", "motivo.perguntar(\"Cancelar a encomenda", "cancela a encomenda (negócio)"),
     ("SecaoComissoes.qml", "Fechar", "fechamento.abrirCom(", "fecha a comissão (negócio)"),
     ("SecaoComissoes.qml", "Fechar e lançar", "fechamento.salvar()", "fecha e lança a comissão (negócio)"),
     ("TelaCompras.qml", "Desistir", "tela.pendentes = []", "descarta os arquivos esperando (descarta dados)"),
-    ("TelaJuntar.qml", "Voltar", "tela.desistir()", "desiste de entrar na loja (desfaz a tentativa)"),
     ("TelaVenda.qml", "Cancelar venda", "tela.cancelar()", "abre o cancelamento da venda/orçamento (negócio)"),
     ("TelaVenda.qml", "Cancelar venda", "\"venda_cancelar\"", "confirma o cancelamento, com motivo e gerente (negócio)"),
     ("TelaOrdem.qml", "Cancelar OS", "pergunta.perguntar(", "cancela a OS (negócio)"),
@@ -196,9 +198,6 @@ FICAM = [
     ("TelaOrdem.qml", "Sair sem salvar", "tela.alterado = false", "descarta a OS não salva (Descartar)"),
     ("TelaCaixa.qml", "Fechar caixa", "fechar.abrirCom()", "fecha o caixa (negócio)"),
     ("TelaCaixa.qml", "Fechar e imprimir", "\"caixa_fechar\"", "fecha o caixa e imprime (negócio)"),
-    ("TelaReceber.qml", "Voltar à lista", "tela.clienteId = \"\"", "só no celular: volta da ficha à lista, dentro da tela (D-V8)"),
-    ("TelaUsuarios.qml", "Voltar à lista", "tela.mostrarFicha = false", "só no celular: volta da ficha à lista, dentro da tela (D-V8)"),
-    ("TelaVender.qml", "Voltar ao carrinho", "tela.verLateral = false", "só no celular: volta ao carrinho, dentro da tela (D-V8)"),
     ("TelaReceber.qml", "Pronto", "feito.close()", "conclusão (Enter) do recibo; não é voltar nem cancelar"),
     ("TelaVender.qml", "Nova venda", "concluida.close()", "conclusão (Enter) da venda; não é voltar nem cancelar"),
     ("SecaoPagar.qml", "Pronto", "categorias.close()", "conclusão da edição das categorias (cada mudança já foi gravada)"),
@@ -275,13 +274,21 @@ def estatico(res):
     volta = re.search(r"Keys\.onBackPressed:.*?\n        \}", main, re.S)
     res.conferir("ESTÁTICO: Esc e o voltar do Android vão por janela.retornar(false)",
                  bool(esc and "retornar(false)" in esc.group(0) and volta and "retornar(false)" in volta.group(0)))
-    res.conferir("ESTÁTICO: D-V3 num lugar só (Main.escLimpaBuscaAntes)",
+    res.conferir("ESTÁTICO: D-V3 num lugar só (Main.escLimpaBuscaAntes), decidida: o Esc igual à seta",
                  len(re.findall(r"property bool escLimpaBuscaAntes", main)) == 1
+                 and "readonly property bool escLimpaBuscaAntes: false" in main
                  and sum(t.count("janela.limparBuscaAntes(daSeta)") for t in conteudo.values()) == 10)
     tema_qml = open(os.path.join(RAIZ, "app", "base", "Tema.qml"), encoding="utf-8").read()
-    res.conferir("ESTÁTICO: D-V1 e D-V2 num lugar só (Tema.setaComTexto, Tema.setaNo)",
-                 "readonly property bool setaComTexto: true" in tema_qml and "function setaNo(sup)" in tema_qml
-                 and "readonly property int toqueSeta: celular ? 48 : 40" in tema_qml)
+    # D-V1, decidida (correção definitiva do dono, 07/11/2026): só a seta, sem
+    # texto, legenda ou nome de destino; D-V2 (a cor) continua em Tema.setaNo.
+    seta_qml = conteudo["Seta.qml"]
+    com_destino = sorted(f for f, t in conteudo.items()
+                         if re.search(r"\b(textoVoltar|voltarPara|setaComTexto|destinoDaSeta)\b", t))
+    res.conferir("ESTÁTICO: D-V1 decidida: a seta é só o desenho (sem texto nem destino) e D-V2 em Tema.setaNo",
+                 "Text {" not in seta_qml and not re.search(r"^\s*text:", seta_qml, re.M)
+                 and "property string destino" not in seta_qml and not com_destino
+                 and "setaComTexto" not in tema_qml and "function setaNo(sup)" in tema_qml
+                 and "readonly property int toqueSeta: celular ? 48 : 40" in tema_qml, str(com_destino))
 
     # Janelinhas: todas pelo Painel (que tem a seta); Popup só nas bases e menus.
     popups = {f: len(re.findall(r"\bPopup\s*\{", t)) for f, t in conteudo.items()}
@@ -365,8 +372,10 @@ def a6_seta_no_lugar(res, fotos, modelo, ids, temas):
                     # Texto que só volta: "Cancelar", "Voltar", "Fechar" fora da própria seta.
                     soltos = [t for x, y, t in textos if simples(t) in ("cancelar", "voltar", "fechar")
                               and not dentro((x, y), g, 2)]
-                    res.conferir(f"A6 {nome_tema} {tela}: seta em ({g[0]}, {g[1]}), {g[2]}×{g[3]}; sem botão de texto que só volta",
-                                 g[2] >= 40 and g[3] >= 40 and not soltos, f"soltos {soltos}" if soltos else "")
+                    # Só a seta (quadrada, sem texto ao lado), a cerca de 1 cm do canto.
+                    res.conferir(f"A6 {nome_tema} {tela}: só a seta em ({g[0]}, {g[1]}), {g[2]}×{g[3]}; sem botão de texto que só volta",
+                                 g[2] >= 40 and g[3] >= 40 and g[2] == g[3] and 28 <= g[0] <= 40 and 24 <= g[1] <= 40
+                                 and not soltos, f"soltos {soltos}" if soltos else "")
                 finally:
                     r.fechar()
         finally:
@@ -469,8 +478,8 @@ def a7_com_alteracao(res, fotos, modelo, ids, nome_tema):
 
 
 def a7_dv3_busca(res, fotos, modelo, ids, nome_tema):
-    """D-V3 (padrão provisório): com a busca preenchida, o Esc limpa a busca e
-    fica; a seta volta direto. Conferido e registrado como a exceção do A7."""
+    """D-V3, decidida pelo dono (07/11/2026): com a busca preenchida, o Esc faz
+    exatamente o mesmo que a seta: os dois voltam direto, sem janelinha."""
     pasta = tema.nova_loja(modelo, nome_tema)
     try:
         for n, (tela, props) in enumerate(TELAS_BUSCA, 1):
@@ -501,9 +510,9 @@ def a7_dv3_busca(res, fotos, modelo, ids, nome_tema):
                     r.fechar()
             if len(r1) == 2:
                 e, s = r1["esc"], r1["seta"]
-                res.conferir(f"A7/D-V3 {tela}: busca preenchida → Esc limpa e fica (pilha {e[1]}→{e[2]}); "
-                             f"seta volta direto (pilha {s[1]}→{s[2]})",
-                             e[0] and s[0] and e[2] == e[1] and not e[3] and s[2] == s[1] - 1 and not s[4],
+                res.conferir(f"A7/D-V3 {tela}: busca preenchida → o Esc (pilha {e[1]}→{e[2]}) e a seta "
+                             f"(pilha {s[1]}→{s[2]}) voltam direto, iguais",
+                             e[0] and s[0] and e[2] == e[1] - 1 and s[2] == s[1] - 1 and not e[4] and not s[4],
                              f"esc {e}, seta {s}")
     finally:
         shutil.rmtree(pasta, ignore_errors=True)

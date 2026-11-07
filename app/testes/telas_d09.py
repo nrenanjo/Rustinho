@@ -132,6 +132,18 @@ class Rustinho:
                 return True
         return False
 
+    def clicar_seta_de_cima(self):
+        """Clica na seta de retorno de cima de tudo: a da janelinha aberta ou,
+        sem janelinha, a da tela. Desde a correção definitiva do botão de
+        retorno (0.9.18, 07/11/2026) todas as setas são só o desenho, com o
+        mesmo nome acessível ("Voltar"); a da tela vem antes na lista dos
+        textos e a da janelinha (por cima), depois."""
+        setas = [(x, y) for x, y, t in self.textos() if t.startswith("GEO:setaDeRetorno:")]
+        if not setas:
+            return False
+        xdo("mousemove", str(setas[-1][0]), str(setas[-1][1]), "click", "1")
+        return True
+
     def entrar(self, usuario):
         for _ in range(40):
             time.sleep(1)
@@ -281,7 +293,7 @@ def main():
             time.sleep(2)
             tudo_certo &= conferir("caixa-preco-sem-custo: pede o gerente", r.foto("-1"), r.textos(),
                                    tem=["Liberar", "mudar o preço de venda"])
-            r.clicar("Voltar")
+            r.clicar_seta_de_cima()
             time.sleep(1.5)
             ok = preco_gravado(pasta, oleo) == antes
             print(("✔ " if ok else "✘ ") + "caixa-preco-sem-custo: desistiu, nada gravado")
@@ -308,7 +320,7 @@ def main():
             time.sleep(1.5)
             tudo_certo &= conferir("caixa-configuracoes: a pílula Gerente pede a senha dela", r.foto("-3"), r.textos(),
                                    tem=["Gerente: só o gerente pode", "Liberar"])
-            r.clicar("Voltar")
+            r.clicar_seta_de_cima()
             time.sleep(1)
             if not r.clicar("Simultaneidade"):
                 raise RuntimeError(f"a pílula Simultaneidade não apareceu (veja {r.saida})")

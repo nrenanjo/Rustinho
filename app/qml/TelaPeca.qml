@@ -8,9 +8,10 @@ FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
     property string produtoId: ""
-    // O "voltar": Peças, ou a tela que abriu esta para resolver alguma
-    // coisa (navegação contextual, 0.9.18: as Etiquetas).
-    property string voltarPara: "Peças"
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: nova ? (servico ? "Novo serviço" : "Nova peça")
+                                              : ficha && ficha.nome ? ficha.nome : servico ? "Serviço" : "Peça"
     property var ficha: null
     // FALHA-04: chave do salvar e da variação (novas ao abrir e depois de
     // dar certo: o próximo salvar já é uma alteração da mesma peça).
@@ -441,7 +442,6 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            textoVoltar: tela.voltarPara
             titulo: tela.nova ? (tela.servico ? "Novo serviço" : "Nova peça") : tela.ficha.nome
             subtitulo: {
                 if (!tela.ficha)

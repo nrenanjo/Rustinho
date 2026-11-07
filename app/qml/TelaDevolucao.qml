@@ -8,6 +8,9 @@ import rustinho
 // como o valor volta ao cliente. Com vale-troca dá para trocar na hora.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Devolução"
     property string parte: "pecas"
     readonly property var janela: ApplicationWindow.window
     property string vendaId: ""
@@ -116,7 +119,6 @@ FocusScope {
         spacing: 12
 
         Cabecalho {
-            textoVoltar: "Voltar"
             titulo: tela.venda ? "Devolução da venda " + tela.venda.numero : "Devolução"
             subtitulo: !tela.venda ? "" : [tela.venda.quando, tela.venda.caixa, tela.venda.cliente || "Consumidor", "total R$ " + tela.venda.total].join(" · ")
             Layout.fillWidth: true

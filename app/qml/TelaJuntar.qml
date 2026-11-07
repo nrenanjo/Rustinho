@@ -7,6 +7,9 @@ import rustinho
 // outro caixa da loja (usuários, peças, clientes, estoque...).
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Juntar este caixa"
     readonly property var janela: ApplicationWindow.window
     property var sync: null
     property bool procurando: false
@@ -22,6 +25,12 @@ FocusScope {
         }
         tela.janela.atualizarEstado()
         tela.janela.trocarPara("TelaBoasVindas")
+    }
+    // A seta e o Esc fazem o mesmo: desistem e voltam às boas-vindas (o
+    // botão "Voltar" saiu na correção definitiva do botão de retorno,
+    // 07/11/2026).
+    function aoEsc(daSeta) {
+        desistir()
     }
 
     // Aberta de novo no meio de uma tentativa (o programa fechou): continua
@@ -73,7 +82,8 @@ FocusScope {
             id: coluna
             width: Math.min(620, parent.width - 2 * Tema.margem)
             x: (parent.width - width) / 2
-            y: Math.max(48, (tela.height - implicitHeight) / 2 - 20)
+            // Abaixo da seta de retorno, mesmo numa tela baixa.
+            y: Math.max(Tema.margem + Tema.toqueSeta + 8, (tela.height - implicitHeight) / 2 - 20)
             spacing: 18
 
             ColumnLayout {
@@ -165,11 +175,6 @@ FocusScope {
             Linha {
                 spacing: 12
                 Layout.fillWidth: true
-                Botao {
-                    text: "Voltar"
-                    tipo: "discreto"
-                    onClicked: tela.desistir()
-                }
                 Item { Layout.fillWidth: true }
                 Botao {
                     text: tela.procurando ? "Procurar de novo" : "Procurar os outros caixas"
@@ -178,6 +183,17 @@ FocusScope {
                 }
             }
         }
+    }
+
+    // A seta de retorno no canto de cima, à esquerda, no mesmo lugar das
+    // telas com Cabecalho (Tema.margem; Seta.descida no computador). Fica por
+    // cima da rolagem, sempre à vista.
+    Seta {
+        id: seta
+        x: Tema.margem
+        y: Tema.margem - 12 + seta.descida
+        z: 1
+        onClicked: tela.janela.retornar(true)
     }
 
     StackView.onActivated: senha.focarSempre()

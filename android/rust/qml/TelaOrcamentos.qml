@@ -6,6 +6,9 @@ import rustinho
 // Orçamentos: lista, busca e atalho para fazer um novo (na tela Vender).
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Orçamentos"
     readonly property var janela: ApplicationWindow.window
     property var itens: []
     property bool buscou: false
@@ -24,7 +27,9 @@ FocusScope {
             janela.abrir("TelaVenda", { vendaId: itens[i].id })
     }
 
-    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    // O Esc e a seta fazem o mesmo (D-V3, decidida pelo dono em 07/11/2026:
+    // com a busca preenchida, os dois voltam direto). limparBuscaAntes só
+    // limparia a busca antes se a regra mudasse em Main.
     function aoEsc(daSeta) {
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""

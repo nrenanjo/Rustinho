@@ -6,6 +6,9 @@ import rustinho
 // Usuários: quem usa o Rustinho. Todos têm acesso a todas as funções.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Usuários"
     // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
     Component.onDestruction: Api.chamar("gerente_encerrar")
     readonly property var janela: ApplicationWindow.window
@@ -13,6 +16,17 @@ FocusScope {
     property var editando: null      // usuário aberto à direita (null = novo)
     // Celular: a lista e a ficha aparecem uma de cada vez.
     property bool mostrarFicha: false
+
+    // No celular, com a ficha na tela, a seta e o Esc voltam à lista (o
+    // botão "Voltar à lista" saiu na correção definitiva do botão de
+    // retorno, 07/11/2026); senão, voltam à tela de antes.
+    function aoEsc(daSeta) {
+        if (Tema.estreito && mostrarFicha) {
+            mostrarFicha = false
+            return
+        }
+        janela.voltar()
+    }
 
     function carregar() {
         const r = Api.chamar("usuarios_listar")
@@ -195,15 +209,6 @@ FocusScope {
             Layout.preferredWidth: 400
             Layout.alignment: Qt.AlignTop
             Layout.topMargin: Tema.estreito ? 0 : 92
-            Botao {
-                visible: Tema.estreito
-                tipo: "discreto"
-                icone: "voltar"
-                text: "Voltar à lista"
-                Layout.leftMargin: -10
-                onClicked: tela.mostrarFicha = false
-            }
-
             Campo {
                 id: nome
                 rotulo: "Nome"

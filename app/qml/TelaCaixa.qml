@@ -7,6 +7,9 @@ import rustinho
 // Caixa deste computador: abrir, sangria, suprimento, fechar e as vendas.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Caixa"
     property string parte: "resumo"
     readonly property var janela: ApplicationWindow.window
     property var estado: null

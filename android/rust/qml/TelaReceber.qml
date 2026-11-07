@@ -7,6 +7,9 @@ import rustinho
 // Receber: quem deve no crediário, as parcelas de cada um e o pagamento.
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Receber"
     readonly property var janela: ApplicationWindow.window
     // Cliente a abrir direto (vindo de outra tela).
     property string clienteInicial: ""
@@ -77,8 +80,18 @@ FocusScope {
             janela.avisar("Enviado para a impressora.", "ok")
     }
 
-    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    // O Esc e a seta fazem o mesmo (D-V3, decidida pelo dono em 07/11/2026:
+    // com a busca preenchida, os dois voltam direto). limparBuscaAntes só
+    // limparia a busca antes se a regra mudasse em Main.
     function aoEsc(daSeta) {
+        // No celular, a ficha do cliente ocupa a tela: a seta e o Esc voltam
+        // à lista (o botão "Voltar à lista" saiu na correção definitiva do
+        // botão de retorno, 07/11/2026).
+        if (Tema.estreito && conta) {
+            clienteId = ""
+            conta = null
+            return
+        }
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregarPainel()
@@ -256,18 +269,6 @@ FocusScope {
                     anchors.fill: parent
                     anchors.margins: Tema.estreito ? 12 : 20
                     spacing: 12
-
-                    Botao {
-                        visible: Tema.estreito
-                        tipo: "discreto"
-                        icone: "voltar"
-                        text: "Voltar à lista"
-                        Layout.leftMargin: -10
-                        onClicked: {
-                            tela.clienteId = ""
-                            tela.conta = null
-                        }
-                    }
 
                     Linha {
                         spacing: 12

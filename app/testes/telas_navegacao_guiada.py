@@ -11,8 +11,8 @@ A janela de arquivos do Qt 6.4 usada aqui (sem o seletor do sistema) marca
 um arquivo por vez; o caso "um dos arquivos some e os outros ficam" é
 conferido no núcleo (testes_nav::nav01_arquivos_conferir_separa_os_que_faltam).
 
-  A. gerente: leva a Configurações › Loja ("voltar" diz Peças), orientação e
-     destaque; CNPJ inválido não volta e mantém o que foi digitado; CNPJ
+  A. gerente: leva a Configurações › Loja (a orientação diz "volta para
+     Peças"; a seta é só o desenho) e destaca o campo; CNPJ inválido não volta e mantém o que foi digitado; CNPJ
      válido volta a Peças, reabre a importação com os arquivos, lê de novo e
      avisa "Requisito satisfeito — conclua a operação."; nada é cadastrado
      sozinho; só uma tela de Configurações na pilha.
@@ -20,8 +20,7 @@ conferido no núcleo (testes_nav::nav01_arquivos_conferir_separa_os_que_faltam).
      requisito; "Tentar de novo" leva outra vez (uma só).
   C. a pasta escolhida some enquanto a pessoa está nas Configurações: avisa,
      sem ler nem cadastrar nada sozinho.
-  D. Configurações aberta à mão: "voltar" diz Início, sem orientação nem
-     escurecimento.
+  D. Configurações aberta à mão: sem orientação nem escurecimento.
   E. caixa, janela pequena: pede a senha do gerente antes; com ela, o campo
      fica à vista (rolagem) e o fluxo termina igual.
 
@@ -335,9 +334,10 @@ def main():
             ok("A: abriu Configurações › Loja", r.esperar("CNPJ da loja"), r.foto("-1"))
             f = r.foto("-1-guia")
             t = r.textos()
+            # D-V1 (dono, 07/11/2026): a seta é só o desenho; o destino aparece na orientação.
             certo &= conferir("A: orientação e origem no voltar", f, t,
                               tem=["Falta o CNPJ da loja", "volta para Peças"],
-                              igual=["Peças", "Configurações"], sem_igual=["Início"])
+                              igual=["Configurações"], sem_igual=["Início"])
             ok("A: uma orientação só", sum(1 for _, _, x in t if simples(x) == simples("Falta o CNPJ da loja")) == 1, f)
             # Escurecimento: fora do destaque fica mais escuro (ver escurecimento()).
             passou, detalhe = escurecimento(f, sem_guia)
@@ -423,7 +423,7 @@ def main():
             r.entrar("Ana")
             time.sleep(1)
             f = r.foto("-1")
-            certo &= conferir("D: à mão, como sempre", f, r.textos(), igual=["Início", "Configurações"],
+            certo &= conferir("D: à mão, como sempre", f, r.textos(), igual=["Configurações"],
                               nao_tem=["Falta o CNPJ", "Requisito"], sem_igual=["Peças"])
         finally:
             r.fechar()
@@ -436,8 +436,10 @@ def main():
             r.entrar("Bia")
             r.escolher_arquivo()
             ok("E: pede a senha do gerente", r.esperar("Configurações da loja: só o gerente pode"), r.foto("-1"))
+            # D-V1 (dono, 07/11/2026): a seta é só o desenho. A Configurações guiada
+            # fica por cima de Peças (Início › Peças › Configurações): a seta volta para lá.
             certo &= conferir("E: orientação da senha", r.foto("-1b"), r.textos(),
-                              tem=["pede a senha do gerente"], igual=["Peças"])
+                              tem=["pede a senha do gerente", "TESTE_PILHA:3"])
             # Janela pequena antes de liberar: o campo tem de ficar à vista.
             r.encolher(760, 480)
             xdo("type", "--delay", "80", base.SENHA["Ana"])

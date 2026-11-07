@@ -6,8 +6,8 @@ janela de arquivos de verdade e confere pelos textos da tela, pelo banco e
 pela cor dos pixels (o escurecimento). Usa as peças do teste do piloto
 (telas_navegacao_guiada.py).
 
-  A. Compras sem CNPJ (gerente): leva a Configurações › Loja ("voltar" diz
-     Compras), orientação e escurecimento; CNPJ inválido fica e não grava;
+  A. Compras sem CNPJ (gerente): leva a Configurações › Loja (a orientação
+     diz "volta para Compras"; a seta é só o desenho) e escurece o resto; CNPJ inválido fica e não grava;
      válido volta a Compras com o arquivo esperando, sem importar sozinho;
      "Importar agora" importa (uma compra).
   B. Compras, desistir (Esc): volta com o arquivo esperando, sem marcar o
@@ -290,9 +290,10 @@ def main():
                 r.escolher_xml_de_compra()
                 ok("A: abriu Configurações › Loja", r.esperar("Falta o CNPJ da loja"), r.foto("-1"))
                 f = r.foto("-1-guia")
+                # D-V1 (dono, 07/11/2026): a seta é só o desenho; o destino aparece na orientação.
                 certo &= conferir("A: orientação e origem no voltar", f, r.textos(),
                                   tem=["Falta o CNPJ da loja", "volta para Compras", "CNPJ da loja"],
-                                  igual=["Compras", "Configurações"], sem_igual=["Início"])
+                                  igual=["Configurações"], sem_igual=["Início"])
                 passou, detalhe = nav.escurecimento(f, sem_guia)
                 ok(f"A: o resto da tela escurece ({detalhe})", passou, f)
                 ok("A: nada importado", compras(pasta) == antes)
@@ -392,11 +393,15 @@ def main():
                                        "DISTRIBUIDORA DE AUTOPECAS EXEMPLO LTDA", "AUTO PECAS EXEMPLO"],
                                   nao_tem=["11.222.333", "11.444.777", "1.245,67"])
                 # 0.9.18 (V-4): a janela não tem mais "Cancelar"; a seta dela
-                # (nome "Voltar") fecha, igual ao Esc.
-                certo &= conferir("D: a janela tem a seta e não tem Cancelar", f, r.textos(),
+                # (nome "Voltar") fecha, igual ao Esc. Desde a correção definitiva
+                # (07/11/2026) a seta da tela tem o mesmo nome: a da janela é a de cima.
+                t = r.textos()
+                certo &= conferir("D: a janela tem a seta e não tem Cancelar", f, t,
                                   igual=["Voltar"], sem_igual=["Cancelar"])
+                ok("D: duas setas: a da tela e a da janela, por cima",
+                   sum(1 for _, _, x in t if x.startswith("GEO:setaDeRetorno:")) == 2, f)
                 # O olho fica atrás da janela (modal): fecha, abre o olho, reabre.
-                r.clicar("Voltar")
+                r.clicar_seta_de_cima()
                 time.sleep(0.8)
                 r.clicar("Mostrar valores")
                 time.sleep(0.8)
@@ -408,7 +413,7 @@ def main():
                 time.sleep(1)
                 certo &= conferir("D: Conferir mostra os itens da nota", r.foto("-2-conferir"), r.textos(),
                                   tem=["Itens da nota (1)", "CORREIA POLY V", "Esconder os itens"])
-                r.clicar("Voltar")
+                r.clicar_seta_de_cima()
                 time.sleep(1)
                 certo &= conferir("D: a seta só fecha; a nota continua em Não importada", r.foto("-3-cancelar"),
                                   r.textos(), tem=["Não importada: nota de outro CNPJ"],
@@ -473,9 +478,10 @@ def main():
                 r.clicar_visivel("Ir para Loja")
                 ok("F: levou à Loja", r.esperar("volta para Fiscal"), r.foto("-2"))
                 ok("F: reutilizou a Configurações atual", r.profundidade_pilha() == profundidade, r.foto("-2-pilha"))
+                # D-V1 (dono, 07/11/2026): a seta é só o desenho; o destino aparece na orientação.
                 certo &= conferir("F: orientação e origem", r.foto("-2b"), r.textos(),
-                                  tem=["Para continuar, informe a UF e o CNPJ da loja", "Estado", "CNPJ da loja"],
-                                  igual=["Fiscal"])
+                                  tem=["Para continuar, informe a UF e o CNPJ da loja", "Estado", "CNPJ da loja",
+                                       "volta para Fiscal"])
                 xdo("key", "Escape")
                 ok("F: Esc desistiu e restaurou Fiscal", r.esperar("Ir para Loja"),
                    r.foto("-2c-desistiu"))
@@ -505,7 +511,8 @@ def main():
                 xdo("key", "F2")
                 time.sleep(3)
                 certo &= conferir("F: só o estado não basta (fica, diz o que falta)", r.foto("-3"), r.textos(),
-                                  tem=["O CNPJ da loja ainda não está salvo."], igual=["Fiscal"])
+                                  tem=["O CNPJ da loja ainda não está salvo."])
+                ok("F: só o estado: continua na Loja guiada (mesma pilha)", r.profundidade_pilha() == profundidade)
                 ok("F: o estado foi gravado", uf_gravada(pasta) == "SP")
                 xdo("key", "Escape")
                 ok("F: desistir depois de salvar só a UF retorna ao Fiscal",

@@ -7,6 +7,9 @@ import rustinho
 // aberto e as devoluções já feitas (que dá para desfazer).
 FocusScope {
     id: tela
+    // Como esta tela aparece na orientação da navegação guiada ("Depois o
+    // Rustinho volta para …").
+    readonly property string nomeNaNavegacao: "Trocas e devoluções"
     readonly property var janela: ApplicationWindow.window
     property string secao: "devolver"
     property var vendas: []
@@ -39,7 +42,9 @@ FocusScope {
             janela.avisar("Enviado para a impressora.", "ok")
     }
 
-    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    // O Esc e a seta fazem o mesmo (D-V3, decidida pelo dono em 07/11/2026:
+    // com a busca preenchida, os dois voltam direto). limparBuscaAntes só
+    // limparia a busca antes se a regra mudasse em Main.
     function aoEsc(daSeta) {
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""

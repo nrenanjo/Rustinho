@@ -294,8 +294,9 @@ FocusScope {
     }
 
     // Ao sair da Nova OS (ou de um rascunho) com algo preenchido: três
-    // opções. "Salvar rascunho" guarda tudo; "Cancelar" volta ao formulário
-    // sem perder nada; "Sair sem salvar" descarta o que não foi salvo.
+    // opções. "Salvar rascunho" guarda tudo; a seta (ou o Esc) da janelinha
+    // volta ao formulário sem perder nada; "Sair sem salvar" descarta o que
+    // não foi salvo.
     function aoEsc() {
         if (saida.opened)
             return
@@ -324,7 +325,6 @@ FocusScope {
         spacing: 12
 
         Cabecalho {
-            textoVoltar: "Ordens de serviço"
             titulo: tela.nova ? "Nova OS" : tela.rascunho ? "Rascunho de OS" + (tela.ficha.placa ? " · " + tela.ficha.placa : "")
                     : "OS " + tela.ficha.numero + (tela.ficha.caixa ? " · " + tela.ficha.caixa : "") + (tela.ficha.placa ? " · " + tela.ficha.placa : "")
             subtitulo: !tela.ficha ? "Comece pela placa: se o carro já veio antes, o Rustinho preenche o resto."

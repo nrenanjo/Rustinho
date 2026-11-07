@@ -5,23 +5,21 @@ import rustinho
 // A seta de retorno (0.9.18, V-2 e V-4): no canto de cima, à esquerda, das
 // telas (Cabecalho) e das janelinhas (Painel, Dialogo). Faz o mesmo que o
 // Esc (e o "voltar" do Android). Área de toque de 40 × 40 px no computador e
-// 48 × 48 dp no celular (Tema.toqueSeta). O texto ao lado (o destino) é a
-// decisão D-V1 (Tema.setaComTexto); a cor, a D-V2 (Tema.setaNo).
+// 48 × 48 dp no celular (Tema.toqueSeta); a cor é a D-V2 (Tema.setaNo).
+// Correção definitiva do dono (07/11/2026, decide a D-V1): um botão só, a
+// seta para a esquerda no vidro roxo, sem texto, legenda ou nome de destino
+// ao lado. Ela substitui os botões "Voltar" e "Cancelar". Para onde volta
+// quem decide é a tela (janela.retornar e aoEsc), pelo mesmo caminho do Esc.
 Button {
     id: seta
-    // Para onde a seta leva ("Início", "Compras"...): fica ao lado da seta
-    // (D-V1). Vazio nas janelinhas (lá a seta só fecha).
-    property string destino: ""
-    // O nome do botão para leitores de tela e para os testes das telas
-    // (--textos-da-tela), que acham por ele o botão sem texto.
-    readonly property string nomeAcessivel: destino !== "" ? destino : "Voltar"
+    // O nome do botão só para leitores de tela e para os testes das telas
+    // (--textos-da-tela), que acham por ele o botão sem texto. Não aparece.
+    readonly property string nomeAcessivel: "Voltar"
     // A superfície embaixo: no roxo, clara no fundo da tela e escura num
     // painel claro. Nos outros temas não importa.
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
     readonly property color cor: Tema.setaNo(superficie)
     readonly property real tamanhoIcone: 18
-    // Do canto da área de toque até o desenho da seta.
-    readonly property real folga: (Tema.toqueSeta - tamanhoIcone) / 2
     // Ordem visual §9 (0.9.18): a seta fica no canto de cima, à esquerda, a
     // cerca de 1 cm das bordas da janela. Com o vidro à mostra, a borda do
     // vidro fica alinhada com o conteúdo (Tema.margem, 32 px) e, no
@@ -31,47 +29,27 @@ Button {
 
     // Os testes acham a seta (e onde ela está) por este nome.
     objectName: "setaDeRetorno"
-    text: Tema.setaComTexto ? destino : ""
-    implicitWidth: Math.max(Tema.toqueSeta, leftPadding + contentItem.implicitWidth + rightPadding)
+    implicitWidth: Tema.toqueSeta
     implicitHeight: Tema.toqueSeta
-    leftPadding: folga
-    rightPadding: text !== "" ? 12 : folga
-    topPadding: 0
-    bottomPadding: 0
-    font.family: Tema.texto
-    font.pixelSize: 14
-    font.weight: Font.DemiBold
+    padding: 0
     focusPolicy: Qt.StrongFocus
-    Accessible.name: destino !== "" ? "Voltar para " + destino : "Voltar"
+    Accessible.name: "Voltar"
 
+    // Só o desenho da seta, no meio do vidro.
     contentItem: Item {
-        implicitWidth: linha.implicitWidth
-        implicitHeight: linha.implicitHeight
-        Row {
-            id: linha
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-            Icone {
-                nome: "voltar"
-                cor: seta.cor
-                tamanho: seta.tamanhoIcone
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            Text {
-                visible: seta.text !== ""
-                text: seta.text
-                font: seta.font
-                color: seta.cor
-                anchors.verticalCenter: parent.verticalCenter
-            }
+        Icone {
+            anchors.centerIn: parent
+            nome: "voltar"
+            cor: seta.cor
+            tamanho: seta.tamanhoIcone
         }
     }
 
-    // Vidro roxo (ordem visual §9): um roxo translúcido em forma de pílula,
-    // com contorno fino e um brilho na metade de cima; claro sobre o fundo
-    // roxo ou escuro, roxo sobre um painel claro (Tema.vidroNo). Mouse em
-    // cima e apertado deixam o vidro mais denso; o foco do teclado, o
-    // contorno de destaque.
+    // Vidro roxo (ordem visual §9): um roxo translúcido redondo, com
+    // contorno fino e um brilho na metade de cima; claro sobre o fundo roxo
+    // ou escuro, roxo sobre um painel claro (Tema.vidroNo). Mouse em cima e
+    // apertado deixam o vidro mais denso; o foco do teclado, o contorno de
+    // destaque.
     background: Rectangle {
         radius: height / 2
         color: seta.down ? Tema.vidroBaixoNo(seta.superficie)

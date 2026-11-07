@@ -228,8 +228,8 @@ FocusScope {
                             tipo: "discreto"
                             altura: 36
                             // D-09: a senha da consulta do Financeiro não vale para desfazer.
-                            onClicked: janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
-                                                        "Voltar", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
+                            onClicked: janela.confirmar("Devolver o cheque à carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
+                                                        "Devolver à carteira", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
                                                             if (!r.ok)
                                                                 janela.avisar(r.erro, "erro")
                                                             secao.carregar()

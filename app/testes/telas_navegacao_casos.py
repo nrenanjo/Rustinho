@@ -130,6 +130,18 @@ class Rustinho(base.Rustinho):
     def tem_igual(self, texto):
         return any(simples(texto) == simples(t) for _, _, t in self.textos())
 
+    def setas(self):
+        """[(x, y, largura, altura)] das setas de retorno: a da tela e, por
+        cima, a de cada janelinha aberta."""
+        return [tuple(int(v) for v in t.rsplit(":", 1)[1].split(",")) for _, _, t in self.textos()
+                if t.startswith("GEO:setaDeRetorno:")]
+
+    def seta_so_desenho(self):
+        """A seta da tela é só o desenho, sem texto ao lado (D-V1, correção definitiva do dono, 07/11/2026):
+        a área de toque fica quadrada."""
+        s = self.setas()
+        return bool(s) and s[0][2] == s[0][3]
+
     def onde(self, texto):
         """[(x, y)] de cada texto igual a este."""
         return [(x, y) for x, y, t in self.textos() if simples(t) == simples(texto)]
@@ -293,15 +305,15 @@ def caso8(placar, fotos):
             f = r.foto("-1")
             ok("8b: o gerente vai direto ao Backup (sem pedir senha)",
                r.esperar(lambda: r.tem("Fazer backup agora")) and not r.tem(PEDIDO), f)
-            ok("8b: o \"voltar\" diz Início", r.tem_igual("Início"), f)
+            ok("8b: a seta é só o desenho e a tela está por cima do Início", r.seta_so_desenho() and r.pilha() == inicio + 1, f)
             ok("8b: o backup bom está na lista", r.rolar_ate("Restaurar") and len(r.onde("Restaurar")) >= 2, r.foto("-2"))
             r.clicar_ultimo("Restaurar")
             f = r.foto("-3")
             ok("8b: restaurar pede confirmação antes", r.esperar(lambda: r.tem("Restaurar o backup de")), f)
             ok("8b: ainda nada restaurado", sha(db) == antes, f)
             # 0.9.18 (V-4): a confirmação não tem mais "Cancelar"; a seta
-            # dela (nome "Voltar") desiste, igual ao Esc.
-            r.clicar("Voltar")
+            # dela (nome "Voltar", a de cima) desiste, igual ao Esc.
+            r.clicar_seta_de_cima()
             time.sleep(1)
             f = r.foto("-4")
             ok("8b: desistir da confirmação (seta) não restaura", not r.tem("Restaurar o backup de") and sha(db) == antes, f)
@@ -450,7 +462,7 @@ def caso4(placar, fotos):
             ok("4: Ver duplicatas abre Simultaneidade › Duplicatas (códigos das peças)",
                r.esperar(lambda: r.tem("Códigos das peças") and r.tem_igual("Dar código novo")), f)
             ok("4: Configurações por cima das Etiquetas (uma só)", r.pilha() == etiquetas + 1, f)
-            ok("4: o \"voltar\" diz Etiquetas", r.tem_igual("Etiquetas"), f)
+            ok("4: a seta é só o desenho", r.seta_so_desenho(), f)
             xdo("key", "Escape")
             f = r.foto("-3")
             ok("4: Esc volta às Etiquetas", r.esperar(lambda: r.pilha() == etiquetas), f)
@@ -462,7 +474,7 @@ def caso4(placar, fotos):
             r.clicar("Abrir a peça")
             f = r.foto("-4")
             ok("4: Abrir a peça abre o cadastro da peça", r.esperar(lambda: r.pilha() == etiquetas + 1 and r.tem(travada)), f)
-            ok("4: o \"voltar\" da peça diz Etiquetas", r.tem_igual("Etiquetas"), f)
+            ok("4: na peça, a seta é só o desenho", r.seta_so_desenho(), f)
             xdo("key", "Escape")
             f = r.foto("-5")
             ok("4: Esc volta às Etiquetas, ainda bloqueada",
@@ -549,10 +561,10 @@ def caso6(placar, fotos):
             # 0.9.18 (V-4): o "Continuar sem rascunho" (só fechava) virou a
             # seta da janelinha (nome "Voltar"), igual ao Esc.
             ok("6a: opções: Ver caixas, a seta (continuar sem rascunho), Sair sem salvar",
-               r.tem_igual("Ver caixas") and r.tem_igual("Voltar") and r.tem_igual("Sair sem salvar"), f)
+               r.tem_igual("Ver caixas") and len(r.setas()) == 2 and r.tem_igual("Sair sem salvar"), f)
             ok("6a: o motivo diz o caixa e o lugar", r.tem("Caixa 2") and r.tem("Simultaneidade › Caixas"), f)
             ok("6a: nada mudou de tela sozinho", r.pilha() == os_pilha, f)
-            r.clicar("Voltar")
+            r.clicar_seta_de_cima()
             time.sleep(1)
             f = r.foto("-2")
             ok("6a: a seta da janelinha volta à OS, com o que foi digitado",
@@ -566,7 +578,7 @@ def caso6(placar, fotos):
             ok("6a: Ver caixas leva a Simultaneidade › Caixas com a orientação",
                r.esperar(lambda: r.tem(TITULO_6) and r.tem("Versão dos caixas")), f)
             ok("6a: o caixa que bloqueia aparece (Caixa 2)", r.tem("Caixa 2"), f)
-            ok("6a: o \"voltar\" diz Nova OS", r.tem_igual("Nova OS"), f)
+            ok("6a: a seta é só o desenho", r.seta_so_desenho(), f)
             ok("6a: uma tela por cima da OS (sem ciclo)", r.pilha() == os_pilha + 1, f)
             xdo("key", "Escape")
             f = r.foto("-4")
@@ -631,7 +643,7 @@ def caso9(placar, fotos):
                 f = r.foto("-" + parte)
                 ok(f"{parte}: {botao} abre a parte certa ({texto})",
                    r.esperar(lambda: r.tem(texto) and r.pilha() == inicio + 1), f)
-                ok(f"{parte}: o \"voltar\" diz Início", r.tem_igual("Início"), f)
+                ok(f"{parte}: a seta é só o desenho", r.seta_so_desenho(), f)
                 xdo("key", "Escape")
                 ok(f"{parte}: Esc volta ao Início", r.esperar(lambda: r.pilha() == inicio), r.foto("-" + parte + "v"))
             # A marca "aberta/minimizada" é deste computador: só abre o

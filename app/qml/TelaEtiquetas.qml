@@ -139,10 +139,10 @@ FocusScope {
     // Onde resolver: a causa (Simultaneidade › Duplicatas › Códigos das
     // peças) ou o cadastro da peça. Esta tela fica na pilha, com a lista.
     function verDuplicatas() {
-        janela.abrir("TelaConfiguracoes", { secao: "duplicatas", voltarPara: nomeNaNavegacao })
+        janela.abrir("TelaConfiguracoes", { secao: "duplicatas" })
     }
     function abrirPeca(id) {
-        janela.abrir("TelaPeca", { produtoId: id, voltarPara: nomeNaNavegacao })
+        janela.abrir("TelaPeca", { produtoId: id })
     }
 
     // B8B1-09 (auditoria, 0.9.18): trocar `itens` a cada tecla recriava as
@@ -220,7 +220,6 @@ FocusScope {
         Cabecalho {
             titulo: "Etiquetas"
             subtitulo: "Preço e código de barras em folha A4 de etiquetas adesivas"
-            textoVoltar: "Voltar"
             Layout.fillWidth: true
             Rotulo {
                 visible: tela.total > 0
