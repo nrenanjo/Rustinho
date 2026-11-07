@@ -195,7 +195,9 @@ FocusScope {
 
     Shortcut {
         sequence: "F2"
-        enabled: tela.StackView.status === StackView.Active
+        // B8B1-09 (auditoria, 0.9.18): como o botão "Imprimir", só com
+        // etiqueta para imprimir.
+        enabled: tela.StackView.status === StackView.Active && tela.total > 0
         onActivated: tela.imprimir()
     }
 

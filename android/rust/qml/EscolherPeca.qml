@@ -69,6 +69,11 @@ Painel {
         Campo {
             id: busca
             icone: "busca"
+            // B8B1-10 (auditoria, 0.9.18): no celular, a câmera lê o código
+            // de barras, como na busca de Peças e de Etiquetas. (O F11 é da
+            // janela inteira: aqui ele agiria na tela de baixo, então fica
+            // sem a marca "F11".)
+            camera: true
             altura: 50
             tamanhoFonte: 17
             dica: "Qualquer código, nome, modelo, marca ou carro"
