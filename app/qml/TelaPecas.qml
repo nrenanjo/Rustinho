@@ -6,9 +6,14 @@ import rustinho
 // Peças: busca única (código, nome, marca, carro...) e lista de resultados.
 FocusScope {
     id: tela
+    objectName: "telaPecas"
     readonly property var janela: ApplicationWindow.window
     // Nome desta tela no "voltar" de uma tela aberta pela navegação guiada.
     readonly property string nomeNaNavegacao: "Peças"
+    // Unidades de medida (0.9.18): T da janela de 24 horas das vendas = a
+    // abertura desta pílula (cada abertura empilha uma tela nova; enquanto
+    // ela fica aberta, T não muda).
+    readonly property string abertaEm: new Date().toISOString()
     property string buscaInicial: ""
     property var itens: []
     property int total: 0

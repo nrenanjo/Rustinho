@@ -30,6 +30,15 @@ FocusScope {
     readonly property bool temGrade: !!ficha && !!ficha.gradeItens && ficha.gradeItens.length > 0
     // Parte do fiscal à mostra (pílulas): icms, pis, ipi, combustivel, servico.
     property string blocoFiscal: "icms"
+    // Unidades de medida (0.9.18): T da janela de 24 horas das vendas = a
+    // abertura da pílula Peças (a tela de Peças embaixo desta, na pilha);
+    // aberta por outro caminho (Etiquetas...), a abertura desta tela.
+    readonly property string abertaEm: new Date().toISOString()
+    function aberturaDasPecas() {
+        const pilha = tela.StackView.view
+        const pecas = pilha ? pilha.find(item => item.objectName === "telaPecas") : null
+        return pecas && pecas.abertaEm ? pecas.abertaEm : tela.abertaEm
+    }
 
     ListModel { id: aplicacoes }
     ListModel { id: equivalentes }
@@ -558,6 +567,7 @@ FocusScope {
                             }
                             Campo {
                                 id: unidade
+                                objectName: "campoUnidade"
                                 rotulo: "Unidade"
                                 maximo: 6
                                 maiusculas: true
@@ -565,7 +575,7 @@ FocusScope {
                                 acao: "baixo"
                                 Layout.preferredWidth: 120
                                 onEditado: tela.marcarAlterado()
-                                onAcionado: escolherUnidade.abrirCom(unidade.texto)
+                                onAcionado: escolherUnidade.abrirCom(unidade.texto, tela.aberturaDasPecas())
                             }
                             Campo {
                                 id: categoria

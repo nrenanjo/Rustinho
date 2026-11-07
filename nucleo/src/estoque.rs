@@ -39,6 +39,11 @@ pub fn lancar(
     Ok(())
 }
 
+/// A mensagem de quantidade quebrada numa unidade que não vende quebrado.
+pub fn inteira(unidade: &str) -> String {
+    format!("{unidade} é contado inteiro (sem vírgula).")
+}
+
 /// Acerta o estoque para a quantidade contada agora. Lança só a diferença.
 /// Devolve o novo saldo.
 pub fn ajustar(
@@ -62,12 +67,22 @@ pub fn ajustar(
     if texto::tamanho(&motivo) > 120 {
         return Err(Erro::campo("motivo", "Use no máximo 120 letras."));
     }
-    let servico: bool = conn
-        .query_row("SELECT tipo = 'servico' FROM produto WHERE id = ?1", [produto_id], |l| l.get(0))
+    let (servico, unidade, fracionada): (bool, String, bool) = conn
+        .query_row(
+            "SELECT p.tipo = 'servico', p.unidade, COALESCE((SELECT fracionada FROM unidade WHERE sigla = p.unidade), 0)
+               FROM produto p WHERE p.id = ?1",
+            [produto_id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+        )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Peça".into()))?;
     if servico {
         return Err(Erro::validacao("Serviço não tem estoque."));
+    }
+    // NEW-B8B2-01 (0.9.18): unidade inteira (UN, PC, PAR...) não fica com
+    // estoque quebrado, como já não vende quebrado.
+    if contado % 1000 != 0 && !fracionada {
+        return Err(Erro::campo("quantidade", inteira(&unidade)));
     }
     let atual = saldo(conn, produto_id)?;
     let diferenca = contado - atual;
@@ -94,4 +109,53 @@ pub fn ajustar(
         ],
     )?;
     Ok(contado)
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::banco::Banco;
+    use crate::{produtos, usuarios};
+
+    fn campo_do_erro(e: Erro) -> (String, String) {
+        match e {
+            Erro::Validacao { campo, mensagem } => (campo.unwrap_or_default(), mensagem),
+            outro => panic!("{outro:?}"),
+        }
+    }
+
+    /// NEW-B8B2-01: unidade inteira não aceita estoque quebrado (no ajuste,
+    /// no estoque inicial e no mínimo); a fracionada aceita.
+    #[test]
+    fn unidade_inteira_sem_estoque_quebrado() {
+        let b = Banco::em_memoria().unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap().id;
+        let mut f = produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Parafuso".into();
+        f.custo = "1,00".into();
+        f.unidade = "UN".into();
+        f.estoque_inicial = "2,5".into();
+        let (campo, msg) = campo_do_erro(produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap_err());
+        assert_eq!((campo.as_str(), msg.as_str()), ("estoqueInicial", "UN é contado inteiro (sem vírgula)."));
+        f.estoque_inicial = "2".into();
+        f.estoque_minimo = "0,5".into();
+        let (campo, _) = campo_do_erro(produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap_err());
+        assert_eq!(campo, "estoqueMinimo");
+        f.estoque_minimo = "1".into();
+        let parafuso = produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        let (campo, msg) =
+            campo_do_erro(ajustar(&b.conn, &b.dispositivo, &u, &parafuso, "2,5", "contagem").unwrap_err());
+        assert_eq!((campo.as_str(), msg.as_str()), ("quantidade", "UN é contado inteiro (sem vírgula)."));
+        assert_eq!(saldo(&b.conn, &parafuso).unwrap(), 2_000, "nada lançado");
+        assert_eq!(ajustar(&b.conn, &b.dispositivo, &u, &parafuso, "3", "contagem").unwrap(), 3_000);
+
+        let mut g = produtos::ficha_nova(&b.conn).unwrap();
+        g.nome = "Cabo".into();
+        g.custo = "1,00".into();
+        g.unidade = "MT".into();
+        g.estoque_inicial = "2,5".into();
+        g.estoque_minimo = "0,5".into();
+        let cabo = produtos::salvar(&b.conn, &b.dispositivo, &u, &g).unwrap();
+        assert_eq!(ajustar(&b.conn, &b.dispositivo, &u, &cabo, "1,25", "contagem").unwrap(), 1_250);
+    }
 }

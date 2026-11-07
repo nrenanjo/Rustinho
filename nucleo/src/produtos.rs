@@ -565,6 +565,16 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         }
     }
     unidades::garantir(conn, &dados.unidade)?;
+    // NEW-B8B2-01 (0.9.18): unidade inteira (UN, PC, PAR...) não tem estoque
+    // quebrado (nem o inicial, nem o mínimo), como já não vende quebrado.
+    if !unidades::fracionada(conn, &dados.unidade)? {
+        if dados.tipo != "servico" && estoque_inicial % 1000 != 0 {
+            return Err(Erro::campo("estoqueInicial", estoque::inteira(&dados.unidade)));
+        }
+        if dados.estoque_minimo % 1000 != 0 {
+            return Err(Erro::campo("estoqueMinimo", estoque::inteira(&dados.unidade)));
+        }
+    }
 
     // Código interno. Vazio numa peça nova (ou que está com código a
     // definir): o Rustinho dá o da faixa deste caixa no fim (veja `faixas`).

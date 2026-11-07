@@ -269,6 +269,8 @@ ColumnLayout {
             onAcionado: campo.copiar()
         }
         Rectangle {
+            // Para os testes das telas acharem o botão (GEO:), quando o campo tem nome.
+            objectName: campo.objectName !== "" ? campo.objectName + "Acao" : ""
             visible: campo.comBotao
             width: 40
             height: 40

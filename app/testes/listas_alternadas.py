@@ -45,7 +45,10 @@ CLASSES = {
     ("DetalheDre.qml", "janelinha.d ? (janelinha.d.itens"): ("LISTA", "lançamentos de uma linha da DRE"),
     ("EmissaoFiscal.qml", '["NFC-e'): ("FORA", ESCOLHA),
     ("EscolherPeca.qml", "janela.itens"): ("LISTA", "peças (LinhaPeca)"),
-    ("EscolherUnidade.qml", "escolher.lista"): ("FORA", ESCOLHA),
+    # 0.9.18: as unidades em três grupos (1ª linha, 2ª linha, as demais),
+    # cada grupo uma grade de botões de escolha.
+    ("EscolherUnidade.qml", "[escolher.linha1"): ("FORA", ESCOLHA + " (os grupos de unidades)"),
+    ("EscolherUnidade.qml", "grade.modelData"): ("FORA", ESCOLHA),
     ("Etapas.qml", "etapas.modelo"): ("FORA", ESCOLHA + " (etapas da ordem)"),
     ("GraficoBarras.qml", "grafico.barras"): ("FORA", "gráfico"),
     ("ImportarCadastros.qml", "painel.previa ? ["): ("FORA", PREVIA + " (contagem por tipo)"),
