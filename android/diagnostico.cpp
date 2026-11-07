@@ -155,6 +155,10 @@ void Diagnostico::telaPronta(const QString& nome)
 {
     m_telaPronta = true;
     marcar(QStringLiteral("tela pronta: %1").arg(nome));
+    // Também no registro do Android (logcat): o teste do emulador
+    // (android/testar.sh) espera a tela certa antes de seguir. Só o nome do
+    // tipo da tela, nada dos dados.
+    qInfo("Rustinho: tela pronta: %s", qPrintable(nome));
 }
 
 bool Diagnostico::imagemUniforme(const QImage& imagem)

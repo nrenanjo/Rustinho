@@ -6,13 +6,17 @@
 # se uma tela não carrega ou se a câmera derruba o app, o teste fica
 # vermelho. Desde a 0.9.18 também reprova quando o Rustinho mostra a tela
 # "Não foi possível abrir" (o banco não abriu), quando nada do app aparece na
-# tela (em branco ou só cinza, como no PEND-18) e quando o app sai da frente.
-# Antes disso o teste passava com a tela de erro (64 bits) e com a tela cinza
-# (32 bits). As fotos ficam em "fotos/" (a montagem guarda depois, mesmo se
-# o teste falhar). Este script não usa nenhuma senha nem chave.
+# tela (em branco ou só cinza, como no PEND-18), quando o app sai da frente e
+# quando a tela esperada não aparece (a loja precisa ficar configurada e cada
+# tela pedida precisa abrir de verdade). Antes disso o teste passava com a
+# tela de erro (64 bits), com a tela cinza (32 bits) e sem nunca ter
+# configurado a loja. A memória do app em cada conferência fica em
+# fotos/memoria.txt. As fotos ficam em "fotos/" (a montagem guarda depois,
+# mesmo se o teste falhar). Este script não usa nenhuma senha nem chave.
 set -uo pipefail
 mkdir -p fotos
 : > fotos/falhas.txt
+: > fotos/memoria.txt
 
 PACOTE=io.github.nrenanjo.rustinho
 ATIVIDADE=$PACOTE/org.qtproject.qt.android.bindings.QtActivity
@@ -28,7 +32,10 @@ na_frente() { adb shell dumpsys activity activities | grep -E "ResumedActivity" 
 # (a tela cinza do PEND-18), não tem nenhuma linha com cores diferentes de um
 # lado ao outro. Olha só a metade de cima e o meio de cada linha, sem as
 # barras do Android (em cima; de lado quando deitado). O teclado da tela,
-# quando aparece, fica embaixo e não conta.
+# quando aparece, fica embaixo e não conta. Pede 10% das linhas olhadas com
+# desenho: as telas do app dão 25% ou mais; a cinza dá 0%, e 3% com a caixa
+# de texto do próprio Android por cima. Deitado e com teclado, o Android
+# pode cobrir tudo com o editor dele: aí quem denuncia é o registro.
 desenhada() {
     adb exec-out screencap > fotos/tela.raw 2> /dev/null || { echo "sem foto"; return 1; }
     python3 - fotos/tela.raw <<'PY'
@@ -46,13 +53,44 @@ if len(d) >= 12:
             linhas += 1
             desenho += linha != linha[:4] * (x1 - x0)
         print(f"{desenho} de {linhas} linhas com desenho")
-        sys.exit(0 if desenho * 50 >= linhas else 1)
-print("formato da foto desconhecido")
+        sys.exit(0 if desenho * 10 >= linhas else 1)
+    print(f"formato da foto desconhecido: {w}x{h}, {len(d)} bytes")
+    sys.exit(1)
+print(f"foto vazia ou cortada: {len(d)} bytes")
 sys.exit(1)
 PY
     local r=$?
     rm -f fotos/tela.raw
     return $r
+}
+# Memória do app agora (o resumo do dumpsys meminfo): no emulador de 64 bits
+# o app chegou a 2,7 GB e o Android o matou; aqui fica de onde vem.
+memoria() {
+    {
+        echo "== $1 ($(date +%T))"
+        adb shell dumpsys meminfo $PACOTE 2> /dev/null |
+            grep -E "^ *(Native Heap|Dalvik Heap|Gfx dev|EGL mtrack|GL mtrack|Other dev|Other mmap|\.so mmap|Unknown|TOTAL)" || echo "(sem app)"
+    } >> fotos/memoria.txt
+}
+# Em que tela o app está? A cada troca de tela o app escreve "Rustinho: tela
+# pronta: <Tela>_..." no logcat (só no Android, diagnostico.cpp). Conta só o
+# processo de agora.
+tela_atual() {
+    local pid
+    pid=$(adb shell pidof $PACOTE | tr -d '\r')
+    [ -n "$pid" ] || return 0
+    adb logcat -d | awk -v p="$pid" '$3 == p' | grep -o "Rustinho: tela pronta: [A-Za-z]*" | tail -1 | sed 's/.*: //'
+}
+# Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
+esperar_tela() {
+    local nome=$1 limite=$2 onde=$3 atual="" i
+    for ((i = 0; i < limite; i += 2)); do
+        atual=$(tela_atual)
+        [ "$atual" = "$nome" ] && return 0
+        sleep 2
+    done
+    falhou "$onde: a tela $nome não apareceu em ${limite}s (está em: ${atual:-nenhuma})"
+    return 1
 }
 # O app está aberto, na frente, desenhado e não teve erro grave desde a
 # última conferência?
@@ -61,6 +99,7 @@ conferir() {
     vivo || falhou "$onde: o app fechou"
     na_frente || falhou "$onde: o app não está na frente"
     d=$(desenhada) || falhou "$onde: nada do app na tela ($d)"
+    memoria "$onde"
     adb logcat -d > fotos/logcat.txt
     # Fechou com erro, uma tela não carregou (componente que falta), o banco
     # não abriu (tela "Não foi possível abrir") ou o Qt não conseguiu pôr o
@@ -70,6 +109,27 @@ conferir() {
         falhou "$onde: $(head -3 fotos/novo.txt | tr '\n' ' ')"
         cat fotos/novo.txt >> fotos/ja_visto.txt
     fi
+}
+# Guarda o registro, o diagnóstico e as listas de erros; reprova se houve
+# falha. Chamado no fim, ou antes se não deu para configurar a loja (aí as
+# telas seguintes não teriam o que conferir).
+encerrar() {
+    adb logcat -d | grep -i -E "camera|multimedia" | tail -40 > fotos/camera.txt
+    adb shell pidof $PACOTE > fotos/pid.txt || echo "fechou" > fotos/pid.txt
+    adb logcat -d > fotos/logcat.txt
+    grep -F "Rustinho: " fotos/logcat.txt >> fotos/diag.txt || true
+    # O diagnóstico do próprio app (PEND-18), quando o Android deixa ler a pasta.
+    adb shell cat "/sdcard/Android/data/$PACOTE/files/diagnostico.txt" > fotos/diagnostico.txt 2> /dev/null || true
+    grep -E "$(adb shell pidof $PACOTE | tr -d '\r')|AndroidRuntime|DEBUG" fotos/logcat.txt | grep -i -E "qml|warn|error|fatal|crash|qt" | tail -150 > fotos/erros.txt || true
+    grep -E "lowmemorykiller: Kill '$PACOTE'|ANR in $PACOTE" -A 3 fotos/logcat.txt > fotos/memoria_mortes.txt || true
+    ls -la fotos
+    if [ -s fotos/falhas.txt ]; then
+        echo "O teste encontrou problemas:"
+        cat fotos/falhas.txt
+        exit 1
+    fi
+    echo "Tudo certo."
+    exit 0
 }
 : > fotos/ja_visto.txt
 
@@ -92,22 +152,27 @@ adb shell settings put system user_rotation 0
 adb logcat -c
 
 adb shell am start -n $ATIVIDADE
-foto 01-primeira-vez 40
+esperar_tela TelaBoasVindas 90 "primeira vez"
+foto 01-primeira-vez 5
 conferir "primeira vez"
-# O primeiro campo (nome da loja) já vem com o cursor.
-# Nome da loja e da pessoa pelo teclado da tela (toques nas teclas), como
-# uma pessoa digita: "Loja" e "Maria".
-for xy in "972 1872" "918 1717" "756 1872" "108 1872"; do adb shell input tap $xy; sleep 0.6; done
-foto 01a-loja-tocada 2
+# O primeiro campo (nome da loja) já vem com o cursor. Antes os nomes eram
+# digitados com toques nas teclas do teclado da tela, em posições fixas: só
+# servia para o teclado do Android 9; no Android 14 nada era digitado e a loja
+# nunca ficava configurada. Agora vão como as senhas (input text).
+texto "Loja"
+foto 01a-loja 2
 tecla KEYCODE_ENTER
 tecla KEYCODE_ENTER
-for xy in "864 2027" "108 1872" "378 1717" "810 1717" "108 1872"; do adb shell input tap $xy; sleep 0.6; done
-foto 01b-nome-tocado 2
+texto "Maria"
+foto 01b-nome 2
 tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
-foto 02-inicio 6
+# A senha passa pelo Argon2: no emulador (código ARM traduzido) demora.
+esperar_tela TelaInicio 240 "configurar a loja"
+foto 02-inicio 3
 conferir "configurar a loja"
+[ "$(tela_atual)" = TelaInicio ] || { falhou "a loja não ficou configurada: as telas seguintes não teriam o que conferir"; encerrar; }
 # Modo escuro: a lua, ao lado de "Trocar usuário". No teste de 32 bits fica
 # escuro até o fim; no de 64, volta para o sol.
 adb shell input tap 187 472
@@ -117,12 +182,16 @@ adb shell input swipe 500 1800 500 600 400
 foto 03-inicio-rolado 3
 conferir "início"
 
+# Abre o app de novo direto numa tela (só nos testes), entra com a senha e
+# espera a tela pedida aparecer.
 abrir() {
     adb shell am force-stop $PACOTE
     sleep 2
     adb shell am start -n $ATIVIDADE --es rustinho "'--abrir $1'"
-    sleep 15
+    esperar_tela TelaEntrar 90 "$1 (entrada)" || return 0
+    sleep 1
     texto "1234"; tecla KEYCODE_ENTER
+    esperar_tela "$1" 120 "$1"
 }
 TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro \
        TelaPeca TelaPessoa TelaPessoas TelaReceber TelaOrcamentos TelaOrdens TelaOrdem TelaEstoque \
@@ -131,7 +200,7 @@ TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel T
 [ -n "${CURTO:-}" ] && TELAS="TelaVender TelaConfiguracoes TelaPeca TelaFinanceiro"
 for t in $TELAS; do
     abrir $t
-    foto "10-$t" 5
+    foto "10-$t" 3
     adb shell input swipe 540 1700 540 700 500
     foto "11-$t-rolada" 3
     conferir "$t"
@@ -139,7 +208,7 @@ done
 # Argumento estranho mandado por outro app: ignorado, o app não fecha (C-13).
 adb shell am force-stop $PACOTE; sleep 2
 adb shell am start -n $ATIVIDADE --es rustinho "'--abrir ../../x --props {quebrado'"
-sleep 15
+esperar_tela TelaEntrar 90 "argumento estranho"
 conferir "argumento estranho"
 # Deitado.
 abrir TelaVender
@@ -154,26 +223,14 @@ adb shell wm user-rotation lock 0
 sleep 4
 # Voltar do Android: volta ao Início (o app continua na frente).
 tecla KEYCODE_BACK
+esperar_tela TelaInicio 30 "voltar do Android"
 foto 30-voltar 3
 conferir "voltar do Android"
 # A câmera por último (no emulador, ela mostra uma sala de mentira):
 # um toque no botão da câmera, no fim do campo de busca da venda.
 abrir TelaVender
-foto 14-vender-antes-da-camera 12
+foto 14-vender-antes-da-camera 5
 adb shell input tap 985 414
 foto 15-camera 12
 conferir "câmera"
-adb logcat -d | grep -i -E "camera|multimedia" | tail -40 > fotos/camera.txt
-adb shell pidof $PACOTE > fotos/pid.txt || echo "fechou" > fotos/pid.txt
-adb logcat -d > fotos/logcat.txt
-grep -i "Rustinho:" fotos/logcat.txt >> fotos/diag.txt || true
-# O diagnóstico do próprio app (PEND-18), quando o Android deixa ler a pasta.
-adb shell cat "/sdcard/Android/data/$PACOTE/files/diagnostico.txt" > fotos/diagnostico.txt 2> /dev/null || true
-grep -E "$(adb shell pidof $PACOTE | tr -d '\r')|AndroidRuntime|DEBUG" fotos/logcat.txt | grep -i -E "qml|warn|error|fatal|crash|qt" | tail -150 > fotos/erros.txt || true
-ls -la fotos
-if [ -s fotos/falhas.txt ]; then
-    echo "O teste encontrou problemas:"
-    cat fotos/falhas.txt
-    exit 1
-fi
-echo "Tudo certo."
+encerrar
