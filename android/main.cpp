@@ -76,6 +76,13 @@ int main(int argc, char* argv[])
     QDir().mkpath(dados);
     qputenv("RUSTINHO_DADOS", dados.toUtf8());
 
+    // NEW-B16-01 (auditoria, 0.9.18): os arquivos escolhidos no Android
+    // (content://) são copiados para o cache em "importar" só para o núcleo
+    // ler (rustinho_arquivo_local, rust/cpp/janela.cpp), inclusive um
+    // certificado .pfx, com a chave privada, e backups. Só servem durante o
+    // uso: ao abrir de novo, as cópias da vez passada são apagadas.
+    QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/importar")).removeRecursively();
+
     qmlRegisterType<VistaCamera>("rustinho.camera", 1, 0, "VistaCamera");
 
     QQmlApplicationEngine engine;
