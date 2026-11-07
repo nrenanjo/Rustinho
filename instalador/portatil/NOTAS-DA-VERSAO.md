@@ -71,6 +71,7 @@ Linux: `sha256sum {{APPIMAGE}}`
 - **Navegação contextual:** quando algo falta (ex.: código ambíguo nas etiquetas, conta de destino na transferência), a tela leva ao lugar de resolver e volta.
 - **Backup:** a cópia no Google Drive só conta como guardada depois de conferida; a restauração registra quem restaurou e nunca deixa o banco pela metade.
 - **Celular:** botões e campos com área de toque de pelo menos 48 dp; ícone adaptativo do Android.
+- **Android:** o app passa a abrir o banco (antes mostrava sempre "Não foi possível abrir o Rustinho… a pasta não aceita trava") e a cadastrar a loja (antes recusava, sem conseguir saber em que aparelho estava). Conferido no emulador; ainda precisa ser conferido num celular de verdade. No Android de 32 bits a tela cinza (PEND-18) continua.
 
 As notas da 0.9.16 e da 0.9.17 ainda faltam neste arquivo (achado NEW-B17-02 da auditoria).
 

@@ -128,6 +128,20 @@ PY
     [ -n "$xy" ] || return 1
     adb shell input tap $xy
 }
+# Aviso do sistema por cima de tudo ("Pixel Launcher isn't responding": no
+# emulador lento até o lançador do Android trava). Ele engole os toques no
+# teclado; toca em "Wait" para ele sair (não fecha app nenhum).
+fechar_avisos() {
+    local i
+    for i in 1 2 3; do
+        adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1
+        adb shell cat /sdcard/tela.xml > fotos/aviso.xml 2> /dev/null
+        grep -q -E "isn(&apos;|.)t responding|não está respondendo" fotos/aviso.xml || return 0
+        echo "aviso do sistema por cima do app: $(grep -o -E '"[^"]*(isn(&apos;|.)t responding|não está respondendo)' fotos/aviso.xml | head -1)" | tee -a fotos/avisos_do_sistema.txt
+        tocar_texto "Wait" aviso || tocar_texto "Aguardar" aviso || true
+        sleep 3
+    done
+}
 # Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
 esperar_tela() {
     local nome=$1 limite=$2 onde=$3 atual="" i
@@ -212,14 +226,18 @@ conferir "primeira vez"
 # o mesmo sintoma do comentário de Campo.qml sobre "texto previsto"). As senhas
 # vão por "input text" (campo de senha não tem sugestões do teclado).
 adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1 && adb shell cat /sdcard/tela.xml > fotos/01-arvore.xml 2> /dev/null
+fechar_avisos
 digitar "loja"
 foto 01a-loja 2
 tecla KEYCODE_ENTER
 tecla KEYCODE_ENTER
+fechar_avisos
 digitar "maria"
 foto 01b-nome 2
 tecla KEYCODE_ENTER
+fechar_avisos
 texto "1234"; tecla KEYCODE_ENTER
+fechar_avisos
 texto "1234"; tecla KEYCODE_ENTER
 # A senha passa pelo Argon2: no emulador (código ARM traduzido) demora.
 if ! esperar_tela TelaInicio 120 "configurar a loja (Enter no último campo)"; then
@@ -251,7 +269,7 @@ abrir() {
     sleep 2
     adb shell am start -n $ATIVIDADE --es rustinho "'--abrir $1'"
     esperar_tela TelaEntrar 90 "$1 (entrada)" || return 0
-    sleep 1
+    fechar_avisos
     texto "1234"; tecla KEYCODE_ENTER
     esperar_tela "$1" 120 "$1"
 }
