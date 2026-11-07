@@ -65,6 +65,13 @@ int main(int argc, char* argv[])
         qputenv("QT_QUICK_BACKEND", "software");
     diagnostico.marcar(QStringLiteral("modo de desenho: %1 (%2)").arg(software ? QStringLiteral("software (processador)") : QStringLiteral("placa de vídeo"), motivo));
 
+    // Sem o cache de shaders do Qt em disco (cache/qtshadercache-*). No
+    // emulador da CI (0.9.18) esses arquivos dobravam de tamanho a cada
+    // abertura (o driver devolvia um binário cada vez maior); o Qt os carregava
+    // inteiros e o app passava de 1 GB até o Android matá-lo. Sem o cache, os
+    // poucos shaders do Qt Quick são compilados a cada abertura (rápido).
+    QCoreApplication::setAttribute(Qt::AA_DisableShaderDiskCache);
+
     QGuiApplication app(argc, argv);
     diagnostico.marcar(QStringLiteral("QGuiApplication criado"));
     app.setApplicationName(QStringLiteral("rustinho"));
@@ -82,6 +89,10 @@ int main(int argc, char* argv[])
     // certificado .pfx, com a chave privada, e backups. Só servem durante o
     // uso: ao abrir de novo, as cópias da vez passada são apagadas.
     QDir(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/importar")).removeRecursively();
+    // O cache de shaders de versões anteriores (veja acima) não é mais usado.
+    const QDir cache(QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
+    for (const QString& nome : cache.entryList({QStringLiteral("qtshadercache*")}, QDir::Dirs | QDir::NoDotAndDotDot))
+        QDir(cache.filePath(nome)).removeRecursively();
 
     qmlRegisterType<VistaCamera>("rustinho.camera", 1, 0, "VistaCamera");
 
