@@ -8,9 +8,11 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::erro::Resultado;
 use crate::{caixa, config, documento, numeros, receber, vendas};
 
-/// Troca &, <, > e aspas para o texto não quebrar o HTML.
+/// Troca &, <, > e as aspas (duplas e simples) para o texto não quebrar o
+/// HTML, nem dentro de um atributo com aspas simples (NEW-B11-03 da
+/// auditoria, 0.9.18).
 pub fn escapar(t: &str) -> String {
-    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
 }
 
 fn cabecalho_loja(conn: &Connection) -> Resultado<String> {
@@ -624,5 +626,6 @@ mod testes {
     #[test]
     fn escapa_html() {
         assert_eq!(escapar("<b>R&D \"x\"</b>"), "&lt;b&gt;R&amp;D &quot;x&quot;&lt;/b&gt;");
+        assert_eq!(escapar("D'Ávila' onmouseover='x"), "D&#39;Ávila&#39; onmouseover=&#39;x");
     }
 }
