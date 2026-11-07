@@ -70,6 +70,11 @@ memoria() {
         echo "== $1 ($(date +%T))"
         adb shell dumpsys meminfo $PACOTE 2> /dev/null |
             grep -E "^ *(Native Heap|Dalvik Heap|Gfx dev|EGL mtrack|GL mtrack|Other dev|Other mmap|\.so mmap|Unknown|TOTAL)" || echo "(sem app)"
+        # Os maiores arquivos do app (pasta privada: só com o adb como root,
+        # que as imagens google_apis do emulador permitem; no computador a
+        # memória não cresce de uma abertura para outra, aqui cresce).
+        echo "-- arquivos (kB)"
+        adb shell "du -ak /data/data/$PACOTE /sdcard/Android/data/$PACOTE 2> /dev/null | sort -n | tail -8"
     } >> fotos/memoria.txt
 }
 # Em que tela o app está? A cada troca de tela o app escreve "Rustinho: tela
@@ -175,6 +180,10 @@ encerrar() {
 }
 : > fotos/ja_visto.txt
 
+# adb como root (só para ler o tamanho dos arquivos do app; veja memoria()).
+adb root > fotos/adb_root.txt 2>&1 || true
+adb wait-for-device
+sleep 3
 APK=$(ls saida/*.apk | head -1)
 if ! adb install -r "$APK" 2>&1 | tee fotos/instalar.txt | grep -q "Success"; then
     falhou "o APK não instalou"
