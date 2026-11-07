@@ -68,6 +68,9 @@ TEMAS = [("Tema escuro", "escuro", "amoled"), ("Tema claro", "claro", "cinza"), 
 TELAS = ["Peças", "Clientes", "Orçamentos", "Caixa", "Compras", "Estoque / Fornecedores", "Financeiro",
          "Ordens de serviço", "Painel", "Usuários", "Trocas e devoluções", "Vender / Receber"]
 FORMULARIOS = [("Peças", "Nova peça", "peca-nova"), ("Clientes", "Novo cliente", "cliente-novo")]
+# (cartão da Início, pílula): listas de dentro das telas, para as faixas.
+LISTAS_POR_PILULA = [("Estoque / Fornecedores", "Fornecedores"), ("Estoque / Fornecedores", "Parados"),
+                     ("Financeiro", "Contas da loja"), ("Painel", "Peças e vendedores")]
 
 
 def simples(t):
@@ -735,8 +738,10 @@ def temas(r, res, pasta):
             r.clicar(botao)
             res.conferir(f"T {nome}: formulário ({botao})", r.esperar_pilha(3), r.foto(f"T-{nome}-{j:02d}-{arq}"))
             voltar_inicio(r, res, f"T {nome} {botao}")
-        # As telas da Início e, pela pílula, a lista dos fornecedores.
-        listas = [(tela, None) for tela in TELAS] + [("Estoque / Fornecedores", "Fornecedores")]
+        # As telas da Início e, pelas pílulas, listas que têm linhas na loja de
+        # validação (as primeiras partes de Estoque, Financeiro e Painel ficam
+        # vazias ou sem lista).
+        listas = [(tela, None) for tela in TELAS] + [(m, p) for m, p in LISTAS_POR_PILULA]
         for i, (tela, pilula) in enumerate(listas, 3 + len(FORMULARIOS)):
             rotulo = f"{tela} › {pilula}" if pilula else tela
             if not r.clicar(tela):
