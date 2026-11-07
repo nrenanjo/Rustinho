@@ -44,7 +44,6 @@ FocusScope {
         const novas = []
         const erros = []
         const conflitos = []
-        let deOutra = 0
         pendentes = []
         avisoPendentes = ""
         function proximo(i) {
@@ -58,11 +57,9 @@ FocusScope {
             Api.gravarDemorado("compra_importar", { caminho: arquivo },
                                lista.length > 1 ? "Importando " + (i + 1) + " de " + lista.length + "…" : "Importando o XML…", r => {
                 if (r.ok) {
-                    for (const c of r.dados.compras) {
+                    // Nota de outro CNPJ não entra: vem em "conflitos" (caso 2b).
+                    for (const c of r.dados.compras)
                         novas.push(c)
-                        if (c.avisoDestinatario.indexOf("não é") >= 0)
-                            deOutra++
-                    }
                     for (const e of r.dados.erros)
                         erros.push(e)
                     for (const c of r.dados.conflitos)
@@ -89,9 +86,7 @@ FocusScope {
             if (novas.length === 1)
                 janela.abrir("TelaCompra", { compraId: novas[0].id })
             else if (novas.length > 1)
-                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar. O Rustinho ainda não verifica a assinatura digital do XML: use só XML que veio do fornecedor ou da SEFAZ."
-                              + (deOutra > 0 ? " Atenção: " + deOutra + (deOutra === 1 ? " nota não é" : " notas não são") + " da loja (outro CNPJ)." : ""),
-                              deOutra > 0 ? "info" : "ok")
+                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar.", "ok")
         }
         proximo(0)
     }
@@ -138,8 +133,9 @@ FocusScope {
         busca.focar()
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             buscar()
         } else {
@@ -188,7 +184,6 @@ FocusScope {
             titulo: "Compras"
             subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Importar XML"
                 icone: "mais"
@@ -243,25 +238,40 @@ FocusScope {
             Layout.fillWidth: true
             Repeater {
                 model: tela.naoImportadas
-                delegate: RowLayout {
+                delegate: Rectangle {
+                    id: faixaDaLista
                     required property var modelData
-                    spacing: 12
                     Layout.fillWidth: true
-                    Nota {
-                        text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
-                        elide: Text.ElideMiddle
-                        wrapMode: Text.NoWrap
-                        Layout.fillWidth: true
-                    }
-                    Botao {
-                        text: "Ver"
-                        tipo: "secundario"
-                        onClicked: conflitoCnpj.mostrar(modelData)
-                    }
-                    Botao {
-                        text: "Descartar"
-                        tipo: "discreto"
-                        onClicked: tela.descartarNaoImportada(modelData)
+                    required property int index
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                    palette.window: Tema.superficie(color)
+                    radius: Tema.raioCampo
+                    implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                    implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                    RowLayout {
+                        id: conteudoDaFaixa
+                        x: 8
+                        y: 4
+                        width: faixaDaLista.width - 16
+                        spacing: 12
+                        Nota {
+                            text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
+                            elide: Text.ElideMiddle
+                            wrapMode: Text.NoWrap
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            text: "Ver"
+                            tipo: "secundario"
+                            onClicked: conflitoCnpj.mostrar(modelData)
+                        }
+                        Botao {
+                            text: "Descartar"
+                            tipo: "discreto"
+                            onClicked: tela.descartarNaoImportada(modelData)
+                        }
                     }
                 }
             }

@@ -1368,6 +1368,118 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
     v
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do cadastro de peças (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{estoque, fiscal, produtos};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "produto_novo", classe: Classe::Leitura, funcao: produto_novo },
+        Comando { nome: "produto_abrir", classe: Classe::Leitura, funcao: produto_abrir },
+        Comando { nome: "produto_salvar", classe: Classe::Caixa, funcao: produto_salvar },
+        Comando { nome: "produto_sugestoes", classe: Classe::Leitura, funcao: produto_sugestoes },
+        Comando { nome: "produto_variacao_criar", classe: Classe::Caixa, funcao: produto_variacao_criar },
+        Comando { nome: "estoque_ajustar", classe: Classe::Gerente("ajustar_estoque"), funcao: estoque_ajustar },
+    ];
+
+    fn produto_novo(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let f = produtos::ficha_nova(p.conn)?;
+        peca_para_tela(p, f)
+    }
+
+    fn produto_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let f = produtos::ficha(p.conn, &d.id)?;
+        peca_para_tela(p, f)
+    }
+
+    fn produto_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let mut ficha: produtos::ProdutoFicha = ler(dados)?;
+        // D-09: quem não vê custo e lucro não mexe neles (o custo
+        // gravado fica; o % segue o preço).
+        if !p.ve_custos()? {
+            produtos::tirar_custos_da_entrada(p.conn, &mut ficha)?;
+        }
+        // Mudar o preço de venda (com custo ou sem) ou o % de lucro
+        // de uma peça cadastrada: só com o gerente, para esta
+        // gravação com estes dados (D-09).
+        if produtos::muda_preco(p.conn, &ficha)? {
+            p.exigir("precos")?;
+        }
+        let tx = p.conn.transaction()?;
+        let id = produtos::salvar(&tx, p.disp, p.usuario_id, &ficha)?;
+        tx.commit()?;
+        let f = produtos::ficha(p.conn, &id)?;
+        peca_para_tela(p, f)
+    }
+
+    fn produto_sugestoes(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let mut v = json!(produtos::sugestoes(p.conn)?);
+        let lista =
+            |l: &[(&str, &str)]| json!(l.iter().map(|(c, t)| json!({ "valor": c, "texto": t })).collect::<Vec<_>>());
+        v["csosns"] = lista(fiscal::CSOSNS);
+        v["cstIpi"] = lista(fiscal::CST_IPI);
+        v["cstPis"] = lista(fiscal::CST_PIS);
+        v["exigibilidades"] = lista(fiscal::EXIGIBILIDADE_ISS);
+        v["ufs"] = json!(crate::documento::UFS);
+        Ok(v)
+    }
+
+    fn produto_variacao_criar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: VariacaoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = produtos::criar_variacao(&tx, p.disp, p.usuario_id, &d.id, &d.atual, &d.nova)?;
+        tx.commit()?;
+        let f = produtos::ficha(p.conn, &id)?;
+        peca_para_tela(p, f)
+    }
+
+    fn estoque_ajustar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: AjusteEstoque = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        produtos::ficha(&tx, &d.produto_id)?; // confere se a peça existe
+        estoque::ajustar(&tx, p.disp, p.usuario_id, &d.produto_id, &d.quantidade, &d.motivo)?;
+        tx.commit()?;
+        let f = produtos::ficha(p.conn, &d.produto_id)?;
+        peca_para_tela(p, f)
+    }
+
+    /// Ficha da peça para a tela: sem custo, % de lucro e histórico do
+    /// custo para quem não vê os resultados (D-09).
+    fn peca_para_tela(p: &mut Pedido, mut f: produtos::ProdutoFicha) -> Resultado<Value> {
+        f.ver_custos = p.ve_custos()?;
+        if !f.ver_custos {
+            produtos::esconder_custos(&mut f);
+        }
+        Ok(json!(f))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct VariacaoEntrada {
+        id: String,
+        atual: String,
+        nova: String,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct AjusteEstoque {
+        produto_id: String,
+        quantidade: String,
+        motivo: String,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

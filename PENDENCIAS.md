@@ -78,7 +78,7 @@ Correções feitas e rastreabilidade em `docs/RASTREABILIDADE-auditorias.md`; o 
 - **PEND-16 · Módulo fiscal: arquitetura de assinatura independente (A1, A3 de pessoa jurídica, Selo Eletrônico, nuvem, PAA) e transição dos certificados.**
   Documento: `docs/FISCAL-assinatura-arquitetura.md` (arquitetura, normas verificadas e **não verificadas**, transição, custos por categoria, testes S-01…S-13 e F-01…F-04). **Nada implementado; nenhum mecanismo declarado como suportado.** Em aberto, não verificado: aceitação do Selo Eletrônico pelos serviços da SEFAZ (assinatura do XML e TLS do cliente), TLS mútuo com certificado de nuvem, preços. Aguarda suas respostas (regime tributário, documentos a emitir, dados do seu e-CNPJ A3).
 
-- **PEND-17 · Tela da compra no celular: na linha do item, os botões (Escolher peça, Cadastrar nova, Não lançar) ficam por cima do texto "Que peça é esta?" (defeito antigo, achado na inspeção do PEND-09; não corrigido).** Ver `LinhaItemCompra.qml` em largura estreita (captura `e5-compra.png` da entrega r10).
+- **PEND-17 · Tela da compra no celular: na linha do item, os botões (Escolher peça, Cadastrar nova, Não lançar) ficavam por cima do texto "Que peça é esta?" — corrigido na 0.9.18.** Reproduzido numa tela virtual de 360 × 780 dp com densidade 2 (o texto ficava com 0 dp de largura e "Não lançar" ia até x = 459): agora os botões vão para uma linha própria embaixo do texto, e a lista da compra abre do começo (os avisos do topo não somem). Conferido pelo roteiro `app/testes/telas_toque_celular.py`. Falta confirmar num aparelho de verdade.
 
 ## Identidade visual
 

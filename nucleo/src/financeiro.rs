@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use time::Duration;
 
 use crate::erro::{Erro, Resultado};
-use crate::receber::{iso, ler_iso};
+use crate::tempo::{iso, ler_iso};
 use crate::{auditoria, fiscal, numeros, pagar, tempo, texto};
 
 // ---------------------------------------------------------------------------
@@ -668,7 +668,7 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     if ate < de {
         return Err(Erro::campo("ate", "A data final é antes da inicial."));
     }
-    if crate::receber::dias_entre(&de, &ate) > 400 {
+    if crate::tempo::dias_entre(&de, &ate) > 400 {
         return Err(Erro::campo("de", "Escolha no máximo um ano."));
     }
 
@@ -846,6 +846,143 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
 /// [("Vendas", 2), ("Aluguel", 1)] → "Vendas (2)", "Aluguel".
 fn resumir(itens: &[(String, usize)]) -> Vec<String> {
     itens.iter().map(|(t, n)| if *n > 1 { format!("{t} ({n})") } else { t.clone() }).collect()
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do financeiro: contas da loja, categorias e fluxo de caixa (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido, Periodo};
+    use crate::erro::Resultado;
+    use crate::{caixa, financeiro, numeros, pagar};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando {
+            nome: "financeiro_resumo",
+            classe: Classe::ConsultaDoGerente("financeiro"),
+            funcao: financeiro_resumo,
+        },
+        Comando { nome: "contas_loja", classe: Classe::Leitura, funcao: contas_loja },
+        Comando { nome: "conta_loja_salvar", classe: Classe::Gerente("financeiro"), funcao: conta_loja_salvar },
+        Comando {
+            nome: "conta_loja_extrato",
+            classe: Classe::ConsultaDoGerente("financeiro"),
+            funcao: conta_loja_extrato,
+        },
+        Comando { nome: "movimento_lancar", classe: Classe::Gerente("financeiro"), funcao: movimento_lancar },
+        Comando { nome: "movimento_estornar", classe: Classe::Gerente("estornar"), funcao: movimento_estornar },
+        Comando { nome: "transferir", classe: Classe::Gerente("financeiro"), funcao: transferir },
+        Comando { nome: "conta_loja_conferir", classe: Classe::Gerente("financeiro"), funcao: conta_loja_conferir },
+        Comando { nome: "categorias", classe: Classe::ConsultaDoGerente("financeiro"), funcao: categorias },
+        Comando { nome: "categoria_salvar", classe: Classe::Gerente("financeiro"), funcao: categoria_salvar },
+        Comando { nome: "fluxo_caixa", classe: Classe::ConsultaDoGerente("financeiro"), funcao: fluxo_caixa },
+        Comando { nome: "pagar_formas", classe: Classe::ConsultaDoGerente("financeiro"), funcao: pagar_formas },
+    ];
+
+    fn financeiro_resumo(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(financeiro::resumo(p.conn)?))
+    }
+
+    fn contas_loja(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        let mut v = json!(financeiro::contas(p.conn, d.quais == "todas")?);
+        // D-02: o caixa usa só o nome (para escolher a conta); o saldo é do financeiro.
+        if !p.pode_ler("financeiro")? {
+            if let Some(lista) = v.as_array_mut() {
+                for c in lista.iter_mut().filter_map(|c| c.as_object_mut()) {
+                    c.remove("saldo");
+                    c.remove("saldoInicial");
+                }
+            }
+        }
+        Ok(v)
+    }
+
+    fn conta_loja_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: financeiro::ContaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = financeiro::salvar_conta(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(id))
+    }
+
+    fn conta_loja_extrato(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(financeiro::extrato(p.conn, &d.id, 500)?))
+    }
+
+    fn movimento_lancar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: financeiro::MovimentoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        financeiro::lancar_movimento(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn movimento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        financeiro::estornar_movimento(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn transferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: financeiro::TransferenciaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        financeiro::transferir(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn conta_loja_conferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Conferencia = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let diferenca = financeiro::conferir(&tx, p.disp, p.usuario_id, &d.conta_id, &d.saldo)?;
+        tx.commit()?;
+        Ok(json!(numeros::escrever_dinheiro(diferenca)))
+    }
+
+    fn categorias(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(financeiro::categorias(p.conn, d.quais == "todas")?))
+    }
+
+    fn categoria_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: financeiro::CategoriaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = financeiro::salvar_categoria(&tx, &d)?;
+        tx.commit()?;
+        Ok(json!(id))
+    }
+
+    fn fluxo_caixa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Periodo = ler(dados)?;
+        Ok(json!(financeiro::fluxo(p.conn, &d.de, &d.ate, d.dias.unwrap_or(30))?))
+    }
+
+    fn pagar_formas(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let gaveta = caixa::sessao_aberta(p.conn, p.disp)?;
+        Ok(json!({
+            "formas": pagar::FORMAS.iter().map(|(f, n)| json!({ "forma": f, "nome": n })).collect::<Vec<_>>(),
+            "contas": financeiro::contas(p.conn, false)?,
+            "gaveta": gaveta.map(|s| s.caixa_nome),
+            "categorias": financeiro::categorias(p.conn, false)?,
+        }))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct Conferencia {
+        conta_id: String,
+        saldo: String,
+    }
 }
 
 #[cfg(test)]

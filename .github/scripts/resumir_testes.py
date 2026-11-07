@@ -52,6 +52,10 @@ def main():
     resumo = f"{soma['passed']} aprovados, {soma['failed']} falharam, {soma['ignored']} só à mão (ignorados)"
     if not resultados:
         resumo = "não terminaram (sem resultado)"
+    # 0.9.18: o resultado fica preso ao commit testado.
+    commit = os.environ.get("GITHUB_SHA", "")[:12]
+    if commit:
+        resumo = f"{resumo} — commit {commit}"
     saida = os.environ.get("GITHUB_OUTPUT")
     if saida:
         with open(saida, "a", encoding="utf-8") as f:

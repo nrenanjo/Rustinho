@@ -15,6 +15,14 @@ FocusScope {
     property string compraId: ""
     // [{ etiqueta: {...}, quantidade: n }]
     property var itens: []
+    // Caso 4 da navegação contextual (0.9.18): as peças que a pessoa quis e
+    // que não saem agora (código a definir ou que leva a outra peça), com a
+    // quantidade pedida. Ficam à parte, com a causa e onde resolver; nunca
+    // são impressas. Ao voltar para esta tela, o núcleo confere de novo: a
+    // que foi resolvida volta para a lista (a impressão continua no clique).
+    property var bloqueadas: []
+    // Como esta tela aparece no "voltar" da tela que ela abriu.
+    readonly property string nomeNaNavegacao: "Etiquetas"
     property var opcoes: null
     property string modelo: "33"
     property int inicio: 1
@@ -46,11 +54,9 @@ FocusScope {
             compraId = ""
             if (c.ok) {
                 // Peça com código a definir ou repetido: não entra (o leitor
-                // pegaria a peça errada).
-                const bloqueadas = c.dados.filter(x => !!x.etiqueta.bloqueio)
+                // pegaria a peça errada); fica à parte, com a causa.
                 itens = c.dados.filter(x => !x.etiqueta.bloqueio)
-                if (bloqueadas.length > 0)
-                    janela.avisar(bloqueadas.map(x => x.etiqueta.nome + ": " + x.etiqueta.bloqueio).join("\n"), "erro")
+                bloqueadas = c.dados.filter(x => !!x.etiqueta.bloqueio)
             }
         }
     }
@@ -67,12 +73,70 @@ FocusScope {
                 return
             }
             if (r.dados.bloqueio) {
-                janela.avisar(r.dados.bloqueio, "erro")
+                janela.avisar(r.dados.nome + ": " + r.dados.bloqueio, "erro")
+                bloquear(r.dados, quantidade)
                 return
             }
             lista.push({ etiqueta: r.dados, quantidade: quantidade })
         }
         itens = lista
+    }
+
+    // Guarda à parte a peça que não sai agora (somando, se já estava).
+    function bloquear(etiqueta, quantidade) {
+        const lista = bloqueadas.slice()
+        const i = lista.findIndex(x => x.etiqueta.produtoId === etiqueta.produtoId)
+        if (i >= 0)
+            lista[i] = { etiqueta: etiqueta, quantidade: lista[i].quantidade + quantidade }
+        else
+            lista.push({ etiqueta: etiqueta, quantidade: quantidade })
+        bloqueadas = lista
+    }
+
+    function tirarBloqueada(indice) {
+        const lista = bloqueadas.slice()
+        lista.splice(indice, 1)
+        bloqueadas = lista
+    }
+
+    // De volta de Duplicatas ou da peça: o núcleo confere cada uma de novo.
+    // A que já pode sair volta para a lista com a quantidade pedida; a que
+    // continua bloqueada fica (com a causa de agora). Nada é impresso aqui.
+    function reconferirBloqueadas() {
+        if (bloqueadas.length === 0)
+            return
+        const ficam = []
+        const voltaram = []
+        let lista = itens.slice()
+        for (const b of bloqueadas) {
+            const r = Api.chamar("etiqueta_previa", { id: b.etiqueta.produtoId })
+            if (!r.ok)
+                continue        // a peça não existe mais: sai da lista
+            if (r.dados.bloqueio) {
+                ficam.push({ etiqueta: r.dados, quantidade: b.quantidade })
+                continue
+            }
+            const i = lista.findIndex(x => x.etiqueta.produtoId === r.dados.produtoId)
+            if (i >= 0)
+                lista[i] = { etiqueta: r.dados, quantidade: lista[i].quantidade + b.quantidade }
+            else
+                lista.push({ etiqueta: r.dados, quantidade: b.quantidade })
+            voltaram.push(r.dados.nome)
+        }
+        itens = lista
+        bloqueadas = ficam
+        if (voltaram.length > 0)
+            janela.avisar((voltaram.length === 1 ? voltaram[0] + " já pode sair: voltou" : voltaram.join(", ") + " já podem sair: voltaram")
+                          + " para a lista. Imprima quando quiser.", "ok")
+    }
+
+    // Onde resolver: a causa (Simultaneidade › Duplicatas › Códigos das
+    // peças) ou o cadastro da peça. Esta tela fica na pilha, com a lista.
+    function verDuplicatas() {
+        janela.abrir("TelaConfiguracoes", { secao: "duplicatas", voltarPara: nomeNaNavegacao })
+    }
+    function abrirPeca(id) {
+        janela.abrir("TelaPeca", { produtoId: id, voltarPara: nomeNaNavegacao })
     }
 
     function mudarQuantidade(indice, texto) {
@@ -146,7 +210,6 @@ FocusScope {
             subtitulo: "Preço e código de barras em folha A4 de etiquetas adesivas"
             textoVoltar: "Voltar"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Rotulo {
                 visible: tela.total > 0
                 text: tela.total + (tela.total === 1 ? " etiqueta" : " etiquetas") + " · " + tela.folhas + (tela.folhas === 1 ? " folha" : " folhas")
@@ -208,7 +271,10 @@ FocusScope {
                         width: lista.width
                         implicitHeight: 62
                         radius: Tema.raio
-                        color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(linha.par)
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: Tema.estreito ? 12 : 18
@@ -219,7 +285,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.e.nome
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 19
@@ -228,7 +294,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: ["cód. " + linha.e.codigo, linha.e.textoBarras !== linha.e.codigo ? "barras " + linha.e.textoBarras : ""].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -243,7 +309,7 @@ FocusScope {
                             }
                             Text {
                                 text: linha.e.semPreco ? "" : "R$ " + linha.e.preco
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(linha.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 16
@@ -263,7 +329,7 @@ FocusScope {
                                 tipo: "discreto"
                                 icone: "lixeira"
                                 text: ""
-                                implicitHeight: 36
+                                altura: 36
                                 onClicked: tela.tirar(linha.index)
                             }
                         }
@@ -284,6 +350,84 @@ FocusScope {
                                   + "Na compra lançada e no cadastro da peça também tem o botão Etiquetas."
                             horizontalAlignment: Text.AlignHCenter
                             Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                // Caso 4 (0.9.18): as que não saem agora, com a causa e onde
+                // resolver (opções; nada é liberado daqui).
+                Faixa {
+                    visible: tela.bloqueadas.length > 0
+                    titulo: "Não saem agora"
+                    subtitulo: tela.bloqueadas.length === 1 ? "1 peça" : tela.bloqueadas.length + " peças"
+                    color: Tema.rosa
+                    corTitulo: Tema.vermelho
+                    espacamento: 10
+                    Layout.fillWidth: true
+                    Layout.maximumHeight: Math.max(160, tela.height * 0.45)
+                    clip: true
+                    Repeater {
+                        model: tela.bloqueadas
+                        // Linhas alternadas (V-6), como a lista de etiquetas acima.
+                        delegate: Rectangle {
+                            id: travada
+                            required property var modelData
+                            required property int index
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(travada.par)
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raio
+                            Layout.fillWidth: true
+                            implicitHeight: conteudoTravada.implicitHeight + 16
+                            ColumnLayout {
+                            id: conteudoTravada
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 4
+                            Text {
+                                text: travada.modelData.etiqueta.nome + " · " + travada.modelData.quantidade
+                                      + (travada.modelData.quantidade === 1 ? " etiqueta" : " etiquetas")
+                                color: Tema.tintaDaFaixa(travada.par)
+                                font.family: Tema.texto
+                                font.weight: Font.DemiBold
+                                font.pixelSize: 15
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: travada.modelData.etiqueta.bloqueio
+                                color: Tema.tintaSuaveDaFaixa(travada.par)
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Flow {
+                                spacing: 8
+                                Layout.fillWidth: true
+                                Botao {
+                                    text: "Ver duplicatas"
+                                    tipo: "secundario"
+                                    altura: 36
+                                    onClicked: tela.verDuplicatas()
+                                }
+                                Botao {
+                                    text: "Abrir a peça"
+                                    tipo: "secundario"
+                                    altura: 36
+                                    onClicked: tela.abrirPeca(travada.modelData.etiqueta.produtoId)
+                                }
+                                Botao {
+                                    text: "Tirar"
+                                    tipo: "discreto"
+                                    altura: 36
+                                    onClicked: tela.tirarBloqueada(travada.index)
+                                }
+                            }
+                            }
                         }
                     }
                 }
@@ -498,6 +642,10 @@ FocusScope {
         onEscolhida: id => tela.adicionar(id, 1)
     }
 
-    StackView.onActivated: busca.focar()
+    StackView.onActivated: {
+        // De volta de onde se resolve o código (caso 4): confere de novo.
+        reconferirBloqueadas()
+        busca.focar()
+    }
     Component.onCompleted: carregar()
 }

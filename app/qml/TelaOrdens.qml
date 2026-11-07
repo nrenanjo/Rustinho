@@ -24,8 +24,9 @@ FocusScope {
         buscou = true
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregar()
         } else {
@@ -67,7 +68,6 @@ FocusScope {
                          + (tela.contagem.atrasadas > 0 ? " · " + tela.contagem.atrasadas + " passaram da previsão" : "")
                        : "O carro, as peças e a mão de obra, do orçamento à entrega"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Nova OS"
                 icone: "mais"
@@ -119,7 +119,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 70
                 radius: Tema.raio
-                color: sobre.hovered ? Qt.darker((index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho, 1.04) : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: sobre.hovered ? Qt.darker(Tema.faixa(linha.par), 1.04) : Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 opacity: o.situacao === "cancelada" ? 0.6 : 1
                 HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: tela.janela.abrir("TelaOrdem", { osId: linha.o.id }) }
@@ -136,7 +139,7 @@ FocusScope {
                         Text {
                             // Rascunho ainda não tem número.
                             text: linha.o.situacao === "rascunho" ? "—" : linha.o.numero
-                            color: Tema.dourado
+                            color: Tema.douradoDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: Tema.estreito ? 22 : 26
@@ -146,7 +149,7 @@ FocusScope {
                         Text {
                             text: linha.o.caixa
                             visible: text !== ""
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 11
                             horizontalAlignment: Text.AlignRight
@@ -178,7 +181,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: [linha.o.veiculo, linha.o.cliente].filter(x => !!x).join(" · ")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -189,7 +192,7 @@ FocusScope {
                             text: [Tema.estreito ? linha.o.nomeSituacao : "",
                                    Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao) ? "previsão " + linha.o.previsao : "",
                                    linha.o.defeito, linha.o.mecanico ? "mecânico " + linha.o.mecanico : "", "aberta " + linha.o.quando].filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -200,7 +203,7 @@ FocusScope {
                     Text {
                         visible: !Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao)
                         text: "previsão " + linha.o.previsao
-                        color: linha.o.atrasada ? Tema.vermelho : Tema.tintaSuave
+                        color: linha.o.atrasada ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: linha.o.atrasada ? Font.Bold : Font.Normal
                         font.pixelSize: 13
@@ -213,7 +216,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + linha.o.total
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: Tema.estreito ? 15 : 17

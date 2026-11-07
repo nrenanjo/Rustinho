@@ -609,7 +609,7 @@ pub fn painel(conn: &Connection, busca: &str, quais: &str) -> Resultado<Painel> 
             let telefone: String = l.get(4)?;
             let produto_id: String = l.get(5)?;
             let estoque: i64 = l.get(22)?;
-            let dias = crate::receber::dias_entre(&criado, &hoje);
+            let dias = crate::tempo::dias_entre(&criado, &hoje);
             let (pagamento, nome_pagamento) = if venda_id.is_empty() || venda_situacao != "concluida" {
                 ("entrega", "Paga na entrega".to_string())
             } else if falta > 0 {
@@ -780,6 +780,102 @@ pub fn reservas(conn: &Connection) -> Resultado<Vec<(String, i64, i64)>> {
         )?
         .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
         .collect::<Result<_, _>>()?)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das encomendas (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::encomendas;
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "encomendas_painel", classe: Classe::Leitura, funcao: encomendas_painel },
+        Comando { nome: "encomenda_criar", classe: Classe::Caixa, funcao: encomenda_criar },
+        Comando { nome: "encomenda_pedir", classe: Classe::Caixa, funcao: encomenda_pedir },
+        Comando { nome: "encomenda_chegou", classe: Classe::Caixa, funcao: encomenda_chegou },
+        Comando { nome: "encomenda_entregar", classe: Classe::Caixa, funcao: encomenda_entregar },
+        Comando { nome: "encomenda_cancelar", classe: Classe::Caixa, funcao: encomenda_cancelar },
+        // RVI-01: marca o cliente como avisado quando a encomenda chegou.
+        Comando { nome: "encomenda_whatsapp", classe: Classe::Caixa, funcao: encomenda_whatsapp },
+        Comando { nome: "encomenda_para_venda", classe: Classe::Leitura, funcao: encomenda_para_venda },
+    ];
+
+    fn encomendas_painel(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(encomendas::painel(p.conn, &d.texto, &d.quais)?))
+    }
+
+    fn encomenda_criar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: encomendas::EncomendaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = encomendas::criar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(id))
+    }
+
+    fn encomenda_pedir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Desfazer = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        for id in d.ids.iter().chain(std::iter::once(&d.id)).filter(|i| !i.is_empty()) {
+            encomendas::pedir(&tx, p.disp, p.usuario_id, id, d.desfazer)?;
+        }
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn encomenda_chegou(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        encomendas::chegou(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn encomenda_entregar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        encomendas::entregar(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn encomenda_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        encomendas::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn encomenda_whatsapp(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        // RVI-01: grava (avisado_em) quando a encomenda chegou.
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let url = encomendas::whatsapp(&tx, &d.id)?;
+        tx.commit()?;
+        Ok(json!({ "url": url }))
+    }
+
+    fn encomenda_para_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(encomendas::para_venda(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Desfazer {
+        id: String,
+        ids: Vec<String>,
+        desfazer: bool,
+    }
 }
 
 #[cfg(test)]

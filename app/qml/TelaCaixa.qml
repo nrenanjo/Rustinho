@@ -57,7 +57,6 @@ FocusScope {
                        ? tela.estado.caixa + " · aberto " + tela.hora(tela.r.sessao.abertoEm) + " por " + tela.r.sessao.abertoPor
                        : tela.estado.caixa + " · fechado"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.aberto
                 text: "Sangria"
@@ -211,12 +210,27 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.r ? tela.r.movimentos : []
-                            delegate: Nota {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                text: Qt.formatTime(new Date(modelData.quando), "HH:mm") + " · " + (modelData.tipo === "sangria" ? "Sangria" : "Suprimento")
-                                      + " R$ " + modelData.valor + " · " + modelData.motivo + " · " + modelData.usuario
-                                font.pixelSize: 14
                                 Layout.fillWidth: true
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                Nota {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    text: Qt.formatTime(new Date(modelData.quando), "HH:mm") + " · " + (modelData.tipo === "sangria" ? "Sangria" : "Suprimento")
+                                          + " R$ " + modelData.valor + " · " + modelData.motivo + " · " + modelData.usuario
+                                    font.pixelSize: 14
+                                }
                             }
                         }
                     }
@@ -229,22 +243,37 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.estado ? tela.estado.historico.slice(0, 12) : []
-                            delegate: RowLayout {
+                            delegate: Rectangle {
+                                id: faixaDaLista2
                                 required property var modelData
                                 Layout.fillWidth: true
-                                Text {
-                                    text: tela.hora(modelData.abertoEm) + " · " + modelData.abertoPor
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.pixelSize: 14
-                                    Layout.fillWidth: true
-                                }
-                                Botao {
-                                    text: "Imprimir"
-                                    tipo: "discreto"
-                                    implicitHeight: 30
-                                    font.pixelSize: 13
-                                    onClicked: tela.imprimir(modelData.id)
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista2.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa2.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa2.implicitWidth + 16
+                                RowLayout {
+                                    id: conteudoDaFaixa2
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista2.width - 16
+                                    Text {
+                                        text: tela.hora(modelData.abertoEm) + " · " + modelData.abertoPor
+                                        color: Tema.tintaDaFaixa(faixaDaLista2.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 14
+                                        Layout.fillWidth: true
+                                    }
+                                    Botao {
+                                        text: "Imprimir"
+                                        tipo: "discreto"
+                                        altura: 30
+                                        font.pixelSize: 13
+                                        onClicked: tela.imprimir(modelData.id)
+                                    }
                                 }
                             }
                         }
@@ -288,18 +317,14 @@ FocusScope {
     }
 
     // Sangria / suprimento
-    Popup {
+    Painel {
         id: movimento
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         property string tipo: "sangria"
         property var contas: []
         property string chave: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(480, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         function abrirCom(t) {
             chave = Api.novaChave()
             tipo = t
@@ -331,7 +356,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: movimento.close() }
                 Botao {
                     id: botaoMov
                     text: "Confirmar"
@@ -356,15 +380,11 @@ FocusScope {
     }
 
     // Fechar
-    Popup {
+    Painel {
         id: fechar
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(520, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         property string chave: ""
         function abrirCom() {
             chave = Api.novaChave()
@@ -385,7 +405,6 @@ FocusScope {
             AreaTexto { id: obs; rotulo: "Observações"; Layout.fillWidth: true }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: fechar.close() }
                 Botao {
                     id: botaoFechar
                     text: "Fechar e imprimir"

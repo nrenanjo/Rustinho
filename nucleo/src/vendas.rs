@@ -12,6 +12,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::caixa::{self, FORMAS};
+use crate::cheques::{calcular_cheques, ChequesCalculo};
 use crate::erro::{Erro, Resultado};
 use crate::{auditoria, cheques, config, documento, encomendas, estoque, numeros, receber, tempo, texto};
 
@@ -162,37 +163,6 @@ pub struct Crediario {
     pub campo: String,
     #[serde(skip)]
     pub v_valor: i64,
-}
-
-/// O que vai em cheque nesta venda (ou recebimento).
-#[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChequesCalculo {
-    pub valor: String,
-    pub cheques: Vec<cheques::ChequePrevia>,
-    pub erro: String,
-    pub campo: String,
-    #[serde(skip)]
-    pub v_valor: i64,
-}
-
-pub fn calcular_cheques(conn: &Connection, valor: i64, e: &cheques::ChequesEntrada) -> Resultado<ChequesCalculo> {
-    let mut c = ChequesCalculo { valor: numeros::escrever_dinheiro(valor), v_valor: valor, ..Default::default() };
-    if valor == 0 {
-        return Ok(c);
-    }
-    match cheques::previa(conn, valor, e).and_then(|l| cheques::conferir(e).map(|_| l)) {
-        Ok(l) => c.cheques = l,
-        Err(Erro::Validacao { campo, mensagem }) => {
-            if let Ok(l) = cheques::previa(conn, valor, e) {
-                c.cheques = l;
-            }
-            c.erro = mensagem;
-            c.campo = campo.unwrap_or_default();
-        }
-        Err(outro) => return Err(outro),
-    }
-    Ok(c)
 }
 
 fn calcular_crediario(conn: &Connection, e: &VendaEntrada) -> Resultado<Crediario> {
@@ -1062,6 +1032,61 @@ pub fn cheques_da(conn: &Connection, coluna: &str, id: &str) -> Resultado<Vec<St
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
+/// A OS pronta vira venda: a venda monta a entrada dela a partir da ficha da
+/// OS (`oficina::ficha`), como faz com o orçamento. Veio da oficina na etapa 4
+/// da modularização (era `oficina::para_venda`): assim a oficina não depende
+/// da venda.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OsParaVenda {
+    pub numero: i64,
+    /// O caixa da OS (FALHA-02: o número é por caixa).
+    pub caixa: String,
+    pub os_id: String,
+    pub cliente_id: String,
+    pub cliente_nome: String,
+    pub desconto: String,
+    pub itens: Vec<ItemEntrada>,
+}
+
+pub fn os_para_venda(conn: &Connection, id: &str) -> Resultado<OsParaVenda> {
+    let f = crate::oficina::ficha(conn, id)?;
+    if f.situacao == "rascunho" {
+        return Err(Erro::validacao("É um rascunho: salve a OS antes de entregar."));
+    }
+    if f.situacao == "entregue" {
+        return Err(Erro::validacao("Esta OS já foi entregue."));
+    }
+    if f.situacao == "cancelada" {
+        return Err(Erro::validacao("Esta OS foi cancelada."));
+    }
+    if f.calculo.itens.is_empty() {
+        return Err(Erro::validacao("A OS não tem peças nem serviços."));
+    }
+    let itens = f
+        .calculo
+        .itens
+        .iter()
+        .map(|i| ItemEntrada {
+            produto_id: i.produto_id.clone(),
+            descricao: if i.tipo == "servico" { i.descricao.clone() } else { String::new() },
+            quantidade: i.quantidade.clone(),
+            preco: i.preco.clone(),
+            desconto: i.desconto.clone(),
+            encomendar: false,
+        })
+        .collect();
+    Ok(OsParaVenda {
+        numero: f.numero,
+        caixa: f.caixa,
+        os_id: id.to_string(),
+        cliente_id: f.cliente_id,
+        cliente_nome: f.cliente,
+        desconto: f.desconto_texto,
+        itens,
+    })
+}
+
 /// O orçamento no formato do carrinho, para virar venda.
 pub fn orcamento_para_venda(conn: &Connection, id: &str) -> Resultado<VendaEntrada> {
     let (tipo, situacao, cliente_id, cliente_nome, tabela, desconto, observacoes): (
@@ -1194,6 +1219,92 @@ pub fn listar(conn: &Connection, tipo: &str, busca: &str, sessao: &str, limite: 
 /// Nome do caixa (para o orçamento feito fora de um caixa aberto).
 pub fn nome_caixa(conn: &Connection) -> Resultado<String> {
     config::nome_caixa(conn)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das vendas e orçamentos (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{config, vendas};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "venda_calcular", classe: Classe::Leitura, funcao: venda_calcular },
+        Comando { nome: "venda_concluir", classe: Classe::Caixa, funcao: venda_concluir },
+        Comando { nome: "orcamento_salvar", classe: Classe::Caixa, funcao: orcamento_salvar },
+        Comando { nome: "orcamento_carregar", classe: Classe::Leitura, funcao: orcamento_carregar },
+        Comando { nome: "venda_abrir", classe: Classe::Leitura, funcao: venda_abrir },
+        Comando { nome: "vendas_listar", classe: Classe::Leitura, funcao: vendas_listar },
+        Comando { nome: "venda_cancelar", classe: Classe::Gerente("cancelar_venda"), funcao: venda_cancelar },
+        // A OS pronta vira venda (era da tabela da oficina; veja `os_para_venda`).
+        Comando { nome: "os_para_venda", classe: Classe::Leitura, funcao: os_para_venda },
+    ];
+
+    fn venda_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        Ok(json!(vendas::calcular(p.conn, &d)?))
+    }
+
+    fn venda_concluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = vendas::concluir(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &id)?))
+    }
+
+    fn orcamento_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: vendas::VendaEntrada = ler(dados)?;
+        let caixa_nome = config::nome_caixa(p.conn)?;
+        let tx = p.conn.transaction()?;
+        let id = vendas::salvar_orcamento(&tx, p.disp, p.usuario_id, &caixa_nome, &d)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &id)?))
+    }
+
+    fn orcamento_carregar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(vendas::orcamento_para_venda(p.conn, &d.id)?))
+    }
+
+    fn venda_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(vendas::ficha(p.conn, &d.id)?))
+    }
+
+    fn vendas_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ListaVendas = ler(dados)?;
+        Ok(json!(vendas::listar(p.conn, &d.tipo, &d.texto, &d.sessao, d.limite.unwrap_or(300))?))
+    }
+
+    fn venda_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        vendas::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(json!(vendas::ficha(p.conn, &d.id)?))
+    }
+
+    fn os_para_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(vendas::os_para_venda(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct ListaVendas {
+        tipo: String,
+        texto: String,
+        sessao: String,
+        limite: Option<i64>,
+    }
 }
 
 #[cfg(test)]

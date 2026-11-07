@@ -234,8 +234,10 @@ FocusScope {
         return (c / 100).toFixed(2).replace(".", ",")
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta não (D-V3). Com
+    // itens no carrinho, os dois perguntam antes de limpar a venda.
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             limparBusca()
         } else if (carrinho.length > 0) {
             janela.confirmar("Limpar esta venda?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
@@ -384,19 +386,20 @@ FocusScope {
         ColumnLayout {
             spacing: 2
             Layout.fillWidth: true
+            // A seta de retorno no mesmo lugar das telas com Cabecalho (esta
+            // coluna começa 4 px mais à esquerda e mais acima) e pelo mesmo
+            // caminho do Esc (V-2/V-3).
             RowLayout {
                 spacing: 10
                 Layout.fillWidth: true
-                Botao {
-                    tipo: "discreto"
-                    icone: "voltar"
-                    text: "Início"
-                    implicitHeight: 34
-                    font.pixelSize: 14
-                    Layout.leftMargin: -10
-                    onClicked: tela.aoEsc()
+                Layout.topMargin: 4
+                Seta {
+                    id: seta
+                    destino: "Início"
+                    Layout.leftMargin: 4 - seta.folga
+                    onClicked: tela.janela.retornar(true)
                 }
-                Item { Layout.fillWidth: true; implicitHeight: 34 }
+                Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }
                 Olho {}
             }
             GridLayout {
@@ -572,13 +575,17 @@ FocusScope {
                             ScrollBar.vertical: ScrollBar {}
                             onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
                             delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
                                 required property int index
                                 readonly property bool atual: listaResultados.currentIndex === index
                                 width: listaResultados.width
                                 height: 54
                                 radius: Tema.raioCampo
-                                color: atual ? Tema.tinta : sobre.hovered ? Tema.azul : "transparent"
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: atual ? Tema.atual : sobre.hovered ? (Tema.roxo ? Qt.darker(Tema.faixa(faixaDaLista.par), 1.05) : Tema.azul) : Tema.faixa(faixaDaLista.par, "transparent", Tema.vela(0.35))
+                                palette.window: Tema.superficie(color)
                                 RowLayout {
                                     anchors.fill: parent
                                     anchors.leftMargin: 12
@@ -586,7 +593,7 @@ FocusScope {
                                     spacing: Tema.estreito ? 8 : 14
                                     Text {
                                         text: modelData.codigo
-                                        color: atual ? Tema.claro : Tema.tintaSuave
+                                        color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
                                         font.pixelSize: 14
@@ -603,7 +610,7 @@ FocusScope {
                                                 id: nomeVenda
                                                 width: Math.min(implicitWidth, parent.width - (achouVenda.visible ? achouVenda.implicitWidth + 8 : 0))
                                                 text: modelData.nome
-                                                color: atual ? Tema.claro : Tema.tinta
+                                                color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                                 font.family: Tema.titulo
                                                 font.weight: Font.Bold
                                                 font.pixelSize: 19
@@ -619,7 +626,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: [Tema.estreito ? modelData.codigo : "", Tema.estreito ? modelData.local : "", modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
-                                            color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuave
+                                            color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.serifa
                                             font.italic: true
                                             font.pixelSize: 13
@@ -629,7 +636,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: modelData.local
-                                        color: atual ? Tema.claro : Tema.tintaSuave
+                                        color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14
                                         visible: !Tema.estreito
@@ -644,7 +651,7 @@ FocusScope {
                                             id: txtEst
                                             anchors.centerIn: parent
                                             text: modelData.servico ? "serviço" : modelData.estoque + " " + modelData.unidade
-                                            color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.claro : Tema.tinta)
+                                            color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.tintaAtual : Tema.tinta)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
                                             font.pixelSize: 15
@@ -652,7 +659,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: (modelData.oferta ? "oferta  " : "") + (modelData.preco ? "R$ " + modelData.preco : "—")
-                                        color: atual ? Tema.claro : Tema.tinta
+                                        color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
                                         font.pixelSize: Tema.estreito ? 16 : 18
@@ -808,7 +815,7 @@ FocusScope {
                         text: "Receber"
                         icone: "check"
                         atalho: "F2"
-                        implicitHeight: 52
+                        altura: 52
                         font.pixelSize: 18
                         enabled: tela.carrinho.length > 0 && tela.caixaAberto
                         Layout.fillWidth: true
@@ -829,6 +836,7 @@ FocusScope {
         Rectangle {
             visible: Tema.estreito && !tela.verLateral
             color: Tema.verde
+            palette.window: Tema.superficie(color)
             radius: Tema.raio
             Layout.fillWidth: true
             implicitHeight: rodapeLinha.implicitHeight + 20
@@ -841,6 +849,10 @@ FocusScope {
                 ColumnLayout {
                     spacing: 0
                     Layout.fillWidth: true
+                    // A15 (0.9.18): o total e o "Cliente e desconto ›" juntos
+                    // abrem o cliente e o desconto (antes, só o texto de baixo:
+                    // 20 dp de altura para o dedo).
+                    TapHandler { onTapped: tela.verLateral = true }
                     Text {
                         text: "R$ " + (tela.calculo ? tela.calculo.total : "0,00")
                         color: Tema.tinta
@@ -859,13 +871,12 @@ FocusScope {
                         font.pixelSize: 14
                         elide: Text.ElideRight
                         Layout.fillWidth: true
-                        TapHandler { onTapped: tela.verLateral = true }
                     }
                 }
                 Botao {
                     text: "Receber"
                     icone: "check"
-                    implicitHeight: 48
+                    altura: 48
                     enabled: tela.carrinho.length > 0 && tela.caixaAberto
                     onClicked: tela.abrirReceber()
                 }
@@ -874,19 +885,12 @@ FocusScope {
     }
 
     // ---------- Receber ----------
-    Popup {
+    Painel {
         id: receber
         property string total: "0,00"
         property string erro: ""
         property var calc: null
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(660, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(total) {
             receber.total = total
@@ -978,6 +982,7 @@ FocusScope {
                 Layout.fillWidth: true
                 radius: Tema.raioCampo
                 color: Tema.verde
+                palette.window: Tema.superficie(color)
                 implicitHeight: linhaSinal.implicitHeight + 16
                 RowLayout {
                     id: linhaSinal
@@ -993,7 +998,7 @@ FocusScope {
                     Botao {
                         text: "Resto na entrega"
                         tipo: "secundario"
-                        implicitHeight: 36
+                        altura: 36
                         onClicked: {
                             for (let i = 0; i < repFormas.count; i++) {
                                 const l = repFormas.itemAt(i)
@@ -1072,6 +1077,7 @@ FocusScope {
                 Layout.fillWidth: true
                 radius: Tema.raioCampo
                 color: Tema.azul
+                palette.window: Tema.superficie(color)
                 implicitHeight: colunaCred.implicitHeight + 24
                 ColumnLayout {
                     id: colunaCred
@@ -1188,12 +1194,6 @@ FocusScope {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
                 Botao {
-                    text: "Voltar"
-                    tipo: "discreto"
-                    atalho: "Esc"
-                    onClicked: receber.close()
-                }
-                Botao {
                     id: botaoConcluir
                     text: "Concluir venda"
                     icone: "check"
@@ -1206,16 +1206,11 @@ FocusScope {
     }
 
     // ---------- Venda concluída ----------
-    Popup {
+    Painel {
         id: concluida
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
         padding: 32
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
+        cor: Tema.verde
         contentItem: ColumnLayout {
             spacing: 12
             Titulo {
@@ -1273,16 +1268,9 @@ FocusScope {
     }
 
     // ---------- Salvar orçamento ----------
-    Popup {
+    Painel {
         id: caixaOrcamento
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom() {
             validade.texto = String(tela.janela.estado.validadeOrcamento || 7)
@@ -1318,7 +1306,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: caixaOrcamento.close() }
                 Botao {
                     text: "Salvar e imprimir"
                     icone: "check"

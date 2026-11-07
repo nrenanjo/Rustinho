@@ -89,7 +89,7 @@ FocusScope {
             }
             Text {
                 text: "Parada depois de"
-                color: Tema.tintaSuave
+                color: Tema.tintaSuaveNo(palette.window)
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 15
@@ -125,7 +125,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 62
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 18
@@ -136,7 +139,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.p.nome + (linha.p.marca ? " · " + linha.p.marca : "")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -148,7 +151,7 @@ FocusScope {
                         Text {
                             text: [Tema.estreito ? linha.p.ha : "", "cód. " + linha.p.codigo, linha.p.local ? "local " + linha.p.local : "", linha.p.ultimaVenda, linha.p.ultimaCompra]
                                   .filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -168,7 +171,7 @@ FocusScope {
                         Text {
                             visible: linha.p.valor !== ""
                             text: "R$ " + Tema.valor(linha.p.valor)
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 17
@@ -176,7 +179,7 @@ FocusScope {
                         }
                         Text {
                             text: "tem " + linha.p.estoque + " " + linha.p.unidade
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight

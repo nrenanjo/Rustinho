@@ -11,6 +11,14 @@ Rectangle {
     id: cartao
     property var item: ({})
     property int indice: 0
+    // Colunas da grade (1 a 4): no Planeta Roxo os cartões ficam em xadrez,
+    // claro e escuro por (linha + coluna) % 2, o primeiro escuro (V-7).
+    property int colunas: 1
+    readonly property int linhaNaGrade: Math.floor(indice / Math.max(1, colunas))
+    readonly property int colunaNaGrade: indice % Math.max(1, colunas)
+    readonly property bool escuraNoXadrez: (linhaNaGrade + colunaNaGrade) % 2 === 0
+    // No cinza e no AMOLED, a cor de sempre (nada de xadrez).
+    readonly property color base: Tema.roxo ? Tema.faixa(escuraNoXadrez) : Tema.cartao
 
     signal abrir()
     signal fixar()
@@ -19,7 +27,8 @@ Rectangle {
 
     radius: Tema.raio
     opacity: item.disponivel ? 1 : 0.78
-    color: sobre.hovered && item.disponivel ? Qt.darker(Tema.cartao, Tema.escuro ? 0.85 : 1.03) : Tema.cartao
+    color: sobre.hovered && item.disponivel ? Qt.darker(base, Tema.escuro || Tema.escura(base) ? 0.85 : 1.03) : base
+    palette.window: Tema.superficie(base)
     border.width: foco.activeFocus ? 2 : 1
     border.color: foco.activeFocus ? Tema.azulEscuro : Tema.bordaCartao
     implicitHeight: Tema.estreito ? 64 : 72
@@ -42,7 +51,7 @@ Rectangle {
             Layout.alignment: Qt.AlignVCenter
             Text {
                 text: cartao.item.titulo || ""
-                color: cartao.item.disponivel ? Tema.tinta : Tema.tintaSuave
+                color: cartao.item.disponivel ? Tema.tintaNo(cartao.base) : Tema.tintaSuaveNo(cartao.base)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: Tema.estreito ? 16 : 18
@@ -54,7 +63,7 @@ Rectangle {
             Text {
                 visible: !cartao.item.disponivel
                 text: "em breve"
-                color: Tema.apagado
+                color: Tema.apagadoNo(cartao.base)
                 font.family: Tema.serifa
                 font.italic: true
                 font.pixelSize: 13
@@ -67,8 +76,8 @@ Rectangle {
         tipo: "discreto"
         icone: "pino"
         tamanhoIcone: 15
-        implicitHeight: 28
-        implicitWidth: 30
+        altura: 28
+        largura: 30
         leftPadding: 0
         rightPadding: 0
         anchors.top: parent.top

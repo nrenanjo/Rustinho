@@ -1,11 +1,11 @@
 import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Templates as T
 import QtQuick.Layouts
 import rustinho
 
-// Pergunta de confirmação (ex.: "Descartar alterações?").
-Popup {
+// Pergunta de confirmação (ex.: "Descartar alterações?"). Como em
+// comoficará.png (V-4, 0.9.18): a seta no canto (a do Painel) desiste, igual
+// ao Esc; o botão faz a ação. Não há mais o "Cancelar" que só fechava.
+Painel {
     id: dialogo
     property string titulo: ""
     property string mensagem: ""
@@ -13,15 +13,7 @@ Popup {
     property string tipoConfirmar: "principal"
     property var aoConfirmar: null
 
-    modal: true
-    focus: true
-    anchors.centerIn: T.Overlay.overlay
     width: Math.min(480, Tema.largura - 24)
-    padding: Tema.estreito ? 18 : 30
-    closePolicy: Popup.CloseOnEscape
-
-    T.Overlay.modal: Rectangle { color: Tema.veu }
-    background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
     contentItem: ColumnLayout {
         spacing: 16
@@ -45,11 +37,6 @@ Popup {
             spacing: 10
             Layout.alignment: Qt.AlignRight
             Layout.topMargin: 6
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                onClicked: dialogo.close()
-            }
             Botao {
                 id: confirmar
                 text: dialogo.textoConfirmar

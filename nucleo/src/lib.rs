@@ -22,17 +22,15 @@ pub mod comissoes;
 pub mod compras;
 pub mod computador;
 pub mod config;
+pub mod despacho;
 pub mod devolucoes;
-pub mod documento;
 pub mod dre;
 pub mod encomendas;
-pub mod erro;
 pub mod estoque;
 pub mod etiquetas;
 pub mod faixas;
 pub mod financeiro;
 pub mod fiscal;
-pub mod gtin;
 pub mod importar;
 pub mod impressao;
 pub mod loja;
@@ -40,7 +38,6 @@ pub mod menu;
 pub mod migracao;
 pub mod nfe_assinatura;
 pub mod nfe_xml;
-pub mod numeros;
 pub mod oficina;
 pub mod pagar;
 pub mod painel;
@@ -65,6 +62,8 @@ mod testes_avisos;
 #[cfg(test)]
 mod testes_chave;
 #[cfg(test)]
+mod testes_estab;
+#[cfg(test)]
 mod testes_loja;
 #[cfg(test)]
 mod testes_modo_seguro;
@@ -76,11 +75,15 @@ mod testes_r03;
 mod testes_rvi03;
 #[cfg(test)]
 mod testes_supervisao;
-pub mod texto;
 pub mod unidades;
 pub mod usuarios;
 pub mod vendas;
 
-pub use api::{Servico, VERSAO};
+// Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos
+// caminhos de antes: `crate::erro::Erro`, `rustinho_nucleo::texto`...
+pub use rustinho_base::{documento, erro, gtin, numeros, texto};
+
+pub use api::Servico;
 pub use banco::caminho_padrao;
 pub use erro::{Erro, Resultado};
+pub use rustinho_base::VERSAO;

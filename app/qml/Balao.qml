@@ -10,7 +10,9 @@ Rectangle {
 
     visible: texto !== ""
     radius: height / 2
-    color: escuro ? Tema.claroSuave(0.16) : Tema.papel
+    // Na linha escolhida: no roxo (magenta), um véu escuro deixa o texto
+    // branco legível; nos outros, um véu claro.
+    color: escuro ? (Tema.roxo ? Qt.rgba(0.2, 0, 0.2, 0.35) : Tema.claroSuave(0.16)) : Tema.papel
     implicitWidth: Math.min(rotulo.implicitWidth + 18, 220)
     implicitHeight: rotulo.implicitHeight + 6
 

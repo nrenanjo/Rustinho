@@ -158,7 +158,37 @@ impl Drop for Vaga {
 
 /// Para a troca de dados enquanto a guarda existir (restaurar backup).
 pub fn pausar() -> RwLockWriteGuard<'static, ()> {
+    #[cfg(test)]
+    return pausar_nos_testes();
+    #[cfg(not(test))]
     TRAVA.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Só nos testes (0.9.18, C1): no programa há um banco por processo e o
+/// outro caixa é outro processo. Nos testes, um teste que restaura backup e
+/// outro que troca dados com um servidor do MESMO processo dividem esta
+/// trava. A `RwLock` dá a vez a quem espera para escrever: com a restauração
+/// esperando, o servidor do próprio processo não consegue ler, o cliente que
+/// segura a leitura espera por ele, e os dois ficam parados até o prazo de
+/// 30 s do cliente (os "os error 11" dos testes em paralelo). Aqui a
+/// restauração tenta sem bloquear quem lê; ela entra no primeiro intervalo
+/// sem leitores. Depois de pegar a trava, o efeito é o mesmo do programa:
+/// ninguém troca dados até a restauração terminar.
+#[cfg(test)]
+fn pausar_nos_testes() -> RwLockWriteGuard<'static, ()> {
+    loop {
+        match TRAVA.try_write() {
+            Ok(g) => return g,
+            Err(std::sync::TryLockError::Poisoned(e)) => return e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+        }
+    }
+}
+
+/// Só nos testes: a troca de dados está parada (alguém segura a pausa)?
+#[cfg(test)]
+pub(crate) fn pausada_para_teste() -> bool {
+    matches!(TRAVA.try_read(), Err(std::sync::TryLockError::WouldBlock))
 }
 
 /// Para quem grava no meio da troca de dados (as tarefas deste módulo e o
@@ -3094,6 +3124,11 @@ pub(crate) fn registrar_par(conn: &Connection, dispositivo: &str, nome: &str, en
 // ---------------------------------------------------------------------------
 
 pub(crate) fn abrir_conexao(caminho: &Path) -> Resultado<Connection> {
+    // 0.9.18: banco trocado por uma restauração que não terminou (ela
+    // termina ao abrir o Rustinho de novo): a troca de dados espera.
+    if banco::restauracao_pela_metade(caminho) {
+        return Err(Erro::validacao(banco::RESTAURACAO_PELA_METADE));
+    }
     let mut conn = Connection::open(caminho)?;
     conn.busy_timeout(Duration::from_secs(10))?;
     // A3: banco com defeito de integridade (modo seguro): só leitura.
@@ -5202,13 +5237,25 @@ mod testes {
         assert!(m.tarefas.is_empty());
         // Com uma tarefa que não termina: prazo curto devolve "não deu",
         // e a tarefa continua guardada (quem chamou segura a trava do banco).
+        // O anúncio do próprio motor também pode passar de 300 ms (espera
+        // pacote até 1 s); quando as do motor terminam, só a travada fica.
         let mut m = Motor::iniciar(c.clone(), 0, 0);
         let (solta, espera) = std::sync::mpsc::channel::<()>();
-        m.esperar_tambem(thread::spawn(move || {
+        let travada = thread::spawn(move || {
             let _ = espera.recv();
-        }));
+        });
+        let id_travada = travada.thread().id();
+        m.esperar_tambem(travada);
         assert!(!m.encerrar(Duration::from_millis(300)));
-        assert_eq!(m.tarefas.len(), 1);
+        assert!(m.tarefas.iter().any(|t| t.thread().id() == id_travada));
+        let fim = Instant::now() + Duration::from_secs(10);
+        while m.tarefas.iter().filter(|t| !t.is_finished()).count() > 1 && Instant::now() < fim {
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!m.encerrar(Duration::from_millis(300)));
+        let vivas: Vec<_> = m.tarefas.iter().map(|t| t.thread().name().map(String::from)).collect();
+        assert_eq!(m.tarefas.len(), 1, "tarefas que ficaram: {vivas:?}");
+        assert_eq!(m.tarefas[0].thread().id(), id_travada);
         solta.send(()).unwrap();
         assert!(m.encerrar(Duration::from_secs(5)));
         drop(lento);

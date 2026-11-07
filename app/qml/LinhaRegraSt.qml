@@ -19,6 +19,7 @@ Rectangle {
 
     radius: Tema.raioCampo
     color: Tema.vela(0.35)
+    palette.window: Tema.superficie(color)
     implicitHeight: coluna.implicitHeight + 24
 
     function campo(nome) {
@@ -81,7 +82,7 @@ Rectangle {
             Botao {
                 tipo: "discreto"
                 icone: "lixeira"
-                implicitWidth: 36
+                largura: 36
                 leftPadding: 0
                 rightPadding: 0
                 Layout.alignment: Qt.AlignBottom

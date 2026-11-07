@@ -794,3 +794,94 @@ fn k_salvar_a_troca_de_dados_e_tudo_ou_nada() {
     let depois = config::ler(&s.banco_para_teste().conn, "sync_interfaces").unwrap().unwrap_or_default();
     assert_eq!(depois, antes, "as interfaces ficaram gravadas pela metade");
 }
+
+/// V-1 / A2 (0.9.18): um banco de antes dos três temas abre no tema certo:
+/// `tela_escura = "1"` no AMOLED; `"0"` ou nada, no cinza. Um `tela_tema`
+/// estranho (gravado à mão) também cai na chave antiga.
+#[test]
+fn a2_tema_de_um_banco_antigo() {
+    for (escura, tema_gravado, esperado) in [
+        (Some("1"), None, "amoled"),
+        (Some("0"), None, "cinza"),
+        (None, None, "cinza"),
+        (Some("1"), Some("azul"), "amoled"),
+        (Some("1"), Some("roxo"), "roxo"),
+    ] {
+        let db = temp("a2-tema-antigo");
+        {
+            let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+            let c = &s.banco_para_teste().conn;
+            c.execute("DELETE FROM config WHERE chave IN ('tela_escura', 'tela_tema')", []).unwrap();
+            if let Some(v) = escura {
+                config::gravar(c, "tela_escura", v).unwrap();
+            }
+            if let Some(v) = tema_gravado {
+                config::gravar(c, "tela_tema", v).unwrap();
+            }
+        }
+        // Abre de novo, como o programa ao começar.
+        let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+        let e = chamar(&mut s, "estado", json!({}));
+        assert_eq!(e["ok"], true, "{e}");
+        assert_eq!(e["dados"]["tema"], esperado, "tela_escura={escura:?} tela_tema={tema_gravado:?}: {e}");
+        assert_eq!(e["dados"]["escuro"], esperado == "amoled", "o `escuro` de antes continua: {e}");
+    }
+}
+
+/// V-1 / A1 (0.9.18): escolher o tema grava `tela_tema` (e a chave antiga,
+/// para uma versão anterior), vale ao abrir de novo e aceita o `{ escuro }`
+/// das telas de antes. Tema desconhecido ou pedido vazio: recusado, nada muda.
+#[test]
+fn a1_tema_salvo_e_lido_de_novo() {
+    let db = temp("a1-tema");
+    {
+        let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+        for (pedido, tema, escura) in [
+            (json!({ "tema": "roxo" }), "roxo", "0"),
+            (json!({ "tema": "amoled" }), "amoled", "1"),
+            (json!({ "tema": "cinza" }), "cinza", "0"),
+            (json!({ "escuro": true }), "amoled", "1"),
+            (json!({ "escuro": false }), "cinza", "0"),
+            (json!({ "tema": "roxo", "escuro": true }), "roxo", "0"),
+        ] {
+            let r = chamar(&mut s, "aparencia_salvar", pedido.clone());
+            assert_eq!(r["ok"], true, "{pedido}: {r}");
+            assert_eq!(r["dados"]["tema"], tema, "{pedido}: {r}");
+            assert_eq!(r["dados"]["escuro"], tema == "amoled", "{pedido}: {r}");
+            let e = chamar(&mut s, "estado", json!({}));
+            assert_eq!(e["dados"]["tema"], tema, "{pedido}: {e}");
+            assert_eq!(e["dados"]["escuro"], tema == "amoled", "{pedido}: {e}");
+            let c = &s.banco_para_teste().conn;
+            assert_eq!(config::ler(c, "tela_tema").unwrap().as_deref(), Some(tema), "{pedido}");
+            assert_eq!(config::ler(c, "tela_escura").unwrap().as_deref(), Some(escura), "{pedido}");
+        }
+        assert_eq!(chamar(&mut s, "aparencia_salvar", json!({ "tema": "roxo" }))["ok"], true);
+        for ruim in [json!({ "tema": "azul" }), json!({ "tema": "" }), json!({})] {
+            let r = chamar(&mut s, "aparencia_salvar", ruim.clone());
+            assert_eq!(r["ok"], false, "{ruim}: {r}");
+            assert_eq!(chamar(&mut s, "estado", json!({}))["dados"]["tema"], "roxo", "{ruim}: nada mudou");
+        }
+    }
+    // Fechou e abriu: continua no roxo.
+    let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+    assert_eq!(chamar(&mut s, "estado", json!({}))["dados"]["tema"], "roxo");
+}
+
+/// V-1 (0.9.18): o tema é só deste computador, como o `tela_escura` de
+/// antes: não é configuração da loja e não entra na troca de dados.
+#[test]
+fn tema_e_so_deste_computador() {
+    assert!(!sync::chave_da_loja("tela_tema"));
+    assert!(!sync::chave_da_loja("tela_escura"));
+    let mut s = loja_com_caixa_bia();
+    let antes = sync::alteracoes_desde(&s.banco_para_teste().conn, 0, 10_000_000).unwrap().0.len();
+    assert_eq!(chamar(&mut s, "aparencia_salvar", json!({ "tema": "roxo" }))["ok"], true);
+    let (lista, _) = sync::alteracoes_desde(&s.banco_para_teste().conn, 0, 10_000_000).unwrap();
+    assert_eq!(lista.len(), antes, "escolher o tema não gerou alteração para os outros caixas");
+    assert!(
+        !lista
+            .iter()
+            .any(|a| a.tabela == "config" && (a.chave.contains("tela_tema") || a.chave.contains("tela_escura"))),
+        "o tema não vai para os outros caixas"
+    );
+}

@@ -106,7 +106,10 @@ FocusScope {
                 // Celular: os botões vão para uma linha embaixo.
                 implicitHeight: Tema.estreito ? 62 + (acoesCh.width > 0 ? acoesCh.height + 10 : 0) : 64
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 readonly property string chip: ch.situacao !== "carteira" ? ch.nomeSituacao
                                                : ch.atrasado ? "Passou do dia"
                                                : ch.podeDepositar ? "Pode depositar"
@@ -130,14 +133,14 @@ FocusScope {
                         Layout.preferredWidth: 96
                         Text {
                             text: linha.ch.bomPara
-                            color: linha.ch.atrasado ? Tema.vermelho : Tema.tinta
+                            color: linha.ch.atrasado ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 15
                         }
                         Text {
                             text: "bom para"
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                         }
@@ -147,7 +150,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: "Nº " + linha.ch.numero + "  ·  " + (linha.ch.emitente || "sem nome")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -159,7 +162,7 @@ FocusScope {
                                    linha.ch.banco, linha.ch.cliente && linha.ch.cliente !== linha.ch.emitente ? "cliente " + linha.ch.cliente : "",
                                    linha.ch.conta ? "em " + linha.ch.conta : "", linha.ch.situacaoEm, linha.ch.observacoes].filter(x => !!x).join("  ·  ")
                             visible: text !== ""
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
@@ -175,7 +178,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + linha.ch.valor
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: 17
@@ -200,21 +203,21 @@ FocusScope {
                             visible: linha.ch.situacao === "carteira"
                             text: "Depositar"
                             tipo: "secundario"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: deposito.abrirCom(linha.ch)
                         }
                         Botao {
                             visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && (sobreLinha.hovered || Tema.celular)
                             text: "Devolvido"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: devolucao.abrirCom(linha.ch)
                         }
                         Botao {
                             visible: linha.ch.situacao === "carteira" && (sobreLinha.hovered || Tema.celular)
                             text: "Repassar"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             onClicked: motivo.perguntar("Repassar o cheque nº " + linha.ch.numero + "?",
                                                         "R$ " + linha.ch.valor + ". Ex.: pagou o fornecedor com ele.", "Repassar",
                                                         (m, pronto) => secao.janela.chamarGerente("cheque_repassar", { id: linha.ch.id, motivo: m }, pronto), "Para quem", "principal")
@@ -223,7 +226,7 @@ FocusScope {
                             visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular)
                             text: "Desfazer"
                             tipo: "discreto"
-                            implicitHeight: 36
+                            altura: 36
                             // D-09: a senha da consulta do Financeiro não vale para desfazer.
                             onClicked: janela.confirmar("Voltar para a carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
                                                         "Voltar", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
@@ -295,7 +298,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: deposito.close() }
                 Botao { text: "Depositar"; icone: "check"; onClicked: deposito.salvar() }
             }
         }
@@ -343,7 +345,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: devolucao.close() }
                 Botao { text: "Registrar"; tipo: "perigo"; onClicked: devolucao.salvar() }
             }
         }

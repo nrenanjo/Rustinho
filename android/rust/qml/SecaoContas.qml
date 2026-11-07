@@ -80,11 +80,14 @@ FocusScope {
                     required property var modelData
                     required property int index
                     readonly property bool escolhida: modelData.id === secao.contaId
-                    readonly property color base: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    readonly property color base: Tema.faixa(par)
                     width: lista.width
                     implicitHeight: 82
                     radius: Tema.raio
-                    color: escolhida ? Tema.tinta : sobre.hovered ? Qt.darker(base, 1.04) : base
+                    color: escolhida ? Tema.atual : sobre.hovered ? Qt.darker(base, 1.04) : base
+                    palette.window: Tema.superficie(color)
                     opacity: modelData.ativo ? 1 : 0.6
                     ColumnLayout {
                         anchors.fill: parent
@@ -98,7 +101,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: cartao.modelData.nome
-                                color: cartao.escolhida ? Tema.claro : Tema.tinta
+                                color: cartao.escolhida ? Tema.tintaAtual : Tema.tintaDaFaixa(cartao.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
                                 font.pixelSize: 22
@@ -107,7 +110,7 @@ FocusScope {
                             }
                             Text {
                                 text: cartao.modelData.ativo ? (cartao.modelData.tipo === "banco" ? "banco" : "dinheiro") : "desativada"
-                                color: cartao.escolhida ? Tema.claroSuave(0.7) : Tema.apagado
+                                color: cartao.escolhida ? Tema.claroSuave(0.7) : Tema.apagadoDaFaixa(cartao.par)
                                 font.family: Tema.serifa
                                 font.italic: true
                                 font.pixelSize: 13
@@ -115,8 +118,8 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + Tema.valor(cartao.modelData.saldo)
-                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.claro)
-                                                    : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelho : Tema.tinta)
+                            color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.tintaAtual)
+                                                    : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoDaFaixa(cartao.par) : Tema.tintaDaFaixa(cartao.par))
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -152,7 +155,9 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: Tema.raio
-            color: Tema.vela(0.28)
+            color: Tema.roxo ? Tema.pergaminho : Tema.vela(0.28)
+            // No roxo, um véu claro sobre o fundo roxo ficaria rosado: painel claro (0.9.18).
+            palette.window: Tema.superficie(color)
 
             ColumnLayout {
                 anchors.fill: parent
@@ -211,12 +216,16 @@ FocusScope {
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Rectangle {
+                        required property int index
                         id: mov
                         required property var modelData
                         width: listaExtrato.width - 10
                         implicitHeight: 52
                         radius: Tema.raioCampo
-                        color: modelData.futuro ? Tema.vela(0.25) : Tema.vela(0.5)
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(mov.par, modelData.futuro ? Tema.vela(0.25) : Tema.vela(0.5), "transparent")
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14
@@ -225,7 +234,7 @@ FocusScope {
                             opacity: mov.modelData.estornado ? 0.5 : 1
                             Text {
                                 text: mov.modelData.data
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
                                 font.pixelSize: 14
@@ -236,7 +245,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: mov.modelData.descricao
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(mov.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 15
@@ -246,7 +255,7 @@ FocusScope {
                                 Text {
                                     text: [mov.modelData.tipo, mov.modelData.categoria, mov.modelData.futuro ? "ainda não saiu" : "",
                                            mov.modelData.estornado ? "ESTORNADO: " + mov.modelData.motivoEstorno : ""].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(mov.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 12
@@ -256,7 +265,7 @@ FocusScope {
                             }
                             Text {
                                 text: (mov.modelData.entrada ? "+ " : "− ") + "R$ " + mov.modelData.valor
-                                color: mov.modelData.entrada ? Tema.verdeEscuro : Tema.vermelho
+                                color: mov.modelData.entrada ? Tema.verdeEscuroDaFaixa(mov.par) : Tema.vermelhoDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 15
@@ -266,7 +275,7 @@ FocusScope {
                             }
                             Text {
                                 text: mov.modelData.estornado ? "" : "R$ " + Tema.valor(mov.modelData.saldo)
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignRight
@@ -304,11 +313,17 @@ FocusScope {
         property string chave: ""
         property string id_: ""
         property string erro: ""
+        // Caso 5 da navegação contextual (0.9.18): aberto pela transferência
+        // sem conta de destino. A transferência fica aberta embaixo, com o que
+        // já foi digitado; ao salvar, volta a ela com a conta nova escolhida
+        // (sem transferir: quem transfere é o clique em "Transferir").
+        property bool paraTransferencia: false
         width: Math.min(520, Tema.largura - 24)
         function abrirCom(c) {
             chave = Api.novaChave()
             id_ = c ? c.id : ""
             erro = ""
+            paraTransferencia = false
             cNome.texto = c ? c.nome : ""
             cTipo.indice = c && c.tipo === "caixa" ? 1 : 0
             cInicial.texto = c ? c.saldoInicial : ""
@@ -316,6 +331,13 @@ FocusScope {
             open()
             cNome.focar()
         }
+        function abrirParaTransferencia() {
+            abrirCom(null)
+            paraTransferencia = true
+        }
+        // Desistir (Cancelar ou Esc) só fecha o cadastro: a transferência
+        // continua aberta, como estava.
+        onClosed: paraTransferencia = false
         function salvar() {
             secao.janela.chamarGerente("conta_loja_salvar", { id: id_, nome: cNome.texto, tipo: cTipo.indice === 1 ? "caixa" : "banco",
                                                         saldoInicial: cInicial.texto, ativo: cAtiva.checked }, r => {
@@ -323,7 +345,14 @@ FocusScope {
                     erro = r.erro
                     return
                 }
+                const destino = paraTransferencia && transferencia.opened
                 close()
+                if (destino) {
+                    // A conta de origem (a escolhida) não muda.
+                    secao.carregar()
+                    transferencia.escolherDestino(r.dados)
+                    return
+                }
                 secao.contaId = r.dados
                 secao.carregar()
             }, cadastro.chave)
@@ -356,7 +385,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: cadastro.close() }
                 Botao { text: "Salvar"; icone: "check"; onClicked: cadastro.salvar() }
             }
         }
@@ -425,7 +453,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: movimento.close() }
                 Botao { text: "Lançar"; icone: "check"; onClicked: movimento.salvar() }
             }
         }
@@ -448,6 +475,14 @@ FocusScope {
             open()
             tValor.focar()
         }
+        // Caso 5 (0.9.18): de volta do cadastro da conta nova. O valor, a data
+        // e a observação continuam como estavam; só o destino é escolhido.
+        function escolherDestino(id) {
+            const i = outras.findIndex(c => c.id === id)
+            if (i >= 0)
+                tPara.indice = i
+            tValor.focar()
+        }
         function salvar() {
             const para = outras[tPara.indice]
             secao.janela.chamarGerente("transferir", { de: secao.contaId, para: para ? para.id : "", valor: tValor.texto,
@@ -464,9 +499,20 @@ FocusScope {
             spacing: 12
             Titulo { text: "Transferir de " + (secao.atual ? secao.atual.nome : ""); font.pixelSize: 30; elide: Text.ElideRight; Layout.fillWidth: true }
             Nota {
-                text: transferencia.outras.length === 0 ? "Cadastre outra conta antes (“Nova conta”)." : "Ex.: depósito do dinheiro do cofre no banco."
+                text: transferencia.outras.length === 0
+                      ? "Ainda não há outra conta para receber a transferência. Cadastre a conta de destino: o que você já digitou aqui continua."
+                      : "Ex.: depósito do dinheiro do cofre no banco."
                 font.pixelSize: 14
                 Layout.fillWidth: true
+            }
+            // Caso 5 da navegação contextual: leva ao cadastro sem fechar a
+            // transferência.
+            Botao {
+                visible: transferencia.outras.length === 0
+                text: "Cadastrar conta"
+                icone: "mais"
+                tipo: "secundario"
+                onClicked: cadastro.abrirParaTransferencia()
             }
             Selecao { id: tPara; rotulo: "Para"; modelo: transferencia.outras.map(c => c.nome); Layout.fillWidth: true }
             RowLayout {
@@ -480,7 +526,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: transferencia.close() }
                 Botao { text: "Transferir"; icone: "check"; enabled: transferencia.outras.length > 0; onClicked: transferencia.salvar() }
             }
         }
@@ -522,7 +567,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: conferencia.close() }
                 Botao { text: "Conferir"; icone: "check"; onClicked: conferencia.salvar() }
             }
         }

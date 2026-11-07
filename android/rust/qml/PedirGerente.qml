@@ -102,7 +102,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Voltar"; tipo: "discreto"; onClicked: pedido.close() }
             Botao { text: "Liberar"; icone: "check"; onClicked: pedido.liberar() }
         }
     }

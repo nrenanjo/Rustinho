@@ -58,7 +58,10 @@ FocusScope {
                 width: lista.width
                 implicitHeight: 64
                 radius: Tema.raio
-                color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par)
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: Tema.estreito ? 10 : 16
@@ -66,7 +69,7 @@ FocusScope {
                     spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.c.posicao
-                        color: Tema.dourado
+                        color: Tema.douradoDaFaixa(linha.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
                         font.pixelSize: 24
@@ -78,7 +81,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.c.nome
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -111,7 +114,7 @@ FocusScope {
                         Layout.preferredWidth: 150
                         Text {
                             text: linha.c.compras + (linha.c.compras === 1 ? " compra" : " compras")
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 15
@@ -119,7 +122,7 @@ FocusScope {
                         }
                         Text {
                             text: "última " + linha.c.ultima
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight
@@ -130,7 +133,7 @@ FocusScope {
                         Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + Tema.valor(linha.c.total)
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 17
@@ -138,7 +141,7 @@ FocusScope {
                         }
                         Text {
                             text: "média R$ " + Tema.valor(linha.c.ticket)
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
                             Layout.alignment: Qt.AlignRight

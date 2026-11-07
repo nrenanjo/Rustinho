@@ -21,6 +21,7 @@ Rectangle {
 
     radius: Tema.raio
     color: cor
+    palette.window: Tema.superficie(color)
     implicitHeight: Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72
     Layout.fillWidth: true
 

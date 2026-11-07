@@ -79,9 +79,12 @@ FocusScope {
                     width: 210
                     height: 128
                     radius: Tema.raio
-                    color: marcado ? Tema.tinta : (index % 2 === 0 ? Tema.pergaminho : Tema.azul)
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: marcado ? Tema.atual : Tema.faixa(cartao.par)
+                    palette.window: Tema.superficie(color)
                     border.width: foco.activeFocus ? 2 : 0
-                    border.color: Tema.azulEscuro
+                    border.color: Tema.azulEscuroDaFaixa(cartao.par && !marcado)
 
                     Text {
                         x: 18
@@ -91,7 +94,7 @@ FocusScope {
                         font.italic: true
                         font.weight: Font.DemiBold
                         font.pixelSize: 64
-                        color: cartao.marcado ? Tema.dourado : Tema.dourado
+                        color: cartao.marcado ? (Tema.roxo ? Tema.tintaAtual : Tema.dourado) : Tema.douradoDaFaixa(cartao.par)
                         opacity: 0.85
                     }
                     Text {
@@ -103,7 +106,7 @@ FocusScope {
                         font.family: Tema.titulo
                         font.weight: Font.Bold
                         font.pixelSize: 26
-                        color: cartao.marcado ? Tema.claro : Tema.tinta
+                        color: cartao.marcado ? Tema.tintaAtual : Tema.tintaDaFaixa(cartao.par)
                         elide: Text.ElideRight
                     }
                     Item {

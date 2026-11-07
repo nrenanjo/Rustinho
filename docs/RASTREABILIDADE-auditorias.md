@@ -97,7 +97,7 @@ R-01 NF-e sem conferência criptográfica: parcial em r7, implementada depois (P
 | M-01 | Dividir `api.rs` e `sync.rs` | **Igual (dívida técnica, não refeito na C8):** hoje 4.515 e 6.430 linhas |
 | M-02 | "Próximo número" repetido | **Igual:** `MAX(numero)` em vendas, devoluções, receber, encomendas, oficina |
 | M-03 | Leitura dos pagamentos em `vendas::calcular` repetida | Não revisto na C8 |
-| M-04 | Gravações fora de transação / auditoria depois do commit | **Corrigido na C8** para `computador_salvar` e `senha_trocar` (e `estoque_dias`, achado C8-01); `unidade_salvar` já era uma gravação só. Testes `m04_*`, `c8_estoque_dias_*` (falharam antes: `logs/07-m04-antes.log`). **Fica:** auditoria do `backup_restaurar` depois de trocar o banco (não cabe numa transação) |
+| M-04 | Gravações fora de transação / auditoria depois do commit | **Corrigido na C8** para `computador_salvar` e `senha_trocar` (e `estoque_dias`, achado C8-01); `unidade_salvar` já era uma gravação só. Testes `m04_*`, `c8_estoque_dias_*` (falharam antes: `logs/07-m04-antes.log`). **0.9.18:** a auditoria do `backup_restaurar` passou a ser gravada na transação que termina a restauração (`Pendente::aplicar`), também quando ela termina ao abrir depois de uma queda; testes `m04_restaurar_registra_na_auditoria_uma_vez` e `m04_queda_depois_da_troca_termina_e_registra_ao_abrir` (este falhou antes: 0 registros) |
 | M-05 | Conexão nova com o banco a cada volta da troca | **Igual** (desperdício, não defeito) |
 | M-06 | `quick_check` na cópia do backup | Feito na 0.9.15 (FALHA-06); a cópia gravada já era conferida pela leitura de volta |
 

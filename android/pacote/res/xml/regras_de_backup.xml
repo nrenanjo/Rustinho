@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12 ou mais novo (T-05): nada do Rustinho sai do aparelho pelo
+  backup do Google nem pela transferência para outro aparelho (D2D). Em alguns
+  fabricantes, android:allowBackup="false" desliga só o backup na nuvem, e não
+  a transferência entre aparelhos. O banco copiado para outro aparelho seria
+  uma segunda cópia da loja com a mesma identidade. O backup do Rustinho é o
+  dele mesmo (Configurações › Backup).
+  Sem <include>, entraria quase tudo; por isso cada área é excluída inteira
+  ("." = a pasta toda da área, com as subpastas).
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>

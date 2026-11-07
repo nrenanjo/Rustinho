@@ -363,7 +363,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
         {
             continue;
         }
-        let d = crate::receber::dias_entre(&criado, &hoje);
+        let d = crate::tempo::dias_entre(&criado, &hoje);
         lista_enc.push(EncomendaPedir {
             id,
             numero,
@@ -649,7 +649,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
             continue;
         }
         let valor = numeros::saturar((custo as i128 * q as i128 + 500) / 1000);
-        let ha = crate::receber::dias_entre(&referencia, &hoje);
+        let ha = crate::tempo::dias_entre(&referencia, &hoje);
         itens.push(Parado {
             produto_id: id,
             codigo,
@@ -751,6 +751,93 @@ pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
         h.push_str("</table>");
     }
     Ok(h)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da reposição: o que comprar, mais vendidos e parados (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Filtro, Pedido};
+    use crate::erro::Resultado;
+    use crate::reposicao;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "estoque_sugestao", classe: Classe::Leitura, funcao: estoque_sugestao },
+        // R-04: grava os dias escolhidos na tela de reposição.
+        Comando { nome: "estoque_dias", classe: Classe::Caixa, funcao: estoque_dias },
+        Comando { nome: "estoque_mais_vendidos", classe: Classe::Leitura, funcao: estoque_mais_vendidos },
+        Comando { nome: "estoque_parados", classe: Classe::Leitura, funcao: estoque_parados },
+    ];
+
+    fn estoque_sugestao(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(reposicao::sugestao(p.conn, &d.texto)?))
+    }
+
+    fn estoque_dias(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Dias = ler(dados)?;
+        // C8: os dias e o histórico, numa transação só.
+        let tx = p.conn.transaction()?;
+        let n = reposicao::salvar_dias(&tx, p.disp, p.usuario_id, &d.qual, &d.dias)?;
+        tx.commit()?;
+        Ok(json!(n))
+    }
+
+    fn estoque_mais_vendidos(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: MaisVendidos = ler(dados)?;
+        let pode = p.pode_sem_senha("resultados")?;
+        let mut v = json!(reposicao::mais_vendidos(p.conn, d.dias, &d.ordem, &d.texto)?);
+        // D-01: lucro e margem só para quem pode ver os resultados.
+        if !pode {
+            v["lucro"] = json!("");
+            if let Some(itens) = v["itens"].as_array_mut() {
+                for it in itens {
+                    it["lucro"] = json!("");
+                    it["margem"] = json!("");
+                }
+            }
+        }
+        v["resultados"] = json!(pode);
+        Ok(v)
+    }
+
+    fn estoque_parados(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        let pode = p.pode_sem_senha("resultados")?;
+        let mut v = json!(reposicao::parados(p.conn, &d.texto)?);
+        // D-09: o valor parado é pelo custo (estoque × custo de cada peça).
+        if !pode {
+            v["valor"] = json!("");
+            if let Some(itens) = v["itens"].as_array_mut() {
+                for it in itens {
+                    it["valor"] = json!("");
+                }
+            }
+        }
+        v["resultados"] = json!(pode);
+        Ok(v)
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Dias {
+        qual: String,
+        dias: String,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct MaisVendidos {
+        dias: i64,
+        ordem: String,
+        texto: String,
+    }
 }
 
 #[cfg(test)]

@@ -11,8 +11,9 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string secao: "comprar"
 
-    function aoEsc() {
-        if (conteudo.item && typeof conteudo.item.aoEsc === "function" && conteudo.item.aoEsc())
+    // Esc: a seção limpa a busca dela primeiro; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (janela.limparBuscaAntes(daSeta) && conteudo.item && typeof conteudo.item.aoEsc === "function" && conteudo.item.aoEsc())
             return
         janela.voltar()
     }
@@ -36,7 +37,6 @@ FocusScope {
             titulo: "Estoque / Fornecedores"
             subtitulo: "O que comprar, o que o cliente encomendou, o que vende e o que está parado"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.secao === "comprar"
                 text: "Imprimir lista"

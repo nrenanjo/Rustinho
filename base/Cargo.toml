@@ -1,0 +1,15 @@
+[package]
+name = "rustinho-base"
+description = "Rustinho: base comum (erro, números, texto, documentos, código de barras), sem regra da loja"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Do SQLite, só o TIPO do erro (`Erro::Banco`), que o núcleo examina para saber
+# se o banco está só para leitura. Nada aqui abre banco nem faz SQL: o teste
+# `nucleo/tests/dependencias.rs` confere. O `bundled` é o mesmo do núcleo, para
+# a base compilar igual também quando é testada sozinha.
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde_json = "1.0.154"
+unicode-normalization = "0.1.25"

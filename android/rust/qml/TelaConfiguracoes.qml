@@ -47,11 +47,20 @@ FocusScope {
     property string secaoAntesDaGuia: ""
     // Como esta tela aparece no "voltar" de outra (navegação guiada).
     readonly property string nomeNaNavegacao: secao === "fiscal" ? "Fiscal" : "Configurações"
-    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela.
+    // O "voltar" desta tela, quando outra tela (não o Início) a abriu para
+    // resolver alguma coisa (navegação contextual, 0.9.18). Com guia, vale o
+    // nome da tela de origem da guia.
+    property string voltarPara: "Início"
+    // Se um gerente liberou esta tela para um caixa, acaba ao sair dela. A
+    // guia que não terminou aqui também acaba (a tela saiu da pilha por outro
+    // caminho: sessão encerrada, backup restaurado). Quando a pilha destrói a
+    // tela, ela já saiu da janela e "janela" vale null; por isso a janela fica
+    // guardada desde a criação (Component.onCompleted).
+    property var janelaAoSair: null
     Component.onDestruction: {
         Api.chamar("gerente_encerrar")
         if (guia)
-            janela.abandonarGuia(guia)
+            janelaAoSair.abandonarGuia(guia)
     }
 
     // Os campos da loja e a parte onde ficam (usado ao mostrar o erro de um
@@ -63,10 +72,28 @@ FocusScope {
                   orcamentoValidade: [validadeOrc, "vendas"], rodapeVenda: [rodapeVenda, "impressao"],
                   rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] })[nome] || null
     }
+    // O que a guia destaca: um campo, ou (caso 6, 0.9.18) a linha do primeiro
+    // caixa que bloqueia o rascunho de OS, em Simultaneidade › Caixas.
+    function alvoDaGuia(nome) {
+        if (nome === "caixa_bloqueando") {
+            for (let i = 0; i < versaoDosCaixas.count; i++) {
+                const linha = versaoDosCaixas.itemAt(i)
+                if (linha && linha.modelData.bloqueia)
+                    return [linha, "caixas"]
+            }
+            return null
+        }
+        return campoChamado(nome)
+    }
     // Guia: abre a parte do requisito e destaca o primeiro campo que falta.
     // Os campos da loja só aparecem com a senha do gerente: sem ela, pede a
-    // senha primeiro (a guia continua apontando para o botão da senha).
+    // senha primeiro (a guia continua apontando para o botão da senha). As
+    // partes da Simultaneidade pedem a senha delas ao abrir (onCompleted).
     function comecarGuia() {
+        if (partesSimultaneidade.includes(guia.requisito.propriedades.secao)) {
+            Qt.callLater(mostrarCampoDaGuia)
+            return
+        }
         if (!completo) {
             janela.guiaDestacar(botaoSenhaGerente, null)
             janela.guiaOrientar("Esta parte das configurações pede a senha do gerente.")
@@ -83,7 +110,7 @@ FocusScope {
     function mostrarCampoDaGuia() {
         if (!guia)
             return
-        const c = campoChamado(guia.requisito.campos[0])
+        const c = alvoDaGuia(guia.requisito.campos[0])
         if (!c)
             return
         secao = c[1]
@@ -202,7 +229,8 @@ FocusScope {
     // ficam ali (configurações da loja, backup e a própria Simultaneidade:
     // duplicatas, histórico e caixas). A pílula Gerente pede a senha dela
     // (FALHA-05, D-09).
-    function entrarSimultaneidade(destino) {
+    // depois (opcional): roda com a parte já aberta (a guia destaca ali).
+    function entrarSimultaneidade(destino, desistiu, depois) {
         janela.comGerenteVarias(["configuracoes", "backup", "simultaneidade"], "Simultaneidade", () => {
             const recarregar = !tela.completo || !tela.verSimultaneidade
             tela.completo = true
@@ -212,7 +240,25 @@ FocusScope {
                 carregar()
             carregarHistorico()
             tela.secao = destino
-        })
+            if (depois)
+                depois()
+        }, desistiu)
+    }
+
+    // Caso 8 (0.9.18): a faixa do modo seguro pede o Backup com esta tela
+    // aberta. Troca só a parte (pede a senha do gerente, se faltar); desistir
+    // da senha deixa a pessoa onde estava, nesta tela.
+    function mostrarBackup() {
+        if (secao !== "backup")
+            entrarSimultaneidade("backup")
+    }
+
+    // NOTIF-03 (0.9.18): a tela foi aberta direto numa parte do gerente (por
+    // uma notificação, por exemplo) e a pessoa desistiu da senha. Ela não
+    // pediu a Loja: volta para onde estava. Só se esta tela ainda é a de cima.
+    function sairSemGerente() {
+        if (tela.StackView.view && tela.StackView.view.currentItem === tela)
+            janela.voltar()
     }
 
     function carregarHistorico() {
@@ -222,16 +268,16 @@ FocusScope {
         auditoria = a.ok ? a.dados : []
     }
 
-    function escolherSecao(id) {
+    function escolherSecao(id, desistiu) {
         if (id === "simultaneidade") {
-            entrarSimultaneidade(ultimaSimultaneidade)
+            entrarSimultaneidade(ultimaSimultaneidade, desistiu)
             return
         }
         if (id === "backup" && !verBackup) {
             janela.comGerente("backup", () => {
                 tela.verBackup = true
                 tela.secao = id
-            })
+            }, desistiu)
             return
         }
         if (id === "gerente" && !verGerente) {
@@ -239,7 +285,7 @@ FocusScope {
                 tela.verGerente = true
                 carregarGerente()
                 tela.secao = id
-            })
+            }, desistiu)
             return
         }
         secao = id
@@ -416,6 +462,10 @@ FocusScope {
                 if (r.ok) {
                     carregarCaixas()
                     janela.avisar(c.nome + " foi retirado da loja.", "ok")
+                    // Caso 6: a guia volta à OS só se o núcleo confirmar que
+                    // nenhum caixa bloqueia mais; senão destaca o próximo.
+                    if (tela.guia && !janela.concluirGuia(true))
+                        Qt.callLater(tela.mostrarCampoDaGuia)
                 }
             }),
             "Motivo (por que sai da loja?)", "perigo")
@@ -564,7 +614,7 @@ FocusScope {
             sensivel: true
             titulo: "Configurações"
             // Aberta pela navegação guiada: o "voltar" diz para onde volta.
-            textoVoltar: tela.guia ? tela.guia.origemNome : "Início"
+            textoVoltar: tela.guia ? tela.guia.origemNome : tela.voltarPara
             subtitulo: ({
                 loja: tela.completo ? "A loja, este computador e a sua senha" : "Este computador e a sua senha",
                 gerente: "Quem é gerente e o que só o gerente pode fazer",
@@ -579,11 +629,10 @@ FocusScope {
                 sobre: "Versão e onde ficam os dados"
             })[tela.secao]
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
-                color: Tema.vermelho
+                color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
             }
@@ -623,10 +672,11 @@ FocusScope {
             onEscolhido: id => tela.escolherSecao(id)
         }
 
-        // Subpílulas de Simultaneidade, numa faixa clara.
+        // Subpílulas de Simultaneidade, numa faixa clara (no roxo, magenta).
         Rectangle {
             visible: tela.grupo === "simultaneidade"
-            color: Tema.sombra(0.06)
+            color: Tema.faixaSubpilulas
+            palette.window: Tema.superficie(color)
             radius: 14
             Layout.preferredWidth: Math.min(subpilulas.implicitWidth + 8, parent.width)
             implicitHeight: subpilulas.implicitHeight + 8
@@ -1102,24 +1152,39 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.sync ? tela.sync.pares : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
+                            id: faixaDaLista
                             required property var modelData
-                            spacing: 8
                             Layout.fillWidth: true
-                            Rectangle {
-                                Layout.preferredWidth: 10
-                                Layout.preferredHeight: 10
-                                Layout.alignment: Qt.AlignVCenter
-                                radius: 5
-                                color: modelData.erro ? Tema.vermelho : modelData.sincronizadoEm ? Tema.verdeEscuro : Tema.apagado
-                            }
-                            Text {
-                                text: (modelData.nome || "Caixa") + " · " + (modelData.erro ? modelData.erro : "sincronizado " + tela.quandoFoi(modelData.sincronizadoEm) + (modelData.via ? " · via " + modelData.via : ""))
-                                color: modelData.erro ? Tema.vermelho : Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa
+                                x: 10
+                                y: 5
+                                width: faixaDaLista.width - 20
+                                spacing: 8
+                                Rectangle {
+                                    Layout.preferredWidth: 10
+                                    Layout.preferredHeight: 10
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: 5
+                                    color: modelData.erro ? Tema.vermelhoDaFaixa(faixaDaLista.par) : modelData.sincronizadoEm ? Tema.verdeEscuroDaFaixa(faixaDaLista.par) : Tema.apagadoDaFaixa(faixaDaLista.par)
+                                }
+                                Text {
+                                    text: (modelData.nome || "Caixa") + " · " + (modelData.erro ? modelData.erro : "sincronizado " + tela.quandoFoi(modelData.sincronizadoEm) + (modelData.via ? " · via " + modelData.via : ""))
+                                    color: modelData.erro ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -1146,37 +1211,51 @@ FocusScope {
                     // Cada registro incompleto: o que é, o que falta e o que fazer.
                     Repeater {
                         model: tela.sync && tela.sync.referencias ? tela.sync.referencias.filter(r => r.estado !== "esperando" || r.atrasada).slice(0, 20) : []
-                        delegate: ColumnLayout {
+                        delegate: Rectangle {
                             id: linhaRef
                             required property var modelData
-                            spacing: 6
                             Layout.fillWidth: true
-                            Text {
-                                text: "<b>" + linhaRef.modelData.oQue + "</b> (desde " + linhaRef.modelData.desde + ") aponta para "
-                                      + linhaRef.modelData.oQueFalta.toLowerCase() + " que "
-                                      + (linhaRef.modelData.estado === "esperando" ? (linhaRef.modelData.atrasada ? "ainda não chegou (atrasada)" : "ainda não chegou")
-                                         : linhaRef.modelData.estado === "apagado" ? "foi apagado"
-                                         : linhaRef.modelData.estado === "aceito" ? "não existe (aceito pelo gerente " + linhaRef.modelData.aceitaPor
-                                                                                  + " em " + linhaRef.modelData.aceitaEm + ": " + linhaRef.modelData.aceiteMotivo + ")"
-                                         : "não existe (comprovado)")
-                                      + ". " + linhaRef.modelData.acao
-                                textFormat: Text.StyledText
-                                color: linhaRef.modelData.estado === "esperando" || linhaRef.modelData.estado === "aceito" ? Tema.tintaSuave : Tema.vermelho
-                                font.family: Tema.texto
-                                font.pixelSize: 13
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                            Botao {
-                                visible: linhaRef.modelData.podeAceitar
-                                text: "Aceitar como está"
-                                tipo: "secundario"
-                                onClicked: motivoReferencia.perguntar(
-                                    "Aceitar como está?",
-                                    "O que falta não vai aparecer por isso: só libera o dinheiro deste registro. Fica no histórico com o seu nome e o motivo.",
-                                    "Aceitar", (m, pronto) => janela.chamarGerente("referencia_aceitar",
-                                                             { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m }, pronto),
-                                    "Motivo (por que aceitar?)", "secundario")
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linhaRef.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa2.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa2.implicitWidth + 20
+                            ColumnLayout {
+                                id: conteudoDaFaixa2
+                                x: 10
+                                y: 5
+                                width: linhaRef.width - 20
+                                spacing: 6
+                                Text {
+                                    text: "<b>" + linhaRef.modelData.oQue + "</b> (desde " + linhaRef.modelData.desde + ") aponta para "
+                                          + linhaRef.modelData.oQueFalta.toLowerCase() + " que "
+                                          + (linhaRef.modelData.estado === "esperando" ? (linhaRef.modelData.atrasada ? "ainda não chegou (atrasada)" : "ainda não chegou")
+                                             : linhaRef.modelData.estado === "apagado" ? "foi apagado"
+                                             : linhaRef.modelData.estado === "aceito" ? "não existe (aceito pelo gerente " + linhaRef.modelData.aceitaPor
+                                                                                      + " em " + linhaRef.modelData.aceitaEm + ": " + linhaRef.modelData.aceiteMotivo + ")"
+                                             : "não existe (comprovado)")
+                                          + ". " + linhaRef.modelData.acao
+                                    textFormat: Text.StyledText
+                                    color: linhaRef.modelData.estado === "esperando" || linhaRef.modelData.estado === "aceito" ? Tema.tintaSuaveDaFaixa(linhaRef.par) : Tema.vermelhoDaFaixa(linhaRef.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    visible: linhaRef.modelData.podeAceitar
+                                    text: "Aceitar como está"
+                                    tipo: "secundario"
+                                    onClicked: motivoReferencia.perguntar(
+                                        "Aceitar como está?",
+                                        "O que falta não vai aparecer por isso: só libera o dinheiro deste registro. Fica no histórico com o seu nome e o motivo.",
+                                        "Aceitar", (m, pronto) => janela.chamarGerente("referencia_aceitar",
+                                                                 { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m }, pronto),
+                                        "Motivo (por que aceitar?)", "secundario")
+                                }
                             }
                         }
                     }
@@ -1190,56 +1269,71 @@ FocusScope {
                     color: Tema.pergaminho
                     Layout.fillWidth: true
                     Repeater {
+                        id: versaoDosCaixas
                         model: tela.caixasConhecidos
-                        delegate: RowLayout {
+                        delegate: Rectangle {
                             id: linhaCaixa
                             required property var modelData
-                            spacing: 10
                             Layout.fillWidth: true
-                            Rectangle {
-                                Layout.preferredWidth: 10
-                                Layout.preferredHeight: 10
-                                Layout.alignment: Qt.AlignVCenter
-                                radius: 5
-                                color: linhaCaixa.modelData.situacao === "compativel" ? Tema.verdeEscuro
-                                       : linhaCaixa.modelData.situacao === "retirado" ? Tema.apagado : Tema.vermelho
-                            }
-                            ColumnLayout {
-                                spacing: 1
-                                Layout.fillWidth: true
-                                Text {
-                                    text: linhaCaixa.modelData.nome
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.weight: Font.DemiBold
-                                    font.pixelSize: 15
-                                    Layout.fillWidth: true
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linhaCaixa.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa3.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa3.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa3
+                                x: 10
+                                y: 5
+                                width: linhaCaixa.width - 20
+                                spacing: 10
+                                Rectangle {
+                                    Layout.preferredWidth: 10
+                                    Layout.preferredHeight: 10
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: 5
+                                    color: linhaCaixa.modelData.situacao === "compativel" ? Tema.verdeEscuroDaFaixa(linhaCaixa.par)
+                                           : linhaCaixa.modelData.situacao === "retirado" ? Tema.apagadoDaFaixa(linhaCaixa.par) : Tema.vermelhoDaFaixa(linhaCaixa.par)
                                 }
-                                Text {
-                                    text: linhaCaixa.modelData.texto
-                                          + (linhaCaixa.modelData.compativelEmTexto ? " Última confirmação: " + linhaCaixa.modelData.compativelEmTexto + "." : "")
-                                          + (linhaCaixa.modelData.naoEnviadas > 0 ? " A troca de dados com ele parou: " + linhaCaixa.modelData.naoEnviadas
-                                             + " alteração(ões) esperam a atualização dele." : "")
-                                          + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
-                                             + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
-                                    color: linhaCaixa.modelData.bloqueia ? Tema.vermelho : Tema.tintaSuave
-                                    font.family: Tema.texto
-                                    font.pixelSize: 13
-                                    wrapMode: Text.WordWrap
+                                ColumnLayout {
+                                    spacing: 1
                                     Layout.fillWidth: true
+                                    Text {
+                                        text: linhaCaixa.modelData.nome
+                                        color: Tema.tintaDaFaixa(linhaCaixa.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 15
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: linhaCaixa.modelData.texto
+                                              + (linhaCaixa.modelData.compativelEmTexto ? " Última confirmação: " + linhaCaixa.modelData.compativelEmTexto + "." : "")
+                                              + (linhaCaixa.modelData.naoEnviadas > 0 ? " A troca de dados com ele parou: " + linhaCaixa.modelData.naoEnviadas
+                                                 + " alteração(ões) esperam a atualização dele." : "")
+                                              + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
+                                                 + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
+                                        color: linhaCaixa.modelData.bloqueia ? Tema.vermelhoDaFaixa(linhaCaixa.par) : Tema.tintaSuaveDaFaixa(linhaCaixa.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
                                 }
-                            }
-                            Botao {
-                                visible: linhaCaixa.modelData.situacao !== "retirado"
-                                text: "Retirar da loja"
-                                tipo: "discreto"
-                                onClicked: tela.retirarCaixa(linhaCaixa.modelData)
-                            }
-                            Botao {
-                                visible: linhaCaixa.modelData.situacao === "retirado"
-                                text: "Readmitir"
-                                tipo: "secundario"
-                                onClicked: tela.readmitirCaixa(linhaCaixa.modelData)
+                                Botao {
+                                    visible: linhaCaixa.modelData.situacao !== "retirado"
+                                    text: "Retirar da loja"
+                                    tipo: "discreto"
+                                    onClicked: tela.retirarCaixa(linhaCaixa.modelData)
+                                }
+                                Botao {
+                                    visible: linhaCaixa.modelData.situacao === "retirado"
+                                    text: "Readmitir"
+                                    tipo: "secundario"
+                                    onClicked: tela.readmitirCaixa(linhaCaixa.modelData)
+                                }
                             }
                         }
                     }
@@ -1276,30 +1370,44 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.verSimultaneidade ? tela.pendencias : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
                             id: linhaPend
                             required property var modelData
-                            spacing: 10
                             Layout.fillWidth: true
-                            Text {
-                                text: "<b>" + linhaPend.modelData.textoMotivo + "</b> · " + linhaPend.modelData.oQue + " · "
-                                      + (linhaPend.modelData.lado === "nao_enviada" ? "não vai para " : "veio de ") + linhaPend.modelData.caixa
-                                      + (linhaPend.modelData.detalhe ? " · " + linhaPend.modelData.detalhe : "")
-                                      + (linhaPend.modelData.ultimoErro ? " · " + linhaPend.modelData.ultimoErro : "")
-                                      + (linhaPend.modelData.estado === "arquivada_manual"
-                                         ? " · arquivada por " + linhaPend.modelData.arquivadaPor + ": " + linhaPend.modelData.arquivadaMotivo : "")
-                                textFormat: Text.StyledText
-                                color: linhaPend.modelData.estado === "arquivada_manual" ? Tema.tintaSuave : Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 13
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                            Botao {
-                                visible: linhaPend.modelData.podeArquivar
-                                text: "Arquivar"
-                                tipo: "discreto"
-                                onClicked: tela.arquivarPendencia(linhaPend.modelData)
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linhaPend.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa4.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa4.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa4
+                                x: 10
+                                y: 5
+                                width: linhaPend.width - 20
+                                spacing: 10
+                                Text {
+                                    text: "<b>" + linhaPend.modelData.textoMotivo + "</b> · " + linhaPend.modelData.oQue + " · "
+                                          + (linhaPend.modelData.lado === "nao_enviada" ? "não vai para " : "veio de ") + linhaPend.modelData.caixa
+                                          + (linhaPend.modelData.detalhe ? " · " + linhaPend.modelData.detalhe : "")
+                                          + (linhaPend.modelData.ultimoErro ? " · " + linhaPend.modelData.ultimoErro : "")
+                                          + (linhaPend.modelData.estado === "arquivada_manual"
+                                             ? " · arquivada por " + linhaPend.modelData.arquivadaPor + ": " + linhaPend.modelData.arquivadaMotivo : "")
+                                    textFormat: Text.StyledText
+                                    color: linhaPend.modelData.estado === "arquivada_manual" ? Tema.tintaSuaveDaFaixa(linhaPend.par) : Tema.tintaDaFaixa(linhaPend.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    visible: linhaPend.modelData.podeArquivar
+                                    text: "Arquivar"
+                                    tipo: "discreto"
+                                    onClicked: tela.arquivarPendencia(linhaPend.modelData)
+                                }
                             }
                         }
                     }
@@ -1408,8 +1516,13 @@ FocusScope {
                     Repeater {
                         model: tela.conflitos
                         delegate: Rectangle {
+                            id: faixaDaLista5
+                            required property int index
                             required property var modelData
-                            color: modelData.resolvido ? "transparent" : Tema.papel
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista5.par, modelData.resolvido ? "transparent" : Tema.papel, modelData.resolvido ? Tema.vela(0.25) : Tema.vela(0.8))
+                            palette.window: Tema.superficie(color)
                             radius: Tema.raioCampo
                             Layout.fillWidth: true
                             implicitHeight: colunaConflito.implicitHeight + 24
@@ -1420,7 +1533,7 @@ FocusScope {
                                 spacing: 6
                                 Text {
                                     text: modelData.oQue + " · " + modelData.quando + (modelData.caixa ? " · " + modelData.caixa : "")
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 15
@@ -1429,7 +1542,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: modelData.texto
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
                                     wrapMode: Text.WordWrap
@@ -1440,7 +1553,7 @@ FocusScope {
                                     delegate: Text {
                                         required property var modelData
                                         text: modelData.nome + ": ficou " + modelData.ficou + " · a outra versão tinha " + modelData.perdeu
-                                        color: Tema.tintaSuave
+                                        color: Tema.tintaSuaveDaFaixa(faixaDaLista5.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14
                                         wrapMode: Text.WordWrap
@@ -1450,7 +1563,7 @@ FocusScope {
                                 Text {
                                     visible: !!modelData.resolvido
                                     text: "Resolvido: " + modelData.resolvido
-                                    color: Tema.verdeEscuro
+                                    color: Tema.verdeEscuroDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
                                     Layout.fillWidth: true
@@ -1588,30 +1701,45 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.codigos ? tela.codigos.esperando : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
+                            id: faixaDaLista6
                             required property var modelData
-                            spacing: 10
                             Layout.fillWidth: true
-                            Text {
-                                text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
-                                      + (modelData.conflito ? " · já é da peça “" + modelData.outraPeca + "”" : " · esperando a confirmação")
-                                color: modelData.conflito ? Tema.vermelho : Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                            Botao {
-                                text: "Abrir"
-                                tipo: "discreto"
-                                onClicked: tela.janela.abrir("TelaPeca", { produtoId: modelData.id })
-                            }
-                            Botao {
-                                visible: modelData.conflito
-                                text: "Dar código novo"
-                                tipo: "secundario"
-                                onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
-                                                               "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista6.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa6.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa6.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa6
+                                x: 10
+                                y: 5
+                                width: faixaDaLista6.width - 20
+                                spacing: 10
+                                Text {
+                                    text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
+                                          + (modelData.conflito ? " · já é da peça “" + modelData.outraPeca + "”" : " · esperando a confirmação")
+                                    color: modelData.conflito ? Tema.vermelhoDaFaixa(faixaDaLista6.par) : Tema.tintaDaFaixa(faixaDaLista6.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    text: "Abrir"
+                                    tipo: "discreto"
+                                    onClicked: tela.janela.abrir("TelaPeca", { produtoId: modelData.id })
+                                }
+                                Botao {
+                                    visible: modelData.conflito
+                                    text: "Dar código novo"
+                                    tipo: "secundario"
+                                    onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
+                                                                   "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
+                                }
                             }
                         }
                     }
@@ -1640,9 +1768,13 @@ FocusScope {
                     Repeater {
                         model: tela.codigos ? tela.codigos.repetidos.slice(0, 50) : []
                         delegate: Rectangle {
+                            required property int index
                             id: grupo
                             required property var modelData
-                            color: Tema.papel
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(grupo.par, Tema.papel, Tema.vela(0.6))
+                            palette.window: Tema.superficie(color)
                             radius: Tema.raioCampo
                             Layout.fillWidth: true
                             implicitHeight: colunaGrupo.implicitHeight + 20
@@ -1653,7 +1785,7 @@ FocusScope {
                                 spacing: 4
                                 Text {
                                     text: (grupo.modelData.tipo === "barras" ? "Código de barras " : "Código ") + grupo.modelData.codigo
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(grupo.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 15
@@ -1667,7 +1799,7 @@ FocusScope {
                                         Layout.fillWidth: true
                                         Text {
                                             text: modelData.nome + (modelData.antigo ? " (era o código dela; agora é " + modelData.codigo + ")" : "")
-                                            color: Tema.tinta
+                                            color: Tema.tintaDaFaixa(grupo.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 14
                                             wrapMode: Text.WordWrap
@@ -1712,30 +1844,45 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.codigos ? tela.codigos.pessoasEsperando : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
+                            id: faixaDaLista7
                             required property var modelData
-                            spacing: 10
                             Layout.fillWidth: true
-                            Text {
-                                text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
-                                      + (modelData.conflito ? " · já é de “" + modelData.outraPessoa + "”" : " · esperando a confirmação")
-                                color: modelData.conflito ? Tema.vermelho : Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                            Botao {
-                                text: "Abrir"
-                                tipo: "discreto"
-                                onClicked: tela.janela.abrir("TelaPessoa", { pessoaId: modelData.id, papel: "cliente" })
-                            }
-                            Botao {
-                                visible: modelData.conflito
-                                text: "Dar código novo"
-                                tipo: "secundario"
-                                onClicked: tela.comandoCodigos("codigos_pessoa_dar_novo", { id: modelData.id },
-                                                               "“" + modelData.nome + "” ganhou um código novo.")
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista7.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa7.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa7.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa7
+                                x: 10
+                                y: 5
+                                width: faixaDaLista7.width - 20
+                                spacing: 10
+                                Text {
+                                    text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
+                                          + (modelData.conflito ? " · já é de “" + modelData.outraPessoa + "”" : " · esperando a confirmação")
+                                    color: modelData.conflito ? Tema.vermelhoDaFaixa(faixaDaLista7.par) : Tema.tintaDaFaixa(faixaDaLista7.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    text: "Abrir"
+                                    tipo: "discreto"
+                                    onClicked: tela.janela.abrir("TelaPessoa", { pessoaId: modelData.id, papel: "cliente" })
+                                }
+                                Botao {
+                                    visible: modelData.conflito
+                                    text: "Dar código novo"
+                                    tipo: "secundario"
+                                    onClicked: tela.comandoCodigos("codigos_pessoa_dar_novo", { id: modelData.id },
+                                                                   "“" + modelData.nome + "” ganhou um código novo.")
+                                }
                             }
                         }
                     }
@@ -1749,9 +1896,13 @@ FocusScope {
                     Repeater {
                         model: tela.codigos ? tela.codigos.pessoasRepetidas.slice(0, 50) : []
                         delegate: Rectangle {
+                            required property int index
                             id: grupoPessoas
                             required property var modelData
-                            color: Tema.papel
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(grupoPessoas.par, Tema.papel, Tema.vela(0.6))
+                            palette.window: Tema.superficie(color)
                             radius: Tema.raioCampo
                             Layout.fillWidth: true
                             implicitHeight: colunaPessoas.implicitHeight + 20
@@ -1762,7 +1913,7 @@ FocusScope {
                                 spacing: 4
                                 Text {
                                     text: "Código " + grupoPessoas.modelData.codigo
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(grupoPessoas.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 15
@@ -1776,7 +1927,7 @@ FocusScope {
                                         Layout.fillWidth: true
                                         Text {
                                             text: modelData.nome + " · " + modelData.papel + " (" + modelData.caixa + ")"
-                                            color: Tema.tinta
+                                            color: Tema.tintaDaFaixa(grupoPessoas.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 14
                                             wrapMode: Text.WordWrap
@@ -1859,40 +2010,54 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.historicoTroca ? tela.historicoTroca.caixas : []
-                        delegate: RowLayout {
+                        delegate: Rectangle {
                             id: linhaTroca
                             required property var modelData
-                            spacing: 10
                             Layout.fillWidth: true
-                            Rectangle {
-                                Layout.preferredWidth: 10
-                                Layout.preferredHeight: 10
-                                Layout.alignment: Qt.AlignVCenter
-                                radius: 5
-                                color: linhaTroca.modelData.situacao === "retirado" ? Tema.apagado
-                                       : linhaTroca.modelData.erro ? Tema.vermelho
-                                       : linhaTroca.modelData.sincronizadoEm ? Tema.verdeEscuro : Tema.apagado
-                            }
-                            ColumnLayout {
-                                spacing: 1
-                                Layout.fillWidth: true
-                                Text {
-                                    text: linhaTroca.modelData.nome + (linhaTroca.modelData.situacao === "retirado" ? " (retirado da loja)" : "")
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.weight: Font.DemiBold
-                                    font.pixelSize: 15
-                                    Layout.fillWidth: true
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linhaTroca.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa8.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa8.implicitWidth + 20
+                            RowLayout {
+                                id: conteudoDaFaixa8
+                                x: 10
+                                y: 5
+                                width: linhaTroca.width - 20
+                                spacing: 10
+                                Rectangle {
+                                    Layout.preferredWidth: 10
+                                    Layout.preferredHeight: 10
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: 5
+                                    color: linhaTroca.modelData.situacao === "retirado" ? Tema.apagadoDaFaixa(linhaTroca.par)
+                                           : linhaTroca.modelData.erro ? Tema.vermelhoDaFaixa(linhaTroca.par)
+                                           : linhaTroca.modelData.sincronizadoEm ? Tema.verdeEscuroDaFaixa(linhaTroca.par) : Tema.apagadoDaFaixa(linhaTroca.par)
                                 }
-                                Text {
-                                    text: "Última troca: " + (linhaTroca.modelData.sincronizadoEm || "nunca")
-                                          + " · visto na rede: " + (linhaTroca.modelData.vistoEm || "nunca")
-                                          + (linhaTroca.modelData.erro ? " · último erro: " + linhaTroca.modelData.erro : "")
-                                    color: linhaTroca.modelData.erro ? Tema.vermelho : Tema.tintaSuave
-                                    font.family: Tema.texto
-                                    font.pixelSize: 13
-                                    wrapMode: Text.WordWrap
+                                ColumnLayout {
+                                    spacing: 1
                                     Layout.fillWidth: true
+                                    Text {
+                                        text: linhaTroca.modelData.nome + (linhaTroca.modelData.situacao === "retirado" ? " (retirado da loja)" : "")
+                                        color: Tema.tintaDaFaixa(linhaTroca.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 15
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: "Última troca: " + (linhaTroca.modelData.sincronizadoEm || "nunca")
+                                              + " · visto na rede: " + (linhaTroca.modelData.vistoEm || "nunca")
+                                              + (linhaTroca.modelData.erro ? " · último erro: " + linhaTroca.modelData.erro : "")
+                                        color: linhaTroca.modelData.erro ? Tema.vermelhoDaFaixa(linhaTroca.par) : Tema.tintaSuaveDaFaixa(linhaTroca.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
                                 }
                             }
                         }
@@ -1909,20 +2074,35 @@ FocusScope {
                     }
                     Repeater {
                         model: tela.historicoTroca ? tela.historicoTroca.encerradas : []
-                        delegate: Text {
+                        delegate: Rectangle {
+                            id: faixaDaLista9
                             required property var modelData
-                            text: "<b>" + modelData.oQue + "</b> · " + (modelData.lado === "nao_enviada" ? "não ia para " : "veio de ") + modelData.caixa
-                                  + " · " + modelData.textoMotivo + " · desde " + modelData.criadoEm + " · "
-                                  + (modelData.estado === "arquivada_manual"
-                                     ? "arquivada em " + modelData.encerradaEm + " por " + (modelData.arquivadaPor || "gerente") + ": " + modelData.arquivadaMotivo
-                                     : "resolvida em " + modelData.encerradaEm)
-                                  + (modelData.tentativas > 0 ? " · " + modelData.tentativas + (modelData.tentativas === 1 ? " tentativa" : " tentativas") : "")
-                            textFormat: Text.StyledText
-                            color: modelData.estado === "arquivada_manual" ? Tema.tintaSuave : Tema.tinta
-                            font.family: Tema.texto
-                            font.pixelSize: 13
-                            wrapMode: Text.WordWrap
                             Layout.fillWidth: true
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista9.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa9.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa9.implicitWidth + 20
+                            Text {
+                                id: conteudoDaFaixa9
+                                x: 10
+                                y: 5
+                                width: faixaDaLista9.width - 20
+                                text: "<b>" + modelData.oQue + "</b> · " + (modelData.lado === "nao_enviada" ? "não ia para " : "veio de ") + modelData.caixa
+                                      + " · " + modelData.textoMotivo + " · desde " + modelData.criadoEm + " · "
+                                      + (modelData.estado === "arquivada_manual"
+                                         ? "arquivada em " + modelData.encerradaEm + " por " + (modelData.arquivadaPor || "gerente") + ": " + modelData.arquivadaMotivo
+                                         : "resolvida em " + modelData.encerradaEm)
+                                      + (modelData.tentativas > 0 ? " · " + modelData.tentativas + (modelData.tentativas === 1 ? " tentativa" : " tentativas") : "")
+                                textFormat: Text.StyledText
+                                color: modelData.estado === "arquivada_manual" ? Tema.tintaSuaveDaFaixa(faixaDaLista9.par) : Tema.tintaDaFaixa(faixaDaLista9.par)
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
+                            }
                         }
                     }
                 }
@@ -1952,29 +2132,44 @@ FocusScope {
                                 return tela.auditoria
                             return tela.auditoria.filter(r => (r.usuario + " " + r.caixa + " " + r.descricao + " " + r.detalhes.join(" ")).toLowerCase().indexOf(f) >= 0)
                         }
-                        delegate: ColumnLayout {
+                        delegate: Rectangle {
+                            id: faixaDaLista10
                             required property var modelData
-                            spacing: 1
                             Layout.fillWidth: true
-                            Text {
-                                text: "<b>" + modelData.quando + "</b> · " + (modelData.usuario || "Sistema")
-                                      + (modelData.caixa ? " (" + modelData.caixa + ")" : "") + " " + modelData.descricao
-                                textFormat: Text.StyledText
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                            Text {
-                                visible: modelData.detalhes.length > 0
-                                text: modelData.detalhes.join(" · ")
-                                textFormat: Text.PlainText
-                                color: Tema.tintaSuave
-                                font.family: Tema.texto
-                                font.pixelSize: 13
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
+                            required property int index
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(faixaDaLista10.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa10.implicitHeight + 10
+                            implicitWidth: conteudoDaFaixa10.implicitWidth + 20
+                            ColumnLayout {
+                                id: conteudoDaFaixa10
+                                x: 10
+                                y: 5
+                                width: faixaDaLista10.width - 20
+                                spacing: 1
+                                Text {
+                                    text: "<b>" + modelData.quando + "</b> · " + (modelData.usuario || "Sistema")
+                                          + (modelData.caixa ? " (" + modelData.caixa + ")" : "") + " " + modelData.descricao
+                                    textFormat: Text.StyledText
+                                    color: Tema.tintaDaFaixa(faixaDaLista10.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: modelData.detalhes.length > 0
+                                    text: modelData.detalhes.join(" · ")
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaSuaveDaFaixa(faixaDaLista10.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                             }
                         }
                     }
@@ -1982,7 +2177,11 @@ FocusScope {
 
                 // ---------------- Backup ----------------
                 Loader {
-                    active: tela.secao === "backup"
+                    // Só com a consulta do Backup liberada: aberta direto aqui
+                    // (pela faixa do modo seguro ou por uma notificação), a
+                    // parte não carrega antes da senha (antes, o caixa via um
+                    // "Só o gerente pode" por trás do pedido da senha).
+                    active: tela.secao === "backup" && tela.verBackup
                     visible: active
                     Layout.fillWidth: true
                     sourceComponent: SecaoBackup { width: corpo.width }
@@ -2043,6 +2242,7 @@ FocusScope {
     PerguntaMotivo { id: motivoReferencia; onFeito: tela.recarregarReferencias() }
 
     Component.onCompleted: {
+        janelaAoSair = janela
         completo = janela.podeGerente("configuracoes", true)
         verBackup = janela.podeGerente("backup", true)
         verGerente = janela.podeGerente("gerente", true)
@@ -2050,23 +2250,33 @@ FocusScope {
         carregar()
         // Aberta por uma notificação numa parte que só aparece com a senha do
         // gerente: pede a senha ali mesmo, sem trocar de usuário.
+        // Desistir da senha aqui volta para a tela de antes (NOTIF-03).
         const soComGerente = !["loja", "impressao", "sobre"].includes(secao)
         if (partesSimultaneidade.includes(secao)) {
             const destino = secao
             secao = "loja"
-            entrarSimultaneidade(destino)
+            // Com guia (caso 6): desistir da senha acaba a guia e volta à
+            // origem sem marcar nada; com a senha, a guia destaca na parte.
+            if (guia && !janela.podeGerente("simultaneidade", true))
+                janela.guiaOrientar("Esta parte das configurações pede a senha do gerente.")
+            entrarSimultaneidade(destino, guia ? () => janela.concluirGuia(false) : sairSemGerente,
+                                 guia ? () => {
+                                     janela.guiaOrientar("")
+                                     tela.comecarGuia()
+                                 } : null)
+            return
         } else if (soComGerente && !completo) {
             const destino = secao
             secao = "loja"
             janela.comGerente("configuracoes", () => {
                 tela.completo = true
                 carregar()
-                tela.escolherSecao(destino)
-            })
+                tela.escolherSecao(destino, sairSemGerente)
+            }, sairSemGerente)
         } else if (secao === "backup" || secao === "gerente") {
             const destino = secao
             secao = "loja"
-            escolherSecao(destino)
+            escolherSecao(destino, sairSemGerente)
         }
         if (guia)
             comecarGuia()

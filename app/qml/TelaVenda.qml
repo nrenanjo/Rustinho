@@ -51,7 +51,6 @@ FocusScope {
             subtitulo: !tela.v ? "" : [Qt.formatDateTime(new Date(tela.v.criadoEm), "dd/MM/yyyy 'às' HH:mm"), tela.v.caixa,
                                        "por " + tela.v.vendedor, tela.orcamento ? "válido até " + tela.v.validade : ""].filter(x => !!x).join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: !!tela.v && ((tela.orcamento && tela.v.situacao === "aberto") || (!tela.orcamento && tela.v.situacao === "concluida"))
                 text: tela.orcamento ? "Cancelar orçamento" : "Cancelar venda"
@@ -123,12 +122,16 @@ FocusScope {
                 model: tela.v ? tela.v.itens : []
                 ScrollBar.vertical: ScrollBar {}
                 delegate: Rectangle {
+                    id: faixaDaLista
                     required property var modelData
                     required property int index
                     width: lista.width
                     height: Tema.estreito ? 62 : 56
                     radius: Tema.raio
-                    color: (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: Tema.faixa(faixaDaLista.par)
+                    palette.window: Tema.superficie(color)
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 16
@@ -136,7 +139,7 @@ FocusScope {
                         spacing: 14
                         Text {
                             text: modelData.codigo
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 14
@@ -148,7 +151,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: modelData.descricao
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(faixaDaLista.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
                                 font.pixelSize: Tema.estreito ? 18 : 20
@@ -159,7 +162,7 @@ FocusScope {
                                 visible: Tema.estreito
                                 text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
                                       + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
-                                color: Tema.tintaSuave
+                                color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
@@ -170,13 +173,13 @@ FocusScope {
                             visible: !Tema.estreito
                             text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
                                   + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.pixelSize: 15
                         }
                         Text {
                             text: "R$ " + modelData.total
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 17
@@ -225,21 +228,36 @@ FocusScope {
                 }
                 Repeater {
                     model: tela.v ? tela.v.parcelas : []
-                    delegate: RowLayout {
+                    delegate: Rectangle {
+                        id: faixaDaLista2
                         required property var modelData
                         Layout.fillWidth: true
-                        Text {
-                            text: modelData.parcela + "  vence " + modelData.vencimento
-                            color: modelData.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
-                            font.family: Tema.texto
-                            font.pixelSize: 14
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            text: modelData.situacao === "paga" ? "paga" : modelData.situacao === "cancelada" ? "cancelada" : "R$ " + modelData.saldo
-                            color: Tema.tinta
-                            font.family: Tema.texto
-                            font.pixelSize: 14
+                        required property int index
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(faixaDaLista2.par, Tema.vela(0.4), "transparent")
+                        palette.window: Tema.superficie(color)
+                        radius: Tema.raioCampo
+                        implicitHeight: conteudoDaFaixa2.implicitHeight + 6
+                        implicitWidth: conteudoDaFaixa2.implicitWidth + 16
+                        RowLayout {
+                            id: conteudoDaFaixa2
+                            x: 8
+                            y: 3
+                            width: faixaDaLista2.width - 16
+                            Text {
+                                text: modelData.parcela + "  vence " + modelData.vencimento
+                                color: modelData.situacao === "vencida" ? Tema.vermelhoDaFaixa(faixaDaLista2.par) : Tema.tintaSuaveDaFaixa(faixaDaLista2.par)
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: modelData.situacao === "paga" ? "paga" : modelData.situacao === "cancelada" ? "cancelada" : "R$ " + modelData.saldo
+                                color: Tema.tintaDaFaixa(faixaDaLista2.par)
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                            }
                         }
                     }
                 }
@@ -257,14 +275,29 @@ FocusScope {
                 }
                 Repeater {
                     model: tela.v ? tela.v.cheques : []
-                    delegate: Text {
+                    delegate: Rectangle {
+                        id: faixaDaLista3
                         required property var modelData
-                        text: modelData
-                        color: Tema.tintaSuave
-                        font.family: Tema.texto
-                        font.pixelSize: 14
-                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
+                        required property int index
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(faixaDaLista3.par, Tema.vela(0.4), "transparent")
+                        palette.window: Tema.superficie(color)
+                        radius: Tema.raioCampo
+                        implicitHeight: conteudoDaFaixa3.implicitHeight + 6
+                        implicitWidth: conteudoDaFaixa3.implicitWidth + 16
+                        Text {
+                            id: conteudoDaFaixa3
+                            x: 8
+                            y: 3
+                            width: faixaDaLista3.width - 16
+                            text: modelData
+                            color: Tema.tintaSuaveDaFaixa(faixaDaLista3.par)
+                            font.family: Tema.texto
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
                 Nota {
@@ -277,15 +310,11 @@ FocusScope {
         }
     }
 
-    Popup {
+    Painel {
         id: caixaCancelar
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(500, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14
             Titulo { text: tela.orcamento ? "Cancelar o orçamento?" : "Cancelar a venda?"; font.pixelSize: 30; Layout.fillWidth: true }
@@ -304,7 +333,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: caixaCancelar.close() }
                 Botao {
                     id: botaoCancelar
                     text: tela.orcamento ? "Cancelar orçamento" : "Cancelar venda"

@@ -282,3 +282,44 @@ pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str)
     conn.execute("UPDATE comissao_fechamento SET cancelado_em = ?2 WHERE id = ?1", params![id, tempo::agora()])?;
     Ok(())
 }
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das comissões (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::comissoes;
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido, Periodo};
+    use crate::erro::Resultado;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "comissoes", classe: Classe::ConsultaDoGerente("financeiro"), funcao: comissoes },
+        Comando { nome: "comissao_fechar", classe: Classe::Gerente("financeiro"), funcao: comissao_fechar },
+        Comando { nome: "comissao_reabrir", classe: Classe::Gerente("financeiro"), funcao: comissao_reabrir },
+    ];
+
+    fn comissoes(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Periodo = ler(dados)?;
+        Ok(json!(comissoes::relatorio(p.conn, &d.de, &d.ate)?))
+    }
+
+    fn comissao_fechar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Periodo = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        comissoes::fechar(&tx, p.disp, p.usuario_id, &d.usuario_id, &d.de, &d.ate, &d.vencimento)?;
+        tx.commit()?;
+        Ok(json!(comissoes::relatorio(p.conn, &d.de, &d.ate)?))
+    }
+
+    fn comissao_reabrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        comissoes::reabrir(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+}

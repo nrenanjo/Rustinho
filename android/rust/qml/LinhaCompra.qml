@@ -12,12 +12,14 @@ Rectangle {
     signal abrir()
 
     readonly property bool par: (indice + 1) % 2 === 0
-    readonly property color corBase: par ? Tema.azul : Tema.pergaminho
-    readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property color corBase: Tema.faixa(par)
+    readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
 
     radius: Tema.raio
-    color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    palette.window: Tema.superficie(color)
     implicitHeight: Math.max(64, conteudo.implicitHeight + 22)
 
     RowLayout {
@@ -73,11 +75,11 @@ Rectangle {
                 radius: height / 2
                 color: {
                     if (linha.atual)
-                        return Tema.vela(0.12)
+                        return Tema.chipAtual
                     switch (linha.item.situacao) {
                     case "rascunho": return Tema.rosa
                     case "lancada": return Tema.verde
-                    default: return Tema.sombra(0.08)
+                    default: return Tema.roxo ? Tema.papel : Tema.sombra(0.08)
                     }
                 }
                 Text {
@@ -90,7 +92,7 @@ Rectangle {
                         default: return "Estornada"
                         }
                     }
-                    color: linha.atual ? Tema.claro : linha.item.situacao === "rascunho" ? Tema.vermelho : linha.item.situacao === "lancada" ? Tema.verdeEscuro : Tema.tintaSuave
+                    color: linha.atual ? Tema.tintaAtual : linha.item.situacao === "rascunho" ? Tema.vermelho : linha.item.situacao === "lancada" ? Tema.verdeEscuro : Tema.tintaSuave
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
                     font.pixelSize: 13

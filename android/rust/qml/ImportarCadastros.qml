@@ -268,6 +268,7 @@ Painel {
                         implicitHeight: coluna.implicitHeight + 20
                         radius: Tema.raio
                         color: modelData.novos > 0 ? modelData.cor : Tema.vela(0.35)
+                        palette.window: Tema.superficie(color)
                         ColumnLayout {
                             id: coluna
                             x: 14
@@ -345,7 +346,6 @@ Painel {
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 Item { Layout.fillWidth: true }
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: painel.close() }
                 Botao {
                     visible: !!painel.previa
                     text: "Cadastrar"

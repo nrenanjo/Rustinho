@@ -168,6 +168,14 @@ FocusScope {
         if (!r.ok) {
             if (r.campo === "previsao")
                 previsao.focar()
+            // Caso 6 (0.9.18): bloqueado por um caixa desatualizado. A janela
+            // de saída mostra o motivo e as opções (resolver ou continuar sem
+            // rascunho); nada muda de tela sem a pessoa escolher.
+            if (r.campo === "requisito:caixas.rascunho") {
+                saida.bloqueio = r.erro
+                saida.campoBloqueio = r.campo
+                return false
+            }
             janela.avisar(r.erro, "erro")
             return false
         }
@@ -176,6 +184,25 @@ FocusScope {
         janela.avisar("Rascunho guardado. Ele fica em Ordens de serviço › Abertas para continuar depois.", "ok")
         return true
     }
+
+    // Caso 6: "Ver caixas" leva a Configurações › Simultaneidade › Caixas
+    // (o caixa que bloqueia destacado). Esta OS fica na pilha, inteira, com
+    // os itens. Na volta, o rascunho NÃO é salvo sozinho: com o requisito
+    // satisfeito, a janela de saída abre de novo para a pessoa escolher.
+    function resolverBloqueioDoRascunho() {
+        const campo = saida.campoBloqueio
+        const motivo = saida.bloqueio
+        saida.close()
+        janela.guiar(campo, motivo, satisfeito => {
+            if (satisfeito) {
+                saida.bloqueio = ""
+                saida.open()
+            }
+        })
+    }
+    // Como esta tela aparece no "voltar" da tela que ela abriu.
+    readonly property string nomeNaNavegacao: nova ? "Nova OS" : rascunho ? "Rascunho de OS"
+                                              : ficha && ficha.numero ? "OS " + ficha.numero : "OS"
 
     function excluirRascunho() {
         janela.confirmar("Excluir este rascunho?", "O que foi preenchido e os itens serão apagados.", "Excluir rascunho", () => {
@@ -304,11 +331,10 @@ FocusScope {
                        : [tela.ficha.veiculo, tela.ficha.cliente, "aberta " + tela.ficha.criadoEm + (tela.ficha.criadoPor ? " por " + tela.ficha.criadoPor : ""),
                           tela.ficha.vendaNumero ? "venda " + tela.ficha.vendaNumero : ""].filter(x => !!x).join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
-                color: Tema.vermelho
+                color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
             }
@@ -346,6 +372,7 @@ FocusScope {
             Layout.fillWidth: true
             radius: Tema.raio
             color: tela.situacao === "pronta" ? Tema.verde : tela.situacao === "cancelada" ? Tema.rosa : Tema.pergaminho
+            palette.window: Tema.superficie(color)
             implicitHeight: Tema.estreito ? caminhoOs.implicitHeight + 20 : 58
             Linha {
                 id: caminhoOs
@@ -388,7 +415,7 @@ FocusScope {
                     visible: tela.situacao === "aprovada" || tela.situacao === "pronta"
                     text: "Voltar etapa"
                     tipo: "discreto"
-                    implicitHeight: 38
+                    altura: 38
                     onClicked: tela.passar(tela.situacao === "pronta" ? "aprovada" : "orcamento")
                 }
                 Botao {
@@ -396,7 +423,7 @@ FocusScope {
                     text: "Avisar no WhatsApp"
                     icone: "mensagem"
                     tipo: "secundario"
-                    implicitHeight: 38
+                    altura: 38
                     onClicked: tela.whatsapp()
                 }
                 Botao {
@@ -404,7 +431,7 @@ FocusScope {
                     // Rascunho: o mesmo que a Nova OS (salva com número e aprova).
                     text: tela.situacao === "orcamento" || tela.rascunho ? "Cliente aprovou" : tela.situacao === "aprovada" ? "Ficou pronta" : "Entregar e receber"
                     icone: tela.situacao === "pronta" ? "check" : "direita"
-                    implicitHeight: 40
+                    altura: 40
                     enabled: tela.situacao === "pronta" || (!tela.nova && !tela.rascunho) || tela.itens.length > 0
                     onClicked: {
                         if (tela.situacao === "pronta")
@@ -584,19 +611,27 @@ FocusScope {
                             Layout.fillWidth: true
                             Repeater {
                                 model: [["Hoje", 0], ["Amanhã", 1], ["Em 2 dias", 2], ["Em 1 semana", 7]]
-                                delegate: Rectangle {
+                                // A15 (0.9.18): a célula é a área de toque (no celular,
+                                // 48 × 48 dp); o atalho fica do tamanho de sempre, no meio.
+                                delegate: Item {
+                                    id: celulaPrev
                                     required property var modelData
-                                    radius: height / 2
-                                    height: 28
-                                    width: rotuloPrev.implicitWidth + 22
-                                    color: sobrePrev.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
-                                    Text {
-                                        id: rotuloPrev
+                                    height: Math.max(28, Tema.toqueMinimo)
+                                    width: Math.max(rotuloPrev.implicitWidth + 22, Tema.toqueMinimo)
+                                    Rectangle {
                                         anchors.centerIn: parent
-                                        text: modelData[0]
-                                        color: Tema.tintaSuave
-                                        font.family: Tema.texto
-                                        font.pixelSize: 13
+                                        radius: height / 2
+                                        height: 28
+                                        width: rotuloPrev.implicitWidth + 22
+                                        color: sobrePrev.hovered ? Tema.vela(0.75) : Tema.vela(0.45)
+                                        Text {
+                                            id: rotuloPrev
+                                            anchors.centerIn: parent
+                                            text: celulaPrev.modelData[0]
+                                            color: Tema.tintaSuave
+                                            font.family: Tema.texto
+                                            font.pixelSize: 13
+                                        }
                                     }
                                     HoverHandler { id: sobrePrev; cursorShape: Qt.PointingHandCursor }
                                     TapHandler {
@@ -637,7 +672,7 @@ FocusScope {
                         text: "Peça"
                         icone: "mais"
                         tipo: "secundario"
-                        implicitHeight: 38
+                        altura: 38
                         onClicked: escolher.abrirCom("", "")
                     }
                     Botao {
@@ -645,7 +680,7 @@ FocusScope {
                         text: "Serviço"
                         icone: "mais"
                         tipo: "secundario"
-                        implicitHeight: 38
+                        altura: 38
                         onClicked: tela.addServico("")
                     }
                 }
@@ -674,7 +709,10 @@ FocusScope {
                         width: listaItens.width
                         implicitHeight: 74
                         radius: Tema.raio
-                        color: c.erro ? Tema.rosa : servico ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0 && !c.erro && !servico
+                        color: c.erro ? Tema.rosa : servico ? Tema.verde : Tema.faixa(li.par)
+                        palette.window: Tema.superficie(color)
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 14
@@ -693,7 +731,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: li.c.descricao || ""
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(li.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 19
@@ -703,7 +741,7 @@ FocusScope {
                                 Text {
                                     text: ["cód. " + (li.c.codigo || ""), li.c.estoque !== undefined && li.c.estoque !== "" ? "tem " + li.c.estoque + " " + (li.c.unidade || "") : ""]
                                           .filter(x => !!x).join("  ·  ")
-                                    color: li.c.falta ? Tema.vermelho : Tema.tintaSuave
+                                    color: li.c.falta ? Tema.vermelhoDaFaixa(li.par) : Tema.tintaSuaveDaFaixa(li.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -759,7 +797,7 @@ FocusScope {
                             }
                             Text {
                                 text: li.c.total ? "R$ " + li.c.total : ""
-                                color: Tema.tinta
+                                color: Tema.tintaDaFaixa(li.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
                                 font.pixelSize: 16
@@ -771,7 +809,7 @@ FocusScope {
                                 tipo: "discreto"
                                 icone: "lixeira"
                                 text: ""
-                                implicitHeight: 36
+                                altura: 36
                                 onClicked: tela.tirar(li.index)
                             }
                         }
@@ -827,6 +865,7 @@ FocusScope {
                     Layout.fillWidth: true
                     radius: Tema.raio
                     color: Tema.pergaminho
+                    palette.window: Tema.superficie(color)
                     implicitHeight: 76
                     RowLayout {
                         anchors.fill: parent
@@ -873,7 +912,7 @@ FocusScope {
                 Text {
                     visible: !!tela.ficha && tela.ficha.historico.length > 0
                     text: tela.ficha ? "Este carro já veio: " + tela.ficha.historico.slice(0, 4).map(h => "OS " + h.numero + " (" + (h.caixa ? h.caixa + ", " : "") + h.quando + ")").join(", ") : ""
-                    color: Tema.tintaSuave
+                    color: Tema.tintaSuaveNo(palette.window)
                     font.family: Tema.serifa
                     font.italic: true
                     font.pixelSize: 13
@@ -889,17 +928,18 @@ FocusScope {
         onEscolhida: id => tela.addPeca(id)
     }
 
-    // Janela de saída da Nova OS: exatamente três opções.
-    Popup {
+    // Janela de saída da Nova OS: exatamente três opções. Com o rascunho
+    // bloqueado (caso 6), as três são: ver os caixas (resolver), continuar
+    // sem rascunho (volta à OS, para salvar normalmente) ou sair sem salvar.
+    Painel {
         id: saida
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
+        // O motivo do bloqueio do rascunho (vazio = sem bloqueio) e o
+        // requisito que o núcleo mandou.
+        property string bloqueio: ""
+        property string campoBloqueio: ""
         width: Math.min(560, Tema.largura - 24)
         padding: Tema.estreito ? 18 : 28
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
+        onClosed: bloqueio = ""
         contentItem: ColumnLayout {
             spacing: 14
             Titulo {
@@ -915,12 +955,22 @@ FocusScope {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
+            Text {
+                visible: saida.bloqueio !== ""
+                text: saida.bloqueio
+                color: Tema.vermelho
+                font.family: Tema.texto
+                font.pixelSize: 15
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
             Flow {
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 6
                 layoutDirection: Qt.RightToLeft
                 Botao {
+                    visible: saida.bloqueio === ""
                     text: "Salvar rascunho"
                     icone: "check"
                     tipo: "principal"
@@ -932,9 +982,10 @@ FocusScope {
                     }
                 }
                 Botao {
-                    text: "Cancelar"
-                    tipo: "discreto"
-                    onClicked: saida.close()
+                    visible: saida.bloqueio !== ""
+                    text: "Ver caixas"
+                    tipo: "principal"
+                    onClicked: tela.resolverBloqueioDoRascunho()
                 }
                 Botao {
                     text: "Sair sem salvar"

@@ -339,7 +339,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: lancamento.close() }
                 Botao { text: "Lançar"; icone: "check"; onClicked: lancamento.salvar() }
             }
         }
@@ -510,7 +509,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; atalho: "Esc"; onClicked: pagamento.close() }
                 Botao { text: "Pagar"; icone: "check"; atalho: "Enter"; onClicked: pagamento.concluir() }
             }
         }
@@ -584,10 +582,15 @@ FocusScope {
             Repeater {
                 model: ficha.dados ? ficha.dados.pagamentos : []
                 delegate: Rectangle {
+                    id: faixaDaLista
+                    required property int index
                     required property var modelData
                     Layout.fillWidth: true
                     radius: Tema.raioCampo
-                    color: Tema.vela(0.5)
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: Tema.faixa(faixaDaLista.par, Tema.vela(0.5), "transparent")
+                    palette.window: Tema.superficie(color)
                     implicitHeight: 46
                     RowLayout {
                         anchors.fill: parent
@@ -601,7 +604,7 @@ FocusScope {
                                    modelData.juros !== "0,00" ? "juros R$ " + modelData.juros : "",
                                    modelData.desconto !== "0,00" ? "desconto R$ " + modelData.desconto : "",
                                    modelData.estornado ? "ESTORNADO: " + modelData.motivoEstorno : ""].filter(x => !!x).join("  ·  ")
-                            color: Tema.tintaSuave
+                            color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.pixelSize: 13
                             elide: Text.ElideRight
@@ -609,7 +612,7 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + modelData.total
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
                             font.pixelSize: 15
@@ -619,7 +622,7 @@ FocusScope {
                             visible: !modelData.estornado
                             text: "Estornar"
                             tipo: "discreto"
-                            implicitHeight: 32
+                            altura: 32
                             // D-09: a senha da consulta do Financeiro não vale para estornar.
                             onClicked: motivo.perguntar("Estornar o pagamento?",
                                 "R$ " + modelData.total + " de " + modelData.data + ". A conta volta a ficar em aberto.",
@@ -656,7 +659,6 @@ FocusScope {
                     }
                 }
                 Item { Layout.fillWidth: true }
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: ficha.close() }
                 Botao {
                     visible: ficha.aberta
                     text: "Pagar"
@@ -721,7 +723,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: correcao.close() }
                 Botao { text: "Salvar"; icone: "check"; onClicked: correcao.salvar() }
             }
         }

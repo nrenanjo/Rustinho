@@ -15,12 +15,16 @@ Rectangle {
     signal abrirVenda()
 
     readonly property bool fechada: item.situacao === "paga" || item.situacao === "cancelada"
-    readonly property var cores: ({ vencida: Tema.rosa, hoje: Tema.amarelo, aberta: Tema.vela(0.55),
-                                    paga: Tema.verde, cancelada: Tema.sombra(0.08) })
+    // No roxo, o selo neutro é claro nas duas faixas (texto escuro).
+    readonly property var cores: ({ vencida: Tema.rosa, hoje: Tema.amarelo, aberta: Tema.roxo ? Tema.papel : Tema.vela(0.55),
+                                    paga: Tema.verde, cancelada: Tema.roxo ? Tema.papel : Tema.sombra(0.08) })
     readonly property var nomes: ({ vencida: "Vencida", hoje: "Vence hoje", aberta: "Em aberto", paga: "Paga", cancelada: "Cancelada" })
 
     radius: Tema.raioCampo
-    color: (indice + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property bool par: (indice + 1) % 2 === 0
+    color: Tema.faixa(par)
+    palette.window: Tema.superficie(color)
     implicitHeight: Tema.estreito ? Math.max(58, conteudoParcela.implicitHeight + 16) : 58
 
     RowLayout {
@@ -44,7 +48,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.descricao + "  ·  " + linha.item.parcela
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 15
@@ -62,7 +66,7 @@ Rectangle {
                 text: [Tema.estreito ? (linha.nomes[linha.item.situacao] || "") : "", "vence " + linha.item.vencimento,
                        linha.item.pago !== "0,00" ? Tema.sigiloTexto("pago R$ " + linha.item.pago + " de R$ " + linha.item.valor) : "",
                        linha.item.diasAtraso > 0 ? linha.item.diasAtraso + " dias de atraso" : ""].filter(x => !!x).join("  ·  ")
-                color: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tintaSuave
+                color: linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 13
                 elide: Text.ElideRight
@@ -90,7 +94,7 @@ Rectangle {
             Layout.preferredWidth: Tema.estreito ? 77 : 110
             Text {
                 text: Tema.sigiloTexto("R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo))
-                color: Tema.tinta
+                color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: 16
@@ -99,7 +103,7 @@ Rectangle {
             Text {
                 visible: linha.item.juros !== ""
                 text: Tema.sigiloTexto("+ R$ " + linha.item.juros + " juros")
-                color: Tema.vermelho
+                color: Tema.vermelhoDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12
                 Layout.alignment: Qt.AlignRight

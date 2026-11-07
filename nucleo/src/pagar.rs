@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use time::Duration;
 
 use crate::erro::{Erro, Resultado};
-use crate::receber::{dias_entre, iso, ler_iso, parcelar, MAX_PARCELAS};
+use crate::receber::MAX_PARCELAS;
+use crate::tempo::{dias_entre, iso, ler_iso, parcelar};
 use crate::{auditoria, caixa, fiscal, nfe_xml, numeros, tempo, texto};
 
 /// Formas de pagar uma conta: (código, nome).
@@ -921,4 +922,84 @@ pub fn do_dia(conn: &Connection) -> Resultado<(i64, i64, i64, i64)> {
         [hoje],
         |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
     )?)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das contas a pagar (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::pagar;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "pagar_painel", classe: Classe::ConsultaDoGerente("financeiro"), funcao: pagar_painel },
+        Comando { nome: "pagar_ficha", classe: Classe::ConsultaDoGerente("financeiro"), funcao: pagar_ficha },
+        Comando { nome: "pagar_previa", classe: Classe::ConsultaDoGerente("financeiro"), funcao: pagar_previa },
+        Comando { nome: "pagar_lancar", classe: Classe::Gerente("financeiro"), funcao: pagar_lancar },
+        Comando { nome: "pagar_alterar", classe: Classe::Gerente("financeiro"), funcao: pagar_alterar },
+        Comando { nome: "pagar_cancelar", classe: Classe::Gerente("financeiro"), funcao: pagar_cancelar },
+        Comando { nome: "pagar_pagar", classe: Classe::Gerente("financeiro"), funcao: pagar_pagar },
+        Comando { nome: "pagamento_estornar", classe: Classe::Gerente("estornar"), funcao: pagamento_estornar },
+    ];
+
+    fn pagar_painel(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(pagar::painel(p.conn, &d.texto, &d.quais)?))
+    }
+
+    fn pagar_ficha(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(pagar::ficha(p.conn, &d.id)?))
+    }
+
+    fn pagar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: pagar::LancamentoEntrada = ler(dados)?;
+        Ok(json!(pagar::previa_texto(p.conn, &d)?))
+    }
+
+    fn pagar_lancar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: pagar::LancamentoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let ids = pagar::lancar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(ids))
+    }
+
+    fn pagar_alterar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: pagar::AlteracaoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        pagar::alterar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(pagar::ficha(p.conn, &d.id)?))
+    }
+
+    fn pagar_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        pagar::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn pagar_pagar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: pagar::PagamentoEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        pagar::pagar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(pagar::ficha(p.conn, &d.conta_id)?))
+    }
+
+    fn pagamento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        pagar::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
 }

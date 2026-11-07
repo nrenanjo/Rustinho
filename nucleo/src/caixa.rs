@@ -322,7 +322,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         }
     }
     let dinheiro_vendas: i64 = somas.iter().find(|s| s.0 == "dinheiro").map(|s| s.1).unwrap_or(0) - troco;
-    let (recebimentos, recebido) = crate::receber::por_forma_na_sessao(conn, sessao_id)?;
+    let (recebimentos, recebido) = por_forma_na_sessao(conn, sessao_id)?;
     let mut recebido_por_forma = Vec::new();
     for (forma, nome, _) in FORMAS {
         if let Some((_, v)) = recebido.iter().find(|s| s.0 == *forma) {
@@ -348,7 +348,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         numeros::somar(movs.iter().filter(|m| m.0 == "sangria").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
     let suprimentos =
         numeros::somar(movs.iter().filter(|m| m.0 == "suprimento").map(|m| m.1)).ok_or_else(numeros::grande_demais)?;
-    let devolvido = crate::devolucoes::dinheiro_na_sessao(conn, sessao_id)?;
+    let devolvido = dinheiro_na_sessao(conn, sessao_id)?;
     let esperado =
         numeros::somar([sessao.valor_inicial, dinheiro_vendas, dinheiro_recebido, suprimentos, -sangrias, -devolvido])
             .ok_or_else(numeros::grande_demais)?;
@@ -387,6 +387,35 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         diferenca_centavos: diferenca,
         fechado_por,
     })
+}
+
+// As duas consultas do resumo que leem os recebimentos e as devoluções da
+// sessão (vieram do `receber` e das `devolucoes` na etapa 4 da modularização,
+// iguais: o caixa já lia as vendas da sessão do mesmo jeito; só leitura).
+
+/// Recebimentos de uma sessão de caixa, por forma: (forma, soma).
+fn por_forma_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<(i64, Vec<(String, i64)>)> {
+    let qtd: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1)",
+        [sessao_id],
+        |l| l.get(0),
+    )?;
+    let mut c = conn.prepare_cached(
+        "SELECT forma, SUM(valor) FROM recebimento
+          WHERE sessao_id = ?1 AND (estornado_em IS NULL OR estornado_apos_fechar = 1) GROUP BY forma",
+    )?;
+    let somas = c.query_map([sessao_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok((qtd, somas))
+}
+
+/// Dinheiro devolvido (saiu da gaveta) numa sessão de caixa.
+fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(dinheiro), 0) FROM devolucao
+          WHERE sessao_id = ?1 AND (cancelado_em IS NULL OR desfeita_apos_fechar = 1)",
+        [sessao_id],
+        |l| l.get(0),
+    )?)
 }
 
 /// Fecha o caixa com o dinheiro contado na gaveta. Devolve o id da sessão.
@@ -520,4 +549,90 @@ pub fn historico(conn: &Connection, dispositivo: &str, limite: i64) -> Resultado
     )?;
     let linhas = c.query_map(params![dispositivo, limite], ler_sessao)?;
     Ok(linhas.collect::<Result<_, _>>()?)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos do caixa (a gaveta deste computador) (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{caixa, config};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "caixa_estado", classe: Classe::Leitura, funcao: caixa_estado },
+        Comando { nome: "caixa_abrir", classe: Classe::Caixa, funcao: caixa_abrir },
+        Comando { nome: "caixa_movimentar", classe: Classe::Caixa, funcao: caixa_movimentar },
+        Comando { nome: "caixa_fechar", classe: Classe::Caixa, funcao: caixa_fechar },
+        Comando { nome: "caixa_resumo", classe: Classe::Leitura, funcao: caixa_resumo },
+        Comando { nome: "formas_pagamento", classe: Classe::Leitura, funcao: formas_pagamento },
+    ];
+
+    fn caixa_estado(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let s = caixa::sessao_aberta(p.conn, p.disp)?;
+        let resumo = match &s {
+            Some(s) => Some(caixa::resumo(p.conn, &s.id)?),
+            None => None,
+        };
+        Ok(json!({
+            "aberto": s.is_some(),
+            "resumo": resumo,
+            "caixa": config::nome_caixa(p.conn)?,
+            "historico": caixa::historico(p.conn, p.disp, 30)?,
+        }))
+    }
+
+    fn caixa_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let nome = config::nome_caixa(p.conn)?;
+        let tx = p.conn.transaction()?;
+        caixa::abrir(&tx, p.disp, p.usuario_id, &nome, &d.valor)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn caixa_movimentar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        caixa::movimentar_com_conta(&tx, p.disp, p.usuario_id, &d.tipo, &d.valor, &d.motivo, Some(&d.conta))?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn caixa_fechar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = caixa::fechar(&tx, p.disp, p.usuario_id, &d.valor, &d.motivo)?;
+        tx.commit()?;
+        Ok(json!(caixa::resumo(p.conn, &id)?))
+    }
+
+    fn caixa_resumo(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(caixa::resumo(p.conn, &d.id)?))
+    }
+
+    // O vale-troca aparece à parte no Receber (só quando há vale).
+    fn formas_pagamento(_p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(caixa::FORMAS
+            .iter()
+            .filter(|(f, ..)| *f != "vale")
+            .map(|(f, n, ok)| json!({ "forma": f, "nome": n, "disponivel": ok }))
+            .collect::<Vec<_>>()))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Valor {
+        tipo: String,
+        valor: String,
+        motivo: String,
+        conta: String,
+    }
 }

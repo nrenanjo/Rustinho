@@ -26,6 +26,8 @@ conferido no núcleo (testes_nav::nav01_arquivos_conferir_separa_os_que_faltam).
      fica à vista (rolagem) e o fluxo termina igual.
 
     python3 app/testes/telas_navegacao_guiada.py [pasta para as fotos]
+    RUSTINHO_TELA=:92 python3 app/testes/telas_navegacao_guiada.py   (outra tela virtual)
+    RUSTINHO_TEMA=roxo python3 app/testes/telas_navegacao_guiada.py  (no Planeta Roxo; 0.9.18)
 """
 
 import os
@@ -40,8 +42,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import telas_d09 as base  # noqa: E402
 from telas_d09 import PROGRAMA, RAIZ, conferir, simples  # noqa: E402
 
-base.TELA = ":83"
+# A tela virtual pode ser trocada (RUSTINHO_TELA=:88) quando a :83 estiver
+# ocupada (por exemplo, por outro teste rodando ao mesmo tempo).
+base.TELA = os.environ.get("RUSTINHO_TELA", ":83")
 TELA = base.TELA
+# Tema da loja de teste (0.9.18): vazio = o de sempre (cinza); "amoled" ou "roxo".
+TEMA = os.environ.get("RUSTINHO_TEMA", "")
 CNPJ_BOM = "11.444.777/0001-61"
 CNPJ_RUIM = "11.444.777/0001-00"
 EXEMPLO = os.path.join(RAIZ, "nucleo", "tests", "nfe_exemplo.xml")
@@ -49,6 +55,19 @@ EXEMPLO = os.path.join(RAIZ, "nucleo", "tests", "nfe_exemplo.xml")
 
 def xdo(*args):
     subprocess.run(["xdotool", *args], env=dict(os.environ, DISPLAY=TELA), check=True)
+
+
+def tema_por_fora(pasta):
+    """Grava o tema pedido (RUSTINHO_TEMA) na loja de teste, pelo núcleo (os
+    gatilhos da troca de dados precisam das funções do Rustinho)."""
+    if not TEMA:
+        return
+    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta,
+               RUSTINHO_SQL=f"INSERT INTO config (chave, valor) VALUES ('tela_tema', '{TEMA}') "
+                            "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;")
+    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
+                    "--ignored", "--exact", "executar_por_fora"],
+                   cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
 
 
 def banco(pasta, sql, *p):
@@ -78,9 +97,77 @@ def brilho(c):
     return sum(c) / 3
 
 
+# Escurecimento da guia (A11), em Configurações › Loja com a faixa no alto:
+# o campo CNPJ (no destaque) e o campo Endereço (fora dele) têm a mesma cor sem
+# o véu; com o véu, o de fora fica mais escuro. Vale nos três temas.
+CAMPO_NO_DESTAQUE = (270, 496)
+CAMPO_FORA = (700, 575)
+FUNDO = (1200, 740)
+
+
+def escurecimento(com_guia, sem_guia):
+    """(passou, detalhe). Mede o campo no destaque contra o campo fora, na
+    mesma foto. Onde o fundo não é preto, confere também o mesmo ponto do
+    fundo com e sem a guia (no AMOLED o fundo é #000000 e não tem como
+    escurecer)."""
+    dentro = brilho(pixel(com_guia, *CAMPO_NO_DESTAQUE))
+    fora = brilho(pixel(com_guia, *CAMPO_FORA))
+    antes = brilho(pixel(sem_guia, *FUNDO))
+    depois = brilho(pixel(com_guia, *FUNDO))
+    fundo_conta = antes > 15
+    passou = dentro - fora > 15 and (not fundo_conta or antes - depois > 15)
+    detalhe = (f"campo {dentro:.0f} no destaque, {fora:.0f} fora; fundo {antes:.0f} → {depois:.0f}"
+               + ("" if fundo_conta else " (preto, não conta)"))
+    return passou, detalhe
+
+
+def janela_de_arquivos(titulo, segundos=10):
+    """(x, y, largura, altura, id) da janela de arquivos ou de pasta do Qt com esse
+    título, ou None. Desde o Qt 6.8, no X11, ela abre numa janela à parte
+    (QQuickFileDialogImpl e QQuickFolderDialogImpl usam Popup.Window), fora
+    da lista de textos da tela do Rustinho."""
+    fim = time.time() + segundos
+    while True:
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", titulo],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        for janela in s.stdout.split():
+            g = subprocess.run(["xdotool", "getwindowgeometry", "--shell", janela],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            d = dict(x.split("=", 1) for x in g.stdout.split() if "=" in x)
+            if all(k in d for k in ("X", "Y", "WIDTH", "HEIGHT")):
+                return int(d["X"]), int(d["Y"]), int(d["WIDTH"]), int(d["HEIGHT"]), janela
+        if time.time() >= fim:
+            return None
+        time.sleep(0.5)
+
+
+def primeiro_arquivo(casa):
+    """O primeiro arquivo que a janela de arquivos lista em Downloads (pelo
+    filtro: XML, ZIP ou RAR, em ordem alfabética)."""
+    pasta = os.path.join(casa, "Downloads")
+    nomes = sorted((n for n in os.listdir(pasta) if n.lower().endswith((".xml", ".zip", ".rar"))), key=str.lower)
+    if not nomes:
+        raise RuntimeError(f"nenhum XML em {pasta}")
+    return os.path.join(pasta, nomes[0])
+
+
+def devolver_teclado():
+    """Sem gerenciador de janelas (tela virtual), o teclado não volta sozinho
+    para a janela do Rustinho quando a de arquivos fecha: as teclas (CNPJ,
+    Esc, F2) se perderiam. Na área de trabalho, quem devolve é o gerenciador."""
+    for busca in (["--class", "rustinho"], ["--name", "Rustinho"]):
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", *busca],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        if s.stdout.split():
+            xdo("windowfocus", "--sync", s.stdout.split()[0])
+            time.sleep(0.3)
+            return
+
+
 class Rustinho(base.Rustinho):
     def __init__(self, pasta, tela, props, fotos, nome, casa):
         # A pasta pessoal do teste: a janela de arquivos abre em Downloads.
+        self.casa = casa
         antes = os.environ.get("HOME")
         os.environ["HOME"] = casa
         try:
@@ -107,7 +194,11 @@ class Rustinho(base.Rustinho):
                 return x, y
         return None
 
-    def abrir_janela(self, botao):
+    def abrir_janela(self, botao, titulo):
+        """Importar XML › botão. Devolve ("dentro", posição do Open) quando a
+        janela de arquivos fica dentro da tela (Qt anterior ao 6.8) ou
+        ("aparte", (x, y, largura, altura)) quando ela abre numa janela à
+        parte (Qt 6.8 ou mais novo no X11)."""
         if not self.clicar("Importar XML"):
             raise RuntimeError(f"não achei Importar XML (veja {self.saida})")
         time.sleep(1.2)
@@ -115,30 +206,67 @@ class Rustinho(base.Rustinho):
             raise RuntimeError(f"não achei {botao} (veja {self.saida})")
         time.sleep(2)
         aberto = self.posicao("Open")
-        if not aberto:
+        if aberto:
+            return "dentro", aberto
+        janela = janela_de_arquivos(titulo)
+        if not janela:
             raise RuntimeError(f"a janela de arquivos não abriu (veja {self.saida})")
-        return aberto
+        return "aparte", janela
+
+    def fechou(self, titulo):
+        if janela_de_arquivos(titulo, segundos=0):
+            raise RuntimeError(f"a janela de arquivos não fechou (veja {self.saida})")
+        devolver_teclado()
 
     def escolher_arquivo(self):
         """Importar XML › Escolher arquivos › o primeiro da lista › Open."""
-        aberto = self.abrir_janela("Escolher arquivos")
-        # A lista começa 235 px acima do botão Open.
-        xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+        titulo = "Escolha os XMLs das notas"
+        modo, p = self.abrir_janela("Escolher arquivos", titulo)
+        if modo == "dentro":
+            # A lista começa 235 px acima do botão Open.
+            xdo("mousemove", str(p[0] - 257), str(p[1] - 235), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(p[0]), str(p[1]), "click", "1")
+            time.sleep(3)
+            return
+        # Ctrl+L abre o campo do caminho; com o caminho de um arquivo, Enter
+        # escolhe e fecha, como o Abrir (igual no Qt 6.8 e no 6.12; a posição
+        # dos arquivos na lista muda entre eles).
+        xdo("windowfocus", "--sync", p[4])
         time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        xdo("key", "ctrl+l")
+        time.sleep(0.5)
+        xdo("type", "--delay", "20", primeiro_arquivo(self.casa))
+        time.sleep(0.3)
+        xdo("key", "Return")
         time.sleep(3)
+        self.fechou(titulo)
 
     def escolher_pasta(self):
         """Importar XML › Escolher uma pasta › sobe uma pasta › Downloads › Open."""
-        aberto = self.abrir_janela("Escolher uma pasta")
-        # A seta de subir fica 384 px à esquerda e 292 px acima do Open; a
-        # primeira linha da lista, 265 px à esquerda e 230 px acima.
-        xdo("mousemove", str(aberto[0] - 384), str(aberto[1] - 292), "click", "1")
-        time.sleep(1)
-        xdo("mousemove", str(aberto[0] - 265), str(aberto[1] - 230), "click", "1")
-        time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        titulo = "Escolha a pasta com os XMLs"
+        modo, p = self.abrir_janela("Escolher uma pasta", titulo)
+        if modo == "dentro":
+            # A seta de subir fica 384 px à esquerda e 292 px acima do Open; a
+            # primeira linha da lista, 265 px à esquerda e 230 px acima.
+            subir, primeira, abrir = (p[0] - 384, p[1] - 292), (p[0] - 265, p[1] - 230), p
+            xdo("mousemove", str(subir[0]), str(subir[1]), "click", "1")
+            time.sleep(1)
+            xdo("mousemove", str(primeira[0]), str(primeira[1]), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(abrir[0]), str(abrir[1]), "click", "1")
+            time.sleep(3)
+            return
+        # Na janela à parte (Qt 6.8 e 6.12): a seta de subir fica a 41 px do
+        # canto, e subir já marca a pasta de onde se veio (Downloads:
+        # QQuickFolderDialogImpl::updateSelectedFolder). Abrir fica 180 px
+        # antes da borda direita e 30 px acima da de baixo.
+        x, y, largura, altura, _ = p
+        xdo("mousemove", str(x + 41), str(y + 41), "click", "1")
+        time.sleep(1.5)
+        xdo("mousemove", str(x + largura - 180), str(y + altura - 30), "click", "1")
         time.sleep(3)
+        self.fechou(titulo)
 
     def encolher(self, largura, altura):
         ids = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
@@ -187,6 +315,7 @@ def main():
     try:
         # A loja de teste vem sem o CNPJ. Cada cenário começa de uma cópia dela.
         base.montar_loja(modelo)
+        tema_por_fora(modelo)
 
         def loja_nova():
             shutil.rmtree(pasta, ignore_errors=True)
@@ -210,9 +339,9 @@ def main():
                               tem=["Falta o CNPJ da loja", "volta para Peças"],
                               igual=["Peças", "Configurações"], sem_igual=["Início"])
             ok("A: uma orientação só", sum(1 for _, _, x in t if simples(x) == simples("Falta o CNPJ da loja")) == 1, f)
-            # Escurecimento: um ponto do fundo longe do campo fica mais escuro
-            # que o mesmo ponto sem guia.
-            ok("A: o resto da tela escurece", brilho(pixel(f, 1200, 740)) < brilho(pixel(sem_guia, 1200, 740)) - 15, f)
+            # Escurecimento: fora do destaque fica mais escuro (ver escurecimento()).
+            passou, detalhe = escurecimento(f, sem_guia)
+            ok(f"A: o resto da tela escurece ({detalhe})", passou, f)
             ok("A: nada gravado ainda", cnpj_gravado(pasta) == "")
             # CNPJ inválido: fica, mostra o erro, mantém o digitado.
             r.digitar_cnpj(CNPJ_RUIM)

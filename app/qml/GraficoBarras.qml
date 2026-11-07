@@ -60,7 +60,7 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     visible: col.modelData.destaque || col.index % grafico.rotuloCada === 0
                     text: col.modelData.rotulo
-                    color: col.modelData.destaque ? Tema.tinta : Tema.apagado
+                    color: col.modelData.destaque ? Tema.tintaNo(palette.window) : Tema.apagadoNo(palette.window)
                     font.family: Tema.texto
                     font.weight: col.modelData.destaque ? Font.Bold : Font.Normal
                     font.pixelSize: 11

@@ -36,8 +36,8 @@ ApplicationWindow {
     palette.toolTipText: Tema.claro
     palette.light: Tema.papel
     palette.midlight: Tema.pergaminho
-    palette.mid: Tema.escuro ? "#4A4239" : "#B9AE9F"
-    palette.dark: Tema.escuro ? "#6A6156" : "#8C8074"
+    palette.mid: Tema.roxo ? "#C49BC0" : Tema.escuro ? "#4A4239" : "#B9AE9F"
+    palette.dark: Tema.roxo ? "#E2BEDD" : Tema.escuro ? "#6A6156" : "#8C8074"
     palette.shadow: Tema.tinta
     palette.link: Tema.azulEscuro
 
@@ -69,7 +69,8 @@ ApplicationWindow {
         const r = Api.chamar("estado")
         if (r.ok) {
             estado = r.dados
-            Tema.escuro = !!r.dados.escuro
+            // 0.9.18: "tema" (cinza, amoled, roxo); um núcleo de antes só manda "escuro".
+            Tema.tema = r.dados.tema || (r.dados.escuro ? "amoled" : "cinza")
             erroGeral = ""
         } else {
             erroGeral = r.erro
@@ -92,6 +93,26 @@ ApplicationWindow {
             pilha.pop()
     }
 
+    // V-3 (0.9.18): a seta de retorno (Cabecalho) e o Esc (e o "voltar" do
+    // Android) vêm por aqui, pelo mesmo caminho: a tela de cima decide com
+    // aoEsc(daSeta), se tiver (pergunta antes de descartar, limpa a busca...);
+    // senão, volta. daSeta = true quando veio da seta.
+    function retornar(daSeta) {
+        const tela = pilha.currentItem
+        if (tela && typeof tela.aoEsc === "function")
+            tela.aoEsc(daSeta === true)
+        else
+            voltar()
+    }
+    // D-V3 (decisão em aberto; padrão provisório = como hoje): com a busca
+    // preenchida, o Esc limpa a busca primeiro e só o próximo Esc volta; a
+    // seta volta direto. false = o Esc também volta direto (igual à seta).
+    // As telas perguntam por esta função; a regra fica só aqui.
+    readonly property bool escLimpaBuscaAntes: true
+    function limparBuscaAntes(daSeta) {
+        return daSeta !== true && escLimpaBuscaAntes
+    }
+
     // Troca a tela de cima por outra (subpílulas das pílulas unidas:
     // Vender / Receber e Estoque / Fornecedores). "Voltar" continua indo
     // para onde ia antes.
@@ -100,10 +121,13 @@ ApplicationWindow {
     }
 
     function inicio() {
+        largarGuia()
         pilha.pop(null)
     }
 
     function trocarPara(tela, propriedades) {
+        largarGuia()
+        fecharJanelinhas()
         pilha.clear(StackView.Immediate)
         pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
     }
@@ -175,22 +199,26 @@ ApplicationWindow {
         const r = Api.chamar("permissao", { acao: acao, consulta: !!consulta })
         return r.ok && r.dados.pode
     }
-    function comGerente(acao, depois) {
+    // desistiu (opcional): chamada se a pessoa fechar o pedido da senha sem
+    // liberar (Voltar ou Esc). NOTIF-03 (0.9.18).
+    function comGerente(acao, depois, desistiu) {
         if (podeGerente(acao, true)) {
             depois()
             return
         }
         pedirGerente.consultar(acao, nomesDasAcoes[acao] || "", depois)
+        pedirGerente.desistiu = desistiu || null
     }
     // Várias consultas de uma vez (Configurações › Simultaneidade): pede a
     // senha só se faltar alguma.
-    function comGerenteVarias(acoes, oQue, depois) {
+    function comGerenteVarias(acoes, oQue, depois, desistiu) {
         const faltam = acoes.filter(a => !podeGerente(a, true))
         if (faltam.length === 0) {
             depois()
             return
         }
         pedirGerente.consultarVarias(faltam, oQue, depois)
+        pedirGerente.desistiu = desistiu || null
     }
     // O mesmo, para uma função demorada (roda à parte, com a tela de espera).
     // `chave`: a chave da operação da tela (FALHA-04); a mesma vai na
@@ -284,6 +312,16 @@ ApplicationWindow {
             nome: "o estado (UF) e o CNPJ da loja",
             titulo: "Para continuar, informe a UF e o CNPJ da loja",
             texto: "Escolha o estado, preencha o CNPJ e salve (F2). Depois o Rustinho volta para %1 e você continua de onde parou."
+        },
+        // Caso 6 (0.9.18): rascunho de OS novo bloqueado por um caixa sem
+        // versão confirmada. Só a pedido (botão "Ver caixas" na saída da OS);
+        // o gerente decide (atualizar o caixa ou retirá-lo da loja). O
+        // rascunho não é salvo sozinho na volta.
+        "caixas.rascunho": {
+            tela: "TelaConfiguracoes", propriedades: { secao: "caixas" }, campos: ["caixa_bloqueando"],
+            nome: "a confirmação de versão de todos os caixas",
+            titulo: "Rascunho de OS bloqueado por um caixa desatualizado",
+            texto: "Atualize o Rustinho no caixa destacado e deixe trocar dados, ou retire-o da loja (decisão do gerente). Quando nenhum caixa bloquear, o Rustinho volta para %1 e você salva o rascunho."
         }
     })
     property var guiaAtiva: null
@@ -389,6 +427,27 @@ ApplicationWindow {
         }
         pilha.busyChanged.connect(quandoParar)
     }
+    // As telas da guia vão sair da pilha (Início, tela de entrada, sessão
+    // encerrada, backup restaurado): a guia acaba agora, antes da troca. Sem
+    // isso, a faixa, o véu e o destaque apareciam por cima da tela seguinte
+    // até a tela de destino ser destruída (0.9.18). O mesmo abandono que o
+    // destino faz ao sair (que então não encontra mais nada a fazer).
+    function largarGuia() {
+        if (guiaAtiva)
+            abandonarGuia(guiaAtiva)
+    }
+    // A pilha inteira vai ser trocada (sessão encerrada, trocar de usuário,
+    // backup restaurado): a pergunta e o pedido da senha do gerente que
+    // estiverem abertos eram da tela (e da sessão) que sai. Fecham sem fazer
+    // nada — sem confirmar e sem o "desistiu" de uma tela que já não existe.
+    // Antes, ficavam abertos por cima da tela de entrada (0.9.18, frente estab).
+    function fecharJanelinhas() {
+        dialogo.aoConfirmar = null
+        dialogo.close()
+        pedirGerente.desistiu = null
+        pedirGerente.depois = null
+        pedirGerente.close()
+    }
     // A tela de destino saiu por outro caminho (Início, trocar de usuário):
     // a guia acaba sem voltar e sem marcar nada.
     function abandonarGuia(g) {
@@ -399,25 +458,61 @@ ApplicationWindow {
         guia.esconder()
     }
 
+    // Caso 8 da navegação contextual (0.9.18): a faixa do modo seguro leva a
+    // Configurações › Simultaneidade › Backup. Só navega: escolher o backup,
+    // confirmar e digitar a senha do gerente continuam lá, como sempre; nada
+    // é restaurado nem apagado por aqui. Com Configurações já aberta (sem
+    // guia em andamento), só troca a parte dela, sem empilhar outra.
+    function irParaBackup() {
+        const atual = pilha.currentItem
+        if (atual && typeof atual.mostrarBackup === "function" && !atual.guia) {
+            atual.mostrarBackup()
+            return
+        }
+        abrir("TelaConfiguracoes", { secao: "backup", voltarPara: nomeDe(atual) })
+    }
+    // Como uma tela aparece no "voltar" da tela que ela abriu.
+    function nomeDe(tela) {
+        return tela && tela.nomeNaNavegacao ? tela.nomeNaNavegacao : "Voltar"
+    }
+
     // A3 (0.9.15): banco com defeito de integridade — modo seguro. A faixa
     // fica sempre à vista, em todas as telas; o núcleo recusa toda gravação.
     Rectangle {
         id: faixaModoSeguro
         visible: !!janela.estado.modoSeguro
         anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: visible ? textoModoSeguro.implicitHeight + 16 : 0
+        height: visible ? conteudoModoSeguro.implicitHeight + 16 : 0
         color: Tema.critico
         border.color: Tema.bordaCritico
         z: 1500
-        Text {
-            id: textoModoSeguro
+        GridLayout {
+            id: conteudoModoSeguro
             anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 12 }
-            text: "Modo seguro: o banco de dados deste caixa tem defeito e nada é gravado (vendas, recebimentos, estoque, caixa, troca de dados). Não continue a operar: restaure um backup bom em Configurações › Backup ou chame o suporte."
-            wrapMode: Text.WordWrap
-            color: Tema.vermelho
-            font.family: Tema.serifa
-            font.pixelSize: 15
-            font.bold: true
+            // No celular, o botão fica embaixo do texto.
+            columns: Tema.estreito ? 1 : 2
+            columnSpacing: 14
+            rowSpacing: 8
+            Text {
+                id: textoModoSeguro
+                text: "Modo seguro: o banco de dados deste caixa tem defeito e nada é gravado (vendas, recebimentos, estoque, caixa, troca de dados). Não continue a operar: restaure um backup bom em Configurações › Backup ou chame o suporte."
+                wrapMode: Text.WordWrap
+                color: Tema.vermelho
+                font.family: Tema.serifa
+                font.pixelSize: 15
+                font.bold: true
+                Layout.fillWidth: true
+            }
+            // Só com alguém dentro (na tela de entrada não há o que abrir).
+            Botao {
+                visible: !!janela.estado.usuario
+                text: "Restaurar um backup"
+                tipo: "secundario"
+                // Não tira o teclado da tela (o Esc continua voltando).
+                focusPolicy: Qt.NoFocus
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: janela.irParaBackup()
+            }
         }
     }
 
@@ -448,23 +543,18 @@ ApplicationWindow {
             NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
         }
 
-        // Esc volta (cada tela pode decidir antes, com a função aoEsc).
+        // Esc volta, pelo mesmo caminho da seta (cada tela pode decidir
+        // antes, com a função aoEsc).
         Keys.onEscapePressed: (evento) => {
-            const tela = pilha.currentItem
-            if (tela && typeof tela.aoEsc === "function")
-                tela.aoEsc()
-            else
-                janela.voltar()
+            janela.retornar(false)
             evento.accepted = true
         }
         // Android: o "voltar" do celular faz o mesmo que o Esc. Na primeira
         // tela, deixa o Android fechar o app (o backup é feito antes).
         Keys.onBackPressed: (evento) => {
             const tela = pilha.currentItem
-            if (tela && typeof tela.aoEsc === "function")
-                tela.aoEsc()
-            else if (pilha.depth > 1)
-                janela.voltar()
+            if ((tela && typeof tela.aoEsc === "function") || pilha.depth > 1)
+                janela.retornar(false)
             else {
                 evento.accepted = false
                 return
@@ -545,6 +635,11 @@ ApplicationWindow {
     // Ctrl+Shift+F12 escreve na saída cada texto que está na tela e onde
     // (sem senhas: os campos de senha dão os pontinhos). Sem a opção, nada.
     readonly property bool textosDaTela: Qt.application.arguments.indexOf("--textos-da-tela") >= 0
+    // A15 (0.9.18), também só com a opção dos testes: --celular desenha as
+    // telas como no celular (Tema.celular, numa tela virtual) e --medir-toque
+    // acrescenta a área de toque de cada controle (linhas TOQUE:) e o
+    // retângulo de cada texto (linhas RET:).
+    readonly property bool medirToque: textosDaTela && Qt.application.arguments.indexOf("--medir-toque") >= 0
     Shortcut {
         sequence: "Ctrl+Shift+F12"
         enabled: janela.textosDaTela
@@ -556,13 +651,25 @@ ApplicationWindow {
         function andar(item) {
             if (!item || !item.visible || item.opacity === 0)
                 return
-            // Sem texto (o quadrado de uma notificação): o nome acessível.
-            const t = item.displayText !== undefined ? item.displayText
-                    : item.text !== undefined ? item.text : item.nomeAcessivel
+            // Sem texto (o quadrado de uma notificação, a seta sozinha de uma
+            // janelinha): o nome acessível.
+            let t = item.displayText !== undefined ? item.displayText
+                  : item.text !== undefined ? item.text : item.nomeAcessivel
+            if ((typeof t !== "string" || t.trim() === "") && typeof item.nomeAcessivel === "string")
+                t = item.nomeAcessivel
             if (typeof t === "string" && t.trim() !== "") {
                 const p = item.mapToItem(null, item.width / 2, item.height / 2)
                 linhas.push(Math.round(p.x) + "\t" + Math.round(p.y) + "\t" + t.replace(/\s+/g, " ").trim())
             }
+            // Itens com nome (a seta de retorno, a busca da Início): onde estão
+            // e o tamanho, para os testes conferirem o lugar (0.9.18).
+            if (item.objectName !== "") {
+                const q = item.mapToItem(null, 0, 0)
+                linhas.push(Math.round(q.x + item.width / 2) + "\t" + Math.round(q.y + item.height / 2) + "\tGEO:"
+                            + item.objectName + ":" + [q.x, q.y, item.width, item.height].map(Math.round).join(","))
+            }
+            if (janela.medirToque)
+                medir(item, linhas)
             for (let i = 0; i < item.children.length; i++)
                 andar(item.children[i])
         }
@@ -578,6 +685,71 @@ ApplicationWindow {
         // confirmar que Fiscal → Loja reutiliza Configurações sem empilhar outra tela.
         linhas.push("0\t0\tTESTE_PILHA:" + pilha.depth)
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
+    }
+    // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas
+    // de marcar e listas (AbstractButton, ComboBox), campos de texto,
+    // MouseArea e TapHandler (com a margem dele). Uma linha por controle:
+    // TOQUE:tipo|componente|classe|nome|x,y,largura,altura|ativo, em pixels
+    // lógicos da janela (no celular, dp). E RET: o retângulo de cada texto
+    // (x,y,largura,altura,largura e altura do desenho,largura natural), para
+    // conferir que nada fica por cima dele nem o espreme.
+    function medir(item, linhas) {
+        function classe(o) {
+            return String(o).split("(")[0].replace(/(_QMLTYPE_\d+|_QML_\d+)+$/, "")
+        }
+        function componente(o) {
+            for (let p = o; p; p = p.parent) {
+                const c = classe(p)
+                if (!c.startsWith("QQuick") && !c.startsWith("QObject"))
+                    return c
+            }
+            return classe(o)
+        }
+        function nome(o, fundo) {
+            let t = typeof o.text === "string" ? o.text : ""
+            if (t.trim() === "" && typeof o.nomeAcessivel === "string")
+                t = o.nomeAcessivel
+            if (t.trim() === "" && typeof o.displayText === "string")
+                t = o.displayText
+            if (t.trim() === "" && fundo > 0)
+                for (let i = 0; i < o.children.length && t.trim() === ""; i++)
+                    if (o.children[i].visible)
+                        t = nome(o.children[i], fundo - 1)
+            return t.replace(/[\s|]+/g, " ").trim()
+        }
+        function linha(tipo, o, dono, margem) {
+            if (o.width <= 0 || o.height <= 0)
+                return
+            const q = o.mapToItem(null, -margem, -margem)
+            const w = o.width + 2 * margem, h = o.height + 2 * margem
+            linhas.push(Math.round(q.x + w / 2) + "\t" + Math.round(q.y + h / 2) + "\tTOQUE:" + tipo + "|"
+                        + componente(dono) + "|" + classe(dono) + "|" + (nome(dono, 4) || "-") + "|"
+                        + [q.x, q.y, w, h].map(v => Math.round(v * 10) / 10).join(",") + "|" + (o.enabled ? 1 : 0))
+        }
+        let tipo = ""
+        if (item.autoRepeat !== undefined && item.checkable !== undefined)
+            tipo = "botao"
+        else if (item.currentIndex !== undefined && item.popup !== undefined && item.displayText !== undefined)
+            tipo = "lista"
+        else if (item.pressAndHoldInterval !== undefined && item.acceptedButtons !== undefined)
+            tipo = item.enabled ? "mousearea" : ""
+        else if (item.cursorPosition !== undefined && item.readOnly === false)
+            tipo = "campo"
+        if (tipo !== "")
+            linha(tipo, item, tipo === "mousearea" && item.parent ? item.parent : item, 0)
+        const rs = item.resources
+        for (let k = 0; rs && k < rs.length; k++) {
+            const h = rs[k]
+            if (h && h.gesturePolicy !== undefined && h.tapCount !== undefined && h.enabled)
+                linha("tap", item, item, h.margin || 0)
+        }
+        if (item.contentWidth !== undefined && item.horizontalAlignment !== undefined && item.font !== undefined
+                && item.cursorPosition === undefined && typeof item.text === "string" && item.text.trim() !== "") {
+            const q = item.mapToItem(null, 0, 0)
+            linhas.push(Math.round(q.x + item.width / 2) + "\t" + Math.round(q.y + item.height / 2) + "\tRET:"
+                        + [q.x, q.y, item.width, item.height, item.contentWidth, item.contentHeight, item.implicitWidth].map(v => Math.round(v * 10) / 10).join(",")
+                        + "|" + item.horizontalAlignment + "|" + componente(item) + "|" + item.text.replace(/[\s|]+/g, " ").trim())
+        }
     }
 
     Aviso { id: aviso }
@@ -643,6 +815,7 @@ ApplicationWindow {
             height: colunaEspera.implicitHeight + 48
             radius: Tema.raio + 3
             color: Tema.pergaminho
+            palette.window: Tema.superficie(color)
             ColumnLayout {
                 id: colunaEspera
                 x: 24
@@ -758,6 +931,9 @@ ApplicationWindow {
             if (atual.startsWith("TelaEntrar") || atual.startsWith("TelaBoasVindas"))
                 return
             janela.voltandoParaEntrada = true
+            // A guia acaba já: a tela que recebeu a recusa não mostra mais
+            // "Não foi salvo" na faixa, que iria junto para a entrada.
+            janela.largarGuia()
             Qt.callLater(() => {
                 Tema.oculto = true
                 janela.atualizarEstado()
@@ -791,6 +967,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (textosDaTela && Qt.application.arguments.indexOf("--celular") >= 0)
+            Tema.simularCelular = true
         marcarDiagnostico("Main.qml: início")
         janela.showMaximized()
         abrirBanco()

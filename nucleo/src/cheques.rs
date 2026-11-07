@@ -8,7 +8,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::receber::{self, dias_entre, iso, ler_iso, mais_meses, LancamentoEntrada};
+use crate::receber::{self, LancamentoEntrada};
+use crate::tempo::{dias_entre, iso, ler_iso, mais_meses};
 use crate::{auditoria, fiscal, numeros, tempo, texto};
 
 /// Máximo de cheques de uma vez.
@@ -65,7 +66,7 @@ pub fn previa(conn: &Connection, valor: i64, e: &ChequesEntrada) -> Resultado<Ve
     let primeiro = fiscal::ler_data(&e.primeiro_bom_para).map_err(|m| Erro::campo("chequeBomPara", m))?.unwrap_or(hoje);
     let inicio = ler_iso(&primeiro)?;
     let numero: String = texto::limpar(&e.numero).chars().filter(|c| !c.is_whitespace()).take(20).collect();
-    Ok(receber::parcelar(inicio, inicio.day(), valor, n)
+    Ok(tempo::parcelar(inicio, inicio.day(), valor, n)
         .into_iter()
         .enumerate()
         .map(|(i, (data, v))| ChequePrevia {
@@ -541,6 +542,124 @@ pub fn do_dia(conn: &Connection) -> Resultado<(i64, i64)> {
         [hoje],
         |l| Ok((l.get(0)?, l.get(1)?)),
     )?)
+}
+
+// Cálculo dos cheques de uma venda ou recebimento (veio de `vendas` na etapa 4
+// da modularização: o crediário também calcula e não precisa depender da venda).
+
+/// O que vai em cheque nesta venda (ou recebimento).
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChequesCalculo {
+    pub valor: String,
+    pub cheques: Vec<ChequePrevia>,
+    pub erro: String,
+    pub campo: String,
+    #[serde(skip)]
+    pub v_valor: i64,
+}
+
+pub fn calcular_cheques(conn: &Connection, valor: i64, e: &ChequesEntrada) -> Resultado<ChequesCalculo> {
+    let mut c = ChequesCalculo { valor: numeros::escrever_dinheiro(valor), v_valor: valor, ..Default::default() };
+    if valor == 0 {
+        return Ok(c);
+    }
+    match previa(conn, valor, e).and_then(|l| conferir(e).map(|_| l)) {
+        Ok(l) => c.cheques = l,
+        Err(Erro::Validacao { campo, mensagem }) => {
+            if let Ok(l) = previa(conn, valor, e) {
+                c.cheques = l;
+            }
+            c.erro = mensagem;
+            c.campo = campo.unwrap_or_default();
+        }
+        Err(outro) => return Err(outro),
+    }
+    Ok(c)
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos dos cheques (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Filtro, Pedido};
+    use crate::erro::{Erro, Resultado};
+    use crate::{cheques, numeros};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "cheques_painel", classe: Classe::ConsultaDoGerente("financeiro"), funcao: cheques_painel },
+        Comando { nome: "cheques_previa", classe: Classe::Leitura, funcao: cheques_previa },
+        Comando { nome: "cheque_depositar", classe: Classe::Gerente("financeiro"), funcao: cheque_depositar },
+        Comando { nome: "cheque_repassar", classe: Classe::Gerente("financeiro"), funcao: cheque_repassar },
+        Comando { nome: "cheque_devolver", classe: Classe::Gerente("financeiro"), funcao: cheque_devolver },
+        Comando { nome: "cheque_desfazer", classe: Classe::Gerente("estornar"), funcao: cheque_desfazer },
+    ];
+
+    fn cheques_painel(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(cheques::painel(p.conn, &d.texto, &d.quais)?))
+    }
+
+    fn cheques_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ChequesPrevia = ler(dados)?;
+        let valor = numeros::ler_dinheiro(&d.valor).map_err(|m| Erro::campo("valor", m))?.unwrap_or(0);
+        Ok(json!(cheques::previa(p.conn, valor, &d.cheques)?))
+    }
+
+    fn cheque_depositar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ChequeAcao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        cheques::depositar(&tx, p.disp, p.usuario_id, &d.id, &d.conta)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn cheque_repassar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ChequeAcao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        cheques::repassar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn cheque_devolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ChequeAcao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        cheques::devolver(&tx, p.disp, p.usuario_id, &d.id, &d.motivo, d.divida)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn cheque_desfazer(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: ChequeAcao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        cheques::desfazer(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct ChequeAcao {
+        id: String,
+        conta: String,
+        motivo: String,
+        divida: bool,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default, rename_all = "camelCase")]
+    struct ChequesPrevia {
+        valor: String,
+        #[serde(flatten)]
+        cheques: crate::cheques::ChequesEntrada,
+    }
 }
 
 #[cfg(test)]

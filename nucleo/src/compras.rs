@@ -1518,6 +1518,131 @@ pub(crate) fn liberar_para_teste(c: &Connection, d: &str, id: &str) {
     registrar_conferencia(c, d, &g, &conf).unwrap();
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos das compras (notas de entrada) (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::erro::{Erro, Resultado};
+    use crate::{arquivos, compras};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "compras_listar", classe: Classe::Leitura, funcao: compras_listar },
+        Comando { nome: "compra_importar", classe: Classe::Caixa, funcao: compra_importar },
+        Comando { nome: "compra_abrir", classe: Classe::Leitura, funcao: compra_abrir },
+        Comando { nome: "compra_atualizar", classe: Classe::Caixa, funcao: compra_atualizar },
+        Comando { nome: "compra_lancar", classe: Classe::Caixa, funcao: compra_lancar },
+        Comando { nome: "compra_estornar", classe: Classe::Gerente("estornar"), funcao: compra_estornar },
+        Comando { nome: "compra_descartar", classe: Classe::Caixa, funcao: compra_descartar },
+    ];
+
+    fn compras_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: BuscaProdutos = ler(dados)?;
+        Ok(json!(compras::listar(p.conn, &d.texto, d.limite.unwrap_or(300))?))
+    }
+
+    // Um arquivo escolhido: um XML, um .zip ou .rar com várias notas,
+    // ou uma pasta. Cada nota vira uma compra; o que falhar vem em "erros".
+    fn compra_importar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Arquivo = ler(dados)?;
+        if d.caminho.trim().is_empty() {
+            return Err(Erro::validacao("Escolha o arquivo XML da nota."));
+        }
+        // 0.9.17: sem o CNPJ da loja (ou com um inválido) não importa:
+        // a tela leva a Configurações › Loja e volta com os arquivos.
+        crate::requisitos::exigir_cnpj_da_loja(p.conn, crate::requisitos::PARA_COMPRAS)?;
+        let lista = arquivos::xmls(std::slice::from_ref(&d.caminho))?;
+        let pacote = lista.len() > 1 || lista.iter().any(|x| x.nome.contains(" › "));
+        let mut fichas = Vec::new();
+        let mut erros = Vec::new();
+        // Notas emitidas para outro CNPJ: não entram; a tela mostra a
+        // janela de conflito para conferir ou descartar.
+        let mut conflitos = Vec::new();
+        for x in lista {
+            if !x.erro.is_empty() {
+                erros.push(format!("{}: {}", x.nome, x.erro));
+                continue;
+            }
+            let tx = p.conn.transaction()?;
+            match compras::importar_xml(&tx, p.disp, p.usuario_id, &x.texto) {
+                Ok(id) => {
+                    tx.commit()?;
+                    fichas.push(compras::ficha(p.conn, &id)?);
+                }
+                // Dentro de um pacote, eventos (cancelamento, carta de
+                // correção) e outros XMLs que não são nota são pulados.
+                Err(e)
+                    if pacote
+                        && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"]
+                            .iter()
+                            .any(|t| e.to_string().contains(t)) => {}
+                Err(e) if e.nome_do_campo() == Some(compras::CAMPO_OUTRO_CNPJ) => {
+                    conflitos.push(compras::conflito_cnpj(&tx, &x.nome, &x.texto)?);
+                }
+                Err(e) => erros.push(format!("{}: {e}", x.nome)),
+            }
+        }
+        if fichas.is_empty() && erros.is_empty() && conflitos.is_empty() {
+            return Err(Erro::validacao("Não achei nenhuma NF-e nesse arquivo."));
+        }
+        Ok(json!({ "compras": fichas, "erros": erros, "conflitos": conflitos }))
+    }
+
+    fn compra_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(compras::ficha(p.conn, &d.id)?))
+    }
+
+    fn compra_atualizar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: compras::CompraEntrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        compras::atualizar(&tx, &d)?;
+        tx.commit()?;
+        Ok(json!(compras::ficha(p.conn, &d.id)?))
+    }
+
+    fn compra_lancar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: compras::CompraEntrada = ler(dados)?;
+        // 0915-N / D-09: a compra que muda o preço de venda de uma
+        // peça já cadastrada ("os preços seguem o % de lucro") é do
+        // gerente, como no cadastro. Confere antes (sem efeito) e
+        // decide depois de saber se algum preço mudou: sem a senha,
+        // nada é lançado (a transação volta inteira).
+        let sem_precos = p.exigir("precos").err();
+        let tx = p.conn.transaction()?;
+        compras::atualizar(&tx, &d)?;
+        let r = compras::lancar(&tx, p.disp, p.usuario_id, &d.id)?;
+        if r.precos_atualizados > 0 {
+            if let Some(e) = sem_precos {
+                return Err(e);
+            }
+        }
+        tx.commit()?;
+        Ok(json!({ "resumo": r, "compra": compras::ficha(p.conn, &d.id)? }))
+    }
+
+    fn compra_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        compras::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(json!(compras::ficha(p.conn, &d.id)?))
+    }
+
+    fn compra_descartar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        compras::excluir_rascunho(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

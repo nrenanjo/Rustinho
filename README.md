@@ -30,7 +30,7 @@ Na página [**Releases**](https://github.com/nrenanjo/Rustinho/releases), na ver
 
 1. Nome da loja, nome deste computador (ex.: Caixa 1) e o seu usuário com senha.
 2. Em **Configurações → Loja**, preencha o CNPJ e o estado.
-3. Em **Configurações → Backup**, crie a senha do backup (anote num papel) e, se quiser, conecte o Google Drive.
+3. Em **Configurações → Backup**, se quiser, conecte o Google Drive. As cópias saem sempre trancadas; para restaurar, o Rustinho pede a senha de um gerente (use uma senha forte, de 8 ou mais letras e números).
 4. Outros caixas: na primeira vez, escolha **"Já uso o Rustinho em outro caixa da loja"** e use a mesma senha da rede.
 
 O [**Manual**](MANUAL.md) explica cada parte.
@@ -40,7 +40,7 @@ O [**Manual**](MANUAL.md) explica cada parte.
 Precisa de Rust (stable) e Qt 6 (qtbase e qtdeclarative).
 
     ./compilar.sh      # Linux: mostra o que falta instalar, compila e deixa ./rustinho
-    cargo test -p rustinho-nucleo
+    cargo test -p rustinho-base -p rustinho-nucleo
 
 A cada envio para a `main`, o GitHub monta o instalador do Windows, o AppImage (`.github/workflows/montar.yml`) e o APK do Android (`.github/workflows/android.yml`, Qt for Android + CMake). Quando a versão do `Cargo.toml` é nova, os três vão para Releases.
 

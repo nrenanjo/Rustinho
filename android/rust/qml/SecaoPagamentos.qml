@@ -60,7 +60,9 @@ FocusScope {
                 model: secao.dados ? secao.dados.itens : []
                 delegate: LinhaRanking {
                     required property var modelData
+                    required property int index
                     item: modelData
+                    indice: index
                 }
             }
             Nota {

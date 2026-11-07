@@ -135,14 +135,29 @@ FocusScope {
                 }
                 Repeater {
                     model: tela.sync ? tela.sync.pares : []
-                    delegate: Text {
+                    delegate: Rectangle {
+                        id: faixaDaLista
                         required property var modelData
-                        text: (modelData.nome || "Caixa") + " (" + modelData.endereco + ")" + (modelData.erro ? " · " + modelData.erro : "")
-                        color: modelData.erro ? Tema.vermelho : Tema.tinta
-                        font.family: Tema.texto
-                        font.pixelSize: 15
-                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
+                        required property int index
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                        palette.window: Tema.superficie(color)
+                        radius: Tema.raioCampo
+                        implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                        implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                        Text {
+                            id: conteudoDaFaixa
+                            x: 8
+                            y: 4
+                            width: faixaDaLista.width - 16
+                            text: (modelData.nome || "Caixa") + " (" + modelData.endereco + ")" + (modelData.erro ? " · " + modelData.erro : "")
+                            color: modelData.erro ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaDaFaixa(faixaDaLista.par)
+                            font.family: Tema.texto
+                            font.pixelSize: 15
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
             }

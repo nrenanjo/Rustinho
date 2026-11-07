@@ -35,6 +35,55 @@ ColumnLayout {
     readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
+    // Busca da Início (0.9.18, D-V6, como nas imagens aprovadas): colar à
+    // esquerda e copiar à direita, dentro do campo (no lugar da lupa); o
+    // atalho F11 fica fora do campo (na Início).
+    property bool colarCopiar: false
+    readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
+    // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
+    // busca escura do Planeta Roxo (campo com a lupa).
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
+    readonly property bool buscaEscura: Tema.roxo && (icone === "busca" || colarCopiar)
+    readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : buscaEscura ? Tema.buscaFundo : Tema.papel
+
+    // Botão redondo dentro do campo (colar e copiar da busca da Início):
+    // área de toque de 40 × 40 px (48 × 48 dp no celular).
+    component BotaoInterno: Rectangle {
+        id: botaoInterno
+        property string nome: ""
+        property string dica: ""
+        property color fundo: Tema.papel
+        property real lado: 40
+        // Para leitores de tela e para os testes das telas (--textos-da-tela).
+        readonly property string nomeAcessivel: dica
+        signal acionado()
+        width: lado
+        height: lado
+        radius: height / 2
+        anchors.verticalCenter: parent.verticalCenter
+        color: toque.pressed ? Tema.sombraNo(0.13, fundo) : toque.containsMouse ? Tema.sombraNo(0.07, fundo) : "transparent"
+        Icone {
+            anchors.centerIn: parent
+            nome: botaoInterno.nome
+            tamanho: 22
+            cor: Tema.tintaSuaveNo(botaoInterno.fundo)
+        }
+        // MouseArea (e não TapHandler): fica com o toque só para si, sem o
+        // campo de texto embaixo roubar o toque para abrir o teclado.
+        MouseArea {
+            id: toque
+            anchors.fill: parent
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: botaoInterno.acionado()
+        }
+        ToolTip.visible: toque.containsMouse && !Tema.celular
+        ToolTip.delay: 600
+        ToolTip.text: dica
+        Accessible.role: Accessible.Button
+        Accessible.name: dica
+    }
 
     signal editado()
     signal confirmado()
@@ -62,6 +111,31 @@ ColumnLayout {
     function focarCursor() {
         if (podeFocar())
             entrada.forceActiveFocus()
+    }
+
+    // Os botões da busca da Início. Colar troca o texto da busca pelo que
+    // foi copiado; copiar leva o texto da busca inteiro.
+    function colar() {
+        entrada.forceActiveFocus()
+        entrada.selectAll()
+        entrada.paste()
+        campo.erro = ""
+        campo.editado()
+    }
+    function copiar() {
+        const janela = ApplicationWindow.window
+        if (entrada.text === "") {
+            if (janela)
+                janela.avisar("A busca está vazia: nada para copiar.", "info")
+            return
+        }
+        const de = entrada.selectionStart
+        const ate = entrada.selectionEnd
+        entrada.selectAll()
+        entrada.copy()
+        entrada.select(de, ate)
+        if (janela)
+            janela.avisar("Copiado: " + entrada.text, "ok")
     }
 
     function semAcento(s) {
@@ -113,20 +187,29 @@ ColumnLayout {
     Rotulo {
         text: campo.rotulo
         visible: text !== ""
-        color: campo.erro !== "" ? Tema.vermelho : Tema.apagado
+        color: campo.erro !== "" ? Tema.vermelhoNo(campo.superficie) : Tema.apagadoNo(campo.superficie)
         Layout.fillWidth: true
         Layout.preferredWidth: 1
     }
 
     TextField {
         id: entrada
+        // Para os testes das telas (--textos-da-tela): onde está a busca.
+        objectName: campo.colarCopiar ? "buscaDaInicio" : campo.icone === "busca" ? "campoDeBusca" : ""
         Layout.fillWidth: true
         implicitWidth: 120
-        implicitHeight: campo.altura
+        // A15 (0.9.18): no celular, a área de toque do campo tem pelo menos
+        // 48 dp de altura (Tema.toqueMinimo); o desenho do campo fica da
+        // altura de sempre (campo.altura), no meio. No computador, igual.
+        implicitHeight: Math.max(campo.altura, Tema.toqueMinimo)
+        topInset: (implicitHeight - campo.altura) / 2
+        bottomInset: topInset
         font.family: Tema.texto
         font.pixelSize: campo.tamanhoFonte
-        color: Tema.tinta
-        placeholderTextColor: Tema.dica
+        color: Tema.tintaNo(campo.corDoCampo)
+        placeholderTextColor: campo.buscaEscura ? Tema.roxoTintaSuaveClara : Tema.dica
+        // O que fica dentro do campo (o atalho "F11") sabe a cor embaixo.
+        palette.window: Tema.superficie(campo.corDoCampo)
         selectionColor: Tema.azulEscuro
         selectedTextColor: Tema.claro
         echoMode: campo.senha || campo.escondido ? TextInput.Password : TextInput.Normal
@@ -135,10 +218,12 @@ ColumnLayout {
         verticalAlignment: TextInput.AlignVCenter
         readOnly: campo.somenteLeitura
         maximumLength: campo.maximo
-        leftPadding: (campo.icone !== "" ? 48 : 12) + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
+        leftPadding: (campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12)
+                     + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
                       + (campo.comBotao ? 44 : 0)
+                      + (campo.colarCopiar ? campo.ladoBotaoInterno : 0)
         selectByMouse: true
         // Celular: sem "texto previsto" (o teclado manda cada letra direto;
         // evita letras trocadas de lugar). Números quando o campo é de número.
@@ -148,19 +233,40 @@ ColumnLayout {
 
         background: Rectangle {
             radius: Tema.raioCampo
-            color: campo.somenteLeitura ? Tema.vela(0.28) : Tema.papel
-            border.width: campo.erro !== "" || entrada.activeFocus ? 2 : 0
-            border.color: campo.erro !== "" ? Tema.vermelho : Tema.azulEscuro
+            color: campo.corDoCampo
+            border.width: campo.erro !== "" || entrada.activeFocus || campo.buscaEscura ? 2 : 0
+            border.color: campo.erro !== "" ? Tema.vermelhoNo(campo.corDoCampo) : campo.buscaEscura ? Tema.buscaBorda : Tema.azulEscuro
         }
 
         Icone {
-            visible: campo.icone !== ""
+            visible: campo.icone !== "" && !campo.colarCopiar
             nome: campo.icone
             tamanho: 22
-            cor: Tema.apagado
+            cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado
             anchors.left: parent.left
             anchors.leftMargin: 15
             anchors.verticalCenter: parent.verticalCenter
+        }
+        // Colar (à esquerda) e copiar (à direita), na busca da Início.
+        BotaoInterno {
+            visible: campo.colarCopiar
+            nome: "colar"
+            dica: "Colar na busca"
+            fundo: campo.corDoCampo
+            lado: campo.ladoBotaoInterno
+            anchors.left: parent.left
+            anchors.leftMargin: 6
+            onAcionado: campo.colar()
+        }
+        BotaoInterno {
+            visible: campo.colarCopiar
+            nome: "copiar"
+            dica: "Copiar a busca"
+            fundo: campo.corDoCampo
+            lado: campo.ladoBotaoInterno
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            onAcionado: campo.copiar()
         }
         Rectangle {
             visible: campo.comBotao
@@ -175,7 +281,7 @@ ColumnLayout {
                 anchors.centerIn: parent
                 nome: campo.comCamera ? "camera" : campo.acao
                 tamanho: 24
-                cor: Tema.tinta
+                cor: Tema.tintaNo(campo.corDoCampo)
             }
             // MouseArea (e não TapHandler): fica com o toque só para si, sem o
             // campo de texto embaixo roubar o toque para abrir o teclado.
@@ -211,9 +317,9 @@ ColumnLayout {
             text: campo.prefixo
             visible: text !== ""
             anchors.left: parent.left
-            anchors.leftMargin: campo.icone !== "" ? 48 : 12
+            anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagado
+            color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }
@@ -224,7 +330,7 @@ ColumnLayout {
             anchors.right: parent.right
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagado
+            color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }
@@ -285,7 +391,7 @@ ColumnLayout {
     Text {
         text: campo.erro
         visible: text !== ""
-        color: Tema.vermelho
+        color: Tema.vermelhoNo(campo.superficie)
         font.family: Tema.texto
         font.pixelSize: 14
         wrapMode: Text.WordWrap
@@ -295,7 +401,8 @@ ColumnLayout {
 
     Popup {
         id: lista
-        y: entrada.y + entrada.height + 4
+        // Logo abaixo do desenho do campo (no celular, a área de toque é maior).
+        y: entrada.y + (entrada.height + campo.altura) / 2 + 4
         x: entrada.x
         width: Math.max(entrada.width, 220)
         padding: 4
@@ -316,7 +423,8 @@ ColumnLayout {
                 required property var modelData
                 required property int index
                 width: vista.width
-                height: 34
+                // A15: no celular, cada sugestão com 48 dp de altura.
+                height: Math.max(34, Tema.toqueMinimo)
                 text: modelData
                 font.family: Tema.texto
                 font.pixelSize: 15

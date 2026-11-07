@@ -956,6 +956,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         saida.sync_all().map_err(|e| erro_pasta(&a.pasta, e))?;
     }
     std::fs::rename(&parcial, &destino).map_err(|e| erro_pasta(&a.pasta, e))?;
+    gravar_pasta(&a.pasta);
     let tamanho = std::fs::metadata(&destino).map(|m| m.len() as i64).unwrap_or(0);
 
     // 4. Conferir lendo de volta do disco.
@@ -990,6 +991,19 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     }
 
     Ok(Feito { arquivo: destino.display().to_string(), tamanho })
+}
+
+/// Garante que o nome de um arquivo criado ou renomeado na pasta chegou ao
+/// disco (0.9.18): o `sync_all` do arquivo guarda o conteúdo, mas, em vários
+/// sistemas de arquivos, a entrada da pasta só com o da pasta. No Windows a
+/// pasta não abre assim; fica o que o sistema garante.
+fn gravar_pasta(pasta: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(pasta) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = pasta;
 }
 
 fn nomes_na_pasta(pasta: &Path) -> Vec<String> {
@@ -1151,8 +1165,9 @@ pub fn esta_na_hora(conn: &Connection, caminho_db: Option<&Path>) -> Resultado<b
 /// Faz o que estiver pendente: o backup do dia e o envio para o Google
 /// Drive. Roda em segundo plano (a tela chama de tempos em tempos).
 pub fn automatico(caminho_db: PathBuf) {
-    // A3: banco com defeito (modo seguro): nada automático.
-    if banco::defeito(&caminho_db).is_some() {
+    // A3: banco com defeito (modo seguro): nada automático. Nem com o banco
+    // trocado por uma restauração que não terminou (0.9.18).
+    if banco::defeito(&caminho_db).is_some() || banco::restauracao_pela_metade(&caminho_db) {
         return;
     }
     std::thread::spawn(move || {
@@ -1191,8 +1206,10 @@ pub fn agora(caminho_db: PathBuf) -> Resultado<()> {
 /// Ao fechar o Rustinho: cópia no computador (espera terminar), se a última
 /// tem mais de meia hora. O Drive fica para a próxima vez que abrir.
 pub fn ao_fechar(caminho_db: &Path) -> Resultado<bool> {
-    // A3: banco com defeito (modo seguro): não faz cópia ao fechar.
-    if banco::defeito(caminho_db).is_some() {
+    // A3: banco com defeito (modo seguro): não faz cópia ao fechar. Nem do
+    // banco trocado por uma restauração que não terminou (0.9.18): ela
+    // termina ao abrir, e só então o banco é o da loja de novo.
+    if banco::defeito(caminho_db).is_some() || banco::restauracao_pela_metade(caminho_db) {
         return Ok(false);
     }
     // Se um backup está no meio, espera ele acabar (até 2 minutos).
@@ -1402,8 +1419,61 @@ fn nomes_na_nuvem() -> Resultado<Vec<(String, i64)>> {
     }
 }
 
+/// Cópias que ESTE computador mandou para o Drive e ainda estão lá (0.9.18),
+/// uma por linha. Configuração local: não vai para a troca de dados (não está
+/// em `sync::CONFIG_DA_LOJA`) e fica como está ao restaurar um backup.
+const ENVIADAS_AO_DRIVE: &str = "backup_nuvem_enviadas";
+
+fn enviadas_ao_drive(conn: &Connection) -> Resultado<Vec<String>> {
+    Ok(config::ler(conn, ENVIADAS_AO_DRIVE)?
+        .map(|t| t.lines().filter(|l| ler_nome(l).is_some()).map(String::from).collect())
+        .unwrap_or_default())
+}
+
+/// Quais cópias do Drive este computador apaga (0.9.18): só as que ele mesmo
+/// mandou (`minhas`), pela regra de `para_apagar`. A pasta do Drive é a mesma
+/// para todos os computadores da conta do Google — os outros caixas da loja,
+/// outra loja na mesma conta, um Rustinho portátil de teste — e o nome do
+/// caixa no arquivo pode se repetir ("Caixa 1"): antes, cada computador
+/// aplicava a sua retenção a tudo o que estava lá e apagava cópias dos
+/// outros. Cópia que não se sabe de quem é fica.
+pub fn apagar_no_drive(la: &[String], minhas: &[String], hoje: &str, dias: i64) -> Vec<String> {
+    let minhas_la: Vec<String> = la.iter().filter(|n| minhas.contains(n)).cloned().collect();
+    para_apagar(&minhas_la, hoje, dias)
+}
+
+/// Tamanho e resumo MD5 de um arquivo, pelo rclone (D3, 0.9.18): no
+/// computador, o rclone lê o arquivo; no Google Drive, é o resumo que o
+/// próprio Drive calculou do que guardou.
+fn tamanho_e_md5(caminho: &str) -> Resultado<(i64, String)> {
+    let saida = rclone(
+        &["lsf", "--files-only", "--format", "sh", "--hash", "MD5", "--separator", "|", caminho],
+        Duration::from_secs(600),
+    )?;
+    saida
+        .lines()
+        .find_map(|l| {
+            let (t, h) = l.split_once('|')?;
+            Some((t.trim().parse().ok()?, h.trim().to_ascii_lowercase()))
+        })
+        .ok_or_else(|| Erro::validacao("Não deu para conferir a cópia no Google Drive."))
+}
+
+/// Configuração local com a última cópia conferida no Drive (D3, 0.9.18):
+/// nome, tamanho, MD5 e quando. Como `ENVIADAS_AO_DRIVE`, é deste computador.
+const CONFERIDA_NO_DRIVE: &str = "backup_nuvem_confirmada";
+
 /// Manda para o Drive a cópia mais nova que ainda não está lá e apaga as
-/// antigas de lá. Só cópias com senha vão para a nuvem.
+/// antigas de lá que este computador mandou. Só cópias com senha vão para a
+/// nuvem.
+///
+/// D3 (aprovada em 24/10/2026): a cópia só conta como guardada depois de o
+/// Rustinho conferir a que ficou lá — o tamanho e o MD5 (calculado pelo
+/// Drive) iguais aos da cópia daqui — e anotar a conferência. Uma cópia com
+/// o mesmo nome e outro conteúdo (um envio que parou no meio, uma cópia
+/// estragada) é mandada de novo. Sem a conferência, nada conta: fica o erro
+/// na tela, a hora do último envio não muda e as cópias antigas de lá não
+/// são apagadas.
 fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
     let a = ajustes(conn, Some(caminho_db))?;
     if !a.nuvem {
@@ -1417,22 +1487,64 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
                 "Um gerente precisa entrar no Rustinho antes: sem a chave da loja nada vai para o Google Drive.",
             ));
         }
+        let daqui = tamanho_e_md5(&c.caminho)?;
+        let remoto = format!("{}/{}", base_nuvem(), c.nome);
         let la = nomes_na_nuvem()?;
-        if !la.iter().any(|(n, _)| *n == c.nome) {
+        let mut minhas = enviadas_ao_drive(conn)?;
+        let enviar = || -> Resultado<()> {
             dizer("Enviando para o Google Drive…");
-            rclone(
-                &["copyto", "--retries", "3", &c.caminho, &format!("{}/{}", base_nuvem(), c.nome)],
-                Duration::from_secs(1800),
-            )?;
+            // Pelo resumo (não pela data): uma cópia de lá com o mesmo
+            // tamanho e a mesma data, mas estragada, também é trocada.
+            rclone(&["copyto", "--checksum", "--retries", "3", &c.caminho, &remoto], Duration::from_secs(1800))
+                .map(|_| ())
+        };
+        // Lá só com o mesmo nome e o mesmo tamanho não precisa mandar agora;
+        // a conferência abaixo decide se é a mesma cópia.
+        let mut enviou = false;
+        if !la.iter().any(|(n, t)| *n == c.nome && *t == daqui.0) {
+            enviar()?;
+            enviou = true;
         }
+        // A de lá, pelo que o próprio Drive diz dela (falta de internet aqui
+        // é erro, não "diferente").
+        let conferir = || -> Resultado<bool> { Ok(!daqui.1.is_empty() && tamanho_e_md5(&remoto)? == daqui) };
+        let mut conferida = conferir()?;
+        if !conferida && !enviou {
+            enviar()?;
+            conferida = conferir()?;
+        }
+        // Mandada por este computador (conferida ou não): é dele para a
+        // retenção apagar um dia.
+        if !minhas.contains(&c.nome) {
+            minhas.push(c.nome.clone());
+        }
+        if !conferida {
+            config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
+            return Err(Erro::validacao(
+                "A cópia no Google Drive não confere com a deste computador (tamanho ou conteúdo diferente): ela \
+                 não conta como guardada. O Rustinho manda de novo no próximo envio.",
+            ));
+        }
+        config::gravar(
+            conn,
+            CONFERIDA_NO_DRIVE,
+            &json!({ "nome": c.nome, "tamanho": daqui.0, "md5": daqui.1, "quando": tempo::agora() }).to_string(),
+        )?;
         let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
         let mut nomes: Vec<String> = la.into_iter().map(|x| x.0).collect();
         if !nomes.contains(&c.nome) {
             nomes.push(c.nome.clone());
         }
-        for velho in para_apagar(&nomes, &hoje, a.dias) {
-            let _ = rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60));
+        for velho in apagar_no_drive(&nomes, &minhas, &hoje, a.dias) {
+            // Se não deu para apagar agora, continua na lista: tenta de novo
+            // no próximo envio.
+            if rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60)).is_ok() {
+                minhas.retain(|n| *n != velho);
+            }
         }
+        // Só as que continuam lá (as apagadas por outro caminho saem da lista).
+        minhas.retain(|n| nomes.contains(n));
+        config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
         Ok(())
     })();
     match &r {
@@ -1482,10 +1594,22 @@ pub fn restaurar(
     nuvem: bool,
     senha: &str,
 ) -> Resultado<Info> {
+    restaurar_por(conn, caminho_db, arquivo, nuvem, senha, None)
+}
+
+/// Como `restaurar`, registrando na auditoria quem restaurou (M-04, 0.9.18):
+/// o registro vai na mesma transação que termina a restauração — também
+/// quando ela termina ao abrir, depois de uma queda —, nunca depois dela.
+pub fn restaurar_por(
+    conn: &mut Connection,
+    caminho_db: Option<&Path>,
+    arquivo: &str,
+    nuvem: bool,
+    senha: &str,
+    usuario_id: Option<&str>,
+) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…")
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
-    // A troca de dados com os outros caixas espera a restauração terminar.
-    let _pausa = sync::pausar();
     let tmp = Temporaria::nova(&std::env::temp_dir())?;
 
     let local = if nuvem {
@@ -1518,6 +1642,14 @@ pub fn restaurar(
         return Err(Erro::validacao("Esse backup é de uma versão mais nova do Rustinho. Atualize o Rustinho antes."));
     }
 
+    // A troca de dados com os outros caixas para daqui até o fim (0.9.18):
+    // baixar do Drive (até meia hora) e conferir o backup só leem o arquivo
+    // dele e não precisam pará-la. Daqui em diante, nada da troca de dados
+    // grava neste banco: a cópia de antes é exatamente o banco que sai, e o
+    // que é deste computador (contadores da troca, numeração) é lido e posto
+    // de volta sem ninguém mexer no meio.
+    let _pausa = sync::pausar();
+
     // Cópia do que existe agora, por segurança.
     if let Some(c) = caminho_db {
         dizer("Guardando uma cópia de agora…");
@@ -1529,15 +1661,27 @@ pub fn restaurar(
     }
 
     // O que é deste computador fica como está.
-    let pendente = Pendente::ler(conn)?;
+    let mut pendente = Pendente::ler(conn)?;
+    // Marca dentro do banco que vai entrar (chave deste computador, que não
+    // vai para os outros caixas e sai ao terminar): depois de uma queda, ela
+    // diz se o banco chegou a ser trocado.
+    pendente.troca = tempo::novo_id();
+    pendente.auditoria = usuario_id.map(|u| (u.to_string(), info.quando.clone()));
+    marcar_banco_que_entra(&db, &pendente.troca)?;
     // D-08: anota ao lado do banco o que é deste computador ANTES de trocar o
     // banco. Se o Rustinho cair no meio, ao abrir de novo termina daqui.
     let marca = caminho_db.map(marca_da_restauracao);
     if let Some(m) = &marca {
         pendente.gravar(m)?;
     }
+    #[cfg(test)]
+    if queda_de_teste::agora("antes_da_troca") {
+        return Err(queda_de_teste::erro());
+    }
 
     dizer("Restaurando…");
+    #[cfg(test)]
+    queda_de_teste::anotar_pausa();
     if let Err(e) = conn.restore(rusqlite::MAIN_DB, &db, None::<fn(rusqlite::backup::Progress)>) {
         // O banco não foi trocado: não há o que terminar depois.
         if let Some(m) = &marca {
@@ -1550,13 +1694,85 @@ pub fn restaurar(
     if std::env::var("RUSTINHO_TESTE_CAIR_RESTAURANDO").is_ok_and(|v| v == "1") {
         std::process::abort();
     }
-    banco::migrar(conn)?;
-    sync::criar_gatilhos(conn)?;
-    pendente.aplicar(conn)?;
+    #[cfg(test)]
+    if queda_de_teste::agora("depois_da_troca") {
+        return Err(queda_de_teste::erro());
+    }
+    let terminar = (|| -> Resultado<()> {
+        #[cfg(test)]
+        if queda_de_teste::agora("falhar_ao_terminar") {
+            return Err(Erro::Interno("falha simulada ao terminar (teste)".into()));
+        }
+        banco::migrar(conn)?;
+        sync::criar_gatilhos(conn)?;
+        pendente.aplicar(conn)
+    })();
+    if let Err(e) = terminar {
+        // O banco já é o do backup, mas o que é deste computador (nome,
+        // identidade, contadores da troca de dados) ainda não voltou. A marca
+        // fica: ao abrir de novo, a restauração termina (D-08). Até lá a troca
+        // de dados não usa este banco (`banco::restauracao_pela_metade`).
+        crate::registro::anotar(&format!("restauração: o banco foi trocado, mas não deu para terminar: {e}"));
+        return Err(Erro::validacao(format!("{} ({e})", banco::RESTAURACAO_PELA_METADE)));
+    }
+    #[cfg(test)]
+    if queda_de_teste::agora("antes_de_tirar_a_marca") {
+        return Err(queda_de_teste::erro());
+    }
     if let Some(m) = &marca {
         let _ = std::fs::remove_file(m);
     }
     Ok(info)
+}
+
+/// Chave deste computador (não vai para os outros caixas: não é da loja)
+/// gravada no banco que vai entrar, com a marca da restauração (0.9.18).
+/// Só existe no banco trocado até `Pendente::aplicar`, que a tira.
+const CHAVE_DA_TROCA: &str = "restauracao_troca";
+
+/// Grava a marca da troca no banco tirado do backup (o arquivo temporário),
+/// antes de ele entrar no lugar do banco. Sem registrar alteração para a
+/// troca de dados (a chave é deste computador; e, num banco de versão mais
+/// antiga, os gatilhos ficam parados enquanto grava).
+fn marcar_banco_que_entra(db: &Path, troca: &str) -> Resultado<()> {
+    let c = Connection::open(db)?;
+    banco::registrar_funcoes(&c)?;
+    let tem_estado: bool = c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sync_estado')",
+        [],
+        |l| l.get(0),
+    )?;
+    let tx = c.unchecked_transaction()?;
+    if tem_estado {
+        tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
+    }
+    config::gravar(&tx, CHAVE_DA_TROCA, troca)?;
+    if tem_estado {
+        tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Só nos testes: a restauração "cai" na etapa pedida (sai na hora, sem
+/// arrumar nada, como numa falta de luz) ou falha ao terminar; e se a troca
+/// de dados estava parada na hora de trocar o banco.
+#[cfg(test)]
+pub(crate) mod queda_de_teste {
+    use std::cell::Cell;
+    thread_local! {
+        pub static ETAPA: Cell<&'static str> = const { Cell::new("") };
+        pub static PAUSADA_NA_TROCA: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+    pub fn agora(etapa: &str) -> bool {
+        ETAPA.with(|e| e.get() == etapa)
+    }
+    pub fn erro() -> crate::erro::Erro {
+        crate::erro::Erro::Interno("queda simulada (teste)".into())
+    }
+    pub fn anotar_pausa() {
+        PAUSADA_NA_TROCA.with(|p| p.set(Some(crate::sync::pausada_para_teste())));
+    }
 }
 
 /// Arquivo ao lado do banco que diz "restauração pela metade" (D-08).
@@ -1579,6 +1795,14 @@ pub struct Pendente {
     /// identidade não deixa a loja sem ela (marcas de versões antigas não têm).
     #[serde(default)]
     loja: String,
+    /// A marca gravada no banco que entra (`CHAVE_DA_TROCA`, 0.9.18). Vazia
+    /// numa marca de versão antiga.
+    #[serde(default)]
+    troca: String,
+    /// Quem restaurou e de quando é o backup (M-04, 0.9.18): o registro na
+    /// auditoria vai na transação que termina a restauração.
+    #[serde(default)]
+    auditoria: Option<(String, String)>,
 }
 
 impl Pendente {
@@ -1610,7 +1834,17 @@ impl Pendente {
             .optional()?
             .unwrap_or(0);
         let loja = crate::loja::id(conn)?;
-        Ok(Pendente { locais, pares, caminhos, seq, loja })
+        Ok(Pendente { locais, pares, caminhos, seq, loja, troca: String::new(), auditoria: None })
+    }
+
+    /// Depois de uma queda: o banco chegou a ser trocado (a marca de dentro
+    /// dele é a desta restauração)? None = marca de uma versão antiga (não
+    /// dá para saber).
+    fn banco_trocado(&self, conn: &Connection) -> Resultado<Option<bool>> {
+        if self.troca.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(config::ler(conn, CHAVE_DA_TROCA)?.as_deref() == Some(self.troca.as_str())))
     }
 
     /// Grava a marca e garante que chegou ao disco antes de seguir.
@@ -1620,6 +1854,10 @@ impl Pendente {
         crate::arquivos::so_do_usuario(marca, "restauração");
         f.write_all(serde_json::to_string(self)?.as_bytes()).map_err(erro)?;
         f.sync_all().map_err(erro)?;
+        // A marca tem de existir no disco antes de o banco ser trocado.
+        if let Some(pasta) = marca.parent() {
+            gravar_pasta(pasta);
+        }
         Ok(())
     }
 
@@ -1658,6 +1896,12 @@ impl Pendente {
         if !self.loja.is_empty() && crate::loja::id(&tx)?.is_empty() {
             config::gravar(&tx, crate::loja::CHAVE, &self.loja)?;
         }
+        // M-04: o registro de quem restaurou, junto (depois da numeração das
+        // alterações ter voltado: o registro vai para os outros caixas).
+        if let Some((usuario, quando)) = &self.auditoria {
+            let dispositivo = config::ler(&tx, "dispositivo_id")?.unwrap_or_default();
+            crate::auditoria::registrar(&tx, &dispositivo, Some(usuario), "backup.restaurar", "config", quando, &[])?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -1669,6 +1913,16 @@ pub fn terminar_restauracao_pela_metade(conn: &mut Connection, caminho_db: &Path
     let marca = marca_da_restauracao(caminho_db);
     let Ok(texto) = std::fs::read_to_string(&marca) else { return Ok(false) };
     match serde_json::from_str::<Pendente>(&texto) {
+        // 0.9.18: a marca de dentro do banco não é a desta restauração — ou
+        // ele não chegou a ser trocado (o banco é o de antes, inteiro), ou a
+        // restauração já tinha terminado (a marca de dentro sai ao terminar,
+        // na mesma transação). Nos dois casos não há nada a terminar: antes,
+        // o banco de antes "terminava" uma restauração que não houve (a troca
+        // de dados recomeçava do zero e a faixa de códigos deste caixa era
+        // abandonada).
+        Ok(p) if p.banco_trocado(conn)? == Some(false) => crate::registro::anotar(
+            "restauração interrompida: o banco não chegou a ser trocado (ou ela já tinha terminado); nada a terminar",
+        ),
         Ok(p) => {
             sync::criar_gatilhos(conn)?;
             p.aplicar(conn)?;
@@ -1706,12 +1960,18 @@ pub fn resumo(conn: &Connection, caminho_db: Option<&Path>, com_drive: bool) -> 
 }
 
 #[cfg(test)]
-mod testes {
+pub(crate) mod testes {
     use super::*;
     use crate::banco::Banco;
 
     /// Restaurar usa a vez única do backup: um teste desses de cada vez.
     static UM_POR_VEZ: Mutex<()> = Mutex::new(());
+
+    /// A mesma vez, para os testes de outros módulos que restauram ou mexem
+    /// nas variáveis do rclone.
+    pub(crate) fn um_por_vez() -> std::sync::MutexGuard<'static, ()> {
+        UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner())
+    }
 
     fn pasta_teste(nome: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("rustinho-teste-backup-{nome}-{}", tempo::novo_id()));
@@ -2186,6 +2446,265 @@ mod testes {
         restaurar(&mut b.conn, Some(&caminho), &la[0].nome, true, "1111").unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Na Nuvem");
         std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// 0.9.18: a retenção do Drive só vale para o que este computador mandou.
+    #[test]
+    fn retencao_do_drive_so_nas_proprias_copias() {
+        let la: Vec<String> = ["20260101", "20260102", "20260103", "20260104", "20261015"]
+            .iter()
+            .map(|d| format!("rustinho-{d}-120000-caixa1.{EXTENSAO}"))
+            .collect();
+        // Antes (até a 0.9.17) a regra valia para tudo o que estava lá:
+        // apagava 2 cópias que podiam ser de outro computador "Caixa 1".
+        assert_eq!(para_apagar(&la, "20261015", 30).len(), 2);
+        // Nenhuma é minha: nada se apaga, mesmo com o mesmo nome de caixa.
+        assert!(apagar_no_drive(&la, &[], "20261015", 30).is_empty());
+        // Todas minhas: a regra de sempre (as 3 mais novas e as do prazo).
+        let mut v = apagar_no_drive(&la, &la, "20261015", 30);
+        v.sort();
+        assert_eq!(v, la[..2].to_vec());
+        // Só uma minha: só ela pode sair, e não sai (é uma das 3 mais novas).
+        assert!(apagar_no_drive(&la, &la[..1], "20261015", 30).is_empty());
+    }
+
+    /// 0.9.18: dois computadores com o mesmo nome de caixa ("Caixa 1") na
+    /// mesma conta do Google (outra loja, um portátil de teste...). O envio
+    /// de um não apaga as cópias do outro; as próprias antigas saem.
+    #[test]
+    fn drive_nao_apaga_copias_de_outro_computador() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let pasta = pasta_teste("nuvem-outro");
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Loja A").unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", "7").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        // Lá já estão 5 cópias antigas de OUTRO computador chamado "Caixa 1"
+        // e 5 antigas deste (anotadas como enviadas por ele).
+        let antigo = |d: u32, h: &str| format!("rustinho-202601{d:02}-{h}-caixa1.{EXTENSAO}");
+        let dele: Vec<String> = (1..=5).map(|d| antigo(d, "080000")).collect();
+        let minhas: Vec<String> = (1..=5).map(|d| antigo(d, "180000")).collect();
+        for n in dele.iter().chain(&minhas) {
+            std::fs::write(nuvem.join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_AO_DRIVE, &minhas.join("\n")).unwrap();
+
+        fazer(&caminho, false).unwrap();
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        let ficaram: Vec<String> = nomes_na_nuvem().unwrap().into_iter().map(|x| x.0).collect();
+        for n in &dele {
+            assert!(ficaram.contains(n), "apagou a cópia do outro computador: {n}");
+        }
+        // Das minhas antigas (fora do prazo de 7 dias) ficam só as 2 mais
+        // novas: com a de hoje, as 3 mais novas deste computador.
+        let minhas_ficaram: Vec<&String> = minhas.iter().filter(|n| ficaram.contains(n)).collect();
+        assert_eq!(minhas_ficaram, vec![&minhas[3], &minhas[4]]);
+        let lista = enviadas_ao_drive(&b.conn).unwrap();
+        assert_eq!(lista.len(), 3, "{lista:?}");
+        assert!(lista.iter().all(|n| ficaram.contains(n)));
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Loja de teste com a cópia no "Drive" (uma pasta comum, pelo rclone):
+    /// gerente Ana (chave da loja criada), envio ligado, `dias` de retenção.
+    fn loja_com_drive(nome: &str, dias: i64) -> (PathBuf, PathBuf, PathBuf, Banco) {
+        let pasta = pasta_teste(nome);
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Loja D3").unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", &dias.to_string()).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        (pasta, nuvem, caminho, b)
+    }
+
+    /// D3 (aprovada em 24/10): a cópia no Drive só conta como guardada depois
+    /// de o Rustinho conferir a de lá (tamanho e MD5 iguais aos da daqui) e
+    /// anotar a conferência. Lá já havia um arquivo com o mesmo nome e outro
+    /// conteúdo (um envio que parou no meio; uma cópia estragada): antes, o
+    /// nome igual bastava, nada era enviado e a cópia ruim contava como feita.
+    #[test]
+    fn d3_copia_ruim_no_drive_e_enviada_de_novo_e_conferida() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let (pasta, nuvem, caminho, b) = loja_com_drive("d3-ruim", 30);
+        let feito = fazer(&caminho, false).unwrap();
+        let nome = Path::new(&feito.arquivo).file_name().unwrap().to_string_lossy().to_string();
+        let certo = std::fs::read(&feito.arquivo).unwrap();
+        // 1. Metade do arquivo (envio que parou no meio).
+        std::fs::write(nuvem.join(&nome), &certo[..certo.len() / 2]).unwrap();
+        let r = enviar_pendentes(&b.conn, &caminho);
+        let la = std::fs::read(nuvem.join(&nome)).unwrap();
+        assert!(r.is_ok(), "{r:?}");
+        assert!(la == certo, "a cópia pela metade no Drive contou como guardada");
+        let confirmada = config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().unwrap_or_default();
+        assert!(confirmada.contains(&nome), "a conferência foi anotada: {confirmada}");
+        // 2. Mesmo tamanho, um byte trocado (cópia estragada lá).
+        let mut ruim = certo.clone();
+        let fim = ruim.len() - 1;
+        ruim[fim] ^= 1;
+        std::fs::write(nuvem.join(&nome), &ruim).unwrap();
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        assert!(std::fs::read(nuvem.join(&nome)).unwrap() == certo, "a cópia estragada no Drive contou como guardada");
+        assert!(situacao(&b.conn).unwrap().nuvem_erro.is_empty());
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// D3: o rclone diz que enviou, mas a cópia que ficou lá é menor (envio
+    /// cortado). Não conta como guardada: fica o erro na tela, a hora do
+    /// último envio não muda, a conferência não é anotada e as cópias antigas
+    /// deste computador que estão lá NÃO são apagadas (só depois de uma nova
+    /// conferida).
+    #[cfg(unix)]
+    #[test]
+    fn d3_envio_cortado_nao_conta_como_guardado() {
+        use std::os::unix::fs::PermissionsExt;
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let (pasta, nuvem, caminho, b) = loja_com_drive("d3-cortado", 7);
+        let antigas: Vec<String> = (1..=5).map(|d| format!("rustinho-202601{d:02}-180000-caixa1.{EXTENSAO}")).collect();
+        for n in &antigas {
+            std::fs::write(nuvem.join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_AO_DRIVE, &antigas.join("\n")).unwrap();
+        // "copyto ... ORIGEM DESTINO": envia e corta o que ficou lá (o
+        // destino é o último argumento).
+        let cortador = pasta.join("rclone-cortado.sh");
+        std::fs::write(
+            &cortador,
+            "#!/bin/sh\nif [ \"$1\" = copyto ]; then rclone \"$@\" || exit $?; for a; do d=$a; done; \
+             truncate -s 100 \"$d\"; exit 0; fi\nexec rclone \"$@\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&cortador, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fazer(&caminho, false).unwrap();
+        std::env::set_var("RUSTINHO_RCLONE", cortador.display().to_string());
+        let r = enviar_pendentes(&b.conn, &caminho);
+        std::env::remove_var("RUSTINHO_RCLONE");
+        let s = situacao(&b.conn).unwrap();
+        assert!(r.is_err(), "o envio cortado contou como guardado");
+        assert!(!s.nuvem_erro.is_empty(), "o erro aparece na tela");
+        assert!(s.nuvem_ultimo.is_empty(), "a hora do último envio não muda");
+        assert!(config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().is_none());
+        for n in &antigas {
+            assert!(nuvem.join(n).exists(), "apagou uma cópia antiga sem ter a nova conferida: {n}");
+        }
+        // Com o envio normal de novo, a nova é conferida e as antigas saem.
+        enviar_pendentes(&b.conn, &caminho).unwrap();
+        assert!(config::ler(&b.conn, "backup_nuvem_confirmada").unwrap().is_some());
+        assert!(!situacao(&b.conn).unwrap().nuvem_ultimo.is_empty());
+        assert!(antigas.iter().filter(|n| nuvem.join(n).exists()).count() < antigas.len());
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Item 8 (frente estab): restaurar e fazer backup não andam juntos. Com
+    /// um backup em andamento (a vez do backup ocupada), restaurar é recusado
+    /// sem mexer em nada (nem a marca de restauração é gravada); com outra
+    /// operação em andamento (uma restauração usa a mesma vez), "fazer backup
+    /// agora" é recusado e o backup automático não começa. Sem nada em
+    /// andamento, a mesma restauração funciona.
+    #[test]
+    fn estab_restaurar_e_backup_nao_andam_juntos() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("juntos");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Antes").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let feito = fazer(&caminho, false).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Depois").unwrap();
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        let quantas = listar(&backups).len();
+
+        let vez = Vez::pegar("Fazendo o backup…").expect("ninguém mais estava fazendo backup");
+        let e = restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap_err();
+        assert!(e.to_string().contains("backup em andamento"), "{e}");
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Depois", "nada mudou");
+        assert!(!marca_da_restauracao(&caminho).exists());
+        let e = agora(caminho.clone()).unwrap_err();
+        assert!(e.to_string().contains("em andamento"), "{e}");
+        config::gravar(&b.conn, "backup_ultimo", "").unwrap();
+        automatico(caminho.clone());
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(listar(&backups).len(), quantas, "o backup automático começou durante outra operação");
+        drop(vez);
+
+        let inicio = Instant::now();
+        while ocupado() {
+            assert!(inicio.elapsed() < Duration::from_secs(60));
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Antes");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// Item 3 (frente estab): um backup estragado na pasta (um byte trocado
+    /// no meio, ou o fim cortado) é recusado na conferência, antes de
+    /// qualquer mudança: o banco fica como está, a marca da restauração não é
+    /// gravada e nem a cópia de antes é feita.
+    #[test]
+    fn estab_backup_estragado_nao_muda_nada() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("estragado");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Antes").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let feito = fazer(&caminho, false).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Depois").unwrap();
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        let bytes = std::fs::read(&feito.arquivo).unwrap();
+        let mut trocado = bytes.clone();
+        let meio = trocado.len() / 2;
+        trocado[meio] ^= 0x40;
+        let com_byte_trocado = pasta.join("trocado.rbk");
+        std::fs::write(&com_byte_trocado, &trocado).unwrap();
+        let cortado = pasta.join("cortado.rbk");
+        std::fs::write(&cortado, &bytes[..bytes.len() - 100]).unwrap();
+        for ruim in [&com_byte_trocado, &cortado] {
+            let quantas = listar(&backups).len();
+            let e = restaurar(&mut b.conn, Some(&caminho), &ruim.display().to_string(), false, "1111").unwrap_err();
+            assert!(e.to_string().contains("estragado") || e.to_string().contains("incompleto"), "{e}");
+            assert_eq!(config::nome_loja(&b.conn).unwrap(), "Depois", "nada mudou");
+            assert!(!marca_da_restauracao(&caminho).exists());
+            assert_eq!(listar(&backups).len(), quantas, "nem a cópia de antes foi feita");
+        }
+        // O backup bom continua restaurando.
+        restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
+        assert_eq!(config::nome_loja(&b.conn).unwrap(), "Antes");
         let _ = std::fs::remove_dir_all(&pasta);
     }
 }

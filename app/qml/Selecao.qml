@@ -31,7 +31,11 @@ ColumnLayout {
         id: combo
         Layout.fillWidth: true
         implicitWidth: 120
-        implicitHeight: 40
+        // A15 (0.9.18): no celular, a área de toque tem pelo menos 48 dp de
+        // altura; o desenho da lista fica com 40, no meio. No computador, igual.
+        implicitHeight: Math.max(40, Tema.toqueMinimo)
+        topInset: (implicitHeight - 40) / 2
+        bottomInset: topInset
         font.family: Tema.texto
         font.pixelSize: 15
         onActivated: {
@@ -65,7 +69,8 @@ ColumnLayout {
             required property var modelData
             required property int index
             width: combo.width - 8
-            height: 36
+            // A15: no celular, cada opção com 48 dp de altura.
+            height: Math.max(36, Tema.toqueMinimo)
             text: modelData
             font: combo.font
             highlighted: combo.highlightedIndex === index
@@ -85,7 +90,8 @@ ColumnLayout {
             }
         }
         popup: Popup {
-            y: combo.height + 4
+            // Logo abaixo do desenho da lista (no celular, a área de toque é maior).
+            y: (combo.height + 40) / 2 + 4
             width: combo.width
             padding: 4
             implicitHeight: Math.min(contentItem.implicitHeight + 8, 340)

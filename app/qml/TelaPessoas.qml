@@ -51,8 +51,9 @@ FocusScope {
         busca.focar()
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             buscar()
         } else {
@@ -90,7 +91,6 @@ FocusScope {
                 return n === 0 ? "Nenhum " + (tela.fornecedores ? "fornecedor" : "cliente") + " cadastrado" : n + " " + nome
             }
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Importar XML"
                 tipo: "secundario"

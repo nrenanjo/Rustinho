@@ -38,6 +38,7 @@ Rectangle {
     visible: !!calc && calc.valor !== "0,00"
     radius: Tema.raioCampo
     color: Tema.azul
+    palette.window: Tema.superficie(color)
     implicitHeight: coluna.implicitHeight + 24
 
     ColumnLayout {

@@ -295,7 +295,7 @@ fn rascunho_salva_reabre_e_vira_orcamento_sem_duplicar() {
     // Rascunho não muda de situação, não cancela, não vira venda.
     assert!(oficina::mudar(c, d, &u, &id, "aprovada").is_err());
     assert!(oficina::cancelar(c, d, &u, &id, "x").is_err());
-    assert!(oficina::para_venda(c, &id).is_err());
+    assert!(crate::vendas::os_para_venda(c, &id).is_err());
     // Salvar de verdade: exige placa válida; vira orçamento com número, o mesmo registro.
     assert!(oficina::salvar(c, d, &u, &e).is_err(), "placa incompleta não passa ao salvar de verdade");
     e.placa = "ABC1D23".into();
@@ -1059,6 +1059,8 @@ fn f06_abertura_confere_a_integridade() {
     let av = avisos::do_dia(&b.conn).unwrap();
     let a = av.iter().find(|a| a.id == "banco_defeito").expect("aviso do defeito");
     assert_eq!(a.categoria, avisos::CRITICA);
+    // Caso 8 (C8, 0.9.18): o botão diz para onde leva (Backup, restaurar).
+    assert_eq!((a.acao.as_str(), a.secao.as_str()), ("Ver backup", "backup"));
     drop(b);
 
     // Backup desse banco: sai como erro (nunca como "íntegro"); se a cópia
@@ -1133,7 +1135,7 @@ fn f02_os_numero_1_de_dois_caixas_mostra_o_caixa() {
         "a busca traz o caixa de cada uma"
     );
     assert_eq!(oficina::ficha(&a.conn, &os_b).unwrap().caixa, "Caixa 2");
-    assert_eq!(oficina::para_venda(&a.conn, &os_a).unwrap().caixa, "Caixa 1", "a venda da OS sabe o caixa");
+    assert_eq!(crate::vendas::os_para_venda(&a.conn, &os_a).unwrap().caixa, "Caixa 1", "a venda da OS sabe o caixa");
     // As telas mostram o caixa junto do número.
     let qml = |nome: &str| {
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/qml").join(nome)).unwrap()

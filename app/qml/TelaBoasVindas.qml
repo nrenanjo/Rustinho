@@ -132,7 +132,7 @@ FocusScope {
                 text: "Começar"
                 atalho: "Enter"
                 Layout.fillWidth: true
-                implicitHeight: 48
+                altura: 48
                 onClicked: tela.comecar()
             }
 

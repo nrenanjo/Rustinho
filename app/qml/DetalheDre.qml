@@ -49,7 +49,10 @@ Painel {
                 width: lista.width - 12
                 implicitHeight: linha.implicitHeight + 14
                 radius: Tema.raioCampo
-                color: registro.index % 2 === 0 ? Tema.papel : "transparent"
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(registro.par, Tema.papel, "transparent")
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     id: linha
                     anchors.fill: parent
@@ -58,7 +61,7 @@ Painel {
                     spacing: 12
                     Text {
                         text: registro.modelData.data
-                        color: Tema.apagado
+                        color: Tema.apagadoDaFaixa(registro.par)
                         font.family: Tema.texto
                         font.pixelSize: 13
                         Layout.preferredWidth: 130
@@ -68,7 +71,7 @@ Painel {
                         Layout.fillWidth: true
                         Text {
                             text: registro.modelData.descricao
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(registro.par)
                             font.family: Tema.texto
                             font.pixelSize: 14
                             wrapMode: Text.WordWrap
@@ -79,7 +82,7 @@ Painel {
                             visible: text !== ""
                             text: [m.categoria, m.fornecedor, m.semCompetencia ? "sem mês de referência (usado o vencimento)" : ""]
                                   .filter(x => !!x).join("  ·  ")
-                            color: m.semCompetencia ? Tema.vermelho : Tema.apagado
+                            color: m.semCompetencia ? Tema.vermelhoDaFaixa(registro.par) : Tema.apagadoDaFaixa(registro.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 12
@@ -88,7 +91,7 @@ Painel {
                     }
                     Text {
                         text: "R$ " + Tema.valor(registro.modelData.valor)
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(registro.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: 14
@@ -103,12 +106,6 @@ Painel {
             text: "A lista mostra os 500 primeiros. O total vale para todos."
             font.pixelSize: 13
             Layout.fillWidth: true
-        }
-        Botao {
-            text: "Fechar"
-            tipo: "discreto"
-            Layout.alignment: Qt.AlignRight
-            onClicked: janelinha.close()
         }
     }
 }

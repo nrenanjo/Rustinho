@@ -17,6 +17,12 @@ pub const CNPJ_DA_LOJA: &str = "loja.cnpj";
 pub const CAMPO_CNPJ_DA_LOJA: &str = "requisito:loja.cnpj";
 /// Estado (UF) e CNPJ da loja (conferência fiscal).
 pub const UF_E_CNPJ_DA_LOJA: &str = "loja.uf_cnpj";
+/// Rascunho de OS novo (caso 6 da C8, 0.9.18): nenhum caixa da loja sem
+/// confirmar uma versão que entende rascunho (veja
+/// `sync::bloqueios_de_rascunho`). Resolve-se em Configurações ›
+/// Simultaneidade › Caixas (atualizar o caixa ou retirá-lo da loja).
+pub const RASCUNHO_DE_OS: &str = "caixas.rascunho";
+pub const CAMPO_RASCUNHO_DE_OS: &str = "requisito:caixas.rascunho";
 
 /// Por que a importação de cadastros (Peças) precisa do CNPJ da loja.
 pub const PARA_CADASTROS: &str = "É por ele que o Rustinho separa as notas da loja das notas de fornecedores.";
@@ -47,6 +53,15 @@ pub fn conferir(conn: &Connection, id: &str) -> Resultado<Situacao> {
                 (false, Ok(_)) => (false, "O estado (UF) da loja ainda não está salvo.".to_string()),
                 (true, Err(falta)) => (false, falta.to_string()),
                 (false, Err(falta)) => (false, format!("O estado (UF) da loja ainda não está salvo. {falta}")),
+            }
+        }
+        RASCUNHO_DE_OS => {
+            let caixas = crate::sync::bloqueios_de_rascunho(conn)?;
+            if caixas.is_empty() {
+                (true, String::new())
+            } else {
+                let nomes = caixas.iter().map(|c| c.nome.clone()).collect::<Vec<_>>().join(", ");
+                (false, format!("{nomes} ainda não confirmou uma versão do Rustinho que entende rascunho."))
             }
         }
         _ => return Err(Erro::validacao(format!("Requisito desconhecido: {id}."))),
@@ -88,4 +103,36 @@ pub struct Arquivos {
 pub fn arquivos(lista: &[String]) -> Arquivos {
     let (existem, faltam) = lista.iter().cloned().partition(|c| std::path::Path::new(c).exists());
     Arquivos { existem, faltam }
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da navegação guiada (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::requisitos;
+
+    pub const COMANDOS: &[Comando] = &[
+        // Navegação guiada: o requisito está satisfeito? os arquivos continuam lá?
+        Comando { nome: "requisito_conferir", classe: Classe::Leitura, funcao: requisito_conferir },
+    ];
+
+    // Navegação guiada (piloto 0.9.16): só leitura.
+    fn requisito_conferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Requisito = ler(dados)?;
+        Ok(json!(requisitos::conferir(p.conn, &d.id)?))
+    }
+
+    #[derive(Deserialize)]
+    struct Requisito {
+        #[serde(default)]
+        id: String,
+    }
 }

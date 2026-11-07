@@ -4,13 +4,25 @@ import rustinho
 
 // Pílula do olho: mostra ou esconde CPF/CNPJ, custo, lucro, comissões e
 // saldos em todas as telas de uma vez.
-Rectangle {
+// A15 (0.9.18): o item é a área de toque; no celular, tem pelo menos 48 dp
+// de altura (Tema.toqueMinimo) e a pílula fica com 34, no meio. No
+// computador, item = pílula.
+Item {
     id: olho
-    radius: height / 2
-    implicitHeight: 34
-    implicitWidth: linha.implicitWidth + 28
-    color: Tema.oculto ? (sobre.hovered ? Tema.vela(0.7) : Tema.vela(0.45)) : (sobre.hovered ? Tema.rosaSobre : Tema.rosa)
-    Behavior on color { ColorAnimation { duration: 120 } }
+    implicitHeight: Math.max(34, Tema.toqueMinimo)
+    implicitWidth: Math.max(linha.implicitWidth + 28, Tema.toqueMinimo)
+
+    // A pílula ocupa a largura toda do item (no computador, exatamente o
+    // lugar de antes: centralizar uma largura fracionária a deslocava 1 px).
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        height: 34
+        radius: height / 2
+        color: Tema.oculto ? (sobre.hovered ? Tema.pilulaClaraSobre : Tema.pilulaClara) : (sobre.hovered ? Tema.rosaSobre : Tema.rosa)
+        Behavior on color { ColorAnimation { duration: 120 } }
+    }
 
     Row {
         id: linha

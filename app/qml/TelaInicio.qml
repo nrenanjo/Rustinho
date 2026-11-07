@@ -8,6 +8,8 @@ import rustinho
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
+    // Como esta tela aparece no "voltar" da tela que ela abriu.
+    readonly property string nomeNaNavegacao: "Início"
     property var menu: ({ todos: [] })
     property var avisos: []
     // Faixas (as críticas primeiro, depois a expandida) e quadrados (as
@@ -158,17 +160,34 @@ FocusScope {
                 }
             }
 
-            Campo {
-                id: busca
-                dica: Tema.estreito ? "Buscar peça: código, nome ou carro" : "Buscar peça: qualquer código, nome, modelo ou carro (ex.: óleo 5w30, 8PK1515)"
-                icone: "busca"
-                atalho: "F11"
-                tamanhoFonte: 19
-                altura: 56
+            // A busca como nas imagens aprovadas (D-V6, 0.9.18): colar à
+            // esquerda e copiar à direita, dentro do campo; o atalho F11 fora
+            // do campo, à direita.
+            RowLayout {
+                spacing: 18
                 Layout.fillWidth: true
                 Layout.topMargin: 2
                 Layout.bottomMargin: 12
-                onConfirmado: tela.buscar()
+                Campo {
+                    id: busca
+                    dica: Tema.estreito ? "Buscar peça: código, nome ou carro" : "Buscar peça: qualquer código, nome, modelo ou carro (ex.: óleo 5w30, 8PK1515)"
+                    colarCopiar: true
+                    tamanhoFonte: 19
+                    altura: 56
+                    Layout.fillWidth: true
+                    onConfirmado: tela.buscar()
+                }
+                Text {
+                    visible: !Tema.celular && !Tema.estreito
+                    text: "F11"
+                    color: Tema.tintaSuaveNo(palette.window)
+                    font.family: Tema.texto
+                    font.weight: Font.Bold
+                    font.pixelSize: 17
+                    font.letterSpacing: 1
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.rightMargin: 4
+                }
             }
         }
 
@@ -243,6 +262,7 @@ FocusScope {
                             required property int index
                             item: modelData
                             indice: index
+                            colunas: tela.colunas
                             Layout.fillWidth: true
                             Layout.preferredWidth: 100
                             onAbrir: tela.janela.abrirFuncao(modelData)

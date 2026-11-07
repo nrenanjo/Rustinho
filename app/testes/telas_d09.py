@@ -30,7 +30,33 @@ import unicodedata
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROGRAMA = os.environ.get("RUSTINHO_PROGRAMA", os.path.join(RAIZ, "target", "debug", "rustinho"))
-TELA = ":79"
+# A tela virtual pode ser trocada (RUSTINHO_TELA=:88) quando a de sempre
+# estiver ocupada por um Xvfb que ficou aberto.
+TELA = os.environ.get("RUSTINHO_TELA", ":79")
+
+
+def ambiente_neutro():
+    """O mesmo ambiente em qualquer computador (T-12), para todos os testes
+    das telas, que importam este arquivo.
+
+    - Só X11: numa sessão Wayland o Qt abriria a janela na área de trabalho
+      de verdade, e o teste ficaria esperando a tela de entrada.
+    - As mensagens do Qt na saída de erro: com journald, o Qt do sistema as
+      manda para o journal quando a saída não é um terminal, e os textos da
+      tela se perderiam.
+    - Sem o tema do desktop (KDE, GNOME...): a janela de arquivos é a do
+      próprio Qt, que os testes sabem usar, e nenhuma janela do sistema abre
+      na área de trabalho."""
+    os.environ.pop("WAYLAND_DISPLAY", None)
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+    os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
+    for v in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION", "KDE_FULL_SESSION",
+              "KDE_SESSION_VERSION", "KDE_SESSION_UID", "GNOME_DESKTOP_SESSION_ID",
+              "QT_QPA_PLATFORMTHEME", "QT_STYLE_OVERRIDE", "APPIMAGE"):
+        os.environ.pop(v, None)
+
+
+ambiente_neutro()
 SENHA = {"Ana": "1234", "Bia": "1111"}
 
 

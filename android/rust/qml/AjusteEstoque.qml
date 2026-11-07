@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import rustinho
 
 // Janela para acertar o estoque com a quantidade contada na prateleira.
-Popup {
+Painel {
     id: ajuste
     property string produtoId: ""
     property string estoqueAtual: "0"
@@ -15,15 +15,8 @@ Popup {
 
     signal ajustado(var ficha)
 
-    modal: true
-    focus: true
-    anchors.centerIn: T.Overlay.overlay
     width: Math.min(520, Tema.largura - 24)
-    padding: Tema.estreito ? 18 : 30
-    closePolicy: Popup.CloseOnEscape
 
-    T.Overlay.modal: Rectangle { color: Tema.veu }
-    background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
     function abrirCom(id, atual, unidadePeca) {
         chave = Api.novaChave()
@@ -105,11 +98,6 @@ Popup {
             spacing: 10
             Layout.alignment: Qt.AlignRight
             Layout.topMargin: 6
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                onClicked: ajuste.close()
-            }
             Botao {
                 text: "Ajustar"
                 icone: "check"

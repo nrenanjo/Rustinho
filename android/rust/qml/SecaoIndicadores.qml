@@ -94,6 +94,7 @@ FocusScope {
                                 required property int index
                                 item: modelData
                                 posicao: index + 1
+                                indice: index
                                 dinheiro: ranking.modelData.dinheiro
                                 sensivel: ranking.modelData.campo === "margem"
                             }
@@ -130,10 +131,10 @@ FocusScope {
                 }
                 Repeater {
                     model: secao.r ? secao.r.vendedores : []
-                    delegate: RowLayout {
+                    delegate: Rectangle {
                         id: v
                         required property var modelData
-                        spacing: 8
+                        required property int index
                         Layout.fillWidth: true
                         // Sem depender do olho: o modelo não muda ao mostrar/esconder (o Qt 6.4
                         // cai se um Repeater dentro de um layout é refeito no meio da arrumação).
@@ -147,28 +148,42 @@ FocusScope {
                             modelData.devolucoes > 0 ? modelData.devolucoes + " · R$ " + modelData.devolucoesValor : "—",
                             modelData.canceladas > 0 ? modelData.canceladas + " · R$ " + modelData.canceladasValor : "—"
                         ]
-                        Text {
-                            text: v.modelData.nome
-                            color: Tema.tinta
-                            font.family: Tema.texto
-                            font.weight: Font.DemiBold
-                            font.pixelSize: 14
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                            Layout.preferredWidth: 140
-                        }
-                        Repeater {
-                            model: v.colunas
-                            delegate: Text {
-                                required property var modelData
-                                required property int index
-                                text: index === 5 && Tema.oculto && modelData !== "—" ? "••" : Tema.sigiloTexto(modelData)
-                                color: Tema.tinta
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0
+                        color: Tema.faixa(v.par, Tema.vela(0.4), "transparent")
+                        palette.window: Tema.superficie(color)
+                        radius: Tema.raioCampo
+                        implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                        implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                        RowLayout {
+                            id: conteudoDaFaixa
+                            x: 8
+                            y: 4
+                            width: v.width - 16
+                            spacing: 8
+                            Text {
+                                text: v.modelData.nome
+                                color: Tema.tintaDaFaixa(v.par)
                                 font.family: Tema.texto
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignRight
-                                elide: Text.ElideLeft
-                                Layout.preferredWidth: index === 4 ? 120 : 96
+                                font.weight: Font.DemiBold
+                                font.pixelSize: 14
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 140
+                            }
+                            Repeater {
+                                model: v.colunas
+                                delegate: Text {
+                                    required property var modelData
+                                    required property int index
+                                    text: index === 5 && Tema.oculto && modelData !== "—" ? "••" : Tema.sigiloTexto(modelData)
+                                    color: Tema.tintaDaFaixa(v.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignRight
+                                    elide: Text.ElideLeft
+                                    Layout.preferredWidth: index === 4 ? 120 : 96
+                                }
                             }
                         }
                     }

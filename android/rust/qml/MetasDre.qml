@@ -69,10 +69,14 @@ Painel {
             delegate: Rectangle {
                 id: meta
                 required property var modelData
+                required property int index
                 width: lista.width - 14
                 implicitHeight: col.implicitHeight + 20
                 radius: Tema.raio
-                color: modelData.atingida ? Tema.verde : Tema.pergaminho
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0 && !modelData.atingida
+                color: modelData.atingida ? Tema.verde : Tema.faixa(meta.par)
+                palette.window: Tema.superficie(color)
                 ColumnLayout {
                     id: col
                     anchors.fill: parent
@@ -84,7 +88,7 @@ Painel {
                         Layout.fillWidth: true
                         Text {
                             text: meta.modelData.indicadorNome + " · " + meta.modelData.vendedor
-                            color: Tema.tinta
+                            color: Tema.tintaDaFaixa(meta.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
                             font.pixelSize: 15
@@ -93,7 +97,7 @@ Painel {
                         }
                         Text {
                             text: meta.modelData.percentual || "—"
-                            color: meta.modelData.atingida ? Tema.verdeEscuro : Tema.tinta
+                            color: meta.modelData.atingida ? Tema.verdeEscuroDaFaixa(meta.par) : Tema.tintaDaFaixa(meta.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 20
@@ -101,7 +105,7 @@ Painel {
                         Botao {
                             text: "Tirar"
                             tipo: "discreto"
-                            implicitHeight: 30
+                            altura: 30
                             font.pixelSize: 13
                             onClicked: janelinha.salvar(meta.modelData.periodo, meta.modelData.indicador, meta.modelData.vendedorId, "")
                         }
@@ -122,7 +126,7 @@ Painel {
                         text: meta.modelData.periodoRotulo + "  ·  realizado " + (Tema.oculto && meta.modelData.unidade === "R$" ? "•••" : meta.modelData.realizado)
                               + " de " + (Tema.oculto && meta.modelData.unidade === "R$" ? "•••" : meta.modelData.meta)
                               + (meta.modelData.diferenca && !Tema.oculto ? "  ·  diferença " + meta.modelData.diferenca : "")
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(meta.par)
                         font.family: Tema.serifa
                         font.italic: true
                         font.pixelSize: 13
@@ -162,7 +166,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Fechar"; tipo: "discreto"; onClicked: janelinha.close() }
             Botao {
                 id: salvarBotao
                 text: "Salvar meta"

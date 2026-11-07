@@ -120,7 +120,6 @@ FocusScope {
             titulo: tela.venda ? "Devolução da venda " + tela.venda.numero : "Devolução"
             subtitulo: !tela.venda ? "" : [tela.venda.quando, tela.venda.caixa, tela.venda.cliente || "Consumidor", "total R$ " + tela.venda.total].join(" · ")
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: !!tela.venda && tela.venda.situacao === "concluida"
                 text: "Devolver tudo"
@@ -193,7 +192,10 @@ FocusScope {
                         width: lista.width
                         implicitHeight: 72
                         radius: Tema.raio
-                        color: escolhida ? Tema.verde : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                        // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                        readonly property bool par: (index + 1) % 2 === 0 && !escolhida
+                        color: escolhida ? Tema.verde : Tema.faixa(linha.par)
+                        palette.window: Tema.superficie(color)
                         opacity: podeVoltar ? 1 : 0.55
                         Behavior on color { ColorAnimation { duration: 120 } }
                         RowLayout {
@@ -206,7 +208,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.it.descricao
-                                    color: Tema.tinta
+                                    color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
                                     font.pixelSize: 20
@@ -217,7 +219,7 @@ FocusScope {
                                     text: ["cód. " + linha.it.codigo, "vendeu " + linha.it.vendido + " " + linha.it.unidade,
                                            linha.it.devolvido ? "já voltou " + linha.it.devolvido : "",
                                            "R$ " + linha.it.valorUnitario + " cada"].filter(x => !!x).join("  ·  ")
-                                    color: Tema.tintaSuave
+                                    color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
                                     font.pixelSize: 13
@@ -234,7 +236,7 @@ FocusScope {
                             Text {
                                 visible: !linha.podeVoltar
                                 text: "já voltou tudo"
-                                color: Tema.apagado
+                                color: Tema.apagadoDaFaixa(linha.par)
                                 font.family: Tema.serifa
                                 font.italic: true
                                 font.pixelSize: 14
@@ -438,10 +440,13 @@ FocusScope {
     }
 
     // ---------- Devolução feita ----------
+    // A seta, o Esc e o imprimir fecham e voltam para a tela de antes (fim
+    // da operação; antes, o "Fechar" fazia isso e o Esc só fechava).
     Painel {
         id: pronto
         cor: Tema.verde
         width: Math.min(520, Tema.largura - 24)
+        onClosed: tela.janela.voltar()
         contentItem: ColumnLayout {
             spacing: 12
             Titulo { text: "Devolução feita"; font.pixelSize: 34; Layout.fillWidth: true }
@@ -454,11 +459,10 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Fechar"; tipo: "discreto"; onClicked: { pronto.close(); tela.janela.voltar() } }
                 Botao {
                     text: "Imprimir comprovante"
                     icone: "impressora"
-                    onClicked: { tela.imprimir(); pronto.close(); tela.janela.voltar() }
+                    onClicked: { tela.imprimir(); pronto.close() }
                 }
             }
         }

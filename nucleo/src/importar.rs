@@ -618,6 +618,44 @@ fn salvar_peca(
     }
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos dos cadastros pelo XML das notas (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::{importar, requisitos};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "importar_previa", classe: Classe::Leitura, funcao: importar_previa },
+        Comando { nome: "importar_cadastros", classe: Classe::Gerente("configuracoes"), funcao: importar_cadastros },
+        Comando { nome: "arquivos_conferir", classe: Classe::Leitura, funcao: arquivos_conferir },
+    ];
+
+    fn importar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: importar::Entrada = ler(dados)?;
+        Ok(json!(importar::previa(p.conn, &d.arquivos)?))
+    }
+
+    fn importar_cadastros(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: importar::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let r = importar::importar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(r))
+    }
+
+    fn arquivos_conferir(_p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: importar::Entrada = ler(dados)?;
+        Ok(json!(requisitos::arquivos(&d.arquivos)))
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

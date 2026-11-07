@@ -12,14 +12,16 @@ Rectangle {
     signal abrir()
 
     readonly property bool par: (indice + 1) % 2 === 0
-    readonly property color corBase: par ? Tema.azul : Tema.pergaminho
-    readonly property color corTexto: atual ? Tema.claro : Tema.tinta
-    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
+    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+    readonly property color corBase: Tema.faixa(par)
+    readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
+    readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
     readonly property bool orcamento: item.tipo === "orcamento"
     readonly property bool apagada: ["cancelada", "cancelado"].includes(item.situacao)
 
     radius: Tema.raio
-    color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
+    palette.window: Tema.superficie(color)
     implicitHeight: Tema.estreito ? 66 : 62
 
     RowLayout {
@@ -31,7 +33,7 @@ Rectangle {
 
         Text {
             text: linha.item.numero
-            color: linha.atual ? Tema.claro : Tema.dourado
+            color: linha.atual ? Tema.tintaAtual : Tema.douradoDaFaixa(linha.par)
             font.family: Tema.titulo
             font.weight: Font.Bold
             font.pixelSize: Tema.estreito ? 22 : 26
@@ -72,8 +74,9 @@ Rectangle {
         Rectangle {
             visible: linha.apagada || linha.orcamento
             radius: height / 2
-            color: linha.atual ? Tema.vela(0.12) : linha.apagada ? Tema.sombra(0.08)
-                   : linha.item.situacao === "vendido" ? Tema.verde : linha.item.vencido ? Tema.rosa : Tema.vela(0.5)
+            // No roxo, o selo neutro é claro nas duas faixas (texto escuro).
+            color: linha.atual ? Tema.chipAtual : linha.apagada ? (Tema.roxo ? Tema.papel : Tema.sombra(0.08))
+                   : linha.item.situacao === "vendido" ? Tema.verde : linha.item.vencido ? Tema.rosa : (Tema.roxo ? Tema.papel : Tema.vela(0.5))
             implicitWidth: chip.implicitWidth + 18
             implicitHeight: chip.implicitHeight + 6
             Text {
@@ -81,7 +84,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: linha.apagada ? (linha.orcamento ? "Cancelado" : "Cancelada")
                       : linha.item.situacao === "vendido" ? "Vendido" : linha.item.vencido ? "Vencido" : "Em aberto"
-                color: linha.atual ? Tema.claro : linha.item.vencido ? Tema.vermelho : Tema.tintaSuave
+                color: linha.atual ? Tema.tintaAtual : linha.item.vencido ? Tema.vermelho : Tema.tintaSuave
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
                 font.pixelSize: 12

@@ -10,7 +10,8 @@ on:
     # FALHA-07 (auditoria da 0.9.15): a branch da 0.9.15. O nome segue a
     # convenção das anteriores (build-0.9.x) e precisa ser confirmado; a
     # da 0.9.14 continua.
-    branches: [build-0.9.14, build-0.9.15, build-0.9.16, build-0.9.17, teste/c8-portatil]
+    # 0.9.18: a branch de desenvolvimento também (a CI testa cada envio).
+    branches: [build-0.9.14, build-0.9.15, build-0.9.16, build-0.9.17, teste/c8-portatil, desenvolvimento-0.9.18]
   # Também à mão (aba Actions › "Run workflow"), sem precisar de push.
   workflow_dispatch:
 
@@ -38,12 +39,12 @@ jobs:
       - name: Formatação
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy -p rustinho-nucleo --all-targets -- -D clippy::correctness -D clippy::suspicious
+        run: cargo clippy -p rustinho-base -p rustinho-nucleo --all-targets -- -D clippy::correctness -D clippy::suspicious
       - name: Testes do núcleo
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
+          cargo test -p rustinho-base -p rustinho-nucleo 2>&1 | tee testes-linux.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()
@@ -53,6 +54,70 @@ jobs:
         with:
           name: Testes-Linux
           path: testes-linux.txt
+          retention-days: 30
+
+  # 0.9.18: os testes do programa (`cargo test -p rustinho`, que precisam do
+  # Qt) e os roteiros das telas (app/testes/telas_*.py) numa tela virtual,
+  # com o Qt dos pacotes. Os roteiros já se isolam do desktop
+  # (ambiente_neutro em telas_d09.py). O do seletor do sistema
+  # (telas_seletor_nativo.py) precisa do portal do KDE numa sessão fechada:
+  # roda à mão (docs/TESTES-estabilidade.md).
+  programa-e-telas:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      # python3-pil: os roteiros do tema e do celular leem os pixels das fotos.
+      - name: Bibliotecas do sistema e da tela virtual
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Testes do programa
+        shell: bash
+        run: |
+          set -o pipefail
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          echo "commit: $GITHUB_SHA" > testes-programa.txt
+          cargo test -p rustinho 2>&1 | tee -a testes-programa.txt
+      - name: Compilar o programa e a loja de teste
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build -p rustinho
+          cargo test -p rustinho-nucleo --test estavel --no-run
+      - name: Roteiros das telas
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > telas.txt
+          falhou=""
+          for t in app/testes/telas_*.py; do
+            case "$t" in *telas_seletor_nativo.py) continue ;; esac
+            nome=$(basename "$t" .py)
+            echo "=== $nome" | tee -a telas.txt
+            if ! timeout 2400 python3 "$t" "fotos/$nome" 2>&1 | tee -a telas.txt; then
+              falhou="$falhou $nome"
+            fi
+          done
+          if [ -n "$falhou" ]; then
+            echo "::error title=Roteiros das telas::falharam:$falhou"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Telas-Linux
+          path: |
+            telas.txt
+            testes-programa.txt
+            fotos/
           retention-days: 30
 
   # Os testes do núcleo também no Windows (não seguram o ZIP: o resultado
@@ -71,7 +136,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
+          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()

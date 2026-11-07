@@ -19,7 +19,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::vendas::ItemEntrada;
 use crate::{auditoria, config, documento, estoque, fiscal, numeros, tempo, texto};
 
 pub const SITUACOES: &[(&str, &str)] = &[
@@ -463,12 +462,14 @@ pub fn salvar_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, e
         let bloqueios = crate::sync::bloqueios_de_rascunho(conn)?;
         if !bloqueios.is_empty() {
             let nomes = bloqueios.iter().map(|b| b.nome.clone()).collect::<Vec<_>>().join(", ");
+            // Caso 6 (C8, 0.9.18): o campo diz o requisito, para a tela
+            // oferecer o lugar de resolver (sem desviar sozinha).
             return Err(Erro::campo(
-                "rascunho",
+                crate::requisitos::CAMPO_RASCUNHO_DE_OS,
                 format!(
                     "Rascunho novo está bloqueado: {nomes} ainda não confirmou uma versão do Rustinho que entende \
                      rascunho. Atualize o Rustinho nesse caixa e deixe trocar dados, ou retire-o da loja em \
-                     Configurações › Caixas da loja. Você pode salvar a OS normalmente."
+                     Configurações › Simultaneidade › Caixas. Você pode salvar a OS normalmente."
                 ),
             ));
         }
@@ -908,57 +909,6 @@ pub fn contagem(conn: &Connection) -> Resultado<serde_json::Value> {
 // Entrega (vira venda)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParaVenda {
-    pub numero: i64,
-    /// O caixa da OS (FALHA-02: o número é por caixa).
-    pub caixa: String,
-    pub os_id: String,
-    pub cliente_id: String,
-    pub cliente_nome: String,
-    pub desconto: String,
-    pub itens: Vec<ItemEntrada>,
-}
-
-pub fn para_venda(conn: &Connection, id: &str) -> Resultado<ParaVenda> {
-    let f = ficha(conn, id)?;
-    if f.situacao == "rascunho" {
-        return Err(Erro::validacao("É um rascunho: salve a OS antes de entregar."));
-    }
-    if f.situacao == "entregue" {
-        return Err(Erro::validacao("Esta OS já foi entregue."));
-    }
-    if f.situacao == "cancelada" {
-        return Err(Erro::validacao("Esta OS foi cancelada."));
-    }
-    if f.calculo.itens.is_empty() {
-        return Err(Erro::validacao("A OS não tem peças nem serviços."));
-    }
-    let itens = f
-        .calculo
-        .itens
-        .iter()
-        .map(|i| ItemEntrada {
-            produto_id: i.produto_id.clone(),
-            descricao: if i.tipo == "servico" { i.descricao.clone() } else { String::new() },
-            quantidade: i.quantidade.clone(),
-            preco: i.preco.clone(),
-            desconto: i.desconto.clone(),
-            encomendar: false,
-        })
-        .collect();
-    Ok(ParaVenda {
-        numero: f.numero,
-        caixa: f.caixa,
-        os_id: id.to_string(),
-        cliente_id: f.cliente_id,
-        cliente_nome: f.cliente,
-        desconto: f.desconto_texto,
-        itens,
-    })
-}
-
 /// A venda da OS foi concluída: OS entregue.
 pub fn entregue_na_venda(
     conn: &Connection,
@@ -1029,6 +979,109 @@ pub fn por_placa(conn: &Connection, placa: &str) -> Resultado<Option<serde_json:
     Ok(o.map(|o| {
         serde_json::json!({ "clienteId": "", "cliente": o.0, "telefone": o.1, "veiculo": o.2, "placa": documento::escrever_placa(&p) })
     }))
+}
+
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da oficina: ordens de serviço (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::erro::Resultado;
+    use crate::{oficina, sync};
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "os_listar", classe: Classe::Leitura, funcao: os_listar },
+        Comando { nome: "os_abrir", classe: Classe::Leitura, funcao: os_abrir },
+        Comando { nome: "os_calcular", classe: Classe::Leitura, funcao: os_calcular },
+        Comando { nome: "os_salvar", classe: Classe::Caixa, funcao: os_salvar },
+        Comando { nome: "os_rascunho_salvar", classe: Classe::Caixa, funcao: os_rascunho_salvar },
+        Comando { nome: "os_rascunho_excluir", classe: Classe::Caixa, funcao: os_rascunho_excluir },
+        Comando { nome: "os_rascunho_pode", classe: Classe::Leitura, funcao: os_rascunho_pode },
+        Comando { nome: "os_situacao", classe: Classe::Caixa, funcao: os_situacao },
+        Comando { nome: "os_cancelar", classe: Classe::Caixa, funcao: os_cancelar },
+        Comando { nome: "os_placa", classe: Classe::Leitura, funcao: os_placa },
+    ];
+
+    fn os_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!({
+            "itens": oficina::listar(p.conn, &d.quais, &d.texto)?,
+            "contagem": oficina::contagem(p.conn)?,
+        }))
+    }
+
+    fn os_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        Ok(json!(oficina::ficha(p.conn, &d.id)?))
+    }
+
+    fn os_calcular(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        Ok(json!(oficina::calcular(p.conn, &d)?))
+    }
+
+    fn os_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = oficina::salvar(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &id)?))
+    }
+
+    fn os_rascunho_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: oficina::Entrada = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let id = oficina::salvar_rascunho(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &id)?))
+    }
+
+    fn os_rascunho_excluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::excluir_rascunho(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn os_rascunho_pode(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        let caixas = sync::bloqueios_de_rascunho(p.conn)?;
+        Ok(json!({ "pode": caixas.is_empty(), "caixas": caixas }))
+    }
+
+    fn os_situacao(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Situacao = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::mudar(&tx, p.disp, p.usuario_id, &d.id, &d.situacao)?;
+        tx.commit()?;
+        Ok(json!(oficina::ficha(p.conn, &d.id)?))
+    }
+
+    fn os_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Estorno = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        oficina::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        tx.commit()?;
+        Ok(Value::Null)
+    }
+
+    fn os_placa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Filtro = ler(dados)?;
+        Ok(json!(oficina::por_placa(p.conn, &d.texto)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Situacao {
+        id: String,
+        situacao: String,
+    }
 }
 
 #[cfg(test)]
@@ -1108,7 +1161,7 @@ mod testes {
         assert_eq!(listar(c, "todas", "carlos").unwrap().len(), 1);
 
         // Entrega: vira venda (peças saem do estoque, o serviço não).
-        let pv = para_venda(c, &id).unwrap();
+        let pv = crate::vendas::os_para_venda(c, &id).unwrap();
         assert_eq!(pv.itens.len(), 2);
         let venda = VendaEntrada {
             itens: pv.itens,
@@ -1134,6 +1187,6 @@ mod testes {
         assert_eq!(ficha(c, &id).unwrap().situacao, "pronta");
         assert_eq!(crate::estoque::saldo(c, &pastilha).unwrap(), 4_000);
         cancelar(c, d, &u, &id, "cliente desistiu").unwrap();
-        assert!(para_venda(c, &id).is_err());
+        assert!(crate::vendas::os_para_venda(c, &id).is_err());
     }
 }

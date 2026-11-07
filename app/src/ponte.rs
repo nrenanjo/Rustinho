@@ -106,6 +106,26 @@ pub struct SistemaRust {
 
 const AGUARDE: &str = "Aguarde: o Rustinho ainda está terminando a operação anterior.";
 
+/// T-04 (duplo clique): começa uma operação demorada. `None` se já há outra
+/// rodando. A trava é solta quando a `Liberacao` sai de cena, inclusive se a
+/// tarefa parar por um erro inesperado.
+fn comecar(ocupado: &Arc<AtomicBool>) -> Option<Liberacao> {
+    if ocupado.swap(true, Ordering::SeqCst) {
+        None
+    } else {
+        Some(Liberacao(ocupado.clone()))
+    }
+}
+
+/// Solta a trava das operações demoradas ao sair de cena.
+struct Liberacao(Arc<AtomicBool>);
+
+impl Drop for Liberacao {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Abre o serviço do núcleo (só uma vez).
 fn abrir_servico() -> Result<Servico, String> {
     // PEND-09: programa montado com a raiz de TESTE da NF-e não abre.
@@ -167,9 +187,9 @@ impl qobject::Sistema {
     }
 
     pub fn chamar_demorado(mut self: Pin<&mut Self>, comando: &QString, dados: &QString) -> i32 {
-        if self.rust().ocupado.swap(true, Ordering::SeqCst) {
+        let Some(liberacao) = comecar(&self.rust().ocupado) else {
             return 0;
-        }
+        };
         let pedido = {
             let mut r = self.as_mut().rust_mut();
             r.pedidos = r.pedidos.wrapping_add(1).max(1);
@@ -177,29 +197,27 @@ impl qobject::Sistema {
         };
         let (comando, dados) = (comando.to_string(), dados.to_string());
         let guardado = self.guardado();
-        let ocupado = self.rust().ocupado.clone();
         let linha = self.qt_thread();
         std::thread::spawn(move || {
             let resposta = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 com_servico(&guardado, |s| s.chamar(&comando, &dados), rustinho_nucleo::api::resposta_de_erro)
             }))
             .unwrap_or_else(|_| rustinho_nucleo::api::resposta_de_erro("Erro interno inesperado na operação."));
-            ocupado.store(false, Ordering::SeqCst);
+            drop(liberacao);
             let _ = linha.queue(move |obj| obj.terminou(pedido, QString::from(&resposta)));
         });
         pedido
     }
 
     pub fn abrir_em_segundo_plano(self: Pin<&mut Self>) {
-        if self.rust().ocupado.swap(true, Ordering::SeqCst) {
+        let Some(liberacao) = comecar(&self.rust().ocupado) else {
             return;
-        }
+        };
         // Antes de abrir o banco: o núcleo compara a identidade deste
         // computador com a que o banco guardou (cópia do banco). Lida aqui,
         // na linha da janela (vem do Qt).
         rustinho_nucleo::computador::definir(&qobject::rustinho_identidade_do_computador().to_string());
         let guardado = self.guardado();
-        let ocupado = self.rust().ocupado.clone();
         let linha = self.qt_thread();
         std::thread::spawn(move || {
             let erro = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -210,7 +228,7 @@ impl qobject::Sistema {
                 }
             }))
             .unwrap_or_else(|_| "Erro interno inesperado ao abrir o banco.".to_string());
-            ocupado.store(false, Ordering::SeqCst);
+            drop(liberacao);
             let _ = linha.queue(move |obj| obj.aberto(QString::from(&erro)));
         });
     }
@@ -276,5 +294,53 @@ impl qobject::Sistema {
         }
         let r = serde_json::json!({ "ok": true, "dados": { "caminho": caminho, "impresso": impresso } });
         QString::from(&r.to_string())
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn t04_segunda_operacao_demorada_nao_comeca() {
+        let ocupado = Arc::new(AtomicBool::new(false));
+        let primeira = comecar(&ocupado).expect("a primeira começa");
+        assert!(ocupado.load(Ordering::SeqCst));
+        assert!(comecar(&ocupado).is_none(), "o segundo clique não começa outra");
+        drop(primeira);
+        assert!(!ocupado.load(Ordering::SeqCst));
+        assert!(comecar(&ocupado).is_some(), "terminada a primeira, a próxima começa");
+    }
+
+    #[test]
+    fn t04_duplo_clique_durante_a_tarefa() {
+        // Como em chamar_demorado: a tarefa à parte leva a liberação e solta
+        // a trava ao terminar; até lá, cliques novos não começam nada.
+        let ocupado = Arc::new(AtomicBool::new(false));
+        let liberacao = comecar(&ocupado).unwrap();
+        let (termina, espera) = mpsc::channel::<()>();
+        let tarefa = std::thread::spawn(move || {
+            espera.recv().unwrap();
+            drop(liberacao);
+        });
+        for _ in 0..5 {
+            assert!(comecar(&ocupado).is_none());
+        }
+        termina.send(()).unwrap();
+        tarefa.join().unwrap();
+        assert!(!ocupado.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn t04_trava_solta_mesmo_se_a_tarefa_parar_com_erro() {
+        let ocupado = Arc::new(AtomicBool::new(false));
+        let liberacao = comecar(&ocupado).unwrap();
+        let tarefa = std::thread::spawn(move || {
+            let _liberacao = liberacao;
+            panic!("erro inesperado de propósito");
+        });
+        assert!(tarefa.join().is_err());
+        assert!(!ocupado.load(Ordering::SeqCst), "a trava não pode ficar presa");
     }
 }

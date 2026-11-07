@@ -73,39 +73,53 @@ Painel {
             Layout.fillWidth: true
             Layout.fillHeight: true
             ScrollBar.vertical: ScrollBar {}
-            delegate: RowLayout {
+            delegate: Rectangle {
                 id: linha
                 required property var modelData
                 width: lista.width - 14
-                spacing: 12
-                ColumnLayout {
-                    spacing: 0
-                    Layout.fillWidth: true
-                    Text {
-                        text: linha.modelData.nome
-                        color: linha.modelData.ativo ? Tema.tinta : Tema.apagado
-                        font.family: Tema.texto
-                        font.weight: Font.DemiBold
-                        font.pixelSize: 15
-                        elide: Text.ElideRight
+                required property int index
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: Tema.faixa(linha.par, Tema.vela(0.4), "transparent")
+                palette.window: Tema.superficie(color)
+                radius: Tema.raioCampo
+                implicitHeight: conteudoDaFaixa.implicitHeight + 12
+                implicitWidth: conteudoDaFaixa.implicitWidth + 20
+                RowLayout {
+                    id: conteudoDaFaixa
+                    x: 10
+                    y: 6
+                    width: linha.width - 20
+                    spacing: 12
+                    ColumnLayout {
+                        spacing: 0
                         Layout.fillWidth: true
+                        Text {
+                            text: linha.modelData.nome
+                            color: linha.modelData.ativo ? Tema.tintaDaFaixa(linha.par) : Tema.apagadoDaFaixa(linha.par)
+                            font.family: Tema.texto
+                            font.weight: Font.DemiBold
+                            font.pixelSize: 15
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: (linha.modelData.tipo === "receita" ? "entrada" : "saída") + (linha.modelData.ativo ? "" : " · desativada")
+                            color: Tema.apagadoDaFaixa(linha.par)
+                            font.family: Tema.serifa
+                            font.italic: true
+                            font.pixelSize: 12
+                        }
                     }
-                    Text {
-                        text: (linha.modelData.tipo === "receita" ? "entrada" : "saída") + (linha.modelData.ativo ? "" : " · desativada")
-                        color: Tema.apagado
-                        font.family: Tema.serifa
-                        font.italic: true
-                        font.pixelSize: 12
-                    }
-                }
-                Selecao {
-                    modelo: janelinha.nomesGrupos()
-                    indice: janelinha.indiceDe(janelinha.escolhas[linha.modelData.id])
-                    Layout.preferredWidth: 300
-                    onEscolhido: {
-                        const e = Object.assign({}, janelinha.escolhas)
-                        e[linha.modelData.id] = indice === 0 ? "" : janelinha.c.grupos[indice - 1].id
-                        janelinha.escolhas = e
+                    Selecao {
+                        modelo: janelinha.nomesGrupos()
+                        indice: janelinha.indiceDe(janelinha.escolhas[linha.modelData.id])
+                        Layout.preferredWidth: 300
+                        onEscolhido: {
+                            const e = Object.assign({}, janelinha.escolhas)
+                            e[linha.modelData.id] = indice === 0 ? "" : janelinha.c.grupos[indice - 1].id
+                            janelinha.escolhas = e
+                        }
                     }
                 }
             }
@@ -119,7 +133,6 @@ Painel {
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: 10
-            Botao { text: "Cancelar"; tipo: "discreto"; onClicked: janelinha.close() }
             Botao { text: "Salvar"; icone: "check"; onClicked: janelinha.salvar() }
         }
     }

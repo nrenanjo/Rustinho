@@ -77,8 +77,9 @@ FocusScope {
             janela.avisar("Enviado para a impressora.", "ok")
     }
 
-    function aoEsc() {
-        if (busca.texto !== "") {
+    // Esc com a busca preenchida limpa a busca; a seta volta direto (D-V3).
+    function aoEsc(daSeta) {
+        if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregarPainel()
         } else {
@@ -102,7 +103,6 @@ FocusScope {
             titulo: "Vender / Receber"
             subtitulo: "Crediário e convênio: quem deve, quanto e quando vence"
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 text: "Lançar dívida"
                 icone: "mais"
@@ -136,6 +136,7 @@ FocusScope {
                     required property var modelData
                     radius: Tema.raio
                     color: modelData[2]
+                    palette.window: Tema.superficie(color)
                     implicitHeight: 72
                     Layout.fillWidth: true
                     ColumnLayout {
@@ -228,7 +229,9 @@ FocusScope {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Tema.raio
-                color: Tema.vela(0.28)
+                color: Tema.roxo ? Tema.pergaminho : Tema.vela(0.28)
+                // No roxo, um véu claro sobre o fundo roxo ficaria rosado: painel claro (0.9.18).
+                palette.window: Tema.superficie(color)
 
                 ColumnLayout {
                     anchors.centerIn: parent
@@ -368,10 +371,15 @@ FocusScope {
                             Repeater {
                                 model: tela.conta ? tela.conta.recebimentos : []
                                 delegate: Rectangle {
+                                    id: faixaDaLista
+                                    required property int index
                                     required property var modelData
                                     Layout.fillWidth: true
                                     radius: Tema.raioCampo
-                                    color: Tema.vela(0.45)
+                                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                    readonly property bool par: (index + 1) % 2 === 0
+                                    color: Tema.faixa(faixaDaLista.par, Tema.vela(0.45), "transparent")
+                                    palette.window: Tema.superficie(color)
                                     implicitHeight: 46
                                     RowLayout {
                                         anchors.fill: parent
@@ -382,7 +390,7 @@ FocusScope {
                                         Text {
                                             text: modelData.quando + "  ·  " + modelData.forma + "  ·  " + modelData.caixa + " nº " + modelData.numero
                                                   + (modelData.estornado ? "  ·  ESTORNADO: " + modelData.motivoEstorno : "")
-                                            color: Tema.tintaSuave
+                                            color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 13
                                             elide: Text.ElideRight
@@ -390,7 +398,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: Tema.sigiloTexto("R$ " + modelData.valor)
-                                            color: Tema.tinta
+                                            color: Tema.tintaDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
                                             font.pixelSize: 15
@@ -399,14 +407,14 @@ FocusScope {
                                         Botao {
                                             text: "Recibo"
                                             tipo: "discreto"
-                                            implicitHeight: 32
+                                            altura: 32
                                             onClicked: tela.imprimir("recibo", modelData.id)
                                         }
                                         Botao {
                                             visible: !modelData.estornado
                                             text: "Estornar"
                                             tipo: "discreto"
-                                            implicitHeight: 32
+                                            altura: 32
                                             onClicked: motivo.perguntar("Estornar o pagamento?",
                                                 Tema.sigiloTexto("R$ " + modelData.valor + " de " + modelData.quando + ". As parcelas voltam a ficar em aberto."),
                                                 "Estornar", (m, pronto) => tela.janela.chamarGerente("recebimento_estornar", { id: modelData.id, motivo: m }, pronto))
@@ -439,21 +447,14 @@ FocusScope {
     }
 
     // ---------- Receber ----------
-    Popup {
+    Painel {
         id: pagar
         property var calc: null
         property string forma: "dinheiro"
         property string erro: ""
         // FALHA-04: chave deste recebimento (nova a cada vez que a janela abre).
         property string chave: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(660, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function entrada() {
             return { clienteId: tela.clienteId, contas: tela.marcadas, valor: valor.texto, juros: juros.texto,
@@ -606,7 +607,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; atalho: "Esc"; onClicked: pagar.close() }
                 Botao { text: "Receber"; icone: "check"; atalho: "Enter"; onClicked: pagar.concluir() }
             }
         }
@@ -614,17 +614,12 @@ FocusScope {
     }
 
     // ---------- Recebido ----------
-    Popup {
+    Painel {
         id: feito
         property var recibo: null
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(520, Tema.largura - 24)
         padding: 32
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.verde; radius: Tema.raio + 3 }
+        cor: Tema.verde
         contentItem: ColumnLayout {
             spacing: 12
             Titulo {
@@ -667,7 +662,7 @@ FocusScope {
     }
 
     // ---------- Lançar dívida ----------
-    Popup {
+    Painel {
         id: lancar
         // FALHA-04: chave deste lançamento (nova a cada vez que a janela abre).
         property string chave: ""
@@ -676,14 +671,7 @@ FocusScope {
         property var achados: []
         property var previa: []
         property string erro: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(580, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function abrirCom(conta) {
             chave = Api.novaChave()
@@ -846,7 +834,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: lancar.close() }
                 Botao { text: "Lançar"; icone: "check"; enabled: lancar.cliente !== ""; onClicked: lancar.salvar() }
             }
         }
@@ -854,21 +841,14 @@ FocusScope {
     }
 
     // ---------- Pergunta com motivo (estornar, tirar dívida) ----------
-    Popup {
+    Painel {
         id: motivo
         property string titulo: ""
         property string mensagem: ""
         property string textoBotao: ""
         property var acao: null
         property string erro: ""
-        modal: true
-        focus: true
-        anchors.centerIn: T.Overlay.overlay
         width: Math.min(500, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        closePolicy: Popup.CloseOnEscape
-        T.Overlay.modal: Rectangle { color: Tema.veu }
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
 
         function perguntar(titulo, mensagem, textoBotao, acao) {
             motivo.titulo = titulo
@@ -905,7 +885,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: motivo.close() }
                 Botao { text: motivo.textoBotao; tipo: "perigo"; onClicked: motivo.confirmar() }
             }
         }

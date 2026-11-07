@@ -26,6 +26,7 @@ pela cor dos pixels (o escurecimento). Usa as peças do teste do piloto
     python3 app/testes/telas_navegacao_etapa1.py [pasta para as fotos]
     RUSTINHO_TELA=:88 python3 app/testes/telas_navegacao_etapa1.py   (se a :84 estiver ocupada)
     RUSTINHO_CASOS=F python3 app/testes/telas_navegacao_etapa1.py    (só alguns casos)
+    RUSTINHO_TEMA=roxo python3 app/testes/telas_navegacao_etapa1.py  (no Planeta Roxo; 0.9.18)
 """
 
 import os
@@ -78,19 +79,83 @@ def compras(pasta):
     return banco(pasta, "SELECT COUNT(*) FROM compra")[0][0]
 
 
+def janela_de_arquivos(titulo, segundos=10):
+    """(x, y, id) da janela de arquivos do Qt com esse título, ou None.
+
+    Desde o Qt 6.8, no X11, a janela de arquivos do próprio Qt abre numa
+    janela à parte (QQuickFileDialogImpl usa Popup.Window), fora da lista de
+    textos da tela do Rustinho. O título é o da tela (FileDialog.title)."""
+    fim = time.time() + segundos
+    while True:
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", titulo],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        for janela in s.stdout.split():
+            g = subprocess.run(["xdotool", "getwindowgeometry", "--shell", janela],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            d = dict(x.split("=", 1) for x in g.stdout.split() if "=" in x)
+            if "X" in d and "Y" in d:
+                return int(d["X"]), int(d["Y"]), janela
+        if time.time() >= fim:
+            return None
+        time.sleep(0.5)
+
+
+def primeiro_xml(casa):
+    """O primeiro arquivo que a janela de arquivos lista em Downloads (pelo
+    filtro de Compras: XML, ZIP ou RAR, em ordem alfabética)."""
+    pasta = os.path.join(casa, "Downloads")
+    nomes = sorted((n for n in os.listdir(pasta) if n.lower().endswith((".xml", ".zip", ".rar"))), key=str.lower)
+    if not nomes:
+        raise RuntimeError(f"nenhum XML em {pasta}")
+    return os.path.join(pasta, nomes[0])
+
+
 class Rustinho(nav.Rustinho):
+    def __init__(self, pasta, tela, props, fotos, nome, casa):
+        self.casa = casa
+        super().__init__(pasta, tela, props, fotos, nome, casa)
+
     def escolher_xml_de_compra(self):
-        """Compras › Importar XML › o primeiro da lista › Open."""
+        """Compras › Importar XML › o primeiro da lista."""
         if not self.clicar("Importar XML"):
             raise RuntimeError(f"não achei Importar XML (veja {self.saida})")
         time.sleep(2)
         aberto = self.posicao("Open")
-        if not aberto:
+        if aberto:
+            # Qt anterior ao 6.8: a janela de arquivos fica dentro da tela.
+            xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+            time.sleep(0.5)
+            xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+            time.sleep(3)
+            return
+        titulo = "Escolha o XML da nota de compra"
+        janela = janela_de_arquivos(titulo)
+        if not janela:
             raise RuntimeError(f"a janela de arquivos não abriu (veja {self.saida})")
-        xdo("mousemove", str(aberto[0] - 257), str(aberto[1] - 235), "click", "1")
+        # Ctrl+L abre o campo do caminho; com o caminho de um arquivo, Enter
+        # escolhe e fecha, como o Abrir (QQuickFolderBreadcrumbBar, igual no
+        # Qt 6.8 e no 6.12; a posição dos arquivos na lista muda entre eles).
+        xdo("windowfocus", "--sync", janela[2])
         time.sleep(0.5)
-        xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
+        xdo("key", "ctrl+l")
+        time.sleep(0.5)
+        xdo("type", "--delay", "20", primeiro_xml(self.casa))
+        time.sleep(0.3)
+        xdo("key", "Return")
         time.sleep(3)
+        if janela_de_arquivos(titulo, segundos=0):
+            raise RuntimeError(f"a janela de arquivos não fechou com o caminho do arquivo (veja {self.saida})")
+        # Sem gerenciador de janelas (tela virtual), o teclado não volta
+        # sozinho para a janela do Rustinho quando a de arquivos fecha: as
+        # teclas (CNPJ, Esc, F2) se perderiam. Na área de trabalho, quem
+        # devolve é o gerenciador de janelas.
+        for busca in (["--class", "rustinho"], ["--name", "Rustinho"]):
+            s = subprocess.run(["xdotool", "search", "--onlyvisible", *busca],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            if s.stdout.split():
+                xdo("windowfocus", "--sync", s.stdout.split()[0])
+                time.sleep(0.3)
+                break
 
     def clicar_campo(self, rotulo):
         """O campo fica logo abaixo do rótulo."""
@@ -122,13 +187,14 @@ class Rustinho(nav.Rustinho):
                 return min(max(alturas), 1000)
         return 760
 
-    def clicar_visivel(self, texto, topo=300, tentativas=40):
+    def clicar_visivel(self, texto, topo=330, tentativas=40):
         """Rola com a roda do mouse até o texto ficar dentro da área que rola e
         clica. Na seção Fiscal, "Adicionar regra" fica bem abaixo e "Ir para
         Loja" no alto: clicar pela posição sem rolar cairia fora da janela ou
         atrás do cabeçalho fixo das Configurações (título e abas, até uns
-        300 px: "topo"). Só clica com a tela parada: um clique durante o
-        deslize só para a rolagem."""
+        300 px; "topo" com folga: na 0.9.18 a linha da seta ficou 6 px mais
+        alta e um botão em y = 301 ficava escondido). Só clica com a tela
+        parada: um clique durante o deslize só para a rolagem."""
         altura = self.altura_da_janela()
         anterior = None
         for _ in range(tentativas):
@@ -165,8 +231,8 @@ def main():
     # tem journald, manda as mensagens para o journal se a saída não é um
     # terminal; isto as mantém na saída de erro.
     os.environ["QT_FORCE_STDERR_LOGGING"] = "1"
-    # Ambiente neutro, como o da CI: sem o tema do desktop (KDE, GNOME...),
-    # a janela de arquivos é a padrão do Qt, com "Open" onde o teste clica.
+    # Ambiente neutro: sem o tema do desktop (KDE, GNOME...), a janela de
+    # arquivos é a do próprio Qt, que o teste sabe usar.
     for v in ("XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION", "KDE_FULL_SESSION",
               "KDE_SESSION_VERSION", "KDE_SESSION_UID", "GNOME_DESKTOP_SESSION_ID",
               "QT_QPA_PLATFORMTHEME", "QT_STYLE_OVERRIDE"):
@@ -183,9 +249,7 @@ def main():
     modelo = os.path.join(raiz, "loja-modelo")
     os.makedirs(modelo)
     certo = True
-    # Casos a rodar: RUSTINHO_CASOS=F roda só o F. Os casos A a E usam a janela
-    # de arquivos do Qt; no Qt 6.12 ela abre numa janela à parte e em
-    # português, fora do que o teste lê: rode-os com o Qt da CI (6.8).
+    # Casos a rodar: RUSTINHO_CASOS=F roda só o F.
     casos = os.environ.get("RUSTINHO_CASOS", "ABCDEF").upper()
 
     def quer(caso):
@@ -198,6 +262,7 @@ def main():
 
     try:
         base.montar_loja(modelo)
+        nav.tema_por_fora(modelo)
 
         def loja_nova(**config):
             shutil.rmtree(pasta, ignore_errors=True)
@@ -228,7 +293,8 @@ def main():
                 certo &= conferir("A: orientação e origem no voltar", f, r.textos(),
                                   tem=["Falta o CNPJ da loja", "volta para Compras", "CNPJ da loja"],
                                   igual=["Compras", "Configurações"], sem_igual=["Início"])
-                ok("A: o resto da tela escurece", brilho(pixel(f, 1200, 740)) < brilho(pixel(sem_guia, 1200, 740)) - 15, f)
+                passou, detalhe = nav.escurecimento(f, sem_guia)
+                ok(f"A: o resto da tela escurece ({detalhe})", passou, f)
                 ok("A: nada importado", compras(pasta) == antes)
                 r.digitar_cnpj(CNPJ_RUIM)
                 certo &= conferir("A: CNPJ inválido fica", r.foto("-2-invalido"), r.textos(),
@@ -322,11 +388,15 @@ def main():
                 f = r.foto("-1-janela")
                 certo &= conferir("D: os dois documentos, sem os números com o olho fechado", f, r.textos(),
                                   tem=["CNPJ da loja", "CNPJ no XML (destinatário)", "Conferir nota", "Descartar nota",
-                                       "Cancelar", "A nota não foi importada e nada foi gravado", "a-nota.xml",
+                                       "A nota não foi importada e nada foi gravado", "a-nota.xml",
                                        "DISTRIBUIDORA DE AUTOPECAS EXEMPLO LTDA", "AUTO PECAS EXEMPLO"],
                                   nao_tem=["11.222.333", "11.444.777", "1.245,67"])
+                # 0.9.18 (V-4): a janela não tem mais "Cancelar"; a seta dela
+                # (nome "Voltar") fecha, igual ao Esc.
+                certo &= conferir("D: a janela tem a seta e não tem Cancelar", f, r.textos(),
+                                  igual=["Voltar"], sem_igual=["Cancelar"])
                 # O olho fica atrás da janela (modal): fecha, abre o olho, reabre.
-                r.clicar("Cancelar")
+                r.clicar("Voltar")
                 time.sleep(0.8)
                 r.clicar("Mostrar valores")
                 time.sleep(0.8)
@@ -338,9 +408,9 @@ def main():
                 time.sleep(1)
                 certo &= conferir("D: Conferir mostra os itens da nota", r.foto("-2-conferir"), r.textos(),
                                   tem=["Itens da nota (1)", "CORREIA POLY V", "Esconder os itens"])
-                r.clicar("Cancelar")
+                r.clicar("Voltar")
                 time.sleep(1)
-                certo &= conferir("D: Cancelar só fecha; a nota continua em Não importada", r.foto("-3-cancelar"),
+                certo &= conferir("D: a seta só fecha; a nota continua em Não importada", r.foto("-3-cancelar"),
                                   r.textos(), tem=["Não importada: nota de outro CNPJ"],
                                   nao_tem=["CNPJ da nota é diferente"])
                 r.clicar("Ver")

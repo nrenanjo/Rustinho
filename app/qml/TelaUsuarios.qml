@@ -117,7 +117,6 @@ FocusScope {
                 titulo: "Usuários"
                 subtitulo: "Todos acessam todas as funções. Cada um entra com o próprio nome e senha."
                 Layout.fillWidth: true
-                onVoltar: tela.janela.voltar()
                 Botao {
                     text: "Novo usuário"
                     icone: "mais"
@@ -142,7 +141,10 @@ FocusScope {
                     width: lista.width
                     height: 76
                     radius: Tema.raio
-                    color: aberto ? Tema.tinta : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
+                    // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                    readonly property bool par: (index + 1) % 2 === 0
+                    color: aberto ? Tema.atual : Tema.faixa(linha.par)
+                    palette.window: Tema.superficie(color)
                     opacity: modelData.ativo ? 1 : 0.6
 
                     Text {
@@ -153,7 +155,7 @@ FocusScope {
                         font.italic: true
                         font.weight: Font.DemiBold
                         font.pixelSize: 56
-                        color: Tema.dourado
+                        color: linha.aberto && Tema.roxo ? Tema.tintaAtual : Tema.douradoDaFaixa(linha.par)
                     }
                     ColumnLayout {
                         anchors.left: parent.left
@@ -164,7 +166,7 @@ FocusScope {
                         spacing: 0
                         Text {
                             text: linha.modelData.nome + (linha.modelData.voce ? "  (você)" : "") + (linha.modelData.ativo ? "" : "  · desativado")
-                            color: linha.aberto ? Tema.claro : Tema.tinta
+                            color: linha.aberto ? Tema.tintaAtual : Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: 24
@@ -173,7 +175,7 @@ FocusScope {
                         }
                         Text {
                             text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha curta" : "")
-                            color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuave
+                            color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 14

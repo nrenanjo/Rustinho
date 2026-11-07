@@ -102,12 +102,17 @@ FocusScope {
         Repeater {
             model: listaPecas.tudo ? listaPecas.pecas : listaPecas.pecas.slice(0, listaPecas.limite)
             delegate: Rectangle {
+                id: faixaDaLista
                 required property var modelData
                 required property int index
                 Layout.fillWidth: true
-                implicitHeight: 40
+                // A15 (0.9.18): no celular, cada linha com 48 dp (Tema.toqueMinimo).
+                implicitHeight: Math.max(40, Tema.toqueMinimo)
                 radius: Tema.raioCampo
-                color: sobre.hovered ? Tema.vela(0.6) : Tema.vela(0.35)
+                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                readonly property bool par: (index + 1) % 2 === 0
+                color: sobre.hovered ? (Tema.roxo ? Qt.darker(Tema.faixa(faixaDaLista.par), 1.04) : Tema.vela(0.6)) : Tema.faixa(faixaDaLista.par, Tema.vela(0.35), "transparent")
+                palette.window: Tema.superficie(color)
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 12
@@ -115,7 +120,7 @@ FocusScope {
                     spacing: 12
                     Text {
                         text: modelData.codigo
-                        color: Tema.tintaSuave
+                        color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
                         font.pixelSize: 14
@@ -124,7 +129,7 @@ FocusScope {
                     }
                     Text {
                         text: modelData.nome + (modelData.marca ? "  ·  " + modelData.marca : "")
-                        color: Tema.tinta
+                        color: Tema.tintaDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.pixelSize: 15
                         elide: Text.ElideRight
@@ -133,12 +138,12 @@ FocusScope {
                     Text {
                         text: listaPecas.mostrarCsosn ? "CSOSN " + modelData.csosn + "  →  " + modelData.sugerido
                                                       : (modelData.ncm ? "NCM " + modelData.ncm : "")
-                        color: listaPecas.mostrarCsosn ? Tema.vermelho : Tema.tintaSuave
+                        color: listaPecas.mostrarCsosn ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
                         font.pixelSize: 14
                     }
-                    Icone { nome: "direita"; tamanho: 16; cor: Tema.apagado }
+                    Icone { nome: "direita"; tamanho: 16; cor: Tema.apagadoDaFaixa(faixaDaLista.par) }
                 }
                 HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: tela.janela.abrir("TelaPeca", { produtoId: modelData.id }) }
@@ -181,7 +186,6 @@ FocusScope {
                                          + " · regras válidas em " + tela.dados.data.split("-").reverse().join("/")
                                          + " · " + tela.dados.totalPecas + " peças ativas"
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
         }
 
         Flickable {

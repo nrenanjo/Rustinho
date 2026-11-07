@@ -14,6 +14,8 @@ Rectangle {
     default property alias conteudo: coluna.data
 
     color: Tema.pergaminho
+    // O texto de dentro sabe a cor embaixo dele (no roxo, a faixa é clara).
+    palette.window: Tema.superficie(color)
     radius: Tema.raio
     implicitHeight: coluna.implicitHeight + preenchimento * 2
     implicitWidth: coluna.implicitWidth + preenchimento * 2

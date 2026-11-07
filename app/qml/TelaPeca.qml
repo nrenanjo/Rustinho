@@ -8,6 +8,9 @@ FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
     property string produtoId: ""
+    // O "voltar": Peças, ou a tela que abriu esta para resolver alguma
+    // coisa (navegação contextual, 0.9.18: as Etiquetas).
+    property string voltarPara: "Peças"
     property var ficha: null
     // FALHA-04: chave do salvar e da variação (novas ao abrir e depois de
     // dar certo: o próximo salvar já é uma alteração da mesma peça).
@@ -411,7 +414,7 @@ FocusScope {
 
         Cabecalho {
             sensivel: true
-            textoVoltar: "Peças"
+            textoVoltar: tela.voltarPara
             titulo: tela.nova ? (tela.servico ? "Novo serviço" : "Nova peça") : tela.ficha.nome
             subtitulo: {
                 if (!tela.ficha)
@@ -428,11 +431,10 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
-            onVoltar: tela.aoEsc()
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
-                color: Tema.vermelho
+                color: Tema.vermelhoNo(palette.window)
                 Layout.alignment: Qt.AlignVCenter
                 Layout.rightMargin: 6
             }
@@ -442,12 +444,6 @@ FocusScope {
                 icone: "impressora"
                 tipo: "secundario"
                 onClicked: tela.janela.abrir("TelaEtiquetas", { produtoId: tela.ficha.id })
-            }
-            Botao {
-                text: "Cancelar"
-                tipo: "discreto"
-                atalho: "Esc"
-                onClicked: tela.aoEsc()
             }
             Botao {
                 text: "Salvar"
@@ -979,13 +975,28 @@ FocusScope {
                         }
                         Repeater {
                             model: tela.ficha && tela.ficha.fornecedores ? tela.ficha.fornecedores : []
-                            delegate: Nota {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                text: modelData.codigo + "  ·  " + modelData.fornecedor + (modelData.fator !== "1" ? "  ·  caixa com " + modelData.fator : "")
-                                font.pixelSize: 14
-                                elide: Text.ElideRight
-                                wrapMode: Text.NoWrap
                                 Layout.fillWidth: true
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                Nota {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    text: modelData.codigo + "  ·  " + modelData.fornecedor + (modelData.fator !== "1" ? "  ·  caixa com " + modelData.fator : "")
+                                    font.pixelSize: 14
+                                    elide: Text.ElideRight
+                                    wrapMode: Text.NoWrap
+                                }
                             }
                         }
                     }
@@ -1055,6 +1066,7 @@ FocusScope {
                                 visible: !!tela.tributacao
                                 radius: Tema.raioCampo
                                 color: tela.tributacao && tela.tributacao.alerta !== "" ? Tema.rosa : Tema.vela(0.35)
+                                palette.window: Tema.superficie(color)
                                 implicitHeight: textoFiscal.implicitHeight + 22
                                 Layout.fillWidth: true
                                 ColumnLayout {
@@ -1273,26 +1285,41 @@ FocusScope {
 
                         Repeater {
                             model: tela.ficha ? tela.ficha.historico : []
-                            delegate: ColumnLayout {
+                            delegate: Rectangle {
+                                id: faixaDaLista2
                                 required property var modelData
-                                spacing: 1
                                 Layout.fillWidth: true
-                                Text {
-                                    text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
-                                    color: Tema.tinta
-                                    font.family: Tema.texto
-                                    font.weight: Font.DemiBold
-                                    font.pixelSize: 14
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                }
-                                Repeater {
-                                    model: modelData.detalhes
-                                    delegate: Nota {
-                                        required property string modelData
-                                        text: modelData
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista2.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa2.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa2.implicitWidth + 16
+                                ColumnLayout {
+                                    id: conteudoDaFaixa2
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista2.width - 16
+                                    spacing: 1
+                                    Text {
+                                        text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
+                                        color: Tema.tintaDaFaixa(faixaDaLista2.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
                                         font.pixelSize: 14
+                                        wrapMode: Text.WordWrap
                                         Layout.fillWidth: true
+                                    }
+                                    Repeater {
+                                        model: modelData.detalhes
+                                        delegate: Nota {
+                                            required property string modelData
+                                            text: modelData
+                                            font.pixelSize: 14
+                                            Layout.fillWidth: true
+                                        }
                                     }
                                 }
                             }
@@ -1347,7 +1374,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: painelVariacao.close() }
                 Botao { text: "Criar"; icone: "mais"; onClicked: tela.criarVariacao() }
             }
         }

@@ -221,6 +221,45 @@ fn nav01_arquivos_conferir_separa_os_que_faltam() {
 #[test]
 fn nav01_comandos_novos_sao_so_leitura() {
     for c in ["requisito_conferir", "arquivos_conferir"] {
-        assert!(crate::api::SO_LEITURA.contains(&c), "{c} fora de SO_LEITURA");
+        assert!(crate::api::so_leitura(c), "{c} não é só leitura");
     }
+}
+
+/// Caso 6 (C8, 0.9.18): o rascunho de OS novo bloqueado por um caixa sem
+/// versão confirmada vem com o requisito (a tela oferece "Ver caixas", sem
+/// desviar sozinha); `requisito_conferir` só diz satisfeito quando nenhum
+/// caixa bloqueia (aqui: o gerente retirou o caixa da loja). Conferir não
+/// grava nada e o rascunho não é salvo sozinho.
+#[test]
+fn nav06_rascunho_bloqueado_e_requisito_dos_caixas() {
+    let (mut s, _) = loja();
+    let conferir = |s: &mut crate::Servico| ok(s, "requisito_conferir", json!({ "id": "caixas.rascunho" }));
+    assert_eq!(conferir(&mut s)["satisfeito"], true, "sozinho, pode");
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "INSERT INTO sync_par (dispositivo, nome, endereco) VALUES ('caixa-2', 'Caixa 2', '10.0.0.2:47810')",
+            [],
+        )
+        .unwrap();
+    let os = json!({ "id": "", "clienteNome": "Carlos", "placa": "ABC1", "defeito": "Barulho",
+                     "itens": [{ "tipo": "servico", "descricao": "Revisão", "preco": "50", "quantidade": "1" }] });
+    let r = chamar(&mut s, "os_rascunho_salvar", os.clone());
+    assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("requisito:caixas.rascunho")), "{r}");
+    assert!(r["erro"].as_str().unwrap().contains("Simultaneidade › Caixas"), "{r}");
+    let c = conferir(&mut s);
+    assert_eq!(c["satisfeito"], false);
+    assert!(c["falta"].as_str().unwrap().contains("Caixa 2"), "{c}");
+    let rascunhos = |s: &mut crate::Servico| -> i64 {
+        s.banco_para_teste()
+            .conn
+            .query_row("SELECT COUNT(*) FROM ordem_servico WHERE situacao = 'rascunho'", [], |l| l.get(0))
+            .unwrap()
+    };
+    assert_eq!(rascunhos(&mut s), 0);
+    ok(&mut s, "caixa_retirar", json!({ "dispositivo": "caixa-2", "motivo": "Computador vendido" }));
+    assert_eq!(conferir(&mut s)["satisfeito"], true);
+    assert_eq!(rascunhos(&mut s), 0, "conferir não salva o rascunho sozinho");
+    assert_eq!(ok(&mut s, "os_rascunho_salvar", os)["situacao"], "rascunho", "com o clique, salva");
+    assert_eq!(rascunhos(&mut s), 1);
 }

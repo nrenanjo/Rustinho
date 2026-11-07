@@ -662,6 +662,77 @@ impl FiscalPeca {
     }
 }
 
+// ------------------------------------------------------------- comandos das telas
+
+pub use comandos::COMANDOS;
+
+/// Os comandos da conferência fiscal das peças (etapa 3 da modularização: vieram do `match` do
+/// `api.rs` sem mudar nome, entrada, resposta nem permissão).
+mod comandos {
+    use serde::Deserialize;
+    use serde_json::{json, Value};
+
+    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::erro::Resultado;
+    use crate::fiscal;
+
+    pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "fiscal_conferir", classe: Classe::Leitura, funcao: fiscal_conferir },
+        Comando { nome: "fiscal_automatico", classe: Classe::Caixa, funcao: fiscal_automatico },
+        Comando {
+            nome: "fiscal_regras_salvar",
+            classe: Classe::Gerente("configuracoes"),
+            funcao: fiscal_regras_salvar,
+        },
+        Comando { nome: "fiscal_tributacao", classe: Classe::Leitura, funcao: fiscal_tributacao },
+    ];
+
+    fn fiscal_conferir(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)?))
+    }
+
+    fn fiscal_automatico(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Ids = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let n = fiscal::usar_automatico(&tx, p.disp, p.usuario_id, &d.ids)?;
+        tx.commit()?;
+        Ok(json!({ "alteradas": n, "conferencia": fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)? }))
+    }
+
+    fn fiscal_regras_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Regras = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        fiscal::salvar_regras(&tx, p.disp, p.usuario_id, &d.regras)?;
+        tx.commit()?;
+        Ok(json!(fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)?))
+    }
+
+    fn fiscal_tributacao(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Tributacao = ler(dados)?;
+        let uf = fiscal::uf_loja(p.conn)?;
+        Ok(json!(fiscal::tributacao(p.conn, &uf, &d.cest, &d.csosn, &fiscal::hoje(p.conn)?)?))
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Ids {
+        ids: Vec<String>,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Regras {
+        regras: Vec<fiscal::RegraSt>,
+    }
+
+    #[derive(Deserialize, Default)]
+    #[serde(default)]
+    struct Tributacao {
+        cest: String,
+        csosn: String,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

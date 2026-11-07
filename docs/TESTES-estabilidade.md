@@ -10,6 +10,18 @@ estiverem aprovados, os automáticos **e** os feitos à mão, no **Linux** e no
 - Teste das telas: `python3 app/testes/telas_d09.py` (D-09) e
   `python3 app/testes/telas_d14_portatil.py` (D-14 e o Rustinho portátil),
   depois de `cargo build -p rustinho` (precisa de Xvfb, xdotool e ImageMagick).
+  Todos os testes das telas (`app/testes/telas_*.py`) rodam num ambiente
+  neutro (só X11, mensagens do Qt na saída de erro, sem o tema do desktop:
+  `ambiente_neutro()` em `telas_d09.py`), em qualquer sessão (KDE, GNOME,
+  Wayland). `RUSTINHO_TELA=:NN` troca a tela virtual e `RUSTINHO_PROGRAMA`
+  escolhe o executável (por exemplo, um compilado com o Qt 6.8.3 dos pacotes,
+  com `LD_LIBRARY_PATH` apontando para ele). Desde o Qt 6.8, a janela de
+  arquivos do próprio Qt abre numa janela à parte: os testes a acham pelo
+  título e devolvem o teclado à janela do Rustinho quando ela fecha.
+  O seletor do sistema no AppImage (T-16, 0.9.18):
+  `python3 app/testes/telas_seletor_nativo.py`, numa sessão fechada (D-Bus,
+  pasta pessoal e pasta de execução só do teste), sem abrir nada na área de
+  trabalho.
 - Testes à mão: `docs/ROTEIRO-linux-completo.md` (o mesmo roteiro serve no
   Windows, com o ZIP portátil `Rustinho-<versão>-Windows-portatil.zip`).
 - Auditoria técnica da 0.9.14 (defeitos, riscos, melhorias, testes que

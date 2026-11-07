@@ -51,12 +51,21 @@ Item {
         "pizza": "M 11 4 A 8.5 8.5 0 1 0 20 13 L 11 13 Z M 13.5 2.5 A 8.5 8.5 0 0 1 21.5 10.5 L 13.5 10.5 Z",
         // Configurações › Simultaneidade › Fiscal (0.9.15).
         "documentoElo": "M 11 20.5 L 5.5 20.5 L 5.5 3.5 L 13.5 3.5 L 18 8 L 18 12 M 13.5 3.5 L 13.5 8 L 18 8 M 8.5 11 L 14.5 11 M 8.5 14 L 12 14 M 15.4 15.6 L 16.8 14.2 A 2 2 0 0 1 19.6 17 L 18.2 18.4 M 17.6 19 L 16.2 20.4 A 2 2 0 0 1 13.4 17.6 L 14.8 16.2 M 15.6 18.2 L 17.4 16.4",
-        "documentoRelogio": "M 11.5 20.5 L 5.5 20.5 L 5.5 3.5 L 13.5 3.5 L 18 8 L 18 11 M 13.5 3.5 L 13.5 8 L 18 8 M 8.5 11 L 14.5 11 M 8.5 14 L 12 14 M 21.5 17 A 4 4 0 1 1 13.5 17 A 4 4 0 1 1 21.5 17 M 17.5 15 L 17.5 17 L 19 18"
+        "documentoRelogio": "M 11.5 20.5 L 5.5 20.5 L 5.5 3.5 L 13.5 3.5 L 18 8 L 18 11 M 13.5 3.5 L 13.5 8 L 18 8 M 8.5 11 L 14.5 11 M 8.5 14 L 12 14 M 21.5 17 A 4 4 0 1 1 13.5 17 A 4 4 0 1 1 21.5 17 M 17.5 15 L 17.5 17 L 19 18",
+        // Início (0.9.18, D-V6): a busca com colar (prancheta com +) e
+        // copiar (duas folhas); Ordens de serviço = prancheta com o visto.
+        // Peças usa a "chave" (a chave inglesa, acima).
+        "colar": "M 9 2.5 L 15 2.5 A 1 1 0 0 1 16 3.5 L 16 5 A 1 1 0 0 1 15 6 L 9 6 A 1 1 0 0 1 8 5 L 8 3.5 A 1 1 0 0 1 9 2.5 Z M 16 4 L 17.5 4 A 2 2 0 0 1 19.5 6 L 19.5 11.5 M 11.5 21.5 L 6.5 21.5 A 2 2 0 0 1 4.5 19.5 L 4.5 6 A 2 2 0 0 1 6.5 4 L 8 4 M 8 10 L 15 10 M 8 13.5 L 12 13.5 M 21 17.5 A 4 4 0 1 1 13 17.5 A 4 4 0 1 1 21 17.5 M 17 15.7 L 17 19.3 M 15.2 17.5 L 18.8 17.5",
+        "copiar": "M 10 8.5 L 19 8.5 A 2 2 0 0 1 21 10.5 L 21 19.5 A 2 2 0 0 1 19 21.5 L 10 21.5 A 2 2 0 0 1 8 19.5 L 8 10.5 A 2 2 0 0 1 10 8.5 Z M 5 15.5 A 2 2 0 0 1 3 13.5 L 3 4.5 A 2 2 0 0 1 5 2.5 L 14 2.5 A 2 2 0 0 1 16 4.5",
+        "prancheta": "M 9 2.5 L 15 2.5 A 1 1 0 0 1 16 3.5 L 16 5 A 1 1 0 0 1 15 6 L 9 6 A 1 1 0 0 1 8 5 L 8 3.5 A 1 1 0 0 1 9 2.5 Z M 16 4 L 17.5 4 A 2 2 0 0 1 19.5 6 L 19.5 19.5 A 2 2 0 0 1 17.5 21.5 L 6.5 21.5 A 2 2 0 0 1 4.5 19.5 L 4.5 6 A 2 2 0 0 1 6.5 4 L 8 4 M 9 14 L 11 16 L 15 12"
     })
 
     Shape {
         anchors.fill: parent
-        layer.enabled: true
+        // A camada (para suavizar as linhas) fica só no desenho normal: no
+        // desenho por processador ("software"), com a tela em escala diferente
+        // de 100%, o ícone com camada sai cortado (150%) ou some (200%).
+        layer.enabled: GraphicsInfo.api !== GraphicsInfo.Software
         layer.samples: 4
         layer.smooth: true
 

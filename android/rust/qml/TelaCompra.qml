@@ -192,7 +192,6 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
-            onVoltar: tela.janela.voltar()
             Botao {
                 visible: tela.rascunho
                 text: "Descartar"
@@ -257,6 +256,7 @@ FocusScope {
                         height: faixaNota.implicitHeight + 20
                         radius: Tema.raioCampo
                         color: Tema.pergaminho
+                        palette.window: Tema.superficie(color)
                         readonly property bool aguardando: !!tela.compra && tela.compra.autorizacao === "aguardando"
                         readonly property bool negada: !!tela.compra && tela.compra.autorizacao === "negada"
                         GridLayout {
@@ -435,13 +435,28 @@ FocusScope {
                         Layout.fillWidth: true
                         Repeater {
                             model: tela.compra ? tela.compra.duplicatas : []
-                            delegate: Text {
+                            delegate: Rectangle {
+                                id: faixaDaLista
                                 required property var modelData
-                                text: modelData
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
                                 Layout.fillWidth: true
+                                required property int index
+                                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                                readonly property bool par: (index + 1) % 2 === 0
+                                color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
+                                palette.window: Tema.superficie(color)
+                                radius: Tema.raioCampo
+                                implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                                implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                                Text {
+                                    id: conteudoDaFaixa
+                                    x: 8
+                                    y: 4
+                                    width: faixaDaLista.width - 16
+                                    text: modelData
+                                    color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                }
                             }
                         }
                         Nota {
@@ -619,7 +634,6 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
-                Botao { text: "Voltar"; tipo: "discreto"; onClicked: conferencia.close() }
                 Botao {
                     text: conferencia.bloqueia ? "Registrar e bloquear" : "Registrar"
                     icone: conferencia.bloqueia ? "" : "check"
@@ -630,14 +644,11 @@ FocusScope {
         }
     }
 
-    Popup {
+    Painel {
         id: caixaEstorno
-        modal: true
-        focus: true
-        anchors.centerIn: parent
+        // Como antes (o padrão do Popup): fecha também com um clique fora.
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         width: Math.min(480, Tema.largura - 24)
-        padding: Tema.estreito ? 18 : 30
-        background: Rectangle { color: Tema.pergaminho; radius: Tema.raio + 3 }
         contentItem: ColumnLayout {
             spacing: 14
             Titulo { text: "Estornar a compra?"; font.pixelSize: 30; Layout.fillWidth: true }
@@ -655,7 +666,6 @@ FocusScope {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Botao { text: "Cancelar"; tipo: "discreto"; onClicked: caixaEstorno.close() }
                 Botao {
                     id: botaoEstornar
                     text: "Estornar"
@@ -690,7 +700,15 @@ FocusScope {
             observacoes.texto = compra.observacoes
     }
 
-    Component.onCompleted: carregar()
+    Component.onCompleted: {
+        carregar()
+        // Os avisos do topo (CNPJ, assinatura e autorização) são o cabeçalho
+        // da lista e ganham altura depois dos itens: com uma lista mais alta
+        // que a tela (no celular, com os botões da decisão embaixo do texto,
+        // PEND-17), ela abria rolada, com os avisos escondidos em cima. Na
+        // primeira abertura, a lista começa do começo, com os avisos.
+        Qt.callLater(() => lista.positionViewAtBeginning())
+    }
     StackView.onActivated: {
         if (compra)
             carregar()
