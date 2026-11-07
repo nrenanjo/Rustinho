@@ -6,7 +6,10 @@
 #   fotografada; depois ele é desinstalado.
 # - Linux: o AppImage é aberto num Ubuntu 22.04 (como o usuário abre, com o
 #   FUSE), numa tela virtual, e a janela é fotografada.
-# Uso: Actions › Verificar pacotes › número da execução do Montar.
+# Uso: Actions › Verificar pacotes › número da execução do Montar. O GitHub só
+# deixa disparar à mão o que existe na main; fora dela, este workflow roda ao
+# enviar uma mudança em .github/verificar-pacotes.execucao (o número da
+# execução do Montar a conferir).
 
 name: Verificar pacotes
 
@@ -16,6 +19,10 @@ on:
       execucao:
         description: "Número da execução do Montar"
         required: true
+  push:
+    branches: [stabilization/0.9.18]
+    paths:
+      - .github/verificar-pacotes.execucao
 
 permissions:
   contents: read
@@ -25,11 +32,17 @@ jobs:
   windows:
     runs-on: windows-2022
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: .github
+      - id: qual
+        shell: bash
+        run: echo "execucao=${{ inputs.execucao || '' }}$( [ -n '${{ inputs.execucao }}' ] || tr -dc '0-9' < .github/verificar-pacotes.execucao )" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Rustinho-Windows
           path: pacote
-          run-id: ${{ inputs.execucao }}
+          run-id: ${{ steps.qual.outputs.execucao }}
           github-token: ${{ github.token }}
       - name: Instalar, conferir, abrir e desinstalar
         shell: pwsh
@@ -120,11 +133,16 @@ jobs:
   linux:
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          sparse-checkout: .github
+      - id: qual
+        run: echo "execucao=${{ inputs.execucao || '' }}$( [ -n '${{ inputs.execucao }}' ] || tr -dc '0-9' < .github/verificar-pacotes.execucao )" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Rustinho-Linux
           path: pacote
-          run-id: ${{ inputs.execucao }}
+          run-id: ${{ steps.qual.outputs.execucao }}
           github-token: ${{ github.token }}
       - name: Abrir o AppImage como um usuário (tela virtual)
         run: |
