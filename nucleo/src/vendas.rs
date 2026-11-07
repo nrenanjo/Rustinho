@@ -166,13 +166,8 @@ pub struct Crediario {
 }
 
 fn calcular_crediario(conn: &Connection, e: &VendaEntrada) -> Resultado<Crediario> {
-    let valor = numeros::somar(
-        e.pagamentos
-            .iter()
-            .filter(|p| p.forma == "crediario")
-            .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
-    )
-    .ok_or_else(|| Erro::validacao("O crediário ficou grande demais."))?;
+    let valor = numeros::somar(e.pagamentos.iter().filter(|p| p.forma == "crediario").map(valor_para_conta))
+        .ok_or_else(|| Erro::validacao("O crediário ficou grande demais."))?;
     let mut c = Crediario { valor: numeros::escrever_dinheiro(valor), v_valor: valor, ..Default::default() };
     if valor == 0 {
         return Ok(c);
@@ -219,6 +214,14 @@ fn ler_desconto(texto: &str, base: i64) -> Result<i64, String> {
 const QUANTIDADE_MAXIMA: i64 = 1_000_000_000; // 1 milhão de unidades (em milésimos)
 const PRECO_MAXIMO: i64 = 100_000_000_000; // R$ 1 bilhão (em centavos)
 const TOTAL_MAXIMO: i64 = 10_000_000_000_000; // R$ 100 bilhões
+
+/// O valor de um pagamento nas contas da prévia (pago, cheques, crediário;
+/// M-03: uma leitura só): o que não é dinheiro válido conta 0, e o valor
+/// fica entre 0 e o máximo de uma venda. A gravação (`gravar`) é mais
+/// rígida: lá, valor inválido é erro do campo.
+fn valor_para_conta(p: &PagamentoEntrada) -> i64 {
+    numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)
+}
 /// Formas de pagamento numa venda só.
 const PAGAMENTOS_MAXIMOS: usize = 50;
 
@@ -443,18 +446,11 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         Err(m) => (0, m),
     };
     let total = depois_itens - desconto;
-    let pago = numeros::somar(
-        e.pagamentos.iter().map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
-    )
-    .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;
+    let pago = numeros::somar(e.pagamentos.iter().map(valor_para_conta))
+        .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;
     let troco = (pago - total).max(0);
     let quantidade_itens = numeros::soma(itens.iter().filter(|i| !i.servico).map(|i| i.v_quantidade))?;
-    let em_cheque = numeros::soma(
-        e.pagamentos
-            .iter()
-            .filter(|p| p.forma == "cheque")
-            .map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
-    )?;
+    let em_cheque = numeros::soma(e.pagamentos.iter().filter(|p| p.forma == "cheque").map(valor_para_conta))?;
     let v_desconto = numeros::soma([desconto, desconto_itens])?;
     let cliente = if !e.cliente_id.is_empty() {
         conn.query_row("SELECT nome FROM pessoa WHERE id = ?1", [&e.cliente_id], |l| l.get(0))
@@ -1332,6 +1328,66 @@ mod testes {
 
     fn item(id: &str, q: &str) -> ItemEntrada {
         ItemEntrada { produto_id: id.into(), quantidade: q.into(), ..Default::default() }
+    }
+
+    /// M-03: a prévia da venda soma os pagamentos (pago), os cheques e o
+    /// crediário com a mesma leitura do valor: o que não é dinheiro válido
+    /// conta 0 e nada fica abaixo de 0. Fixa o comportamento de antes.
+    #[test]
+    fn m03_previa_com_pagamentos_estranhos() {
+        let (b, _, p1, _) = base();
+        let pg = |forma: &str, valor: &str| PagamentoEntrada {
+            forma: forma.into(),
+            valor: valor.into(),
+            ..Default::default()
+        };
+        let e = VendaEntrada {
+            itens: vec![item(&p1, "1")],
+            tabela: 1,
+            pagamentos: vec![
+                pg("dinheiro", "abc"),
+                pg("dinheiro", "-50"),
+                pg("cheque", "30,00"),
+                pg("cheque", "lixo"),
+                pg("crediario", "20"),
+                pg("crediario", ""),
+                pg("pix", "40,00"),
+            ],
+            ..Default::default()
+        };
+        let c = calcular(&b.conn, &e).unwrap();
+        assert_eq!(c.v_pago, 9000, "30 + 20 + 40; inválido e negativo contam 0");
+        assert_eq!(c.troco, "10,00");
+        assert_eq!(c.cheques.v_valor, 3000);
+        assert_eq!(c.crediario.v_valor, 2000);
+    }
+
+    /// M-03: a função única dá, para cada texto, exatamente o que a expressão
+    /// repetida dava (copiada aqui como era).
+    #[test]
+    fn m03_valor_para_conta_igual_a_expressao_de_antes() {
+        let antes =
+            |p: &PagamentoEntrada| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO);
+        let valores = [
+            "",
+            "abc",
+            "0",
+            "10",
+            "10,50",
+            "1.234,56",
+            "-50",
+            "-0,01",
+            " 7 ",
+            "12,345",
+            "99999999999999,99",
+            "999999999999999999999",
+        ];
+        for v in valores {
+            let p = PagamentoEntrada { forma: "dinheiro".into(), valor: v.into(), ..Default::default() };
+            assert_eq!(valor_para_conta(&p), antes(&p), "valor {v:?}");
+        }
+        let maximo = PagamentoEntrada { valor: "99999999999999,99".into(), ..Default::default() };
+        assert!(valor_para_conta(&maximo) <= TOTAL_MAXIMO);
     }
 
     #[test]
