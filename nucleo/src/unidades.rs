@@ -617,9 +617,19 @@ mod testes {
         let depois = listar_em(&b.conn, "2026-11-05T14:00:00Z").unwrap();
         assert_eq!((vendida(&depois, "KG"), vendida(&depois, "C")), (0, 9_000));
         assert_eq!((vendida(&depois, "F"), vendida(&depois, "G")), (0, 0));
-        // Referência estranha ou no futuro: vale agora (nada disso é de agora).
+        // Referência vazia, estranha ou no futuro: vale agora. Uma venda de uma
+        // hora atrás conta (e as de 05/11 não); com T no futuro não contaria.
+        let hora_atras = (OffsetDateTime::now_utc() - time::Duration::hours(1))
+            .replace_nanosecond(0)
+            .unwrap()
+            .format(&Rfc3339)
+            .unwrap();
+        // Sigla do item em minúsculas, com espaço: é a mesma "KG".
+        venda(&b, "v9", &hora_atras, &[("v9a", " kg", 1_250)]);
         for r in ["", "ontem", "2999-01-01T00:00:00Z"] {
-            assert!(listar_em(&b.conn, r).unwrap().iter().all(|u| u.vendida == 0), "{r}");
+            let l = listar_em(&b.conn, r).unwrap();
+            assert_eq!(vendida(&l, "KG"), 1_250, "{r}");
+            assert!(l.iter().filter(|u| u.sigla != "KG").all(|u| u.vendida == 0), "{r}");
         }
         // Orçamento não é venda.
         b.conn.execute("UPDATE venda SET tipo = 'orcamento' WHERE id = 'v2'", []).unwrap();
