@@ -1,0 +1,163 @@
+# Confere os pacotes já montados por uma execução do Montar, sem montar nada
+# de novo e sem publicar nada:
+# - Windows: o instalador é instalado como um usuário faria (pasta padrão,
+#   atalhos), os arquivos, a versão, o ícone, os atalhos e a regra do firewall
+#   são conferidos, o Rustinho é aberto (pasta de dados padrão) e a janela é
+#   fotografada; depois ele é desinstalado.
+# - Linux: o AppImage é aberto num Ubuntu 22.04 (como o usuário abre, com o
+#   FUSE), numa tela virtual, e a janela é fotografada.
+# Uso: Actions › Verificar pacotes › número da execução do Montar.
+
+name: Verificar pacotes
+
+on:
+  workflow_dispatch:
+    inputs:
+      execucao:
+        description: "Número da execução do Montar"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Windows
+          path: pacote
+          run-id: ${{ inputs.execucao }}
+          github-token: ${{ github.token }}
+      - name: Instalar, conferir, abrir e desinstalar
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force verificacao | Out-Null
+          $rel = "verificacao\relatorio.txt"
+          function anota($t) { $t | Tee-Object -FilePath $rel -Append }
+          $setup = Get-ChildItem pacote\*-Windows-instalador.exe | Select-Object -First 1
+          if (-not $setup) { throw "instalador não encontrado" }
+          anota "instalador: $($setup.Name) | $($setup.Length) bytes | SHA-256 $((Get-FileHash $setup.FullName -Algorithm SHA256).Hash)"
+          anota "assinatura digital do instalador: $((Get-AuthenticodeSignature $setup.FullName).Status)"
+
+          # Instala como um usuário (pasta padrão; com o atalho na área de trabalho).
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/TASKS=atalho", "/LOG=verificacao\instalacao.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "o instalador saiu com o código $($p.ExitCode)" }
+          $dir = Join-Path $env:ProgramFiles "Rustinho"
+          $exe = Join-Path $dir "rustinho.exe"
+          if (-not (Test-Path $exe)) { throw "rustinho.exe não está em $dir" }
+          anota "instalado em: $dir"
+
+          # Arquivos: os que o Rustinho precisa para abrir.
+          Get-ChildItem $dir -Recurse -File | ForEach-Object { "{0,12}  {1}" -f $_.Length, $_.FullName.Substring($dir.Length + 1) } | Set-Content verificacao\arquivos.txt
+          anota "arquivos instalados: $((Get-ChildItem $dir -Recurse -File).Count)"
+          foreach ($f in "rustinho.exe", "rclone.exe", "rustinho.ico", "LICENCA.txt", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Qml.dll", "Qt6Quick.dll", "platforms\qwindows.dll", "unins000.exe") {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "faltou $f" }
+          }
+          foreach ($m in "qml\QtQuick\Controls", "qml\QtQuick\Layouts", "qml\Qt\labs\folderlistmodel") {
+            if (-not (Test-Path (Join-Path $dir $m))) { throw "faltou o módulo $m" }
+          }
+          anota "arquivos essenciais e módulos do QML: presentes"
+
+          # Versão e ícone do executável.
+          $v = (Get-Item $exe).VersionInfo
+          anota "versão do rustinho.exe: FileVersion=$($v.FileVersion) ProductVersion=$($v.ProductVersion) ProductName=$($v.ProductName) FileDescription=$($v.FileDescription)"
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          [System.Drawing.Icon]::ExtractAssociatedIcon($exe).ToBitmap().Save("$PWD\verificacao\icone_do_exe.png", [System.Drawing.Imaging.ImageFormat]::Png)
+
+          # Atalhos (menu Iniciar e área de trabalho de todos os usuários).
+          $sh = New-Object -ComObject WScript.Shell
+          foreach ($lnk in "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Rustinho\Rustinho.lnk", "$env:PUBLIC\Desktop\Rustinho.lnk") {
+            if (-not (Test-Path $lnk)) { throw "atalho não criado: $lnk" }
+            $a = $sh.CreateShortcut($lnk)
+            anota "atalho: $lnk -> $($a.TargetPath) | ícone $($a.IconLocation)"
+          }
+          # Entrada de "Adicionar ou remover programas".
+          $u = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -like "Rustinho*" } | Select-Object -First 1
+          anota "programas instalados: $($u.DisplayName) | versão $($u.DisplayVersion) | ícone $($u.DisplayIcon)"
+          # Regra do firewall (decisão A9 em aberto).
+          netsh advfirewall firewall show rule name=Rustinho | Out-File -Append $rel
+
+          # Abre como um usuário: sem RUSTINHO_DADOS (pasta de dados padrão).
+          $dados = Join-Path $env:LOCALAPPDATA "Rustinho"
+          $proc = Start-Process -FilePath $exe -WorkingDirectory $dir -PassThru
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "$dados\rustinho.db"); $i++) { Start-Sleep -Seconds 1 }
+          if (-not (Test-Path "$dados\rustinho.db")) { throw "o banco não foi criado em $dados" }
+          anota "banco criado na pasta padrão: $dados\rustinho.db"
+          for ($i = 0; $i -lt 30; $i++) { $proc.Refresh(); if ($proc.MainWindowHandle -ne 0) { break }; Start-Sleep -Seconds 1 }
+          Start-Sleep -Seconds 10
+          $proc.Refresh()
+          if ($proc.HasExited) { throw "o Rustinho fechou sozinho" }
+          anota "janela: título '$($proc.MainWindowTitle)' | handle $($proc.MainWindowHandle)"
+          if (-not $proc.MainWindowTitle) { throw "o Rustinho não mostrou janela" }
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\verificacao\janela.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          # A tela tem desenho? (muitas cores diferentes numa amostra)
+          $cores = @{}
+          for ($x = 0; $x -lt $b.Width; $x += 16) { for ($y = 0; $y -lt $b.Height; $y += 16) { $cores[$bmp.GetPixel($x, $y).ToArgb()] = 1 } }
+          anota "foto da tela: $($b.Width)x$($b.Height), $($cores.Count) cores diferentes na amostra"
+          if ($cores.Count -lt 20) { throw "a tela parece sem desenho ($($cores.Count) cores)" }
+          Stop-Process -Id $proc.Id -Force
+
+          # Desinstala e confere o que sai e o que fica.
+          Start-Process -FilePath (Join-Path $dir "unins000.exe") -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait
+          for ($i = 0; $i -lt 60 -and (Test-Path $exe); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $exe) { throw "a desinstalação não removeu o rustinho.exe" }
+          $regra = (netsh advfirewall firewall show rule name=Rustinho) -join " "
+          anota "depois de desinstalar: programa removido; regra do firewall: $(if ($regra -match 'Rustinho') { 'AINDA EXISTE' } else { 'removida' }); atalho do menu: $(if (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Rustinho") { 'AINDA EXISTE' } else { 'removido' }); dados do usuário em $dados`: $(if (Test-Path "$dados\rustinho.db") { 'mantidos' } else { 'apagados' })"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: verificacao-windows
+          path: verificacao/
+          retention-days: 30
+
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Linux
+          path: pacote
+          run-id: ${{ inputs.execucao }}
+          github-token: ${{ github.token }}
+      - name: Abrir o AppImage como um usuário (tela virtual)
+        run: |
+          set -u
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xdotool imagemagick libfuse2 > /dev/null
+          mkdir -p verificacao
+          A=$(ls pacote/*.AppImage | head -1)
+          chmod +x "$A"
+          { sha256sum "$A"; file "$A"; ldd --version | head -1; } | tee verificacao/relatorio.txt
+          Xvfb :99 -screen 0 1440x900x24 &
+          sleep 2
+          export DISPLAY=:99
+          # Direto, com o FUSE, como o usuário abre (sem --appimage-extract-and-run).
+          "$A" --textos-da-tela > verificacao/saida.log 2>&1 &
+          P=$!
+          ok=0
+          for i in $(seq 1 60); do xdotool search --onlyvisible --class rustinho > /dev/null 2>&1 && { ok=1; break; }; sleep 1; done
+          sleep 6
+          xdotool mousemove 700 450
+          xdotool key ctrl+shift+F12
+          sleep 2
+          import -window root verificacao/janela.png
+          kill $P 2> /dev/null || true
+          sleep 2
+          echo "janela abriu: $ok" | tee -a verificacao/relatorio.txt
+          echo "erros de QML: $(grep -c -E 'TypeError|ReferenceError|is not a type|module .* is not installed' verificacao/saida.log)" | tee -a verificacao/relatorio.txt
+          echo "banco na pasta padrão: $(ls ~/.local/share/rustinho/rustinho.db 2> /dev/null || echo 'NÃO')" | tee -a verificacao/relatorio.txt
+          sed -n '/TEXTOS-DA-TELA-INICIO/,/TEXTOS-DA-TELA-FIM/p' verificacao/saida.log | cut -f3 | grep -v '^GEO:' | head -8 | tee -a verificacao/relatorio.txt
+          test "$ok" = 1 && grep -q "Bem-vindo" verificacao/saida.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: verificacao-linux
+          path: verificacao/
+          retention-days: 30
