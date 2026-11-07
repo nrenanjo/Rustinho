@@ -318,7 +318,10 @@ jobs:
             15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 linuxdeploy-plugin-qt | sha256sum -c -
           chmod +x linuxdeploy linuxdeploy-plugin-qt
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
-          export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base"
+          # instalador/appimage: módulos que as janelas de arquivo do Qt usam
+          # (como no montar.yml; NEW-B17-01 da auditoria: sem ele o AppImage
+          # deste teste saía sem Qt.labs.folderlistmodel).
+          export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base:$PWD/instalador/appimage"
           export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:${LD_LIBRARY_PATH:-}"
           export OUTPUT="Rustinho-$VERSAO-Linux-x86_64.AppImage"
           ./linuxdeploy --appdir AppDir \
@@ -326,6 +329,8 @@ jobs:
             $(for n in 16 22 24 32 48 64 128 256 512; do printf -- '--icon-file instalador/icones/hicolor/%sx%s/apps/rustinho.png ' "$n" "$n"; done) \
             --icon-filename rustinho \
             --plugin qt --output appimage
+          # Sem este módulo, "Escolher arquivos" fecha o programa (como no montar.yml).
+          test -f AppDir/usr/qml/Qt/labs/folderlistmodel/qmldir || { echo "AppImage sem Qt.labs.folderlistmodel"; exit 1; }
           mkdir -p saida && mv Rustinho-*.AppImage saida/
           h=$(sha256sum "saida/$OUTPUT" | cut -d' ' -f1)
           echo "$h  $OUTPUT" > "saida/$OUTPUT.sha256"
