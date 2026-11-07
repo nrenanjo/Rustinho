@@ -92,6 +92,29 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersao=$env:VERSAO" "/DOrigem=..\dist" instalador\rustinho.iss
           Get-ChildItem saida
+      # 0.9.18: o instalador instala de verdade neste Windows da CI (sem tela,
+      # /VERYSILENT) e o Rustinho instalado abre e cria o banco, numa pasta de
+      # dados só do teste (RUSTINHO_DADOS). Nada é publicado aqui.
+      - name: Instalar e abrir (teste do instalador)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
+          if (-not $setup) { throw "Instalador não encontrado em saida\" }
+          $dir = Join-Path $env:RUNNER_TEMP "RustinhoInstalado"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "O instalador saiu com o código $($p.ExitCode)" }
+          if (-not (Test-Path "$dir\rustinho.exe")) { throw "O instalador não pôs o rustinho.exe em $dir" }
+          $dados = Join-Path $env:RUNNER_TEMP "RustinhoDadosDoTeste"
+          $env:RUSTINHO_DADOS = $dados
+          $proc = Start-Process -FilePath "$dir\rustinho.exe" -WorkingDirectory $dir -PassThru
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "$dados\rustinho.db"); $i++) { Start-Sleep -Seconds 1 }
+          $vivo = -not $proc.HasExited
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$dados\rustinho.db")) { throw "O Rustinho instalado não criou o banco (estava aberto: $vivo)" }
+          # O resultado fica só no registro da CI: a publicação (na main) manda
+          # tudo o que está em saida/ para a versão.
+          "Instalado em $dir; abriu e criou o banco em $dados (estava aberto: $vivo)."
+          "::notice title=Instalador::instalado e aberto; banco criado em $dados"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Rustinho-Windows
