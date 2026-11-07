@@ -1,0 +1,137 @@
+# Validação visual e funcional dos pacotes JÁ MONTADOS por uma execução do
+# Montar, antes de publicar (app/testes/validacao_visual_0918.py): busca de
+# peças, os três temas com as listas alternadas e a navegação (seta, Esc,
+# formulário não salvo e navegação guiada Fiscal › Loja), com uma foto de cada
+# passo.
+# - Windows: instala o instalador como um usuário e valida o Rustinho
+#   instalado, na área de trabalho da máquina da CI.
+# - Linux: valida o AppImage num Ubuntu 22.04, numa tela virtual.
+# Os pacotes são conferidos pelo SHA-256 (os mesmos da pré-release). A loja de
+# teste é montada na própria máquina (a identidade do computador tem de bater).
+# Nada é montado de novo e nada é publicado.
+# Roda ao enviar uma mudança em .github/validar-telas.execucao (a execução do
+# Montar e os SHA-256 esperados), neste arquivo ou no roteiro.
+
+name: Validar telas
+
+on:
+  push:
+    branches: [stabilization/0.9.18]
+    paths:
+      - .github/validar-telas.execucao
+      - .github/workflows/validar-telas.yml
+      - app/testes/validacao_visual_0918.py
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: qual
+        shell: bash
+        run: |
+          for c in execucao windows; do echo "$c=$(sed -n "s/^$c=//p" .github/validar-telas.execucao | tr -dc '0-9a-f')" >> "$GITHUB_OUTPUT"; done
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Windows
+          path: pacote
+          run-id: ${{ steps.qual.outputs.execucao }}
+          github-token: ${{ github.token }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Montar a loja de validação (neste Windows)
+        shell: pwsh
+        env:
+          RUSTINHO_LOJA_TESTE: ${{ runner.temp }}\loja
+        run: |
+          New-Item -ItemType Directory -Force $env:RUSTINHO_LOJA_TESTE | Out-Null
+          cargo test -p rustinho-nucleo --test estavel -- --ignored --exact montar_loja_de_validacao
+          if (-not (Test-Path "$env:RUSTINHO_LOJA_TESTE\busca_esperada.json")) { throw "a loja de validação não foi montada" }
+      - name: Instalar o Rustinho (o instalador da pré-release)
+        shell: pwsh
+        env:
+          SHA_ESPERADO: ${{ steps.qual.outputs.windows }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force validacao-windows | Out-Null
+          $setup = Get-ChildItem pacote\*-Windows-instalador.exe | Select-Object -First 1
+          if (-not $setup) { throw "instalador não encontrado" }
+          $sha = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          "instalador: $($setup.Name) | $($setup.Length) bytes | SHA-256 $sha" | Tee-Object validacao-windows\pacote.txt
+          if ($sha -ne $env:SHA_ESPERADO) { throw "não é o instalador da pré-release (esperado $env:SHA_ESPERADO)" }
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=validacao-windows\instalacao.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "o instalador saiu com o código $($p.ExitCode)" }
+          if (-not (Test-Path "$env:ProgramFiles\Rustinho\rustinho.exe")) { throw "rustinho.exe não foi instalado" }
+          "instalado em $env:ProgramFiles\Rustinho" | Tee-Object -Append validacao-windows\pacote.txt
+      - name: Tela de 1920x1080
+        shell: pwsh
+        run: |
+          try { Set-DisplayResolution -Width 1920 -Height 1080 -Force } catch { "Set-DisplayResolution: $_" }
+          Add-Type -AssemblyName System.Windows.Forms
+          "tela: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
+      - name: Ferramentas do roteiro
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check --quiet pyautogui==0.9.54 pywin32 pillow
+      - name: Validar as telas no Rustinho instalado
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: python app\testes\validacao_visual_0918.py "$env:ProgramFiles\Rustinho\rustinho.exe" "${{ runner.temp }}\loja" validacao-windows
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validacao-windows
+          path: validacao-windows/
+          retention-days: 30
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: qual
+        run: |
+          for c in execucao linux; do echo "$c=$(sed -n "s/^$c=//p" .github/validar-telas.execucao | tr -dc '0-9a-f')" >> "$GITHUB_OUTPUT"; done
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Linux
+          path: pacote
+          run-id: ${{ steps.qual.outputs.execucao }}
+          github-token: ${{ github.token }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: "1.97.0"
+      - name: Montar a loja de validação (neste Linux)
+        env:
+          RUSTINHO_LOJA_TESTE: ${{ runner.temp }}/loja
+        run: |
+          mkdir -p "$RUSTINHO_LOJA_TESTE"
+          cargo test -p rustinho-nucleo --test estavel -- --ignored --exact montar_loja_de_validacao
+          test -f "$RUSTINHO_LOJA_TESTE/busca_esperada.json"
+      - name: Validar as telas no AppImage (tela virtual)
+        env:
+          SHA_ESPERADO: ${{ steps.qual.outputs.linux }}
+        run: |
+          set -u
+          sudo apt-get update -qq
+          # O OpenGL/EGL vem do sistema (como em qualquer Linux com área de trabalho).
+          sudo apt-get install -y -qq xvfb xdotool imagemagick libfuse2 libegl1 libgl1 libglx-mesa0 libegl-mesa0 libgl1-mesa-dri python3-pil > /dev/null
+          mkdir -p validacao-linux
+          A=$(ls "$PWD"/pacote/*.AppImage | head -1)
+          chmod +x "$A"
+          sha=$(sha256sum "$A" | cut -d' ' -f1)
+          echo "AppImage: $(basename "$A") | $(stat -c %s "$A") bytes | SHA-256 $sha" | tee validacao-linux/pacote.txt
+          test "$sha" = "$SHA_ESPERADO"
+          python3 app/testes/validacao_visual_0918.py "$A" "${{ runner.temp }}/loja" validacao-linux
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: validacao-linux
+          path: validacao-linux/
+          retention-days: 30
