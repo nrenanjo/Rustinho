@@ -305,7 +305,9 @@ class Rustinho:
         env.update(RUSTINHO_DADOS=pasta, QT_FORCE_STDERR_LOGGING="1",
                    QT_LOGGING_RULES="qml.info=true;js.info=true;default.info=true")
         self.log = open(self.saida, "wb")
-        self.p = subprocess.Popen([programa, "--textos-da-tela"], env=env, stdout=self.log, stderr=self.log)
+        # --medir-toque: as linhas das listas (áreas de toque), para conferir as faixas.
+        self.p = subprocess.Popen([programa, "--textos-da-tela", "--medir-toque"], env=env, stdout=self.log,
+                                  stderr=self.log)
         if not self.s.preparar(self.p.pid):
             raise RuntimeError(f"a janela do Rustinho não apareceu (veja {self.saida})")
         time.sleep(3)
@@ -483,52 +485,69 @@ class Resultado:
         return certo
 
 
-def linhas_da_lista(textos, h):
-    """As alturas das linhas de uma lista: a maior sequência de textos com
-    espaçamento regular (28 a 120 px, ±2)."""
-    ys = sorted({y for x, y, t in textos
-                 if t and not t.startswith(("GEO:", "TESTE_")) and 100 < y < h - 8})
-    melhor = []
-    for passo in range(28, 121):
-        for ini in ys:
-            seq = [ini]
-            while True:
-                alvo = seq[-1] + passo
-                prox = [y for y in ys if abs(y - alvo) <= 2]
-                if not prox:
-                    break
-                seq.append(min(prox, key=lambda y: abs(y - alvo)))
-            if len(seq) > len(melhor):
-                melhor = seq
-    return melhor
+def listas_da_tela(textos):
+    """As linhas das listas da tela, pelo que o próprio Rustinho informa com
+    --medir-toque (linhas TOQUE: a área de toque de cada controle): as linhas
+    de uma lista são áreas de toque (TapHandler ou MouseArea) do mesmo
+    componente, na mesma coluna e com a mesma largura, uma logo abaixo da
+    outra (vão de até 16 px). Devolve [(componente, [(x, y, w, h)])], só as
+    listas com 3 linhas ou mais."""
+    grupos = collections.defaultdict(list)
+    for _, _, t in textos:
+        if t.startswith(("TOQUE:tap|", "TOQUE:mousearea|")):
+            partes = t.split("|")
+            x, y, w, h = (float(v) for v in partes[4].split(","))
+            grupos[(partes[1], partes[2], round(x), round(w))].append((x, y, w, h))
+    listas = []
+    for (componente, _, _, _), rets in grupos.items():
+        rets.sort(key=lambda r: r[1])
+        seq = [rets[0]]
+        for r in rets[1:]:
+            if 0 <= r[1] - (seq[-1][1] + seq[-1][3]) <= 16:
+                seq.append(r)
+                continue
+            if len(seq) >= 3:
+                listas.append((componente, seq))
+            seq = [r]
+        if len(seq) >= 3:
+            listas.append((componente, seq))
+    return listas
 
 
 def alternancia(foto, textos, janela):
-    """Confere as faixas de uma lista pelos pixels da foto. Pula a 1ª linha
-    (a escolhida, com a cor de destaque) e usa as 6 seguintes: em cada coluna
-    de pixels, a cor de cada linha; nas colunas de fundo, as vizinhas têm de
-    ser diferentes e as alternadas iguais. Devolve (alterna? ou None quando a
-    tela não tem linhas bastantes, detalhe)."""
+    """Confere as faixas claras e escuras das listas da tela. As linhas vêm do
+    próprio Rustinho (listas_da_tela); a cor de cada linha é a do fundo dela
+    na foto, na margem da esquerda, a meia altura (a cor que mais aparece de
+    x+3 a x+12), onde não há texto. Só as linhas inteiras dentro da janela.
+    Devolve (estado, detalhe): "alterna" (em cada lista com 3 linhas ou mais,
+    da 2ª em diante, vizinhas com fundos diferentes e alternadas iguais: A, B,
+    A...; a 1ª, a escolhida, pode ter a cor de destaque), "nao" (alguma lista
+    sem isso) ou "sem" (nenhuma lista com 3 linhas inteiras à vista)."""
     from PIL import Image
     img = Image.open(foto).convert("RGB")
     ox, oy, w, h = janela
-    linhas = linhas_da_lista(textos, h)
-    if len(linhas) < 4:
-        return None, f"{len(linhas)} linhas com espaçamento regular (poucas para conferir)"
-    usadas = linhas[1:7]
-    colunas = range(ox + 2, ox + w - 2, 2)
-    pares = collections.Counter()
-    for x in colunas:
-        c = [img.getpixel((x, oy + y)) for y in usadas]
+    vistas, falhas = [], []
+    for componente, linhas in listas_da_tela(textos):
+        inteiras = [r for r in linhas if r[1] >= 0 and r[1] + r[3] <= h and r[0] >= 0 and r[0] + 14 <= w]
+        if len(inteiras) < 3:
+            continue
+        cores = []
+        for x, y, _, alt in inteiras:
+            amostra = [img.getpixel((round(ox + x + dx), round(oy + y + alt / 2))) for dx in range(3, 13)]
+            cores.append(collections.Counter(amostra).most_common(1)[0][0])
+        descricao = f"{componente}: {len(inteiras)} linhas, fundos {' '.join(hexa(c) for c in cores[:6])}"
+        # Sem a 1ª (a escolhida pode ter a cor de destaque): vizinhas
+        # diferentes e alternadas iguais.
+        c = cores[1:]
         if all(c[i] != c[i + 1] for i in range(len(c) - 1)) and all(c[i] == c[i + 2] for i in range(len(c) - 2)):
-            pares[(c[0], c[1])] += 1
-    alternam = sum(pares.values())
-    fracao = alternam / len(colunas)
-    if not pares:
-        return False, f"{len(linhas)} linhas; nenhuma coluna de fundo alterna"
-    (a, b), _ = pares.most_common(1)[0]
-    return fracao >= 0.10, (f"{len(linhas)} linhas; fundos alternados {hexa(a)} / {hexa(b)} "
-                            f"em {round(fracao * 100)}% da largura")
+            vistas.append(descricao)
+        else:
+            falhas.append(descricao)
+    if falhas:
+        return "nao", "sem faixas alternadas: " + "; ".join(falhas)
+    if vistas:
+        return "alterna", "; ".join(vistas)
+    return "sem", "nenhuma lista com 3 linhas inteiras à vista nesta tela (não dá para conferir as faixas)"
 
 
 def hexa(c):
@@ -716,21 +735,28 @@ def temas(r, res, pasta):
             r.clicar(botao)
             res.conferir(f"T {nome}: formulário ({botao})", r.esperar_pilha(3), r.foto(f"T-{nome}-{j:02d}-{arq}"))
             voltar_inicio(r, res, f"T {nome} {botao}")
-        for i, tela in enumerate(TELAS, 3 + len(FORMULARIOS)):
+        # As telas da Início e, pela pílula, a lista dos fornecedores.
+        listas = [(tela, None) for tela in TELAS] + [("Estoque / Fornecedores", "Fornecedores")]
+        for i, (tela, pilula) in enumerate(listas, 3 + len(FORMULARIOS)):
+            rotulo = f"{tela} › {pilula}" if pilula else tela
             if not r.clicar(tela):
                 res.conferir(f"T {nome}: abrir {tela}", False, r.foto(f"T-{nome}-erro-{i:02d}"), "cartão não achado")
                 continue
             r.senha_se_pedir()
             r.esperar_pilha(2)
             time.sleep(1.2)
-            foto = r.foto(f"T-{nome}-{i:02d}-{arquivo(tela)}")
+            if pilula:
+                r.clicar(pilula)
+                time.sleep(1.5)
+            foto = r.foto(f"T-{nome}-{i:02d}-{arquivo(rotulo)}")
             t = r.textos()
-            alterna, detalhe = alternancia(foto, t, r.s.janela())
-            if alterna is None:
-                res.conferir(f"T {nome}: {tela}", r.pilha(t) == 2, foto, detalhe)
+            estado, detalhe = alternancia(foto, t, r.s.janela())
+            if estado == "sem":
+                res.conferir(f"T {nome}: {rotulo}", r.pilha(t) == 2, foto, detalhe)
             else:
-                res.conferir(f"T {nome}: {tela} — linhas alternadas", alterna and r.pilha(t) == 2, foto, detalhe)
-            voltar_inicio(r, res, f"T {nome} {tela}")
+                res.conferir(f"T {nome}: {rotulo} — linhas alternadas", estado == "alterna" and r.pilha(t) == 2, foto,
+                             detalhe)
+            voltar_inicio(r, res, f"T {nome} {rotulo}")
     res.conferir("T: os três temas têm fundos diferentes", len(set(fundos.values())) == 3,
                  detalhe=", ".join(f"{k} #%02X%02X%02X" % v for k, v in fundos.items()))
 
