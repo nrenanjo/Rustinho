@@ -12,7 +12,7 @@ on:
     # da 0.9.14 continua.
     # 0.9.18: a branch de desenvolvimento também (a CI testa cada envio), e
     # a de estabilização (o Rustinho portátil abre de verdade num Windows da
-    # CI; rascunho de versão só com "[rascunho]" na mensagem do commit).
+    # CI; desta branch nunca sai rascunho de versão, veja a tarefa "rascunho").
     branches: [build-0.9.14, build-0.9.15, build-0.9.16, build-0.9.17, teste/c8-portatil, desenvolvimento-0.9.18,
                stabilization/0.9.18]
   # Também à mão (aba Actions › "Run workflow"), sem precisar de push.
@@ -76,7 +76,7 @@ jobs:
       - name: Bibliotecas do sistema e da tela virtual
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil x11-utils
       - name: Qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
@@ -105,7 +105,9 @@ jobs:
             case "$t" in *telas_seletor_nativo.py) continue ;; esac
             nome=$(basename "$t" .py)
             echo "=== $nome" | tee -a telas.txt
-            if ! timeout 2400 python3 "$t" "fotos/$nome" 2>&1 | tee -a telas.txt; then
+            # O Python do sistema (o do Pillow do apt): o passo do Qt põe
+            # outro python3 na frente, sem o Pillow ("No module named PIL").
+            if ! timeout 2400 /usr/bin/python3 "$t" "fotos/$nome" 2>&1 | tee -a telas.txt; then
               falhou="$falhou $nome"
             fi
           done
@@ -400,9 +402,12 @@ jobs:
 
   # RASCUNHO da versão (não publicado: só o dono do repositório vê). Os dois
   # arquivos são os mesmos que as tarefas acima montaram e conferiram.
+  # Nunca a partir da estabilização (07/11/2026): a versão estável é decisão do
+  # dono. Um commit desta branch que só EXPLICAVA a marca acionou este passo, que
+  # tentou criar a tag v0.9.18 e foi recusado pelo GitHub (403); nada foi criado.
   rascunho:
     needs: [testes, testes-windows, portatil, linux]
-    if: always() && needs.testes.result == 'success' && needs.portatil.result == 'success' && needs.linux.result == 'success' && contains(github.event.head_commit.message, '[rascunho]')
+    if: always() && needs.testes.result == 'success' && needs.portatil.result == 'success' && needs.linux.result == 'success' && contains(github.event.head_commit.message, '[rascunho]') && github.ref != 'refs/heads/stabilization/0.9.18'
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -88,11 +88,13 @@ def gravado(pasta, nome):
         c.close()
 
 
-def caso(modelo, fotos, res, nome, passos, conferir):
+def caso(modelo, fotos, res, nome, arquivo, peca, passos, conferir):
+    """nome: o que aparece no resultado; arquivo: o nome das fotos e do
+    registro (sem ":", que os artefatos da CI recusam); peca: o nome digitado."""
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-tipo-")
     shutil.rmtree(pasta)
     shutil.copytree(modelo, pasta)
-    rr = u.Rustinho(pasta, "TelaPeca", {}, fotos, nome)
+    rr = u.Rustinho(pasta, "TelaPeca", {}, fotos, arquivo)
     try:
         rr.entrar("Ana")
         time.sleep(2)
@@ -106,7 +108,7 @@ def caso(modelo, fotos, res, nome, passos, conferir):
         res.conferir(f"{nome}: salvou sem erro do fiscal escondido", not erros, f"{erros[:2]}; foto {foto}")
     finally:
         rr.fechar()
-    conferir(gravado(pasta, nome.split(":")[0]), res, nome)
+    conferir(gravado(pasta, peca), res, nome)
     shutil.rmtree(pasta, ignore_errors=True)
 
 
@@ -149,8 +151,10 @@ def main():
                          and linha[0] == "produto" and not fiscal.get("servicoCodigo") and not fiscal.get("servico_codigo"),
                          f"{linha}")
 
-        caso(modelo, fotos, res, "Troca T1: produto com NCM ruim vira serviço", servico_com_ncm, conferir_t1)
-        caso(modelo, fotos, res, "Troca T2: serviço com ISS ruim vira produto", produto_com_iss, conferir_t2)
+        caso(modelo, fotos, res, "Troca T1: produto com NCM ruim vira serviço", "t1-produto-vira-servico", "Troca T1",
+             servico_com_ncm, conferir_t1)
+        caso(modelo, fotos, res, "Troca T2: serviço com ISS ruim vira produto", "t2-servico-vira-produto", "Troca T2",
+             produto_com_iss, conferir_t2)
         erros = [f for f in os.listdir(fotos) if f.endswith(".log")
                  and any(e in open(os.path.join(fotos, f), errors="replace").read() for e in ("TypeError", "ReferenceError"))]
         res.conferir("T3 nenhum TypeError/ReferenceError nos registros", not erros, ", ".join(erros))
