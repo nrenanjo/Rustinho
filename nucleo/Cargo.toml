@@ -34,6 +34,11 @@ rustls-pki-types = "1"
 x509-parser = { version = "0.18", default-features = false }
 base64 = "0.22"
 
+# A trava do banco (`api::tentar_travar`) usa o `flock` do sistema em todo Unix:
+# a biblioteca do Rust 1.97 (a da montagem do Android) não tem trava no Android.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 # Só para os testes de integração (tests/*.rs): troca as raízes da ICP-Brasil
 # pela raiz FICTÍCIA de teste (nucleo/tests/pki). Nunca ligar no programa: o

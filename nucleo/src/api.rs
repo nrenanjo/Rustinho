@@ -472,8 +472,33 @@ fn travar(caminho: &Path) -> Resultado<std::fs::File> {
         .write(true)
         .open(std::path::PathBuf::from(nome))
         .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta dos dados: {e}")))?;
-    resultado_da_trava(f.try_lock())?;
+    resultado_da_trava(tentar_travar(&f))?;
     Ok(f)
+}
+
+/// A trava em si, sem esperar. Em todo Unix é o `flock` do sistema, o mesmo
+/// que a biblioteca do Rust usa no Linux: a da montagem do Android (Rust 1.97)
+/// não tem `try_lock` no Android e respondia "não suportado", e por isso o
+/// app do celular nunca abria o banco (0.9.18). No Windows, a da biblioteca.
+#[cfg(unix)]
+fn tentar_travar(f: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: o descritor é de `f`, que fica aberto durante toda a chamada;
+    // `flock` só recebe o número e não mexe em memória do Rust.
+    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        Err(std::fs::TryLockError::WouldBlock)
+    } else {
+        Err(std::fs::TryLockError::Error(e))
+    }
+}
+
+#[cfg(not(unix))]
+fn tentar_travar(f: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    f.try_lock()
 }
 
 /// R-07: sem a trava, não abre. Seguir sem ela deixaria dois Rustinhos
@@ -2637,6 +2662,28 @@ mod testes {
         assert!(e.contains("já está aberto"), "{e}");
         drop(t1);
         assert!(travar(&caminho).is_ok());
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// A trava do sistema (a mesma do Android): pega, recusa um segundo
+    /// arquivo aberto no mesmo lugar sem esperar e solta ao fechar. No Android
+    /// a da biblioteca do Rust respondia "não suportado" e o app nunca abria.
+    #[test]
+    fn trava_do_sistema_pega_recusa_e_solta() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-flock-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db.trava");
+        let abrir = || std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&caminho).unwrap();
+        let primeiro = abrir();
+        assert!(tentar_travar(&primeiro).is_ok(), "a trava do sistema funciona aqui");
+        let segundo = abrir();
+        assert!(
+            matches!(tentar_travar(&segundo), Err(std::fs::TryLockError::WouldBlock)),
+            "o segundo é recusado na hora (sem esperar)"
+        );
+        drop(primeiro);
+        assert!(tentar_travar(&segundo).is_ok(), "ao fechar o primeiro, a trava solta");
+        drop(segundo);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
