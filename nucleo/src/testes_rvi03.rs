@@ -225,6 +225,10 @@ fn ok(s: &mut crate::Servico, cmd: &str, d: Value) -> Value {
 /// suporte e restaura um backup bom; ao abrir de novo, a loja volta inteira.
 #[test]
 fn rvi03_recuperacao_pelo_modo_seguro_com_banco_antigo() {
+    // A vez do backup é uma só no processo: a cópia para o suporte (em
+    // segundo plano) e a restauração daqui não podem cruzar com as dos outros
+    // testes quando rodam em paralelo (como na CI).
+    let _vez = crate::backup::testes::um_por_vez();
     let pasta = pasta_nova("recupera");
     let db = loja_v22(&pasta);
     // Um backup bom desta loja (estrutura 22), feito antes do defeito.

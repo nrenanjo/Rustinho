@@ -18,6 +18,19 @@ use crate::comum::*;
 const SENHA_REDE: &str = "rede-da-loja";
 const FILHO: &str = "RUSTINHO_T8_FILHO";
 
+/// A troca de dados destes testes usa um servidor (o motor) DESTE processo.
+/// Uma restauração de backup de outro teste do mesmo processo (t1) pausa a
+/// troca (`sync::pausar`: a trava de escrita, que no Rust passa na frente de
+/// quem lê): esperando por ela, o servidor daqui não atende, e o cliente fica
+/// parado até o prazo de 30 s ("os error 11", visto em paralelo, 0.9.18). No
+/// programa, cliente e servidor de uma troca são processos diferentes; nos
+/// testes da própria biblioteca isso é evitado por `pausar_nos_testes`, que
+/// não vale aqui (estes testes usam a biblioteca de verdade). Então os
+/// testes de troca esperam a vez dos testes de backup.
+fn vez_da_troca() -> std::sync::MutexGuard<'static, ()> {
+    vez_do_backup()
+}
+
 fn caixa_novo(pasta: &Path, nome: &str) -> Banco {
     let b = Banco::abrir(&pasta.join("rustinho.db")).unwrap();
     config::gravar(&b.conn, "caixa_nome", nome).unwrap();
@@ -99,6 +112,7 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
+    let _vez = vez_da_troca();
     let pa = pasta_nova("t8-a");
     let pb = pasta_nova("t8-b");
     let mut a = caixa_novo(&pa, "Caixa A");
@@ -208,6 +222,7 @@ fn t8_2_senha_da_rede_errada_nao_troca() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
+    let _vez = vez_da_troca();
     let pa = pasta_nova("t8-2a");
     let pb = pasta_nova("t8-2b");
     let a = caixa_novo(&pa, "Caixa A");

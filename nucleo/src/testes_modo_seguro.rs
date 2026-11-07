@@ -241,6 +241,9 @@ fn a3_sem_troca_de_dados_com_banco_com_defeito() {
 /// backups bons ficam. O backup automático e o de fechar não rodam.
 #[test]
 fn a3_backup_de_banco_com_defeito_nao_vira_backup_bom() {
+    // A vez do backup é uma só no processo: com os testes em paralelo (como
+    // na CI), um backup de outro teste recusaria o daqui (e vice-versa).
+    let _vez = backup::testes::um_por_vez();
     let pasta = pasta_nova("backup");
     let l = loja_em_arquivo(&pasta);
     let backups = pasta.join("backups");
@@ -296,6 +299,8 @@ fn a3_backup_de_banco_com_defeito_nao_vira_backup_bom() {
 /// de novo, o banco é conferido e o caixa volta a vender.
 #[test]
 fn a3_restaurar_backup_bom_tira_do_modo_seguro() {
+    // Restaurar usa a vez única do backup (veja o teste anterior).
+    let _vez = backup::testes::um_por_vez();
     let pasta = pasta_nova("restaurar");
     let l = loja_em_arquivo(&pasta);
     let backups = pasta.join("backups");
@@ -385,6 +390,7 @@ fn a3_consulta_que_nao_le_devolve_erro_sem_derrubar() {
 #[ignore]
 fn c8_backup_da_zip2_restaura_com_a_zip9() {
     let Some(pasta) = std::env::var_os("C8_BACKUP_ZIP2").map(PathBuf::from) else { return };
+    let _vez = backup::testes::um_por_vez();
     let antigo = backup::listar(&pasta.join("backups")).into_iter().next().expect("backup antigo").caminho;
     let db = pasta.join("rustinho.db");
     let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
