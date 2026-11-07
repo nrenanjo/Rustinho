@@ -9,7 +9,9 @@
 //!
 //! De onde vem a identidade:
 //! - O programa pergunta ao Qt (`QSysInfo::machineUniqueId`) e entrega aqui
-//!   com `definir`, antes de abrir o banco (Windows, Android e Linux).
+//!   com `definir`, antes de abrir o banco (Windows e Linux). No Android o Qt
+//!   não informa nada; o programa entrega o ANDROID_ID (`cpp/janela.cpp`).
+//!   Sem identidade, a loja nem é cadastrada (veja `faixas`).
 //! - Sem isso (testes, ferramentas), no Linux: `/etc/machine-id` (ou o de
 //!   `/var/lib/dbus`); no Windows, o MachineGuid do registro (o mesmo que o
 //!   Qt lê); nos outros sistemas, sem identidade.
