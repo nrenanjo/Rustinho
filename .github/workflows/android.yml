@@ -261,9 +261,17 @@ jobs:
           - nome: "64bits"
             sufixo: ""
             curto: ""
+            api: 34
+            arquitetura: x86_64
+          # O APK de 32 bits só tem armeabi-v7a. A imagem x86_64 da API 34 só
+          # traduz ARM de 64 bits: o APK nem instalava
+          # (INSTALL_FAILED_NO_MATCHING_ABIS, CI de 07/11/2026). A imagem x86
+          # da API 30 traduz ARM de 32 bits (o Moto e6i é Android 10, API 29).
           - nome: "32bits"
             sufixo: "-32bits"
             curto: "1"
+            api: 30
+            arquitetura: x86
     name: testar (${{ matrix.nome }})
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -286,8 +294,8 @@ jobs:
         env:
           CURTO: ${{ matrix.curto }}
         with:
-          api-level: 34
-          arch: x86_64
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arquitetura }}
           target: google_apis
           profile: pixel_6
           disable-animations: true
