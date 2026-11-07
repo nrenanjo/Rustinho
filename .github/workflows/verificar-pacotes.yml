@@ -23,6 +23,7 @@ on:
     branches: [stabilization/0.9.18]
     paths:
       - .github/verificar-pacotes.execucao
+      - .github/workflows/verificar-pacotes.yml
 
 permissions:
   contents: read
@@ -123,6 +124,10 @@ jobs:
           if (Test-Path $exe) { throw "a desinstalação não removeu o rustinho.exe" }
           $regra = (netsh advfirewall firewall show rule name=Rustinho) -join " "
           anota "depois de desinstalar: programa removido; regra do firewall: $(if ($regra -match 'Rustinho') { 'AINDA EXISTE' } else { 'removida' }); atalho do menu: $(if (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Rustinho") { 'AINDA EXISTE' } else { 'removido' }); dados do usuário em $dados`: $(if (Test-Path "$dados\rustinho.db") { 'mantidos' } else { 'apagados' })"
+          if ($regra -match 'Rustinho') { throw "a regra do firewall ficou depois de desinstalar" }
+          # O "netsh ... show rule" sem a regra sai com 1 (é o certo depois de
+          # desinstalar); sem isto o passo terminaria com esse código.
+          exit 0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
@@ -148,7 +153,10 @@ jobs:
         run: |
           set -u
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xdotool imagemagick libfuse2 > /dev/null
+          # O OpenGL/EGL vem do sistema (o AppImage não leva: depende do driver
+          # de vídeo de cada computador). Todo Linux com área de trabalho já
+          # tem; a máquina da CI é um servidor sem tela e precisa instalar.
+          sudo apt-get install -y -qq xvfb xdotool imagemagick libfuse2 libegl1 libgl1 libglx-mesa0 libegl-mesa0 libgl1-mesa-dri > /dev/null
           mkdir -p verificacao
           A=$(ls pacote/*.AppImage | head -1)
           chmod +x "$A"
