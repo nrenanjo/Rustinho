@@ -81,6 +81,48 @@ tela_atual() {
     [ -n "$pid" ] || return 0
     adb logcat -d | awk -v p="$pid" '$3 == p' | grep -o "Rustinho: tela pronta: [A-Za-z]*" | tail -1 | sed 's/.*: //'
 }
+# Digita como uma pessoa: um toque em cada tecla do teclado da tela (só
+# letras minúsculas; o teclado põe a maiúscula do começo). As posições são
+# as do teclado QWERTY do emulador (1080 × 2400), iguais no Android 9 e 14.
+digitar() {
+    local palavra=$1 i letra xy
+    for ((i = 0; i < ${#palavra}; i++)); do
+        letra=${palavra:i:1}
+        case "$letra" in
+            q) xy="58 1717" ;; w) xy="166 1717" ;; e) xy="272 1717" ;; r) xy="379 1717" ;; t) xy="486 1717" ;;
+            y) xy="593 1717" ;; u) xy="700 1717" ;; i) xy="808 1717" ;; o) xy="914 1717" ;; p) xy="1021 1717" ;;
+            a) xy="112 1872" ;; s) xy="218 1872" ;; d) xy="326 1872" ;; f) xy="432 1872" ;; g) xy="539 1872" ;;
+            h) xy="646 1872" ;; j) xy="754 1872" ;; k) xy="860 1872" ;; l) xy="967 1872" ;;
+            z) xy="218 2027" ;; x) xy="326 2027" ;; c) xy="432 2027" ;; v) xy="539 2027" ;; b) xy="646 2027" ;;
+            n) xy="754 2027" ;; m) xy="860 2027" ;;
+            *) falhou "digitar: sem a tecla '$letra'"; return 1 ;;
+        esac
+        adb shell input tap $xy
+        sleep 0.4
+    done
+}
+# Toca no item que tem esse texto, achado na árvore de acessibilidade do
+# Android (o Qt mostra os itens do QML para ela). Guarda a árvore em fotos/.
+tocar_texto() {
+    local alvo=$1 nome=$2 xy
+    adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1
+    adb shell cat /sdcard/tela.xml > "fotos/$nome.xml" 2> /dev/null
+    xy=$(python3 - "fotos/$nome.xml" "$alvo" <<'PY'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+for m in re.finditer(r"<node [^>]*>", x):
+    n = m.group(0)
+    if f'text="{sys.argv[2]}"' in n or f'content-desc="{sys.argv[2]}"' in n:
+        b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', n)
+        if b:
+            x1, y1, x2, y2 = map(int, b.groups())
+            print((x1 + x2) // 2, (y1 + y2) // 2)
+            break
+PY
+)
+    [ -n "$xy" ] || return 1
+    adb shell input tap $xy
+}
 # Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
 esperar_tela() {
     local nome=$1 limite=$2 onde=$3 atual="" i
@@ -155,21 +197,32 @@ adb shell am start -n $ATIVIDADE
 esperar_tela TelaBoasVindas 90 "primeira vez"
 foto 01-primeira-vez 5
 conferir "primeira vez"
-# O primeiro campo (nome da loja) já vem com o cursor. Antes os nomes eram
-# digitados com toques nas teclas do teclado da tela, em posições fixas: só
-# servia para o teclado do Android 9; no Android 14 nada era digitado e a loja
-# nunca ficava configurada. Agora vão como as senhas (input text).
-texto "Loja"
+# O primeiro campo (nome da loja) já vem com o cursor e o teclado da tela
+# aberto. Os nomes vão tecla por tecla, como uma pessoa digita (com "input
+# text" o teclado do Android 14 trocava letras de lugar: "Loja" virava "ojaL",
+# o mesmo sintoma do comentário de Campo.qml sobre "texto previsto"). As senhas
+# vão por "input text" (campo de senha não tem sugestões do teclado).
+adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1 && adb shell cat /sdcard/tela.xml > fotos/01-arvore.xml 2> /dev/null
+digitar "loja"
 foto 01a-loja 2
 tecla KEYCODE_ENTER
 tecla KEYCODE_ENTER
-texto "Maria"
+digitar "maria"
 foto 01b-nome 2
 tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 texto "1234"; tecla KEYCODE_ENTER
 # A senha passa pelo Argon2: no emulador (código ARM traduzido) demora.
-esperar_tela TelaInicio 240 "configurar a loja"
+if ! esperar_tela TelaInicio 120 "configurar a loja (Enter no último campo)"; then
+    # O Enter no último campo não começou: tenta o botão, como uma pessoa
+    # faria (o "voltar" fecha só o teclado).
+    foto 02-sem-comecar 1
+    tecla KEYCODE_BACK
+    adb shell input swipe 540 1800 540 600 400
+    sleep 2
+    tocar_texto "Começar" 02-arvore || falhou "configurar a loja: o botão Começar não foi achado na tela"
+    esperar_tela TelaInicio 120 "configurar a loja (botão Começar)"
+fi
 foto 02-inicio 3
 conferir "configurar a loja"
 [ "$(tela_atual)" = TelaInicio ] || { falhou "a loja não ficou configurada: as telas seguintes não teriam o que conferir"; encerrar; }

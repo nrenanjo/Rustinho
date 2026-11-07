@@ -11,6 +11,9 @@ FocusScope {
     function comecar() {
         for (const c of [loja, caixa, nome, senha, senha2])
             c.erro = ""
+        // No registro (no Android, no logcat): o teste do emulador sabe se o
+        // cadastro foi pedido e por que foi recusado. Nunca as senhas.
+        console.info("Rustinho: cadastro inicial pedido")
         const r = Api.chamar("configurar_inicio", {
             loja: loja.texto,
             caixa: caixa.texto,
@@ -22,6 +25,7 @@ FocusScope {
             janela.entrou()
             return
         }
+        console.warn("Rustinho: cadastro inicial recusado (" + (r.campo || "geral") + "): " + r.erro)
         const campos = { loja: loja, caixa: caixa, nome: nome, senha: senha, senha2: senha2 }
         const alvo = campos[r.campo]
         if (alvo) {
