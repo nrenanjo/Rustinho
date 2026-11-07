@@ -10,8 +10,11 @@ on:
     # FALHA-07 (auditoria da 0.9.15): a branch da 0.9.15. O nome segue a
     # convenção das anteriores (build-0.9.x) e precisa ser confirmado; a
     # da 0.9.14 continua.
-    # 0.9.18: a branch de desenvolvimento também (a CI testa cada envio).
-    branches: [build-0.9.14, build-0.9.15, build-0.9.16, build-0.9.17, teste/c8-portatil, desenvolvimento-0.9.18]
+    # 0.9.18: a branch de desenvolvimento também (a CI testa cada envio), e
+    # a de estabilização (o Rustinho portátil abre de verdade num Windows da
+    # CI; rascunho de versão só com "[rascunho]" na mensagem do commit).
+    branches: [build-0.9.14, build-0.9.15, build-0.9.16, build-0.9.17, teste/c8-portatil, desenvolvimento-0.9.18,
+               stabilization/0.9.18]
   # Também à mão (aba Actions › "Run workflow"), sem precisar de push.
   workflow_dispatch:
 
