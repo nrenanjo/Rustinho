@@ -7,6 +7,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      desenho:
+        # Só para experiência (PEND-18): o teste do emulador grava este modo no
+        # desenho.txt do app antes de abrir (main.cpp). "automatico" não grava.
+        description: "Modo de desenho no teste do emulador (experiência)"
+        type: choice
+        options: [automatico, gpu, software]
+        default: automatico
 
 # Só ler, de fábrica; cada tarefa pede o que precisa.
 permissions:
@@ -267,10 +275,12 @@ jobs:
           # traduz ARM de 64 bits: o APK nem instalava
           # (INSTALL_FAILED_NO_MATCHING_ABIS, CI de 07/11/2026). Na x86 da API
           # 30 ele instala, mas o aplicativo cai dentro do tradutor
-          # (libndk_translation, chamada JNI; run 42335229052). Tentativa: a
-          # x86 da API 28 (Android 9), que também traduz ARM de 32 bits. O
-          # alvo de verdade é o Moto e6i (Android 10, API 29): o emulador não
-          # substitui o aparelho.
+          # (libndk_translation, chamada JNI; run 42335229052). Na x86 da API
+          # 28 (Android 9) ele instala e abre, mas a tela fica cinza, como no
+          # PEND-18 do Moto e6i: o Qt não consegue o contexto do OpenGL
+          # (EGL_BAD_CONFIG) e, sem ele, nem o desenho "software" vai para a
+          # tela (run 42336971823). O alvo de verdade é o Moto e6i (Android
+          # 10, API 29): o emulador não substitui o aparelho.
           - nome: "32bits"
             sufixo: "-32bits"
             curto: "1"
@@ -297,6 +307,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         env:
           CURTO: ${{ matrix.curto }}
+          DESENHO: ${{ inputs.desenho }}
         with:
           api-level: ${{ matrix.api }}
           arch: ${{ matrix.arquitetura }}

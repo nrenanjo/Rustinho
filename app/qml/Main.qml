@@ -917,7 +917,15 @@ ApplicationWindow {
                 diagnostico.telaPronta(String(pilha.currentItem).split("(")[0])
         }
     }
-    onErroGeralChanged: if (erroGeral !== "") marcarDiagnostico("erro ao abrir: " + erroGeral)
+    // No Android também vai para o registro do sistema (logcat): o teste do
+    // emulador (android/testar.sh) reprova quando o Rustinho não abre.
+    onErroGeralChanged: {
+        if (erroGeral === "")
+            return
+        marcarDiagnostico("erro ao abrir: " + erroGeral)
+        if (typeof diagnostico !== "undefined")
+            console.warn("Rustinho: erro ao abrir: " + erroGeral)
+    }
 
     // D-07: usuário desativado (aqui ou em outro caixa) ou sessão perdida:
     // volta para a entrada uma vez só, com o motivo.
