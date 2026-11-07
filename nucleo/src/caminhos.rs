@@ -860,10 +860,16 @@ mod testes {
     ///
     /// O-6 (auditoria da 0.9.15): a prova principal não depende mais do relógio.
     /// Enquanto o ciclo "espera a rede" (dentro de cada tentativa), outra
-    /// conexão tenta pegar a gravação do banco SEM esperar nada (`BEGIN
-    /// IMMEDIATE` com espera zero): se o ciclo segurasse o banco, ela falharia
-    /// na hora, com a máquina livre ou carregada. O tempo de cada gravação
-    /// continua medido e anotado na saída, para diagnóstico.
+    /// conexão tenta pegar a gravação do banco (`BEGIN IMMEDIATE`): se o ciclo
+    /// segurasse o banco, ela falharia, com a máquina livre ou carregada. O
+    /// tempo de cada gravação continua medido e anotado na saída.
+    ///
+    /// 0.9.18: a sonda espera até 1 s (antes, zero). Com espera zero ela
+    /// também falhava quando coincidia com uma das gravações do PRÓPRIO teste
+    /// (o laço abaixo grava 8 vezes): "database is locked" em paralelo, com a
+    /// máquina carregada, sem o ciclo segurar nada. A prova continua certa: a
+    /// sonda roda dentro da tarefa do ciclo, então um banco preso pelo ciclo
+    /// não seria solto durante a espera e ela falharia do mesmo jeito.
     #[test]
     fn t35_operacoes_locais_continuam_durante_o_ciclo() {
         let pasta = std::env::temp_dir().join(format!("rustinho-caminhos-{}", crate::tempo::novo_id()));
@@ -876,7 +882,7 @@ mod testes {
             let conn = Connection::open(&caminho).unwrap();
             conn.busy_timeout(Duration::from_secs(10)).unwrap();
             let sonda = Connection::open(&caminho).unwrap();
-            sonda.busy_timeout(Duration::ZERO).unwrap();
+            sonda.busy_timeout(Duration::from_secs(1)).unwrap();
             let mut presos = Vec::new();
             let mut puxar = |e: &str, _s: Option<&Saida>| -> Resultado<Puxada> {
                 // No meio da "espera da rede": o banco tem de estar livre.
