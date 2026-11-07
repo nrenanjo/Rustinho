@@ -57,6 +57,22 @@ Linux: `sha256sum {{APPIMAGE}}`
 - Conferência da DRE pelo dono e pelo contador (PEND-20).
 - Importação de uma cópia da exportação real do SINTEC.
 - Decisões pendentes da auditoria: R-01 (senha da rede curta), R-02 (cancelar venda de um caixa aberto em outro computador), R-03 (parcela paga a mais por dois caixas sem rede).
+- **Deixe a troca de dados entre caixas desligada** (como hoje): a proteção nova da entrada de caixas (protocolo 4) ainda não está nesta versão.
+
+### O que mudou na 0.9.18
+
+- **Três temas na mesma identidade roxa:** claro (sol), escuro (lua) e Planeta Roxo (planeta), com o magenta nos botões, na linha escolhida e no foco. Listas em faixas claras e escuras em todas as telas, com a linha escolhida em magenta.
+- **Campos com seis estados:** normal, com o cursor (contorno magenta), preenchido, com erro (vermelho), desligado e conferido (verde: CNPJ da loja, CPF/CNPJ de clientes e fornecedores e código de barras da peça ficam verdes quando os números conferem).
+- **Seta de retorno** com vidro roxo no canto de cima, à esquerda, nas telas e nas janelinhas; faz o mesmo que o Esc. Saíram os botões "Voltar"/"Cancelar" que só fechavam.
+- **Busca de peças** melhor: termos em qualquer ordem, começo do código, palavra curta só no começo da palavra.
+- **Unidades de medida** na ordem combinada: as 5 mais usadas nas peças, depois as que mais venderam nas últimas 24 horas (entrando pela direita), e as outras em ordem alfabética; no celular, 3 por linha. Sigla repetida ("kg" e "KG") é recusada.
+- **Estoque inteiro:** peça em UN, PC, PAR... não aceita estoque com vírgula (ajuste, estoque inicial e mínimo).
+- **Peça e serviço:** trocar o tipo não leva mais o fiscal do outro tipo junto ao salvar.
+- **Navegação contextual:** quando algo falta (ex.: código ambíguo nas etiquetas, conta de destino na transferência), a tela leva ao lugar de resolver e volta.
+- **Backup:** a cópia no Google Drive só conta como guardada depois de conferida; a restauração registra quem restaurou e nunca deixa o banco pela metade.
+- **Celular:** botões e campos com área de toque de pelo menos 48 dp; ícone adaptativo do Android.
+
+As notas da 0.9.16 e da 0.9.17 ainda faltam neste arquivo (achado NEW-B17-02 da auditoria).
 
 ### O que mudou na 0.9.15
 
