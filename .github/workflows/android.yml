@@ -73,11 +73,11 @@ jobs:
       - name: Versão
         run: |
           V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          IFS=. read A B C <<< "$V"
+          V_NUM=$(echo "$V" | cut -d'-' -f1)
+          IFS=. read A B C <<< "$V_NUM"
           echo "VERSAO=$V" >> $GITHUB_ENV
           echo "CODIGO=$((A*10000 + B*100 + C))" >> $GITHUB_ENV
-          sed -i "s/^project(Rustinho VERSION [0-9.]*/project(Rustinho VERSION $V/" android/CMakeLists.txt
-      # Com a chave da loja (segredos do GitHub), o APK pode ir para Releases.
+          sed -i "s/^project(Rustinho VERSION [0-9.]*/project(Rustinho VERSION $V_NUM/" android/CMakeLists.txt
       # Sem ela, o APK é assinado com uma chave de uso único, só para testar,
       # e nunca é publicado (um APK assim não atualiza o app instalado).
       - name: Assinatura
