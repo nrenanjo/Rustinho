@@ -211,14 +211,16 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
         conn.execute(
             "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, descricao, ncm, cest, cfop, unidade,
                                       origem, cst_icms, cst_pis, quantidade, valor_produtos, frete, seguro, desconto,
-                                      outras, ipi, icms_st, acao, produto_id, achado_por, fator)
+                                      outras, ipi, icms_st, acao, produto_id, achado_por, fator,
+                                      gtin_tributavel, codigo_barra, codigo_barra_tributavel)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21,
-                     ?22, ?23, ?24, ?25)",
+                     ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
             params![
                 tempo::novo_id(), id, ordem as i64, item.codigo, item.gtin, item.descricao, item.ncm, item.cest,
                 item.cfop, item.unidade, item.origem, item.cst_icms, item.cst_pis, item.quantidade,
                 item.valor_produtos, item.frete, item.seguro, item.desconto, item.outras, item.ipi, item.icms_st,
-                acao, produto_id, achado_por, fator
+                acao, produto_id, achado_por, fator, item.gtin_tributavel, item.codigo_barra,
+                item.codigo_barra_tributavel
             ],
         )?;
     }
@@ -297,8 +299,8 @@ fn codigos_ambiguos<'a>(itens: impl Iterator<Item = (&'a str, &'a str)>) -> Hash
     vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(c, _)| c).collect()
 }
 
-/// Tenta achar a peça do item: código do fornecedor → código de barras →
-/// código original/equivalente. Devolve (ação, peça, como achou, fator).
+/// Tenta achar a peça por GTIN exato e único, depois por fornecedor + `cProd`
+/// exatos. Se os dois identificadores discordarem, deixa a escolha pendente.
 fn ligar_sozinho(
     conn: &Connection,
     fornecedor_id: &str,
@@ -306,38 +308,48 @@ fn ligar_sozinho(
     ambiguo: bool,
 ) -> Resultado<(String, Option<String>, String, i64)> {
     let compacto = texto::compactar(&item.codigo);
-    if !compacto.is_empty() && !ambiguo {
-        let r: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
-                  WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
-                params![fornecedor_id, compacto],
-                |l| Ok((l.get(0)?, l.get(1)?)),
-            )
-            .optional()?;
-        if let Some((pid, fator)) = r {
-            return Ok(("ligar".into(), Some(pid), "fornecedor".into(), fator));
+    let mut codigos_gtin = HashSet::new();
+    for codigo in [&item.gtin, &item.gtin_tributavel, &item.codigo_barra, &item.codigo_barra_tributavel] {
+        if crate::gtin::gtin_valido(codigo) {
+            codigos_gtin.insert(codigo.as_str());
         }
     }
-    if !item.gtin.is_empty() {
-        // Só se o código de barras for de uma peça só (dois caixas podem ter
-        // cadastrado o mesmo): com duas, a pessoa escolhe na tela.
-        let r: Vec<String> = conn
-            .prepare_cached("SELECT id FROM produto WHERE codigo_barras = ?1 LIMIT 2")?
-            .query_map([&item.gtin], |l| l.get(0))?
+    let mut candidatos_gtin = HashSet::new();
+    for gtin in codigos_gtin {
+        let encontrados: Vec<String> = conn
+            .prepare_cached(
+                "SELECT id FROM produto WHERE codigo_barras = ?1
+                 UNION SELECT produto_id FROM produto_gtin WHERE gtin = ?1 LIMIT 2",
+            )?
+            .query_map([gtin], |l| l.get(0))?
             .collect::<Result<_, _>>()?;
-        if r.len() == 1 {
-            return Ok(("ligar".into(), Some(r[0].clone()), "barras".into(), 1000));
+        candidatos_gtin.extend(encontrados);
+    }
+
+    let mut candidatos_fornecedor: HashMap<String, i64> = HashMap::new();
+    if !compacto.is_empty() {
+        let mut consulta = conn.prepare_cached(
+            "SELECT produto_id, fator FROM produto_fornecedor
+               WHERE fornecedor_id = ?1 AND codigo_compacto = ?2
+             UNION
+             SELECT produto_id, fator FROM produto_fornecedor_alternativo
+               WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+        )?;
+        for linha in consulta.query_map(params![fornecedor_id, compacto], |l| Ok((l.get(0)?, l.get(1)?)))? {
+            let (produto, fator) = linha?;
+            candidatos_fornecedor.insert(produto, fator);
         }
     }
-    if compacto.len() >= 3 {
-        let r: Vec<String> = conn
-            .prepare_cached("SELECT id FROM produto WHERE instr(codigos, ' ' || ?1 || ' ') > 0 LIMIT 2")?
-            .query_map([&compacto], |l| l.get(0))?
-            .collect::<Result<_, _>>()?;
-        if r.len() == 1 {
-            return Ok(("ligar".into(), Some(r[0].clone()), "codigo".into(), 1000));
+
+    if candidatos_gtin.len() == 1 {
+        let produto = candidatos_gtin.iter().next().unwrap();
+        if candidatos_fornecedor.keys().all(|p| p == produto) {
+            return Ok(("ligar".into(), Some(produto.clone()), "gtin".into(), 1000));
         }
+    }
+    if candidatos_gtin.is_empty() && candidatos_fornecedor.len() == 1 && !ambiguo {
+        let (produto, fator) = candidatos_fornecedor.into_iter().next().unwrap();
+        return Ok(("ligar".into(), Some(produto), "fornecedor".into(), fator));
     }
     Ok((String::new(), None, String::new(), 1000))
 }
@@ -611,6 +623,9 @@ pub struct ItemFicha {
     pub ordem: i64,
     pub codigo_fornecedor: String,
     pub gtin: String,
+    pub gtin_tributavel: String,
+    pub codigo_barra: String,
+    pub codigo_barra_tributavel: String,
     pub descricao: String,
     pub ncm: String,
     pub cest: String,
@@ -660,6 +675,9 @@ struct ItemBanco {
     ordem: i64,
     codigo_fornecedor: String,
     gtin: String,
+    gtin_tributavel: String,
+    codigo_barra: String,
+    codigo_barra_tributavel: String,
     descricao: String,
     ncm: String,
     cest: String,
@@ -705,7 +723,7 @@ fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> 
     let mut c = conn.prepare_cached(
         "SELECT id, ordem, codigo_fornecedor, gtin, descricao, ncm, cest, cfop, unidade, origem, cst_pis, quantidade,
                 valor_produtos, frete, seguro, desconto, outras, ipi, icms_st, acao, produto_id, achado_por, fator,
-                baixar_preco
+                baixar_preco, gtin_tributavel, codigo_barra, codigo_barra_tributavel
            FROM compra_item WHERE compra_id = ?1 ORDER BY ordem",
     )?;
     let linhas = c.query_map([compra_id], |l| {
@@ -734,6 +752,9 @@ fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> 
             achado_por: l.get(21)?,
             fator: l.get(22)?,
             baixar_preco: l.get(23)?,
+            gtin_tributavel: l.get(24)?,
+            codigo_barra: l.get(25)?,
+            codigo_barra_tributavel: l.get(26)?,
         })
     })?;
     Ok(linhas.collect::<Result<_, _>>()?)
@@ -902,6 +923,9 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
             ordem: it.ordem + 1,
             codigo_fornecedor: it.codigo_fornecedor.clone(),
             gtin: it.gtin.clone(),
+            gtin_tributavel: it.gtin_tributavel.clone(),
+            codigo_barra: it.codigo_barra.clone(),
+            codigo_barra_tributavel: it.codigo_barra_tributavel.clone(),
             descricao: it.descricao.clone(),
             ncm: it.ncm.clone(),
             cest: it.cest.clone(),
@@ -1150,6 +1174,19 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Esta compra já foi lançada."));
     }
+    let chave: String = conn.query_row("SELECT chave FROM compra WHERE id = ?1", [id], |l| l.get(0))?;
+    if !chave.is_empty() {
+        let copias_ativas: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM compra WHERE chave = ?1 AND situacao <> 'estornada'",
+            [&chave],
+            |l| l.get(0),
+        )?;
+        if copias_ativas > 1 {
+            return Err(Erro::validacao(
+                "Há mais de uma cópia ativa desta NF-e em caixas da loja. Compare as notas e mantenha uma única entrada antes de lançar.",
+            ));
+        }
+    }
     // PEND-09 / D7: porta única do estoque, do custo e do financeiro.
     if let Some(motivo) = situacao_fiscal(conn, id)?.bloqueio() {
         return Err(Erro::validacao(motivo));
@@ -1209,6 +1246,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         };
         let antes = estoque::saldo(conn, &produto_id)?;
         estoque::lancar(conn, dispositivo, Some(usuario_id), &produto_id, pecas, "compra", &motivo)?;
+        registrar_gtins(conn, &produto_id, it)?;
         detalhes.insert(
             0,
             format!(
@@ -1227,13 +1265,13 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         }
         let compacto = texto::compactar(&it.codigo_fornecedor);
         if !cab.fornecedor_id.is_empty() && !compacto.is_empty() && !ambiguos.contains(&compacto) {
-            conn.execute(
-                "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
-                   SET codigo = excluded.codigo, produto_id = excluded.produto_id, fator = excluded.fator,
-                       atualizado_em = excluded.atualizado_em",
-                params![cab.fornecedor_id, compacto, it.codigo_fornecedor, produto_id, it.fator, tempo::agora()],
+            registrar_codigo_fornecedor(
+                conn,
+                &cab.fornecedor_id,
+                &compacto,
+                &it.codigo_fornecedor,
+                &produto_id,
+                it.fator,
             )?;
         }
     }
@@ -1256,6 +1294,66 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         )],
     )?;
     Ok(resumo)
+}
+
+fn registrar_gtins(conn: &Connection, produto_id: &str, item: &ItemBanco) -> Resultado<()> {
+    let codigos = [&item.gtin, &item.gtin_tributavel, &item.codigo_barra, &item.codigo_barra_tributavel];
+    for codigo in codigos.into_iter().filter(|c| crate::gtin::gtin_valido(c)) {
+        conn.execute(
+            "INSERT OR IGNORE INTO produto_gtin (produto_id, gtin) VALUES (?1, ?2)",
+            params![produto_id, codigo],
+        )?;
+    }
+    Ok(())
+}
+
+/// Mantém o vínculo original e registra separadamente uma escolha manual que
+/// confirme o mesmo código do fornecedor para outra peça.
+fn registrar_codigo_fornecedor(
+    conn: &Connection,
+    fornecedor_id: &str,
+    codigo_compacto: &str,
+    codigo: &str,
+    produto_id: &str,
+    fator: i64,
+) -> Resultado<()> {
+    let existente: Option<String> = conn
+        .query_row(
+            "SELECT produto_id FROM produto_fornecedor
+              WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+            params![fornecedor_id, codigo_compacto],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let agora = tempo::agora();
+    match existente {
+        None => {
+            conn.execute(
+                "INSERT INTO produto_fornecedor
+                    (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![fornecedor_id, codigo_compacto, codigo, produto_id, fator, agora],
+            )?;
+        }
+        Some(atual) if atual == produto_id => {
+            conn.execute(
+                "UPDATE produto_fornecedor SET codigo = ?3, fator = ?4, atualizado_em = ?5
+                  WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+                params![fornecedor_id, codigo_compacto, codigo, fator, agora],
+            )?;
+        }
+        Some(_) => {
+            conn.execute(
+                "INSERT INTO produto_fornecedor_alternativo
+                    (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT (fornecedor_id, codigo_compacto, produto_id) DO UPDATE
+                   SET codigo = excluded.codigo, fator = excluded.fator, atualizado_em = excluded.atualizado_em",
+                params![fornecedor_id, codigo_compacto, codigo, produto_id, fator, agora],
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Troca o custo da peça e, se pedido, o preço das tabelas que têm % de
@@ -1343,7 +1441,12 @@ fn cadastrar_peca(
     let barras_livre = !it.gtin.is_empty()
         && gtin::gtin_valido(&it.gtin)
         && conn
-            .query_row("SELECT 1 FROM produto WHERE codigo_barras = ?1", [&it.gtin], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM produto p WHERE p.codigo_barras = ?1
+                 UNION SELECT 1 FROM produto_gtin g WHERE g.gtin = ?1 LIMIT 1",
+                [&it.gtin],
+                |_| Ok(()),
+            )
             .optional()?
             .is_none();
     if barras_livre {
@@ -1522,6 +1625,7 @@ pub(crate) fn liberar_para_teste(c: &Connection, d: &str, id: &str) {
 mod testes {
     use super::*;
     use crate::banco::Banco;
+    use crate::sync;
     use crate::usuarios;
 
     /// R-10: pesos enormes no rateio não estouram e não perdem centavo.
@@ -1676,6 +1780,58 @@ mod testes {
         let prova: String =
             b.conn.query_row("SELECT xml_prova FROM compra WHERE id = ?1", [&id], |l| l.get(0)).unwrap();
         assert!(prova.contains("11222333000181") && prova.contains("AC de TESTE"), "{prova}");
+    }
+
+    /// PDV-01: duas caixas podem importar a mesma chave offline. Ao receber
+    /// a segunda cópia, ambas ficam visíveis e o lançamento é bloqueado até
+    /// o gerente decidir qual entrada manter.
+    #[test]
+    fn pdv01_mesma_nfe_importada_offline_alerta_e_bloqueia_lancamento() {
+        let (mut a, ua) = base();
+        let (mut b, ub) = base();
+        let id_a = importar_xml(&a.conn, &a.dispositivo, &ua, nfe_xml::EXEMPLO).unwrap();
+
+        // Compartilha o fornecedor antes da segunda importação, como quando
+        // os caixas já trocaram os cadastros de pessoas.
+        let (lista_a, _) = sync::alteracoes_desde(&a.conn, 0, 100_000).unwrap();
+        let fornecedores: Vec<_> = lista_a.into_iter().filter(|x| x.tabela == "pessoa").collect();
+        sync::aplicar(&mut b.conn, &fornecedores).unwrap();
+        let id_b = importar_xml(&b.conn, &b.dispositivo, &ub, nfe_xml::EXEMPLO).unwrap();
+        assert_ne!(id_a, id_b);
+
+        // Isola as linhas comerciais da segunda importação. A chave de NF-e
+        // é igual, mas os IDs locais dos dois rascunhos são distintos.
+        let (lista_b, _) = sync::alteracoes_desde(&b.conn, 0, 100_000).unwrap();
+        let nota: Vec<_> =
+            lista_b.into_iter().filter(|a| matches!(a.tabela.as_str(), "compra" | "compra_item")).collect();
+        assert!(nota.iter().any(|a| a.tabela == "compra"));
+        let aplicada = sync::aplicar_de(&mut a.conn, &nota, &b.dispositivo, None).unwrap();
+        assert!(!aplicada.suspenso, "as duas cópias ficam para reconciliação explícita");
+        assert_eq!(aplicada.novas, nota.len());
+        assert_eq!(
+            a.conn.query_row("SELECT COUNT(*) FROM compra", [], |l| l.get::<_, i64>(0)).unwrap(),
+            2,
+            "a cópia recebida não some silenciosamente"
+        );
+        assert_eq!(
+            a.conn.query_row("SELECT COUNT(*) FROM estoque_movimento", [], |l| l.get::<_, i64>(0)).unwrap(),
+            0,
+            "rascunhos ainda não alteraram o estoque"
+        );
+        let aviso = crate::avisos::do_dia(&a.conn)
+            .unwrap()
+            .into_iter()
+            .find(|x| x.id == "nfe_duplicada")
+            .expect("a condição deve ser visível como alerta crítico");
+        assert_eq!(aviso.categoria, crate::avisos::CRITICA);
+        assert!(aviso.texto.contains('2'));
+        let erro = lancar(&a.conn, &a.dispositivo, &ua, &id_a).unwrap_err().to_string();
+        assert!(erro.contains("mais de uma cópia") || erro.contains("mais de um caixa"), "{erro}");
+        assert_eq!(
+            a.conn.query_row("SELECT COUNT(*) FROM estoque_movimento", [], |l| l.get::<_, i64>(0)).unwrap(),
+            0,
+            "o bloqueio evita lançar outra entrada"
+        );
     }
 
     /// PEND-19: nota de fornecedor com CNPJ alfanumérico entra de ponta a
@@ -1895,6 +2051,73 @@ mod testes {
         }
     }
 
+    #[test]
+    fn gtins_sao_aditivos_e_codigo_cprod_e_especifico_do_emitente() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let compra_id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        let fornecedor_a: String =
+            c.query_row("SELECT fornecedor_id FROM compra WHERE id = ?1", [&compra_id], |l| l.get(0)).unwrap();
+        let mut ficha_fornecedor = pessoas::ficha_nova(c, "fornecedor").unwrap();
+        ficha_fornecedor.nome = "Fornecedor B de teste".into();
+        let fornecedor_b = pessoas::salvar(c, &b.dispositivo, &u, &ficha_fornecedor).unwrap();
+        let produto_a = peca(&b, &u, "Produto A", "", "OEM-A", "10");
+        let produto_b = peca(&b, &u, "Produto B", "", "OEM-B", "10");
+
+        let item_id: String = c
+            .query_row("SELECT id FROM compra_item WHERE compra_id = ?1 ORDER BY ordem LIMIT 1", [&compra_id], |l| {
+                l.get(0)
+            })
+            .unwrap();
+        c.execute(
+            "UPDATE compra_item SET codigo_fornecedor = 'MESMO-7', gtin = '036000291452',
+                    gtin_tributavel = '7891234567895', codigo_barra = '96385074',
+                    codigo_barra_tributavel = '4006381333931' WHERE id = ?1",
+            [&item_id],
+        )
+        .unwrap();
+        let itens = itens_banco(c, &compra_id).unwrap();
+        let item = &itens[0];
+        for _ in 0..2 {
+            registrar_gtins(c, &produto_a, item).unwrap();
+        }
+        let gtins_a: i64 =
+            c.query_row("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = ?1", [&produto_a], |l| l.get(0)).unwrap();
+        assert_eq!(gtins_a, 4, "os quatro campos são preservados sem duplicação");
+
+        registrar_codigo_fornecedor(c, &fornecedor_a, "mesmo7", "MESMO-7", &produto_a, 1000).unwrap();
+        registrar_codigo_fornecedor(c, &fornecedor_b, "mesmo7", "MESMO-7", &produto_b, 1000).unwrap();
+        let sem_gtin = nfe_xml::ItemXml { codigo: "MESMO-7".into(), ..Default::default() };
+        assert_eq!(ligar_sozinho(c, &fornecedor_a, &sem_gtin, false).unwrap().1, Some(produto_a.clone()));
+        assert_eq!(ligar_sozinho(c, &fornecedor_b, &sem_gtin, false).unwrap().1, Some(produto_b.clone()));
+
+        // Uma decisão posterior conflitante é guardada como alternativa; o
+        // vínculo original não é substituído e a próxima importação fica ambígua.
+        registrar_codigo_fornecedor(c, &fornecedor_a, "mesmo7", "MESMO-7", &produto_b, 1000).unwrap();
+        let principal: String = c
+            .query_row(
+                "SELECT produto_id FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = 'mesmo7'",
+                [&fornecedor_a],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(principal, produto_a);
+        let alternativo: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM produto_fornecedor_alternativo WHERE fornecedor_id = ?1 AND codigo_compacto = 'mesmo7' AND produto_id = ?2",
+                rusqlite::params![fornecedor_a, produto_b],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(alternativo, 1);
+        assert!(ligar_sozinho(c, &fornecedor_a, &sem_gtin, false).unwrap().1.is_none());
+
+        // Um GTIN que passou a existir em dois produtos não escolhe um deles.
+        c.execute("INSERT INTO produto_gtin (produto_id, gtin) VALUES (?1, '036000291452')", [&produto_b]).unwrap();
+        let ambigua = nfe_xml::ItemXml { gtin: "036000291452".into(), ..Default::default() };
+        assert!(ligar_sozinho(c, &fornecedor_b, &ambigua, false).unwrap().1.is_none());
+    }
+
     /// O-4 (R-12 da 0.9.14): descartar um rascunho de compra guarda a
     /// auditoria dele (e mais uma linha dizendo que foi descartado), e o
     /// descartado não conta como compra lançada.
@@ -1943,11 +2166,13 @@ mod testes {
         assert_eq!(f.fornecedor, "DISTRIBUIDORA DE AUTOPECAS EXEMPLO LTDA");
         assert_eq!(f.itens.len(), 3);
         assert_eq!(f.itens[0].acao, "ligar");
-        assert_eq!(f.itens[0].achado_por, "barras");
-        assert_eq!(f.itens[1].acao, "ligar");
-        assert_eq!(f.itens[1].achado_por, "codigo");
+        assert_eq!(f.itens[0].achado_por, "gtin");
+        // cProd não é comparado ao código interno nem ao código original:
+        // sem mapeamento anterior do fornecedor, a decisão fica pendente.
+        assert_eq!(f.itens[1].acao, "");
+        assert_eq!(f.itens[1].achado_por, "");
         assert_eq!(f.itens[2].acao, "");
-        assert_eq!(f.pendentes, 1);
+        assert_eq!(f.pendentes, 2);
         // rolamento: (520 + 20 frete + 20,50 IPI) / 10 = 56,05
         assert_eq!(f.itens[0].custo_unitario, "56,05");
         assert_eq!(f.itens[0].peca.as_ref().unwrap().preco_novo, "112,10");
@@ -2060,7 +2285,8 @@ mod testes {
         assert!(crate::pagar::painel(c, "12345", "abertas").unwrap().parcelas.is_empty(), "parcelas saíram");
         let id2 = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
         let f2 = ficha(c, &id2).unwrap();
-        assert!(f2.itens.iter().all(|i| i.acao == "ligar" && i.achado_por == "fornecedor"));
+        assert_eq!(f2.itens[0].achado_por, "gtin");
+        assert!(f2.itens.iter().skip(1).all(|i| i.acao == "ligar" && i.achado_por == "fornecedor"));
         assert_eq!(f2.itens[1].fator, "2");
         assert_eq!(listar(c, "", 50).unwrap().len(), 2);
         assert_eq!(listar(c, "pastilha", 50).unwrap().len(), 2);

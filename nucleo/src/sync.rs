@@ -85,6 +85,13 @@ pub const RECURSOS: &[&str] = &["pendencias-v1", crate::loja::RECURSO];
 pub const RECURSO_PENDENCIAS: &str = "pendencias-v1";
 /// Estrutura do banco (user_version) que entende o rascunho de OS (0.9.15).
 pub const ESQUEMA_RASCUNHO: i64 = 23;
+/// 0.9.18-dev.3: identificadores e vínculos de fornecedor passam a integrar
+/// alterações de produto e itens fiscais. Estruturas anteriores não têm as
+/// tabelas/colunas correspondentes.
+const ESQUEMA_IDENTIFICADORES: i64 = 24;
+/// 0.9.18-dev.3: registro estável que torna concorrência no cancelamento de
+/// uma mesma venda incompatível com aplicação parcial dos efeitos.
+const ESQUEMA_CANCELAMENTO_IDEMPOTENTE: i64 = 25;
 /// Caixa que não informa a estrutura é de antes da 0.9.15: tratado como a
 /// 0.9.14 (estrutura 22).
 pub const ESQUEMA_LEGADO: i64 = 22;
@@ -206,6 +213,9 @@ pub const TABELAS: &[&str] = &[
     "produto_aplicacao",
     "produto_equivalente",
     "produto_fornecedor",
+    "produto_fornecedor_alternativo",
+    "produto_gtin",
+    "venda_cancelamento",
     // Códigos que uma peça já teve.
     "produto_codigo_antigo",
     // Faixas de códigos das peças de cada caixa (veja `faixas`).
@@ -1552,6 +1562,14 @@ pub fn incompatibilidade(esquema: i64, a: &Alteracao) -> Option<String> {
             return Some("rascunho de ordem de serviço: o caixa precisa da versão 0.9.15 ou mais nova".into());
         }
     }
+    if esquema < ESQUEMA_IDENTIFICADORES
+        && matches!(a.tabela.as_str(), "produto" | "compra_item" | "produto_gtin" | "produto_fornecedor_alternativo")
+    {
+        return Some("identificadores de produto e da nota: o caixa precisa da estrutura 24 ou mais nova".into());
+    }
+    if esquema < ESQUEMA_CANCELAMENTO_IDEMPOTENTE && a.tabela == "venda_cancelamento" {
+        return Some("cancelamento seguro de venda: o caixa precisa da estrutura 25 ou mais nova".into());
+    }
     None
 }
 
@@ -1863,6 +1881,11 @@ fn suspender_lote(
     cursor: Option<&AvancoCursor>,
 ) -> Resultado<Aplicacao> {
     crate::registro::anotar(&format!("troca de dados: lote de {} alterações suspenso: {erro}", lista.len()));
+    let erro_legivel = if erro.contains("venda_cancelamento.venda_id") {
+        "Já existe um cancelamento desta venda feito neste caixa. O lote concorrente foi guardado inteiro; confira as duas operações antes de decidir qual manter."
+    } else {
+        erro
+    };
     let tx = conn.transaction()?;
     let mut pendentes = 0;
     for (i, a) in lista.iter().enumerate() {
@@ -1875,10 +1898,10 @@ fn suspender_lote(
             continue;
         }
         if i == indice {
-            guardar_pendencia(&tx, origem, a, "erro_aplicacao", erro)?;
+            guardar_pendencia(&tx, origem, a, "erro_aplicacao", erro_legivel)?;
             tx.execute(
                 "UPDATE sync_pendencia SET ultimo_erro = ?2 WHERE lado = 'recebida' AND alteracao_id = ?1",
-                params![a.id, erro],
+                params![a.id, erro_legivel],
             )?;
         } else {
             guardar_pendencia(
@@ -1898,7 +1921,7 @@ fn suspender_lote(
             params![
                 origem,
                 format!(
-                    "Uma alteração vinda deste caixa não pôde ser aplicada ({erro}). O lote ficou guardado nas pendências; \
+                    "Uma alteração vinda deste caixa não pôde ser aplicada ({erro_legivel}). O lote ficou guardado nas pendências; \
                      a troca continua com o resto."
                 )
             ],
@@ -2245,6 +2268,8 @@ const PODE_USAR: &[&str] = &[
     "produto_aplicacao",
     "produto_equivalente",
     "produto_fornecedor",
+    "produto_fornecedor_alternativo",
+    "produto_gtin",
     "pessoa",
     "pessoa_veiculo",
     "tabela_preco",
@@ -2262,6 +2287,8 @@ fn nome_da_tabela(t: &str) -> &'static str {
         | "produto_aplicacao"
         | "produto_equivalente"
         | "produto_fornecedor"
+        | "produto_fornecedor_alternativo"
+        | "produto_gtin"
         | "produto_codigo_antigo" => "Peça",
         "faixa_codigo" => "Faixa de códigos das peças",
         "pessoa" | "pessoa_veiculo" => "Cliente ou fornecedor",
@@ -5682,6 +5709,140 @@ mod testes {
         config::gravar(&b.conn, "caixa_nome", "Caixa 2").unwrap();
         trocar(&mut a, &mut b);
         (a, b, u, p)
+    }
+
+    /// B4-SYNC-01: cancelamentos independentes da mesma venda não podem
+    /// replicar duas vezes estoque ou dinheiro. O segundo evento tem outra
+    /// chave local, mas a mesma venda_id; a restrição suspende o lote e
+    /// conserva a operação recebida para decisão do gerente.
+    #[test]
+    fn cancelar_a_mesma_venda_offline_suspende_o_lote_concorrente() {
+        let (mut a, mut b, u, p) = dois_caixas();
+        crate::estoque::lancar(&a.conn, &a.dispositivo, Some(&u), &p, 5000, "entrada", "estoque inicial").unwrap();
+        trocar(&mut a, &mut b);
+
+        crate::caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "100").unwrap();
+        let venda = crate::vendas::concluir(
+            &a.conn,
+            &a.dispositivo,
+            &u,
+            &crate::vendas::VendaEntrada {
+                itens: vec![crate::vendas::ItemEntrada {
+                    produto_id: p.clone(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                }],
+                tabela: 1,
+                pagamentos: vec![crate::vendas::PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "80".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        crate::caixa::fechar(&a.conn, &a.dispositivo, &u, "180", "fim da venda inicial").unwrap();
+        trocar(&mut a, &mut b);
+        assert_eq!(crate::estoque::saldo(&a.conn, &p).unwrap(), 4000);
+        assert_eq!(crate::estoque::saldo(&b.conn, &p).unwrap(), 4000);
+
+        // Os caixas ficaram offline. A origem está fechada no Caixa 1; o
+        // Caixa 2 tem uma gaveta própria para receber uma eventual devolução.
+        crate::caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 2", "100").unwrap();
+        crate::vendas::cancelar(&a.conn, &a.dispositivo, &u, &venda, "Cancelamento no Caixa 1").unwrap();
+        crate::vendas::cancelar(&b.conn, &b.dispositivo, &u, &venda, "Cancelamento no Caixa 2").unwrap();
+        assert_eq!(crate::estoque::saldo(&a.conn, &p).unwrap(), 5000);
+        assert_eq!(crate::estoque::saldo(&b.conn, &p).unwrap(), 5000);
+
+        // Cada banco conserva o próprio cancelamento; ao trocar, a restrição
+        // suspende todo o lote remoto. Nenhuma reversão ou devolução é somada.
+        trocar(&mut a, &mut b);
+        for banco in [&a, &b] {
+            assert_eq!(crate::estoque::saldo(&banco.conn, &p).unwrap(), 5000);
+            let compensacoes: i64 = banco
+                .conn
+                .query_row(
+                    "SELECT (SELECT COUNT(*) FROM caixa_movimento WHERE origem_tipo = 'venda_cancelada' AND origem_id = ?1)
+                          + (SELECT COUNT(*) FROM movimento_conta WHERE origem_tipo = 'venda_cancelada' AND origem_id = ?1)",
+                    [&venda],
+                    |l| l.get(0),
+                )
+                .unwrap();
+            assert_eq!(compensacoes, 1, "só a compensação local fica aplicada");
+            let suspensas: i64 = banco
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND motivo = 'erro_aplicacao' AND estado = 'pendente'",
+                    [],
+                    |l| l.get(0),
+                )
+                .unwrap();
+            assert!(suspensas > 0, "o lote concorrente permanece para revisão do gerente");
+            let aviso: i64 = banco
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND ultimo_erro LIKE '%lote concorrente foi guardado inteiro%'",
+                    [],
+                    |l| l.get(0),
+                )
+                .unwrap();
+            assert!(aviso > 0, "a pendência explica o motivo e pede revisão explícita");
+        }
+    }
+
+    #[test]
+    fn cancelamento_unico_da_venda_e_replicado() {
+        let (mut a, mut b, u, p) = dois_caixas();
+        crate::estoque::lancar(&a.conn, &a.dispositivo, Some(&u), &p, 5000, "entrada", "estoque inicial").unwrap();
+        trocar(&mut a, &mut b);
+        crate::caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "100").unwrap();
+        let venda = crate::vendas::concluir(
+            &a.conn,
+            &a.dispositivo,
+            &u,
+            &crate::vendas::VendaEntrada {
+                itens: vec![crate::vendas::ItemEntrada {
+                    produto_id: p.clone(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                }],
+                tabela: 1,
+                pagamentos: vec![crate::vendas::PagamentoEntrada {
+                    forma: "pix".into(),
+                    valor: "80".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        trocar(&mut a, &mut b);
+        crate::vendas::cancelar(&a.conn, &a.dispositivo, &u, &venda, "Cancelamento conferido").unwrap();
+        trocar(&mut a, &mut b);
+        for banco in [&a, &b] {
+            assert_eq!(crate::estoque::saldo(&banco.conn, &p).unwrap(), 5000);
+            assert_eq!(
+                banco
+                    .conn
+                    .query_row("SELECT COUNT(*) FROM venda_cancelamento WHERE venda_id = ?1", [&venda], |l| l
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert_eq!(
+                banco
+                    .conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+                        [],
+                        |l| l.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0,
+                "uma única decisão legítima replica sem pendência"
+            );
+        }
     }
 
     fn renomear(b: &Banco, u: &str, p: &str, nome: &str) {

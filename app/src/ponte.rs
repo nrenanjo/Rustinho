@@ -55,9 +55,17 @@ pub mod qobject {
         #[qinvokable]
         fn chamar_demorado(self: Pin<&mut Self>, comando: &QString, dados: &QString) -> i32;
 
+        /// Busca de leitura em segundo plano, sem bloquear os comandos normais.
+        #[qinvokable]
+        fn buscar_produtos(self: Pin<&mut Self>, dados: &QString) -> i32;
+
         /// Um comando demorado terminou.
         #[qsignal]
         fn terminou(self: Pin<&mut Self>, pedido: i32, resposta: QString);
+
+        /// Uma busca de produtos terminou.
+        #[qsignal]
+        fn busca_terminou(self: Pin<&mut Self>, pedido: i32, resposta: QString);
 
         /// Há um comando demorado (ou a abertura do banco) rodando.
         #[qinvokable]
@@ -119,7 +127,12 @@ fn abrir_servico() -> Result<Servico, String> {
 /// Antes de abrir o banco (na linha da janela): o núcleo compara a
 /// identidade deste computador com a que o banco guardou (cópia do banco).
 fn definir_computador_se_preciso(g: &Guardado) {
-    if travar(g).is_none() {
+    let vazio = match g.try_lock() {
+        Ok(s) => s.is_none(),
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner().is_none(),
+        Err(std::sync::TryLockError::WouldBlock) => false,
+    };
+    if vazio {
         rustinho_nucleo::computador::definir(&qobject::rustinho_identidade_do_computador().to_string());
     }
 }
@@ -131,6 +144,20 @@ fn travar(g: &Guardado) -> MutexGuard<'_, Option<Result<Servico, String>>> {
 /// Roda `f` com o serviço (aberto agora, se ainda não estava).
 fn com_servico<T>(g: &Guardado, f: impl FnOnce(&mut Servico) -> T, erro: impl FnOnce(&str) -> T) -> T {
     let mut s = travar(g);
+    match s.get_or_insert_with(abrir_servico) {
+        Ok(servico) => f(servico),
+        Err(m) => erro(m),
+    }
+}
+
+/// Para chamadas feitas na thread visual: nunca espera por uma busca que
+/// esteja usando o mesmo serviço. A pessoa pode repetir a ação ao terminar.
+fn com_servico_sem_esperar<T>(g: &Guardado, f: impl FnOnce(&mut Servico) -> T, erro: impl FnOnce(&str) -> T) -> T {
+    let mut s = match g.try_lock() {
+        Ok(s) => s,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return erro(AGUARDE),
+    };
     match s.get_or_insert_with(abrir_servico) {
         Ok(servico) => f(servico),
         Err(m) => erro(m),
@@ -161,8 +188,11 @@ impl qobject::Sistema {
         }
         let (comando, dados) = (comando.to_string(), dados.to_string());
         definir_computador_se_preciso(&self.guardado());
-        let resposta =
-            com_servico(&self.guardado(), |s| s.chamar(&comando, &dados), rustinho_nucleo::api::resposta_de_erro);
+        let resposta = com_servico_sem_esperar(
+            &self.guardado(),
+            |s| s.chamar(&comando, &dados),
+            rustinho_nucleo::api::resposta_de_erro,
+        );
         QString::from(&resposta)
     }
 
@@ -186,6 +216,26 @@ impl qobject::Sistema {
             .unwrap_or_else(|_| rustinho_nucleo::api::resposta_de_erro("Erro interno inesperado na operação."));
             ocupado.store(false, Ordering::SeqCst);
             let _ = linha.queue(move |obj| obj.terminou(pedido, QString::from(&resposta)));
+        });
+        pedido
+    }
+
+    pub fn buscar_produtos(mut self: Pin<&mut Self>, dados: &QString) -> i32 {
+        let pedido = {
+            let mut r = self.as_mut().rust_mut();
+            r.pedidos = r.pedidos.wrapping_add(1).max(1);
+            r.pedidos
+        };
+        let dados = dados.to_string();
+        let guardado = self.guardado();
+        definir_computador_se_preciso(&guardado);
+        let linha = self.qt_thread();
+        std::thread::spawn(move || {
+            let resposta = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                com_servico(&guardado, |s| s.chamar("produtos_buscar", &dados), rustinho_nucleo::api::resposta_de_erro)
+            }))
+            .unwrap_or_else(|_| rustinho_nucleo::api::resposta_de_erro("Erro interno inesperado na busca."));
+            let _ = linha.queue(move |obj| obj.busca_terminou(pedido, QString::from(&resposta)));
         });
         pedido
     }
@@ -234,7 +284,13 @@ impl qobject::Sistema {
         }
         let guardado = self.guardado();
         definir_computador_se_preciso(&guardado);
-        let mut guarda = travar(&guardado);
+        let mut guarda = match guardado.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return QString::from(&rustinho_nucleo::api::resposta_de_erro(AGUARDE));
+            }
+        };
         let servico = match guarda.get_or_insert_with(abrir_servico) {
             Ok(s) => s,
             Err(m) => return QString::from(&rustinho_nucleo::api::resposta_de_erro(m)),

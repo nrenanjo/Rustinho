@@ -33,6 +33,8 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0021_dre_gerencial.sql"),
     include_str!("migracoes/0022_caixa_fechado.sql"),
     include_str!("migracoes/0023_rascunho_e_pendencias.sql"),
+    include_str!("migracoes/0024_identificadores_produto.sql"),
+    include_str!("migracoes/0025_cancelamento_idempotente.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -736,7 +738,8 @@ mod testes {
                 .unwrap();
             assert_eq!(n, 1, "{t}.{col}");
         }
-        // A 0.9.15 acrescentou a 0023 (rascunho de OS e pendências).
-        assert_eq!(MIGRACOES.len(), 23);
+        // A 0.9.15 acrescentou a 0023; a dev.3 acrescenta identificadores
+        // fiscais (0024) e idempotência no cancelamento (0025).
+        assert_eq!(MIGRACOES.len(), 25);
     }
 }

@@ -1,0 +1,46 @@
+   Compiling rustinho-nucleo v0.9.18-dev.3 (/home/renan/Área de trabalho/Rustinh0/nucleo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.39s
+     Running unittests src/lib.rs (.reversa/validacao_0918/target/debug/deps/rustinho_nucleo-46f96eb3c2514f80)
+
+running 1 test
+XMLs reais conferidos: arquivos=558, UTF-8=558, NF-e lidas=549, itens=5193, cEAN=2212, cEANTrib=2212, cBarra/cBarraTrib=2
+test nfe_xml::testes::xmls_reais_do_zip_sao_lidos_sem_expor_dados ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 437 filtered out; finished in 1.28s
+
+     Running tests/caixas.rs (.reversa/validacao_0918/target/debug/deps/caixas-b807ed1b47aebf97)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/contratos.rs (.reversa/validacao_0918/target/debug/deps/contratos-ecf6a85d1c91a524)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/contratos_telas.rs (.reversa/validacao_0918/target/debug/deps/contratos_telas-776226466f4a506c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/estavel/main.rs (.reversa/validacao_0918/target/debug/deps/estavel-5aa348f4602e12a8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.00s
+
+     Running tests/fluxo.rs (.reversa/validacao_0918/target/debug/deps/fluxo-db01c75f3217c03b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/portatil.rs (.reversa/validacao_0918/target/debug/deps/portatil-52cebe91a20ff2e8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+

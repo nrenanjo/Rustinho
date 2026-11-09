@@ -10,6 +10,7 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property string compraId: ""
     property var compra: null
+    property bool focarPendenteInicial: false
     // FALHA-04: chave do lançamento desta compra (nova ao carregar de novo).
     property string chaveLancar: Api.novaChave()
     property int itemEscolhendo: -1
@@ -680,6 +681,12 @@ FocusScope {
     onCompraChanged: {
         if (!compra)
             return
+        if (focarPendenteInicial) {
+            const indicePendente = compra.itens.findIndex(it => it.acao === "")
+            if (indicePendente >= 0)
+                Qt.callLater(() => lista.positionViewAtIndex(indicePendente, ListView.Contain))
+            focarPendenteInicial = false
+        }
         if (compra.situacao !== "rascunho")
             Qt.callLater(() => lista.positionViewAtBeginning())
         if (!freteExtra.entrada.activeFocus)

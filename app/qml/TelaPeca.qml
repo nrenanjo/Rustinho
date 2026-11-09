@@ -14,6 +14,7 @@ FocusScope {
     property string chave: Api.novaChave()
     property string chaveVariacao: Api.novaChave()
     property var precos: []
+    property var fornecedoresOpcoes: []
     property var sugestoes: ({ marcas: [], categorias: [], montadoras: [], modelos: [], locais: [], unidades: [], origens: [], csosns: [] })
     property var tributacao: null
     property bool alterado: false
@@ -52,6 +53,18 @@ FocusScope {
 
     function preencher(f) {
         ficha = f
+        const opcoesFornecedor = [{ fornecedorId: "", codigo: "", rotulo: "Sem fornecedor principal" }]
+        for (const p of (f.fornecedores || [])) {
+            opcoesFornecedor.push({
+                fornecedorId: p.fornecedorId,
+                codigo: p.codigo,
+                rotulo: p.codigo + " · " + p.fornecedor + (p.fator !== "1" ? " · caixa com " + p.fator : "")
+            })
+        }
+        fornecedoresOpcoes = opcoesFornecedor
+        let principal = fornecedoresOpcoes.findIndex(p => p.fornecedorId === f.fornecedorPrincipalId
+                                                           && p.codigo === f.fornecedorPrincipalCodigo)
+        fornecedorPrincipal.indice = Math.max(0, principal)
         nome.texto = f.nome
         codigo.texto = f.codigo
         codigoBarras.texto = f.codigoBarras
@@ -112,6 +125,7 @@ FocusScope {
             const q = equivalentes.get(i)
             listaEquivalentes.push({ marca: q.marca, codigo: q.codigo })
         }
+        const principal = fornecedoresOpcoes[fornecedorPrincipal.indice] || fornecedoresOpcoes[0]
         return {
             id: ficha ? ficha.id : "",
             codigo: codigo.texto,
@@ -120,6 +134,8 @@ FocusScope {
             unidade: unidade.texto,
             codigoBarras: codigoBarras.texto,
             codigoOriginal: codigoOriginal.texto,
+            fornecedorPrincipalId: principal.fornecedorId,
+            fornecedorPrincipalCodigo: principal.codigo,
             categoria: categoria.texto,
             ativo: ativo.checked,
             custo: campoCusto.texto,
@@ -971,6 +987,21 @@ FocusScope {
                             sugestoes: tela.sugestoes.locais
                             Layout.fillWidth: true
                             onEditado: tela.marcarAlterado()
+                        }
+                        Selecao {
+                            id: fornecedorPrincipal
+                            visible: tela.ficha && tela.ficha.fornecedores && tela.ficha.fornecedores.length > 0
+                            rotulo: "Código de fornecedor principal"
+                            modelo: tela.fornecedoresOpcoes.map(p => p.rotulo)
+                            Layout.fillWidth: true
+                            onEscolhido: tela.marcarAlterado()
+                        }
+                        Nota {
+                            visible: tela.ficha && tela.ficha.fornecedores && tela.ficha.fornecedores.length > 0
+                            text: "Este código aparece como referência principal. As demais referências continuam disponíveis para busca."
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
                         }
                         Rotulo {
                             visible: tela.ficha && tela.ficha.fornecedores && tela.ficha.fornecedores.length > 0

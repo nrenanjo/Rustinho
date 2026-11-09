@@ -15,6 +15,11 @@ Rectangle {
     readonly property color corBase: par ? Tema.azul : Tema.pergaminho
     readonly property color corTexto: atual ? Tema.claro : Tema.tinta
     readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuave
+    readonly property bool achouFornecedor: (linha.item.achou || "").startsWith("Fornecedor")
+    readonly property string codigoFornecedorMostrado: linha.item.codigoExato && linha.achouFornecedor
+                                                        && linha.item.codigoEncontrado
+                                                        ? linha.item.codigoEncontrado
+                                                        : (linha.item.codigoFornecedorPrincipal || "")
 
     radius: Tema.raio
     color: atual ? Tema.tinta : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
@@ -65,14 +70,32 @@ Rectangle {
         RowLayout {
             spacing: 8
             Layout.fillWidth: true
-            Text {
-                text: ["Cód. " + (linha.item.codigo || "a definir"), linha.item.local].filter(x => !!x).join("  ·  ")
-                color: linha.corSuave
-                font.family: Tema.texto
-                font.weight: Font.DemiBold
-                font.pixelSize: 13
-                elide: Text.ElideRight
+            ColumnLayout {
+                spacing: 0
                 Layout.fillWidth: true
+                Text {
+                    text: linha.item.codigoExato && linha.achouFornecedor
+                          ? "Correspondência " + linha.item.codigoEncontrado
+                          : linha.item.codigoFornecedorPrincipal
+                            ? "Fornecedor " + linha.item.codigoFornecedorPrincipal
+                              + (linha.item.fornecedorPrincipal ? " · " + linha.item.fornecedorPrincipal : "")
+                            : "Fornecedor principal não escolhido"
+                    color: linha.corTexto
+                    font.family: Tema.texto
+                    font.weight: Font.DemiBold
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: ["Cód. interno " + (linha.item.codigo || "a definir"), linha.item.local]
+                          .filter(x => !!x).join("  ·  ")
+                    color: linha.corSuave
+                    font.family: Tema.texto
+                    font.pixelSize: 12
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
             }
             Balao {
                 texto: linha.item.achou || ""
@@ -105,14 +128,26 @@ Rectangle {
         spacing: 18
         opacity: linha.item.ativo ? 1 : 0.6
 
-        Text {
-            text: linha.item.codigo || "a definir"
-            color: linha.corSuave
-            font.family: Tema.texto
-            font.weight: Font.DemiBold
-            font.pixelSize: 15
-            elide: Text.ElideRight
-            Layout.preferredWidth: 84
+        ColumnLayout {
+            spacing: 1
+            Layout.preferredWidth: 140
+            Text {
+                text: linha.codigoFornecedorMostrado || "—"
+                color: linha.corTexto
+                font.family: Tema.texto
+                font.weight: Font.DemiBold
+                font.pixelSize: 14
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Text {
+                text: "Interno " + (linha.item.codigo || "a definir")
+                color: linha.corSuave
+                font.family: Tema.texto
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
         }
 
         ColumnLayout {

@@ -256,7 +256,7 @@ FocusScope {
                 required property var modelData
                 required property int index
                 width: listaFeitas.width
-                implicitHeight: 66
+                implicitHeight: lf.modelData.valeUsado && !lf.modelData.cancelada ? 96 : 84
                 radius: Tema.raio
                 color: lf.modelData.cancelada ? Tema.vela(0.3) : (index + 1) % 2 === 0 ? Tema.azul : Tema.pergaminho
                 HoverHandler { id: sobreFeita }
@@ -280,12 +280,23 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Text {
-                            text: [lf.modelData.quando, lf.modelData.itens, lf.modelData.motivo, lf.modelData.cancelada ? "desfeita" : ""].filter(x => !!x).join("  ·  ")
+                            text: [lf.modelData.quando,
+                                   lf.modelData.itens,
+                                   lf.modelData.motivo,
+                                   lf.modelData.cancelada ? "desfeita" : ""].filter(x => !!x).join("  ·  ")
                             color: Tema.tintaSuave
                             font.family: Tema.serifa
                             font.italic: true
                             font.pixelSize: 13
-                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: "Caixa da devolução: " + lf.modelData.caixa + " · venda do caixa: " + lf.modelData.vendaCaixa
+                                  + (!lf.modelData.cancelada && lf.modelData.valeUsado ? " · vale usado: desfaça primeiro a venda que o utilizou" : "")
+                            color: Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 12
+                            wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
                     }
@@ -298,13 +309,13 @@ FocusScope {
                         onClicked: tela.imprimir("devolucao", lf.modelData.id)
                     }
                     Botao {
-                        visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada
+                        visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada && !lf.modelData.valeUsado
                         text: "Desfazer"
                         tipo: "discreto"
                         implicitHeight: 36
                         onClicked: pergunta.perguntar("Desfazer a devolução " + lf.modelData.numero + "?",
                                                       lf.modelData.valeUsado ? "O vale-troca desta devolução já foi usado: cancele antes a venda que usou o vale."
-                                                                             : "As peças saem de novo do estoque" + (lf.modelData.como.indexOf("vale") >= 0 ? " e o vale-troca é cancelado." : "."),
+                                                      : "A devolução e seus efeitos serão desfeitos conforme os itens e valores registrados" + (lf.modelData.como.indexOf("vale") >= 0 ? "; o vale-troca também será cancelado." : "."),
                                                       "Desfazer",
                                                       (m, pronto) => tela.janela.chamarGerente("devolucao_desfazer", { id: lf.modelData.id, motivo: m }, pronto))
                     }

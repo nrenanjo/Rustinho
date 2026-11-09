@@ -11,6 +11,7 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     readonly property string nomeNaNavegacao: "Compras"
     property var itens: []
+    property string buscaInicial: ""
     property bool buscou: false
     // 0.9.17: arquivos que esperam a importação (faltava o CNPJ da loja). Ficam
     // aqui enquanto a pessoa resolve o requisito; nada é importado sozinho.
@@ -339,6 +340,10 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (buscaInicial !== "") {
+            busca.texto = buscaInicial
+            buscaInicial = ""
+        }
         buscar()
         busca.focarCursor()
     }

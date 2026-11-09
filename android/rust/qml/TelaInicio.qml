@@ -10,6 +10,7 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property var menu: ({ todos: [] })
     property var avisos: []
+    readonly property bool temVinculosXml: avisos.some(a => a.id === "vinculos_xml")
     // Faixas (as críticas primeiro, depois a expandida) e quadrados (as
     // informativas e de atenção minimizadas), na ordem que vem do núcleo.
     readonly property var faixas: avisos.filter(a => !(a.minimizado && a.categoria !== "critica"))
@@ -56,7 +57,24 @@ FocusScope {
         const f = funcao(aviso.funcao)
         if (!f)
             return
-        if (aviso.id.indexOf("senha.") === 0) {
+        if (aviso.id === "vinculos_xml") {
+            const r = Api.chamar("compras_listar", { texto: "", limite: 1000 })
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            const pendente = r.dados.find(c => c.situacao === "rascunho" && c.pendentes > 0)
+            if (!pendente) {
+                carregar()
+                return
+            }
+            Api.chamar("menu_usar", { id: "compras" })
+            janela.abrir("TelaCompra", { compraId: pendente.id, focarPendenteInicial: true })
+        } else if (aviso.id === "nfe_duplicada") {
+            const chave = aviso.detalhes.find(d => d.rotulo === "Chave NF-e")
+            Api.chamar("menu_usar", { id: "compras" })
+            janela.abrir("TelaCompras", { buscaInicial: chave ? chave.valor : "" })
+        } else if (aviso.id.indexOf("senha.") === 0) {
             janela.abrir("TelaConfiguracoes", { secao: "loja" })
         } else if (aviso.secao) {
             janela.abrir("TelaConfiguracoes", { secao: aviso.secao })
@@ -243,6 +261,7 @@ FocusScope {
                             required property int index
                             item: modelData
                             indice: index
+                            alerta: modelData.id === "pecas" && tela.temVinculosXml
                             Layout.fillWidth: true
                             Layout.preferredWidth: 100
                             onAbrir: tela.janela.abrirFuncao(modelData)

@@ -68,7 +68,13 @@ pub struct Duplicata {
 #[derive(Debug, Default, Clone)]
 pub struct ItemXml {
     pub codigo: String,
+    /// Código de barras da unidade comercial (`cEAN`), somente se for GTIN válido.
     pub gtin: String,
+    /// Código de barras da unidade tributável (`cEANTrib`), separado do `cEAN`.
+    pub gtin_tributavel: String,
+    /// Campos adicionais de código de barras, quando fornecidos como GTIN válido.
+    pub codigo_barra: String,
+    pub codigo_barra_tributavel: String,
     pub descricao: String,
     pub ncm: String,
     pub cest: String,
@@ -98,6 +104,17 @@ fn descendente<'a, 'i>(no: Node<'a, 'i>, nome: &str) -> Option<Node<'a, 'i>> {
 
 fn texto(no: Option<Node>, nome: &str) -> String {
     no.and_then(|n| filho(n, nome)).and_then(|n| n.text()).map(|t| t.trim().to_string()).unwrap_or_default()
+}
+
+/// Lê um identificador de barras sem converter texto inválido (por exemplo,
+/// `SEM GTIN`) em código. O texto XML original continua preservado na compra.
+fn gtin_xml(no: Option<Node>, nome: &str) -> String {
+    let codigo = texto(no, nome);
+    if crate::gtin::gtin_valido(&codigo) {
+        codigo
+    } else {
+        String::new()
+    }
 }
 
 /// "123.4567" → valor inteiro com `casas` casas decimais (arredondado).
@@ -277,18 +294,13 @@ fn nota_do_no(raiz: Node, inf: Node, aceita_nfce: bool) -> Result<NotaXml, Strin
         let icms_st = somar_xml(dinheiro(icms, "vICMSST")?, dinheiro(icms, "vFCPST")?)?;
         let ipi = imposto.and_then(|i| filho(i, "IPI")).and_then(|i| filho(i, "IPITrib"));
         let pis = imposto.and_then(|i| filho(i, "PIS")).and_then(|i| i.children().find(|n| n.is_element()));
-        let gtin = {
-            let g = texto(prod, "cEAN");
-            if g.chars().all(|c| c.is_ascii_digit()) {
-                g
-            } else {
-                String::new()
-            }
-        };
         let cfop = texto(prod, "CFOP");
         let item = ItemXml {
             codigo: texto(prod, "cProd"),
-            gtin,
+            gtin: gtin_xml(prod, "cEAN"),
+            gtin_tributavel: gtin_xml(prod, "cEANTrib"),
+            codigo_barra: gtin_xml(prod, "cBarra"),
+            codigo_barra_tributavel: gtin_xml(prod, "cBarraTrib"),
             descricao: texto(prod, "xProd"),
             ncm: texto(prod, "NCM"),
             cest: texto(prod, "CEST"),
@@ -500,6 +512,60 @@ pub const EXEMPLO: &str = include_str!("../tests/nfe_exemplo.xml");
 mod testes {
     use super::*;
 
+    /// Validação local opcional sobre XMLs fornecidos pelo usuário. O teste
+    /// não extrai nem grava o conteúdo da nota e registra apenas contagens.
+    /// Para reproduzir: RUSTINHO_XMLS_ZIP=".../xml's.zip" cargo test -p rustinho-nucleo xmls_reais_do_zip.
+    #[test]
+    fn xmls_reais_do_zip_sao_lidos_sem_expor_dados() {
+        use std::io::Read;
+
+        let Some(caminho) = std::env::var_os("RUSTINHO_XMLS_ZIP") else {
+            eprintln!("SKIP: defina RUSTINHO_XMLS_ZIP para validar os XMLs locais");
+            return;
+        };
+        let arquivo = std::fs::File::open(caminho).expect("abrir ZIP de XMLs indicado");
+        let mut zip = zip::ZipArchive::new(arquivo).expect("ler ZIP de XMLs indicado");
+        let mut arquivos_xml = 0usize;
+        let mut utf8 = 0usize;
+        let mut notas_lidas = 0usize;
+        let mut assinaturas_validas = 0usize;
+        let mut itens_lidos = 0usize;
+        let mut gtins_comerciais = 0usize;
+        let mut gtins_tributaveis = 0usize;
+        let mut barras_adicionais = 0usize;
+
+        for indice in 0..zip.len() {
+            let mut membro = zip.by_index(indice).unwrap();
+            if !membro.name().unwrap().to_ascii_lowercase().ends_with(".xml") {
+                continue;
+            }
+            arquivos_xml += 1;
+            let mut bytes = Vec::new();
+            membro.read_to_end(&mut bytes).unwrap();
+            let Ok(conteudo) = std::str::from_utf8(&bytes) else { continue };
+            utf8 += 1;
+            let Ok(nota) = ler(conteudo) else { continue };
+            notas_lidas += 1;
+            if ler_verificada(conteudo, &Ancoras::padrao()).is_ok() {
+                assinaturas_validas += 1;
+            }
+            itens_lidos += nota.itens.len();
+            gtins_comerciais += nota.itens.iter().filter(|i| !i.gtin.is_empty()).count();
+            gtins_tributaveis += nota.itens.iter().filter(|i| !i.gtin_tributavel.is_empty()).count();
+            barras_adicionais += nota
+                .itens
+                .iter()
+                .filter(|i| !i.codigo_barra.is_empty() || !i.codigo_barra_tributavel.is_empty())
+                .count();
+        }
+
+        assert!(arquivos_xml > 0, "o arquivo não contém XMLs");
+        assert!(notas_lidas > 0, "nenhuma NF-e foi reconhecida nos XMLs UTF-8");
+        eprintln!(
+            "XMLs reais conferidos: arquivos={arquivos_xml}, UTF-8={utf8}, NF-e lidas={notas_lidas}, assinaturas aceitas={assinaturas_validas}, itens={itens_lidos}, cEAN={gtins_comerciais}, cEANTrib={gtins_tributaveis}, cBarra/cBarraTrib={barras_adicionais}"
+        );
+    }
+
     #[test]
     fn decimais() {
         assert_eq!(decimal("123.45", 2).unwrap(), 12345);
@@ -528,6 +594,31 @@ mod testes {
         assert_eq!(n.duplicatas.len(), 2);
         assert_eq!(n.duplicatas[0], Duplicata { numero: "001".into(), vencimento: "2026-11-07".into(), valor: 55_025 });
         assert_eq!(n.duplicatas[1].vencimento, "2026-12-07");
+    }
+
+    #[test]
+    fn preserva_separadamente_gtins_comercial_e_tributavel() {
+        let xml = EXEMPLO.replace(
+            "<cEAN>7891234567895</cEAN>",
+            "<cEAN>036000291452</cEAN><cEANTrib>7891234567895</cEANTrib><cBarra>96385074</cBarra><cBarraTrib>4006381333931</cBarraTrib>",
+        );
+        let item = &ler(&xml).unwrap().itens[0];
+        assert_eq!(item.gtin, "036000291452");
+        assert_eq!(item.gtin_tributavel, "7891234567895");
+        assert_eq!(item.codigo_barra, "96385074");
+        assert_eq!(item.codigo_barra_tributavel, "4006381333931");
+    }
+
+    #[test]
+    fn nao_importa_sem_gtin_nem_gtin_com_digito_invalido() {
+        let xml = EXEMPLO.replace(
+            "<cEAN>7891234567895</cEAN>",
+            "<cEAN>SEM GTIN</cEAN><cEANTrib>7891234567890</cEANTrib><cBarra>12AB</cBarra>",
+        );
+        let item = &ler(&xml).unwrap().itens[0];
+        assert_eq!(item.gtin, "");
+        assert_eq!(item.gtin_tributavel, "");
+        assert_eq!(item.codigo_barra, "");
     }
 
     fn alfa(nome: &str) -> String {

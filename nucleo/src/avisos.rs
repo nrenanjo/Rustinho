@@ -130,6 +130,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "oficina" => "Ver ordens de serviço",
             "backup" | "backup_nuvem" => "Ver backup",
             "conflitos" | "codigos" | "codigos_bloqueio" => "Resolver no Gerente",
+            "vinculos_xml" => "Revisar itens da nota",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
             id if id.starts_with("senha.") => "Trocar senha",
             _ => "Abrir",
@@ -226,6 +227,63 @@ pub fn da_senha(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>>
 pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     let hoje = fiscal::hoje(conn)?;
     let mut avisos = Vec::new();
+
+    // Uma mesma chave de NF-e pode ser importada offline em caixas distintos.
+    // Ambas as cópias ficam preservadas, mas nenhuma pode gerar outra entrada
+    // de estoque/conta a pagar até a reconciliação explícita.
+    let duplicadas: Vec<(String, i64)> = conn
+        .prepare(
+            "SELECT chave, COUNT(*) FROM compra
+              WHERE chave <> '' AND situacao <> 'estornada'
+              GROUP BY chave HAVING COUNT(*) > 1 ORDER BY chave",
+        )?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    if !duplicadas.is_empty() {
+        let notas: i64 = duplicadas.iter().map(|(_, quantidade)| quantidade).sum();
+        let mut a = Aviso::simples(
+            "nfe_duplicada",
+            &hoje,
+            "NF-e importada em mais de um caixa".into(),
+            format!("{} chaves repetidas em {notas} notas ativas", duplicadas.len()),
+            String::new(),
+            "compras",
+        )
+        .categoria(CRITICA);
+        a.descricao = "A mesma chave fiscal foi importada offline em mais de um caixa. Compare as notas e mantenha uma única entrada ativa. Não lance outra cópia; se já houver lançamentos, confira estoque e contas antes de estornar.".into();
+        a.detalhes =
+            duplicadas.into_iter().map(|(chave, _)| Detalhe { rotulo: "Chave NF-e".into(), valor: chave }).collect();
+        a.acao = "Ver notas repetidas".into();
+        avisos.push(a);
+    }
+
+    // A associação de um item importado é uma decisão comercial explícita.
+    // Enquanto houver rascunho com item sem decisão, o alerta permanece
+    // crítico; só a gravação da escolha no banco encerra a condição.
+    let (itens_xml_pendentes, notas_xml_pendentes): (i64, i64) = conn.query_row(
+        "SELECT COUNT(*), COUNT(DISTINCT c.id)
+           FROM compra c JOIN compra_item i ON i.compra_id = c.id
+          WHERE c.situacao = 'rascunho' AND i.acao = ''",
+        [],
+        |l| Ok((l.get(0)?, l.get(1)?)),
+    )?;
+    if itens_xml_pendentes > 0 {
+        let mut a = Aviso::simples(
+            "vinculos_xml",
+            &hoje,
+            "Itens de XML aguardam associação".into(),
+            format!(
+                "{} em {} precisam de uma escolha",
+                plural(itens_xml_pendentes, "item", "itens"),
+                plural(notas_xml_pendentes, "nota", "notas")
+            ),
+            String::new(),
+            "compras",
+        )
+        .categoria(CRITICA);
+        a.descricao = "Há itens de notas importadas sem associação confirmada. Revise cada item em Compras e escolha a peça, o cadastro de uma peça nova ou ignorar. O Rustinho não decide nem lança essas notas automaticamente.".into();
+        avisos.push(a);
+    }
 
     let (hoje_qtd, hoje_valor, venc_valor, venc_clientes): (i64, i64, i64, i64) = conn.query_row(
         "SELECT COUNT(CASE WHEN vencimento = ?1 THEN 1 END),

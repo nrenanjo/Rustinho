@@ -839,20 +839,21 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
 /// geral (caixa já fechado).
 pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
     crate::sync::exigir_editavel(conn, "pagamento", id)?;
-    let (conta_id, valor, juros, desconto, sessao, estornado, descricao): (
+    let (conta_id, valor, juros, desconto, sessao, estornado, descricao, dispositivo_origem): (
         String,
         i64,
         i64,
         i64,
         Option<String>,
         Option<String>,
+        String,
         String,
     ) = conn
         .query_row(
-            "SELECT g.conta_pagar_id, g.valor, g.juros, g.desconto, g.sessao_id, g.estornado_em, c.descricao
+            "SELECT g.conta_pagar_id, g.valor, g.juros, g.desconto, g.sessao_id, g.estornado_em, c.descricao, g.dispositivo
                FROM pagamento g JOIN conta_pagar c ON c.id = g.conta_pagar_id WHERE g.id = ?1",
             [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?)),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Pagamento".into()))?;
@@ -865,8 +866,9 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     }
     let total = numeros::soma([valor, juros, -desconto])?;
     if let Some(sessao_id) = sessao {
-        let aberta = caixa::sessao_aberta(conn, dispositivo)?.filter(|s| s.id == sessao_id);
-        if aberta.is_some() {
+        let mesma_sessao = dispositivo_origem == dispositivo
+            && caixa::sessao_aberta(conn, dispositivo_origem.as_str())?.is_some_and(|s| s.id == sessao_id);
+        if mesma_sessao {
             caixa::movimentar_com_conta(
                 conn,
                 dispositivo,
@@ -877,19 +879,14 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 None,
             )?;
         } else {
-            conn.execute(
-                "INSERT INTO movimento_conta (id, conta_id, data, valor, tipo, descricao, origem_id, usuario_id, criado_em, dispositivo)
-                 VALUES (?1, 'caixa-geral', ?2, ?3, 'ajuste', ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    tempo::novo_id(),
-                    fiscal::hoje(conn)?,
-                    total,
-                    format!("Estorno do pagamento (saiu da gaveta): {descricao}"),
-                    id,
-                    usuario_id,
-                    tempo::agora(),
-                    dispositivo
-                ],
+            caixa::compensar_caixa_fechado(
+                conn,
+                dispositivo,
+                usuario_id,
+                total,
+                "pagamento_estornado",
+                id,
+                &format!("Estorno do pagamento {descricao} (origem em outro computador ou caixa fechado)"),
             )?;
         }
     }

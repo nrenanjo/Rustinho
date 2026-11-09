@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/estavel/main.rs (.reversa/validacao_0918/target/debug/deps/estavel-5aa348f4602e12a8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 61 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running tests/estavel/main.rs (.reversa/validacao_0918/target/debug/deps/estavel-5aa348f4602e12a8)
+
+running 2 tests
+test a1_auditoria::d14_estornar_recebimento_de_caixa_fechado ... ok
+test a1_auditoria::d14_estornar_recebimento_de_caixa_fechado_sem_caixa_aberto ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 59 filtered out; finished in 2.83s
+

@@ -101,6 +101,121 @@ fn abertos_do_tipo(s: &mut crate::Servico, tipo: &str) -> Vec<Value> {
         .collect()
 }
 
+fn dados_loja(s: &mut crate::Servico) -> (String, String) {
+    let c = conn(s);
+    let dispositivo = c.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |l| l.get(0)).unwrap();
+    let usuario = c.query_row("SELECT id FROM usuario ORDER BY criado_em LIMIT 1", [], |l| l.get(0)).unwrap();
+    (dispositivo, usuario)
+}
+
+/// Um estorno feito no Caixa 1 não altera o resumo do Caixa 2, mesmo se a
+/// gaveta de origem ainda estiver aberta. A compensação fica ligada ao
+/// recebimento na gaveta em que o estorno foi feito.
+#[test]
+fn b10_03_estorno_de_recebimento_em_outro_caixa_preserva_origem() {
+    let (mut s, cliente) = loja();
+    let (caixa_local, usuario) = dados_loja(&mut s);
+    let c = conn(&mut s);
+    let sessao_local = crate::caixa::sessao_aberta(c, &caixa_local).unwrap().unwrap().id;
+    let contas = crate::receber::lancar(
+        c,
+        &caixa_local,
+        &usuario,
+        &crate::receber::LancamentoEntrada {
+            cliente_id: cliente.clone(),
+            descricao: "Compra a prazo".into(),
+            valor: "80".into(),
+            parcelas: 1,
+            primeiro_vencimento: String::new(),
+        },
+    )
+    .unwrap();
+    crate::caixa::abrir(c, "disp-caixa-2", &usuario, "Caixa 2", "100").unwrap();
+    let sessao_origem = crate::caixa::sessao_aberta(c, "disp-caixa-2").unwrap().unwrap().id;
+    let recebimento = crate::receber::receber(
+        c,
+        "disp-caixa-2",
+        &usuario,
+        &crate::receber::ReceberEntrada {
+            cliente_id: cliente,
+            contas,
+            valor: "50".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(crate::caixa::resumo(c, &sessao_origem).unwrap().esperado_dinheiro, 15_000);
+
+    crate::receber::estornar(c, &caixa_local, &usuario, &recebimento, "Duplicado").unwrap();
+
+    assert_eq!(crate::caixa::resumo(c, &sessao_origem).unwrap().esperado_dinheiro, 15_000);
+    assert_eq!(crate::caixa::resumo(c, &sessao_local).unwrap().esperado_dinheiro, 5_000);
+    let compensacoes: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM caixa_movimento WHERE origem_tipo = 'recebimento_estornado' AND origem_id = ?1 AND tipo = 'sangria'",
+            [&recebimento],
+            |l| l.get(0),
+        )
+        .unwrap();
+    assert_eq!(compensacoes, 1);
+}
+
+/// Um estorno de pagamento ocorrido em outro caixa devolve o dinheiro à
+/// gaveta atual e conserva o saldo histórico da gaveta que pagou.
+#[test]
+fn b10_04_estorno_de_pagamento_em_outro_caixa_preserva_origem() {
+    let (mut s, _) = loja();
+    let mut f = ok(&mut s, "pessoa_nova", json!({ "papel": "fornecedor" }));
+    f["nome"] = json!("Distribuidora de teste");
+    let fornecedor = ok(&mut s, "pessoa_salvar", f)["id"].as_str().unwrap().to_string();
+    let (caixa_local, usuario) = dados_loja(&mut s);
+    let c = conn(&mut s);
+    let sessao_local = crate::caixa::sessao_aberta(c, &caixa_local).unwrap().unwrap().id;
+    let contas = crate::pagar::lancar(
+        c,
+        &caixa_local,
+        &usuario,
+        &crate::pagar::LancamentoEntrada {
+            fornecedor_id: fornecedor,
+            descricao: "Boleto".into(),
+            valor: "80".into(),
+            parcelas: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    crate::caixa::abrir(c, "disp-caixa-2", &usuario, "Caixa 2", "100").unwrap();
+    let sessao_origem = crate::caixa::sessao_aberta(c, "disp-caixa-2").unwrap().unwrap().id;
+    let pagamento = crate::pagar::pagar(
+        c,
+        "disp-caixa-2",
+        &usuario,
+        &crate::pagar::PagamentoEntrada {
+            conta_id: contas[0].clone(),
+            valor: "50".into(),
+            forma: "dinheiro".into(),
+            origem: "gaveta".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(crate::caixa::resumo(c, &sessao_origem).unwrap().esperado_dinheiro, 5_000);
+
+    crate::pagar::estornar(c, &caixa_local, &usuario, &pagamento, "Cobrança duplicada").unwrap();
+
+    assert_eq!(crate::caixa::resumo(c, &sessao_origem).unwrap().esperado_dinheiro, 5_000);
+    assert_eq!(crate::caixa::resumo(c, &sessao_local).unwrap().esperado_dinheiro, 15_000);
+    let compensacoes: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM caixa_movimento WHERE origem_tipo = 'pagamento_estornado' AND origem_id = ?1 AND tipo = 'suprimento'",
+            [&pagamento],
+            |l| l.get(0),
+        )
+        .unwrap();
+    assert_eq!(compensacoes, 1);
+}
+
 /// A mesma parcela recebida nos dois caixas sem rede: depois da troca,
 /// conflito para o gerente (com os dois recebimentos e os caixas), os dois
 /// recebimentos continuam lá, e estornar o que sobrou fecha o conflito.

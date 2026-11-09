@@ -97,6 +97,7 @@ FocusScope {
                 corValor: Tema.verdeEscuro
             }
             CartaoNumero {
+                visible: !!secao.dados && secao.dados.custoTotal !== ""
                 rotulo: "Custo estimado"
                 sensivel: true
                 valor: secao.dados ? secao.dados.custoTotal : ""
@@ -346,6 +347,7 @@ FocusScope {
                         Layout.alignment: Qt.AlignRight
                     }
                     Text {
+                        visible: lp.p.custoTotal !== ""
                         text: lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : "sem custo"
                         color: Tema.tintaSuave
                         font.family: Tema.texto

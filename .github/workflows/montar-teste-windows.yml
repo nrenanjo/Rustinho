@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo 2>&1 | tee testes-linux.txt
+          cargo test -p rustinho-nucleo -- --test-threads=1 2>&1 | tee testes-linux.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()
@@ -71,7 +71,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cargo test -p rustinho-nucleo --no-fail-fast 2>&1 | tee testes-windows.txt
+          cargo test -p rustinho-nucleo --no-fail-fast -- --test-threads=1 2>&1 | tee testes-windows.txt
       - name: Resumo dos testes (avisos)
         id: resumo
         if: always()

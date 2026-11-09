@@ -337,6 +337,7 @@ FocusScope {
             clienteId = c.id
             nCliente.texto = c.nome
             nTelefone.texto = c.telefone || ""
+            corrigir("cliente")
             achados = []
             nPeca.focar()
         }
@@ -346,7 +347,14 @@ FocusScope {
                 return
             nPeca.texto = r.dados.nome + (r.dados.marca ? " · " + r.dados.marca : "")
             produtoId = id
+            corrigir("peca")
             nQtd.focar()
+        }
+        function corrigir(campo) {
+            if (campoErro === campo || campoErro === "") {
+                erro = ""
+                campoErro = ""
+            }
         }
         function salvar() {
             const r = Api.gravar("encomenda_criar", {
@@ -386,7 +394,11 @@ FocusScope {
                 dica: "Nome, CPF, telefone ou placa"
                 erro: nova_.campoErro === "cliente" ? nova_.erro : ""
                 Layout.fillWidth: true
-                onEditado: esperaCli.restart()
+                onEditado: {
+                    nova_.clienteId = ""
+                    nova_.corrigir("cliente")
+                    esperaCli.restart()
+                }
             }
             Repeater {
                 model: nova_.achados
@@ -417,6 +429,7 @@ FocusScope {
                 maximo: 20
                 erro: nova_.campoErro === "telefone" ? nova_.erro : ""
                 Layout.fillWidth: true
+                onEditado: nova_.corrigir("telefone")
             }
             Linha {
                 spacing: 10
@@ -428,7 +441,10 @@ FocusScope {
                     maximo: 160
                     erro: nova_.campoErro === "peca" ? nova_.erro : ""
                     Layout.fillWidth: true
-                    onEditado: nova_.produtoId = ""
+                    onEditado: {
+                        nova_.produtoId = ""
+                        nova_.corrigir("peca")
+                    }
                 }
                 Botao {
                     text: "Procurar"
@@ -448,13 +464,16 @@ FocusScope {
                     maximo: 8
                     erro: nova_.campoErro === "quantidade" ? nova_.erro : ""
                     Layout.preferredWidth: 140
+                    onEditado: nova_.corrigir("quantidade")
                 }
                 Campo {
                     id: nObs
                     rotulo: "Observação"
                     dica: "Ex.: cliente vem buscar sábado"
                     maximo: 300
+                    erro: nova_.campoErro === "observacoes" ? nova_.erro : ""
                     Layout.fillWidth: true
+                    onEditado: nova_.corrigir("observacoes")
                     onConfirmado: nova_.salvar()
                 }
             }

@@ -56,6 +56,45 @@ fn pasta() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rustinho-avisos-{}", crate::tempo::novo_id())).join("rustinho.db")
 }
 
+/// Itens de XML sem escolha ficam críticos até que a decisão seja gravada.
+#[test]
+fn itens_xml_sem_associacao_geram_critica_ate_a_escolha_ser_salva() {
+    let caminho = pasta();
+    let (mut s, _) = loja(&caminho);
+    let dispositivo = s.banco_para_teste().dispositivo.clone();
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "INSERT INTO compra (id, numero, emissao, criado_em, dispositivo)
+         VALUES ('compra-pendente', '42', '2026-11-09', '2026-11-09', ?1)",
+            [&dispositivo],
+        )
+        .unwrap();
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "INSERT INTO compra_item (id, compra_id, ordem, quantidade, valor_produtos)
+         VALUES ('item-pendente', 'compra-pendente', 0, 1000, 2500)",
+            [],
+        )
+        .unwrap();
+
+    let a = aviso(&mut s, "vinculos_xml").expect("aviso persistente");
+    assert_eq!(a["categoria"], "critica");
+    assert_eq!(a["funcao"], "compras");
+    assert!(a["texto"].as_str().unwrap().contains("1 item"));
+    let r = chamar(&mut s, "aviso_minimizar", serde_json::json!({ "id": "vinculos_xml", "minimizado": true }));
+    assert_eq!(r["ok"], false, "crítica não pode ser minimizada: {r}");
+
+    s.banco_para_teste()
+        .conn
+        .execute("UPDATE compra_item SET acao = 'ignorar' WHERE id = 'item-pendente'", [])
+        .unwrap();
+    assert!(aviso(&mut s, "vinculos_xml").is_none(), "a condição some só depois da decisão salva");
+    drop(s);
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+}
+
 /// Arrastar para a esquerda (a tela chama `aviso_esconder`): a informativa
 /// some até a meia-noite; a atenção e a crítica são recusadas e continuam.
 #[test]

@@ -109,6 +109,12 @@ pub struct ItemCalculado {
     #[serde(skip)]
     pub v_preco: i64,
     #[serde(skip)]
+    v_preco_tabela: i64,
+    #[serde(skip)]
+    v_preco_aberto: bool,
+    #[serde(skip)]
+    v_desconto_maximo: Option<i64>,
+    #[serde(skip)]
     pub v_desconto: i64,
     #[serde(skip)]
     pub v_total: i64,
@@ -451,6 +457,9 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             erro,
             v_quantidade: quantidade,
             v_preco: preco,
+            v_preco_tabela: preco_tabela,
+            v_preco_aberto: p.preco_aberto,
+            v_desconto_maximo: p.desconto_maximo,
             v_desconto: desconto,
             v_total: total,
             v_custo: p.custo,
@@ -472,6 +481,34 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         Ok(d) => (d, String::new()),
         Err(m) => (0, m),
     };
+    if erro_desconto.is_empty() && depois_itens > 0 {
+        let mut distribuido = 0_i64;
+        let quantidade_itens = itens.len();
+        for (indice, item) in itens.iter_mut().enumerate() {
+            let desconto_global = if indice + 1 == quantidade_itens {
+                desconto - distribuido
+            } else {
+                crate::numeros::saturar(
+                    (desconto as i128 * item.v_total as i128 + depois_itens as i128 / 2) / depois_itens as i128,
+                )
+                .clamp(0, desconto - distribuido)
+            };
+            distribuido += desconto_global;
+            let Some(maximo) = item.v_desconto_maximo else { continue };
+            let cheio = if item.v_preco_aberto {
+                multiplicar(item.v_quantidade, item.v_preco)
+            } else {
+                multiplicar(item.v_quantidade, item.v_preco_tabela)
+            };
+            if cheio <= 0 {
+                continue;
+            }
+            let desconto_acumulado = (cheio - item.v_total + desconto_global).max(0);
+            if desconto_acumulado as i128 * 10_000 > cheio as i128 * maximo as i128 && item.erro.is_empty() {
+                item.erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(maximo));
+            }
+        }
+    }
     let total = depois_itens - desconto;
     let pago = numeros::somar(
         e.pagamentos.iter().map(|p| numeros::ler_dinheiro(&p.valor).ok().flatten().unwrap_or(0).clamp(0, TOTAL_MAXIMO)),
@@ -788,13 +825,39 @@ pub fn salvar_orcamento(
 
 /// Cancela uma venda (as peças voltam ao estoque) ou um orçamento.
 pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
-    let (tipo, situacao, numero, caixa_nome, sessao_id): (String, String, i64, String, Option<String>) = conn
-        .query_row("SELECT tipo, situacao, numero, caixa_nome, sessao_id FROM venda WHERE id = ?1", [id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?))
-        })
+    let (tipo, situacao, numero, caixa_nome, sessao_id, venda_dispositivo): (
+        String,
+        String,
+        i64,
+        String,
+        Option<String>,
+        String,
+    ) = conn
+        .query_row(
+            "SELECT tipo, situacao, numero, caixa_nome, sessao_id, dispositivo FROM venda WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)),
+        )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Venda".into()))?;
+    crate::sync::exigir_editavel(conn, "venda", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "venda_item", "venda_id", id)?;
     let motivo = texto::limpar(motivo);
+    let dinheiro: i64 = if tipo == "venda" {
+        conn.query_row(
+            "SELECT COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = ?1 AND forma = 'dinheiro'), 0)
+                    - troco FROM venda WHERE id = ?1",
+            [id],
+            |l| l.get(0),
+        )?
+    } else {
+        0
+    };
+    // Uma venda aberta em outro computador pertence à gaveta de origem,
+    // mesmo que essa sessão ainda esteja aberta. O estorno sai da gaveta
+    // deste computador e é registrado como compensação vinculada.
+    let caixa_fora_do_computador =
+        caixa::sessao_fechada(conn, sessao_id.as_deref())? || venda_dispositivo != dispositivo;
     if tipo == "venda" {
         if situacao != "concluida" {
             return Err(Erro::validacao("Esta venda já foi cancelada."));
@@ -807,10 +870,34 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 "Esta venda tem devolução. Desfaça a devolução (em Trocas e devoluções) antes de cancelar a venda.",
             ));
         }
+        if dinheiro > 0 {
+            if let Some(sessao_atual) = caixa::sessao_aberta(conn, dispositivo)? {
+                let resumo = caixa::resumo(conn, &sessao_atual.id)?;
+                if dinheiro > resumo.esperado_dinheiro {
+                    return Err(Erro::validacao(format!(
+                        "A gaveta tem R$ {} disponíveis, mas o cancelamento precisa devolver R$ {} em dinheiro.",
+                        numeros::escrever_dinheiro(resumo.esperado_dinheiro.max(0)),
+                        numeros::escrever_dinheiro(dinheiro)
+                    )));
+                }
+            } else if !caixa_fora_do_computador {
+                return Err(Erro::validacao("Abra o caixa da venda antes de cancelar e devolver o dinheiro."));
+            }
+        }
         cheques::cancelar_de(conn, usuario_id, "venda_id", id)?;
         encomendas::cancelar_da_venda(conn, id)?;
         crate::oficina::cancelar_da_venda(conn, id)?;
         receber::cancelar_da_venda(conn, usuario_id, id, &motivo)?;
+        // Chave comercial estável. Se outro caixa também cancelar esta venda
+        // offline, a UNIQUE(venda_id) suspende o lote recebido inteiro antes
+        // de aplicar estoque, gaveta ou a segunda versão da venda. Registre
+        // depois das validações que podem recusar o cancelamento para não
+        // deixar o marcador reservado quando a operação é negada.
+        conn.execute(
+            "INSERT INTO venda_cancelamento (id, venda_id, dispositivo, usuario_id, criado_em, motivo)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![crate::tempo::novo_id(), id, dispositivo, usuario_id, tempo::agora(), motivo],
+        )?;
         let itens: Vec<(String, i64)> = conn
             .prepare("SELECT produto_id, quantidade FROM venda_item WHERE venda_id = ?1 AND produto_id IS NOT NULL")?
             .query_map([id], |l| Ok((l.get(0)?, l.get(1)?)))?
@@ -826,9 +913,9 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 &format!("Cancelamento da venda {numero} · {caixa_nome} · {motivo}"),
             )?;
         }
-        // D-14: venda de um caixa já fechado. O fechamento dele não muda; o
-        // dinheiro devolvido sai da gaveta aberta (ou do Caixa geral).
-        let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
+        // A sessão de origem não muda, inclusive quando ainda está aberta em
+        // outro computador; o dinheiro sai da gaveta atual.
+        let fechado = caixa_fora_do_computador;
         conn.execute(
             "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4,
                               cancelado_apos_fechar = ?5 WHERE id = ?1",
@@ -836,12 +923,6 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         )?;
         let mut detalhes = vec![format!("Motivo: {motivo}")];
         if fechado {
-            let dinheiro: i64 = conn.query_row(
-                "SELECT COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = ?1 AND forma = 'dinheiro'), 0)
-                        - troco FROM venda WHERE id = ?1",
-                [id],
-                |l| l.get(0),
-            )?;
             let onde = caixa::compensar_caixa_fechado(
                 conn,
                 dispositivo,
@@ -849,10 +930,12 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 -dinheiro.max(0),
                 "venda_cancelada",
                 id,
-                &format!("Cancelamento da venda {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
+                &format!("Cancelamento da venda {numero} · {caixa_nome} (origem em outro computador ou caixa fechado) · {motivo}"),
             )?;
             detalhes.push(match onde {
-                Some(o) => format!("O caixa da venda já estava fechado (o fechamento não muda): {o}"),
+                Some(o) => {
+                    format!("O caixa da venda já estava fechado (o fechamento não muda); compensação registrada: {o}")
+                }
                 None => {
                     "O caixa da venda já estava fechado (o fechamento não muda); não havia dinheiro a devolver".into()
                 }
@@ -1251,6 +1334,42 @@ mod testes {
         assert!(calcular(&b.conn, &e).unwrap().itens[0].erro.is_empty());
     }
 
+    #[test]
+    fn limite_de_desconto_da_peca_cobre_desconto_global_e_preco_aberto() {
+        let (b, u, p1, p2) = base();
+        let c = &b.conn;
+        caixa::abrir(c, &b.dispositivo, &u, "Caixa 1", "0").unwrap();
+
+        let global = VendaEntrada {
+            itens: vec![item(&p1, "1"), item(&p2, "1")],
+            tabela: 1,
+            desconto: "20%".into(),
+            ..Default::default()
+        };
+        let calculo = calcular(c, &global).unwrap();
+        assert!(calculo.itens[0].erro.contains("máximo desta peça"), "{}", calculo.itens[0].erro);
+        assert!(concluir(c, &b.dispositivo, &u, &global).unwrap_err().nome_do_campo().unwrap().starts_with("itens."));
+
+        let mut ficha = produtos::ficha_nova(c).unwrap();
+        ficha.nome = "Peça de preço aberto".into();
+        ficha.custo = "10".into();
+        ficha.preco_aberto = true;
+        ficha.desconto_maximo = "10".into();
+        let aberta = produtos::salvar(c, &b.dispositivo, &u, &ficha).unwrap();
+        let mut linha = item(&aberta, "1");
+        linha.preco = "100".into();
+        linha.desconto = "15".into();
+        let aberta_com_desconto = VendaEntrada { itens: vec![linha], tabela: 1, ..Default::default() };
+        let calculo = calcular(c, &aberta_com_desconto).unwrap();
+        assert!(calculo.itens[0].erro.contains("máximo desta peça"), "{}", calculo.itens[0].erro);
+
+        let mut linha = item(&p1, "1");
+        linha.desconto = "4".into();
+        let dentro_do_limite =
+            VendaEntrada { itens: vec![linha], tabela: 1, desconto: "5%".into(), ..Default::default() };
+        assert!(calcular(c, &dentro_do_limite).unwrap().itens[0].erro.is_empty());
+    }
+
     /// C-05: valores na fronteira e além. Nada "dá a volta", nada é gravado.
     #[test]
     fn valores_extremos_sao_recusados_sem_gravar() {
@@ -1370,6 +1489,63 @@ mod testes {
 
         assert_eq!(listar(c, "venda", "", "", 50).unwrap().len(), 2);
         assert_eq!(listar(c, "venda", "óleo", "", 50).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn cancelamento_confere_dinheiro_e_compensa_gaveta_de_outro_computador() {
+        let (b, u, p1, p2) = base();
+        let c = &b.conn;
+        let d1 = b.dispositivo.clone();
+        let d2 = "outro-dispositivo";
+        caixa::abrir(c, &d1, &u, "Caixa 1", "0").unwrap();
+        let v1 = concluir(
+            c,
+            &d1,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&p1, "1")],
+                tabela: 1,
+                pagamentos: vec![PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "80".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        caixa::movimentar(c, &d1, &u, "sangria", "80", "Cofre").unwrap();
+        let sessao_origem = caixa::sessao_aberta(c, &d1).unwrap().unwrap();
+        assert_eq!(caixa::resumo(c, &sessao_origem.id).unwrap().esperado_dinheiro, 0);
+        assert!(cancelar(c, &d1, &u, &v1, "cliente desistiu").is_err(), "não devolve mais do que há na gaveta");
+        assert_eq!(ficha(c, &v1).unwrap().situacao, "concluida");
+
+        let v2 = concluir(
+            c,
+            &d1,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&p2, "1")],
+                tabela: 1,
+                pagamentos: vec![PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "43".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        caixa::abrir(c, d2, &u, "Caixa 2", "50").unwrap();
+        cancelar(c, d2, &u, &v2, "cliente desistiu").unwrap();
+        assert_eq!(ficha(c, &v2).unwrap().situacao, "cancelada");
+        let cancelada_apos_fechar: bool =
+            c.query_row("SELECT cancelado_apos_fechar FROM venda WHERE id = ?1", [&v2], |l| l.get(0)).unwrap();
+        assert!(cancelada_apos_fechar, "a venda remota continua registrada na gaveta de origem");
+        assert_eq!(caixa::resumo(c, &sessao_origem.id).unwrap().esperado_dinheiro, 4_300);
+        let sessao_atual = caixa::sessao_aberta(c, d2).unwrap().unwrap();
+        assert_eq!(caixa::resumo(c, &sessao_atual.id).unwrap().esperado_dinheiro, 700);
+        assert_eq!(estoque::saldo(c, &p2).unwrap(), 2_000);
     }
 
     #[test]

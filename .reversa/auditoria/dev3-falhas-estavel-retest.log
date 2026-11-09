@@ -1,0 +1,5 @@
+error: unexpected argument 'a1_auditoria::d14_estornar_recebimento_de_caixa_fechado' found
+
+Usage: cargo test [OPTIONS] [TESTNAME] [-- [ARGS]...]
+
+For more information, try '--help'.

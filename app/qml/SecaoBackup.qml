@@ -16,6 +16,7 @@ ColumnLayout {
     property string onde: "computador"      // lista: "computador" ou "nuvem"
     property var nuvem: []
     property bool buscandoNuvem: false
+    property int requisicaoNuvem: 0
     property bool todas: false
     property var pedirSenhaDe: null         // cópia que pediu outra senha
     property bool restaurando: false
@@ -100,9 +101,11 @@ ColumnLayout {
 
     function buscarNuvem() {
         onde = "nuvem"
+        const requisicao = ++requisicaoNuvem
         buscandoNuvem = true
-        Qt.callLater(() => {
-            const r = Api.chamar("backup_nuvem_lista")
+        janela.chamarGerenteDemorado("backup_nuvem_lista", {}, "Consultando cópias no Google Drive…", r => {
+            if (requisicao !== requisicaoNuvem)
+                return
             buscandoNuvem = false
             if (r.ok)
                 nuvem = r.dados
@@ -534,8 +537,11 @@ ColumnLayout {
                 onEscolhido: id => {
                     if (id === "nuvem")
                         secao.buscarNuvem()
-                    else
+                    else {
+                        secao.requisicaoNuvem++
+                        secao.buscandoNuvem = false
                         secao.onde = "computador"
+                    }
                 }
             }
             Item { Layout.fillWidth: true }

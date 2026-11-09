@@ -33,6 +33,21 @@ pub fn escrever_percentual(centesimos: i64) -> String {
 
 /// Lê quantidade digitada: "2", "1,5" ou "0,250".
 pub fn ler_quantidade(texto: &str) -> Result<Option<i64>, String> {
+    // Um valor iniciado por zero não pode representar milhar. Em campos de
+    // quantidade, trate `0.350` como decimal, preservando o ponto como
+    // separador decimal nesse caso ambíguo para o parser genérico.
+    let limpo = texto.trim();
+    let (sinal, numero) = limpo.strip_prefix('-').map_or(("", limpo), |n| ("-", n));
+    if let Some((inteira, fracao)) = numero.split_once('.') {
+        if !inteira.is_empty()
+            && inteira.chars().all(|c| c == '0')
+            && !fracao.is_empty()
+            && fracao.len() <= CASAS_QUANTIDADE as usize
+            && fracao.chars().all(|c| c.is_ascii_digit())
+        {
+            return ler_decimal(&format!("{sinal}{inteira},{fracao}"), CASAS_QUANTIDADE);
+        }
+    }
     ler_decimal(texto, CASAS_QUANTIDADE)
 }
 
@@ -340,6 +355,13 @@ mod testes {
         assert_eq!(ler_quantidade("2"), Ok(Some(2000)));
         assert_eq!(ler_quantidade("1,5"), Ok(Some(1500)));
         assert_eq!(ler_quantidade("0,250"), Ok(Some(250)));
+        assert_eq!(ler_quantidade("0.350"), Ok(Some(350)));
+        assert_eq!(ler_quantidade("-0.350"), Ok(Some(-350)));
+        assert_eq!(
+            ler_quantidade("1.350"),
+            Ok(Some(1_350_000)),
+            "ponto de milhar continua válido em inteiros positivos"
+        );
         assert_eq!(escrever_quantidade(2000), "2");
         assert_eq!(escrever_quantidade(1500), "1,5");
         assert_eq!(escrever_quantidade(1234500), "1.234,5");

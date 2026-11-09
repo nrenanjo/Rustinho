@@ -306,6 +306,11 @@ pub fn calcular(conn: &Connection, e: &Entrada) -> Resultado<Calculo> {
             c.campo = format!("itens.{n}");
             return Ok(c);
         }
+        if q % 1000 != 0 && !crate::unidades::fracionada(conn, &v.unidade)? {
+            c.erro = format!("{} é vendido inteiro (sem vírgula).", v.unidade);
+            c.campo = format!("itens.{n}");
+            return Ok(c);
+        }
         // Na última parte do item, devolve o que sobrou (sem perder centavo
         // no arredondamento).
         let (valor, valor_item) = if q == pode {
@@ -396,6 +401,8 @@ fn proximo(conn: &Connection, tabela: &str, dispositivo: &str) -> Resultado<i64>
 
 /// Grava a devolução. Devolve o id.
 pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<String> {
+    crate::sync::exigir_editavel(conn, "venda", &e.venda_id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "venda_item", "venda_id", &e.venda_id)?;
     let c = calcular(conn, e)?;
     if !c.erro.is_empty() {
         return Err(if c.campo.is_empty() { Erro::validacao(c.erro) } else { Erro::campo(&c.campo, c.erro) });
@@ -576,12 +583,22 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     crate::sync::exigir_editavel(conn, "devolucao", id)?;
     crate::sync::exigir_filhos_editaveis(conn, "devolucao_item", "devolucao_id", id)?;
     #[allow(clippy::type_complexity)]
-    let d: (Option<String>, Option<String>, Option<String>, String, i64, i64, Option<String>, String) = conn
+    let d: (Option<String>, Option<String>, Option<String>, String, i64, i64, Option<String>, String, String) = conn
         .query_row(
-            "SELECT cancelado_em, vale_id, recebimento_id, venda_id, numero, dinheiro, sessao_id, caixa_nome
+            "SELECT cancelado_em, vale_id, recebimento_id, venda_id, numero, dinheiro, sessao_id, caixa_nome, dispositivo
                FROM devolucao WHERE id = ?1",
             [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?)),
+            |l| Ok((
+                l.get(0)?,
+                l.get(1)?,
+                l.get(2)?,
+                l.get(3)?,
+                l.get(4)?,
+                l.get(5)?,
+                l.get(6)?,
+                l.get(7)?,
+                l.get(8)?,
+            )),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Devolução".into()))?;
@@ -631,21 +648,20 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             &format!("Devolução nº {} desfeita · venda {venda_numero} · {venda_caixa} · {motivo}", d.4),
         )?;
     }
-    // D-14: devolução em dinheiro de um caixa já fechado. O fechamento dele
-    // não muda; o dinheiro que o cliente devolve entra na gaveta aberta (ou
-    // no Caixa geral).
-    let fechado = caixa::sessao_fechada(conn, d.6.as_deref())?;
+    // A sessão de origem não muda quando a devolução é desfeita em outro
+    // computador; o dinheiro que volta do cliente entra na gaveta atual.
+    let caixa_fora_do_computador = caixa::sessao_fechada(conn, d.6.as_deref())? || d.8 != dispositivo;
     conn.execute(
         "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4, desfeita_apos_fechar = ?5
           WHERE id = ?1",
-        params![id, agora, usuario_id, motivo, fechado],
+        params![id, agora, usuario_id, motivo, caixa_fora_do_computador],
     )?;
     let mut detalhes = vec![format!(
         "Devolução nº {} desfeita · {motivo}{}",
         d.4,
-        if d.5 > 0 && !fechado { " (o dinheiro volta a contar na gaveta)" } else { "" }
+        if d.5 > 0 && !caixa_fora_do_computador { " (o dinheiro volta a contar na gaveta)" } else { "" }
     )];
-    if fechado {
+    if caixa_fora_do_computador {
         let onde = caixa::compensar_caixa_fechado(
             conn,
             dispositivo,
@@ -982,6 +998,138 @@ mod testes {
     }
 
     #[test]
+    fn unidade_indivisivel_nao_aceita_devolucao_fracionaria() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        caixa::abrir(c, d, &u, "Caixa 1", "0").unwrap();
+        let unidade = peca(&b, &u, "Filtro", "10");
+        let venda = vendas::concluir(
+            c,
+            d,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&unidade, "2")],
+                tabela: 1,
+                pagamentos: vec![pg("dinheiro", "40")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let item_id = da_venda(c, &venda).unwrap().itens[0].venda_item_id.clone();
+        let fracao = entrada(&venda, vec![(&item_id, "0,5", false)], "vale", "");
+        let calculo = calcular(c, &fracao).unwrap();
+        assert!(calculo.erro.contains("vendido inteiro"), "{}", calculo.erro);
+        assert!(devolver(c, d, &u, &fracao).is_err());
+
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "Mangueira".into();
+        f.unidade = "KG".into();
+        f.custo = "10".into();
+        f.estoque_inicial = "2".into();
+        let fracionada = produtos::salvar(c, d, &u, &f).unwrap();
+        let venda_fracionada = vendas::concluir(
+            c,
+            d,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&fracionada, "1,5")],
+                tabela: 1,
+                pagamentos: vec![pg("dinheiro", "30")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let item_fracionado = da_venda(c, &venda_fracionada).unwrap().itens[0].venda_item_id.clone();
+        let retorno =
+            calcular(c, &entrada(&venda_fracionada, vec![(&item_fracionado, "0,5", false)], "vale", "")).unwrap();
+        assert!(retorno.erro.is_empty(), "unidade fracionada continua aceitando frações");
+    }
+
+    #[test]
+    fn r05_impede_cancelar_ou_devolver_venda_com_referencia_inconsistente() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        caixa::abrir(c, d, &u, "Caixa 1", "0").unwrap();
+        let p = peca(&b, &u, "Filtro", "10");
+        let venda = vendas::concluir(
+            c,
+            d,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&p, "1")],
+                tabela: 1,
+                pagamentos: vec![pg("dinheiro", "20")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let venda_item_id = da_venda(c, &venda).unwrap().itens[0].venda_item_id.clone();
+
+        c.execute(
+            "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+             VALUES ('venda', json_array(?1), 'venda_item', '[]', 'inconsistente', '2020-01-01T00:00:00Z', 'log')",
+            [&venda],
+        )
+        .unwrap();
+        assert!(vendas::cancelar(c, d, &u, &venda, "teste").is_err());
+        assert_eq!(
+            c.query_row("SELECT situacao FROM venda WHERE id = ?1", [&venda], |l| l.get::<_, String>(0)).unwrap(),
+            "concluida"
+        );
+        c.execute("DELETE FROM sync_referencia WHERE tabela = 'venda'", []).unwrap();
+        c.execute(
+            "INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+             VALUES ('venda_item', json_array(?1), 'venda', '[]', 'inconsistente', '2020-01-01T00:00:00Z', 'log')",
+            [&venda_item_id],
+        )
+        .unwrap();
+        let tentativa = entrada(&venda, vec![(&venda_item_id, "1", false)], "vale", "");
+        assert!(devolver(c, d, &u, &tentativa).is_err());
+        assert!(!tem_devolucao(c, &venda).unwrap());
+        assert_eq!(estoque::saldo(c, &p).unwrap(), 9_000);
+    }
+
+    #[test]
+    fn desfazer_devolucao_em_outro_computador_compensa_gaveta_atual() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d1) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d1, "Maria", "1234", true).unwrap().id;
+        let d2 = "outro-dispositivo";
+        caixa::abrir(c, d1, &u, "Caixa 1", "0").unwrap();
+        let p = peca(&b, &u, "Filtro", "10");
+        let venda = vendas::concluir(
+            c,
+            d1,
+            &u,
+            &VendaEntrada {
+                itens: vec![item(&p, "1")],
+                tabela: 1,
+                pagamentos: vec![pg("dinheiro", "20")],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let venda_item_id = da_venda(c, &venda).unwrap().itens[0].venda_item_id.clone();
+        let devolucao =
+            devolver(c, d1, &u, &entrada(&venda, vec![(&venda_item_id, "1", false)], "dinheiro", "")).unwrap();
+        let sessao_origem = caixa::sessao_aberta(c, d1).unwrap().unwrap();
+        assert_eq!(caixa::resumo(c, &sessao_origem.id).unwrap().esperado_dinheiro, 0);
+        caixa::abrir(c, d2, &u, "Caixa 2", "10").unwrap();
+
+        desfazer(c, d2, &u, &devolucao, "erro no cadastro").unwrap();
+        let desfeita_apos_fechar: bool = c
+            .query_row("SELECT desfeita_apos_fechar FROM devolucao WHERE id = ?1", [&devolucao], |l| l.get(0))
+            .unwrap();
+        assert!(desfeita_apos_fechar, "a sessão de origem fica sem alteração");
+        assert_eq!(caixa::resumo(c, &sessao_origem.id).unwrap().esperado_dinheiro, 0);
+        let sessao_atual = caixa::sessao_aberta(c, d2).unwrap().unwrap();
+        assert_eq!(caixa::resumo(c, &sessao_atual.id).unwrap().esperado_dinheiro, 3_000);
+        assert_eq!(estoque::saldo(c, &p).unwrap(), 9_000);
+    }
+
+    #[test]
     fn abate_do_crediario_e_o_resto_vira_vale() {
         let b = Banco::em_memoria().unwrap();
         let (c, d) = (&b.conn, b.dispositivo.as_str());
@@ -1005,7 +1153,12 @@ mod testes {
         // Devolve os 3 (60): 40 abatem o crediário e os outros 20 precisam de destino.
         let x = calcular(c, &entrada(&venda, vec![(&i, "3", false)], "crediario", "")).unwrap();
         assert!(x.precisa_resto && !x.erro.is_empty());
-        devolver(c, d, &u, &entrada(&venda, vec![(&i, "3", false)], "crediario", "vale")).unwrap();
+        let devolucao_id = devolver(c, d, &u, &entrada(&venda, vec![(&i, "3", false)], "crediario", "vale")).unwrap();
+        let recebimento_id: String =
+            c.query_row("SELECT recebimento_id FROM devolucao WHERE id = ?1", [&devolucao_id], |l| l.get(0)).unwrap();
+        let estorno_separado = crate::receber::estornar(c, d, &u, &recebimento_id, "teste").unwrap_err().to_string();
+        assert!(estorno_separado.contains("Desfaça a devolução"), "{estorno_separado}");
+        assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "0,00", "o estorno recusado não mudou o saldo");
         assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "0,00");
         let vales = vales_abertos(c, &cliente).unwrap();
         assert_eq!((vales[0].saldo.as_str(), vales[0].cliente.as_str()), ("20,00", "Maria"));
@@ -1013,5 +1166,8 @@ mod testes {
         assert_eq!(l.len(), 1);
         assert!(l[0].como.contains("crediário") && l[0].como.contains("vale-troca"));
         assert!(crate::impressao::devolucao(c, &l[0].id).unwrap().contains("Vale-troca nº 1"));
+        desfazer(c, d, &u, &devolucao_id, "teste").unwrap();
+        assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "40,00");
+        assert_eq!(saldo_vale(c, &vales[0].id).unwrap(), 0);
     }
 }

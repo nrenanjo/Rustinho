@@ -166,6 +166,16 @@ pub struct Sugestao {
     pub itens: Vec<ItemCompra>,
 }
 
+/// Remove do retorno valores internos para quem não tem permissão de
+/// resultados. A tela recebe o mesmo conjunto de quantidades e itens.
+pub fn esconder_custos(s: &mut Sugestao) {
+    s.custo_total.clear();
+    for item in &mut s.itens {
+        item.custo.clear();
+        item.custo_total.clear();
+    }
+}
+
 pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let dias = dias_compra(conn)?;
     let desde = tempo::dias_atras(JANELA);

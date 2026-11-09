@@ -397,19 +397,26 @@ fn de_rar(pacote: &str, caminho: &Path, saida: &mut Vec<Xml>, orc: &mut Orcament
             saida.push(ruim(nome, "grande demais para ser uma nota"));
             continue;
         }
-        if !orc.gastar(tamanho) {
+        if tamanho > orc.bytes {
             saida.push(ruim(pacote.into(), &passou_do_total()));
             return;
         }
         let mut opcoes = rars::ArchiveReadOptions::new();
-        opcoes.max_member_output_bytes = Some(MAX_TAMANHO);
-        opcoes.max_total_output_bytes = Some(MAX_TOTAL);
+        // O tamanho anunciado pelo cabeçalho pode estar incorreto. Limite a
+        // descompactação ao orçamento que ainda resta e desconte o tamanho
+        // realmente produzido, não apenas o valor declarado.
+        opcoes.max_member_output_bytes = Some(MAX_TAMANHO.min(orc.bytes));
+        opcoes.max_total_output_bytes = Some(orc.bytes);
         opcoes.rar50_dictionary_size_limit = Some(limites::MAX_DICIONARIO_RAR as _);
         match arquivo.read_member_at_with_options(i, opcoes) {
-            Ok(Some(b)) if b.len() as u64 <= MAX_TAMANHO => {
+            Ok(Some(b)) if b.len() as u64 <= MAX_TAMANHO && orc.gastar(b.len() as u64) => {
                 saida.push(Xml { nome, texto: texto_do_xml(&b), erro: String::new() })
             }
-            Ok(Some(_)) => saida.push(ruim(nome, "grande demais para ser uma nota")),
+            Ok(Some(b)) if b.len() as u64 > MAX_TAMANHO => saida.push(ruim(nome, "grande demais para ser uma nota")),
+            Ok(Some(_)) => {
+                saida.push(ruim(pacote.into(), &passou_do_total()));
+                return;
+            }
             Ok(None) => {}
             Err(_) => saida.push(ruim(nome, "não deu para descompactar (senha ou grande demais?)")),
         }
@@ -506,6 +513,21 @@ mod testes {
             assert!(l.iter().all(|x| x.erro.is_empty() && x.texto.contains("<nfeProc")), "{nome}: {l:?}");
             let _ = std::fs::remove_dir_all(&pasta);
         }
+    }
+
+    #[test]
+    fn rar_respeita_orcamento_total_restante() {
+        let bytes = base64_decodificar(RAR5);
+        let pasta = std::env::temp_dir().join(format!("rustinho-rar-limite-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let p = pasta.join("notas.rar");
+        std::fs::write(&p, bytes).unwrap();
+        let mut saida = Vec::new();
+        let mut orc = Orcamento { bytes: 1, membros: 100 };
+        de_rar("notas.rar", &p, &mut saida, &mut orc);
+        assert!(saida.iter().all(|x| !x.erro.is_empty()), "nenhum XML excede o orçamento: {saida:?}");
+        assert_eq!(orc.bytes, 1, "cabeçalho grande demais é recusado antes de descompactar");
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     fn base64_decodificar(t: &str) -> Vec<u8> {

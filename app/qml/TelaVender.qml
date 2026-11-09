@@ -41,6 +41,7 @@ FocusScope {
     property var caixaEstado: null
     property string clienteId: ""
     property string clienteNome: ""
+    property int tabelaVenda: 1
     property var clientesAchados: []
     property string orcamentoCarregado: ""
     property int itemAtual: -1
@@ -53,7 +54,7 @@ FocusScope {
     function entrada(pagamentos) {
         return {
             itens: carrinho,
-            tabela: 1,
+            tabela: tabelaVenda,
             clienteId: clienteId,
             clienteNome: clienteId ? "" : clienteNome,
             desconto: descontoTotal.texto,
@@ -211,6 +212,7 @@ FocusScope {
         calculo = null
         clienteId = ""
         clienteNome = ""
+        tabelaVenda = 1
         campoCliente.texto = ""
         descontoTotal.texto = ""
         orcamentoCarregado = ""
@@ -301,6 +303,11 @@ FocusScope {
         if (calculo && calculo.erroEncomenda) {
             janela.avisar(calculo.erroEncomenda, "erro")
             campoCliente.focar()
+            return
+        }
+        if (calculo && calculo.erroDesconto) {
+            janela.avisar(calculo.erroDesconto, "erro")
+            descontoTotal.focar()
             return
         }
         receber.abrirCom(calculo.total)
@@ -789,6 +796,7 @@ FocusScope {
                         maximo: 10
                         erro: tela.calculo ? tela.calculo.erroDesconto : ""
                         Layout.fillWidth: true
+                        onEditado: tela.recalcular()
                         onConfirmado: tela.recalcular()
                         onSaiu: tela.recalcular()
                     }
@@ -941,6 +949,11 @@ FocusScope {
         function completarVale() {
             campoVale.texto = ""
             atualizar()
+            if (calc && calc.falta === "0,00") {
+                for (let i = 0; i < repFormas.count; i++)
+                    repFormas.itemAt(i).campo.texto = ""
+                atualizar()
+            }
             const saldo = tela.centavos(tela.vales[escolhaVale.indice].saldo)
             const falta = calc ? tela.centavos(calc.falta) : 0
             campoVale.texto = tela.reais(Math.min(saldo, falta))
@@ -1357,6 +1370,7 @@ FocusScope {
                 clienteId = r.dados.clienteId
                 clienteNome = r.dados.clienteNome
                 descontoTotal.texto = r.dados.desconto
+                tabelaVenda = r.dados.tabela || 1
                 orcamentoCarregado = r.dados.orcamentoId
             } else {
                 janela.avisar(r.erro, "erro")

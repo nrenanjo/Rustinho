@@ -56,6 +56,8 @@ fn nome_da_acao(acao: &str) -> String {
         "gerente" => "a pílula Gerente".into(),
         "simultaneidade" => "a Simultaneidade (duplicatas, histórico e caixas da loja)".into(),
         "precos" => "mudar o preço de venda ou a regra de preço (% de lucro)".into(),
+        "muda_rede" => "ligar a troca de dados ou trocar a senha da rede".into(),
+        "mexe_em_gerente" => "criar, promover ou alterar a conta de um gerente".into(),
         _ => ACOES_DO_GERENTE
             .iter()
             .find(|(id, _)| *id == acao)
@@ -538,9 +540,10 @@ enum Liberacao {
     /// Consulta de uma tela do gerente (Financeiro, Usuários, Resultados...):
     /// só as leituras daquela ação, até sair da tela. Não grava nada.
     Consulta { usuario_id: String, acao: &'static str, ate: Instant },
-    /// Uma gravação: este comando com estes dados exatos. Acaba quando dá
-    /// certo; se der erro, só repete a mesma coisa.
-    Uma { usuario_id: String, comando: String, resumo: [u8; 32], ate: Instant },
+    /// Uma tentativa de gravação: comando e dados exatos, com a lista de
+    /// todas as ações protegidas que foram mostradas ao gerente. É consumida
+    /// ao executar, mesmo que o comando falhe.
+    Uma { usuario_id: String, comando: String, resumo: [u8; 32], acoes: Vec<&'static str>, ate: Instant },
 }
 
 impl Liberacao {
@@ -558,8 +561,8 @@ pub struct Servico {
     /// Senhas do gerente digitadas no aperto (D-09: cada uma vale só para
     /// o que foi pedido; veja `Liberacao`).
     liberacoes: Vec<Liberacao>,
-    /// O comando que está rodando e o resumo dos dados dele.
-    chamada: Option<(String, [u8; 32])>,
+    /// O comando, resumo dos dados e todas as ações protegidas desta chamada.
+    chamada: Option<(String, [u8; 32], Vec<&'static str>)>,
     /// Sincronização com os outros caixas (só com banco em arquivo).
     _motor: Option<sync::Motor>,
     /// Houve um erro interno grave (pânico): não dá para provar que o que
@@ -937,35 +940,94 @@ impl Servico {
 
     /// A senha do gerente foi digitada para esta chamada (o mesmo comando,
     /// com os mesmos dados, pelo mesmo usuário)?
-    fn liberada_esta_chamada(&mut self, sessao: &Sessao) -> bool {
+    fn liberada_esta_chamada(&mut self, sessao: &Sessao, acao: &str) -> bool {
         let agora = Instant::now();
         self.liberacoes.retain(|l| agora < l.ate());
-        let Some((comando, resumo)) = &self.chamada else { return false };
+        let Some((comando, resumo, _)) = &self.chamada else { return false };
         self.liberacoes.iter().any(|l| {
-            matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: r, .. }
-                if usuario_id == &sessao.usuario_id && c == comando && r == resumo)
+            matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: r, acoes, .. }
+                if usuario_id == &sessao.usuario_id && c == comando && r == resumo && acoes.contains(&acao))
         })
+    }
+
+    /// Ações que esta tentativa pode proteger. A lista é calculada a partir
+    /// dos dados exatos da operação e filtrada pelas permissões do usuário.
+    fn acoes_protegidas_para(&self, comando: &str, dados: &Value, sessao: &Sessao) -> Resultado<Vec<&'static str>> {
+        let mut todas = Vec::new();
+        if let Some(acao) = acao_do_comando(comando) {
+            todas.push(acao);
+        }
+        match comando {
+            "config_salvar" => {
+                let entrada: config::ConfigEntrada = ler(dados.clone())?;
+                if !config::mudancas_no_lucro(&self.banco.conn, &entrada)?.is_empty() {
+                    todas.push("precos");
+                }
+            }
+            "sync_salvar" => {
+                let entrada: AjustesSync = ler(dados.clone())?;
+                let atual = sync::ajustes(&self.banco.conn)?;
+                let senha_nova = !entrada.senha.trim().is_empty() && entrada.senha.trim() != atual.senha;
+                if (entrada.ligado && !atual.ligado) || senha_nova {
+                    todas.push("muda_rede");
+                }
+            }
+            "usuario_salvar" => {
+                let entrada: UsuarioEntrada = ler(dados.clone())?;
+                let altera_gerente = entrada.gerente == Some(true)
+                    || (!entrada.id.is_empty()
+                        && entrada.id != sessao.usuario_id
+                        && usuarios::buscar(&self.banco.conn, &entrada.id)?.gerente);
+                if altera_gerente {
+                    todas.push("mexe_em_gerente");
+                }
+            }
+            "produto_salvar" => {
+                let ficha: produtos::ProdutoFicha = ler(dados.clone())?;
+                if produtos::muda_preco(&self.banco.conn, &ficha)? {
+                    todas.push("precos");
+                }
+            }
+            // O comando só pede autorização após a tentativa transacional
+            // detectar alteração de preço. O retry corresponde ao mesmo
+            // payload e precisa nomear essa ação explicitamente.
+            "compra_lancar" => todas.push("precos"),
+            _ => {}
+        }
+        let mut protegidas = Vec::new();
+        for acao in todas {
+            if !protegidas.contains(&acao) && !self.pode_sem_senha(acao, sessao)? {
+                protegidas.push(acao);
+            }
+        }
+        Ok(protegidas)
     }
 
     /// Esta chamada pode fazer esta ação do gerente? Uma leitura vale com a
     /// consulta da tela; qualquer outra coisa precisa da senha para ela.
     fn exigir(&mut self, acao: &str, sessao: &Sessao) -> Resultado<()> {
-        if self.pode_sem_senha(acao, sessao)? || self.liberada_esta_chamada(sessao) {
+        if self.pode_sem_senha(acao, sessao)? || self.liberada_esta_chamada(sessao, acao) {
             return Ok(());
         }
         let leitura = self
             .chamada
             .as_ref()
-            .map(|(c, _)| SO_LEITURA.contains(&c.as_str()) && acao_do_comando(c) == Some(acao))
+            .map(|(c, _, _)| SO_LEITURA.contains(&c.as_str()) && acao_do_comando(c) == Some(acao))
             .unwrap_or(false);
         if leitura && self.consulta_aberta(acao, sessao) {
             return Ok(());
         }
         // "precos" tem campo próprio: a tela sabe que é o preço da peça que
         // pede a senha.
+        let acoes = self.chamada.as_ref().map(|(_, _, acoes)| acoes.as_slice()).unwrap_or(&[]);
+        let nomes = if acoes.is_empty() {
+            nome_da_acao(acao)
+        } else {
+            acoes.iter().map(|a| nome_da_acao(a)).collect::<Vec<_>>().join("; ")
+        };
         Err(Erro::campo(
             if acao == "precos" { "precos" } else { "gerente" },
-            format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
+            format!("Só o gerente pode: {nomes}. Peça para o gerente digitar a senha."),
         ))
     }
 
@@ -973,6 +1035,7 @@ impl Servico {
     /// (mesmos dados) acaba: não fica aberta para outra coisa (D-09).
     fn executar_conectado(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let resumo = resumo_da_chamada(comando, &dados);
+        let acoes_protegidas = self.acoes_protegidas_para(comando, &dados, sessao)?;
         // Duplo clique: a mesma operação (a mesma chave) chegando de novo.
         let repeticao = match dados["chaveOperacao"].as_str().map(str::trim) {
             Some(k) if !k.is_empty() && NAO_REPETIR.contains(&comando) => {
@@ -1004,7 +1067,7 @@ impl Servico {
                 ));
             }
         }
-        self.chamada = Some((comando.to_string(), resumo));
+        self.chamada = Some((comando.to_string(), resumo, acoes_protegidas));
         let r = self.executar_comando(comando, dados, sessao);
         self.chamada = None;
         if let (Some(chave), Ok(_)) = (repeticao, &r) {
@@ -1013,12 +1076,12 @@ impl Servico {
                 self.feitas.pop_front();
             }
         }
-        if r.is_ok() {
-            self.liberacoes.retain(|l| {
-                !matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: d, .. }
-                    if usuario_id == &sessao.usuario_id && c == comando && *d == resumo)
-            });
-        }
+        // Cada autorização de gravação é uma tentativa de uso único. Um
+        // erro de validação não deixa a senha anterior presa a outro retry.
+        self.liberacoes.retain(|l| {
+            !matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: d, .. }
+                if usuario_id == &sessao.usuario_id && c == comando && *d == resumo)
+        });
         r
     }
 
@@ -1046,7 +1109,11 @@ impl Servico {
                         return Err(Erro::validacao("Diga para que é a senha do gerente."));
                     }
                     let dados = d.dados.clone().unwrap_or_else(|| json!({}));
-                    Err((d.comando.clone(), resumo_da_chamada(&d.comando, &dados)))
+                    let acoes = self.acoes_protegidas_para(&d.comando, &dados, sessao)?;
+                    if acoes.is_empty() {
+                        return Err(Erro::validacao("Esta operação não tem uma ação protegida que exija liberação."));
+                    }
+                    Err((d.comando.clone(), resumo_da_chamada(&d.comando, &dados), acoes))
                 } else if !d.acoes.is_empty() {
                     // Simultaneidade (0.9.15): uma senha abre a consulta das
                     // partes que ficam juntas ali (só leitura; cada gravação
@@ -1084,7 +1151,7 @@ impl Servico {
                                 let nomes: Vec<String> = acoes.iter().map(|a| nome_da_acao(a)).collect();
                                 format!("consultar {} (só leitura, nesta tela)", nomes.join("; "))
                             }
-                            Err((comando, resumo)) => {
+                            Err((comando, resumo, acoes)) => {
                                 self.liberacoes.retain(|l| {
                                     !matches!(l, Liberacao::Uma { comando: c, usuario_id: u, .. }
                                         if c == comando && *u == usuario_id)
@@ -1093,12 +1160,11 @@ impl Servico {
                                     usuario_id,
                                     comando: comando.clone(),
                                     resumo: *resumo,
+                                    acoes: acoes.clone(),
                                     ate: Instant::now() + LIBERACAO_CURTA,
                                 });
-                                format!(
-                                    "{} (uma vez, com estes dados)",
-                                    nome_da_acao(acao_do_comando(comando).unwrap_or("precos"))
-                                )
+                                let nomes = acoes.iter().map(|a| nome_da_acao(a)).collect::<Vec<_>>().join("; ");
+                                format!("{nomes} (uma vez, com estes dados)")
                             }
                         };
                         self.gravar_se_der(auditoria::registrar(
@@ -1357,9 +1423,15 @@ impl Servico {
 
             "produtos_buscar" => {
                 let d: BuscaProdutos = ler(dados)?;
-                let lista = busca::buscar(&self.banco.conn, &d.texto, d.inativas, d.limite.unwrap_or(200))?;
-                let total = busca::total(&self.banco.conn, d.inativas)?;
-                Ok(json!({ "itens": lista, "total": total }))
+                let (lista, total) = busca::buscar_pagina(
+                    &self.banco.conn,
+                    &d.texto,
+                    d.inativas,
+                    d.deslocamento.unwrap_or(0),
+                    d.limite.unwrap_or(200),
+                )?;
+                let catalogo = busca::total(&self.banco.conn, d.inativas)?;
+                Ok(json!({ "itens": lista, "total": total, "catalogo": catalogo }))
             }
             "produto_novo" => {
                 let f = produtos::ficha_nova(&self.banco.conn)?;
@@ -2098,7 +2170,11 @@ impl Servico {
 
             "estoque_sugestao" => {
                 let d: Filtro = ler(dados)?;
-                Ok(json!(reposicao::sugestao(&self.banco.conn, &d.texto)?))
+                let mut s = reposicao::sugestao(&self.banco.conn, &d.texto)?;
+                if !self.ve_custos(sessao)? {
+                    reposicao::esconder_custos(&mut s);
+                }
+                Ok(json!(s))
             }
             "estoque_dias" => {
                 let d: Dias = ler(dados)?;
@@ -2500,11 +2576,8 @@ impl Servico {
                 let entrada = d.senha.trim();
                 let senha_nova = !entrada.is_empty() && entrada != atual.senha;
                 let muda_rede = (d.ligado && !atual.ligado) || senha_nova;
-                if muda_rede && !sessao.gerente && !self.liberada_esta_chamada(sessao) {
-                    return Err(Erro::campo(
-                        "gerente",
-                        "Só o gerente pode ligar a troca de dados ou trocar a senha da rede. Peça para o gerente digitar a senha.",
-                    ));
+                if muda_rede {
+                    self.exigir("muda_rede", sessao)?;
                 }
                 let senha = if entrada.is_empty() { atual.senha.clone() } else { entrada.to_string() };
                 // 0915-K: tudo numa transação (endereço inválido não deixa as
@@ -2837,8 +2910,8 @@ impl Servico {
         // mesmo com "Usuários" liberado para todos.
         let mexe_em_gerente = d.gerente == Some(true)
             || (!d.id.is_empty() && d.id != sessao.usuario_id && usuarios::buscar(&self.banco.conn, &d.id)?.gerente);
-        if mexe_em_gerente && !sessao.gerente && !self.liberada_esta_chamada(sessao) {
-            return Err(Erro::campo("gerente", "Só o gerente pode mexer na conta de um gerente."));
+        if mexe_em_gerente {
+            self.exigir("mexe_em_gerente", sessao)?;
         }
         let tem_senha = !d.senha.is_empty() || !d.senha2.is_empty();
         if tem_senha && d.senha != d.senha2 {
@@ -3163,6 +3236,8 @@ struct BuscaProdutos {
     texto: String,
     inativas: bool,
     limite: Option<i64>,
+    #[serde(alias = "offset")]
+    deslocamento: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -3587,6 +3662,117 @@ mod testes {
 
     fn categorias_teste(s: &Servico) -> i64 {
         s.banco.conn.query_row("SELECT COUNT(*) FROM categoria WHERE id = 't'", [], |l| l.get(0)).unwrap()
+    }
+
+    #[test]
+    fn estoque_sugestao_oculta_custos_sem_permissao_de_resultados() {
+        let mut s = conectado();
+        let gerente = s.sessao.clone().unwrap();
+        let dispositivo = s.banco.dispositivo.clone();
+        let mut f = produtos::ficha_nova(&s.banco.conn).unwrap();
+        f.nome = "Filtro para sugestão".into();
+        f.custo = "10".into();
+        f.estoque_minimo = "5".into();
+        let id = produtos::salvar(&s.banco.conn, &dispositivo, &gerente.usuario_id, &f).unwrap();
+        let operador = usuarios::criar(&s.banco.conn, &dispositivo, "Operador", "senha-operador-1", true).unwrap();
+        s.sessao = Some(Sessao { usuario_id: operador.id, nome: operador.nome, gerente: false });
+        config::gravar(&s.banco.conn, "gerente_livres", "").unwrap();
+
+        let sem_permissao = chamar(&mut s, "estoque_sugestao", r#"{"texto":""}"#);
+        assert_eq!(sem_permissao["ok"], true, "{sem_permissao}");
+        let itens = sem_permissao["dados"]["itens"].as_array().unwrap();
+        let item = itens.iter().find(|i| i["produtoId"] == id).expect("peça sugerida");
+        assert_eq!(sem_permissao["dados"]["custoTotal"], "");
+        assert_eq!(item["custo"], "");
+        assert_eq!(item["custoTotal"], "");
+
+        s.sessao = Some(gerente);
+        let com_permissao = chamar(&mut s, "estoque_sugestao", r#"{"texto":""}"#);
+        assert!(!com_permissao["dados"]["custoTotal"].as_str().unwrap().is_empty());
+        let item = com_permissao["dados"]["itens"].as_array().unwrap().iter().find(|i| i["produtoId"] == id).unwrap();
+        assert!(!item["custo"].as_str().unwrap().is_empty());
+        assert!(!item["custoTotal"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn b1_autorizacao_lista_todas_as_acoes_e_e_consumida_apos_falha() {
+        let mut s = conectado();
+        let mut inicial = chamar(&mut s, "config_ler", "{}")["dados"].clone();
+        inicial["tabelas"][0]["lucroPadrao"] = json!("100");
+        let salva_inicial = chamar(&mut s, "config_salvar", &inicial.to_string());
+        assert_eq!(salva_inicial["ok"], true, "prepara uma margem existente: {salva_inicial}");
+        let operador =
+            usuarios::criar(&s.banco.conn, &s.banco.dispositivo, "Operador", "senha-operador-1", true).unwrap();
+        s.sessao = Some(Sessao { usuario_id: operador.id.clone(), nome: operador.nome, gerente: false });
+        config::gravar(&s.banco.conn, "gerente_livres", "configuracoes,resultados").unwrap();
+
+        let mut base = chamar(&mut s, "config_ler", "{}")["dados"].clone();
+        let lucro_atual = base["tabelas"][0]["lucroPadrao"].as_str().unwrap().to_string();
+        let novo_lucro = "101".to_string();
+        base["tabelas"][0]["lucroPadrao"] = json!(novo_lucro);
+        base["uf"] = json!("XX");
+
+        let negada = chamar(&mut s, "config_salvar", &base.to_string());
+        assert_eq!(negada["ok"], false, "a regra de preço continua protegida: {negada}");
+        assert!(negada["erro"].as_str().unwrap().contains("preço de venda"), "{negada}");
+
+        let liberada = chamar(
+            &mut s,
+            "gerente_liberar",
+            &json!({ "comando": "config_salvar", "dados": base, "senha": "balcao-azul-2026" }).to_string(),
+        );
+        assert_eq!(liberada["ok"], true, "{liberada}");
+        let trilha: String = s
+            .banco
+            .conn
+            .query_row(
+                "SELECT detalhes FROM auditoria WHERE acao = 'gerente.liberar' ORDER BY rowid DESC LIMIT 1",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert!(trilha.contains("mudar o preço de venda"), "a ação específica consta no histórico: {trilha}");
+        assert!(!trilha.contains("configurações da loja"), "configurações está liberada neste cenário: {trilha}");
+
+        let falha = chamar(&mut s, "config_salvar", &base.to_string());
+        assert_eq!(falha["ok"], false, "a validação posterior à autorização falha: {falha}");
+        assert!(falha["erro"].as_str().unwrap().contains("estado"), "{falha}");
+        assert_eq!(config::tabelas_preco(&s.banco.conn).unwrap()[0].lucro_padrao, lucro_atual);
+
+        let mut corrigida = base.clone();
+        corrigida["uf"] = json!("SP");
+        let nova_tentativa = chamar(&mut s, "config_salvar", &corrigida.to_string());
+        assert_eq!(nova_tentativa["ok"], false, "o erro consumiu a autorização antiga: {nova_tentativa}");
+        assert!(nova_tentativa["erro"].as_str().unwrap().contains("preço de venda"), "{nova_tentativa}");
+        assert_eq!(s.sessao.as_ref().unwrap().usuario_id, operador.id);
+    }
+
+    #[test]
+    fn b1_autorizacao_tem_escopo_de_acao_e_expira() {
+        let mut s = conectado();
+        let operador =
+            usuarios::criar(&s.banco.conn, &s.banco.dispositivo, "Operador", "senha-operador-1", true).unwrap();
+        let sessao = Sessao { usuario_id: operador.id, nome: operador.nome, gerente: false };
+        let resumo = [7; 32];
+        s.chamada = Some(("config_salvar".into(), resumo, vec!["precos"]));
+        s.liberacoes.push(Liberacao::Uma {
+            usuario_id: sessao.usuario_id.clone(),
+            comando: "config_salvar".into(),
+            resumo,
+            acoes: vec!["precos"],
+            ate: Instant::now() + LIBERACAO_CURTA,
+        });
+        assert!(s.liberada_esta_chamada(&sessao, "precos"));
+        assert!(!s.liberada_esta_chamada(&sessao, "muda_rede"), "não transfere a aprovação para outra ação");
+
+        s.liberacoes[0] = Liberacao::Uma {
+            usuario_id: sessao.usuario_id.clone(),
+            comando: "config_salvar".into(),
+            resumo,
+            acoes: vec!["precos"],
+            ate: Instant::now() - Duration::from_secs(1),
+        };
+        assert!(!s.liberada_esta_chamada(&sessao, "precos"), "a liberação expirada não vale");
     }
 
     /// C-15: pânico antes do commit desfaz a gravação e bloqueia novas

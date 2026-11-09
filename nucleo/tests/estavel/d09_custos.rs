@@ -330,14 +330,15 @@ fn d09_5_senha_presa_a_acao_e_aos_dados() {
     l.ok("venda_cancelar", json!({ "motivo": "cliente desistiu", "id": v }));
     so_o_gerente(&mut l, "venda_cancelar", cancelar.clone());
 
-    // Erro: a senha fica só para repetir a mesma coisa.
+    // A liberação é consumida na primeira tentativa, inclusive quando os
+    // dados falham. A repetição precisa pedir a senha novamente.
     let errado = json!({ "produtoId": p.filtro, "quantidade": "abc", "motivo": "contagem" });
     liberar(&mut l, "estoque_ajustar", &errado);
-    for _ in 0..2 {
-        let r = l.chamar("estoque_ajustar", errado.clone());
-        assert_eq!(r["ok"], false);
-        assert_ne!(r["campo"], "gerente", "deu erro do ajuste, não de permissão: {r}");
-    }
+    let r = l.chamar("estoque_ajustar", errado.clone());
+    assert_eq!(r["ok"], false);
+    assert_ne!(r["campo"], "gerente", "a primeira tentativa usa a liberação mesmo com dados inválidos: {r}");
+    let r = l.chamar("estoque_ajustar", errado);
+    assert_eq!(r["campo"], "gerente", "a liberação foi consumida após a tentativa: {r}");
     so_o_gerente(&mut l, "estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "3", "motivo": "contagem" }));
     // 10 − 2 + 1 − 1 (do povoar), −1 +1 (venda cancelada acima): 8, sem ajuste.
     assert_eq!(l.estoque(&p.filtro), "8", "o ajuste corrigido não podia passar com a senha do errado");

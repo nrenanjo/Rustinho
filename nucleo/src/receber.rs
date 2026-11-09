@@ -962,7 +962,7 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     crate::sync::exigir_editavel(conn, "recebimento", id)?;
     crate::sync::exigir_filhos_editaveis(conn, "recebimento_parcela", "recebimento_id", id)?;
     #[allow(clippy::type_complexity)]
-    let (cliente_id, numero, caixa_nome, estornado, sessao_id, forma, valor): (
+    let (cliente_id, numero, caixa_nome, estornado, sessao_id, forma, valor, dispositivo_origem): (
         String,
         i64,
         String,
@@ -970,32 +970,43 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         Option<String>,
         String,
         i64,
+        String,
     ) = conn
         .query_row(
-            "SELECT cliente_id, numero, caixa_nome, estornado_em, sessao_id, forma, valor FROM recebimento WHERE id = ?1",
+            "SELECT cliente_id, numero, caixa_nome, estornado_em, sessao_id, forma, valor, dispositivo FROM recebimento WHERE id = ?1",
             [id],
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?, l.get(6)?, l.get(7)?)),
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Recebimento".into()))?;
     if estornado.is_some() {
         return Err(Erro::validacao("Este recebimento já foi estornado."));
     }
+    if forma == "devolucao" {
+        return Err(Erro::validacao(
+            "Este abatimento pertence a uma devolução. Desfaça a devolução em Trocas e devoluções para reverter tudo junto.",
+        ));
+    }
     let motivo = texto::limpar(motivo);
     if motivo.is_empty() {
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
     crate::cheques::cancelar_de(conn, usuario_id, "recebimento_id", id)?;
-    // D-14: recebimento de um caixa já fechado. O fechamento dele não muda; o
-    // dinheiro sai da gaveta aberta (ou do Caixa geral).
-    let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
+    // D-14: se o estorno ocorre fora da sessão de origem, não altere o resumo
+    // daquela gaveta. Registre a devolução na gaveta deste computador ou no
+    // Caixa geral, mesmo se a sessão de origem ainda estiver aberta em outro.
+    let mesma_sessao = match (dispositivo_origem == dispositivo, sessao_id.as_deref()) {
+        (true, Some(id)) => caixa::sessao_aberta(conn, dispositivo)?.is_some_and(|s| s.id == id),
+        _ => false,
+    };
+    let fora_da_origem = !mesma_sessao;
     conn.execute(
         "UPDATE recebimento SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = ?4, estornado_apos_fechar = ?5
           WHERE id = ?1",
-        params![id, tempo::agora(), usuario_id, motivo, fechado],
+        params![id, tempo::agora(), usuario_id, motivo, fora_da_origem],
     )?;
     let mut detalhes = vec![format!("Estorno do recebimento {numero} · {caixa_nome} · {motivo}")];
-    if fechado {
+    if fora_da_origem {
         let onde = caixa::compensar_caixa_fechado(
             conn,
             dispositivo,
@@ -1006,7 +1017,9 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             &format!("Estorno do recebimento {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
         )?;
         detalhes.push(match onde {
-            Some(o) => format!("O caixa do recebimento já estava fechado (o fechamento não muda): {o}"),
+            Some(o) => {
+                format!("O caixa do recebimento já estava fechado (o fechamento não muda); a compensação ficou em {o}")
+            }
             None => "O caixa do recebimento já estava fechado (o fechamento não muda); não era dinheiro".into(),
         });
     }

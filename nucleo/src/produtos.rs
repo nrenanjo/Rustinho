@@ -39,6 +39,9 @@ pub struct ProdutoFicha {
     pub unidade: String,
     pub codigo_barras: String,
     pub codigo_original: String,
+    /// Fornecedor e código de referência escolhidos explicitamente como principal.
+    pub fornecedor_principal_id: String,
+    pub fornecedor_principal_codigo: String,
     pub categoria: String,
     pub ativo: bool,
     pub custo: String,
@@ -131,6 +134,7 @@ pub struct ItemGrade {
 #[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodigoFornecedor {
+    pub fornecedor_id: String,
     pub fornecedor: String,
     pub codigo: String,
     pub fator: String,
@@ -178,6 +182,8 @@ struct Dados {
     unidade: String,
     codigo_barras: String,
     codigo_original: String,
+    fornecedor_principal_id: String,
+    fornecedor_principal_codigo: String,
     categoria: String,
     ativo: bool,
     custo: i64,
@@ -270,6 +276,16 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
     }
 
     let codigo_original = texto_curto(&f.codigo_original, "codigoOriginal", "Código original", 60)?;
+    let fornecedor_principal_id =
+        texto_curto(&f.fornecedor_principal_id, "fornecedorPrincipalId", "Fornecedor principal", 80)?;
+    let fornecedor_principal_codigo =
+        texto_curto(&f.fornecedor_principal_codigo, "fornecedorPrincipalCodigo", "Código do fornecedor principal", 60)?;
+    if fornecedor_principal_id.is_empty() != fornecedor_principal_codigo.is_empty() {
+        return Err(Erro::campo(
+            "fornecedorPrincipalId",
+            "Escolha o fornecedor e o código juntos, ou limpe os dois campos.",
+        ));
+    }
     let categoria = texto_curto(&f.categoria, "categoria", "Categoria", 60)?;
     let local = texto_curto(&f.local, "local", "Local", 40)?;
     let observacoes = f.observacoes.trim().to_string();
@@ -446,6 +462,8 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
             unidade,
             codigo_barras,
             codigo_original,
+            fornecedor_principal_id,
+            fornecedor_principal_codigo,
             categoria,
             ativo: f.ativo,
             custo,
@@ -554,6 +572,26 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     let antes = if novo { None } else { Some(carregar(conn, &ficha.id)?) };
     let (mut dados, estoque_inicial) = validar(ficha)?;
     let id = if novo { tempo::novo_id() } else { ficha.id.clone() };
+    if !dados.fornecedor_principal_id.is_empty() {
+        let codigo_compacto = texto::compactar(&dados.fornecedor_principal_codigo);
+        let pertence: bool = conn.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM produto_fornecedor
+                  WHERE produto_id = ?1 AND fornecedor_id = ?2 AND codigo_compacto = ?3
+                 UNION ALL
+                 SELECT 1 FROM produto_fornecedor_alternativo
+                  WHERE produto_id = ?1 AND fornecedor_id = ?2 AND codigo_compacto = ?3
+             )",
+            params![id, dados.fornecedor_principal_id, codigo_compacto],
+            |l| l.get(0),
+        )?;
+        if !pertence {
+            return Err(Erro::campo(
+                "fornecedorPrincipalId",
+                "O código escolhido não está vinculado a esta peça e a este fornecedor.",
+            ));
+        }
+    }
     if let Some(a) = &antes {
         manter_lucros(a, &mut dados);
         dados.grade = a.grade.clone();
@@ -652,9 +690,10 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                                   custo, estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao,
                                   peso_gramas, desconto_maximo, comissao, observacoes, ativo, busca, codigos,
                                   criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, csosn, monofasico,
-                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal, codigo_validado)
+                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal, codigo_validado,
+                                  fornecedor_principal_id, fornecedor_principal_codigo)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)",
+                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38)",
             params![
                 id,
                 dados.codigo,
@@ -692,6 +731,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.grade,
                 dados.fiscal.para_json(),
                 confirmado,
+                dados.fornecedor_principal_id,
+                dados.fornecedor_principal_codigo,
             ],
         )?;
     } else {
@@ -702,7 +743,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                     peso_gramas = ?17, desconto_maximo = ?18, comissao = ?19, observacoes = ?20, ativo = ?21,
                     busca = ?22, codigos = ?23, atualizado_em = ?24, atualizado_por = ?25, dispositivo = ?26,
                     csosn = ?27, monofasico = ?28, tipo = ?29, oferta_preco = ?30, oferta_ate = ?31,
-                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35, codigo_validado = ?36
+                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35, codigo_validado = ?36,
+                    fornecedor_principal_id = ?37, fornecedor_principal_codigo = ?38
               WHERE id = ?1",
             params![
                 id,
@@ -741,6 +783,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.grade,
                 dados.fiscal.para_json(),
                 confirmado,
+                dados.fornecedor_principal_id,
+                dados.fornecedor_principal_codigo,
             ],
         )?;
         conn.execute("DELETE FROM produto_preco WHERE produto_id = ?1", [&id])?;
@@ -864,7 +908,8 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
             "SELECT codigo, nome, marca, unidade, codigo_barras, codigo_original, categoria, ativo, custo,
                     estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao, peso_gramas,
                     desconto_maximo, comissao, observacoes, csosn, monofasico,
-                    tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal
+                    tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal,
+                    fornecedor_principal_id, fornecedor_principal_codigo
                FROM produto WHERE id = ?1",
             [id],
             |l| {
@@ -898,6 +943,8 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
                     variacao: l.get(26)?,
                     grade: l.get(27)?,
                     fiscal: fiscal::FiscalPeca::de_json(&l.get::<_, String>(28)?),
+                    fornecedor_principal_id: l.get(29)?,
+                    fornecedor_principal_codigo: l.get(30)?,
                     ..Default::default()
                 })
             },
@@ -953,15 +1000,23 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
     let fracionada = unidades::fracionada(conn, &d.unidade)?;
     let tributacao = fiscal::tributacao(conn, &fiscal::uf_loja(conn)?, &d.cest, &d.csosn, &fiscal::hoje(conn)?)?;
     let mut consulta = conn.prepare_cached(
-        "SELECT p.nome, f.codigo, f.fator FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
-          WHERE f.produto_id = ?1 ORDER BY f.atualizado_em DESC",
+        "SELECT fornecedor_id, nome, codigo, fator, atualizado_em FROM (
+             SELECT f.fornecedor_id, p.nome, f.codigo, f.fator, f.atualizado_em
+               FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+              WHERE f.produto_id = ?1
+             UNION ALL
+             SELECT f.fornecedor_id, p.nome, f.codigo, f.fator, f.atualizado_em
+               FROM produto_fornecedor_alternativo f JOIN pessoa p ON p.id = f.fornecedor_id
+              WHERE f.produto_id = ?1
+         ) ORDER BY atualizado_em DESC, nome COLLATE NOCASE, codigo",
     )?;
     let fornecedores = consulta
         .query_map([id], |l| {
             Ok(CodigoFornecedor {
-                fornecedor: l.get(0)?,
-                codigo: l.get(1)?,
-                fator: numeros::escrever_quantidade(l.get(2)?),
+                fornecedor_id: l.get(0)?,
+                fornecedor: l.get(1)?,
+                codigo: l.get(2)?,
+                fator: numeros::escrever_quantidade(l.get(3)?),
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -991,6 +1046,8 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         unidade: d.unidade,
         codigo_barras: d.codigo_barras,
         codigo_original: d.codigo_original,
+        fornecedor_principal_id: d.fornecedor_principal_id,
+        fornecedor_principal_codigo: d.fornecedor_principal_codigo,
         categoria: d.categoria,
         ativo: d.ativo,
         custo: if d.custo > 0 { numeros::escrever_dinheiro(d.custo) } else { String::new() },
@@ -1311,6 +1368,11 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
     campo("Unidade", a.unidade.clone(), b.unidade.clone());
     campo("Código de barras", a.codigo_barras.clone(), b.codigo_barras.clone());
     campo("Código original", a.codigo_original.clone(), b.codigo_original.clone());
+    campo(
+        "Fornecedor principal",
+        format!("{} · {}", a.fornecedor_principal_id, a.fornecedor_principal_codigo),
+        format!("{} · {}", b.fornecedor_principal_id, b.fornecedor_principal_codigo),
+    );
     campo("Categoria", a.categoria.clone(), b.categoria.clone());
     campo("Custo", dinheiro(a.custo), dinheiro(b.custo));
     for t in tabelas {
@@ -1371,6 +1433,41 @@ fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<Stri
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn fornecedor_principal_exige_vinculo_e_persiste_a_escolha() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        let u = crate::usuarios::criar(c, &b.dispositivo, "Maria", "1234", true).unwrap().id;
+        let mut peca = ficha_nova(c).unwrap();
+        peca.nome = "Filtro de óleo".into();
+        peca.precos[0].preco = "1,00".into();
+        let id = salvar(c, &b.dispositivo, &u, &peca).unwrap();
+        let mut fornecedor = crate::pessoas::ficha_nova(c, "fornecedor").unwrap();
+        fornecedor.nome = "Distribuidora Exemplo".into();
+        let fornecedor_id = crate::pessoas::salvar(c, &b.dispositivo, &u, &fornecedor).unwrap();
+        c.execute(
+            "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+             VALUES (?1, 'abc123', 'ABC-123', ?2, 1000, '2026-11-09')",
+            rusqlite::params![fornecedor_id, id],
+        )
+        .unwrap();
+
+        let mut editada = ficha(c, &id).unwrap();
+        editada.fornecedor_principal_id = fornecedor_id.clone();
+        editada.fornecedor_principal_codigo = "ABC-123".into();
+        salvar(c, &b.dispositivo, &u, &editada).unwrap();
+        let lida = ficha(c, &id).unwrap();
+        assert_eq!(lida.fornecedor_principal_id, fornecedor_id);
+        assert_eq!(lida.fornecedor_principal_codigo, "ABC-123");
+        assert_eq!(lida.fornecedores.len(), 1);
+        assert_eq!(lida.fornecedores[0].codigo, "ABC-123");
+
+        let mut adulterada = lida;
+        adulterada.fornecedor_principal_codigo = "NAO-VINCULADO".into();
+        let erro = salvar(c, &b.dispositivo, &u, &adulterada).unwrap_err().to_string();
+        assert!(erro.contains("não está vinculado"), "{erro}");
+    }
 
     #[test]
     fn calcula_preco_e_lucro() {

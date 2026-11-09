@@ -11,6 +11,7 @@ Rectangle {
     id: cartao
     property var item: ({})
     property int indice: 0
+    property bool alerta: false
 
     signal abrir()
     signal fixar()
@@ -74,12 +75,32 @@ Rectangle {
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: 4
+        anchors.rightMargin: cartao.alerta ? 30 : 4
         visible: cartao.mostraPino
         opacity: cartao.item.fixo ? 1 : 0.55
         ToolTip.visible: hovered && !Tema.celular
         ToolTip.delay: 500
         ToolTip.text: cartao.item.fixo ? "Soltar" : "Fixar no começo da tela"
         onClicked: cartao.fixar()
+    }
+
+    Rectangle {
+        visible: cartao.alerta
+        width: 21
+        height: 21
+        radius: 11
+        color: Tema.vermelho
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 5
+        z: 2
+        Text {
+            anchors.centerIn: parent
+            text: "!"
+            color: "white"
+            font.bold: true
+            font.pixelSize: 15
+        }
     }
 
     Item {

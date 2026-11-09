@@ -2054,6 +2054,20 @@ mod testes {
         let _ = std::fs::remove_dir_all(&pasta2);
     }
 
+    #[test]
+    fn restauracao_preserva_marcadores_dos_caixas_retirados() {
+        let mut b = Banco::em_memoria().unwrap();
+        let marcador_atual = r#"{"nome":"Caixa 2","motivo":"retirado depois do backup","por":"Ana","em":"2026-11-09"}"#;
+        config::gravar(&b.conn, "caixa_retirado:disp-caixa-2", marcador_atual).unwrap();
+        let pendente = Pendente::ler(&b.conn).unwrap();
+
+        // Simula a configuração antiga que veio no banco restaurado.
+        config::gravar(&b.conn, "caixa_retirado:disp-caixa-2", "marcador antigo").unwrap();
+        pendente.aplicar(&mut b.conn).unwrap();
+
+        assert_eq!(config::ler(&b.conn, "caixa_retirado:disp-caixa-2").unwrap().as_deref(), Some(marcador_atual));
+    }
+
     /// d) Caixa restaurado cria peças. O backup tinha a faixa do caixa, mas
     /// o banco perdido pode ter dado códigos dela depois do backup (e as
     /// etiquetas deles podem estar na prateleira): a faixa não é mais usada

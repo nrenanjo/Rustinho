@@ -507,17 +507,19 @@ fn caixa_antigo_para_no_rascunho_e_nada_se_perde() {
     assert!(marcada[i_rascunho].incompativel.is_some());
 }
 
-/// Matriz de compatibilidade conferida contra a estrutura 22 de verdade
-/// (as migrações reais): o que ela diz que não cabe é o que o banco recusa.
+/// Tabelas sincronizadas que realmente existem na estrutura 22.
 #[test]
 fn matriz_bate_com_a_estrutura_22_real() {
     let mut v22 = Connection::open_in_memory().unwrap();
     banco::registrar_funcoes(&v22).unwrap();
     banco::migrar_ate(&mut v22, 22).unwrap();
     for t in sync::TABELAS {
+        let esperado =
+            if matches!(*t, "produto_gtin" | "produto_fornecedor_alternativo" | "venda_cancelamento") { 0 } else { 1 };
         assert!(
-            contar(&v22, &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{t}'")) == 1,
-            "{t} existe na 22"
+            contar(&v22, &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{t}'"))
+                == esperado,
+            "presença de {t} na estrutura 22"
         );
     }
     let (_, lista) = log_com_rascunho();
@@ -557,6 +559,48 @@ fn matriz_bate_com_a_estrutura_22_real() {
         normal.dados = Some(a.dados.as_deref().unwrap().replace("\"rascunho\"", "\"orcamento\""));
         assert!(sync::incompatibilidade(22, &normal).is_none());
     }
+}
+
+#[test]
+fn identificadores_novos_ficam_pendentes_ate_a_estrutura_24() {
+    for tabela in ["produto", "compra_item", "produto_gtin", "produto_fornecedor_alternativo"] {
+        let alteracao = Alteracao {
+            seq: 1,
+            id: "a1".into(),
+            tabela: tabela.into(),
+            chave: "[]".into(),
+            operacao: "gravar".into(),
+            dados: Some("{}".into()),
+            dispositivo: "caixa-1".into(),
+            quando: "agora".into(),
+            base: None,
+            ordem: 1,
+            historia: None,
+            compactada: false,
+            operacao_id: None,
+            incompativel: None,
+        };
+        assert!(sync::incompatibilidade(23, &alteracao).is_some(), "{tabela} exige estrutura 24");
+        assert!(sync::incompatibilidade(24, &alteracao).is_none(), "{tabela} cabe na estrutura 24");
+    }
+    let cancelamento = Alteracao {
+        seq: 1,
+        id: "cancelamento-1".into(),
+        tabela: "venda_cancelamento".into(),
+        chave: "[]".into(),
+        operacao: "gravar".into(),
+        dados: Some("{}".into()),
+        dispositivo: "caixa-1".into(),
+        quando: "agora".into(),
+        base: None,
+        ordem: 1,
+        historia: None,
+        compactada: false,
+        operacao_id: None,
+        incompativel: None,
+    };
+    assert!(sync::incompatibilidade(24, &cancelamento).is_some());
+    assert!(sync::incompatibilidade(25, &cancelamento).is_none());
 }
 
 fn alteracao(id: &str, seq: i64, tabela: &str, chave: Value, dados: Option<Value>, op: Option<&str>) -> Alteracao {

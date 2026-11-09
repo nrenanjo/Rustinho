@@ -12,28 +12,113 @@ FocusScope {
     property string buscaInicial: ""
     property var itens: []
     property int total: 0
+    property int totalCatalogo: 0
     property bool buscou: false
+    property var avisoVinculosXml: null
+    property int buscaVersao: 0
+    property bool buscaEmAndamento: false
+    property var buscaSeguinte: null
+    property var pedidosBusca: ({})
 
-    function buscar(manterSelecao) {
+    function buscar(manterSelecao, adicionar) {
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < itens.length
                          ? itens[lista.currentIndex].id : ""
-        const r = Api.chamar("produtos_buscar", { texto: busca.texto, inativas: inativas.checked, limite: 200 })
+        const consulta = {
+            versao: ++buscaVersao,
+            anterior: anterior,
+            adicionar: adicionar === true,
+            dados: {
+                texto: busca.texto,
+                inativas: inativas.checked,
+                limite: 100,
+                deslocamento: adicionar ? itens.length : 0
+            }
+        }
+        if (buscaEmAndamento) {
+            buscaSeguinte = consulta
+            return
+        }
+        enviarBusca(consulta)
+    }
+
+    function invalidarBusca() {
+        buscaVersao++
+        buscaSeguinte = null
+    }
+
+    function enviarBusca(consulta) {
+        buscaEmAndamento = true
+        const pedido = Sistema.buscar_produtos(JSON.stringify(consulta.dados))
+        if (pedido === 0) {
+            buscaEmAndamento = false
+            janela.avisar("Não foi possível iniciar a busca agora. Tente novamente.", "erro")
+            return
+        }
+        const pendentes = Object.assign({}, pedidosBusca)
+        pendentes[pedido] = consulta
+        pedidosBusca = pendentes
+    }
+
+    function aplicarResultado(consulta, resposta) {
+        if (consulta.versao !== buscaVersao)
+            return
+        const r = Api.interpretar("produtos_buscar", resposta)
         if (r.ok) {
-            itens = r.dados.itens
+            itens = consulta.adicionar ? itens.concat(r.dados.itens) : r.dados.itens
             total = r.dados.total
+            totalCatalogo = r.dados.catalogo
             let indice = itens.length > 0 ? 0 : -1
-            if (anterior !== "") {
-                const achou = itens.findIndex(p => p.id === anterior)
+            if (consulta.anterior !== "") {
+                const achou = itens.findIndex(p => p.id === consulta.anterior)
                 if (achou >= 0)
                     indice = achou
             }
             lista.currentIndex = indice
-            if (indice <= 0)
+            if (!consulta.adicionar && indice <= 0)
                 lista.positionViewAtBeginning()
         } else {
             janela.avisar(r.erro, "erro")
         }
         buscou = true
+    }
+
+    function carregarAvisoVinculos() {
+        const alertas = Api.chamar("avisos_do_dia")
+        avisoVinculosXml = alertas.ok ? alertas.dados.find(a => a.id === "vinculos_xml") || null : null
+    }
+
+    Connections {
+        target: Sistema
+        function onBuscaTerminou(pedido, resposta) {
+            const pendentes = Object.assign({}, tela.pedidosBusca)
+            const consulta = pendentes[pedido]
+            delete pendentes[pedido]
+            tela.pedidosBusca = pendentes
+            tela.buscaEmAndamento = false
+            if (tela.buscaSeguinte) {
+                const seguinte = tela.buscaSeguinte
+                tela.buscaSeguinte = null
+                tela.enviarBusca(seguinte)
+                return
+            }
+            if (consulta)
+                tela.aplicarResultado(consulta, resposta)
+        }
+    }
+
+    function abrirXmlPendente() {
+        const r = Api.chamar("compras_listar", { texto: "", limite: 1000 })
+        if (!r.ok) {
+            janela.avisar(r.erro, "erro")
+            return
+        }
+        const compra = r.dados.find(c => c.situacao === "rascunho" && c.pendentes > 0)
+        if (!compra) {
+            buscar()
+            return
+        }
+        Api.chamar("menu_usar", { id: "compras" })
+        janela.abrir("TelaCompra", { compraId: compra.id, focarPendenteInicial: true })
     }
 
     function abrirPeca(indice) {
@@ -91,7 +176,10 @@ FocusScope {
 
         Cabecalho {
             titulo: "Peças"
-            subtitulo: tela.total === 0 ? "Nenhuma peça cadastrada" : tela.total === 1 ? "1 peça cadastrada" : tela.total + " peças cadastradas"
+            subtitulo: busca.texto.trim() !== ""
+                       ? tela.total + (tela.total === 1 ? " resultado" : " resultados")
+                       : tela.totalCatalogo === 0 ? "Nenhuma peça cadastrada"
+                         : tela.totalCatalogo === 1 ? "1 peça cadastrada" : tela.totalCatalogo + " peças cadastradas"
             Layout.fillWidth: true
             onVoltar: tela.janela.voltar()
             Botao {
@@ -113,6 +201,35 @@ FocusScope {
             }
         }
 
+        Rectangle {
+            visible: !!tela.avisoVinculosXml
+            radius: Tema.raio
+            color: Tema.critico
+            border.width: 1
+            border.color: Tema.bordaCritico
+            Layout.fillWidth: true
+            implicitHeight: conteudoAlerta.implicitHeight + 24
+            RowLayout {
+                id: conteudoAlerta
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 12
+                Text {
+                    text: tela.avisoVinculosXml ? tela.avisoVinculosXml.texto : ""
+                    color: Tema.tinta
+                    font.family: Tema.texto
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: "Revisar"
+                    tipo: "principal"
+                    onClicked: tela.abrirXmlPendente()
+                }
+            }
+        }
+
         Linha {
             spacing: 18
             Layout.fillWidth: true
@@ -125,7 +242,7 @@ FocusScope {
                 tamanhoFonte: 18
                 dica: Tema.estreito ? "Código, nome ou carro" : "Qualquer código, nome, modelo, marca ou carro (ex.: 8PK1515, pastilha gol 2015)"
                 Layout.fillWidth: true
-                onEditado: espera.restart()
+                onEditado: { tela.invalidarBusca(); espera.restart() }
                 onConfirmado: tela.abrirPeca(lista.currentIndex)
             }
             Marcar {
@@ -142,7 +259,7 @@ FocusScope {
             Layout.leftMargin: 18
             Layout.rightMargin: 20
             Layout.topMargin: 4
-            Rotulo { text: "Código"; Layout.preferredWidth: 84 }
+            Rotulo { text: "Cód. fornecedor"; Layout.preferredWidth: 140 }
             Rotulo { text: busca.texto.trim() === "" ? "Peça · alteradas por último" : "Peça"; Layout.fillWidth: true }
             Rotulo { text: "Local"; Layout.preferredWidth: 90 }
             Rotulo { text: "Estoque"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 104 }
@@ -162,6 +279,19 @@ FocusScope {
             keyNavigationEnabled: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
+            footer: Component {
+                Item {
+                    width: lista.width
+                    height: tela.itens.length < tela.total ? 58 : 0
+                    Botao {
+                        anchors.centerIn: parent
+                        visible: parent.height > 0
+                        text: "Carregar mais resultados"
+                        tipo: "secundario"
+                        onClicked: tela.buscar(true, true)
+                    }
+                }
+            }
             onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
             delegate: LinhaPeca {
                 required property var modelData
@@ -179,13 +309,13 @@ FocusScope {
                 visible: tela.buscou && tela.itens.length === 0
                 spacing: 14
                 Titulo {
-                    text: tela.total === 0 ? "Nenhuma peça cadastrada ainda" : "Nada encontrado"
+                    text: tela.totalCatalogo === 0 ? "Nenhuma peça cadastrada ainda" : "Nada encontrado"
                     font.pixelSize: 32
                     horizontalAlignment: Text.AlignHCenter
                     Layout.fillWidth: true
                 }
                 Nota {
-                    text: tela.total === 0
+                    text: tela.totalCatalogo === 0
                           ? "Cadastre as peças com os carros em que servem: assim o balcão acha tudo por um campo só."
                           : "Nenhuma peça combina com “" + busca.texto + "”. Tente só uma parte do código ou do nome."
                     font.pixelSize: 16
@@ -193,7 +323,7 @@ FocusScope {
                     Layout.fillWidth: true
                 }
                 Botao {
-                    visible: tela.total === 0
+                    visible: tela.totalCatalogo === 0
                     text: "Cadastrar a primeira peça"
                     icone: "mais"
                     Layout.alignment: Qt.AlignHCenter
@@ -205,6 +335,7 @@ FocusScope {
 
     StackView.onActivated: {
         buscar(true)
+        carregarAvisoVinculos()
         busca.focarCursor()
     }
     Component.onCompleted: {

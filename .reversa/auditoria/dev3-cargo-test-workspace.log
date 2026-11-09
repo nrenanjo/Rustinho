@@ -1,0 +1,612 @@
+   Compiling rustinho-nucleo v0.9.18-dev.3 (/home/renan/Área de trabalho/Rustinh0/nucleo)
+   Compiling rustinho v0.9.18-dev.3 (/home/renan/Área de trabalho/Rustinh0/app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 19s
+     Running unittests src/main.rs (.reversa/validacao_0918/target/debug/deps/rustinho-fa2efb47be251fa6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (.reversa/validacao_0918/target/debug/deps/rustinho_nucleo-883ade506dafc7d4)
+
+running 435 tests
+test api::testes::dados_so_do_usuario ... ok
+test api::testes::fechar_com_tarefa_travada_segura_a_trava ... ok
+test api::testes::f17_a1_primeira_configuracao ... ok
+test api::testes::copia_do_banco_so_o_gerente_registra_como_caixa_novo ... ok
+test api::testes::banco_sem_registro_do_computador_o_gerente_confirma ... ok
+test api::testes::codigo_de_cliente_sai_da_faixa_e_o_gerente_resolve_repetido ... ok
+test api::testes::c8_estoque_dias_e_o_historico_juntos ... ok
+test api::testes::f17_a8_senha_da_rede ... ok
+test api::testes::permissoes_conferidas ... ok
+test api::testes::b1_autorizacao_tem_escopo_de_acao_e_expira ... ok
+test api::testes::estoque_sugestao_oculta_custos_sem_permissao_de_resultados ... ok
+test api::testes::pasta_ruim_da_erro_e_a_boa_abre ... ok
+test api::testes::r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio ... ok
+test api::testes::rvi01_quem_grava_nao_e_so_leitura ... ok
+test api::testes::r5_t6_operacoes_de_dinheiro_recusam_so_o_inconsistente ... ok
+test api::testes::m04_computador_salvar_tudo_ou_nada ... ok
+test api::testes::b1_autorizacao_lista_todas_as_acoes_e_e_consumida_apos_falha ... ok
+test api::testes::todo_comando_tem_permissao ... ok
+test api::testes::trava_que_falha_recusa ... ok
+test api::testes::um_rustinho_por_banco ... ok
+test arquivos::testes::caminhos ... ok
+test arquivos::testes::endereco_malformado ... ok
+test arquivos::testes::latin1_e_bom ... ok
+test arquivos::testes::limite_para_xml_solto_e_pasta ... ok
+test arquivos::testes::limite_total_dos_pacotes ... ok
+test arquivos::testes::rar_de_verdade ... ok
+test arquivos::testes::rar_respeita_orcamento_total_restante ... ok
+test arquivos::testes::zip_dentro_de_zip_e_pasta ... ok
+test api::testes::leitor_e_etiqueta_com_codigo_repetido ... ok
+test avisos::testes::avisa_backup ... ok
+test api::testes::panico_antes_do_commit_desfaz_e_bloqueia ... ok
+test api::testes::r5_api_aceitar_exige_gerente_motivo_e_audita ... ok
+test api::testes::f17_a2_usuario_salvar ... ok
+test api::testes::r5_t7_o_resto_da_loja_continua ... ok
+test api::testes::rvi01_whatsapp_depois_do_panico_nao_grava ... ok
+test api::testes::rvi01_whatsapp_marca_avisado_sem_panico ... ok
+test api::testes::f17_a6_hash_trocado_por_outro_caixa ... ok
+test avisos::testes::avisa_o_que_vence_hoje_e_o_vencido ... ok
+test backup::testes::ajustes_validos ... ok
+test avisos::testes::n01_esconder_segue_a_categoria ... ok
+test backup::testes::f11_banco_dentro_do_backup_maior_que_o_limite_e_recusado ... ok
+test avisos::testes::n02_marca_de_escondida_nao_some_com_atencao_nem_critica ... ok
+test backup::testes::f11_zip_que_mente_o_tamanho_nao_passa_do_limite ... ok
+test avisos::testes::n03_escondida_volta_no_outro_dia_so_se_ainda_vale ... ok
+test avisos::testes::n04_minimizar_e_so_apresentacao ... ok
+test backup::testes::nomes ... ok
+test backup::testes::chave_antiga_sai_do_banco ... ok
+test api::testes::f17_a7_senha_longa_e_unicode ... ok
+test backup::testes::quais_apagar ... ok
+test avisos::testes::n05_uma_notificacao_por_condicao ... ok
+test api::testes::panico_depois_do_commit_nao_repete ... ok
+test banco::testes::a27_migracao_20_marca_as_compras_antigas_sem_bloquear ... ok
+test backup::testes::restauracao_preserva_marcadores_dos_caixas_retirados ... ok
+test backup::testes::pasta_que_nao_da ... ok
+test api::testes::f17_a4_senha_antiga_entra_com_aviso ... ok
+test api::testes::so_leitura_nao_grava ... ok
+test api::testes::m04_senha_trocar_e_o_historico_juntos ... ok
+test backup::testes::f11_formato_antigo_acima_do_limite_e_recusado_sem_ler_o_corpo ... ok
+test banco::testes::d14_migracao_22_nao_muda_o_que_existia ... ok
+test banco::testes::migracao_21_dre_nao_inventa_nada ... ok
+test banco::testes::r5_t11_migracao_17_preserva_pares_e_referencias ... ok
+test banco::testes::cria_estrutura_e_dispositivo ... ok
+test backup::testes::formato_antigo_abre_com_a_senha_de_entao ... ok
+test banco::testes::t24_migracao_19_preserva_pares_e_enderecos ... ok
+test api::testes::f17_a3_senha_trocar ... ok
+test caminhos::testes::anuncio_zera_a_espera_do_caminho ... ok
+test banco::testes::reabrir_mantem_dispositivo ... ok
+test caminhos::testes::caminho_de_interface_virtual_so_com_liberacao_ou_digitado ... ok
+test caminhos::testes::digitar_e_tirar_da_lista ... ok
+test busca::testes::acha_gtin_importado_e_mapeamento_alternativo_sem_escolher_um_produto ... ok
+test busca::testes::acha_pelo_codigo_do_fornecedor ... ok
+test busca::testes::busca_devolve_contagem_exata_e_pagina_separada ... ok
+test caminhos::testes::t04_dois_enderecos_do_mesmo_caixa_sao_um_par ... ok
+test banco::testes::banco_da_091_abre_sem_perder_nada ... ok
+test api::testes::f17_a5_esconder_painel_e_troca ... ok
+test backup::testes::cadeados_dos_gerentes ... ok
+test caminhos::testes::t14_endereco_que_mudou_de_dono_nao_herda_contador ... ok
+test caminhos::testes::t09_t26_interface_que_sumiu_nao_e_tentada ... ok
+test caminhos::testes::t06_um_caminho_por_par_e_cabo_primeiro ... ok
+test caminhos::testes::t07_t08_falha_no_cabo_usa_o_wifi_e_o_cabo_reassume ... ok
+test caminhos::testes::t15_endereco_proprio_nao_vira_par_nem_penaliza ... ok
+test caminhos::testes::t17_ip_que_mudou_e_expiracao ... ok
+test backup::testes::caixa_restaurado_nao_reusa_codigos_da_faixa ... ok
+test caminhos::testes::t25_ordem_dos_pares_e_rodizio_entre_os_mortos ... ok
+test cheques::testes::numeros_em_sequencia ... ok
+test codigo::testes::foto_em_pgm_e_ppm ... ok
+test codigo::testes::le_ean_e_code128 ... ok
+test codigo::testes::sem_codigo_e_lixo ... ok
+test caminhos::testes::t37_morto_que_volta_sincroniza_sozinho ... ok
+test caminhos::testes::t35_operacoes_locais_continuam_durante_o_ciclo ... ok
+test caminhos::testes::t38_sem_noticia_ha_7_dias_nao_e_mais_tentado ... ok
+test caminhos::testes::t34_t36_quarenta_mortos_e_um_saudavel ... ok
+test compras::testes::a20_xml_adulterado_com_resumos_mantidos_e_recusado_sem_gravar_nada ... ok
+test caminhos::testes::t16_todos_os_caminhos_caidos_e_volta_sozinho ... FAILED
+test compras::testes::custo_por_peca ... ok
+test compras::testes::a24_atomicidade_de_toda_recusa_da_assinatura ... ok
+test caminhos::testes::t11_lote_aplicado_sem_contador_gravado ... ok
+test caminhos::testes::i01_cabo_cai_wifi_entrega_e_cabo_reassume ... ok
+test compras::testes::a26_nota_valida_vira_rascunho_verificado_aguardando_autorizacao ... ok
+test backup::testes::chave_da_loja_e_estrago ... ok
+test compras::testes::a34_a35_lancar_exige_autorizacao_comprovada_e_negada_nunca_libera ... ok
+test compras::testes::rateio_com_pesos_enormes ... ok
+test compras::testes::rateio_sem_perder_centavos ... ok
+test compras::testes::aviso_de_cnpj_de_outra_empresa ... ok
+test computador::testes::impressao_nao_mostra_o_identificador_e_ignora_caixa_e_espacos ... ok
+test computador::testes::le_o_machine_guid_do_reg_query ... ok
+test computador::testes::nos_testes_a_identidade_e_fixa ... ok
+test compras::testes::d15_lucro_abaixo_do_custo ... ok
+test compras::testes::so_entra_nota_autorizada_de_compra_para_a_loja ... ok
+test compras::testes::d5_compra_anterior_nao_e_bloqueada ... ok
+test compras::testes::o4_descartar_rascunho_preserva_a_auditoria ... ok
+test compras::testes::importa_liga_lanca_e_estorna ... ok
+test documento::testes::confere_cnpj_numerico_e_alfanumerico ... ok
+test documento::testes::confere_cpf ... ok
+test documento::testes::confere_placas ... ok
+test documento::testes::escreve_documentos ... ok
+test devolucoes::testes::abate_do_crediario_e_o_resto_vira_vale ... ok
+test compras::testes::a36_a46_conferencia_do_gerente ... ok
+test devolucoes::testes::desfazer_devolucao_em_outro_computador_compensa_gaveta_atual ... ok
+test devolucoes::testes::r05_impede_cancelar_ou_devolver_venda_com_referencia_inconsistente ... ok
+test devolucoes::testes::devolve_com_vale_dinheiro_e_crediario ... ok
+test compras::testes::pdv01_mesma_nfe_importada_offline_alerta_e_bloqueia_lancamento ... ok
+test devolucoes::testes::unidade_indivisivel_nao_aceita_devolucao_fracionaria ... ok
+test compras::testes::pend19_compra_de_fornecedor_com_cnpj_alfanumerico ... ok
+test dre::testes::dre_alteracao_de_custo_nao_muda_o_passado ... ok
+test dre::testes::dre_cancelamento_posterior_nao_apaga_o_mes_fechado ... ok
+test dre::testes::dre_periodos ... ok
+test dre::testes::dre_cada_total_e_rastreavel ... ok
+test dre::testes::dre_rateio ... ok
+test dre::testes::dre_cenario_manual ... ok
+test dre::testes::dre_classificacao_de_fabrica ... ok
+test dre::testes::dre_contas_mensais_competencia_e_classificacao ... ok
+test encomendas::testes::monta_o_numero_do_whatsapp ... ok
+test etiquetas::testes::codigos_iguais_aos_de_referencia ... ok
+test dre::testes::dre_mes_sem_dados_e_serie ... ok
+test etiquetas::testes::simbolos_do_code128_tem_11_modulos ... ok
+test dre::testes::dre_devolucao_desfeita_e_defeito ... ok
+test dre::testes::dre_metas ... ok
+test dre::testes::dre_pagamento_posterior_e_compra_de_estoque ... ok
+test etiquetas::testes::quantidade_enorme_nao_estoura ... ok
+test dre::testes::dre_resumo_do_painel_e_impresso ... ok
+test encomendas::testes::m0915_mesmo_numero_de_dois_caixas_mostra_o_caixa ... ok
+test dre::testes::dre_rankings_e_vendedores ... ok
+test encomendas::testes::encomenda_paga_com_sinal_chega_pela_compra_e_e_entregue ... ok
+test faixas::testes::f_busca_leitor_etiqueta_e_venda_com_colisao ... ok
+test faixas::testes::e_dois_caixas_com_codigos_que_ja_coincidiam ... ok
+test faixas::testes::g_caixa_registrado_como_novo_recebe_faixa_nova_e_nao_repete_codigos_do_original ... ok
+test faixas::testes::a_dois_caixas_sem_rede_criam_pecas ... ok
+test faixas::testes::g_identidade_divergente_ou_nao_confirmada_bloqueia_e_so_o_registro_libera ... ok
+test faixas::testes::h_codigo_com_letras_espera_a_confirmacao_do_distribuidor ... ok
+test faixas::testes::c_caixa_sem_rede_esgota_a_faixa ... ok
+test faixas::testes::h_confirmacao_e_atomica_no_distribuidor ... ok
+test faixas::testes::faixa_ja_usada_nao_volta ... ok
+test faixas::testes::h_loja_de_um_caixa_so_confirma_na_hora_e_o_segundo_caixa_recebe_os_codigos_validos ... ok
+test faixas::testes::h_dois_caixas_offline_com_o_mesmo_codigo_so_um_confirma ... ok
+test caminhos::testes::t19_duas_puxadas_ao_mesmo_tempo ... ok
+test faixas::testes::migracao_com_codigos_repetidos_e_acima_de_99999_sem_renumerar ... ok
+test faixas::testes_pessoas::j_arquivo_ao_lado_guarda_a_contagem_das_pessoas ... ok
+test faixas::testes_pessoas::j_banco_copiado_nao_da_codigo_de_pessoa_ate_ser_registrado ... ok
+test caminhos::testes::t12_troca_de_caminho_no_meio_da_puxada ... ok
+test faixas::testes::i_distribuidor_perdido_outro_caixa_assume_sem_repetir ... ok
+test faixas::testes_pessoas::j_caixa_comum_com_faixa_acabando_por_pessoas_pede_outra ... ok
+test faixas::testes_pessoas::j_caixa_sem_faixa_deixa_codigo_a_definir_e_recebe_depois ... ok
+test faixas::testes_pessoas::j_codigos_de_antes_continuam_e_o_proximo_vem_depois ... ok
+test faixas::testes_pessoas::j_faixa_esgotada_por_pessoas_pede_outra ... ok
+test faixas::testes_pessoas::j_migracao_nao_renumera_pessoas_e_faixa_cobre_o_maior_codigo ... ok
+test faixas::testes_pessoas::j_gerente_define_pessoas_a_definir_de_outro_caixa ... ok
+test faixas::testes_pessoas::j_restaurar_backup_nao_reaproveita_codigo_de_pessoa ... ok
+test faixas::testes_pessoas::j_dois_caixas_offline_nao_repetem_codigo_de_pessoa ... ok
+test faixas::testes_pessoas::k_banco_copiado_deixa_pessoa_com_letras_esperando ... ok
+test faixas::testes_pessoas::j_codigo_digitado_e_mesmo_codigo_com_letras_em_dois_caixas ... ok
+test faixas::testes_pessoas::k_alterar_so_o_codigo_da_pessoa_grava_e_confirma_de_novo ... ok
+test faixas::testes::reserva_concorrente ... ok
+test faixas::testes_pessoas::k_loja_de_um_caixa_so_confirma_pessoa_na_hora ... ok
+test backup::testes::fazer_conferir_e_restaurar has been running for over 60 seconds
+test backup::testes::nuvem_pelo_rclone has been running for over 60 seconds
+test financeiro::testes::cheques_da_venda_ao_deposito ... ok
+test faixas::testes_pessoas::l_pend08_pecas_e_pessoas_criadas_no_banco_copiado ... ok
+test financeiro::testes::comissao_do_periodo ... ok
+test gtin::testes::confere_digito ... ok
+test faixas::testes_pessoas::k_pessoa_com_letras_espera_a_confirmacao_do_distribuidor ... ok
+test faixas::testes_pessoas::k_confirmacao_de_pessoas_e_atomica_e_na_ordem_de_criacao ... ok
+test impressao::testes::escapa_html ... ok
+test financeiro::testes::contas_a_pagar_e_contas_da_loja ... ok
+test financeiro::testes::juros_que_estouram_sao_recusados ... ok
+test fiscal::testes::autopecas_sp_saem_da_st_em_outubro_de_2026 ... ok
+test financeiro::testes::limites_ao_pagar_e_receber ... ok
+test nfe_assinatura::testes::a03_c14n_bate_com_o_libxml2_nos_casos_sinteticos ... ok
+test nfe_assinatura::testes::a04_nota_assinada_pela_pki_de_teste_e_aceita ... ok
+test nfe_assinatura::testes::a04_par_sha256_tambem_e_aceito ... ok
+test nfe_assinatura::testes::a05_a08_qualquer_mudanca_no_conteudo_assinado_e_recusada ... ok
+test nfe_assinatura::testes::a09_resumo_recalculado_sem_a_assinatura_e_recusado ... ok
+test nfe_assinatura::testes::a10_assinatura_de_outra_nota_e_recusada ... ok
+test nfe_assinatura::testes::a11_certificado_de_outra_empresa_no_xml_e_recusado ... ok
+test nfe_assinatura::testes::a12_reassinada_com_certificado_proprio_e_recusada ... ok
+test nfe_assinatura::testes::a13_raiz_falsa_com_o_mesmo_nome_e_recusada ... ok
+test nfe_assinatura::testes::a14_cadeia_quebrada ... ok
+test nfe_assinatura::testes::a15_fora_da_validade_em_qualquer_dos_dois_instantes_e_recusado ... ok
+test nfe_assinatura::testes::a16_vencido_hoje_mas_valido_na_emissao_e_no_recebimento_e_aceito ... ok
+test nfe_assinatura::testes::a16b_ac_ou_raiz_que_vence_antes_do_recebimento_e_recusada ... ok
+test nfe_assinatura::testes::a16c_fuso_errado_no_recebimento_e_aceito_com_aviso ... ok
+test nfe_assinatura::testes::a18_titular_do_certificado ... ok
+test nfe_assinatura::testes::a19_homologacao_e_recusada ... ok
+test nfe_assinatura::testes::a21_dados_lidos_sao_do_no_verificado ... ok
+test nfe_assinatura::testes::a21_estruturas_que_enganariam_a_leitura_sao_recusadas ... ok
+test nfe_assinatura::testes::a22_algoritmos_e_transformacoes_fora_do_padrao_sao_recusados ... ok
+test nfe_assinatura::testes::a23_malformados_sao_recusados_sem_panico_e_rapido ... ok
+test nfe_assinatura::testes::a47_certificado_do_xml_nunca_vira_ancora ... ok
+test nfe_assinatura::testes::a47_so_as_ancoras_escolhidas_valem_e_com_as_categorias_certas ... ok
+test nfe_assinatura::testes::a48_pacote_embutido_confere_com_o_sha512_publicado_pelo_iti ... ok
+test nfe_assinatura::testes::a49_key_usage_fora_do_perfil_e_recusado ... ok
+test nfe_assinatura::testes::a50_sem_key_encipherment_e_aceito_com_registro ... ok
+test nfe_assinatura::testes::a51_eku_e_conferido_como_perfil_nao_como_tls ... ok
+test nfe_assinatura::testes::a52_politica_fora_de_a1_a3_e_recusada ... ok
+test nfe_assinatura::testes::a53_certificado_de_usuario_com_ca_true_e_recusado ... ok
+test nfe_assinatura::testes::a54_ac_sem_key_cert_sign_e_recusada_pelo_rustinho ... ok
+test nfe_assinatura::testes::acervo_a01_a55_notas_reais_com_as_ancoras_da_icp_brasil ... ignored
+test nfe_assinatura::testes::acervo_a03_c14n_reproduz_o_resumo_de_todas_as_assinaturas ... ignored
+test nfe_assinatura::testes::bom_e_espacos_antes_da_declaracao_sao_tolerados ... ok
+test nfe_assinatura::testes::comparacao_do_resumo_confere_todos_os_bytes ... ok
+test nfe_assinatura::testes::pend19_titular_com_cnpj_alfanumerico ... ok
+test nfe_assinatura::testes::profundidade_e_contada_antes_de_ler_sem_estourar_a_pilha ... ok
+test nfe_assinatura::testes::protocolo_sem_data_de_recebimento_e_recusado ... ok
+test nfe_assinatura::testes::rsa_1024_e_recusado ... ok
+test nfe_xml::testes::data_malformada_nao_derruba ... ok
+test nfe_xml::testes::decimais ... ok
+test nfe_xml::testes::le_nota_de_exemplo ... ok
+test nfe_xml::testes::nao_importa_sem_gtin_nem_gtin_com_digito_invalido ... ok
+test nfe_xml::testes::pend19_chave_com_cnpj_alfanumerico ... ok
+test nfe_xml::testes::preserva_separadamente_gtins_comercial_e_tributavel ... ok
+test nfe_xml::testes::recusa_o_que_nao_e_nfe ... ok
+test numeros::testes::anos ... ok
+test numeros::testes::escreve_dinheiro ... ok
+test numeros::testes::fronteiras_do_numero ... ok
+test numeros::testes::le_dinheiro ... ok
+test numeros::testes::milhar_de_tres_em_tres ... ok
+test numeros::testes::percentuais ... ok
+test numeros::testes::preco_e_lucro ... ok
+test numeros::testes::quantidades ... ok
+test numeros::testes::soma_nos_limites ... ok
+test fiscal::testes::regras_editaveis_e_conferencia ... ok
+test faixas::testes::g_banco_copiado_com_o_arquivo_dos_codigos_para_outro_computador_nao_da_codigo ... ok
+test caminhos::testes::t10_resposta_cortada_em_qualquer_ponto has been running for over 60 seconds
+test importar::testes::a43_cadastro_por_xml_so_com_assinatura_e_sem_efeito_financeiro ... ok
+test caminhos::testes::t13_caminho_novo_de_caixa_conhecido_continua_do_contador has been running for over 60 seconds
+test faixas::testes_pessoas::k_mesmo_codigo_em_varios_caixas_so_um_confirma_e_o_gerente_resolve ... ok
+test menu::testes::fixadas_de_antes_viram_a_pilula_unida_e_fiscal_sai ... ok
+test importar::testes::importa_clientes_pecas_e_fornecedores ... ok
+test portatil::testes::dentro_da_pasta_portatil ... ok
+test portatil::testes::fora_do_portatil_nada_muda ... ok
+test produtos::testes::calcula_preco_e_lucro ... ok
+test menu::testes::fixar_poe_na_frente_na_ordem_em_que_foi_fixada ... ok
+test menu::testes::letra_e_disponibilidade ... ok
+test receber::testes::meses_e_juros ... ok
+test rede_local::testes::broadcast_e_sub_rede ... ok
+test rede_local::testes::caminho_pela_interface_que_alcanca ... ok
+test rede_local::testes::confirmacao_compara_o_ip_local_com_o_planejado ... ok
+test rede_local::testes::saida_planejada_vem_da_interface_que_alcanca ... ok
+test rede_local::testes::t01_classifica_pelo_nome ... ok
+test rede_local::testes::t02_alvos_de_anuncio ... ok
+test menu::testes::ordem_fixa_sem_mais_usados_e_uso_nao_muda_a_ordem ... ok
+test rede_local::testes::t05_erro_de_uma_interface_nao_impede_as_outras_e_registra_uma_vez ... ok
+test rede_local::testes::t06_cabo_antes_do_wifi ... ok
+test rede_local::testes::t08_espera_crescente ... ok
+test rede_local::testes::t09_interface_que_sumiu_tira_o_caminho ... ok
+test rede_local::testes::t18_lista_de_interfaces_que_falha_volta_ao_comportamento_antigo ... ok
+test rede_local::testes::t26_mudanca_nas_interfaces_dispara_anuncio_imediato ... ok
+test rede_local::testes::t27_conexao_presa_ao_ip_da_interface ... ok
+test rede_local::testes::t28_confere_a_interface_realmente_usada ... ok
+test rede_local::testes::t29_prende_a_interface_ou_cai_para_so_o_ip ... ok
+test rede_local::testes::t30_metadados_do_sistema_antes_do_nome ... ok
+test rede_local::testes::t31_so_interfaces_apropriadas_anunciam ... ok
+test rede_local::testes::t32_configuracao_explicita_para_vpn_e_virtuais ... ok
+test rede_local::testes::t33_cabo_direto_com_link_local ... ok
+test registro::testes::grava_e_troca_o_arquivo ... ok
+test rede_local::testes::t03_anuncio_sai_por_cada_interface ... ok
+test senhas::testes::s01_tamanhos ... ok
+test senhas::testes::s02_unicode_e_espacos ... ok
+test senhas::testes::s03_sem_restricoes_alem_do_tamanho ... ok
+test senhas::testes::s04_mensagens_e_codigos ... ok
+test sync::testes::anuncio_do_proprio_caixa_ou_de_interface_virtual_e_ignorado ... ok
+test oficina::testes::os_do_orcamento_a_entrega ... ok
+test pessoas::testes::cadastra_busca_e_altera ... ok
+test painel::testes::resume_o_dia_o_mes_e_as_formas ... ok
+test pessoas::testes::confere_campos ... ok
+test caminhos::testes::t20_pedido_de_faixa_refeito_por_outro_caminho has been running for over 60 seconds
+test pessoas::testes::fornecedor_da_nota ... ok
+test caminhos::testes::t13_caminho_novo_de_caixa_conhecido_continua_do_contador ... FAILED
+test pessoas::testes::pend19_cnpj_alfanumerico_no_cadastro ... ok
+test produtos::testes::fornecedor_principal_exige_vinculo_e_persiste_a_escolha ... ok
+test caminhos::testes::t20_pedido_de_faixa_refeito_por_outro_caminho ... ok
+test receber::testes::crediario_do_comeco_ao_fim ... ok
+test reposicao::testes::sugere_compra_mostra_mais_vendidos_e_parados ... ok
+test sync::testes::compactar_e_conflito ... ok
+test sync::testes::d16_configuracao_deste_computador_nao_vem_da_rede ... ok
+test backup::testes::fazer_conferir_e_restaurar ... ok
+test sync::testes::cancelamento_unico_da_venda_e_replicado ... ok
+test sync::testes::cancelar_a_mesma_venda_offline_suspende_o_lote_concorrente ... ok
+test sync::testes::historia_tem_tamanho_limitado ... ok
+test sync::testes::encerrar_espera_as_tarefas ... FAILED
+test sync::testes::encerrar_com_rede_lenta_ou_com_erro ... ok
+test sync::testes::banco_copiado_nao_troca_dados_pela_rede_ate_ser_registrado ... ok
+test sync::testes::espera_recomeca_quando_o_que_falta_muda ... ok
+test sync::testes::mensagens_do_protocolo_2 ... ok
+test sync::testes::decisao_do_gerente_vai_para_os_outros ... ok
+test sync::testes::r5_t12_chave_composta_bloqueia_por_qualquer_elemento ... ok
+test faixas::testes::b_computador_novo_entra_numa_loja_com_milhares_de_pecas has been running for over 60 seconds
+test sync::testes::ordem_incerta_vira_conflito ... ok
+test sync::testes::r5_t2_prova_do_log_bloqueia ... ok
+test sync::testes::r5_t3_prova_dos_pares_exige_todos ... ok
+test sync::testes::r5_t1_tempo_sozinho_nunca_e_prova ... ok
+test sync::testes::r5_t8_aceite_do_gerente ... ok
+test sync::testes::r5_t4_pai_que_chega_desbloqueia_e_apagado_nao_bloqueia ... ok
+test sync::testes::dois_gerentes_decidem_diferente ... ok
+test sync::testes::backup_restaurado ... ok
+test sync::testes::reenvio_nao_repete ... ok
+test sync::testes::t22_pacote_de_anuncio_compativel ... ok
+test sync::testes::feita_depois_vale_mesmo_com_relogio_atrasado ... ok
+test sync::testes::vaga_volta_depois_de_panico ... ok
+test sync::testes::volume_do_historico ... ignored
+test tempo::testes::formato_da_hora ... ok
+test tempo::testes::ids_unicos_e_ordenados ... ok
+test sync::testes::senha_curta_recusada ... ok
+test sync::testes::referencias_esperando_apagadas_e_inconsistentes ... ok
+test sync::testes::t23_porta_ocupada_nao_e_silenciosa ... ok
+test testes_0915::caixa_antigo_para_no_rascunho_e_nada_se_perde ... ok
+test testes_0915::caixa_que_so_aparece_no_log_bloqueia_ate_ser_retirado ... ok
+test testes_0915::caixa_retirado_nao_troca_dados ... ok
+test testes_0915::chaves_estrangeiras_voltam_ligadas_depois_da_migracao ... ok
+test sync::testes::qualquer_ordem_de_chegada_termina_igual ... ok
+test testes_0915::dados_estragados_e_tabela_desconhecida_viram_pendencia_e_d16_continua ... ok
+test testes_0915::chave_da_operacao_recusa_o_clique_repetido ... ok
+test testes_0915::erro_de_check_desfaz_o_lote_guarda_tudo_e_a_troca_continua ... ok
+test sync::testes::rajada_de_sais_inventados ... ok
+test testes_0915::f06_copia_estragada_nao_e_reaproveitada ... ok
+test testes_0915::filho_migracao ... ok
+test testes_0915::identificadores_novos_ficam_pendentes_ate_a_estrutura_24 ... ok
+test testes_0915::f06_backup_de_banco_integro_segue_a_retencao ... ok
+test testes_0915::f06_duas_falhas_seguidas_nao_duplicam_a_copia ... ok
+test testes_0915::falha_na_conferencia_depois_do_commit_poe_a_copia_de_volta ... ok
+test testes_0915::f02_os_numero_1_de_dois_caixas_mostra_o_caixa ... ok
+test sync::testes::conflito_com_qualquer_diferenca_de_relogio ... ok
+test testes_0915::migracao_0023_preserva_tudo_e_guarda_a_copia ... ok
+test testes_0915::prazo_de_sete_dias_e_caixa_antigo_bloqueiam_rascunho_novo ... ok
+test testes_0915::operacao_comercial_e_a_transacao ... ok
+test testes_0915::matriz_bate_com_a_estrutura_22_real ... ok
+test testes_0915::juntar_a_loja_existente_nao_cria_gerente_local ... ok
+test testes_0915::rascunho_salva_reabre_e_vira_orcamento_sem_duplicar ... ok
+test testes_0915::v03_pai_ausente_de_todo_lugar_continua_inconsistente ... ok
+test testes_0915::rvi03_copia_de_antes_falha_sem_mexer_no_banco ... ok
+test testes_0915::f06_abertura_confere_a_integridade ... ok
+test testes_0915::v03_pai_guardado_em_pendencia_nao_vira_inconsistente ... ok
+test testes_avisos::itens_xml_sem_associacao_geram_critica_ate_a_escolha_ser_salva ... ok
+test testes_avisos::n06_esconder_pela_api_respeita_a_categoria ... ok
+test testes_chave::telas_mandam_a_chave ... ok
+test testes_chave::comandos_criticos_respeitam_a_chave ... ok
+test testes_chave::duas_vendas_iguais_ficam_e_a_repetida_nao ... ok
+test testes_chave::sem_chave_nada_e_gravado ... ok
+test testes_0915::queda_no_meio_da_migracao_em_cada_ponto ... ok
+test testes_avisos::n08_so_uma_nao_critica_aberta_mesmo_com_marcas_antigas ... ok
+test testes_loja::a4_desistir_sem_tentativa_nao_mexe_em_nada ... ok
+test testes_loja::a2_caixa_nao_troca_a_senha_com_a_rede_desligada ... ok
+test backup::testes::nuvem_pelo_rclone ... ok
+test testes_avisos::n07_minimizada_continua_depois_de_fechar_e_abrir ... ok
+test sync::testes::conexoes_mudas_nao_tomam_o_servidor ... ok
+test caminhos::testes::t10_resposta_cortada_em_qualquer_ponto ... FAILED
+test sync::testes::faixa_de_codigos_pela_rede ... FAILED
+test testes_loja::a4_desistir_com_origem_incerta_nao_apaga ... ok
+test testes_loja::telas_desfazem_e_retomam_a_juncao ... ok
+test sync::testes::t05_descoberta_por_varias_origens ... FAILED
+test testes_loja::a2_senha_curta_ja_gravada_nao_liga_a_rede ... ok
+test sync::testes::dois_caixas_pela_rede has been running for over 60 seconds
+test testes_loja::a2_gerente_troca_a_senha_desligada_com_o_minimo ... ok
+test sync::testes::r5_t10_troca_completa_marca_o_par ... ok
+test testes_loja::k_salvar_a_troca_de_dados_e_tudo_ou_nada ... ok
+test testes_loja::a4_desistir_atomico_e_sem_efeito_repetido ... ok
+test testes_loja::primeiro_caixa_liga_a_rede_com_o_gerente_local ... ok
+test testes_loja::v01a_configurar_inicio_nao_herda_a_juncao ... ok
+test testes_modo_seguro::c8_backup_da_zip2_restaura_com_a_zip9 ... ignored
+test testes_nav::nav01_arquivos_conferir_separa_os_que_faltam ... ok
+test testes_nav::nav01_comandos_novos_sao_so_leitura ... ok
+test testes_loja::v01a_desistir_da_juncao_e_comecar_loja_nova ... ok
+test sync::testes::recuo_do_contador_e_ressincronizacao has been running for over 60 seconds
+test sync::testes::dois_caixas_pela_rede ... ok
+test testes_modo_seguro::a3_banco_com_defeito_entra_em_modo_seguro_e_nao_grava ... ok
+test testes_modo_seguro::a3_backup_de_banco_com_defeito_nao_vira_backup_bom ... ok
+test testes_nav::nav01_previa_sem_cnpj_diz_o_requisito ... ok
+test testes_nav::nav01_requisito_cnpj_so_com_o_salvamento_valido ... ok
+test testes_nav::nav02_cnpj_gravado_invalido_tambem_e_requisito ... ok
+test testes_nav::nav03_compras_sem_cnpj_e_requisito ... ok
+test testes_nav::nav04_nota_de_outro_cnpj_vem_como_conflito ... ok
+test testes_nav::nav05_requisito_do_fiscal_uf_e_cnpj ... ok
+test testes_r03::b10_03_estorno_de_recebimento_em_outro_caixa_preserva_origem ... ok
+test testes_rvi03::montar_loja_v22_com_defeito ... ignored
+test testes_r03::b10_04_estorno_de_pagamento_em_outro_caixa_preserva_origem ... ok
+test testes_r03::r03_conta_paga_em_dois_caixas_vira_conflito ... ok
+test testes_r03::r03_parcela_recebida_em_dois_caixas_vira_conflito ... ok
+test testes_modo_seguro::a3_consulta_que_nao_le_devolve_erro_sem_derrubar ... ok
+test testes_r03::r03_vale_usado_em_dois_caixas_vira_conflito ... ok
+test faixas::testes::b_computador_novo_entra_numa_loja_com_milhares_de_pecas ... ok
+test testes_supervisao::rvi02_limite_de_quedas_exato ... ok
+test testes_rvi03::p0915_banco_zerado_abre_como_primeira_vez_e_nao_apaga_backups ... ok
+test testes_supervisao::rvi02_panico_uma_vez_volta_e_parar_nao_e_queda ... ok
+test testes_rvi03::rvi03_banco_antigo_com_defeito_abre_em_modo_seguro_sem_migrar ... ok
+test testes_rvi03::rvi03_banco_antigo_que_nem_copia_abre_em_modo_seguro ... ok
+test testes_rvi03::rvi03_banco_que_nem_abre_nao_vira_loja_vazia ... ok
+test testes_supervisao::rvi02_falha_chega_a_api_das_telas ... ok
+test texto::testes::compacta_codigos ... ok
+test texto::testes::limpa_espacos ... ok
+test texto::testes::normaliza_acentos_e_pontuacao ... ok
+test unidades::testes::junta_repetidas ... ok
+test testes_supervisao::rvi02_porta_udp_ocupada_aparece_e_para_depois_do_limite ... ok
+test unidades::testes::lista_pronta_e_da_loja ... ok
+test testes_supervisao::rvi02_troca_desligada_sem_alarme_falso ... ok
+test usuarios::testes::argon2_igual_ao_de_antes ... ok
+test usuarios::testes::nomes_repetidos_depois_de_juntar ... ok
+test usuarios::testes::nao_desativa_o_ultimo_ativo ... ok
+test usuarios::testes::nomes_unicos_sem_ligar_para_acento ... ok
+test usuarios::testes::senha_curta ... ok
+test usuarios::testes::senhas_erradas_ficam_guardadas ... ok
+test usuarios::testes::criar_entrar_e_trocar_senha ... ok
+test vendas::testes::calcula_descontos_estoque_e_troco ... ok
+test vendas::testes::cancelamento_confere_dinheiro_e_compensa_gaveta_de_outro_computador ... ok
+test usuarios::testes::primeiro_usuario_e_gerente_e_sempre_sobra_um ... ok
+test vendas::testes::limite_de_desconto_da_peca_cobre_desconto_global_e_preco_aberto ... ok
+test vendas::testes::orcamento_vira_venda ... ok
+test vendas::testes::servico_oferta_preco_aberto_e_unidade_inteira ... ok
+test vendas::testes::tamanhos_e_cores ... ok
+test vendas::testes::valores_extremos_sao_recusados_sem_gravar ... ok
+test vendas::testes::vende_cancela_e_fecha_o_caixa ... ok
+test testes_loja::caixa_novo_entra_pela_juncao_e_troca_nos_dois_sentidos has been running for over 60 seconds
+test testes_loja::copia_registrada_e_banco_restaurado_continuam_na_loja has been running for over 60 seconds
+test testes_loja::v01b_duas_lojas_independentes_nao_se_fundem ... FAILED
+test testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_a has been running for over 60 seconds
+test testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_b has been running for over 60 seconds
+test testes_loja::falha01_caixa_novo_com_loja_antiga_escolhida has been running for over 60 seconds
+test testes_supervisao::rvi02_porta_que_libera_volta_sozinha ... FAILED
+test testes_supervisao::rvi02_porta_tcp_ocupada_aparece_e_para_depois_do_limite ... FAILED
+test testes_modo_seguro::a3_restaurar_backup_bom_tira_do_modo_seguro ... ok
+test testes_modo_seguro::a3_sem_troca_de_dados_com_banco_com_defeito has been running for over 60 seconds
+test testes_modo_seguro::a3_sem_troca_de_dados_com_banco_com_defeito ... FAILED
+test sync::testes::recuo_do_contador_e_ressincronizacao ... FAILED
+test testes_loja::falha01_caixa_novo_com_loja_antiga_escolhida ... FAILED
+test testes_rvi03::rvi03_recuperacao_pelo_modo_seguro_com_banco_antigo ... ok
+test testes_supervisao::tarefa_da_troca_volta_depois_de_cair_e_para_se_cair_demais ... FAILED
+test testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_a ... FAILED
+test testes_loja::caixa_novo_entra_pela_juncao_e_troca_nos_dois_sentidos ... FAILED
+test testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_b ... FAILED
+test testes_loja::copia_registrada_e_banco_restaurado_continuam_na_loja ... FAILED
+
+failures:
+
+---- caminhos::testes::t16_todos_os_caminhos_caidos_e_volta_sozinho stdout ----
+
+thread 'caminhos::testes::t16_todos_os_caminhos_caidos_e_volta_sozinho' (195098) panicked at nucleo/src/caminhos.rs:1354:9:
+4.065253594s
+
+---- caminhos::testes::t13_caminho_novo_de_caixa_conhecido_continua_do_contador stdout ----
+
+thread 'caminhos::testes::t13_caminho_novo_de_caixa_conhecido_continua_do_contador' (195049) panicked at nucleo/src/caminhos.rs:1253:9:
+digitado: 0 contra 8608
+
+---- sync::testes::encerrar_espera_as_tarefas stdout ----
+
+thread 'sync::testes::encerrar_espera_as_tarefas' (196900) panicked at nucleo/src/sync.rs:5216:9:
+3.00465491s
+
+---- caminhos::testes::t10_resposta_cortada_em_qualquer_ponto stdout ----
+
+thread 'caminhos::testes::t10_resposta_cortada_em_qualquer_ponto' (195037) panicked at nucleo/src/caminhos.rs:1156:9:
+assertion `left == right` failed
+  left: ["127.0.0.2:36021"]
+ right: ["127.0.0.2:36021", "127.0.0.3:44129"]
+
+---- sync::testes::faixa_de_codigos_pela_rede stdout ----
+
+thread '<unnamed>' (196950) panicked at nucleo/src/sync.rs:4618:13:
+assertion `left == right` failed
+  left: [([], ""), ([], "")]
+ right: [([(100000, 199999)], "100000"), ([(200000, 299999)], "200000")]
+
+thread 'sync::testes::faixa_de_codigos_pela_rede' (196949) panicked at nucleo/src/sync.rs:4629:10:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- sync::testes::t05_descoberta_por_varias_origens stdout ----
+
+thread 'sync::testes::t05_descoberta_por_varias_origens' (197734) panicked at nucleo/src/sync.rs:6567:9:
+assertion `left == right` failed: []
+  left: 0
+ right: 1
+
+---- testes_loja::v01b_duas_lojas_independentes_nao_se_fundem stdout ----
+
+thread '<unnamed>' (198512) panicked at nucleo/src/testes_loja.rs:248:13:
+assertion failed: mb.encerrar(Duration::from_secs(20))
+
+thread 'testes_loja::v01b_duas_lojas_independentes_nao_se_fundem' (198511) panicked at nucleo/src/testes_loja.rs:273:6:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_supervisao::rvi02_porta_que_libera_volta_sozinha stdout ----
+
+thread 'testes_supervisao::rvi02_porta_que_libera_volta_sozinha' (199669) panicked at nucleo/src/testes_supervisao.rs:186:5:
+assertion failed: m.encerrar(Duration::from_secs(20))
+
+---- testes_supervisao::rvi02_porta_tcp_ocupada_aparece_e_para_depois_do_limite stdout ----
+
+thread 'testes_supervisao::rvi02_porta_tcp_ocupada_aparece_e_para_depois_do_limite' (199670) panicked at nucleo/src/testes_supervisao.rs:138:5:
+assertion failed: m.encerrar(Duration::from_secs(20))
+
+---- testes_modo_seguro::a3_sem_troca_de_dados_com_banco_com_defeito stdout ----
+
+thread '<unnamed>' (198848) panicked at nucleo/src/testes_modo_seguro.rs:206:9:
+assertion failed: mg.encerrar(Duration::from_secs(20))
+
+thread 'testes_modo_seguro::a3_sem_troca_de_dados_com_banco_com_defeito' (198847) panicked at nucleo/src/testes_modo_seguro.rs:235:6:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- sync::testes::recuo_do_contador_e_ressincronizacao stdout ----
+
+thread '<unnamed>' (197573) panicked at nucleo/src/sync.rs:4769:13:
+assertion failed: ma.encerrar(Duration::from_secs(20))
+
+thread 'sync::testes::recuo_do_contador_e_ressincronizacao' (197572) panicked at nucleo/src/sync.rs:4689:72:
+mesmo computador: Any { .. }
+
+---- testes_loja::falha01_caixa_novo_com_loja_antiga_escolhida stdout ----
+
+thread '<unnamed>' (198477) panicked at nucleo/src/testes_loja.rs:551:47:
+loja A (a escolhida), volta 0: Falha na rede: Resource temporarily unavailable (os error 11)
+
+thread 'testes_loja::falha01_caixa_novo_com_loja_antiga_escolhida' (198476) panicked at nucleo/src/testes_loja.rs:653:63:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_supervisao::tarefa_da_troca_volta_depois_de_cair_e_para_se_cair_demais stdout ----
+
+thread 'sync-puxada' (199758) panicked at nucleo/src/supervisao.rs:159:13:
+queda de teste da tarefa puxada
+
+thread '<unnamed>' (199701) panicked at nucleo/src/testes_supervisao.rs:51:62:
+called `Result::unwrap()` on an `Err` value: Validacao { campo: None, mensagem: "Falha na rede: Resource temporarily unavailable (os error 11)" }
+
+thread 'testes_supervisao::tarefa_da_troca_volta_depois_de_cair_e_para_se_cair_demais' (199700) panicked at nucleo/src/testes_supervisao.rs:86:6:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_a stdout ----
+
+thread '<unnamed>' (198444) panicked at nucleo/src/testes_loja.rs:561:23:
+loja B, volta 0: devia ser a recusa por outra loja: Falha na rede: Resource temporarily unavailable (os error 11)
+
+thread 'testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_a' (198443) panicked at nucleo/src/testes_loja.rs:641:64:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_loja::caixa_novo_entra_pela_juncao_e_troca_nos_dois_sentidos stdout ----
+
+thread '<unnamed>' (198408) panicked at nucleo/src/testes_loja.rs:291:64:
+depois de reabrir: A puxa de B: Falha na rede: Resource temporarily unavailable (os error 11)
+
+thread 'testes_loja::caixa_novo_entra_pela_juncao_e_troca_nos_dois_sentidos' (198407) panicked at nucleo/src/testes_loja.rs:309:6:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_b stdout ----
+
+thread '<unnamed>' (198452) panicked at nucleo/src/testes_loja.rs:561:23:
+loja A, volta 0: devia ser a recusa por outra loja: Falha na rede: Resource temporarily unavailable (os error 11)
+
+thread 'testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_b' (198451) panicked at nucleo/src/testes_loja.rs:646:64:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+---- testes_loja::copia_registrada_e_banco_restaurado_continuam_na_loja stdout ----
+
+thread '<unnamed>' (198426) panicked at nucleo/src/testes_loja.rs:331:64:
+banco restaurado: A puxa da cópia: Falha na rede: Resource temporarily unavailable (os error 11)
+
+thread 'testes_loja::copia_registrada_e_banco_restaurado_continuam_na_loja' (198425) panicked at nucleo/src/testes_loja.rs:365:6:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+
+
+failures:
+    caminhos::testes::t10_resposta_cortada_em_qualquer_ponto
+    caminhos::testes::t13_caminho_novo_de_caixa_conhecido_continua_do_contador
+    caminhos::testes::t16_todos_os_caminhos_caidos_e_volta_sozinho
+    sync::testes::encerrar_espera_as_tarefas
+    sync::testes::faixa_de_codigos_pela_rede
+    sync::testes::recuo_do_contador_e_ressincronizacao
+    sync::testes::t05_descoberta_por_varias_origens
+    testes_loja::caixa_novo_entra_pela_juncao_e_troca_nos_dois_sentidos
+    testes_loja::copia_registrada_e_banco_restaurado_continuam_na_loja
+    testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_a
+    testes_loja::falha01_caixa_novo_com_duas_lojas_primeiro_b
+    testes_loja::falha01_caixa_novo_com_loja_antiga_escolhida
+    testes_loja::v01b_duas_lojas_independentes_nao_se_fundem
+    testes_modo_seguro::a3_sem_troca_de_dados_com_banco_com_defeito
+    testes_supervisao::rvi02_porta_que_libera_volta_sozinha
+    testes_supervisao::rvi02_porta_tcp_ocupada_aparece_e_para_depois_do_limite
+    testes_supervisao::tarefa_da_troca_volta_depois_de_cair_e_para_se_cair_demais
+
+test result: FAILED. 413 passed; 17 failed; 5 ignored; 0 measured; 0 filtered out; finished in 251.40s
+
+error: test failed, to rerun pass `-p rustinho-nucleo --lib`
+cargo test --workspace exit=101

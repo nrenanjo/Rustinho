@@ -1,0 +1,9 @@
+   Compiling rustinho-nucleo v0.9.18-dev.3 (/home/renan/Área de trabalho/Rustinh0/nucleo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.93s
+     Running tests/estavel/main.rs (.reversa/validacao_0918/target/debug/deps/estavel-5aa348f4602e12a8)
+
+running 1 test
+test d09_custos::d09_5_senha_presa_a_acao_e_aos_dados ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 60 filtered out; finished in 10.58s
+
