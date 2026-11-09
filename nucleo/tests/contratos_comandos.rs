@@ -218,6 +218,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("venda_cancelar", "cancelar_venda", &["nao_repetir"]),
     ("venda_concluir", "caixa", &["do_caixa", "nao_repetir"]),
     ("vendas_listar", "leitura", &["leitura"]),
+    ("xml_pendencia_resolver", "caixa", &["do_caixa", "nao_repetir"]),
+    ("xml_pendencias_listar", "leitura", &["leitura"]),
 ];
 
 /// Os comandos que a API atende hoje: as tabelas de comandos (a do serviço e

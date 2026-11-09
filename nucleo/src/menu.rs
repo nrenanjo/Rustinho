@@ -141,6 +141,8 @@ pub struct ItemMenu {
     pub fixo: bool,
     /// Pode mostrar o alfinete de fixar (menos de 4 fixadas).
     pub pode_fixar: bool,
+    /// Contador de pendências (Fase 4.D: pendências de identificação XML na pílula Peças).
+    pub pendencias: i64,
 }
 
 /// O menu de um usuário: a grade toda, já na ordem.
@@ -183,16 +185,17 @@ fn fixadas(conn: &Connection, usuario_id: &str) -> Resultado<Vec<String>> {
 /// Monta o menu do usuário: as fixadas primeiro (na ordem em que foram
 /// fixadas) e depois as outras, na ordem fixa.
 pub fn menu(conn: &Connection, usuario_id: &str) -> Resultado<Menu> {
-    Ok(montar(fixadas(conn, usuario_id)?))
+    let pend_pecas = crate::importar::contar_pendencias(conn);
+    Ok(montar(fixadas(conn, usuario_id)?, pend_pecas))
 }
 
 /// RVI-03: o menu sem as fixadas (no modo seguro, um banco de versão anterior
 /// pode não ter onde elas ficam).
 pub fn sem_fixadas() -> Menu {
-    montar(Vec::new())
+    montar(Vec::new(), 0)
 }
 
-fn montar(fixas: Vec<String>) -> Menu {
+fn montar(fixas: Vec<String>, pend_pecas: i64) -> Menu {
     let pode_fixar = fixas.len() < FIXADAS_MAXIMAS;
     let item = |f: &Funcao| ItemMenu {
         id: f.id.to_string(),
@@ -204,6 +207,7 @@ fn montar(fixas: Vec<String>) -> Menu {
         etapa: f.etapa,
         fixo: fixas.iter().any(|x| x == f.id),
         pode_fixar,
+        pendencias: if f.id == "pecas" { pend_pecas } else { 0 },
     };
     let mut todos: Vec<ItemMenu> =
         fixas.iter().filter_map(|id| FUNCOES.iter().find(|f| f.id == id)).map(item).collect();

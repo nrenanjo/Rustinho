@@ -185,11 +185,13 @@ pub struct Filtro {
 }
 
 #[derive(Deserialize, Default)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct BuscaProdutos {
     pub texto: String,
     pub inativas: bool,
     pub limite: Option<i64>,
+    #[serde(alias = "offset")]
+    pub deslocamento: Option<i64>,
 }
 
 #[derive(Deserialize, Default)]

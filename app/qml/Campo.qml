@@ -38,7 +38,7 @@ ColumnLayout {
     // Busca da Início (0.9.18, D-V6, como nas imagens aprovadas): colar à
     // esquerda e copiar à direita, dentro do campo (no lugar da lupa); o
     // atalho F11 fica fora do campo (na Início).
-    property bool colarCopiar: false
+    property bool colarCopiar: icone === "busca"
     readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
     // busca escura do Planeta Roxo (campo com a lupa).
@@ -263,7 +263,7 @@ ColumnLayout {
     TextField {
         id: entrada
         // Para os testes das telas (--textos-da-tela): onde está a busca.
-        objectName: campo.colarCopiar ? "buscaDaInicio" : campo.icone === "busca" ? "campoDeBusca" : ""
+        objectName: (campo.colarCopiar && campo.icone !== "busca") ? "buscaDaInicio" : campo.busca ? "campoDeBusca" : ""
         Layout.fillWidth: true
         implicitWidth: 120
         // A15 (0.9.18): no celular, a área de toque do campo tem pelo menos
@@ -347,7 +347,7 @@ ColumnLayout {
         }
 
         Icone {
-            visible: campo.icone !== "" && !campo.colarCopiar
+            visible: campo.icone !== "" && !campo.colarCopiar && campo.icone !== "busca"
             nome: campo.icone
             tamanho: 22
             cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado

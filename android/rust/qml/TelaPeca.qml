@@ -137,6 +137,7 @@ FocusScope {
             marca: marca.texto,
             unidade: unidade.texto,
             codigoBarras: codigoBarras.texto,
+            gtins: deServico || !ficha || !Array.isArray(ficha.gtins) ? [] : ficha.gtins,
             codigoOriginal: codigoOriginal.texto,
             categoria: categoria.texto,
             ativo: ativo.checked,
@@ -570,6 +571,15 @@ FocusScope {
                             text: tela.ficha ? tela.ficha.codigoAviso : ""
                             color: tela.ficha && tela.ficha.codigo && tela.ficha.codigoAviso ? Tema.vermelho : Tema.tintaSuave
                             font.family: Tema.texto
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Nota {
+                            visible: !tela.servico && !!tela.ficha && Array.isArray(tela.ficha.gtins) && tela.ficha.gtins.length > 0
+                                     && (tela.ficha.gtins.length > 1 || tela.ficha.gtins[0].origem !== "manual")
+                            text: !tela.ficha || !Array.isArray(tela.ficha.gtins) ? ""
+                                  : "GTINs registrados: " + tela.ficha.gtins.map(g => g.gtin + " (" + (g.tipo === "tributavel" ? "tributável" : "comercial") + " · " + g.origem + ")").join("  ·  ")
                             font.pixelSize: 13
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true

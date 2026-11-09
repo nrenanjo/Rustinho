@@ -49,16 +49,37 @@ Rectangle {
             spacing: 0
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignVCenter
-            Text {
-                text: cartao.item.titulo || ""
-                color: cartao.item.disponivel ? Tema.tintaNo(cartao.base) : Tema.tintaSuaveNo(cartao.base)
-                font.family: Tema.texto
-                font.weight: Font.DemiBold
-                font.pixelSize: Tema.estreito ? 16 : 18
-                wrapMode: Text.WordWrap
-                maximumLineCount: 2
-                elide: Text.ElideRight
+            RowLayout {
+                spacing: 8
                 Layout.fillWidth: true
+                Text {
+                    text: cartao.item.titulo || ""
+                    color: cartao.item.disponivel ? Tema.tintaNo(cartao.base) : Tema.tintaSuaveNo(cartao.base)
+                    font.family: Tema.texto
+                    font.weight: Font.DemiBold
+                    font.pixelSize: Tema.estreito ? 16 : 18
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Rectangle {
+                    visible: (cartao.item.pendencias || 0) > 0
+                    radius: 10
+                    color: Tema.vermelho
+                    implicitWidth: Math.max(20, textoPendencias.implicitWidth + 12)
+                    implicitHeight: 20
+                    Layout.alignment: Qt.AlignVCenter
+                    Text {
+                        id: textoPendencias
+                        anchors.centerIn: parent
+                        text: "" + (cartao.item.pendencias || 0)
+                        color: "#ffffff"
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 12
+                    }
+                }
             }
             Text {
                 visible: !cartao.item.disponivel

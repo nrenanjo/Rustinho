@@ -16,6 +16,10 @@ Rectangle {
     readonly property color corBase: Tema.faixa(par)
     readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
     readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
+    readonly property string codigoFornecedorExibido: (linha.item && linha.item.codigoFornecedor) ? linha.item.codigoFornecedor : "—"
+    readonly property string subtituloFornecedor: (linha.item && linha.item.fornecedorNome) ? linha.item.fornecedorNome
+                                                  : ((linha.item && (linha.item.fornecedoresQtd || 0) > 1) ? linha.item.fornecedoresQtd + " fornecedores" : "")
+    readonly property string codigoInternoExibido: "Interno: " + ((linha.item && linha.item.codigo) ? linha.item.codigo : "a definir")
 
     radius: Tema.raio
     color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
@@ -68,7 +72,7 @@ Rectangle {
             spacing: 8
             Layout.fillWidth: true
             Text {
-                text: ["Cód. " + (linha.item.codigo || "a definir"), linha.item.local].filter(x => !!x).join("  ·  ")
+                text: ["Cód. forn.: " + linha.codigoFornecedorExibido, linha.subtituloFornecedor, linha.codigoInternoExibido, linha.item.local].filter(x => !!x).join("  ·  ")
                 color: linha.corSuave
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -107,14 +111,37 @@ Rectangle {
         spacing: 18
         opacity: linha.item.ativo ? 1 : 0.6
 
-        Text {
-            text: linha.item.codigo || "a definir"
-            color: linha.corSuave
-            font.family: Tema.texto
-            font.weight: Font.DemiBold
-            font.pixelSize: 15
-            elide: Text.ElideRight
-            Layout.preferredWidth: 84
+        ColumnLayout {
+            spacing: 1
+            Layout.preferredWidth: 136
+            Layout.alignment: Qt.AlignVCenter
+            Text {
+                text: linha.codigoFornecedorExibido
+                color: linha.corTexto
+                font.family: Tema.texto
+                font.weight: Font.Bold
+                font.pixelSize: 15
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Text {
+                visible: linha.subtituloFornecedor !== ""
+                text: linha.subtituloFornecedor
+                color: linha.corSuave
+                font.family: Tema.texto
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
+            Text {
+                text: linha.codigoInternoExibido
+                color: linha.corSuave
+                font.family: Tema.texto
+                font.weight: Font.DemiBold
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+            }
         }
 
         ColumnLayout {

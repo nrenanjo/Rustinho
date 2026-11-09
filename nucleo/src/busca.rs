@@ -41,6 +41,28 @@ pub struct ProdutoResumo {
     /// Por qual código achou, para o balão ao lado do nome: "Cód. barras",
     /// "Similar · Cofap", "Fornecedor · Dayco"… Vazio quando achou pelo nome.
     pub achou: String,
+    /// O código externo que produziu a correspondência na busca.
+    pub codigo_achado: String,
+    /// Código do fornecedor (quando há apenas um fornecedor ou quando a busca
+    /// casou com o código de um fornecedor específico; vazio quando não há
+    /// fornecedor ou quando há mais de um sem correspondência específica).
+    pub codigo_fornecedor: String,
+    /// Nome curto do fornecedor correspondente (ou "N fornecedores" quando há vários).
+    pub fornecedor_nome: String,
+    /// Quantos códigos de fornecedor estão vinculados a esta peça.
+    pub fornecedores_qtd: i64,
+}
+
+/// Uma página determinística da lista de peças controlada pelo núcleo.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginaProdutos {
+    pub itens: Vec<ProdutoResumo>,
+    pub total: i64,
+    pub total_filtrado: i64,
+    pub deslocamento: i64,
+    pub limite: i64,
+    pub tem_mais: bool,
 }
 
 /// Um carro de uma peça, para filtrar por ano e montar o resumo.
@@ -92,7 +114,20 @@ pub fn buscar(
     incluir_inativas: bool,
     limite: i64,
 ) -> Resultado<Vec<ProdutoResumo>> {
+    Ok(buscar_pagina(conn, texto_busca, incluir_inativas, limite, 0)?.itens)
+}
+
+/// Busca peças com paginação determinística controlada pelo núcleo.
+pub fn buscar_pagina(
+    conn: &Connection,
+    texto_busca: &str,
+    incluir_inativas: bool,
+    limite: i64,
+    deslocamento: i64,
+) -> Resultado<PaginaProdutos> {
     let limite = limite.clamp(1, 1000) as usize;
+    let deslocamento = deslocamento.max(0) as usize;
+    let total_geral = total(conn, incluir_inativas)?;
     let normalizado = texto::normalizar(texto_busca);
     let tokens: Vec<&str> = normalizado.split(' ').filter(|t| !t.is_empty()).take(MAX_TERMOS).collect();
     let anos: Vec<(&str, i64)> = tokens.iter().filter_map(|t| como_ano(t).map(|a| (*t, a))).collect();
@@ -101,12 +136,18 @@ pub fn buscar(
 
     if tokens.is_empty() {
         let sql = if incluir_inativas {
-            "SELECT p.id FROM produto p ORDER BY p.atualizado_em DESC LIMIT ?1"
+            "SELECT p.id FROM produto p
+              ORDER BY p.atualizado_em DESC, normalizar(p.nome) ASC, p.codigo ASC, p.id ASC
+              LIMIT ?1 OFFSET ?2"
         } else {
-            "SELECT p.id FROM produto p WHERE p.ativo = 1 ORDER BY p.atualizado_em DESC LIMIT ?1"
+            "SELECT p.id FROM produto p
+              WHERE p.ativo = 1
+              ORDER BY p.atualizado_em DESC, normalizar(p.nome) ASC, p.codigo ASC, p.id ASC
+              LIMIT ?1 OFFSET ?2"
         };
         let mut c = conn.prepare_cached(sql)?;
-        let ids: Vec<String> = c.query_map([limite as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        let ids: Vec<String> =
+            c.query_map([limite as i64, deslocamento as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
         let mut carros = carros_das_pecas(conn, &ids.iter().map(String::as_str).collect::<Vec<_>>())?;
         let escolhidas = ids
             .into_iter()
@@ -115,7 +156,16 @@ pub fn buscar(
                 (Achada::recente(id), c)
             })
             .collect();
-        return montar(conn, escolhidas, &compacto, &[]);
+        let itens = montar(conn, escolhidas, &compacto, &[])?;
+        let tem_mais = (deslocamento + itens.len()) < (total_geral.max(0) as usize);
+        return Ok(PaginaProdutos {
+            itens,
+            total: total_geral,
+            total_filtrado: total_geral,
+            deslocamento: deslocamento as i64,
+            limite: limite as i64,
+            tem_mais,
+        });
     }
 
     let termos: Vec<Termo> = tokens.iter().map(|t| Termo::novo(t)).collect();
@@ -130,14 +180,47 @@ pub fn buscar(
         }
     }
 
-    // Com ano na busca, olha mais candidatas, porque algumas saem no filtro
-    // fino (o ano do carro certo).
-    let olhar = if anos.is_empty() { limite } else { (limite * 5).min(5000) };
-    ordenar_as_primeiras(&mut achadas, olhar);
+    if anos.is_empty() {
+        let total_filtrado = achadas.len() as i64;
+        let ate = deslocamento.saturating_add(limite).min(achadas.len());
+        if deslocamento >= achadas.len() {
+            return Ok(PaginaProdutos {
+                itens: Vec::new(),
+                total: total_geral,
+                total_filtrado,
+                deslocamento: deslocamento as i64,
+                limite: limite as i64,
+                tem_mais: false,
+            });
+        }
+        ordenar_as_primeiras(&mut achadas, ate);
+        let fatia: Vec<Achada> = achadas.into_iter().skip(deslocamento).take(limite).collect();
+        let mut carros = carros_das_pecas(conn, &fatia.iter().map(|a| a.id.as_str()).collect::<Vec<_>>())?;
+        let escolhidas: Vec<(Achada, Vec<Carro>)> = fatia
+            .into_iter()
+            .map(|a| {
+                let c = carros.remove(&a.id).unwrap_or_default();
+                (a, c)
+            })
+            .collect();
+        let itens = montar(conn, escolhidas, &compacto, &termos)?;
+        let tem_mais = (deslocamento + itens.len()) < (total_filtrado as usize);
+        return Ok(PaginaProdutos {
+            itens,
+            total: total_geral,
+            total_filtrado,
+            deslocamento: deslocamento as i64,
+            limite: limite as i64,
+            tem_mais,
+        });
+    }
+
+    achadas.sort_unstable_by(Achada::ordem);
     let mut escolhidas = Vec::new();
+    let mut correspondentes = 0usize;
     let mut fila = achadas.into_iter();
-    'blocos: loop {
-        let bloco: Vec<Achada> = fila.by_ref().take(limite).collect();
+    loop {
+        let bloco: Vec<Achada> = fila.by_ref().take(limite.max(100)).collect();
         if bloco.is_empty() {
             break;
         }
@@ -147,13 +230,23 @@ pub fn buscar(
             if !anos.iter().all(|(token, ano)| serve_no_ano(&a.busca, &carros, &palavras, token, *ano)) {
                 continue;
             }
-            escolhidas.push((a, carros));
-            if escolhidas.len() >= limite {
-                break 'blocos;
+            if correspondentes >= deslocamento && escolhidas.len() < limite {
+                escolhidas.push((a, carros));
             }
+            correspondentes += 1;
         }
     }
-    montar(conn, escolhidas, &compacto, &termos)
+    let itens = montar(conn, escolhidas, &compacto, &termos)?;
+    let total_filtrado = correspondentes as i64;
+    let tem_mais = (deslocamento + itens.len()) < correspondentes;
+    Ok(PaginaProdutos {
+        itens,
+        total: total_geral,
+        total_filtrado,
+        deslocamento: deslocamento as i64,
+        limite: limite as i64,
+        tem_mais,
+    })
 }
 
 /// Um termo da busca (já normalizado: minúsculas, sem acento).
@@ -406,10 +499,14 @@ fn codigos_de_fora(conn: &Connection, termos: &[Termo]) -> Resultado<CodigosDeFo
     }
     let condicao: Vec<String> = (1..=padroes.len()).map(|i| format!("codigo_compacto LIKE ?{i}")).collect();
     let condicao = condicao.join(" OR ");
+    let condicao_gtin: Vec<String> = (1..=padroes.len()).map(|i| format!("lower(gtin) LIKE ?{i}")).collect();
+    let condicao_gtin = condicao_gtin.join(" OR ");
     let sql = format!(
         "SELECT produto_id, codigo_compacto FROM produto_fornecedor WHERE {condicao}
           UNION ALL
-         SELECT produto_id, codigo_compacto FROM produto_codigo_antigo WHERE {condicao}"
+         SELECT produto_id, codigo_compacto FROM produto_codigo_antigo WHERE {condicao}
+          UNION ALL
+         SELECT produto_id, lower(gtin) FROM produto_gtin WHERE {condicao_gtin}"
     );
     let valores: Vec<String> = padroes.iter().map(|p| format!("%{p}%")).collect();
     let mut c = conn.prepare_cached(&sql)?;
@@ -659,6 +756,10 @@ fn montar(
             aplicacoes: String::new(),
             codigo_exato: false,
             achou: String::new(),
+            codigo_achado: String::new(),
+            codigo_fornecedor: String::new(),
+            fornecedor_nome: String::new(),
+            fornecedores_qtd: 0,
         };
         let codigo_barras: String = l.get(11)?;
         // Código com letras que ainda espera a confirmação do caixa que
@@ -667,21 +768,72 @@ fn montar(
         Ok((id, (item, codigo_barras, esperando)))
     })?;
     let mut detalhes: HashMap<String, (ProdutoResumo, String, bool)> = linhas.collect::<Result<_, _>>()?;
+    let mut fornecedores_por_peca = fornecedores_das_pecas(conn, &ids)?;
 
     let parece_codigo = compacto.len() >= 3 && compacto.chars().any(|c| c.is_ascii_digit());
     let mut resultado = Vec::with_capacity(escolhidas.len());
     for (a, carros) in escolhidas {
         let Some((mut item, codigo_barras, esperando)) = detalhes.remove(&a.id) else { continue };
+        let fornecedores = fornecedores_por_peca.remove(&a.id).unwrap_or_default();
+        item.fornecedores_qtd = fornecedores.len() as i64;
         let exato_pelo_interno_esperando = esperando && texto::compactar(&item.codigo) == compacto;
         item.codigo_exato = a.nivel == 0 && !compacto.is_empty() && !exato_pelo_interno_esperando;
         item.aplicacoes = resumo(&carros);
+        let mut fornecedor_achado: Option<(String, String)> = None;
         if (parece_codigo || a.por_codigo_de_fora) && a.tem_balao {
             let de_fora: Vec<&Termo> = a.termos_de_fora.iter().filter_map(|i| termos.get(*i)).collect();
-            item.achou = achou_por(conn, &item, &codigo_barras, compacto, termos, &de_fora)?;
+            let (achou, codigo_achado, forn) =
+                achou_por(conn, &item, &codigo_barras, &fornecedores, compacto, termos, &de_fora)?;
+            item.achou = achou;
+            item.codigo_achado = codigo_achado;
+            fornecedor_achado = forn;
+        }
+        if let Some((cod_forn, nome_forn)) = fornecedor_achado {
+            item.codigo_fornecedor = cod_forn;
+            item.fornecedor_nome = nome_forn;
+        } else if fornecedores.len() == 1 {
+            item.codigo_fornecedor = fornecedores[0].codigo.clone();
+            item.fornecedor_nome = fornecedores[0].curto.clone();
+        } else if fornecedores.len() > 1 {
+            item.codigo_fornecedor = String::new();
+            item.fornecedor_nome = format!("{} fornecedores", fornecedores.len());
         }
         resultado.push(item);
     }
     Ok(resultado)
+}
+
+#[derive(Clone)]
+struct FornecedorResumo {
+    codigo_compacto: String,
+    codigo: String,
+    curto: String,
+}
+
+fn fornecedores_das_pecas(conn: &Connection, ids: &[&str]) -> Resultado<HashMap<String, Vec<FornecedorResumo>>> {
+    let mut por_peca: HashMap<String, Vec<FornecedorResumo>> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(por_peca);
+    }
+    let mut c = conn.prepare_cached(
+        "SELECT f.produto_id, f.codigo_compacto, f.codigo, COALESCE(NULLIF(p.fantasia, ''), p.nome)
+           FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+          WHERE f.produto_id IN (SELECT value FROM json_each(?1))
+          ORDER BY f.produto_id, f.atualizado_em DESC, f.codigo ASC",
+    )?;
+    let linhas = c.query_map([serde_json::to_string(ids)?], |l| {
+        let produto_id: String = l.get(0)?;
+        let codigo_compacto: String = l.get(1)?;
+        let codigo: String = l.get(2)?;
+        let nome: String = l.get(3)?;
+        let curto: String = nome.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
+        Ok((produto_id, FornecedorResumo { codigo_compacto, codigo, curto }))
+    })?;
+    for linha in linhas {
+        let (produto_id, f) = linha?;
+        por_peca.entry(produto_id).or_default().push(f);
+    }
+    Ok(por_peca)
 }
 
 /// Por qual código a peça foi achada, para o balão: o código igual ao
@@ -692,45 +844,90 @@ fn achou_por(
     conn: &Connection,
     item: &ProdutoResumo,
     codigo_barras: &str,
+    fornecedores: &[FornecedorResumo],
     compacto: &str,
     termos: &[Termo],
     termos_de_fora: &[&Termo],
-) -> Resultado<String> {
-    let mut candidatos: Vec<(String, String)> = vec![
-        (texto::compactar(&item.codigo), "Cód. interno".to_string()),
-        (texto::compactar(codigo_barras), "Cód. barras".to_string()),
-        (texto::compactar(&item.codigo_original), "Cód. original".to_string()),
+) -> Resultado<(String, String, Option<(String, String)>)> {
+    struct Candidato {
+        compacto: String,
+        rotulo: String,
+        codigo_exibido: String,
+        fornecedor: Option<(String, String)>,
+    }
+    let mut candidatos: Vec<Candidato> = vec![
+        Candidato {
+            compacto: texto::compactar(&item.codigo),
+            rotulo: "Cód. interno".to_string(),
+            codigo_exibido: item.codigo.clone(),
+            fornecedor: None,
+        },
+        Candidato {
+            compacto: texto::compactar(codigo_barras),
+            rotulo: "Cód. barras".to_string(),
+            codigo_exibido: codigo_barras.to_string(),
+            fornecedor: None,
+        },
+        Candidato {
+            compacto: texto::compactar(&item.codigo_original),
+            rotulo: "Cód. original".to_string(),
+            codigo_exibido: item.codigo_original.clone(),
+            fornecedor: None,
+        },
     ];
-    let mut c = conn.prepare_cached(
-        "SELECT codigo_compacto, marca FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem",
-    )?;
-    for linha in c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
-        let (codigo, marca) = linha?;
-        let nome = if marca.trim().is_empty() { "Similar".to_string() } else { format!("Similar · {}", marca.trim()) };
-        candidatos.push((codigo, nome));
+    let mut c_gtin =
+        conn.prepare_cached("SELECT gtin FROM produto_gtin WHERE produto_id = ?1 ORDER BY ordem, rowid")?;
+    for linha in c_gtin.query_map([&item.id], |l| l.get::<_, String>(0))? {
+        let g = linha?;
+        let comp = texto::compactar(&g);
+        if !comp.is_empty() && !candidatos.iter().any(|x| x.compacto == comp && x.rotulo == "Cód. barras") {
+            candidatos.push(Candidato {
+                compacto: comp,
+                rotulo: "Cód. barras".to_string(),
+                codigo_exibido: g,
+                fornecedor: None,
+            });
+        }
     }
     let mut c = conn.prepare_cached(
-        "SELECT f.codigo_compacto, COALESCE(NULLIF(p.fantasia, ''), p.nome)
-           FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
-          WHERE f.produto_id = ?1 ORDER BY f.atualizado_em DESC",
+        "SELECT codigo_compacto, codigo, marca FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem",
     )?;
-    for linha in c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
-        let (codigo, nome) = linha?;
-        let curto: String = nome.split_whitespace().take(2).collect::<Vec<_>>().join(" ");
-        candidatos.push((codigo, format!("Fornecedor · {curto}")));
+    for linha in
+        c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?)))?
+    {
+        let (comp, codigo, marca) = linha?;
+        let nome = if marca.trim().is_empty() { "Similar".to_string() } else { format!("Similar · {}", marca.trim()) };
+        candidatos.push(Candidato { compacto: comp, rotulo: nome, codigo_exibido: codigo, fornecedor: None });
+    }
+    for f in fornecedores {
+        candidatos.push(Candidato {
+            compacto: f.codigo_compacto.clone(),
+            rotulo: format!("Fornecedor · {}", f.curto),
+            codigo_exibido: f.codigo.clone(),
+            fornecedor: Some((f.codigo.clone(), f.curto.clone())),
+        });
     }
     let mut c =
         conn.prepare_cached("SELECT codigo_compacto, codigo FROM produto_codigo_antigo WHERE produto_id = ?1")?;
     for linha in c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
-        let (compacto, _) = linha?;
-        candidatos.push((compacto, "Cód. antigo".to_string()));
+        let (comp, codigo) = linha?;
+        candidatos.push(Candidato {
+            compacto: comp,
+            rotulo: "Cód. antigo".to_string(),
+            codigo_exibido: codigo,
+            fornecedor: None,
+        });
     }
-    let validos = || candidatos.iter().filter(|(codigo, _)| !codigo.is_empty());
-    let igual = validos().find(|(codigo, _)| codigo == compacto);
-    let comeca = || validos().find(|(codigo, _)| codigo.starts_with(compacto));
-    let todos = || validos().find(|(codigo, _)| !termos.is_empty() && termos.iter().all(|t| t.no_codigo(codigo)));
-    let de_fora = || validos().find(|(codigo, _)| termos_de_fora.iter().any(|t| codigo.contains(t.compacto.as_str())));
-    Ok(igual.or_else(comeca).or_else(todos).or_else(de_fora).map(|(_, nome)| nome.clone()).unwrap_or_default())
+    let validos = || candidatos.iter().filter(|cand| !cand.compacto.is_empty());
+    let igual = validos().find(|cand| cand.compacto == compacto);
+    let comeca = || validos().find(|cand| cand.compacto.starts_with(compacto));
+    let todos = || validos().find(|cand| !termos.is_empty() && termos.iter().all(|t| t.no_codigo(&cand.compacto)));
+    let de_fora = || validos().find(|cand| termos_de_fora.iter().any(|t| cand.compacto.contains(t.compacto.as_str())));
+    let achado = igual.or_else(comeca).or_else(todos).or_else(de_fora);
+    Ok(match achado {
+        Some(cand) => (cand.rotulo.clone(), cand.codigo_exibido.clone(), cand.fornecedor.clone()),
+        None => (String::new(), String::new(), None),
+    })
 }
 
 /// A peça serve no ano buscado? O ano tem que ser do carro certo: em
@@ -859,9 +1056,9 @@ mod comandos {
 
     fn produtos_buscar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: BuscaProdutos = ler(dados)?;
-        let lista = busca::buscar(p.conn, &d.texto, d.inativas, d.limite.unwrap_or(200))?;
-        let total = busca::total(p.conn, d.inativas)?;
-        Ok(json!({ "itens": lista, "total": total }))
+        let pagina =
+            busca::buscar_pagina(p.conn, &d.texto, d.inativas, d.limite.unwrap_or(200), d.deslocamento.unwrap_or(0))?;
+        Ok(serde_json::to_value(pagina)?)
     }
 
     fn produto_por_codigo(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1325,6 +1522,104 @@ mod testes {
         let achou = pelo_codigo_exato(&v.b.conn, "TCF01").unwrap();
         assert_eq!(achou.len(), 2);
         assert!(achou.iter().any(|p| p.id == c.terminal) && achou.iter().any(|p| p.id == rele));
+    }
+
+    /// 0.9.18: paginação real determinística, sem repetir nem omitir peças
+    /// entre páginas, busca por descrição/observações e múltiplos GTINs, e
+    /// regras de exibição de código do fornecedor (nunca escolhe fornecedor
+    /// arbitrário quando há vários; mostra o que correspondeu à busca).
+    #[test]
+    fn paginacao_deterministica_descricao_multiplos_gtins_e_fornecedor() {
+        let v = Vitrine::nova();
+        let forn2 = v.fornecedor("AUTO PECAS SUL LTDA");
+        let mut criadas = Vec::new();
+        for i in 1..=7 {
+            let id = v.peca(&format!("PECA TESTE PAGINACAO {i:02}"), |f| {
+                f.categoria = "Suspensão".into();
+                f.observacoes = format!(" Aplicação especial eixo traseiro lotex{i:02} ");
+            });
+            criadas.push(id);
+        }
+        // Peça 0 tem 1 fornecedor: mostra o código dele na listagem.
+        v.codigo_do_fornecedor(&v.hidraflux, &criadas[0], "HID-101");
+        // Peça 1 tem 2 fornecedores: sem busca por código de fornecedor, não escolhe um arbitrariamente.
+        v.codigo_do_fornecedor(&v.hidraflux, &criadas[1], "HID-202");
+        v.codigo_do_fornecedor(&forn2, &criadas[1], "SUL-909");
+
+        // Múltiplos GTINs (comercial e tributável) na peça 2.
+        produtos::registrar_gtins_xml(
+            &v.b.conn,
+            &criadas[2],
+            &[
+                produtos::GtinFicha { gtin: "7891234567895".into(), tipo: "comercial".into(), origem: "cEAN".into() },
+                produtos::GtinFicha {
+                    gtin: "17891234567892".into(),
+                    tipo: "tributavel".into(),
+                    origem: "cEANTrib".into(),
+                },
+            ],
+        )
+        .unwrap();
+
+        // Busca por descrição (observacoes) e por categoria.
+        assert_eq!(v.ids("lotex04"), vec![criadas[3].clone()]);
+        assert_eq!(v.ids("suspensao").len(), 7);
+
+        // Busca pelos dois GTINs da mesma peça.
+        let r_com = v.primeira("7891234567895");
+        assert_eq!(r_com.id, criadas[2]);
+        assert!(r_com.codigo_exato);
+        assert_eq!(r_com.achou, "Cód. barras");
+        assert_eq!(r_com.codigo_achado, "7891234567895");
+
+        let r_trib = v.primeira("17891234567892");
+        assert_eq!(r_trib.id, criadas[2]);
+        assert!(r_trib.codigo_exato);
+        assert_eq!(r_trib.achou, "Cód. barras");
+        assert_eq!(r_trib.codigo_achado, "17891234567892");
+
+        // Listagem sem busca por fornecedor: peça com 1 fornecedor traz o código;
+        // peça com 2 fornecedores não escolhe um principal arbitrariamente;
+        // peça sem fornecedor traz vazio (nunca o código interno).
+        let todas = buscar_pagina(&v.b.conn, "paginacao", false, 10, 0).unwrap();
+        let p0 = todas.itens.iter().find(|p| p.id == criadas[0]).unwrap();
+        assert_eq!(p0.codigo_fornecedor, "HID-101");
+        assert_eq!(p0.fornecedor_nome, "HIDRAFLUX INDUSTRIAL");
+        let p1 = todas.itens.iter().find(|p| p.id == criadas[1]).unwrap();
+        assert_eq!(
+            p1.codigo_fornecedor, "",
+            "múltiplos fornecedores sem busca específica: não escolhe arbitrariamente"
+        );
+        assert_eq!(p1.fornecedores_qtd, 2);
+        let p2 = todas.itens.iter().find(|p| p.id == criadas[2]).unwrap();
+        assert_eq!(p2.codigo_fornecedor, "", "sem fornecedor: nunca exibe código interno como fornecedor");
+
+        // Ao pesquisar pelo código de um dos fornecedores da peça 1, mostra exatamente o fornecedor e o código que casaram.
+        let r_sul = v.primeira("SUL-909");
+        assert_eq!(r_sul.id, criadas[1]);
+        assert_eq!(r_sul.achou, "Fornecedor · AUTO PECAS");
+        assert_eq!(r_sul.codigo_achado, "SUL-909");
+        assert_eq!(r_sul.codigo_fornecedor, "SUL-909");
+        assert_eq!(r_sul.fornecedor_nome, "AUTO PECAS");
+
+        // Paginação real controlada pelo núcleo (com termo e sem termo):
+        for consulta in ["paginacao", ""] {
+            let completa = buscar_pagina(&v.b.conn, consulta, false, 100, 0).unwrap();
+            assert_eq!(completa.total_filtrado, 7);
+            let pag1 = buscar_pagina(&v.b.conn, consulta, false, 3, 0).unwrap();
+            let pag2 = buscar_pagina(&v.b.conn, consulta, false, 3, 3).unwrap();
+            let pag3 = buscar_pagina(&v.b.conn, consulta, false, 3, 6).unwrap();
+            assert_eq!(pag1.itens.len(), 3);
+            assert!(pag1.tem_mais);
+            assert_eq!(pag2.itens.len(), 3);
+            assert!(pag2.tem_mais);
+            assert_eq!(pag3.itens.len(), 1);
+            assert!(!pag3.tem_mais);
+            let juntos: Vec<String> =
+                pag1.itens.into_iter().chain(pag2.itens).chain(pag3.itens).map(|p| p.id).collect();
+            let esperados: Vec<String> = completa.itens.into_iter().map(|p| p.id).collect();
+            assert_eq!(juntos, esperados, "páginas não repetem nem omitem produtos ({consulta:?})");
+        }
     }
 }
 

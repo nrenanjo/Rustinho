@@ -250,6 +250,7 @@ pub const NAO_REPETIR: &[&str] = &[
     "caixa_retirar",
     "caixa_readmitir",
     "pendencia_arquivar",
+    "xml_pendencia_resolver",
 ];
 
 /// Quantas chaves de operação já feitas ficam guardadas (as mais antigas saem).

@@ -88,6 +88,8 @@ struct Lido {
     pecas_loja: BTreeMap<(String, String), (ItemXml, String)>,
     /// (documento do fornecedor, código do fornecedor, descrição compactada) → (item, emissão)
     pecas_fornecedor: BTreeMap<(String, String, String), (ItemXml, String)>,
+    /// (documento do fornecedor, código do fornecedor, descrição compactada) → (chave_nfe, numero_nfe)
+    notas_fornecedor_meta: BTreeMap<(String, String, String), (String, String)>,
 }
 
 impl Lido {
@@ -237,7 +239,14 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
                 let cod = it.codigo.trim().to_string();
                 if !cod.is_empty() {
                     let chave = (emitente.clone(), cod, descricao_chave(it));
-                    guardar_mais_nova_b(&mut lido.pecas_fornecedor, chave, it.clone(), &nota.emissao);
+                    let atualizar_meta = match lido.pecas_fornecedor.get(&chave) {
+                        Some((_, e)) => e.as_str() < nota.emissao.as_str(),
+                        None => true,
+                    };
+                    guardar_mais_nova_b(&mut lido.pecas_fornecedor, chave.clone(), it.clone(), &nota.emissao);
+                    if atualizar_meta {
+                        lido.notas_fornecedor_meta.insert(chave, (nota.chave.clone(), nota.numero.clone()));
+                    }
                 }
             }
         }
@@ -254,6 +263,92 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
 // Conferir o que já existe
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BuscaId {
+    Nenhum,
+    Unico(String),
+    Ambiguo(Vec<String>),
+}
+
+pub(crate) fn gtins_para_ficha(gtins: &[nfe_xml::GtinXml], gtin_fallback: &str) -> Vec<produtos::GtinFicha> {
+    let mut r: Vec<produtos::GtinFicha> = gtins
+        .iter()
+        .map(|g| produtos::GtinFicha { gtin: g.codigo.clone(), tipo: g.tipo.clone(), origem: g.origem.clone() })
+        .collect();
+    if r.is_empty() && !gtin_fallback.is_empty() && gtin::gtin_valido(gtin_fallback) {
+        r.push(produtos::GtinFicha {
+            gtin: gtin_fallback.to_string(),
+            tipo: "comercial".into(),
+            origem: "cEAN".into(),
+        });
+    }
+    r
+}
+
+pub(crate) fn peca_por_gtins_inequivoco(
+    conn: &Connection,
+    gtins: &[nfe_xml::GtinXml],
+    gtin_fallback: &str,
+) -> Resultado<BuscaId> {
+    let mut codigos: Vec<String> = Vec::new();
+    for g in gtins {
+        let valido = gtin::gtin_valido(&g.codigo)
+            || (matches!(g.origem.as_str(), "cBarra" | "cBarraTrib") && g.codigo.len() >= 4);
+        if valido && !codigos.contains(&g.codigo) {
+            codigos.push(g.codigo.clone());
+        }
+    }
+    if codigos.is_empty() && !gtin_fallback.is_empty() && gtin::gtin_valido(gtin_fallback) {
+        codigos.push(gtin_fallback.to_string());
+    }
+    if codigos.is_empty() {
+        return Ok(BuscaId::Nenhum);
+    }
+    let mut achados: Vec<String> = Vec::new();
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT p.id FROM produto p
+          WHERE p.codigo_barras = ?1
+             OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?1)
+          ORDER BY p.id",
+    )?;
+    for cod in &codigos {
+        let linhas: Vec<String> = stmt.query_map([cod], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        for pid in linhas {
+            if !achados.contains(&pid) {
+                achados.push(pid);
+            }
+        }
+    }
+    Ok(match achados.len() {
+        0 => BuscaId::Nenhum,
+        1 => BuscaId::Unico(achados.remove(0)),
+        _ => BuscaId::Ambiguo(achados),
+    })
+}
+
+pub(crate) fn peca_por_fornecedor_inequivoco(
+    conn: &Connection,
+    fornecedor_doc: &str,
+    codigo: &str,
+) -> Resultado<BuscaId> {
+    let compacto = texto::compactar(codigo);
+    if fornecedor_doc.is_empty() || compacto.is_empty() {
+        return Ok(BuscaId::Nenhum);
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+          WHERE p.documento = ?1 AND f.codigo_compacto = ?2
+          ORDER BY f.produto_id",
+    )?;
+    let mut achados: Vec<String> =
+        stmt.query_map(params![fornecedor_doc, compacto], |l| l.get(0))?.collect::<Result<_, _>>()?;
+    Ok(match achados.len() {
+        0 => BuscaId::Nenhum,
+        1 => BuscaId::Unico(achados.remove(0)),
+        _ => BuscaId::Ambiguo(achados),
+    })
+}
+
 fn pessoa_existe(conn: &Connection, doc: &str) -> Resultado<Option<String>> {
     Ok(conn.query_row("SELECT id FROM pessoa WHERE documento = ?1", [doc], |l| l.get(0)).optional()?)
 }
@@ -266,18 +361,10 @@ fn peca_por_barras(conn: &Connection, gtin_: &str) -> Resultado<Option<String>> 
     if gtin_.is_empty() || !gtin::gtin_valido(gtin_) {
         return Ok(None);
     }
-    Ok(conn.query_row("SELECT id FROM produto WHERE codigo_barras = ?1", [gtin_], |l| l.get(0)).optional()?)
-}
-
-fn peca_por_fornecedor(conn: &Connection, fornecedor_doc: &str, codigo: &str) -> Resultado<Option<String>> {
-    Ok(conn
-        .query_row(
-            "SELECT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
-              WHERE p.documento = ?1 AND f.codigo_compacto = ?2",
-            params![fornecedor_doc, texto::compactar(codigo)],
-            |l| l.get(0),
-        )
-        .optional()?)
+    match peca_por_gtins_inequivoco(conn, &[], gtin_)? {
+        BuscaId::Unico(id) => Ok(Some(id)),
+        _ => Ok(None),
+    }
 }
 
 /// D-13: peça de código repetido já cadastrada (mesmo código antigo ou
@@ -304,10 +391,11 @@ fn peca_pela_descricao(conn: &Connection, it: &ItemXml) -> Resultado<Option<Stri
 
 /// A peça da loja deste item já existe?
 fn peca_loja_existe(conn: &Connection, codigo: &str, it: &ItemXml, repetido: bool) -> Resultado<bool> {
+    let gtin_existe = !matches!(peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?, BuscaId::Nenhum);
     if repetido {
-        return Ok(peca_repetida(conn, codigo, it)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some());
+        return Ok(peca_repetida(conn, codigo, it)?.is_some() || gtin_existe);
     }
-    Ok(peca_por_codigo(conn, codigo)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some())
+    Ok(peca_por_codigo(conn, codigo)?.is_some() || gtin_existe)
 }
 
 pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
@@ -357,6 +445,11 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
             if !it.gtin.is_empty() {
                 barras_novas.insert(it.gtin.clone());
             }
+            for g in &it.gtins {
+                if !g.codigo.is_empty() {
+                    barras_novas.insert(g.codigo.clone());
+                }
+            }
             if exemplos.len() < 6 {
                 exemplos.push(texto::limpar(&it.descricao));
             }
@@ -366,15 +459,22 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
         let ja = if repetidos_f.contains(&(forn.clone(), codigo.clone())) {
             peca_pela_descricao(conn, it)?.is_some()
         } else {
-            peca_por_fornecedor(conn, forn, codigo)?.is_some()
+            !matches!(peca_por_fornecedor_inequivoco(conn, forn, codigo)?, BuscaId::Nenhum)
         };
-        if ja || peca_por_barras(conn, &it.gtin)?.is_some() || (!it.gtin.is_empty() && barras_novas.contains(&it.gtin))
-        {
+        let gtin_ja = !matches!(peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?, BuscaId::Nenhum)
+            || (!it.gtin.is_empty() && barras_novas.contains(&it.gtin))
+            || it.gtins.iter().any(|g| !g.codigo.is_empty() && barras_novas.contains(&g.codigo));
+        if ja || gtin_ja {
             p.pecas_ja += 1;
         } else {
             p.pecas_fornecedor_novas += 1;
             if !it.gtin.is_empty() {
                 barras_novas.insert(it.gtin.clone());
+            }
+            for g in &it.gtins {
+                if !g.codigo.is_empty() {
+                    barras_novas.insert(g.codigo.clone());
+                }
             }
             if exemplos.len() < 6 {
                 exemplos.push(texto::limpar(&it.descricao));
@@ -412,6 +512,7 @@ fn ficha_do_item(conn: &Connection, it: &ItemXml) -> Resultado<produtos::Produto
     if !it.gtin.is_empty() && gtin::gtin_valido(&it.gtin) && peca_por_barras(conn, &it.gtin)?.is_none() {
         f.codigo_barras = it.gtin.clone();
     }
+    f.gtins = gtins_para_ficha(&it.gtins, &it.gtin);
     f.unidade = crate::unidades::de_fora(&it.unidade);
     if it.ncm.len() == 8 && it.ncm.chars().all(|c| c.is_ascii_digit()) {
         f.ncm = it.ncm.clone();
@@ -437,6 +538,9 @@ fn ligar_fornecedor(conn: &Connection, fornecedor_id: &str, codigo: &str, produt
          ON CONFLICT (fornecedor_id, codigo_compacto) DO NOTHING",
         params![fornecedor_id, compacto, codigo, produto_id, tempo::agora()],
     )?;
+    if n > 0 {
+        produtos::atualizar_indice_busca(conn, produto_id)?;
+    }
     Ok(n > 0)
 }
 
@@ -493,7 +597,18 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
     if e.pecas_loja {
         for ((codigo, _), (it, _)) in &lido.pecas_loja {
             let repetido = repetidos.contains(codigo);
+            let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
             if peca_loja_existe(conn, codigo, it, repetido)? {
+                let pid_existente =
+                    if repetido { peca_repetida(conn, codigo, it)? } else { peca_por_codigo(conn, codigo)? }.or_else(
+                        || match peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin).ok()? {
+                            BuscaId::Unico(id) => Some(id),
+                            _ => None,
+                        },
+                    );
+                if let Some(pid) = pid_existente {
+                    produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+                }
                 continue;
             }
             let mut f = ficha_do_item(conn, it)?;
@@ -512,6 +627,7 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 }
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
+            produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
             let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
             if repetido && !cod.is_empty() {
                 conn.execute(
@@ -519,6 +635,7 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                      VALUES (?1, ?2, ?3, ?4)",
                     params![cod, id, texto::compactar(&cod), tempo::agora()],
                 )?;
+                produtos::atualizar_indice_busca(conn, &id)?;
                 detalhes.push(format!(
                     "O código {cod} do sistema antigo está em mais de uma peça: ficou como código antigo"
                 ));
@@ -534,25 +651,122 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
         }
     }
 
-    if e.pecas_fornecedor {
-        for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
-            let Some(fornecedor_id) = ids_fornecedor.get(forn) else { continue };
-            // D-13: código repetido com descrições diferentes: peças separadas,
-            // sem ligar o código a nenhuma delas.
-            let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
-            if repetido {
-                if peca_pela_descricao(conn, it)?.is_some() || peca_por_barras(conn, &it.gtin)?.is_some() {
-                    continue;
+    // GTINs que aparecem em mais de uma descrição nas notas de fornecedor.
+    let gtins_repetidos_forn: HashSet<String> = {
+        let mut vistos: HashMap<String, HashSet<String>> = HashMap::new();
+        for ((_, _, desc), (it, _)) in &lido.pecas_fornecedor {
+            for g in gtins_para_ficha(&it.gtins, &it.gtin) {
+                if !g.gtin.is_empty() {
+                    vistos.entry(g.gtin).or_default().insert(desc.clone());
                 }
-            } else if peca_por_fornecedor(conn, forn, codigo)?.is_some() {
+            }
+        }
+        vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(g, _)| g).collect()
+    };
+
+    for ((forn, codigo, desc_chave), (it, emissao)) in &lido.pecas_fornecedor {
+        let fornecedor_id = ids_fornecedor.get(forn).cloned();
+        let forn_nome = lido
+            .fornecedores
+            .get(forn)
+            .map(|(em, _)| if em.fantasia.is_empty() { em.nome.clone() } else { em.fantasia.clone() })
+            .unwrap_or_default();
+        let (chave_nfe, numero_nfe) = lido
+            .notas_fornecedor_meta
+            .get(&(forn.clone(), codigo.clone(), desc_chave.clone()))
+            .cloned()
+            .unwrap_or_default();
+        let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
+        let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
+        let gtin_repetido_no_lote = gtins_ficha.iter().any(|g| gtins_repetidos_forn.contains(&g.gtin));
+        let gtin_busca = if gtin_repetido_no_lote {
+            BuscaId::Ambiguo(Vec::new())
+        } else {
+            peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?
+        };
+        let forn_busca = if repetido { BuscaId::Nenhum } else { peca_por_fornecedor_inequivoco(conn, forn, codigo)? };
+
+        // 1. Ambiguidade de GTIN ou conflito entre GTIN e código do fornecedor:
+        //    não associar automaticamente; registrar pendência persistente.
+        if let BuscaId::Ambiguo(cands) = &gtin_busca {
+            registrar_pendencia_xml(
+                conn,
+                fornecedor_id.as_deref(),
+                forn,
+                &forn_nome,
+                &chave_nfe,
+                &numero_nfe,
+                emissao,
+                it,
+                "gtin_ambiguo",
+                cands,
+            )?;
+            continue;
+        }
+        if let BuscaId::Ambiguo(cands) = &forn_busca {
+            registrar_pendencia_xml(
+                conn,
+                fornecedor_id.as_deref(),
+                forn,
+                &forn_nome,
+                &chave_nfe,
+                &numero_nfe,
+                emissao,
+                it,
+                "fornecedor_ambiguo",
+                cands,
+            )?;
+            continue;
+        }
+        if let (BuscaId::Unico(pid_g), BuscaId::Unico(pid_f)) = (&gtin_busca, &forn_busca) {
+            if pid_g != pid_f {
+                registrar_pendencia_xml(
+                    conn,
+                    fornecedor_id.as_deref(),
+                    forn,
+                    &forn_nome,
+                    &chave_nfe,
+                    &numero_nfe,
+                    emissao,
+                    it,
+                    "conflito_gtin_fornecedor",
+                    &[pid_g.clone(), pid_f.clone()],
+                )?;
                 continue;
             }
-            // Já existe pelo código de barras: só liga o código do fornecedor.
-            if let Some(pid) = peca_por_barras(conn, &it.gtin)? {
-                if ligar_fornecedor(conn, fornecedor_id, codigo, &pid)? {
-                    r.codigos_ligados += 1;
+        }
+
+        // 2. GTIN exato e inequívoco tem prioridade antes de outras formas.
+        if let BuscaId::Unico(pid) = gtin_busca {
+            produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+            if !repetido {
+                if let Some(fid) = &fornecedor_id {
+                    if matches!(forn_busca, BuscaId::Nenhum) && ligar_fornecedor(conn, fid, codigo, &pid)? {
+                        r.codigos_ligados += 1;
+                    }
+                    resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
                 }
-                continue;
+            }
+            continue;
+        }
+
+        // 3. Associação já existente pelo (CNPJ do fornecedor, cProd).
+        if let BuscaId::Unico(pid) = forn_busca {
+            produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+            if let Some(fid) = &fornecedor_id {
+                resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
+            }
+            continue;
+        }
+
+        // 4. Sem GTIN correspondente e sem vínculo prévio do fornecedor:
+        if e.pecas_fornecedor {
+            let Some(fid) = &fornecedor_id else { continue };
+            if repetido {
+                if let Some(pid_desc) = peca_pela_descricao(conn, it)? {
+                    produtos::registrar_gtins_xml(conn, &pid_desc, &gtins_ficha)?;
+                    continue;
+                }
             }
             let mut f = ficha_do_item(conn, it)?;
             let custo = valor_unitario(it, true);
@@ -565,8 +779,10 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 }
             }
             let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
+            produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
             if !repetido {
-                ligar_fornecedor(conn, fornecedor_id, codigo, &id)?;
+                ligar_fornecedor(conn, fid, codigo, &id)?;
+                resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &id)?;
             }
             auditoria::registrar(
                 conn,
@@ -578,21 +794,22 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
                 &["Cadastrada pelo XML de uma nota de compra".into()],
             )?;
             r.pecas += 1;
-        }
-    } else {
-        // Mesmo sem cadastrar peças novas, liga o código do fornecedor às
-        // peças que já existem (pelo código de barras): ajuda na próxima compra.
-        for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
-            let Some(fornecedor_id) = ids_fornecedor.get(forn) else { continue };
-            if repetidos_f.contains(&(forn.clone(), codigo.clone()))
-                || peca_por_fornecedor(conn, forn, codigo)?.is_some()
-            {
-                continue;
-            }
-            if let Some(pid) = peca_por_barras(conn, &it.gtin)? {
-                if ligar_fornecedor(conn, fornecedor_id, codigo, &pid)? {
-                    r.codigos_ligados += 1;
-                }
+        } else {
+            // Sem cadastrar peças novas automaticamente: preserva como pendência
+            // de identificação caso o fornecedor tenha sido selecionado ou já exista.
+            if fornecedor_id.is_some() || e.fornecedores {
+                registrar_pendencia_xml(
+                    conn,
+                    fornecedor_id.as_deref(),
+                    forn,
+                    &forn_nome,
+                    &chave_nfe,
+                    &numero_nfe,
+                    emissao,
+                    it,
+                    if repetido { "codigo_repetido" } else { "sem_vinculo" },
+                    &[],
+                )?;
             }
         }
     }
@@ -612,10 +829,551 @@ fn salvar_peca(
         Err(Erro::Validacao { campo: Some(c), .. }) if c == "codigoBarras" || c == "codigo" => {
             f.codigo_barras = String::new();
             f.codigo = String::new();
+            f.gtins.clear();
             produtos::salvar(conn, dispositivo, usuario_id, &f)
         }
         Err(e) => Err(e),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pendências persistentes de identificação XML (Fase 4.D)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidatoPendencia {
+    pub id: String,
+    pub codigo: String,
+    pub nome: String,
+    pub marca: String,
+    pub codigo_barras: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendenciaXml {
+    pub id: String,
+    pub fornecedor_id: String,
+    pub fornecedor_documento: String,
+    pub fornecedor_nome: String,
+    pub chave_nfe: String,
+    pub numero_nfe: String,
+    pub emissao_nfe: String,
+    pub codigo_fornecedor: String,
+    pub gtin_comercial: String,
+    pub origem_comercial: String,
+    pub gtin_tributavel: String,
+    pub origem_tributavel: String,
+    pub gtins: Vec<produtos::GtinFicha>,
+    pub descricao: String,
+    pub ncm: String,
+    pub cest: String,
+    pub cfop: String,
+    pub unidade: String,
+    pub quantidade: String,
+    pub valor_unitario: String,
+    pub motivo: String,
+    pub motivo_texto: String,
+    pub candidatos: Vec<CandidatoPendencia>,
+    pub criado_em: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ResolverPendencia {
+    pub id: String,
+    /// "ligar" (associar a `produto_id` existente) ou "nova" (cadastrar peça nova com os dados do XML).
+    pub acao: String,
+    pub produto_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendenciaResolvida {
+    pub produto_id: String,
+    pub pendentes: i64,
+}
+
+pub fn contar_pendencias(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'", [], |l| l.get(0))
+        .unwrap_or(0)
+}
+
+fn motivo_legivel(motivo: &str) -> &'static str {
+    match motivo {
+        "gtin_ambiguo" => "GTIN/código de barras corresponde a mais de uma peça cadastrada",
+        "fornecedor_ambiguo" => "Código do fornecedor está associado a mais de uma peça",
+        "conflito_gtin_fornecedor" => "GTIN aponta para uma peça e o código do fornecedor para outra",
+        "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
+        "codigo_ambiguo" => "Código original/equivalente corresponde a mais de uma peça",
+        _ => "Peça ainda não identificada no cadastro para este fornecedor",
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn registrar_pendencia_xml(
+    conn: &Connection,
+    fornecedor_id: Option<&str>,
+    fornecedor_doc: &str,
+    fornecedor_nome: &str,
+    chave_nfe: &str,
+    numero_nfe: &str,
+    emissao_nfe: &str,
+    item: &ItemXml,
+    motivo: &str,
+    candidatos: &[String],
+) -> Resultado<String> {
+    let doc_limpo = documento::limpar(fornecedor_doc);
+    let compacto = texto::compactar(&item.codigo);
+    let desc_comp = texto::compactar(&item.descricao);
+    let gtins_json = serde_json::to_string(&item.gtins).unwrap_or_else(|_| "[]".to_string());
+    let candidatos_json = serde_json::to_string(candidatos).unwrap_or_else(|_| "[]".to_string());
+    let v_unit = valor_unitario(item, true);
+
+    // Se já foi resolvida anteriormente para o mesmo fornecedor + código (sem ambiguidade),
+    // ou se já existe pendência aberta para o mesmo fornecedor + código + descrição, não duplica.
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, descricao FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente'
+            AND fornecedor_documento = ?1
+            AND codigo_compacto = ?2",
+    )?;
+    let abertas: Vec<(String, String)> =
+        stmt.query_map(params![doc_limpo, compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    if let Some((id_existente, _)) = abertas.into_iter().find(|(_, d)| texto::compactar(d) == desc_comp) {
+        conn.execute(
+            "update xml_pendencia_identificacao
+                set fornecedor_id = COALESCE(?2, fornecedor_id),
+                    fornecedor_nome = CASE WHEN ?3 <> '' THEN ?3 ELSE fornecedor_nome END,
+                    chave_nfe = CASE WHEN ?4 <> '' THEN ?4 ELSE chave_nfe END,
+                    numero_nfe = CASE WHEN ?5 <> '' THEN ?5 ELSE numero_nfe END,
+                    emissao_nfe = CASE WHEN ?6 <> '' THEN ?6 ELSE emissao_nfe END,
+                    gtin_comercial = ?7,
+                    origem_comercial = ?8,
+                    gtin_tributavel = ?9,
+                    origem_tributavel = ?10,
+                    gtins_json = ?11,
+                    ncm = ?12,
+                    cest = ?13,
+                    cfop = ?14,
+                    unidade = ?15,
+                    origem_fiscal = ?16,
+                    cst_icms = ?17,
+                    cst_pis = ?18,
+                    quantidade = ?19,
+                    valor_unitario = ?20,
+                    motivo = ?21,
+                    candidatos_json = ?22
+              where id = ?1",
+            params![
+                id_existente,
+                fornecedor_id,
+                fornecedor_nome,
+                chave_nfe,
+                numero_nfe,
+                emissao_nfe,
+                item.gtin_comercial,
+                item.origem_comercial,
+                item.gtin_tributavel,
+                item.origem_tributavel,
+                gtins_json,
+                item.ncm,
+                item.cest,
+                item.cfop,
+                item.unidade,
+                item.origem,
+                item.cst_icms,
+                item.cst_pis,
+                item.quantidade,
+                v_unit,
+                motivo,
+                candidatos_json,
+            ],
+        )?;
+        return Ok(id_existente);
+    }
+
+    let id = tempo::novo_id();
+    conn.execute(
+        "insert into xml_pendencia_identificacao (
+            id, fornecedor_id, fornecedor_documento, fornecedor_nome, chave_nfe, numero_nfe, emissao_nfe,
+            codigo_fornecedor, codigo_compacto, gtin_comercial, origem_comercial, gtin_tributavel, origem_tributavel,
+            gtins_json, descricao, descricao_compacta, ncm, cest, cfop, unidade, origem_fiscal, cst_icms, cst_pis, quantidade,
+            valor_unitario, motivo, candidatos_json, situacao, criado_em
+         ) values (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+            ?8, ?9, ?10, ?11, ?12, ?13,
+            ?14, ?15, ?28, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
+            ?24, ?25, ?26, 'pendente', ?27
+         )",
+        params![
+            id,
+            fornecedor_id,
+            doc_limpo,
+            fornecedor_nome,
+            chave_nfe,
+            numero_nfe,
+            emissao_nfe,
+            item.codigo.trim(),
+            compacto,
+            item.gtin_comercial,
+            item.origem_comercial,
+            item.gtin_tributavel,
+            item.origem_tributavel,
+            gtins_json,
+            texto::limpar(&item.descricao),
+            item.ncm,
+            item.cest,
+            item.cfop,
+            item.unidade,
+            item.origem,
+            item.cst_icms,
+            item.cst_pis,
+            item.quantidade,
+            v_unit,
+            motivo,
+            candidatos_json,
+            tempo::agora(),
+            desc_comp,
+        ],
+    )?;
+    Ok(id)
+}
+
+pub(crate) fn resolver_pendencias_do_item(
+    conn: &Connection,
+    fornecedor_id: &str,
+    codigo_fornecedor: &str,
+    descricao: &str,
+    produto_id: &str,
+) -> Resultado<()> {
+    let compacto = texto::compactar(codigo_fornecedor);
+    let desc_comp = texto::compactar(descricao);
+    let doc: String = conn
+        .query_row("SELECT documento FROM pessoa WHERE id = ?1", [fornecedor_id], |l| l.get(0))
+        .optional()?
+        .unwrap_or_default();
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, descricao, motivo FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente'
+            AND (fornecedor_id = ?1 OR (?2 <> '' AND fornecedor_documento = ?2))
+            AND codigo_compacto = ?3",
+    )?;
+    let linhas: Vec<(String, String, String)> = stmt
+        .query_map(params![fornecedor_id, doc, compacto], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    let agora = tempo::agora();
+    for (pid_pend, desc_pend, motivo) in linhas {
+        if motivo != "codigo_repetido" || texto::compactar(&desc_pend) == desc_comp {
+            conn.execute(
+                "update xml_pendencia_identificacao
+                    set situacao = 'resolvida', produto_id = ?2, resolvido_em = ?3
+                  where id = ?1",
+                params![pid_pend, produto_id, agora],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+pub fn listar_pendencias(conn: &Connection) -> Resultado<Vec<PendenciaXml>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, COALESCE(fornecedor_id, ''), fornecedor_documento, fornecedor_nome, chave_nfe, numero_nfe,
+                emissao_nfe, codigo_fornecedor, gtin_comercial, origem_comercial, gtin_tributavel, origem_tributavel,
+                gtins_json, descricao, ncm, cest, cfop, unidade, quantidade, valor_unitario, motivo, candidatos_json,
+                criado_em
+           FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente'
+          ORDER BY criado_em DESC, id ASC",
+    )?;
+    let rows: Vec<_> = stmt
+        .query_map([], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                l.get::<_, String>(1)?,
+                l.get::<_, String>(2)?,
+                l.get::<_, String>(3)?,
+                l.get::<_, String>(4)?,
+                l.get::<_, String>(5)?,
+                l.get::<_, String>(6)?,
+                l.get::<_, String>(7)?,
+                l.get::<_, String>(8)?,
+                l.get::<_, String>(9)?,
+                l.get::<_, String>(10)?,
+                l.get::<_, String>(11)?,
+                l.get::<_, String>(12)?,
+                l.get::<_, String>(13)?,
+                l.get::<_, String>(14)?,
+                l.get::<_, String>(15)?,
+                l.get::<_, String>(16)?,
+                l.get::<_, String>(17)?,
+                l.get::<_, i64>(18)?,
+                l.get::<_, i64>(19)?,
+                l.get::<_, String>(20)?,
+                l.get::<_, String>(21)?,
+                l.get::<_, String>(22)?,
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let mut lista = Vec::with_capacity(rows.len());
+    for (
+        id,
+        fornecedor_id,
+        fornecedor_doc,
+        fornecedor_nome,
+        chave_nfe,
+        numero_nfe,
+        emissao_nfe,
+        codigo_fornecedor,
+        gtin_comercial,
+        origem_comercial,
+        gtin_tributavel,
+        origem_tributavel,
+        gtins_json,
+        descricao,
+        ncm,
+        cest,
+        cfop,
+        unidade,
+        quantidade,
+        valor_unitario,
+        motivo,
+        candidatos_json,
+        criado_em,
+    ) in rows
+    {
+        let gtins_xml: Vec<nfe_xml::GtinXml> = serde_json::from_str(&gtins_json).unwrap_or_default();
+        let fallback = if !gtin_comercial.is_empty() { &gtin_comercial } else { &gtin_tributavel };
+        let gtins = gtins_para_ficha(&gtins_xml, fallback);
+        let ids_cand: Vec<String> = serde_json::from_str(&candidatos_json).unwrap_or_default();
+        let mut candidatos = Vec::new();
+        for cid in ids_cand {
+            if let Some((codigo, nome, marca, codigo_barras)) = conn
+                .query_row("SELECT codigo, nome, marca, codigo_barras FROM produto WHERE id = ?1", [&cid], |l| {
+                    Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+                })
+                .optional()?
+            {
+                candidatos.push(CandidatoPendencia { id: cid, codigo, nome, marca, codigo_barras });
+            }
+        }
+        lista.push(PendenciaXml {
+            id,
+            fornecedor_id,
+            fornecedor_documento: documento::escrever(&fornecedor_doc),
+            fornecedor_nome,
+            chave_nfe,
+            numero_nfe,
+            emissao_nfe: crate::fiscal::data_br(&emissao_nfe),
+            codigo_fornecedor,
+            gtin_comercial,
+            origem_comercial,
+            gtin_tributavel,
+            origem_tributavel,
+            gtins,
+            descricao,
+            ncm,
+            cest,
+            cfop,
+            unidade,
+            quantidade: numeros::escrever_quantidade(quantidade),
+            valor_unitario: numeros::escrever_dinheiro(valor_unitario),
+            motivo_texto: motivo_legivel(&motivo).to_string(),
+            motivo,
+            candidatos,
+            criado_em,
+        });
+    }
+    Ok(lista)
+}
+
+pub fn resolver_pendencia(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    d: &ResolverPendencia,
+) -> Resultado<PendenciaResolvida> {
+    if d.id.trim().is_empty() {
+        return Err(Erro::validacao("Escolha a pendência de identificação."));
+    }
+    #[allow(clippy::type_complexity)]
+    let linha: Option<(
+        Option<String>,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        i64,
+        String,
+    )> = conn
+        .query_row(
+            "SELECT fornecedor_id, fornecedor_documento, fornecedor_nome, codigo_fornecedor, gtin_comercial,
+                    gtin_tributavel, gtins_json, descricao, ncm, cest, cfop, unidade, origem_fiscal, cst_pis,
+                    valor_unitario, situacao
+               FROM xml_pendencia_identificacao
+              WHERE id = ?1",
+            [&d.id],
+            |l| {
+                Ok((
+                    l.get(0)?,
+                    l.get(1)?,
+                    l.get(2)?,
+                    l.get(3)?,
+                    l.get(4)?,
+                    l.get(5)?,
+                    l.get(6)?,
+                    l.get(7)?,
+                    l.get(8)?,
+                    l.get(9)?,
+                    l.get(10)?,
+                    l.get(11)?,
+                    l.get(12)?,
+                    l.get(13)?,
+                    l.get(14)?,
+                    l.get(15)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        fornecedor_id,
+        fornecedor_doc,
+        fornecedor_nome,
+        codigo_fornecedor,
+        gtin_comercial,
+        gtin_tributavel,
+        gtins_json,
+        descricao,
+        ncm,
+        cest,
+        _cfop,
+        unidade,
+        origem_fiscal,
+        cst_pis,
+        valor_unitario,
+        situacao,
+    )) = linha
+    else {
+        return Err(Erro::NaoEncontrado("Pendência de identificação".into()));
+    };
+    if situacao == "resolvida" {
+        return Err(Erro::validacao("Esta pendência já foi resolvida."));
+    }
+
+    let gtins_xml: Vec<nfe_xml::GtinXml> = serde_json::from_str(&gtins_json).unwrap_or_default();
+    let fallback = if !gtin_comercial.is_empty() { &gtin_comercial } else { &gtin_tributavel };
+    let gtins_ficha = gtins_para_ficha(&gtins_xml, fallback);
+
+    let acao = d.acao.trim();
+    let produto_id = match acao {
+        "ligar" => {
+            if d.produto_id.trim().is_empty() {
+                return Err(Erro::campo("produtoId", "Escolha a peça para associar."));
+            }
+            let existe: bool = conn
+                .query_row("SELECT 1 FROM produto WHERE id = ?1", [&d.produto_id], |_| Ok(true))
+                .optional()?
+                .unwrap_or(false);
+            if !existe {
+                return Err(Erro::NaoEncontrado("Peça".into()));
+            }
+            d.produto_id.trim().to_string()
+        }
+        "nova" => {
+            let mut f = produtos::ficha_nova(conn)?;
+            f.nome = texto::limpar(&descricao).chars().take(120).collect();
+            if f.nome.is_empty() {
+                f.nome = "Peça sem nome".into();
+            }
+            if !fallback.is_empty() && gtin::gtin_valido(fallback) && peca_por_barras(conn, fallback)?.is_none() {
+                f.codigo_barras = fallback.to_string();
+            }
+            f.gtins = gtins_ficha.clone();
+            f.unidade = crate::unidades::de_fora(&unidade);
+            if ncm.len() == 8 && ncm.chars().all(|c| c.is_ascii_digit()) {
+                f.ncm = ncm;
+            }
+            if cest.len() == 7 && cest.chars().all(|c| c.is_ascii_digit()) {
+                f.cest = cest;
+            }
+            if (0..produtos::ORIGENS.len() as i64).contains(&origem_fiscal) {
+                f.origem = origem_fiscal;
+            }
+            f.monofasico = cst_pis == "04";
+            if valor_unitario > 0 {
+                f.custo = numeros::escrever_dinheiro(valor_unitario);
+                if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+                    if p.lucro.is_empty() {
+                        p.lucro = "100".into();
+                    }
+                }
+            }
+            salvar_peca(conn, dispositivo, usuario_id, f)?
+        }
+        _ => {
+            return Err(Erro::validacao("Escolha se quer associar a uma peça existente ou cadastrar como peça nova."));
+        }
+    };
+
+    // Garante o vínculo do fornecedor (se houver fornecedor identificado) e os GTINs.
+    let fid = match fornecedor_id {
+        Some(id) if !id.is_empty() => Some(id),
+        _ if !fornecedor_doc.is_empty() => pessoa_existe(conn, &fornecedor_doc)?,
+        _ => None,
+    };
+    if let Some(fid) = &fid {
+        let compacto = texto::compactar(&codigo_fornecedor);
+        if !compacto.is_empty() {
+            conn.execute(
+                "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+                 VALUES (?1, ?2, ?3, ?4, 1000, ?5)
+                 ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
+                   SET codigo = excluded.codigo, produto_id = excluded.produto_id, atualizado_em = excluded.atualizado_em",
+                params![fid, compacto, codigo_fornecedor.trim(), produto_id, tempo::agora()],
+            )?;
+            produtos::atualizar_indice_busca(conn, &produto_id)?;
+        }
+    }
+    produtos::registrar_gtins_xml(conn, &produto_id, &gtins_ficha)?;
+
+    let agora = tempo::agora();
+    conn.execute(
+        "update xml_pendencia_identificacao
+            set situacao = 'resolvida', produto_id = ?2, resolvido_em = ?3
+          where id = ?1",
+        params![d.id, produto_id, agora],
+    )?;
+    if let Some(fid) = &fid {
+        resolver_pendencias_do_item(conn, fid, &codigo_fornecedor, &descricao, &produto_id)?;
+    }
+
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "produto.importar",
+        "produto",
+        &produto_id,
+        &[format!(
+            "Pendência XML resolvida ({}) · fornecedor {} · código {}",
+            if acao == "nova" { "peça nova" } else { "associada" },
+            if fornecedor_nome.is_empty() { &fornecedor_doc } else { &fornecedor_nome },
+            if codigo_fornecedor.is_empty() { "—" } else { &codigo_fornecedor }
+        )],
+    )?;
+
+    Ok(PendenciaResolvida { produto_id, pendentes: contar_pendencias(conn) })
 }
 
 // ------------------------------------------------------------- comandos das telas
@@ -635,6 +1393,8 @@ mod comandos {
         Comando { nome: "importar_previa", classe: Classe::Leitura, funcao: importar_previa },
         Comando { nome: "importar_cadastros", classe: Classe::Gerente("configuracoes"), funcao: importar_cadastros },
         Comando { nome: "arquivos_conferir", classe: Classe::Leitura, funcao: arquivos_conferir },
+        Comando { nome: "xml_pendencias_listar", classe: Classe::Leitura, funcao: xml_pendencias_listar },
+        Comando { nome: "xml_pendencia_resolver", classe: Classe::Caixa, funcao: xml_pendencia_resolver },
     ];
 
     fn importar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -653,6 +1413,18 @@ mod comandos {
     fn arquivos_conferir(_p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: importar::Entrada = ler(dados)?;
         Ok(json!(requisitos::arquivos(&d.arquivos)))
+    }
+
+    fn xml_pendencias_listar(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(importar::listar_pendencias(p.conn)?))
+    }
+
+    fn xml_pendencia_resolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: importar::ResolverPendencia = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let r = importar::resolver_pendencia(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!(r))
     }
 }
 
@@ -793,6 +1565,110 @@ mod testes {
         let r = importar(c, d, &u, &e).unwrap();
         assert_eq!((r.clientes, r.pecas), (1, 1));
         assert_eq!(financeiro(), fin, "cadastro não muda estoque, custo nem financeiro");
+        std::fs::remove_dir_all(&pasta).ok();
+    }
+
+    #[test]
+    fn pendencias_xml_multiplos_gtins_e_fornecedores() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+
+        let pasta = std::env::temp_dir().join(format!("rustinho-pend-xml-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("compra.xml"), nfe_xml::EXEMPLO).unwrap();
+        let arquivos = vec![pasta.display().to_string()];
+
+        // Importa só o fornecedor (sem cadastrar peças novas automaticamente):
+        // os 3 itens da nota sem vínculo viram pendências persistentes de identificação!
+        let r = importar(
+            c,
+            d,
+            &u,
+            &Entrada {
+                arquivos: arquivos.clone(),
+                clientes: false,
+                fornecedores: true,
+                pecas_loja: false,
+                pecas_fornecedor: false,
+            },
+        )
+        .unwrap();
+        assert_eq!((r.fornecedores, r.pecas, r.codigos_ligados), (1, 0, 0));
+        assert_eq!(contar_pendencias(c), 3);
+
+        // Reimportar o mesmo XML não cria duplicações de pendências.
+        let r2 = importar(
+            c,
+            d,
+            &u,
+            &Entrada {
+                arquivos: arquivos.clone(),
+                clientes: false,
+                fornecedores: true,
+                pecas_loja: false,
+                pecas_fornecedor: false,
+            },
+        )
+        .unwrap();
+        assert_eq!((r2.fornecedores, r2.pecas, r2.codigos_ligados), (0, 0, 0));
+        assert_eq!(contar_pendencias(c), 3, "reimportar não duplica pendências");
+
+        // Apenas listar/abrir as pendências não resolve nenhuma.
+        let lista = listar_pendencias(c).unwrap();
+        assert_eq!(lista.len(), 3);
+        assert_eq!(contar_pendencias(c), 3);
+
+        // Resolve a 1ª pendência criando peça nova: não confunde cProd com código original.
+        let p0 = lista.iter().find(|p| p.codigo_fornecedor == "FAG-32206").unwrap();
+        assert_eq!(p0.gtin_comercial, "7891234567895");
+        assert_eq!(p0.origem_comercial, "cEAN");
+        let res0 = resolver_pendencia(
+            c,
+            d,
+            &u,
+            &ResolverPendencia { id: p0.id.clone(), acao: "nova".into(), produto_id: String::new() },
+        )
+        .unwrap();
+        assert_eq!(res0.pendentes, 2);
+        let ficha0 = produtos::ficha(c, &res0.produto_id).unwrap();
+        assert_eq!(ficha0.codigo_original, "", "cProd nunca vira código original do fabricante");
+        assert_eq!(ficha0.fornecedores.len(), 1);
+        assert_eq!(ficha0.fornecedores[0].codigo, "FAG-32206");
+        assert!(ficha0.gtins.iter().any(|g| g.gtin == "7891234567895" && g.tipo == "comercial" && g.origem == "cEAN"));
+
+        // Outro fornecedor com código diferente para a mesma peça: preserva ambos os vínculos.
+        let mut forn2 = pessoas::ficha_nova(c, "fornecedor").unwrap();
+        forn2.nome = "OUTRO FORNECEDOR LTDA".into();
+        forn2.documento = "33.444.555/0001-81".into();
+        let forn2_id = pessoas::salvar(c, d, &u, &forn2).unwrap();
+        ligar_fornecedor(c, &forn2_id, "OUTRO-999", &res0.produto_id).unwrap();
+        let ficha0 = produtos::ficha(c, &res0.produto_id).unwrap();
+        assert_eq!(ficha0.fornecedores.len(), 2, "mesma peça com códigos diferentes em fornecedores diferentes");
+
+        // Resolve a 2ª pendência ligando a uma peça já existente.
+        let mut f_pas = produtos::ficha_nova(c).unwrap();
+        f_pas.nome = "Pastilha dianteira existente".into();
+        f_pas.codigo_original = "FAB-ORIG-1".into();
+        f_pas.custo = "30,00".into();
+        let pas_id = produtos::salvar(c, d, &u, &f_pas).unwrap();
+
+        let p1 = lista.iter().find(|p| p.codigo_fornecedor == "N1100").unwrap();
+        let res1 = resolver_pendencia(
+            c,
+            d,
+            &u,
+            &ResolverPendencia { id: p1.id.clone(), acao: "ligar".into(), produto_id: pas_id.clone() },
+        )
+        .unwrap();
+        assert_eq!(res1.pendentes, 1);
+        let ficha_pas = produtos::ficha(c, &pas_id).unwrap();
+        assert_eq!(ficha_pas.codigo_original, "FAB-ORIG-1", "preserva código original existente");
+        assert_eq!(ficha_pas.fornecedores.len(), 1);
+        assert_eq!(ficha_pas.fornecedores[0].codigo, "N1100");
+
         std::fs::remove_dir_all(&pasta).ok();
     }
 }

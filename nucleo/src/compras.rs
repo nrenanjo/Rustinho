@@ -205,22 +205,68 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
         ],
     )?;
     let ambiguos = codigos_ambiguos(itens.iter().map(|i| (i.codigo.as_str(), i.descricao.as_str())));
+    let gtins_amb = gtins_ambiguos(&itens);
+    let forn_nome =
+        if nota.emitente.fantasia.is_empty() { nota.emitente.nome.as_str() } else { nota.emitente.fantasia.as_str() };
     for (ordem, item) in itens.iter().enumerate() {
         let ambiguo = ambiguos.contains(&texto::compactar(&item.codigo));
-        let (acao, produto_id, achado_por, fator) = ligar_sozinho(conn, &fornecedor_id, item, ambiguo)?;
+        let gtin_ambiguo =
+            crate::importar::gtins_para_ficha(&item.gtins, &item.gtin).iter().any(|g| gtins_amb.contains(&g.gtin));
+        let lig = ligar_sozinho(conn, &fornecedor_id, item, ambiguo, gtin_ambiguo)?;
+        let gtins_json = serde_json::to_string(&item.gtins).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
-            "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, descricao, ncm, cest, cfop, unidade,
+            "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, gtin_tributavel, origem_gtin,
+                                      origem_gtin_tributavel, gtins_json, descricao, ncm, cest, cfop, unidade,
                                       origem, cst_icms, cst_pis, quantidade, valor_produtos, frete, seguro, desconto,
                                       outras, ipi, icms_st, acao, produto_id, achado_por, fator)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21,
-                     ?22, ?23, ?24, ?25)",
+                     ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
-                tempo::novo_id(), id, ordem as i64, item.codigo, item.gtin, item.descricao, item.ncm, item.cest,
-                item.cfop, item.unidade, item.origem, item.cst_icms, item.cst_pis, item.quantidade,
-                item.valor_produtos, item.frete, item.seguro, item.desconto, item.outras, item.ipi, item.icms_st,
-                acao, produto_id, achado_por, fator
+                tempo::novo_id(),
+                id,
+                ordem as i64,
+                item.codigo,
+                item.gtin,
+                item.gtin_tributavel,
+                item.origem_comercial,
+                item.origem_tributavel,
+                gtins_json,
+                item.descricao,
+                item.ncm,
+                item.cest,
+                item.cfop,
+                item.unidade,
+                item.origem,
+                item.cst_icms,
+                item.cst_pis,
+                item.quantidade,
+                item.valor_produtos,
+                item.frete,
+                item.seguro,
+                item.desconto,
+                item.outras,
+                item.ipi,
+                item.icms_st,
+                lig.acao,
+                lig.produto_id,
+                lig.achado_por,
+                lig.fator
             ],
         )?;
+        if lig.acao.is_empty() {
+            crate::importar::registrar_pendencia_xml(
+                conn,
+                Some(&fornecedor_id),
+                &nota.emitente.documento,
+                forn_nome,
+                &nota.chave,
+                &nota.numero,
+                &nota.emissao,
+                item,
+                &lig.motivo_pendencia,
+                &lig.candidatos,
+            )?;
+        }
     }
     auditoria::registrar(
         conn,
@@ -297,49 +343,174 @@ fn codigos_ambiguos<'a>(itens: impl Iterator<Item = (&'a str, &'a str)>) -> Hash
     vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(c, _)| c).collect()
 }
 
-/// Tenta achar a peça do item: código do fornecedor → código de barras →
-/// código original/equivalente. Devolve (ação, peça, como achou, fator).
+fn gtins_ambiguos(itens: &[ItemXml]) -> HashSet<String> {
+    let mut vistos: HashMap<String, HashSet<String>> = HashMap::new();
+    for item in itens {
+        let desc = texto::compactar(&item.descricao);
+        for g in crate::importar::gtins_para_ficha(&item.gtins, &item.gtin) {
+            if !g.gtin.is_empty() {
+                vistos.entry(g.gtin).or_default().insert(desc.clone());
+            }
+        }
+    }
+    vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(g, _)| g).collect()
+}
+
+struct LigacaoAutomatica {
+    acao: String,
+    produto_id: Option<String>,
+    achado_por: String,
+    fator: i64,
+    motivo_pendencia: String,
+    candidatos: Vec<String>,
+}
+
+/// Tenta achar a peça do item: GTIN exato e inequívoco e vínculo do fornecedor
+/// (sem conflito entre eles) → código original/equivalente.
+/// Nunca associa automaticamente quando houver ambiguidade nem confunde `cProd`
+/// com código interno.
 fn ligar_sozinho(
     conn: &Connection,
     fornecedor_id: &str,
     item: &ItemXml,
     ambiguo: bool,
-) -> Resultado<(String, Option<String>, String, i64)> {
+    gtin_ambiguo: bool,
+) -> Resultado<LigacaoAutomatica> {
+    use crate::importar::BuscaId;
+
     let compacto = texto::compactar(&item.codigo);
-    if !compacto.is_empty() && !ambiguo {
-        let r: Option<(String, i64)> = conn
-            .query_row(
-                "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
-                  WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
-                params![fornecedor_id, compacto],
-                |l| Ok((l.get(0)?, l.get(1)?)),
-            )
-            .optional()?;
-        if let Some((pid, fator)) = r {
-            return Ok(("ligar".into(), Some(pid), "fornecedor".into(), fator));
+    let gtin_busca = if gtin_ambiguo {
+        BuscaId::Ambiguo(Vec::new())
+    } else {
+        crate::importar::peca_por_gtins_inequivoco(conn, &item.gtins, &item.gtin)?
+    };
+    let forn_ligado: Option<(String, i64)> = if !compacto.is_empty() && !ambiguo {
+        conn.query_row(
+            "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
+              WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
+            params![fornecedor_id, compacto],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?
+    } else {
+        None
+    };
+
+    if let BuscaId::Ambiguo(cands) = gtin_busca {
+        return Ok(LigacaoAutomatica {
+            acao: String::new(),
+            produto_id: None,
+            achado_por: String::new(),
+            fator: 1000,
+            motivo_pendencia: "gtin_ambiguo".into(),
+            candidatos: cands,
+        });
+    }
+
+    if let (BuscaId::Unico(pid_gtin), Some((pid_forn, _))) = (&gtin_busca, &forn_ligado) {
+        if pid_gtin != pid_forn {
+            return Ok(LigacaoAutomatica {
+                acao: String::new(),
+                produto_id: None,
+                achado_por: String::new(),
+                fator: 1000,
+                motivo_pendencia: "conflito_gtin_fornecedor".into(),
+                candidatos: vec![pid_gtin.clone(), pid_forn.clone()],
+            });
         }
     }
-    if !item.gtin.is_empty() {
-        // Só se o código de barras for de uma peça só (dois caixas podem ter
-        // cadastrado o mesmo): com duas, a pessoa escolhe na tela.
-        let r: Vec<String> = conn
-            .prepare_cached("SELECT id FROM produto WHERE codigo_barras = ?1 LIMIT 2")?
-            .query_map([&item.gtin], |l| l.get(0))?
-            .collect::<Result<_, _>>()?;
-        if r.len() == 1 {
-            return Ok(("ligar".into(), Some(r[0].clone()), "barras".into(), 1000));
-        }
+
+    // Vínculo prévio do mesmo fornecedor (com o seu fator) quando concorda com o GTIN ou quando não há GTIN.
+    if let Some((pid, fator)) = forn_ligado {
+        return Ok(LigacaoAutomatica {
+            acao: "ligar".into(),
+            produto_id: Some(pid),
+            achado_por: "fornecedor".into(),
+            fator,
+            motivo_pendencia: String::new(),
+            candidatos: Vec::new(),
+        });
     }
+
+    // GTIN exato e inequívoco antes de qualquer outra forma.
+    if let BuscaId::Unico(pid) = gtin_busca {
+        return Ok(LigacaoAutomatica {
+            acao: "ligar".into(),
+            produto_id: Some(pid),
+            achado_por: "barras".into(),
+            fator: 1000,
+            motivo_pendencia: String::new(),
+            candidatos: Vec::new(),
+        });
+    }
+
+    if ambiguo {
+        return Ok(LigacaoAutomatica {
+            acao: String::new(),
+            produto_id: None,
+            achado_por: String::new(),
+            fator: 1000,
+            motivo_pendencia: "codigo_repetido".into(),
+            candidatos: Vec::new(),
+        });
+    }
+
     if compacto.len() >= 3 {
-        let r: Vec<String> = conn
-            .prepare_cached("SELECT id FROM produto WHERE instr(codigos, ' ' || ?1 || ' ') > 0 LIMIT 2")?
-            .query_map([&compacto], |l| l.get(0))?
-            .collect::<Result<_, _>>()?;
-        if r.len() == 1 {
-            return Ok(("ligar".into(), Some(r[0].clone()), "codigo".into(), 1000));
+        let mut c = conn.prepare_cached(
+            "SELECT p.id, p.codigo_original FROM produto p
+              WHERE instr(p.codigos, ' ' || ?1 || ' ') > 0
+              ORDER BY p.id
+              LIMIT 5",
+        )?;
+        let linhas: Vec<(String, String)> =
+            c.query_map([&compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut candidatos_cod = Vec::new();
+        for (pid, orig) in linhas {
+            if texto::compactar(&orig) == compacto {
+                candidatos_cod.push(pid);
+            } else {
+                let tem_equiv: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM produto_equivalente WHERE produto_id = ?1 AND codigo_compacto = ?2 LIMIT 1",
+                        params![pid, compacto],
+                        |_| Ok(true),
+                    )
+                    .optional()?
+                    .unwrap_or(false);
+                if tem_equiv {
+                    candidatos_cod.push(pid);
+                }
+            }
+        }
+        if candidatos_cod.len() == 1 {
+            return Ok(LigacaoAutomatica {
+                acao: "ligar".into(),
+                produto_id: Some(candidatos_cod.remove(0)),
+                achado_por: "codigo".into(),
+                fator: 1000,
+                motivo_pendencia: String::new(),
+                candidatos: Vec::new(),
+            });
+        } else if candidatos_cod.len() > 1 {
+            return Ok(LigacaoAutomatica {
+                acao: String::new(),
+                produto_id: None,
+                achado_por: String::new(),
+                fator: 1000,
+                motivo_pendencia: "codigo_ambiguo".into(),
+                candidatos: candidatos_cod,
+            });
         }
     }
-    Ok((String::new(), None, String::new(), 1000))
+
+    Ok(LigacaoAutomatica {
+        acao: String::new(),
+        produto_id: None,
+        achado_por: String::new(),
+        fator: 1000,
+        motivo_pendencia: "sem_vinculo".into(),
+        candidatos: Vec::new(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +831,7 @@ struct ItemBanco {
     ordem: i64,
     codigo_fornecedor: String,
     gtin: String,
+    gtins_json: String,
     descricao: String,
     ncm: String,
     cest: String,
@@ -699,13 +871,20 @@ impl ItemBanco {
     fn pecas(&self) -> i64 {
         crate::numeros::saturar((self.quantidade as i128 * self.fator as i128 + 500) / 1000)
     }
+    fn gtins_ficha(&self) -> Vec<produtos::GtinFicha> {
+        serde_json::from_str::<Vec<nfe_xml::GtinXml>>(&self.gtins_json)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|g| produtos::GtinFicha { gtin: g.codigo, tipo: g.tipo, origem: g.origem })
+            .collect()
+    }
 }
 
 fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> {
     let mut c = conn.prepare_cached(
         "SELECT id, ordem, codigo_fornecedor, gtin, descricao, ncm, cest, cfop, unidade, origem, cst_pis, quantidade,
                 valor_produtos, frete, seguro, desconto, outras, ipi, icms_st, acao, produto_id, achado_por, fator,
-                baixar_preco
+                baixar_preco, COALESCE(gtins_json, '[]')
            FROM compra_item WHERE compra_id = ?1 ORDER BY ordem",
     )?;
     let linhas = c.query_map([compra_id], |l| {
@@ -714,6 +893,7 @@ fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> 
             ordem: l.get(1)?,
             codigo_fornecedor: l.get(2)?,
             gtin: l.get(3)?,
+            gtins_json: l.get(24)?,
             descricao: l.get(4)?,
             ncm: l.get(5)?,
             cest: l.get(6)?,
@@ -736,7 +916,44 @@ fn itens_banco(conn: &Connection, compra_id: &str) -> Resultado<Vec<ItemBanco>> 
             baixar_preco: l.get(23)?,
         })
     })?;
-    Ok(linhas.collect::<Result<_, _>>()?)
+    let mut itens: Vec<ItemBanco> = linhas.collect::<Result<_, _>>()?;
+    if itens.iter().any(|i| i.acao.is_empty() && i.produto_id.is_none()) {
+        if let Some((situacao, fornecedor_id, chave_compra)) = conn
+            .query_row(
+                "SELECT situacao, COALESCE(fornecedor_id, ''), chave FROM compra WHERE id = ?1",
+                [compra_id],
+                |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?)),
+            )
+            .optional()?
+        {
+            if situacao == "rascunho" && !fornecedor_id.is_empty() {
+                for it in &mut itens {
+                    if !it.acao.is_empty() || it.produto_id.is_some() {
+                        continue;
+                    }
+                    let cod_comp = texto::compactar(&it.codigo_fornecedor);
+                    let desc_comp = texto::compactar(&it.descricao);
+                    let resolvido: Option<String> = conn
+                        .query_row(
+                            "SELECT produto_id FROM xml_pendencia_identificacao
+                              WHERE fornecedor_id = ?1 AND chave_nfe = ?2
+                                AND codigo_compacto = ?3 AND descricao_compacta = ?4
+                                AND situacao = 'resolvida' AND produto_id IS NOT NULL
+                              ORDER BY resolvido_em DESC LIMIT 1",
+                            params![fornecedor_id, chave_compra, cod_comp, desc_comp],
+                            |l| l.get(0),
+                        )
+                        .optional()?;
+                    if let Some(pid) = resolvido {
+                        it.acao = "ligar".into();
+                        it.produto_id = Some(pid);
+                        it.achado_por = "fornecedor".into();
+                    }
+                }
+            }
+        }
+    }
+    Ok(itens)
 }
 
 /// Frete pago à parte dividido entre os itens que entram no estoque.
@@ -1191,6 +1408,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             pid
         } else {
             let pid = it.produto_id.clone().ok_or_else(|| Erro::Interno("item ligado sem peça".into()))?;
+            conn.execute("UPDATE compra_item SET acao = 'ligar', produto_id = ?2 WHERE id = ?1", params![it.id, pid])?;
             let (d, mudou_preco) = atualizar_custo(
                 conn,
                 dispositivo,
@@ -1207,6 +1425,14 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             detalhes = d;
             pid
         };
+        produtos::registrar_gtins_xml(conn, &produto_id, &it.gtins_ficha())?;
+        crate::importar::resolver_pendencias_do_item(
+            conn,
+            &cab.fornecedor_id,
+            &it.codigo_fornecedor,
+            &it.descricao,
+            &produto_id,
+        )?;
         let antes = estoque::saldo(conn, &produto_id)?;
         estoque::lancar(conn, dispositivo, Some(usuario_id), &produto_id, pecas, "compra", &motivo)?;
         detalhes.insert(
@@ -1235,6 +1461,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
                        atualizado_em = excluded.atualizado_em",
                 params![cab.fornecedor_id, compacto, it.codigo_fornecedor, produto_id, it.fator, tempo::agora()],
             )?;
+            produtos::atualizar_indice_busca(conn, &produto_id)?;
         }
     }
     conn.execute(
@@ -1342,13 +1569,11 @@ fn cadastrar_peca(
     f.nome = texto::limpar(&it.descricao).chars().take(120).collect();
     let barras_livre = !it.gtin.is_empty()
         && gtin::gtin_valido(&it.gtin)
-        && conn
-            .query_row("SELECT 1 FROM produto WHERE codigo_barras = ?1", [&it.gtin], |_| Ok(()))
-            .optional()?
-            .is_none();
+        && matches!(crate::importar::peca_por_gtins_inequivoco(conn, &[], &it.gtin)?, crate::importar::BuscaId::Nenhum);
     if barras_livre {
         f.codigo_barras = it.gtin.clone();
     }
+    f.gtins = it.gtins_ficha();
     f.unidade = if it.fator == 1000 { crate::unidades::de_fora(&it.unidade) } else { "UN".into() };
     if it.ncm.len() == 8 && it.ncm.chars().all(|c| c.is_ascii_digit()) {
         f.ncm = it.ncm.clone();
@@ -1367,6 +1592,7 @@ fn cadastrar_peca(
         }
     }
     let id = produtos::salvar(conn, dispositivo, usuario_id, &f)?;
+    produtos::registrar_gtins_xml(conn, &id, &f.gtins)?;
     Ok(id)
 }
 

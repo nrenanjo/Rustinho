@@ -138,6 +138,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
             "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
+            "xml_pendencias" => "Resolver pendências",
             id if id.starts_with("senha.") => "Trocar senha",
             _ => "Abrir",
         }
@@ -410,6 +411,23 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             .categoria(ATENCAO)
             .secao("duplicatas"),
         );
+    }
+
+    // Pendências persistentes de identificação XML (Fase 4.D): ficam visíveis
+    // na tela inicial até todas as associações serem salvas.
+    let xml_pendentes = crate::importar::contar_pendencias(conn);
+    if xml_pendentes > 0 {
+        let mut a = Aviso::simples(
+            "xml_pendencias",
+            &hoje,
+            "Pendências de identificação XML".into(),
+            format!("{} aguardando associação com peças", plural(xml_pendentes, "item de XML", "itens de XML")),
+            "associe a uma peça existente ou cadastre como peça nova".into(),
+            "pecas",
+        )
+        .categoria(CRITICA);
+        a.acao = "Resolver pendências".into();
+        avisos.push(a);
     }
 
     // O-3: uma tarefa da troca de dados caiu (erro interno). Parada de vez:

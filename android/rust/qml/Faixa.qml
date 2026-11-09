@@ -8,7 +8,7 @@ Rectangle {
     id: faixa
     property string titulo: ""
     property string subtitulo: ""
-    property color corTitulo: Tema.apagado
+    property color corTitulo: Tema.roxo ? Tema.apagadoNo(color) : Tema.apagado
     property int preenchimento: Tema.estreito ? 16 : 22
     property alias espacamento: coluna.spacing
     default property alias conteudo: coluna.data

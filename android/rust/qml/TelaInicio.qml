@@ -60,6 +60,9 @@ FocusScope {
             return
         if (aviso.id.indexOf("senha.") === 0) {
             janela.abrir("TelaConfiguracoes", { secao: "loja" })
+        } else if (aviso.id === "xml_pendencias") {
+            Api.chamar("menu_usar", { id: f.id })
+            janela.abrir("TelaPecas", { abrirPendenciasXml: true })
         } else if (aviso.secao) {
             janela.abrir("TelaConfiguracoes", { secao: aviso.secao })
         } else if (aviso.id === "receber") {

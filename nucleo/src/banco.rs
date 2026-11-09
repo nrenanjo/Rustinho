@@ -33,6 +33,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("migracoes/0021_dre_gerencial.sql"),
     include_str!("migracoes/0022_caixa_fechado.sql"),
     include_str!("migracoes/0023_rascunho_e_pendencias.sql"),
+    include_str!("migracoes/0024_gtins_e_pendencias_xml.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -423,6 +424,18 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
     if !operacao || !pendencia {
         return Err(Erro::Interno("faltam operacao_id ou sync_pendencia".into()));
     }
+    if v >= 24 {
+        for tabela in ["produto_gtin", "xml_pendencia_identificacao"] {
+            let tem: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [tabela],
+                |l| l.get(0),
+            )?;
+            if !tem {
+                return Err(Erro::Interno(format!("falta a tabela {tabela}")));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -747,7 +760,7 @@ mod testes {
                 .unwrap();
             assert_eq!(n, 1, "{t}.{col}");
         }
-        // A 0.9.15 acrescentou a 0023 (rascunho de OS e pendências).
-        assert_eq!(MIGRACOES.len(), 23);
+        // A 0.9.15 acrescentou a 0023 e a 0.9.18 acrescentou a 0024.
+        assert_eq!(MIGRACOES.len(), 24);
     }
 }

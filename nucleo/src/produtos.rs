@@ -104,6 +104,9 @@ pub struct ProdutoFicha {
     /// Fornecedores e códigos que eles usam para esta peça.
     #[serde(skip_deserializing)]
     pub fornecedores: Vec<CodigoFornecedor>,
+    /// Todos os códigos GTIN / barras associados à peça (comercial e tributável, com origem).
+    #[serde(default)]
+    pub gtins: Vec<GtinFicha>,
     /// Peça nova: o código que ela deve receber ao salvar (só para mostrar;
     /// o código é dado na hora de salvar, da faixa deste caixa).
     #[serde(skip_deserializing)]
@@ -134,6 +137,16 @@ pub struct CodigoFornecedor {
     pub fornecedor: String,
     pub codigo: String,
     pub fator: String,
+}
+
+/// Um código GTIN / barras associado à peça, com tipo (`comercial` ou
+/// `tributavel`) e origem (`cEAN`, `cEANTrib`, `cBarra`, `cBarraTrib` ou `manual`).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GtinFicha {
+    pub gtin: String,
+    pub tipo: String,
+    pub origem: String,
 }
 
 /// Preço de uma tabela.
@@ -198,6 +211,7 @@ struct Dados {
     observacoes: String,
     aplicacoes: Vec<Aplicacao>,
     equivalentes: Vec<Equivalente>,
+    gtins: Vec<GtinFicha>,
     tipo: String,
     oferta_preco: Option<i64>,
     /// "AAAA-MM-DD" ou vazio (sem prazo).
@@ -438,6 +452,30 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
         return Err(Erro::validacao(format!("Use no máximo {MAX_LINHAS} equivalências por peça.")));
     }
 
+    let mut gtins: Vec<GtinFicha> = Vec::new();
+    for g in &f.gtins {
+        let codigo: String = g.gtin.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+        if codigo.is_empty() {
+            continue;
+        }
+        let tipo = match g.tipo.trim() {
+            "tributavel" => "tributavel",
+            _ => "comercial",
+        }
+        .to_string();
+        let origem = match g.origem.trim() {
+            "cEAN" | "cEANTrib" | "cBarra" | "cBarraTrib" => g.origem.trim(),
+            _ => "manual",
+        }
+        .to_string();
+        if !gtins.iter().any(|x| x.gtin == codigo && x.tipo == tipo && x.origem == origem) {
+            gtins.push(GtinFicha { gtin: codigo, tipo, origem });
+        }
+    }
+    if !codigo_barras.is_empty() && !gtins.iter().any(|x| x.gtin == codigo_barras && x.tipo == "comercial") {
+        gtins.insert(0, GtinFicha { gtin: codigo_barras.clone(), tipo: "comercial".into(), origem: "manual".into() });
+    }
+
     Ok((
         Dados {
             codigo,
@@ -465,6 +503,7 @@ fn validar(f: &ProdutoFicha) -> Resultado<(Dados, i64)> {
             observacoes,
             aplicacoes,
             equivalentes,
+            gtins,
             tipo,
             oferta_preco,
             oferta_ate,
@@ -557,6 +596,11 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     if let Some(a) = &antes {
         manter_lucros(a, &mut dados);
         dados.grade = a.grade.clone();
+        for g in &a.gtins {
+            if !dados.gtins.iter().any(|x| x.gtin == g.gtin && x.tipo == g.tipo && x.origem == g.origem) {
+                dados.gtins.push(g.clone());
+            }
+        }
         if !a.grade.is_empty() && dados.variacao.is_empty() {
             return Err(Erro::campo("variacao", "Diga o tamanho ou a cor deste produto."));
         }
@@ -602,7 +646,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     if !dados.codigo_barras.is_empty() && barras_mudou {
         let mesmo_barras: Option<String> = conn
             .query_row(
-                "SELECT nome FROM produto WHERE codigo_barras = ?1 AND id <> ?2",
+                "SELECT nome FROM produto p
+                  WHERE p.id <> ?2
+                    AND (p.codigo_barras = ?1 OR EXISTS (SELECT 1 FROM produto_gtin g WHERE g.produto_id = p.id AND g.gtin = ?1))",
                 params![dados.codigo_barras, id],
                 |l| l.get(0),
             )
@@ -787,6 +833,14 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
             params![tempo::novo_id(), id, ordem as i64, q.marca, q.codigo, texto::compactar(&q.codigo)],
         )?;
     }
+    for (ordem, g) in dados.gtins.iter().enumerate() {
+        conn.execute(
+            "insert into produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             on conflict (produto_id, gtin, tipo, origem) do nothing",
+            params![tempo::novo_id(), id, g.gtin, g.tipo, g.origem, ordem as i64, agora],
+        )?;
+    }
 
     if novo && estoque_inicial != 0 {
         estoque::lancar(conn, dispositivo, Some(usuario_id), &id, estoque_inicial, "inicial", "Estoque inicial")?;
@@ -941,6 +995,16 @@ fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
     d.equivalentes = consulta
         .query_map([id], |l| Ok(Equivalente { marca: l.get(0)?, codigo: l.get(1)? }))?
         .collect::<Result<_, _>>()?;
+
+    let mut consulta =
+        conn.prepare_cached("SELECT gtin, tipo, origem FROM produto_gtin WHERE produto_id = ?1 ORDER BY ordem, rowid")?;
+    let mut gtins: Vec<GtinFicha> = consulta
+        .query_map([id], |l| Ok(GtinFicha { gtin: l.get(0)?, tipo: l.get(1)?, origem: l.get(2)? }))?
+        .collect::<Result<_, _>>()?;
+    if !d.codigo_barras.is_empty() && !gtins.iter().any(|x| x.gtin == d.codigo_barras && x.tipo == "comercial") {
+        gtins.insert(0, GtinFicha { gtin: d.codigo_barras.clone(), tipo: "comercial".into(), origem: "manual".into() });
+    }
+    d.gtins = gtins;
     Ok(d)
 }
 
@@ -1049,6 +1113,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         historico: auditoria::historico(conn, "produto", id, 30)?,
         tributacao: Some(tributacao),
         fornecedores,
+        gtins: d.gtins,
         oferta_valendo: oferta_vale(d.oferta_preco, &d.oferta_ate, &hoje),
         oferta_preco: d.oferta_preco.map(numeros::escrever_dinheiro).unwrap_or_default(),
         oferta_ate: if d.oferta_ate.is_empty() { String::new() } else { fiscal::data_br(&d.oferta_ate) },
@@ -1269,7 +1334,11 @@ fn texto_busca(d: &Dados) -> (String, String) {
         d.categoria.clone(),
         d.local.clone(),
         d.variacao.clone(),
+        d.observacoes.clone(),
     ];
+    for g in &d.gtins {
+        partes.push(g.gtin.clone());
+    }
     for a in &d.aplicacoes {
         partes.push(a.montadora.clone());
         for s in texto::sinonimos_montadora(&texto::normalizar(&a.montadora)) {
@@ -1284,8 +1353,10 @@ fn texto_busca(d: &Dados) -> (String, String) {
         partes.push(q.codigo.clone());
     }
     let mut codigos: Vec<String> = Vec::new();
-    for c in
-        [&d.codigo, &d.codigo_barras, &d.codigo_original].into_iter().chain(d.equivalentes.iter().map(|q| &q.codigo))
+    for c in [&d.codigo, &d.codigo_barras, &d.codigo_original]
+        .into_iter()
+        .chain(d.gtins.iter().map(|g| &g.gtin))
+        .chain(d.equivalentes.iter().map(|q| &q.codigo))
     {
         let compacto = texto::compactar(c);
         if !compacto.is_empty() && !codigos.contains(&compacto) {
@@ -1294,6 +1365,97 @@ fn texto_busca(d: &Dados) -> (String, String) {
     }
     let busca = format!("{} {}", texto::normalizar(&partes.join(" ")), codigos.join(" "));
     (busca.trim().to_string(), format!(" {} ", codigos.join(" ")))
+}
+
+/// Atualiza `produto.busca` e `produto.codigos` de uma peça após adicionar
+/// GTINs ou alterar vínculos externos.
+pub fn atualizar_indice_busca(conn: &Connection, produto_id: &str) -> Resultado<()> {
+    let dados = carregar(conn, produto_id)?;
+    let (busca, codigos) = texto_busca(&dados);
+    conn.execute("UPDATE produto SET busca = ?2, codigos = ?3 WHERE id = ?1", params![produto_id, busca, codigos])?;
+    Ok(())
+}
+
+/// Registra os GTINs / códigos de barras vindos do XML (`cEAN`, `cEANTrib`,
+/// `cBarra`, `cBarraTrib`) para `produto_id`, diferenciando comercial e
+/// tributável e preservando a origem, sem sobrescrever identificadores que já
+/// existam na peça nem associar código que já pertença a outra peça.
+pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFicha]) -> Resultado<usize> {
+    if gtins.is_empty() {
+        return Ok(0);
+    }
+    let agora = tempo::agora();
+    let mut gravados = 0usize;
+    let mut primeiro_valido_comercial = String::new();
+    let mut primeiro_valido_qualquer = String::new();
+    let ordem_base: i64 = conn
+        .query_row("SELECT COALESCE(MAX(ordem), -1) + 1 FROM produto_gtin WHERE produto_id = ?1", [produto_id], |l| {
+            l.get(0)
+        })
+        .unwrap_or(0);
+
+    for (idx, g) in gtins.iter().enumerate() {
+        let tipo = if g.tipo == "tributavel" { "tributavel" } else { "comercial" };
+        let origem = match g.origem.as_str() {
+            "cEAN" | "cEANTrib" | "cBarra" | "cBarraTrib" => g.origem.as_str(),
+            _ => "cEAN",
+        };
+        let limpo: String = g.gtin.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+        let codigo_valido = if gtin::gtin_valido(&limpo) {
+            limpo
+        } else if matches!(origem, "cBarra" | "cBarraTrib") {
+            let alfa: String = limpo.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            if alfa.len() >= 4 {
+                alfa
+            } else {
+                continue;
+            }
+        } else {
+            continue;
+        };
+        let de_outra: bool = conn
+            .query_row(
+                "SELECT 1 FROM produto p
+                  WHERE p.id <> ?1
+                    AND (p.codigo_barras = ?2 OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?2))
+                  LIMIT 1",
+                params![produto_id, codigo_valido],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if de_outra {
+            continue;
+        }
+        let n = conn.execute(
+            "insert into produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             on conflict (produto_id, gtin, tipo, origem) do nothing",
+            params![tempo::novo_id(), produto_id, codigo_valido, tipo, origem, ordem_base + idx as i64, agora],
+        )?;
+        if n > 0 {
+            gravados += n;
+        }
+        if gtin::gtin_valido(&codigo_valido) {
+            if tipo == "comercial" && primeiro_valido_comercial.is_empty() {
+                primeiro_valido_comercial = codigo_valido.clone();
+            }
+            if primeiro_valido_qualquer.is_empty() {
+                primeiro_valido_qualquer = codigo_valido;
+            }
+        }
+    }
+
+    let principal =
+        if !primeiro_valido_comercial.is_empty() { primeiro_valido_comercial } else { primeiro_valido_qualquer };
+    if !principal.is_empty() {
+        conn.execute(
+            "UPDATE produto SET codigo_barras = ?2 WHERE id = ?1 AND codigo_barras = ''",
+            params![produto_id, principal],
+        )?;
+    }
+    atualizar_indice_busca(conn, produto_id)?;
+    Ok(gravados)
 }
 
 /// Frases com o que mudou, para o histórico.

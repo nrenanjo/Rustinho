@@ -15,17 +15,47 @@ FocusScope {
     // ela fica aberta, T não muda).
     readonly property string abertaEm: new Date().toISOString()
     property string buscaInicial: ""
+    property bool abrirPendenciasXml: false
     property var itens: []
     property int total: 0
+    property int tamanhoPagina: 50
+    property int deslocamento: 0
+    property int pendenciasXml: 0
     property bool buscou: false
+
+    function atualizarPendenciasXml() {
+        const p = Api.chamar("xml_pendencias_listar")
+        if (p.ok && Array.isArray(p.dados))
+            pendenciasXml = p.dados.length
+    }
+
+    function novaBusca() {
+        deslocamento = 0
+        buscar(false)
+    }
+
+    function irParaPagina(novoDeslocamento) {
+        deslocamento = Math.max(0, novoDeslocamento)
+        buscar(false)
+    }
 
     function buscar(manterSelecao) {
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < itens.length
                          ? itens[lista.currentIndex].id : ""
-        const r = Api.chamar("produtos_buscar", { texto: busca.texto, inativas: inativas.checked, limite: 200 })
+        const r = Api.chamar("produtos_buscar", {
+            texto: busca.texto,
+            inativas: inativas.checked,
+            limite: tamanhoPagina,
+            deslocamento: deslocamento
+        })
         if (r.ok) {
             itens = r.dados.itens
             total = r.dados.total
+            deslocamento = r.dados.deslocamento || 0
+            if (itens.length === 0 && total > 0 && deslocamento > 0) {
+                deslocamento = Math.max(0, Math.floor((total - 1) / tamanhoPagina) * tamanhoPagina)
+                return buscar(false)
+            }
             let indice = itens.length > 0 ? 0 : -1
             if (anterior !== "") {
                 const achou = itens.findIndex(p => p.id === anterior)
@@ -38,6 +68,7 @@ FocusScope {
         } else {
             janela.avisar(r.erro, "erro")
         }
+        atualizarPendenciasXml()
         buscou = true
     }
 
@@ -60,7 +91,7 @@ FocusScope {
     function aoEsc(daSeta) {
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
-            buscar()
+            novaBusca()
         } else {
             janela.voltar()
         }
@@ -69,7 +100,7 @@ FocusScope {
     Timer {
         id: espera
         interval: 160
-        onTriggered: tela.buscar()
+        onTriggered: tela.novaBusca()
     }
 
     Shortcut {
@@ -138,7 +169,57 @@ FocusScope {
             Marcar {
                 id: inativas
                 text: "Mostrar inativas"
-                onToggled: tela.buscar()
+                onToggled: tela.novaBusca()
+            }
+        }
+
+        // Aviso contextual persistente de pendências de identificação XML (Fase 4.D):
+        // não pode ser dispensado enquanto houver pendências.
+        Rectangle {
+            visible: tela.pendenciasXml > 0
+            Layout.fillWidth: true
+            implicitHeight: linhaAvisoXml.implicitHeight + 22
+            radius: Tema.raio
+            color: Tema.critico
+            palette.window: Tema.superficie(color)
+            border.width: 1
+            border.color: Tema.bordaCritico
+            RowLayout {
+                id: linhaAvisoXml
+                x: 18
+                y: 11
+                width: parent.width - 36
+                spacing: 14
+                ColumnLayout {
+                    spacing: 2
+                    Layout.fillWidth: true
+                    Text {
+                        text: "Pendências de identificação XML"
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 16
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: (tela.pendenciasXml === 1
+                               ? "1 item de XML aguardando associação com peça"
+                               : tela.pendenciasXml + " itens de XML aguardando associação com peças")
+                              + " · associe a uma peça existente ou cadastre como nova para concluir."
+                        color: Tema.tinta
+                        font.family: Tema.texto
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+                Botao {
+                    text: "Pendências de identificação"
+                    tipo: "principal"
+                    Layout.alignment: Qt.AlignVCenter
+                    onClicked: importador.abrirPendencias()
+                }
             }
         }
 
@@ -149,7 +230,7 @@ FocusScope {
             Layout.leftMargin: 18
             Layout.rightMargin: 20
             Layout.topMargin: 4
-            Rotulo { text: "Código"; Layout.preferredWidth: 84 }
+            Rotulo { text: "Cód. fornecedor"; Layout.preferredWidth: 136 }
             Rotulo { text: busca.texto.trim() === "" ? "Peça · alteradas por último" : "Peça"; Layout.fillWidth: true }
             Rotulo { text: "Local"; Layout.preferredWidth: 90 }
             Rotulo { text: "Estoque"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 104 }
@@ -208,11 +289,44 @@ FocusScope {
                 }
             }
         }
+
+        RowLayout {
+            visible: tela.total > tela.tamanhoPagina || tela.deslocamento > 0
+            spacing: 12
+            Layout.fillWidth: true
+            Botao {
+                text: "Anterior"
+                tipo: "secundario"
+                enabled: tela.deslocamento > 0
+                onClicked: tela.irParaPagina(Math.max(0, tela.deslocamento - tela.tamanhoPagina))
+            }
+            Item { Layout.fillWidth: true }
+            Nota {
+                text: "Página " + (Math.floor(tela.deslocamento / tela.tamanhoPagina) + 1)
+                      + " de " + Math.max(1, Math.ceil(tela.total / tela.tamanhoPagina))
+                      + (tela.itens.length > 0
+                         ? "  ·  " + (tela.deslocamento + 1) + " a " + (tela.deslocamento + tela.itens.length) + " de " + tela.total
+                         : "")
+                font.pixelSize: 14
+            }
+            Item { Layout.fillWidth: true }
+            Botao {
+                text: "Próxima"
+                tipo: "secundario"
+                enabled: tela.deslocamento + tela.itens.length < tela.total
+                onClicked: tela.irParaPagina(tela.deslocamento + tela.tamanhoPagina)
+            }
+        }
     }
 
     StackView.onActivated: {
         buscar(true)
-        busca.focarCursor()
+        if (abrirPendenciasXml) {
+            abrirPendenciasXml = false
+            Qt.callLater(() => importador.abrirPendencias())
+        } else {
+            busca.focarCursor()
+        }
     }
     Component.onCompleted: {
         busca.texto = buscaInicial

@@ -11,8 +11,12 @@ import rustinho
 Painel {
     id: painel
     property string chave: ""
+    property string chavePendencia: ""
     readonly property var janela: ApplicationWindow.window
-    width: Math.min(640, Tema.largura - 24)
+    width: Math.min(680, Tema.largura - 24)
+    property string aba: "importar"
+    property var pendencias: []
+    property var pendenciaAberta: null
     property var arquivos: []
     property var previa: null
     property string erro: ""
@@ -29,14 +33,83 @@ Painel {
 
     signal importou()
 
+    function carregarPendencias() {
+        const r = Api.chamar("xml_pendencias_listar")
+        if (r.ok && Array.isArray(r.dados)) {
+            pendencias = r.dados
+            if (pendenciaAberta) {
+                const atualizada = pendencias.find(p => p.id === pendenciaAberta.id)
+                pendenciaAberta = atualizada || null
+            }
+        }
+    }
+
     function abrirCom() {
         chave = Api.novaChave()
+        aba = "importar"
+        pendenciaAberta = null
         arquivos = []
         previa = null
         erro = ""
         escolhas = null
         avisoArquivos = ""
+        carregarPendencias()
         open()
+    }
+
+    function abrirPendencias() {
+        chave = Api.novaChave()
+        aba = "pendencias"
+        pendenciaAberta = null
+        erro = ""
+        carregarPendencias()
+        if (pendencias.length === 1)
+            abrirPendencia(pendencias[0])
+        open()
+    }
+
+    function abrirPendencia(p) {
+        pendenciaAberta = p
+        chavePendencia = Api.novaChave()
+        erro = ""
+    }
+
+    function resolverComoNova() {
+        if (!pendenciaAberta)
+            return
+        erro = ""
+        const r = Api.gravar("xml_pendencia_resolver", {
+            id: pendenciaAberta.id,
+            acao: "nova",
+            produtoId: ""
+        }, chavePendencia)
+        if (!r.ok) {
+            erro = r.erro
+            return
+        }
+        pendenciaAberta = null
+        carregarPendencias()
+        janela.avisar("Peça cadastrada e associada ao fornecedor.", "ok")
+        painel.importou()
+    }
+
+    function resolverLigando(produtoId) {
+        if (!pendenciaAberta || !produtoId)
+            return
+        erro = ""
+        const r = Api.gravar("xml_pendencia_resolver", {
+            id: pendenciaAberta.id,
+            acao: "ligar",
+            produtoId: produtoId
+        }, chavePendencia)
+        if (!r.ok) {
+            erro = r.erro
+            return
+        }
+        pendenciaAberta = null
+        carregarPendencias()
+        janela.avisar("Item do XML associado à peça.", "ok")
+        painel.importou()
     }
 
     function ler(lista) {
@@ -121,6 +194,7 @@ Painel {
             let msg = partes.length > 0 ? "Cadastrados: " + partes.join(", ") + "." : "Nada novo para cadastrar."
             if (d.codigosLigados > 0)
                 msg += " " + d.codigosLigados + " códigos de fornecedor ligados às peças."
+            painel.carregarPendencias()
             painel.janela.avisar(msg, "ok")
             painel.close()
             painel.importou()
@@ -164,8 +238,29 @@ Painel {
             width: parent.width
             spacing: 14
 
-            Titulo { text: "Trazer cadastros pelo XML"; font.pixelSize: 32; Layout.fillWidth: true }
+            Pilulas {
+                visible: painel.pendencias.length > 0 || painel.aba === "pendencias"
+                pequenas: true
+                modelo: [
+                    { id: "importar", nome: "Trazer cadastros" },
+                    { id: "pendencias", nome: "Pendências de identificação" + (painel.pendencias.length > 0 ? " (" + painel.pendencias.length + ")" : "") }
+                ]
+                atual: painel.aba
+                onEscolhido: (id) => {
+                    painel.aba = id
+                    painel.erro = ""
+                    if (id === "pendencias")
+                        painel.carregarPendencias()
+                }
+            }
+
+            Titulo {
+                text: painel.aba === "pendencias" ? "Pendências de identificação XML" : "Trazer cadastros pelo XML"
+                font.pixelSize: 32
+                Layout.fillWidth: true
+            }
             Nota {
+                visible: painel.aba === "importar"
                 text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
                       + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. O que já está cadastrado não muda. "
                       + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
@@ -174,6 +269,7 @@ Painel {
             }
 
             Linha {
+                visible: painel.aba === "importar"
                 spacing: 10
                 Layout.fillWidth: true
                 Botao {
@@ -193,14 +289,14 @@ Painel {
                 Item { Layout.fillWidth: true }
             }
             Nota {
-                visible: !painel.previa && !painel.trabalhando && painel.erro === ""
+                visible: painel.aba === "importar" && !painel.previa && !painel.trabalhando && painel.erro === ""
                 text: "Dá para escolher vários .xml, um .zip ou .rar com os XMLs dentro ou uma pasta inteira (com subpastas). Também dá para arrastar para cá."
                 font.pixelSize: 13
                 Layout.fillWidth: true
             }
 
             Text {
-                visible: painel.trabalhando
+                visible: painel.aba === "importar" && painel.trabalhando
                 text: "Lendo as notas..."
                 color: Tema.tintaSuave
                 font.family: Tema.serifa
@@ -211,7 +307,7 @@ Painel {
             // Os arquivos já escolhidos (continuam escolhidos quando a leitura
             // não deu: dá para tentar de novo sem escolher outra vez).
             Linha {
-                visible: painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
+                visible: painel.aba === "importar" && painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
                 spacing: 10
                 Layout.fillWidth: true
                 Nota {
@@ -229,7 +325,7 @@ Painel {
                 }
             }
             Nota {
-                visible: painel.avisoArquivos !== ""
+                visible: painel.aba === "importar" && painel.avisoArquivos !== ""
                 text: painel.avisoArquivos
                 color: Tema.vermelho
                 font.pixelSize: 13
@@ -238,7 +334,7 @@ Painel {
 
             // Prévia
             ColumnLayout {
-                visible: !!painel.previa && !painel.trabalhando
+                visible: painel.aba === "importar" && !!painel.previa && !painel.trabalhando
                 spacing: 8
                 Layout.fillWidth: true
 
@@ -341,7 +437,240 @@ Painel {
                 }
             }
 
+            // Pendências de identificação XML (Fase 4.D)
+            ColumnLayout {
+                visible: painel.aba === "pendencias"
+                spacing: 10
+                Layout.fillWidth: true
+
+                Nota {
+                    visible: painel.pendencias.length === 0
+                    text: "Nenhuma pendência de identificação XML aberta no momento."
+                    font.pixelSize: 15
+                    Layout.fillWidth: true
+                }
+
+                // Lista de pendências abertas
+                ListView {
+                    id: listaPendencias
+                    visible: !painel.pendenciaAberta && painel.pendencias.length > 0
+                    Layout.fillWidth: true
+                    implicitHeight: Math.min(360, contentHeight)
+                    clip: true
+                    spacing: 6
+                    model: painel.pendencias
+                    boundsBehavior: Flickable.StopAtBounds; delegate: Rectangle {
+                        id: cartaoPend
+                        required property var modelData
+                        required property int index
+                        readonly property bool par: (index + 1) % 2 === 0
+                        width: listaPendencias.width
+                        implicitHeight: colPend.implicitHeight + 20
+                        radius: Tema.raio
+                        color: Tema.faixa(par)
+                        palette.window: Tema.superficie(color)
+                        RowLayout {
+                            id: colPend
+                            x: 14
+                            y: 10
+                            width: parent.width - 28
+                            spacing: 12
+                            ColumnLayout {
+                                spacing: 2
+                                Layout.fillWidth: true
+                                Text {
+                                    text: cartaoPend.modelData.descricao || ""
+                                    color: Tema.tintaDaFaixa(cartaoPend.par)
+                                    font.family: Tema.texto
+                                    font.weight: Font.Bold
+                                    font.pixelSize: 16
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: [
+                                        "Cód. forn.: " + (cartaoPend.modelData.codigoFornecedor || "—"),
+                                        cartaoPend.modelData.fornecedorNome || cartaoPend.modelData.fornecedorDocumento,
+                                        cartaoPend.modelData.gtinComercial ? "GTIN: " + cartaoPend.modelData.gtinComercial + " (" + cartaoPend.modelData.origemComercial + ")" : "SEM GTIN"
+                                    ].filter(x => !!x).join("  ·  ")
+                                    color: Tema.tintaSuaveDaFaixa(cartaoPend.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: cartaoPend.modelData.motivoTexto || ""
+                                    color: Tema.vermelho
+                                    font.family: Tema.texto
+                                    font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                            }
+                            Botao {
+                                text: "Abrir pendência"
+                                tipo: "secundario"
+                                Layout.alignment: Qt.AlignVCenter
+                                onClicked: painel.abrirPendencia(cartaoPend.modelData)
+                            }
+                        }
+                    }
+                }
+
+                // Detalhe da pendência aberta com todos os dados preservados do XML
+                Rectangle {
+                    visible: !!painel.pendenciaAberta
+                    Layout.fillWidth: true
+                    implicitHeight: detCol.implicitHeight + 28
+                    radius: Tema.raio
+                    color: Tema.pergaminho
+                    palette.window: Tema.superficie(color)
+                    ColumnLayout {
+                        id: detCol
+                        x: 16
+                        y: 14
+                        width: parent.width - 32
+                        spacing: 8
+                        Text {
+                            text: painel.pendenciaAberta ? painel.pendenciaAberta.descricao : ""
+                            color: Tema.tintaNo(Tema.pergaminho)
+                            font.family: Tema.titulo
+                            font.weight: Font.Bold
+                            font.pixelSize: 20
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            visible: !!painel.pendenciaAberta && !!painel.pendenciaAberta.motivoTexto
+                            text: painel.pendenciaAberta ? painel.pendenciaAberta.motivoTexto : ""
+                            color: Tema.vermelho
+                            font.family: Tema.texto
+                            font.weight: Font.DemiBold
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: !painel.pendenciaAberta ? "" : [
+                                "Fornecedor: " + (painel.pendenciaAberta.fornecedorNome || "—") + " · CNPJ " + (painel.pendenciaAberta.fornecedorDocumento || "—"),
+                                "NF-e: " + (painel.pendenciaAberta.numeroNfe || "—")
+                                    + (painel.pendenciaAberta.emissaoNfe ? " · emissão " + painel.pendenciaAberta.emissaoNfe : "")
+                                    + (painel.pendenciaAberta.chaveNfe ? " · chave " + painel.pendenciaAberta.chaveNfe : ""),
+                                "Cód. fornecedor (cProd): " + (painel.pendenciaAberta.codigoFornecedor || "—"),
+                                "GTIN comercial: " + (painel.pendenciaAberta.gtinComercial
+                                    ? painel.pendenciaAberta.gtinComercial + " (" + painel.pendenciaAberta.origemComercial + ")"
+                                    : "SEM GTIN")
+                                    + "  ·  GTIN tributável: " + (painel.pendenciaAberta.gtinTributavel
+                                    ? painel.pendenciaAberta.gtinTributavel + " (" + painel.pendenciaAberta.origemTributavel + ")"
+                                    : "SEM GTIN"),
+                                "NCM: " + (painel.pendenciaAberta.ncm || "—")
+                                    + (painel.pendenciaAberta.cest ? " · CEST: " + painel.pendenciaAberta.cest : "")
+                                    + (painel.pendenciaAberta.cfop ? " · CFOP: " + painel.pendenciaAberta.cfop : ""),
+                                "Quantidade: " + (painel.pendenciaAberta.quantidade || "1") + " " + (painel.pendenciaAberta.unidade || "UN")
+                                    + "  ·  Valor unitário: R$ " + (painel.pendenciaAberta.valorUnitario || "0,00")
+                            ].join("\n")
+                            color: Tema.tintaNo(Tema.pergaminho)
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            lineHeight: 1.25
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Rotulo {
+                            visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
+                            text: "Peças candidatas no cadastro"
+                            color: Tema.roxo ? Tema.apagadoNo(Tema.pergaminho) : Tema.apagado
+                        }
+
+                        ListView {
+                            id: listaCands
+                            visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
+                            Layout.fillWidth: true
+                            implicitHeight: Math.min(180, contentHeight)
+                            clip: true
+                            spacing: 4
+                            model: painel.pendenciaAberta ? (painel.pendenciaAberta.candidatos || []) : []
+                            boundsBehavior: Flickable.StopAtBounds; delegate: Rectangle {
+                                id: candItem
+                                required property var modelData
+                                required property int index
+                                readonly property bool par: (index + 1) % 2 === 0
+                                width: listaCands.width
+                                implicitHeight: candLinha.implicitHeight + 14
+                                radius: Tema.raioCampo
+                                color: Tema.faixa(par)
+                                palette.window: Tema.superficie(color)
+                                RowLayout {
+                                    id: candLinha
+                                    x: 10
+                                    y: 7
+                                    width: parent.width - 20
+                                    spacing: 10
+                                    ColumnLayout {
+                                        spacing: 1
+                                        Layout.fillWidth: true
+                                        Text {
+                                            text: candItem.modelData.nome || ""
+                                            color: Tema.tintaDaFaixa(candItem.par)
+                                            font.family: Tema.texto
+                                            font.weight: Font.Bold
+                                            font.pixelSize: 14
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Text {
+                                            text: [
+                                                "Interno: " + (candItem.modelData.codigo || "a definir"),
+                                                candItem.modelData.marca,
+                                                candItem.modelData.codigoBarras ? "GTIN: " + candItem.modelData.codigoBarras : ""
+                                            ].filter(x => !!x).join("  ·  ")
+                                            color: Tema.tintaSuaveDaFaixa(candItem.par)
+                                            font.family: Tema.texto
+                                            font.pixelSize: 12
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                    Botao {
+                                        text: "Associar a esta peça"
+                                        tipo: "principal"
+                                        onClicked: painel.resolverLigando(candItem.modelData.id)
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Layout.topMargin: 4
+                            Botao {
+                                visible: painel.pendencias.length > 1
+                                text: "Todas as pendências"
+                                tipo: "discreto"
+                                onClicked: painel.pendenciaAberta = null
+                            }
+                            Item { Layout.fillWidth: true }
+                            Botao {
+                                text: "Escolher peça existente"
+                                tipo: "secundario"
+                                onClicked: escolherPecaParaPendencia.abrirCom(painel.pendenciaAberta ? painel.pendenciaAberta.descricao : "")
+                            }
+                            Botao {
+                                text: "Cadastrar como peça nova"
+                                icone: "mais"
+                                tipo: "principal"
+                                onClicked: painel.resolverComoNova()
+                            }
+                        }
+                    }
+                }
+            }
+
             RowLayout {
+                visible: painel.aba === "importar"
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 6
@@ -354,6 +683,11 @@ Painel {
                     onClicked: painel.cadastrar()
                 }
             }
+        }
+
+        EscolherPeca {
+            id: escolherPecaParaPendencia
+            onEscolhida: (p) => painel.resolverLigando(p.id)
         }
     }
 }

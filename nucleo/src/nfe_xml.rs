@@ -10,9 +10,21 @@
 //! leitura sem verificação (`ler`) só serve para reler um XML já guardado.
 
 use roxmltree::{Document, Node};
+use serde::{Deserialize, Serialize};
 
 use crate::nfe_assinatura::{self, Ancoras, Prova};
 use crate::pessoas::Emitente;
+
+/// Um código de barras / GTIN lido do item do XML, preservando o tipo
+/// (`comercial` ou `tributavel`) e a tag de origem (`cEAN`, `cEANTrib`,
+/// `cBarra` ou `cBarraTrib`).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GtinXml {
+    pub codigo: String,
+    pub tipo: String,
+    pub origem: String,
+}
 
 /// Uma nota lida do XML.
 #[derive(Debug, Default, Clone)]
@@ -69,6 +81,15 @@ pub struct Duplicata {
 pub struct ItemXml {
     pub codigo: String,
     pub gtin: String,
+    pub gtin_comercial: String,
+    pub origem_comercial: String,
+    pub gtin_tributavel: String,
+    pub origem_tributavel: String,
+    pub c_ean: String,
+    pub c_ean_trib: String,
+    pub c_barra: String,
+    pub c_barra_trib: String,
+    pub gtins: Vec<GtinXml>,
     pub descricao: String,
     pub ncm: String,
     pub cest: String,
@@ -86,6 +107,33 @@ pub struct ItemXml {
     pub origem: i64,
     pub cst_icms: String,
     pub cst_pis: String,
+}
+
+fn ler_codigo_barras_xml(no: Option<Node>, tag: &str, apenas_digitos: bool) -> String {
+    let bruto = texto(no, tag);
+    let t = bruto.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    let maiusculo = t.to_ascii_uppercase();
+    if matches!(maiusculo.as_str(), "SEM GTIN" | "S/GTIN" | "SEM BARRAS" | "NAO INFORMADO" | "N/A") {
+        return String::new();
+    }
+    let limpo: String = t.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    if limpo.is_empty() {
+        return String::new();
+    }
+    if apenas_digitos {
+        if limpo.chars().all(|c| c.is_ascii_digit()) {
+            limpo
+        } else {
+            String::new()
+        }
+    } else if limpo.chars().all(|c| c.is_ascii_alphanumeric()) {
+        limpo
+    } else {
+        String::new()
+    }
 }
 
 fn filho<'a, 'i>(no: Node<'a, 'i>, nome: &str) -> Option<Node<'a, 'i>> {
@@ -277,18 +325,51 @@ fn nota_do_no(raiz: Node, inf: Node, aceita_nfce: bool) -> Result<NotaXml, Strin
         let icms_st = somar_xml(dinheiro(icms, "vICMSST")?, dinheiro(icms, "vFCPST")?)?;
         let ipi = imposto.and_then(|i| filho(i, "IPI")).and_then(|i| filho(i, "IPITrib"));
         let pis = imposto.and_then(|i| filho(i, "PIS")).and_then(|i| i.children().find(|n| n.is_element()));
-        let gtin = {
-            let g = texto(prod, "cEAN");
-            if g.chars().all(|c| c.is_ascii_digit()) {
-                g
-            } else {
-                String::new()
-            }
+        let c_ean = ler_codigo_barras_xml(prod, "cEAN", true);
+        let c_ean_trib = ler_codigo_barras_xml(prod, "cEANTrib", true);
+        let c_barra = ler_codigo_barras_xml(prod, "cBarra", false);
+        let c_barra_trib = ler_codigo_barras_xml(prod, "cBarraTrib", false);
+        let (gtin_comercial, origem_comercial) = if !c_ean.is_empty() {
+            (c_ean.clone(), "cEAN".to_string())
+        } else if !c_barra.is_empty() {
+            (c_barra.clone(), "cBarra".to_string())
+        } else {
+            (String::new(), String::new())
         };
+        let (gtin_tributavel, origem_tributavel) = if !c_ean_trib.is_empty() {
+            (c_ean_trib.clone(), "cEANTrib".to_string())
+        } else if !c_barra_trib.is_empty() {
+            (c_barra_trib.clone(), "cBarraTrib".to_string())
+        } else {
+            (String::new(), String::new())
+        };
+        let gtin = if !gtin_comercial.is_empty() { gtin_comercial.clone() } else { gtin_tributavel.clone() };
+        let mut gtins = Vec::new();
+        for (origem, tipo, codigo) in [
+            ("cEAN", "comercial", &c_ean),
+            ("cBarra", "comercial", &c_barra),
+            ("cEANTrib", "tributavel", &c_ean_trib),
+            ("cBarraTrib", "tributavel", &c_barra_trib),
+        ] {
+            if !codigo.is_empty()
+                && !gtins.iter().any(|g: &GtinXml| g.codigo == *codigo && g.tipo == tipo && g.origem == origem)
+            {
+                gtins.push(GtinXml { codigo: codigo.clone(), tipo: tipo.to_string(), origem: origem.to_string() });
+            }
+        }
         let cfop = texto(prod, "CFOP");
         let item = ItemXml {
             codigo: texto(prod, "cProd"),
             gtin,
+            gtin_comercial,
+            origem_comercial,
+            gtin_tributavel,
+            origem_tributavel,
+            c_ean,
+            c_ean_trib,
+            c_barra,
+            c_barra_trib,
+            gtins,
             descricao: texto(prod, "xProd"),
             ncm: texto(prod, "NCM"),
             cest: texto(prod, "CEST"),
@@ -603,5 +684,48 @@ mod testes {
             let r = r.expect("não pode dar pânico");
             assert!(r.unwrap_err().contains("data de emissão"), "{d}");
         }
+    }
+
+    #[test]
+    fn le_gtins_comercial_e_tributavel_com_origem_preservada() {
+        let xml = EXEMPLO
+            .replace(
+                "<cProd>FAG-32206</cProd><cEAN>7891234567895</cEAN>",
+                "<cProd>FAG-32206</cProd><cEAN>7891234567895</cEAN><cEANTrib>17891234567892</cEANTrib>",
+            )
+            .replace(
+                "<cProd>N1100</cProd><cEAN>SEM GTIN</cEAN>",
+                "<cProd>N1100</cProd><cEAN>SEM GTIN</cEAN><cBarra>7891000053508</cBarra><cBarraTrib>7891000053515</cBarraTrib>",
+            );
+        let n = ler(&xml).unwrap();
+        let it0 = &n.itens[0];
+        assert_eq!(it0.codigo, "FAG-32206");
+        assert_eq!(it0.gtin, "7891234567895");
+        assert_eq!(it0.gtin_comercial, "7891234567895");
+        assert_eq!(it0.origem_comercial, "cEAN");
+        assert_eq!(it0.gtin_tributavel, "17891234567892");
+        assert_eq!(it0.origem_tributavel, "cEANTrib");
+        assert_eq!(
+            it0.gtins,
+            vec![
+                GtinXml { codigo: "7891234567895".into(), tipo: "comercial".into(), origem: "cEAN".into() },
+                GtinXml { codigo: "17891234567892".into(), tipo: "tributavel".into(), origem: "cEANTrib".into() },
+            ]
+        );
+
+        let it1 = &n.itens[1];
+        assert_eq!(it1.codigo, "N1100");
+        assert_eq!(it1.gtin, "7891000053508");
+        assert_eq!(it1.gtin_comercial, "7891000053508");
+        assert_eq!(it1.origem_comercial, "cBarra");
+        assert_eq!(it1.gtin_tributavel, "7891000053515");
+        assert_eq!(it1.origem_tributavel, "cBarraTrib");
+        assert_eq!(
+            it1.gtins,
+            vec![
+                GtinXml { codigo: "7891000053508".into(), tipo: "comercial".into(), origem: "cBarra".into() },
+                GtinXml { codigo: "7891000053515".into(), tipo: "tributavel".into(), origem: "cBarraTrib".into() },
+            ]
+        );
     }
 }
