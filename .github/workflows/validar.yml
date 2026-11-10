@@ -406,47 +406,8 @@ jobs:
           Expand-Archive rclone.zip -DestinationPath rclone-tmp
           Copy-Item (Get-ChildItem rclone-tmp -Recurse -Filter rclone.exe | Select-Object -First 1).FullName dist\
           Get-ChildItem dist | Select-Object Name, Length | Format-Table
-      - name: Instalador (Inno Setup)
-        shell: pwsh
-        run: |
-          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
-          $base = "dist-instalador"
-          Copy-Item -Recurse dist $base
-          Copy-Item LICENSE "$base\LICENCA.txt"
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          $inno = (Get-Item $iscc).VersionInfo.ProductVersion
-          & $iscc "/DVersao=$env:VERSAO" "/DOrigem=..\$base" instalador\rustinho.iss
-          if ($LASTEXITCODE -ne 0) { throw "ISCC saiu com o código $LASTEXITCODE" }
-          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
-          if (-not $setup) { throw "Instalador não encontrado em saida\" }
-          $h = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
-          "$h  $($setup.Name)" | Out-File -Encoding ascii "saida\$($setup.Name).sha256"
-          "Inno Setup $inno" | Out-File -Encoding utf8 saida\instalador.txt
-          Write-Output "::notice title=Instalador::$($setup.Name)%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
-      # O instalador instala de verdade neste Windows da CI (sem tela,
-      # /VERYSILENT) e o Rustinho instalado abre e cria o banco, numa pasta de
-      # dados só do teste (RUSTINHO_DADOS).
-      - name: Instalar e abrir (teste do instalador)
-        shell: pwsh
-        run: |
-          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
-          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP "RustinhoInstalado"
-          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$dir" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "O instalador saiu com o código $($p.ExitCode)" }
-          if (-not (Test-Path "$dir\rustinho.exe")) { throw "O instalador não pôs o rustinho.exe em $dir" }
-          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
-            if (-not (Test-Path "$dir\$dll")) { throw "O Rustinho instalado está sem $dll (J07)" }
-          }
-          $dados = Join-Path $env:RUNNER_TEMP "RustinhoDadosDoTeste"
-          $env:RUSTINHO_DADOS = $dados
-          $proc = Start-Process -FilePath "$dir\rustinho.exe" -WorkingDirectory $dir -PassThru
-          for ($i = 0; $i -lt 60 -and -not (Test-Path "$dados\rustinho.db"); $i++) { Start-Sleep -Seconds 1 }
-          $vivo = -not $proc.HasExited
-          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          if (-not (Test-Path "$dados\rustinho.db")) { throw "O Rustinho instalado não criou o banco (estava aberto: $vivo)" }
-          "Instalado em $dir (com as 4 DLLs do Visual C++); abriu e criou o banco em $dados (estava aberto: $vivo)." | Tee-Object -Append -FilePath saida\instalador.txt
+      # Antes do instalador: o isolamento é conferido numa máquina ainda limpa
+      # (o Rustinho instalado deixa %LOCALAPPDATA%\Rustinho, veja o passo dele).
       - name: Portátil (pasta, isolamento, ZIP)
         shell: pwsh
         run: |
@@ -495,6 +456,56 @@ jobs:
           $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           "$h  $nome.zip" | Out-File -Encoding ascii "saida\$nome.zip.sha256"
           Write-Output "::notice title=ZIP portátil::$nome.zip%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
+      - name: Instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          $base = "dist-instalador"
+          Copy-Item -Recurse dist $base
+          Copy-Item LICENSE "$base\LICENCA.txt"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $inno = (Get-Item $iscc).VersionInfo.ProductVersion
+          & $iscc "/DVersao=$env:VERSAO" "/DOrigem=..\$base" instalador\rustinho.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC saiu com o código $LASTEXITCODE" }
+          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
+          if (-not $setup) { throw "Instalador não encontrado em saida\" }
+          $h = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          "$h  $($setup.Name)" | Out-File -Encoding ascii "saida\$($setup.Name).sha256"
+          "Inno Setup $inno" | Out-File -Encoding utf8 saida\instalador.txt
+          Write-Output "::notice title=Instalador::$($setup.Name)%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
+      # O instalador instala de verdade neste Windows da CI (sem tela,
+      # /VERYSILENT) e o Rustinho instalado abre e cria o banco, numa pasta de
+      # dados só do teste (RUSTINHO_DADOS).
+      - name: Instalar e abrir (teste do instalador)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "RustinhoInstalado"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "O instalador saiu com o código $($p.ExitCode)" }
+          if (-not (Test-Path "$dir\rustinho.exe")) { throw "O instalador não pôs o rustinho.exe em $dir" }
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            if (-not (Test-Path "$dir\$dll")) { throw "O Rustinho instalado está sem $dll (J07)" }
+          }
+          $dados = Join-Path $env:RUNNER_TEMP "RustinhoDadosDoTeste"
+          $env:RUSTINHO_DADOS = $dados
+          $proc = Start-Process -FilePath "$dir\rustinho.exe" -WorkingDirectory $dir -PassThru
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "$dados\rustinho.db"); $i++) { Start-Sleep -Seconds 1 }
+          $vivo = -not $proc.HasExited
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$dados\rustinho.db")) { throw "O Rustinho instalado não criou o banco (estava aberto: $vivo)" }
+          "Instalado em $dir (com as 4 DLLs do Visual C++); abriu e criou o banco em $dados (estava aberto: $vivo)." | Tee-Object -Append -FilePath saida\instalador.txt
+          # O que o Rustinho instalado deixou na pasta de sempre, mesmo com RUSTINHO_DADOS (registro).
+          $sempre = Join-Path $env:LOCALAPPDATA "Rustinho"
+          if (Test-Path $sempre) {
+            $lista = (Get-ChildItem -Recurse -File $sempre | ForEach-Object { $_.FullName.Substring($sempre.Length + 1) }) -join ", "
+            "Com RUSTINHO_DADOS, o Rustinho instalado criou em %LOCALAPPDATA%\Rustinho: $lista" | Tee-Object -Append -FilePath saida\instalador.txt
+            if (Test-Path "$sempre\rustinho.db") { throw "O Rustinho instalado criou o banco em $sempre apesar de RUSTINHO_DADOS" }
+          } else {
+            "Com RUSTINHO_DADOS, nada foi criado em %LOCALAPPDATA%\Rustinho." | Tee-Object -Append -FilePath saida\instalador.txt
+          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Rustinho-Windows
