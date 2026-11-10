@@ -1,20 +1,45 @@
 #!/usr/bin/env python3
-"""Teste visual automatizado da lista de peças (Rustinho 0.9.18-dev.3.2).
+"""Roteiro da lista de peças (dev.3.3, passo 1.3 — K06).
 
-Verifica os requisitos L1 a L16:
-  - Recuperação da densidade e desenho da dev.2;
-  - Primeira coluna: CÓD. FORNECEDOR em 84 px (com traço quando não houver);
-  - Descrição da peça sempre visível em nomePeca;
-  - Balão de identificação formatado 'Fornecedor · CÓDIGO · FORNECEDOR';
-  - Paginação determinística 50 em 50 e navegação PageUp/PageDown;
-  - Campo de busca com Lupa + Colar/Copiar + F11 limpos.
+Abre o Rustinho de verdade numa tela virtual 1920 × 1080 (Xvfb), no ambiente
+neutro dos outros roteiros, com uma loja montada PELO NÚCLEO
+(`nucleo/tests/lojas_de_teste.rs::montar_lista_de_pecas`: 120 peças, a peça 2
+com o código de fornecedor FAG-32206 e 2 pendências de XML). Nada de SQL direto.
 
-Usa banco sintético (sem dados reais). Sai com 0 se aprovado.
+Confere os requisitos da lista de peças registrados no histórico de decisões do
+proprietário (dossiê dev.3.3, Categoria A, itens 1, 2 e 5):
+
+  L1  a lista carrega peças;
+  L2  densidade: cerca de 10 peças visíveis em 1080p (8 a 13);
+  L3  o nome da peça sempre visível (nunca colapsa);
+  L4  a primeira coluna se chama "Cód. forn." (H07: hoje "Código");
+  L5  sem código de fornecedor, a primeira coluna mostra o traço "—";
+  L6  a primeira coluna nunca mostra o código interno;
+  L7  nada empilhado na primeira coluna (nenhum "Interno:");
+  L8  o campo de busca está na tela;
+  L9  o botão Colar está na busca;
+  L10 o botão Copiar está na busca;
+  L11 Copiar e F11 não ficam um sobre o outro (H01);
+  L12 a busca por texto filtra (FILTRO);
+  L13 a busca pelo código do fornecedor (FAG-32206) acha a peça e mostra o
+      código na primeira coluna, e o balão mostra "… · FAG-32206 · …";
+  L14 o rodapé mostra a página ("Página 1 de 3": 120 peças, 50 por página);
+  L15 PageDown passa à página 2 e PageUp volta à página 1;
+  L16 o aviso das pendências de XML aparece e não muda enquanto se digita.
+
+As falhas de achados já registrados, que ficam para passos seguintes, são
+ESPERADAS (não reprovam o roteiro, mas aparecem no resultado): L4 (H07, passo
+7.3) e L11 (H01, passo 7.1). Se uma esperada passar, o roteiro avisa e reprova
+(é hora de tirá-la da lista). Qualquer outra falha reprova.
+
+    python3 app/testes/telas_lista_pecas.py [pasta para as fotos]
+
+Precisa de: Xvfb, xdotool, ImageMagick (import), cargo. Sai com 0 se aprovado.
 """
 
 import os
+import re
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -22,101 +47,64 @@ import time
 
 os.environ.setdefault("RUSTINHO_TELA", ":78")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import telas_unidades as u
+import telas_unidades as u  # noqa: E402
 
 base, tema = u.base, u.tema
 TELA = u.TELA
 
+ESPERADAS = {
+    "L4": "H07 (cabeçalho \"Código\" na coluna do código do fornecedor), passo 7.3",
+    "L11": "H01 (Copiar e F11 desenhados um sobre o outro), passo 7.1",
+}
+LARGURA_1A_COLUNA = 152  # o nome da peça começa em x = 152 (GEO:nomePeca)
 
-def popular_banco_sintetico(pasta_dados):
-    base.montar_loja(pasta_dados)
-    c = sqlite3.connect(os.path.join(pasta_dados, "rustinho.db"))
-    for nome_f, n in (("rustinho_id", 0), ("rustinho_agora", 0), ("rustinho_operacao", 0),
-                      ("rustinho_historia", 3), ("normalizar", 1), ("compactar", 1)):
-        c.create_function(nome_f, n, lambda *x: "stub")
-    
-    # 1. Obter ou criar fornecedor DISTRIBUIDORA DAYCO
-    forn_id = c.execute("SELECT id FROM pessoa WHERE nome LIKE '%DAYCO%'").fetchone()
-    if not forn_id:
-        forn_id = "forn-dayco-001"
-        c.execute("""
-            INSERT INTO pessoa (id, codigo, tipo, fornecedor, cliente, nome, fantasia, documento, criado_em, atualizado_em, dispositivo)
-            VALUES (?, 'FORN-DAYCO', 'J', 1, 0, 'DISTRIBUIDORA DAYCO', 'DAYCO', '11222333000199', datetime('now'), datetime('now'), 'disp-teste')
-        """, (forn_id,))
+
+def montar_loja(pasta):
+    """A loja pelo núcleo (os mesmos comandos das telas)."""
+    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
+    subprocess.run(
+        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
+         "--ignored", "--exact", "montar_lista_de_pecas"],
+        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
+    )
+
+
+def primeira_coluna(textos):
+    """Os textos da primeira coluna das linhas da lista (abaixo do cabeçalho)."""
+    nomes = [(y, t) for x, y, t in textos if t.startswith("GEO:nomePeca:")]
+    if not nomes:
+        return []
+    y_min = min(y for y, _ in nomes) - 40
+    return [(x, y, t) for x, y, t in textos
+            if x < LARGURA_1A_COLUNA and y >= y_min and not t.startswith(("GEO:", "RET:"))]
+
+
+def nomes_das_pecas(textos):
+    """Os nomes das peças visíveis (o texto que está no centro de cada GEO:nomePeca)."""
+    geos = [(x, y) for x, y, t in textos if t.startswith("GEO:nomePeca:")]
+    return [t for x, y, t in textos if not t.startswith(("GEO:", "RET:")) and (x, y) in geos]
+
+
+def aviso_xml(textos):
+    return next((t for _, _, t in textos if "de XML aguardando" in t), "")
+
+
+def texto_com(textos, trecho):
+    return [(x, y, t) for x, y, t in textos if trecho in t and not t.startswith(("GEO:", "RET:"))]
+
+
+def digitar_na_busca(rr, g, texto):
+    rr.clicar_em(g["campoDeBusca"])
+    base.xdo("key", "ctrl+a")
+    if texto:
+        base.xdo("type", "--delay", "50", texto)
     else:
-        forn_id = forn_id[0]
-
-    # 2. Criar 120 peças sintéticas:
-    # 60 com "FILTRO" no nome, 60 normais.
-    # Peça 1: Peça sem marca, código original e aplicações.
-    # Peça 2: Associada ao fornecedor DAYCO pelo código DY-6PK1515-XL.
-    # Peça 3: Com marca, código original e aplicações.
-    agora = "2026-11-10T00:00:00Z"
-    for i in range(1, 121):
-        pid = f"peca-sintetica-{i:03d}"
-        codigo_interno = f"{7000 + i}"
-        if i <= 60:
-            nome = f"FILTRO DE AR MOTOR SINTETICO MOD {i:02d}"
-        else:
-            nome = f"PASTILHA DE FREIO CERAMICA SINTETICA MOD {i:02d}"
-        
-        marca = ""
-        orig = ""
-        
-        if i == 1:
-            nome = "PECA SEM MARCA NEM APLICACOES SINTETICA"
-        elif i == 2:
-            nome = "CORREIA DENTADA MOTOR DAYCO SINTETICA"
-            marca = "DAYCO"
-            orig = "04E109119C"
-        elif i == 3:
-            nome = "AMORTECEDOR DIANTEIRO PRESSURIZADO TURBOGAS"
-            marca = "COFAP"
-            orig = "GP32488"
-        elif i > 3:
-            marca = "GENERICA" if i % 2 == 0 else "BOSCH"
-            orig = f"ORIG-{i:04d}"
-
-        c.execute("""
-            INSERT OR REPLACE INTO produto (
-                id, codigo, nome, marca, codigo_original, local, unidade, ativo, criado_em, atualizado_em, dispositivo
-            ) VALUES (?, ?, ?, ?, ?, 'A-01', 'PC', 1, ?, ?, 'disp-teste')
-        """, (pid, codigo_interno, nome, marca, orig, agora, agora))
-
-        c.execute("""
-            INSERT OR REPLACE INTO produto_preco (produto_id, tabela, preco)
-            VALUES (?, 1, 15000)
-        """, (pid,))
-
-        c.execute("""
-            INSERT OR REPLACE INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, dispositivo, criado_em)
-            VALUES (?, ?, 10, 'ajuste', 'saldo inicial teste', 'disp-teste', ?)
-        """, (f"mov-{i:03d}", pid, agora))
-
-        # Vincula peça 2 ao fornecedor DAYCO com código DY-6PK1515-XL
-        if i == 2:
-            c.execute("""
-                INSERT OR REPLACE INTO produto_fornecedor (
-                    fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em
-                ) VALUES (?, 'dy6pk1515xl', 'DY-6PK1515-XL', ?, 1000, ?)
-            """, (forn_id, pid, agora))
-
-    # 3. Criar 107 pendências XML sintéticas
-    c.execute("DELETE FROM xml_pendencia_identificacao")
-    for k in range(1, 108):
-        c.execute("""
-            INSERT INTO xml_pendencia_identificacao (
-                id, fornecedor_documento, fornecedor_nome, codigo_fornecedor, codigo_compacto,
-                gtin_comercial, descricao, situacao, criado_em
-            ) VALUES (?, '11222333000199', 'DISTRIBUIDORA DAYCO', ?, ?, '7890000000000', ?, 'pendente', ?)
-        """, (f"pend-{k:03d}", f"COD-XML-{k:03d}", f"CODXML{k:03d}", f"ITEM PENDENTE XML {k:03d}", agora))
-
-    c.commit()
-    c.close()
+        base.xdo("key", "BackSpace")
+    time.sleep(1.5)
 
 
 def main():
-    for p in ("Xvfb", "xdotool", "import"):
+    for p in ("Xvfb", "xdotool", "import", "cargo"):
         if not shutil.which(p):
             sys.exit(f"Falta o programa {p}")
 
@@ -124,63 +112,127 @@ def main():
     os.makedirs(fotos, exist_ok=True)
     modelo = tempfile.mkdtemp(prefix="rustinho-dados-pecas-")
 
-    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1440x1000x24"], stderr=subprocess.DEVNULL)
+    xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1920x1080x24"], stderr=subprocess.DEVNULL)
     time.sleep(1)
-    res = tema.Resultado()
+    resultados = {}
+
+    def conferir(codigo, nome, certo, detalhe=""):
+        resultados[codigo] = (bool(certo), nome, detalhe)
 
     try:
         if xvfb.poll() is not None:
             sys.exit(f"Xvfb não abriu na tela {TELA}")
-
-        popular_banco_sintetico(modelo)
+        montar_loja(modelo)
         rr = u.Rustinho(modelo, "TelaPecas", {}, fotos, "lista_pecas")
         try:
+            for _ in range(150):  # a janela pode demorar a aparecer (como no modo celular do ajudante)
+                s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
+                                   env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+                if s.stdout.split():
+                    break
+                time.sleep(0.2)
+            time.sleep(0.5)
+            rr.redimensionar(1920, 1080)
+            time.sleep(1)
             rr.entrar("Ana")
             time.sleep(3.0)
-            rr.foto("-lista-inicial")
+            rr.foto("-1-lista")
+            t = rr.textos()
+            g = u.geos(t)
+            nomes_geo = [(float(x), float(y), tx) for x, y, tx in t if tx.startswith("GEO:nomePeca:")]
 
-            # L1 & L2: Verificação do desenho da lista e nomePeca
-            g = u.geos(rr.textos())
-            nome_pecas = [k for k in g if k.startswith("nomePeca")]
-            res.conferir("L1 Lista geral: carrega elementos da lista", len(rr.textos()) > 10, f"textos: {len(rr.textos())}")
-            
-            # L12: Barra de pesquisa possui lupa e objeto campoDeBusca
-            campo_busca = g.get("campoDeBusca")
-            res.conferir("L12 Barra de pesquisa: campoDeBusca presente e acessivel", campo_busca is not None, f"geo: {campo_busca}")
+            conferir("L1", "a lista carrega peças", len(nomes_geo) >= 8, f"{len(nomes_geo)} linhas")
+            visiveis = [n for n in nomes_geo if 0 < n[1] < 1080]
+            conferir("L2", "cerca de 10 peças visíveis em 1080p", 8 <= len(visiveis) <= 13, f"{len(visiveis)} visíveis")
+            larguras = [float(tx.rsplit(":", 1)[1].split(",")[2]) for _, _, tx in nomes_geo]
+            conferir("L3", "o nome da peça sempre visível", larguras and min(larguras) > 40, f"larguras {larguras[:5]}")
+            cabecalho = [tx for x, y, tx in t if x < LARGURA_1A_COLUNA and tx in ("Código", "Cód. forn.", "CÓD. FORNECEDOR")]
+            conferir("L4", "a primeira coluna se chama \"Cód. forn.\"", "Cód. forn." in cabecalho, f"cabeçalho: {cabecalho}")
+            col1 = primeira_coluna(t)
+            tracos = [tx for _, _, tx in col1 if tx == "—"]
+            conferir("L5", "sem código de fornecedor, a primeira coluna mostra \"—\"", len(tracos) >= 5, f"{len(tracos)} traços")
+            internos = [tx for _, _, tx in col1 if re.fullmatch(r"7\d{3}|\d{1,6}", tx)]
+            conferir("L6", "a primeira coluna nunca mostra o código interno", not internos, f"internos: {internos[:5]}")
+            conferir("L7", "nada empilhado na primeira coluna", not texto_com(t, "Interno:"), "")
+            conferir("L8", "o campo de busca está na tela", "campoDeBusca" in g, f"{g.get('campoDeBusca')}")
+            colar = texto_com(t, "Colar na busca")
+            copiar = texto_com(t, "Copiar a busca")
+            conferir("L9", "o botão Colar está na busca", bool(colar), f"{colar[:1]}")
+            conferir("L10", "o botão Copiar está na busca", bool(copiar), f"{copiar[:1]}")
+            f11 = [(x, y, tx) for x, y, tx in t if tx == "F11"]
+            sobre = [(c, f) for c in copiar for f in f11 if abs(c[0] - f[0]) < 24 and abs(c[1] - f[1]) < 12]
+            conferir("L11", "Copiar e F11 não ficam um sobre o outro", not sobre,
+                     f"Copiar {copiar[:1]} × F11 {f11[:1]}")
+            aviso_antes = aviso_xml(t)
 
-            # L11: Aviso de pendencias XML mostra 107
-            tem_107 = any("107 itens de XML aguardando" in t for _, _, t in rr.textos())
-            res.conferir("L11 Pendencias XML: contagem inicial de 107 itens", tem_107, "Aviso de pendencias presente")
+            digitar_na_busca(rr, g, "FILTRO")
+            rr.foto("-2-busca-filtro")
+            t2 = rr.textos()
+            n2 = nomes_das_pecas(t2)
+            conferir("L12", "a busca por texto filtra", n2 and all("FILTRO" in n.upper() for n in n2), f"{n2[:3]}")
+            aviso_depois = aviso_xml(t2)
+            conferir("L16", "o aviso das pendências de XML aparece e não muda ao digitar",
+                     aviso_antes != "" and aviso_antes == aviso_depois, f"antes {aviso_antes[:50]!r} depois {aviso_depois[:50]!r}")
 
-            # L5: Busca por filtro
-            rr.clicar_em(campo_busca)
-            base.xdo("type", "--delay", "50", "FILTRO")
-            time.sleep(1.0)
-            tem_filtro = any("FILTRO" in t for _, _, t in rr.textos())
-            res.conferir("L5 Busca por filtro: filtra itens com termo", tem_filtro, "Resultados contêm FILTRO")
+            digitar_na_busca(rr, g, "FAG-32206")
+            rr.foto("-3-busca-fornecedor")
+            t3 = rr.textos()
+            n3 = nomes_das_pecas(t3)
+            col3 = primeira_coluna(t3)
+            achou = any("CORREIA DENTADA" in n.upper() for n in n3)
+            na_coluna = [(x, y) for x, y, tx in col3 if tx == "FAG-32206"]
+            balao = []
+            if na_coluna:
+                x, y = na_coluna[0]
+                px, py = rr.ponto(x, y)
+                base.xdo("mousemove", str(px), str(py))
+                time.sleep(1.5)
+                rr.foto("-4-balao")
+                balao = [tx for _, _, tx in rr.textos() if "FAG-32206" in tx and "·" in tx]
+            conferir("L13", "a busca pelo código do fornecedor acha a peça, mostra o código e o balão",
+                     achou and na_coluna and balao, f"achou={achou} coluna={na_coluna[:1]} balão={balao[:1]}")
 
-            # L3: Busca por código de fornecedor DY-6PK1515-XL
-            base.xdo("key", "ctrl+a")
-            base.xdo("type", "--delay", "50", "DY-6PK1515-XL")
+            digitar_na_busca(rr, g, "")
+            t4 = rr.textos()
+            pagina1 = texto_com(t4, "Página 1 de 3")
+            conferir("L14", "o rodapé mostra \"Página 1 de 3\"", bool(pagina1), f"{[tx for _, _, tx in t4 if 'Página' in tx]}")
+            for _ in range(12):
+                base.xdo("key", "Next")
+                time.sleep(0.4)
+                if texto_com(rr.textos(), "Página 2 de 3"):
+                    break
+            t5 = rr.textos()
+            na2 = bool(texto_com(t5, "Página 2 de 3"))
+            rr.foto("-5-pagina-2")
+            base.xdo("key", "Prior")
             time.sleep(1.2)
-            achou_forn = any("DAYCO" in t or "DY-6PK1515-XL" in t for _, _, t in rr.textos())
-            res.conferir("L3 Busca por fornecedor: encontra por DY-6PK1515-XL", achou_forn, "Item DAYCO encontrado")
-
-            rr.foto("-final")
+            voltou = bool(texto_com(rr.textos(), "Página 1 de 3"))
+            conferir("L15", "PageDown passa à página 2 e PageUp volta à 1", na2 and voltou, f"página 2={na2} voltou={voltou}")
+            rr.foto("-6-final")
         finally:
             rr.fechar()
     finally:
-        try:
-            shutil.rmtree(modelo)
-        except Exception:
-            pass
+        shutil.rmtree(modelo, ignore_errors=True)
         xvfb.terminate()
         xvfb.wait()
 
-    print(f"\n{res.ok} conferências certas, {len(res.falhas)} com falha.")
-    for f in res.falhas:
-        print("  ✘ " + f)
-    sys.exit(0 if not res.falhas else 1)
+    reprovado = False
+    for codigo in sorted(resultados, key=lambda c: int(c[1:])):
+        certo, nome, detalhe = resultados[codigo]
+        if certo and codigo in ESPERADAS:
+            print(f"  ⚠ {codigo} {nome}: PASSOU, mas estava como falha esperada ({ESPERADAS[codigo]}) — tirar da lista")
+            reprovado = True
+        elif certo:
+            print(f"  ✔ {codigo} {nome}")
+        elif codigo in ESPERADAS:
+            print(f"  ✘ {codigo} {nome} — falha ESPERADA: {ESPERADAS[codigo]} · {detalhe}")
+        else:
+            print(f"  ✘ {codigo} {nome} — {detalhe}")
+            reprovado = True
+    certas = sum(1 for c in resultados.values() if c[0])
+    print(f"\n{certas} de {len(resultados)} conferências certas; falhas esperadas: "
+          f"{sum(1 for k, v in resultados.items() if not v[0] and k in ESPERADAS)}; fotos em {fotos}")
+    sys.exit(1 if reprovado or len(resultados) != 16 else 0)
 
 
 if __name__ == "__main__":
