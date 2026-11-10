@@ -11,8 +11,11 @@
 //! - **Trava** (sem `#[ignore]`): o que já está certo e não pode piorar
 //!   (vários cenários do N02).
 //!
-//! Nada aqui decide regra comercial pendente: o "código original / fabricante"
-//! a partir do XML depende da DP-51 e não é afirmado em nenhum teste.
+//! DP-51 (decidida pelo proprietário em 10/11/2026): o "código original /
+//! fabricante" é editável pelo operador; o código de cada fornecedor fica à
+//! parte ("Código nos fornecedores"); a importação não depende do código
+//! original. Os testes `dp51_*` travam o que já vale e caracterizam o resto.
+//! Nada aqui decide regra comercial ainda pendente (DP-06, DP-07, DP-10).
 //! Tudo com dados de mentira, em pastas temporárias.
 
 #[path = "apoio/chave.rs"]
@@ -401,4 +404,115 @@ fn n02_reimportar_nao_duplica() {
     let antes = contar(&l);
     l.ok("importar_cadastros", entrada);
     assert_eq!(contar(&l), antes, "(vínculos, GTINs, pendências, peças) mudaram ao reimportar");
+}
+
+// ===========================================================================
+// DP-51 (decisão do proprietário, 10/11/2026): o "CÓDIGO ORIGINAL /
+// FABRICANTE" é editável pelo operador; o código de cada fornecedor fica à
+// parte, em "Código nos fornecedores", e a importação do XML não depende do
+// código original. Travas do que já vale; a implementação é a do passo 4.2.
+// ===========================================================================
+
+/// Importa a nota de exemplo com as peças do fornecedor (cada item vira peça
+/// ligada ao código dele) e devolve o id do fornecedor A.
+fn importar_com_pecas(l: &mut Loja) -> String {
+    let pasta = pasta_com_exemplo(l, "xml-pecas");
+    l.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [pasta], "clientes": false, "fornecedores": true,
+                "pecasLoja": false, "pecasFornecedor": true }),
+    );
+    id_fornecedor(l, FORNECEDOR_A)
+}
+
+/// (fornecedor, código) de cada vínculo da peça.
+fn vinculos(l: &Loja, peca: &str) -> Vec<(String, String)> {
+    let c = l.conexao();
+    let mut st =
+        c.prepare("SELECT fornecedor_id, codigo FROM produto_fornecedor WHERE produto_id = ?1 ORDER BY 1, 2").unwrap();
+    st.query_map([peca], |x| Ok((x.get(0)?, x.get(1)?))).unwrap().map(Result::unwrap).collect()
+}
+
+/// DP-51, requisitos 1, 3, 4 e 7: o operador preenche, corrige e muda o
+/// código original na ficha; os zeros ficam; os vínculos dos fornecedores não
+/// mudam; e a importação ligou o código do fornecedor sem precisar dele.
+#[test]
+fn dp51_codigo_original_editavel_sem_mexer_nos_fornecedores() {
+    let mut l = loja("dp51-editar");
+    let forn_a = importar_com_pecas(&mut l);
+    let peca = dono_do_codigo(&l, &forn_a, "N1100").expect("a importação ligou N1100 a uma peça");
+    assert_eq!(ficha(&mut l, &peca)["codigoOriginal"], "", "a importação preencheu o código original");
+    let forn_b = l.pessoa("fornecedor", "AUTOPECAS B TESTE LTDA");
+    ligar_no_banco(&l, &forn_b, "X-77", &peca);
+    let antes = vinculos(&l, &peca);
+    assert_eq!(antes.len(), 2, "{antes:?}");
+    for valor in ["000123", "FAB-123", "FAB-123-B", ""] {
+        let mut f = ficha(&mut l, &peca);
+        f["codigoOriginal"] = json!(valor);
+        l.ok("produto_salvar", f);
+        assert_eq!(ficha(&mut l, &peca)["codigoOriginal"], valor, "o código original não ficou como digitado");
+        assert_eq!(vinculos(&l, &peca), antes, "mudar o código original para {valor:?} mexeu nos fornecedores");
+    }
+}
+
+/// DP-51, requisito 5: mudar a razão social e o nome fantasia do fornecedor
+/// não rompe os vínculos; a nota seguinte (mesmo CNPJ) cai no mesmo fornecedor
+/// e nas mesmas peças, sem duplicar nada.
+#[test]
+fn dp51_mudar_razao_social_e_fantasia_nao_rompe_vinculos() {
+    let mut l = loja("dp51-razao");
+    let forn_a = importar_com_pecas(&mut l);
+    let peca = dono_do_codigo(&l, &forn_a, "N1100").unwrap();
+    let vinculos_antes = l.numero("SELECT COUNT(*) FROM produto_fornecedor");
+    let mut p = l.ok("pessoa_abrir", json!({ "id": forn_a }));
+    p["nome"] = json!("NOVA RAZAO SOCIAL AUTOPECAS LTDA");
+    p["fantasia"] = json!("NOVO NOME FANTASIA");
+    l.ok("pessoa_salvar", p);
+    assert_eq!(dono_do_codigo(&l, &forn_a, "N1100").as_deref(), Some(peca.as_str()), "o vínculo mudou");
+    let f = ficha(&mut l, &peca);
+    let mostrado = f["fornecedores"].as_array().unwrap().iter().any(|x| x["codigo"] == "N1100");
+    assert!(mostrado, "o código sumiu da ficha depois de mudar o nome: {}", f["fornecedores"]);
+    // A nota seguinte do mesmo CNPJ (com o nome antigo no XML).
+    importar_com_pecas(&mut l);
+    let com_o_cnpj = l.numero(&format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{FORNECEDOR_A}'"));
+    assert_eq!(com_o_cnpj, 1, "a nota seguinte criou outro fornecedor com o mesmo CNPJ");
+    assert_eq!(id_fornecedor(&l, FORNECEDOR_A), forn_a);
+    assert_eq!(dono_do_codigo(&l, &forn_a, "N1100").as_deref(), Some(peca.as_str()));
+    assert_eq!(l.numero("SELECT COUNT(*) FROM produto_fornecedor"), vinculos_antes, "vínculos duplicados");
+}
+
+/// DP-51 com o cenário 4 do N02: o código original que o operador digitou
+/// numa peça, igual ao cProd que outro fornecedor manda para OUTRA peça, não
+/// mexe nos vínculos daquele fornecedor nem faz a nota dele mudar de peça.
+#[test]
+fn dp51_codigo_original_igual_ao_de_outro_fornecedor_nao_mexe_no_vinculo() {
+    let mut l = loja("dp51-coincide");
+    let forn_a = importar_com_pecas(&mut l);
+    let peca_a = dono_do_codigo(&l, &forn_a, "N1100").unwrap();
+    let peca_x = peca_com(&mut l, "PECA COM ORIGINAL DIGITADO", |f| f["codigoOriginal"] = json!("N1100"));
+    assert_eq!(dono_do_codigo(&l, &forn_a, "N1100").as_deref(), Some(peca_a.as_str()), "o vínculo mudou");
+    let compra = importar_compra(&mut l);
+    let f = l.ok("compra_abrir", json!({ "id": compra }));
+    let it = item_da_compra(&f, "N1100");
+    assert_eq!(it["peca"]["id"].as_str(), Some(peca_a.as_str()), "o item foi para a peça do código original: {it}");
+    assert!(vinculos(&l, &peca_x).is_empty(), "a peça do código original ganhou vínculo");
+}
+
+/// DP-51 com o cenário 4 do N02: sem vínculo do fornecedor, um cProd igual ao
+/// código original que o operador digitou numa peça não liga a nota a ela em
+/// silêncio (vira candidato/pendência, pela política única do passo 4.2).
+#[test]
+#[ignore = "caracterização N02/DP-51: em 4b253c6 o cProd liga sozinho pela coincidência com o código original; passa no passo 4.2"]
+fn dp51_cprod_igual_ao_codigo_original_nao_liga_em_silencio() {
+    let mut l = loja("dp51-silencio");
+    let peca_x = peca_com(&mut l, "PECA COM ORIGINAL DIGITADO", |f| f["codigoOriginal"] = json!("FAG-32206"));
+    let compra = importar_compra(&mut l);
+    let f = l.ok("compra_abrir", json!({ "id": compra }));
+    let it = item_da_compra(&f, "FAG-32206");
+    assert_ne!(
+        it["peca"]["id"].as_str(),
+        Some(peca_x.as_str()),
+        "a nota caiu sozinha na peça cujo código original (digitado) coincide com o cProd: {it}"
+    );
+    assert!(vinculos(&l, &peca_x).is_empty(), "a coincidência criou vínculo sem pergunta: {:?}", vinculos(&l, &peca_x));
 }
