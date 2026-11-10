@@ -84,3 +84,26 @@ fn montar_lista_de_pecas() {
     l.ok("xml_pendencia_resolver", json!({ "id": pend, "acao": "ligar", "produtoId": correia }));
     l.fechar();
 }
+
+/// Geometria (dev.3.3, passo 1.3) — a loja do roteiro `app/testes/geometria_telas.py`:
+/// Ana (gerente) e mais quatro usuários (5 na tela de entrada, como na revisão
+/// visual da auditoria, VIS33-06) e algumas peças.
+#[test]
+#[ignore = "só à mão: monta a loja do roteiro de geometria"]
+fn montar_geometria() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja Teste Auto Peças", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    for nome in ["Bia", "Carlos", "Dani", "Eduarda"] {
+        l.usuario_caixa(nome, "1111");
+    }
+    for i in 1..=12 {
+        l.peca(&format!("PECA DE GEOMETRIA {i:02}"), "", "10,00", "5");
+    }
+    l.fechar();
+}
