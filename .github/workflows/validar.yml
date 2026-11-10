@@ -465,7 +465,10 @@ jobs:
           Copy-Item LICENSE "$base\LICENCA.txt"
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          $inno = (Get-Item $iscc).VersionInfo.ProductVersion
+          # A versão instalada, pela lista de programas do Windows (o ISCC.exe não traz a versão no arquivo).
+          $chaves = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+          $inno = (Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Inno Setup*" } | Select-Object -First 1).DisplayVersion
+          if (-not $inno) { $inno = "versão não encontrada" }
           & $iscc "/DVersao=$env:VERSAO" "/DOrigem=..\$base" instalador\rustinho.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC saiu com o código $LASTEXITCODE" }
           $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
