@@ -2,7 +2,9 @@
 # computador (app/), como biblioteca estática para o CMake do Qt for Android.
 [package]
 name = "rustinho_android"
-version = "0.9.18"
+# A mesma versão do Cargo.toml da raiz (AUD33-I06): a CI recusa o APK se
+# forem diferentes. Ao mudar a versão da raiz, mude aqui também.
+version = "0.9.18-dev.3.2"
 edition = "2021"
 authors = ["Renan Galvão"]
 license = "MIT"

@@ -3,7 +3,7 @@
 Para quando o app abre e a tela fica toda cinza (ou fecha sozinho).
 
 **Onde ficam os arquivos** (no celular, pelo app Arquivos): `Android/data/<nome do pacote>/files/`
-- Pacote do APK de teste: `io.github.nrenanjo.rustinho.teste` (ou o do APK que você instalou).
+- Pacote do APK: `io.github.nrenanjo.rustinho` (o mesmo no APK de teste da CI e no da loja; só a assinatura muda).
 - `diagnostico.txt`: o que o app e o Qt avisaram, os marcos da abertura e a conclusão ("uniforme (uma cor só): SIM" = a tela cinza).
 - `diagnostico-anterior.txt`: o da abertura anterior.
 - `captura-HHMMSS.png`: foto da janela aos 8 e aos 20 segundos (mostra o que está na tela de verdade).
