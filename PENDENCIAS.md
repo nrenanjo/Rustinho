@@ -80,7 +80,23 @@ Correções feitas e rastreabilidade em `docs/RASTREABILIDADE-auditorias.md`; o 
 
 - **PEND-17 · Tela da compra no celular: na linha do item, os botões (Escolher peça, Cadastrar nova, Não lançar) ficavam por cima do texto "Que peça é esta?" — corrigido na 0.9.18.** Reproduzido numa tela virtual de 360 × 780 dp com densidade 2 (o texto ficava com 0 dp de largura e "Não lançar" ia até x = 459): agora os botões vão para uma linha própria embaixo do texto, e a lista da compra abre do começo (os avisos do topo não somem). Conferido pelo roteiro `app/testes/telas_toque_celular.py`. Falta confirmar num aparelho de verdade.
 
-## Identidade visual
+## Pendências da Versão 0.9.18-dev.3.2 (Fora do Escopo Atual)
+
+- **PEND-34 · Correção de código de barras incorreto deixa o GTIN antigo em `produto_gtin`.**
+  Arquivo: `nucleo/src/produtos.rs:1367` (`registrar_gtins_xml`) e `nucleo/src/produtos.rs:248`. Quando um código de barras manual é corrigido na ficha ou novo XML associa código diferente, os GTINs antigos continuam na tabela auxiliar `produto_gtin`, mantendo a busca vinculada ao código antigo.
+- **PEND-35 · `produto_gtin` e `xml_pendencia_identificacao` não fazem parte da troca de dados entre caixas.**
+  Arquivo: `nucleo/src/sync.rs:115`. As novas tabelas da migração 0024 não foram incluídas na lista de tabelas sincronizadas via protocolo de troca de dados local. Reservado para decisão D1 (dev.3.3).
+- **PEND-36 · Resolver pendência pode mudar silenciosamente o produto associado a código de fornecedor já utilizado.**
+  Arquivo: `nucleo/src/importar.rs:780` (`resolver_pendencia`). Não há bloqueio ou confirmação humana quando o código do fornecedor já estava associado a outra peça. Reservado para decisão D2 (dev.3.3).
+- **PEND-37 · Ciclo de pendências sem encerramento e situações de rascunhos/itens ignorados que não fecham pendências.**
+  Arquivo: `nucleo/src/importar.rs:810` e `app/qml/TelaPecas.qml:178`. Não há mecanismo de descarte com justificativa, tornando o aviso crítico permanente. Reservado para decisão D3 (dev.3.3).
+- **PEND-38 · Solicitação da senha do gerente para 'Trazer cadastros' ocorre somente na etapa final.**
+  Arquivo: `app/qml/ImportarCadastros.qml:240`. O operador faz toda a leitura e mapeamento de arquivos e a validação de permissão ocorre apenas na gravação.
+- **PEND-39 · Busca mais lenta que a dev.2 nos benchmarks existentes.**
+  Arquivo: `nucleo/src/busca.rs:130`. Em 4.000 peças: 2,76 ms → 4,70 ms; em 20.000 peças: 12,88 ms → 20,67 ms; lista sem busca: 6,97 ms → 37,16 ms, devido a subconsultas de múltiplos GTINs e fornecedores por peça.
+- **PEND-40 · Busca de candidatos por código original corta resultados em cinco antes de filtrar.**
+  Arquivo: `nucleo/src/busca.rs:340`. Subconsulta SQL aplica `LIMIT 5` antes da filtragem final de termos equivalentes.
+
 
 - **PEND-18 · Android 32 bits: tela toda cinza ao abrir (20/10/2026) — ABERTO, causa desconhecida.** Visto por você no APK de teste (ramo `teste-apk-32bits`, código `f50aa30`/r10). O teste automático de 32 bits de 17/10 nunca rodou o app (`INSTALL_FAILED_NO_MATCHING_ABIS` no emulador; as fotos do ramo `testes-android-32bits` são de outro aplicativo): o Android de 32 bits nunca foi visto funcionando. Plano em `docs/PLANO-fiscal-e-plataformas.md` (P0). APK em que o cinza foi visto (enviado por você, 20/10): `Rustinho-0_9_11-r10-Android-32bits-TESTE.apk`, SHA-256 `8fed4605df76d03d23201c072085ccb06500e8444c0a54400810dc80110ec86e`, identificador `io.github.nrenanjo.rustinho.teste32`, certificado `CN=Rustinho teste 32 bits` (SHA-256 `5964962A…A90648`), só `armeabi-v7a`, contém o código do PEND-09 (versão 0.9.11). **Não** é o APK da execução `39496934486` (essa usa `…rustinho.teste` e `CN=Rustinho teste descartavel`).
   **Andamento (20/10):** (1) Moto e6i, Android 10, 2 GB (confirmado por você). (2) No computador, o aplicativo abre normal no modo de desenho por processador (`QT_QUICK_BACKEND=software`, Qt 6.4): o cinza **não** se reproduz aqui; é específico do Android/Qt 6.8 ou do aparelho. (3) Implementado o **diagnóstico** (`android/diagnostico.*`, `android/DIAGNOSTICO.md`): registro em arquivo, foto da janela, aviso do Android e `desenho.txt` para trocar o modo sem novo APK; testado no computador (`android/diagnostico_teste/rodar.sh`), **não** testado no Android. (4) **Causa ainda desconhecida**; falta rodar o novo APK no aparelho e ler o `diagnostico.txt`.

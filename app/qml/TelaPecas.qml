@@ -18,6 +18,8 @@ FocusScope {
     property bool abrirPendenciasXml: false
     property var itens: []
     property int total: 0
+    property int totalFiltrado: 0
+    property bool temMais: false
     property int tamanhoPagina: 50
     property int deslocamento: 0
     property int pendenciasXml: 0
@@ -49,13 +51,23 @@ FocusScope {
             deslocamento: deslocamento
         })
         if (r.ok) {
-            itens = r.dados.itens
-            total = r.dados.total
+            itens = r.dados.itens || []
+            total = r.dados.total || 0
+            totalFiltrado = (r.dados.totalFiltrado !== undefined) ? r.dados.totalFiltrado : total
+            temMais = !!r.dados.temMais
             deslocamento = r.dados.deslocamento || 0
-            if (itens.length === 0 && total > 0 && deslocamento > 0) {
-                deslocamento = Math.max(0, Math.floor((total - 1) / tamanhoPagina) * tamanhoPagina)
-                return buscar(false)
+
+            // Se a busca ou remoção tornou a página atual vazia:
+            // calcula a última página efetivamente existente usando totalFiltrado
+            // somente recua, não repete deslocamento e não entra em recursão infinita
+            if (itens.length === 0 && totalFiltrado > 0 && deslocamento > 0) {
+                const maxDeslocamento = Math.max(0, Math.floor((totalFiltrado - 1) / tamanhoPagina) * tamanhoPagina)
+                if (maxDeslocamento < deslocamento) {
+                    deslocamento = maxDeslocamento
+                    return buscar(false)
+                }
             }
+
             let indice = itens.length > 0 ? 0 : -1
             if (anterior !== "") {
                 const achou = itens.findIndex(p => p.id === anterior)
@@ -68,7 +80,6 @@ FocusScope {
         } else {
             janela.avisar(r.erro, "erro")
         }
-        atualizarPendenciasXml()
         buscou = true
     }
 
@@ -110,15 +121,29 @@ FocusScope {
     }
 
     // Setas e Page Up/Down mexem na lista enquanto se digita na busca.
+    // L10 (Seção 6.5): PageDown na última linha passa à primeira da próxima página;
+    // PageUp na primeira linha passa à última da página anterior.
     Keys.onDownPressed: lista.currentIndex = Math.min(lista.currentIndex + 1, lista.count - 1)
     Keys.onUpPressed: lista.currentIndex = Math.max(lista.currentIndex - 1, 0)
     Keys.onPressed: (evento) => {
         if (evento.key === Qt.Key_PageDown) {
-            lista.currentIndex = Math.min(lista.currentIndex + 8, lista.count - 1)
             evento.accepted = true
+            if (lista.currentIndex === lista.count - 1 && tela.temMais) {
+                tela.irParaPagina(tela.deslocamento + tela.tamanhoPagina)
+            } else {
+                lista.currentIndex = Math.min(lista.currentIndex + 8, lista.count - 1)
+            }
         } else if (evento.key === Qt.Key_PageUp) {
-            lista.currentIndex = Math.max(lista.currentIndex - 8, 0)
             evento.accepted = true
+            if (lista.currentIndex === 0 && tela.deslocamento > 0) {
+                const novoDeslocamento = Math.max(0, tela.deslocamento - tela.tamanhoPagina)
+                tela.deslocamento = novoDeslocamento
+                tela.buscar(false)
+                if (lista.count > 0)
+                    lista.currentIndex = lista.count - 1
+            } else {
+                lista.currentIndex = Math.max(lista.currentIndex - 8, 0)
+            }
         }
     }
 
@@ -230,7 +255,7 @@ FocusScope {
             Layout.leftMargin: 18
             Layout.rightMargin: 20
             Layout.topMargin: 4
-            Rotulo { text: "Cód. fornecedor"; Layout.preferredWidth: 136 }
+            Rotulo { text: "Código"; Layout.preferredWidth: 84 }
             Rotulo { text: busca.texto.trim() === "" ? "Peça · alteradas por último" : "Peça"; Layout.fillWidth: true }
             Rotulo { text: "Local"; Layout.preferredWidth: 90 }
             Rotulo { text: "Estoque"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 104 }
@@ -291,7 +316,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: tela.total > tela.tamanhoPagina || tela.deslocamento > 0
+            visible: tela.totalFiltrado > tela.tamanhoPagina || tela.deslocamento > 0
             spacing: 12
             Layout.fillWidth: true
             Botao {
@@ -303,9 +328,9 @@ FocusScope {
             Item { Layout.fillWidth: true }
             Nota {
                 text: "Página " + (Math.floor(tela.deslocamento / tela.tamanhoPagina) + 1)
-                      + " de " + Math.max(1, Math.ceil(tela.total / tela.tamanhoPagina))
+                      + " de " + Math.max(1, Math.ceil(tela.totalFiltrado / tela.tamanhoPagina))
                       + (tela.itens.length > 0
-                         ? "  ·  " + (tela.deslocamento + 1) + " a " + (tela.deslocamento + tela.itens.length) + " de " + tela.total
+                         ? "  ·  " + (tela.deslocamento + 1) + " a " + (tela.deslocamento + tela.itens.length) + " de " + tela.totalFiltrado
                          : "")
                 font.pixelSize: 14
             }
@@ -313,7 +338,7 @@ FocusScope {
             Botao {
                 text: "Próxima"
                 tipo: "secundario"
-                enabled: tela.deslocamento + tela.itens.length < tela.total
+                enabled: tela.temMais
                 onClicked: tela.irParaPagina(tela.deslocamento + tela.tamanhoPagina)
             }
         }
@@ -321,6 +346,7 @@ FocusScope {
 
     StackView.onActivated: {
         buscar(true)
+        atualizarPendenciasXml()
         if (abrirPendenciasXml) {
             abrirPendenciasXml = false
             Qt.callLater(() => importador.abrirPendencias())
@@ -334,9 +360,14 @@ FocusScope {
 
     ImportarCadastros {
         id: importador
-        onImportou: tela.buscar()
-        // O cursor volta à busca só se Peças for a tela de cima (a importação
-        // também fecha quando a navegação guiada leva a outra tela).
-        onClosed: if (tela.StackView.status === StackView.Active) busca.focarCursor()
+        onImportou: {
+            tela.atualizarPendenciasXml()
+            tela.buscar()
+        }
+        onClosed: {
+            tela.atualizarPendenciasXml()
+            if (tela.StackView.status === StackView.Active)
+                busca.focarCursor()
+        }
     }
 }

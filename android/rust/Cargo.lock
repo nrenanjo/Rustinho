@@ -1222,18 +1222,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustinho-base"
+version = "0.9.18-dev.3.2"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "rustinho-nucleo"
-version = "0.9.18"
+version = "0.9.18-dev.3.2"
 dependencies = [
  "argon2",
  "base64",
  "chacha20poly1305",
  "getrandom 0.3.4",
  "if-addrs",
+ "libc",
  "rars",
  "ring",
  "roxmltree",
  "rusqlite",
+ "rustinho-base",
  "rustls-pki-types",
  "rustls-webpki",
  "rxing",
@@ -1242,7 +1253,6 @@ dependencies = [
  "sha2",
  "socket2",
  "time",
- "unicode-normalization",
  "uuid",
  "x25519-dalek",
  "x509-parser",

@@ -7,13 +7,14 @@ Rectangle {
     id: balao
     property string texto: ""
     property bool escuro: false   // a linha está selecionada (fundo escuro)
+    property int larguraMaxima: 220
 
     visible: texto !== ""
     radius: height / 2
     // Na linha escolhida (magenta nos três temas): um véu escuro deixa o
     // texto branco legível.
     color: escuro ? Tema.chipAtual : Tema.papel
-    implicitWidth: Math.min(rotulo.implicitWidth + 18, 220)
+    implicitWidth: Math.min(rotulo.implicitWidth + 18, larguraMaxima)
     implicitHeight: rotulo.implicitHeight + 6
 
     Text {

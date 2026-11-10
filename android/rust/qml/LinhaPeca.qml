@@ -16,17 +16,35 @@ Rectangle {
     readonly property color corBase: Tema.faixa(par)
     readonly property color corTexto: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(par)
     readonly property color corSuave: atual ? Tema.claroSuave(0.78) : Tema.tintaSuaveDaFaixa(par)
+
+    // Código do fornecedor como identificação principal da primeira coluna (dev.3.2):
+    // quando não houver código de fornecedor associado, exibe um traço ("—"), nunca o código interno.
     readonly property string codigoFornecedorExibido: (linha.item && linha.item.codigoFornecedor) ? linha.item.codigoFornecedor : "—"
-    readonly property string subtituloFornecedor: (linha.item && linha.item.fornecedorNome) ? linha.item.fornecedorNome
-                                                  : ((linha.item && (linha.item.fornecedoresQtd || 0) > 1) ? linha.item.fornecedoresQtd + " fornecedores" : "")
-    readonly property string codigoInternoExibido: "Interno: " + ((linha.item && linha.item.codigo) ? linha.item.codigo : "a definir")
+
+    // Texto do balão de identificação (Seção 5.2):
+    // Quando a busca encontra a peça por código de fornecedor, formata:
+    // "Fornecedor · CÓDIGO · NOME DO FORNECEDOR"
+    // Mantém os demais rótulos inalterados ("Cód. barras", "Cód. original", "Cód. antigo", "Similar").
+    readonly property string textoAchou: {
+        if (!linha.item || !linha.item.achou)
+            return ""
+        if (linha.item.achou.indexOf("Fornecedor") === 0) {
+            const cod = linha.item.codigoAchado || linha.item.codigoFornecedor || ""
+            const forn = linha.item.fornecedorNome || ""
+            if (cod !== "" && forn !== "")
+                return "Fornecedor · " + cod + " · " + forn
+            if (cod !== "")
+                return "Fornecedor · " + cod
+        }
+        return linha.item.achou
+    }
 
     radius: Tema.raio
     color: atual ? Tema.atual : sobre.hovered ? Qt.darker(corBase, 1.04) : corBase
     palette.window: Tema.superficie(color)
     implicitHeight: Tema.estreito ? compacto.implicitHeight + 20 : Math.max(64, conteudo.implicitHeight + 22)
 
-    // Celular: nome e preço em cima; código, local e estoque embaixo.
+    // Celular: nome e preço em cima; código do fornecedor, local e estoque embaixo.
     ColumnLayout {
         id: compacto
         visible: Tema.estreito
@@ -72,7 +90,7 @@ Rectangle {
             spacing: 8
             Layout.fillWidth: true
             Text {
-                text: ["Cód. forn.: " + linha.codigoFornecedorExibido, linha.subtituloFornecedor, linha.codigoInternoExibido, linha.item.local].filter(x => !!x).join("  ·  ")
+                text: ["Cód. forn.: " + linha.codigoFornecedorExibido, linha.item.local].filter(x => !!x).join("  ·  ")
                 color: linha.corSuave
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -81,7 +99,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
             Balao {
-                texto: linha.item.achou || ""
+                texto: linha.textoAchou
                 escuro: linha.atual
             }
             Rectangle {
@@ -111,47 +129,28 @@ Rectangle {
         spacing: 18
         opacity: linha.item.ativo ? 1 : 0.6
 
-        ColumnLayout {
-            spacing: 1
-            Layout.preferredWidth: 136
-            Layout.alignment: Qt.AlignVCenter
-            Text {
-                text: linha.codigoFornecedorExibido
-                color: linha.corTexto
-                font.family: Tema.texto
-                font.weight: Font.Bold
-                font.pixelSize: 15
-                elide: Text.ElideRight
-                Layout.fillWidth: true
-            }
-            Text {
-                visible: linha.subtituloFornecedor !== ""
-                text: linha.subtituloFornecedor
-                color: linha.corSuave
-                font.family: Tema.texto
-                font.pixelSize: 12
-                elide: Text.ElideRight
-                Layout.fillWidth: true
-            }
-            Text {
-                text: linha.codigoInternoExibido
-                color: linha.corSuave
-                font.family: Tema.texto
-                font.weight: Font.DemiBold
-                font.pixelSize: 12
-                elide: Text.ElideRight
-                Layout.fillWidth: true
-            }
+        // Coluna 1: CÓD. FORNECEDOR em uma única linha, largura 84 px (idêntico à dev.2)
+        Text {
+            text: linha.codigoFornecedorExibido
+            color: linha.corSuave
+            font.family: Tema.texto
+            font.weight: Font.DemiBold
+            font.pixelSize: 15
+            elide: Text.ElideRight
+            Layout.preferredWidth: 84
         }
 
+        // Coluna 2: Descrição da Peça e Balão de Identificação
         ColumnLayout {
             spacing: 1
             Layout.fillWidth: true
             Item {
                 Layout.fillWidth: true
-                implicitHeight: nomePeca.implicitHeight
+                implicitHeight: Math.max(nomePeca.implicitHeight, achou.implicitHeight)
+                implicitWidth: nomePeca.implicitWidth + (achou.visible ? achou.implicitWidth + 10 : 0)
                 Text {
                     id: nomePeca
+                    objectName: "nomePeca"
                     width: Math.min(implicitWidth, parent.width - (achou.visible ? achou.implicitWidth + 10 : 0))
                     text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativa)")
                     color: linha.corTexto
@@ -164,7 +163,8 @@ Rectangle {
                     id: achou
                     x: nomePeca.width + 10
                     anchors.verticalCenter: nomePeca.verticalCenter
-                    texto: linha.item.achou || ""
+                    larguraMaxima: 360
+                    texto: linha.textoAchou
                     escuro: linha.atual
                 }
             }

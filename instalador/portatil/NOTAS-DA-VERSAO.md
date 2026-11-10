@@ -61,6 +61,8 @@ Linux: `sha256sum {{APPIMAGE}}`
 
 ### O que mudou na 0.9.18
 
+- **Lista de peças recuperada (0.9.18-dev.3.2):** desenho visual e densidade da dev.2, com o código do fornecedor exibido na 1ª coluna (84 px), descrição completa na coluna central e balão `Fornecedor · CÓDIGO · FORNECEDOR` quando achado por esse código. Paginação estável de 50 em 50 e navegação por PageUp/PageDown.
+- **Colar e Copiar nas buscas:** botões integrados em todas as barras de pesquisa (Colar à esquerda, Copiar à direita), preservando a lupa e os atalhos.
 - **Três temas na mesma identidade roxa:** claro (sol), escuro (lua) e Planeta Roxo (planeta), com o magenta nos botões, na linha escolhida e no foco. Listas em faixas claras e escuras em todas as telas, com a linha escolhida em magenta.
 - **Campos com seis estados:** normal, com o cursor (contorno magenta), preenchido, com erro (vermelho), desligado e conferido (verde: CNPJ da loja, CPF/CNPJ de clientes e fornecedores e código de barras da peça ficam verdes quando os números conferem).
 - **Seta de retorno** com vidro roxo no canto de cima, à esquerda, nas telas e nas janelinhas; faz o mesmo que o Esc. Saíram os botões "Voltar"/"Cancelar" que só fechavam.

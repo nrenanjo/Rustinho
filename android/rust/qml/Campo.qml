@@ -35,9 +35,9 @@ ColumnLayout {
     readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
-    // Busca da Início (0.9.18, D-V6, como nas imagens aprovadas): colar à
-    // esquerda e copiar à direita, dentro do campo (no lugar da lupa); o
-    // atalho F11 fica fora do campo (na Início).
+    // Busca da Início e barras de pesquisa gerais (0.9.18-dev.3.2): colar à
+    // esquerda e copiar à direita, dentro do campo. Nas buscas com lupa, a lupa
+    // permanece visível ao lado do botão colar.
     property bool colarCopiar: icone === "busca"
     readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
@@ -286,7 +286,9 @@ ColumnLayout {
         verticalAlignment: TextInput.AlignVCenter
         readOnly: campo.somenteLeitura
         maximumLength: campo.maximo
-        leftPadding: (campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12)
+        leftPadding: (campo.colarCopiar && campo.icone === "busca" ? campo.ladoBotaoInterno + 38
+                      : campo.colarCopiar ? campo.ladoBotaoInterno + 10
+                      : campo.icone !== "" ? 48 : 12)
                      + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
@@ -347,12 +349,12 @@ ColumnLayout {
         }
 
         Icone {
-            visible: campo.icone !== "" && !campo.colarCopiar && campo.icone !== "busca"
+            visible: campo.icone !== ""
             nome: campo.icone
             tamanho: 22
             cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado
             anchors.left: parent.left
-            anchors.leftMargin: 15
+            anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 8 : 15
             anchors.verticalCenter: parent.verticalCenter
         }
         // Colar (à esquerda) e copiar (à direita), na busca da Início.
