@@ -1,0 +1,795 @@
+# Pipeline ÚNICO de validação (dev.3.3, DP-02a; AUD33-J01, J02, J03, I06, I07,
+# J07, J08). Todos os caminhos chamam este mesmo pipeline pelo ci.yml: push em
+# main, desenvolvimento-*, stabilization/* e ensaio/*, tags v*, pull_request e
+# workflow_dispatch. Ele NÃO publica nada: monta, confere e registra tudo no
+# MANIFESTO.json. Quem prepara versão é o job "rascunho" do ci.yml, só em tag
+# v*, só se tudo aqui passou e só com a aprovação do dono (ambiente publicacao).
+#
+# Camadas (PLANO_VALIDACAO_E_PUBLICACAO_DEV33.md §2):
+#   L0 formato · L1/L2 nucleo-linux, nucleo-windows · L3 programa-e-telas ·
+#   L4 pacote-linux, pacote-windows, verificar, apk, emulador.
+# O manifesto depende de TODOS os jobs (conferido por
+# .github/scripts/conferir_portao.py, no job formato).
+name: Validar
+
+on:
+  workflow_call:
+    inputs:
+      desenho:
+        description: "Modo de desenho no teste do emulador (experiência do PEND-18)"
+        type: string
+        required: false
+        default: automatico
+
+permissions:
+  contents: read
+  actions: read
+
+# Versões fixas de tudo o que a montagem usa (os arquivos baixados têm o
+# SHA-256 conferido). O manifesto registra as FERRAMENTA_*.
+env:
+  QT_VERSAO: "6.8.3"
+  RCLONE_VERSAO: "v1.68.2"
+  RUST_VERSAO: "1.97.0"
+  NDK_VERSAO: "26.1.10909125"
+  CARGO_TERM_COLOR: always
+  # Testes do núcleo que abrem portas: rodam em série, à parte (os outros, em
+  # paralelo). Juntos são exatamente todos os testes (partição conferida no
+  # passo 1.2 da dev.3.3: 64 de rede + 522 = 586).
+  TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao::"
+  PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao::"
+
+jobs:
+  # L0: formatação, clippy e a forma do portão.
+  formato:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: formato
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+          components: rustfmt, clippy
+      - name: Formatação
+        run: cargo fmt --all --check
+      # Erros prováveis (correctness, suspicious) reprovam; os outros avisos
+      # aparecem como "annotation", sem reprovar.
+      - name: Clippy
+        shell: bash
+        run: |
+          set +e
+          cargo clippy -p rustinho-base -p rustinho-nucleo --all-targets --message-format=short -- -D clippy::correctness -D clippy::suspicious 2>&1 | tee clippy.txt
+          st=${PIPESTATUS[0]}
+          grep -E "^[a-z_/]+\.rs:[0-9]+:[0-9]+: (warning|error)" clippy.txt | head -40 | while read -r l; do echo "::warning title=clippy::$l"; done
+          exit $st
+      - name: Forma do portão e versionCode
+        run: |
+          python3 -c "import yaml" 2>/dev/null || sudo apt-get install -y python3-yaml
+          python3 .github/scripts/conferir_portao.py
+          python3 .github/scripts/versao_android.py --testar
+
+  # L1/L2: testes do núcleo no Linux, como o programa de teste (debug) e como
+  # o programa final (release); os de rede em série.
+  nucleo-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: nucleo-linux
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+      - name: Testes do núcleo (debug)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p testes
+          echo "commit: $GITHUB_SHA" > testes/nucleo-debug.txt
+          cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-debug.txt
+      - name: Testes de rede do núcleo, em série (debug)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > testes/nucleo-debug-rede.txt
+          cargo test -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-debug-rede.txt
+      # Contas que passariam do tamanho do número viram erro nos dois modos
+      # (overflow-checks no Cargo.toml).
+      - name: Testes do núcleo (release)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > testes/nucleo-release.txt
+          cargo test --release -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-release.txt
+      - name: Testes de rede do núcleo, em série (release)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > testes/nucleo-release-rede.txt
+          cargo test --release -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-release-rede.txt
+      - name: Resumo dos testes (avisos)
+        if: always()
+        shell: bash
+        run: |
+          for f in testes/*.txt; do python3 .github/scripts/resumir_testes.py "$f" "Linux $(basename "$f" .txt)" || true; done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Testes-Linux
+          path: testes/
+          retention-days: 90
+
+  # L1: testes do núcleo no Windows.
+  nucleo-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: nucleo-windows
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+      - name: Testes do núcleo (Windows)
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p testes
+          echo "commit: $GITHUB_SHA" > testes/nucleo-windows.txt
+          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-windows.txt
+      - name: Testes de rede do núcleo, em série (Windows)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > testes/nucleo-windows-rede.txt
+          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-windows-rede.txt
+      - name: Resumo dos testes (avisos)
+        if: always()
+        shell: bash
+        run: |
+          for f in testes/*.txt; do python .github/scripts/resumir_testes.py "$f" "Windows $(basename "$f" .txt)" || true; done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Testes-Windows
+          path: testes/
+          retention-days: 90
+
+  # L3: os testes do programa (`cargo test -p rustinho`, com o Qt) e os
+  # roteiros das telas numa tela virtual, inclusive a geometria. Os roteiros já
+  # se isolam do desktop (ambiente_neutro em telas_d09.py). O do seletor do
+  # sistema (telas_seletor_nativo.py) precisa do portal do KDE numa sessão
+  # fechada: roda à mão (docs/TESTES-estabilidade.md).
+  programa-e-telas:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: programa-e-telas
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+      # python3-pil: os roteiros do tema e do celular leem os pixels das fotos.
+      - name: Bibliotecas do sistema e da tela virtual
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil x11-utils
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Testes do programa
+        shell: bash
+        run: |
+          set -o pipefail
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          echo "commit: $GITHUB_SHA" > testes-programa.txt
+          cargo test -p rustinho 2>&1 | tee -a testes-programa.txt
+      - name: Compilar o programa e as lojas de teste
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build -p rustinho
+          cargo test -p rustinho-nucleo --test estavel --test lojas_de_teste --no-run
+      - name: Roteiros das telas (com geometria)
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > telas.txt
+          : > telas-resultado.txt
+          falhou=""
+          for t in app/testes/telas_*.py app/testes/geometria_telas.py; do
+            case "$t" in *telas_seletor_nativo.py) continue ;; esac
+            nome=$(basename "$t" .py)
+            echo "=== $nome" | tee -a telas.txt
+            # O Python do sistema (o do Pillow do apt): o passo do Qt põe
+            # outro python3 na frente, sem o Pillow ("No module named PIL").
+            if timeout 2400 /usr/bin/python3 "$t" "fotos/$nome" 2>&1 | tee -a telas.txt; then
+              printf '%s\tok\n' "$nome" >> telas-resultado.txt
+            else
+              printf '%s\tfalhou\n' "$nome" >> telas-resultado.txt
+              falhou="$falhou $nome"
+            fi
+          done
+          if [ -n "$falhou" ]; then
+            echo "::error title=Roteiros das telas::falharam:$falhou"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Telas-Linux
+          path: |
+            telas.txt
+            telas-resultado.txt
+            testes-programa.txt
+            fotos/
+          retention-days: 90
+
+  # L4: AppImage do Linux, com conferência (bibliotecas e abrir de verdade).
+  pacote-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: pacote-linux
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+      - name: Bibliotecas do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libfuse2 file xvfb
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: linux_gcc_64
+          cache: true
+      - name: Versão
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          cargo build --release -p rustinho
+      - name: AppImage
+        id: appimage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin
+          cp target/release/rustinho AppDir/usr/bin/
+          curl -fsSL -o rclone.zip "https://github.com/rclone/rclone/releases/download/$RCLONE_VERSAO/rclone-$RCLONE_VERSAO-linux-amd64.zip"
+          echo "0e6fa18051e67fc600d803a2dcb10ddedb092247fc6eee61be97f64ec080a13c  rclone.zip" | sha256sum -c -
+          unzip -q -j rclone.zip '*/rclone' -d AppDir/usr/bin/
+          # Versões fixas (não a "continuous", que muda sozinha); um byte
+          # diferente para a montagem (C-11).
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          printf '%s  %s\n' \
+            c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d linuxdeploy \
+            15106be885c1c48a021198e7e1e9a48ce9d02a86dd0a1848f00bdbf3c1c92724 linuxdeploy-plugin-qt | sha256sum -c -
+          chmod +x linuxdeploy linuxdeploy-plugin-qt
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          # instalador/appimage: módulos que as janelas de arquivo do Qt usam.
+          export QML_SOURCES_PATHS="$PWD/app/qml:$PWD/app/base:$PWD/instalador/appimage"
+          export LD_LIBRARY_PATH="$QT_ROOT_DIR/lib:${LD_LIBRARY_PATH:-}"
+          export OUTPUT="Rustinho-$VERSAO-Linux-x86_64.AppImage"
+          ./linuxdeploy --appdir AppDir \
+            --desktop-file instalador/rustinho.desktop \
+            $(for n in 16 22 24 32 48 64 128 256 512; do printf -- '--icon-file instalador/icones/hicolor/%sx%s/apps/rustinho.png ' "$n" "$n"; done) \
+            --icon-filename rustinho \
+            --plugin qt --output appimage
+          # Sem este módulo, "Escolher arquivos" fecha o programa.
+          test -f AppDir/usr/qml/Qt/labs/folderlistmodel/qmldir || { echo "AppImage sem Qt.labs.folderlistmodel"; exit 1; }
+          mkdir -p saida && mv Rustinho-*.AppImage saida/
+          h=$(sha256sum "saida/$OUTPUT" | cut -d' ' -f1)
+          echo "$h  $OUTPUT" > "saida/$OUTPUT.sha256"
+          echo "nome=$OUTPUT" >> $GITHUB_OUTPUT
+          echo "::notice title=AppImage::$OUTPUT%0ASHA-256: $h%0ATamanho: $(stat -c %s saida/$OUTPUT) bytes%0ACommit: $GITHUB_SHA"
+      # Confere o arquivo pronto: (1) nenhuma biblioteca faltando dentro dele;
+      # (2) abre numa tela virtual, carrega as telas e cria o banco (pasta de
+      # dados de teste, HOME de mentira).
+      - name: Conferir o AppImage (dependências e abrir)
+        shell: bash
+        run: |
+          set -uo pipefail
+          A="$PWD/saida/${{ steps.appimage.outputs.nome }}"
+          chmod +x "$A"
+          mkdir -p conferir && cd conferir
+          "$A" --appimage-extract >/dev/null
+          r=squashfs-root
+          falta=$(find "$r/usr" -type f \( -name '*.so*' -o -path '*/usr/bin/rustinho' \) -print0 \
+                  | xargs -0 -n1 ldd 2>/dev/null | grep "not found" | sort -u || true)
+          libs=$(find "$r/usr/lib" -maxdepth 1 -name '*.so*' | wc -l)
+          plataformas=$(ls "$r/usr/plugins/platforms" 2>/dev/null | tr '\n' ' ')
+          qml=$(ls "$r/usr/qml" 2>/dev/null | tr '\n' ' ')
+          echo "::notice title=AppImage por dentro::$libs bibliotecas em usr/lib; plataformas: $plataformas; módulos QML: $qml"
+          if [ -n "$falta" ]; then echo "::error title=Bibliotecas faltando::$(echo "$falta" | tr '\n' ';')"; exit 1; fi
+          cd ..
+          export HOME="$RUNNER_TEMP/casa"; mkdir -p "$HOME"
+          export RUSTINHO_DADOS="$RUNNER_TEMP/dados-teste"
+          export QT_QUICK_BACKEND=software
+          fechar_arvore() { for c in $(pgrep -P "$1"); do fechar_arvore "$c"; done; kill -TERM "$1" 2>/dev/null || true; }
+          abrir() {
+            rm -rf "$RUSTINHO_DADOS"
+            xvfb-run -a -s "-screen 0 1280x800x24" "$A" > abrir.log 2>&1 &
+            pid=$!
+            for i in $(seq 1 60); do [ -f "$RUSTINHO_DADOS/rustinho.db" ] && break; kill -0 $pid 2>/dev/null || break; sleep 1; done
+            sleep 8
+            if kill -0 $pid 2>/dev/null; then vivo=sim; else vivo=nao; fi
+            fechar_arvore $pid
+            sleep 3
+          }
+          modo="com FUSE (como no computador)"
+          abrir
+          if [ ! -f "$RUSTINHO_DADOS/rustinho.db" ] && grep -qi "fuse" abrir.log; then
+            cat abrir.log
+            modo="sem FUSE no robô (APPIMAGE_EXTRACT_AND_RUN)"
+            export APPIMAGE_EXTRACT_AND_RUN=1
+            abrir
+          fi
+          problemas=$(grep -iE "failed to load component|is not installed|cannot load library|could not load the qt platform|segmentation|abort" abrir.log | head -5 | tr '\n' ';' || true)
+          echo "--- registro ao abrir ---"; head -60 abrir.log
+          if [ ! -f "$RUSTINHO_DADOS/rustinho.db" ]; then echo "::error title=AppImage não abriu::não criou o banco em RUSTINHO_DADOS; $problemas"; exit 1; fi
+          if [ -n "$problemas" ]; then echo "::error title=AppImage com problema ao abrir::$problemas"; exit 1; fi
+          if [ -e "$HOME/.local/share/rustinho" ]; then echo "::error title=AppImage::usou a pasta de sempre com RUSTINHO_DADOS"; exit 1; fi
+          if [ "$vivo" != sim ]; then echo "::error title=AppImage fechou sozinho::$problemas"; exit 1; fi
+          msg="sem biblioteca faltando dentro do arquivo ($libs bibliotecas junto; plataforma $plataformas); aberto $modo numa tela virtual (X), carregou as telas, criou o banco na pasta de RUSTINHO_DADOS e continuava aberto depois de 8 s"
+          echo "$msg" > saida/conferencia.txt
+          echo "::notice title=AppImage aberto::$msg"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Linux
+          path: |
+            saida/*.AppImage
+            saida/*.sha256
+            saida/conferencia.txt
+          retention-days: 90
+
+  # L4: Windows — UMA compilação, dois pacotes (instalador e portátil), com as
+  # DLLs do Visual C++ conferidas (J07), o instalador instalado e aberto e o
+  # portátil aberto conferindo o isolamento.
+  pacote-windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: pacote-windows
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+      - name: Qt
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
+        with:
+          version: ${{ env.QT_VERSAO }}
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Versão
+        shell: bash
+        run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
+      - name: Compilar
+        shell: bash
+        run: |
+          export QMAKE="$QT_ROOT_DIR/bin/qmake.exe"
+          cargo build --release -p rustinho
+      - name: Juntar os arquivos (Qt, rclone, runtime do Visual C++)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          New-Item -ItemType Directory -Force dist, saida | Out-Null
+          Copy-Item target\release\rustinho.exe dist\
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --qmldir app\qml --qmldir app\base --no-translations --no-system-d3d-compiler --no-opengl-sw dist\rustinho.exe
+          # J07: sem uma destas DLLs o Rustinho não abre num Windows sem o
+          # runtime do Visual C++. Falta uma: o pacote é recusado.
+          $linhas = @()
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            $origem = "$env:WINDIR\System32\$dll"
+            if (-not (Test-Path $origem)) { throw "DLL do Visual C++ ausente no Windows da CI: $origem" }
+            Copy-Item $origem dist\
+            if (-not (Test-Path "dist\$dll")) { throw "DLL do Visual C++ não entrou no pacote: $dll" }
+            $v = (Get-Item "dist\$dll").VersionInfo.FileVersion
+            $h = (Get-FileHash "dist\$dll" -Algorithm SHA256).Hash.ToLower()
+            $linhas += "$dll | versão $v | SHA-256 $h"
+          }
+          $linhas | Set-Content -Encoding utf8 saida\dlls.txt
+          Get-Content saida\dlls.txt
+          Invoke-WebRequest "https://github.com/rclone/rclone/releases/download/$env:RCLONE_VERSAO/rclone-$env:RCLONE_VERSAO-windows-amd64.zip" -OutFile rclone.zip
+          $hash = (Get-FileHash rclone.zip -Algorithm SHA256).Hash
+          if ($hash -ne "812BF76CC02C04CF6327F3683F3D5A88E47D36C39DB84C1A745777496BE7D993") { throw "rclone.zip diferente do esperado: $hash" }
+          Expand-Archive rclone.zip -DestinationPath rclone-tmp
+          Copy-Item (Get-ChildItem rclone-tmp -Recurse -Filter rclone.exe | Select-Object -First 1).FullName dist\
+          Get-ChildItem dist | Select-Object Name, Length | Format-Table
+      - name: Instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          $base = "dist-instalador"
+          Copy-Item -Recurse dist $base
+          Copy-Item LICENSE "$base\LICENCA.txt"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $inno = (Get-Item $iscc).VersionInfo.ProductVersion
+          & $iscc "/DVersao=$env:VERSAO" "/DOrigem=..\$base" instalador\rustinho.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC saiu com o código $LASTEXITCODE" }
+          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
+          if (-not $setup) { throw "Instalador não encontrado em saida\" }
+          $h = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          "$h  $($setup.Name)" | Out-File -Encoding ascii "saida\$($setup.Name).sha256"
+          "Inno Setup $inno" | Out-File -Encoding utf8 saida\instalador.txt
+          Write-Output "::notice title=Instalador::$($setup.Name)%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
+      # O instalador instala de verdade neste Windows da CI (sem tela,
+      # /VERYSILENT) e o Rustinho instalado abre e cria o banco, numa pasta de
+      # dados só do teste (RUSTINHO_DADOS).
+      - name: Instalar e abrir (teste do instalador)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          $setup = Get-ChildItem saida\*-Windows-instalador.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "RustinhoInstalado"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "O instalador saiu com o código $($p.ExitCode)" }
+          if (-not (Test-Path "$dir\rustinho.exe")) { throw "O instalador não pôs o rustinho.exe em $dir" }
+          foreach ($dll in "msvcp140.dll","msvcp140_1.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            if (-not (Test-Path "$dir\$dll")) { throw "O Rustinho instalado está sem $dll (J07)" }
+          }
+          $dados = Join-Path $env:RUNNER_TEMP "RustinhoDadosDoTeste"
+          $env:RUSTINHO_DADOS = $dados
+          $proc = Start-Process -FilePath "$dir\rustinho.exe" -WorkingDirectory $dir -PassThru
+          for ($i = 0; $i -lt 60 -and -not (Test-Path "$dados\rustinho.db"); $i++) { Start-Sleep -Seconds 1 }
+          $vivo = -not $proc.HasExited
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$dados\rustinho.db")) { throw "O Rustinho instalado não criou o banco (estava aberto: $vivo)" }
+          "Instalado em $dir (com as 4 DLLs do Visual C++); abriu e criou o banco em $dados (estava aberto: $vivo)." | Tee-Object -Append -FilePath saida\instalador.txt
+      - name: Portátil (pasta, isolamento, ZIP)
+        shell: pwsh
+        run: |
+          trap { Write-Output "::error title=Falha nesta etapa::$($_.Exception.Message) (linha $($_.InvocationInfo.ScriptLineNumber))"; break }
+          $nome = "Rustinho-$env:VERSAO-Windows-portatil"
+          $p = "portatil\$nome"
+          New-Item -ItemType Directory -Force portatil | Out-Null
+          Copy-Item -Recurse dist $p
+          # A marca do modo portátil e as instruções (texto do Windows: UTF-8 com BOM e CRLF).
+          $utf8 = New-Object System.Text.UTF8Encoding $true
+          foreach ($f in "rustinho-portatil.txt","LEIA-ME.txt") {
+            $t = (Get-Content -Raw -Encoding UTF8 "instalador\portatil\$f") -replace "`r?`n", "`r`n"
+            [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) $f), $t, $utf8)
+          }
+          $t = (Get-Content -Raw -Encoding UTF8 LICENSE) -replace "`r?`n", "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "LICENCA.txt"), $t, $utf8)
+          $t = (Get-Content -Raw -Encoding UTF8 docs\ROTEIRO-linux-completo.md) -replace "`r?`n", "`r`n"
+          [System.IO.File]::WriteAllText((Join-Path (Resolve-Path $p) "ROTEIRO-DE-TESTE.txt"), $t, $utf8)
+          New-Item -ItemType Directory -Force "$p\dados" | Out-Null
+          # Abre uma CÓPIA sem tela (offscreen): os dados ficam em "dados"
+          # dentro dela, e nada aparece na pasta do Rustinho instalado
+          # (%LOCALAPPDATA%\Rustinho) nem na de RUSTINHO_DADOS.
+          $copia = "conferir\$nome"
+          New-Item -ItemType Directory -Force conferir | Out-Null
+          Copy-Item -Recurse $p $copia
+          Copy-Item "$env:QT_ROOT_DIR\plugins\platforms\qoffscreen.dll" "$copia\platforms\"
+          $instalado = Join-Path $env:LOCALAPPDATA "Rustinho"
+          $outra = Join-Path $env:RUNNER_TEMP "rustinho-dados-env"
+          if (Test-Path $instalado) { throw "A pasta do Rustinho instalado já existia no robô: $instalado" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:QT_QUICK_BACKEND = "software"
+          $env:RUSTINHO_DADOS = $outra
+          $proc = Start-Process -FilePath "$copia\rustinho.exe" -WorkingDirectory $copia -PassThru
+          $banco = "$copia\dados\rustinho.db"
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $banco); $i++) { Start-Sleep -Seconds 1 }
+          Start-Sleep -Seconds 3
+          $vivo = -not $proc.HasExited
+          if ($vivo) { Stop-Process -Id $proc.Id -Force }
+          if (-not (Test-Path $banco)) { throw "O portátil não criou o banco em dados\ (o programa abriu? $vivo)" }
+          if (Test-Path $instalado) { throw "O portátil criou dados na pasta do Rustinho instalado: $instalado" }
+          if (Test-Path $outra) { throw "O portátil usou RUSTINHO_DADOS: $outra" }
+          if (Test-Path "$p\dados\rustinho.db") { throw "A pasta que vai no ZIP ganhou um banco" }
+          "Isolamento conferido: banco em dados\ da cópia; nada em LOCALAPPDATA\Rustinho nem em RUSTINHO_DADOS." | Out-File -Encoding utf8 saida\isolamento.txt
+          $zip = "saida\$nome.zip"
+          Compress-Archive -Path $p -DestinationPath $zip -CompressionLevel Optimal
+          $h = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$h  $nome.zip" | Out-File -Encoding ascii "saida\$nome.zip.sha256"
+          Write-Output "::notice title=ZIP portátil::$nome.zip%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Windows
+          path: |
+            saida/*-Windows-instalador.exe
+            saida/*-Windows-instalador.exe.sha256
+            saida/instalador.txt
+            saida/dlls.txt
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Windows-portatil
+          path: |
+            saida/*.zip
+            saida/*.zip.sha256
+            saida/isolamento.txt
+          retention-days: 90
+
+  # L4: os pacotes desta execução conferidos como um usuário os usaria
+  # (instalar na pasta padrão, atalhos, firewall, desinstalar; AppImage com o
+  # FUSE). J08: a verificação roda sobre ESTA execução.
+  verificar:
+    needs: [pacote-windows, pacote-linux]
+    uses: ./.github/workflows/verificar-pacotes.yml
+
+  # L4: APKs de 64 e 32 bits, com a versão da raiz (I06) e o versionCode da
+  # DP-36 (J08). Sem a chave da loja, o APK sai assinado só para teste.
+  apk:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: "64bits"
+            qt: android_arm64_v8a
+            rust: aarch64-linux-android
+            sufixo: ""
+          - nome: "32bits"
+            qt: android_armv7
+            rust: armv7-linux-androideabi
+            sufixo: "-32bits"
+    name: apk (${{ matrix.nome }})
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: apk-${{ matrix.nome }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_VERSAO }}
+          targets: ${{ matrix.rust }}
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Versão (raiz) e versionCode (DP-36)
+        run: |
+          set -eu
+          eval "$(python3 .github/scripts/versao_android.py)"
+          DO_APP=$(grep -m1 '^version' android/rust/Cargo.toml | cut -d'"' -f2)
+          if [ "$DO_APP" != "$VERSAO" ]; then
+            echo "::error title=Versão do app de Android::android/rust/Cargo.toml tem $DO_APP; a raiz tem $VERSAO (AUD33-I06)"
+            exit 1
+          fi
+          echo "VERSAO=$VERSAO" >> $GITHUB_ENV
+          echo "CODIGO=$CODIGO" >> $GITHUB_ENV
+          sed -i "s/^project(Rustinho VERSION [0-9.]*/project(Rustinho VERSION $BASE/" android/CMakeLists.txt
+          mkdir -p saida
+          printf 'VERSAO=%s\nCODIGO=%s\n' "$VERSAO" "$CODIGO" > saida/versao.txt
+          echo "::notice title=Versão do APK::$VERSAO (versionCode $CODIGO)"
+      - name: Qt (computador e Android)
+        run: |
+          set -o pipefail
+          (
+            pip install --quiet aqtinstall &&
+            aqt install-qt linux desktop "$QT_VERSAO" linux_gcc_64 -O "$RUNNER_TEMP/qt" &&
+            aqt install-qt linux android "$QT_VERSAO" ${{ matrix.qt }} -m qtmultimedia -O "$RUNNER_TEMP/qt" &&
+            chmod +x "$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}/bin/"* &&
+            ls "$RUNNER_TEMP/qt/$QT_VERSAO"
+          ) 2>&1 | tee -a registro.txt
+      - name: NDK
+        run: |
+          if [ ! -d "$ANDROID_SDK_ROOT/ndk/$NDK_VERSAO" ]; then
+            yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSAO" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+          fi
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VERSAO" >> $GITHUB_ENV
+          sudo apt-get install -y ninja-build > /dev/null 2>&1 || true
+      # Com a chave da loja (segredos do GitHub), o APK pode ir para uma
+      # versão. Sem ela, é assinado com uma chave de uso único, só para testar,
+      # e o portão recusa publicá-lo.
+      - name: Assinatura
+        env:
+          CHAVE: ${{ secrets.ANDROID_CHAVE_BASE64 }}
+          SENHA: ${{ secrets.ANDROID_CHAVE_SENHA }}
+        run: |
+          if [ -n "$CHAVE" ] && [ -n "$SENHA" ]; then
+            echo "$CHAVE" | base64 -d > "$RUNNER_TEMP/rustinho.jks"
+            echo "::add-mask::$SENHA"
+            echo "QT_ANDROID_KEYSTORE_STORE_PASS=$SENHA" >> $GITHUB_ENV
+            echo "QT_ANDROID_KEYSTORE_KEY_PASS=$SENHA" >> $GITHUB_ENV
+            echo "loja" > saida/assinatura.txt
+          else
+            SENHA=$(openssl rand -hex 16)
+            echo "::add-mask::$SENHA"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/rustinho.jks" -alias rustinho -keyalg RSA -keysize 2048 \
+              -validity 30 -storepass "$SENHA" -keypass "$SENHA" -dname "CN=Rustinho teste" > /dev/null 2>&1
+            echo "QT_ANDROID_KEYSTORE_STORE_PASS=$SENHA" >> $GITHUB_ENV
+            echo "QT_ANDROID_KEYSTORE_KEY_PASS=$SENHA" >> $GITHUB_ENV
+            echo "teste" > saida/assinatura.txt
+            echo "::warning title=Assinatura::Sem a chave da loja: APK só para teste (o portão não deixa publicar)."
+          fi
+          echo "QT_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/rustinho.jks" >> $GITHUB_ENV
+          echo "QT_ANDROID_KEYSTORE_ALIAS=rustinho" >> $GITHUB_ENV
+      - name: Compilar o APK
+        env:
+          # 32 bits: o compilador do C++ da ponte precisa saber que é ARMv7.
+          CFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
+          CXXFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
+        run: |
+          QT_ANDROID="$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}"
+          QT_HOST="$RUNNER_TEMP/qt/$QT_VERSAO/gcc_64"
+          set -o pipefail
+          (
+            "$QT_ANDROID/bin/qt-cmake" -S android -B build-android -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DQT_HOST_PATH="$QT_HOST" \
+              -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+              -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" \
+              -DQT_ANDROID_SIGN_APK=ON \
+              -DRUSTINHO_QMAKE="$QT_ANDROID/bin/qmake" \
+              -DRUSTINHO_VERSAO_CODIGO=$CODIGO \
+              -DRUSTINHO_VERSAO_NOME="$VERSAO" &&
+            cmake --build build-android --target apk
+          ) 2>&1 | tee -a registro.txt
+      - name: Mostrar o erro
+        if: failure()
+        run: |
+          touch registro.txt
+          grep -n -i -E "error|erro|failed|fatal|undefined" registro.txt | tail -40 > erros.txt || true
+          tail -80 registro.txt > fim.txt
+          python3 - <<'PY'
+          def anotar(titulo, arquivo):
+              t = open(arquivo, errors="replace").read()[-6000:]
+              t = t.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print(f"::error title={titulo}::{t}")
+          anotar("linhas com erro", "erros.txt")
+          anotar("fim do registro", "fim.txt")
+          PY
+      - name: Juntar o APK
+        run: |
+          APK=$(find build-android -name "*.apk" | grep -v unsigned | head -1)
+          [ -z "$APK" ] && APK=$(find build-android -name "*.apk" | head -1)
+          echo "APK: $APK"
+          cp "$APK" "saida/Rustinho-$VERSAO-Android${{ matrix.sufixo }}.apk"
+          ls -la saida
+      # Confere no próprio APK quem assinou (C-10): o certificado do APK tem
+      # de ser o da chave usada, e nunca o da chave antiga, que era pública.
+      - name: Conferir a assinatura
+        run: |
+          set -eu
+          ASSINADOR=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/ | sort -V | tail -1)apksigner
+          APK=$(ls saida/*.apk)
+          "$ASSINADOR" verify --print-certs "$APK" > certs.txt
+          DO_APK=$(grep -m1 "SHA-256 digest" certs.txt | awk '{print $NF}' | tr 'a-f' 'A-F')
+          DA_CHAVE=$(keytool -list -v -keystore "$RUNNER_TEMP/rustinho.jks" -storepass "$QT_ANDROID_KEYSTORE_STORE_PASS" -alias rustinho \
+                       | grep -m1 "SHA256:" | awk '{print $2}' | tr -d ':')
+          ANTIGA=F00729D099BFBBC2C1F74AB560F580CC708E16F028BF32C39F293AEEC983223A
+          echo "Certificado do APK: $DO_APK"
+          [ -n "$DO_APK" ] && [ "$DO_APK" = "$DA_CHAVE" ] || { echo "::error title=Assinatura::o certificado do APK não é o da chave usada"; exit 1; }
+          [ "$DO_APK" != "$ANTIGA" ] || { echo "::error title=Assinatura::APK assinado com a chave antiga (pública)"; exit 1; }
+          echo "$DO_APK" > saida/certificado.txt
+          sha256sum "$APK" | awk '{print $1}' > saida/arquivo.txt
+          echo "| APK | versionCode | certificado (SHA-256) | arquivo (SHA-256) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| $(basename "$APK") ($(cat saida/assinatura.txt)) | $CODIGO | $DO_APK | $(cat saida/arquivo.txt) |" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Rustinho-Android${{ matrix.sufixo }}
+          path: saida/
+          retention-days: 90
+
+  # L4: o APK num Android de mentira (emulador), com fotos. O de 64 bits
+  # reprova o pipeline. O de 32 bits roda e fica REGISTRADO no manifesto, sem
+  # reprovar: a imagem x86 da API 28 deixa a tela cinza (EGL_BAD_CONFIG), como
+  # no PEND-18 do Moto e6i; a API 34 não instala ARMv7 e a 30 cai no tradutor.
+  # O alvo de verdade é o aparelho (L6); o emulador não o substitui.
+  emulador:
+    needs: apk
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nome: "64bits"
+            sufixo: ""
+            curto: ""
+            api: 34
+            arquitetura: x86_64
+            bloqueia: true
+          - nome: "32bits"
+            sufixo: "-32bits"
+            curto: "1"
+            api: 28
+            arquitetura: x86
+            bloqueia: false
+    name: emulador (${{ matrix.nome }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: emulador-${{ matrix.nome }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Android${{ matrix.sufixo }}
+          path: saida
+      - name: Liberar o KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulador
+        id: emulador
+        continue-on-error: ${{ !matrix.bloqueia }}
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          CURTO: ${{ matrix.curto }}
+          # "automatico" não grava nada (android/testar.sh só age com gpu ou software).
+          DESENHO: ${{ inputs.desenho }}
+        with:
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arquitetura }}
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -camera-back emulated
+          script: bash android/testar.sh
+      - name: Resultado
+        if: always()
+        shell: bash
+        env:
+          SAIU: ${{ steps.emulador.outcome }}
+          BLOQUEIA: ${{ matrix.bloqueia }}
+        run: |
+          mkdir -p fotos
+          if [ "$SAIU" = success ]; then r=aprovado; else r="reprovado ($SAIU)"; fi
+          if [ "$BLOQUEIA" = true ]; then
+            obs="bloqueia o pipeline"
+          else
+            obs="não bloqueia: limitação conhecida do emulador x86 da API 28 (tela cinza, PEND-18); só o Moto e6i (L6) valida o APK de 32 bits"
+          fi
+          printf 'resultado=%s\nbloqueia=%s\nobservacao=%s\n' "$r" "$BLOQUEIA" "$obs" > fotos/resultado.txt
+          cat fotos/resultado.txt
+          [ "$SAIU" = success ] || echo "::warning title=Emulador ${{ matrix.nome }}::$r — $obs"
+          if [ -f fotos/erros.txt ]; then
+            python3 -c "t=open('fotos/erros.txt',errors='replace').read()[-6000:] or 'nenhum'; print('::warning title=registro do app::'+t.replace('%','%25').replace('\r','').replace('\n','%0A'))"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Emulador-${{ matrix.nome }}
+          path: fotos/
+          retention-days: 90
+
+  # O MANIFESTO da execução (MANIFESTO.json, SHA256SUMS.txt, NOTAS.md). Roda
+  # sempre (para registrar também as reprovações) e REPROVA se qualquer job
+  # não passou. Não publica nada.
+  manifesto:
+    needs: [formato, nucleo-linux, nucleo-windows, programa-e-telas, pacote-linux, pacote-windows, verificar, apk, emulador]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artefatos
+      - name: Montar o manifesto
+        id: manifesto
+        env:
+          NECESSARIOS: ${{ toJSON(needs) }}
+          FERRAMENTA_RUST: ${{ env.RUST_VERSAO }}
+          FERRAMENTA_QT: ${{ env.QT_VERSAO }}
+          FERRAMENTA_NDK: ${{ env.NDK_VERSAO }}
+          FERRAMENTA_RCLONE: ${{ env.RCLONE_VERSAO }}
+          FERRAMENTA_LINUXDEPLOY: "1-alpha-20251107-1 (plugin qt 1-alpha-20250213-1)"
+          FERRAMENTA_INNO_SETUP: "veja conferencias.instalador"
+          FERRAMENTA_JAVA: "temurin 17"
+        run: python3 .github/scripts/manifesto.py artefatos manifesto
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Manifesto
+          path: manifesto/
+          retention-days: 90
+      - name: Reprovar se algum job não passou
+        if: steps.manifesto.outputs.aprovado != 'sim'
+        run: |
+          echo "::error title=Manifesto::a execução não foi aprovada (veja MANIFESTO.json, jobs e problemas)"
+          exit 1

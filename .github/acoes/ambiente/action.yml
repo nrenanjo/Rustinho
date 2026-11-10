@@ -1,0 +1,25 @@
+# Registra a máquina do job (sistema, arquitetura, imagem e versão da imagem)
+# num artefato "Ambiente-<nome>", que o manifesto da execução junta
+# (dev.3.3, DP-02a: "imagens das máquinas" no MANIFESTO.json).
+name: Ambiente do job
+description: Registra a máquina deste job para o manifesto.
+inputs:
+  nome:
+    description: Nome do job (único na execução).
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        NOME: ${{ inputs.nome }}
+      run: |
+        mkdir -p ambiente-do-job
+        printf '{"job":"%s","sistema":"%s","arquitetura":"%s","imagem":"%s","versao_da_imagem":"%s"}\n' \
+          "$NOME" "$RUNNER_OS" "$RUNNER_ARCH" "${ImageOS:-}" "${ImageVersion:-}" > ambiente-do-job/ambiente.json
+        cat ambiente-do-job/ambiente.json
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: Ambiente-${{ inputs.nome }}
+        path: ambiente-do-job/ambiente.json
+        retention-days: 90

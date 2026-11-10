@@ -1,0 +1,97 @@
+# CI do Rustinho (dev.3.3, DP-02a e DP-02b; AUD33-J01, J02, J03).
+#
+# - Gatilhos por PADRÃO (J01): todo push em main, desenvolvimento-*,
+#   stabilization/* e ensaio/* (branches descartáveis de ensaio), toda tag v*,
+#   pull_request para main e desenvolvimento-*, e à mão.
+# - Um pipeline só (J03): validar.yml, o mesmo em todos os caminhos.
+# - Portão (J02): roda em toda execução, só se TODOS os jobs do pipeline
+#   passaram, e confere manifesto, commit, SHA-256 e versões.
+# - Rascunho de versão: só em tag v*, depende do pipeline e do portão (sem
+#   always()), e espera a aprovação do dono no ambiente "publicacao". Sai
+#   como RASCUNHO; publicar é ato do dono. Nenhum outro workflow publica.
+#
+# A forma deste arquivo é conferida por .github/scripts/conferir_portao.py.
+name: CI
+
+on:
+  push:
+    branches: [main, "desenvolvimento-*", "stabilization/*", "ensaio/*"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, "desenvolvimento-*"]
+  # À mão (ensaio): nunca prepara versão; o manifesto registra o commit exato.
+  workflow_dispatch:
+    inputs:
+      desenho:
+        description: "Modo de desenho no teste do emulador (experiência do PEND-18)"
+        type: choice
+        options: [automatico, gpu, software]
+        default: automatico
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validar:
+    uses: ./.github/workflows/validar.yml
+    with:
+      desenho: ${{ inputs.desenho || 'automatico' }}
+    secrets: inherit
+
+  portao:
+    name: Portão
+    needs: validar
+    runs-on: ubuntu-24.04
+    env:
+      ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artefatos
+      - name: Conferir manifesto, commit, pacotes e versões
+        run: python3 .github/scripts/portao.py artefatos
+
+  rascunho:
+    name: Rascunho da versão
+    needs: [validar, portao]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: publicacao
+    permissions:
+      contents: write
+    env:
+      ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artefatos
+      - name: Conferir de novo e juntar os arquivos
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/portao.py artefatos
+          mkdir -p versao
+          python3 - <<'PY'
+          import json, shutil
+          m = json.load(open("artefatos/Manifesto/MANIFESTO.json", encoding="utf-8"))
+          for p in m["pacotes"]:
+              shutil.copy(f"artefatos/{p['artefato']}/{p['arquivo']}", "versao/")
+          for f in ("MANIFESTO.json", "SHA256SUMS.txt"):
+              shutil.copy(f"artefatos/Manifesto/{f}", "versao/")
+          PY
+          ( cd versao && grep -v -e MANIFESTO.json -e SHA256SUMS.txt <(ls) | while read -r f; do grep -q "  $f\$" SHA256SUMS.txt || { echo "fora do SHA256SUMS: $f"; exit 1; }; done && sha256sum -c SHA256SUMS.txt )
+          ls -la versao
+      - name: Rascunho da versão (não publicado)
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Rustinho ${{ github.ref_name }}${{ contains(github.ref_name, '-') && ' — versão de TESTE (não estável)' || '' }}
+          body_path: artefatos/Manifesto/NOTAS.md
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: false
+          files: versao/*

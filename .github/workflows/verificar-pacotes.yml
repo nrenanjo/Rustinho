@@ -1,15 +1,17 @@
-# Confere os pacotes já montados por uma execução do Montar, sem montar nada
-# de novo e sem publicar nada:
+# Confere os pacotes já montados por uma execução do CI, sem montar nada de
+# novo e sem publicar nada:
 # - Windows: o instalador é instalado como um usuário faria (pasta padrão,
 #   atalhos), os arquivos, a versão, o ícone, os atalhos e a regra do firewall
 #   são conferidos, o Rustinho é aberto (pasta de dados padrão) e a janela é
 #   fotografada; depois ele é desinstalado.
 # - Linux: o AppImage é aberto num Ubuntu 22.04 (como o usuário abre, com o
 #   FUSE), numa tela virtual, e a janela é fotografada.
-# Uso: Actions › Verificar pacotes › número da execução do Montar. O GitHub só
-# deixa disparar à mão o que existe na main; fora dela, este workflow roda ao
-# enviar uma mudança em .github/verificar-pacotes.execucao (o número da
-# execução do Montar a conferir).
+# Uso (dev.3.3, AUD33-J08: a verificação roda sobre a execução indicada, sem
+# depender de branch):
+# - o pipeline "Validar" chama este workflow em TODA execução, sobre os
+#   pacotes que ela mesma montou (sem "execucao");
+# - à mão: Actions › Verificar pacotes › número da execução do CI (o GitHub só
+#   deixa disparar à mão o que existe na main).
 
 name: Verificar pacotes
 
@@ -17,13 +19,15 @@ on:
   workflow_dispatch:
     inputs:
       execucao:
-        description: "Número da execução do Montar"
+        description: "Número da execução do CI"
         required: true
-  push:
-    branches: [stabilization/0.9.18]
-    paths:
-      - .github/verificar-pacotes.execucao
-      - .github/workflows/verificar-pacotes.yml
+  workflow_call:
+    inputs:
+      execucao:
+        description: "Número da execução (vazio = esta execução)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -36,14 +40,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           sparse-checkout: .github
-      - id: qual
-        shell: bash
-        run: echo "execucao=${{ inputs.execucao || '' }}$( [ -n '${{ inputs.execucao }}' ] || tr -dc '0-9' < .github/verificar-pacotes.execucao )" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: verificar-windows
+      # Pacotes desta execução (chamado pelo pipeline) ou da execução indicada.
+      - if: ${{ inputs.execucao == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Rustinho-Windows
           path: pacote
-          run-id: ${{ steps.qual.outputs.execucao }}
+      - if: ${{ inputs.execucao != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Windows
+          path: pacote
+          run-id: ${{ inputs.execucao }}
           github-token: ${{ github.token }}
       - name: Instalar, conferir, abrir e desinstalar
         shell: pwsh
@@ -68,7 +79,8 @@ jobs:
           # Arquivos: os que o Rustinho precisa para abrir.
           Get-ChildItem $dir -Recurse -File | ForEach-Object { "{0,12}  {1}" -f $_.Length, $_.FullName.Substring($dir.Length + 1) } | Set-Content verificacao\arquivos.txt
           anota "arquivos instalados: $((Get-ChildItem $dir -Recurse -File).Count)"
-          foreach ($f in "rustinho.exe", "rclone.exe", "rustinho.ico", "LICENCA.txt", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Qml.dll", "Qt6Quick.dll", "platforms\qwindows.dll", "unins000.exe") {
+          # J07: as DLLs do Visual C++ também (sem elas o Rustinho não abre num Windows sem o runtime).
+          foreach ($f in "rustinho.exe", "rclone.exe", "rustinho.ico", "LICENCA.txt", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Qml.dll", "Qt6Quick.dll", "platforms\qwindows.dll", "unins000.exe", "msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll") {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "faltou $f" }
           }
           foreach ($m in "qml\QtQuick\Controls", "qml\QtQuick\Layouts", "qml\Qt\labs\folderlistmodel") {
@@ -141,13 +153,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           sparse-checkout: .github
-      - id: qual
-        run: echo "execucao=${{ inputs.execucao || '' }}$( [ -n '${{ inputs.execucao }}' ] || tr -dc '0-9' < .github/verificar-pacotes.execucao )" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/acoes/ambiente
+        with:
+          nome: verificar-linux
+      # Pacotes desta execução (chamado pelo pipeline) ou da execução indicada.
+      - if: ${{ inputs.execucao == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Rustinho-Linux
           path: pacote
-          run-id: ${{ steps.qual.outputs.execucao }}
+      - if: ${{ inputs.execucao != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Rustinho-Linux
+          path: pacote
+          run-id: ${{ inputs.execucao }}
           github-token: ${{ github.token }}
       - name: Abrir o AppImage como um usuário (tela virtual)
         run: |
