@@ -3,23 +3,28 @@
 //!
 //! Gera (uma vez) um banco com peças sintéticas — nomes de autopeças, marcas,
 //! códigos de barras, códigos originais, similares, carros e anos, códigos de
-//! fornecedor, códigos antigos e movimentos de estoque — e mede o tempo de
-//! `busca::buscar` num conjunto fixo de consultas típicas.
+//! fornecedor, códigos antigos, movimentos de estoque e, desde a dev.3.3
+//! (AUD33-K03), GTINs comerciais e tributáveis em `produto_gtin` e pendências
+//! de identificação do XML — e mede o tempo de `busca::buscar`,
+//! `busca::pelo_codigo_exato` e das pendências que a tela de Peças consulta,
+//! num conjunto fixo de consultas típicas.
 //!
 //! ```text
 //! RUSTINHO_MEDIR_PASTA=/tmp/medir RUSTINHO_MEDIR_PECAS=4000,20000 RUSTINHO_MEDIR_RODADAS=7 \
 //!   cargo test --release -p rustinho-nucleo --test medir_busca -- --ignored --nocapture
 //! ```
 //!
-//! O banco fica em `<pasta>/busca_<peças>.db` e é reaproveitado nas medições
-//! seguintes (mesmos dados para medir antes e depois de uma mudança). Sem
-//! `RUSTINHO_MEDIR_PASTA`, usa uma pasta no diretório temporário.
+//! O banco fica em `<pasta>/busca_g2_<peças>.db` e é reaproveitado nas
+//! medições seguintes (mesmos dados para medir antes e depois de uma mudança).
+//! O `g2` é a versão do gerador: mudou o gerador, muda o nome (um banco do
+//! gerador antigo nunca é confundido com o novo). Sem `RUSTINHO_MEDIR_PASTA`,
+//! usa uma pasta no diretório temporário.
 
 use std::path::PathBuf;
 use std::time::Instant;
 
 use rustinho_nucleo::banco::Banco;
-use rustinho_nucleo::{busca, faixas, pessoas, produtos, tempo, texto, usuarios};
+use rustinho_nucleo::{busca, faixas, importar, pessoas, produtos, tempo, texto, usuarios};
 
 /// Sorteio determinístico (xorshift64*), sem dependência nova.
 struct Sorteio(u64);
@@ -277,6 +282,22 @@ fn gerar(caminho: &PathBuf, quantas: usize) {
         if s.chance(70) {
             f.estoque_inicial = format!("{}", 1 + s.ate(20));
         }
+        // K03: GTINs só em produto_gtin (fora do codigo_barras), como a
+        // importação do XML deixa: comercial (cEAN) e, às vezes, tributável.
+        if s.chance(35) {
+            f.gtins.push(produtos::GtinFicha {
+                gtin: ean13(300_000_000 + i as u64),
+                tipo: "comercial".into(),
+                origem: "cEAN".into(),
+            });
+            if s.chance(50) {
+                f.gtins.push(produtos::GtinFicha {
+                    gtin: ean13(600_000_000 + i as u64),
+                    tipo: "tributavel".into(),
+                    origem: "cEANTrib".into(),
+                });
+            }
+        }
         for _ in 0..s.ate(4) {
             let (montadora, modelos) = CARROS[s.ate(CARROS.len())];
             let ano = 1995 + s.ate(28);
@@ -331,6 +352,35 @@ fn gerar(caminho: &PathBuf, quantas: usize) {
             eprint!("\r{} peças", i + 1 + capturas.len());
         }
     }
+    // K03: pendências de identificação do XML (uma a cada 40 peças, metade
+    // ainda pendente), como a importação deixa.
+    for k in 0..quantas / 40 {
+        let forn = &fornecedores[s.ate(fornecedores.len())];
+        let codigo = s.codigo();
+        let descricao = format!("{} {}", s.um(TIPOS), s.um(QUALIFICADORES));
+        let pendente = k % 2 == 0;
+        c.execute(
+            "INSERT INTO xml_pendencia_identificacao (id, fornecedor_id, fornecedor_nome, fornecedor_documento,
+                 chave_nfe, numero_nfe, codigo_fornecedor, codigo_compacto, gtin_comercial, origem_comercial,
+                 descricao, descricao_compacta, motivo, situacao, criado_em, resolvido_em)
+             VALUES (?1, ?2, 'FORNECEDOR SINTETICO', '00000000000000', ?3, ?4, ?5, ?6, ?7, 'cEAN', ?8, ?9,
+                 'sem_correspondencia', ?10, '2026-10-15T10:00:00Z', ?11)",
+            rusqlite::params![
+                tempo::novo_id(),
+                forn,
+                format!("3526{:040}", k),
+                format!("{}", 1000 + k),
+                codigo,
+                texto::compactar(&codigo),
+                ean13(900_000_000 + k as u64),
+                descricao,
+                texto::compactar(&descricao),
+                if pendente { "pendente" } else { "resolvida" },
+                if pendente { None } else { Some("2026-10-16T10:00:00Z") },
+            ],
+        )
+        .unwrap();
+    }
     c.execute_batch("COMMIT").unwrap();
     c.execute_batch("ANALYZE").unwrap();
     eprintln!("\rgerado: {quantas} peças em {:.1} s", inicio.elapsed().as_secs_f64());
@@ -373,7 +423,7 @@ fn medir_busca() {
 
 fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     std::fs::create_dir_all(pasta).unwrap();
-    let caminho = pasta.join(format!("busca_{quantas}.db"));
+    let caminho = pasta.join(format!("busca_g2_{quantas}.db"));
     if !caminho.exists() {
         gerar(&caminho, quantas);
     }
@@ -386,7 +436,10 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
              || (SELECT COUNT(*) FROM produto_codigo_antigo) || ' códigos antigos, '
              || (SELECT COUNT(*) FROM produto_aplicacao) || ' aplicações, '
              || (SELECT COUNT(*) FROM produto_equivalente) || ' similares, '
-             || (SELECT COUNT(*) FROM estoque_movimento) || ' movimentos de estoque'",
+             || (SELECT COUNT(*) FROM estoque_movimento) || ' movimentos de estoque, '
+             || (SELECT COUNT(*) FROM produto_gtin) || ' GTINs em produto_gtin, '
+             || (SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente') || ' pendências XML abertas e '
+             || (SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'resolvida') || ' resolvidas'",
     );
     let versao = um_valor(&b, "SELECT sqlite_version()");
     println!("# banco {} — {pecas} peças; {contagens}; SQLite {versao}", caminho.display());
@@ -403,6 +456,11 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     let prefixo: String = texto::compactar(&do_fornecedor).chars().take(4).collect();
     let antigo = um_valor(&b, "SELECT codigo FROM produto_codigo_antigo ORDER BY rowid LIMIT 1 OFFSET 99");
     let similar = um_valor(&b, "SELECT codigo FROM produto_equivalente ORDER BY rowid LIMIT 1 OFFSET 321");
+    // K03: GTINs que só estão em produto_gtin (a varredura LIKE da dev.3).
+    let gtin = um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'comercial' ORDER BY rowid LIMIT 1 OFFSET 333");
+    let gtin_trib =
+        um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'tributavel' ORDER BY rowid LIMIT 1 OFFSET 111");
+    let gtin_parcial: String = gtin.chars().skip(4).take(7).collect();
 
     let consultas: Vec<String> = [
         "",
@@ -434,6 +492,9 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
         &prefixo,
         &antigo,
         &similar,
+        &gtin,
+        &gtin_trib,
+        &gtin_parcial,
         "pa",
         "p",
         "xyzw",
@@ -485,7 +546,9 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     // Leitor de código de barras / Enter com código.
     let mut amostras: Vec<f64> = Vec::new();
     println!("\n## leitor (pelo_codigo_exato)");
-    for consulta in [&barras, &interno, &original, &do_fornecedor, &antigo, &similar, &"tcf 01".to_string()] {
+    for consulta in
+        [&barras, &interno, &original, &do_fornecedor, &antigo, &similar, &gtin, &gtin_trib, &"tcf 01".to_string()]
+    {
         let _ = busca::pelo_codigo_exato(&b.conn, consulta).unwrap();
         let mut tempos = Vec::new();
         let mut n = 0;
@@ -505,6 +568,23 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
         percentil(&amostras, 0.95),
         amostras[amostras.len() - 1]
     );
+    // K03: as pendências que a tela de Peças consulta (aviso e lista).
+    println!("\n## pendências do XML (tela de Peças)");
+    for (nome, rodar) in [
+        ("contar_pendencias", &(|| importar::contar_pendencias(&b.conn) as usize) as &dyn Fn() -> usize),
+        ("listar_pendencias", &|| importar::listar_pendencias(&b.conn).unwrap().len()),
+    ] {
+        let _ = rodar();
+        let mut tempos = Vec::new();
+        let mut n = 0;
+        for _ in 0..rodadas {
+            let t = Instant::now();
+            n = rodar();
+            tempos.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        tempos.sort_by(f64::total_cmp);
+        println!("{:<34} {:>7.2}ms  {n}", nome, percentil(&tempos, 0.5));
+    }
     todas.sort_by(f64::total_cmp);
     println!(
         "RESUMO GERAL buscar (limites 200 e 30): {} amostras — p50 {:.2} ms, p95 {:.2} ms, máximo {:.2} ms",
