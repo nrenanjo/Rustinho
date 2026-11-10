@@ -421,6 +421,7 @@ struct Escrita {
     tabela: String,
     teste: bool,
     linha: usize,
+    minuscula: bool,
 }
 
 /// Lê um arquivo que está no módulo `base`; `teste_inicial` quando o arquivo
@@ -518,8 +519,8 @@ fn analisar(fonte: &str, onde: &str, base: &[String], teste_inicial: bool) -> An
             continue;
         }
         if t[i].tipo == Tipo::Texto {
-            for tabela in escritas_sql(&t[i].texto) {
-                a.escritas.push(Escrita { de: caminho.clone(), tabela, teste, linha: t[i].linha });
+            for (tabela, minuscula) in escritas_sql_com_caixa(&t[i].texto) {
+                a.escritas.push(Escrita { de: caminho.clone(), tabela, teste, linha: t[i].linha, minuscula });
             }
         }
         i += 1;
@@ -577,15 +578,32 @@ fn reexportes(fonte: &str, onde: &str) -> BTreeMap<String, String> {
 /// As tabelas em que cada texto de SQL grava (INSERT, REPLACE, UPDATE,
 /// DELETE). Nome montado na hora (`{tabela}`, `{}`) vira "*". Eventos de
 /// gatilho (`AFTER UPDATE ON t`) e `ON CONFLICT … DO UPDATE SET` não gravam
-/// por si (o corpo do gatilho, sim). Só palavras-chave em maiúsculas: o SQL
-/// do projeto é todo assim, e texto comum ("update depois") não conta.
+/// por si (o corpo do gatilho, sim).
+///
+/// Palavras-chave em maiúsculas OU em minúsculas (a dev.3 gravou
+/// `produto_gtin` e `xml_pendencia_identificacao` em minúsculas e a trava não
+/// as via: AUD33-K02); mistas ("Update") não contam. Para texto comum não
+/// contar ("update depois"), o UPDATE só vale com SET logo depois do nome.
 fn escritas_sql(texto: &str) -> Vec<String> {
+    escritas_sql_com_caixa(texto).into_iter().map(|(t, _)| t).collect()
+}
+
+/// Como `escritas_sql`, dizendo também se a gravação estava em minúsculas.
+fn escritas_sql_com_caixa(texto: &str) -> Vec<(String, bool)> {
     let p: Vec<String> = texto
         .split(|c: char| c.is_whitespace() || c == '(' || c == ',' || c == ';')
         .filter(|x| !x.is_empty())
         .map(String::from)
         .collect();
-    let maiusc = |k: usize| p.get(k).cloned().unwrap_or_default();
+    // A palavra em maiúsculas, se estiver toda em maiúsculas ou toda em minúsculas.
+    let maiusc = |k: usize| {
+        let x = p.get(k).cloned().unwrap_or_default();
+        if x == x.to_ascii_lowercase() {
+            x.to_ascii_uppercase()
+        } else {
+            x
+        }
+    };
     let tabela = |k: usize| -> Option<String> {
         let t = p.get(k)?;
         if t.starts_with('{') {
@@ -601,7 +619,7 @@ fn escritas_sql(texto: &str) -> Vec<String> {
         let mut j = k + 1;
         let alvo = match maiusc(k).as_str() {
             // "INSERT OR REPLACE INTO": o REPLACE não é outra gravação.
-            "REPLACE" if k > 0 && p[k - 1] == "OR" => continue,
+            "REPLACE" if k > 0 && maiusc(k - 1) == "OR" => continue,
             "INSERT" | "REPLACE" => {
                 if maiusc(j) == "OR" {
                     j += 2;
@@ -615,7 +633,7 @@ fn escritas_sql(texto: &str) -> Vec<String> {
                 if maiusc(j) == "OR" {
                     j += 2;
                 }
-                if ["SET", "ON", "OF"].contains(&maiusc(j).as_str()) {
+                if ["SET", "ON", "OF"].contains(&maiusc(j).as_str()) || maiusc(j + 1) != "SET" {
                     continue;
                 }
                 tabela(j)
@@ -624,7 +642,7 @@ fn escritas_sql(texto: &str) -> Vec<String> {
             _ => continue,
         };
         if let Some(t) = alvo {
-            v.push(t);
+            v.push((t, p.get(k).is_some_and(|x| x.chars().any(|c| c.is_ascii_lowercase()))));
         }
     }
     v
@@ -645,6 +663,8 @@ struct Grafo {
     exemplo: BTreeMap<(String, String), String>,
     /// (tabela, módulo) que grava nela no código de produção, com o primeiro lugar.
     escritores: BTreeMap<(String, String), String>,
+    /// Toda gravação de produção: (lugar, tabela, módulo, em minúsculas).
+    gravacoes: Vec<(String, String, String, bool)>,
     /// Problemas de leitura (o teste falha se houver).
     problemas: Vec<String>,
 }
@@ -751,6 +771,7 @@ fn ler_crate(src: &Path) -> Grafo {
         if e.teste || g.modulos.get(&de).copied().unwrap_or(false) {
             continue;
         }
+        g.gravacoes.push((format!("{onde}:{}", e.linha), e.tabela.clone(), de.clone(), e.minuscula));
         g.escritores.entry((e.tabela, de)).or_insert_with(|| format!("{onde}:{}", e.linha));
     }
     g
@@ -1033,6 +1054,12 @@ fn base_fica_embaixo_sem_sql_e_sem_ciclos() {
 ///
 /// Gerada com `RUSTINHO_DEPENDENCIAS_MOSTRAR=1 cargo test -p rustinho-nucleo
 /// --test dependencias -- --nocapture nenhum_escritor_novo`.
+///
+/// Dev.3.3, passo 1.4 (AUD33-K02): entram as duas tabelas da migração 0024
+/// (`produto_gtin`, `xml_pendencia_identificacao`), gravadas em minúsculas.
+/// Se o leitor voltar a não ver minúsculas, elas "deixam de ter escritor" e o
+/// teste falha. É o embrião da lista única de tabelas (`dados::esquema`, com a
+/// classe de sincronização), que vem com a PEND-35.
 #[rustfmt::skip]
 const ESCRITORES: &[(&str, &[&str])] = &[
     ("*", &["loja"]),
@@ -1068,6 +1095,7 @@ const ESCRITORES: &[(&str, &[&str])] = &[
     ("produto_codigo_antigo", &["importar", "produtos"]),
     ("produto_equivalente", &["produtos"]),
     ("produto_fornecedor", &["compras", "importar"]),
+    ("produto_gtin", &["produtos"]),
     ("produto_preco", &["compras", "produtos"]),
     ("recebimento", &["devolucoes", "receber"]),
     ("recebimento_parcela", &["devolucoes", "receber"]),
@@ -1089,6 +1117,7 @@ const ESCRITORES: &[(&str, &[&str])] = &[
     ("venda", &["vendas"]),
     ("venda_item", &["vendas"]),
     ("venda_pagamento", &["vendas"]),
+    ("xml_pendencia_identificacao", &["importar"]),
 ];
 
 #[test]
@@ -1105,6 +1134,10 @@ fn nenhum_escritor_novo_por_tabela() {
         for (t, ms) in &por_tabela {
             let v: Vec<String> = ms.iter().map(|m| format!("\"{m}\"")).collect();
             println!("    (\"{t}\", &[{}]),", v.join(", "));
+        }
+        println!("== gravações em minúsculas (AUD33-K02):");
+        for (lugar, t, m, _) in g.gravacoes.iter().filter(|x| x.3) {
+            println!("K02 {lugar}: {m} grava {t}");
         }
         println!("== tabelas com mais de um escritor:");
         for (t, ms) in por_tabela.iter().filter(|(_, ms)| ms.len() > 1) {
@@ -1212,7 +1245,16 @@ fn leitor_acha_ciclos() {
 fn leitor_acha_escritas_sql() {
     assert_eq!(escritas_sql("INSERT INTO venda (id) VALUES (?1)"), ["venda"]);
     assert_eq!(escritas_sql("INSERT OR REPLACE INTO config(chave, valor) VALUES (?1, ?2)"), ["config"]);
-    assert!(escritas_sql("insert into config values (1)").is_empty());
+    // K02: minúsculas contam (as seis gravações da dev.3 são assim); mistas, não.
+    assert_eq!(escritas_sql("insert into config values (1)"), ["config"]);
+    assert_eq!(escritas_sql("insert or ignore into produto_gtin (id) values (?1)"), ["produto_gtin"]);
+    assert_eq!(escritas_sql_com_caixa("delete from a; DELETE FROM b"), [("a".into(), true), ("b".into(), false)]);
+    assert_eq!(
+        escritas_sql("update xml_pendencia_identificacao\n                set situacao = 'resolvida'"),
+        ["xml_pendencia_identificacao"]
+    );
+    assert!(escritas_sql("Insert Into config values (1)").is_empty());
+    assert!(escritas_sql("depois do update, delete o arquivo; insert depois").is_empty());
     assert_eq!(escritas_sql("UPDATE OR IGNORE produto SET x = 1"), ["produto"]);
     assert_eq!(escritas_sql("DELETE FROM main.sync_par WHERE id = ?1"), ["sync_par"]);
     assert_eq!(escritas_sql("REPLACE INTO a (x) VALUES (1); UPDATE b SET y = 2;"), ["a", "b"]);
