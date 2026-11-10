@@ -63,6 +63,16 @@ fn copias_do_android_iguais_as_do_computador() {
             diferentes.push(format!("{a} × {b}"));
         }
     }
+    // K05 (dev.3.3): a montagem do Android inclui os cabeçalhos como
+    // "rustinho/cpp/..." a partir de `android/rust/include/`; eles também são
+    // cópias de `app/cpp` (até a ponte única, passo 8.7).
+    let inc = r.join("android/rust/include/rustinho/cpp");
+    for f in arquivos(&inc) {
+        let origem = r.join("app/cpp").join(&f);
+        if !origem.is_file() || conteudo(&origem) != conteudo(&inc.join(&f)) {
+            diferentes.push(format!("android/rust/include/rustinho/cpp/{0} × app/cpp/{0}", f.display()));
+        }
+    }
     assert!(
         diferentes.is_empty(),
         "cópias do Android diferentes das do computador (copie a mudança para as duas): {diferentes:#?}"
