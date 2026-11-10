@@ -31,14 +31,17 @@ TELA = u.TELA
 def popular_banco_sintetico(pasta_dados):
     base.montar_loja(pasta_dados)
     c = sqlite3.connect(os.path.join(pasta_dados, "rustinho.db"))
+    for nome_f, n in (("rustinho_id", 0), ("rustinho_agora", 0), ("rustinho_operacao", 0),
+                      ("rustinho_historia", 3), ("normalizar", 1), ("compactar", 1)):
+        c.create_function(nome_f, n, lambda *x: "stub")
     
     # 1. Obter ou criar fornecedor DISTRIBUIDORA DAYCO
     forn_id = c.execute("SELECT id FROM pessoa WHERE nome LIKE '%DAYCO%'").fetchone()
     if not forn_id:
         forn_id = "forn-dayco-001"
         c.execute("""
-            INSERT INTO pessoa (id, tipo, papel, nome, fantasia, documento, criado_em, atualizado_em)
-            VALUES (?, 'juridica', 'fornecedor', 'DISTRIBUIDORA DAYCO', 'DAYCO', '11222333000199', datetime('now'), datetime('now'))
+            INSERT INTO pessoa (id, codigo, tipo, fornecedor, cliente, nome, fantasia, documento, criado_em, atualizado_em, dispositivo)
+            VALUES (?, 'FORN-DAYCO', 'J', 1, 0, 'DISTRIBUIDORA DAYCO', 'DAYCO', '11222333000199', datetime('now'), datetime('now'), 'disp-teste')
         """, (forn_id,))
     else:
         forn_id = forn_id[0]
@@ -59,7 +62,6 @@ def popular_banco_sintetico(pasta_dados):
         
         marca = ""
         orig = ""
-        aplic = ""
         
         if i == 1:
             nome = "PECA SEM MARCA NEM APLICACOES SINTETICA"
@@ -67,40 +69,47 @@ def popular_banco_sintetico(pasta_dados):
             nome = "CORREIA DENTADA MOTOR DAYCO SINTETICA"
             marca = "DAYCO"
             orig = "04E109119C"
-            aplic = "Gol 1.6 16V MSI 2015 a 2022"
         elif i == 3:
             nome = "AMORTECEDOR DIANTEIRO PRESSURIZADO TURBOGAS"
             marca = "COFAP"
             orig = "GP32488"
-            aplic = "Palio Fire 1.0 2001 a 2014"
         elif i > 3:
             marca = "GENERICA" if i % 2 == 0 else "BOSCH"
             orig = f"ORIG-{i:04d}"
-            aplic = "Universal Sintetico"
 
         c.execute("""
             INSERT OR REPLACE INTO produto (
-                id, codigo, nome, marca, codigo_original, local, estoque, preco_venda,
-                unidade, ativo, criado_em, atualizado_em
-            ) VALUES (?, ?, ?, ?, ?, 'A-01', 10, 150.00, 'PC', 1, ?, ?)
+                id, codigo, nome, marca, codigo_original, local, unidade, ativo, criado_em, atualizado_em, dispositivo
+            ) VALUES (?, ?, ?, ?, ?, 'A-01', 'PC', 1, ?, ?, 'disp-teste')
         """, (pid, codigo_interno, nome, marca, orig, agora, agora))
+
+        c.execute("""
+            INSERT OR REPLACE INTO produto_preco (produto_id, tabela, preco)
+            VALUES (?, 1, 15000)
+        """, (pid,))
+
+        c.execute("""
+            INSERT OR REPLACE INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, dispositivo, criado_em)
+            VALUES (?, ?, 10, 'ajuste', 'saldo inicial teste', 'disp-teste', ?)
+        """, (f"mov-{i:03d}", pid, agora))
 
         # Vincula peça 2 ao fornecedor DAYCO com código DY-6PK1515-XL
         if i == 2:
             c.execute("""
                 INSERT OR REPLACE INTO produto_fornecedor (
-                    id, produto_id, fornecedor_id, codigo, codigo_compacto, criado_em, atualizado_em
-                ) VALUES ('pf-dayco-02', ?, ?, 'DY-6PK1515-XL', 'DY6PK1515XL', ?, ?)
-            """, (pid, forn_id, agora, agora))
+                    fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em
+                ) VALUES (?, 'dy6pk1515xl', 'DY-6PK1515-XL', ?, 1000, ?)
+            """, (forn_id, pid, agora))
 
     # 3. Criar 107 pendências XML sintéticas
-    c.execute("CREATE TABLE IF NOT EXISTS xml_pendencia_identificacao (id TEXT PRIMARY KEY, emitente_cnpj TEXT, emitente_nome TEXT, c_prod TEXT, x_prod TEXT, c_ean TEXT, ncm TEXT, criado_em TEXT)")
     c.execute("DELETE FROM xml_pendencia_identificacao")
     for k in range(1, 108):
         c.execute("""
-            INSERT INTO xml_pendencia_identificacao (id, emitente_cnpj, emitente_nome, c_prod, x_prod, c_ean, ncm, criado_em)
-            VALUES (?, '99888777000166', 'FORNECEDOR SINTETICO S/A', ?, ?, '7890000000000', '87082999', ?)
-        """, (f"pend-{k:03d}", f"COD-XML-{k:03d}", f"ITEM PENDENTE XML {k:03d}", agora))
+            INSERT INTO xml_pendencia_identificacao (
+                id, fornecedor_documento, fornecedor_nome, codigo_fornecedor, codigo_compacto,
+                gtin_comercial, descricao, situacao, criado_em
+            ) VALUES (?, '11222333000199', 'DISTRIBUIDORA DAYCO', ?, ?, '7890000000000', ?, 'pendente', ?)
+        """, (f"pend-{k:03d}", f"COD-XML-{k:03d}", f"CODXML{k:03d}", f"ITEM PENDENTE XML {k:03d}", agora))
 
     c.commit()
     c.close()
@@ -128,6 +137,7 @@ def main():
         try:
             rr.entrar("Ana")
             time.sleep(3.0)
+            rr.foto("-lista-inicial")
 
             # L1 & L2: Verificação do desenho da lista e nomePeca
             g = u.geos(rr.textos())
@@ -158,7 +168,7 @@ def main():
 
             rr.foto("-final")
         finally:
-            rr.parar()
+            rr.fechar()
     finally:
         try:
             shutil.rmtree(modelo)
@@ -167,7 +177,10 @@ def main():
         xvfb.terminate()
         xvfb.wait()
 
-    sys.exit(res.fechar())
+    print(f"\n{res.ok} conferências certas, {len(res.falhas)} com falha.")
+    for f in res.falhas:
+        print("  ✘ " + f)
+    sys.exit(0 if not res.falhas else 1)
 
 
 if __name__ == "__main__":
