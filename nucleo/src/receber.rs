@@ -1013,7 +1013,9 @@ pub struct Recibo {
 }
 
 pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
-    let r = conn
+    // E17 (dev.3.3): o id da cliente vem à parte (antes ficava, por um
+    // instante, no campo `em_aberto` do recibo).
+    let (mut r, cliente_id) = conn
         .query_row(
             "SELECT r.numero, r.caixa_nome, r.criado_em, p.nome, p.documento, r.forma, r.valor, r.juros, r.desconto, r.troco,
                     COALESCE(u.nome, ''), r.estornado_em IS NOT NULL, r.cliente_id
@@ -1021,7 +1023,7 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
               WHERE r.id = ?1",
             [id],
             |l| {
-                Ok(Recibo {
+                let recibo = Recibo {
                     id: id.to_string(),
                     numero: l.get(0)?,
                     caixa: l.get(1)?,
@@ -1036,14 +1038,13 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
                     usuario: l.get(10)?,
                     estornado: l.get(11)?,
                     partes: vec![],
-                    em_aberto: l.get(12)?,
-                })
+                    em_aberto: String::new(),
+                };
+                Ok((recibo, l.get::<_, String>(12)?))
             },
         )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Recebimento".into()))?;
-    let mut r = r;
-    let cliente_id = std::mem::take(&mut r.em_aberto);
     let mut c = conn.prepare(
         "SELECT rp.conta_id, c.descricao, c.parcela, c.parcelas, c.vencimento, rp.valor, c.valor - c.pago
            FROM recebimento_parcela rp JOIN conta_receber_saldo c ON c.id = rp.conta_id
