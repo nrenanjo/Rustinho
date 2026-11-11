@@ -1436,7 +1436,7 @@ mod testes {
 
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
-    const NOTA_LOJA: &str = include_str!("../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
+    const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
 
     #[test]
     fn importa_clientes_pecas_e_fornecedores() {

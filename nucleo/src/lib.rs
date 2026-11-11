@@ -13,16 +13,12 @@ pub mod avisos;
 pub mod backup;
 pub mod caminhos;
 pub mod codigo;
-pub mod compras;
 pub mod despacho;
-pub mod importar;
 pub mod impressao;
 pub mod loja;
 pub mod menu;
 pub mod nfe_assinatura;
-pub mod nfe_xml;
 pub mod rede_local;
-pub mod reposicao;
 pub mod requisitos;
 pub mod senhas;
 pub mod supervisao;
@@ -52,6 +48,7 @@ mod testes_supervisao;
 
 pub mod cadastros;
 pub mod catalogo;
+pub mod compras;
 pub mod dados;
 pub mod operacao;
 
@@ -59,6 +56,7 @@ pub mod operacao;
 // passo 3.1): `crate::banco`, `rustinho_nucleo::backup`...
 pub use cadastros::{pessoas, usuarios};
 pub use catalogo::{busca, estoque, etiquetas, faixas, fiscal, produtos, unidades};
+pub use compras::{importar, nfe_xml, reposicao};
 pub use dados::{auditoria, banco, computador, config, migracao, portatil, registro, tempo};
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,

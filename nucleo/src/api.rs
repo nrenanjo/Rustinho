@@ -3112,7 +3112,7 @@ mod testes {
             ("receber", include_str!("operacao/receber.rs"), &["receber", "estornar", "cancelar_conta"]),
             ("cheques", include_str!("operacao/cheques.rs"), &["depositar", "repassar", "devolver", "desfazer"]),
             ("pagar", include_str!("operacao/pagar.rs"), &["pagar", "estornar", "alterar", "cancelar"]),
-            ("compras", include_str!("compras.rs"), &["lancar", "atualizar", "estornar"]),
+            ("compras", include_str!("compras/mod.rs"), &["lancar", "atualizar", "estornar"]),
             ("devolucoes", include_str!("operacao/devolucoes.rs"), &["desfazer"]),
             ("financeiro", include_str!("operacao/financeiro.rs"), &["estornar_movimento"]),
         ];

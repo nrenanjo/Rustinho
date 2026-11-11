@@ -575,7 +575,7 @@ fn conferir_coerencia(raiz: Node, inf: Node, chave: &str) -> String {
 
 /// XML de exemplo para os testes (uma nota com 3 itens).
 #[cfg(test)]
-pub const EXEMPLO: &str = include_str!("../tests/nfe_exemplo.xml");
+pub const EXEMPLO: &str = include_str!("../../tests/nfe_exemplo.xml");
 
 #[cfg(test)]
 mod testes {

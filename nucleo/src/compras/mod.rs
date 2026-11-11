@@ -16,13 +16,17 @@
 //! quantidade de peças. O Simples Nacional não aproveita crédito de IPI nem
 //! de ICMS-ST, por isso eles entram no custo.
 
+pub mod importar;
+pub mod nfe_xml;
+pub mod reposicao;
+
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::{Erro, Resultado};
-use crate::nfe_xml::{self, ItemXml, NotaXml};
+use crate::nfe_xml::{ItemXml, NotaXml};
 use crate::{auditoria, config, documento, estoque, fiscal, gtin, numeros, pessoas, produtos, tempo, texto};
 
 // ---------------------------------------------------------------------------
