@@ -7,7 +7,54 @@
 
 mod ponte;
 
-use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+
+/// J04 (dev.3.3): se a tela principal não carrega, o Rustinho ficava aberto e
+/// invisível (nada na tela, o processo rodando). Agora mostra este aviso e
+/// sai com erro quando ele é fechado (como o Android, que avisa e sai). Só
+/// QtQuick: se o que falhou foi outra parte das telas, o aviso ainda abre.
+const AVISO_SEM_TELA: &str = r##"
+import QtQuick
+import QtQuick.Window
+Window {
+    width: 560
+    height: 220
+    visible: true
+    title: "Rustinho"
+    color: "#f4eff7"
+    onClosing: Qt.exit(1)
+    Item {
+        anchors.fill: parent
+        focus: true
+        Keys.onEscapePressed: Qt.exit(1)
+        Keys.onReturnPressed: Qt.exit(1)
+    }
+    Column {
+        anchors.centerIn: parent
+        width: parent.width - 48
+        spacing: 18
+        Text {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            font.pixelSize: 17
+            color: "#2a1f33"
+            text: "A tela principal do Rustinho não abriu. Feche e abra de novo. Se continuar, instale o Rustinho de novo ou chame o suporte."
+        }
+        Text {
+            text: "Fechar"
+            font.pixelSize: 17
+            font.bold: true
+            color: "#8a1a8f"
+            MouseArea { anchors.fill: parent; onClicked: Qt.exit(1) }
+        }
+    }
+}
+"##;
+
+/// A tela principal já falhou uma vez (então o que falhou agora foi o aviso).
+static SEM_TELA: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     // PEND-09: um programa montado com a raiz de TESTE aceitaria notas
@@ -40,11 +87,25 @@ fn main() {
     if let Some(mut engine) = engine.as_mut() {
         // Necessário no Qt 6.4 (nas versões novas já é o padrão).
         engine.as_mut().add_import_path(&QString::from("qrc:/qt/qml"));
+        // J04: a tela principal não carregou → o aviso; nem o aviso → sai.
+        engine
+            .as_mut()
+            .on_object_creation_failed(|engine, url| {
+                eprintln!("Rustinho: a tela {url} não carregou (o motivo está nas mensagens acima).");
+                if SEM_TELA.swap(true, Ordering::SeqCst) {
+                    std::process::exit(1);
+                }
+                engine.load_data(&QByteArray::from(AVISO_SEM_TELA), &QUrl::from("rustinho:aviso-sem-tela.qml"));
+            })
+            .release();
         engine.load(&QUrl::from("qrc:/qt/qml/rustinho/qml/Main.qml"));
     }
 
     if let Some(app) = app.as_mut() {
-        app.exec();
+        let codigo = app.exec();
+        if codigo != 0 {
+            std::process::exit(codigo);
+        }
     }
 }
 
