@@ -59,7 +59,7 @@ pub const TABELAS: &[Tabela] = &[
     t("tabela_preco", Viaja, &["config"]),
     t("regra_st", Viaja, &["fiscal"]),
     t("unidade", Viaja, &["unidades"]),
-    t("produto", Viaja, &["compras", "faixas", "fiscal", "produtos"]),
+    t("produto", Viaja, &["codigos", "compras", "faixas", "fiscal", "produtos"]),
     t("produto_preco", Viaja, &["compras", "produtos"]),
     t("produto_aplicacao", Viaja, &["produtos"]),
     t("produto_equivalente", Viaja, &["produtos"]),
@@ -104,7 +104,7 @@ pub const TABELAS: &[Tabela] = &[
     t("alteracao", Local, &["loja", "sync"]),
     t("entrada_falha", Local, &["usuarios"]),
     t("menu_uso", Local, &["menu"]),
-    t("produto_gtin", Local, &["produtos"]),
+    t("produto_gtin", Local, &["codigos"]),
     t("senha_situacao", Local, &["usuarios"]),
     // Interna do SQLite (contadores do AUTOINCREMENT).
     t("sqlite_sequence", Local, &["sync"]),
