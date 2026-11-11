@@ -677,6 +677,8 @@ mod limites_de_teste {
     thread_local! {
         pub static FORMATO_ANTIGO: Cell<u64> = const { Cell::new(0) };
         pub static BANCO: Cell<u64> = const { Cell::new(0) };
+        /// F01: idade mínima (s) das sobras de uma queda que o backup apaga.
+        pub static IDADE_DAS_SOBRAS: Cell<Option<u64>> = const { Cell::new(None) };
     }
 }
 
@@ -804,15 +806,49 @@ fn abrir_conexao(caminho_db: &Path) -> Resultado<Connection> {
 struct Temporaria(PathBuf);
 
 impl Temporaria {
-    fn nova(perto_de: &Path) -> Resultado<Temporaria> {
-        let base = if perto_de.is_dir() { perto_de.to_path_buf() } else { std::env::temp_dir() };
-        let p = base.join(format!(".rustinho-tmp-{}", tempo::novo_id()));
+    /// F01 (dev.3.3): a pasta temporária fica SEMPRE na pasta privada do
+    /// Rustinho (a do banco), nunca na de destino do backup nem ao lado do
+    /// arquivo aberto (pen drive, pasta sincronizada com a nuvem): é nela que
+    /// fica, por um instante, a cópia do banco sem tranca.
+    fn nova(privada: &Path) -> Resultado<Temporaria> {
+        let p = privada.join(format!(".rustinho-tmp-{}", tempo::novo_id()));
         std::fs::create_dir_all(&p)
-            .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta {}: {e}", base.display())))?;
-        // Aqui fica, por um instante, a cópia do banco sem criptografia.
+            .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta {}: {e}", privada.display())))?;
         crate::arquivos::so_do_usuario(&p, "pasta temporária do backup");
         Ok(Temporaria(p))
     }
+}
+
+/// A pasta privada do Rustinho: a do banco (sem banco em arquivo, só nos
+/// testes, a temporária do sistema).
+fn pasta_privada(caminho_db: Option<&Path>) -> PathBuf {
+    caminho_db.and_then(Path::parent).map(Path::to_path_buf).unwrap_or_else(std::env::temp_dir)
+}
+
+/// Sobras de uma queda no meio do backup ou da restauração (pastas
+/// temporárias na pasta privada, com a cópia sem tranca): saem no backup
+/// seguinte. Só as com mais de uma hora, para não apagar a de uma conferência
+/// que esteja em andamento.
+fn apagar_sobras(privada: &Path) {
+    let idade = idade_das_sobras();
+    for e in std::fs::read_dir(privada).into_iter().flatten().flatten() {
+        if !e.file_name().to_string_lossy().starts_with(".rustinho-tmp-") {
+            continue;
+        }
+        let velha =
+            e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|d| d >= idade);
+        if velha {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+fn idade_das_sobras() -> Duration {
+    #[cfg(test)]
+    if let Some(s) = limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.get()) {
+        return Duration::from_secs(s);
+    }
+    Duration::from_secs(3600)
 }
 
 impl Drop for Temporaria {
@@ -884,7 +920,11 @@ fn anotar(conn: &Connection, r: &Resultado<Feito>) -> Resultado<()> {
 fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Feito> {
     let a = ajustes(conn, Some(caminho_db))?;
     std::fs::create_dir_all(&a.pasta).map_err(|e| erro_pasta(&a.pasta, e))?;
-    // Restos de uma cópia interrompida (Rustinho fechado no meio).
+    let privada = pasta_privada(Some(caminho_db));
+    apagar_sobras(&privada);
+    // Restos de uma cópia interrompida (Rustinho fechado no meio): o
+    // ".parcial" (com tranca) e, de versões antes da dev.3.3, a pasta
+    // temporária que ficava aqui.
     if let Ok(lista) = std::fs::read_dir(&a.pasta) {
         for e in lista.flatten() {
             let n = e.file_name().to_string_lossy().to_string();
@@ -895,7 +935,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
             }
         }
     }
-    let tmp = Temporaria::nova(&a.pasta)?;
+    let tmp = Temporaria::nova(&privada)?;
 
     // FALHA-06: o banco de origem também é conferido. Com defeito, o backup
     // é feito assim mesmo (pode ser o que sobrou de bom), mas sai como erro
@@ -940,6 +980,13 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     fim.flush().map_err(|e| erro_pasta(&a.pasta, e))?;
     drop(fim);
     let _ = std::fs::remove_file(&foto);
+    // Só nos testes (F01): o Rustinho cai aqui, com o zip SEM tranca gravado
+    // na pasta temporária, sem arrumar nada (como numa falta de luz).
+    #[cfg(test)]
+    if queda_de_teste::agora("backup_depois_do_zip") {
+        std::mem::forget(tmp);
+        return Err(queda_de_teste::erro());
+    }
 
     // 3. Criptografia e gravação (primeiro com outro nome, para não deixar meio arquivo).
     let acessos = acessos_da_loja(conn)?;
@@ -964,7 +1011,7 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         Some(k) => Como::Chave(k),
         None => Como::Senha { senha: "", acessos: &[] },
     };
-    if let Err(e) = conferir_com(&destino, &como) {
+    if let Err(e) = conferir_com(&destino, &como, &privada) {
         let _ = std::fs::remove_file(&destino);
         return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
     }
@@ -1083,11 +1130,12 @@ const TAMANHO_BANCO: u64 = 16 * 1024 * 1024 * 1024;
 /// senha do backup). Devolve as informações de dentro dele.
 pub fn conferir(conn: &Connection, arquivo: &Path, senha: &str) -> Resultado<Info> {
     let acessos = acessos_da_loja(conn)?;
-    conferir_com(arquivo, &Como::Senha { senha, acessos: &acessos })
+    let privada = pasta_privada(conn.path().filter(|p| !p.is_empty()).map(Path::new));
+    conferir_com(arquivo, &Como::Senha { senha, acessos: &acessos }, &privada)
 }
 
-fn conferir_com(arquivo: &Path, como: &Como) -> Resultado<Info> {
-    let tmp = Temporaria::nova(arquivo.parent().unwrap_or(Path::new(".")))?;
+fn conferir_com(arquivo: &Path, como: &Como, privada: &Path) -> Resultado<Info> {
+    let tmp = Temporaria::nova(privada)?;
     abrir(arquivo, como, &tmp).map(|(_, i)| i)
 }
 
@@ -1610,7 +1658,7 @@ pub fn restaurar_por(
 ) -> Resultado<Info> {
     let _vez = Vez::pegar("Restaurando…")
         .ok_or_else(|| Erro::validacao("Tem um backup em andamento. Espere terminar e tente de novo."))?;
-    let tmp = Temporaria::nova(&std::env::temp_dir())?;
+    let tmp = Temporaria::nova(&pasta_privada(caminho_db))?;
 
     let local = if nuvem {
         if ler_nome(arquivo).is_none() {
@@ -2107,6 +2155,57 @@ pub(crate) mod testes {
         caminho
     }
 
+    /// Arquivos SEM tranca (o banco ou o zip antes da criptografia) que
+    /// sobraram em pastas temporárias do backup dentro de `pasta`.
+    fn copias_sem_tranca(pasta: &Path) -> Vec<PathBuf> {
+        let mut achados = Vec::new();
+        for e in std::fs::read_dir(pasta).into_iter().flatten().flatten() {
+            if e.file_name().to_string_lossy().starts_with(".rustinho-tmp-") && e.path().is_dir() {
+                for f in std::fs::read_dir(e.path()).into_iter().flatten().flatten() {
+                    achados.push(f.path());
+                }
+            }
+        }
+        achados
+    }
+
+    /// F01 (dev.3.3, passo 2.3): o Rustinho cai no meio do backup (falta de
+    /// luz: nada é arrumado). Na pasta de destino (pen drive, pasta
+    /// sincronizada com a nuvem) não pode ficar cópia do banco sem tranca; a
+    /// sobra fica na pasta privada do Rustinho (onde o próprio banco já está)
+    /// e sai no backup seguinte.
+    #[test]
+    fn f01_queda_no_meio_do_backup_nao_deixa_copia_sem_tranca_no_destino() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let privada = pasta_teste("f01-privada");
+        let destino = pasta_teste("f01-destino");
+        let caminho = privada.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "loja_nome", "Loja Teste").unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        let ajustes = AjustesEntrada { pasta: destino.display().to_string(), dias: "7".into(), hora: "18:00".into() };
+        salvar_ajustes(&b.conn, Some(&caminho), &ajustes).unwrap();
+
+        queda_de_teste::ETAPA.with(|e| e.set("backup_depois_do_zip"));
+        let r = fazer(&caminho, false);
+        queda_de_teste::ETAPA.with(|e| e.set(""));
+        assert!(r.is_err(), "a queda simulada não aconteceu");
+        let no_destino = copias_sem_tranca(&destino);
+        assert!(no_destino.is_empty(), "cópia do banco SEM tranca ficou na pasta de destino: {no_destino:?}");
+        assert!(!copias_sem_tranca(&privada).is_empty(), "a sobra da queda devia estar na pasta privada");
+
+        // O backup seguinte apaga a sobra antiga e funciona.
+        limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.set(Some(0)));
+        let feito = fazer(&caminho, false);
+        limites_de_teste::IDADE_DAS_SOBRAS.with(|c| c.set(None));
+        let feito = feito.unwrap();
+        assert!(PathBuf::from(&feito.arquivo).starts_with(&destino), "{}", feito.arquivo);
+        assert!(copias_sem_tranca(&privada).is_empty(), "a sobra da queda não foi apagada");
+        assert!(copias_sem_tranca(&destino).is_empty());
+    }
+
     fn sem_senha() -> Como<'static> {
         Como::Senha { senha: "", acessos: &[] }
     }
@@ -2119,11 +2218,11 @@ pub(crate) mod testes {
         let pasta = pasta_teste("f11-banco");
         let arquivo = backup_com_banco_de(&pasta, 5000, None);
         limites_de_teste::BANCO.with(|c| c.set(1000));
-        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        let e = conferir_com(&arquivo, &sem_senha(), &std::env::temp_dir()).unwrap_err().to_string();
         assert!(e.contains("grande demais"), "{e}");
         // Controle: com o limite acima do tamanho, o erro é outro (não é banco).
         limites_de_teste::BANCO.with(|c| c.set(10_000));
-        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        let e = conferir_com(&arquivo, &sem_senha(), &std::env::temp_dir()).unwrap_err().to_string();
         assert!(!e.contains("grande demais"), "o limite não deveria disparar: {e}");
         let _ = std::fs::remove_dir_all(&pasta);
     }
@@ -2135,7 +2234,7 @@ pub(crate) mod testes {
         let pasta = pasta_teste("f11-mentira");
         let arquivo = backup_com_banco_de(&pasta, 5000, Some(100));
         limites_de_teste::BANCO.with(|c| c.set(1000));
-        let e = conferir_com(&arquivo, &sem_senha()).unwrap_err().to_string();
+        let e = conferir_com(&arquivo, &sem_senha(), &std::env::temp_dir()).unwrap_err().to_string();
         // O que importa: não grava 5000 bytes como se coubessem em 1000. Com a
         // `zip` 9 (R-07, C8), a própria biblioteca já recusa o tamanho que
         // mente ("estragado"); com a 2.4 era o limite daqui ("grande demais").
@@ -2159,11 +2258,11 @@ pub(crate) mod testes {
         std::fs::write(&arquivo, &b).unwrap();
         limites_de_teste::FORMATO_ANTIGO.with(|c| c.set(1000));
         let como = Como::Senha { senha: "qualquer", acessos: &[] };
-        let e = conferir_com(&arquivo, &como).unwrap_err().to_string();
+        let e = conferir_com(&arquivo, &como, &std::env::temp_dir()).unwrap_err().to_string();
         assert!(e.contains("grande demais"), "{e}");
         // Controle: dentro do limite o erro é outro (senha errada/estragado).
         limites_de_teste::FORMATO_ANTIGO.with(|c| c.set(1_000_000));
-        let e = conferir_com(&arquivo, &como).unwrap_err().to_string();
+        let e = conferir_com(&arquivo, &como, &std::env::temp_dir()).unwrap_err().to_string();
         assert!(!e.contains("grande demais"), "{e}");
         let _ = std::fs::remove_dir_all(&pasta);
     }
