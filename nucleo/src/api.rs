@@ -674,7 +674,9 @@ impl Servico {
                 if matches!(erro, Erro::Interno(_) | Erro::Banco(_)) {
                     crate::registro::anotar(&format!("{comando}: {erro}"));
                 }
-                json!({ "ok": false, "erro": erro.to_string(), "campo": erro.nome_do_campo() })
+                // G02 (dev.3.3): o erro do banco vai curto para a tela; o
+                // detalhe ficou no registro (acima).
+                json!({ "ok": false, "erro": erro.para_a_tela(), "campo": erro.nome_do_campo() })
             }
             Err(_) => {
                 self.comprometido = true;

@@ -42,6 +42,24 @@ impl Erro {
     }
 }
 
+/// G02 (dev.3.3): o que a tela mostra de um erro do banco. O texto do SQLite
+/// ("no such table: …", "database is locked") não ajuda quem está no caixa:
+/// vai só para o registro técnico (o `Display` continua com ele, para os
+/// registros), e a tela diz o que fazer.
+pub const TEXTO_ERRO_DO_BANCO: &str = "Não deu certo por um erro no banco de dados. Tente de novo; se continuar, \
+     chame o suporte (o detalhe ficou no registro técnico).";
+
+impl Erro {
+    /// A mensagem para a tela: a de sempre, menos no erro do banco (curta,
+    /// sem o texto do SQLite).
+    pub fn para_a_tela(&self) -> String {
+        match self {
+            Erro::Banco(_) => TEXTO_ERRO_DO_BANCO.to_string(),
+            outro => outro.to_string(),
+        }
+    }
+}
+
 impl fmt::Display for Erro {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
