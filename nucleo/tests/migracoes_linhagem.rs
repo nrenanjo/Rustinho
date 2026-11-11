@@ -273,9 +273,9 @@ fn numeracao_das_migracoes_continua_e_igual_a_lista_do_banco() {
         assert_eq!(*numero, i + 1, "numeração com buraco ou repetida em {nome}");
     }
     let arquivos: Vec<&str> = m.iter().map(|x| x.1.as_str()).collect();
-    let fonte = std::fs::read_to_string(raiz_do_nucleo().join("src/banco.rs")).unwrap();
+    let fonte = std::fs::read_to_string(raiz_do_nucleo().join("src/dados/banco.rs")).unwrap();
     let lista: Vec<&str> =
-        fonte.split("include_str!(\"migracoes/").skip(1).map(|r| r.split('"').next().unwrap()).collect();
+        fonte.split("include_str!(\"../migracoes/").skip(1).map(|r| r.split('"').next().unwrap()).collect();
     assert_eq!(lista, arquivos, "a lista MIGRACOES do banco.rs e os arquivos de nucleo/src/migracoes/");
     assert_eq!(m.len(), versao_da_estrutura());
     assert_eq!(arquivos.get(23), Some(&"0024_gtins_e_pendencias_xml.sql"), "a 0024 publicada desta linha");

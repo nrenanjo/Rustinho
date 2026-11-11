@@ -9,18 +9,14 @@ pub mod api;
 #[path = "../tests/apoio/chave.rs"]
 pub(crate) mod apoio_chave;
 pub mod arquivos;
-pub mod auditoria;
 pub mod avisos;
 pub mod backup;
-pub mod banco;
 pub mod caixa;
 pub mod caminhos;
 pub mod cheques;
 pub mod codigo;
 pub mod comissoes;
 pub mod compras;
-pub mod computador;
-pub mod config;
 pub mod despacho;
 pub mod devolucoes;
 pub mod dre;
@@ -30,22 +26,18 @@ pub mod importar;
 pub mod impressao;
 pub mod loja;
 pub mod menu;
-pub mod migracao;
 pub mod nfe_assinatura;
 pub mod nfe_xml;
 pub mod oficina;
 pub mod pagar;
 pub mod painel;
-pub mod portatil;
 pub mod receber;
 pub mod rede_local;
-pub mod registro;
 pub mod reposicao;
 pub mod requisitos;
 pub mod senhas;
 pub mod supervisao;
 pub mod sync;
-pub mod tempo;
 #[cfg(test)]
 pub(crate) mod teste_rede;
 #[cfg(test)]
@@ -72,11 +64,13 @@ pub mod vendas;
 
 pub mod cadastros;
 pub mod catalogo;
+pub mod dados;
 
 // Os módulos nos mesmos caminhos de antes das pastas de domínio (dev.3.3,
 // passo 3.1): `crate::banco`, `rustinho_nucleo::backup`...
 pub use cadastros::{pessoas, usuarios};
 pub use catalogo::{busca, estoque, etiquetas, faixas, fiscal, produtos, unidades};
+pub use dados::{auditoria, banco, computador, config, migracao, portatil, registro, tempo};
 
 // Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos
 // caminhos de antes: `crate::erro::Erro`, `rustinho_nucleo::texto`...

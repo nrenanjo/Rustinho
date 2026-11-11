@@ -6,7 +6,7 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 ## 1. Como funciona
 
 - Cada arquivo `nucleo/src/migracoes/NNNN_assunto.sql` é uma versão da estrutura. A lista
-  `MIGRACOES` (`nucleo/src/banco.rs`) inclui os arquivos na ordem dos números.
+  `MIGRACOES` (`nucleo/src/dados/banco.rs`) inclui os arquivos na ordem dos números.
 - O banco guarda **só a contagem** de migrações aplicadas (`PRAGMA user_version`). Não guarda qual
   linha de versões as aplicou.
 - Ao abrir (`Banco::abrir`):
