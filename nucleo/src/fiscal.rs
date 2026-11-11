@@ -345,6 +345,11 @@ pub fn ler_data(texto: &str) -> Result<Option<String>, String> {
         [d, m, a] => (*d, *m, *a),
         _ => return Err("Data inválida (use dd/mm/aaaa).".into()),
     };
+    // E11 (dev.3.3): o ano com 4 algarismos, ou 2 (que vira 20xx). Com 3 (ou
+    // 1) era aceito e virava o ano 0202 (ou 2006).
+    if !(a.len() == 4 || a.len() == 2) || !a.bytes().all(|c| c.is_ascii_digit()) {
+        return Err("Ano inválido (use 4 algarismos, como 2026).".into());
+    }
     let (Ok(d), Ok(m), Ok(mut a)) = (d.parse::<u32>(), m.parse::<u32>(), a.parse::<i32>()) else {
         return Err("Data inválida (use dd/mm/aaaa).".into());
     };
@@ -795,5 +800,17 @@ mod testes {
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());
         assert_eq!(data_br("2026-10-01"), "01/10/2026");
+    }
+
+    /// E11 (dev.3.3, 2.4): o ano tem 4 algarismos, ou 2 (= 20xx). Com 3 (ou 1)
+    /// era aceito e virava o ano 0202 (ou 2006).
+    #[test]
+    fn e11_ano_com_3_algarismos_e_recusado() {
+        assert_eq!(ler_data("01/10/2026").unwrap().unwrap(), "2026-10-01");
+        assert_eq!(ler_data("01/10/26").unwrap().unwrap(), "2026-10-01");
+        assert_eq!(ler_data("2026-10-01").unwrap().unwrap(), "2026-10-01");
+        for errada in ["01/10/202", "01/10/6", "01/10/20265", "01/10/+26", "202-10-01"] {
+            assert!(ler_data(errada).is_err(), "{errada} foi aceita: {:?}", ler_data(errada));
+        }
     }
 }
