@@ -627,6 +627,9 @@ done
 adb shell am force-stop $PACOTE; sleep 2
 adb shell am start -n $ATIVIDADE --es rustinho "'--abrir ../../x --props {quebrado'"
 esperar_tela TelaEntrar 90 "argumento estranho"
+# A pausa da foto deixa o primeiro quadro chegar à tela (sem ela, a conferência
+# já pegou a tela antes do desenho: CI 43086646820).
+foto 19-argumento-estranho 3
 conferir "argumento estranho"
 # Deitado.
 abrir TelaVender
