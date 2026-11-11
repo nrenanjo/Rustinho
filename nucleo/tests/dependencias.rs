@@ -669,6 +669,22 @@ struct Grafo {
     problemas: Vec<String>,
 }
 
+/// Pastas de domínio (dev.3.3, passo 3.1) que só agrupam módulos: o lib.rs
+/// os reexporta nos caminhos de antes. O `compras` é ao mesmo tempo a pasta e
+/// o módulo de antes (`compras.rs` virou `compras/mod.rs`), por isso não está aqui.
+const PASTAS_DE_DOMINIO: &[&str] = &["cadastros", "catalogo", "dados", "integracoes", "operacao", "servico", "troca"];
+
+/// O módulo de um caminho: o primeiro nome; dentro de uma pasta de domínio, o
+/// módulo que o lib.rs reexporta dela (`dados::banco` é `banco`). Assim o
+/// grafo fica igual ao de antes das pastas.
+fn modulo_de(caminho: &[String], reexp: &BTreeMap<String, String>) -> Option<String> {
+    match caminho {
+        [d, m, ..] if reexp.get(m) == Some(d) => Some(m.clone()),
+        [m, ..] => Some(m.clone()),
+        [] => None,
+    }
+}
+
 fn ler_crate(src: &Path) -> Grafo {
     let ler = |p: &Path| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
     let lib = src.join("lib.rs");
@@ -690,7 +706,9 @@ fn ler_crate(src: &Path) -> Grafo {
         let filhos = if ["lib", "mod", "main"].contains(&haste.as_str()) { pasta.clone() } else { pasta.join(&haste) };
         for d in a.mods {
             let m = d.caminho.last().unwrap().clone();
-            if d.caminho.len() == 1 {
+            let pasta_de_dominio = d.caminho.len() == 1 && PASTAS_DE_DOMINIO.contains(&m.as_str());
+            let reexportado = d.caminho.len() == 2 && reexp.get(&m) == Some(&d.caminho[0]);
+            if (d.caminho.len() == 1 && !pasta_de_dominio) || reexportado {
                 g.modulos.insert(m.clone(), d.teste);
             }
             let arquivo = match d.arquivo {
@@ -729,7 +747,7 @@ fn ler_crate(src: &Path) -> Grafo {
         }
     }
     for (r, onde) in refs {
-        let Some(de) = r.de.first().cloned() else { continue };
+        let Some(de) = modulo_de(&r.de, &reexp) else { continue };
         let so_teste = g.modulos.get(&de).copied().unwrap_or(false);
         let teste = r.teste || so_teste;
         // Segue as reexportações do lib.rs até um módulo daqui ou outra crate:
@@ -767,7 +785,7 @@ fn ler_crate(src: &Path) -> Grafo {
         }
     }
     for (e, onde) in escritas {
-        let Some(de) = e.de.first().cloned() else { continue };
+        let Some(de) = modulo_de(&e.de, &reexp) else { continue };
         if e.teste || g.modulos.get(&de).copied().unwrap_or(false) {
             continue;
         }

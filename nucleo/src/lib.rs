@@ -41,7 +41,6 @@ pub mod nfe_xml;
 pub mod oficina;
 pub mod pagar;
 pub mod painel;
-pub mod pessoas;
 pub mod portatil;
 pub mod produtos;
 pub mod receber;
@@ -76,8 +75,13 @@ mod testes_rvi03;
 #[cfg(test)]
 mod testes_supervisao;
 pub mod unidades;
-pub mod usuarios;
 pub mod vendas;
+
+pub mod cadastros;
+
+// Os módulos nos mesmos caminhos de antes das pastas de domínio (dev.3.3,
+// passo 3.1): `crate::banco`, `rustinho_nucleo::backup`...
+pub use cadastros::{pessoas, usuarios};
 
 // Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos
 // caminhos de antes: `crate::erro::Erro`, `rustinho_nucleo::texto`...
