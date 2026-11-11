@@ -66,7 +66,7 @@ ColumnLayout {
     }
 
     function agora() {
-        janela.chamarGerente("backup_agora", r => {
+        janela.chamarGerente("backup_agora", {}, r => {
             if (!r.ok) {
                 janela.avisar(r.erro, "erro")
                 return
@@ -78,7 +78,7 @@ ColumnLayout {
     }
 
     function conectar() {
-        janela.chamarGerente("backup_conectar_drive", r => {
+        janela.chamarGerente("backup_conectar_drive", {}, r => {
             if (!r.ok) {
                 janela.avisar(r.erro, "erro")
                 return

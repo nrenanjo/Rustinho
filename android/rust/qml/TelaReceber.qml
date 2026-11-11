@@ -842,53 +842,12 @@ FocusScope {
     }
 
     // ---------- Pergunta com motivo (estornar, tirar dívida) ----------
-    Painel {
+    // H11 (dev.3.3, 2.1): a pergunta comum. Ela espera a resposta, mesmo a que
+    // chega depois da senha do gerente (`pronto`), antes de fechar e atualizar;
+    // a cópia que ficava aqui usava o retorno de acao(...) e dava TypeError.
+    PerguntaMotivo {
         id: motivo
-        property string titulo: ""
-        property string mensagem: ""
-        property string textoBotao: ""
-        property var acao: null
-        property string erro: ""
-        width: Math.min(500, Tema.largura - 24)
-
-        function perguntar(titulo, mensagem, textoBotao, acao) {
-            motivo.titulo = titulo
-            motivo.mensagem = mensagem
-            motivo.textoBotao = textoBotao
-            motivo.acao = acao
-            motivo.erro = ""
-            campoMotivo.texto = ""
-            open()
-            campoMotivo.focar()
-        }
-        function confirmar() {
-            const r = acao(campoMotivo.texto)
-            if (!r.ok) {
-                erro = r.erro
-                return
-            }
-            close()
-            tela.atualizarTudo()
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 14
-            Titulo { text: motivo.titulo; font.pixelSize: 30; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            Nota { text: motivo.mensagem; font.pixelSize: 15; Layout.fillWidth: true }
-            Campo {
-                id: campoMotivo
-                rotulo: "Motivo"
-                erro: motivo.erro
-                maximo: 200
-                Layout.fillWidth: true
-                onConfirmado: motivo.confirmar()
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 10
-                Botao { text: motivo.textoBotao; tipo: "perigo"; onClicked: motivo.confirmar() }
-            }
-        }
+        onFeito: tela.atualizarTudo()
         onClosed: busca.focar()
     }
 

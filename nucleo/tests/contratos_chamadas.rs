@@ -128,7 +128,6 @@ fn toda_chamada_das_telas_usa_comando_que_existe() {
 ///    o retorno na hora, numa tela em que as ações são `(m, pronto) => …`
 ///    (assíncronas, respondem pelo `pronto`) — o retorno é `undefined` (H11).
 #[test]
-#[ignore = "caracterização K04 (H11, H12): formas erradas em 4b253c6; passa no passo 2.1"]
 fn chamadas_com_senha_do_gerente_na_forma_certa() {
     let mut erradas = Vec::new();
     for (arq, texto) in arquivos_qml() {

@@ -226,6 +226,8 @@ ApplicationWindow {
     // tentativa e na repetição com a senha do gerente (a senha fica presa a
     // estes dados exatos, com a chave).
     function chamarGerenteDemorado(comando, dados, texto, depois, chave) {
+        if (formaErradaGerente(comando, dados, depois))
+            return
         dados = Api.comChave(dados, chave)
         Api.chamarDemorado(comando, dados, texto, r => {
             const pedeSenha = !r.ok && (r.campo === "gerente" || r.campo === "precos")
@@ -243,7 +245,22 @@ ApplicationWindow {
             })
         })
     }
+    // H12 (dev.3.3, 2.1): a forma das chamadas com a senha do gerente é
+    // (comando, dados, depois, chave). Uma função no lugar dos dados, ou um
+    // "depois" que não é função, é erro do programa: antes o comando rodava e
+    // a resposta se perdia em silêncio (o backup manual não mostrava nada).
+    // Agora o comando não roda, e o erro vai para o registro e para a tela.
+    function formaErradaGerente(comando, dados, depois) {
+        if (typeof dados !== "function" && (depois === undefined || depois === null || typeof depois === "function"))
+            return false
+        console.error("Rustinho: chamada com a senha do gerente na forma errada: " + comando
+                      + " (os dados vêm antes da função de resposta)")
+        avisar("Erro interno do programa (" + comando + "): nada foi feito. Avise o suporte.", "erro")
+        return true
+    }
     function chamarGerente(comando, dados, depois, chave) {
+        if (formaErradaGerente(comando, dados, depois))
+            return
         dados = Api.comChave(dados, chave)
         const r = Api.chamar(comando, dados)
         const pedeSenha = !r.ok && (r.campo === "gerente" || r.campo === "precos")

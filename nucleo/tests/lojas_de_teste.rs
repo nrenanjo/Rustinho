@@ -107,3 +107,41 @@ fn montar_geometria() {
     }
     l.fechar();
 }
+
+/// Chamadas com a senha do gerente (dev.3.3, passo 2.1: H11 e H12) — a loja do
+/// roteiro `app/testes/telas_chamadas_gerente.py`:
+/// - Ana (gerente, senha 1234) e o caixa aberto;
+/// - a cliente "Oficina do Zé" com R$ 300,00 no crediário (3 parcelas) e um
+///   recebimento de R$ 100,00 (o que o roteiro estorna);
+/// - o backup apontado para `<pasta>/backups` (o roteiro troca a pasta por um
+///   arquivo para provocar o erro).
+///
+/// Grava `<pasta>/ids.json` com o id da cliente, para o roteiro abrir a conta dela.
+#[test]
+#[ignore = "só à mão: monta a loja do roteiro das chamadas com a senha do gerente (H11, H12)"]
+fn montar_chamadas_gerente() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja Teste Auto Peças", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    let cliente = l.pessoa("cliente", "Oficina do Zé");
+    l.ok(
+        "receber_lancar",
+        json!({ "clienteId": cliente, "descricao": "caderno de setembro", "valor": "300", "parcelas": 3,
+                "primeiroVencimento": "" }),
+    );
+    l.ok("caixa_abrir", json!({ "valor": "50" }));
+    let conta = l.ok("receber_cliente", json!({ "id": cliente, "todas": false }));
+    let parcela = conta["parcelas"][0]["id"].as_str().unwrap().to_string();
+    l.ok("receber_baixar", json!({ "clienteId": cliente, "contas": [parcela], "valor": "100", "forma": "dinheiro" }));
+    let backups = pasta.join("backups");
+    std::fs::create_dir_all(&backups).unwrap();
+    let b = l.ok("backup_ler", json!({}));
+    l.ok("backup_salvar", json!({ "pasta": backups.display().to_string(), "hora": b["hora"], "dias": b["dias"] }));
+    std::fs::write(pasta.join("ids.json"), json!({ "cliente": cliente }).to_string()).unwrap();
+    l.fechar();
+}
