@@ -25,7 +25,7 @@ use x509_parser::prelude::*;
 use super::BASE64;
 
 /// O pacote oficial embutido (Cadeia Completa, inclui expiradas).
-pub const PACOTE_ICP_BRASIL: &[u8] = include_bytes!("../../dados/icp-brasil/ACcompactadox.zip");
+pub const PACOTE_ICP_BRASIL: &[u8] = include_bytes!("../../../dados/icp-brasil/ACcompactadox.zip");
 /// SHA-512 publicado pelo ITI em `hashsha512x.txt` (conferido em 20/10/2026).
 pub const PACOTE_SHA512_PUBLICADO: &str = "48a9ed4bd1e2a81bf31e00b981501854b979cdee4eb402c8da658184ab6bd55f2522863ff1e7a97c18159dea73f21ae080f299613e2ef4413a548483b50b5b56";
 
@@ -114,22 +114,26 @@ impl Ancoras {
         A.get_or_init(|| {
             let d = |n: &str| -> Vec<u8> {
                 match n {
-                    "raiz_teste.der" => include_bytes!("../../tests/pki/raiz_teste.der").to_vec(),
-                    "raiz_historica_teste.der" => include_bytes!("../../tests/pki/raiz_historica_teste.der").to_vec(),
-                    "ac_teste.der" => include_bytes!("../../tests/pki/ac_teste.der").to_vec(),
-                    "ac_sem_keycertsign.der" => include_bytes!("../../tests/pki/ac_sem_keycertsign.der").to_vec(),
+                    "raiz_teste.der" => include_bytes!("../../../tests/pki/raiz_teste.der").to_vec(),
+                    "raiz_historica_teste.der" => {
+                        include_bytes!("../../../tests/pki/raiz_historica_teste.der").to_vec()
+                    }
+                    "ac_teste.der" => include_bytes!("../../../tests/pki/ac_teste.der").to_vec(),
+                    "ac_sem_keycertsign.der" => include_bytes!("../../../tests/pki/ac_sem_keycertsign.der").to_vec(),
                     "ac_vence_no_recebimento.der" => {
-                        include_bytes!("../../tests/pki/ac_vence_no_recebimento.der").to_vec()
+                        include_bytes!("../../../tests/pki/ac_vence_no_recebimento.der").to_vec()
                     }
                     "raiz_alfanumerico_teste.der" => {
-                        include_bytes!("../../tests/pki/raiz_alfanumerico_teste.der").to_vec()
+                        include_bytes!("../../../tests/pki/raiz_alfanumerico_teste.der").to_vec()
                     }
-                    "ac_alfanumerico_teste.der" => include_bytes!("../../tests/pki/ac_alfanumerico_teste.der").to_vec(),
-                    "raiz_acervo_teste.der" => include_bytes!("../../tests/pki/raiz_acervo_teste.der").to_vec(),
-                    "ac_acervo_teste.der" => include_bytes!("../../tests/pki/ac_acervo_teste.der").to_vec(),
-                    "raiz_codigos_teste.der" => include_bytes!("../../tests/pki/raiz_codigos_teste.der").to_vec(),
-                    "ac_codigos_teste.der" => include_bytes!("../../tests/pki/ac_codigos_teste.der").to_vec(),
-                    _ => include_bytes!("../../tests/pki/ac_raiz_historica.der").to_vec(),
+                    "ac_alfanumerico_teste.der" => {
+                        include_bytes!("../../../tests/pki/ac_alfanumerico_teste.der").to_vec()
+                    }
+                    "raiz_acervo_teste.der" => include_bytes!("../../../tests/pki/raiz_acervo_teste.der").to_vec(),
+                    "ac_acervo_teste.der" => include_bytes!("../../../tests/pki/ac_acervo_teste.der").to_vec(),
+                    "raiz_codigos_teste.der" => include_bytes!("../../../tests/pki/raiz_codigos_teste.der").to_vec(),
+                    "ac_codigos_teste.der" => include_bytes!("../../../tests/pki/ac_codigos_teste.der").to_vec(),
+                    _ => include_bytes!("../../../tests/pki/ac_raiz_historica.der").to_vec(),
                 }
             };
             Ancoras::montar(

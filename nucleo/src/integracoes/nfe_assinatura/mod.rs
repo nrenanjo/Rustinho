@@ -59,7 +59,7 @@ const OID_CNPJ: &str = "2.16.76.1.3.3";
 const OID_PESSOA_FISICA: &str = "2.16.76.1.3.1";
 
 #[cfg(test)]
-pub(crate) const EXEMPLO_TESTE: &str = include_str!("../../tests/nfe_exemplo.xml");
+pub(crate) const EXEMPLO_TESTE: &str = include_str!("../../../tests/nfe_exemplo.xml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motivo {
