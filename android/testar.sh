@@ -202,6 +202,29 @@ focar() {
     arvore "foco$n"
     [ "$(campo "fotos/foco$n.xml" foco)" = "$n" ] && teclado_aberto
 }
+# O que a acessibilidade diz do campo n. Campo com dica: a dica (o Qt a dá
+# mesmo com texto digitado). Campo sem dica: o conteúdo ("••••" numa senha,
+# o texto nos outros). Medido na execução 42933015475.
+descricao() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+n = 0
+for m in re.finditer(r"<node [^>]*>", x):
+    no = m.group(0)
+    if "TextField" not in (re.search(r'resource-id="([^"]*)"', no) or [None, ""])[1]:
+        continue
+    n += 1
+    if n == int(sys.argv[2]):
+        d = re.search(r'content-desc="([^"]*)"', no)
+        print(d.group(1) if d else "")
+PY
+}
+# O campo sem dica mostra o texto digitado (ou "•" no lugar de cada letra
+# de uma senha)? Conta letras, não bytes (o "•" ocupa 3 bytes).
+mostra_o_texto() {
+    python3 -c 'import sys; v, p = sys.argv[1], sys.argv[2]; sys.exit(0 if len(v) == len(p) and (v.lower() == p.lower() or set(v) == {"\u2022"}) else 1)' "$1" "$2"
+}
 aviso_na_tela() {
     arvore aviso
     grep -q -E "isn(&apos;|.)t responding|não está respondendo" fotos/aviso.xml
@@ -249,7 +272,7 @@ ENSAIO_PENDENTE=1
 # no teclado do Android 14); "texto" usa o "input text" (senhas: campo sem
 # sugestões do teclado).
 preencher() {
-    local n=$1 palavra=$2 modo=$3 t linha x1 y1 x2 y2 antes esq0 depois esq dica ensaio max=3
+    local n=$1 palavra=$2 modo=$3 t linha x1 y1 x2 y2 antes esq0 depois esq dica visto recebeu ensaio max=3
     # O ensaio não gasta uma das 3 tentativas de verdade.
     [ -n "$ENSAIO_PENDENTE" ] && max=4
     for t in $(seq 1 $max); do
@@ -265,9 +288,19 @@ preencher() {
         adb shell input keyevent KEYCODE_MOVE_END
         adb shell input keyevent $(printf 'KEYCODE_DEL %.0s' $(seq 1 24))
         sleep 1
-        read -r antes esq0 <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
-        dica=0
-        [ "$antes" -gt 2 ] && dica=1
+        # Vazio, o campo com dica mostra a dica na acessibilidade; o sem dica,
+        # nada. O com dica é conferido pela foto (a dica some); o sem dica,
+        # pela acessibilidade (que mostra o que foi digitado). A foto não serve
+        # para o sem dica: na tela de entrada, o campo da senha fica embaixo do
+        # teclado (execução 42933015475).
+        arvore "campo$n"
+        dica=$(descricao "fotos/campo$n.xml" "$n")
+        if [ -n "$dica" ] && mostra_o_texto "$dica" "$palavra"; then
+            instavel "campo $n: não limpou o que a tentativa anterior deixou (tentativa $t)"
+            continue
+        fi
+        antes=-1; esq0=-1
+        [ -n "$dica" ] && read -r antes esq0 <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
         ensaio=0
         if [ -n "$ENSAIO_PENDENTE" ]; then
             ENSAIO_PENDENTE=""
@@ -279,12 +312,20 @@ preencher() {
             texto "$palavra"
         fi
         if aviso_na_tela; then instavel "campo $n: aviso do sistema durante a digitação (tentativa $t)"; continue; fi
-        read -r depois esq <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
-        echo "campo $n tentativa $t: dica=$dica antes(dir=$antes esq=$esq0) depois(dir=$depois esq=$esq)" >> fotos/medidas_campos.txt
-        # Com dica: a dica sumiu e apareceu texto à esquerda. Sem dica: a
-        # esquerda, que só tinha o cursor, ganhou o texto.
-        if { [ "$dica" = 1 ] && [ "$depois" -ge 0 ] && [ "$depois" -le 1 ] && [ "$esq" -ge 8 ]; } ||
-            { [ "$dica" = 0 ] && [ "$esq0" -ge 0 ] && [ "$esq0" -le 6 ] && [ "$esq" -ge 12 ]; }; then
+        recebeu=1
+        if [ -n "$dica" ]; then
+            # A dica sumiu da faixa da direita e apareceu texto à esquerda.
+            read -r depois esq <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
+            echo "campo $n tentativa $t: dica \"$dica\" antes(dir=$antes esq=$esq0) depois(dir=$depois esq=$esq)" >> fotos/medidas_campos.txt
+            [ "$antes" -gt 2 ] && [ "$depois" -ge 0 ] && [ "$depois" -le 1 ] && [ "$esq" -ge 8 ] && recebeu=0
+        else
+            # A acessibilidade mostra o texto digitado (ou um "•" por letra).
+            arvore "campo$n"
+            visto=$(descricao "fotos/campo$n.xml" "$n")
+            echo "campo $n tentativa $t: sem dica; a acessibilidade mostra \"$visto\"" >> fotos/medidas_campos.txt
+            mostra_o_texto "$visto" "$palavra" && recebeu=0
+        fi
+        if [ "$recebeu" = 0 ]; then
             if [ "$ensaio" = 1 ]; then
                 falhou "[roteiro] a conferência do campo $n não percebeu a digitação omitida de propósito"
                 return 1
@@ -294,7 +335,7 @@ preencher() {
         if [ "$ensaio" = 1 ]; then
             echo "  → percebida: o campo não recebeu o texto (ensaio aprovado)" >> fotos/ensaio_n03.txt
         else
-            instavel "campo $n: o texto não chegou ao campo (tentativa $t; dica=$dica, antes $antes/$esq0, depois $depois/$esq)"
+            instavel "campo $n: o texto não chegou ao campo (tentativa $t; veja medidas_campos.txt)"
         fi
     done
     falhou "$AMBIENTE campo $n: não deu para digitar \"$palavra\" em 3 tentativas (veja instabilidade.txt)"
@@ -352,17 +393,26 @@ encerrar() {
     adb shell cat "/sdcard/Android/data/$PACOTE/files/diagnostico.txt" > fotos/diagnostico.txt 2> /dev/null || true
     grep -E "$(adb shell pidof $PACOTE | tr -d '\r')|AndroidRuntime|DEBUG" fotos/logcat.txt | grep -i -E "qml|warn|error|fatal|crash|qt" | tail -150 > fotos/erros.txt || true
     grep -E "lowmemorykiller: Kill '$PACOTE'|ANR in $PACOTE" -A 3 fotos/logcat.txt > fotos/memoria_mortes.txt || true
-    # A causa (N03): só as falhas marcadas "[ambiente do emulador]" = ambiente;
-    # alguma "[roteiro]" (a conferência errou) = roteiro de teste; qualquer
-    # outra = programa. Vai para o resultado da CI e para o manifesto.
+    # A causa (N03) é a da PRIMEIRA falha: "[ambiente do emulador]" =
+    # ambiente; "[roteiro]" (a conferência errou) = roteiro de teste; sem
+    # marca = programa. Falhas sem marca depois de uma do ambiente podem ser
+    # consequência dela (ex.: sem entrar, a tela seguinte não abre): o
+    # resultado diz quantas, e todas ficam em falhas.txt. Vai para o resultado
+    # da CI e para o manifesto.
     if [ ! -s fotos/falhas.txt ]; then
         echo nenhuma > fotos/causa.txt
-    elif grep -v -F -e "$AMBIENTE" -e "[roteiro]" fotos/falhas.txt | grep -q .; then
-        echo programa > fotos/causa.txt
-    elif grep -q -F "[roteiro]" fotos/falhas.txt; then
-        echo "roteiro de teste" > fotos/causa.txt
     else
-        echo "ambiente do emulador" > fotos/causa.txt
+        local c outras
+        case "$(head -1 fotos/falhas.txt)" in
+            *"$AMBIENTE"*) c="ambiente do emulador" ;;
+            *"[roteiro]"*) c="roteiro de teste" ;;
+            *) c="programa" ;;
+        esac
+        outras=$(grep -c -v -F -e "$AMBIENTE" -e "[roteiro]" fotos/falhas.txt)
+        if [ "$c" != programa ] && [ "$outras" -gt 0 ]; then
+            c="$c (a primeira falha; depois dela, $outras sem marca, talvez consequência: veja falhas.txt)"
+        fi
+        echo "$c" > fotos/causa.txt
     fi
     ls -la fotos
     if [ -s fotos/falhas.txt ]; then
