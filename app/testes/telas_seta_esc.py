@@ -329,7 +329,7 @@ def estatico(res):
     icone = conteudo["Icone.qml"]
     res.conferir("ESTÁTICO: ícones novos no Icone.qml (colar, copiar, prancheta; chave inglesa = chave)",
                  all(f"\"{n}\":" in icone for n in ("colar", "copiar", "prancheta", "chave")))
-    menu = open(os.path.join(RAIZ, "nucleo", "src", "menu.rs"), encoding="utf-8").read()
+    menu = open(os.path.join(RAIZ, "nucleo", "src", "servico", "menu.rs"), encoding="utf-8").read()
     pecas = re.search(r"id: \"pecas\",.*?icone: \"(\w+)\"", menu, re.S)
     oficina = re.search(r"id: \"oficina\",.*?icone: \"(\w+)\"", menu, re.S)
     res.conferir("ESTÁTICO: menu.rs: Peças = chave (inglesa), Ordens = prancheta",
