@@ -385,9 +385,15 @@ fn alvos(t: &[Token], par: &[usize], j: usize) -> Vec<String> {
 
 /// O módulo de um nome depois de `crate::`: o próprio nome ou, se for uma
 /// pasta de domínio, o módulo dentro dela (`crate::dados::esquema` é `esquema`).
+/// Em `crate::a::b::…` fica `a::b`: se `b` for um módulo com arquivo próprio
+/// dentro de `a` (`crate::compras::pendencias`, passo 3.4), o alvo é `b`; senão,
+/// `a` (veja `ler_crate`).
 fn alvo_do_nome(t: &[Token], par: &[usize], k: usize) -> Vec<String> {
     if PASTAS_DE_DOMINIO.contains(&t[k].texto.as_str()) && simbolo(t, k + 1, "::") {
         return alvos(t, par, k + 2);
+    }
+    if simbolo(t, k + 1, "::") && t.get(k + 2).is_some_and(|x| x.tipo == Tipo::Nome) && simbolo(t, k + 3, "::") {
+        return vec![format!("{}::{}", t[k].texto, t[k + 2].texto)];
     }
     vec![t[k].texto.clone()]
 }
@@ -683,13 +689,25 @@ struct Grafo {
 /// o módulo de antes (`compras.rs` virou `compras/mod.rs`), por isso não está aqui.
 const PASTAS_DE_DOMINIO: &[&str] = &["cadastros", "catalogo", "dados", "integracoes", "operacao", "servico", "troca"];
 
+/// Módulos que também são pasta (o `compras.rs` virou `compras/mod.rs`): os
+/// submódulos com arquivo próprio são módulos do grafo (`compras::pendencias`).
+const MODULOS_PASTA: &[&str] = &["compras"];
+
 /// O módulo de um caminho: o primeiro nome; dentro de uma pasta de domínio, o
 /// módulo de dentro dela (`dados::banco` é `banco`; o `dados::esquema`, novo
-/// da 3.2, também); no `compras`, os que o lib.rs reexporta dele (`importar`).
-/// Assim o grafo fica igual ao de antes das pastas.
-fn modulo_de(caminho: &[String], reexp: &BTreeMap<String, String>) -> Option<String> {
+/// da 3.2, também); no `compras`, os submódulos de arquivo próprio
+/// (`importar`, reexportado pelo lib.rs, e o `pendencias`, novo da 3.4). Os
+/// módulos escritos dentro do próprio arquivo (`compras::comandos`) são parte
+/// dele. Assim o grafo fica igual ao de antes das pastas.
+fn modulo_de(caminho: &[String], reexp: &BTreeMap<String, String>, modulos: &BTreeMap<String, bool>) -> Option<String> {
     match caminho {
-        [d, m, ..] if PASTAS_DE_DOMINIO.contains(&d.as_str()) || reexp.get(m) == Some(d) => Some(m.clone()),
+        [d, m, ..]
+            if PASTAS_DE_DOMINIO.contains(&d.as_str())
+                || reexp.get(m) == Some(d)
+                || (MODULOS_PASTA.contains(&d.as_str()) && modulos.contains_key(m)) =>
+        {
+            Some(m.clone())
+        }
         [m, ..] => Some(m.clone()),
         [] => None,
     }
@@ -718,7 +736,9 @@ fn ler_crate(src: &Path) -> Grafo {
             let m = d.caminho.last().unwrap().clone();
             let pasta_de_dominio = d.caminho.len() == 1 && PASTAS_DE_DOMINIO.contains(&m.as_str());
             let de_dominio = d.caminho.len() == 2
-                && (PASTAS_DE_DOMINIO.contains(&d.caminho[0].as_str()) || reexp.get(&m) == Some(&d.caminho[0]));
+                && (PASTAS_DE_DOMINIO.contains(&d.caminho[0].as_str())
+                    || reexp.get(&m) == Some(&d.caminho[0])
+                    || MODULOS_PASTA.contains(&d.caminho[0].as_str()));
             if (d.caminho.len() == 1 && !pasta_de_dominio) || de_dominio {
                 g.modulos.insert(m.clone(), d.teste);
             }
@@ -758,12 +778,17 @@ fn ler_crate(src: &Path) -> Grafo {
         }
     }
     for (r, onde) in refs {
-        let Some(de) = modulo_de(&r.de, &reexp) else { continue };
+        let Some(de) = modulo_de(&r.de, &reexp, &g.modulos) else { continue };
         let so_teste = g.modulos.get(&de).copied().unwrap_or(false);
         let teste = r.teste || so_teste;
         // Segue as reexportações do lib.rs até um módulo daqui ou outra crate:
         // `crate::Erro` → `erro` → `rustinho_base`.
-        let mut para = r.alvo.clone();
+        // `a::b` (veja `alvo_do_nome`): `b` se for módulo daqui; senão, `a`.
+        let mut para = match r.alvo.split_once("::") {
+            Some((_, filho)) if g.modulos.contains_key(filho) => filho.to_string(),
+            Some((pai, _)) => pai.to_string(),
+            None => r.alvo.clone(),
+        };
         let mut passos = 0;
         while !g.modulos.contains_key(&para) && passos < 8 {
             match reexp.get(&para) {
@@ -796,7 +821,7 @@ fn ler_crate(src: &Path) -> Grafo {
         }
     }
     for (e, onde) in escritas {
-        let Some(de) = modulo_de(&e.de, &reexp) else { continue };
+        let Some(de) = modulo_de(&e.de, &reexp, &g.modulos) else { continue };
         if e.teste || g.modulos.get(&de).copied().unwrap_or(false) {
             continue;
         }
@@ -1216,6 +1241,16 @@ fn leitor_entende_modulo_dentro_de_pasta_de_dominio() {
     "#;
     let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
     assert_eq!(r, ["esquema", "sync", "busca", "produtos", "banco", "esquema"]);
+}
+
+#[test]
+fn leitor_guarda_o_submodulo_de_um_modulo_pasta() {
+    let fonte = r#"
+        use crate::compras::pendencias::{registrar, resolver};
+        fn f() { crate::compras::lancar(); crate::compras::Cabecalho::novo(); }
+    "#;
+    let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
+    assert_eq!(r, ["compras::pendencias", "compras", "compras::Cabecalho"]);
 }
 
 #[test]

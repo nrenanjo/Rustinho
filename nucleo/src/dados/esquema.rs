@@ -114,7 +114,7 @@ pub const TABELAS: &[Tabela] = &[
     t("sync_par", Local, &["backup", "caminhos", "sync"]),
     t("sync_pendencia", Local, &["sync"]),
     t("sync_referencia", Local, &["sync"]),
-    t("xml_pendencia_identificacao", Local, &["importar"]),
+    t("xml_pendencia_identificacao", Local, &["pendencias"]),
 
     // Visões (saldos calculados na hora).
     t("conta_pagar_saldo", Derivada, &[]),

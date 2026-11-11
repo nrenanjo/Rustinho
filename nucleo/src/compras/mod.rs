@@ -18,6 +18,7 @@
 
 pub mod importar;
 pub mod nfe_xml;
+pub mod pendencias;
 pub mod reposicao;
 
 use std::collections::{HashMap, HashSet};
@@ -258,7 +259,7 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
             ],
         )?;
         if lig.acao.is_empty() {
-            crate::importar::registrar_pendencia_xml(
+            crate::compras::pendencias::registrar_pendencia_xml(
                 conn,
                 Some(&fornecedor_id),
                 &nota.emitente.documento,
@@ -267,6 +268,7 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
                 &nota.numero,
                 &nota.emissao,
                 item,
+                crate::importar::valor_unitario(item, true),
                 &lig.motivo_pendencia,
                 &lig.candidatos,
             )?;
@@ -1400,7 +1402,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             pid
         };
         produtos::registrar_gtins_xml(conn, &produto_id, &it.gtins_ficha())?;
-        crate::importar::resolver_pendencias_do_item(
+        crate::compras::pendencias::resolver_pendencias_do_item(
             conn,
             &cab.fornecedor_id,
             &it.codigo_fornecedor,
