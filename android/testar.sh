@@ -312,7 +312,7 @@ ENSAIO_PENDENTE=1
 # no teclado do Android 14); "texto" usa o "input text" (senhas: campo sem
 # sugestões do teclado).
 preencher() {
-    local n=$1 palavra=$2 modo=$3 t linha x1 y1 x2 y2 antes esq0 depois esq dica visto recebeu ensaio max=3
+    local n=$1 palavra=$2 modo=$3 t linha x1 y1 x2 y2 antes esq0 depois esq dica visto recebeu ensaio d max=3
     # O ensaio não gasta uma das 3 tentativas de verdade.
     [ -n "$ENSAIO_PENDENTE" ] && max=4
     for t in $(seq 1 $max); do
@@ -344,9 +344,16 @@ preencher() {
             # A foto de antes, com o teclado fechado; depois o cursor volta.
             read -r antes esq0 <<< "$(medir_sem_teclado "$n")"
             if [ "$antes" -le 2 ]; then
-                # Com o teclado fechado e o campo vazio, a dica TEM de aparecer:
-                # se não aparece, a foto não está medindo o campo.
-                falhou "[roteiro] campo $n: a dica não aparece na foto do campo vazio (dir=$antes esq=$esq0)"
+                # Com o teclado fechado e o campo vazio, a dica TEM de aparecer.
+                # Se o app não desenha nada (a tela cinza do emulador x86 da
+                # API 28, PEND-18; execução 42947158143), a falha é essa, não
+                # do roteiro. Com o app desenhado, a foto não está medindo o
+                # campo: defeito do roteiro.
+                if d=$(desenhada); then
+                    falhou "[roteiro] campo $n: a dica não aparece na foto do campo vazio (dir=$antes esq=$esq0)"
+                else
+                    falhou "campo $n: nada do app na tela ($d); a foto do campo não tem o que medir"
+                fi
                 return 1
             fi
             if ! focar "$n"; then instavel "campo $n: o cursor não voltou ao campo (tentativa $t)"; continue; fi
