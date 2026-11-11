@@ -527,21 +527,20 @@ fn ficha_do_item(conn: &Connection, it: &ItemXml) -> Resultado<produtos::Produto
     Ok(f)
 }
 
+/// Liga o código do fornecedor à peça, sem mexer num vínculo que já existe.
 fn ligar_fornecedor(conn: &Connection, fornecedor_id: &str, codigo: &str, produto_id: &str) -> Resultado<bool> {
-    let compacto = texto::compactar(codigo);
-    if compacto.is_empty() {
-        return Ok(false);
-    }
-    let n = conn.execute(
-        "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
-         VALUES (?1, ?2, ?3, ?4, 1000, ?5)
-         ON CONFLICT (fornecedor_id, codigo_compacto) DO NOTHING",
-        params![fornecedor_id, compacto, codigo, produto_id, tempo::agora()],
+    let ligou = crate::catalogo::codigos::vincular_fornecedor(
+        conn,
+        fornecedor_id,
+        codigo,
+        produto_id,
+        1000,
+        crate::catalogo::codigos::JaLigado::Manter,
     )?;
-    if n > 0 {
+    if ligou {
         produtos::atualizar_indice_busca(conn, produto_id)?;
     }
-    Ok(n > 0)
+    Ok(ligou)
 }
 
 pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<Importado> {
@@ -1335,12 +1334,13 @@ pub fn resolver_pendencia(
     if let Some(fid) = &fid {
         let compacto = texto::compactar(&codigo_fornecedor);
         if !compacto.is_empty() {
-            conn.execute(
-                "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
-                 VALUES (?1, ?2, ?3, ?4, 1000, ?5)
-                 ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
-                   SET codigo = excluded.codigo, produto_id = excluded.produto_id, atualizado_em = excluded.atualizado_em",
-                params![fid, compacto, codigo_fornecedor.trim(), produto_id, tempo::agora()],
+            crate::catalogo::codigos::vincular_fornecedor(
+                conn,
+                fid,
+                codigo_fornecedor.trim(),
+                &produto_id,
+                1000,
+                crate::catalogo::codigos::JaLigado::PassarPeca,
             )?;
             produtos::atualizar_indice_busca(conn, &produto_id)?;
         }

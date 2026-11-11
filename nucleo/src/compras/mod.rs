@@ -1457,13 +1457,13 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         }
         let compacto = texto::compactar(&it.codigo_fornecedor);
         if !cab.fornecedor_id.is_empty() && !compacto.is_empty() && !ambiguos.contains(&compacto) {
-            conn.execute(
-                "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
-                   SET codigo = excluded.codigo, produto_id = excluded.produto_id, fator = excluded.fator,
-                       atualizado_em = excluded.atualizado_em",
-                params![cab.fornecedor_id, compacto, it.codigo_fornecedor, produto_id, it.fator, tempo::agora()],
+            crate::catalogo::codigos::vincular_fornecedor(
+                conn,
+                &cab.fornecedor_id,
+                &it.codigo_fornecedor,
+                &produto_id,
+                it.fator,
+                crate::catalogo::codigos::JaLigado::PassarPecaEFator,
             )?;
             produtos::atualizar_indice_busca(conn, &produto_id)?;
         }

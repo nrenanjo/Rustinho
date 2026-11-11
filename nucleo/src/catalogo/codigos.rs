@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::erro::Resultado;
-use crate::{gtin, tempo};
+use crate::{gtin, tempo, texto};
 
 /// Um código GTIN / barras associado à peça, com tipo (`comercial` ou
 /// `tributavel`) e origem (`cEAN`, `cEANTrib`, `cBarra`, `cBarraTrib` ou `manual`).
@@ -128,4 +128,58 @@ pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFic
         )?;
     }
     Ok(gravados)
+}
+
+/// O que fazer quando o fornecedor já tem esse código ligado a uma peça.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JaLigado {
+    /// Fica como está (a importação de cadastros).
+    Manter,
+    /// Passa para esta peça e o fator fica (resolver a pendência à mão:
+    /// PEND-36, que a 4.2 muda).
+    PassarPeca,
+    /// Passa para esta peça com o fator novo (lançar a compra: A08, que a 4.2
+    /// muda).
+    PassarPecaEFator,
+}
+
+/// Liga o código que o fornecedor usa a uma peça (`produto_fornecedor`), pela
+/// forma compacta do código (os zeros à esquerda ficam). O código é guardado
+/// como veio. Código vazio não liga nada. Devolve se gravou (ligou agora ou,
+/// conforme `ja_ligado`, passou de peça). Não refaz o índice de busca: quem
+/// chama refaz, como antes.
+pub fn vincular_fornecedor(
+    conn: &Connection,
+    fornecedor_id: &str,
+    codigo: &str,
+    produto_id: &str,
+    fator: i64,
+    ja_ligado: JaLigado,
+) -> Resultado<bool> {
+    let compacto = texto::compactar(codigo);
+    if compacto.is_empty() {
+        return Ok(false);
+    }
+    let sql = match ja_ligado {
+        JaLigado::Manter => {
+            "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (fornecedor_id, codigo_compacto) DO NOTHING"
+        }
+        JaLigado::PassarPeca => {
+            "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
+               SET codigo = excluded.codigo, produto_id = excluded.produto_id, atualizado_em = excluded.atualizado_em"
+        }
+        JaLigado::PassarPecaEFator => {
+            "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
+               SET codigo = excluded.codigo, produto_id = excluded.produto_id, fator = excluded.fator,
+                   atualizado_em = excluded.atualizado_em"
+        }
+    };
+    let n = conn.execute(sql, params![fornecedor_id, compacto, codigo, produto_id, fator, tempo::agora()])?;
+    Ok(n > 0)
 }
