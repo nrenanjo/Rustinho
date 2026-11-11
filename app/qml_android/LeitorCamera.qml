@@ -13,7 +13,15 @@ Item {
     id: leitor
     property var depois: null
     property bool ocupado: false
-    readonly property string foto: Api.caminho(StandardPaths.writableLocation(StandardPaths.CacheLocation)) + "/quadro.pgm"
+    // F03 (dev.3.3, 2.3): o quadro da câmera fica no lugar que o núcleo
+    // escolhe (um só, na pasta privada); a tela não manda caminho para ler e
+    // apagar.
+    property string foto: ""
+    Component.onCompleted: {
+        const r = Api.chamar("codigo_caminho_foto")
+        if (r.ok)
+            foto = r.dados.caminho
+    }
 
     function ler(funcao) {
         depois = funcao
@@ -70,11 +78,11 @@ Item {
             running: !!vista.item && vista.item.ligada
             onTriggered: {
                 const saida = vista.item.saida
-                if (leitor.ocupado || !saida.temQuadro)
+                if (leitor.ocupado || !saida.temQuadro || leitor.foto === "")
                     return
                 leitor.ocupado = true
                 if (saida.salvar(leitor.foto, 900)) {
-                    const r = Api.chamar("codigo_ler_foto", { caminho: leitor.foto })
+                    const r = Api.chamar("codigo_ler_foto")
                     if (r.ok && r.dados.codigo && janelaCamera.opened) {
                         const f = leitor.depois
                         leitor.ocupado = false

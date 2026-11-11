@@ -6,7 +6,7 @@
 //! (o das etiquetas) e QR.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rxing::{BarcodeFormat, DecodeHints};
 
@@ -85,12 +85,20 @@ pub fn ler_imagem(largura: u32, altura: u32, cinza: Vec<u8>) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-/// Lê o arquivo da foto e apaga em seguida.
+/// F03 (dev.3.3): o arquivo onde o leitor da câmera grava cada quadro. Um só,
+/// na pasta privada do Rustinho, escolhido aqui: a tela pergunta o caminho
+/// (`codigo_caminho_foto`) e nunca manda outro para ler e apagar.
+pub fn caminho_da_foto(pasta_privada: &Path) -> PathBuf {
+    pasta_privada.join("leitor-camera.pgm")
+}
+
+/// Lê o quadro da câmera e só o apaga depois de conferir que é uma imagem
+/// (um arquivo que não é imagem fica onde está).
 pub fn ler_foto(caminho: &Path) -> Resultado<Option<String>> {
     let dados =
         std::fs::read(caminho).map_err(|e| Erro::validacao(format!("Não consegui ler a foto da câmera: {e}")))?;
-    let _ = std::fs::remove_file(caminho);
     let (l, a, cinza) = ler_pnm(&dados)?;
+    let _ = std::fs::remove_file(caminho);
     Ok(ler_imagem(l, a, cinza))
 }
 

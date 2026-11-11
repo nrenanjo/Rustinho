@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::banco::Banco;
-use crate::despacho::{ler, Acesso, Arquivo, Classe, Comando, Estorno, Id, Pedido};
+use crate::despacho::{ler, Acesso, Classe, Comando, Estorno, Id, Pedido};
 use crate::erro::{Erro, Resultado};
 use crate::{
     arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes,
@@ -272,6 +272,8 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("sync_ler", Classe::LeituraSemSessao),
     ("aparencia_salvar", Classe::SemSessao),
     ("codigo_ler_foto", Classe::LeituraSemSessao),
+    // F03 (dev.3.3, 2.3): o lugar do quadro da câmera é do núcleo.
+    ("codigo_caminho_foto", Classe::LeituraSemSessao),
     ("backup_automatico", Classe::SemSessao),
     ("backup_ao_fechar", Classe::SemSessao),
     ("sair", Classe::SemSessao),
@@ -781,9 +783,16 @@ impl Servico {
                 Ok(json!({ "tema": tema, "escuro": tema == "amoled" }))
             }
             // Câmera do celular como leitor de código de barras.
+            // F03 (dev.3.3, 2.3): o quadro fica num lugar só, o do núcleo;
+            // outro caminho mandado pela tela é recusado e nada é apagado.
+            "codigo_caminho_foto" => Ok(json!({ "caminho": self.foto_da_camera().display().to_string() })),
             "codigo_ler_foto" => {
-                let d: Arquivo = ler(dados)?;
-                Ok(json!({ "codigo": codigo::ler_foto(&arquivos::caminho_local(&d.caminho))?.unwrap_or_default() }))
+                let d: FotoDaCamera = ler(dados)?;
+                let foto = self.foto_da_camera();
+                if !d.caminho.is_empty() && Path::new(&arquivos::caminho_local(&d.caminho)) != foto {
+                    return Err(Erro::validacao("A foto da câmera fica num lugar só, e não é esse."));
+                }
+                Ok(json!({ "codigo": codigo::ler_foto(&foto)?.unwrap_or_default() }))
             }
             // Backup automático e ao fechar: rodam mesmo sem ninguém conectado.
             "backup_automatico" => {
@@ -839,6 +848,12 @@ impl Servico {
             }
             _ => Err(Erro::Interno(format!("comando desconhecido: {comando}"))),
         }
+    }
+
+    /// F03: o arquivo do quadro da câmera, na pasta privada (a do banco).
+    fn foto_da_camera(&self) -> std::path::PathBuf {
+        let privada = self.banco.caminho.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+        codigo::caminho_da_foto(&privada.unwrap_or_else(std::env::temp_dir))
     }
 
     /// Pode fazer esta ação do gerente sem senha? (é gerente, ou a loja
@@ -2210,6 +2225,13 @@ struct Entrada {
 struct Formatar {
     tipo: String,
     texto: String,
+}
+
+/// `codigo_ler_foto`: o caminho é opcional (só vale o do próprio leitor).
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct FotoDaCamera {
+    caminho: String,
 }
 
 /// `numero_somar`: soma `somar` e tira `subtrair`, lendo cada texto pela

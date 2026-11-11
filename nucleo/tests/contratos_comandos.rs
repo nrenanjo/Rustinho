@@ -62,6 +62,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("cheque_repassar", "financeiro", &["nao_repetir"]),
     ("cheques_painel", "financeiro", &["leitura"]),
     ("cheques_previa", "leitura", &["leitura"]),
+    // dev.3.3, passo 2.3 (F03): o lugar do quadro da câmera é do núcleo; sem sessão, como o codigo_ler_foto.
+    ("codigo_caminho_foto", "leitura", &["leitura", "sem_sessao"]),
     ("codigo_ler_foto", "leitura", &["leitura", "sem_sessao"]),
     ("codigos_assumir", "gerente", &[]),
     ("codigos_confirmar_computador", "gerente", &[]),
