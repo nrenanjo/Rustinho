@@ -1189,9 +1189,6 @@ mod testes {
         assert!(do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup_nuvem"));
     }
 
-    /// T-07 (C8): caixa da loja sem trocar dados há um dia ou mais vira
-    /// atenção, com o nome e a última troca. Some com uma troca que dê certo,
-    /// com a retirada do caixa e com a troca de dados desligada. Menos de um
     /// NOTIF-01 (0.9.18): o texto do botão diz o que ele faz. Os avisos de
     /// diferenças entre caixas e de códigos abrem Simultaneidade ›
     /// Duplicatas: o botão é "Ver duplicatas" (antes: "Resolver no Gerente").
@@ -1224,6 +1221,9 @@ mod testes {
         }
     }
 
+    /// T-07 (C8): caixa da loja sem trocar dados há um dia ou mais vira
+    /// atenção, com o nome e a última troca. Some com uma troca que dê certo,
+    /// com a retirada do caixa e com a troca de dados desligada. Menos de um
     /// dia, ou nunca ter trocado, não avisa.
     #[test]
     fn t07_caixa_sem_contato_ha_um_dia() {
