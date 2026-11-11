@@ -266,8 +266,8 @@ fn a08_lancar_compra_nao_transfere_vinculo_em_silencio() {
 // N02 — código do fornecedor na importação de XML (travas que já valem hoje)
 // Cenários de `_reversa_sdd/auditoria_dev33/REQUISITO_CODIGO_FORNECEDOR_XML.md` §4.
 // Os que pedem notas próprias assinadas (caso PATRAL completo, zeros à esquerda
-// na importação, cProd igual ao GTIN de outra peça) entram junto da PKI de
-// teste dos códigos (ver o relatório da fase 1).
+// na importação, cProd igual ao GTIN de outra peça, GTIN tributável) estão no
+// fim do arquivo, com a PKI de teste dos códigos (dev.3.3, passo 3.0).
 // ===========================================================================
 
 /// G01 (trava) — os casos que já valem continuam valendo.
@@ -515,4 +515,216 @@ fn dp51_cprod_igual_ao_codigo_original_nao_liga_em_silencio() {
         "a nota caiu sozinha na peça cujo código original (digitado) coincide com o cProd: {it}"
     );
     assert!(vinculos(&l, &peca_x).is_empty(), "a coincidência criou vínculo sem pergunta: {:?}", vinculos(&l, &peca_x));
+}
+
+// ===========================================================================
+// N02 — cenários 1, 5, 6 e 9 com notas ASSINADAS sob medida (dev.3.3, passo
+// 3.0), da PKI de teste dos códigos (`tests/pki/gerar_codigos_fornecedor.py`):
+// uma "PATRAL" fictícia manda as notas para a loja de teste. Travas do que já
+// vale. Ficam fora porque ainda não estão decididos ou porque são de tela: o
+// destaque do código do fornecedor na ficha (passo 4.2, roteiro L5), o que fazer
+// com o `8373` além de não juntá-lo (pendência ou pergunta: DP-06/DP-07, passo
+// 4.2) e qual GTIN a venda usa (DP-10).
+// ===========================================================================
+
+/// CNPJ (inventado) da "PATRAL" das notas de `tests/pki/xml/codigos/`.
+const PATRAL: &str = "44666777000165";
+const NOME_PATRAL: &str = "PATRAL PECAS DE TESTE LTDA";
+/// O GTIN do caso relatado (só o número).
+const GTIN_PATRAL: &str = "7908168151578";
+const GTIN_OUTRA: &str = "7891000000090";
+const GTIN_COMERCIAL: &str = "7891000000113";
+const GTIN_TRIBUTAVEL: &str = "7891000000120";
+const NF601: &str = include_str!("pki/xml/codigos/nf601_patral_00008373.xml");
+const NF602: &str = include_str!("pki/xml/codigos/nf602_patral_8373.xml");
+const NF603: &str = include_str!("pki/xml/codigos/nf603_patral_cprod_igual_gtin.xml");
+const NF604: &str = include_str!("pki/xml/codigos/nf604_patral_gtin_tributavel.xml");
+
+/// Grava a nota numa pasta só dela e devolve (pasta, arquivo).
+fn gravar_nota(l: &Loja, pasta: &str, xml: &str) -> (String, String) {
+    let p = l.pasta.join(pasta);
+    std::fs::create_dir_all(&p).unwrap();
+    let arquivo = p.join("nota.xml");
+    std::fs::write(&arquivo, xml).unwrap();
+    (p.display().to_string(), arquivo.display().to_string())
+}
+
+/// "Trazer cadastros" de uma nota: o fornecedor e, se `pecas`, as peças dela.
+fn trazer_cadastros(l: &mut Loja, pasta: &str, xml: &str, pecas: bool) {
+    let (p, _) = gravar_nota(l, pasta, xml);
+    l.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [p], "clientes": false, "fornecedores": true,
+                "pecasLoja": false, "pecasFornecedor": pecas }),
+    );
+}
+
+/// Importa a nota como compra; devolve o id da compra e o item (as notas têm um só).
+fn compra_da_nota(l: &mut Loja, pasta: &str, xml: &str) -> (String, Value) {
+    let (_, arquivo) = gravar_nota(l, pasta, xml);
+    let r = l.ok("compra_importar", json!({ "caminho": arquivo }));
+    let id = r["compras"][0]["id"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let f = l.ok("compra_abrir", json!({ "id": id }));
+    let itens = f["itens"].as_array().unwrap();
+    assert_eq!(itens.len(), 1, "{f}");
+    (id, itens[0].clone())
+}
+
+/// (gtin, tipo, origem) de cada GTIN da peça.
+fn gtins(l: &Loja, peca: &str) -> Vec<(String, String, String)> {
+    let c = l.conexao();
+    let mut st =
+        c.prepare("SELECT gtin, tipo, origem FROM produto_gtin WHERE produto_id = ?1 ORDER BY 1, 2, 3").unwrap();
+    st.query_map([peca], |x| Ok((x.get(0)?, x.get(1)?, x.get(2)?))).unwrap().map(Result::unwrap).collect()
+}
+
+fn trinca(a: &str, b: &str, c: &str) -> (String, String, String) {
+    (a.to_string(), b.to_string(), c.to_string())
+}
+
+/// N02, cenário 1 (o caso relatado), de ponta a ponta. A nota da PATRAL com
+/// `cProd` 00008373 e `cEAN` 7908168151578 cadastra o fornecedor pelo CNPJ e a
+/// peça com o código do fornecedor (zeros mantidos), o GTIN comercial e um
+/// código interno próprio, sem gravar o código original (DP-51). A compra da
+/// mesma peça cai nela pelo vínculo e, lançada, não muda nenhum código.
+#[test]
+fn n02_c1_patral_de_ponta_a_ponta() {
+    let mut l = loja("n02-c1");
+    trazer_cadastros(&mut l, "cadastro", NF601, true);
+    let patral = id_fornecedor(&l, PATRAL);
+    let peca = dono_do_codigo(&l, &patral, "00008373").expect("00008373 ligado a uma peça");
+    let so_o_da_patral = vec![(patral.clone(), "00008373".to_string())];
+    assert_eq!(vinculos(&l, &peca), so_o_da_patral, "o código do fornecedor não ficou como veio na nota");
+    assert!(
+        gtins(&l, &peca).contains(&trinca(GTIN_PATRAL, "comercial", "cEAN")),
+        "GTIN comercial: {:?}",
+        gtins(&l, &peca)
+    );
+    let f = ficha(&mut l, &peca);
+    let interno = f["codigo"].as_str().unwrap_or("");
+    assert!(!interno.is_empty() && !interno.ends_with("8373"), "o código interno não é próprio: {interno:?}");
+    assert_eq!(f["codigoOriginal"], "", "a importação gravou o código original (DP-51)");
+    let mostrado = f["fornecedores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|x| x["codigo"] == "00008373" && x["fornecedor"] == NOME_PATRAL);
+    assert!(mostrado, "a ficha não mostra 00008373 com a PATRAL: {}", f["fornecedores"]);
+
+    // A compra: o item cai na peça pelo vínculo do fornecedor; lançar não muda os códigos.
+    let (compra, it) = compra_da_nota(&mut l, "compra", NF601);
+    assert_eq!(it["codigoFornecedor"], "00008373", "{it}");
+    assert_eq!(it["peca"]["id"].as_str(), Some(peca.as_str()), "{it}");
+    assert_eq!(it["achadoPor"], "fornecedor", "{it}");
+    l.ok(
+        "compra_conferir_autorizacao",
+        json!({ "id": compra, "situacao": "autorizada", "protocolo": "135260000000601",
+                "conferidoEm": "08/10/2026 11:00", "senha": SENHA_ANA }),
+    );
+    l.ok(
+        "compra_lancar",
+        json!({ "id": compra, "itens": [{ "id": it["id"], "acao": "ligar", "produtoId": peca, "fator": "1" }] }),
+    );
+    assert_eq!(l.estoque_pelos_movimentos(&peca), 2, "as 2 unidades da nota");
+    assert_eq!(vinculos(&l, &peca), so_o_da_patral, "lançar a compra mexeu no código do fornecedor");
+    assert_eq!(ficha(&mut l, &peca)["codigoOriginal"], "", "lançar a compra gravou o código original");
+    assert_eq!(l.numero("SELECT COUNT(*) FROM produto_fornecedor"), 1, "vínculo a mais");
+}
+
+/// N02, cenário 5: a PATRAL manda `00008373` numa nota e `8373` (sem GTIN, mesma
+/// descrição) na seguinte. Os zeros nunca saem do código guardado, e o `8373`
+/// não é juntado em silêncio à peça do `00008373` por nenhum dos caminhos de
+/// importação. O que fazer com ele (pendência ou pergunta) é da política da 4.2.
+#[test]
+fn n02_c5_zeros_a_esquerda_nao_juntam_em_silencio() {
+    let preparar = |nome: &str| {
+        let mut l = loja(nome);
+        trazer_cadastros(&mut l, "cadastro", NF601, true);
+        let patral = id_fornecedor(&l, PATRAL);
+        let peca = dono_do_codigo(&l, &patral, "00008373").expect("00008373 ligado a uma peça");
+        (l, patral, peca)
+    };
+    let intacto = |l: &Loja, patral: &str, peca: &str| {
+        let so_o_com_zeros = vec![(patral.to_string(), "00008373".to_string())];
+        assert_eq!(vinculos(l, peca), so_o_com_zeros, "o código com zeros mudou, ou a peça ganhou o 8373");
+        assert_ne!(dono_do_codigo(l, patral, "8373").as_deref(), Some(peca), "o 8373 foi juntado à peça do 00008373");
+    };
+
+    // Compra: o item do 8373 não cai na peça do 00008373.
+    let (mut l, patral, peca) = preparar("n02-c5-compra");
+    let (_, it) = compra_da_nota(&mut l, "compra", NF602);
+    assert_eq!(it["codigoFornecedor"], "8373", "{it}");
+    assert_ne!(it["peca"]["id"].as_str(), Some(peca.as_str()), "o 8373 caiu na peça do 00008373: {it}");
+    intacto(&l, &patral, &peca);
+
+    // Trazer só o fornecedor: o 8373 fica pendente, sem ligar.
+    let (mut l, patral, peca) = preparar("n02-c5-pendencia");
+    trazer_cadastros(&mut l, "so-fornecedor", NF602, false);
+    pendencia(&mut l, "8373");
+    intacto(&l, &patral, &peca);
+
+    // Trazer as peças do fornecedor: o 8373 não vai para a peça do 00008373.
+    let (mut l, patral, peca) = preparar("n02-c5-pecas");
+    trazer_cadastros(&mut l, "pecas", NF602, true);
+    intacto(&l, &patral, &peca);
+}
+
+/// N02, cenário 6: o `cProd` da PATRAL é igual ao GTIN de outra peça. O código do
+/// fornecedor só vale para a PATRAL: a nota não cai na peça do GTIN, ela não
+/// ganha vínculo da PATRAL, e o GTIN continua só nela.
+#[test]
+fn n02_c6_cprod_igual_ao_gtin_de_outra_peca_nao_colide() {
+    let preparar = |nome: &str| {
+        let mut l = loja(nome);
+        let outra = peca_com(&mut l, "PECA DONA DO GTIN", |f| f["codigoBarras"] = json!(GTIN_OUTRA));
+        (l, outra)
+    };
+    let gtin_so_na_outra = |l: &mut Loja, outra: &str| {
+        assert_eq!(ficha(l, outra)["codigoBarras"], GTIN_OUTRA, "o código de barras da outra peça mudou");
+        let com_barras = l.numero(&format!("SELECT COUNT(*) FROM produto WHERE codigo_barras = '{GTIN_OUTRA}'"));
+        let em_outras = l.numero(&format!(
+            "SELECT COUNT(*) FROM produto_gtin WHERE gtin = '{GTIN_OUTRA}' AND produto_id <> '{outra}'"
+        ));
+        assert_eq!((com_barras, em_outras), (1, 0), "o GTIN foi parar em outra peça");
+        assert!(vinculos(l, outra).is_empty(), "a peça do GTIN ganhou vínculo: {:?}", vinculos(l, outra));
+    };
+
+    // Compra: o cProd não leva o item para a peça do GTIN.
+    let (mut l, outra) = preparar("n02-c6-compra");
+    let (_, it) = compra_da_nota(&mut l, "compra", NF603);
+    assert_eq!(it["codigoFornecedor"], GTIN_OUTRA, "{it}");
+    assert_ne!(it["peca"]["id"].as_str(), Some(outra.as_str()), "a nota caiu na peça do GTIN pelo cProd: {it}");
+    gtin_so_na_outra(&mut l, &outra);
+
+    // Trazer só o fornecedor: o código fica pendente, sem ligar.
+    let (mut l, outra) = preparar("n02-c6-pendencia");
+    trazer_cadastros(&mut l, "so-fornecedor", NF603, false);
+    pendencia(&mut l, GTIN_OUTRA);
+    gtin_so_na_outra(&mut l, &outra);
+
+    // Trazer as peças do fornecedor: a peça da nota é outra, ligada à PATRAL.
+    let (mut l, outra) = preparar("n02-c6-pecas");
+    trazer_cadastros(&mut l, "pecas", NF603, true);
+    let patral = id_fornecedor(&l, PATRAL);
+    let da_nota = dono_do_codigo(&l, &patral, GTIN_OUTRA).expect("o código da PATRAL ligado a uma peça");
+    assert_ne!(da_nota, outra, "o código da PATRAL foi ligado à peça do GTIN");
+    gtin_so_na_outra(&mut l, &outra);
+}
+
+/// N02, cenário 9: GTIN tributável diferente do comercial. Os dois ficam na
+/// peça, cada um com o seu tipo e a sua origem; a compra seguinte acha a mesma
+/// peça e trazer a nota de novo não duplica. Qual GTIN a venda usa é da DP-10.
+#[test]
+fn n02_c9_gtin_tributavel_diferente_do_comercial() {
+    let mut l = loja("n02-c9");
+    trazer_cadastros(&mut l, "pecas", NF604, true);
+    let patral = id_fornecedor(&l, PATRAL);
+    let peca = dono_do_codigo(&l, &patral, "PT-9").expect("PT-9 ligado a uma peça");
+    let os_dois = vec![trinca(GTIN_COMERCIAL, "comercial", "cEAN"), trinca(GTIN_TRIBUTAVEL, "tributavel", "cEANTrib")];
+    assert_eq!(gtins(&l, &peca), os_dois, "GTINs com o tipo ou a origem trocados");
+    let (_, it) = compra_da_nota(&mut l, "compra", NF604);
+    assert_eq!(it["peca"]["id"].as_str(), Some(peca.as_str()), "{it}");
+    trazer_cadastros(&mut l, "de-novo", NF604, true);
+    assert_eq!(gtins(&l, &peca), os_dois, "trazer a nota de novo mudou os GTINs");
+    assert_eq!(l.numero("SELECT COUNT(*) FROM produto"), 1, "trazer a nota de novo criou outra peça");
 }
