@@ -2155,12 +2155,14 @@ fn formatar(tipo: &str, texto: &str) -> String {
 /// percentual ou quantidade; vazio vale 0; texto inválido é recusado com a
 /// mensagem da leitura (nunca vira 0 em silêncio).
 fn somar_textos(tipo: &str, somar: &[String], subtrair: &[String]) -> Resultado<String> {
-    let (ler, escrever): (fn(&str) -> Result<Option<i64>, String>, fn(i64) -> String) = match tipo {
-        "dinheiro" => (numeros::ler_dinheiro, numeros::escrever_dinheiro),
-        "percentual" => (numeros::ler_percentual, numeros::escrever_percentual),
-        "quantidade" => (numeros::ler_quantidade, numeros::escrever_quantidade),
-        outro => return Err(Erro::Interno(format!("numero_somar: tipo desconhecido: {outro}"))),
+    let ler = |texto: &str| match tipo {
+        "dinheiro" => numeros::ler_dinheiro(texto),
+        "percentual" => numeros::ler_percentual(texto),
+        _ => numeros::ler_quantidade(texto),
     };
+    if !matches!(tipo, "dinheiro" | "percentual" | "quantidade") {
+        return Err(Erro::Interno(format!("numero_somar: tipo desconhecido: {tipo}")));
+    }
     let mut valores = Vec::with_capacity(somar.len() + subtrair.len());
     for (lista, sinal) in [(somar, 1), (subtrair, -1)] {
         for texto in lista {
@@ -2168,7 +2170,12 @@ fn somar_textos(tipo: &str, somar: &[String], subtrair: &[String]) -> Resultado<
             valores.push(v.checked_mul(sinal).ok_or_else(numeros::grande_demais)?);
         }
     }
-    Ok(escrever(numeros::soma(valores)?))
+    let total = numeros::soma(valores)?;
+    Ok(match tipo {
+        "dinheiro" => numeros::escrever_dinheiro(total),
+        "percentual" => numeros::escrever_percentual(total),
+        _ => numeros::escrever_quantidade(total),
+    })
 }
 
 /// Troca o nome do campo de um erro (ex.: "senha" → "nova").
