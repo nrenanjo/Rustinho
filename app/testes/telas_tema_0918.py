@@ -225,21 +225,28 @@ class Rustinho(base.Rustinho):
         (DISPLAY certo) e sem Wayland, senão a janela iria para a área de
         trabalho de verdade."""
         # Logo depois do fork o processo ainda é uma cópia do Python: espera o
-        # programa de verdade (a linha de comando dele) antes de ler.
+        # programa de verdade (a linha de comando dele) antes de ler. N05
+        # (dev.3.3): logo depois do exec (ou com o processo já terminando), o
+        # /proc/<pid>/environ pode vir VAZIO; vazio não é "ambiente errado", é
+        # "ainda não deu para ler": lê de novo. Um ambiente lido e errado
+        # continua parando o roteiro antes de tocar no programa.
         for _ in range(100):
+            if self.p.poll() is not None:
+                raise RuntimeError(f"o Rustinho fechou antes de abrir a janela (código {self.p.returncode})")
             try:
                 with open(f"/proc/{self.p.pid}/cmdline", "rb") as f:
                     carregado = f.read().split(b"\0")[0] == PROGRAMA.encode()
                 if carregado:
                     with open(f"/proc/{self.p.pid}/environ", "rb") as f:
                         amb = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
-                    break
-            except FileNotFoundError:
+                    if amb:
+                        break
+            except (FileNotFoundError, ProcessLookupError):
                 pass
             time.sleep(0.05)
         else:
             self.p.kill()
-            raise RuntimeError("o Rustinho não abriu")
+            raise RuntimeError("o Rustinho não abriu (o ambiente dele não pôde ser lido)")
         tela = amb.get(b"DISPLAY", b"").decode()
         if tela != TELA or b"WAYLAND_DISPLAY" in amb or amb.get(b"QT_QPA_PLATFORM") != b"xcb":
             self.p.kill()
