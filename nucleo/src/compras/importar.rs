@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::catalogo::codigos::{peca_por_fornecedor_inequivoco, BuscaId};
 use crate::erro::{Erro, Resultado};
 use crate::nfe_xml::{self, ItemXml, NotaXml};
 use crate::pessoas::{self, Emitente};
@@ -263,13 +264,6 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
 // Conferir o que já existe
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BuscaId {
-    Nenhum,
-    Unico(String),
-    Ambiguo(Vec<String>),
-}
-
 pub(crate) fn gtins_para_ficha(gtins: &[nfe_xml::GtinXml], gtin_fallback: &str) -> Vec<produtos::GtinFicha> {
     let mut r: Vec<produtos::GtinFicha> = gtins
         .iter()
@@ -304,49 +298,7 @@ pub(crate) fn peca_por_gtins_inequivoco(
     if codigos.is_empty() {
         return Ok(BuscaId::Nenhum);
     }
-    let mut achados: Vec<String> = Vec::new();
-    let mut stmt = conn.prepare_cached(
-        "SELECT DISTINCT p.id FROM produto p
-          WHERE p.codigo_barras = ?1
-             OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?1)
-          ORDER BY p.id",
-    )?;
-    for cod in &codigos {
-        let linhas: Vec<String> = stmt.query_map([cod], |l| l.get(0))?.collect::<Result<_, _>>()?;
-        for pid in linhas {
-            if !achados.contains(&pid) {
-                achados.push(pid);
-            }
-        }
-    }
-    Ok(match achados.len() {
-        0 => BuscaId::Nenhum,
-        1 => BuscaId::Unico(achados.remove(0)),
-        _ => BuscaId::Ambiguo(achados),
-    })
-}
-
-pub(crate) fn peca_por_fornecedor_inequivoco(
-    conn: &Connection,
-    fornecedor_doc: &str,
-    codigo: &str,
-) -> Resultado<BuscaId> {
-    let compacto = texto::compactar(codigo);
-    if fornecedor_doc.is_empty() || compacto.is_empty() {
-        return Ok(BuscaId::Nenhum);
-    }
-    let mut stmt = conn.prepare_cached(
-        "SELECT DISTINCT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
-          WHERE p.documento = ?1 AND f.codigo_compacto = ?2
-          ORDER BY f.produto_id",
-    )?;
-    let mut achados: Vec<String> =
-        stmt.query_map(params![fornecedor_doc, compacto], |l| l.get(0))?.collect::<Result<_, _>>()?;
-    Ok(match achados.len() {
-        0 => BuscaId::Nenhum,
-        1 => BuscaId::Unico(achados.remove(0)),
-        _ => BuscaId::Ambiguo(achados),
-    })
+    crate::catalogo::codigos::pecas_pelos_gtins(conn, &codigos)
 }
 
 fn pessoa_existe(conn: &Connection, doc: &str) -> Resultado<Option<String>> {

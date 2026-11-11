@@ -241,3 +241,116 @@ pub fn definir_codigo_interno(
     )?;
     Ok(n == 1)
 }
+
+// ---------------------------------------------------------------------------
+// Consultas (as mesmas de antes; as mudanças de política são da fase 4)
+// ---------------------------------------------------------------------------
+
+/// O que uma busca de peça por código achou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BuscaId {
+    Nenhum,
+    Unico(String),
+    Ambiguo(Vec<String>),
+}
+
+fn por_quantidade(mut achados: Vec<String>) -> BuscaId {
+    match achados.len() {
+        0 => BuscaId::Nenhum,
+        1 => BuscaId::Unico(achados.remove(0)),
+        _ => BuscaId::Ambiguo(achados),
+    }
+}
+
+/// As peças que têm algum destes códigos como código de barras principal ou
+/// como GTIN, sem repetir, na ordem em que aparecem.
+pub(crate) fn pecas_pelos_gtins(conn: &Connection, codigos: &[String]) -> Resultado<BuscaId> {
+    let mut achados: Vec<String> = Vec::new();
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT p.id FROM produto p
+          WHERE p.codigo_barras = ?1
+             OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?1)
+          ORDER BY p.id",
+    )?;
+    for cod in codigos {
+        let linhas: Vec<String> = stmt.query_map([cod], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        for pid in linhas {
+            if !achados.contains(&pid) {
+                achados.push(pid);
+            }
+        }
+    }
+    Ok(por_quantidade(achados))
+}
+
+/// A peça ligada ao código do fornecedor identificado pelo documento (CNPJ ou
+/// CPF), pela forma compacta do código.
+pub(crate) fn peca_por_fornecedor_inequivoco(
+    conn: &Connection,
+    fornecedor_doc: &str,
+    codigo: &str,
+) -> Resultado<BuscaId> {
+    let compacto = texto::compactar(codigo);
+    if fornecedor_doc.is_empty() || compacto.is_empty() {
+        return Ok(BuscaId::Nenhum);
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+          WHERE p.documento = ?1 AND f.codigo_compacto = ?2
+          ORDER BY f.produto_id",
+    )?;
+    let achados: Vec<String> =
+        stmt.query_map(params![fornecedor_doc, compacto], |l| l.get(0))?.collect::<Result<_, _>>()?;
+    Ok(por_quantidade(achados))
+}
+
+/// A peça e o fator do vínculo do fornecedor (pelo id dele), pela forma
+/// compacta do código.
+pub(crate) fn vinculo_do_fornecedor(
+    conn: &Connection,
+    fornecedor_id: &str,
+    compacto: &str,
+) -> Resultado<Option<(String, i64)>> {
+    Ok(conn
+        .query_row(
+            "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
+              WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
+            params![fornecedor_id, compacto],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?)
+}
+
+/// As peças cujo código original ou um equivalente é este código (forma
+/// compacta), de qualquer fornecedor. Como antes, olha só as 5 primeiras peças
+/// do índice que têm o código e filtra depois: a peça certa pode ficar de fora
+/// (PEND-40, que o passo 4.1 corrige; a caracterização continua falhando).
+pub(crate) fn candidatos_por_codigo_original(conn: &Connection, compacto: &str) -> Resultado<Vec<String>> {
+    let mut c = conn.prepare_cached(
+        "SELECT p.id, p.codigo_original FROM produto p
+          WHERE instr(p.codigos, ' ' || ?1 || ' ') > 0
+          ORDER BY p.id
+          LIMIT 5",
+    )?;
+    let linhas: Vec<(String, String)> =
+        c.query_map([compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    let mut candidatos = Vec::new();
+    for (pid, orig) in linhas {
+        if texto::compactar(&orig) == compacto {
+            candidatos.push(pid);
+        } else {
+            let tem_equiv: bool = conn
+                .query_row(
+                    "SELECT 1 FROM produto_equivalente WHERE produto_id = ?1 AND codigo_compacto = ?2 LIMIT 1",
+                    params![pid, compacto],
+                    |_| Ok(true),
+                )
+                .optional()?
+                .unwrap_or(false);
+            if tem_equiv {
+                candidatos.push(pid);
+            }
+        }
+    }
+    Ok(candidatos)
+}

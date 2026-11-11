@@ -380,7 +380,7 @@ fn ligar_sozinho(
     ambiguo: bool,
     gtin_ambiguo: bool,
 ) -> Resultado<LigacaoAutomatica> {
-    use crate::importar::BuscaId;
+    use crate::catalogo::codigos::BuscaId;
 
     let compacto = texto::compactar(&item.codigo);
     let gtin_busca = if gtin_ambiguo {
@@ -389,13 +389,7 @@ fn ligar_sozinho(
         crate::importar::peca_por_gtins_inequivoco(conn, &item.gtins, &item.gtin)?
     };
     let forn_ligado: Option<(String, i64)> = if !compacto.is_empty() && !ambiguo {
-        conn.query_row(
-            "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
-              WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
-            params![fornecedor_id, compacto],
-            |l| Ok((l.get(0)?, l.get(1)?)),
-        )
-        .optional()?
+        crate::catalogo::codigos::vinculo_do_fornecedor(conn, fornecedor_id, &compacto)?
     } else {
         None
     };
@@ -460,32 +454,7 @@ fn ligar_sozinho(
     }
 
     if compacto.len() >= 3 {
-        let mut c = conn.prepare_cached(
-            "SELECT p.id, p.codigo_original FROM produto p
-              WHERE instr(p.codigos, ' ' || ?1 || ' ') > 0
-              ORDER BY p.id
-              LIMIT 5",
-        )?;
-        let linhas: Vec<(String, String)> =
-            c.query_map([&compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
-        let mut candidatos_cod = Vec::new();
-        for (pid, orig) in linhas {
-            if texto::compactar(&orig) == compacto {
-                candidatos_cod.push(pid);
-            } else {
-                let tem_equiv: bool = conn
-                    .query_row(
-                        "SELECT 1 FROM produto_equivalente WHERE produto_id = ?1 AND codigo_compacto = ?2 LIMIT 1",
-                        params![pid, compacto],
-                        |_| Ok(true),
-                    )
-                    .optional()?
-                    .unwrap_or(false);
-                if tem_equiv {
-                    candidatos_cod.push(pid);
-                }
-            }
-        }
+        let mut candidatos_cod = crate::catalogo::codigos::candidatos_por_codigo_original(conn, &compacto)?;
         if candidatos_cod.len() == 1 {
             return Ok(LigacaoAutomatica {
                 acao: "ligar".into(),
@@ -1573,7 +1542,10 @@ fn cadastrar_peca(
     f.nome = texto::limpar(&it.descricao).chars().take(120).collect();
     let barras_livre = !it.gtin.is_empty()
         && gtin::gtin_valido(&it.gtin)
-        && matches!(crate::importar::peca_por_gtins_inequivoco(conn, &[], &it.gtin)?, crate::importar::BuscaId::Nenhum);
+        && matches!(
+            crate::importar::peca_por_gtins_inequivoco(conn, &[], &it.gtin)?,
+            crate::catalogo::codigos::BuscaId::Nenhum
+        );
     if barras_livre {
         f.codigo_barras = it.gtin.clone();
     }
