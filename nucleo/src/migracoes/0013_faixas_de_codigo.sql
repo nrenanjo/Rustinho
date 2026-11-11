@@ -50,5 +50,5 @@ CREATE INDEX produto_sem_codigo ON produto (dispositivo) WHERE codigo = '';
 
 -- Banco que já tinha usuários (loja que já usava o Rustinho antes das
 -- faixas): a primeira faixa sai depois de conferir os códigos que existem
--- (veja `codigos::garantir_distribuidor`). Só deste computador.
+-- (veja `faixas::garantir_distribuidor`). Só deste computador.
 INSERT INTO config (chave, valor) SELECT 'codigos_legado', '1' WHERE EXISTS (SELECT 1 FROM usuario);
