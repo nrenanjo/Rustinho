@@ -35,7 +35,7 @@ import sys
 import tempfile
 import time
 
-os.environ.setdefault("RUSTINHO_TELA", ":79")
+os.environ.setdefault("RUSTINHO_TELA", ":86")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import telas_unidades as u  # noqa: E402
 
