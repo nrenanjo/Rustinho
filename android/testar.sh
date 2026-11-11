@@ -263,6 +263,33 @@ print(linhas, colunas)
 PY
     rm -f fotos/tela.raw
 }
+# Fecha o teclado (o "voltar" só quando ele está aberto: com ele fechado, o
+# "voltar" sairia da tela).
+fechar_teclado() {
+    local i
+    teclado_aberto && tecla KEYCODE_BACK
+    for i in 1 2 3 4 5 6; do teclado_aberto || break; sleep 0.5; done
+    sleep 0.5
+}
+# medir_sem_teclado <n>: a foto do campo n com o teclado FECHADO e o campo
+# dentro da tela. Com o teclado aberto, o Android às vezes não desloca a
+# janela a tempo e o campo fica embaixo do teclado: a foto mediria o teclado
+# (execução 42944215226). Imprime "direita esquerda" (veja medir_campo).
+medir_sem_teclado() {
+    local n=$1 i linha x1 y1 x2 y2
+    fechar_teclado
+    for i in 1 2 3; do
+        arvore "campo$n"
+        linha=$(campo "fotos/campo$n.xml" "$n")
+        [ -n "$linha" ] || { echo "-1 -1"; return; }
+        read -r _ x1 y1 x2 y2 <<< "$linha"
+        if [ "$y2" -gt 2250 ]; then adb shell input swipe 540 1600 540 1000 400; sleep 1; continue; fi
+        if [ "$y1" -lt 200 ]; then adb shell input swipe 540 1000 540 1600 400; sleep 1; continue; fi
+        medir_campo "$x1" "$y1" "$x2" "$y2"
+        return
+    done
+    echo "-1 -1"
+}
 # Ensaio permanente da conferência: na 1ª tentativa do 1º campo, o roteiro
 # não digita nada, como se o emulador tivesse perdido tudo. A conferência
 # tem de perceber e digitar de novo; se não perceber, o roteiro está errado.
@@ -300,7 +327,18 @@ preencher() {
             continue
         fi
         antes=-1; esq0=-1
-        [ -n "$dica" ] && read -r antes esq0 <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
+        if [ -n "$dica" ]; then
+            # A foto de antes, com o teclado fechado; depois o cursor volta.
+            read -r antes esq0 <<< "$(medir_sem_teclado "$n")"
+            if [ "$antes" -le 2 ]; then
+                # Com o teclado fechado e o campo vazio, a dica TEM de aparecer:
+                # se não aparece, a foto não está medindo o campo.
+                falhou "[roteiro] campo $n: a dica não aparece na foto do campo vazio (dir=$antes esq=$esq0)"
+                return 1
+            fi
+            if ! focar "$n"; then instavel "campo $n: o cursor não voltou ao campo (tentativa $t)"; continue; fi
+            sleep 1
+        fi
         ensaio=0
         if [ -n "$ENSAIO_PENDENTE" ]; then
             ENSAIO_PENDENTE=""
@@ -314,8 +352,9 @@ preencher() {
         if aviso_na_tela; then instavel "campo $n: aviso do sistema durante a digitação (tentativa $t)"; continue; fi
         recebeu=1
         if [ -n "$dica" ]; then
-            # A dica sumiu da faixa da direita e apareceu texto à esquerda.
-            read -r depois esq <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
+            # A dica sumiu da faixa da direita e apareceu texto à esquerda
+            # (foto com o teclado fechado, como a de antes).
+            read -r depois esq <<< "$(medir_sem_teclado "$n")"
             echo "campo $n tentativa $t: dica \"$dica\" antes(dir=$antes esq=$esq0) depois(dir=$depois esq=$esq)" >> fotos/medidas_campos.txt
             [ "$antes" -gt 2 ] && [ "$depois" -ge 0 ] && [ "$depois" -le 1 ] && [ "$esq" -ge 8 ] && recebeu=0
         else
