@@ -224,54 +224,9 @@ fn lote(_conn: &Connection) -> i64 {
     LOTE
 }
 
-/// Tabelas que os caixas compartilham.
-pub const TABELAS: &[&str] = &[
-    "config",
-    "usuario",
-    "tabela_preco",
-    "regra_st",
-    "unidade",
-    "produto",
-    "produto_preco",
-    "produto_aplicacao",
-    "produto_equivalente",
-    "produto_fornecedor",
-    // Códigos que uma peça já teve.
-    "produto_codigo_antigo",
-    // Faixas de códigos das peças de cada caixa (veja `faixas`).
-    "faixa_codigo",
-    "estoque_movimento",
-    "pessoa",
-    "pessoa_veiculo",
-    "compra",
-    "compra_item",
-    "caixa_sessao",
-    "caixa_movimento",
-    "venda",
-    "venda_item",
-    "venda_pagamento",
-    "conta_receber",
-    "recebimento",
-    "recebimento_parcela",
-    "conta_loja",
-    "categoria",
-    "conta_pagar",
-    "pagamento",
-    "movimento_conta",
-    "cheque",
-    "comissao_fechamento",
-    // Metas da DRE gerencial (veja `dre`).
-    "meta",
-    "encomenda",
-    "devolucao",
-    "devolucao_item",
-    "vale",
-    "ordem_servico",
-    "ordem_servico_item",
-    "auditoria",
-    // Decisões do gerente sobre conflitos (vão para todos os caixas).
-    "sync_resolucao",
-];
+/// Tabelas que os caixas compartilham: as de classe `Viaja` do `dados::esquema`,
+/// na ordem de lá (a mesma de antes; dev.3.3, passo 3.2).
+pub const TABELAS: &[&str] = &crate::dados::esquema::QUE_VIAJAM;
 
 /// Configurações que valem para a loja toda. As outras (nome deste caixa,
 /// senha da rede...) são de cada computador.

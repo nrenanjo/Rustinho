@@ -356,7 +356,7 @@ fn extensao(t: &[Token], par: &[usize], inicio: usize) -> usize {
 /// `crate::a::X` dá `a`; `crate::{a::X, b}` dá `a` e `b`.
 fn alvos(t: &[Token], par: &[usize], j: usize) -> Vec<String> {
     if t.get(j).is_some_and(|x| x.tipo == Tipo::Nome) {
-        return vec![t[j].texto.clone()];
+        return alvo_do_nome(t, par, j);
     }
     if !simbolo(t, j, "{") {
         return vec!["?".into()];
@@ -367,7 +367,7 @@ fn alvos(t: &[Token], par: &[usize], j: usize) -> Vec<String> {
     while k < par[j] {
         if comeco {
             match t[k].tipo {
-                Tipo::Nome if t[k].texto != "self" => v.push(t[k].texto.clone()),
+                Tipo::Nome if t[k].texto != "self" => v.extend(alvo_do_nome(t, par, k)),
                 Tipo::Nome => {}
                 _ => v.push("?".into()),
             }
@@ -381,6 +381,15 @@ fn alvos(t: &[Token], par: &[usize], j: usize) -> Vec<String> {
         k += 1;
     }
     v
+}
+
+/// O módulo de um nome depois de `crate::`: o próprio nome ou, se for uma
+/// pasta de domínio, o módulo dentro dela (`crate::dados::esquema` é `esquema`).
+fn alvo_do_nome(t: &[Token], par: &[usize], k: usize) -> Vec<String> {
+    if PASTAS_DE_DOMINIO.contains(&t[k].texto.as_str()) && simbolo(t, k + 1, "::") {
+        return alvos(t, par, k + 2);
+    }
+    vec![t[k].texto.clone()]
 }
 
 #[derive(Debug)]
@@ -675,11 +684,12 @@ struct Grafo {
 const PASTAS_DE_DOMINIO: &[&str] = &["cadastros", "catalogo", "dados", "integracoes", "operacao", "servico", "troca"];
 
 /// O módulo de um caminho: o primeiro nome; dentro de uma pasta de domínio, o
-/// módulo que o lib.rs reexporta dela (`dados::banco` é `banco`). Assim o
-/// grafo fica igual ao de antes das pastas.
+/// módulo de dentro dela (`dados::banco` é `banco`; o `dados::esquema`, novo
+/// da 3.2, também); no `compras`, os que o lib.rs reexporta dele (`importar`).
+/// Assim o grafo fica igual ao de antes das pastas.
 fn modulo_de(caminho: &[String], reexp: &BTreeMap<String, String>) -> Option<String> {
     match caminho {
-        [d, m, ..] if reexp.get(m) == Some(d) => Some(m.clone()),
+        [d, m, ..] if PASTAS_DE_DOMINIO.contains(&d.as_str()) || reexp.get(m) == Some(d) => Some(m.clone()),
         [m, ..] => Some(m.clone()),
         [] => None,
     }
@@ -707,8 +717,9 @@ fn ler_crate(src: &Path) -> Grafo {
         for d in a.mods {
             let m = d.caminho.last().unwrap().clone();
             let pasta_de_dominio = d.caminho.len() == 1 && PASTAS_DE_DOMINIO.contains(&m.as_str());
-            let reexportado = d.caminho.len() == 2 && reexp.get(&m) == Some(&d.caminho[0]);
-            if (d.caminho.len() == 1 && !pasta_de_dominio) || reexportado {
+            let de_dominio = d.caminho.len() == 2
+                && (PASTAS_DE_DOMINIO.contains(&d.caminho[0].as_str()) || reexp.get(&m) == Some(&d.caminho[0]));
+            if (d.caminho.len() == 1 && !pasta_de_dominio) || de_dominio {
                 g.modulos.insert(m.clone(), d.teste);
             }
             let arquivo = match d.arquivo {
@@ -1060,83 +1071,30 @@ fn base_fica_embaixo_sem_sql_e_sem_ciclos() {
 }
 
 /// Quem grava em cada tabela no código de produção (etapa 4 da
-/// modularização: "um dono por tabela"). Formato: tabela e os módulos que
-/// gravam nela (INSERT, REPLACE, UPDATE ou DELETE num texto de SQL; ler não
-/// conta). Por enquanto só registra o que existe: um módulo que passe a
-/// gravar numa tabela em que não gravava faz o teste falhar — a gravação
-/// nova vai pela função do dono, como `pagar::criar_da_compra` —, e um
-/// escritor que deixou de gravar tem de sair da lista (para não voltar).
-/// `*` = nome de tabela montado na hora (a troca de dados e o backup gravam
-/// qualquer tabela). As tabelas com mais de um escritor são as que ainda
-/// precisam de um dono só (relatório da frente modular2).
+/// modularização: "um dono por tabela"). Desde a dev.3.3, passo 3.2 (ARQ-10),
+/// a lista sai do `dados::esquema` do núcleo (os `escritores` de cada tabela),
+/// a mesma fonte da `sync::TABELAS`: tabela e os módulos que gravam nela
+/// (INSERT, REPLACE, UPDATE ou DELETE num texto de SQL; ler não conta). Um
+/// módulo que passe a gravar numa tabela em que não gravava faz o teste falhar
+/// — a gravação nova vai pela função do dono, como `pagar::criar_da_compra` —,
+/// e um escritor que deixou de gravar tem de sair do esquema (para não voltar).
+/// `*` = nome de tabela montado na hora (`esquema::GRAVAM_QUALQUER_TABELA`).
+/// As tabelas com mais de um escritor são as que ainda precisam de um dono só
+/// (ARQ-01).
 ///
-/// Gerada com `RUSTINHO_DEPENDENCIAS_MOSTRAR=1 cargo test -p rustinho-nucleo
-/// --test dependencias -- --nocapture nenhum_escritor_novo`.
+/// Para ver o que o código grava hoje: `RUSTINHO_DEPENDENCIAS_MOSTRAR=1 cargo
+/// test -p rustinho-nucleo --test dependencias -- --nocapture nenhum_escritor_novo`.
 ///
-/// Dev.3.3, passo 1.4 (AUD33-K02): entram as duas tabelas da migração 0024
-/// (`produto_gtin`, `xml_pendencia_identificacao`), gravadas em minúsculas.
+/// Dev.3.3, passo 1.4 (AUD33-K02): as duas tabelas da migração 0024
+/// (`produto_gtin`, `xml_pendencia_identificacao`) são gravadas em minúsculas.
 /// Se o leitor voltar a não ver minúsculas, elas "deixam de ter escritor" e o
-/// teste falha. É o embrião da lista única de tabelas (`dados::esquema`, com a
-/// classe de sincronização), que vem com a PEND-35.
-#[rustfmt::skip]
-const ESCRITORES: &[(&str, &[&str])] = &[
-    ("*", &["loja"]),
-    ("alteracao", &["loja", "sync"]),
-    ("auditoria", &["auditoria"]),
-    ("caixa_movimento", &["caixa"]),
-    ("caixa_sessao", &["caixa"]),
-    ("categoria", &["dre", "financeiro"]),
-    ("cheque", &["cheques"]),
-    ("comissao_fechamento", &["comissoes"]),
-    ("compra", &["compras"]),
-    ("compra_item", &["compras"]),
-    ("config", &["backup", "banco", "config", "faixas", "loja", "sync"]),
-    ("conta_loja", &["financeiro"]),
-    ("conta_pagar", &["pagar"]),
-    ("conta_receber", &["receber"]),
-    ("devolucao", &["devolucoes"]),
-    ("devolucao_item", &["devolucoes"]),
-    ("encomenda", &["encomendas"]),
-    ("entrada_falha", &["usuarios"]),
-    ("estoque_movimento", &["estoque"]),
-    ("faixa_codigo", &["faixas"]),
-    ("menu_uso", &["menu"]),
-    ("meta", &["dre"]),
-    ("movimento_conta", &["caixa", "cheques", "financeiro", "pagar"]),
-    ("ordem_servico", &["oficina"]),
-    ("ordem_servico_item", &["oficina"]),
-    ("pagamento", &["pagar"]),
-    ("pessoa", &["faixas", "pessoas"]),
-    ("pessoa_veiculo", &["oficina", "pessoas"]),
-    ("produto", &["compras", "faixas", "fiscal", "produtos"]),
-    ("produto_aplicacao", &["produtos"]),
-    ("produto_codigo_antigo", &["importar", "produtos"]),
-    ("produto_equivalente", &["produtos"]),
-    ("produto_fornecedor", &["compras", "importar"]),
-    ("produto_gtin", &["produtos"]),
-    ("produto_preco", &["compras", "produtos"]),
-    ("recebimento", &["devolucoes", "receber"]),
-    ("recebimento_parcela", &["devolucoes", "receber"]),
-    ("ref_atual", &["sync"]),
-    ("regra_st", &["fiscal"]),
-    ("senha_situacao", &["usuarios"]),
-    ("sqlite_sequence", &["sync"]),
-    ("sync_conflito", &["sync"]),
-    ("sync_endereco", &["backup", "caminhos"]),
-    ("sync_estado", &["backup", "loja", "sync"]),
-    ("sync_par", &["backup", "caminhos", "sync"]),
-    ("sync_pendencia", &["sync"]),
-    ("sync_referencia", &["sync"]),
-    ("sync_resolucao", &["sync"]),
-    ("tabela_preco", &["config"]),
-    ("unidade", &["unidades"]),
-    ("usuario", &["backup", "sync", "usuarios"]),
-    ("vale", &["devolucoes"]),
-    ("venda", &["vendas"]),
-    ("venda_item", &["vendas"]),
-    ("venda_pagamento", &["vendas"]),
-    ("xml_pendencia_identificacao", &["importar"]),
-];
+/// teste falha.
+fn escritores() -> Vec<(&'static str, &'static [&'static str])> {
+    use rustinho_nucleo::dados::esquema;
+    let mut v = vec![("*", esquema::GRAVAM_QUALQUER_TABELA)];
+    v.extend(esquema::TABELAS.iter().chain(esquema::TEMPORARIAS).map(|t| (t.nome, t.escritores)));
+    v
+}
 
 #[test]
 fn nenhum_escritor_novo_por_tabela() {
@@ -1162,23 +1120,23 @@ fn nenhum_escritor_novo_por_tabela() {
             println!("E {t}: {}", ms.join(", "));
         }
     }
+    let lista = escritores();
     let mut registrados = BTreeSet::new();
-    for (t, ms) in ESCRITORES {
+    for (t, ms) in &lista {
         for m in *ms {
             assert!(registrados.insert((t.to_string(), m.to_string())), "repetido na lista: {t} ← {m}");
         }
     }
     let mut erros = Vec::new();
     for (t, m) in atuais.difference(&registrados) {
-        let outros: Vec<&str> =
-            ESCRITORES.iter().filter(|(x, _)| x == t).flat_map(|(_, ms)| ms.iter().copied()).collect();
+        let outros: Vec<&str> = lista.iter().filter(|(x, _)| x == t).flat_map(|(_, ms)| ms.iter().copied()).collect();
         erros.push(format!(
             "escritor NOVO: {m} grava a tabela {t} (primeiro em {}); quem já gravava: {outros:?}",
             g.escritores[&(t.clone(), m.clone())]
         ));
     }
     for (t, m) in registrados.difference(&atuais) {
-        erros.push(format!("{m} não grava mais a tabela {t}: tire-o de ESCRITORES (assim não volta)"));
+        erros.push(format!("{m} não grava mais a tabela {t}: tire-o do dados::esquema (assim não volta)"));
     }
     assert!(erros.is_empty(), "{}", erros.join("\n"));
     assert!(atuais.len() > 40, "o leitor achou poucas gravações: {}", atuais.len());
@@ -1247,6 +1205,17 @@ fn leitor_entende_grupos_super_e_modulos_em_bloco() {
     "#;
     let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
     assert_eq!(r, ["a", "b", "c", "d"]);
+}
+
+#[test]
+fn leitor_entende_modulo_dentro_de_pasta_de_dominio() {
+    let fonte = r#"
+        use crate::dados::esquema::TABELAS;
+        use crate::{troca::sync, catalogo::{busca, produtos::X}, banco};
+        fn f() -> usize { crate::dados::esquema::QUE_VIAJAM.len() }
+    "#;
+    let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
+    assert_eq!(r, ["esquema", "sync", "busca", "produtos", "banco", "esquema"]);
 }
 
 #[test]
