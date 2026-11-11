@@ -194,7 +194,12 @@ pub fn salvar_categoria(conn: &Connection, e: &CategoriaEntrada) -> Resultado<St
     if texto::tamanho(&nome) > 40 {
         return Err(Erro::campo("nome", "Use no máximo 40 letras."));
     }
-    let tipo = if e.tipo == "receita" { "receita" } else { "despesa" };
+    // E12 (dev.3.3): tipo desconhecido é recusado (virava despesa em silêncio).
+    let tipo = match e.tipo.as_str() {
+        "receita" => "receita",
+        "despesa" => "despesa",
+        _ => return Err(Erro::campo("tipo", "Escolha receita ou despesa.")),
+    };
     let repetida: Option<String> = conn
         .query_row(
             "SELECT id FROM categoria WHERE normalizar(nome) = normalizar(?1) AND id <> ?2",
@@ -277,11 +282,15 @@ pub fn lancar_movimento(
     if texto::tamanho(&descricao) > 80 {
         return Err(Erro::campo("descricao", "Use no máximo 80 letras."));
     }
+    // E12 (dev.3.3): como em Contas a pagar, a categoria que não existe é
+    // recusada (o movimento era gravado sem ela, em silêncio).
     let categoria = if e.categoria_id.is_empty() {
         None
     } else {
-        conn.query_row("SELECT id FROM categoria WHERE id = ?1", [&e.categoria_id], |l| l.get::<_, String>(0))
-            .optional()?
+        let achada = conn
+            .query_row("SELECT id FROM categoria WHERE id = ?1", [&e.categoria_id], |l| l.get::<_, String>(0))
+            .optional()?;
+        Some(achada.ok_or_else(|| Erro::campo("categoriaId", "Categoria não encontrada."))?)
     };
     let id = tempo::novo_id();
     conn.execute(
@@ -1284,6 +1293,41 @@ mod testes {
         assert_eq!(f.realizado[0].saidas, "512,90");
         assert!(f.realizado[0].detalhes.iter().any(|x| x == "Tarifa do mês"));
         assert!(resumo(c).unwrap().saldo_contas.starts_with("527"));
+    }
+
+    /// E12 (dev.3.3, 2.4): como em Contas a pagar, uma categoria que não
+    /// existe é recusada (o movimento era gravado sem ela, em silêncio), e
+    /// um tipo de categoria desconhecido também (virava despesa).
+    #[test]
+    fn e12_categoria_inexistente_e_tipo_desconhecido_recusados() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        let mov = |categoria: &str| MovimentoEntrada {
+            conta_id: l.banco.clone(),
+            tipo: "saida".into(),
+            valor: "10,00".into(),
+            categoria_id: categoria.into(),
+            descricao: "Tarifa".into(),
+            ..Default::default()
+        };
+        let antes: i64 = c.query_row("SELECT COUNT(*) FROM movimento_conta", [], |x| x.get(0)).unwrap();
+        let e = lancar_movimento(c, d, u, &mov("categoria-que-nao-existe")).unwrap_err();
+        assert!(matches!(&e, Erro::Validacao { campo: Some(campo), .. } if campo == "categoriaId"), "{e:?}");
+        let depois: i64 = c.query_row("SELECT COUNT(*) FROM movimento_conta", [], |x| x.get(0)).unwrap();
+        assert_eq!(depois, antes, "o movimento foi gravado sem a categoria");
+        lancar_movimento(c, d, u, &mov("cat-tarifas")).unwrap();
+        lancar_movimento(c, d, u, &mov("")).unwrap();
+
+        let cat = |tipo: &str| CategoriaEntrada {
+            nome: format!("Nova {tipo}"),
+            tipo: tipo.into(),
+            ativo: true,
+            ..Default::default()
+        };
+        let e = salvar_categoria(c, &cat("investimento")).unwrap_err();
+        assert!(matches!(&e, Erro::Validacao { campo: Some(campo), .. } if campo == "tipo"), "{e:?}");
+        salvar_categoria(c, &cat("despesa")).unwrap();
+        salvar_categoria(c, &cat("receita")).unwrap();
     }
 
     #[test]
