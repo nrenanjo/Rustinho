@@ -422,16 +422,24 @@ fn titular_do_certificado(c: &X509Certificate) -> (Option<String>, Option<String
                 let Some(v) = conteudo_outro_nome(bruto) else { continue };
                 if id == OID_CNPJ && crate::documento::cnpj_formato(&v) {
                     cnpj = Some(v);
-                } else if id == OID_PESSOA_FISICA && v.len() >= 19 {
-                    let x = &v[8..19];
-                    if x.bytes().all(|b| b.is_ascii_digit()) {
-                        cpf = Some(x.to_string());
+                } else if id == OID_PESSOA_FISICA {
+                    if let Some(x) = cpf_do_outro_nome(&v) {
+                        cpf = Some(x);
                     }
                 }
             }
         }
     }
     (cnpj, cpf)
+}
+
+/// O CPF do titular: as posições 8 a 19 do conteúdo (depois da data de
+/// nascimento), só algarismos. F05 (dev.3.3): `get` em vez de cortar por
+/// bytes; com uma letra de mais de um byte no caminho, devolve nada em vez de
+/// derrubar o programa.
+fn cpf_do_outro_nome(v: &str) -> Option<String> {
+    let x = v.get(8..19)?;
+    x.bytes().all(|b| b.is_ascii_digit()).then(|| x.to_string())
 }
 
 fn nome_comum(c: &X509Certificate) -> String {
@@ -756,4 +764,22 @@ fn verificar_com<'a>(xml: &'a str, ancoras: &Ancoras, exigir_protocolo: bool) ->
     };
     let inf = inf.id();
     Ok(Verificado { doc, inf, prova })
+}
+
+#[cfg(test)]
+mod f05_testes {
+    use super::cpf_do_outro_nome;
+
+    /// F05 (dev.3.3, 2.4): o conteúdo vem do certificado; uma letra de mais de
+    /// um byte antes da posição 19 não pode derrubar o programa (um pânico no
+    /// núcleo deixa o Rustinho só para leitura): o certificado só fica sem CPF.
+    #[test]
+    fn f05_letra_de_varios_bytes_no_certificado_nao_derruba() {
+        assert_eq!(cpf_do_outro_nome("01011990123456789010000000").as_deref(), Some("12345678901"));
+        assert_eq!(cpf_do_outro_nome("0101199é12345678901"), None);
+        assert_eq!(cpf_do_outro_nome("01011990123456789é"), None);
+        assert_eq!(cpf_do_outro_nome("ççççççççççç"), None);
+        assert_eq!(cpf_do_outro_nome("curto"), None);
+        assert_eq!(cpf_do_outro_nome("01011990ABCDEFGHIJK"), None);
+    }
 }
