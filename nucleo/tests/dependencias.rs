@@ -428,6 +428,17 @@ struct Analise {
     inclusoes: Vec<Inclusao>,
     /// Tabelas em que um texto de SQL grava (veja `escritas_sql`).
     escritas: Vec<Escrita>,
+    /// Lugares que abrem uma transação (contrato C5, passo 3.5).
+    transacoes: Vec<Transacao>,
+}
+
+/// Uma abertura de transação: `.transaction()`, `.unchecked_transaction()`,
+/// `.transaction_with_behavior(…)` ou um texto de SQL que começa com `BEGIN`.
+#[derive(Debug)]
+struct Transacao {
+    de: Vec<String>,
+    teste: bool,
+    linha: usize,
 }
 
 #[derive(Debug)]
@@ -532,6 +543,15 @@ fn analisar(fonte: &str, onde: &str, base: &[String], teste_inicial: bool) -> An
             }
             i = j;
             continue;
+        }
+        let abre_por_metodo = t[i].tipo == Tipo::Nome
+            && ["transaction", "unchecked_transaction", "transaction_with_behavior"].contains(&t[i].texto.as_str())
+            && i > 0
+            && simbolo(&t, i - 1, ".")
+            && simbolo(&t, i + 1, "(");
+        let abre_por_sql = t[i].tipo == Tipo::Texto && t[i].texto.trim_start().to_uppercase().starts_with("BEGIN");
+        if abre_por_metodo || abre_por_sql {
+            a.transacoes.push(Transacao { de: caminho.clone(), teste, linha: t[i].linha });
         }
         if t[i].tipo == Tipo::Texto {
             for (tabela, minuscula) in escritas_sql_com_caixa(&t[i].texto) {
@@ -680,6 +700,8 @@ struct Grafo {
     escritores: BTreeMap<(String, String), String>,
     /// Toda gravação de produção: (lugar, tabela, módulo, em minúsculas).
     gravacoes: Vec<(String, String, String, bool)>,
+    /// Módulo que abre a própria transação no código de produção, com o primeiro lugar.
+    transacoes: BTreeMap<String, String>,
     /// Problemas de leitura (o teste falha se houver).
     problemas: Vec<String>,
 }
@@ -721,6 +743,7 @@ fn ler_crate(src: &Path) -> Grafo {
     let mut lidos = BTreeSet::new();
     let mut refs: Vec<(Referencia, String)> = Vec::new();
     let mut escritas: Vec<(Escrita, String)> = Vec::new();
+    let mut transacoes: Vec<(Transacao, String)> = Vec::new();
     let mut fila: VecDeque<(PathBuf, Vec<String>, bool)> = VecDeque::from([(lib.clone(), Vec::new(), false)]);
     while let Some((arq, caminho, teste)) = fila.pop_front() {
         let real = arq.canonicalize().unwrap_or_else(|e| panic!("{}: {e}", arq.display()));
@@ -764,6 +787,7 @@ fn ler_crate(src: &Path) -> Grafo {
         }
         refs.extend(a.refs.into_iter().map(|r| (r, onde.clone())));
         escritas.extend(a.escritas.into_iter().map(|e| (e, onde.clone())));
+        transacoes.extend(a.transacoes.into_iter().map(|x| (x, onde.clone())));
     }
     // Todo arquivo .rs da pasta tem de ter sido lido (senão o leitor perdeu algum).
     let mut pendentes = vec![src.to_path_buf()];
@@ -827,6 +851,15 @@ fn ler_crate(src: &Path) -> Grafo {
         }
         g.gravacoes.push((format!("{onde}:{}", e.linha), e.tabela.clone(), de.clone(), e.minuscula));
         g.escritores.entry((e.tabela, de)).or_insert_with(|| format!("{onde}:{}", e.linha));
+    }
+    for (x, onde) in transacoes {
+        let Some(de) = modulo_de(&x.de, &reexp, &g.modulos) else { continue };
+        // Aberta pelo atendente do comando (o submódulo `comandos` de cada
+        // domínio): é a regra C5, não conta.
+        if x.teste || g.modulos.get(&de).copied().unwrap_or(false) || x.de.iter().any(|n| n == "comandos") {
+            continue;
+        }
+        g.transacoes.entry(de).or_insert_with(|| format!("{onde}:{}", x.linha));
     }
     g
 }
@@ -1121,6 +1154,44 @@ fn escritores() -> Vec<(&'static str, &'static [&'static str])> {
     v
 }
 
+/// Dev.3.3, passo 3.5 (contrato C5; a regra está no cabeçalho de
+/// `servico/despacho.rs`): o comando abre a transação e o domínio recebe
+/// `&Transaction`. Abrem pela regra o serviço e o banco (as migrações); os
+/// atendentes dos comandos (o submódulo `comandos` de cada domínio) não contam.
+const ABREM_PELA_REGRA: &[&str] = &["api", "banco"];
+
+/// Os módulos que ainda abrem a própria transação, como estavam antes da
+/// regra. Cada um passa a receber a do comando quando for mexido na fase dele
+/// (6 a 8). Módulo novo abrindo a própria transação faz o teste falhar; um que
+/// deixou de abrir tem de sair daqui (para não voltar).
+const TRANSACAO_PROPRIA: &[&str] = &["backup", "faixas", "loja", "sync"];
+
+#[test]
+fn so_os_modulos_de_hoje_abrem_a_propria_transacao() {
+    let g = ler_crate(&raiz().join("nucleo/src"));
+    assert!(g.problemas.is_empty(), "o leitor de fontes não entendeu tudo: {:#?}", g.problemas);
+    if std::env::var_os("RUSTINHO_DEPENDENCIAS_MOSTRAR").is_some() {
+        println!("== abrem a própria transação ({}):", g.transacoes.len());
+        for (m, lugar) in &g.transacoes {
+            println!("TX {m} {lugar}");
+        }
+    }
+    let mut erros = Vec::new();
+    for (m, lugar) in &g.transacoes {
+        if !ABREM_PELA_REGRA.contains(&m.as_str()) && !TRANSACAO_PROPRIA.contains(&m.as_str()) {
+            erros.push(format!(
+                "NOVO: {m} abre a própria transação (primeiro em {lugar}); pela regra C5 o comando abre e o domínio recebe &Transaction"
+            ));
+        }
+    }
+    for m in TRANSACAO_PROPRIA.iter().chain(ABREM_PELA_REGRA) {
+        if !g.transacoes.contains_key(*m) {
+            erros.push(format!("{m} não abre mais a própria transação: tire-o da lista (assim não volta)"));
+        }
+    }
+    assert!(erros.is_empty(), "{}", erros.join("\n"));
+}
+
 #[test]
 fn nenhum_escritor_novo_por_tabela() {
     let g = ler_crate(&raiz().join("nucleo/src"));
@@ -1251,6 +1322,20 @@ fn leitor_guarda_o_submodulo_de_um_modulo_pasta() {
     "#;
     let r: Vec<_> = refs(fonte).into_iter().map(|x| x.0).collect();
     assert_eq!(r, ["compras::pendencias", "compras", "compras::Cabecalho"]);
+}
+
+#[test]
+fn leitor_acha_aberturas_de_transacao() {
+    let fonte = r#"
+        fn a(c: &mut Connection) { let tx = c.transaction()?; }
+        fn b(c: &Connection) { c.unchecked_transaction()?; c.execute_batch("BEGIN IMMEDIATE")?; }
+        fn transaction() {} // não é abertura
+        #[cfg(test)]
+        fn t(c: &mut Connection) { c.transaction_with_behavior(x)?; }
+    "#;
+    let a = analisar(fonte, "trecho", &["m".to_string()], false);
+    let v: Vec<(usize, bool)> = a.transacoes.iter().map(|x| (x.linha, x.teste)).collect();
+    assert_eq!(v, [(2, false), (3, false), (3, false), (6, true)]);
 }
 
 #[test]

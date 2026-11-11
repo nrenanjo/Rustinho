@@ -3104,39 +3104,99 @@ mod testes {
         crate::sync::exigir_editavel(&s.banco.conn, "conta_receber", "c1").unwrap();
     }
 
-    /// R5-T9 · R5-10: varredura. Toda operação de dinheiro listada chama o bloqueio; se alguém
-    /// tirar a chamada (ou criar uma operação nova sem ela e listá-la aqui), o teste falha.
+    /// R5-T9 · R5-10 (gerado da marca `dinheiro`, dev.3.3 passo 3.5; E04):
+    /// cada comando de `despacho::DINHEIRO` existe, o atendente dele chama a
+    /// função de domínio marcada, e a função chama o bloqueio de registro
+    /// inconsistente, menos as lacunas conhecidas, que ficam aqui até a 6.3
+    /// (quando uma passar a chamar, tem de sair da lista). As 16 operações que
+    /// a varredura conferia à mão até a 3.5 continuam marcadas: tirar a marca
+    /// de uma delas faz o teste falhar.
     #[test]
     fn r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio() {
-        let fontes: [(&str, &str, &[&str]); 6] = [
-            ("receber", include_str!("../operacao/receber.rs"), &["receber", "estornar", "cancelar_conta"]),
-            ("cheques", include_str!("../operacao/cheques.rs"), &["depositar", "repassar", "devolver", "desfazer"]),
-            ("pagar", include_str!("../operacao/pagar.rs"), &["pagar", "estornar", "alterar", "cancelar"]),
-            ("compras", include_str!("../compras/mod.rs"), &["lancar", "atualizar", "estornar"]),
-            ("devolucoes", include_str!("../operacao/devolucoes.rs"), &["desfazer"]),
-            ("financeiro", include_str!("../operacao/financeiro.rs"), &["estornar_movimento"]),
+        use crate::despacho::DINHEIRO;
+        const LACUNAS: &[&str] = &[
+            "vendas::cancelar",
+            "devolucoes::devolver",
+            "caixa::movimentar_com_conta",
+            "caixa::fechar",
+            "comissoes::fechar",
+            "comissoes::reabrir",
         ];
-        let corpo = |codigo: &str, nome: &str| -> String {
-            let ini = codigo.find(&format!("pub fn {nome}(")).unwrap_or_else(|| panic!("não achei {nome}"));
-            let resto = &codigo[ini + 1..];
-            let fim = ["\npub fn ", "\nfn ", "\n#[cfg(test)]"]
-                .iter()
-                .filter_map(|m| resto.find(m))
-                .min()
-                .unwrap_or(resto.len());
+        const CONFERIDAS_ATE_A_3_5: &[&str] = &[
+            "receber::receber",
+            "receber::estornar",
+            "receber::cancelar_conta",
+            "cheques::depositar",
+            "cheques::repassar",
+            "cheques::devolver",
+            "cheques::desfazer",
+            "pagar::pagar",
+            "pagar::estornar",
+            "pagar::alterar",
+            "pagar::cancelar",
+            "compras::lancar",
+            "compras::atualizar",
+            "compras::estornar",
+            "devolucoes::desfazer",
+            "financeiro::estornar_movimento",
+        ];
+        let fonte = |modulo: &str| -> &'static str {
+            match modulo {
+                "receber" => include_str!("../operacao/receber.rs"),
+                "cheques" => include_str!("../operacao/cheques.rs"),
+                "pagar" => include_str!("../operacao/pagar.rs"),
+                "compras" => include_str!("../compras/mod.rs"),
+                "devolucoes" => include_str!("../operacao/devolucoes.rs"),
+                "financeiro" => include_str!("../operacao/financeiro.rs"),
+                "vendas" => include_str!("../operacao/vendas.rs"),
+                "caixa" => include_str!("../operacao/caixa.rs"),
+                "comissoes" => include_str!("../operacao/comissoes.rs"),
+                _ => panic!("módulo marcado sem fonte no teste R-05: {modulo} (acrescente aqui)"),
+            }
+        };
+        // O corpo de uma função: da assinatura até a próxima função (ou o fim do bloco de testes).
+        let corpo = |codigo: &str, assinatura: &str| -> String {
+            let ini = codigo.find(assinatura).unwrap_or_else(|| panic!("não achei {assinatura}"));
+            let resto = &codigo[ini + assinatura.len()..];
+            let mut fim = resto.len();
+            let mut pos = 0;
+            for linha in resto.split_inclusive('\n') {
+                let l = linha.trim_start();
+                if pos > 0 && (l.starts_with("fn ") || l.starts_with("pub fn ") || l.starts_with("#[cfg(test)]")) {
+                    fim = pos;
+                    break;
+                }
+                pos += linha.len();
+            }
             resto[..fim].to_string()
         };
-        for (arq, codigo, nomes) in fontes {
-            for nome in nomes {
-                let c = corpo(codigo, nome);
+        for (comando, funcao) in DINHEIRO {
+            assert!(
+                super::do_dominio(comando).is_some(),
+                "{comando} tem a marca dinheiro e não é comando de nenhum domínio"
+            );
+            let (modulo, nome) = funcao.split_once("::").unwrap();
+            let codigo = fonte(modulo);
+            assert!(
+                corpo(codigo, &format!("fn {comando}(")).contains(&format!("{funcao}(")),
+                "o atendente de {comando} não chama {funcao}"
+            );
+            let c = corpo(codigo, &format!("pub fn {nome}("));
+            let chama = c.contains("exigir_editavel") || c.contains("exigir_filhos_editaveis");
+            if LACUNAS.contains(funcao) {
+                assert!(!chama, "{funcao} já chama o bloqueio: tire-a das LACUNAS (E04)");
+            } else {
                 assert!(
-                    c.contains("exigir_editavel") || c.contains("exigir_filhos_editaveis"),
-                    "{arq}::{nome} mexe em dinheiro e não chama o bloqueio de registro inconsistente (R-05)"
+                    chama,
+                    "{comando} ({funcao}) mexe em dinheiro e não chama o bloqueio de registro inconsistente (R-05)"
                 );
             }
         }
+        for f in CONFERIDAS_ATE_A_3_5.iter().chain(LACUNAS) {
+            assert!(DINHEIRO.iter().any(|(_, x)| x == f), "{f} perdeu a marca dinheiro em despacho::DINHEIRO");
+        }
         // Controle: uma função de leitura não precisa (e a varredura sabe diferenciar).
-        assert!(!corpo(include_str!("../operacao/receber.rs"), "previa").contains("exigir_editavel"));
+        assert!(!corpo(include_str!("../operacao/receber.rs"), "pub fn previa(").contains("exigir_editavel"));
     }
 
     // ------------------------------------------------------------------

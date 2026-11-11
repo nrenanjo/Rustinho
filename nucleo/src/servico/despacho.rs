@@ -17,6 +17,23 @@
 //! [`Acesso`], que o serviço implementa: se um domínio dependesse do
 //! serviço, cada domínio fecharia um ciclo com ele (o teste
 //! `tests/dependencias.rs` não deixa).
+//!
+//! ## Regra das transações (contrato C5; dev.3.3, passo 3.5)
+//!
+//! - Quem abre a transação é o comando: o atendente (no serviço ou no
+//!   submódulo `comandos` de cada domínio) abre, com `IMMEDIATE` (o padrão das
+//!   conexões, veja `banco`), e passa `&tx` para o domínio. O domínio não abre
+//!   outra nem faz `commit`.
+//! - A auditoria vai na mesma transação.
+//! - O comando que mexe no dinheiro ou no estoque de um registro que já existe
+//!   tem a marca [`DINHEIRO`], e a função de domínio dele chama o bloqueio de
+//!   registro comprovadamente inconsistente (`sync::exigir_editavel`, R-05).
+//! - A leitura pesada da tela vai por conexão só de leitura (passo 7.6).
+//!
+//! Os módulos de domínio que ainda abrem a própria transação (backup, faixas,
+//! loja e sync) estão congelados em `tests/dependencias.rs`: módulo novo fora
+//! da regra faz o teste falhar. Cada um passa a receber a transação do comando
+//! quando for mexido na fase dele.
 
 use rusqlite::Connection;
 use serde::de::DeserializeOwned;
@@ -24,6 +41,38 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::erro::Resultado;
+
+/// Marca `dinheiro` (contrato C5, R-05): os comandos que mexem no dinheiro ou
+/// no estoque de um registro que já existe, com a função de domínio que grava
+/// (`módulo::função`). O teste R-05 do serviço é gerado desta lista: o
+/// atendente chama a função, e a função chama o bloqueio de registro
+/// comprovadamente inconsistente, menos as lacunas conhecidas (E04), que
+/// ficam listadas no teste para a 6.3. Comando novo assim entra aqui.
+pub const DINHEIRO: &[(&str, &str)] = &[
+    ("receber_baixar", "receber::receber"),
+    ("recebimento_estornar", "receber::estornar"),
+    ("conta_cancelar", "receber::cancelar_conta"),
+    ("cheque_depositar", "cheques::depositar"),
+    ("cheque_repassar", "cheques::repassar"),
+    ("cheque_devolver", "cheques::devolver"),
+    ("cheque_desfazer", "cheques::desfazer"),
+    ("pagar_pagar", "pagar::pagar"),
+    ("pagamento_estornar", "pagar::estornar"),
+    ("pagar_alterar", "pagar::alterar"),
+    ("pagar_cancelar", "pagar::cancelar"),
+    ("compra_atualizar", "compras::atualizar"),
+    ("compra_lancar", "compras::lancar"),
+    ("compra_estornar", "compras::estornar"),
+    ("devolucao_desfazer", "devolucoes::desfazer"),
+    ("movimento_estornar", "financeiro::estornar_movimento"),
+    // Lacunas conhecidas (E04, para a 6.3): ainda não chamam o bloqueio.
+    ("venda_cancelar", "vendas::cancelar"),
+    ("devolucao_gravar", "devolucoes::devolver"),
+    ("caixa_movimentar", "caixa::movimentar_com_conta"),
+    ("caixa_fechar", "caixa::fechar"),
+    ("comissao_fechar", "comissoes::fechar"),
+    ("comissao_reabrir", "comissoes::reabrir"),
+];
 
 /// Classe de permissão de um comando: quem pode usar e se ele só lê.
 ///
