@@ -495,30 +495,79 @@ fn ligar_fornecedor(conn: &Connection, fornecedor_id: &str, codigo: &str, produt
     Ok(ligou)
 }
 
+/// Quem grava, nas etapas da importação de cadastros.
+#[derive(Clone, Copy)]
+struct Gravacao<'a> {
+    conn: &'a Connection,
+    dispositivo: &'a str,
+    usuario_id: &'a str,
+}
+
+/// O que as etapas das peças do fornecedor precisam saber do lote lido.
+struct LoteFornecedor<'a> {
+    e: &'a Entrada,
+    lido: &'a Lido,
+    ids_fornecedor: &'a HashMap<String, String>,
+    repetidos_f: HashSet<(String, String)>,
+    gtins_repetidos_forn: HashSet<String>,
+}
+
+/// "Trazer cadastros" dos XMLs, em etapas (ARQ-13): clientes, fornecedores,
+/// peças da loja e peças dos fornecedores.
 pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<Importado> {
     let lido = ler_tudo(conn, &e.arquivos)?;
     let mut r = Importado::default();
-
+    let gr = Gravacao { conn, dispositivo, usuario_id };
     if e.clientes {
-        let mut lista: Vec<_> = lido.clientes.iter().collect();
-        lista.sort_by(|a, b| a.0.cmp(b.0));
-        for (doc, (pessoa, _)) in lista {
-            if pessoa_existe(conn, doc)?.is_none() {
-                pessoas::garantir_pela_nota(
-                    conn,
-                    dispositivo,
-                    usuario_id,
-                    pessoa,
-                    true,
-                    "Cadastrado pelo XML de uma nota da loja",
-                )?;
-                r.clientes += 1;
-            }
+        importar_clientes(gr, &lido, &mut r)?;
+    }
+    let ids_fornecedor = importar_fornecedores(gr, e, &lido, &mut r)?;
+    if e.pecas_loja {
+        importar_pecas_da_loja(gr, &lido, &mut r)?;
+    }
+    let lote = LoteFornecedor {
+        e,
+        lido: &lido,
+        ids_fornecedor: &ids_fornecedor,
+        repetidos_f: lido.repetidos_fornecedor(),
+        gtins_repetidos_forn: gtins_em_mais_de_uma_descricao(&lido),
+    };
+    for (chave, item) in &lido.pecas_fornecedor {
+        importar_peca_do_fornecedor(gr, &lote, chave, item, &mut r)?;
+    }
+    Ok(r)
+}
+
+/// Etapa 1: os clientes das notas da loja que ainda não estão cadastrados.
+fn importar_clientes(gr: Gravacao, lido: &Lido, r: &mut Importado) -> Resultado<()> {
+    let Gravacao { conn, dispositivo, usuario_id } = gr;
+    let mut lista: Vec<_> = lido.clientes.iter().collect();
+    lista.sort_by(|a, b| a.0.cmp(b.0));
+    for (doc, (pessoa, _)) in lista {
+        if pessoa_existe(conn, doc)?.is_none() {
+            pessoas::garantir_pela_nota(
+                conn,
+                dispositivo,
+                usuario_id,
+                pessoa,
+                true,
+                "Cadastrado pelo XML de uma nota da loja",
+            )?;
+            r.clientes += 1;
         }
     }
+    Ok(())
+}
 
-    // Fornecedores: cadastra os que faltam (sempre que for cadastrar as
-    // peças deles também, para ligar o código).
+/// Etapa 2: os fornecedores. Cadastra os que faltam (sempre que for cadastrar
+/// as peças deles também, para ligar o código). Devolve documento → id.
+fn importar_fornecedores(
+    gr: Gravacao,
+    e: &Entrada,
+    lido: &Lido,
+    r: &mut Importado,
+) -> Resultado<HashMap<String, String>> {
+    let Gravacao { conn, dispositivo, usuario_id } = gr;
     let mut ids_fornecedor: HashMap<String, String> = HashMap::new();
     let mut lista: Vec<_> = lido.fornecedores.iter().collect();
     lista.sort_by(|a, b| a.0.cmp(b.0));
@@ -542,225 +591,237 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
             None => {}
         }
     }
+    Ok(ids_fornecedor)
+}
 
+/// Etapa 3: as peças das notas da loja.
+fn importar_pecas_da_loja(gr: Gravacao, lido: &Lido, r: &mut Importado) -> Resultado<()> {
+    let Gravacao { conn, dispositivo, usuario_id } = gr;
     let repetidos = lido.repetidos_loja();
-    let repetidos_f = lido.repetidos_fornecedor();
-    if e.pecas_loja {
-        for ((codigo, _), (it, _)) in &lido.pecas_loja {
-            let repetido = repetidos.contains(codigo);
-            let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
-            if peca_loja_existe(conn, codigo, it, repetido)? {
-                let pid_existente =
-                    if repetido { peca_repetida(conn, codigo, it)? } else { peca_por_codigo(conn, codigo)? }.or_else(
-                        || match peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin).ok()? {
-                            BuscaId::Unico(id) => Some(id),
-                            _ => None,
-                        },
-                    );
-                if let Some(pid) = pid_existente {
-                    produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
-                }
-                continue;
+    for ((codigo, _), (it, _)) in &lido.pecas_loja {
+        let repetido = repetidos.contains(codigo);
+        let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
+        if peca_loja_existe(conn, codigo, it, repetido)? {
+            let pid_existente =
+                if repetido { peca_repetida(conn, codigo, it)? } else { peca_por_codigo(conn, codigo)? }.or_else(
+                    || match peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin).ok()? {
+                        BuscaId::Unico(id) => Some(id),
+                        _ => None,
+                    },
+                );
+            if let Some(pid) = pid_existente {
+                produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
             }
-            let mut f = ficha_do_item(conn, it)?;
-            // O código da loja só se usar letras, números e traço, sem repetir.
-            // D-13: código que o sistema antigo deu a peças diferentes não fica
-            // com nenhuma (o leitor daria a peça errada); vira código antigo.
-            let cod = texto::limpar(codigo);
-            if !repetido && !cod.is_empty() && cod.chars().count() <= 20 && peca_por_codigo(conn, &cod)?.is_none() {
-                f.codigo = cod.clone();
+            continue;
+        }
+        let mut f = ficha_do_item(conn, it)?;
+        // O código da loja só se usar letras, números e traço, sem repetir.
+        // D-13: código que o sistema antigo deu a peças diferentes não fica
+        // com nenhuma (o leitor daria a peça errada); vira código antigo.
+        let cod = texto::limpar(codigo);
+        if !repetido && !cod.is_empty() && cod.chars().count() <= 20 && peca_por_codigo(conn, &cod)?.is_none() {
+            f.codigo = cod.clone();
+        }
+        let preco = valor_unitario(it, false);
+        if preco > 0 {
+            if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+                p.preco = numeros::escrever_dinheiro(preco);
+                p.lucro = String::new();
             }
-            let preco = valor_unitario(it, false);
-            if preco > 0 {
-                if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
-                    p.preco = numeros::escrever_dinheiro(preco);
-                    p.lucro = String::new();
-                }
+        }
+        let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
+        produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
+        let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
+        if repetido && !cod.is_empty() {
+            crate::catalogo::codigos::guardar_codigo_antigo(conn, &cod, &id, &tempo::agora())?;
+            produtos::atualizar_indice_busca(conn, &id)?;
+            detalhes
+                .push(format!("O código {cod} do sistema antigo está em mais de uma peça: ficou como código antigo"));
+            // A faixa deste caixa pode ter dado justamente esse número a
+            // esta peça (antes de ele virar código antigo): troca.
+            let atual: String = conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
+            if texto::compactar(&atual) == texto::compactar(&cod) {
+                produtos::trocar_codigo(conn, dispositivo, usuario_id, &id)?;
             }
-            let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
-            produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
-            let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
-            if repetido && !cod.is_empty() {
-                crate::catalogo::codigos::guardar_codigo_antigo(conn, &cod, &id, &tempo::agora())?;
-                produtos::atualizar_indice_busca(conn, &id)?;
-                detalhes.push(format!(
-                    "O código {cod} do sistema antigo está em mais de uma peça: ficou como código antigo"
-                ));
-                // A faixa deste caixa pode ter dado justamente esse número a
-                // esta peça (antes de ele virar código antigo): troca.
-                let atual: String = conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
-                if texto::compactar(&atual) == texto::compactar(&cod) {
-                    produtos::trocar_codigo(conn, dispositivo, usuario_id, &id)?;
-                }
+        }
+        auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.importar", "produto", &id, &detalhes)?;
+        r.pecas += 1;
+    }
+    Ok(())
+}
+
+/// GTINs que aparecem em mais de uma descrição nas notas de fornecedor.
+fn gtins_em_mais_de_uma_descricao(lido: &Lido) -> HashSet<String> {
+    let mut vistos: HashMap<String, HashSet<String>> = HashMap::new();
+    for ((_, _, desc), (it, _)) in &lido.pecas_fornecedor {
+        for g in gtins_para_ficha(&it.gtins, &it.gtin) {
+            if !g.gtin.is_empty() {
+                vistos.entry(g.gtin).or_default().insert(desc.clone());
             }
-            auditoria::registrar(conn, dispositivo, Some(usuario_id), "produto.importar", "produto", &id, &detalhes)?;
-            r.pecas += 1;
+        }
+    }
+    vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(g, _)| g).collect()
+}
+
+/// Etapa 4: uma peça das notas de fornecedor: liga ao que já existe, deixa
+/// pendente ou cadastra, conforme o que o GTIN e o código do fornecedor acham.
+fn importar_peca_do_fornecedor(
+    gr: Gravacao,
+    lote: &LoteFornecedor,
+    (forn, codigo, desc_chave): &(String, String, String),
+    (it, emissao): &(ItemXml, String),
+    r: &mut Importado,
+) -> Resultado<()> {
+    let Gravacao { conn, dispositivo, usuario_id } = gr;
+    let LoteFornecedor { e, lido, ids_fornecedor, repetidos_f, gtins_repetidos_forn } = lote;
+    let fornecedor_id = ids_fornecedor.get(forn).cloned();
+    let forn_nome = lido
+        .fornecedores
+        .get(forn)
+        .map(|(em, _)| if em.fantasia.is_empty() { em.nome.clone() } else { em.fantasia.clone() })
+        .unwrap_or_default();
+    let (chave_nfe, numero_nfe) = lido
+        .notas_fornecedor_meta
+        .get(&(forn.clone(), codigo.clone(), desc_chave.clone()))
+        .cloned()
+        .unwrap_or_default();
+    let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
+    let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
+    let gtin_repetido_no_lote = gtins_ficha.iter().any(|g| gtins_repetidos_forn.contains(&g.gtin));
+    let gtin_busca = if gtin_repetido_no_lote {
+        BuscaId::Ambiguo(Vec::new())
+    } else {
+        peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?
+    };
+    let forn_busca = if repetido { BuscaId::Nenhum } else { peca_por_fornecedor_inequivoco(conn, forn, codigo)? };
+
+    // 1. Ambiguidade de GTIN ou conflito entre GTIN e código do fornecedor:
+    //    não associar automaticamente; registrar pendência persistente.
+    if let BuscaId::Ambiguo(cands) = &gtin_busca {
+        registrar_pendencia_xml(
+            conn,
+            fornecedor_id.as_deref(),
+            forn,
+            &forn_nome,
+            &chave_nfe,
+            &numero_nfe,
+            emissao,
+            it,
+            "gtin_ambiguo",
+            cands,
+        )?;
+        return Ok(());
+    }
+    if let BuscaId::Ambiguo(cands) = &forn_busca {
+        registrar_pendencia_xml(
+            conn,
+            fornecedor_id.as_deref(),
+            forn,
+            &forn_nome,
+            &chave_nfe,
+            &numero_nfe,
+            emissao,
+            it,
+            "fornecedor_ambiguo",
+            cands,
+        )?;
+        return Ok(());
+    }
+    if let (BuscaId::Unico(pid_g), BuscaId::Unico(pid_f)) = (&gtin_busca, &forn_busca) {
+        if pid_g != pid_f {
+            registrar_pendencia_xml(
+                conn,
+                fornecedor_id.as_deref(),
+                forn,
+                &forn_nome,
+                &chave_nfe,
+                &numero_nfe,
+                emissao,
+                it,
+                "conflito_gtin_fornecedor",
+                &[pid_g.clone(), pid_f.clone()],
+            )?;
+            return Ok(());
         }
     }
 
-    // GTINs que aparecem em mais de uma descrição nas notas de fornecedor.
-    let gtins_repetidos_forn: HashSet<String> = {
-        let mut vistos: HashMap<String, HashSet<String>> = HashMap::new();
-        for ((_, _, desc), (it, _)) in &lido.pecas_fornecedor {
-            for g in gtins_para_ficha(&it.gtins, &it.gtin) {
-                if !g.gtin.is_empty() {
-                    vistos.entry(g.gtin).or_default().insert(desc.clone());
-                }
-            }
-        }
-        vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(g, _)| g).collect()
-    };
-
-    for ((forn, codigo, desc_chave), (it, emissao)) in &lido.pecas_fornecedor {
-        let fornecedor_id = ids_fornecedor.get(forn).cloned();
-        let forn_nome = lido
-            .fornecedores
-            .get(forn)
-            .map(|(em, _)| if em.fantasia.is_empty() { em.nome.clone() } else { em.fantasia.clone() })
-            .unwrap_or_default();
-        let (chave_nfe, numero_nfe) = lido
-            .notas_fornecedor_meta
-            .get(&(forn.clone(), codigo.clone(), desc_chave.clone()))
-            .cloned()
-            .unwrap_or_default();
-        let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
-        let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
-        let gtin_repetido_no_lote = gtins_ficha.iter().any(|g| gtins_repetidos_forn.contains(&g.gtin));
-        let gtin_busca = if gtin_repetido_no_lote {
-            BuscaId::Ambiguo(Vec::new())
-        } else {
-            peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?
-        };
-        let forn_busca = if repetido { BuscaId::Nenhum } else { peca_por_fornecedor_inequivoco(conn, forn, codigo)? };
-
-        // 1. Ambiguidade de GTIN ou conflito entre GTIN e código do fornecedor:
-        //    não associar automaticamente; registrar pendência persistente.
-        if let BuscaId::Ambiguo(cands) = &gtin_busca {
-            registrar_pendencia_xml(
-                conn,
-                fornecedor_id.as_deref(),
-                forn,
-                &forn_nome,
-                &chave_nfe,
-                &numero_nfe,
-                emissao,
-                it,
-                "gtin_ambiguo",
-                cands,
-            )?;
-            continue;
-        }
-        if let BuscaId::Ambiguo(cands) = &forn_busca {
-            registrar_pendencia_xml(
-                conn,
-                fornecedor_id.as_deref(),
-                forn,
-                &forn_nome,
-                &chave_nfe,
-                &numero_nfe,
-                emissao,
-                it,
-                "fornecedor_ambiguo",
-                cands,
-            )?;
-            continue;
-        }
-        if let (BuscaId::Unico(pid_g), BuscaId::Unico(pid_f)) = (&gtin_busca, &forn_busca) {
-            if pid_g != pid_f {
-                registrar_pendencia_xml(
-                    conn,
-                    fornecedor_id.as_deref(),
-                    forn,
-                    &forn_nome,
-                    &chave_nfe,
-                    &numero_nfe,
-                    emissao,
-                    it,
-                    "conflito_gtin_fornecedor",
-                    &[pid_g.clone(), pid_f.clone()],
-                )?;
-                continue;
-            }
-        }
-
-        // 2. GTIN exato e inequívoco tem prioridade antes de outras formas.
-        if let BuscaId::Unico(pid) = gtin_busca {
-            produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
-            if !repetido {
-                if let Some(fid) = &fornecedor_id {
-                    if matches!(forn_busca, BuscaId::Nenhum) && ligar_fornecedor(conn, fid, codigo, &pid)? {
-                        r.codigos_ligados += 1;
-                    }
-                    resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
-                }
-            }
-            continue;
-        }
-
-        // 3. Associação já existente pelo (CNPJ do fornecedor, cProd).
-        if let BuscaId::Unico(pid) = forn_busca {
-            produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+    // 2. GTIN exato e inequívoco tem prioridade antes de outras formas.
+    if let BuscaId::Unico(pid) = gtin_busca {
+        produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+        if !repetido {
             if let Some(fid) = &fornecedor_id {
+                if matches!(forn_busca, BuscaId::Nenhum) && ligar_fornecedor(conn, fid, codigo, &pid)? {
+                    r.codigos_ligados += 1;
+                }
                 resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
             }
-            continue;
         }
+        return Ok(());
+    }
 
-        // 4. Sem GTIN correspondente e sem vínculo prévio do fornecedor:
-        if e.pecas_fornecedor {
-            let Some(fid) = &fornecedor_id else { continue };
-            if repetido {
-                if let Some(pid_desc) = peca_pela_descricao(conn, it)? {
-                    produtos::registrar_gtins_xml(conn, &pid_desc, &gtins_ficha)?;
-                    continue;
+    // 3. Associação já existente pelo (CNPJ do fornecedor, cProd).
+    if let BuscaId::Unico(pid) = forn_busca {
+        produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+        if let Some(fid) = &fornecedor_id {
+            resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
+        }
+        return Ok(());
+    }
+
+    // 4. Sem GTIN correspondente e sem vínculo prévio do fornecedor:
+    if e.pecas_fornecedor {
+        let Some(fid) = &fornecedor_id else { return Ok(()) };
+        if repetido {
+            if let Some(pid_desc) = peca_pela_descricao(conn, it)? {
+                produtos::registrar_gtins_xml(conn, &pid_desc, &gtins_ficha)?;
+                return Ok(());
+            }
+        }
+        let mut f = ficha_do_item(conn, it)?;
+        let custo = valor_unitario(it, true);
+        if custo > 0 {
+            f.custo = numeros::escrever_dinheiro(custo);
+            if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+                if p.lucro.is_empty() {
+                    p.lucro = "100".into();
                 }
             }
-            let mut f = ficha_do_item(conn, it)?;
-            let custo = valor_unitario(it, true);
-            if custo > 0 {
-                f.custo = numeros::escrever_dinheiro(custo);
-                if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
-                    if p.lucro.is_empty() {
-                        p.lucro = "100".into();
-                    }
-                }
-            }
-            let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
-            produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
-            if !repetido {
-                ligar_fornecedor(conn, fid, codigo, &id)?;
-                resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &id)?;
-            }
-            auditoria::registrar(
+        }
+        let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
+        produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
+        if !repetido {
+            ligar_fornecedor(conn, fid, codigo, &id)?;
+            resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &id)?;
+        }
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "produto.importar",
+            "produto",
+            &id,
+            &["Cadastrada pelo XML de uma nota de compra".into()],
+        )?;
+        r.pecas += 1;
+    } else {
+        // Sem cadastrar peças novas automaticamente: preserva como pendência
+        // de identificação caso o fornecedor tenha sido selecionado ou já exista.
+        if fornecedor_id.is_some() || e.fornecedores {
+            registrar_pendencia_xml(
                 conn,
-                dispositivo,
-                Some(usuario_id),
-                "produto.importar",
-                "produto",
-                &id,
-                &["Cadastrada pelo XML de uma nota de compra".into()],
+                fornecedor_id.as_deref(),
+                forn,
+                &forn_nome,
+                &chave_nfe,
+                &numero_nfe,
+                emissao,
+                it,
+                if repetido { "codigo_repetido" } else { "sem_vinculo" },
+                &[],
             )?;
-            r.pecas += 1;
-        } else {
-            // Sem cadastrar peças novas automaticamente: preserva como pendência
-            // de identificação caso o fornecedor tenha sido selecionado ou já exista.
-            if fornecedor_id.is_some() || e.fornecedores {
-                registrar_pendencia_xml(
-                    conn,
-                    fornecedor_id.as_deref(),
-                    forn,
-                    &forn_nome,
-                    &chave_nfe,
-                    &numero_nfe,
-                    emissao,
-                    it,
-                    if repetido { "codigo_repetido" } else { "sem_vinculo" },
-                    &[],
-                )?;
-            }
         }
     }
-    Ok(r)
+    Ok(())
 }
 
 /// Salva a peça; se o código de barras ou o código já existirem (corrida
