@@ -212,20 +212,59 @@ fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32, olhar: &m
     }
 }
 
-/// XMLs antigos às vezes vêm em ISO-8859-1 (Latin-1).
+/// Windows-1252 nos bytes 0x80 a 0x9F (fora isso, é o Latin-1). Os cinco
+/// sem letra ficam como no Latin-1.
+const CP1252: [char; 32] = [
+    '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}', '\u{90}', '‘', '’',
+    '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',
+];
+
+/// XMLs antigos às vezes não vêm em UTF-8: ISO-8859-1 (Latin-1) ou, feitos no
+/// Windows, Windows-1252 (o Latin-1 com aspas curvas, travessão e € nos
+/// bytes 0x80 a 0x9F). F06 (dev.3.3): lidos como Windows-1252, e a
+/// declaração passa a dizer UTF-8 com qualquer aspa e qualquer nome (antes,
+/// só `encoding="ISO-8859-1"` com aspas duplas era trocado).
 pub fn texto_do_xml(bytes: &[u8]) -> String {
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-    match std::str::from_utf8(bytes) {
+    let texto = match std::str::from_utf8(bytes) {
         Ok(t) => t.to_string(),
-        Err(_) => {
-            let t: String = bytes.iter().map(|&b| b as char).collect();
-            t.replacen("encoding=\"ISO-8859-1\"", "encoding=\"UTF-8\"", 1).replacen(
-                "encoding=\"iso-8859-1\"",
-                "encoding=\"UTF-8\"",
-                1,
-            )
-        }
+        Err(_) => bytes
+            .iter()
+            .map(|&b| if (0x80..0xA0).contains(&b) { CP1252[(b - 0x80) as usize] } else { b as char })
+            .collect(),
+    };
+    declarar_utf8(texto)
+}
+
+/// O texto já está em UTF-8: a declaração `<?xml … encoding="…"?>` passa a
+/// dizer isso (o leitor de XML recusa outra codificação declarada).
+fn declarar_utf8(texto: String) -> String {
+    if !texto.starts_with("<?xml") {
+        return texto;
     }
+    let Some(fim) = texto.find("?>") else { return texto };
+    let Some(i) = texto[..fim].find("encoding") else { return texto };
+    let b = texto.as_bytes();
+    let mut j = i + "encoding".len();
+    while j < fim && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if j >= fim || b[j] != b'=' {
+        return texto;
+    }
+    j += 1;
+    while j < fim && b[j].is_ascii_whitespace() {
+        j += 1;
+    }
+    if j >= fim || (b[j] != b'"' && b[j] != b'\'') {
+        return texto;
+    }
+    let inicio = j + 1;
+    let Some(k) = texto[inicio..fim].find(b[j] as char) else { return texto };
+    if texto[inicio..inicio + k].eq_ignore_ascii_case("utf-8") {
+        return texto;
+    }
+    format!("{}UTF-8{}", &texto[..inicio], &texto[inicio + k..])
 }
 
 /// Um XML achado. `texto` vazio = não deu para ler (o motivo em `erro`).
@@ -461,6 +500,26 @@ mod testes {
         assert_eq!(texto_do_xml(&[0xEF, 0xBB, 0xBF, b'<', b'a', b'>']), "<a>");
         let t = texto_do_xml(b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><x>S\xC3O</x>");
         assert!(t.contains("UTF-8") && t.contains("SÃO"));
+    }
+
+    /// F06 (dev.3.3, 2.4): Latin-1 com aspas simples na declaração e
+    /// Windows-1252 (aspas curvas, travessão, € nos bytes 0x80 a 0x9F) viram
+    /// o texto certo, com a declaração dizendo UTF-8, e o XML abre.
+    #[test]
+    fn f06_latin1_com_aspas_simples_e_windows_1252() {
+        let t = texto_do_xml(b"<?xml version='1.0' encoding='ISO-8859-1'?><x>S\xC3O</x>");
+        assert!(t.contains("encoding='UTF-8'") && t.contains("SÃO"), "{t}");
+        assert!(roxmltree::Document::parse(&t).is_ok(), "não abriu: {t}");
+        let t = texto_do_xml(b"<?xml version=\"1.0\" encoding=\"windows-1252\"?><x>\x93Pe\xE7a\x94 \x96 \x80 10</x>");
+        assert!(t.contains("encoding=\"UTF-8\""), "{t}");
+        assert!(t.contains("\u{201c}Peça\u{201d} \u{2013} € 10"), "{t}");
+        assert!(roxmltree::Document::parse(&t).is_ok(), "não abriu: {t}");
+        // Só ASCII (é UTF-8 também), mas declarado ISO-8859-1: abre.
+        let t = texto_do_xml(b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><x>SAO</x>");
+        assert!(roxmltree::Document::parse(&t).is_ok(), "não abriu: {t}");
+        // O que já era UTF-8 fica igual.
+        let utf8 = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><x>São “ok”</x>";
+        assert_eq!(texto_do_xml(utf8.as_bytes()), utf8);
     }
 
     #[test]
