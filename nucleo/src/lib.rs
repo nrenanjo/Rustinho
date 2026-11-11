@@ -11,18 +11,14 @@ pub(crate) mod apoio_chave;
 pub mod arquivos;
 pub mod avisos;
 pub mod backup;
-pub mod caminhos;
 pub mod codigo;
 pub mod despacho;
 pub mod impressao;
-pub mod loja;
 pub mod menu;
 pub mod nfe_assinatura;
-pub mod rede_local;
 pub mod requisitos;
 pub mod senhas;
 pub mod supervisao;
-pub mod sync;
 #[cfg(test)]
 pub(crate) mod teste_rede;
 #[cfg(test)]
@@ -51,6 +47,7 @@ pub mod catalogo;
 pub mod compras;
 pub mod dados;
 pub mod operacao;
+pub mod troca;
 
 // Os módulos nos mesmos caminhos de antes das pastas de domínio (dev.3.3,
 // passo 3.1): `crate::banco`, `rustinho_nucleo::backup`...
@@ -61,6 +58,7 @@ pub use dados::{auditoria, banco, computador, config, migracao, portatil, regist
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,
 };
+pub use troca::{caminhos, loja, rede_local, sync};
 
 // Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos
 // caminhos de antes: `crate::erro::Erro`, `rustinho_nucleo::texto`...
