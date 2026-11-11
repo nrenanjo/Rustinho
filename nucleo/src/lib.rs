@@ -4,16 +4,9 @@
 //! comandos com dados em JSON. Assim tudo aqui pode ser testado sem abrir
 //! nenhuma janela (`cargo test`).
 
-pub mod api;
 #[cfg(test)]
 #[path = "../tests/apoio/chave.rs"]
 pub(crate) mod apoio_chave;
-pub mod avisos;
-pub mod despacho;
-pub mod menu;
-pub mod requisitos;
-pub mod senhas;
-pub mod supervisao;
 #[cfg(test)]
 pub(crate) mod teste_rede;
 #[cfg(test)]
@@ -43,6 +36,7 @@ pub mod compras;
 pub mod dados;
 pub mod integracoes;
 pub mod operacao;
+pub mod servico;
 pub mod troca;
 
 // Os módulos nos mesmos caminhos de antes das pastas de domínio (dev.3.3,
@@ -55,6 +49,7 @@ pub use integracoes::{arquivos, backup, codigo, impressao, nfe_assinatura};
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,
 };
+pub use servico::{api, avisos, despacho, menu, requisitos, senhas, supervisao};
 pub use troca::{caminhos, loja, rede_local, sync};
 
 // Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos

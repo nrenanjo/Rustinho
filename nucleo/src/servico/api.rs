@@ -3109,12 +3109,12 @@ mod testes {
     #[test]
     fn r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio() {
         let fontes: [(&str, &str, &[&str]); 6] = [
-            ("receber", include_str!("operacao/receber.rs"), &["receber", "estornar", "cancelar_conta"]),
-            ("cheques", include_str!("operacao/cheques.rs"), &["depositar", "repassar", "devolver", "desfazer"]),
-            ("pagar", include_str!("operacao/pagar.rs"), &["pagar", "estornar", "alterar", "cancelar"]),
-            ("compras", include_str!("compras/mod.rs"), &["lancar", "atualizar", "estornar"]),
-            ("devolucoes", include_str!("operacao/devolucoes.rs"), &["desfazer"]),
-            ("financeiro", include_str!("operacao/financeiro.rs"), &["estornar_movimento"]),
+            ("receber", include_str!("../operacao/receber.rs"), &["receber", "estornar", "cancelar_conta"]),
+            ("cheques", include_str!("../operacao/cheques.rs"), &["depositar", "repassar", "devolver", "desfazer"]),
+            ("pagar", include_str!("../operacao/pagar.rs"), &["pagar", "estornar", "alterar", "cancelar"]),
+            ("compras", include_str!("../compras/mod.rs"), &["lancar", "atualizar", "estornar"]),
+            ("devolucoes", include_str!("../operacao/devolucoes.rs"), &["desfazer"]),
+            ("financeiro", include_str!("../operacao/financeiro.rs"), &["estornar_movimento"]),
         ];
         let corpo = |codigo: &str, nome: &str| -> String {
             let ini = codigo.find(&format!("pub fn {nome}(")).unwrap_or_else(|| panic!("não achei {nome}"));
@@ -3136,7 +3136,7 @@ mod testes {
             }
         }
         // Controle: uma função de leitura não precisa (e a varredura sabe diferenciar).
-        assert!(!corpo(include_str!("operacao/receber.rs"), "previa").contains("exigir_editavel"));
+        assert!(!corpo(include_str!("../operacao/receber.rs"), "previa").contains("exigir_editavel"));
     }
 
     // ------------------------------------------------------------------
