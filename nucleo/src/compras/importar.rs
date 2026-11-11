@@ -1034,38 +1034,64 @@ pub fn listar_pendencias(conn: &Connection) -> Resultado<Vec<PendenciaXml>> {
           WHERE situacao = 'pendente'
           ORDER BY criado_em DESC, id ASC",
     )?;
-    let rows: Vec<_> = stmt
+    /// A linha da pendência como a lista lê (A16: no lugar da tupla de 23 campos).
+    struct LinhaPendente {
+        id: String,
+        fornecedor_id: String,
+        fornecedor_doc: String,
+        fornecedor_nome: String,
+        chave_nfe: String,
+        numero_nfe: String,
+        emissao_nfe: String,
+        codigo_fornecedor: String,
+        gtin_comercial: String,
+        origem_comercial: String,
+        gtin_tributavel: String,
+        origem_tributavel: String,
+        gtins_json: String,
+        descricao: String,
+        ncm: String,
+        cest: String,
+        cfop: String,
+        unidade: String,
+        quantidade: i64,
+        valor_unitario: i64,
+        motivo: String,
+        candidatos_json: String,
+        criado_em: String,
+    }
+    let rows: Vec<LinhaPendente> = stmt
         .query_map([], |l| {
-            Ok((
-                l.get::<_, String>(0)?,
-                l.get::<_, String>(1)?,
-                l.get::<_, String>(2)?,
-                l.get::<_, String>(3)?,
-                l.get::<_, String>(4)?,
-                l.get::<_, String>(5)?,
-                l.get::<_, String>(6)?,
-                l.get::<_, String>(7)?,
-                l.get::<_, String>(8)?,
-                l.get::<_, String>(9)?,
-                l.get::<_, String>(10)?,
-                l.get::<_, String>(11)?,
-                l.get::<_, String>(12)?,
-                l.get::<_, String>(13)?,
-                l.get::<_, String>(14)?,
-                l.get::<_, String>(15)?,
-                l.get::<_, String>(16)?,
-                l.get::<_, String>(17)?,
-                l.get::<_, i64>(18)?,
-                l.get::<_, i64>(19)?,
-                l.get::<_, String>(20)?,
-                l.get::<_, String>(21)?,
-                l.get::<_, String>(22)?,
-            ))
+            Ok(LinhaPendente {
+                id: l.get(0)?,
+                fornecedor_id: l.get(1)?,
+                fornecedor_doc: l.get(2)?,
+                fornecedor_nome: l.get(3)?,
+                chave_nfe: l.get(4)?,
+                numero_nfe: l.get(5)?,
+                emissao_nfe: l.get(6)?,
+                codigo_fornecedor: l.get(7)?,
+                gtin_comercial: l.get(8)?,
+                origem_comercial: l.get(9)?,
+                gtin_tributavel: l.get(10)?,
+                origem_tributavel: l.get(11)?,
+                gtins_json: l.get(12)?,
+                descricao: l.get(13)?,
+                ncm: l.get(14)?,
+                cest: l.get(15)?,
+                cfop: l.get(16)?,
+                unidade: l.get(17)?,
+                quantidade: l.get(18)?,
+                valor_unitario: l.get(19)?,
+                motivo: l.get(20)?,
+                candidatos_json: l.get(21)?,
+                criado_em: l.get(22)?,
+            })
         })?
         .collect::<Result<_, _>>()?;
 
     let mut lista = Vec::with_capacity(rows.len());
-    for (
+    for LinhaPendente {
         id,
         fornecedor_id,
         fornecedor_doc,
@@ -1089,7 +1115,7 @@ pub fn listar_pendencias(conn: &Connection) -> Resultado<Vec<PendenciaXml>> {
         motivo,
         candidatos_json,
         criado_em,
-    ) in rows
+    } in rows
     {
         let gtins_xml: Vec<nfe_xml::GtinXml> = serde_json::from_str(&gtins_json).unwrap_or_default();
         let fallback = if !gtin_comercial.is_empty() { &gtin_comercial } else { &gtin_tributavel };
@@ -1145,25 +1171,26 @@ pub fn resolver_pendencia(
     if d.id.trim().is_empty() {
         return Err(Erro::validacao("Escolha a pendência de identificação."));
     }
-    #[allow(clippy::type_complexity)]
-    let linha: Option<(
-        Option<String>,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        i64,
-        String,
-    )> = conn
+    /// A pendência como a resolução lê (A16: no lugar da tupla de 16 campos).
+    struct PendenciaGravada {
+        fornecedor_id: Option<String>,
+        fornecedor_doc: String,
+        fornecedor_nome: String,
+        codigo_fornecedor: String,
+        gtin_comercial: String,
+        gtin_tributavel: String,
+        gtins_json: String,
+        descricao: String,
+        ncm: String,
+        cest: String,
+        cfop: String,
+        unidade: String,
+        origem_fiscal: i64,
+        cst_pis: String,
+        valor_unitario: i64,
+        situacao: String,
+    }
+    let linha: Option<PendenciaGravada> = conn
         .query_row(
             "SELECT fornecedor_id, fornecedor_documento, fornecedor_nome, codigo_fornecedor, gtin_comercial,
                     gtin_tributavel, gtins_json, descricao, ncm, cest, cfop, unidade, origem_fiscal, cst_pis,
@@ -1172,28 +1199,28 @@ pub fn resolver_pendencia(
               WHERE id = ?1",
             [&d.id],
             |l| {
-                Ok((
-                    l.get(0)?,
-                    l.get(1)?,
-                    l.get(2)?,
-                    l.get(3)?,
-                    l.get(4)?,
-                    l.get(5)?,
-                    l.get(6)?,
-                    l.get(7)?,
-                    l.get(8)?,
-                    l.get(9)?,
-                    l.get(10)?,
-                    l.get(11)?,
-                    l.get(12)?,
-                    l.get(13)?,
-                    l.get(14)?,
-                    l.get(15)?,
-                ))
+                Ok(PendenciaGravada {
+                    fornecedor_id: l.get(0)?,
+                    fornecedor_doc: l.get(1)?,
+                    fornecedor_nome: l.get(2)?,
+                    codigo_fornecedor: l.get(3)?,
+                    gtin_comercial: l.get(4)?,
+                    gtin_tributavel: l.get(5)?,
+                    gtins_json: l.get(6)?,
+                    descricao: l.get(7)?,
+                    ncm: l.get(8)?,
+                    cest: l.get(9)?,
+                    cfop: l.get(10)?,
+                    unidade: l.get(11)?,
+                    origem_fiscal: l.get(12)?,
+                    cst_pis: l.get(13)?,
+                    valor_unitario: l.get(14)?,
+                    situacao: l.get(15)?,
+                })
             },
         )
         .optional()?;
-    let Some((
+    let Some(PendenciaGravada {
         fornecedor_id,
         fornecedor_doc,
         fornecedor_nome,
@@ -1204,13 +1231,13 @@ pub fn resolver_pendencia(
         descricao,
         ncm,
         cest,
-        _cfop,
+        cfop: _cfop,
         unidade,
         origem_fiscal,
         cst_pis,
         valor_unitario,
         situacao,
-    )) = linha
+    }) = linha
     else {
         return Err(Erro::NaoEncontrado("Pendência de identificação".into()));
     };
