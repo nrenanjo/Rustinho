@@ -183,3 +183,61 @@ pub fn vincular_fornecedor(
     let n = conn.execute(sql, params![fornecedor_id, compacto, codigo, produto_id, fator, tempo::agora()])?;
     Ok(n > 0)
 }
+
+/// Guarda um código que a peça teve (`produto_codigo_antigo`): a etiqueta
+/// velha ainda acha a peça, e o código nunca vai para outra. O que já está
+/// guardado fica como está.
+pub fn guardar_codigo_antigo(conn: &Connection, codigo: &str, produto_id: &str, quando: &str) -> Resultado<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![codigo, produto_id, texto::compactar(codigo), quando],
+    )?;
+    Ok(())
+}
+
+/// Grava o índice de busca da peça (`produto.busca` e `produto.codigos`), que
+/// `produtos` monta a partir da peça inteira.
+pub fn gravar_indice(conn: &Connection, produto_id: &str, (busca, codigos): &(String, String)) -> Resultado<()> {
+    conn.execute("UPDATE produto SET busca = ?2, codigos = ?3 WHERE id = ?1", params![produto_id, busca, codigos])?;
+    Ok(())
+}
+
+/// Troca o código interno da peça (o gerente resolve um código repetido) e o
+/// índice de busca; o código novo vale já (`codigo_validado`).
+pub fn trocar_codigo_interno(
+    conn: &Connection,
+    id: &str,
+    novo: &str,
+    (busca, codigos): &(String, String),
+    agora: &str,
+    usuario_id: &str,
+    dispositivo: &str,
+) -> Resultado<()> {
+    conn.execute(
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, atualizado_por = ?6, dispositivo = ?7,
+                codigo_validado = 1
+          WHERE id = ?1",
+        params![id, novo, busca, codigos, agora, usuario_id, dispositivo],
+    )?;
+    Ok(())
+}
+
+/// Dá o código interno a uma peça que estava com código a definir, com o
+/// índice de busca. Devolve se deu (`false` = a peça já tinha código).
+pub fn definir_codigo_interno(
+    conn: &Connection,
+    id: &str,
+    codigo: &str,
+    (busca, codigos): &(String, String),
+    agora: &str,
+    dispositivo: &str,
+) -> Resultado<bool> {
+    let n = conn.execute(
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6,
+                codigo_validado = 1
+          WHERE id = ?1 AND codigo = ''",
+        params![id, codigo, busca, codigos, agora, dispositivo],
+    )?;
+    Ok(n == 1)
+}

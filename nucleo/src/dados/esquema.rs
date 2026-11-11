@@ -65,7 +65,7 @@ pub const TABELAS: &[Tabela] = &[
     t("produto_equivalente", Viaja, &["produtos"]),
     t("produto_fornecedor", Viaja, &["codigos"]),
     // Códigos que uma peça já teve.
-    t("produto_codigo_antigo", Viaja, &["importar", "produtos"]),
+    t("produto_codigo_antigo", Viaja, &["codigos"]),
     // Faixas de códigos das peças de cada caixa (veja `faixas`).
     t("faixa_codigo", Viaja, &["faixas"]),
     t("estoque_movimento", Viaja, &["estoque"]),

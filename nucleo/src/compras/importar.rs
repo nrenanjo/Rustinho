@@ -629,11 +629,7 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
             produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
             let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
             if repetido && !cod.is_empty() {
-                conn.execute(
-                    "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![cod, id, texto::compactar(&cod), tempo::agora()],
-                )?;
+                crate::catalogo::codigos::guardar_codigo_antigo(conn, &cod, &id, &tempo::agora())?;
                 produtos::atualizar_indice_busca(conn, &id)?;
                 detalhes.push(format!(
                     "O código {cod} do sistema antigo está em mais de uma peça: ficou como código antigo"

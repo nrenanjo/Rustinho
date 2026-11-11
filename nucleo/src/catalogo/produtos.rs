@@ -529,20 +529,18 @@ pub fn trocar_codigo(conn: &Connection, dispositivo: &str, usuario_id: &str, id:
         None => return Err(Erro::validacao(faixas::texto_sem_poder_dar(conn)?)),
     };
     dados.codigo = novo.clone();
-    let (busca, codigos) = texto_busca(&dados);
     let agora = tempo::agora();
-    conn.execute(
-        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, atualizado_por = ?6, dispositivo = ?7,
-                codigo_validado = 1
-          WHERE id = ?1",
-        params![id, novo, busca, codigos, agora, usuario_id, dispositivo],
+    crate::catalogo::codigos::trocar_codigo_interno(
+        conn,
+        id,
+        &novo,
+        &texto_busca(&dados),
+        &agora,
+        usuario_id,
+        dispositivo,
     )?;
     if !velho.is_empty() && confirmado_antes {
-        conn.execute(
-            "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![velho, id, texto::compactar(&velho), agora],
-        )?;
+        crate::catalogo::codigos::guardar_codigo_antigo(conn, &velho, id, &agora)?;
     }
     auditoria::registrar(
         conn,
@@ -567,17 +565,18 @@ pub fn definir_codigo(conn: &Connection, dispositivo: &str, id: &str, codigo: &s
         return Ok(false);
     }
     dados.codigo = codigo.to_string();
-    let (busca, codigos) = texto_busca(&dados);
-    let n = conn.execute(
-        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6,
-                codigo_validado = 1
-          WHERE id = ?1 AND codigo = ''",
-        params![id, codigo, busca, codigos, tempo::agora(), dispositivo],
+    let deu = crate::catalogo::codigos::definir_codigo_interno(
+        conn,
+        id,
+        codigo,
+        &texto_busca(&dados),
+        &tempo::agora(),
+        dispositivo,
     )?;
-    if n == 1 {
+    if deu {
         auditoria::registrar(conn, dispositivo, None, "produto.codigo", "produto", id, &[format!("Código: {codigo}")])?;
     }
-    Ok(n == 1)
+    Ok(deu)
 }
 
 /// Salva a peça (nova ou alterada). Devolve o id.
@@ -798,11 +797,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         // O código de antes fica guardado: etiquetas velhas ainda o têm, e ele
         // nunca vai para outra peça.
         if let Some(velho) = codigo_antes.filter(|c| !c.is_empty() && *c != dados.codigo) {
-            conn.execute(
-                "INSERT OR IGNORE INTO produto_codigo_antigo (codigo, produto_id, codigo_compacto, trocado_em)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![velho, id, texto::compactar(&velho), agora],
-            )?;
+            crate::catalogo::codigos::guardar_codigo_antigo(conn, &velho, &id, &agora)?;
         }
     }
 
@@ -1357,9 +1352,7 @@ fn texto_busca(d: &Dados) -> (String, String) {
 /// GTINs ou alterar vínculos externos.
 pub fn atualizar_indice_busca(conn: &Connection, produto_id: &str) -> Resultado<()> {
     let dados = carregar(conn, produto_id)?;
-    let (busca, codigos) = texto_busca(&dados);
-    conn.execute("UPDATE produto SET busca = ?2, codigos = ?3 WHERE id = ?1", params![produto_id, busca, codigos])?;
-    Ok(())
+    crate::catalogo::codigos::gravar_indice(conn, produto_id, &texto_busca(&dados))
 }
 
 /// Registra os GTINs / códigos de barras vindos do XML (`cEAN`, `cEANTrib`,
