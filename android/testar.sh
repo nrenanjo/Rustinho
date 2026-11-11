@@ -129,16 +129,29 @@ PY
     adb shell input tap $xy
 }
 # Aviso do sistema por cima de tudo ("Pixel Launcher isn't responding": no
-# emulador lento até o lançador do Android trava). Ele engole os toques no
-# teclado; toca em "Wait" para ele sair (não fecha app nenhum).
+# emulador lento até o lançador do Android trava). Ele engole os toques e
+# fica com o foco, então o teclado não abre no Rustinho.
+# - Outro app travado (o lançador): "Close app". Com "Wait", o aviso do
+#   lançador voltava 5 s depois, sempre por cima, e nenhum campo recebia o
+#   cursor (execução 42947158143: 4 vezes seguidas, o Rustinho sem travar).
+# - O próprio Rustinho: "Wait" (não fecha o app que está sendo testado) e
+#   fica anotado à parte, para não se perder entre os avisos do emulador.
 fechar_avisos() {
-    local i
+    local i titulo
     for i in 1 2 3; do
         adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1
         adb shell cat /sdcard/tela.xml > fotos/aviso.xml 2> /dev/null
         grep -q -E "isn(&apos;|.)t responding|não está respondendo" fotos/aviso.xml || return 0
-        echo "aviso do sistema por cima do app: $(grep -o -E '"[^"]*(isn(&apos;|.)t responding|não está respondendo)' fotos/aviso.xml | head -1)" | tee -a fotos/avisos_do_sistema.txt
-        tocar_texto "Wait" aviso || tocar_texto "Aguardar" aviso || true
+        titulo=$(grep -o -E '"[^"]*(isn(&apos;|.)t responding|não está respondendo)' fotos/aviso.xml | head -1)
+        echo "aviso do sistema por cima do app: $titulo" | tee -a fotos/avisos_do_sistema.txt
+        if printf '%s' "$titulo" | grep -q "Rustinho"; then
+            echo "  → o próprio Rustinho não respondeu: Wait" | tee -a fotos/avisos_do_sistema.txt fotos/rustinho_nao_respondeu.txt
+            tocar_texto "Wait" aviso || tocar_texto "Aguardar" aviso || true
+        else
+            echo "  → outro app do emulador travado: Close app" | tee -a fotos/avisos_do_sistema.txt
+            tocar_texto "Close app" aviso || tocar_texto "Fechar app" aviso \
+                || tocar_texto "Wait" aviso || tocar_texto "Aguardar" aviso || true
+        fi
         sleep 3
     done
 }
