@@ -226,7 +226,14 @@ def notas(m):
                       f"inesperada; {len(m['roteiros_de_tela']['falhas_esperadas'])} falhas esperadas listadas "
                       "(defeitos já registrados, com passo de correção)")
     for nome, kv in m["emulador"].items():
-        linhas.append(f"- emulador {nome}: {kv.get('resultado', '?')}" +
+        # N03: a causa de uma reprovação e as instabilidades do emulador
+        # contornadas pelo roteiro (cada uma registrada nas fotos do job).
+        extra = ""
+        if kv.get("resultado") != "aprovado" and kv.get("causa"):
+            extra += f"; causa: {kv['causa']}"
+        if kv.get("instabilidades", "0") not in ("", "0"):
+            extra += f"; {kv['instabilidades']} instabilidades do emulador contornadas e registradas"
+        linhas.append(f"- emulador {nome}: {kv.get('resultado', '?')}{extra}" +
                       (f" — {kv['observacao']}" if kv.get("observacao") else ""))
     linhas += [
         "",

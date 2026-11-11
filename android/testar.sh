@@ -142,15 +142,184 @@ fechar_avisos() {
         sleep 3
     done
 }
+# --- Digitação conferida (N03, dev.3.3) ------------------------------------
+# No emulador lento, o aviso do sistema pode aparecer a qualquer momento e
+# fechar o teclado: os toques nas teclas caíam no formulário e a perda só
+# aparecia no fim, como recusa do cadastro ("As duas senhas não são iguais"),
+# parecendo defeito do programa (execução 42907779755, tentativa 1). Agora
+# cada campo é preenchido assim: sem aviso por cima, campo tocado, teclado
+# aberto; depois, a foto do campo confirma que ele recebeu o texto. Se não
+# recebeu, limpa e digita de novo (até 3 vezes) e anota em
+# fotos/instabilidade.txt. A falha que vem do emulador sai marcada
+# "[ambiente do emulador]", para não ser confundida com defeito do programa.
+AMBIENTE="[ambiente do emulador]"
+instavel() { echo "$(date +%T) $*" | tee -a fotos/instabilidade.txt; }
+arvore() {
+    adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1
+    adb shell cat /sdcard/tela.xml > "fotos/$1.xml" 2> /dev/null
+}
+# O campo de texto n da tela (na ordem da árvore de acessibilidade):
+# "n x1 y1 x2 y2".
+campo() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+x = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+n = 0
+for m in re.finditer(r"<node [^>]*>", x):
+    no = m.group(0)
+    if "TextField" not in (re.search(r'resource-id="([^"]*)"', no) or [None, ""])[1]:
+        continue
+    n += 1
+    b = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', no)
+    if sys.argv[2] == "foco":
+        if 'focused="true"' in no:
+            print(n)
+    elif n == int(sys.argv[2]) and b:
+        print(n, *b.groups())
+PY
+}
+# focar <n>: o cursor no campo n, com o teclado aberto. O app usa
+# "adjustPan" (o Android desloca a janela para o campo ficar acima do
+# teclado), então só se toca num campo com o teclado fechado: um campo
+# coberto pelo teclado faria o toque cair numa tecla.
+focar() {
+    local n=$1 i j linha x1 y1 x2 y2
+    for i in 1 2 3; do
+        arvore "foco$n"
+        [ "$(campo "fotos/foco$n.xml" foco)" = "$n" ] && teclado_aberto && return 0
+        # O "voltar" com o teclado aberto fecha só o teclado.
+        if teclado_aberto; then tecla KEYCODE_BACK; fi
+        arvore "foco$n"
+        linha=$(campo "fotos/foco$n.xml" "$n")
+        [ -n "$linha" ] || { sleep 2; continue; }
+        read -r _ x1 y1 x2 y2 <<< "$linha"
+        # Fora da tela (embaixo, perto da barra do Android, ou em cima): rola.
+        if [ "$y2" -gt 2250 ]; then adb shell input swipe 540 1600 540 1000 400; sleep 1; continue; fi
+        if [ "$y1" -lt 200 ]; then adb shell input swipe 540 1000 540 1600 400; sleep 1; continue; fi
+        adb shell input tap $(((x1 + x2) / 2)) $(((y1 + y2) / 2))
+        for j in 1 2 3 4 5 6; do teclado_aberto && break; sleep 1; done
+    done
+    arvore "foco$n"
+    [ "$(campo "fotos/foco$n.xml" foco)" = "$n" ] && teclado_aberto
+}
+aviso_na_tela() {
+    arvore aviso
+    grep -q -E "isn(&apos;|.)t responding|não está respondendo" fotos/aviso.xml
+}
+teclado_aberto() { adb shell dumpsys input_method 2> /dev/null | grep -q "mInputShown=true"; }
+# Mede o campo na tela agora: "direita esquerda" = linhas com desenho na faixa
+# da direita (de 35% a 95% da largura) e colunas com desenho na da esquerda.
+# A dica do campo ocupa as duas; um texto curto digitado (nome, senha) só a
+# esquerda; o cursor sozinho, 2 ou 3 colunas. Medido nas fotos da execução
+# 42907779755: campo da loja vazio = 9 linhas à direita; com "Loja" = 0
+# linhas à direita e 75 colunas à esquerda.
+medir_campo() {
+    adb exec-out screencap > fotos/tela.raw 2> /dev/null || { echo "-1 -1"; return; }
+    python3 - fotos/tela.raw "$@" <<'PY'
+import struct, sys
+from collections import Counter
+d = open(sys.argv[1], "rb").read()
+x1, y1, x2, y2 = map(int, sys.argv[2:6])
+w, h = struct.unpack_from("<II", d, 0)
+cab = len(d) - w * h * 4
+if not w or cab not in (12, 16) or y2 > h or x2 > w:
+    print(-1, -1)
+    sys.exit()
+def px(x, y):
+    i = cab + (y * w + x) * 4
+    return d[i:i + 3]
+def difere(a, b):
+    return max(abs(a[k] - b[k]) for k in range(3)) > 40
+larg = x2 - x1
+ys = range(y1 + 28, y2 - 28)
+fundo = Counter(px(x, y) for y in ys[::4] for x in range(x1 + 10, x2 - 10, 7)).most_common(1)[0][0]
+dx0, dx1 = x1 + larg * 35 // 100, x1 + larg * 95 // 100
+linhas = sum(1 for y in ys[::3] if sum(1 for x in range(dx0, dx1, 2) if difere(px(x, y), fundo)) > 2)
+colunas = sum(1 for x in range(x1 + 10, dx0) if any(difere(px(x, y), fundo) for y in ys[::2]))
+print(linhas, colunas)
+PY
+    rm -f fotos/tela.raw
+}
+# Ensaio permanente da conferência: na 1ª tentativa do 1º campo, o roteiro
+# não digita nada, como se o emulador tivesse perdido tudo. A conferência
+# tem de perceber e digitar de novo; se não perceber, o roteiro está errado.
+ENSAIO_PENDENTE=1
+# preencher <n> <texto> <teclas|texto>: preenche o campo n e confere.
+# "teclas" toca tecla por tecla (nomes: o "input text" troca letras de lugar
+# no teclado do Android 14); "texto" usa o "input text" (senhas: campo sem
+# sugestões do teclado).
+preencher() {
+    local n=$1 palavra=$2 modo=$3 t linha x1 y1 x2 y2 antes esq0 depois esq dica ensaio max=3
+    # O ensaio não gasta uma das 3 tentativas de verdade.
+    [ -n "$ENSAIO_PENDENTE" ] && max=4
+    for t in $(seq 1 $max); do
+        fechar_avisos
+        if ! focar "$n"; then instavel "campo $n: não deu para pôr o cursor no campo com o teclado aberto (tentativa $t)"; continue; fi
+        sleep 1
+        # Com o teclado aberto, a janela pode ter sido deslocada: a posição de agora.
+        arvore "campo$n"
+        linha=$(campo "fotos/campo$n.xml" "$n")
+        if [ -z "$linha" ]; then instavel "campo $n: sumiu ao abrir o teclado (tentativa $t)"; continue; fi
+        read -r _ x1 y1 x2 y2 <<< "$linha"
+        # Limpa o que uma tentativa anterior deixou.
+        adb shell input keyevent KEYCODE_MOVE_END
+        adb shell input keyevent $(printf 'KEYCODE_DEL %.0s' $(seq 1 24))
+        sleep 1
+        read -r antes esq0 <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
+        dica=0
+        [ "$antes" -gt 2 ] && dica=1
+        ensaio=0
+        if [ -n "$ENSAIO_PENDENTE" ]; then
+            ENSAIO_PENDENTE=""
+            ensaio=1
+            echo "campo $n, tentativa $t: digitação omitida de propósito (ensaio da conferência)" >> fotos/ensaio_n03.txt
+        elif [ "$modo" = teclas ]; then
+            digitar "$palavra"
+        else
+            texto "$palavra"
+        fi
+        if aviso_na_tela; then instavel "campo $n: aviso do sistema durante a digitação (tentativa $t)"; continue; fi
+        read -r depois esq <<< "$(medir_campo "$x1" "$y1" "$x2" "$y2")"
+        echo "campo $n tentativa $t: dica=$dica antes(dir=$antes esq=$esq0) depois(dir=$depois esq=$esq)" >> fotos/medidas_campos.txt
+        # Com dica: a dica sumiu e apareceu texto à esquerda. Sem dica: a
+        # esquerda, que só tinha o cursor, ganhou o texto.
+        if { [ "$dica" = 1 ] && [ "$depois" -ge 0 ] && [ "$depois" -le 1 ] && [ "$esq" -ge 8 ]; } ||
+            { [ "$dica" = 0 ] && [ "$esq0" -ge 0 ] && [ "$esq0" -le 6 ] && [ "$esq" -ge 12 ]; }; then
+            if [ "$ensaio" = 1 ]; then
+                falhou "[roteiro] a conferência do campo $n não percebeu a digitação omitida de propósito"
+                return 1
+            fi
+            return 0
+        fi
+        if [ "$ensaio" = 1 ]; then
+            echo "  → percebida: o campo não recebeu o texto (ensaio aprovado)" >> fotos/ensaio_n03.txt
+        else
+            instavel "campo $n: o texto não chegou ao campo (tentativa $t; dica=$dica, antes $antes/$esq0, depois $depois/$esq)"
+        fi
+    done
+    falhou "$AMBIENTE campo $n: não deu para digitar \"$palavra\" em 3 tentativas (veja instabilidade.txt)"
+    return 1
+}
 # Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
-esperar_tela() {
-    local nome=$1 limite=$2 onde=$3 atual="" i
-    for ((i = 0; i < limite; i += 2)); do
-        atual=$(tela_atual)
-        [ "$atual" = "$nome" ] && return 0
+# chegou <Tela> <segundos>: espera sem reprovar (quem chama decide).
+chegou() {
+    local i
+    for ((i = 0; i < $2; i += 2)); do
+        [ "$(tela_atual)" = "$1" ] && return 0
         sleep 2
     done
-    falhou "$onde: a tela $nome não apareceu em ${limite}s (está em: ${atual:-nenhuma})"
+    return 1
+}
+esperar_tela() {
+    local nome=$1 limite=$2 onde=$3 atual
+    chegou "$nome" "$limite" && return 0
+    atual=$(tela_atual)
+    # Com um aviso do sistema por cima, a culpa pode ser do emulador.
+    if aviso_na_tela; then
+        falhou "$AMBIENTE $onde: a tela $nome não apareceu em ${limite}s (está em: ${atual:-nenhuma}; aviso do sistema na tela)"
+    else
+        falhou "$onde: a tela $nome não apareceu em ${limite}s (está em: ${atual:-nenhuma})"
+    fi
     return 1
 }
 # O app está aberto, na frente, desenhado e não teve erro grave desde a
@@ -183,6 +352,18 @@ encerrar() {
     adb shell cat "/sdcard/Android/data/$PACOTE/files/diagnostico.txt" > fotos/diagnostico.txt 2> /dev/null || true
     grep -E "$(adb shell pidof $PACOTE | tr -d '\r')|AndroidRuntime|DEBUG" fotos/logcat.txt | grep -i -E "qml|warn|error|fatal|crash|qt" | tail -150 > fotos/erros.txt || true
     grep -E "lowmemorykiller: Kill '$PACOTE'|ANR in $PACOTE" -A 3 fotos/logcat.txt > fotos/memoria_mortes.txt || true
+    # A causa (N03): só as falhas marcadas "[ambiente do emulador]" = ambiente;
+    # alguma "[roteiro]" (a conferência errou) = roteiro de teste; qualquer
+    # outra = programa. Vai para o resultado da CI e para o manifesto.
+    if [ ! -s fotos/falhas.txt ]; then
+        echo nenhuma > fotos/causa.txt
+    elif grep -v -F -e "$AMBIENTE" -e "[roteiro]" fotos/falhas.txt | grep -q .; then
+        echo programa > fotos/causa.txt
+    elif grep -q -F "[roteiro]" fotos/falhas.txt; then
+        echo "roteiro de teste" > fotos/causa.txt
+    else
+        echo "ambiente do emulador" > fotos/causa.txt
+    fi
     ls -la fotos
     if [ -s fotos/falhas.txt ]; then
         echo "O teste encontrou problemas:"
@@ -220,39 +401,85 @@ adb shell am start -n $ATIVIDADE
 esperar_tela TelaBoasVindas 90 "primeira vez"
 foto 01-primeira-vez 5
 conferir "primeira vez"
-# O primeiro campo (nome da loja) já vem com o cursor e o teclado da tela
-# aberto. Os nomes vão tecla por tecla, como uma pessoa digita (com "input
-# text" o teclado do Android 14 trocava letras de lugar: "Loja" virava "ojaL",
-# o mesmo sintoma do comentário de Campo.qml sobre "texto previsto"). As senhas
-# vão por "input text" (campo de senha não tem sugestões do teclado).
-adb shell uiautomator dump /sdcard/tela.xml > /dev/null 2>&1 && adb shell cat /sdcard/tela.xml > fotos/01-arvore.xml 2> /dev/null
-fechar_avisos
-digitar "loja"
-foto 01a-loja 2
-tecla KEYCODE_ENTER
-tecla KEYCODE_ENTER
-fechar_avisos
-digitar "maria"
-foto 01b-nome 2
-tecla KEYCODE_ENTER
-fechar_avisos
-texto "1234"; tecla KEYCODE_ENTER
-fechar_avisos
-texto "1234"; tecla KEYCODE_ENTER
-# A senha passa pelo Argon2: no emulador (código ARM traduzido) demora.
-if ! esperar_tela TelaInicio 120 "configurar a loja (Enter no último campo)"; then
-    # O Enter no último campo não começou: tenta o botão, como uma pessoa
-    # faria (o "voltar" fecha só o teclado).
-    foto 02-sem-comecar 1
-    tecla KEYCODE_BACK
-    adb shell input swipe 540 1800 540 600 400
-    sleep 2
-    tocar_texto "Começar" 02-arvore || falhou "configurar a loja: o botão Começar não foi achado na tela"
-    esperar_tela TelaInicio 120 "configurar a loja (botão Começar)"
-fi
+# O teclado já abre no primeiro campo: guarda o que o Android diz dele (a
+# conferência "teclado aberto" lê o mInputShown daqui).
+adb shell dumpsys input_method > fotos/teclado_dumpsys.txt 2>&1 || true
+# Os campos da tela de boas-vindas, na ordem: 1 nome da loja, 2 nome deste
+# aparelho (já vem "Celular 1"), 3 seu nome, 4 senha, 5 repita a senha. Os
+# nomes vão tecla por tecla, como uma pessoa digita (com "input text" o
+# teclado do Android 14 trocava letras de lugar: "Loja" virava "ojaL", o mesmo
+# sintoma do comentário de Campo.qml sobre "texto previsto"). As senhas vão
+# por "input text" (campo de senha não tem sugestões do teclado).
+#
+# O que o app responde decide o resultado (registro do próprio app):
+# "cadastro inicial pedido" = o app recebeu o pedido; "cadastro inicial
+# recusado (campo): motivo" = o app recusou. Recusa depois de instabilidade
+# do emulador = ambiente (digita tudo de novo). Recusa com os campos
+# conferidos e sem instabilidade, duas vezes = defeito do programa.
+arvore 01-arvore
+pedidos() { adb logcat -d | grep -c "Rustinho: cadastro inicial pedido"; }
+recusa_do_app() { adb logcat -d | grep -o "Rustinho: cadastro inicial recusado.*" | tail -1; }
+instabilidades() { if [ -f fotos/instabilidade.txt ]; then wc -l < fotos/instabilidade.txt; else echo 0; fi; }
+configurar_loja() {
+    local tentativa p0 i0 recusa
+    for tentativa in 1 2; do
+        i0=$(instabilidades)
+        preencher 1 loja teclas || return 1
+        [ "$tentativa" = 1 ] && foto 01a-loja 1
+        preencher 3 maria teclas || return 1
+        [ "$tentativa" = 1 ] && foto 01b-nome 1
+        preencher 4 1234 texto || return 1
+        preencher 5 1234 texto || return 1
+        foto "01c-preenchido-$tentativa" 1
+        p0=$(pedidos)
+        tecla KEYCODE_ENTER
+        # A senha passa pelo Argon2: no emulador (código ARM traduzido) demora.
+        chegou TelaInicio 120 && return 0
+        foto "02-sem-comecar-$tentativa" 1
+        if [ "$(pedidos)" -gt "$p0" ]; then
+            recusa=$(recusa_do_app)
+            if [ -z "$recusa" ]; then
+                falhou "configurar a loja: o cadastro foi pedido e o Início não apareceu em 120s"
+                return 1
+            fi
+            if [ "$(instabilidades)" -gt "$i0" ] || aviso_na_tela; then
+                instavel "configurar a loja: o app recusou o cadastro depois de instabilidade do emulador ($recusa)"
+            elif [ "$tentativa" = 2 ]; then
+                falhou "configurar a loja: o app recusou duas vezes o cadastro com os campos conferidos ($recusa)"
+                return 1
+            else
+                instavel "configurar a loja: o app recusou o cadastro com os campos conferidos ($recusa); de novo, para separar emulador de programa"
+            fi
+        elif aviso_na_tela; then
+            instavel "configurar a loja: o Enter no último campo não chegou ao app (aviso do sistema na tela)"
+        else
+            falhou "configurar a loja: o Enter no último campo não começou o cadastro"
+            # Segunda via, como uma pessoa faria (o "voltar" fecha só o teclado).
+            teclado_aberto && tecla KEYCODE_BACK
+            adb shell input swipe 540 1800 540 600 400
+            sleep 2
+            tocar_texto "Começar" 02-arvore || { falhou "configurar a loja: o botão Começar não foi achado na tela"; return 1; }
+            chegou TelaInicio 120 && return 0
+            falhou "configurar a loja: nem o botão Começar levou ao Início ($(recusa_do_app))"
+            return 1
+        fi
+    done
+    falhou "$AMBIENTE configurar a loja: o cadastro não passou em 2 tentativas por instabilidade do emulador (veja instabilidade.txt)"
+    return 1
+}
+configurar_loja
 foto 02-inicio 3
 conferir "configurar a loja"
-[ "$(tela_atual)" = TelaInicio ] || { falhou "a loja não ficou configurada: as telas seguintes não teriam o que conferir"; encerrar; }
+if [ "$(tela_atual)" != TelaInicio ]; then
+    # Herda a causa: se o cadastro parou por instabilidade do emulador, esta
+    # falha também é do ambiente.
+    if tail -1 fotos/falhas.txt 2> /dev/null | grep -q -F "$AMBIENTE"; then
+        falhou "$AMBIENTE a loja não ficou configurada: as telas seguintes não teriam o que conferir"
+    else
+        falhou "a loja não ficou configurada: as telas seguintes não teriam o que conferir"
+    fi
+    encerrar
+fi
 # Modo escuro: a lua, ao lado de "Trocar usuário". No teste de 32 bits fica
 # escuro até o fim; no de 64, volta para o sol.
 adb shell input tap 187 472
@@ -269,8 +496,10 @@ abrir() {
     sleep 2
     adb shell am start -n $ATIVIDADE --es rustinho "'--abrir $1'"
     esperar_tela TelaEntrar 90 "$1 (entrada)" || return 0
-    fechar_avisos
-    texto "1234"; tecla KEYCODE_ENTER
+    # A senha do cadastro (1234) abre a tela: confere também que o cadastro
+    # gravou a senha digitada, letra por letra.
+    preencher 1 1234 texto || return 0
+    tecla KEYCODE_ENTER
     esperar_tela "$1" 120 "$1"
 }
 TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel TelaFinanceiro \

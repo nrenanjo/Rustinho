@@ -754,15 +754,21 @@ jobs:
           BLOQUEIA: ${{ matrix.bloqueia }}
         run: |
           mkdir -p fotos
+          # N03: o roteiro diz a causa da falha (programa, roteiro de teste ou
+          # ambiente do emulador) e anota cada instabilidade que contornou.
+          causa=$(cat fotos/causa.txt 2> /dev/null || echo "não informada")
+          inst=0
+          [ -f fotos/instabilidade.txt ] && inst=$(wc -l < fotos/instabilidade.txt)
           if [ "$SAIU" = success ]; then r=aprovado; else r="reprovado ($SAIU)"; fi
           if [ "$BLOQUEIA" = true ]; then
             obs="bloqueia o pipeline"
           else
             obs="não bloqueia: limitação conhecida do emulador x86 da API 28 (tela cinza, PEND-18); só o Moto e6i (L6) valida o APK de 32 bits"
           fi
-          printf 'resultado=%s\nbloqueia=%s\nobservacao=%s\n' "$r" "$BLOQUEIA" "$obs" > fotos/resultado.txt
+          printf 'resultado=%s\nbloqueia=%s\nobservacao=%s\ncausa=%s\ninstabilidades=%s\n' \
+            "$r" "$BLOQUEIA" "$obs" "$causa" "$inst" > fotos/resultado.txt
           cat fotos/resultado.txt
-          [ "$SAIU" = success ] || echo "::warning title=Emulador ${{ matrix.nome }}::$r — $obs"
+          [ "$SAIU" = success ] || echo "::warning title=Emulador ${{ matrix.nome }}::$r (causa: $causa) — $obs"
           if [ -f fotos/erros.txt ]; then
             python3 -c "t=open('fotos/erros.txt',errors='replace').read()[-6000:] or 'nenhum'; print('::warning title=registro do app::'+t.replace('%','%25').replace('\r','').replace('\n','%0A'))"
           fi
