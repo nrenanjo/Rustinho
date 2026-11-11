@@ -88,11 +88,22 @@ regra do §4.
    diagnóstico registra a recusa.
 4. Bancos desta linha, de qualquer número publicado, continuam abrindo e atualizando normalmente.
 
-**Situação:**
-- os testes que exigem a regra estão escritos (passo 1.6, `#[ignore]` até o passo 2.4);
-- a implementação é o passo 2.4;
-- **a primeira 0025 desta linha só entra depois da 2.4** (pelo §3, antes disso um banco dev.3/25
-  seria aceito).
+**Situação: implementada no passo 2.4** (`banco::conferir_linhagem`, chamada no começo de
+`Banco::abrir`):
+- a conferência abre o arquivo **só para leitura**, antes da cópia, da migração e até do diário WAL;
+- ela compara a **forma** da estrutura, pelo conteúdo, não o texto do `CREATE` de `sqlite_master`,
+  que versões diferentes do SQLite reescrevem. A forma é: as colunas de cada tabela (nome, tipo, não
+  nulo, posição na chave), as colunas e a unicidade de cada índice, e as visões. Assim um banco
+  legítimo, atualizado ao longo do tempo por Rustinhos antigos, não é recusado por diferença de
+  texto;
+- **conferido no passo 2.4**:
+  - as migrações de todas as versões desta linha que estão no repositório (v0.9.1, v0.9.14, a base
+    0.9.17, `main`, dev, dev.2, dev.3.1, dev.3.2) deixam exatamente a forma esperada de hoje;
+  - a linha dev.3 não deixa;
+- número maior que o desta versão: se o banco tem tudo o que esta versão conhece, igual, é "versão
+  mais nova" (desta linha); senão, é de outra linha;
+- a mensagem da recusa é `banco::TEXTO_OUTRA_LINHA`, e o registro técnico anota as diferenças;
+- **a primeira 0025 desta linha pode entrar** (a 2.4 está feita).
 
 ## 5. Ordem prevista das migrações da dev.3.3 (DP-47 revista)
 
@@ -143,9 +154,11 @@ Se a 6.5 ou a 7.5 entrarem antes da 5.x, a numeração segue a ordem real de ent
 | `banco_na_estrutura_23_atualiza_para_a_atual` | trava | 0.9.15 a 0.9.17 atualizam |
 | `numeracao_das_migracoes_continua_e_igual_a_lista_do_banco` | trava | §6, item 1; a 0024 é a desta linha |
 | `nenhuma_migracao_reaproveita_nome` | trava | §6, itens 3 e 4 |
-| `banco_dev3_estrutura24_e_recusado_sem_gravar` | caracterização (até a 2.4) | §4 |
-| `banco_dev3_estrutura25_e_recusado_como_outra_linha` | caracterização (até a 2.4) | §4 |
-| `banco_de_estrutura_desconhecida_e_recusado_sem_gravar` | caracterização (até a 2.4) | §4 |
+| `banco_dev3_estrutura24_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
+| `banco_dev3_estrutura25_e_recusado_como_outra_linha` | trava (era caracterização até a 2.4) | §4 |
+| `banco_de_estrutura_desconhecida_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
+| `banco::testes::n01_todas_as_estruturas_desta_linha_passam` | trava | §4, item 4: nenhuma estrutura desta linha (1 a N) é recusada |
+| `banco::testes::n01_banco_de_um_rustinho_mais_novo_desta_linha` | trava | número maior, com tudo igual: "versão mais nova" |
 
 As amostras ficam em `nucleo/tests/amostras_dev3/`. Veja o LEIA-ME de lá: origem, cópias limpas e
 SHA-256.

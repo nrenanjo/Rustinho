@@ -19,9 +19,10 @@
 //!   estrutura 23 atualiza; a numeração é contínua e igual à lista do
 //!   `banco.rs`; nenhuma migração reaproveita nome (índice redefinido, ou nome
 //!   da linha dev.3 a partir da 0025).
-//! - Caracterizações (`#[ignore]`; falham em `4b253c6` e passam no passo 2.4):
+//! - Recusas (eram caracterizações até o passo 2.4: falhavam em `4b253c6`):
 //!   bancos dev.3/24, dev.3/25 e de estrutura desconhecida são recusados SEM
-//!   GRAVAR (o SHA-256 do arquivo fica igual).
+//!   GRAVAR (o SHA-256 do arquivo fica igual), por `banco::conferir_linhagem`,
+//!   que compara a estrutura pelo conteúdo (colunas e índices), não pelo texto.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -336,11 +337,10 @@ fn nenhuma_migracao_reaproveita_nome() {
     }
 }
 
-// ---------------------------------------------------------- caracterizações
+// ------------------------------------- recusas (caracterizações até o passo 2.4)
 
 /// N01 (DP-50): o banco dev.3/24 é recusado sem gravar.
 #[test]
-#[ignore = "caracterização N01 (DP-50): em 4b253c6 o banco dev.3/24 é aceito como a 24 desta linha; passa no passo 2.4"]
 fn banco_dev3_estrutura24_e_recusado_sem_gravar() {
     let (_p, db) = copia("dev3_estrutura24.db");
     let (erro, mudou) = abrir_pelo_programa(&db);
@@ -356,7 +356,6 @@ fn banco_dev3_estrutura24_e_recusado_sem_gravar() {
 /// linha — não como "versão mais nova", que é o número falando: com uma 0025
 /// desta linha, o mesmo número seria aceito.
 #[test]
-#[ignore = "caracterização N01 (DP-50): em 4b253c6 o banco dev.3/25 é recusado só pelo número (versão mais nova); passa no passo 2.4"]
 fn banco_dev3_estrutura25_e_recusado_como_outra_linha() {
     let (_p, db) = copia("dev3_estrutura25.db");
     let (erro, mudou) = abrir_pelo_programa(&db);
@@ -370,7 +369,6 @@ fn banco_dev3_estrutura25_e_recusado_como_outra_linha() {
 
 /// N01 (DP-50): número desta linha com outra estrutura é recusado sem gravar.
 #[test]
-#[ignore = "caracterização N01 (DP-50): em 4b253c6 um banco com o número atual e outra estrutura é aceito; passa no passo 2.4"]
 fn banco_de_estrutura_desconhecida_e_recusado_sem_gravar() {
     let p = Pasta::nova("desconhecida");
     let db = p.0.join("rustinho.db");

@@ -1,8 +1,10 @@
 //! Abertura do banco de dados SQLite e atualização da sua estrutura.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::erro::{Erro, Resultado};
 use crate::tempo;
@@ -45,6 +47,149 @@ pub fn versao_da_estrutura() -> usize {
     MIGRACOES.len()
 }
 
+// ---------------------------------------------------------------------------
+// N01 (dev.3.3, DP-50): a linhagem da estrutura, conferida pelo conteúdo.
+// ---------------------------------------------------------------------------
+
+/// A forma de uma estrutura, pelo conteúdo: (tipo, nome) → o que importa de
+/// cada objeto. Tabela: as colunas (nome, tipo, não nulo, posição na chave).
+/// Índice: a tabela, se é único e as colunas. Visão: a tabela. NÃO o texto do
+/// CREATE, que versões diferentes do SQLite reescrevem: um banco legítimo,
+/// atualizado ao longo do tempo por Rustinhos antigos, não pode ser recusado
+/// por isso. Sem gatilhos: nenhuma migração cria gatilho (o programa os cria
+/// ao abrir, `sync::criar_gatilhos`).
+type Forma = BTreeMap<(String, String), String>;
+
+fn forma(conn: &Connection) -> Resultado<Forma> {
+    let objetos: Vec<(String, String, String)> = conn
+        .prepare("SELECT type, name, tbl_name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND type <> 'trigger'")?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut f = Forma::new();
+    for (tipo, nome, tabela) in objetos {
+        let descricao = match tipo.as_str() {
+            "table" => conn
+                .prepare("SELECT name, upper(type), \"notnull\", pk FROM pragma_table_info(?1) ORDER BY cid")?
+                .query_map([&nome], |l| {
+                    Ok(format!(
+                        "{}|{}|{}|{}",
+                        l.get::<_, String>(0)?,
+                        l.get::<_, String>(1)?,
+                        l.get::<_, i64>(2)?,
+                        l.get::<_, i64>(3)?
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+                .join(";"),
+            "index" => {
+                let unico: i64 = conn
+                    .query_row("SELECT \"unique\" FROM pragma_index_list(?1) WHERE name = ?2", [&tabela, &nome], |l| {
+                        l.get(0)
+                    })
+                    .optional()?
+                    .unwrap_or(0);
+                let colunas: Vec<String> = conn
+                    .prepare("SELECT coalesce(name, '(expressão)') FROM pragma_index_info(?1) ORDER BY seqno")?
+                    .query_map([&nome], |l| l.get(0))?
+                    .collect::<Result<_, _>>()?;
+                format!("{tabela}|{unico}|{}", colunas.join(","))
+            }
+            _ => tabela,
+        };
+        f.insert((tipo, nome), descricao);
+    }
+    Ok(f)
+}
+
+/// A forma que as migrações 0001..`n` deixam, aplicadas num banco na
+/// memória como num banco de verdade (uma vez por número enquanto o programa
+/// está aberto).
+fn forma_esperada(n: usize) -> Resultado<Forma> {
+    static GUARDADAS: Mutex<BTreeMap<usize, Forma>> = Mutex::new(BTreeMap::new());
+    if let Some(f) = GUARDADAS.lock().unwrap_or_else(|e| e.into_inner()).get(&n) {
+        return Ok(f.clone());
+    }
+    let mut c = Connection::open_in_memory()?;
+    c.pragma_update(None, "foreign_keys", true)?;
+    registrar_funcoes(&c)?;
+    for (i, sql) in MIGRACOES.iter().enumerate().take(n) {
+        aplicar_migracao(&mut c, i, sql)?;
+    }
+    let f = forma(&c)?;
+    GUARDADAS.lock().unwrap_or_else(|e| e.into_inner()).insert(n, f.clone());
+    Ok(f)
+}
+
+fn diferencas_de_forma(esperada: &Forma, real: &Forma) -> Vec<String> {
+    let mut d = Vec::new();
+    for (k, v) in esperada {
+        match real.get(k) {
+            None => d.push(format!("falta {} {}", k.0, k.1)),
+            Some(r) if r != v => d.push(format!("{} {} diferente", k.0, k.1)),
+            _ => {}
+        }
+    }
+    for k in real.keys().filter(|k| !esperada.contains_key(*k)) {
+        d.push(format!("sobra {} {}", k.0, k.1));
+    }
+    d
+}
+
+/// O que a tela mostra quando o banco não é desta linha de versões.
+pub const TEXTO_OUTRA_LINHA: &str = "Este banco de dados não é de uma versão do Rustinho que este programa \
+     reconhece (parece de outra linha de versões, como a 0.9.18-dev.3, ou foi mudado fora do Rustinho). Nada foi \
+     alterado nele. Use o Rustinho que criou este banco, ou restaure um backup, e chame o suporte.";
+
+/// N01 (DP-50): antes de qualquer gravação (da cópia, da migração e até do
+/// diário WAL), confere a estrutura do arquivo pelo conteúdo, só lendo. O
+/// número (`user_version`) sozinho não basta: o 24 tem duas estruturas
+/// publicadas (esta linha e a dev.3). Banco da linha dev.3 ou de estrutura
+/// desconhecida é recusado sem nada gravado; o detalhe vai para o registro.
+/// Número maior que o desta versão: se o banco tem tudo o que esta versão
+/// conhece, igual, é de um Rustinho mais novo desta linha ("versão mais
+/// nova"); senão, é de outra linha.
+pub(crate) fn conferir_linhagem(caminho: &Path) -> Resultado<()> {
+    if !caminho.exists() {
+        return Ok(());
+    }
+    let (v, real) = {
+        let conn =
+            Connection::open_with_flags(caminho, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        registrar_funcoes(&conn)?;
+        let v: i64 = conn.query_row("PRAGMA user_version", [], |l| l.get(0))?;
+        (v, forma(&conn)?)
+    };
+    if v == 0 && real.is_empty() {
+        return Ok(()); // arquivo novo, ainda sem estrutura
+    }
+    let n = MIGRACOES.len();
+    let (esperada, numero) = match usize::try_from(v) {
+        Ok(k) if (1..=n).contains(&k) => (forma_esperada(k)?, k),
+        Ok(k) if k > n => {
+            let e = forma_esperada(n)?;
+            if e.iter().all(|(chave, f)| real.get(chave) == Some(f)) {
+                return Err(Erro::Interno(format!(
+                    "este banco de dados é de uma versão mais nova do Rustinho (estrutura {v})"
+                )));
+            }
+            (e, n)
+        }
+        _ => (Forma::new(), 0),
+    };
+    if real == esperada {
+        return Ok(());
+    }
+    let d = diferencas_de_forma(&esperada, &real);
+    crate::registro::anotar(&format!(
+        "banco recusado ao abrir, sem nada gravado (N01): {} tem o número {v} e uma estrutura que não é a {numero} \
+         desta linha ({} diferenças: {})",
+        caminho.display(),
+        d.len(),
+        d.iter().take(8).cloned().collect::<Vec<_>>().join("; ")
+    ));
+    Err(Erro::validacao(TEXTO_OUTRA_LINHA))
+}
+
 /// Conexão com o banco mais a identidade deste computador.
 pub struct Banco {
     pub conn: Connection,
@@ -66,6 +211,9 @@ impl Banco {
             std::fs::create_dir_all(pasta)
                 .map_err(|e| Erro::Interno(format!("não foi possível criar a pasta {}: {e}", pasta.display())))?;
         }
+        // N01 (dev.3.3): a estrutura é conferida pelo conteúdo antes de tudo,
+        // só lendo: banco de outra linha ou desconhecido é recusado sem gravar.
+        conferir_linhagem(caminho)?;
         // Banco de uma versão anterior: cópia conferida antes de mexer na
         // estrutura, e volta da cópia se algo der errado (veja `migracao`).
         // RVI-03: um banco de versão anterior é conferido antes da cópia e da
@@ -491,6 +639,54 @@ pub fn caminho_padrao() -> PathBuf {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    fn arquivo_n01(nome: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("rustinho-n01-{nome}-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&p).unwrap();
+        p.join("rustinho.db")
+    }
+
+    /// N01: nenhuma estrutura desta linha (0001 a 00NN, como as versões
+    /// publicadas deixaram) é recusada pela conferência; e ela é rápida.
+    #[test]
+    fn n01_todas_as_estruturas_desta_linha_passam() {
+        let inicio = std::time::Instant::now();
+        for k in 1..=MIGRACOES.len() {
+            let db = arquivo_n01(&format!("e{k}"));
+            {
+                let mut c = Connection::open(&db).unwrap();
+                c.pragma_update(None, "foreign_keys", true).unwrap();
+                registrar_funcoes(&c).unwrap();
+                for (i, sql) in MIGRACOES.iter().enumerate().take(k) {
+                    aplicar_migracao(&mut c, i, sql).unwrap();
+                }
+            }
+            conferir_linhagem(&db).unwrap_or_else(|e| panic!("a estrutura {k} desta linha foi recusada: {e}"));
+        }
+        let novo = arquivo_n01("novo");
+        conferir_linhagem(&novo).unwrap();
+        drop(Connection::open(&novo).unwrap());
+        conferir_linhagem(&novo).expect("arquivo vazio (banco novo) passa");
+        eprintln!("N01: {} estruturas conferidas em {:?}", MIGRACOES.len(), inicio.elapsed());
+    }
+
+    /// N01: número maior que o desta versão, com tudo o que ela conhece igual,
+    /// é de um Rustinho mais novo desta linha (a mensagem continua essa).
+    #[test]
+    fn n01_banco_de_um_rustinho_mais_novo_desta_linha() {
+        let db = arquivo_n01("mais-novo");
+        {
+            let mut c = Connection::open(&db).unwrap();
+            registrar_funcoes(&c).unwrap();
+            for (i, sql) in MIGRACOES.iter().enumerate() {
+                aplicar_migracao(&mut c, i, sql).unwrap();
+            }
+            c.execute_batch("CREATE TABLE tabela_de_uma_versao_futura (id TEXT PRIMARY KEY)").unwrap();
+            c.pragma_update(None, "user_version", (MIGRACOES.len() + 1) as i64).unwrap();
+        }
+        let e = conferir_linhagem(&db).unwrap_err().to_string();
+        assert!(e.contains("mais nova"), "{e}");
+    }
 
     #[test]
     fn cria_estrutura_e_dispositivo() {
