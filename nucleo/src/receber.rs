@@ -279,7 +279,9 @@ pub fn taxas_texto(conn: &Connection) -> Resultado<(String, String, String)> {
     Ok((p(t.multa), p(t.juros_mes), if t.carencia == 0 { String::new() } else { t.carencia.to_string() }))
 }
 
-pub fn salvar_taxas(conn: &Connection, multa: &str, juros: &str, carencia: &str) -> Resultado<()> {
+/// Lê as taxas digitadas na tela (o mesmo para gravar e para o exemplo):
+/// multa e juros de 0 a 20%, tolerância de 0 a 60 dias.
+fn ler_taxas(multa: &str, juros: &str, carencia: &str) -> Resultado<Taxas> {
     let ler = |texto: &str, campo: &str, max: i64| -> Resultado<i64> {
         let v = numeros::ler_percentual(texto).map_err(|m| Erro::campo(campo, m))?.unwrap_or(0);
         if !(0..=max).contains(&v) {
@@ -287,9 +289,9 @@ pub fn salvar_taxas(conn: &Connection, multa: &str, juros: &str, carencia: &str)
         }
         Ok(v)
     };
-    let m = ler(multa, "crediarioMulta", 2_000)?;
-    let j = ler(juros, "crediarioJuros", 2_000)?;
-    let c: i64 = if carencia.trim().is_empty() {
+    let multa = ler(multa, "crediarioMulta", 2_000)?;
+    let juros_mes = ler(juros, "crediarioJuros", 2_000)?;
+    let carencia: i64 = if carencia.trim().is_empty() {
         0
     } else {
         carencia
@@ -299,10 +301,26 @@ pub fn salvar_taxas(conn: &Connection, multa: &str, juros: &str, carencia: &str)
             .filter(|v| (0..=60).contains(v))
             .ok_or_else(|| Erro::campo("crediarioCarencia", "Use de 0 a 60 dias."))?
     };
-    config::gravar(conn, "crediario_multa", &m.to_string())?;
-    config::gravar(conn, "crediario_juros", &j.to_string())?;
-    config::gravar(conn, "crediario_carencia", &c.to_string())?;
+    Ok(Taxas { multa, juros_mes, carencia })
+}
+
+pub fn salvar_taxas(conn: &Connection, multa: &str, juros: &str, carencia: &str) -> Resultado<()> {
+    let t = ler_taxas(multa, juros, carencia)?;
+    config::gravar(conn, "crediario_multa", &t.multa.to_string())?;
+    config::gravar(conn, "crediario_juros", &t.juros_mes.to_string())?;
+    config::gravar(conn, "crediario_carencia", &t.carencia.to_string())?;
     Ok(())
+}
+
+/// O exemplo de atraso das Configurações (ARQ-09, dev.3.3 passo 2.2): uma
+/// parcela de `valor` centavos com `dias` de atraso, com as taxas ainda não
+/// gravadas, pela MESMA conta da cobrança (`juros_de`). Devolve (multa e
+/// juros, total, dentro da tolerância). Antes a tela refazia a conta e lia os
+/// números de outro jeito ("2.5" virava 25%).
+pub fn exemplo_atraso(multa: &str, juros: &str, carencia: &str, valor: i64, dias: i64) -> Resultado<(i64, i64, bool)> {
+    let t = ler_taxas(multa, juros, carencia)?;
+    let extra = juros_de(valor, dias, t);
+    Ok((extra, numeros::soma([valor, extra])?, dias <= t.carencia))
 }
 
 // ---------------------------------------------------------------------------

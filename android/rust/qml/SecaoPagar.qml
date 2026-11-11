@@ -397,10 +397,11 @@ FocusScope {
             if (f === "cheque")
                 pCheque.focar()
         }
+        // ARQ-09 (dev.3.3, 2.2): o total pela leitura do núcleo ("1.5" = 1,50;
+        // a tela lia 15). Número inválido não vira 0: o total fica "—".
         readonly property string total: {
-            const n = s => parseFloat((s || "0").replace(/\./g, "").replace(",", ".")) || 0
-            const t = n(pValor.texto) + n(pJuros.texto) - n(pDesconto.texto)
-            return t.toLocaleString(Qt.locale("pt_BR"), "f", 2)
+            const r = Api.chamar("numero_somar", { tipo: "dinheiro", somar: [pValor.texto, pJuros.texto], subtrair: [pDesconto.texto] })
+            return r.ok ? r.dados.texto : "—"
         }
         function concluir() {
             secao.janela.chamarGerente("pagar_pagar", {

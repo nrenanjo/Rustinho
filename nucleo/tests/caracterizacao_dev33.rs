@@ -142,8 +142,8 @@ fn item_da_compra(compra: &Value, codigo: &str) -> Value {
 // ===========================================================================
 
 /// G01 — "0.250" (zero à esquerda, ponto e três algarismos) é decimal, não milhar.
+/// Era caracterização (falhava em 4b253c6: virava 250000); corrigido no passo 2.2.
 #[test]
-#[ignore = "caracterização G01: \"0.250\" vira 250 em 4b253c6; passa no passo 2.2"]
 fn g01_zero_com_ponto_e_decimal() {
     use rustinho_base::numeros::ler_quantidade;
     assert_eq!(ler_quantidade("0.250"), Ok(Some(250)), "0.250 tem de ser 0,250 (250 milésimos)");

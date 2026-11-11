@@ -145,3 +145,29 @@ fn montar_chamadas_gerente() {
     std::fs::write(pasta.join("ids.json"), json!({ "cliente": cliente }).to_string()).unwrap();
     l.fechar();
 }
+
+/// Números das telas (dev.3.3, passo 2.2: H13, ARQ-09) — a loja do roteiro
+/// `app/testes/telas_numeros.py`: Ana (gerente, senha 1234), o caixa aberto e
+/// uma peça vendida a quilo com o código de barras 7891000000014 (entra direto no carrinho).
+#[test]
+#[ignore = "só à mão: monta a loja do roteiro dos números das telas (H13, ARQ-09)"]
+fn montar_numeros_das_telas() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja Teste Auto Peças", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    let mut f = l.ok("produto_novo", json!({}));
+    f["nome"] = json!("PARAFUSO SINTETICO A GRANEL");
+    f["codigoBarras"] = json!("7891000000014");
+    f["unidade"] = json!("KG");
+    f["estoqueInicial"] = json!("100");
+    f["precos"][0]["preco"] = json!("2,00");
+    f["precos"][0]["lucro"] = json!("");
+    l.ok("produto_salvar", f);
+    l.ok("caixa_abrir", json!({ "valor": "50" }));
+    l.fechar();
+}

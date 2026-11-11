@@ -165,19 +165,20 @@ FocusScope {
     }
 
     // Exemplo do crediário: parcela de R$ 100,00 com 10 dias de atraso.
-    function numero(t) {
-        const v = parseFloat(String(t || "").replace(/\./g, "").replace(",", "."))
-        return isNaN(v) ? 0 : v
-    }
+    // ARQ-09 (dev.3.3, 2.2): o exemplo é a conta da cobrança, feita pelo
+    // núcleo com as taxas como estão digitadas ("2.5" = 2,5%; a tela lia 25%
+    // e refazia a conta do jeito dela). Taxa fora do permitido: sem exemplo
+    // (o erro aparece no campo ao salvar).
     readonly property string exemploJuros: {
-        const dias = 10
-        const tol = parseInt(carencia.texto) || 0
-        if (dias <= tol)
-            return "Exemplo: parcela de R$ 100,00 com 10 dias de atraso fica em R$ 100,00 (está dentro da tolerância)."
-        const extra = numero(multa.texto) + numero(jurosMes.texto) * dias / 30
-        const total = 100 + extra
-        return "Exemplo: parcela de R$ 100,00 com 10 dias de atraso fica em R$ "
-               + total.toFixed(2).replace(".", ",") + (extra > 0 ? " (R$ " + extra.toFixed(2).replace(".", ",") + " de multa e juros)." : ".")
+        const r = Api.chamar("crediario_exemplo", { multa: multa.texto, juros: jurosMes.texto, carencia: carencia.texto,
+                                                    valor: "100", dias: 10 })
+        if (!r.ok)
+            return ""
+        const e = r.dados
+        if (e.dentroDaTolerancia)
+            return "Exemplo: parcela de R$ " + e.valor + " com 10 dias de atraso fica em R$ " + e.total + " (está dentro da tolerância)."
+        return "Exemplo: parcela de R$ " + e.valor + " com 10 dias de atraso fica em R$ " + e.total
+               + (e.extra !== "0,00" ? " (R$ " + e.extra + " de multa e juros)." : ".")
     }
 
     function carregar() {
@@ -1017,6 +1018,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Rectangle {
+                        visible: tela.exemploJuros !== ""
                         Layout.fillWidth: true
                         implicitHeight: exemplo.implicitHeight + 20
                         radius: Tema.raioCampo

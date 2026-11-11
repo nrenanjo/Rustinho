@@ -276,6 +276,10 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("backup_ao_fechar", Classe::SemSessao),
     ("sair", Classe::SemSessao),
     ("numero_formatar", Classe::LeituraSemSessao),
+    // ARQ-09/H13 (dev.3.3, 2.2): somas e o exemplo de atraso pelo núcleo,
+    // para a tela não ler número do jeito dela.
+    ("numero_somar", Classe::LeituraSemSessao),
+    ("crediario_exemplo", Classe::LeituraSemSessao),
     ("preco_calcular", Classe::LeituraSemSessao),
     // Permissões, senha do gerente e usuários (pílula Gerente).
     ("permissao", Classe::Leitura),
@@ -812,6 +816,21 @@ impl Servico {
             "numero_formatar" => {
                 let d: Formatar = ler(dados)?;
                 Ok(json!({ "texto": formatar(&d.tipo, &d.texto) }))
+            }
+            "numero_somar" => {
+                let d: Somar = ler(dados)?;
+                Ok(json!({ "texto": somar_textos(&d.tipo, &d.somar, &d.subtrair)? }))
+            }
+            "crediario_exemplo" => {
+                let d: ExemploAtraso = ler(dados)?;
+                let valor = numeros::ler_dinheiro(&d.valor).map_err(|m| Erro::campo("valor", m))?.unwrap_or(0);
+                let (extra, total, dentro) = receber::exemplo_atraso(&d.multa, &d.juros, &d.carencia, valor, d.dias)?;
+                Ok(json!({
+                    "valor": numeros::escrever_dinheiro(valor),
+                    "extra": numeros::escrever_dinheiro(extra),
+                    "total": numeros::escrever_dinheiro(total),
+                    "dentroDaTolerancia": dentro,
+                }))
             }
             "preco_calcular" => {
                 let d: PrecoCalculo = ler(dados)?;
@@ -2132,6 +2151,26 @@ fn formatar(tipo: &str, texto: &str) -> String {
     }
 }
 
+/// Soma pela regra do núcleo (H13, ARQ-09): cada texto lido como dinheiro,
+/// percentual ou quantidade; vazio vale 0; texto inválido é recusado com a
+/// mensagem da leitura (nunca vira 0 em silêncio).
+fn somar_textos(tipo: &str, somar: &[String], subtrair: &[String]) -> Resultado<String> {
+    let (ler, escrever): (fn(&str) -> Result<Option<i64>, String>, fn(i64) -> String) = match tipo {
+        "dinheiro" => (numeros::ler_dinheiro, numeros::escrever_dinheiro),
+        "percentual" => (numeros::ler_percentual, numeros::escrever_percentual),
+        "quantidade" => (numeros::ler_quantidade, numeros::escrever_quantidade),
+        outro => return Err(Erro::Interno(format!("numero_somar: tipo desconhecido: {outro}"))),
+    };
+    let mut valores = Vec::with_capacity(somar.len() + subtrair.len());
+    for (lista, sinal) in [(somar, 1), (subtrair, -1)] {
+        for texto in lista {
+            let v = ler(texto).map_err(Erro::validacao)?.unwrap_or(0);
+            valores.push(v.checked_mul(sinal).ok_or_else(numeros::grande_demais)?);
+        }
+    }
+    Ok(escrever(numeros::soma(valores)?))
+}
+
 /// Troca o nome do campo de um erro (ex.: "senha" → "nova").
 fn renomear_campo(de: &'static str, para: &'static str) -> impl Fn(Erro) -> Erro {
     move |e| match e {
@@ -2164,6 +2203,26 @@ struct Entrada {
 struct Formatar {
     tipo: String,
     texto: String,
+}
+
+/// `numero_somar`: soma `somar` e tira `subtrair`, lendo cada texto pela
+/// regra do núcleo (vazio = 0).
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Somar {
+    tipo: String,
+    somar: Vec<String>,
+    subtrair: Vec<String>,
+}
+
+/// `crediario_exemplo`: as taxas como estão digitadas (ainda não gravadas).
+#[derive(Deserialize)]
+struct ExemploAtraso {
+    multa: String,
+    juros: String,
+    carencia: String,
+    valor: String,
+    dias: i64,
 }
 
 #[derive(Deserialize, Default)]

@@ -93,6 +93,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("conta_loja_extrato", "financeiro", &["leitura"]),
     ("conta_loja_salvar", "financeiro", &["nao_repetir"]),
     ("contas_loja", "leitura", &["leitura"]),
+    // dev.3.3, passo 2.2 (ARQ-09): o exemplo de atraso das Configurações pela conta da cobrança.
+    ("crediario_exemplo", "leitura", &["leitura", "sem_sessao"]),
     ("devolucao_calcular", "leitura", &["leitura"]),
     ("devolucao_desfazer", "estornar", &["nao_repetir"]),
     ("devolucao_gravar", "caixa", &["do_caixa", "nao_repetir"]),
@@ -147,6 +149,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("movimento_estornar", "estornar", &["nao_repetir"]),
     ("movimento_lancar", "financeiro", &["nao_repetir"]),
     ("numero_formatar", "leitura", &["leitura", "sem_sessao"]),
+    // dev.3.3, passo 2.2 (H13, ARQ-09): somas pelo núcleo; sem sessão, como o numero_formatar.
+    ("numero_somar", "leitura", &["leitura", "sem_sessao"]),
     ("orcamento_carregar", "leitura", &["leitura"]),
     ("orcamento_salvar", "caixa", &["do_caixa", "nao_repetir"]),
     ("os_abrir", "leitura", &["leitura"]),

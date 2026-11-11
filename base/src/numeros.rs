@@ -163,8 +163,12 @@ fn ler_decimal(texto: &str, casas: u32) -> Result<Option<i64>, String> {
         (partes[0].replace('.', ""), partes[1].to_string())
     } else if numero.contains('.') {
         let partes: Vec<&str> = numero.split('.').collect();
-        if partes.len() == 2 && partes[1].len() != 3 {
-            // Um único ponto que não separa milhar: é o separador decimal.
+        // G01 (dev.3.3): um único ponto é o separador decimal quando não separa
+        // milhar: depois dele não vêm três algarismos ("1.5", "85.50"), ou antes
+        // dele só há zeros ("0.250" = 0,250: nenhum número escrito em milhares
+        // começa pelo grupo "0").
+        let so_zeros_antes = !partes[0].is_empty() && partes[0].chars().all(|c| c == '0');
+        if partes.len() == 2 && (partes[1].len() != 3 || so_zeros_antes) {
             (partes[0].to_string(), partes[1].to_string())
         } else {
             if partes[0].is_empty() || partes[0].len() > 3 || partes[1..].iter().any(|p| p.len() != 3) {
@@ -339,6 +343,16 @@ mod testes {
     fn quantidades() {
         assert_eq!(ler_quantidade("2"), Ok(Some(2000)));
         assert_eq!(ler_quantidade("1,5"), Ok(Some(1500)));
+        // G01: zero à esquerda com ponto é decimal; o resto das regras fica.
+        assert_eq!(ler_quantidade("0.250"), Ok(Some(250)));
+        assert_eq!(ler_quantidade("0.5"), Ok(Some(500)));
+        assert_eq!(ler_quantidade("00.500"), Ok(Some(500)));
+        assert_eq!(ler_quantidade("-0.250"), Ok(Some(-250)));
+        assert_eq!(ler_dinheiro("0.250"), Ok(Some(25)), "R$ 0,25 (era R$ 250,00)");
+        assert_eq!(ler_quantidade("1.234"), Ok(Some(1_234_000)), "1 a 3 algarismos antes: milhar");
+        assert_eq!(ler_quantidade("10.000"), Ok(Some(10_000_000)));
+        assert_eq!(ler_quantidade("0,250"), Ok(Some(250)));
+        assert!(ler_quantidade(".250").is_err(), "sem nada antes do ponto continua inválido");
         assert_eq!(ler_quantidade("0,250"), Ok(Some(250)));
         assert_eq!(escrever_quantidade(2000), "2");
         assert_eq!(escrever_quantidade(1500), "1,5");

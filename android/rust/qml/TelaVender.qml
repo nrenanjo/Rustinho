@@ -100,10 +100,14 @@ FocusScope {
         const lista = carrinho.slice()
         const i = lista.findIndex(x => x.produtoId === produtoId && x.preco === "" && x.desconto === "")
         if (i >= 0) {
-            const atual = parseFloat((lista[i].quantidade || "0").replace(".", "").replace(",", "."))
-            const mais = parseFloat(quantidade.replace(",", "."))
-            const soma = (atual + mais)
-            lista[i] = Object.assign({}, lista[i], { quantidade: String(Number.isInteger(soma) ? soma : soma.toFixed(3)).replace(".", ",") })
+            // H13 (dev.3.3, 2.2): a soma é do núcleo, com a mesma leitura de
+            // todo o resto ("1.5" + 1 = 2,5); a tela lia o ponto como milhar.
+            const r = Api.chamar("numero_somar", { tipo: "quantidade", somar: [lista[i].quantidade || "0", quantidade], subtrair: [] })
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            lista[i] = Object.assign({}, lista[i], { quantidade: r.dados.texto })
             itemAtual = i
         } else {
             lista.push({ produtoId: produtoId, quantidade: quantidade, preco: "", desconto: "" })
