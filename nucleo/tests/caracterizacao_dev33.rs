@@ -937,7 +937,6 @@ fn a07_ligar_a_peca_inativa_e_recusado() {
 /// D04 — um GTIN repetido via `produto_gtin` (não só no código de barras)
 /// aparece nas duplicatas e bloqueia a etiqueta.
 #[test]
-#[ignore = "caracterização D04: duplicatas e bloqueio da etiqueta olham só o codigo_barras em 310cee0; passa no item D04 da fase 4"]
 fn d04_gtin_repetido_em_produto_gtin_bloqueia_a_etiqueta() {
     let mut l = loja("d04");
     peca_com(&mut l, "PECA COM O CODIGO DE BARRAS", |f| f["codigoBarras"] = json!(GTIN_FAG));

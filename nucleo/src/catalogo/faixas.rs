@@ -1421,20 +1421,11 @@ pub fn repetidos(conn: &Connection) -> Resultado<Vec<Repetido>> {
             );
         }
     }
-    {
-        let mut c = conn.prepare(
-            "SELECT codigo_barras, id, nome, codigo FROM produto
-              WHERE codigo_barras IN (SELECT codigo_barras FROM produto WHERE codigo_barras <> ''
-                                       GROUP BY codigo_barras HAVING COUNT(*) > 1)
-              ORDER BY codigo_barras, nome",
-        )?;
-        let linhas = c.query_map([], |l| {
-            Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?, l.get::<_, String>(3)?))
-        })?;
-        for l in linhas {
-            let (barras, id, nome, codigo) = l?;
-            juntar("barras", barras, PecaRepetida { id, nome, codigo, antigo: false });
-        }
+    // D04: o mesmo GTIN no código de barras ou nos GTINs guardados (o dono responde).
+    for (gtin, id) in crate::catalogo::codigos::gtins_em_mais_de_uma_peca(conn)? {
+        let (nome, codigo): (String, String) =
+            conn.query_row("SELECT nome, codigo FROM produto WHERE id = ?1", [&id], |l| Ok((l.get(0)?, l.get(1)?)))?;
+        juntar("barras", gtin, PecaRepetida { id, nome, codigo, antigo: false });
     }
     Ok(grupos
         .into_iter()
@@ -1524,10 +1515,13 @@ pub fn problema_da_peca(conn: &Connection, produto_id: &str) -> Resultado<Option
              e é achada pelo nome, mas a etiqueta não sai e o leitor não a acha por este código."
         )));
     }
-    if !barras.is_empty() {
-        if let Some(n) = outra("SELECT nome FROM produto WHERE codigo_barras = ?1 AND id <> ?2 LIMIT 1", &barras)? {
-            return Ok(Some(format!("O código de barras {barras} também é da peça \"{n}\".")));
-        }
+    // D04: um GTIN da peça (o código de barras ou um guardado) que leva também a outra.
+    if let Some((gtin, n)) = crate::catalogo::codigos::gtin_de_outra_peca(conn, produto_id)? {
+        return Ok(Some(if gtin == barras {
+            format!("O código de barras {barras} também é da peça \"{n}\".")
+        } else {
+            format!("O GTIN {gtin} desta peça também é da peça \"{n}\".")
+        }));
     }
     Ok(None)
 }

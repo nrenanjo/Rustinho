@@ -361,3 +361,38 @@ pub(crate) fn candidatos_por_codigo_original(conn: &Connection, compacto: &str) 
     }
     Ok(candidatos)
 }
+
+// D04: as perguntas sobre GTIN repetido. Contam o código de barras da peça e
+// os GTINs guardados dela (`produto_gtin`); antes, as duplicatas e o bloqueio
+// da etiqueta olhavam só o código de barras.
+
+/// Os GTINs que levam a mais de uma peça: (GTIN, peça), por GTIN e nome.
+pub(crate) fn gtins_em_mais_de_uma_peca(conn: &Connection) -> Resultado<Vec<(String, String)>> {
+    let mut c = conn.prepare_cached(
+        "WITH g AS (SELECT codigo_barras AS gtin, id AS produto_id FROM produto WHERE codigo_barras <> ''
+                    UNION SELECT gtin, produto_id FROM produto_gtin WHERE gtin <> '')
+         SELECT g.gtin, g.produto_id FROM g JOIN produto p ON p.id = g.produto_id
+          WHERE g.gtin IN (SELECT gtin FROM g GROUP BY gtin HAVING COUNT(DISTINCT produto_id) > 1)
+          ORDER BY g.gtin, p.nome, g.produto_id",
+    )?;
+    let linhas = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok(linhas)
+}
+
+/// Um GTIN desta peça (o código de barras ou um guardado) que também leva a
+/// outra peça: (GTIN, nome da outra).
+pub(crate) fn gtin_de_outra_peca(conn: &Connection, produto_id: &str) -> Resultado<Option<(String, String)>> {
+    Ok(conn
+        .query_row(
+            "WITH meus AS (SELECT codigo_barras AS gtin FROM produto WHERE id = ?1 AND codigo_barras <> ''
+                           UNION SELECT gtin FROM produto_gtin WHERE produto_id = ?1 AND gtin <> ''),
+                  outros AS (SELECT codigo_barras AS gtin, id AS produto_id FROM produto
+                              WHERE codigo_barras <> '' AND id <> ?1
+                             UNION SELECT gtin, produto_id FROM produto_gtin WHERE produto_id <> ?1)
+             SELECT o.gtin, p.nome FROM outros o JOIN meus m ON m.gtin = o.gtin JOIN produto p ON p.id = o.produto_id
+              ORDER BY o.gtin, p.nome LIMIT 1",
+            [produto_id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?)
+}
