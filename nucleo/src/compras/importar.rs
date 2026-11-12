@@ -104,13 +104,15 @@ impl Lido {
         vistos.into_iter().filter(|(_, n)| *n > 1).map(|(c, _)| c.to_string()).collect()
     }
 
-    /// (fornecedor, código) que estão em mais de uma descrição.
+    /// (fornecedor, código compacto) que estão em mais de uma descrição. A02:
+    /// pela chave compacta, a mesma do vínculo (como o `codigos_ambiguos` da
+    /// compra): "AB-12" e "AB12" são o mesmo código.
     fn repetidos_fornecedor(&self) -> HashSet<(String, String)> {
-        let mut vistos: HashMap<(&str, &str), usize> = HashMap::new();
-        for (f, cod, _) in self.pecas_fornecedor.keys() {
-            *vistos.entry((f.as_str(), cod.as_str())).or_default() += 1;
+        let mut vistos: HashMap<(&str, String), HashSet<&str>> = HashMap::new();
+        for (f, cod, desc) in self.pecas_fornecedor.keys() {
+            vistos.entry((f.as_str(), texto::compactar(cod))).or_default().insert(desc.as_str());
         }
-        vistos.into_iter().filter(|(_, n)| *n > 1).map(|((f, c), _)| (f.to_string(), c.to_string())).collect()
+        vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|((f, c), _)| (f.to_string(), c)).collect()
     }
 
     /// Avisos dos códigos repetidos (até 5), com as descrições.
@@ -133,7 +135,15 @@ impl Lido {
         }
         let mut forn: Vec<(String, String)> = self.repetidos_fornecedor().into_iter().collect();
         forn.sort();
-        for (_, cod) in forn {
+        for (f, compacto) in forn {
+            // O código como veio nas notas ("AB-12 / AB12" quando vieram as duas formas).
+            let formas: std::collections::BTreeSet<&str> = self
+                .pecas_fornecedor
+                .keys()
+                .filter(|(f2, c, _)| *f2 == f && texto::compactar(c) == compacto)
+                .map(|(_, c, _)| c.as_str())
+                .collect();
+            let cod = formas.into_iter().collect::<Vec<_>>().join(" / ");
             r.push(format!(
                 "Código {cod} de um fornecedor está em peças diferentes. Entram separadas e o código não fica ligado a nenhuma: na próxima compra, escolha a peça certa."
             ));
@@ -409,7 +419,7 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
         }
     }
     for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
-        let ja = if repetidos_f.contains(&(forn.clone(), codigo.clone())) {
+        let ja = if repetidos_f.contains(&(forn.clone(), texto::compactar(codigo))) {
             peca_pela_descricao(conn, it)?.is_some()
         } else {
             !matches!(peca_por_fornecedor_inequivoco(conn, forn, codigo)?, BuscaId::Nenhum)
@@ -692,7 +702,7 @@ fn importar_peca_do_fornecedor(
         .get(&(forn.clone(), codigo.clone(), desc_chave.clone()))
         .cloned()
         .unwrap_or_default();
-    let repetido = repetidos_f.contains(&(forn.clone(), codigo.clone()));
+    let repetido = repetidos_f.contains(&(forn.clone(), texto::compactar(codigo)));
     let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
     let gtin_repetido_no_lote = gtins_ficha.iter().any(|g| gtins_repetidos_forn.contains(&g.gtin));
     let gtin_busca = if gtin_repetido_no_lote {
@@ -1605,5 +1615,75 @@ mod testes {
         assert_eq!(ficha_pas.fornecedores[0].codigo, "N1100");
 
         std::fs::remove_dir_all(&pasta).ok();
+    }
+
+    /// A02 — "AB-12" e "AB12" do mesmo fornecedor, com descrições diferentes,
+    /// são o mesmo código (o vínculo é pela forma compacta). Não há nota
+    /// assinada com esse par (e as chaves da PKI de teste foram descartadas):
+    /// o caso é montado como sairia da leitura. A peça já ligada ao AB12 não
+    /// recebe GTIN de nenhum dos dois; sem "Peças do fornecedor", os dois viram
+    /// pendência de código repetido; com ela, o vínculo do AB12 não muda.
+    #[test]
+    fn a02_ab12_e_ab_12_sao_o_mesmo_codigo() {
+        const FORN: &str = "11222333000181";
+        let caso = |pecas_fornecedor: bool| {
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            crate::faixas::comecar_loja(c).unwrap();
+            config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+            let emitente =
+                Emitente { documento: FORN.into(), nome: "FORNECEDOR DE TESTE".into(), ..Default::default() };
+            let (fid, _) = pessoas::garantir_pela_nota(c, d, &u, &emitente, false, "teste").unwrap();
+            let mut f = produtos::ficha_nova(c).unwrap();
+            f.nome = "PECA JA LIGADA AO AB12".into();
+            if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+                p.preco = "10,00".into();
+                p.lucro = String::new();
+            }
+            let ligada = produtos::salvar(c, d, &u, &f).unwrap();
+            crate::catalogo::codigos::vincular_fornecedor(
+                c,
+                &fid,
+                "AB12",
+                &ligada,
+                1000,
+                crate::catalogo::codigos::JaLigado::Manter,
+            )
+            .unwrap();
+            let mut lido = Lido::default();
+            lido.fornecedores.insert(FORN.into(), (emitente, "2026-11-01".into()));
+            for (cod, desc, g) in [("AB-12", "ROLAMENTO A", "7891000000090"), ("AB12", "ROLAMENTO B", "7891000000113")]
+            {
+                let it = ItemXml {
+                    codigo: cod.into(),
+                    descricao: desc.into(),
+                    gtin: g.into(),
+                    quantidade: 1000,
+                    valor_produtos: 5000,
+                    ..Default::default()
+                };
+                lido.pecas_fornecedor
+                    .insert((FORN.into(), cod.into(), descricao_chave(&it)), (it, "2026-11-01".into()));
+            }
+            let e = Entrada { fornecedores: true, pecas_fornecedor, ..Default::default() };
+            gravar(c, d, &u, &e, &lido).unwrap();
+            let conta = |sql: &str| -> i64 { c.query_row(sql, [&ligada], |l| l.get(0)).unwrap() };
+            let gtins_na_ligada = conta("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = ?1");
+            let ab12_na_ligada =
+                conta("SELECT COUNT(*) FROM produto_fornecedor WHERE produto_id = ?1 AND codigo_compacto = 'ab12'");
+            let repetidas = conta(
+                "SELECT COUNT(*) FROM xml_pendencia_identificacao
+                  WHERE situacao = 'pendente' AND motivo = 'codigo_repetido' AND ?1 <> ''",
+            );
+            (gtins_na_ligada, ab12_na_ligada, repetidas)
+        };
+        assert_eq!(
+            caso(false),
+            (0, 1, 2),
+            "sem \"Peças do fornecedor\": (GTINs na peça ligada, vínculo AB12, pendências repetidas)"
+        );
+        let (gtins, vinculo, _) = caso(true);
+        assert_eq!((gtins, vinculo), (0, 1), "com \"Peças do fornecedor\": (GTINs na peça ligada, vínculo AB12)");
     }
 }
