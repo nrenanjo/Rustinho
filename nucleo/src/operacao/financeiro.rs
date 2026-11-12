@@ -715,8 +715,11 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     }
     for (data, valor, d) in consultar(
         conn,
-        "SELECT date(situacao_em, 'localtime'), valor, 'Cheque ' || CASE situacao WHEN 'depositado' THEN 'depositado' ELSE 'repassado' END
-           FROM cheque WHERE situacao IN ('depositado', 'repassado') AND date(situacao_em, 'localtime') BETWEEN ?1 AND ?2",
+        // E01: o cheque repassado sai daqui (não mexe em conta da loja); o
+        // depositado sai do movimento do depósito, no dia dele (abaixo), e não
+        // some quando o cheque é devolvido depois.
+        "SELECT date(situacao_em, 'localtime'), valor, 'Cheque repassado'
+           FROM cheque WHERE situacao = 'repassado' AND date(situacao_em, 'localtime') BETWEEN ?1 AND ?2",
         &de,
         &ate,
     )? {
@@ -724,8 +727,9 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     }
     for (data, valor, d) in consultar(
         conn,
-        "SELECT data, valor, descricao FROM movimento_conta
-          WHERE estornado_em IS NULL AND tipo IN ('entrada', 'saida', 'cheque_devolvido') AND data BETWEEN ?1 AND ?2",
+        "SELECT data, valor, CASE tipo WHEN 'deposito_cheque' THEN 'Cheque depositado' ELSE descricao END FROM movimento_conta
+          WHERE estornado_em IS NULL AND tipo IN ('entrada', 'saida', 'cheque_devolvido', 'deposito_cheque')
+            AND data BETWEEN ?1 AND ?2",
         &de,
         &ate,
     )? {
@@ -1335,7 +1339,6 @@ mod testes {
     /// aparece no dia dela. Antes, o fluxo lia o depósito pela situação ATUAL do
     /// cheque: devolvido, o depósito sumia e ficava só a saída da devolução.
     #[test]
-    #[ignore = "caracterização E01: o depósito do cheque devolvido some do fluxo em 24ceb31"]
     fn e01_cheque_devolvido_nao_apaga_o_deposito_do_fluxo() {
         let l = loja();
         let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
