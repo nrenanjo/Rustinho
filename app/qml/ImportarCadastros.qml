@@ -6,8 +6,12 @@ import QtQuick.Layouts
 import rustinho
 
 // Trazer clientes, fornecedores e peças dos XMLs das notas: as da loja
-// (exportadas do sistema antigo) e as dos fornecedores. Mostra antes o que vai ser
-// cadastrado; nada que já existe é mudado.
+// (exportadas do sistema antigo) e as dos fornecedores. Mostra antes o que vai
+// ser feito, pelas mesmas regras do cadastro (T-1): o que entra, as peças que já
+// existem e mudam (A03b) e o que vai para pendências (O-3).
+// PEND-38/H02 (DP-52 (b)): quem não é gerente nem tem a ação liberada pela loja
+// digita a senha do gerente ao abrir, antes de escolher arquivos; ela vale para
+// esta tela até fechá-la. A aba de pendências continua sem senha.
 Painel {
     id: painel
     property string chave: ""
@@ -30,8 +34,75 @@ Painel {
     property bool qFornecedores: false
     property bool qPecasLoja: false
     property bool qPecasFornecedor: false
+    // DP-52 (b): a chave desta abertura da tela e se a senha já valeu.
+    property string chaveTela: ""
+    property bool liberada: false
+    // A navegação guiada fecha e reabre o painel: não encerra a liberação.
+    property bool naGuia: false
+    // A07: a peça desativada que o "Associar" recusou (para "Abrir a peça").
+    property string pecaDesativadaId: ""
 
     signal importou()
+
+    PedirGerente { id: pedirSenhaTela }
+
+    // PEND-38/H02: antes de escolher arquivos, a senha do gerente (se precisar).
+    function exigirSenhaDaTela(depois, desistiu) {
+        if (liberada) {
+            depois()
+            return
+        }
+        const p = Api.chamar("permissao", { acao: "configuracoes" })
+        if (p.ok && p.dados.pode) {
+            liberada = true
+            depois()
+            return
+        }
+        chaveTela = Api.novaChave()
+        pedirSenhaTela.paraTela("importar_cadastros", chaveTela, "Trazer cadastros", () => {
+            painel.liberada = true
+            depois()
+        }, desistiu)
+    }
+    onClosed: {
+        if (naGuia)
+            return
+        if (chaveTela !== "")
+            Api.chamar("gerente_encerrar", { tela: "importar_cadastros", chave: chaveTela })
+        chaveTela = ""
+        liberada = false
+    }
+    function cat(codigo) {
+        const c = previa ? (previa.categorias || []).find(x => x.codigo === codigo) : null
+        return c ? c.quantidade : 0
+    }
+    // O que vai para a prévia e para o cadastro: os arquivos, a chave da tela e,
+    // depois da primeira leitura, as opções marcadas.
+    function dadosDaPrevia(comOpcoes) {
+        const d = { arquivos: painel.arquivos, chaveTela: painel.chaveTela }
+        if (comOpcoes) {
+            d.clientes = painel.qClientes
+            d.fornecedores = painel.qFornecedores
+            d.pecasLoja = painel.qPecasLoja
+            d.pecasFornecedor = painel.qPecasFornecedor
+        }
+        return d
+    }
+    // Refaz a prévia com as opções marcadas (o que vai para pendências e as
+    // peças que mudam dependem delas).
+    function refazerPrevia(manterErro) {
+        const erroAntes = painel.erro
+        trabalhando = true
+        Api.chamarDemorado("importar_previa", dadosDaPrevia(true), "Conferindo…", r => {
+            painel.trabalhando = false
+            if (r.ok) {
+                painel.previa = r.dados
+                painel.erro = manterErro ? erroAntes : ""
+            } else {
+                painel.erro = r.erro
+            }
+        })
+    }
 
     function carregarPendencias() {
         const r = Api.chamar("xml_pendencias_listar")
@@ -53,8 +124,12 @@ Painel {
         erro = ""
         escolhas = null
         avisoArquivos = ""
+        pecaDesativadaId = ""
+        naGuia = false
+        liberada = false
+        chaveTela = ""
         carregarPendencias()
-        open()
+        exigirSenhaDaTela(() => painel.open(), () => {})
     }
 
     function abrirPendencias() {
@@ -72,6 +147,7 @@ Painel {
         pendenciaAberta = p
         chavePendencia = Api.novaChave()
         erro = ""
+        pecaDesativadaId = ""
     }
 
     function resolverComoNova() {
@@ -104,8 +180,11 @@ Painel {
         }, chavePendencia)
         if (!r.ok) {
             erro = r.erro
+            // A07: a peça está desativada; a tela oferece abrir a ficha dela.
+            pecaDesativadaId = r.campo === "pecaDesativada" ? produtoId : ""
             return
         }
+        pecaDesativadaId = ""
         pendenciaAberta = null
         carregarPendencias()
         janela.avisar("Item do XML associado à peça.", "ok")
@@ -125,7 +204,7 @@ Painel {
         previa = null
         trabalhando = true
         // Deixa a tela mostrar "Lendo..." antes de começar.
-        Api.chamarDemorado("importar_previa", { arquivos: painel.arquivos }, "Lendo os arquivos…", r => {
+        Api.chamarDemorado("importar_previa", dadosDaPrevia(false), "Lendo os arquivos…", r => {
             painel.trabalhando = false
             if (r.ok) {
                 painel.previa = r.dados
@@ -134,20 +213,27 @@ Painel {
                 painel.qFornecedores = r.dados.fornecedoresNovos > 0 && (!e || e.qFornecedores)
                 painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
                 painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
+                // A primeira leitura supõe todas as opções (P-5); com outras
+                // marcadas, a prévia é refeita para mostrar o que elas fazem.
+                if (!(painel.qClientes && painel.qFornecedores && painel.qPecasLoja && painel.qPecasFornecedor))
+                    painel.refazerPrevia(false)
                 return
             }
             painel.erro = r.erro
             // Falta um requisito (ex.: o CNPJ da loja): a navegação guiada
             // leva ao lugar de resolver. Os arquivos e as escolhas ficam aqui;
-            // a janela volta igual quando a pessoa voltar.
-            if (painel.janela.guiar(r.campo, r.erro, ok => painel.voltouDaGuia(ok)))
+            // a janela volta igual quando a pessoa voltar (a senha da tela fica).
+            if (painel.janela.guiar(r.campo, r.erro, ok => painel.voltouDaGuia(ok))) {
+                painel.naGuia = true
                 painel.close()
+            }
         })
     }
     // Volta da navegação guiada: reabre como estava. Com o requisito
     // satisfeito, confere se os arquivos continuam no lugar e lê de novo
     // (a pessoa decide se cadastra).
     function voltouDaGuia(satisfeito) {
+        naGuia = false
         open()
         if (!satisfeito)
             return
@@ -171,19 +257,30 @@ Painel {
     }
     function cadastrarAgora() {
         trabalhando = true
+        erro = ""
         Qt.callLater(() => {
-            // D-09: a senha do gerente vale para esta importação, com estes arquivos.
-            painel.janela.chamarGerenteDemorado("importar_cadastros", {
-                arquivos: painel.arquivos, clientes: painel.qClientes, fornecedores: painel.qFornecedores,
-                pecasLoja: painel.qPecasLoja, pecasFornecedor: painel.qPecasFornecedor
-            }, "Cadastrando…", r => painel.depoisDeImportar(r), painel.chave)
+            // DP-52 (b): a senha dada ao abrir vale para o cadastro (chave da
+            // tela); P-4: o carimbo da prévia que a pessoa viu.
+            const d = painel.dadosDaPrevia(true)
+            d.carimbo = painel.previa ? painel.previa.carimbo : ""
+            Api.chamarDemorado("importar_cadastros", Api.comChave(d, painel.chave), "Cadastrando…",
+                               r => painel.depoisDeImportar(r))
         })
     }
     function depoisDeImportar(r) {
         Qt.callLater(() => {
             painel.trabalhando = false
             if (!r.ok) {
+                // A senha da tela venceu (muito tempo parada): pede de novo.
+                if (r.campo === "gerente") {
+                    painel.liberada = false
+                    painel.exigirSenhaDaTela(() => painel.cadastrarAgora(), () => {})
+                    return
+                }
                 painel.erro = r.erro
+                // P-4: os arquivos ou os cadastros mudaram: a prévia é refeita.
+                if (r.erro.indexOf("mudaram desde a prévia") >= 0)
+                    painel.refazerPrevia(true)
                 return
             }
             const d = r.dados
@@ -247,10 +344,14 @@ Painel {
                 ]
                 atual: painel.aba
                 onEscolhido: (id) => {
-                    painel.aba = id
                     painel.erro = ""
-                    if (id === "pendencias")
+                    if (id === "pendencias") {
+                        painel.aba = id
                         painel.carregarPendencias()
+                        return
+                    }
+                    // A aba de importar pede a senha (se precisar) antes.
+                    painel.exigirSenhaDaTela(() => painel.aba = id, () => {})
                 }
             }
 
@@ -262,7 +363,7 @@ Painel {
             Nota {
                 visible: painel.aba === "importar"
                 text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
-                      + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. O que já está cadastrado não muda. "
+                      + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
                       + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
                 font.pixelSize: 14
                 Layout.fillWidth: true
@@ -304,6 +405,13 @@ Painel {
                 font.pixelSize: 16
             }
             TextoErro { text: painel.erro; Layout.fillWidth: true }
+            // A07: a peça escolhida está desativada; dá para abrir a ficha e reativá-la.
+            Botao {
+                visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
+                text: "Abrir a peça"
+                tipo: "secundario"
+                onClicked: painel.janela.abrir("TelaPeca", { produtoId: painel.pecaDesativadaId })
+            }
             // Os arquivos já escolhidos (continuam escolhidos quando a leitura
             // não deu: dá para tentar de novo sem escolher outra vez).
             Linha {
@@ -352,14 +460,15 @@ Painel {
                         { chave: "qFornecedores", titulo: "Fornecedores", novos: painel.previa.fornecedoresNovos, ja: painel.previa.fornecedoresJa,
                           exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul },
                         { chave: "qPecasLoja", titulo: "Peças das notas da loja", novos: painel.previa.pecasLojaNovas, ja: -1,
-                          exemplos: [], cor: Tema.papel },
+                          mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
                         { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
+                          mudam: painel.cat("forn.ja_pelo_gtin_liga") + painel.cat("forn.ja_pelo_vinculo_gtin_novo"),
                           exemplos: [], cor: Tema.papel }
                     ] : []
                     delegate: Rectangle {
                         id: linha
                         required property var modelData
-                        visible: modelData.novos > 0 || modelData.ja > 0
+                        visible: modelData.novos > 0 || modelData.ja > 0 || (modelData.mudam || 0) > 0
                         Layout.fillWidth: true
                         implicitHeight: coluna.implicitHeight + 20
                         radius: Tema.raio
@@ -375,12 +484,13 @@ Painel {
                                 spacing: 6
                                 Layout.fillWidth: true
                                 Marcar {
-                                    visible: linha.modelData.novos > 0
+                                    visible: linha.modelData.novos > 0 || (linha.modelData.mudam || 0) > 0
                                     checked: painel[linha.modelData.chave]
                                     onToggled: {
                                         painel[linha.modelData.chave] = checked
                                         painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
                                                             qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
+                                        painel.refazerPrevia(false)
                                     }
                                     leftPadding: 0
                                 }
@@ -417,6 +527,25 @@ Painel {
                     }
                 }
 
+                // A03b e O-3 (com as opções marcadas): o que muda no que já existe
+                // e o que fica para identificar depois.
+                Nota {
+                    visible: !!painel.previa && painel.previa.pecasQueMudam > 0
+                    text: painel.previa ? "Peças que já existem e mudam (GTIN ou código do fornecedor): " + painel.previa.pecasQueMudam
+                          + (painel.previa.exemplosPecasQueMudam.length > 0
+                             ? " — " + painel.previa.exemplosPecasQueMudam.join(", ")
+                               + (painel.previa.pecasQueMudam > painel.previa.exemplosPecasQueMudam.length ? "..." : "")
+                             : "") : ""
+                    font.pixelSize: 13
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    visible: !!painel.previa && painel.previa.vaoParaPendencias > 0
+                    text: painel.previa ? "Vão para pendências: " + painel.previa.vaoParaPendencias + " — "
+                          + painel.previa.pendenciasPorMotivo.map(m => m.texto + ": " + m.quantidade).join("; ") : ""
+                    font.pixelSize: 13
+                    Layout.fillWidth: true
+                }
                 Nota {
                     visible: !!painel.previa && painel.previa.pecasLojaNovas > 0 && painel.previa.pecasFornecedorNovas > 0
                     text: "Peça sem código de barras pode ficar repetida (uma com o código da loja, outra do fornecedor). Se for migrar de outro sistema, prefira só as notas da loja."
