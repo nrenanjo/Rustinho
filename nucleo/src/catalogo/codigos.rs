@@ -87,14 +87,7 @@ pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFic
             continue;
         };
         let de_outra: bool = conn
-            .query_row(
-                "SELECT 1 FROM produto p
-                  WHERE p.id <> ?1
-                    AND (p.codigo_barras = ?2 OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?2))
-                  LIMIT 1",
-                params![produto_id, codigo_valido],
-                |_| Ok(true),
-            )
+            .query_row(SQL_GTIN_DE_OUTRA_PECA, params![produto_id, codigo_valido], |_| Ok(true))
             .optional()?
             .unwrap_or(false);
         if de_outra {
@@ -262,17 +255,31 @@ fn por_quantidade(mut achados: Vec<String>) -> BuscaId {
     }
 }
 
+/// N07: as peças com este código como código de barras principal ou como GTIN.
+/// O índice de `produto.codigo_barras` é parcial (`WHERE codigo_barras <> ''`):
+/// o SQLite só o usa se a consulta também disser `codigo_barras <> ''`; com o
+/// `OR EXISTS` de antes, lia a tabela de peças inteira a cada código. Mesmo
+/// resultado para código não vazio (o único que os chamadores mandam).
+pub(crate) const SQL_PECAS_PELO_GTIN: &str = "SELECT id FROM produto WHERE codigo_barras = ?1 AND codigo_barras <> ''
+     UNION SELECT produto_id FROM produto_gtin WHERE gtin = ?1
+     ORDER BY 1";
+
+/// N07: há outra peça (que não ?1) com este código ?2, no código de barras ou
+/// num GTIN? Cada metade pelo seu índice (veja `SQL_PECAS_PELO_GTIN`).
+pub(crate) const SQL_GTIN_DE_OUTRA_PECA: &str =
+    "SELECT 1 FROM produto WHERE id <> ?1 AND codigo_barras = ?2 AND codigo_barras <> ''
+     UNION ALL SELECT 1 FROM produto_gtin WHERE produto_id <> ?1 AND gtin = ?2
+     LIMIT 1";
+
 /// As peças que têm algum destes códigos como código de barras principal ou
 /// como GTIN, sem repetir, na ordem em que aparecem.
 pub(crate) fn pecas_pelos_gtins(conn: &Connection, codigos: &[String]) -> Resultado<BuscaId> {
     let mut achados: Vec<String> = Vec::new();
-    let mut stmt = conn.prepare_cached(
-        "SELECT DISTINCT p.id FROM produto p
-          WHERE p.codigo_barras = ?1
-             OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?1)
-          ORDER BY p.id",
-    )?;
+    let mut stmt = conn.prepare_cached(SQL_PECAS_PELO_GTIN)?;
     for cod in codigos {
+        if cod.is_empty() {
+            continue;
+        }
         let linhas: Vec<String> = stmt.query_map([cod], |l| l.get(0))?.collect::<Result<_, _>>()?;
         for pid in linhas {
             if !achados.contains(&pid) {
@@ -395,4 +402,142 @@ pub(crate) fn gtin_de_outra_peca(conn: &Connection, produto_id: &str) -> Resulta
             |l| Ok((l.get(0)?, l.get(1)?)),
         )
         .optional()?)
+}
+
+#[cfg(test)]
+mod testes_n07 {
+    //! N07: as buscas por GTIN e por documento usam os índices parciais e dão
+    //! o mesmo resultado das consultas de antes (que liam a tabela inteira).
+    use super::*;
+    use crate::banco::Banco;
+    use crate::{produtos, usuarios};
+
+    /// As consultas de antes, como estavam em `24ceb31` (só para comparar).
+    const ANTES_PECAS_PELO_GTIN: &str = "SELECT DISTINCT p.id FROM produto p
+          WHERE p.codigo_barras = ?1
+             OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?1)
+          ORDER BY p.id";
+    const ANTES_GTIN_DE_OUTRA_PECA: &str = "SELECT 1 FROM produto p
+                  WHERE p.id <> ?1
+                    AND (p.codigo_barras = ?2 OR EXISTS (SELECT 1 FROM produto_gtin pg WHERE pg.produto_id = p.id AND pg.gtin = ?2))
+                  LIMIT 1";
+    const ANTES_BARRAS_DE_OUTRA_PECA: &str = "SELECT nome FROM produto p
+                  WHERE p.id <> ?2
+                    AND (p.codigo_barras = ?1 OR EXISTS (SELECT 1 FROM produto_gtin g WHERE g.produto_id = p.id AND g.gtin = ?1))";
+
+    fn ean(base12: u64) -> String {
+        let b = format!("{base12:012}");
+        let s: u32 = b.chars().enumerate().map(|(i, c)| c.to_digit(10).unwrap() * if i % 2 == 1 { 3 } else { 1 }).sum();
+        format!("{b}{}", (10 - s % 10) % 10)
+    }
+
+    fn plano(c: &Connection, sql: &str, n: usize) -> String {
+        let args: Vec<String> = (0..n).map(|i| format!("x{i}")).collect();
+        let mut s = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let linhas: Vec<String> = s
+            .query_map(rusqlite::params_from_iter(args.iter()), |l| l.get::<_, String>(3))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        linhas.join(" | ")
+    }
+
+    #[test]
+    fn n07_as_buscas_usam_os_indices() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        for (sql, n, indices) in [
+            (SQL_PECAS_PELO_GTIN, 1, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
+            (SQL_GTIN_DE_OUTRA_PECA, 2, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
+            (produtos::SQL_BARRAS_DE_OUTRA_PECA, 2, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
+            (crate::pessoas::SQL_PESSOA_PELO_DOCUMENTO, 1, &["pessoa_documento"][..]),
+            (crate::pessoas::SQL_DOCUMENTO_DE_OUTRA, 2, &["pessoa_documento"][..]),
+        ] {
+            let p = plano(c, sql, n);
+            for i in indices {
+                assert!(
+                    p.contains(&format!("USING INDEX {i}")) || p.contains(&format!("USING COVERING INDEX {i}")),
+                    "{sql}\n→ {p}"
+                );
+            }
+            assert!(
+                !p.contains("SCAN produto") && !p.contains("SCAN p ") && !p.contains("SCAN pessoa"),
+                "lê a tabela inteira: {sql}\n→ {p}"
+            );
+        }
+    }
+
+    #[test]
+    fn n07_mesmo_resultado_que_as_consultas_de_antes() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        // 60 peças: 40 com código de barras, 20 sem; GTINs extras em algumas,
+        // inclusive repetindo o código de barras de outra (estado que notas
+        // antigas deixaram) e GTINs que só existem em `produto_gtin`.
+        let mut ids = Vec::new();
+        for i in 0..60u64 {
+            let mut f = produtos::ficha_nova(c).unwrap();
+            f.nome = format!("PECA N07 {i}");
+            f.precos[0].preco = "10,00".into();
+            if i < 40 {
+                f.codigo_barras = ean(789_100_000_000 + i);
+            }
+            ids.push(produtos::salvar(c, d, &u, &f).unwrap());
+        }
+        let extra = |pid: &str, g: &str, ordem: i64| {
+            c.execute(
+                "INSERT INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+                 VALUES (?1, ?2, ?3, 'comercial', 'cEAN', ?4, '2026-11-12')",
+                params![tempo::novo_id(), pid, g, ordem],
+            )
+            .unwrap();
+        };
+        for i in 0..20usize {
+            extra(&ids[40 + i], &ean(789_200_000_000 + i as u64), 10);
+            if i % 4 == 0 {
+                extra(&ids[40 + i], &ean(789_100_000_000 + i as u64), 11); // o código de barras de outra peça
+            }
+            if i % 5 == 0 {
+                extra(&ids[i], &ean(789_200_000_000 + i as u64), 12); // o mesmo GTIN em duas peças
+            }
+        }
+        let mut codigos: Vec<String> = (0..45u64).map(|i| ean(789_100_000_000 + i)).collect();
+        codigos.extend((0..25u64).map(|i| ean(789_200_000_000 + i)));
+        let todos = |sql: &str, args: &[&dyn rusqlite::ToSql]| -> Vec<String> {
+            let mut s = c.prepare(sql).unwrap();
+            s.query_map(args, |l| l.get::<_, rusqlite::types::Value>(0).map(|v| format!("{v:?}")))
+                .unwrap()
+                .map(|x| x.unwrap())
+                .collect()
+        };
+        let mut comparados = 0;
+        for g in &codigos {
+            assert_eq!(todos(ANTES_PECAS_PELO_GTIN, &[g]), todos(SQL_PECAS_PELO_GTIN, &[g]), "pelo GTIN {g}");
+            for pid in ids.iter().step_by(3) {
+                let antes = !todos(ANTES_GTIN_DE_OUTRA_PECA, &[pid, g]).is_empty();
+                let agora = !todos(SQL_GTIN_DE_OUTRA_PECA, &[pid, g]).is_empty();
+                assert_eq!(antes, agora, "de outra peça: {pid} {g}");
+                let antes = !todos(ANTES_BARRAS_DE_OUTRA_PECA, &[g, pid]).is_empty();
+                let agora = !todos(produtos::SQL_BARRAS_DE_OUTRA_PECA, &[g, pid]).is_empty();
+                assert_eq!(antes, agora, "barras de outra peça: {g} {pid}");
+                comparados += 2;
+            }
+        }
+        assert!(comparados > 2000, "{comparados}");
+        // A função inteira: o mesmo BuscaId de antes para cada código.
+        for g in &codigos {
+            let antes = todos(ANTES_PECAS_PELO_GTIN, &[g]);
+            let agora = pecas_pelos_gtins(c, std::slice::from_ref(g)).unwrap();
+            let quantos = match &agora {
+                BuscaId::Nenhum => 0,
+                BuscaId::Unico(_) => 1,
+                BuscaId::Ambiguo(v) => v.len(),
+            };
+            assert_eq!(quantos, antes.len(), "{g}: {agora:?}");
+        }
+        // Código vazio não acha nada (as peças sem código de barras não contam).
+        assert!(matches!(pecas_pelos_gtins(c, &[String::new()]).unwrap(), BuscaId::Nenhum));
+    }
 }

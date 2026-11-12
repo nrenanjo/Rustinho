@@ -379,11 +379,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pe
         }
     }
     if !dados.documento.is_empty() {
-        let mesmo_doc: Option<String> = conn
-            .query_row("SELECT nome FROM pessoa WHERE documento = ?1 AND id <> ?2", params![dados.documento, id], |l| {
-                l.get(0)
-            })
-            .optional()?;
+        let mesmo_doc: Option<String> =
+            conn.query_row(SQL_DOCUMENTO_DE_OUTRA, params![dados.documento, id], |l| l.get(0)).optional()?;
         if let Some(outro) = mesmo_doc {
             return Err(Erro::campo("documento", format!("Este documento já está cadastrado em \"{outro}\".")));
         }
@@ -815,6 +812,15 @@ pub fn garantir_fornecedor(
 /// Acha a pessoa pelo CPF/CNPJ ou cadastra com os dados da nota, como
 /// cliente (`cliente` = true) ou fornecedor. Se já existe com o outro papel,
 /// passa a ter os dois. Devolve (id, foi_criado).
+/// N07: o índice de `pessoa.documento` é parcial (`WHERE documento <> ''`); só
+/// é usado se a consulta também disser `documento <> ''`. Os chamadores já
+/// excluem o documento vazio, então o resultado não muda.
+pub(crate) const SQL_PESSOA_PELO_DOCUMENTO: &str =
+    "SELECT id, cliente, fornecedor FROM pessoa WHERE documento = ?1 AND documento <> ''";
+/// N07: o mesmo, para o nome de outra pessoa com o documento (salvar).
+pub(crate) const SQL_DOCUMENTO_DE_OUTRA: &str =
+    "SELECT nome FROM pessoa WHERE documento = ?1 AND documento <> '' AND id <> ?2";
+
 pub fn garantir_pela_nota(
     conn: &Connection,
     dispositivo: &str,
@@ -825,11 +831,8 @@ pub fn garantir_pela_nota(
 ) -> Resultado<(String, bool)> {
     let doc = documento::limpar(&e.documento);
     if !doc.is_empty() {
-        let achou: Option<(String, bool, bool)> = conn
-            .query_row("SELECT id, cliente, fornecedor FROM pessoa WHERE documento = ?1", [&doc], |l| {
-                Ok((l.get(0)?, l.get(1)?, l.get(2)?))
-            })
-            .optional()?;
+        let achou: Option<(String, bool, bool)> =
+            conn.query_row(SQL_PESSOA_PELO_DOCUMENTO, [&doc], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?))).optional()?;
         if let Some((id, eh_cliente, eh_fornecedor)) = achou {
             if cliente && !eh_cliente {
                 conn.execute("UPDATE pessoa SET cliente = 1 WHERE id = ?1", [&id])?;

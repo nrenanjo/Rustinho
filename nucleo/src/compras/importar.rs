@@ -313,7 +313,10 @@ pub(crate) fn peca_por_gtins_inequivoco(
 }
 
 fn pessoa_existe(conn: &Connection, doc: &str) -> Resultado<Option<String>> {
-    Ok(conn.query_row("SELECT id FROM pessoa WHERE documento = ?1", [doc], |l| l.get(0)).optional()?)
+    // N07: `documento <> ''` deixa o SQLite usar o índice parcial; nunca vem vazio.
+    Ok(conn
+        .query_row("SELECT id FROM pessoa WHERE documento = ?1 AND documento <> ''", [doc], |l| l.get(0))
+        .optional()?)
 }
 
 /// Como a pendência de um item de nota da própria loja aparece (não há fornecedor).
