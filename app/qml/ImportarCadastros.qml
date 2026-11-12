@@ -41,10 +41,11 @@ Painel {
     property bool naGuia: false
     // A07: a peça desativada que o "Associar" recusou (para "Abrir a peça").
     property string pecaDesativadaId: ""
+    // A aba de importar, já com a senha (ou sem precisar dela).
+    readonly property bool naImportacao: aba === "importar" && liberada
 
     signal importou()
 
-    PedirGerente { id: pedirSenhaTela }
 
     // PEND-38/H02: antes de escolher arquivos, a senha do gerente (se precisar).
     function exigirSenhaDaTela(depois, desistiu) {
@@ -129,7 +130,10 @@ Painel {
         liberada = false
         chaveTela = ""
         carregarPendencias()
-        exigirSenhaDaTela(() => painel.open(), () => {})
+        open()
+        // Antes de escolher arquivos: sem a senha, nada da importação aparece e,
+        // desistindo, a tela fecha sem ler nada.
+        Qt.callLater(() => painel.exigirSenhaDaTela(() => {}, () => painel.close()))
     }
 
     function abrirPendencias() {
@@ -361,7 +365,7 @@ Painel {
                 Layout.fillWidth: true
             }
             Nota {
-                visible: painel.aba === "importar"
+                visible: painel.naImportacao
                 text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
                       + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
                       + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
@@ -370,7 +374,7 @@ Painel {
             }
 
             Linha {
-                visible: painel.aba === "importar"
+                visible: painel.naImportacao
                 spacing: 10
                 Layout.fillWidth: true
                 Botao {
@@ -390,14 +394,14 @@ Painel {
                 Item { Layout.fillWidth: true }
             }
             Nota {
-                visible: painel.aba === "importar" && !painel.previa && !painel.trabalhando && painel.erro === ""
+                visible: painel.naImportacao && !painel.previa && !painel.trabalhando && painel.erro === ""
                 text: "Dá para escolher vários .xml, um .zip ou .rar com os XMLs dentro ou uma pasta inteira (com subpastas). Também dá para arrastar para cá."
                 font.pixelSize: 13
                 Layout.fillWidth: true
             }
 
             Text {
-                visible: painel.aba === "importar" && painel.trabalhando
+                visible: painel.naImportacao && painel.trabalhando
                 text: "Lendo as notas..."
                 color: Tema.tintaSuave
                 font.family: Tema.serifa
@@ -410,12 +414,19 @@ Painel {
                 visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
                 text: "Abrir a peça"
                 tipo: "secundario"
-                onClicked: painel.janela.abrir("TelaPeca", { produtoId: painel.pecaDesativadaId })
+                // Fecha o painel antes: a ficha abre por baixo dele e precisa ficar à vista
+                // (é lá que a peça é reativada); a pendência continua aberta.
+                onClicked: {
+                    const id = painel.pecaDesativadaId
+                    painel.pecaDesativadaId = ""
+                    painel.close()
+                    painel.janela.abrir("TelaPeca", { produtoId: id })
+                }
             }
             // Os arquivos já escolhidos (continuam escolhidos quando a leitura
             // não deu: dá para tentar de novo sem escolher outra vez).
             Linha {
-                visible: painel.aba === "importar" && painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
+                visible: painel.naImportacao && painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
                 spacing: 10
                 Layout.fillWidth: true
                 Nota {
@@ -433,7 +444,7 @@ Painel {
                 }
             }
             Nota {
-                visible: painel.aba === "importar" && painel.avisoArquivos !== ""
+                visible: painel.naImportacao && painel.avisoArquivos !== ""
                 text: painel.avisoArquivos
                 color: Tema.vermelho
                 font.pixelSize: 13
@@ -442,7 +453,7 @@ Painel {
 
             // Prévia
             ColumnLayout {
-                visible: painel.aba === "importar" && !!painel.previa && !painel.trabalhando
+                visible: painel.naImportacao && !!painel.previa && !painel.trabalhando
                 spacing: 8
                 Layout.fillWidth: true
 
@@ -799,7 +810,7 @@ Painel {
             }
 
             RowLayout {
-                visible: painel.aba === "importar"
+                visible: painel.naImportacao
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 6
@@ -813,6 +824,9 @@ Painel {
                 }
             }
         }
+
+        // PEND-38/H02: o pedido da senha da tela, por cima do painel aberto.
+        PedirGerente { id: pedirSenhaTela }
 
         EscolherPeca {
             id: escolherPecaParaPendencia
