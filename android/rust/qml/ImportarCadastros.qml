@@ -267,8 +267,7 @@ Painel {
             // tela); P-4: o carimbo da prévia que a pessoa viu.
             const d = painel.dadosDaPrevia(true)
             d.carimbo = painel.previa ? painel.previa.carimbo : ""
-            Api.chamarDemorado("importar_cadastros", Api.comChave(d, painel.chave), "Cadastrando…",
-                               r => painel.depoisDeImportar(r))
+            Api.gravarDemorado("importar_cadastros", d, "Cadastrando…", r => painel.depoisDeImportar(r), painel.chave)
         })
     }
     function depoisDeImportar(r) {
