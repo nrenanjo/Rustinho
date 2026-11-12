@@ -809,6 +809,27 @@ fn importar_peca_do_fornecedor(
 
     // 2. GTIN exato e inequívoco tem prioridade antes de outras formas.
     if let BuscaId::Unico(pid) = gtin_busca {
+        // A03a (DP-11): sem "Peças do fornecedor" marcada, nada é gravado na peça
+        // que já existe (nem GTIN, nem vínculo). Pela leitura técnica da DP-11
+        // (sem veto), o item fica como pendência, com a peça como candidata.
+        if !e.pecas_fornecedor {
+            if fornecedor_id.is_some() || e.fornecedores {
+                registrar_pendencia_xml(
+                    conn,
+                    fornecedor_id.as_deref(),
+                    forn,
+                    &forn_nome,
+                    &chave_nfe,
+                    &numero_nfe,
+                    emissao,
+                    it,
+                    valor_unitario(it, true),
+                    "peca_pelo_gtin",
+                    &[pid],
+                )?;
+            }
+            return Ok(());
+        }
         produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
         if !repetido {
             if let Some(fid) = &fornecedor_id {
@@ -823,7 +844,10 @@ fn importar_peca_do_fornecedor(
 
     // 3. Associação já existente pelo (CNPJ do fornecedor, cProd).
     if let BuscaId::Unico(pid) = forn_busca {
-        produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+        // A03a (DP-11): os GTINs da nota só vão para a peça com "Peças do fornecedor".
+        if e.pecas_fornecedor {
+            produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+        }
         if let Some(fid) = &fornecedor_id {
             resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
         }
@@ -1000,6 +1024,9 @@ fn motivo_legivel(motivo: &str) -> &'static str {
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
         "codigo_ambiguo" => "Código original/equivalente corresponde a mais de uma peça",
         "codigo_de_outra_peca" => "O código desta nota da loja já é de uma peça com outra descrição",
+        "peca_pelo_gtin" => {
+            "O GTIN aponta para uma peça cadastrada; a importação não estava marcada para mexer em peças"
+        }
         _ => "Peça ainda não identificada no cadastro para este fornecedor",
     }
 }

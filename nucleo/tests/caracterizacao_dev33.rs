@@ -974,7 +974,6 @@ fn a13_falha_na_contagem_aparece_no_aviso() {
 /// grava GTIN nem vínculo numa peça que já existe (DP-11). Pela leitura técnica
 /// da DP-11 (sem veto), o item continua como pendência, com a peça candidata.
 #[test]
-#[ignore = "caracterização A03: trazer só clientes ou só fornecedores muda peças existentes em 310cee0; passa no item A03a da fase 4"]
 fn a03_so_clientes_nao_muda_peca_existente() {
     let mut l = loja("a03");
     let peca = peca_com(&mut l, "ROLAMENTO JA CADASTRADO", |f| f["codigoBarras"] = json!(GTIN_FAG));
@@ -1003,6 +1002,16 @@ fn a03_so_clientes_nao_muda_peca_existente() {
         .find(|p| p["codigoFornecedor"] == "FAG-32206")
         .unwrap_or_else(|| panic!("o FAG-32206 não ficou como pendência: {lista}"));
     assert!(fag.to_string().contains(&peca), "a peça existente não aparece como candidata: {fag}");
+
+    // Com o código do fornecedor já ligado a uma peça sem GTIN: trazer só os
+    // fornecedores não grava nela o GTIN da nota.
+    let mut l = loja("a03-ligada");
+    importar_so_fornecedor(&mut l);
+    let ligada = peca_com(&mut l, "ROLAMENTO LIGADO SEM GTIN", |_| {});
+    ligar_no_banco(&l, &id_fornecedor(&l, FORNECEDOR_A), "FAG-32206", &ligada);
+    let antes = gtins(&l, &ligada);
+    importar_so_fornecedor(&mut l);
+    assert_eq!(gtins(&l, &ligada), antes, "trazer só os fornecedores gravou o GTIN da nota na peça ligada");
 }
 
 /// A04 — o código interno de uma nota da própria loja que coincide com uma
