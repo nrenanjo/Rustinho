@@ -145,8 +145,9 @@ pub(crate) fn registrar_pendencia_xml(
     Ok(id)
 }
 
-/// Fecha as pendências abertas do mesmo fornecedor e código (e, quando o
-/// motivo é código repetido, da mesma descrição) com a peça escolhida.
+/// Fecha as pendências abertas do mesmo fornecedor, código e descrição com a
+/// peça escolhida. A06 (D-13): antes, a descrição só contava quando o motivo era
+/// "código repetido", e uma resolução fechava as pendências de outra peça.
 pub(crate) fn resolver_pendencias_do_item(
     conn: &Connection,
     fornecedor_id: &str,
@@ -167,17 +168,17 @@ pub(crate) fn resolver_pendencias_do_item(
         .optional()?
         .unwrap_or_default();
     let mut stmt = conn.prepare_cached(
-        "SELECT id, descricao, motivo FROM xml_pendencia_identificacao
+        "SELECT id, descricao FROM xml_pendencia_identificacao
           WHERE situacao = 'pendente'
             AND (fornecedor_id = ?1 OR (?2 <> '' AND fornecedor_documento = ?2))
             AND codigo_compacto = ?3",
     )?;
-    let linhas: Vec<(String, String, String)> = stmt
-        .query_map(params![fornecedor_id, doc, compacto], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+    let linhas: Vec<(String, String)> = stmt
+        .query_map(params![fornecedor_id, doc, compacto], |l| Ok((l.get(0)?, l.get(1)?)))?
         .collect::<Result<_, _>>()?;
     let agora = tempo::agora();
-    for (pid_pend, desc_pend, motivo) in linhas {
-        if motivo != "codigo_repetido" || texto::compactar(&desc_pend) == desc_comp {
+    for (pid_pend, desc_pend) in linhas {
+        if texto::compactar(&desc_pend) == desc_comp {
             conn.execute(
                 "update xml_pendencia_identificacao
                     set situacao = 'resolvida', produto_id = ?2, resolvido_em = ?3

@@ -901,7 +901,6 @@ fn a01_codigo_so_de_simbolos_nao_fecha_pendencia_de_outro() {
 /// A06 — resolver uma pendência fecha só as do mesmo fornecedor, código e
 /// descrição (D-13); a de outra descrição continua aberta, com os seus GTINs.
 #[test]
-#[ignore = "caracterização A06: resolver fecha a pendência de outra descrição com o mesmo código em 310cee0; passa no item A06 da fase 4"]
 fn a06_resolver_fecha_so_a_mesma_descricao() {
     let mut l = loja("a06");
     importar_so_fornecedor(&mut l);
