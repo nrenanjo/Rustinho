@@ -316,6 +316,21 @@ fn pessoa_existe(conn: &Connection, doc: &str) -> Resultado<Option<String>> {
     Ok(conn.query_row("SELECT id FROM pessoa WHERE documento = ?1", [doc], |l| l.get(0)).optional()?)
 }
 
+/// Como a pendência de um item de nota da própria loja aparece (não há fornecedor).
+const NOTA_DA_LOJA: &str = "Nota da própria loja";
+
+/// A04 (D-13): a peça que já tem este código da loja, quando a descrição dela
+/// é outra. O nome cortado no cadastro pela nota (120 letras) conta como o mesmo.
+fn peca_de_outra_descricao(conn: &Connection, codigo: &str, it: &ItemXml) -> Resultado<Option<String>> {
+    let achada: Option<(String, String)> = conn
+        .query_row("SELECT id, nome FROM produto WHERE codigo = ?1", [codigo], |l| Ok((l.get(0)?, l.get(1)?)))
+        .optional()?;
+    let Some((id, nome)) = achada else { return Ok(None) };
+    let (nome_c, desc_c) = (texto::compactar(&nome), descricao_chave(it));
+    let cortado = nome.chars().count() >= 120 && desc_c.starts_with(&nome_c);
+    Ok((!desc_c.is_empty() && nome_c != desc_c && !cortado).then_some(id))
+}
+
 fn peca_por_codigo(conn: &Connection, codigo: &str) -> Resultado<Option<String>> {
     Ok(conn.query_row("SELECT id FROM produto WHERE codigo = ?1", [codigo], |l| l.get(0)).optional()?)
 }
@@ -615,9 +630,36 @@ fn importar_fornecedores(
 fn importar_pecas_da_loja(gr: Gravacao, lido: &Lido, r: &mut Importado) -> Resultado<()> {
     let Gravacao { conn, dispositivo, usuario_id } = gr;
     let repetidos = lido.repetidos_loja();
-    for ((codigo, _), (it, _)) in &lido.pecas_loja {
+    for ((codigo, _), (it, emissao)) in &lido.pecas_loja {
         let repetido = repetidos.contains(codigo);
         let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
+        // A04 (D-13): o código da loja só identifica a peça se a descrição
+        // também bater. Com outra descrição, vale o GTIN; sem GTIN que ache a
+        // peça, o item vira pendência, sem gravar nada em peça nenhuma.
+        if let Some(outra) = if repetido { None } else { peca_de_outra_descricao(conn, codigo, it)? } {
+            match peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)? {
+                BuscaId::Unico(pid) => {
+                    produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
+                }
+                _ => {
+                    // Sem fornecedor: resolver esta pendência nunca liga código de fornecedor.
+                    registrar_pendencia_xml(
+                        conn,
+                        None,
+                        "",
+                        NOTA_DA_LOJA,
+                        "",
+                        "",
+                        emissao,
+                        it,
+                        valor_unitario(it, false),
+                        "codigo_de_outra_peca",
+                        &[outra],
+                    )?;
+                }
+            }
+            continue;
+        }
         if peca_loja_existe(conn, codigo, it, repetido)? {
             let pid_existente =
                 if repetido { peca_repetida(conn, codigo, it)? } else { peca_por_codigo(conn, codigo)? }.or_else(
@@ -948,6 +990,7 @@ fn motivo_legivel(motivo: &str) -> &'static str {
         "conflito_gtin_fornecedor" => "GTIN aponta para uma peça e o código do fornecedor para outra",
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
         "codigo_ambiguo" => "Código original/equivalente corresponde a mais de uma peça",
+        "codigo_de_outra_peca" => "O código desta nota da loja já é de uma peça com outra descrição",
         _ => "Peça ainda não identificada no cadastro para este fornecedor",
     }
 }

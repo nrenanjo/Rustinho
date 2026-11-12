@@ -1013,7 +1013,6 @@ fn a03_so_clientes_nao_muda_peca_existente() {
 /// A04 — o código interno de uma nota da própria loja que coincide com uma
 /// peça de outra descrição não cai nela (D-13): vira pendência, sem GTIN.
 #[test]
-#[ignore = "caracterização A04: o código da nota da loja cai na peça de outra descrição em 310cee0; passa no item A04 da fase 4"]
 fn a04_codigo_interno_com_descricao_diferente_vira_pendencia() {
     let mut l = loja("a04");
     let outra = peca_com(&mut l, "AMORTECEDOR DIANTEIRO", |_| {});
