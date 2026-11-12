@@ -1466,6 +1466,128 @@ mod testes {
         }
     }
 
+    /// Regressão do A03a (lote 1, `24ceb31`; não acontecia em `310cee0`): sem
+    /// "Peças do fornecedor", o item cujo código do fornecedor JÁ está ligado à
+    /// mesma peça que o GTIN acha virava pendência `peca_pelo_gtin` (nada a
+    /// decidir: a peça e o vínculo já estão certos). A matriz confere também
+    /// que as pendências legítimas da DP-11 continuam: o item achado só pelo
+    /// GTIN (sem vínculo), a peça nova sem a opção, o código só de símbolos e o
+    /// conflito entre GTIN e vínculo. Cada caso num banco novo.
+    #[test]
+    #[ignore = "caracterização da regressão do A03a: falha em 24ceb31 no caso (já ligado, sem a opção)"]
+    fn a03a_item_ja_ligado_sem_a_opcao_nao_vira_pendencia() {
+        const FORN: &str = "11222333000181";
+        const G_P: &str = "7891234567895"; // GTIN da peça P (ligada ao código C1)
+        const G_Q: &str = "7890000000017"; // GTIN da peça Q (sem vínculo)
+
+        // (caso, código, GTIN do item, com a opção, sem a opção); o resultado é
+        // (peças novas, vínculos novos, GTINs novos em P ou Q, pendências por motivo).
+        // Com a opção, o GTIN da nota é registrado na peça (origem cEAN) mesmo
+        // quando é igual ao código de barras dela: é o comportamento de hoje
+        // (A03/H02), fora da regressão.
+        type Esperado = (i64, i64, i64, &'static [(&'static str, i64)]);
+        let casos: &[(&str, &str, &str, Esperado, Esperado)] = &[
+            ("já ligado à mesma peça", "C1", G_P, (0, 0, 1, &[]), (0, 0, 0, &[])),
+            ("achado só pelo GTIN", "C2", G_Q, (0, 1, 1, &[]), (0, 0, 0, &[("peca_pelo_gtin", 1)])),
+            ("peça nova", "C3", "", (1, 1, 0, &[]), (0, 0, 0, &[("sem_vinculo", 1)])),
+            (
+                "código só de símbolos",
+                "---",
+                "",
+                (0, 0, 0, &[("codigo_so_de_simbolos", 1)]),
+                (0, 0, 0, &[("codigo_so_de_simbolos", 1)]),
+            ),
+            (
+                "conflito GTIN × vínculo",
+                "C1",
+                G_Q,
+                (0, 0, 0, &[("conflito_gtin_fornecedor", 1)]),
+                (0, 0, 0, &[("conflito_gtin_fornecedor", 1)]),
+            ),
+        ];
+        let mut erros = Vec::new();
+        for (nome, codigo, gtin, com, sem) in casos {
+            for (pecas_fornecedor, esperado) in [(true, com), (false, sem)] {
+                let b = Banco::em_memoria().unwrap();
+                let (c, d) = (&b.conn, b.dispositivo.as_str());
+                let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+                crate::faixas::comecar_loja(c).unwrap();
+                config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+                let emitente =
+                    Emitente { documento: FORN.into(), nome: "FORNECEDOR DE TESTE".into(), ..Default::default() };
+                let (fid, _) = crate::pessoas::garantir_pela_nota(c, d, &u, &emitente, false, "teste").unwrap();
+                let peca = |nome: &str, barras: &str| {
+                    let mut f = produtos::ficha_nova(c).unwrap();
+                    f.nome = nome.into();
+                    f.codigo_barras = barras.into();
+                    f.precos[0].preco = "10,00".into();
+                    produtos::salvar(c, d, &u, &f).unwrap()
+                };
+                let p = peca("PECA P LIGADA", G_P);
+                peca("PECA Q SEM VINCULO", G_Q);
+                crate::catalogo::codigos::vincular_fornecedor(
+                    c,
+                    &fid,
+                    "C1",
+                    &p,
+                    1000,
+                    crate::catalogo::codigos::JaLigado::Manter,
+                )
+                .unwrap();
+                let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+                let antes = (
+                    conta("SELECT COUNT(*) FROM produto"),
+                    conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                    conta("SELECT COUNT(*) FROM produto_gtin"),
+                );
+                let mut lido = Lido::default();
+                lido.fornecedores.insert(FORN.into(), (emitente, "2026-11-01".into()));
+                let mut it = ItemXml {
+                    codigo: (*codigo).into(),
+                    descricao: format!("ITEM {nome}").to_uppercase(),
+                    quantidade: 1000,
+                    valor_produtos: 5000,
+                    ..Default::default()
+                };
+                if !gtin.is_empty() {
+                    it.gtin = (*gtin).into();
+                    it.gtins = vec![nfe_xml::GtinXml {
+                        codigo: (*gtin).into(),
+                        tipo: "comercial".into(),
+                        origem: "cEAN".into(),
+                    }];
+                }
+                lido.pecas_fornecedor
+                    .insert((FORN.into(), (*codigo).into(), descricao_chave(&it)), (it, "2026-11-01".into()));
+                let e = Entrada { fornecedores: true, pecas_fornecedor, ..Default::default() };
+                gravar(c, d, &u, &e, &lido).unwrap();
+                let mut pend: Vec<(String, i64)> = c
+                    .prepare("SELECT motivo, COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente' GROUP BY motivo ORDER BY motivo")
+                    .unwrap()
+                    .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+                    .unwrap()
+                    .map(|x| x.unwrap())
+                    .collect();
+                pend.sort();
+                let obtido = (
+                    conta("SELECT COUNT(*) FROM produto") - antes.0,
+                    conta("SELECT COUNT(*) FROM produto_fornecedor") - antes.1,
+                    conta("SELECT COUNT(*) FROM produto_gtin") - antes.2,
+                    pend,
+                );
+                let quer: Vec<(String, i64)> = esperado.3.iter().map(|(m, n)| (m.to_string(), *n)).collect();
+                if (obtido.0, obtido.1, obtido.2, &obtido.3) != (esperado.0, esperado.1, esperado.2, &quer) {
+                    erros.push(format!(
+                        "{nome}, \"Peças do fornecedor\" = {pecas_fornecedor}: esperado {:?}, obtido {:?}",
+                        (esperado.0, esperado.1, esperado.2, &quer),
+                        obtido
+                    ));
+                }
+            }
+        }
+        assert!(erros.is_empty(), "\n{}", erros.join("\n"));
+    }
+
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
     const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
