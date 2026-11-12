@@ -1330,6 +1330,53 @@ mod testes {
         salvar_categoria(c, &cat("receita")).unwrap();
     }
 
+    /// E01 (passo 6.1): o depósito do cheque fica no fluxo de caixa no dia em
+    /// que aconteceu, mesmo depois de o cheque ser devolvido; a devolução
+    /// aparece no dia dela. Antes, o fluxo lia o depósito pela situação ATUAL do
+    /// cheque: devolvido, o depósito sumia e ficava só a saída da devolução.
+    #[test]
+    #[ignore = "caracterização E01: o depósito do cheque devolvido some do fluxo em 24ceb31"]
+    fn e01_cheque_devolvido_nao_apaga_o_deposito_do_fluxo() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        caixa::abrir(c, d, u, "Caixa 1", "0").unwrap();
+        let e = VendaEntrada {
+            itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+            tabela: 1,
+            cliente_id: l.cliente.clone(),
+            pagamentos: vec![Pg { forma: "cheque".into(), valor: "300".into(), ..Default::default() }],
+            cheques: ChequesEntrada {
+                quantidade: 1,
+                banco: "Itaú".into(),
+                numero: "000201".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        vendas::concluir(c, d, u, &e).unwrap();
+        let centavos = |t: &str| crate::numeros::ler_dinheiro(t).unwrap().unwrap_or(0);
+        let totais = || {
+            let f = fluxo(c, "", "", 90).unwrap();
+            (centavos(&f.entradas), centavos(&f.saidas))
+        };
+        let antes = totais();
+        let id = cheques::painel(c, "", "carteira").unwrap().cheques[0].id.clone();
+        cheques::depositar(c, d, u, &id, &l.banco).unwrap();
+        assert_eq!(totais(), (antes.0 + 30_000, antes.1), "o depósito entra no fluxo");
+        cheques::devolver(c, d, u, &id, "Sem fundos", true).unwrap();
+        assert_eq!(totais(), (antes.0 + 30_000, antes.1 + 30_000), "o depósito continua; a devolução sai");
+        // Em dias diferentes: o depósito anteontem, a devolução hoje.
+        let hoje = crate::fiscal::hoje(c).unwrap();
+        let anteontem: String = c.query_row("SELECT date(?1, '-2 days')", [&hoje], |x| x.get(0)).unwrap();
+        c.execute(
+            "UPDATE movimento_conta SET data = ?1 WHERE tipo = 'deposito_cheque' AND origem_id = ?2",
+            [&anteontem, &id],
+        )
+        .unwrap();
+        let f = fluxo(c, &crate::fiscal::data_br(&anteontem), &crate::fiscal::data_br(&anteontem), 90).unwrap();
+        assert_eq!(centavos(&f.entradas), 30_000, "no dia do depósito, a entrada: {:?}", f.realizado);
+    }
+
     #[test]
     fn cheques_da_venda_ao_deposito() {
         let l = loja();
