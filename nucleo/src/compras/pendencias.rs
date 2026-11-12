@@ -155,6 +155,12 @@ pub(crate) fn resolver_pendencias_do_item(
     produto_id: &str,
 ) -> Resultado<()> {
     let compacto = texto::compactar(codigo_fornecedor);
+    // A01 (e G04, sem mudar o esquema): um código só de símbolos ("---")
+    // compacta para vazio e não identifica item nenhum; fechar "as do mesmo
+    // código" fecharia as de outros itens. Quem chamou fecha a sua à parte.
+    if compacto.is_empty() {
+        return Ok(());
+    }
     let desc_comp = texto::compactar(descricao);
     let doc: String = conn
         .query_row("SELECT documento FROM pessoa WHERE id = ?1", [fornecedor_id], |l| l.get(0))

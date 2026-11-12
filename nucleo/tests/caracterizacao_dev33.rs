@@ -885,7 +885,6 @@ fn f4_interrupcao_compra_desfaz_so_a_nota_da_falha() {
 /// A01 — um código que compacta para vazio ("---", "***") não fecha a
 /// pendência de outro item: resolver uma não mexe na outra.
 #[test]
-#[ignore = "caracterização A01: o compacto vazio fecha pendências de outros itens em 310cee0; passa no item A01 da fase 4"]
 fn a01_codigo_so_de_simbolos_nao_fecha_pendencia_de_outro() {
     let mut l = loja("a01");
     importar_so_fornecedor(&mut l);

@@ -517,21 +517,27 @@ struct LoteFornecedor<'a> {
 /// peças da loja e peças dos fornecedores.
 pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<Importado> {
     let lido = ler_tudo(conn, &e.arquivos)?;
+    gravar(conn, dispositivo, usuario_id, e, &lido)
+}
+
+/// As etapas de gravação sobre o que já foi lido. Separada da leitura para os
+/// testes montarem casos sem nota assinada (as notas de teste vêm prontas).
+fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada, lido: &Lido) -> Resultado<Importado> {
     let mut r = Importado::default();
     let gr = Gravacao { conn, dispositivo, usuario_id };
     if e.clientes {
-        importar_clientes(gr, &lido, &mut r)?;
+        importar_clientes(gr, lido, &mut r)?;
     }
-    let ids_fornecedor = importar_fornecedores(gr, e, &lido, &mut r)?;
+    let ids_fornecedor = importar_fornecedores(gr, e, lido, &mut r)?;
     if e.pecas_loja {
-        importar_pecas_da_loja(gr, &lido, &mut r)?;
+        importar_pecas_da_loja(gr, lido, &mut r)?;
     }
     let lote = LoteFornecedor {
         e,
-        lido: &lido,
+        lido,
         ids_fornecedor: &ids_fornecedor,
         repetidos_f: lido.repetidos_fornecedor(),
-        gtins_repetidos_forn: gtins_em_mais_de_uma_descricao(&lido),
+        gtins_repetidos_forn: gtins_em_mais_de_uma_descricao(lido),
     };
     for (chave, item) in &lido.pecas_fornecedor {
         importar_peca_do_fornecedor(gr, &lote, chave, item, &mut r)?;
@@ -772,8 +778,12 @@ fn importar_peca_do_fornecedor(
         return Ok(());
     }
 
-    // 4. Sem GTIN correspondente e sem vínculo prévio do fornecedor:
-    if e.pecas_fornecedor {
+    // 4. Sem GTIN correspondente e sem vínculo prévio do fornecedor.
+    // A01: um código só de símbolos ("---") não identifica a peça nem pode ser
+    // ligado; vira pendência própria em vez de peça nova (que se repetiria a
+    // cada importação da mesma nota).
+    let so_simbolos = texto::compactar(codigo).is_empty();
+    if e.pecas_fornecedor && !so_simbolos {
         let Some(fid) = &fornecedor_id else { return Ok(()) };
         if repetido {
             if let Some(pid_desc) = peca_pela_descricao(conn, it)? {
@@ -808,8 +818,9 @@ fn importar_peca_do_fornecedor(
         )?;
         r.pecas += 1;
     } else {
-        // Sem cadastrar peças novas automaticamente: preserva como pendência
-        // de identificação caso o fornecedor tenha sido selecionado ou já exista.
+        // Sem cadastrar peça nova (a opção desmarcada ou o código só de
+        // símbolos): preserva como pendência de identificação caso o
+        // fornecedor tenha sido selecionado ou já exista.
         if fornecedor_id.is_some() || e.fornecedores {
             registrar_pendencia_xml(
                 conn,
@@ -821,7 +832,13 @@ fn importar_peca_do_fornecedor(
                 emissao,
                 it,
                 valor_unitario(it, true),
-                if repetido { "codigo_repetido" } else { "sem_vinculo" },
+                if so_simbolos {
+                    "codigo_so_de_simbolos"
+                } else if repetido {
+                    "codigo_repetido"
+                } else {
+                    "sem_vinculo"
+                },
                 &[],
             )?;
         }
@@ -916,6 +933,7 @@ pub fn contar_pendencias(conn: &Connection) -> i64 {
 fn motivo_legivel(motivo: &str) -> &'static str {
     match motivo {
         "gtin_ambiguo" => "GTIN/código de barras corresponde a mais de uma peça cadastrada",
+        "codigo_so_de_simbolos" => "O código do fornecedor só tem símbolos e não identifica a peça",
         "fornecedor_ambiguo" => "Código do fornecedor está associado a mais de uma peça",
         "conflito_gtin_fornecedor" => "GTIN aponta para uma peça e o código do fornecedor para outra",
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
@@ -1303,6 +1321,53 @@ mod testes {
     use super::*;
     use crate::banco::Banco;
     use crate::{config, usuarios};
+
+    /// A01 + G04 — um código só de símbolos ("---"), sem GTIN que ache a peça,
+    /// vira pendência própria, com ou sem "Peças do fornecedor": nenhuma peça
+    /// nova, nenhum vínculo, e importar a mesma nota de novo não duplica nada.
+    /// Não há nota assinada com esse código (e as chaves da PKI de teste foram
+    /// descartadas): o caso é montado como sairia da leitura.
+    #[test]
+    fn a01_codigo_so_de_simbolos_vira_pendencia_e_nao_peca() {
+        const FORN: &str = "11222333000181";
+        for pecas_fornecedor in [false, true] {
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            crate::faixas::comecar_loja(c).unwrap();
+            config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+            let emitente =
+                Emitente { documento: FORN.into(), nome: "FORNECEDOR DE TESTE".into(), ..Default::default() };
+            let mut lido = Lido::default();
+            lido.fornecedores.insert(FORN.into(), (emitente, "2026-11-01".into()));
+            let it = ItemXml {
+                codigo: "---".into(),
+                descricao: "PECA SO DE SIMBOLOS".into(),
+                quantidade: 1000,
+                valor_produtos: 5000,
+                ..Default::default()
+            };
+            lido.pecas_fornecedor.insert((FORN.into(), "---".into(), descricao_chave(&it)), (it, "2026-11-01".into()));
+            let e = Entrada { fornecedores: true, pecas_fornecedor, ..Default::default() };
+            let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+            for vez in 1..=2 {
+                gravar(c, d, &u, &e, &lido).unwrap();
+                let pendencias = conta(
+                    "SELECT COUNT(*) FROM xml_pendencia_identificacao
+                      WHERE situacao = 'pendente' AND motivo = 'codigo_so_de_simbolos'",
+                );
+                assert_eq!(
+                    (
+                        conta("SELECT COUNT(*) FROM produto"),
+                        conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                        pendencias
+                    ),
+                    (0, 0, 1),
+                    "\"Peças do fornecedor\" = {pecas_fornecedor}, {vez}ª importação: (peças, vínculos, pendências)"
+                );
+            }
+        }
+    }
 
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
