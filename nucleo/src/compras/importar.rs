@@ -1226,12 +1226,20 @@ pub fn resolver_pendencia(
             if d.produto_id.trim().is_empty() {
                 return Err(Erro::campo("produtoId", "Escolha a peça para associar."));
             }
-            let existe: bool = conn
-                .query_row("SELECT 1 FROM produto WHERE id = ?1", [&d.produto_id], |_| Ok(true))
-                .optional()?
-                .unwrap_or(false);
-            if !existe {
+            let peca: Option<(String, String, bool)> = conn
+                .query_row("SELECT nome, codigo, ativo FROM produto WHERE id = ?1", [&d.produto_id], |l| {
+                    Ok((l.get(0)?, l.get(1)?, l.get::<_, i64>(2)? != 0))
+                })
+                .optional()?;
+            let Some((nome, codigo, ativa)) = peca else {
                 return Err(Erro::NaoEncontrado("Peça".into()));
+            };
+            // A07: ligar a uma peça desativada a faria voltar pelas próximas notas, sem ninguém ver.
+            if !ativa {
+                return Err(Erro::campo(
+                    "produtoId",
+                    format!("A peça \"{nome}\" (código {codigo}) está desativada. Reative a peça ou escolha outra."),
+                ));
             }
             d.produto_id.trim().to_string()
         }

@@ -922,7 +922,6 @@ fn a06_resolver_fecha_so_a_mesma_descricao() {
 /// A07 — "ligar" a uma peça inativa é recusado, com o nome da peça na mensagem;
 /// a pendência continua aberta e nenhum vínculo é gravado.
 #[test]
-#[ignore = "caracterização A07: ligar a peça inativa é aceito em 310cee0; passa no item A07 da fase 4"]
 fn a07_ligar_a_peca_inativa_e_recusado() {
     let mut l = loja("a07");
     importar_so_fornecedor(&mut l);
