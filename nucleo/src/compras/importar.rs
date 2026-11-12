@@ -363,11 +363,37 @@ fn peca_repetida(conn: &Connection, codigo: &str, it: &ItemXml) -> Resultado<Opt
 }
 
 /// D-13: peça de fornecedor de código repetido já cadastrada (pela descrição).
-fn peca_pela_descricao(conn: &Connection, it: &ItemXml) -> Resultado<Option<String>> {
-    let desc = descricao_chave(it);
-    let mut c = conn.prepare_cached("SELECT id, nome FROM produto")?;
-    let lista: Vec<(String, String)> = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
-    Ok(lista.into_iter().find(|(_, nome)| texto::compactar(nome) == desc).map(|(id, _)| id))
+///
+/// A14: antes, cada consulta lia e compactava todas as peças. Agora o mapa
+/// (descrição compactada → a primeira peça com ela, na ordem da tabela, como a
+/// consulta de antes) é montado uma vez, na primeira consulta de cada prévia
+/// ou importação, e cada peça nova da importação entra nele (`nova`).
+#[derive(Default)]
+struct PorDescricao(std::cell::RefCell<Option<HashMap<String, String>>>);
+
+impl PorDescricao {
+    fn achar(&self, conn: &Connection, it: &ItemXml) -> Resultado<Option<String>> {
+        let mut mapa = self.0.borrow_mut();
+        if mapa.is_none() {
+            let mut m: HashMap<String, String> = HashMap::new();
+            let mut c = conn.prepare_cached("SELECT id, nome FROM produto")?;
+            for linha in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
+                let (id, nome) = linha?;
+                m.entry(texto::compactar(&nome)).or_insert(id);
+            }
+            *mapa = Some(m);
+        }
+        Ok(mapa.as_ref().and_then(|m| m.get(&descricao_chave(it)).cloned()))
+    }
+
+    /// Uma peça nova desta importação (com o nome como ficou gravado).
+    fn nova(&self, conn: &Connection, id: &str) -> Resultado<()> {
+        if let Some(m) = self.0.borrow_mut().as_mut() {
+            let nome: String = conn.query_row("SELECT nome FROM produto WHERE id = ?1", [id], |l| l.get(0))?;
+            m.entry(texto::compactar(&nome)).or_insert_with(|| id.to_string());
+        }
+        Ok(())
+    }
 }
 
 /// A peça da loja deste item já existe?
@@ -415,6 +441,7 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
 
     let repetidos = lido.repetidos_loja();
     let repetidos_f = lido.repetidos_fornecedor();
+    let por_descricao = PorDescricao::default();
     p.codigos_repetidos = (repetidos.len() + repetidos_f.len()) as i64;
     let mut barras_novas: HashSet<String> = HashSet::new();
     let mut exemplos: Vec<String> = Vec::new();
@@ -438,7 +465,7 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
     }
     for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
         let ja = if repetidos_f.contains(&(forn.clone(), texto::compactar(codigo))) {
-            peca_pela_descricao(conn, it)?.is_some()
+            por_descricao.achar(conn, it)?.is_some()
         } else {
             !matches!(peca_por_fornecedor_inequivoco(conn, forn, codigo)?, BuscaId::Nenhum)
         };
@@ -539,6 +566,7 @@ struct LoteFornecedor<'a> {
     ids_fornecedor: &'a HashMap<String, String>,
     repetidos_f: HashSet<(String, String)>,
     gtins_repetidos_forn: HashSet<String>,
+    por_descricao: PorDescricao,
 }
 
 /// "Trazer cadastros" dos XMLs, em etapas (ARQ-13): clientes, fornecedores,
@@ -566,6 +594,7 @@ fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada, l
         ids_fornecedor: &ids_fornecedor,
         repetidos_f: lido.repetidos_fornecedor(),
         gtins_repetidos_forn: gtins_em_mais_de_uma_descricao(lido),
+        por_descricao: PorDescricao::default(),
     };
     for (chave, item) in &lido.pecas_fornecedor {
         importar_peca_do_fornecedor(gr, &lote, chave, item, &mut r)?;
@@ -735,7 +764,7 @@ fn importar_peca_do_fornecedor(
     r: &mut Importado,
 ) -> Resultado<()> {
     let Gravacao { conn, dispositivo, usuario_id } = gr;
-    let LoteFornecedor { e, lido, ids_fornecedor, repetidos_f, gtins_repetidos_forn } = lote;
+    let LoteFornecedor { e, lido, ids_fornecedor, repetidos_f, gtins_repetidos_forn, por_descricao } = lote;
     let fornecedor_id = ids_fornecedor.get(forn).cloned();
     let forn_nome = lido
         .fornecedores
@@ -874,7 +903,7 @@ fn importar_peca_do_fornecedor(
     if e.pecas_fornecedor && !so_simbolos {
         let Some(fid) = &fornecedor_id else { return Ok(()) };
         if repetido {
-            if let Some(pid_desc) = peca_pela_descricao(conn, it)? {
+            if let Some(pid_desc) = por_descricao.achar(conn, it)? {
                 produtos::registrar_gtins_xml(conn, &pid_desc, &gtins_ficha)?;
                 return Ok(());
             }
@@ -890,6 +919,7 @@ fn importar_peca_do_fornecedor(
             }
         }
         let id = salvar_peca(conn, dispositivo, usuario_id, f)?;
+        por_descricao.nova(conn, &id)?;
         produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
         if !repetido {
             ligar_fornecedor(conn, fid, codigo, &id)?;
@@ -1597,6 +1627,43 @@ mod testes {
             }
         }
         assert!(erros.is_empty(), "\n{}", erros.join("\n"));
+    }
+
+    /// A14: o mapa das descrições (montado uma vez) acha também a peça criada
+    /// NESTA importação depois de montado, como a consulta de antes (que lia a
+    /// tabela a cada item). Os códigos K1 e K2 se repetem em descrições
+    /// diferentes; K2 "AAA" tem de achar a peça "AAA" que K1 acabou de criar.
+    #[test]
+    fn a14_descricao_acha_a_peca_criada_na_mesma_importacao() {
+        const FORN: &str = "11222333000181";
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let emitente = Emitente { documento: FORN.into(), nome: "FORNECEDOR DE TESTE".into(), ..Default::default() };
+        let mut lido = Lido::default();
+        lido.fornecedores.insert(FORN.into(), (emitente, "2026-11-01".into()));
+        for (codigo, descricao) in [("K1", "PECA AAA"), ("K1", "PECA BBB"), ("K2", "PECA AAA"), ("K2", "PECA CCC")] {
+            let it = ItemXml {
+                codigo: codigo.into(),
+                descricao: descricao.into(),
+                quantidade: 1000,
+                valor_produtos: 5000,
+                ..Default::default()
+            };
+            lido.pecas_fornecedor.insert((FORN.into(), codigo.into(), descricao_chave(&it)), (it, "2026-11-01".into()));
+        }
+        let e = Entrada { fornecedores: true, pecas_fornecedor: true, ..Default::default() };
+        gravar(c, d, &u, &e, &lido).unwrap();
+        let nomes: Vec<String> = c
+            .prepare("SELECT nome FROM produto ORDER BY nome")
+            .unwrap()
+            .query_map([], |l| l.get(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        assert_eq!(nomes, ["PECA AAA", "PECA BBB", "PECA CCC"], "uma peça por descrição, sem a AAA repetida");
     }
 
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
