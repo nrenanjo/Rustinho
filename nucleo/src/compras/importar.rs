@@ -813,6 +813,15 @@ fn importar_peca_do_fornecedor(
         // que já existe (nem GTIN, nem vínculo). Pela leitura técnica da DP-11
         // (sem veto), o item fica como pendência, com a peça como candidata.
         if !e.pecas_fornecedor {
+            // O código do fornecedor já está ligado a esta mesma peça: o item
+            // já está identificado e não há nada a decidir. Sem a opção, nada é
+            // gravado na peça; as pendências do item fecham, como no passo 3.
+            if matches!(&forn_busca, BuscaId::Unico(pf) if *pf == pid) {
+                if let Some(fid) = &fornecedor_id {
+                    resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
+                }
+                return Ok(());
+            }
             if fornecedor_id.is_some() || e.fornecedores {
                 registrar_pendencia_xml(
                     conn,
@@ -1474,7 +1483,6 @@ mod testes {
     /// GTIN (sem vínculo), a peça nova sem a opção, o código só de símbolos e o
     /// conflito entre GTIN e vínculo. Cada caso num banco novo.
     #[test]
-    #[ignore = "caracterização da regressão do A03a: falha em 24ceb31 no caso (já ligado, sem a opção)"]
     fn a03a_item_ja_ligado_sem_a_opcao_nao_vira_pendencia() {
         const FORN: &str = "11222333000181";
         const G_P: &str = "7891234567895"; // GTIN da peça P (ligada ao código C1)
