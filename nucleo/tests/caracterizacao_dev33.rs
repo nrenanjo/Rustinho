@@ -728,3 +728,306 @@ fn n02_c9_gtin_tributavel_diferente_do_comercial() {
     assert_eq!(gtins(&l, &peca), os_dois, "trazer a nota de novo mudou os GTINs");
     assert_eq!(l.numero("SELECT COUNT(*) FROM produto"), 1, "trazer a nota de novo criou outra peça");
 }
+
+// ---------------------------------------------------------------------------
+// Fase 4, lote 1: travas de idempotência e de interrupção (passam hoje) e as
+// caracterizações dos itens A01, A03a, A04, A06, A07, D04 e A13 (falham hoje;
+// cada item tira o `#[ignore]` da sua). A do A02 fica no próprio `importar.rs`:
+// nenhuma nota assinada tem "AB-12" e "AB12" do mesmo emitente, e as chaves da
+// PKI de teste foram descartadas. O gatilho que simula a queda existe só no
+// banco de teste, criado pelo próprio teste.
+// ---------------------------------------------------------------------------
+
+/// Nota de venda da própria loja (emitente = a loja de teste), item `4455`.
+const NOTA_LOJA: &str = include_str!("pki/xml/venda_da_loja_sem_protocolo.xml");
+/// O GTIN do FAG-32206 na nota de exemplo.
+const GTIN_FAG: &str = "7891234567895";
+const IDENTIFICACAO: [&str; 5] =
+    ["produto", "produto_fornecedor", "produto_gtin", "xml_pendencia_identificacao", "pessoa"];
+const TODAS: [&str; 9] = [
+    "produto",
+    "produto_fornecedor",
+    "produto_gtin",
+    "xml_pendencia_identificacao",
+    "pessoa",
+    "compra",
+    "compra_item",
+    "alteracao",
+    "auditoria",
+];
+
+fn contagens(l: &Loja, tabelas: &[&str]) -> Vec<(String, i64)> {
+    tabelas.iter().map(|t| (t.to_string(), l.numero(&format!("SELECT COUNT(*) FROM {t}")))).collect()
+}
+
+/// Uma pasta com várias notas, uma por arquivo.
+fn pasta_com_notas(l: &Loja, nome: &str, notas: &[(&str, &str)]) -> String {
+    let p = l.pasta.join(nome);
+    std::fs::create_dir_all(&p).unwrap();
+    for (arquivo, xml) in notas {
+        std::fs::write(p.join(arquivo), xml).unwrap();
+    }
+    p.display().to_string()
+}
+
+fn numeros_das_compras(l: &Loja) -> Vec<String> {
+    let c = l.conexao();
+    let mut st = c.prepare("SELECT numero FROM compra ORDER BY numero").unwrap();
+    st.query_map([], |x| x.get(0)).unwrap().map(Result::unwrap).collect()
+}
+
+/// Uma pendência a mais, copiada de uma que a importação abriu (o mesmo
+/// fornecedor, a mesma nota e o mesmo motivo), com outro código, descrição e
+/// GTINs: como a de outro item da mesma nota.
+fn pendencia_copiada(l: &Loja, id: &str, codigo: &str, descricao: &str, gtins_json: &str) {
+    let compacto = rustinho_base::texto::compactar(codigo);
+    let desc_comp = rustinho_base::texto::compactar(descricao);
+    l.executar(&format!(
+        "CREATE TEMP TABLE copia AS SELECT * FROM xml_pendencia_identificacao WHERE situacao = 'pendente' LIMIT 1;
+         UPDATE copia SET id = '{id}', codigo_fornecedor = '{codigo}', codigo_compacto = '{compacto}',
+                descricao = '{descricao}', descricao_compacta = '{desc_comp}', gtin_comercial = '',
+                gtin_tributavel = '', gtins_json = '{gtins_json}';
+         INSERT INTO xml_pendencia_identificacao SELECT * FROM copia;
+         DROP TABLE copia;"
+    ));
+}
+
+fn situacao_da_pendencia(l: &Loja, id: &str) -> String {
+    l.conexao()
+        .query_row("SELECT situacao FROM xml_pendencia_identificacao WHERE id = ?1", [id], |x| x.get(0))
+        .unwrap_or_else(|e| panic!("pendência {id}: {e}"))
+}
+
+/// Fase 4 (trava): a mesma NF-e importada de novo como compra é recusada, e
+/// nada é gravado de novo (a recusa é pelo banco: vale depois de reiniciar).
+#[test]
+fn f4_compra_repetida_e_recusada() {
+    let mut l = loja("f4-compra-repetida");
+    let (_, arquivo) = gravar_nota(&l, "compra", NF601);
+    let r = l.ok("compra_importar", json!({ "caminho": arquivo }));
+    assert_eq!(r["compras"].as_array().map(Vec::len), Some(1), "{r}");
+    let uma = contagens(&l, &TODAS);
+    let r = l.ok("compra_importar", json!({ "caminho": arquivo }));
+    assert_eq!(r["compras"].as_array().map(Vec::len), Some(0), "{r}");
+    assert!(r["erros"].to_string().contains("já foi importada"), "{r}");
+    assert_eq!(contagens(&l, &TODAS), uma, "importar a mesma nota de novo gravou algo");
+}
+
+/// Fase 4 (trava): "Trazer cadastros" duas vezes com a mesma nota identifica
+/// igual a uma vez só (nenhuma peça, vínculo, GTIN, pendência ou pessoa a mais).
+#[test]
+fn f4_trazer_cadastros_duas_vezes_igual_a_uma() {
+    let mut l = loja("f4-trazer-duas-vezes");
+    let pasta = pasta_com_exemplo(&l, "xml");
+    let dados = json!({ "arquivos": [pasta], "clientes": true, "fornecedores": true,
+                        "pecasLoja": true, "pecasFornecedor": true });
+    l.ok("importar_cadastros", dados.clone());
+    let uma = contagens(&l, &IDENTIFICACAO);
+    assert!(uma.iter().any(|(t, n)| t == "produto" && *n > 0), "a primeira vez não cadastrou peça: {uma:?}");
+    l.ok("importar_cadastros", dados);
+    assert_eq!(contagens(&l, &IDENTIFICACAO), uma, "trazer a mesma nota de novo mudou a identificação");
+}
+
+/// Fase 4 (trava): uma queda no meio do "Trazer cadastros" não deixa nada pela
+/// metade (é uma transação só). O gatilho aborta a gravação de um GTIN só
+/// depois de a mesma operação já ter gravado uma peça nova; nenhuma das 9
+/// tabelas muda, nem as alterações da troca. Sem o gatilho, a operação entra
+/// uma vez, e repetir não duplica.
+#[test]
+fn f4_interrupcao_trazer_cadastros_nao_deixa_metade() {
+    let mut l = loja("f4-interrupcao-trazer");
+    let pasta = pasta_com_exemplo(&l, "xml");
+    let dados = json!({ "arquivos": [pasta], "clientes": true, "fornecedores": true,
+                        "pecasLoja": true, "pecasFornecedor": true });
+    let antes = contagens(&l, &TODAS);
+    let pecas_antes = l.numero("SELECT COUNT(*) FROM produto");
+    l.executar(&format!(
+        "CREATE TRIGGER falha_de_teste BEFORE INSERT ON produto_gtin
+           WHEN (SELECT COUNT(*) FROM produto) > {pecas_antes}
+           BEGIN SELECT RAISE(ABORT, 'falha de teste no meio'); END"
+    ));
+    l.erro("importar_cadastros", dados.clone());
+    assert_eq!(contagens(&l, &TODAS), antes, "a interrupção deixou algo pela metade");
+    l.executar("DROP TRIGGER falha_de_teste");
+    l.ok("importar_cadastros", dados.clone());
+    let uma = contagens(&l, &IDENTIFICACAO);
+    assert!(uma.iter().any(|(t, n)| t == "produto_gtin" && *n > 0), "depois da queda, a operação não entrou: {uma:?}");
+    l.ok("importar_cadastros", dados);
+    assert_eq!(contagens(&l, &IDENTIFICACAO), uma, "repetir depois da queda duplicou a identificação");
+}
+
+/// Fase 4 (trava): numa compra de 3 notas, uma queda na 2ª desfaz só ela (uma
+/// transação por nota). O gatilho aborta o primeiro item da nota 603 depois de
+/// ela já ter gravado o cabeçalho; a 601 e a 604 entram, a 603 vai para os
+/// erros sem deixar nada. Repetir o pacote: 601 e 604 recusadas, 603 entra.
+#[test]
+fn f4_interrupcao_compra_desfaz_so_a_nota_da_falha() {
+    let mut l = loja("f4-interrupcao-compra");
+    let pasta = pasta_com_notas(&l, "pacote", &[("1.xml", NF601), ("2.xml", NF603), ("3.xml", NF604)]);
+    l.executar(
+        "CREATE TRIGGER falha_de_teste BEFORE INSERT ON compra_item
+           WHEN (SELECT numero FROM compra WHERE id = NEW.compra_id) LIKE '%603'
+           BEGIN SELECT RAISE(ABORT, 'falha de teste no meio'); END",
+    );
+    let r = l.ok("compra_importar", json!({ "caminho": pasta }));
+    assert_eq!(r["compras"].as_array().map(Vec::len), Some(2), "{r}");
+    assert_eq!(r["erros"].as_array().map(Vec::len), Some(1), "{r}");
+    let duas = numeros_das_compras(&l);
+    assert_eq!(duas.len(), 2, "{duas:?}");
+    assert!(duas.iter().all(|n| !n.ends_with("603")), "a nota da queda ficou pela metade: {duas:?}");
+    l.executar("DROP TRIGGER falha_de_teste");
+    let r = l.ok("compra_importar", json!({ "caminho": pasta }));
+    assert_eq!(r["compras"].as_array().map(Vec::len), Some(1), "só a 603 entra de novo: {r}");
+    assert_eq!(r["erros"].as_array().map(Vec::len), Some(2), "a 601 e a 604 são recusadas: {r}");
+    assert_eq!(numeros_das_compras(&l).len(), 3, "{:?}", numeros_das_compras(&l));
+}
+
+/// A01 — um código que compacta para vazio ("---", "***") não fecha a
+/// pendência de outro item: resolver uma não mexe na outra.
+#[test]
+#[ignore = "caracterização A01: o compacto vazio fecha pendências de outros itens em 310cee0; passa no item A01 da fase 4"]
+fn a01_codigo_so_de_simbolos_nao_fecha_pendencia_de_outro() {
+    let mut l = loja("a01");
+    importar_so_fornecedor(&mut l);
+    pendencia_copiada(&l, "a01-um", "---", "PECA SO DE SIMBOLOS UM", "[]");
+    pendencia_copiada(&l, "a01-dois", "***", "PECA SO DE SIMBOLOS DOIS", "[]");
+    l.ok("xml_pendencia_resolver", json!({ "id": "a01-um", "acao": "nova", "produtoId": "" }));
+    assert_eq!(situacao_da_pendencia(&l, "a01-um"), "resolvida");
+    assert_eq!(
+        situacao_da_pendencia(&l, "a01-dois"),
+        "pendente",
+        "resolver a pendência de um código só de símbolos fechou a de outro item"
+    );
+}
+
+/// A06 — resolver uma pendência fecha só as do mesmo fornecedor, código e
+/// descrição (D-13); a de outra descrição continua aberta, com os seus GTINs.
+#[test]
+#[ignore = "caracterização A06: resolver fecha a pendência de outra descrição com o mesmo código em 310cee0; passa no item A06 da fase 4"]
+fn a06_resolver_fecha_so_a_mesma_descricao() {
+    let mut l = loja("a06");
+    importar_so_fornecedor(&mut l);
+    let fag = pendencia(&mut l, "FAG-32206");
+    let gtins_da_outra = r#"[{"gtin":"7891000000090"}]"#;
+    pendencia_copiada(&l, "a06-outra", "FAG-32206", "ROLAMENTO DIANTEIRO OUTRO MODELO", gtins_da_outra);
+    l.ok("xml_pendencia_resolver", json!({ "id": fag, "acao": "nova", "produtoId": "" }));
+    assert_eq!(situacao_da_pendencia(&l, &fag), "resolvida");
+    assert_eq!(situacao_da_pendencia(&l, "a06-outra"), "pendente", "fechou a pendência de outra descrição");
+    let guardados: String = l
+        .conexao()
+        .query_row("SELECT gtins_json FROM xml_pendencia_identificacao WHERE id = 'a06-outra'", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(guardados, gtins_da_outra, "os GTINs da outra pendência se perderam");
+}
+
+/// A07 — "ligar" a uma peça inativa é recusado, com o nome da peça na mensagem;
+/// a pendência continua aberta e nenhum vínculo é gravado.
+#[test]
+#[ignore = "caracterização A07: ligar a peça inativa é aceito em 310cee0; passa no item A07 da fase 4"]
+fn a07_ligar_a_peca_inativa_e_recusado() {
+    let mut l = loja("a07");
+    importar_so_fornecedor(&mut l);
+    let inativa = l.peca("ROLAMENTO DESATIVADO", "", "10,00", "");
+    l.executar(&format!("UPDATE produto SET ativo = 0 WHERE id = '{inativa}'"));
+    let fag = pendencia(&mut l, "FAG-32206");
+    let e = l.erro("xml_pendencia_resolver", json!({ "id": fag, "acao": "ligar", "produtoId": inativa }));
+    assert!(e.contains("ROLAMENTO DESATIVADO"), "a mensagem não diz qual peça: {e}");
+    assert_eq!(situacao_da_pendencia(&l, &fag), "pendente");
+    let a = id_fornecedor(&l, FORNECEDOR_A);
+    assert_eq!(dono_do_codigo(&l, &a, "FAG-32206"), None, "o código foi ligado à peça inativa");
+}
+
+/// D04 — um GTIN repetido via `produto_gtin` (não só no código de barras)
+/// aparece nas duplicatas e bloqueia a etiqueta.
+#[test]
+#[ignore = "caracterização D04: duplicatas e bloqueio da etiqueta olham só o codigo_barras em 310cee0; passa no item D04 da fase 4"]
+fn d04_gtin_repetido_em_produto_gtin_bloqueia_a_etiqueta() {
+    let mut l = loja("d04");
+    peca_com(&mut l, "PECA COM O CODIGO DE BARRAS", |f| f["codigoBarras"] = json!(GTIN_FAG));
+    let com_gtin = peca_com(&mut l, "PECA COM O GTIN DA NOTA", |_| {});
+    // Como o GTIN que outra nota ou outro caixa gravou nesta peça.
+    l.executar(&format!(
+        "INSERT INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+         VALUES ('d04-gtin', '{com_gtin}', '{GTIN_FAG}', 'comercial', 'cEAN', 0, '2026-11-11T00:00:00Z')"
+    ));
+    let s = l.ok("codigos_situacao", json!({}));
+    let repetido = s["repetidos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["codigo"] == GTIN_FAG && r["pecas"].as_array().map_or(0, Vec::len) >= 2);
+    assert!(repetido, "o GTIN repetido via produto_gtin não aparece nas duplicatas: {}", s["repetidos"]);
+    let e = l.ok("etiqueta_previa", json!({ "id": com_gtin }));
+    assert!(!e["bloqueio"].as_str().unwrap_or("").is_empty(), "a etiqueta não foi bloqueada: {e}");
+}
+
+/// A13 — uma falha ao contar as pendências não vira "zero pendências": o
+/// aviso continua na Início, dizendo que a contagem falhou.
+#[test]
+#[ignore = "caracterização A13: a falha ao contar as pendências vira zero e o aviso some em 310cee0; passa no item A13 da fase 4"]
+fn a13_falha_na_contagem_aparece_no_aviso() {
+    let mut l = loja("a13");
+    importar_so_fornecedor(&mut l);
+    let avisos = l.ok("avisos_do_dia", json!({}));
+    assert!(avisos.to_string().contains("\"xml_pendencias\""), "sem o aviso antes da falha: {avisos}");
+    // A falha de leitura, só no banco de teste: a tabela sai do lugar.
+    l.executar("ALTER TABLE xml_pendencia_identificacao RENAME TO xml_pendencia_fora_do_lugar");
+    let avisos = l.ok("avisos_do_dia", json!({}));
+    assert!(avisos.to_string().contains("\"xml_pendencias\""), "a falha ao contar sumiu com o aviso: {avisos}");
+}
+
+/// A03a — "Trazer cadastros" só com "Clientes", ou só com "Fornecedores", não
+/// grava GTIN nem vínculo numa peça que já existe (DP-11). Pela leitura técnica
+/// da DP-11 (sem veto), o item continua como pendência, com a peça candidata.
+#[test]
+#[ignore = "caracterização A03: trazer só clientes ou só fornecedores muda peças existentes em 310cee0; passa no item A03a da fase 4"]
+fn a03_so_clientes_nao_muda_peca_existente() {
+    let mut l = loja("a03");
+    let peca = peca_com(&mut l, "ROLAMENTO JA CADASTRADO", |f| f["codigoBarras"] = json!(GTIN_FAG));
+    let retrato = |l: &Loja| {
+        (gtins(l, &peca), vinculos(l, &peca), contagens(l, &["produto", "produto_fornecedor", "produto_gtin"]))
+    };
+    let antes = retrato(&l);
+    let pasta = pasta_com_exemplo(&l, "xml");
+    l.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [pasta.clone()], "clientes": true, "fornecedores": false,
+                "pecasLoja": false, "pecasFornecedor": false }),
+    );
+    assert_eq!(retrato(&l), antes, "trazer só os clientes mudou a peça existente");
+    l.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [pasta], "clientes": false, "fornecedores": true,
+                "pecasLoja": false, "pecasFornecedor": false }),
+    );
+    assert_eq!(retrato(&l), antes, "trazer só os fornecedores mudou a peça existente");
+    let lista = l.ok("xml_pendencias_listar", json!({}));
+    let fag = lista
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["codigoFornecedor"] == "FAG-32206")
+        .unwrap_or_else(|| panic!("o FAG-32206 não ficou como pendência: {lista}"));
+    assert!(fag.to_string().contains(&peca), "a peça existente não aparece como candidata: {fag}");
+}
+
+/// A04 — o código interno de uma nota da própria loja que coincide com uma
+/// peça de outra descrição não cai nela (D-13): vira pendência, sem GTIN.
+#[test]
+#[ignore = "caracterização A04: o código da nota da loja cai na peça de outra descrição em 310cee0; passa no item A04 da fase 4"]
+fn a04_codigo_interno_com_descricao_diferente_vira_pendencia() {
+    let mut l = loja("a04");
+    let outra = peca_com(&mut l, "AMORTECEDOR DIANTEIRO", |_| {});
+    l.executar(&format!("UPDATE produto SET codigo = '4455' WHERE id = '{outra}'"));
+    let antes = (gtins(&l, &outra), contagens(&l, &["produto", "produto_gtin"]));
+    let (p, _) = gravar_nota(&l, "loja", NOTA_LOJA);
+    l.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [p], "clientes": false, "fornecedores": false,
+                "pecasLoja": true, "pecasFornecedor": false }),
+    );
+    assert_eq!((gtins(&l, &outra), contagens(&l, &["produto", "produto_gtin"])), antes, "a nota da loja mexeu na peça");
+    let lista = l.ok("xml_pendencias_listar", json!({}));
+    let virou = lista.as_array().unwrap().iter().any(|x| x["codigoFornecedor"] == "4455");
+    assert!(virou, "o 4455 da nota da loja (outra descrição) não virou pendência: {lista}");
+}
