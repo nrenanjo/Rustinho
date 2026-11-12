@@ -275,7 +275,23 @@ mod comandos {
 
     fn unidade_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: UnidadeEntrada = ler(dados)?;
-        let sigla = unidades::salvar(p.conn, &d.sigla, &d.descricao, d.fracionada)?;
+        // E10 (6.5): a unidade nova entra na auditoria, na mesma transação.
+        let tx = p.conn.transaction()?;
+        let sigla = unidades::salvar(&tx, &d.sigla, &d.descricao, d.fracionada)?;
+        crate::auditoria::registrar(
+            &tx,
+            p.disp,
+            Some(p.usuario_id),
+            "unidade.criar",
+            "unidade",
+            &sigla,
+            &[format!(
+                "Unidade {sigla} criada: {}{}",
+                d.descricao.trim(),
+                if d.fracionada { " (vende quebrado)" } else { "" }
+            )],
+        )?;
+        tx.commit()?;
         Ok(json!({ "sigla": sigla, "lista": unidades::listar(p.conn)? }))
     }
 
