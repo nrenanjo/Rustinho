@@ -442,13 +442,18 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
 /// notas trazem); o resumo, com as opções desta prévia.
 pub fn previa_com(conn: &Connection, e: &Entrada) -> Resultado<Previa> {
     let lido = ler_tudo(conn, &e.arquivos)?;
+    previa_do_lido(conn, e, &lido)
+}
+
+/// A prévia sobre o que já foi lido (os testes montam o lote sem nota assinada).
+fn previa_do_lido(conn: &Connection, e: &Entrada, lido: &Lido) -> Resultado<Previa> {
     let todas = todas_as_opcoes(&e.arquivos);
-    let d_todas = decidir(conn, &todas, &lido)?;
+    let d_todas = decidir(conn, &todas, lido)?;
     let opcoes = opcoes_de(e);
     let resumo = if opcoes == opcoes_de(&todas) {
-        resumir(conn, &lido, &d_todas)?
+        resumir(conn, lido, &d_todas)?
     } else {
-        resumir(conn, &lido, &decidir(conn, e, &lido)?)?
+        resumir(conn, lido, &decidir(conn, e, lido)?)?
     };
     let mut p = Previa {
         arquivos: lido.arquivos,
@@ -458,7 +463,7 @@ pub fn previa_com(conn: &Connection, e: &Entrada) -> Resultado<Previa> {
         ignorados: lido.ignorados,
         avisos: lido.avisos.clone(),
         opcoes,
-        carimbo: carimbo(conn, &opcoes, &lido)?,
+        carimbo: carimbo(conn, &opcoes, lido)?,
         resumo,
         ..Default::default()
     };
@@ -615,6 +620,7 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
     let Gravacao { conn, dispositivo, usuario_id } = gr;
     let mut r = Importado::default();
     let mut reais = Reais::default();
+    let mut gtin_novo = GtinsEmPecasExistentes::default();
 
     // Etapa 1: os clientes das notas da loja que ainda não estão cadastrados.
     for p in &d.clientes {
@@ -654,8 +660,9 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
     for (_, it, emissao, dec) in &d.loja {
         let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
         match dec {
-            DecisaoLoja::OutraDescricaoPeloGtin { pid, .. } => {
+            DecisaoLoja::OutraDescricaoPeloGtin { pid, gtins_novos } => {
                 produtos::registrar_gtins_xml(conn, &reais.de(pid), &gtins_ficha)?;
+                gtin_novo.anotar(pid, gtins_novos, NOTA_DA_LOJA);
             }
             DecisaoLoja::OutraDescricaoPendencia { outra } => {
                 // Sem fornecedor: resolver esta pendência nunca liga código de fornecedor.
@@ -673,9 +680,10 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                     &[reais.de(outra)],
                 )?;
             }
-            DecisaoLoja::Existente { pid, .. } => {
+            DecisaoLoja::Existente { pid, gtins_novos } => {
                 if let Some(pid) = pid {
                     produtos::registrar_gtins_xml(conn, &reais.de(pid), &gtins_ficha)?;
+                    gtin_novo.anotar(pid, gtins_novos, NOTA_DA_LOJA);
                 }
             }
             DecisaoLoja::Nova { id: plano, codigo: codigo_peca, barras, codigo_antigo } => {
@@ -729,6 +737,11 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
         let (it, emissao) = i.item;
         let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
         let fornecedor_id = i.fornecedor_id.as_deref().map(|f| reais.de(f));
+        let nota = if i.numero_nfe.is_empty() {
+            format!("nota de {}", i.forn_nome)
+        } else {
+            format!("NF-e {} de {}", i.numero_nfe, i.forn_nome)
+        };
         match &i.decisao {
             DecisaoForn::Pendencia { motivo, candidatos } => {
                 let candidatos: Vec<String> = candidatos.iter().map(|c| reais.de(c)).collect();
@@ -751,7 +764,8 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                     resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &reais.de(pid))?;
                 }
             }
-            DecisaoForn::PeloGtin { pid, ligar, .. } => {
+            DecisaoForn::PeloGtin { pid, ligar, gtins_novos } => {
+                gtin_novo.anotar(pid, gtins_novos, &nota);
                 let pid = reais.de(pid);
                 produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
                 if !i.repetido {
@@ -763,7 +777,8 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                     }
                 }
             }
-            DecisaoForn::PeloVinculo { pid, gtins, .. } => {
+            DecisaoForn::PeloVinculo { pid, gtins, gtins_novos } => {
+                gtin_novo.anotar(pid, gtins_novos, &nota);
                 let pid = reais.de(pid);
                 if *gtins {
                     produtos::registrar_gtins_xml(conn, &pid, &gtins_ficha)?;
@@ -772,8 +787,9 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                     resolver_pendencias_do_item(conn, fid, codigo, &it.descricao, &pid)?;
                 }
             }
-            DecisaoForn::MesmaDescricao { pid, .. } => {
+            DecisaoForn::MesmaDescricao { pid, gtins_novos } => {
                 produtos::registrar_gtins_xml(conn, &reais.de(pid), &gtins_ficha)?;
+                gtin_novo.anotar(pid, gtins_novos, &nota);
             }
             DecisaoForn::Nova { id: plano, barras, ligar } => {
                 let mut f = ficha_do_item(conn, it, barras)?;
@@ -809,7 +825,49 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
             DecisaoForn::Nada => {}
         }
     }
+    // A03b (lote 2, item 04): uma linha de auditoria por peça que JÁ existia e
+    // recebeu GTIN novo, com os GTINs e as notas. Antes não ficava rastro.
+    for (pid, gtins, notas) in &gtin_novo.0 {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "produto.gtin_importado",
+            "produto",
+            pid,
+            &[format!("GTIN novo pelo XML: {}", gtins.join(", ")), format!("Origem: {}", notas.join("; "))],
+        )?;
+    }
     Ok(r)
+}
+
+/// A03b: os GTINs novos de cada peça que já existia, com as notas de onde
+/// vieram, na ordem em que aparecem.
+#[derive(Default)]
+struct GtinsEmPecasExistentes(Vec<(String, Vec<String>, Vec<String>)>);
+
+impl GtinsEmPecasExistentes {
+    fn anotar(&mut self, pid: &str, gtins: &[String], nota: &str) {
+        if gtins.is_empty() || pid.starts_with(PLANEJADO) {
+            return;
+        }
+        let i = match self.0.iter().position(|(p, _, _)| p == pid) {
+            Some(i) => i,
+            None => {
+                self.0.push((pid.to_string(), Vec::new(), Vec::new()));
+                self.0.len() - 1
+            }
+        };
+        let (_, g, n) = &mut self.0[i];
+        for x in gtins {
+            if !g.contains(x) {
+                g.push(x.clone());
+            }
+        }
+        if !n.iter().any(|x| x == nota) {
+            n.push(nota.to_string());
+        }
+    }
 }
 
 /// GTINs que aparecem em mais de uma descrição nas notas de fornecedor.
@@ -2012,9 +2070,11 @@ pub fn resolver_pendencia(
                 return Err(Erro::NaoEncontrado("Peça".into()));
             };
             // A07: ligar a uma peça desativada a faria voltar pelas próximas notas, sem ninguém ver.
+            // Lote 2, item 06: o campo próprio diz à tela que é a peça
+            // desativada (ela oferece "Abrir a peça"); a mensagem é a mesma.
             if !ativa {
                 return Err(Erro::campo(
-                    "produtoId",
+                    "pecaDesativada",
                     format!("A peça \"{nome}\" (código {codigo}) está desativada. Reative a peça ou escolha outra."),
                 ));
             }
@@ -2116,7 +2176,13 @@ mod comandos {
     use crate::{importar, requisitos};
 
     pub const COMANDOS: &[Comando] = &[
-        Comando { nome: "importar_previa", classe: Classe::Leitura, funcao: importar_previa },
+        // T-2 (a): a prévia lê os arquivos da importação, que é do gerente;
+        // só com a senha (a da tela, DP-52 (b)) ou quem a loja liberou.
+        Comando {
+            nome: "importar_previa",
+            classe: Classe::ConsultaDoGerente("configuracoes"),
+            funcao: importar_previa,
+        },
         Comando { nome: "importar_cadastros", classe: Classe::Gerente("configuracoes"), funcao: importar_cadastros },
         Comando { nome: "arquivos_conferir", classe: Classe::Leitura, funcao: arquivos_conferir },
         Comando { nome: "xml_pendencias_listar", classe: Classe::Leitura, funcao: xml_pendencias_listar },
@@ -2370,6 +2436,252 @@ mod testes {
             .map(|x| x.unwrap())
             .collect();
         assert_eq!(nomes, ["PECA AAA", "PECA BBB", "PECA CCC"], "uma peça por descrição, sem a AAA repetida");
+    }
+
+    /// EAN-13 com o dígito certo.
+    fn ean13(base12: u64) -> String {
+        let b = format!("{base12:012}");
+        let s: u32 = b.chars().enumerate().map(|(i, c)| c.to_digit(10).unwrap() * if i % 2 == 1 { 3 } else { 1 }).sum();
+        format!("{b}{}", (10 - s % 10) % 10)
+    }
+
+    /// CNPJ com os dígitos certos.
+    fn cnpj(base12: &str) -> String {
+        let dv = |n: &str, pesos: &[u32]| {
+            let s: u32 = n.chars().zip(pesos).map(|(c, p)| c.to_digit(10).unwrap() * p).sum();
+            let r = s % 11;
+            if r < 2 {
+                0
+            } else {
+                11 - r
+            }
+        };
+        let d1 = dv(base12, &[5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+        let n13 = format!("{base12}{d1}");
+        let d2 = dv(&n13, &[6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
+        format!("{n13}{d2}")
+    }
+
+    /// Lote 2 (T-1, O-3, A03b), a trava "prévia = resultado": um lote com um
+    /// item de cada caminho, nas 16 combinações das opções, cada uma num banco
+    /// novo. A prévia roda com o banco SÓ PARA LEITURA (não grava nada) e o
+    /// que ela anuncia é conferido no banco depois da importação: peças,
+    /// vínculos, pessoas, pendências, peças que já existiam e mudam, e a
+    /// auditoria do GTIN novo (uma linha por peça que já existia).
+    #[test]
+    fn o3_previa_igual_ao_resultado() {
+        let f1 = cnpj("112223330001");
+        let f2 = cnpj("998887770001");
+        let cliente = "52998224725";
+        let (g1, g2, g2b, g3, g4, g5, g6) = (
+            ean13(789_100_000_001),
+            ean13(789_100_000_002),
+            ean13(789_100_000_022),
+            ean13(789_100_000_003),
+            ean13(789_100_000_004),
+            ean13(789_100_000_005),
+            ean13(789_100_000_006),
+        );
+        let gtin =
+            |g: &str| vec![nfe_xml::GtinXml { codigo: g.into(), tipo: "comercial".into(), origem: "cEAN".into() }];
+        let item = |codigo: &str, descricao: &str, gtins: Vec<nfe_xml::GtinXml>| ItemXml {
+            codigo: codigo.into(),
+            descricao: descricao.into(),
+            gtins,
+            quantidade: 1000,
+            valor_produtos: 5000,
+            ..Default::default()
+        };
+        let mut lido = Lido::default();
+        lido.clientes.insert(
+            cliente.into(),
+            (
+                Emitente { documento: cliente.into(), nome: "CLIENTE NOVO".into(), ..Default::default() },
+                "2026-11-01".into(),
+            ),
+        );
+        for (doc, nome) in [(&f1, "FORNECEDOR UM"), (&f2, "FORNECEDOR NOVO")] {
+            lido.fornecedores.insert(
+                doc.clone(),
+                (Emitente { documento: doc.clone(), nome: nome.into(), ..Default::default() }, "2026-11-01".into()),
+            );
+        }
+        let itens_f1 = [
+            item("A1", "PECA ACHADA PELO GTIN", gtin(&g1)),
+            item("B1", "PECA LIGADA COM GTIN NOVO", vec![gtin(&g2)[0].clone(), gtin(&g2b)[0].clone()]),
+            item("C1", "PECA DESATIVADA", gtin(&g3)),
+            item("D1", "PECA NOVA", gtin(&g4)),
+            item("---", "SO SIMBOLOS", Vec::new()),
+            item("R1", "PECA MESMA DESCRICAO", Vec::new()),
+            item("R1", "OUTRA PECA R1", Vec::new()),
+            item("B2", "CONFLITO GTIN E VINCULO", gtin(&g1)),
+            item("K1", "PECA K", gtin(&g5)),
+            item("K2", "PECA K", gtin(&g5)),
+        ];
+        for it in itens_f1 {
+            lido.pecas_fornecedor
+                .insert((f1.clone(), it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
+        }
+        let n1 = item("N1", "PECA DO FORNECEDOR NOVO", Vec::new());
+        lido.pecas_fornecedor.insert((f2.clone(), "N1".into(), descricao_chave(&n1)), (n1, "2026-11-01".into()));
+        for it in [item("LJ1", "OUTRA COISA NA LOJA", Vec::new()), item("LJ2", "PECA LOJA NOVA", gtin(&g6))] {
+            lido.pecas_loja.insert((it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
+        }
+
+        let mut erros = Vec::new();
+        for n in 0..16u8 {
+            let e = Entrada {
+                clientes: n & 8 != 0,
+                fornecedores: n & 4 != 0,
+                pecas_loja: n & 2 != 0,
+                pecas_fornecedor: n & 1 != 0,
+                ..Default::default()
+            };
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            crate::faixas::comecar_loja(c).unwrap();
+            config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+            let em = Emitente { documento: f1.clone(), nome: "FORNECEDOR UM".into(), ..Default::default() };
+            let (fid, _) = crate::pessoas::garantir_pela_nota(c, d, &u, &em, false, "teste").unwrap();
+            let peca = |nome: &str, barras: &str, codigo: &str| {
+                let mut f = produtos::ficha_nova(c).unwrap();
+                f.nome = nome.into();
+                f.codigo_barras = barras.into();
+                if !codigo.is_empty() {
+                    f.codigo = codigo.into();
+                }
+                f.precos[0].preco = "10,00".into();
+                produtos::salvar(c, d, &u, &f).unwrap()
+            };
+            let p1 = peca("PECA P1", &g1, "");
+            let p2 = peca("PECA P2", &g2, "");
+            let p3 = peca("PECA P3 DESATIVADA", &g3, "");
+            peca("PECA MESMA DESCRICAO", "", "");
+            peca("PECA DA LOJA ANTIGA", "", "LJ1");
+            c.execute("UPDATE produto SET ativo = 0 WHERE id = ?1", [&p3]).unwrap();
+            for (cod, pid) in [("B1", &p2), ("B2", &p2)] {
+                crate::catalogo::codigos::vincular_fornecedor(
+                    c,
+                    &fid,
+                    cod,
+                    pid,
+                    1000,
+                    crate::catalogo::codigos::JaLigado::Manter,
+                )
+                .unwrap();
+            }
+            let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+            let codigos_de = |pid: &str| -> std::collections::BTreeSet<String> {
+                let mut s: std::collections::BTreeSet<String> = c
+                    .prepare("SELECT gtin FROM produto_gtin WHERE produto_id = ?1")
+                    .unwrap()
+                    .query_map([pid], |l| l.get(0))
+                    .unwrap()
+                    .map(|x| x.unwrap())
+                    .collect();
+                let barras: String =
+                    c.query_row("SELECT codigo_barras FROM produto WHERE id = ?1", [pid], |l| l.get(0)).unwrap();
+                if !barras.is_empty() {
+                    s.insert(barras);
+                }
+                s
+            };
+            let existentes: Vec<String> = c
+                .prepare("SELECT id FROM produto")
+                .unwrap()
+                .query_map([], |l| l.get(0))
+                .unwrap()
+                .map(|x| x.unwrap())
+                .collect();
+            let antes_codigos: Vec<_> = existentes.iter().map(|p| codigos_de(p)).collect();
+            let vinculos_de = |pid: &str| -> i64 {
+                c.query_row("SELECT COUNT(*) FROM produto_fornecedor WHERE produto_id = ?1", [pid], |l| l.get(0))
+                    .unwrap()
+            };
+            let antes_vinculos: Vec<i64> = existentes.iter().map(|p| vinculos_de(p)).collect();
+            let antes = (
+                conta("SELECT COUNT(*) FROM produto"),
+                conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                conta("SELECT COUNT(*) FROM pessoa WHERE cliente = 1"),
+                conta("SELECT COUNT(*) FROM pessoa WHERE fornecedor = 1"),
+                conta("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"),
+            );
+            c.pragma_update(None, "query_only", true).unwrap();
+            let p = previa_do_lido(c, &e, &lido);
+            c.pragma_update(None, "query_only", false).unwrap();
+            let p = p.unwrap_or_else(|x| panic!("a prévia falhou (gravou?) com {n:04b}: {x}"));
+            let r = gravar(c, d, &u, &e, &lido).unwrap();
+            let cat =
+                |codigo: &str| p.resumo.categorias.iter().find(|x| x.codigo == codigo).map_or(0, |x| x.quantidade);
+            let depois = (
+                conta("SELECT COUNT(*) FROM produto"),
+                conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                conta("SELECT COUNT(*) FROM pessoa WHERE cliente = 1"),
+                conta("SELECT COUNT(*) FROM pessoa WHERE fornecedor = 1"),
+                conta("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"),
+            );
+            let abertas: i64 = p.resumo.pendencias_por_motivo.iter().map(|m| m.ja_abertas).sum();
+            let anunciado = (
+                cat("loja.nova") + cat("forn.nova") + cat("forn.nova_codigo_repetido"),
+                cat("forn.nova") + cat("forn.ja_pelo_gtin_liga"),
+                cat("cliente.novo"),
+                cat("fornecedor.novo") + cat("fornecedor.novo_implicito"),
+                p.resumo.vao_para_pendencias - abertas,
+            );
+            let feito =
+                (depois.0 - antes.0, depois.1 - antes.1, depois.2 - antes.2, depois.3 - antes.3, depois.4 - antes.4);
+            if anunciado != feito {
+                erros.push(format!("{n:04b}: anunciado (peças, vínculos, clientes, fornecedores, pendências) {anunciado:?}, feito {feito:?}"));
+            }
+            if p.resumo != r.resumo {
+                erros.push(format!("{n:04b}: o resumo da prévia e o da importação diferem"));
+            }
+            let mut ganharam_gtin = std::collections::BTreeSet::new();
+            let mut mudaram = std::collections::BTreeSet::new();
+            for (i, pid) in existentes.iter().enumerate() {
+                if codigos_de(pid).difference(&antes_codigos[i]).next().is_some() {
+                    ganharam_gtin.insert(pid.clone());
+                    mudaram.insert(pid.clone());
+                }
+                if vinculos_de(pid) > antes_vinculos[i] {
+                    mudaram.insert(pid.clone());
+                }
+            }
+            let auditados: std::collections::BTreeSet<String> = c
+                .prepare("SELECT entidade_id FROM auditoria WHERE acao = 'produto.gtin_importado'")
+                .unwrap()
+                .query_map([], |l| l.get(0))
+                .unwrap()
+                .map(|x| x.unwrap())
+                .collect();
+            let linhas = conta("SELECT COUNT(*) FROM auditoria WHERE acao = 'produto.gtin_importado'");
+            if auditados != ganharam_gtin || linhas != ganharam_gtin.len() as i64 {
+                erros.push(format!("{n:04b}: auditoria do GTIN {auditados:?} ({linhas} linhas), peças que ganharam GTIN {ganharam_gtin:?}"));
+            }
+            if p.resumo.pecas_que_mudam != mudaram.len() as i64 {
+                erros.push(format!(
+                    "{n:04b}: peças que mudam: anunciado {}, no banco {}",
+                    p.resumo.pecas_que_mudam,
+                    mudaram.len()
+                ));
+            }
+            // O plano: o K2 acha pelo GTIN a peça que o K1 cria na MESMA importação
+            // (como na gravação item a item de antes) e o código K2 é ligado a ela.
+            if e.pecas_fornecedor {
+                let k = conta("SELECT COUNT(*) FROM produto WHERE nome = 'PECA K'");
+                let k2 = conta("SELECT COUNT(*) FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id WHERE f.codigo = 'K2' AND p.nome = 'PECA K'");
+                if (k, k2) != (1, 1) {
+                    erros.push(format!(
+                        "{n:04b}: o K2 não achou a peça do K1 pelo plano: {k} peças PECA K, {k2} vínculo do K2"
+                    ));
+                }
+            }
+            if e.pecas_fornecedor && p.resumo.pecas_desativadas != 1 {
+                erros.push(format!("{n:04b}: a peça desativada achada pelo GTIN não foi anunciada"));
+            }
+        }
+        assert!(erros.is_empty(), "{}", erros.join("\n"));
     }
 
     /// Fornecedor implícito (achado da preparação de 12/11): as 16 combinações
