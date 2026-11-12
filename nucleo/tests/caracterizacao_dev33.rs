@@ -1119,3 +1119,48 @@ fn a07_peca_desativada_tem_campo_proprio() {
     assert!(r["erro"].as_str().unwrap_or("").contains("ROLAMENTO DESATIVADO"), "{r}");
     assert_eq!(situacao_da_pendencia(&l, &fag), "pendente");
 }
+
+/// E10 (passo 6.5), caracterização: mudanças que hoje não deixam rastro na
+/// auditoria. Cada caso conta as linhas da auditoria antes e depois da ação
+/// feita pelo comando, como a tela faz. Hoje os três ficam sem registro.
+/// Os outros casos do E10 (encomenda que volta para "falta pedir", chegada
+/// automática pela compra, reabrir fechamento de comissão) ficam para o pedido
+/// da 6.5, com o preparo próprio de cada um.
+#[test]
+#[ignore = "caracterização E10 (6.5): estas mudanças não entram na auditoria hoje"]
+fn e10_mudancas_sem_registro_na_auditoria() {
+    let mut l = Loja::nova("e10");
+    l.abrir_caixa();
+    let auditoria = |l: &Loja| l.numero("SELECT COUNT(*) FROM auditoria");
+    let mut erros = Vec::new();
+
+    let antes = auditoria(&l);
+    l.ok("unidade_salvar", json!({ "sigla": "FDZ", "descricao": "Fardo com 12", "fracionada": false }));
+    if auditoria(&l) == antes {
+        erros.push("unidade nova (unidade_salvar) não entra na auditoria");
+    }
+
+    let antes = auditoria(&l);
+    l.ok("categoria_salvar", json!({ "nome": "Combustível", "tipo": "despesa", "ativo": true }));
+    if auditoria(&l) == antes {
+        erros.push("categoria salva (categoria_salvar) não entra na auditoria");
+    }
+
+    let dono = l.pessoa("cliente", "Carlos");
+    let os = l.ok(
+        "os_salvar",
+        json!({ "clienteId": dono, "placa": "ABC1D23", "veiculo": "Gol G5", "defeito": "Barulho",
+                "itens": [{ "tipo": "servico", "descricao": "Revisão", "preco": "50" }] }),
+    );
+    let id = os["id"].as_str().expect("id da OS").to_string();
+    let antes = auditoria(&l);
+    l.ok(
+        "os_salvar",
+        json!({ "id": id, "clienteId": dono, "placa": "ABC1D23", "veiculo": "Gol G5", "defeito": "Barulho e vibração",
+                "itens": [{ "tipo": "servico", "descricao": "Revisão completa", "preco": "80" }] }),
+    );
+    if auditoria(&l) == antes {
+        erros.push("alteração de OS já salva (os_salvar com id) não entra na auditoria");
+    }
+    assert!(erros.is_empty(), "{}", erros.join("\n"));
+}
