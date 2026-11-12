@@ -977,9 +977,18 @@ pub struct PendenciaResolvida {
     pub pendentes: i64,
 }
 
+/// Quantas pendências de identificação estão abertas; 0 se a leitura falhar
+/// (como sempre foi: o selo do menu e a medição usam assim). O aviso da Início
+/// usa `contar_pendencias_ou_erro`, que não esconde a falha (A13).
 pub fn contar_pendencias(conn: &Connection) -> i64 {
-    conn.query_row("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'", [], |l| l.get(0))
-        .unwrap_or(0)
+    contar_pendencias_ou_erro(conn).unwrap_or(0)
+}
+
+/// A13: a contagem com a falha de leitura como erro (antes ela virava zero, e o
+/// aviso da Início sumia sem motivo).
+pub fn contar_pendencias_ou_erro(conn: &Connection) -> Resultado<i64> {
+    Ok(conn
+        .query_row("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'", [], |l| l.get(0))?)
 }
 
 fn motivo_legivel(motivo: &str) -> &'static str {

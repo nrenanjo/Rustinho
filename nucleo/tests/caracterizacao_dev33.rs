@@ -960,7 +960,6 @@ fn d04_gtin_repetido_em_produto_gtin_bloqueia_a_etiqueta() {
 /// A13 — uma falha ao contar as pendências não vira "zero pendências": o
 /// aviso continua na Início, dizendo que a contagem falhou.
 #[test]
-#[ignore = "caracterização A13: a falha ao contar as pendências vira zero e o aviso some em 310cee0; passa no item A13 da fase 4"]
 fn a13_falha_na_contagem_aparece_no_aviso() {
     let mut l = loja("a13");
     importar_so_fornecedor(&mut l);

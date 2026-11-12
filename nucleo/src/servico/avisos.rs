@@ -415,13 +415,23 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
 
     // Pendências persistentes de identificação XML (Fase 4.D): ficam visíveis
     // na tela inicial até todas as associações serem salvas.
-    let xml_pendentes = crate::importar::contar_pendencias(conn);
-    if xml_pendentes > 0 {
+    // A13: uma falha ao contar não vira "zero pendências": o aviso continua,
+    // dizendo que não deu para conferir, e o detalhe vai para o registro técnico.
+    let xml_pendentes = crate::importar::contar_pendencias_ou_erro(conn);
+    if let Err(e) = &xml_pendentes {
+        crate::registro::anotar(&format!("contagem das pendências de identificação XML: {e}"));
+    }
+    let texto_xml = match xml_pendentes {
+        Ok(0) => None,
+        Ok(n) => Some(format!("{} aguardando associação com peças", plural(n, "item de XML", "itens de XML"))),
+        Err(_) => Some("não foi possível conferir as pendências agora".to_string()),
+    };
+    if let Some(texto) = texto_xml {
         let mut a = Aviso::simples(
             "xml_pendencias",
             &hoje,
             "Pendências de identificação XML".into(),
-            format!("{} aguardando associação com peças", plural(xml_pendentes, "item de XML", "itens de XML")),
+            texto,
             "associe a uma peça existente ou cadastre como peça nova".into(),
             "pecas",
         )
