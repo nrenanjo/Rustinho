@@ -202,7 +202,6 @@ fn pend37_gerente_descarta_pendencia_com_motivo() {
 /// PEND-40 — a busca por código original pega as 5 primeiras peças do índice
 /// ANTES de filtrar: a peça certa (a 6ª) some e o item fica "sem vínculo".
 #[test]
-#[ignore = "caracterização PEND-40: LIMIT 5 antes do filtro em 4b253c6; passa no passo 4.1"]
 fn pend40_sexto_candidato_nao_some() {
     let mut l = loja("pend40");
     // Cinco peças que têm o código no índice de busca sem ser o código original

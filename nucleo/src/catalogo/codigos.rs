@@ -321,16 +321,20 @@ pub(crate) fn vinculo_do_fornecedor(
         .optional()?)
 }
 
+/// No máximo quantos candidatos por código original a compra mostra (a
+/// partir de 2, é ambíguo e vira pendência).
+const CANDIDATOS_MAXIMOS: usize = 5;
+
 /// As peças cujo código original ou um equivalente é este código (forma
-/// compacta), de qualquer fornecedor. Como antes, olha só as 5 primeiras peças
-/// do índice que têm o código e filtra depois: a peça certa pode ficar de fora
-/// (PEND-40, que o passo 4.1 corrige; a caracterização continua falhando).
+/// compacta), de qualquer fornecedor. PEND-40: filtra **antes** de limitar.
+/// Antes, olhava só as 5 primeiras peças do índice que tinham o código e
+/// filtrava depois: a peça certa podia ficar de fora (falso "sem vínculo") ou
+/// sobrar uma só (falso "único").
 pub(crate) fn candidatos_por_codigo_original(conn: &Connection, compacto: &str) -> Resultado<Vec<String>> {
     let mut c = conn.prepare_cached(
         "SELECT p.id, p.codigo_original FROM produto p
           WHERE instr(p.codigos, ' ' || ?1 || ' ') > 0
-          ORDER BY p.id
-          LIMIT 5",
+          ORDER BY p.id",
     )?;
     let linhas: Vec<(String, String)> =
         c.query_map([compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
@@ -350,6 +354,9 @@ pub(crate) fn candidatos_por_codigo_original(conn: &Connection, compacto: &str) 
             if tem_equiv {
                 candidatos.push(pid);
             }
+        }
+        if candidatos.len() == CANDIDATOS_MAXIMOS {
+            break;
         }
     }
     Ok(candidatos)
