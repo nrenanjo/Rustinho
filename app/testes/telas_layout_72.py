@@ -248,7 +248,9 @@ def main():
                 if abaixo:
                     r = abaixo[-1]
                     x, y = pt(r[0] + (r[2] - min(r[2], r[4])) / 2, r[1])
-                    razao, fundo, frente = medir_contraste(foto, x, y, min(r[2], r[4]), min(r[3], r[5]), folga=1)
+                    # Sem folga: as barras terminam logo acima do número, e um pixel
+                    # delas no retângulo mediria o contraste das barras, não o do texto.
+                    razao, fundo, frente = medir_contraste(foto, x, y, min(r[2], r[4]), min(r[3], r[5]), folga=0)
                     conferir("M1", "Etiquetas (AMOLED): o número da prévia tem contraste >= 4,5:1", razao >= 4.5,
                              f"\"{r[7]}\": {razao:.2f}:1 (frente {hx(frente)} sobre {hx(fundo)})")
                 else:
