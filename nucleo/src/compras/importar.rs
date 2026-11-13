@@ -2554,7 +2554,7 @@ mod testes {
                 f.precos[0].preco = "10,00".into();
                 produtos::salvar(c, d, &u, &f).unwrap()
             };
-            let p1 = peca("PECA P1", &g1, "");
+            peca("PECA P1", &g1, "");
             let p2 = peca("PECA P2", &g2, "");
             let p3 = peca("PECA P3 DESATIVADA", &g3, "");
             peca("PECA MESMA DESCRICAO", "", "");
