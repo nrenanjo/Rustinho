@@ -35,6 +35,9 @@ FocusScope {
     property bool carregando: false
     property int pendenciasXml: 0
     property bool buscou: false
+    // Para os testes das telas (--textos-da-tela): o texto da busca cujo
+    // resultado está na lista.
+    property string textoDaLista: ""
 
     function atualizarPendenciasXml() {
         const p = Api.chamar("xml_pendencias_listar")
@@ -53,8 +56,11 @@ FocusScope {
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < pecas.count
                          ? pecas.get(lista.currentIndex).id : ""
         const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
+        const texto = busca.texto
+        const comeco = Date.now()
         const r = parte(0, Math.min(ate, 1000), "")
         if (r.ok) {
+            textoDaLista = texto
             pecas.clear()
             lidas = 0
             continuar = ""
@@ -82,6 +88,15 @@ FocusScope {
             janela.avisar(r.erro, "erro")
         }
         buscou = true
+        anotarBusca(comeco, texto)
+    }
+
+    // Para os testes das telas (--textos-da-tela): quando a lista de uma busca
+    // ficou pronta e quanto levou desde o pedido (TESTE_BUSCA_PRONTA:<quando,
+    // em ms desde 1970>:<ms>:<texto>).
+    function anotarBusca(comeco, texto) {
+        if (!!janela && janela.textosDaTela === true)
+            console.info("TESTE_BUSCA_PRONTA:" + Date.now() + ":" + (Date.now() - comeco) + ":" + texto)
     }
 
     // Uma parte da lista, depois das que já vieram (na ordem da lista inteira).
@@ -378,6 +393,25 @@ FocusScope {
     Item {
         readonly property string nomeAcessivel: "TESTE_LISTA:" + pecas.count + ":" + tela.diferentes + ":"
                                                 + (tela.temMais ? 1 : 0) + ":" + lista.currentIndex
+    }
+    // O texto cuja busca está na lista (roteiro telas_busca_rapida.py, 7.6).
+    Item {
+        readonly property string nomeAcessivel: "TESTE_BUSCA:" + tela.textoDaLista
+    }
+    // H09 (7.6), só com --textos-da-tela: um relógio de 16 ms anota no registro
+    // cada pausa da linha da janela maior que 50 ms (TESTE_PAUSA:<quando, em ms
+    // desde 1970>:<pausa em ms>). O roteiro da digitação rápida lê essas linhas.
+    Timer {
+        property real ultimo: 0
+        interval: 16
+        repeat: true
+        running: !!tela.janela && tela.janela.textosDaTela === true
+        onTriggered: {
+            const agora = Date.now()
+            if (ultimo > 0 && agora - ultimo > 50)
+                console.info("TESTE_PAUSA:" + agora + ":" + (agora - ultimo))
+            ultimo = agora
+        }
     }
 
     StackView.onActivated: {
