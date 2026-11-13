@@ -202,6 +202,13 @@ fn registrar_linhas(conn: &Connection, tabela: &str) -> Resultado<()> {
 /// marca `sync_inicio:<tabela>` fica na configuração deste caixa, junto, numa
 /// gravação só). O mesmo dado já gravado nos outros caixas com outro id é
 /// reconhecido lá pela chave natural (veja `dados::esquema::CHAVES_NATURAIS`).
+///
+/// R-1 (revisão cruzada de 13/11, 7.5 × 5.2): se a tabela alimenta um
+/// derivado (o `produto_gtin` alimenta o índice da peça), o derivado de todas
+/// as linhas donas é refeito junto, uma vez. Antes da 5.2 a troca
+/// sobrescrevia o índice da peça com o do outro caixa (D01): o GTIN só deste
+/// caixa ficava fora dele, e com a 7.5 o pedaço do GTIN só acha pelo índice.
+/// Refazer só mexe nas colunas derivadas (não viajam): não grava alteração.
 fn registrar_as_que_passaram_a_viajar(conn: &Connection) -> Resultado<()> {
     for tabela in crate::dados::esquema::PASSARAM_A_VIAJAR {
         let marca = format!("sync_inicio:{tabela}");
@@ -209,7 +216,12 @@ fn registrar_as_que_passaram_a_viajar(conn: &Connection) -> Resultado<()> {
             continue;
         }
         conn.execute_batch("SAVEPOINT passou_a_viajar")?;
-        let r = registrar_linhas(conn, tabela).and_then(|_| config::gravar(conn, &marca, &tempo::agora()));
+        let r = registrar_linhas(conn, tabela)
+            .and_then(|_| match crate::dados::esquema::alimenta(tabela) {
+                Some((_, derivado)) => super::aplicacao::refazer_derivado_de_todas(conn, derivado).map(|_| ()),
+                None => Ok(()),
+            })
+            .and_then(|_| config::gravar(conn, &marca, &tempo::agora()));
         match r {
             Ok(()) => conn.execute_batch("RELEASE passou_a_viajar")?,
             Err(e) => {

@@ -1232,6 +1232,11 @@ mod testes {
     /// registros e os mesmos valores nas colunas que já existiam; e o log da
     /// troca de dados não ganha nada (o que a 0026 grava não é alteração da
     /// loja e não vai para os outros caixas).
+    ///
+    /// Menos as colunas derivadas da peça (`busca`, `codigos`): a loja de teste
+    /// já trocava dados antes da 5.2 (tem a marca `sync_inicio`, sem a
+    /// `sync_inicio:produto_gtin`), e a primeira abertura com a 5.2 as refaz
+    /// (R-1). Elas ficam as que o dono grava (refazer de novo não muda nada).
     #[test]
     fn m26_nao_muda_o_que_existia() {
         for estrutura in [25, 24] {
@@ -1239,7 +1244,7 @@ mod testes {
             let db = loja_antiga(&pasta, estrutura);
             let (colunas, antes) = {
                 let c = Connection::open(&db).unwrap();
-                let colunas = colunas_de(&c);
+                let colunas = sem_as_derivadas(colunas_de(&c));
                 let antes = conteudo(&c, &colunas);
                 (colunas, antes)
             };
@@ -1254,9 +1259,31 @@ mod testes {
                 assert_eq!(antes[*t], depois[*t], "a tabela {t} mudou com a 0026 (da estrutura {estrutura})");
             }
             nome_normalizado_preenchido(&b.conn);
+            let derivadas = |c: &Connection| -> Vec<(String, String)> {
+                c.prepare("SELECT busca, codigos FROM produto ORDER BY rowid")
+                    .unwrap()
+                    .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            let ao_abrir = derivadas(&b.conn);
+            crate::catalogo::codigos::refazer_todos_os_indices(&b.conn).unwrap();
+            assert_eq!(derivadas(&b.conn), ao_abrir, "a primeira abertura com a 5.2 não refez o índice (R-1)");
             drop(b);
             let _ = std::fs::remove_dir_all(&pasta);
         }
+    }
+
+    /// As colunas de cada tabela, menos as derivadas (`dados::esquema::COLUNAS`).
+    fn sem_as_derivadas(mut colunas: BTreeMap<String, Vec<String>>) -> BTreeMap<String, Vec<String>> {
+        use crate::dados::esquema::{ClasseDaColuna, COLUNAS};
+        for (t, cols) in colunas.iter_mut() {
+            cols.retain(|c| {
+                !COLUNAS.iter().any(|x| x.tabela == t && x.nome == c && matches!(x.classe, ClasseDaColuna::Derivada(_)))
+            });
+        }
+        colunas
     }
 
     /// B04: a 0026 preenche o nome sem acento de todas as peças que já

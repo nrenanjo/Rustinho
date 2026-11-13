@@ -23,7 +23,9 @@
 
 use rusqlite::Connection;
 use rustinho_nucleo::banco::Banco;
+use rustinho_nucleo::catalogo::codigos::GtinFicha;
 use rustinho_nucleo::sync::{self, Alteracao};
+use rustinho_nucleo::{busca, faixas, produtos, usuarios};
 use serde_json::{json, Value};
 
 fn alteracao(id: &str, dados: Value) -> Alteracao {
@@ -130,4 +132,60 @@ fn coluna_que_o_caixa_nao_tem_e_ignorada_ao_receber() {
     assert_eq!(nome, "Correia do caixa novo");
     let pendentes: i64 = um(&b.conn, "SELECT COUNT(*) FROM sync_pendencia");
     assert_eq!(pendentes, 0, "nada ficou pendente");
+}
+
+/// EAN-13 válido a partir de 12 dígitos.
+fn ean13(base: u64) -> String {
+    let s = format!("{base:012}");
+    let soma: u32 = s.chars().enumerate().map(|(i, c)| c.to_digit(10).unwrap() * if i % 2 == 0 { 1 } else { 3 }).sum();
+    format!("{s}{}", (10 - soma % 10) % 10)
+}
+
+/// R-1 (revisão cruzada de 13/11, 7.5 × 5.2; sonda S7): numa loja que já
+/// trocava dados antes da 5.2, a troca sobrescrevia o índice da peça com o do
+/// outro caixa (D01), e o GTIN só deste caixa ficava fora de `produto.codigos`.
+/// Com a 7.5 (o GTIN por igualdade), o pedaço de um GTIN acha a peça só pelo
+/// índice. Na primeira abertura com a 5.2 (quando a marca
+/// `sync_inicio:produto_gtin` ainda não existe), o índice de todas as peças é
+/// refeito, sem gravar alteração da troca. Em `da963e1`: o pedaço não acha.
+#[test]
+fn indice_velho_de_antes_da_5_2_refeito_na_primeira_abertura() {
+    let pasta = std::env::temp_dir().join(format!("rustinho-r1-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let db = pasta.join("rustinho.db");
+    let gtin = ean13(789_555_123_456);
+    let id = {
+        let b = Banco::abrir(&db).unwrap();
+        faixas::assumir(&b.conn).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        let mut f = produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Rolamento traseiro".into();
+        f.custo = "10".into();
+        f.gtins = vec![GtinFicha { gtin: gtin.clone(), tipo: "comercial".into(), origem: "manual".into() }];
+        let id = produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        // O índice como a troca de antes da 5.2 o deixava (D01): o do outro
+        // caixa, que não tinha este GTIN; e a loja ainda sem a marca da 5.2.
+        b.conn
+            .execute(
+                "UPDATE produto SET busca = 'rolamento traseiro', codigos = ' ' || codigo || ' ' WHERE id = ?1",
+                [&id],
+            )
+            .unwrap();
+        b.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+        id
+    };
+    let alteracoes_da_peca =
+        |c: &Connection| -> i64 { um(c, "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto'") };
+    let antes = alteracoes_da_peca(&Connection::open(&db).unwrap());
+
+    let b = Banco::abrir(&db).unwrap();
+    let pedaco = &gtin[4..12];
+    let acha = |texto: &str| busca::buscar(&b.conn, texto, true, 50).unwrap().iter().any(|p| p.id == id);
+    assert!(acha(&gtin), "o GTIN inteiro acha (por igualdade)");
+    assert!(acha(pedaco), "o pedaço {pedaco} do GTIN {gtin} não acha a peça: o índice velho ficou");
+    assert_eq!(alteracoes_da_peca(&b.conn), antes, "refazer o índice gravou alteração da troca");
+    let marca: i64 = um(&b.conn, "SELECT COUNT(*) FROM config WHERE chave = 'sync_inicio:produto_gtin'");
+    assert_eq!(marca, 1, "a marca da 5.2 ficou");
+    drop(b);
+    let _ = std::fs::remove_dir_all(&pasta);
 }
