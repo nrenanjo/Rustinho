@@ -38,6 +38,14 @@ FocusScope {
     // Para os testes das telas (--textos-da-tela): o texto da busca cujo
     // resultado está na lista.
     property string textoDaLista: ""
+    // H09 (7.6): a busca digitada roda fora da linha da janela, pelo canal
+    // desta tela (a última vence: a resposta de uma busca velha não chega).
+    readonly property string canal: "pecas-" + Api.novaChave()
+    // Uma busca pedida e ainda sem resposta.
+    property bool buscando: false
+    // Enter com a busca a caminho: abre a peça quando ela chegar (antes, a
+    // busca segurava a janela, e o Enter esperava por ela).
+    property bool abrirAoChegar: false
 
     function atualizarPendenciasXml() {
         const p = Api.chamar("xml_pendencias_listar")
@@ -45,14 +53,43 @@ FocusScope {
             pendenciasXml = p.dados.length
     }
 
+    // A busca digitada (e "Mostrar inativas"): fora da linha da janela.
     function novaBusca() {
-        buscar(false)
+        const texto = busca.texto
+        const comeco = Date.now()
+        buscando = true
+        Api.consultar(canal, "produtos_buscar", {
+            texto: texto,
+            inativas: inativas.checked,
+            limite: tamanhoParte,
+            deslocamento: 0
+        }, r => {
+            buscando = false
+            mostrar(r, texto, "", tamanhoParte)
+            anotarBusca(comeco, texto)
+            if (abrirAoChegar) {
+                abrirAoChegar = false
+                abrirPeca(lista.currentIndex)
+            }
+        })
+    }
+
+    function confirmar() {
+        if (buscando)
+            abrirAoChegar = true
+        else
+            abrirPeca(lista.currentIndex)
     }
 
     // A lista do começo. Com manterSelecao (ao voltar de uma peça), lê de novo
     // até onde a pessoa já tinha rolado e fica na mesma peça, se ela ainda
     // estiver na lista.
     function buscar(manterSelecao) {
+        // Pelo caminho de sempre (ao voltar de uma peça, depois de importar):
+        // esta leitura é a mais nova, e a busca que estava a caminho não vale.
+        Api.esquecer(canal)
+        buscando = false
+        abrirAoChegar = false
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < pecas.count
                          ? pecas.get(lista.currentIndex).id : ""
         const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
@@ -134,7 +171,8 @@ FocusScope {
 
     // A próxima parte, no fim da lista. Devolve se veio.
     function maisUmaParte(quantas) {
-        if (!temMais || carregando)
+        // Com uma busca nova a caminho, a lista na tela já é velha.
+        if (!temMais || carregando || buscando)
             return false
         carregando = true
         const r = parte(lidas, quantas || tamanhoParte, continuar)
@@ -258,7 +296,7 @@ FocusScope {
                 dica: Tema.estreito ? "Código, nome ou carro" : "Qualquer código, nome, modelo, marca ou carro (ex.: 8PK1515, pastilha gol 2015)"
                 Layout.fillWidth: true
                 onEditado: espera.restart()
-                onConfirmado: tela.abrirPeca(lista.currentIndex)
+                onConfirmado: tela.confirmar()
             }
             Marcar {
                 id: inativas
@@ -432,6 +470,7 @@ FocusScope {
     Component.onCompleted: {
         busca.texto = buscaInicial
     }
+    Component.onDestruction: Api.esquecer(canal)
 
     ImportarCadastros {
         id: importador
