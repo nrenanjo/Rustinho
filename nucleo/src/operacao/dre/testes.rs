@@ -188,7 +188,8 @@ fn dre_cenario_manual() {
     let l_rl = d.linhas.iter().find(|x| x.id == "receita_liquida").unwrap();
     assert_eq!((l_rl.valor.as_str(), l_rl.subtotal), ("300,00", true));
     let l_cmv = d.linhas.iter().find(|x| x.id == "cmv").unwrap();
-    assert_eq!((l_cmv.v, l_cmv.percentual.as_str()), (-180_00, "-60%"));
+    // VIS33-12 (7.3): o % da dedução sem o sinal; o v continua com sinal.
+    assert_eq!((l_cmv.v, l_cmv.percentual.as_str()), (-180_00, "60%"));
     assert_eq!(d.linhas.last().unwrap().id, "resultado");
     assert_eq!(d.margem_bruta, "40%");
 }
@@ -635,3 +636,21 @@ fn e03_aviso_da_peca_sem_custo_conforme_o_calculo() {
     assert!(p.texto.contains("R$ 50,00"), "{}", p.texto);
 }
 
+/// VIS33-12 (passo 7.3): nas linhas de dedução ("(−) …"), o valor e o % saem
+/// sem o sinal (o "(−)" do nome já diz que subtrai); o `v` continua com sinal
+/// (a conta e a cor da tela não mudam). Antes: "(−) CMV … −60% … R$ −180,00".
+#[test]
+fn vis33_12_deducao_sem_sinal_duplo() {
+    let l = cenario();
+    let d = l.dre("mes");
+    let cmv = d.linhas.iter().find(|x| x.id == "cmv").unwrap();
+    assert_eq!((cmv.valor.as_str(), cmv.percentual.as_str(), cmv.v), ("180,00", "60%", -180_00));
+    let desc = d.linhas.iter().find(|x| x.id == "descontos").unwrap();
+    assert_eq!((desc.valor.as_str(), desc.v), ("20,00", -20_00));
+    for linha in d.linhas.iter().filter(|x| x.nome.starts_with("(−)")) {
+        assert!(!linha.valor.starts_with('-') || linha.v > 0, "{}: {}", linha.id, linha.valor);
+    }
+    // Os subtotais continuam com o sinal (o resultado negativo é negativo).
+    let res = d.linhas.iter().find(|x| x.id == "resultado").unwrap();
+    assert_eq!(res.valor, "-878,00");
+}

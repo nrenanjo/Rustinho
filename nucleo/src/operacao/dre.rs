@@ -1243,12 +1243,19 @@ fn montar_linhas(n: &Numeros, incluidos: &[Lanc], vendedor: bool) -> Vec<LinhaDr
             let bruto = n.valor(id);
             let subtotal = subtotais.contains(id);
             let v = if subtotal || positivas.contains(id) { bruto } else { -bruto };
+            // VIS33-12 (7.3): na dedução ("(−) …"), o valor e o % aparecem sem o
+            // sinal (o "(−)" do nome já subtrai); o `v` continua com sinal.
+            let mostrado = if subtotal || positivas.contains(id) { v } else { bruto };
             LinhaDre {
                 id: id.to_string(),
                 nome: nome.to_string(),
-                valor: dinheiro(v),
+                valor: dinheiro(mostrado),
                 v,
-                percentual: if *id == "receita_bruta" { String::new() } else { texto_pct(pct(v, n.receita_liquida)) },
+                percentual: if *id == "receita_bruta" {
+                    String::new()
+                } else {
+                    texto_pct(pct(mostrado, n.receita_liquida))
+                },
                 subtotal,
                 detalhavel: !subtotal && incluidos.iter().any(|l| l.linha == *id),
             }
