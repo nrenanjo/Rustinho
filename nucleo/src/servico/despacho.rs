@@ -26,8 +26,9 @@
 //!   outra nem faz `commit`.
 //! - A auditoria vai na mesma transação.
 //! - O comando que mexe no dinheiro ou no estoque de um registro que já existe
-//!   tem a marca [`DINHEIRO`], e a função de domínio dele chama o bloqueio de
-//!   registro comprovadamente inconsistente (`sync::exigir_editavel`, R-05).
+//!   tem a marca `dinheiro` ([`COMANDOS_DE_DINHEIRO`]), e a função de domínio
+//!   dele chama o bloqueio de registro comprovadamente inconsistente
+//!   (`sync::exigir_editavel`, R-05).
 //! - A leitura pesada da tela vai por conexão só de leitura (passo 7.6).
 //!
 //! Os módulos de domínio que ainda abrem a própria transação (backup, faixas,
@@ -42,13 +43,14 @@ use serde_json::Value;
 
 use crate::erro::Resultado;
 
-/// Marca `dinheiro` (contrato C5, R-05): os comandos que mexem no dinheiro ou
+/// Marca `dinheiro` (contrato C5, R-05; nome único no núcleo desde a RS-6, que
+/// o separou das colunas em centavos da troca de dados): os comandos que mexem no dinheiro ou
 /// no estoque de um registro que já existe, com a função de domínio que grava
 /// (`módulo::função`). O teste R-05 do serviço é gerado desta lista: o
 /// atendente chama a função, e a função chama o bloqueio de registro
 /// comprovadamente inconsistente, menos as lacunas conhecidas (E04), que
 /// ficam listadas no teste para a 6.3. Comando novo assim entra aqui.
-pub const DINHEIRO: &[(&str, &str)] = &[
+pub const COMANDOS_DE_DINHEIRO: &[(&str, &str)] = &[
     ("receber_baixar", "receber::receber"),
     ("recebimento_estornar", "receber::estornar"),
     ("conta_cancelar", "receber::cancelar_conta"),

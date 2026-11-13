@@ -3247,15 +3247,15 @@ mod testes {
     }
 
     /// R5-T9 · R5-10 (gerado da marca `dinheiro`, dev.3.3 passo 3.5; E04):
-    /// cada comando de `despacho::DINHEIRO` existe, o atendente dele chama a
-    /// função de domínio marcada, e a função chama o bloqueio de registro
+    /// cada comando de `despacho::COMANDOS_DE_DINHEIRO` existe, o atendente
+    /// dele chama a função de domínio marcada, e a função chama o bloqueio de registro
     /// inconsistente, menos as lacunas conhecidas, que ficam aqui até a 6.3
     /// (quando uma passar a chamar, tem de sair da lista). As 16 operações que
     /// a varredura conferia à mão até a 3.5 continuam marcadas: tirar a marca
     /// de uma delas faz o teste falhar.
     #[test]
     fn r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio() {
-        use crate::despacho::DINHEIRO;
+        use crate::despacho::COMANDOS_DE_DINHEIRO;
         const LACUNAS: &[&str] = &[
             "vendas::cancelar",
             "devolucoes::devolver",
@@ -3312,7 +3312,7 @@ mod testes {
             }
             resto[..fim].to_string()
         };
-        for (comando, funcao) in DINHEIRO {
+        for (comando, funcao) in COMANDOS_DE_DINHEIRO {
             assert!(
                 super::do_dominio(comando).is_some(),
                 "{comando} tem a marca dinheiro e não é comando de nenhum domínio"
@@ -3335,7 +3335,10 @@ mod testes {
             }
         }
         for f in CONFERIDAS_ATE_A_3_5.iter().chain(LACUNAS) {
-            assert!(DINHEIRO.iter().any(|(_, x)| x == f), "{f} perdeu a marca dinheiro em despacho::DINHEIRO");
+            assert!(
+                COMANDOS_DE_DINHEIRO.iter().any(|(_, x)| x == f),
+                "{f} perdeu a marca dinheiro em despacho::COMANDOS_DE_DINHEIRO"
+            );
         }
         // Controle: uma função de leitura não precisa (e a varredura sabe diferenciar).
         assert!(!corpo(include_str!("../operacao/receber.rs"), "pub fn previa(").contains("exigir_editavel"));
