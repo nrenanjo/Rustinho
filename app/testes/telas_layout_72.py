@@ -362,18 +362,14 @@ def main():
         # ---- M8: pendências XML no roxo ----
         if quer("M8"):
             pasta = nova(est, "roxo")
-            c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
-            forn = c.execute("SELECT id FROM pessoa WHERE documento = '11222333000181'").fetchone()
-            for i, desc in ((1, "PENDENCIA DE TESTE A"), (2, "PENDENCIA DE TESTE B")):
-                c.execute(
-                    "INSERT INTO xml_pendencia_identificacao (id, fornecedor_id, fornecedor_documento, fornecedor_nome,"
-                    " numero_nfe, emissao_nfe, codigo_fornecedor, codigo_compacto, descricao, descricao_compacta, unidade,"
-                    " motivo, situacao, criado_em) VALUES (?, ?, '11222333000181', 'FORNECEDOR DE TESTE', '1',"
-                    " '2026-11-01', ?, ?, ?, ?, 'PC', 'sem_vinculo', 'pendente', ?)",
-                    (f"m8-{i}", forn[0] if forn else None, f"COD-{i}", f"cod{i}", desc, desc.lower().replace(" ", ""),
-                     f"2026-11-1{i}T00:00:00Z"))
-            c.commit()
-            c.close()
+            # Pelo núcleo (os gatilhos do banco usam funções dele).
+            tema.por_fora(pasta, "".join(
+                "INSERT INTO xml_pendencia_identificacao (id, fornecedor_documento, fornecedor_nome, numero_nfe,"
+                " emissao_nfe, codigo_fornecedor, codigo_compacto, descricao, descricao_compacta, unidade, motivo,"
+                f" situacao, criado_em) VALUES ('m8-{i}', '11222333000181', 'FORNECEDOR DE TESTE', '1', '2026-11-01',"
+                f" 'COD-{i}', 'cod{i}', '{d}', '{d.lower().replace(' ', '')}', 'PC', 'sem_vinculo', 'pendente',"
+                f" '2026-11-1{i}T00:00:00Z');"
+                for i, d in ((1, "PENDENCIA DE TESTE A"), (2, "PENDENCIA DE TESTE B"))))
             rr = abrir(pasta, "TelaPecas", {"abrirPendenciasXml": True}, fotos, "m8_pendencias_roxo")
             logs.append(rr.saida)
             try:
@@ -405,12 +401,12 @@ def main():
         if quer("M10"):
             pasta = nova(est)
             c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
-            c.execute("UPDATE produto SET grade = 'GRADE-M10', variacao = '<i>P</i>' WHERE id = ?", (filtro,))
             outra = c.execute("SELECT id FROM produto WHERE id <> ? AND tipo = 'produto' AND ativo = 1 LIMIT 1",
                               (filtro,)).fetchone()[0]
-            c.execute("UPDATE produto SET grade = 'GRADE-M10', variacao = 'M' WHERE id = ?", (outra,))
-            c.commit()
             c.close()
+            # Pelo núcleo (os gatilhos do banco usam funções dele).
+            tema.por_fora(pasta, f"UPDATE produto SET grade = 'GRADE-M10', variacao = '<i>P</i>' WHERE id = '{filtro}';"
+                                 f"UPDATE produto SET grade = 'GRADE-M10', variacao = 'M' WHERE id = '{outra}';")
             rr = abrir(pasta, "TelaPeca", {"produtoId": filtro}, fotos, "m10_grade_escapada")
             logs.append(rr.saida)
             try:
@@ -429,16 +425,11 @@ def main():
         # ---- M11: o selo numérico fora da pílula; o aviso textual fica ----
         if quer("M11"):
             pasta = nova(est)
-            c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
-            for i in (1, 2):
-                c.execute(
-                    "INSERT INTO xml_pendencia_identificacao (id, fornecedor_documento, fornecedor_nome, numero_nfe,"
-                    " codigo_fornecedor, codigo_compacto, descricao, descricao_compacta, unidade, motivo, situacao,"
-                    " criado_em) VALUES (?, '11222333000181', 'FORNECEDOR DE TESTE', '1', ?, ?, ?, ?, 'PC',"
-                    " 'sem_vinculo', 'pendente', '2026-11-12T00:00:00Z')",
-                    (f"m11-{i}", f"S-{i}", f"s{i}", f"SELO {i}", f"selo{i}"))
-            c.commit()
-            c.close()
+            tema.por_fora(pasta, "".join(
+                "INSERT INTO xml_pendencia_identificacao (id, fornecedor_documento, fornecedor_nome, numero_nfe,"
+                " codigo_fornecedor, codigo_compacto, descricao, descricao_compacta, unidade, motivo, situacao,"
+                f" criado_em) VALUES ('m11-{i}', '11222333000181', 'FORNECEDOR DE TESTE', '1', 'S-{i}', 's{i}',"
+                f" 'SELO {i}', 'selo{i}', 'PC', 'sem_vinculo', 'pendente', '2026-11-12T00:00:00Z');" for i in (1, 2)))
             rr = abrir(pasta, "TelaInicio", {}, fotos, "m11_inicio_selo", tamanho=(1366, 768))
             logs.append(rr.saida)
             try:
