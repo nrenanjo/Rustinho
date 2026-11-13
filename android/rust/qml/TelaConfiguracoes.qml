@@ -1245,14 +1245,15 @@ FocusScope {
                                 width: linhaRef.width - 20
                                 spacing: 6
                                 Text {
-                                    text: "<b>" + linhaRef.modelData.oQue + "</b> (desde " + linhaRef.modelData.desde + ") aponta para "
-                                          + linhaRef.modelData.oQueFalta.toLowerCase() + " que "
+                                    // H10 (7.2): os dados vão escapados (o texto é formatado).
+                                    text: "<b>" + Tema.escapar(linhaRef.modelData.oQue) + "</b> (desde " + Tema.escapar(linhaRef.modelData.desde) + ") aponta para "
+                                          + Tema.escapar(linhaRef.modelData.oQueFalta.toLowerCase()) + " que "
                                           + (linhaRef.modelData.estado === "esperando" ? (linhaRef.modelData.atrasada ? "ainda não chegou (atrasada)" : "ainda não chegou")
                                              : linhaRef.modelData.estado === "apagado" ? "foi apagado"
-                                             : linhaRef.modelData.estado === "aceito" ? "não existe (aceito pelo gerente " + linhaRef.modelData.aceitaPor
-                                                                                      + " em " + linhaRef.modelData.aceitaEm + ": " + linhaRef.modelData.aceiteMotivo + ")"
+                                             : linhaRef.modelData.estado === "aceito" ? "não existe (aceito pelo gerente " + Tema.escapar(linhaRef.modelData.aceitaPor)
+                                                                                      + " em " + Tema.escapar(linhaRef.modelData.aceitaEm) + ": " + Tema.escapar(linhaRef.modelData.aceiteMotivo) + ")"
                                              : "não existe (comprovado)")
-                                          + ". " + linhaRef.modelData.acao
+                                          + ". " + Tema.escapar(linhaRef.modelData.acao)
                                     textFormat: Text.StyledText
                                     color: linhaRef.modelData.estado === "esperando" || linhaRef.modelData.estado === "aceito" ? Tema.tintaSuaveDaFaixa(linhaRef.par) : Tema.vermelhoDaFaixa(linhaRef.par)
                                     font.family: Tema.texto
@@ -1404,12 +1405,13 @@ FocusScope {
                                 width: linhaPend.width - 20
                                 spacing: 10
                                 Text {
-                                    text: "<b>" + linhaPend.modelData.textoMotivo + "</b> · " + linhaPend.modelData.oQue + " · "
-                                          + (linhaPend.modelData.lado === "nao_enviada" ? "não vai para " : "veio de ") + linhaPend.modelData.caixa
-                                          + (linhaPend.modelData.detalhe ? " · " + linhaPend.modelData.detalhe : "")
-                                          + (linhaPend.modelData.ultimoErro ? " · " + linhaPend.modelData.ultimoErro : "")
+                                    // H10 (7.2): os dados vão escapados (o texto é formatado).
+                                    text: "<b>" + Tema.escapar(linhaPend.modelData.textoMotivo) + "</b> · " + Tema.escapar(linhaPend.modelData.oQue) + " · "
+                                          + (linhaPend.modelData.lado === "nao_enviada" ? "não vai para " : "veio de ") + Tema.escapar(linhaPend.modelData.caixa)
+                                          + (linhaPend.modelData.detalhe ? " · " + Tema.escapar(linhaPend.modelData.detalhe) : "")
+                                          + (linhaPend.modelData.ultimoErro ? " · " + Tema.escapar(linhaPend.modelData.ultimoErro) : "")
                                           + (linhaPend.modelData.estado === "arquivada_manual"
-                                             ? " · arquivada por " + linhaPend.modelData.arquivadaPor + ": " + linhaPend.modelData.arquivadaMotivo : "")
+                                             ? " · arquivada por " + Tema.escapar(linhaPend.modelData.arquivadaPor) + ": " + Tema.escapar(linhaPend.modelData.arquivadaMotivo) : "")
                                     textFormat: Text.StyledText
                                     color: linhaPend.modelData.estado === "arquivada_manual" ? Tema.tintaSuaveDaFaixa(linhaPend.par) : Tema.tintaDaFaixa(linhaPend.par)
                                     font.family: Tema.texto
@@ -2096,12 +2098,13 @@ FocusScope {
                                 x: 10
                                 y: 5
                                 width: faixaDaLista9.width - 20
-                                text: "<b>" + modelData.oQue + "</b> · " + (modelData.lado === "nao_enviada" ? "não ia para " : "veio de ") + modelData.caixa
-                                      + " · " + modelData.textoMotivo + " · desde " + modelData.criadoEm + " · "
+                                // H10 (7.2): os dados vão escapados (o texto é formatado).
+                                text: "<b>" + Tema.escapar(modelData.oQue) + "</b> · " + (modelData.lado === "nao_enviada" ? "não ia para " : "veio de ") + Tema.escapar(modelData.caixa)
+                                      + " · " + Tema.escapar(modelData.textoMotivo) + " · desde " + Tema.escapar(modelData.criadoEm) + " · "
                                       + (modelData.estado === "arquivada_manual"
-                                         ? "arquivada em " + modelData.encerradaEm + " por " + (modelData.arquivadaPor || "gerente") + ": " + modelData.arquivadaMotivo
-                                         : "resolvida em " + modelData.encerradaEm)
-                                      + (modelData.tentativas > 0 ? " · " + modelData.tentativas + (modelData.tentativas === 1 ? " tentativa" : " tentativas") : "")
+                                         ? "arquivada em " + Tema.escapar(modelData.encerradaEm) + " por " + Tema.escapar(modelData.arquivadaPor || "gerente") + ": " + Tema.escapar(modelData.arquivadaMotivo)
+                                         : "resolvida em " + Tema.escapar(modelData.encerradaEm))
+                                      + (modelData.tentativas > 0 ? " · " + Tema.escapar(modelData.tentativas) + (modelData.tentativas === 1 ? " tentativa" : " tentativas") : "")
                                 textFormat: Text.StyledText
                                 color: modelData.estado === "arquivada_manual" ? Tema.tintaSuaveDaFaixa(faixaDaLista9.par) : Tema.tintaDaFaixa(faixaDaLista9.par)
                                 font.family: Tema.texto
@@ -2156,8 +2159,9 @@ FocusScope {
                                 width: faixaDaLista10.width - 20
                                 spacing: 1
                                 Text {
-                                    text: "<b>" + modelData.quando + "</b> · " + (modelData.usuario || "Sistema")
-                                          + (modelData.caixa ? " (" + modelData.caixa + ")" : "") + " " + modelData.descricao
+                                    // H10 (7.2): os dados vão escapados (o texto é formatado).
+                                    text: "<b>" + Tema.escapar(modelData.quando) + "</b> · " + Tema.escapar(modelData.usuario || "Sistema")
+                                          + (modelData.caixa ? " (" + Tema.escapar(modelData.caixa) + ")" : "") + " " + Tema.escapar(modelData.descricao)
                                     textFormat: Text.StyledText
                                     color: Tema.tintaDaFaixa(faixaDaLista10.par)
                                     font.family: Tema.texto

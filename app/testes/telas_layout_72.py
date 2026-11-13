@@ -56,7 +56,6 @@ CELULAR = (360, 780)
 # Item → (passo). Cada correção da 7.2 tira o seu.
 ESPERADAS = {
     "M5": "VIS33-05 (\"Salvar como orçamento\" cortado em 1366 × 768), passo 7.2",
-    "M10": "H10 (texto formatado com dados sem escapar), passo 7.2",
 }
 
 
