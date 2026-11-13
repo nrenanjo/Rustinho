@@ -296,13 +296,56 @@ pub(super) fn ler_alteracao(l: &rusqlite::Row) -> rusqlite::Result<Alteracao> {
     })
 }
 
-/// Alterações deste banco depois da número `desde`.
+/// Alterações deste banco depois da número `desde`, no máximo `limite`.
+///
+/// Passo 5.4 (PEND-35): a lista termina no fim de uma operação comercial (as
+/// alterações gravadas numa mesma transação: a venda com itens, pagamentos e
+/// movimentos). Quem recebe aplica cada resposta numa transação; se ela
+/// cortasse uma venda no meio, o outro caixa a mostraria pela metade até a
+/// resposta seguinte. A lista nunca passa do `limite` (o achado do t2_5:
+/// cada resposta segura a escrita de quem recebe): a operação que não cabe
+/// inteira fica para a resposta seguinte. Uma operação sozinha maior que o
+/// `limite` vai em partes, como antes (decisão D54-2).
 pub fn alteracoes_desde(conn: &Connection, desde: i64, limite: i64) -> Resultado<(Vec<Alteracao>, bool)> {
     let mut c = conn
         .prepare_cached(&format!("SELECT {COLUNAS_ALTERACAO} FROM alteracao WHERE seq > ?1 ORDER BY seq LIMIT ?2"))?;
-    let lista: Vec<Alteracao> = c.query_map(params![desde, limite + 1], ler_alteracao)?.collect::<Result<_, _>>()?;
+    let mut lista: Vec<Alteracao> =
+        c.query_map(params![desde, limite + 1], ler_alteracao)?.collect::<Result<_, _>>()?;
     let tem_mais = lista.len() as i64 > limite;
-    Ok((lista.into_iter().take(limite as usize).collect(), tem_mais))
+    lista.truncate(limite.max(0) as usize);
+    if tem_mais {
+        let ate = sem_operacao_pela_metade(conn, &lista)?;
+        lista.truncate(ate);
+    }
+    Ok((lista, tem_mais))
+}
+
+/// Quantas alterações do começo da `lista` podem ir sem deixar operação
+/// comercial pela metade: nenhuma operação que está na lista tem alteração
+/// depois da última que vai. Se nem a primeira operação cabe inteira (uma
+/// operação maior que a resposta), vai a lista toda (D54-2).
+pub(super) fn sem_operacao_pela_metade(conn: &Connection, lista: &[Alteracao]) -> Resultado<usize> {
+    // A última alteração de cada operação da lista, neste log.
+    let mut ultima: HashMap<&str, i64> = HashMap::new();
+    let mut c = conn.prepare_cached("SELECT MAX(seq) FROM alteracao WHERE operacao_id = ?1")?;
+    for a in lista {
+        if let Some(o) = a.operacao_id.as_deref() {
+            if !ultima.contains_key(o) {
+                let fim: Option<i64> = c.query_row([o], |l| l.get(0))?;
+                ultima.insert(o, fim.unwrap_or(a.seq));
+            }
+        }
+    }
+    let mut ate = lista.len();
+    while ate > 0 {
+        let fim = lista[ate - 1].seq;
+        let cortada = lista[..ate].iter().position(|a| a.operacao_id.as_deref().is_some_and(|o| ultima[o] > fim));
+        match cortada {
+            Some(i) => ate = i,
+            None => return Ok(ate),
+        }
+    }
+    Ok(lista.len())
 }
 
 /// Resposta do distribuidor a um pedido de faixa de códigos das peças: as
