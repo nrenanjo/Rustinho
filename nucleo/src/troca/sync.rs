@@ -2016,4 +2016,98 @@ mod testes {
         assert!(aceitar_anuncio("outro", &liberada, Some(&lista), "100.100.1.9:47810"));
         assert!(aceitar_anuncio("outro", &liberada, None, "100.100.1.9:47810"), "sem lista: como antes");
     }
+
+    /// Passo 5.2 (regra de versão homogênea, `ARQUITETURA_ALVO_RUSTINHO.md`
+    /// §5.3.4): a 5.2 muda o que viaja (o `produto_gtin` passa a viajar; o
+    /// índice da peça e o último acesso, não). Um caixa de versão anterior não
+    /// refaz o índice nem conhece o `produto_gtin`: trocar com ele deixaria as
+    /// peças novas sem busca lá. Então os dois lados recusam, com o mesmo
+    /// aviso de versão, sem entregar nem aplicar nada; nada se perde (cada
+    /// log continua guardado e vai inteiro depois de atualizar). Em
+    /// `b3a171c` o caixa de versão anterior recebe tudo e o de agora aplica
+    /// o que vem dele.
+    #[test]
+    #[ignore = "caracterização 5.2 (versão homogênea): b3a171c troca com caixa sem as classes da 5.2; passa no passo 5.2"]
+    fn classes_caixa_de_versao_anterior_nao_troca_dados() {
+        thread::spawn(|| {
+            let senha = "senha-da-loja";
+            let ca = temp("classes-novo");
+            let a = Banco::abrir(&ca).unwrap();
+            let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
+            crate::loja::criar(&a.conn).unwrap();
+            let mut f = produtos::ficha_nova(&a.conn).unwrap();
+            f.nome = "Peça do caixa novo".into();
+            f.precos[0].preco = "10,00".into();
+            produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+            salvar_ajustes(&a.conn, true, senha, "").unwrap();
+            let mut ma = Motor::iniciar(ca.clone(), 0, 0);
+            let (pt_a, _) = ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+            // Os recursos que um caixa de antes da 5.2 manda (os de hoje, sem o das classes).
+            let antigos: Vec<&str> = RECURSOS.iter().copied().filter(|r| *r != "classes-v1").collect();
+
+            // 1. Um caixa de versão anterior pede ao caixa novo.
+            let cb = temp("classes-antigo");
+            let b = Banco::abrir(&cb).unwrap();
+            config::gravar(&b.conn, "caixa_nome", "Caixa antigo").unwrap();
+            let kb = Chaves::de(&b.conn, senha).unwrap();
+            let (loja_b, novo_b) = crate::loja::campos(&b.conn).unwrap();
+            let mut fluxo = TcpStream::connect(("127.0.0.1", pt_a)).unwrap();
+            enviar(
+                &mut fluxo,
+                &kb,
+                &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": 0, "marca": null,
+                         "dispositivo": b.dispositivo, "nome": "Caixa antigo", "porta": 1, "esquema": 24,
+                         "recursos": antigos, "loja": loja_b, "novo": novo_b }),
+            )
+            .unwrap();
+            let r = receber(&mut fluxo, &kb, TAMANHO_MAXIMO, Duration::from_secs(30), None).unwrap();
+            let entregues = r["alteracoes"].as_array().map_or(0, |l| l.len());
+            assert_eq!(entregues, 0, "o caixa novo entregou {entregues} alterações a um caixa de versão anterior");
+            assert_eq!(r["recusado"].as_str(), Some(PROTOCOLO_DIFERENTE), "{r}");
+
+            // 2. O caixa novo puxa de um caixa de versão anterior (um servidor
+            // de mentira que responde como a versão anterior, com uma peça).
+            let velho = Banco::em_memoria().unwrap();
+            let uv = usuarios::criar(&velho.conn, &velho.dispositivo, "Bia", "1234", true).unwrap().id;
+            let mut f = produtos::ficha_nova(&velho.conn).unwrap();
+            f.nome = "Peça do caixa antigo".into();
+            f.precos[0].preco = "10,00".into();
+            let peca_velha = produtos::salvar(&velho.conn, &velho.dispositivo, &uv, &f).unwrap();
+            let (lista, _) = alteracoes_desde(&velho.conn, 0, 10_000).unwrap();
+            let kv = Chaves::de(&velho.conn, senha).unwrap();
+            let (loja_a, _) = crate::loja::campos(&a.conn).unwrap();
+            let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
+            let pt_v = ouvinte.local_addr().unwrap().port();
+            let disp_velho = velho.dispositivo.clone();
+            let resposta = json!({ "protocolo": PROTOCOLO, "dispositivo": disp_velho, "nome": "Caixa antigo",
+                                   "alteracoes": lista, "temMais": false, "agoraMs": agora_ms(), "geracao": "g-velho",
+                                   "seqMaxima": lista.iter().map(|x| x.seq).max().unwrap_or(0), "esquema": 24,
+                                   "recursos": ["pendencias-v1", crate::loja::RECURSO], "loja": loja_a, "novo": false });
+            let fim = Arc::new(AtomicBool::new(false));
+            let fim_servidor = fim.clone();
+            // Responde a quantos pedidos vierem (a primeira volta pode ser a
+            // "sonda" de quem pergunta), até o teste dizer que acabou.
+            let servidor = thread::spawn(move || loop {
+                let Ok((mut s, _)) = ouvinte.accept() else { return };
+                if fim_servidor.load(Ordering::SeqCst) {
+                    return;
+                }
+                if receber(&mut s, &kv, TAMANHO_PEDIDO, Duration::from_secs(30), None).is_ok() {
+                    let _ = enviar(&mut s, &kv, &resposta);
+                }
+            });
+            let r = puxar(&ca, &format!("127.0.0.1:{pt_v}"), 0);
+            fim.store(true, Ordering::SeqCst);
+            let _ = TcpStream::connect(("127.0.0.1", pt_v));
+            servidor.join().unwrap();
+            let e = r.expect_err("puxou de um caixa de versão anterior");
+            assert!(e.to_string().contains(PROTOCOLO_DIFERENTE), "{e}");
+            let chegou: i64 =
+                a.conn.query_row("SELECT COUNT(*) FROM produto WHERE id = ?1", [&peca_velha], |l| l.get(0)).unwrap();
+            assert_eq!(chegou, 0, "aplicou uma alteração do caixa de versão anterior");
+            assert!(ma.encerrar(Duration::from_secs(20)));
+        })
+        .join()
+        .unwrap();
+    }
 }
