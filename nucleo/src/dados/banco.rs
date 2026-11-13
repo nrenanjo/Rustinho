@@ -616,7 +616,8 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
         if !tem_coluna {
             return Err(Erro::Interno("falta a coluna produto.nome_normalizado".into()));
         }
-        for indice in ["estoque_movimento_produto_tipo_data", "produto_alteradas_por_ultimo"] {
+        for indice in ["estoque_movimento_produto_tipo_data", "produto_alteradas_por_ultimo", "produto_texto_de_busca"]
+        {
             let tem: bool = conn.query_row(
                 "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'index' AND name = ?1",
                 [indice],

@@ -32,3 +32,11 @@ UPDATE sync_estado SET aplicando = 0 WHERE id = 1;
 -- acento, o código e o id), lida pelo índice, parte a parte. O `ativo` no fim
 -- serve ao filtro das inativas sem ler a tabela.
 CREATE INDEX produto_alteradas_por_ultimo ON produto (atualizado_em DESC, nome_normalizado, codigo, id, ativo);
+
+-- PEND-39 (a busca com texto): o filtro grosso da busca (`busca LIKE '%…%'`, e
+-- os códigos e o nome da peça que ela confere depois) lê só este índice, bem
+-- menor que a tabela (sem o fiscal, as observações...), e não a tabela inteira.
+-- O resultado é o mesmo (a ordem final não depende da ordem da leitura). O
+-- `ativo` vai no fim: na frente, ele atrairia a lista sem busca para este índice
+-- (que não tem a ordem dela) e a faria ordenar tudo de novo.
+CREATE INDEX produto_texto_de_busca ON produto (busca, codigos, nome, id, ativo);

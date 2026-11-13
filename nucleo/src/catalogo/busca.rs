@@ -2048,6 +2048,40 @@ mod testes_75 {
         assert!(por_vez.iter().all(|n| *n <= 1), "consultas por peça para o balão (50 peças): {por_vez:?}");
     }
 
+    /// PEND-39: o filtro grosso da busca com texto lê o índice de cobertura
+    /// `produto_texto_de_busca` (0026), e não a tabela inteira, com e sem as
+    /// inativas e com os códigos de fora. A consulta é a de `candidatas` (o
+    /// texto dela é conferido aqui). Em `b3a171c`: `SCAN p` (a tabela).
+    #[test]
+    fn pend39_filtro_da_busca_pelo_indice() {
+        let fonte = include_str!("busca.rs");
+        assert!(fonte.contains(
+            "\"SELECT p.id, p.nome, p.ativo, p.busca, p.codigos\n           FROM produto p\n          WHERE {}{onde}\""
+        ));
+        assert!(fonte.contains("let mut condicao = format!(\"p.busca LIKE ?{}\", valores.len());"));
+        let b = Banco::em_memoria().unwrap();
+        for (sql, esperado) in [
+            ("p.ativo = 1 AND (p.busca LIKE ?1)", "SCAN p USING COVERING INDEX produto_texto_de_busca"),
+            ("(p.busca LIKE ?1)", "SCAN p USING COVERING INDEX produto_texto_de_busca"),
+            (
+                "p.ativo = 1 AND (p.busca LIKE ?1 OR p.id IN (SELECT value FROM json_each('[]')))",
+                "SCAN p USING COVERING INDEX produto_texto_de_busca",
+            ),
+        ] {
+            let plano: Vec<String> = b
+                .conn
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN SELECT p.id, p.nome, p.ativo, p.busca, p.codigos FROM produto p WHERE {sql}"
+                ))
+                .unwrap()
+                .query_map(["%x%"], |l| l.get::<_, String>(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(plano.first().map(String::as_str), Some(esperado), "{sql}: {plano:?}");
+        }
+    }
+
     /// N04 (caracterização, passava antes): a lista lida em partes, como a
     /// tela rola, traz todas as peças na ordem da lista inteira, sem repetir
     /// nem omitir, também com muitas peças alteradas no mesmo segundo (o

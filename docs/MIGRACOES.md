@@ -51,7 +51,7 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0023 | `0023_rascunho_e_pendencias.sql` | rascunho da OS e pendências da troca de dados (0.9.15) | recria tabelas (`sem_chaves_estrangeiras`) |
 | 0024 | `0024_gtins_e_pendencias_xml.sql` | vários GTINs por peça e pendências de identificação do XML (0.9.18-dev.3.1) | **publicada**; a dev.3 paralela tem outra 0024 (§3) |
 | 0025 | `0025_caixas_aprovados.sql` | registro assinado de caixas aprovados e retirados (protocolo 4, etapa 2; era a 0024 da `frente-p4`) | **não publicada**; número provisório até entrar na branch (§5). **Não é a 0025 da dev.3** (`venda_cancelamento`, §3): a linhagem (§4) recusa o banco dev.3/25 |
-| 0026 | `0026_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada, preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39) | **não publicada**; número provisório até entrar na branch (§5). Era a 0025 da preparação `prod-f75`, renumerada na integração (MIG-1 (a): quem entra depois renumera) |
+| 0026 | `0026_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada, preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | **não publicada**; número provisório até entrar na branch (§5). Era a 0025 da preparação `prod-f75`, renumerada na integração (MIG-1 (a): quem entra depois renumera) |
 
 Um número publicado **nunca muda de conteúdo**.
 
