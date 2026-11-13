@@ -84,7 +84,9 @@ begin
   if UninstallSilent then
     Exit;
 
-  Janela := CreateCustomForm(ScaleX(480), ScaleY(250), False, False);
+  // J05 (= PEND-32, passo 7.3): a janela ficou mais alta para o aviso dizer de
+  // QUAL pasta os dados são apagados (a do usuário do Windows que desinstala).
+  Janela := CreateCustomForm(ScaleX(480), ScaleY(290), False, False);
   try
     Janela.Caption := 'Desinstalar o Rustinho';
 
@@ -107,7 +109,7 @@ begin
     Marca.Height := ScaleY(24);
     Marca.Font.Style := [fsBold];
     Marca.Font.Size := 11;
-    Marca.Caption := 'Apagar também os dados da loja';
+    Marca.Caption := 'Apagar também os dados da loja deste usuário do Windows';
     Marca.Checked := False;
 
     Aviso := TNewStaticText.Create(Janela);
@@ -117,10 +119,12 @@ begin
     Aviso.Left := ScaleX(40);
     Aviso.Top := ScaleY(104);
     Aviso.Width := Janela.ClientWidth - ScaleX(60);
-    Aviso.Height := ScaleY(70);
+    Aviso.Height := ScaleY(110);
     Aviso.Font.Color := $003A4494;
     Aviso.Font.Style := [fsBold];
-    Aviso.Caption := 'ATENÇÃO: apaga vendas, peças, clientes, caixa e os backups deste computador, para sempre. ' +
+    Aviso.Caption := 'ATENÇÃO: apaga para sempre os dados da loja (vendas, peças, clientes, caixa e backups) ' +
+      'que estão na pasta deste usuário do Windows: ' + ExpandConstant('{localappdata}\Rustinho') + '. ' +
+      'Os dados de outro usuário do Windows deste computador não são apagados. ' +
       'Se quiser guardar, faça antes um backup (em Configurações, Backup) e copie para um pen drive.';
 
     Continuar := TNewButton.Create(Janela);
@@ -151,7 +155,8 @@ begin
   end;
 
   if Result and ApagarDados then
-    Result := MsgBox('Tem certeza? Os dados da loja deste computador vão ser apagados e não dá para desfazer.',
+    Result := MsgBox('Tem certeza? Os dados da loja da pasta ' + ExpandConstant('{localappdata}\Rustinho') +
+      ' (deste usuário do Windows) vão ser apagados e não dá para desfazer.',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
 
