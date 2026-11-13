@@ -23,8 +23,10 @@ proprietário (dossiê dev.3.3, Categoria A, itens 1, 2 e 5):
   L12 a busca por texto filtra (FILTRO);
   L13 a busca pelo código do fornecedor (FAG-32206) acha a peça e mostra o
       código na primeira coluna, e o balão mostra "… · FAG-32206 · …";
-  L14 o rodapé mostra a página ("Página 1 de 3": 120 peças, 50 por página);
-  L15 PageDown passa à página 2 e PageUp volta à página 1;
+  L14 a lista é contínua (N04, passo 7.5): nenhum "Anterior", "Próxima" nem
+      "Página" na tela (antes: "Página 1 de 3", 50 por página);
+  L15 PageDown anda pela lista inteira: passa da linha 100 sem página (a
+      próxima parte vem sozinha) até a 120ª peça, e PageUp volta 8 linhas;
   L16 o aviso das pendências de XML aparece e não muda enquanto se digita.
 
 As falhas de achados já registrados, que ficam para passos seguintes, são
@@ -90,6 +92,21 @@ def aviso_xml(textos):
 
 def texto_com(textos, trecho):
     return [(x, y, t) for x, y, t in textos if trecho in t and not t.startswith(("GEO:", "RET:"))]
+
+
+def marcador(textos):
+    """A lista na tela (TESTE_LISTA): (linhas, peças diferentes, ainda há mais, linha atual)."""
+    for _, _, t in textos:
+        if t.startswith("TESTE_LISTA:"):
+            n, dif, mais, atual = t.split(":")[1:5]
+            return int(n), int(dif), mais == "1", int(atual)
+    return None
+
+
+def com_pagina(textos):
+    """Textos de paginação na tela (não pode haver: N04)."""
+    return [tx for _, _, tx in textos if not tx.startswith(("GEO:", "RET:", "TOQUE:"))
+            and (re.search(r"\bP[áa]gina\b", tx) or tx.strip() in ("Anterior", "Próxima"))]
 
 
 def digitar_na_busca(rr, g, texto):
@@ -193,20 +210,22 @@ def main():
 
             digitar_na_busca(rr, g, "")
             t4 = rr.textos()
-            pagina1 = texto_com(t4, "Página 1 de 3")
-            conferir("L14", "o rodapé mostra \"Página 1 de 3\"", bool(pagina1), f"{[tx for _, _, tx in t4 if 'Página' in tx]}")
-            for _ in range(12):
+            m4 = marcador(t4)
+            conferir("L14", "lista contínua: nenhum \"Anterior\", \"Próxima\" nem \"Página\"",
+                     not com_pagina(t4) and m4 is not None and m4[:3] == (100, 100, True),
+                     f"paginação {com_pagina(t4)}; marcador {m4}")
+            for _ in range(14):
                 base.xdo("key", "Next")
                 time.sleep(0.4)
-                if texto_com(rr.textos(), "Página 2 de 3"):
-                    break
             t5 = rr.textos()
-            na2 = bool(texto_com(t5, "Página 2 de 3"))
-            rr.foto("-5-pagina-2")
+            m5 = marcador(t5)
+            rr.foto("-5-depois-da-linha-100")
             base.xdo("key", "Prior")
             time.sleep(1.2)
-            voltou = bool(texto_com(rr.textos(), "Página 1 de 3"))
-            conferir("L15", "PageDown passa à página 2 e PageUp volta à 1", na2 and voltou, f"página 2={na2} voltou={voltou}")
+            m6 = marcador(rr.textos())
+            conferir("L15", "PageDown passa da linha 100 sem página até a 120ª peça, e PageUp volta 8 linhas",
+                     m5 == (120, 120, False, 112) and m6 is not None and m6[3] == 104 and not com_pagina(t5),
+                     f"depois de 14 PageDown {m5}; depois de PageUp {m6}; paginação {com_pagina(t5)}")
             rr.foto("-6-final")
         finally:
             rr.fechar()

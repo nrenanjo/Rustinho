@@ -85,6 +85,46 @@ fn montar_lista_de_pecas() {
     l.fechar();
 }
 
+/// N04 (dev.3.3, passo 7.5) — a loja do roteiro `app/testes/telas_lista_continua.py`:
+/// - Ana (gerente, senha 1234);
+/// - `RUSTINHO_LOJA_PECAS` peças (20.000 se não disser), cada uma com um nome
+///   único "… LISTA 00001"…, algumas com acento e minúsculas (o desempate da
+///   lista é o nome sem acento), metade com marca, todas com estoque e preço,
+///   pelo comando da tela (`produto_salvar`), uma a uma: muitas ficam com a mesma
+///   hora de alteração, como numa importação.
+#[test]
+#[ignore = "só à mão: monta a loja do roteiro da lista contínua de peças (N04)"]
+fn montar_lista_continua() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    let quantas: usize = std::env::var("RUSTINHO_LOJA_PECAS").ok().and_then(|n| n.parse().ok()).unwrap_or(20_000);
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja Teste Auto Peças", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    for i in 1..=quantas {
+        let nome = match i % 5 {
+            0 => format!("Óleo lista {i:05}"),
+            1 => format!("PASTILHA LISTA {i:05}"),
+            2 => format!("Água lista {i:05}"),
+            3 => format!("FILTRO LISTA {i:05}"),
+            _ => format!("correia lista {i:05}"),
+        };
+        let mut f = l.ok("produto_novo", json!({}));
+        f["nome"] = json!(nome);
+        f["marca"] = json!(if i % 2 == 0 { "GENERICA" } else { "" });
+        f["local"] = json!("A-01");
+        f["custo"] = json!("");
+        f["estoqueInicial"] = json!("3");
+        f["precos"][0]["preco"] = json!("10,00");
+        f["precos"][0]["lucro"] = json!("");
+        l.ok("produto_salvar", f);
+    }
+    l.fechar();
+}
+
 /// Geometria (dev.3.3, passo 1.3) — a loja do roteiro `app/testes/geometria_telas.py`:
 /// Ana (gerente) e mais quatro usuários (5 na tela de entrada, como na revisão
 /// visual da auditoria, VIS33-06) e algumas peças.

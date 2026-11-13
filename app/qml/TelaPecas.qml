@@ -16,12 +16,20 @@ FocusScope {
     readonly property string abertaEm: new Date().toISOString()
     property string buscaInicial: ""
     property bool abrirPendenciasXml: false
-    property var itens: []
+    // N04 (dev.3.3, passo 7.5): a lista é contínua, sem páginas. As peças vêm do
+    // núcleo em partes, na ordem da lista inteira, e a próxima parte vem sozinha
+    // quando a rolagem (ou o teclado) chega perto do fim. Nenhum botão de página
+    // nem de "carregar mais". Uma peça que já está na lista não entra de novo.
+    ListModel { id: pecas }
     property int total: 0
-    property int totalFiltrado: 0
     property bool temMais: false
-    property int tamanhoPagina: 50
-    property int deslocamento: 0
+    readonly property int tamanhoParte: 100
+    // Quantas linhas o núcleo já mandou nesta busca (é o deslocamento da
+    // próxima parte) e os ids que já estão na lista.
+    property int lidas: 0
+    property var vistas: ({})
+    property int diferentes: 0
+    property bool carregando: false
     property int pendenciasXml: 0
     property bool buscou: false
 
@@ -32,47 +40,36 @@ FocusScope {
     }
 
     function novaBusca() {
-        deslocamento = 0
         buscar(false)
     }
 
-    function irParaPagina(novoDeslocamento) {
-        deslocamento = Math.max(0, novoDeslocamento)
-        buscar(false)
-    }
-
+    // A lista do começo. Com manterSelecao (ao voltar de uma peça), lê de novo
+    // até onde a pessoa já tinha rolado e fica na mesma peça, se ela ainda
+    // estiver na lista.
     function buscar(manterSelecao) {
-        const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < itens.length
-                         ? itens[lista.currentIndex].id : ""
-        const r = Api.chamar("produtos_buscar", {
-            texto: busca.texto,
-            inativas: inativas.checked,
-            limite: tamanhoPagina,
-            deslocamento: deslocamento
-        })
+        const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < pecas.count
+                         ? pecas.get(lista.currentIndex).id : ""
+        const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
+        const r = parte(0, Math.min(ate, 1000))
         if (r.ok) {
-            itens = r.dados.itens || []
+            pecas.clear()
+            lidas = 0
+            vistas = {}
+            diferentes = 0
             total = r.dados.total || 0
-            totalFiltrado = (r.dados.totalFiltrado !== undefined) ? r.dados.totalFiltrado : total
-            temMais = !!r.dados.temMais
-            deslocamento = r.dados.deslocamento || 0
-
-            // Se a busca ou remoção tornou a página atual vazia:
-            // calcula a última página efetivamente existente usando totalFiltrado
-            // somente recua, não repete deslocamento e não entra em recursão infinita
-            if (itens.length === 0 && totalFiltrado > 0 && deslocamento > 0) {
-                const maxDeslocamento = Math.max(0, Math.floor((totalFiltrado - 1) / tamanhoPagina) * tamanhoPagina)
-                if (maxDeslocamento < deslocamento) {
-                    deslocamento = maxDeslocamento
-                    return buscar(false)
-                }
+            acrescentar(r.dados)
+            while (temMais && pecas.count < ate) {
+                if (!maisUmaParte(Math.min(ate - pecas.count, 1000)))
+                    break
             }
-
-            let indice = itens.length > 0 ? 0 : -1
+            let indice = pecas.count > 0 ? 0 : -1
             if (anterior !== "") {
-                const achou = itens.findIndex(p => p.id === anterior)
-                if (achou >= 0)
-                    indice = achou
+                for (let i = 0; i < pecas.count; i++) {
+                    if (pecas.get(i).id === anterior) {
+                        indice = i
+                        break
+                    }
+                }
             }
             lista.currentIndex = indice
             if (indice <= 0)
@@ -83,9 +80,62 @@ FocusScope {
         buscou = true
     }
 
+    // Uma parte da lista, a partir de `desde` (na ordem da lista inteira).
+    function parte(desde, quantas) {
+        return Api.chamar("produtos_buscar", {
+            texto: busca.texto,
+            inativas: inativas.checked,
+            limite: quantas,
+            deslocamento: desde
+        })
+    }
+
+    function acrescentar(dados) {
+        const chegaram = dados.itens || []
+        const novas = []
+        for (const p of chegaram) {
+            if (!vistas[p.id]) {
+                vistas[p.id] = true
+                novas.push(p)
+            }
+        }
+        lidas += chegaram.length
+        diferentes += novas.length
+        if (novas.length > 0)
+            pecas.append(novas)
+        temMais = !!dados.temMais && chegaram.length > 0
+    }
+
+    // A próxima parte, no fim da lista. Devolve se veio.
+    function maisUmaParte(quantas) {
+        if (!temMais || carregando)
+            return false
+        carregando = true
+        const r = parte(lidas, quantas || tamanhoParte)
+        if (r.ok)
+            acrescentar(r.dados)
+        else {
+            temMais = false
+            janela.avisar(r.erro, "erro")
+        }
+        carregando = false
+        return r.ok
+    }
+
+    // Perto do fim (a última linha à vista a 30 do fim, ou a linha atual nas
+    // 12 últimas, pelo teclado): a próxima parte vem sozinha. Antes de a lista
+    // se arrumar na tela não há linha à vista (-1), e nada vem antes da hora.
+    function talvezMais() {
+        if (!temMais || carregando || lista.count === 0)
+            return
+        const ultimaAVista = lista.indexAt(lista.width / 2, lista.contentY + lista.height - 1)
+        if (ultimaAVista >= lista.count - 30 || lista.currentIndex >= lista.count - 12)
+            Qt.callLater(maisUmaParte)
+    }
+
     function abrirPeca(indice) {
-        if (indice >= 0 && indice < itens.length)
-            janela.abrir("TelaPeca", { produtoId: itens[indice].id })
+        if (indice >= 0 && indice < pecas.count)
+            janela.abrir("TelaPeca", { produtoId: pecas.get(indice).id })
     }
 
     function novaPeca() {
@@ -120,30 +170,23 @@ FocusScope {
         onActivated: tela.novaPeca()
     }
 
-    // Setas e Page Up/Down mexem na lista enquanto se digita na busca.
-    // L10 (Seção 6.5): PageDown na última linha passa à primeira da próxima página;
-    // PageUp na primeira linha passa à última da página anterior.
-    Keys.onDownPressed: lista.currentIndex = Math.min(lista.currentIndex + 1, lista.count - 1)
+    // Setas e Page Up/Down mexem na lista enquanto se digita na busca, pela
+    // lista inteira (N04): na última linha, a próxima parte vem antes de andar.
+    Keys.onDownPressed: {
+        if (lista.currentIndex >= lista.count - 1)
+            tela.maisUmaParte()
+        lista.currentIndex = Math.min(lista.currentIndex + 1, lista.count - 1)
+    }
     Keys.onUpPressed: lista.currentIndex = Math.max(lista.currentIndex - 1, 0)
     Keys.onPressed: (evento) => {
         if (evento.key === Qt.Key_PageDown) {
             evento.accepted = true
-            if (lista.currentIndex === lista.count - 1 && tela.temMais) {
-                tela.irParaPagina(tela.deslocamento + tela.tamanhoPagina)
-            } else {
-                lista.currentIndex = Math.min(lista.currentIndex + 8, lista.count - 1)
-            }
+            if (lista.currentIndex + 8 > lista.count - 1)
+                tela.maisUmaParte()
+            lista.currentIndex = Math.min(lista.currentIndex + 8, lista.count - 1)
         } else if (evento.key === Qt.Key_PageUp) {
             evento.accepted = true
-            if (lista.currentIndex === 0 && tela.deslocamento > 0) {
-                const novoDeslocamento = Math.max(0, tela.deslocamento - tela.tamanhoPagina)
-                tela.deslocamento = novoDeslocamento
-                tela.buscar(false)
-                if (lista.count > 0)
-                    lista.currentIndex = lista.count - 1
-            } else {
-                lista.currentIndex = Math.max(lista.currentIndex - 8, 0)
-            }
+            lista.currentIndex = Math.max(lista.currentIndex - 8, 0)
         }
     }
 
@@ -249,7 +292,7 @@ FocusScope {
         }
 
         RowLayout {
-            visible: tela.itens.length > 0 && !Tema.estreito
+            visible: pecas.count > 0 && !Tema.estreito
             spacing: 18
             Layout.fillWidth: true
             Layout.leftMargin: 18
@@ -268,19 +311,26 @@ FocusScope {
             Layout.fillHeight: true
             clip: true
             spacing: 6
-            model: tela.itens
+            model: pecas
             currentIndex: -1
             highlightMoveDuration: 0
             highlightFollowsCurrentItem: true
             keyNavigationEnabled: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
-            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: {
+                if (currentIndex >= 0)
+                    positionViewAtIndex(currentIndex, ListView.Contain)
+                tela.talvezMais()
+            }
+            onContentYChanged: tela.talvezMais()
+            onCountChanged: tela.talvezMais()
+            onHeightChanged: tela.talvezMais()
             delegate: LinhaPeca {
-                required property var modelData
                 required property int index
                 width: lista.width
-                item: modelData
+                // Ao recomeçar a lista, a linha que está saindo não tem mais peça.
+                item: pecas.get(index) || ({})
                 indice: index
                 atual: lista.currentIndex === index
                 onAbrir: tela.abrirPeca(index)
@@ -289,7 +339,7 @@ FocusScope {
             ColumnLayout {
                 anchors.centerIn: parent
                 width: Math.min(560, parent.width - 40)
-                visible: tela.buscou && tela.itens.length === 0
+                visible: tela.buscou && pecas.count === 0
                 spacing: 14
                 Titulo {
                     text: tela.total === 0 ? "Nenhuma peça cadastrada ainda" : "Nada encontrado"
@@ -314,34 +364,14 @@ FocusScope {
                 }
             }
         }
+    }
 
-        RowLayout {
-            visible: tela.totalFiltrado > tela.tamanhoPagina || tela.deslocamento > 0
-            spacing: 12
-            Layout.fillWidth: true
-            Botao {
-                text: "Anterior"
-                tipo: "secundario"
-                enabled: tela.deslocamento > 0
-                onClicked: tela.irParaPagina(Math.max(0, tela.deslocamento - tela.tamanhoPagina))
-            }
-            Item { Layout.fillWidth: true }
-            Nota {
-                text: "Página " + (Math.floor(tela.deslocamento / tela.tamanhoPagina) + 1)
-                      + " de " + Math.max(1, Math.ceil(tela.totalFiltrado / tela.tamanhoPagina))
-                      + (tela.itens.length > 0
-                         ? "  ·  " + (tela.deslocamento + 1) + " a " + (tela.deslocamento + tela.itens.length) + " de " + tela.totalFiltrado
-                         : "")
-                font.pixelSize: 14
-            }
-            Item { Layout.fillWidth: true }
-            Botao {
-                text: "Próxima"
-                tipo: "secundario"
-                enabled: tela.temMais
-                onClicked: tela.irParaPagina(tela.deslocamento + tela.tamanhoPagina)
-            }
-        }
+    // Para os testes das telas (--textos-da-tela): quantas linhas a lista tem,
+    // quantas peças diferentes, se ainda há mais (1/0) e a linha atual. Sem
+    // tamanho: não aparece e não se toca.
+    Item {
+        readonly property string nomeAcessivel: "TESTE_LISTA:" + pecas.count + ":" + tela.diferentes + ":"
+                                                + (tela.temMais ? 1 : 0) + ":" + lista.currentIndex
     }
 
     StackView.onActivated: {
