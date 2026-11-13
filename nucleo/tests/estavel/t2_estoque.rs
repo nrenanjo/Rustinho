@@ -414,6 +414,10 @@ fn t2_5_diagnostico() {
 fn t2_5_lote_grande() {
     use std::time::{Duration, Instant};
     let vendas_b: usize = std::env::var("RUSTINHO_DIAG_VENDAS_B").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    // Tamanho de cada resposta da troca (o `LOTE` do servidor) e o intervalo
+    // entre uma resposta e a próxima (a ida e volta pela rede).
+    let tamanho: i64 = std::env::var("RUSTINHO_DIAG_LOTE").ok().and_then(|v| v.parse().ok()).unwrap_or(2000);
+    let intervalo: u64 = std::env::var("RUSTINHO_DIAG_INTERVALO_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
     let mut a = Loja::nova("t2-5-lote");
     rustinho_nucleo::registro::iniciar(&a.pasta);
     let p = a.peca("Lâmpada H4", "10", "25", "100000");
@@ -439,21 +443,39 @@ fn t2_5_lote_grande() {
         vendas::concluir(&tx, &b.dispositivo, &ana, &e).unwrap();
         tx.commit().unwrap();
     }
-    let (lote, mais) = sync::alteracoes_desde(&b.conn, desde, 2000).unwrap();
+    let mut lotes: Vec<Vec<sync::Alteracao>> = Vec::new();
+    let mut d = desde;
+    let mut total_b = 0;
+    loop {
+        let (lista, mais) = sync::alteracoes_desde(&b.conn, d, tamanho).unwrap();
+        if let Some(u) = lista.last() {
+            d = u.seq;
+        }
+        total_b += lista.len();
+        lotes.push(lista);
+        if !mais || total_b >= 2000 {
+            break;
+        }
+    }
     let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let sonda = {
         let (db, parar) = (a.db.clone(), parar.clone());
         std::thread::spawn(move || sondar_trava(db, parar))
     };
     let comeco = Instant::now();
-    let n_lote = lote.len();
+    let n_lotes = lotes.len();
     let tarefa = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(200));
         let t = Instant::now();
-        sync::aplicar(&mut lado.conn, &lote).unwrap();
-        let ms = t.elapsed().as_millis();
+        let mut maior_lote = 0u128;
+        for lote in lotes {
+            let u = Instant::now();
+            sync::aplicar(&mut lado.conn, &lote).unwrap();
+            maior_lote = maior_lote.max(u.elapsed().as_millis());
+            std::thread::sleep(Duration::from_millis(intervalo));
+        }
         sync::verificar_depois(&lado.conn).unwrap();
-        (ms, t.elapsed().as_millis())
+        (maior_lote, t.elapsed().as_millis())
     });
     let mut falhas = 0;
     let mut maior = 0u128;
@@ -476,7 +498,13 @@ fn t2_5_lote_grande() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let (aplicar_ms, com_verificar_ms) = tarefa.join().unwrap();
+    let (maior_lote_ms, tudo_ms) = tarefa.join().unwrap();
+    // Nada pela metade: cada venda do balcão que deu certo está inteira, e a
+    // que falhou não deixou nada.
+    let feitas: i64 = a.numero(&format!(
+        "SELECT COUNT(*) FROM venda v WHERE v.dispositivo = (SELECT valor FROM config WHERE chave = 'dispositivo_id') \
+           AND EXISTS (SELECT 1 FROM venda_item i WHERE i.venda_id = v.id AND i.produto_id = '{p}')"
+    ));
     parar.store(true, std::sync::atomic::Ordering::Relaxed);
     let (preso_max, preso_soma, _) = sonda.join().unwrap();
     let log = std::fs::read_to_string(a.pasta.join("registro/rustinho.log")).unwrap_or_default();
@@ -484,8 +512,10 @@ fn t2_5_lote_grande() {
         println!("DIAG registro: {l}");
     }
     println!(
-        "DIAG lote alteracoes={n_lote} (mais={mais}) aplicar_ms={aplicar_ms} com_verificar_ms={com_verificar_ms} \
-         trava_presa_max_ms={preso_max} trava_presa_soma_ms={preso_soma} vendas_falhas={falhas} venda_max_ms={maior}"
+        "DIAG lote tamanho={tamanho} lotes={n_lotes} alteracoes={total_b} maior_lote_ms={maior_lote_ms} tudo_ms={tudo_ms} \
+         trava_presa_max_ms={preso_max} trava_presa_soma_ms={preso_soma} vendas_falhas={falhas} venda_max_ms={maior} \
+         vendas_do_balcao_gravadas={feitas}"
     );
+    assert_eq!(feitas, 30 - falhas as i64, "venda pela metade");
     assert_eq!(falhas, 0, "vendas que falharam durante a troca");
 }
