@@ -1055,32 +1055,50 @@ mod testes_juntar {
         assert_eq!(n, 0);
     }
 
-    /// Duas versões válidas da mesma linha (o mesmo caixa aprovou a mesma
-    /// chave duas vezes): os dois caixas ficam com a mesma, em qualquer ordem
-    /// de chegada.
+    /// Versões válidas da mesma linha (o mesmo caixa aprovou a mesma chave
+    /// mais de uma vez): os caixas ficam com a mesma, em qualquer ordem de
+    /// chegada. **Nenhum horário vem do relógio de verdade:** a aprovação do
+    /// Caixa 2 que `duas_lojas` gravou com `tempo::agora()` fica de fora, e as
+    /// três versões têm horário fixo. (Antes de 13/11 a de base vinha do relógio
+    /// e, depois das 11:00 UTC daquele dia, ficava mais nova que a "v2" fixa: o
+    /// teste falhava conforme a hora em que rodava.)
     #[test]
     fn mesma_linha_em_duas_versoes_fica_a_mesma_em_qualquer_ordem() {
         let (aqui, la, u, raiz, [c2, _]) = duas_lojas();
         let r = raiz.publica();
         let (outro, _) = crate::faixas::para_testes::loja("Caixa 8");
-        let base = linhas(&aqui.conn, LOJA).unwrap();
+        let mut base = linhas(&aqui.conn, LOJA).unwrap();
+        base.aprovacoes.retain(|a| !(a.chave == c2.publica() && a.aprovador == r));
         juntar(&la.conn, LOJA, &base).unwrap();
         juntar(&outro.conn, LOJA, &base).unwrap();
-        let mut v1 = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2 (balcão)", &u);
-        let mut v2 = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2 (fundos)", &u);
-        v1.aprovado_em = "2026-11-13T10:00:00Z".into();
-        v1.assinatura = raiz.assinar(Dominio::Aprovacao, &v1.corpo());
-        v2.aprovado_em = "2026-11-13T11:00:00Z".into();
-        v2.assinatura = raiz.assinar(Dominio::Aprovacao, &v2.corpo());
+        let versao = |nome: &str, quando: &str| {
+            let mut a = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, nome, &u);
+            a.aprovado_em = quando.into();
+            a.assinatura = raiz.assinar(Dominio::Aprovacao, &a.corpo());
+            a
+        };
+        let v0 = versao("Caixa 2", "2026-01-01T09:00:00Z");
+        let v1 = versao("Caixa 2 (balcão)", "2026-01-01T10:00:00Z");
+        let v2 = versao("Caixa 2 (fundos)", "2026-01-01T11:00:00Z");
         let so = |a: &Aprovacao| Linhas { aprovacoes: vec![a.clone()], retiradas: Vec::new() };
-        juntar(&la.conn, LOJA, &so(&v1)).unwrap();
-        juntar(&la.conn, LOJA, &so(&v2)).unwrap();
-        juntar(&outro.conn, LOJA, &so(&v2)).unwrap();
-        let j = juntar(&outro.conn, LOJA, &so(&v1)).unwrap();
-        assert_eq!(j.ja_tinha, 1, "a de 11:00 fica; a de 10:00 não a troca");
-        assert_eq!(linhas(&la.conn, LOJA).unwrap(), linhas(&outro.conn, LOJA).unwrap());
-        let a = linhas(&la.conn, LOJA).unwrap().aprovacoes.into_iter().find(|a| a.chave == c2.publica()).unwrap();
-        assert_eq!(a.nome, "Caixa 2 (fundos)");
+        // Lá chegam na ordem do tempo; no outro, a mais nova primeiro.
+        for v in [&v0, &v1, &v2] {
+            juntar(&la.conn, LOJA, &so(v)).unwrap();
+        }
+        let mut ja_tinha = 0;
+        for v in [&v2, &v0, &v1] {
+            ja_tinha += juntar(&outro.conn, LOJA, &so(v)).unwrap().ja_tinha;
+        }
+        assert_eq!(ja_tinha, 2, "a de 11:00 chegou primeiro e fica; as mais velhas não a trocam");
+        let ordenadas = |b: &Banco| {
+            let mut l = linhas(&b.conn, LOJA).unwrap();
+            l.aprovacoes.sort_by_key(|a| (a.chave, a.aprovador));
+            l.retiradas.sort_by_key(|t| (t.chave, t.retirador));
+            l
+        };
+        assert_eq!(ordenadas(&la), ordenadas(&outro), "os dois caixas ficaram com o mesmo registro");
+        let a = ordenadas(&la).aprovacoes.into_iter().find(|a| a.chave == c2.publica() && a.aprovador == r).unwrap();
+        assert_eq!((a.nome.as_str(), a.aprovado_em.as_str()), ("Caixa 2 (fundos)", "2026-01-01T11:00:00Z"));
         assert!(autorizada(&la.conn, &r, LOJA, &c2.publica()).unwrap());
     }
 
