@@ -438,7 +438,7 @@ fn cheque_devolvido(l: &Loja) -> String {
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
     caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
-    let v = vender(&l, d, "1", vec![pg("cheque", "300")], Some("000401"));
+    let v = vender(l, d, "1", vec![pg("cheque", "300")], Some("000401"));
     let ch = texto(c, "SELECT id FROM cheque WHERE venda_id = ?1", [&v]);
     cheques::depositar(c, d, &l.u, &ch, &l.banco).unwrap();
     cheques::devolver(c, d, &l.u, &ch, "Sem fundos", true).unwrap();
