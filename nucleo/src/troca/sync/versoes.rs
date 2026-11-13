@@ -29,7 +29,8 @@ impl Versao {
 /// (`dispositivo` diz só quem mexeu por último; `busca` sai do nome.)
 pub(super) const SEM_CONFLITO: &[&str] = &["atualizado_em", "ultimo_acesso", "backup_acesso", "dispositivo", "busca"];
 
-/// Colunas que diferem entre duas versões (sem as que mudam sozinhas).
+/// Colunas que diferem entre duas versões (sem as que mudam sozinhas e sem
+/// as que não viajam: derivadas e locais do `dados::esquema`, passo 5.2).
 pub fn diferencas(a: Option<&str>, b: Option<&str>) -> Vec<String> {
     let ler = |t: Option<&str>| -> Option<serde_json::Map<String, Value>> {
         t.and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v.as_object().cloned())
@@ -39,7 +40,11 @@ pub fn diferencas(a: Option<&str>, b: Option<&str>) -> Vec<String> {
             let mut cols: Vec<String> = x
                 .keys()
                 .chain(y.keys())
-                .filter(|k| !SEM_CONFLITO.contains(&k.as_str()) && x.get(*k) != y.get(*k))
+                .filter(|k| {
+                    !SEM_CONFLITO.contains(&k.as_str())
+                        && !crate::dados::esquema::nome_que_nao_viaja(k)
+                        && x.get(*k) != y.get(*k)
+                })
                 .cloned()
                 .collect();
             cols.sort();
