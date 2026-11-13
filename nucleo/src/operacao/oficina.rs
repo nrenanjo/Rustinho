@@ -741,7 +741,21 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<Ficha> {
         desconto: if b.7 > 0 { numeros::escrever_dinheiro(b.7) } else { String::new() },
         ..Default::default()
     };
-    let calculo = calcular(conn, &entrada)?;
+    let mut calculo = calcular(conn, &entrada)?;
+    // E14 (6.5): a OS salva mostra (e reimprime) cada peça como foi GRAVADA
+    // nela (código, nome e unidade), não como está no cadastro hoje; o preço
+    // já era o gravado. As colunas existem desde a 0008: sem migração.
+    let gravados: Vec<(String, String, String)> = conn
+        .prepare("SELECT codigo, descricao, unidade FROM ordem_servico_item WHERE ordem_id = ?1 ORDER BY ordem")?
+        .query_map([id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    for (item, (codigo, descricao, unidade)) in calculo.itens.iter_mut().zip(gravados) {
+        if item.tipo == "peca" {
+            item.codigo = codigo;
+            item.descricao = descricao;
+            item.unidade = unidade;
+        }
+    }
     let hoje = fiscal::hoje(conn)?;
     let previsao = b.6.clone().unwrap_or_default();
     let quando = |iso: &Option<String>| -> Resultado<String> {
@@ -1195,7 +1209,6 @@ mod testes {
     /// ficha e a reimpressão recalculam pelo cadastro de HOJE. Uma OS antiga sai
     /// com o nome novo da peça. O certo: mostrar o que foi gravado na OS.
     #[test]
-    #[ignore = "caracterização do E14 (6.5): falha hoje pelo motivo certo"]
     fn e14_os_antiga_mostra_o_nome_e_o_codigo_gravados() {
         let b = Banco::em_memoria().unwrap();
         let (c, d) = (&b.conn, b.dispositivo.as_str());
