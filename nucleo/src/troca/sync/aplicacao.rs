@@ -859,3 +859,177 @@ pub(super) fn detectar_pago_a_mais(conn: &Connection) -> Resultado<()> {
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Passo 5.4, parte 1 (PEND-35): resumo por tabela, a conferência entre dois
+// caixas em dia um com o outro.
+// ---------------------------------------------------------------------------
+
+/// Versão do cálculo do resumo: só se comparam resumos da mesma versão e das
+/// mesmas classes ([`RECURSO_CLASSES`]); um caixa que não manda o resumo (de
+/// versão anterior) simplesmente não compara (não troca menos dados).
+pub const RESUMO_VERSAO: &str = "resumo-v1";
+
+/// De quanto em quanto tempo um caixa compara o resumo com cada outro (o
+/// cálculo lê inteiras as tabelas que viajam: medido em 0,37 s na loja de 20
+/// mil peças, em release, sem segurar a escrita; frente F54).
+pub(super) const RESUMO_INTERVALO: Duration = Duration::from_secs(10 * 60);
+
+/// Linhas que cada banco cria sozinho ao nascer (pela estrutura, sem passar
+/// pela troca), com o mesmo id em todos e a hora de cada computador: (tabela,
+/// chave como no log). Só entram no resumo depois de viajar uma vez (alguém
+/// mexeu nelas); antes, a diferença é só a hora em que cada banco nasceu.
+pub(super) const NASCEM_EM_CADA_BANCO: &[(&str, &str)] = &[("conta_loja", "[\"caixa-geral\"]")];
+
+/// Quando este caixa comparou o resumo com cada outro (banco, outro caixa).
+static ULTIMO_RESUMO: Mutex<Vec<(PathBuf, String, Instant)>> = Mutex::new(Vec::new());
+
+/// Está na hora de comparar o resumo com este outro caixa? (Uma vez a cada
+/// [`RESUMO_INTERVALO`]; só nos testes, `sync_resumo_teste` = "sempre".)
+pub(super) fn hora_do_resumo(conn: &Connection, caminho: &Path, outro: &str) -> bool {
+    #[cfg(any(test, feature = "ancoras-de-teste"))]
+    if config::ler(conn, "sync_resumo_teste").ok().flatten().as_deref() == Some("sempre") {
+        return true;
+    }
+    let _ = conn;
+    let lista = ULTIMO_RESUMO.lock().unwrap_or_else(|e| e.into_inner());
+    !lista.iter().any(|(c, o, quando)| c == caminho && o == outro && quando.elapsed() < RESUMO_INTERVALO)
+}
+
+/// Anota que o resumo foi comparado agora com este outro caixa.
+pub(super) fn resumo_comparado(caminho: &Path, outro: &str) {
+    let mut lista = ULTIMO_RESUMO.lock().unwrap_or_else(|e| e.into_inner());
+    lista.retain(|(c, o, _)| !(c == caminho && o == outro));
+    lista.push((caminho.to_path_buf(), outro.to_string(), Instant::now()));
+}
+
+/// Contagem e soma de verificação de cada tabela que viaja: as colunas que
+/// viajam em JSON (na ordem da tabela; na tabela com chave natural, sem o id,
+/// que pode ser diferente de propósito em cada caixa; na `config`, só as da
+/// loja), SHA-256 de cada linha e a soma dos 8 primeiros bytes, módulo 2^64
+/// (não depende da ordem; uma linha a mais, a menos ou diferente muda a soma).
+pub fn resumo_das_tabelas(conn: &Connection) -> Resultado<Value> {
+    let mut tabelas = serde_json::Map::new();
+    for tabela in TABELAS {
+        let (todas, chave) = colunas(conn, tabela)?;
+        let natural = crate::dados::esquema::chave_natural(tabela).is_some();
+        let cols: Vec<String> = que_viajam(tabela, &todas)
+            .into_iter()
+            .filter(|c| !(natural && chave.contains(c)))
+            .map(|c| format!("\"{c}\""))
+            .collect();
+        let chave_sql = chave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+        let mut c = conn.prepare(&format!(
+            "SELECT json_array({}), json_array({chave_sql}){} FROM \"{tabela}\"",
+            cols.join(", "),
+            if *tabela == "config" { ", chave" } else { ", ''" }
+        ))?;
+        let mut linhas = c.query([])?;
+        let (mut n, mut soma) = (0u64, 0u64);
+        while let Some(l) = linhas.next()? {
+            if *tabela == "config" && !chave_da_loja(&l.get::<_, String>(2)?) {
+                continue;
+            }
+            let k: String = l.get(1)?;
+            if NASCEM_EM_CADA_BANCO.iter().any(|(t, ch)| t == tabela && *ch == k) {
+                let viajou: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM alteracao WHERE tabela = ?1 AND chave = ?2 LIMIT 1",
+                        params![tabela, k],
+                        |_| Ok(true),
+                    )
+                    .optional()?
+                    .unwrap_or(false);
+                if !viajou {
+                    continue;
+                }
+            }
+            let h = Sha256::digest(l.get::<_, String>(0)?.as_bytes());
+            let mut oito = [0u8; 8];
+            oito.copy_from_slice(&h[..8]);
+            soma = soma.wrapping_add(u64::from_le_bytes(oito));
+            n += 1;
+        }
+        tabelas.insert(tabela.to_string(), json!([n, format!("{soma:016x}")]));
+    }
+    Ok(Value::Object(tabelas))
+}
+
+/// O resumo deste caixa e onde ele está em relação ao `outro` caixa, lidos
+/// juntos numa leitura (no modo WAL a leitura não segura a escrita: o balcão
+/// grava enquanto isso): a numeração deste caixa, até onde ele já recebeu do
+/// outro e quantas alterações recebidas estão guardadas sem aplicar.
+pub(super) fn resumo_agora(conn: &Connection, outro: &str) -> Resultado<Value> {
+    let dentro = !conn.is_autocommit();
+    if !dentro {
+        conn.execute_batch("BEGIN")?;
+    }
+    let r = (|| -> Resultado<Value> {
+        let seq = seq_maxima(conn)?;
+        let cursor: i64 = conn
+            .query_row("SELECT cursor FROM sync_par WHERE dispositivo = ?1", [outro], |l| l.get(0))
+            .optional()?
+            .unwrap_or(0);
+        let pendentes: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+            [],
+            |l| l.get(0),
+        )?;
+        Ok(json!({ "versao": RESUMO_VERSAO, "classes": RECURSO_CLASSES, "seqMaxima": seq, "cursorDoOutro": cursor,
+                   "pendencias": pendentes, "tabelas": resumo_das_tabelas(conn)? }))
+    })();
+    if !dentro {
+        let _ = conn.execute_batch("COMMIT");
+    }
+    r
+}
+
+/// Dá para comparar os dois resumos? Mesma versão e mesmas classes, os dois
+/// caixas em dia um com o outro (cada um já recebeu tudo o que o outro tinha
+/// quando tirou o resumo) e nada guardado sem aplicar (uma pendência é uma
+/// diferença conhecida, já mostrada ao gerente).
+pub(super) fn resumos_comparaveis(meu: &Value, dele: &Value) -> bool {
+    meu["versao"] == dele["versao"]
+        && meu["classes"] == dele["classes"]
+        && meu["seqMaxima"].is_i64()
+        && meu["cursorDoOutro"] == dele["seqMaxima"]
+        && dele["cursorDoOutro"] == meu["seqMaxima"]
+        && meu["pendencias"].as_i64() == Some(0)
+        && dele["pendencias"].as_i64() == Some(0)
+}
+
+/// Compara o resumo deste caixa com o do `outro` (só quando dá: veja
+/// [`resumos_comparaveis`]). Cada tabela diferente vira um item para o gerente
+/// em Simultaneidade › Diferenças ("Conferência entre caixas"), uma vez para
+/// cada diferença. Não decide nada: nenhum dado é mudado. Devolve quantas
+/// tabelas diferem.
+pub(super) fn comparar_resumos(conn: &Connection, outro: &str, meu: &Value, dele: &Value) -> Resultado<usize> {
+    if !resumos_comparaveis(meu, dele) {
+        return Ok(0);
+    }
+    let mut diferentes = 0;
+    for tabela in TABELAS {
+        let (aqui, la) = (&meu["tabelas"][*tabela], &dele["tabelas"][*tabela]);
+        if la.is_null() || aqui == la {
+            continue;
+        }
+        diferentes += 1;
+        let marca = format!(
+            "{}|{}|{}|{}",
+            aqui[0].as_u64().unwrap_or(0),
+            aqui[1].as_str().unwrap_or(""),
+            la[0].as_u64().unwrap_or(0),
+            la[1].as_str().unwrap_or("")
+        );
+        // Numa gravação só: este caixa pode comparar com o mesmo outro como
+        // quem pede e como quem responde ao mesmo tempo.
+        conn.execute(
+            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+             SELECT ?1, ?2, '', ?3, ?2, ?4, 'resumo'
+              WHERE NOT EXISTS (SELECT 1 FROM sync_conflito
+                                 WHERE tipo = 'resumo' AND tabela = ?1 AND chave = ?2 AND perdeu = ?3)",
+            params![tabela, outro, marca, tempo::agora()],
+        )?;
+    }
+    Ok(diferentes)
+}

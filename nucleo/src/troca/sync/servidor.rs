@@ -129,14 +129,34 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
     // fonte de loja nenhuma; o que recebeu de outro caixa não é repassado.
     let (lista, tem_mais) = if sou_novo { (Vec::new(), false) } else { alteracoes_desde(&conn, desde, lote(&conn))? };
     let (lista, tem_mais) = preparar_para(&conn, &quem, &pedido, lista, tem_mais)?;
-    enviar(
-        &mut fluxo,
-        &k,
-        &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista,
-                 "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
-                 "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
-                 "loja": minha_loja, "novo": sou_novo }),
-    )
+    let mut resposta = json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista,
+                               "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
+                               "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                               "loja": minha_loja, "novo": sou_novo });
+    // Passo 5.4: quem pediu mandou o resumo das tabelas e está em dia com
+    // este caixa (já tem tudo daqui) — este também compara e devolve o seu.
+    if let Some(r) = resumo_do_servidor(&conn, &quem, &pedido, seq_maxima, sou_novo) {
+        resposta["resumo"] = r;
+    }
+    enviar(&mut fluxo, &k, &resposta)
+}
+
+/// O resumo das tabelas deste caixa para a resposta (passo 5.4), comparado
+/// com o de quem pediu, quando os dois estão em dia um com o outro. Erro aqui
+/// não atrapalha a troca: fica no registro técnico.
+fn resumo_do_servidor(conn: &Connection, quem: &str, pedido: &Value, seq_maxima: i64, sou_novo: bool) -> Option<Value> {
+    let dele = &pedido["resumo"];
+    if sou_novo || quem.is_empty() || !dele.is_object() || dele["cursorDoOutro"].as_i64() != Some(seq_maxima) {
+        return None;
+    }
+    let r = resumo_agora(conn, quem).and_then(|meu| comparar_resumos(conn, quem, &meu, dele).map(|_| meu));
+    match r {
+        Ok(meu) => Some(meu),
+        Err(e) => {
+            crate::registro::anotar(&format!("troca de dados: resumo das tabelas: {e}"));
+            None
+        }
+    }
 }
 
 pub(super) const TEXTO_RETIRADO_AQUI: &str =
