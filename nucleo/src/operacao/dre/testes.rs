@@ -617,3 +617,21 @@ fn dre_classificacao_de_fabrica() {
     assert!(!c.confirmada);
     assert_eq!(c.grupos.len(), GRUPOS.len());
 }
+
+/// E03 (passo 7.3): o aviso da peça sem custo diz o que o cálculo faz (e a
+/// especificação aprovada, `docs/DRE-gerencial.md` §3 e §6): a venda dela
+/// ENTRA no lucro bruto, sem o custo, e por isso o lucro fica incompleto (o de
+/// verdade é menor). O texto de antes dizia que essas peças "não entram como
+/// lucro", o contrário do número mostrado.
+#[test]
+fn e03_aviso_da_peca_sem_custo_conforme_o_calculo() {
+    let l = cenario();
+    let d = l.dre("mes");
+    // O cálculo (o mesmo do dre_cenario_manual): os 50,00 sem custo estão no lucro bruto.
+    assert_eq!(d.numeros.lucro_bruto, 120_00, "300 − 180: inclui a venda de 50,00 sem custo");
+    let p = d.pendencias.iter().find(|p| p.codigo == "sem_custo").expect("a pendência da peça sem custo");
+    assert!(!p.texto.contains("não entram como lucro"), "o aviso contradiz o cálculo: {}", p.texto);
+    assert!(p.texto.contains("entra no lucro bruto sem o custo"), "o aviso não diz o que o cálculo faz: {}", p.texto);
+    assert!(p.texto.contains("R$ 50,00"), "{}", p.texto);
+}
+

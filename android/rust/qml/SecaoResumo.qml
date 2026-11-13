@@ -205,7 +205,8 @@ FocusScope {
                     Nota {
                         visible: !!secao.r && secao.r.semCusto > 0 && !Tema.oculto && !secao.dre
                         text: secao.r ? secao.r.semCusto + (secao.r.semCusto === 1 ? " peça vendida no mês está" : " peças vendidas no mês estão")
-                                        + " sem custo no cadastro: o lucro do mês está incompleto (elas não contam como lucro)." : ""
+                                        + " sem custo no cadastro: o lucro do mês está incompleto (a venda "
+                                        + (secao.r.semCusto === 1 ? "dela" : "delas") + " entra no lucro sem o custo; o lucro de verdade é menor)." : ""
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
