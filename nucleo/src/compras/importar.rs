@@ -34,6 +34,9 @@ pub struct Entrada {
     pub fornecedores: bool,
     pub pecas_loja: bool,
     pub pecas_fornecedor: bool,
+    /// P-4: o carimbo da prévia que a tela mostrou. Se vier e não for o de
+    /// agora (os arquivos ou os cadastros mudaram), nada é gravado.
+    pub carimbo: String,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -62,6 +65,14 @@ pub struct Previa {
     /// D-13: códigos que aparecem em peças com descrições diferentes (cada
     /// descrição vira uma peça; o código não é dado a nenhuma delas).
     pub codigos_repetidos: i64,
+    /// Lote 2 (O-3, A03b): as opções desta prévia e o que a importação vai
+    /// fazer com elas, pelas mesmas decisões (os campos de cima são, como
+    /// antes, com todas as opções marcadas).
+    pub opcoes: Opcoes,
+    #[serde(flatten)]
+    pub resumo: Resumo,
+    /// P-4: mandar de volta no "Cadastrar".
+    pub carimbo: String,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -71,6 +82,11 @@ pub struct Importado {
     pub fornecedores: i64,
     pub pecas: i64,
     pub codigos_ligados: i64,
+    /// O resumo das decisões que foram aplicadas: o mesmo da prévia. Fica de
+    /// fora da resposta (a trava T7 congela o resultado da importação); serve
+    /// à trava "prévia = resultado".
+    #[serde(skip)]
+    pub resumo: Resumo,
 }
 
 /// O que foi lido das notas, já sem repetição.
@@ -92,6 +108,8 @@ struct Lido {
     pecas_fornecedor: BTreeMap<(String, String, String), (ItemXml, String)>,
     /// (documento do fornecedor, código do fornecedor, descrição compactada) → (chave_nfe, numero_nfe)
     notas_fornecedor_meta: BTreeMap<(String, String, String), (String, String)>,
+    /// P-4: SHA-256 do conteúdo dos XMLs, na ordem em que foram lidos.
+    assinatura: [u8; 32],
 }
 
 impl Lido {
@@ -206,7 +224,18 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
     let loja = cnpj_loja(conn)?;
     let mut lido = Lido::default();
     let mut chaves: HashSet<String> = HashSet::new();
+    let mut assinatura = {
+        use sha2::Digest;
+        sha2::Sha256::new()
+    };
     let total = cada_xml(arquivos, |nome, xml| {
+        {
+            use sha2::Digest;
+            assinatura.update(nome.as_bytes());
+            assinatura.update([0u8]);
+            assinatura.update(xml.as_bytes());
+            assinatura.update([0u8]);
+        }
         // PEND-09 (D2, D8): só cadastra a partir de nota com a assinatura do
         // emitente verificada; a autorização da SEFAZ não é exigida aqui
         // (cadastro não mexe em estoque, custo nem financeiro).
@@ -264,6 +293,10 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         }
     })?;
     lido.arquivos = total;
+    lido.assinatura = {
+        use sha2::Digest;
+        assinatura.finalize().into()
+    };
     let avisos = lido.avisos_repetidos();
     for a in avisos.into_iter().take(5) {
         lido.avisos.push(a);
@@ -377,16 +410,46 @@ impl PorDescricao {
 }
 
 /// A peça da loja deste item já existe?
-fn peca_loja_existe(conn: &Connection, codigo: &str, it: &ItemXml, repetido: bool) -> Resultado<bool> {
-    let gtin_existe = !matches!(peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?, BuscaId::Nenhum);
-    if repetido {
-        return Ok(peca_repetida(conn, codigo, it)?.is_some() || gtin_existe);
+/// As opções de uma entrada.
+fn opcoes_de(e: &Entrada) -> Opcoes {
+    Opcoes {
+        clientes: e.clientes,
+        fornecedores: e.fornecedores,
+        pecas_loja: e.pecas_loja,
+        pecas_fornecedor: e.pecas_fornecedor,
     }
-    Ok(peca_por_codigo(conn, codigo)?.is_some() || gtin_existe)
 }
 
+/// Todas as opções marcadas (P-5: a prévia sem opções supõe todas).
+fn todas_as_opcoes(arquivos: &[String]) -> Entrada {
+    Entrada {
+        arquivos: arquivos.to_vec(),
+        clientes: true,
+        fornecedores: true,
+        pecas_loja: true,
+        pecas_fornecedor: true,
+        carimbo: String::new(),
+    }
+}
+
+/// A prévia com todas as opções marcadas (P-5).
 pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
-    let lido = ler_tudo(conn, arquivos)?;
+    previa_com(conn, &todas_as_opcoes(arquivos))
+}
+
+/// A prévia (T-1): as MESMAS decisões da importação (`decidir`), sem gravar.
+/// Os campos de antes saem das decisões com todas as opções marcadas (o que as
+/// notas trazem); o resumo, com as opções desta prévia.
+pub fn previa_com(conn: &Connection, e: &Entrada) -> Resultado<Previa> {
+    let lido = ler_tudo(conn, &e.arquivos)?;
+    let todas = todas_as_opcoes(&e.arquivos);
+    let d_todas = decidir(conn, &todas, &lido)?;
+    let opcoes = opcoes_de(e);
+    let resumo = if opcoes == opcoes_de(&todas) {
+        resumir(conn, &lido, &d_todas)?
+    } else {
+        resumir(conn, &lido, &decidir(conn, e, &lido)?)?
+    };
     let mut p = Previa {
         arquivos: lido.arquivos,
         notas: lido.notas_loja + lido.notas_fornecedor,
@@ -394,6 +457,9 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
         notas_fornecedor: lido.notas_fornecedor,
         ignorados: lido.ignorados,
         avisos: lido.avisos.clone(),
+        opcoes,
+        carimbo: carimbo(conn, &opcoes, &lido)?,
+        resumo,
         ..Default::default()
     };
     let mut nomes: Vec<(String, String)> = Vec::new();
@@ -418,55 +484,33 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
     }
     nomes.sort();
     p.exemplos_fornecedores = nomes.into_iter().take(6).collect();
-
-    let repetidos = lido.repetidos_loja();
-    let repetidos_f = lido.repetidos_fornecedor();
-    let por_descricao = PorDescricao::default();
-    p.codigos_repetidos = (repetidos.len() + repetidos_f.len()) as i64;
-    let mut barras_novas: HashSet<String> = HashSet::new();
+    p.codigos_repetidos = (lido.repetidos_loja().len() + lido.repetidos_fornecedor().len()) as i64;
     let mut exemplos: Vec<String> = Vec::new();
-    for ((codigo, _), (it, _)) in &lido.pecas_loja {
-        if peca_loja_existe(conn, codigo, it, repetidos.contains(codigo))? {
-            p.pecas_ja += 1;
-        } else {
+    for (_, it, _, dec) in &d_todas.loja {
+        if matches!(dec, DecisaoLoja::Nova { .. }) {
             p.pecas_loja_novas += 1;
-            if !it.gtin.is_empty() {
-                barras_novas.insert(it.gtin.clone());
-            }
-            for g in &it.gtins {
-                if !g.codigo.is_empty() {
-                    barras_novas.insert(g.codigo.clone());
-                }
-            }
             if exemplos.len() < 6 {
                 exemplos.push(texto::limpar(&it.descricao));
             }
+        } else {
+            p.pecas_ja += 1;
         }
     }
-    for ((forn, codigo, _), (it, _)) in &lido.pecas_fornecedor {
-        let ja = if repetidos_f.contains(&(forn.clone(), texto::compactar(codigo))) {
-            por_descricao.achar(conn, &Plano::default(), it)?.is_some()
-        } else {
-            !matches!(peca_por_fornecedor_inequivoco(conn, forn, codigo)?, BuscaId::Nenhum)
-        };
-        let gtin_ja = !matches!(peca_por_gtins_inequivoco(conn, &it.gtins, &it.gtin)?, BuscaId::Nenhum)
-            || (!it.gtin.is_empty() && barras_novas.contains(&it.gtin))
-            || it.gtins.iter().any(|g| !g.codigo.is_empty() && barras_novas.contains(&g.codigo));
-        if ja || gtin_ja {
-            p.pecas_ja += 1;
-        } else {
-            p.pecas_fornecedor_novas += 1;
-            if !it.gtin.is_empty() {
-                barras_novas.insert(it.gtin.clone());
-            }
-            for g in &it.gtins {
-                if !g.codigo.is_empty() {
-                    barras_novas.insert(g.codigo.clone());
+    for i in &d_todas.forn {
+        match &i.decisao {
+            DecisaoForn::Nova { .. } => {
+                p.pecas_fornecedor_novas += 1;
+                if exemplos.len() < 6 {
+                    exemplos.push(texto::limpar(&i.item.0.descricao));
                 }
             }
-            if exemplos.len() < 6 {
-                exemplos.push(texto::limpar(&it.descricao));
-            }
+            DecisaoForn::Pendencia { motivo, .. }
+                if !matches!(
+                    *motivo,
+                    "gtin_ambiguo" | "fornecedor_ambiguo" | "conflito_gtin_fornecedor" | "peca_pelo_gtin"
+                ) => {}
+            DecisaoForn::Nada => {}
+            _ => p.pecas_ja += 1,
         }
     }
     p.exemplos_pecas = exemplos;
@@ -547,7 +591,13 @@ pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
 /// Separada da leitura para os testes montarem casos sem nota assinada.
 fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada, lido: &Lido) -> Resultado<Importado> {
     let d = decidir(conn, e, lido)?;
-    aplicar(Gravacao { conn, dispositivo, usuario_id }, lido, &d)
+    if !e.carimbo.is_empty() && carimbo(conn, &d.opcoes, lido)? != e.carimbo {
+        return Err(Erro::validacao(CARIMBO_VENCIDO));
+    }
+    let resumo = resumir(conn, lido, &d)?;
+    let mut r = aplicar(Gravacao { conn, dispositivo, usuario_id }, lido, &d)?;
+    r.resumo = resumo;
+    Ok(r)
 }
 
 /// Os ids do plano viram os ids gravados à medida que peças e pessoas são criadas.
@@ -601,7 +651,7 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
     }
 
     // Etapa 3: as peças das notas da loja.
-    for (codigo, it, emissao, dec) in &d.loja {
+    for (_, it, emissao, dec) in &d.loja {
         let gtins_ficha = gtins_para_ficha(&it.gtins, &it.gtin);
         match dec {
             DecisaoLoja::OutraDescricaoPeloGtin { pid, .. } => {
@@ -671,7 +721,6 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                 r.pecas += 1;
             }
         }
-        let _ = codigo;
     }
 
     // Etapa 4: as peças das notas de fornecedor.
@@ -1116,6 +1165,9 @@ struct ItemForn<'a> {
 /// Todas as decisões de uma prévia ou importação, na ordem em que a
 /// importação as aplica.
 struct Decisoes<'a> {
+    opcoes: Opcoes,
+    /// Documento → fornecedor (gravado ou do plano).
+    ids_fornecedor: HashMap<String, String>,
     clientes: Vec<DecisaoPessoa>,
     fornecedores: Vec<DecisaoPessoa>,
     loja: Vec<(&'a String, &'a ItemXml, &'a String, DecisaoLoja)>,
@@ -1125,7 +1177,14 @@ struct Decisoes<'a> {
 /// Decide tudo, sem gravar. É a mesma função para a prévia e para a importação.
 fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Decisoes<'a>> {
     let mut plano = Plano::default();
-    let mut d = Decisoes { clientes: Vec::new(), fornecedores: Vec::new(), loja: Vec::new(), forn: Vec::new() };
+    let mut d = Decisoes {
+        opcoes: opcoes_de(e),
+        ids_fornecedor: HashMap::new(),
+        clientes: Vec::new(),
+        fornecedores: Vec::new(),
+        loja: Vec::new(),
+        forn: Vec::new(),
+    };
 
     // Etapa 1: clientes.
     let mut lista: Vec<_> = lido.clientes.keys().collect();
@@ -1327,8 +1386,282 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
         };
         d.forn.push(ItemForn { chave, item, fornecedor_id, forn_nome, chave_nfe, numero_nfe, repetido, decisao });
     }
+    d.ids_fornecedor = ids_fornecedor;
     Ok(d)
 }
+
+// ---------------------------------------------------------------------------
+// Lote 2, itens 03b e 04 (O-3, A03b, P-4, P-5): o que a importação vai fazer,
+// contado das MESMAS decisões. A prévia mostra este resumo; a importação
+// devolve o dela, calculado do mesmo jeito; a trava "prévia = resultado" e o
+// carimbo garantem que é o mesmo.
+// ---------------------------------------------------------------------------
+
+/// As opções que valeram numa prévia.
+#[derive(Debug, Default, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Opcoes {
+    pub clientes: bool,
+    pub fornecedores: bool,
+    pub pecas_loja: bool,
+    pub pecas_fornecedor: bool,
+}
+
+/// Uma categoria do que a importação faz (código estável, texto da tela,
+/// quantidade e até 6 exemplos). A especificação está em
+/// `preparacao/ESPEC_O3_CLASSIFICACAO_PREVIA.md`.
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Categoria {
+    pub codigo: String,
+    pub texto: String,
+    pub quantidade: i64,
+    pub exemplos: Vec<String>,
+}
+
+/// Quantos itens vão para pendência por um motivo, e quantos deles só
+/// atualizam a pendência que já estava aberta.
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MotivoPendencia {
+    pub motivo: String,
+    pub texto: String,
+    pub quantidade: i64,
+    pub ja_abertas: i64,
+}
+
+/// O resumo das decisões: o mesmo na prévia e no resultado da importação.
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Resumo {
+    pub categorias: Vec<Categoria>,
+    pub vao_para_pendencias: i64,
+    pub pendencias_por_motivo: Vec<MotivoPendencia>,
+    /// Peças que JÁ existiam e recebem GTIN novo ou o código do fornecedor (A03b).
+    pub pecas_que_mudam: i64,
+    pub exemplos_pecas_que_mudam: Vec<String>,
+    /// Peças desativadas que a importação acha (pelo GTIN ou pelo vínculo).
+    /// Só informação: a regra para elas é a decisão N06, ainda aberta.
+    pub pecas_desativadas: i64,
+    pub exemplos_pecas_desativadas: Vec<String>,
+}
+
+/// O texto de cada categoria, na ordem em que a tela mostra.
+const CATEGORIAS: &[(&str, &str)] = &[
+    ("cliente.novo", "Clientes novos"),
+    ("cliente.ja", "Clientes já cadastrados"),
+    ("cliente.nao_cadastrado", "Clientes que não entram (opção desmarcada)"),
+    ("fornecedor.novo", "Fornecedores novos"),
+    ("fornecedor.novo_implicito", "Fornecedores novos que entram porque \"Peças do fornecedor\" está marcada"),
+    ("fornecedor.ja", "Fornecedores já cadastrados"),
+    ("fornecedor.nao_cadastrado", "Fornecedores que não entram (opções desmarcadas)"),
+    ("loja.nova", "Peças novas (notas da loja)"),
+    ("loja.ja", "Peças da loja já cadastradas (nada muda)"),
+    ("loja.ja_gtin_novo", "Peças da loja já cadastradas que ganham GTIN"),
+    ("loja.pendencia", "Peças da loja com código de outra peça (vão para pendências)"),
+    ("forn.nova", "Peças novas (notas de fornecedor), com o código do fornecedor ligado"),
+    ("forn.nova_codigo_repetido", "Peças novas de código repetido (o código não fica ligado)"),
+    ("forn.mesma_descricao", "Código repetido: entram na peça de mesma descrição"),
+    ("forn.ja_ligado", "Já ligadas ao código do fornecedor (nada muda)"),
+    ("forn.ja_pelo_vinculo", "Já ligadas ao código do fornecedor"),
+    ("forn.ja_pelo_vinculo_gtin_novo", "Já ligadas ao código do fornecedor, ganham GTIN"),
+    ("forn.ja_pelo_gtin", "Achadas pelo GTIN"),
+    ("forn.ja_pelo_gtin_liga", "Achadas pelo GTIN: o código do fornecedor será ligado"),
+    ("forn.pendencia", "Peças de fornecedor que vão para pendências"),
+    ("forn.ignorada", "Peças de fornecedor que não entram (opções desmarcadas)"),
+];
+
+/// Uma pendência aberta para o mesmo item (fornecedor, código e descrição)?
+fn pendencia_aberta(conn: &Connection, doc: &str, codigo: &str, descricao: &str) -> Resultado<bool> {
+    let desc = texto::compactar(descricao);
+    let mut c = conn.prepare_cached(
+        "SELECT descricao FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente' AND fornecedor_documento = ?1 AND codigo_compacto = ?2",
+    )?;
+    let abertas: Vec<String> = c
+        .query_map(params![documento::limpar(doc), texto::compactar(codigo)], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(abertas.iter().any(|d| texto::compactar(d) == desc))
+}
+
+fn nome_e_ativo(conn: &Connection, pid: &str) -> Resultado<Option<(String, bool)>> {
+    Ok(conn
+        .query_row("SELECT nome, ativo FROM produto WHERE id = ?1", [pid], |l| {
+            Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)? != 0))
+        })
+        .optional()?)
+}
+
+/// O resumo das decisões (a prévia e a importação chamam a mesma função).
+fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
+    let mut cat: BTreeMap<&'static str, (i64, Vec<String>)> = BTreeMap::new();
+    let mut conta = |c: &'static str, exemplo: String| {
+        let e = cat.entry(c).or_default();
+        e.0 += 1;
+        if e.1.len() < 6 && !exemplo.is_empty() && !e.1.contains(&exemplo) {
+            e.1.push(exemplo);
+        }
+    };
+    let nome_pessoa = |e: &Emitente| if e.fantasia.is_empty() { e.nome.clone() } else { e.fantasia.clone() };
+    for p in &d.clientes {
+        let (em, _) = &lido.clientes[&p.doc];
+        if p.nova.is_some() {
+            conta("cliente.novo", nome_pessoa(em));
+        } else if pessoa_existe(conn, &p.doc)?.is_some() {
+            conta("cliente.ja", String::new());
+        } else {
+            conta("cliente.nao_cadastrado", nome_pessoa(em));
+        }
+    }
+    for p in &d.fornecedores {
+        let (em, _) = &lido.fornecedores[&p.doc];
+        match &p.nova {
+            Some(_) if d.opcoes.fornecedores => conta("fornecedor.novo", nome_pessoa(em)),
+            Some(_) => conta("fornecedor.novo_implicito", nome_pessoa(em)),
+            None if d.ids_fornecedor.contains_key(&p.doc) => conta("fornecedor.ja", String::new()),
+            None => conta("fornecedor.nao_cadastrado", nome_pessoa(em)),
+        }
+    }
+    let mut que_mudam: Vec<String> = Vec::new();
+    let mut desativadas: Vec<String> = Vec::new();
+    let muda = |pid: &str, que_mudam: &mut Vec<String>| {
+        if !pid.starts_with(PLANEJADO) && !que_mudam.iter().any(|p| p == pid) {
+            que_mudam.push(pid.to_string());
+        }
+    };
+    let achada = |pid: &str, desativadas: &mut Vec<String>| -> Resultado<()> {
+        if !pid.starts_with(PLANEJADO) && !desativadas.iter().any(|p| p == pid) {
+            if let Some((_, false)) = nome_e_ativo(conn, pid)? {
+                desativadas.push(pid.to_string());
+            }
+        }
+        Ok(())
+    };
+    let mut motivos: BTreeMap<&'static str, (i64, i64)> = BTreeMap::new();
+    for (codigo, it, _, dec) in &d.loja {
+        let desc = texto::limpar(&it.descricao);
+        match dec {
+            DecisaoLoja::Nova { .. } => conta("loja.nova", desc),
+            DecisaoLoja::OutraDescricaoPendencia { .. } => {
+                conta("loja.pendencia", desc);
+                let m = motivos.entry("codigo_de_outra_peca").or_default();
+                m.0 += 1;
+                if pendencia_aberta(conn, "", codigo, &it.descricao)? {
+                    m.1 += 1;
+                }
+            }
+            DecisaoLoja::OutraDescricaoPeloGtin { pid, gtins_novos }
+            | DecisaoLoja::Existente { pid: Some(pid), gtins_novos } => {
+                if gtins_novos.is_empty() {
+                    conta("loja.ja", String::new());
+                } else {
+                    conta("loja.ja_gtin_novo", desc);
+                    muda(pid, &mut que_mudam);
+                }
+            }
+            DecisaoLoja::Existente { pid: None, .. } => conta("loja.ja", String::new()),
+        }
+    }
+    for i in &d.forn {
+        let (it, _) = i.item;
+        let desc = texto::limpar(&it.descricao);
+        match &i.decisao {
+            DecisaoForn::Pendencia { motivo, .. } => {
+                conta("forn.pendencia", desc);
+                let m = motivos.entry(motivo).or_default();
+                m.0 += 1;
+                if pendencia_aberta(conn, &i.chave.0, &i.chave.1, &it.descricao)? {
+                    m.1 += 1;
+                }
+            }
+            DecisaoForn::JaLigadoFecha { pid } => {
+                conta("forn.ja_ligado", String::new());
+                achada(pid, &mut desativadas)?;
+            }
+            DecisaoForn::PeloGtin { pid, ligar, gtins_novos } => {
+                conta(if *ligar { "forn.ja_pelo_gtin_liga" } else { "forn.ja_pelo_gtin" }, desc);
+                if *ligar || !gtins_novos.is_empty() {
+                    muda(pid, &mut que_mudam);
+                }
+                achada(pid, &mut desativadas)?;
+            }
+            DecisaoForn::PeloVinculo { pid, gtins_novos, .. } => {
+                if gtins_novos.is_empty() {
+                    conta("forn.ja_pelo_vinculo", String::new());
+                } else {
+                    conta("forn.ja_pelo_vinculo_gtin_novo", desc);
+                    muda(pid, &mut que_mudam);
+                }
+                achada(pid, &mut desativadas)?;
+            }
+            DecisaoForn::MesmaDescricao { pid, gtins_novos } => {
+                conta("forn.mesma_descricao", desc);
+                if !gtins_novos.is_empty() {
+                    muda(pid, &mut que_mudam);
+                }
+            }
+            DecisaoForn::Nova { ligar, .. } => {
+                conta(if *ligar { "forn.nova" } else { "forn.nova_codigo_repetido" }, desc)
+            }
+            DecisaoForn::Nada => conta("forn.ignorada", desc),
+        }
+    }
+    let nomes = |ids: &[String]| -> Resultado<Vec<String>> {
+        let mut v = Vec::new();
+        for p in ids.iter().take(6) {
+            if let Some((n, _)) = nome_e_ativo(conn, p)? {
+                v.push(n);
+            }
+        }
+        Ok(v)
+    };
+    let categorias = CATEGORIAS
+        .iter()
+        .filter_map(|(c, t)| {
+            cat.get(c).map(|(n, ex)| Categoria {
+                codigo: c.to_string(),
+                texto: t.to_string(),
+                quantidade: *n,
+                exemplos: ex.clone(),
+            })
+        })
+        .collect();
+    let pendencias_por_motivo: Vec<MotivoPendencia> = motivos
+        .iter()
+        .map(|(m, (n, abertas))| MotivoPendencia {
+            motivo: m.to_string(),
+            texto: motivo_legivel(m).to_string(),
+            quantidade: *n,
+            ja_abertas: *abertas,
+        })
+        .collect();
+    Ok(Resumo {
+        categorias,
+        vao_para_pendencias: pendencias_por_motivo.iter().map(|m| m.quantidade).sum(),
+        pendencias_por_motivo,
+        pecas_que_mudam: que_mudam.len() as i64,
+        exemplos_pecas_que_mudam: nomes(&que_mudam)?,
+        pecas_desativadas: desativadas.len() as i64,
+        exemplos_pecas_desativadas: nomes(&desativadas)?,
+    })
+}
+
+/// P-4: o carimbo de uma prévia. Muda se mudam as opções, o conteúdo dos
+/// arquivos lidos ou os cadastros (a fila de alterações da troca anda a cada
+/// gravação de peça, pessoa, GTIN ou vínculo).
+fn carimbo(conn: &Connection, e: &Opcoes, lido: &Lido) -> Resultado<String> {
+    use sha2::Digest;
+    let seq: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))?;
+    let mut h = sha2::Sha256::new();
+    h.update([e.clientes as u8, e.fornecedores as u8, e.pecas_loja as u8, e.pecas_fornecedor as u8]);
+    h.update(lido.assinatura);
+    h.update(seq.to_le_bytes());
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// O texto do carimbo vencido (a tela mostra e refaz a prévia).
+const CARIMBO_VENCIDO: &str =
+    "Os arquivos ou os cadastros mudaram desde a prévia. Nada foi gravado: confira a prévia de novo e cadastre.";
 
 /// Salva a peça; se o código de barras ou o código já existirem (corrida
 /// com outra peça da mesma importação), tenta sem eles.
@@ -1791,8 +2124,15 @@ mod comandos {
     ];
 
     fn importar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        // P-5: sem nenhuma opção no pedido, a prévia supõe todas marcadas.
+        let com_opcoes =
+            ["clientes", "fornecedores", "pecasLoja", "pecasFornecedor"].iter().any(|k| dados.get(k).is_some());
         let d: importar::Entrada = ler(dados)?;
-        Ok(json!(importar::previa(p.conn, &d.arquivos)?))
+        if com_opcoes {
+            Ok(json!(importar::previa_com(p.conn, &d)?))
+        } else {
+            Ok(json!(importar::previa(p.conn, &d.arquivos)?))
+        }
     }
 
     fn importar_cadastros(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -2134,6 +2474,7 @@ mod testes {
             fornecedores: true,
             pecas_loja: true,
             pecas_fornecedor: true,
+            ..Default::default()
         };
         let r = importar(c, d, &u, &e).unwrap();
         assert_eq!((r.clientes, r.fornecedores, r.pecas), (1, 1, 4));
@@ -2206,6 +2547,7 @@ mod testes {
             fornecedores: true,
             pecas_loja: true,
             pecas_fornecedor: true,
+            ..Default::default()
         };
         let conta = |t: &str| -> i64 { c.query_row(&format!("SELECT count(*) FROM {t}"), [], |l| l.get(0)).unwrap() };
         let financeiro = || {
@@ -2258,6 +2600,7 @@ mod testes {
                 fornecedores: true,
                 pecas_loja: false,
                 pecas_fornecedor: false,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2275,6 +2618,7 @@ mod testes {
                 fornecedores: true,
                 pecas_loja: false,
                 pecas_fornecedor: false,
+                ..Default::default()
             },
         )
         .unwrap();
