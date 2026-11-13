@@ -157,7 +157,6 @@ pub struct Coluna {
     pub classe: ClasseDaColuna,
 }
 
-#[allow(dead_code)]
 const fn c(tabela: &'static str, nome: &'static str, classe: ClasseDaColuna) -> Coluna {
     Coluna { tabela, nome, classe }
 }
@@ -182,6 +181,8 @@ const fn c(tabela: &'static str, nome: &'static str, classe: ClasseDaColuna) -> 
 /// (o recurso de troca `classes-v1`, veja `troca::sync`).
 #[rustfmt::skip]
 pub const COLUNAS: &[Coluna] = &[
+    // C07: a hora da última entrada é de cada caixa (entrar não gera troca).
+    c("usuario", "ultimo_acesso", ClasseDaColuna::Local),
 ];
 
 /// Tabelas que viajam cujas linhas alimentam um derivado: (tabela, coluna com
