@@ -611,7 +611,10 @@ FocusScope {
                                 Text {
                                     visible: tela.comBarras
                                     text: previa.e ? previa.e.textoBarras : ""
-                                    color: Tema.tinta
+                                    // H22 (7.2): a prévia é sempre branca (o papel): cor fixa
+                                    // escura, como as outras linhas dela (no AMOLED, Tema.tinta
+                                    // é clara e o número sumia).
+                                    color: "#2A2622"
                                     font.family: Tema.texto
                                     font.pixelSize: Math.max(6, 1.8 * previa.escala)
                                     Layout.alignment: Qt.AlignHCenter
