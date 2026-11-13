@@ -47,6 +47,13 @@ const MESMO_NOME_NAS_DUAS_0024: &[(&str, &str)] = &[("table", "produto_gtin"), (
 /// A partir desta migração (a primeira da dev.3.3) vale a regra dos nomes da linha dev.3.
 const PRIMEIRA_DA_DEV33: usize = 25;
 
+/// B02 (passo 7.5): `CREATE INDEX IF NOT EXISTS` com um nome que já existe não
+/// faz nada, sem erro. Foi assim que o índice composto do estoque da 0006
+/// nunca existiu (B01). O único caso da história, publicado: (migração, nome,
+/// o índice que o corrige com nome novo). Nenhum outro entra aqui.
+const IGNORADOS_NA_HISTORIA: &[(usize, &str, &str)] =
+    &[(6, "estoque_movimento_produto", "estoque_movimento_produto_tipo_data")];
+
 /// (tipo, nome) → (tabela, definição com os espaços normalizados).
 type Estrutura = BTreeMap<(String, String), (String, String)>;
 
@@ -151,6 +158,61 @@ fn estrutura_esperada(ate: usize) -> Estrutura {
     let c = Connection::open_in_memory().unwrap();
     montar(&c, ate);
     estrutura(&c)
+}
+
+/// Os `CREATE [UNIQUE] INDEX IF NOT EXISTS` de uma migração: (nome, tabela,
+/// único, colunas). Coluna com expressão vira "(expressão)", como no
+/// `pragma_index_info`; ASC, DESC e COLLATE não contam.
+fn indices_if_not_exists(sql: &str) -> Vec<(String, String, bool, Vec<String>)> {
+    let sem_comentarios: String =
+        sql.lines().map(|l| l.split("--").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
+    let mut v = Vec::new();
+    for comando in sem_comentarios.split(';') {
+        let palavras: Vec<&str> = comando.split_whitespace().collect();
+        let maiusculas: Vec<String> = palavras.iter().map(|p| p.to_uppercase()).collect();
+        let unico = maiusculas.get(1).is_some_and(|p| p == "UNIQUE");
+        let k = if unico { 2 } else { 1 };
+        let prefixo = ["CREATE", "INDEX", "IF", "NOT", "EXISTS"];
+        if maiusculas.first().map(String::as_str) != Some("CREATE")
+            || maiusculas.get(k..k + 4).is_none_or(|p| p != &prefixo[1..])
+        {
+            continue;
+        }
+        let resto = palavras[k + 4..].join(" ");
+        let (nome, depois) = resto.split_once(' ').unwrap();
+        let depois = depois.trim_start();
+        assert!(depois.to_uppercase().starts_with("ON "), "{comando}");
+        let (tabela, colunas) = depois[3..].split_once('(').unwrap();
+        let mut nivel = 0;
+        let mut atual = String::new();
+        let mut cols = Vec::new();
+        for ch in colunas.chars() {
+            match ch {
+                '(' => nivel += 1,
+                ')' if nivel == 0 => break,
+                ')' => nivel -= 1,
+                ',' if nivel == 0 => {
+                    cols.push(std::mem::take(&mut atual));
+                    continue;
+                }
+                _ => {}
+            }
+            atual.push(ch);
+        }
+        cols.push(atual);
+        let cols = cols
+            .iter()
+            .map(|c| {
+                let c = c.trim();
+                if c.contains('(') {
+                    return "(expressão)".to_string();
+                }
+                c.split_whitespace().next().unwrap().trim_matches('"').to_string()
+            })
+            .collect();
+        v.push((nome.trim_matches('"').to_string(), tabela.trim().trim_matches('"').to_string(), unico, cols));
+    }
+    v
 }
 
 /// (tabela, único, colunas) de um índice que existe no banco.
@@ -356,6 +418,66 @@ fn nenhuma_migracao_reaproveita_nome() {
         let k = (tipo.to_string(), nome.to_string());
         assert!(nossa.contains_key(&k) && dev3.contains_key(&k) && nossa[&k] != dev3[&k], "{tipo} {nome}");
     }
+}
+
+/// B02 (passo 7.5): nenhuma migração tem um `CREATE INDEX IF NOT EXISTS` que
+/// o SQLite ignora sem dizer nada (o nome já existia com outra definição). O
+/// único caso da história (a 0006, publicada) fica registrado com o índice
+/// que o corrige, e esse índice tem de existir com a definição que a 0006
+/// queria. Em `b3a171c` este teste falhava: a definição da 0006 não existia
+/// com nome nenhum.
+#[test]
+fn b02_nenhum_indice_if_not_exists_ignorado() {
+    let c = Connection::open_in_memory().unwrap();
+    let mut ignorados = Vec::new();
+    let mut erros = Vec::new();
+    for (numero, arquivo, sql) in migracoes() {
+        aplicar(&c, &sql);
+        for (nome, tabela, unico, colunas) in indices_if_not_exists(&sql) {
+            let pedida = (tabela, unico, colunas);
+            let ficou = definicao_do_indice(&c, &nome);
+            if ficou.as_ref() == Some(&pedida) {
+                continue;
+            }
+            match IGNORADOS_NA_HISTORIA.iter().find(|(n, x, _)| *n == numero && *x == nome) {
+                Some((_, _, corrige)) => ignorados.push((numero, nome.clone(), corrige.to_string(), pedida)),
+                None => erros.push(format!(
+                    "{arquivo}: CREATE INDEX IF NOT EXISTS {nome} {pedida:?} foi ignorado: o nome já existia com {ficou:?}"
+                )),
+            }
+        }
+    }
+    assert!(erros.is_empty(), "{erros:#?}");
+    let vistos: Vec<(usize, &str)> = ignorados.iter().map(|(n, x, _, _)| (*n, x.as_str())).collect();
+    let registrados: Vec<(usize, &str)> = IGNORADOS_NA_HISTORIA.iter().map(|(n, x, _)| (*n, *x)).collect();
+    assert_eq!(vistos, registrados, "IGNORADOS_NA_HISTORIA tem de ser exatamente o que a história tem");
+    for (numero, nome, corrige, pedida) in &ignorados {
+        assert_eq!(
+            definicao_do_indice(&c, corrige).as_ref(),
+            Some(pedida),
+            "o índice que a {numero:04} quis criar como {nome} {pedida:?} não existe com o nome novo {corrige}"
+        );
+    }
+}
+
+/// B02: a trava pega um `IF NOT EXISTS` ignorado numa migração nova (um
+/// texto de exemplo, aplicado depois de todas as de verdade).
+#[test]
+fn b02_a_trava_pega_um_if_not_exists_ignorado() {
+    let c = Connection::open_in_memory().unwrap();
+    montar(&c, versao_da_estrutura());
+    let exemplo = "-- uma migração errada
+        CREATE INDEX IF NOT EXISTS produto_nome ON produto (nome, marca);
+        CREATE UNIQUE INDEX IF NOT EXISTS indice_novo_de_exemplo ON produto (\"codigo\" DESC, lower(nome));";
+    aplicar(&c, exemplo);
+    let achados: Vec<(String, bool)> = indices_if_not_exists(exemplo)
+        .into_iter()
+        .map(|(nome, tabela, unico, colunas)| {
+            let igual = definicao_do_indice(&c, &nome) == Some((tabela, unico, colunas));
+            (nome, igual)
+        })
+        .collect();
+    assert_eq!(achados, [("produto_nome".to_string(), false), ("indice_novo_de_exemplo".to_string(), true)]);
 }
 
 /// B01 (passo 7.5): o índice composto do estoque `(produto_id, tipo,
