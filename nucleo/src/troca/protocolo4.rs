@@ -20,8 +20,9 @@
 //! (junto com o serviço de senhas do sistema, D4) são de quem chama: aqui a
 //! senha e o caminho chegam como parâmetro.
 //!
-//! Submódulo: [`aprovados`] (etapa 2, registro assinado de caixas aprovados e
-//! retirados). Nada disto é chamado pela troca de dados ainda: ligar exige o canal
+//! Submódulos: [`aprovados`] (etapa 2, registro assinado de caixas aprovados e
+//! retirados) e [`anuncio`] (etapa 3, anúncio assinado sem nada da senha da
+//! rede). Nada disto é chamado pela troca de dados ainda: ligar exige o canal
 //! autenticado (A5) e a convivência com o protocolo 3 (A4), etapas 4 a 7.
 
 use std::io::Write;
@@ -34,6 +35,7 @@ use sha2::{Digest, Sha256};
 
 use crate::erro::{Erro, Resultado};
 
+pub mod anuncio;
 pub mod aprovados;
 
 /// Uma chave pública (Ed25519 ou X25519): 32 bytes.
