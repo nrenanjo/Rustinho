@@ -17,6 +17,8 @@ ColumnLayout {
     Layout.alignment: Qt.AlignTop
     // Por padrão não estica; quem usar decide (Layout.fillWidth: true).
     Layout.fillWidth: false
+    // A superfície embaixo (0.9.18; veja Tema.superficie), como no Campo.
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
 
     function focar() {
         if (!Tema.celular || Qt.inputMethod.visible)
@@ -26,7 +28,8 @@ ColumnLayout {
     Rotulo {
         text: area.rotulo
         visible: text !== ""
-        color: area.erro !== "" ? Tema.vermelho : Tema.apagado
+        // H05 (7.2): pela superfície, como o Campo (no roxo escuro, claro).
+        color: area.erro !== "" ? Tema.vermelhoNo(area.superficie) : Tema.apagadoNo(area.superficie)
         Layout.fillWidth: true
         Layout.preferredWidth: 1
     }
