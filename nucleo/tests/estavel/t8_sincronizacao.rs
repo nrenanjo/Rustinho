@@ -362,6 +362,100 @@ fn t8_4_uma_resposta_nao_corta_uma_venda() {
     let _ = std::fs::remove_dir_all(&pb);
 }
 
+/// Os itens de "Conferência entre caixas" (resumo por tabela, passo 5.4) do caixa.
+fn conferencias(b: &Banco) -> Vec<sync::Conflito> {
+    sync::conflitos(&b.conn).unwrap().into_iter().filter(|c| c.tipo == "resumo").collect()
+}
+
+/// T8.5 — Passo 5.4, parte 1 (PEND-35): resumo por tabela. Dois caixas EM DIA
+/// um com o outro (cada um já recebeu tudo do outro) comparam o resumo das
+/// tabelas que viajam (contagem e soma de verificação) ao trocar dados:
+/// - em dia e iguais: nada vai para o gerente (o Caixa geral, que cada banco
+///   cria ao nascer com a sua hora, não conta como diferença);
+/// - uma linha mexida por fora do Rustinho em B (sem passar pela troca): os
+///   dois caixas avisam o gerente, com a tabela, e nada é mudado sozinho;
+/// - caixas que ainda não estão em dia não comparam (não é diferença, é o que
+///   ainda vai chegar).
+#[test]
+#[ignore = "passo 5.4: caracterização do resumo por tabela (falha hoje: ninguém percebe a linha mexida)"]
+fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let _vez = vez_da_troca();
+    let pa = pasta_nova("t8-5-a");
+    let pb = pasta_nova("t8-5-b");
+    let mut a = caixa_novo(&pa, "Caixa A");
+    let ana = usuarios::criar(&a.conn, &a.dispositivo, "Ana", SENHA_ANA, true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &ana, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja Teste").unwrap();
+    let peca = {
+        let mut f = rustinho_nucleo::produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Fusível".into();
+        f.custo = "1".into();
+        f.estoque_inicial = "100".into();
+        f.precos[0].preco = "10".into();
+        f.precos[0].lucro = String::new();
+        rustinho_nucleo::produtos::salvar(&a.conn, &a.dispositivo, &ana, &f).unwrap()
+    };
+    caixa::abrir(&a.conn, &a.dispositivo, &ana, "Caixa A", "0").unwrap();
+    vender(&mut a, &ana, &peca, 3);
+    // O banco de B nasce num segundo depois do de A (o Caixa geral de cada um
+    // fica com a sua hora, como em dois computadores de verdade).
+    std::thread::sleep(Duration::from_millis(1100));
+    drop(caixa_novo(&pb, "Caixa B"));
+    // Só nos testes: comparar a cada troca (o programa compara de tempos em tempos).
+    for c in [&pa, &pb] {
+        let x = Banco::abrir(&c.join("rustinho.db")).unwrap();
+        config::gravar(&x.conn, "sync_resumo_teste", "sempre").unwrap();
+    }
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let mut motor_b = sync::Motor::iniciar(pb.join("rustinho.db"), 0, 0);
+    let (pt_b, _) = motor_b.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let (end_a, end_b) = (format!("127.0.0.1:{pt_a}"), format!("127.0.0.1:{pt_b}"));
+    // Trocam até ficar em dia um com o outro.
+    puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+    puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+    puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
+    assert_eq!(contar(&b, "SELECT COUNT(*) FROM venda"), 3, "B recebeu tudo de A");
+    for (nome, x) in [("A", &a), ("B", &b)] {
+        assert!(conferencias(x).is_empty(), "{nome}: em dia e iguais, nada para o gerente: {:#?}", conferencias(x));
+    }
+    // Uma linha mexida por fora em B (sem passar pela troca).
+    b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    b.conn.execute("UPDATE produto SET nome = 'Fusível (mexido à mão)' WHERE id = ?1", [&peca]).unwrap();
+    b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+    for (nome, x) in [("A", &a), ("B", &b)] {
+        let k = conferencias(x);
+        assert_eq!(k.len(), 1, "{nome}: a diferença vai para o gerente uma vez: {k:#?}");
+        assert!(k[0].texto.contains("Peça"), "{nome}: diz a tabela: {}", k[0].texto);
+        assert!(!k[0].pode_usar, "não decide nada sozinha");
+    }
+    // Nada é mudado sozinho.
+    let nome = |x: &Banco| -> String {
+        x.conn.query_row("SELECT nome FROM produto WHERE id = ?1", [&peca], |l| l.get(0)).unwrap()
+    };
+    assert_eq!(nome(&a), "Fusível");
+    assert_eq!(nome(&b), "Fusível (mexido à mão)");
+    // A mesma diferença na troca seguinte não vira outro item.
+    puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    assert_eq!(conferencias(&a).len(), 1);
+    // Caixas que não estão em dia não comparam: A vende e B ainda não recebeu.
+    let antes = (conferencias(&a).len(), conferencias(&b).len());
+    vender(&mut a, &ana, &peca, 1);
+    puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    assert_eq!((conferencias(&a).len(), conferencias(&b).len()), antes, "sem estar em dia, não compara");
+    assert!(motor_a.encerrar(Duration::from_secs(20)));
+    assert!(motor_b.encerrar(Duration::from_secs(20)));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(&pa);
+    let _ = std::fs::remove_dir_all(&pb);
+}
+
 /// T8.2 — Senha da rede errada: nada passa; com a certa, passa.
 #[test]
 fn t8_2_senha_da_rede_errada_nao_troca() {
