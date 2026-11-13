@@ -16,6 +16,8 @@ mod testes_avisos;
 #[cfg(test)]
 mod testes_chave;
 #[cfg(test)]
+mod testes_consulta;
+#[cfg(test)]
 mod testes_estab;
 #[cfg(test)]
 mod testes_fase6;
@@ -51,7 +53,7 @@ pub use integracoes::{arquivos, backup, codigo, impressao, nfe_assinatura};
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,
 };
-pub use servico::{api, avisos, despacho, menu, requisitos, senhas, supervisao};
+pub use servico::{api, avisos, consulta, despacho, menu, requisitos, senhas, supervisao};
 pub use troca::{caminhos, loja, rede_local, sync};
 
 // Da base (crate `rustinho-base`, etapa 1 da modularização), nos mesmos

@@ -1815,6 +1815,8 @@ pub(crate) mod queda_de_teste {
     thread_local! {
         pub static ETAPA: Cell<&'static str> = const { Cell::new("") };
         pub static PAUSADA_NA_TROCA: Cell<Option<bool>> = const { Cell::new(None) };
+        /// 7.6: quando o banco foi trocado (para o teste da tarefa de leitura).
+        pub static TROCA_EM: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
     }
     pub fn agora(etapa: &str) -> bool {
         ETAPA.with(|e| e.get() == etapa)
@@ -1824,6 +1826,7 @@ pub(crate) mod queda_de_teste {
     }
     pub fn anotar_pausa() {
         PAUSADA_NA_TROCA.with(|p| p.set(Some(crate::sync::pausada_para_teste())));
+        TROCA_EM.with(|t| t.set(Some(std::time::Instant::now())));
     }
 }
 
