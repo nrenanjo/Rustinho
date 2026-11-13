@@ -192,8 +192,8 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
         (String::new(), true)
     };
 
-    // Lucro bruto do mês: o da DRE gerencial (peça sem custo deixa o lucro
-    // incompleto; nunca conta como lucro inteiro).
+    // Lucro bruto do mês: o da DRE gerencial. A venda da peça sem custo entra
+    // sem o custo e deixa o lucro incompleto (marcado; E03).
     let desde_mes = utc_desde(&iso(inicio_mes));
     let dre_mes = crate::dre::apurar_dre(conn, &crate::dre::Filtro { periodo: "mes".into(), ..Default::default() })?;
     let sem_custo = dre_mes.pendencias.iter().find(|p| p.codigo == "sem_custo").map(|p| p.quantidade).unwrap_or(0);

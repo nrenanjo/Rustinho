@@ -929,9 +929,11 @@ fn apurar(conn: &Connection, lido: Lido, p: &Periodo, hoje: &str, vendedor: bool
         pend.push(Pendencia {
             codigo: "sem_custo".into(),
             texto: format!(
-                "{q} {} sem custo no cadastro (R$ {} de venda): o CMV e o lucro estão incompletos (essas peças não entram como lucro).",
+                // E03 (7.3): o texto diz o que o cálculo faz (DRE-gerencial.md §3 e §6).
+                "{q} {} sem custo no cadastro (R$ {} de venda): a venda {} entra no lucro bruto sem o custo, então o CMV e o lucro estão incompletos (o lucro de verdade é menor).",
                 if q == 1 { "peça vendida" } else { "peças vendidas" },
-                dinheiro(n.receita_sem_custo)
+                dinheiro(n.receita_sem_custo),
+                if q == 1 { "dela" } else { "delas" }
             ),
             quantidade: q,
             valor: dinheiro(n.receita_sem_custo),

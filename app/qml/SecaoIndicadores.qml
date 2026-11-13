@@ -195,7 +195,7 @@ FocusScope {
                 }
                 Nota {
                     visible: !!secao.r && secao.r.vendedores.some(v => v.semCusto)
-                    text: "* lucro incompleto: há peça vendida sem custo no cadastro."
+                    text: "* lucro incompleto: há peça vendida sem custo no cadastro (a venda dela entra no lucro sem o custo)."
                     font.pixelSize: 13
                     Layout.fillWidth: true
                 }
