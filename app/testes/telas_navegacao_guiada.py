@@ -21,8 +21,9 @@ conferido no núcleo (testes_nav::nav01_arquivos_conferir_separa_os_que_faltam).
   C. a pasta escolhida some enquanto a pessoa está nas Configurações: avisa,
      sem ler nem cadastrar nada sozinho.
   D. Configurações aberta à mão: sem orientação nem escurecimento.
-  E. caixa, janela pequena: pede a senha do gerente antes; com ela, o campo
-     fica à vista (rolagem) e o fluxo termina igual.
+  E. caixa, janela pequena: digita a senha do gerente ao abrir a importação
+     (lote 2, PEND-38/H02); nas Configurações, pede a senha do gerente antes;
+     com ela, o campo fica à vista (rolagem) e o fluxo termina igual.
 
     python3 app/testes/telas_navegacao_guiada.py [pasta para as fotos]
     RUSTINHO_TELA=:92 python3 app/testes/telas_navegacao_guiada.py   (outra tela virtual)
@@ -201,6 +202,14 @@ class Rustinho(base.Rustinho):
         if not self.clicar("Importar XML"):
             raise RuntimeError(f"não achei Importar XML (veja {self.saida})")
         time.sleep(1.2)
+        # Lote 2 (PEND-38/H02, DP-52 (b)): quem não é gerente digita a senha do
+        # gerente ao abrir a importação, antes de escolher os arquivos.
+        senha = getattr(self, "senha_da_tela", None)
+        if senha:
+            self.pediu_senha_da_tela = self.esperar("Trazer cadastros: só o gerente pode")
+            xdo("type", "--delay", "80", senha)
+            xdo("key", "Return")
+            time.sleep(1.5)
         if not self.clicar(botao):
             raise RuntimeError(f"não achei {botao} (veja {self.saida})")
         time.sleep(2)
@@ -434,7 +443,9 @@ def main():
         r = Rustinho(pasta, "TelaPecas", {}, fotos, "E-caixa-pequena", casa)
         try:
             r.entrar("Bia")
+            r.senha_da_tela = base.SENHA["Ana"]
             r.escolher_arquivo()
+            ok("E: pediu a senha ao abrir a importação (lote 2)", getattr(r, "pediu_senha_da_tela", False), r.foto("-0"))
             ok("E: pede a senha do gerente", r.esperar("Configurações da loja: só o gerente pode"), r.foto("-1"))
             # D-V1 (dono, 07/11/2026): a seta é só o desenho. A Configurações guiada
             # fica por cima de Peças (Início › Peças › Configurações): a seta volta para lá.
