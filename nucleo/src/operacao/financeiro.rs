@@ -1498,6 +1498,17 @@ mod testes {
         assert!(!r.vendedores[0].ja_fechado.is_empty());
         comissoes::reabrir(c, d, u, &r.fechamentos[0].id).unwrap();
         assert!(pagar::painel(c, "comissao", "abertas").unwrap().parcelas.is_empty());
+        // E10: desfazer o fechamento fica no histórico do vendedor, com o período e o valor.
+        let (n, detalhes): (i64, String) = c
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MAX(detalhes), '') FROM auditoria
+                  WHERE acao = 'comissao.reabrir' AND entidade = 'usuario' AND entidade_id = ?1",
+                [u],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "desfazer o fechamento não entrou na auditoria");
+        assert!(detalhes.contains("desfeito") && detalhes.contains("22,50"), "{detalhes}");
         // venda cancelada sai da comissão
         vendas::cancelar(c, d, u, &v, "desistiu").unwrap();
         assert_eq!(comissoes::relatorio(c, "", "").unwrap().vendedores[0].comissao, "0,00");

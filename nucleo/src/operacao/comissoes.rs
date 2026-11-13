@@ -256,10 +256,20 @@ pub fn fechar(
 
 /// Desfaz um fechamento (a conta a pagar sai, se não foi paga).
 pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
-    let (conta, cancelado): (Option<String>, Option<String>) = conn
-        .query_row("SELECT conta_pagar_id, cancelado_em FROM comissao_fechamento WHERE id = ?1", [id], |l| {
-            Ok((l.get(0)?, l.get(1)?))
-        })
+    #[allow(clippy::type_complexity)]
+    let (conta, cancelado, vendedor_id, de, ate, valor): (
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+        String,
+        i64,
+    ) = conn
+        .query_row(
+            "SELECT conta_pagar_id, cancelado_em, usuario_id, de, ate, valor FROM comissao_fechamento WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?, l.get(5)?)),
+        )
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Fechamento".into()))?;
     if cancelado.is_some() {
@@ -280,6 +290,22 @@ pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str)
         }
     }
     conn.execute("UPDATE comissao_fechamento SET cancelado_em = ?2 WHERE id = ?1", params![id, tempo::agora()])?;
+    // E10: desfazer o fechamento fica no histórico do vendedor (antes, só a
+    // conta cancelada aparecia, sem dizer de qual fechamento).
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "comissao.reabrir",
+        "usuario",
+        &vendedor_id,
+        &[format!(
+            "Fechamento de {} a {} desfeito (comissão R$ {})",
+            fiscal::data_br(&de),
+            fiscal::data_br(&ate),
+            numeros::escrever_dinheiro(valor)
+        )],
+    )?;
     Ok(())
 }
 

@@ -1163,3 +1163,60 @@ fn e10_mudancas_sem_registro_na_auditoria() {
     }
     assert!(erros.is_empty(), "{}", erros.join("\n"));
 }
+
+// ===========================================================================
+// Autorização ampla de 12/11: C04-a (senha errada do gerente no histórico) e
+// o resto do E10 (encomenda e compra).
+// ===========================================================================
+
+/// E10 (passo 6.5), o resto: voltar a encomenda para "falta pedir", a chegada
+/// automática pela compra lançada e a volta pelo estorno da compra ficam no
+/// histórico da encomenda, cada um com a sua frase. (O desfazer do fechamento
+/// da comissão está no teste das comissões, em `operacao/financeiro.rs`.)
+#[test]
+fn e10_encomenda_pela_compra_fica_no_historico() {
+    let mut l = loja("e10-encomenda");
+    let conta = |l: &Loja, acao: &str| l.numero(&format!("SELECT COUNT(*) FROM auditoria WHERE acao = '{acao}'"));
+    let rolamento = l.peca("ROLAMENTO ENCOMENDADO", "", "10,00", "");
+    let encomenda = l.ok(
+        "encomenda_criar",
+        json!({ "clienteNome": "CLIENTE DA ENCOMENDA", "produtoId": rolamento, "quantidade": "1" }),
+    );
+    let encomenda = encomenda.as_str().unwrap_or_else(|| panic!("{encomenda}")).to_string();
+    l.ok("encomenda_pedir", json!({ "id": encomenda, "ids": [], "desfazer": false }));
+    l.ok("encomenda_pedir", json!({ "id": encomenda, "ids": [], "desfazer": true }));
+    assert_eq!(conta(&l, "encomenda.voltar"), 1, "voltar para \"falta pedir\" não entrou na auditoria");
+
+    let compra = importar_compra(&mut l);
+    let f = l.ok("compra_abrir", json!({ "id": compra }));
+    let escolhas: Vec<Value> = f["itens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|it| {
+            if it["codigoFornecedor"] == "FAG-32206" {
+                json!({ "id": it["id"], "acao": "ligar", "produtoId": rolamento, "fator": "1" })
+            } else {
+                json!({ "id": it["id"], "acao": "nova", "produtoId": "", "fator": "1" })
+            }
+        })
+        .collect();
+    l.ok(
+        "compra_conferir_autorizacao",
+        json!({ "id": compra, "situacao": "autorizada", "protocolo": PROTOCOLO_EXEMPLO,
+                "conferidoEm": "08/10/2026 11:00", "senha": SENHA_ANA }),
+    );
+    l.ok("compra_lancar", json!({ "id": compra, "itens": escolhas }));
+    let situacao = || format!("SELECT COUNT(*) FROM encomenda WHERE id = '{encomenda}' AND situacao = 'chegou'");
+    assert_eq!(l.numero(&situacao()), 1, "a encomenda não chegou pela compra");
+    assert_eq!(conta(&l, "encomenda.chegou_compra"), 1, "a chegada pela compra não entrou na auditoria");
+
+    l.ok("compra_estornar", json!({ "id": compra, "motivo": "nota errada" }));
+    assert_eq!(l.numero(&situacao()), 0, "o estorno não devolveu a encomenda");
+    assert_eq!(conta(&l, "encomenda.voltou_estorno"), 1, "a volta pelo estorno não entrou na auditoria");
+    let detalhes = l.numero(&format!(
+        "SELECT COUNT(*) FROM auditoria WHERE entidade = 'encomenda' AND entidade_id = '{encomenda}'
+          AND acao IN ('encomenda.voltar', 'encomenda.chegou_compra', 'encomenda.voltou_estorno')"
+    ));
+    assert_eq!(detalhes, 3, "as três mudanças ficam no histórico da própria encomenda");
+}

@@ -1445,7 +1445,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         params![id, tempo::agora(), usuario_id],
     )?;
     resumo.parcelas_pagar = crate::pagar::criar_da_compra(conn, dispositivo, usuario_id, id)? as i64;
-    resumo.encomendas = crate::encomendas::chegou_na_compra(conn, id, &entraram)?;
+    resumo.encomendas = crate::encomendas::chegou_na_compra(conn, dispositivo, usuario_id, id, &entraram)?;
     auditoria::registrar(
         conn,
         dispositivo,
@@ -1589,7 +1589,7 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
     crate::pagar::cancelar_da_compra(conn, usuario_id, id)?;
-    crate::encomendas::desfazer_da_compra(conn, id)?;
+    crate::encomendas::desfazer_da_compra(conn, dispositivo, usuario_id, id)?;
     let itens = itens_banco(conn, id)?;
     for it in &itens {
         if it.acao == "ignorar" {
