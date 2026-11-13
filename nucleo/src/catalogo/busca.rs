@@ -1205,30 +1205,10 @@ pub fn esperando_pelo_codigo(conn: &Connection, codigo: &str) -> Resultado<usize
 /// (`PRAGMA data_version`: a troca de dados, o backup). Antes ela rodava a cada
 /// tecla da busca e a cada parte da lista. A conexão é reconhecida pelo número
 /// que `banco::registrar_funcoes` dá a cada uma (`rustinho_conexao()`); sem
-/// ele, conta sempre.
+/// ele, conta sempre. A guarda fica em `catalogo::contagem`, que o backup
+/// esquece ao trocar o banco (R-3).
 fn total_guardado(conn: &Connection, incluir_inativas: bool) -> Resultado<i64> {
-    type Guardada = ((i64, bool), (i64, u64), i64);
-    static GUARDADAS: std::sync::Mutex<Vec<Guardada>> = std::sync::Mutex::new(Vec::new());
-    let Ok(conexao) = conn.prepare_cached("SELECT rustinho_conexao()").and_then(|mut c| c.query_row([], |l| l.get(0)))
-    else {
-        return total(conn, incluir_inativas);
-    };
-    let chave = (conexao, incluir_inativas);
-    let versao: i64 = conn.prepare_cached("PRAGMA data_version")?.query_row([], |l| l.get(0))?;
-    let marca = (versao, conn.total_changes());
-    let ja =
-        GUARDADAS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|g| g.0 == chave && g.1 == marca).map(|g| g.2);
-    if let Some(n) = ja {
-        return Ok(n);
-    }
-    let n = total(conn, incluir_inativas)?;
-    let mut guardadas = GUARDADAS.lock().unwrap_or_else(|e| e.into_inner());
-    guardadas.retain(|g| g.0 != chave);
-    if guardadas.len() >= 32 {
-        guardadas.remove(0);
-    }
-    guardadas.push((chave, marca, n));
-    Ok(n)
+    crate::catalogo::contagem::guardada(conn, incluir_inativas, || total(conn, incluir_inativas))
 }
 
 /// Quantas peças existem.
