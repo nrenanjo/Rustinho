@@ -88,6 +88,21 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
                      "recusado": TEXTO_RETIRADO_LA }),
         );
     }
+    // Passo 5.2, regra de versão homogênea (veja `RECURSO_CLASSES`): um caixa
+    // de versão anterior não recebe nada, e o gerente vê o motivo aqui também.
+    if !mesmas_classes(&pedido) {
+        if !quem.is_empty() {
+            conn.execute("UPDATE sync_par SET erro = ?2 WHERE dispositivo = ?1", params![quem, PROTOCOLO_DIFERENTE])?;
+        }
+        let (loja, novo) = crate::loja::campos(&conn)?;
+        return enviar(
+            &mut fluxo,
+            &k,
+            &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                     "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                     "loja": loja, "novo": novo, "recusado": PROTOCOLO_DIFERENTE }),
+        );
+    }
     let desde = pedido["desde"].as_i64().unwrap_or(0).max(0);
     let geracao = geracao(&conn)?;
     let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;

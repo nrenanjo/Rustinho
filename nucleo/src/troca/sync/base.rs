@@ -28,8 +28,28 @@ pub(super) const PROTOCOLO_DIFERENTE: &str =
 /// que não consegue aplicar, e a numeração dele avança sem perdê-la.
 /// "loja-v1" (FALHA-01): o caixa manda a identidade da loja e confere a do
 /// outro antes de entregar ou aplicar qualquer coisa (veja `loja`).
-pub const RECURSOS: &[&str] = &["pendencias-v1", crate::loja::RECURSO];
+/// "classes-v1" (passo 5.2): veja [`RECURSO_CLASSES`].
+pub const RECURSOS: &[&str] = &["pendencias-v1", crate::loja::RECURSO, RECURSO_CLASSES];
 pub const RECURSO_PENDENCIAS: &str = "pendencias-v1";
+/// Passo 5.2 da dev.3.3 (DP-15): o caixa troca dados com as classes do
+/// `dados::esquema` — o `produto_gtin` viaja; o índice de busca da peça
+/// (`busca`, `codigos`) e o último acesso do usuário não viajam, e quem
+/// recebe refaz o índice.
+///
+/// Regra de versão homogênea (`ARQUITETURA_ALVO_RUSTINHO.md` §5.3.4: "mudar
+/// a classe de uma tabela exige todos os caixas na mesma versão"): com um
+/// caixa que não diz este recurso (versão anterior), não há troca de dados
+/// em nenhum sentido. Ele não refaria o índice das peças que recebe (ficariam
+/// sem busca lá) e não guardaria os GTINs. Os dois lados mostram o aviso de
+/// versão ([`PROTOCOLO_DIFERENTE`]); nada se perde: o log de cada caixa
+/// continua guardado e vai inteiro depois que todos forem atualizados.
+pub const RECURSO_CLASSES: &str = "classes-v1";
+
+/// O outro caixa troca com as mesmas classes (manda o recurso
+/// [`RECURSO_CLASSES`])?
+pub fn mesmas_classes(mensagem: &Value) -> bool {
+    mensagem["recursos"].as_array().is_some_and(|l| l.iter().any(|v| v.as_str() == Some(RECURSO_CLASSES)))
+}
 /// Estrutura do banco (user_version) que entende o rascunho de OS (0.9.15).
 pub const ESQUEMA_RASCUNHO: i64 = 23;
 /// Caixa que não informa a estrutura é de antes da 0.9.15: tratado como a
