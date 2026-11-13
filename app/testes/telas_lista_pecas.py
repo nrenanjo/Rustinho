@@ -27,7 +27,11 @@ proprietário (dossiê dev.3.3, Categoria A, itens 1, 2 e 5):
       "Página" na tela (antes: "Página 1 de 3", 50 por página);
   L15 PageDown anda pela lista inteira: passa da linha 100 sem página (a
       próxima parte vem sozinha) até a 120ª peça, e PageUp volta 8 linhas;
-  L16 o aviso das pendências de XML aparece e não muda enquanto se digita.
+  L16 o aviso das pendências de XML aparece e não muda enquanto se digita;
+  L17 o cabeçalho da primeira coluna cabe inteiro na coluna (84 px, sem
+      reticências), em 1920 × 1080 e em 1366 × 768; no celular (360 × 780,
+      --celular) não há cabeçalho e cada linha diz "Cód. forn.: …" (H07: o
+      texto novo não pode quebrar a largura da coluna).
 
 As falhas de achados já registrados, que ficam para passos seguintes, são
 ESPERADAS (não reprovam o roteiro, mas aparecem no resultado): L4 (H07, passo
@@ -58,6 +62,7 @@ ESPERADAS = {
     "L4": "H07 (cabeçalho \"Código\" na coluna do código do fornecedor), passo 7.3",
 }
 LARGURA_1A_COLUNA = 152  # o nome da peça começa em x = 152 (GEO:nomePeca)
+LARGURA_COLUNA_CODIGO = 84  # a coluna do código do fornecedor (TelaPecas e LinhaPeca)
 
 
 def montar_loja(pasta):
@@ -101,6 +106,30 @@ def marcador(textos):
             n, dif, mais, atual = t.split(":")[1:5]
             return int(n), int(dif), mais == "1", int(atual)
     return None
+
+
+def cabecalho_1a_coluna(textos):
+    """O rótulo do cabeçalho da 1ª coluna, pelas linhas RET: (--medir-toque):
+    (x, largura, largura natural, texto), ou None se não há cabeçalho. É o
+    Rotulo à esquerda do "Peça…", na mesma altura. A largura natural maior que
+    a largura quer dizer reticências (o Rotulo corta o fim)."""
+    rets = []
+    for _, _, t in textos:
+        if t.startswith("RET:"):
+            numeros, _, componente, texto = t[4:].split("|", 3)
+            rets.append(([float(v) for v in numeros.split(",")], componente, texto))
+    peca = [v for v, c, tx in rets if c == "Rotulo" and tx.startswith("Peça")]
+    if not peca:
+        return None
+    x_peca, y_peca = peca[0][0], peca[0][1]
+    antes = sorted((v[0], v[2], v[6], tx) for v, c, tx in rets
+                   if c == "Rotulo" and abs(v[1] - y_peca) < 4 and v[0] < x_peca)
+    return antes[0] if antes else None
+
+
+def cabe_na_coluna(cab):
+    """O cabeçalho existe, a coluna continua com 84 px e o texto cabe inteiro."""
+    return cab is not None and abs(cab[1] - LARGURA_COLUNA_CODIGO) < 0.5 and cab[2] <= cab[1] + 0.5
 
 
 def com_pagina(textos):
@@ -180,6 +209,7 @@ def main():
             conferir("L11", "Copiar e F11 não ficam um sobre o outro", not sobre,
                      f"Copiar {copiar[:1]} × F11 {f11[:1]}")
             aviso_antes = aviso_xml(t)
+            cab_1920 = cabecalho_1a_coluna(t)
 
             digitar_na_busca(rr, g, "FILTRO")
             rr.foto("-2-busca-filtro")
@@ -227,8 +257,30 @@ def main():
                      m5 == (120, 120, False, 112) and m6 is not None and m6[3] == 104 and not com_pagina(t5),
                      f"depois de 14 PageDown {m5}; depois de PageUp {m6}; paginação {com_pagina(t5)}")
             rr.foto("-6-final")
+            rr.redimensionar(1366, 768)
+            time.sleep(1.5)
+            rr.foto("-7-1366x768")
+            cab_1366 = cabecalho_1a_coluna(rr.textos())
         finally:
             rr.fechar()
+        # O celular (360 × 780, o desenho do Android): a lista sem cabeçalho.
+        # Nesta loja as primeiras linhas ficam abaixo do cartão das pendências
+        # (fora da tela): basta uma linha criada com "Cód. forn.: …".
+        rc = u.Rustinho(modelo, "TelaPecas", {}, fotos, "lista_pecas_celular", celular=True)
+        try:
+            rc.entrar("Ana")
+            time.sleep(3.0)
+            rc.foto("-1-lista")
+            tc = rc.textos()
+            cab_celular = cabecalho_1a_coluna(tc)
+            linhas_celular = [tx for _, _, tx in tc if tx.startswith("Cód. forn.: ")]
+        finally:
+            rc.fechar()
+        conferir("L17", "o cabeçalho da 1ª coluna cabe inteiro na coluna de 84 px (1920 e 1366); no celular, "
+                        "sem cabeçalho e \"Cód. forn.: …\" na linha",
+                 cabe_na_coluna(cab_1920) and cabe_na_coluna(cab_1366) and cab_celular is None and len(linhas_celular) >= 1,
+                 f"1920: {cab_1920}; 1366: {cab_1366}; celular: cabeçalho {cab_celular}, "
+                 f"{len(linhas_celular)} linhas com \"Cód. forn.: \" (x, largura, largura natural, texto)")
     finally:
         shutil.rmtree(modelo, ignore_errors=True)
         xvfb.terminate()
@@ -250,7 +302,7 @@ def main():
     certas = sum(1 for c in resultados.values() if c[0])
     print(f"\n{certas} de {len(resultados)} conferências certas; falhas esperadas: "
           f"{sum(1 for k, v in resultados.items() if not v[0] and k in ESPERADAS)}; fotos em {fotos}")
-    sys.exit(1 if reprovado or len(resultados) != 16 else 0)
+    sys.exit(1 if reprovado or len(resultados) != 17 else 0)
 
 
 if __name__ == "__main__":
