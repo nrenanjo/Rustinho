@@ -22,10 +22,12 @@ Rectangle {
     radius: Tema.raio
     color: cor
     palette.window: Tema.superficie(color)
-    implicitHeight: Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72
+    // VIS33-08 (7.2): cresce se o rótulo quebrar em duas linhas no celular.
+    implicitHeight: Math.max(Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72, conteudoCartao.implicitHeight + 20)
     Layout.fillWidth: true
 
     ColumnLayout {
+        id: conteudoCartao
         anchors.fill: parent
         anchors.leftMargin: Tema.estreito ? 14 : 18
         anchors.rightMargin: Tema.estreito ? 10 : 14
@@ -35,8 +37,15 @@ Rectangle {
         RowLayout {
             spacing: 8
             Layout.fillWidth: true
-            Rotulo { text: cartao.rotulo }
-            Item { Layout.fillWidth: true }
+            // VIS33-08 (7.2): o rótulo nunca alarga o cartão: ocupa o espaço que
+            // sobra e, no celular, quebra em até duas linhas, com reticências.
+            Rotulo {
+                text: cartao.rotulo
+                wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: Tema.estreito ? 2 : 1
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+            }
             Text {
                 visible: !cartao._embaixo
                 text: cartao.nota
