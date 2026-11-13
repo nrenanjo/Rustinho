@@ -5,6 +5,10 @@
 
 use super::*;
 
+/// F89-4: a pausa entre uma resposta e a próxima, mais que um passo da espera
+/// do SQLite (100 ms). Custa ~0,12 s a cada 200 alterações recebidas.
+pub(super) const VEZ_DO_BALCAO: Duration = Duration::from_millis(120);
+
 /// Puxa de um endereço tudo o que há de novo. Devolve (dispositivo, quantas novas).
 pub fn puxar(caminho: &Path, endereco: &str, porta_local: u16) -> Resultado<(String, usize)> {
     puxar_ate(caminho, endereco, porta_local, None)
@@ -295,6 +299,12 @@ pub(crate) fn puxar_por(
         {
             break;
         }
+        // F89-4 (proposta, decisão técnica com veto): dá a vez ao balcão antes
+        // de pedir a resposta seguinte. Cada resposta é aplicada numa transação
+        // e segura a escrita; com as respostas uma atrás da outra, a escrita
+        // fica livre só por milissegundos, e a espera do SQLite (que acorda de
+        // 100 em 100 ms) pode não achar a brecha (achado do t2_5).
+        thread::sleep(VEZ_DO_BALCAO);
     }
     // Códigos das peças: depois de receber tudo do caixa que distribui as
     // faixas (assim este caixa já conhece todos os códigos que ele conhece),
