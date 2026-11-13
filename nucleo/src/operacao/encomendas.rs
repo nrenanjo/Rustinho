@@ -258,6 +258,16 @@ pub fn pedir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, d
             "UPDATE encomenda SET situacao = 'aberta', pedida_em = NULL, atualizado_em = ?2 WHERE id = ?1",
             params![id, tempo::agora()],
         )?;
+        // E10: voltar para "falta pedir" também fica no histórico.
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "encomenda.voltar",
+            "encomenda",
+            id,
+            &[format!("Encomenda {} voltou para \"falta pedir\"", a.numero)],
+        )?;
         return Ok(());
     }
     if a.situacao != "aberta" {
@@ -299,24 +309,33 @@ pub fn chegou(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
 }
 
 /// A compra lançada trouxe peças encomendadas: as mais antigas primeiro,
-/// enquanto a quantidade da nota der. Devolve quantas chegaram.
-pub fn chegou_na_compra(conn: &Connection, compra_id: &str, pecas: &[(String, i64)]) -> Resultado<i64> {
-    let fornecedor: Option<String> = conn
-        .query_row("SELECT fornecedor_id FROM compra WHERE id = ?1", [compra_id], |l| l.get(0))
+/// enquanto a quantidade da nota der. Devolve quantas chegaram. E10: cada
+/// encomenda que chega assim fica no histórico, com a nota.
+pub fn chegou_na_compra(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    compra_id: &str,
+    pecas: &[(String, i64)],
+) -> Resultado<i64> {
+    let (fornecedor, nota): (Option<String>, String) = conn
+        .query_row("SELECT fornecedor_id, numero FROM compra WHERE id = ?1", [compra_id], |l| {
+            Ok((l.get(0)?, l.get::<_, Option<String>>(1)?.unwrap_or_default()))
+        })
         .optional()?
-        .flatten();
+        .unwrap_or_default();
     let mut chegaram = 0;
     let agora = tempo::agora();
     for (pid, recebido) in pecas {
         let mut sobra = *recebido;
-        let lista: Vec<(String, i64, String)> = conn
+        let lista: Vec<(String, i64, String, i64)> = conn
             .prepare(
-                "SELECT id, quantidade, situacao FROM encomenda
+                "SELECT id, quantidade, situacao, numero FROM encomenda
                   WHERE produto_id = ?1 AND situacao IN ('aberta', 'pedida') ORDER BY criado_em, numero",
             )?
-            .query_map([pid], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+            .query_map([pid], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
             .collect::<Result<_, _>>()?;
-        for (id, q, situacao) in lista {
+        for (id, q, situacao, numero) in lista {
             if q > sobra {
                 break;
             }
@@ -327,6 +346,15 @@ pub fn chegou_na_compra(conn: &Connection, compra_id: &str, pecas: &[(String, i6
                   WHERE id = ?1",
                 params![id, situacao, agora, compra_id, fornecedor],
             )?;
+            auditoria::registrar(
+                conn,
+                dispositivo,
+                Some(usuario_id),
+                "encomenda.chegou_compra",
+                "encomenda",
+                &id,
+                &[format!("Encomenda {numero} chegou pela compra (NF {nota})")],
+            )?;
             chegaram += 1;
         }
     }
@@ -334,13 +362,29 @@ pub fn chegou_na_compra(conn: &Connection, compra_id: &str, pecas: &[(String, i6
 }
 
 /// A compra foi estornada: as encomendas que ela trouxe voltam a esperar.
-pub fn desfazer_da_compra(conn: &Connection, compra_id: &str) -> Resultado<()> {
+/// E10: cada uma fica no histórico (o contrário da chegada pela compra).
+pub fn desfazer_da_compra(conn: &Connection, dispositivo: &str, usuario_id: &str, compra_id: &str) -> Resultado<()> {
+    let voltam: Vec<(String, i64)> = conn
+        .prepare("SELECT id, numero FROM encomenda WHERE compra_id = ?1 AND situacao = 'chegou' ORDER BY numero")?
+        .query_map([compra_id], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     conn.execute(
         "UPDATE encomenda SET situacao = CASE WHEN situacao_antes = 'pedida' THEN 'pedida' ELSE 'aberta' END,
                               chegou_em = NULL, avisado_em = NULL, compra_id = NULL, atualizado_em = ?2
           WHERE compra_id = ?1 AND situacao = 'chegou'",
         params![compra_id, tempo::agora()],
     )?;
+    for (id, numero) in voltam {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "encomenda.voltou_estorno",
+            "encomenda",
+            &id,
+            &[format!("Encomenda {numero} voltou a esperar: a compra que a trouxe foi estornada")],
+        )?;
+    }
     Ok(())
 }
 

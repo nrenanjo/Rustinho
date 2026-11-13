@@ -119,6 +119,7 @@ fn descrever(acao: &str) -> &'static str {
         "compra.entrada" => "deu entrada pela compra",
         "compra.lancar" => "lançou no estoque",
         "compra.estornar" => "estornou",
+        "compra.descartar" => "descartou o rascunho da compra",
         "fiscal.regras" => "mudou as regras de ST",
         "usuario.alterar" => "alterou o usuário",
         "usuario.senha_fora_da_politica" => "entrou com senha fora da política",
@@ -142,11 +143,15 @@ fn descrever(acao: &str) -> &'static str {
         "cheque.devolver" => "registrou cheque devolvido",
         "cheque.desfazer" => "voltou o cheque para a carteira",
         "comissao.fechar" => "fechou a comissão",
+        "comissao.reabrir" => "desfez o fechamento da comissão",
         "encomenda.criar" => "anotou a encomenda",
         "encomenda.pedir" => "pediu a encomenda",
         "encomenda.chegou" => "marcou que a encomenda chegou",
         "encomenda.entregar" => "entregou a encomenda",
         "encomenda.cancelar" => "cancelou a encomenda",
+        "encomenda.voltar" => "voltou a encomenda para falta pedir",
+        "encomenda.chegou_compra" => "recebeu a encomenda pela compra",
+        "encomenda.voltou_estorno" => "voltou a encomenda a esperar (compra estornada)",
         "estoque.dias" => "mudou os dias da sugestão de compra",
         "backup.restaurar" => "restaurou um backup",
         "caixa.abrir" => "abriu o caixa",
@@ -154,6 +159,10 @@ fn descrever(acao: &str) -> &'static str {
         "caixa.caixa_fechado" => "lançou no Caixa geral (caixa fechado)",
         "caixa.retirar" => "retirou um caixa da loja",
         "caixa.readmitir" => "readmitiu um caixa na loja",
+        "caixa.sangria" => "fez uma sangria",
+        "caixa.suprimento" => "fez um suprimento",
+        "categoria.criar" => "criou a categoria",
+        "categoria.alterar" => "alterou a categoria",
         "codigos.assumir" => "passou a distribuir as faixas de códigos",
         "codigos.caixa_novo" => "registrou este banco como caixa novo",
         "codigos.computador" => "confirmou o computador deste caixa",
@@ -171,17 +180,94 @@ fn descrever(acao: &str) -> &'static str {
         "os.cancelar" => "cancelou a OS",
         "os.rascunho" => "salvou um rascunho de OS",
         "os.rascunho_excluir" => "excluiu um rascunho de OS",
+        "os.alterar" => "alterou a OS",
         "pendencia.arquivar" => "arquivou uma pendência da troca de dados",
         "pessoa.codigo" => "deu código novo ao cadastro",
         "precos.regras" => "mudou a regra de preço",
         "produto.codigo" => "deu código novo à peça",
         "produto.defeito" => "registrou peça com defeito",
         "produto.importar" => "importou cadastros",
+        "produto.gtin_importado" => "gravou GTIN do XML na peça",
+        "unidade.criar" => "cadastrou a unidade",
         "referencia.aceitar" => "aceitou um registro incompleto como está",
         "venda.devolucao" => "registrou troca ou devolução",
         "venda.devolucao_desfeita" => "desfez a troca ou devolução",
         "entrar" => "entrou",
         "sair" => "saiu",
         _ => "registrou",
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::descrever;
+
+    /// As ações que o código grava a partir de uma variável (não dá para ler do texto).
+    const PELA_VARIAVEL: &[&str] = &["caixa.sangria", "caixa.suprimento"];
+
+    /// O 4º argumento de cada `auditoria::registrar(` no código do núcleo: os
+    /// textos "dominio.acao" que aparecem nele.
+    fn acoes_gravadas() -> Vec<(String, String)> {
+        fn ler(dir: &std::path::Path, saida: &mut Vec<(String, String)>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    ler(&p, saida);
+                    continue;
+                }
+                if p.extension().and_then(|x| x.to_str()) != Some("rs") {
+                    continue;
+                }
+                let t = std::fs::read_to_string(&p).unwrap();
+                for (i, _) in t.match_indices("auditoria::registrar(") {
+                    let resto = &t[i + "auditoria::registrar(".len()..];
+                    let (mut nivel, mut virgulas, mut inicio) = (0i32, 0, 0);
+                    let mut arg = "";
+                    for (j, c) in resto.char_indices() {
+                        match c {
+                            '(' | '[' | '{' => nivel += 1,
+                            ')' | ']' | '}' if nivel == 0 => break,
+                            ')' | ']' | '}' => nivel -= 1,
+                            ',' if nivel == 0 => {
+                                virgulas += 1;
+                                if virgulas == 3 {
+                                    inicio = j + 1;
+                                } else if virgulas == 4 {
+                                    arg = &resto[inicio..j];
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    for parte in arg.split('"').skip(1).step_by(2) {
+                        if parte.contains('.') && parte.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_')
+                        {
+                            saida.push((parte.to_string(), p.display().to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        let mut v = Vec::new();
+        ler(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut v);
+        v
+    }
+
+    /// Toda ação gravada tem uma frase no Histórico (sem cair no "registrou").
+    #[test]
+    fn toda_acao_gravada_tem_descricao_no_historico() {
+        let acoes = acoes_gravadas();
+        assert!(acoes.len() > 60, "a leitura do código achou poucas ações: {}", acoes.len());
+        let mut faltam: Vec<String> = acoes
+            .iter()
+            .map(|(a, _)| a.as_str())
+            .chain(PELA_VARIAVEL.iter().copied())
+            .filter(|a| descrever(a) == descrever("?"))
+            .map(|a| a.to_string())
+            .collect();
+        faltam.sort();
+        faltam.dedup();
+        assert!(faltam.is_empty(), "ações sem frase no Histórico: {faltam:?}");
     }
 }
