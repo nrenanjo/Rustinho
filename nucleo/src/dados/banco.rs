@@ -1320,6 +1320,10 @@ mod testes {
     /// restaura num Rustinho com a 0026: o banco do backup volta inteiro e é
     /// atualizado para a 26 pelo caminho da restauração, sem gravar nada no
     /// log da troca de dados.
+    ///
+    /// Menos as colunas derivadas da peça (`busca`, `codigos`): a restauração
+    /// as refaz (N-I1; o backup pode ser de antes da 5.2, com o índice velho).
+    /// Elas ficam as que o dono grava (refazer de novo não muda nada).
     #[test]
     fn m26_backup_de_estrutura_anterior_restaura_e_atualiza() {
         let _vez = crate::backup::testes::um_por_vez();
@@ -1328,7 +1332,7 @@ mod testes {
             let db = loja_antiga(&pasta, estrutura);
             let (colunas, antes) = {
                 let c = Connection::open(&db).unwrap();
-                let colunas = colunas_de(&c);
+                let colunas = sem_as_derivadas(colunas_de(&c));
                 (colunas.clone(), conteudo(&c, &colunas))
             };
             let feito = na_vez(|| crate::backup::fazer(&db, false));
@@ -1350,6 +1354,17 @@ mod testes {
             };
             assert_eq!(do_log(&antes["alteracao"]), do_log(&depois["alteracao"]), "o log da troca ganhou registros");
             nome_normalizado_preenchido(&b.conn);
+            let derivadas = |c: &Connection| -> Vec<(String, String)> {
+                c.prepare("SELECT busca, codigos FROM produto ORDER BY rowid")
+                    .unwrap()
+                    .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            let restauradas = derivadas(&b.conn);
+            crate::catalogo::codigos::refazer_todos_os_indices(&b.conn).unwrap();
+            assert_eq!(derivadas(&b.conn), restauradas, "a restauração não refez o índice (N-I1)");
             drop(b);
             let _ = std::fs::remove_dir_all(&pasta);
         }

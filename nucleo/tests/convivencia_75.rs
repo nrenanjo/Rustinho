@@ -25,7 +25,7 @@ use rusqlite::Connection;
 use rustinho_nucleo::banco::Banco;
 use rustinho_nucleo::catalogo::codigos::GtinFicha;
 use rustinho_nucleo::sync::{self, Alteracao};
-use rustinho_nucleo::{busca, faixas, produtos, usuarios};
+use rustinho_nucleo::{backup, busca, faixas, produtos, usuarios};
 use serde_json::{json, Value};
 
 fn alteracao(id: &str, dados: Value) -> Alteracao {
@@ -212,4 +212,56 @@ fn resumo_da_troca_deixa_de_fora_as_colunas_derivadas() {
     assert_eq!(produto(&b.conn), antes, "uma coluna derivada entrou no resumo da troca");
     b.conn.execute("UPDATE produto SET nome = 'Outro nome' WHERE id = ?1", [&id]).unwrap();
     assert_ne!(produto(&b.conn), antes, "o nome (que viaja) não mudou o resumo");
+}
+
+/// N-I1 (integração 2, 13/11): um caixa já na 5.2 restaura um backup de antes
+/// dela (índice velho do D01, sem a marca `sync_inicio:produto_gtin`). A
+/// marca é deste caixa e volta com a restauração, então a primeira abertura
+/// não refaz o índice de novo (R-1): o índice velho do backup ficava, e o
+/// pedaço do GTIN não achava a peça. A restauração refaz o índice de todas as
+/// peças, sem gravar alteração da troca. Em `bad5fb8`: o pedaço não acha.
+#[test]
+fn restaurar_backup_de_antes_da_5_2_refaz_o_indice() {
+    let pasta = std::env::temp_dir().join(format!("rustinho-n-i1-a-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let db = pasta.join("rustinho.db");
+    let gtin = ean13(789_555_123_456);
+    let pedaco = gtin[4..12].to_string();
+    let alteracoes_da_peca =
+        |c: &Connection| -> i64 { um(c, "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto'") };
+    let (id, feito, no_backup) = {
+        let b = Banco::abrir(&db).unwrap();
+        faixas::assumir(&b.conn).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        usuarios::definir_gerente(&b.conn, &u, true).unwrap();
+        let mut f = produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Rolamento traseiro".into();
+        f.custo = "10".into();
+        f.gtins = vec![GtinFicha { gtin: gtin.clone(), tipo: "comercial".into(), origem: "manual".into() }];
+        let id = produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        // O banco como era antes da 5.2: o índice velho (D01) e sem a marca.
+        b.conn
+            .execute(
+                "UPDATE produto SET busca = 'rolamento traseiro', codigos = ' ' || codigo || ' ' WHERE id = ?1",
+                [&id],
+            )
+            .unwrap();
+        b.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+        let no_backup = alteracoes_da_peca(&b.conn);
+        (id, backup::fazer(&db, false).unwrap(), no_backup)
+    };
+    // O caixa atualiza para a 5.2 (a primeira abertura refaz o índice, R-1).
+    let mut b = Banco::abrir(&db).unwrap();
+    let acha = |b: &Banco, texto: &str| busca::buscar(&b.conn, texto, true, 50).unwrap().iter().any(|p| p.id == id);
+    assert!(acha(&b, &pedaco), "a R-1 não refez o índice ao atualizar");
+    // E restaura o backup de antes da 5.2.
+    backup::restaurar(&mut b.conn, Some(&db), &feito.arquivo, false, "1234").unwrap();
+    assert!(acha(&b, &gtin), "o GTIN inteiro acha (por igualdade)");
+    assert!(acha(&b, &pedaco), "depois de restaurar, o pedaço {pedaco} do GTIN não acha a peça: o índice velho voltou");
+    assert_eq!(alteracoes_da_peca(&b.conn), no_backup, "refazer o índice gravou alteração da troca");
+    drop(b);
+    let b = Banco::abrir(&db).unwrap();
+    assert!(acha(&b, &pedaco), "abrindo de novo, o pedaço não acha");
+    drop(b);
+    let _ = std::fs::remove_dir_all(&pasta);
 }

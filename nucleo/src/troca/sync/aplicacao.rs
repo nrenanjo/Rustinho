@@ -519,6 +519,21 @@ pub(super) fn refazer_derivado(conn: &Connection, derivado: Derivado, id: &str) 
     Ok(())
 }
 
+/// Refaz todos os derivados de todas as linhas donas (N-I1: depois de
+/// restaurar um backup, que pode ser de antes da 5.2, com o índice velho do
+/// D01; veja `backup::Pendente::aplicar`). Só mexe em colunas que não viajam:
+/// não grava alteração. Devolve quantas linhas.
+pub fn refazer_todos_os_derivados(conn: &Connection) -> Resultado<usize> {
+    let mut derivados: Vec<Derivado> = crate::dados::esquema::ALIMENTAM.iter().map(|a| a.2).collect();
+    derivados.sort();
+    derivados.dedup();
+    let mut n = 0;
+    for d in derivados {
+        n += refazer_derivado_de_todas(conn, d)?;
+    }
+    Ok(n)
+}
+
 /// Refaz o derivado de todas as linhas donas (R-1: na primeira abertura com a
 /// 5.2, veja `registro::registrar_as_que_passaram_a_viajar`). Sem `_`, como
 /// [`refazer_derivado`].
