@@ -563,3 +563,156 @@ fn o1_regravar_sem_mudanca_nao_grava_alteracao() {
     a.conn.execute("UPDATE produto SET nome = 'Correia dentada' WHERE id = ?1", [&p]).unwrap();
     assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao"), antes + 1, "a mudança de verdade tem de gravar");
 }
+
+// ---------------------------------------------------------------------------
+// Preparação do passo 5.3 (DP-41, DP-42; nenhuma regra nova): estes testes
+// DOCUMENTAM o comportamento de hoje e passam. O commit que implementar a
+// decisão do proprietário inverte as asserções marcadas "hoje".
+// ---------------------------------------------------------------------------
+
+/// A nota de exemplo (emitente 11.222.333/0001-81; itens FAG-32206 com GTIN,
+/// N1100 e OL5W30 sem GTIN), numa pasta só dela.
+const NFE_EXEMPLO: &str = include_str!("nfe_exemplo.xml");
+const GTIN_FAG: &str = "7891234567895";
+
+fn nota_numa_pasta(nome: &str) -> String {
+    let p = std::env::temp_dir().join(format!("rustinho-caixas-{nome}-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&p).unwrap();
+    std::fs::write(p.join("nota.xml"), NFE_EXEMPLO).unwrap();
+    p.display().to_string()
+}
+
+/// "Trazer cadastros" só com o fornecedor: os itens viram pendências.
+fn trazer_so_o_fornecedor(b: &Banco, u: &str, pasta: &str) {
+    let e = rustinho_nucleo::importar::Entrada {
+        arquivos: vec![pasta.to_string()],
+        fornecedores: true,
+        ..Default::default()
+    };
+    rustinho_nucleo::importar::importar(&b.conn, &b.dispositivo, u, &e).unwrap();
+}
+
+fn pendencia_do_codigo(b: &Banco, codigo: &str) -> String {
+    let lista = rustinho_nucleo::importar::listar_pendencias(&b.conn).unwrap();
+    lista.into_iter().find(|p| p.codigo_fornecedor == codigo).unwrap_or_else(|| panic!("sem pendência de {codigo}")).id
+}
+
+fn resolver(b: &Banco, u: &str, pendencia: &str, acao: &str, peca: &str) -> String {
+    let d = rustinho_nucleo::importar::ResolverPendencia {
+        id: pendencia.into(),
+        acao: acao.into(),
+        produto_id: peca.into(),
+    };
+    rustinho_nucleo::importar::resolver_pendencia(&b.conn, &b.dispositivo, u, &d).unwrap().produto_id
+}
+
+/// (peça ligada ao código, situação) da pendência deste caixa.
+fn pendencia_ficou(b: &Banco, id: &str) -> (Option<String>, String) {
+    b.conn
+        .query_row("SELECT produto_id, situacao FROM xml_pendencia_identificacao WHERE id = ?1", [id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
+        .unwrap()
+}
+
+/// A peça ligada ao código do fornecedor da nota de exemplo.
+fn dono_do_codigo(b: &Banco, codigo: &str) -> String {
+    b.conn
+        .query_row(
+            "SELECT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+              WHERE p.documento = '11222333000181' AND f.codigo_compacto = ?1",
+            [rustinho_nucleo::texto::compactar(codigo)],
+            |l| l.get(0),
+        )
+        .unwrap()
+}
+
+/// Os dois caixas com a mesma pendência (a mesma nota, o fornecedor já conhecido nos dois).
+fn mesma_pendencia_nos_dois(nome: &str, codigo: &str) -> (Banco, Banco, String, String, String) {
+    let (mut a, mut b, u) = loja();
+    config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
+    let pasta = nota_numa_pasta(nome);
+    trazer_so_o_fornecedor(&a, &u, &pasta);
+    trocar(&mut a, &mut b);
+    trazer_so_o_fornecedor(&b, &u, &pasta);
+    let (pa, pb) = (pendencia_do_codigo(&a, codigo), pendencia_do_codigo(&b, codigo));
+    assert_ne!(pa, pb, "a fila de pendências é de cada caixa (tabela local)");
+    (a, b, u, pa, pb)
+}
+
+/// D03 / DP-41 (preparação da 5.3): dois caixas resolvem o mesmo item de
+/// formas diferentes, sem rede. A liga o FAG-32206 à peça X que já existia; B
+/// cadastra uma peça nova Y. HOJE, depois de trocar:
+/// - vale o vínculo do último a gravar (B: Y), igual nos dois caixas; o de A
+///   aparece só como conflito "Peça" em Simultaneidade › Diferenças, com o
+///   campo "produto id" (dois ids, sem o nome das peças) e "usar a que perdeu";
+/// - cada caixa continua com a SUA pendência resolvida, cada uma numa peça (a
+///   fila é local; ninguém compara as duas decisões);
+/// - as duas peças ficam nos dois caixas, e o GTIN da nota foi gravado nas
+///   duas: Duplicatas mostra o GTIN repetido (D04 + 5.2).
+#[test]
+fn d03_hoje_dois_caixas_resolvem_o_mesmo_item_de_formas_diferentes() {
+    let (mut a, mut b, u, pa, pb) = mesma_pendencia_nos_dois("d03", "FAG-32206");
+    let x = peca(&a, &u, "Rolamento da loja", "0");
+    trocar(&mut a, &mut b);
+    resolver(&a, &u, &pa, "ligar", &x);
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    let y = resolver(&b, &u, &pb, "nova", "");
+    assert_ne!(x, y);
+    trocar(&mut a, &mut b);
+    // Hoje: vence o último a gravar, igual nos dois caixas.
+    assert_eq!(dono_do_codigo(&a, "FAG-32206"), y, "hoje vale o vínculo do último a gravar");
+    assert_eq!(dono_do_codigo(&b, "FAG-32206"), y);
+    // Hoje: o de A vira um conflito genérico de "Peça" (só o id da peça).
+    for k in [sync::conflitos(&a.conn).unwrap(), sync::conflitos(&b.conn).unwrap()] {
+        let vinculo: Vec<_> = k.iter().filter(|c| c.campos.iter().any(|f| f["campo"] == "produto_id")).collect();
+        assert_eq!(vinculo.len(), 1, "{k:?}");
+        assert_eq!((vinculo[0].o_que.as_str(), vinculo[0].pode_usar), ("Peça", true));
+        let campo = vinculo[0].campos.iter().find(|f| f["campo"] == "produto_id").unwrap();
+        assert_eq!((campo["ficou"].as_str(), campo["perdeu"].as_str()), (Some(y.as_str()), Some(x.as_str())));
+    }
+    // Hoje: cada caixa fica com a sua decisão na pendência.
+    assert_eq!(pendencia_ficou(&a, &pa), (Some(x.clone()), "resolvida".to_string()));
+    assert_eq!(pendencia_ficou(&b, &pb), (Some(y.clone()), "resolvida".to_string()));
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM xml_pendencia_identificacao"), 3, "a de B não veio para A");
+    // As duas peças nos dois caixas; o GTIN da nota nas duas, e Duplicatas mostra.
+    for c in [&a, &b] {
+        assert_eq!(achou_pelo_codigo(c, GTIN_FAG).len(), 2, "duas peças com o GTIN da nota");
+        let rep = rustinho_nucleo::faixas::repetidos(&c.conn).unwrap();
+        let g = rep.iter().find(|r| r.tipo == "barras" && r.codigo == GTIN_FAG).expect("Duplicatas mostra o GTIN");
+        let mut ids: Vec<&str> = g.pecas.iter().map(|p| p.id.as_str()).collect();
+        ids.sort();
+        let mut esperado = vec![x.as_str(), y.as_str()];
+        esperado.sort();
+        assert_eq!(ids, esperado);
+    }
+}
+
+/// DP-42 (preparação da 5.3): a mesma pendência vira peça nova nos dois
+/// caixas, sem rede (item sem GTIN: N1100). HOJE, depois de trocar: duas
+/// peças com o mesmo nome nos dois caixas, cada uma com o seu código interno
+/// (das faixas de cada caixa); o código do fornecedor fica com a última; o
+/// vínculo da outra vira um conflito "Peça" em Diferenças; Duplicatas não
+/// mostra nada (os códigos internos são diferentes e não há GTIN). Com GTIN,
+/// Duplicatas mostraria o GTIN repetido (veja o teste do D03).
+#[test]
+fn dp42_hoje_a_mesma_peca_nova_nos_dois_caixas() {
+    let (mut a, mut b, u, pa, pb) = mesma_pendencia_nos_dois("dp42", "N1100");
+    let ya = resolver(&a, &u, &pa, "nova", "");
+    std::thread::sleep(std::time::Duration::from_millis(3));
+    let yb = resolver(&b, &u, &pb, "nova", "");
+    assert_ne!(ya, yb);
+    trocar(&mut a, &mut b);
+    for c in [&a, &b] {
+        let nomes = contar(c, "SELECT COUNT(*) FROM produto WHERE nome = 'PASTILHA FREIO DIANT COBREQ N-1100'");
+        assert_eq!(nomes, 2, "hoje: a mesma peça cadastrada duas vezes");
+        assert_eq!(dono_do_codigo(c, "N1100"), yb, "hoje: o código do fornecedor fica com a última");
+        let rep = rustinho_nucleo::faixas::repetidos(&c.conn).unwrap();
+        assert!(
+            !rep.iter().any(|r| r.pecas.iter().any(|p| p.id == ya) && r.pecas.iter().any(|p| p.id == yb)),
+            "hoje Duplicatas não mostra as duas: {rep:?}"
+        );
+        let k = sync::conflitos(&c.conn).unwrap();
+        assert_eq!(k.iter().filter(|c| c.campos.iter().any(|f| f["campo"] == "produto_id")).count(), 1, "{k:?}");
+    }
+}
