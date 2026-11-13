@@ -370,6 +370,20 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     onde.join(" e ")
                 );
             }
+            "resumo" => {
+                // Passo 5.4: o resumo das tabelas diferente entre dois caixas em dia.
+                let partes: Vec<&str> = perdeu.split('|').collect();
+                let caixa = if k.caixa.is_empty() { "outro caixa".to_string() } else { k.caixa.clone() };
+                k.o_que = "Conferência entre caixas".into();
+                k.texto = format!(
+                    "{} está diferente neste caixa e no {caixa}: {} registro(s) aqui e {} lá, com os dois em dia (cada um \
+                     já tinha recebido tudo do outro). Nada foi mudado. Pode ser um registro mexido por fora do Rustinho; \
+                     se ninguém souber o motivo, avise o suporte.",
+                    nome_da_tabela(&tabela),
+                    partes.first().unwrap_or(&"?"),
+                    partes.get(2).unwrap_or(&"?")
+                );
+            }
             "pago_a_mais" | "vale_a_mais" => {
                 k.o_que = match tabela.as_str() {
                     "conta_receber" => "Parcela recebida a mais",

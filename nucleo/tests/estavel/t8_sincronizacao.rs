@@ -377,7 +377,6 @@ fn conferencias(b: &Banco) -> Vec<sync::Conflito> {
 /// - caixas que ainda não estão em dia não comparam (não é diferença, é o que
 ///   ainda vai chegar).
 #[test]
-#[ignore = "passo 5.4: caracterização do resumo por tabela (falha hoje: ninguém percebe a linha mexida)"]
 fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
     if std::env::var_os(FILHO).is_some() {
         return;
@@ -443,7 +442,7 @@ fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
     assert_eq!(nome(&b), "Fusível (mexido à mão)");
     // A mesma diferença na troca seguinte não vira outro item.
     puxar(&pa.join("rustinho.db"), &end_b, pt_a);
-    assert_eq!(conferencias(&a).len(), 1);
+    assert_eq!(conferencias(&a).len(), 1, "{:#?}", conferencias(&a));
     // Caixas que não estão em dia não comparam: A vende e B ainda não recebeu.
     let antes = (conferencias(&a).len(), conferencias(&b).len());
     vender(&mut a, &ana, &peca, 1);

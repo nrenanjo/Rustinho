@@ -64,6 +64,9 @@ pub(crate) fn puxar_por(
     let mut sondou = false;
     let mut lotes = 0usize;
     let mut confirmacao: Option<rede_local::Confirmacao>;
+    // Passo 5.4: o resumo das tabelas deste caixa, mandado no primeiro pedido
+    // da troca (de tempos em tempos; veja `hora_do_resumo`).
+    let mut resumo_mandado = false;
     loop {
         // Contador, marca e geração guardados deste outro caixa. Na primeira
         // volta o caixa só se conhece pelo endereço: pelo caminho já aprendido
@@ -111,15 +114,37 @@ pub(crate) fn puxar_por(
         fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
         let saiu = agora_ms();
         let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
-        enviar(
-            &mut fluxo,
-            &k,
-            &json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": if sonda { i64::MAX } else { cursor },
-                     "marca": if sonda { Some("sonda".to_string()) } else { marca },
-                     "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local,
-                     "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
-                     "loja": minha_loja, "novo": sou_novo }),
-        )?;
+        let mut pedido = json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": if sonda { i64::MAX } else { cursor },
+                                 "marca": if sonda { Some("sonda".to_string()) } else { marca },
+                                 "dispositivo": a.dispositivo, "nome": a.nome, "porta": porta_local,
+                                 "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                                 "loja": minha_loja, "novo": sou_novo });
+        // Passo 5.4 (PEND-35): a troca anterior com este caixa terminou
+        // completa — de tempos em tempos, o primeiro pedido leva o resumo das
+        // tabelas daqui. Se ele também estiver em dia, devolve o dele e os dois
+        // comparam (nenhuma conexão a mais; erro aqui não atrapalha a troca).
+        let meu_resumo = if !resumo_mandado
+            && !sonda
+            && !dono.is_empty()
+            && completo_antes(&conn, &dono)?
+            && hora_do_resumo(&conn, caminho, &dono)
+        {
+            resumo_mandado = true;
+            resumo_comparado(caminho, &dono);
+            match resumo_agora(&conn, &dono) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    crate::registro::anotar(&format!("troca de dados: resumo das tabelas: {e}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(r) = &meu_resumo {
+            pedido["resumo"] = r.clone();
+        }
+        enviar(&mut fluxo, &k, &pedido)?;
         let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
         // Outro protocolo: recusa antes de ler qualquer alteração.
         if resposta["protocolo"].as_i64() != Some(PROTOCOLO) {
@@ -227,6 +252,14 @@ pub(crate) fn puxar_por(
         )?;
         total += r.novas;
         let avancou = r.avancou;
+        // Passo 5.4: o outro caixa devolveu o resumo dele (estava em dia).
+        if let Some(meu) = &meu_resumo {
+            if dono == dispositivo {
+                if let Err(e) = comparar_resumos(&conn, &dispositivo, meu, &resposta["resumo"]) {
+                    crate::registro::anotar(&format!("troca de dados: resumo das tabelas: {e}"));
+                }
+            }
+        }
         // Troca COMPLETA com este caixa (R-05): não há mais nada a receber e o
         // contador chegou ao máximo dele. É a prova de que ele já entregou tudo.
         if avancou && !resposta["temMais"].as_bool().unwrap_or(false) && novo_cursor >= seq_dele {
@@ -288,6 +321,15 @@ pub(crate) fn puxar_por(
     let confirmacao =
         confirmacao.unwrap_or(rede_local::Confirmacao { preso_ao_ip: false, preso_a_interface: None, local: None });
     Ok(Puxada { dispositivo, total, confirmacao })
+}
+
+/// A última troca com este outro caixa terminou completa (R-05: recebeu tudo
+/// o que ele tinha)?
+pub(super) fn completo_antes(conn: &Connection, dispositivo: &str) -> Resultado<bool> {
+    Ok(conn
+        .query_row("SELECT completo_em IS NOT NULL FROM sync_par WHERE dispositivo = ?1", [dispositivo], |l| l.get(0))
+        .optional()?
+        .unwrap_or(false))
 }
 
 /// Pede ao distribuidor uma faixa de códigos das peças. A faixa chega como
