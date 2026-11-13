@@ -58,7 +58,13 @@ FocusScope {
         const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
         const texto = busca.texto
         const comeco = Date.now()
-        const r = parte(0, Math.min(ate, 1000), "")
+        mostrar(parte(0, Math.min(ate, 1000), ""), texto, anterior, ate)
+        anotarBusca(comeco, texto)
+    }
+
+    // A lista do começo com a primeira parte (r) da busca de `texto`: lê mais
+    // até `ate` e fica na peça `anterior`, se ela ainda estiver na lista.
+    function mostrar(r, texto, anterior, ate) {
         if (r.ok) {
             textoDaLista = texto
             pecas.clear()
@@ -88,7 +94,6 @@ FocusScope {
             janela.avisar(r.erro, "erro")
         }
         buscou = true
-        anotarBusca(comeco, texto)
     }
 
     // Para os testes das telas (--textos-da-tela): quando a lista de uma busca
