@@ -246,6 +246,141 @@ pub fn definir_codigo_interno(
 }
 
 // ---------------------------------------------------------------------------
+// Índice de busca da peça (`produto.busca` e `produto.codigos`)
+// ---------------------------------------------------------------------------
+
+/// Uma aplicação (carro) da peça, como entra no índice de busca.
+#[derive(Debug, Default, Clone)]
+pub struct CarroDoIndice {
+    pub montadora: String,
+    pub modelo: String,
+    pub motor: String,
+    pub observacao: String,
+}
+
+/// O que entra no índice de busca de uma peça: a peça inteira (nome, códigos,
+/// GTINs, carros e equivalências). Quem tem a peça na mão (a ficha, ao
+/// salvar) monta isto; quem só tem o id usa [`refazer_indice`].
+#[derive(Debug, Default, Clone)]
+pub struct TextoDaPeca {
+    pub nome: String,
+    pub marca: String,
+    pub codigo: String,
+    pub codigo_barras: String,
+    pub codigo_original: String,
+    pub categoria: String,
+    pub local: String,
+    pub variacao: String,
+    pub observacoes: String,
+    /// Os GTINs na ordem da peça (o código de barras primeiro, se não estiver
+    /// entre os comerciais; veja [`refazer_indice`]).
+    pub gtins: Vec<String>,
+    pub aplicacoes: Vec<CarroDoIndice>,
+    /// (marca, código) de cada equivalência.
+    pub equivalentes: Vec<(String, String)>,
+}
+
+/// Texto de busca da peça: nome primeiro (para a ordenação), depois o resto.
+/// Devolve (`produto.busca`, `produto.codigos`). Veio de `produtos` (passo
+/// 5.2, "mover sem mudar"): a troca de dados refaz o índice da peça que
+/// recebe, e `produtos` não pode ser chamado de lá (ciclo).
+pub fn indice(d: &TextoDaPeca) -> (String, String) {
+    let mut partes: Vec<String> = vec![
+        d.nome.clone(),
+        d.marca.clone(),
+        d.codigo.clone(),
+        d.codigo_barras.clone(),
+        d.codigo_original.clone(),
+        d.categoria.clone(),
+        d.local.clone(),
+        d.variacao.clone(),
+        d.observacoes.clone(),
+    ];
+    for g in &d.gtins {
+        partes.push(g.clone());
+    }
+    for a in &d.aplicacoes {
+        partes.push(a.montadora.clone());
+        for s in texto::sinonimos_montadora(&texto::normalizar(&a.montadora)) {
+            partes.push(s.to_string());
+        }
+        partes.push(a.modelo.clone());
+        partes.push(a.motor.clone());
+        partes.push(a.observacao.clone());
+    }
+    for (marca, codigo) in &d.equivalentes {
+        partes.push(marca.clone());
+        partes.push(codigo.clone());
+    }
+    let mut codigos: Vec<String> = Vec::new();
+    for c in [&d.codigo, &d.codigo_barras, &d.codigo_original]
+        .into_iter()
+        .chain(d.gtins.iter())
+        .chain(d.equivalentes.iter().map(|q| &q.1))
+    {
+        let compacto = texto::compactar(c);
+        if !compacto.is_empty() && !codigos.contains(&compacto) {
+            codigos.push(compacto);
+        }
+    }
+    let busca = format!("{} {}", texto::normalizar(&partes.join(" ")), codigos.join(" "));
+    (busca.trim().to_string(), format!(" {} ", codigos.join(" ")))
+}
+
+/// Lê a peça gravada e refaz o índice de busca dela (o mesmo que a ficha
+/// grava ao salvar). `false` = a peça não existe (nada a fazer).
+pub fn refazer_indice(conn: &Connection, produto_id: &str) -> Resultado<bool> {
+    let Some(mut d) = conn
+        .query_row(
+            "SELECT codigo, nome, marca, codigo_barras, codigo_original, categoria, local, variacao, observacoes
+               FROM produto WHERE id = ?1",
+            [produto_id],
+            |l| {
+                Ok(TextoDaPeca {
+                    codigo: l.get(0)?,
+                    nome: l.get(1)?,
+                    marca: l.get(2)?,
+                    codigo_barras: l.get(3)?,
+                    codigo_original: l.get(4)?,
+                    categoria: l.get(5)?,
+                    local: l.get(6)?,
+                    variacao: l.get(7)?,
+                    observacoes: l.get(8)?,
+                    ..Default::default()
+                })
+            },
+        )
+        .optional()?
+    else {
+        return Ok(false);
+    };
+    let mut c = conn.prepare_cached(
+        "SELECT montadora, modelo, motor, observacao FROM produto_aplicacao WHERE produto_id = ?1 ORDER BY ordem",
+    )?;
+    d.aplicacoes = c
+        .query_map([produto_id], |l| {
+            Ok(CarroDoIndice { montadora: l.get(0)?, modelo: l.get(1)?, motor: l.get(2)?, observacao: l.get(3)? })
+        })?
+        .collect::<Result<_, _>>()?;
+    let mut c =
+        conn.prepare_cached("SELECT marca, codigo FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem")?;
+    d.equivalentes = c.query_map([produto_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    // Como a ficha lê os GTINs: o código de barras entra primeiro, como
+    // comercial, se não estiver lá.
+    let mut c =
+        conn.prepare_cached("SELECT gtin, tipo FROM produto_gtin WHERE produto_id = ?1 ORDER BY ordem, rowid")?;
+    let gtins: Vec<(String, String)> =
+        c.query_map([produto_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    let barras_entre_os_comerciais = gtins.iter().any(|(g, t)| *g == d.codigo_barras && t == "comercial");
+    d.gtins = gtins.into_iter().map(|(g, _)| g).collect();
+    if !d.codigo_barras.is_empty() && !barras_entre_os_comerciais {
+        d.gtins.insert(0, d.codigo_barras.clone());
+    }
+    gravar_indice(conn, produto_id, &indice(&d))?;
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // Consultas (as mesmas de antes; as mudanças de política são da fase 4)
 // ---------------------------------------------------------------------------
 
@@ -412,6 +547,57 @@ pub(crate) fn gtin_de_outra_peca(conn: &Connection, produto_id: &str) -> Resulta
             |l| Ok((l.get(0)?, l.get(1)?)),
         )
         .optional()?)
+}
+
+#[cfg(test)]
+mod testes_indice {
+    //! O índice refeito pelo id é o mesmo que a ficha grava ao salvar (passo
+    //! 5.2: o texto do índice veio de `produtos` sem mudar).
+    use super::*;
+    use crate::banco::Banco;
+    use crate::{produtos, usuarios};
+
+    #[test]
+    fn refazer_pelo_id_e_igual_ao_da_ficha() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "Pastilha de Freio Dianteira".into();
+        f.marca = "Cobreq".into();
+        f.codigo_barras = "7891000000090".into();
+        f.codigo_original = "N-1234/A".into();
+        f.categoria = "Freios".into();
+        f.local = "Prateleira 3".into();
+        f.observacoes = "Jogo com 4".into();
+        f.precos[0].preco = "10,00".into();
+        f.gtins = vec![
+            GtinFicha { gtin: "7891000000113".into(), tipo: "comercial".into(), origem: "manual".into() },
+            GtinFicha { gtin: "7891000000120".into(), tipo: "tributavel".into(), origem: "manual".into() },
+        ];
+        f.aplicacoes = vec![
+            produtos::AplicacaoFicha {
+                montadora: "VW".into(),
+                modelo: "Gol".into(),
+                motor: "1.6".into(),
+                ..Default::default()
+            },
+            produtos::AplicacaoFicha { montadora: "Chevrolet".into(), modelo: "Corsa".into(), ..Default::default() },
+        ];
+        f.equivalentes = vec![produtos::EquivalenteFicha { marca: "Fras-le".into(), codigo: "PD/580".into() }];
+        let id = produtos::salvar(c, d, &u, &f).unwrap();
+        let ler = || -> (String, String) {
+            c.query_row("SELECT busca, codigos FROM produto WHERE id = ?1", [&id], |l| Ok((l.get(0)?, l.get(1)?)))
+                .unwrap()
+        };
+        let da_ficha = ler();
+        assert!(da_ficha.1.contains("7891000000113") && da_ficha.0.contains("corsa"), "{da_ficha:?}");
+        c.execute("UPDATE produto SET busca = '', codigos = '' WHERE id = ?1", [&id]).unwrap();
+        assert!(refazer_indice(c, &id).unwrap());
+        assert_eq!(ler(), da_ficha);
+        assert!(!refazer_indice(c, "nao-existe").unwrap());
+    }
 }
 
 #[cfg(test)]
