@@ -53,6 +53,12 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 
 Um número publicado **nunca muda de conteúdo**.
 
+**Preparada, ainda não publicada** (número provisório: só se fixa no commit do projeto, MIG-1 (a)):
+
+| Nº | Arquivo | Conteúdo | Observação |
+|---|---|---|---|
+| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
+
 ## 3. A linha paralela dev.3: não é esta estrutura
 
 A tag `v0.9.18-dev.3` (`8cb29af`) e a linha dev.3.1/dev.3.2 saem do mesmo commit (`67d006f`) e
@@ -117,7 +123,7 @@ A reserva de 05/11 é substituída: ela previa uma 0024 para os caixas aprovados
 | 0026 | decisão de identificação por chave natural | 5.3 | conforme DP-41/42 |
 | 0027 | caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | renumerar nome do arquivo, `MIGRACOES`, comentário, sentinela e `conferir_estrutura` |
 | 0028 | demais registros do protocolo 4 e da recuperação, se precisarem de banco | 5.5 | conforme DP-44 |
-| 0029 | índices de desempenho (inclui o composto da 0006, com nome novo) | 7.5 | só índices |
+| 0029 | índices de desempenho (inclui o composto da 0006, com nome novo) | 7.5 | preparada como 0025 (o próximo livre da árvore de preparação), com o nome sem acento gravado (B04); veja §2 |
 | 0030 | nome e código gravados no item da OS, se o item não os tiver | 6.5 | só se preciso |
 
 Se a 6.5 ou a 7.5 entrarem antes da 5.x, a numeração segue a ordem real de entrada.
@@ -154,6 +160,10 @@ Se a 6.5 ou a 7.5 entrarem antes da 5.x, a numeração segue a ordem real de ent
 | `banco_na_estrutura_23_atualiza_para_a_atual` | trava | 0.9.15 a 0.9.17 atualizam |
 | `numeracao_das_migracoes_continua_e_igual_a_lista_do_banco` | trava | §6, item 1; a 0024 é a desta linha |
 | `nenhuma_migracao_reaproveita_nome` | trava | §6, itens 3 e 4 |
+| `b01_indice_composto_do_estoque_com_nome_novo` | trava (passo 7.5) | o índice `(produto_id, tipo, criado_em)` existe num banco novo e num atualizado |
+| `b01_parados_usa_o_indice_composto` | trava (passo 7.5) | o plano da conta dos parados usa o índice |
+| `banco::testes::m25_nao_muda_o_que_existia` | trava (passo 7.5) | §6, item 6: a 24 → 25 não muda as tabelas da loja nem grava no log da troca |
+| `banco::testes::m25_backup_da_estrutura_24_restaura_e_atualiza` | trava (passo 7.5) | §6, item 6: backup da estrutura 24 restaura e atualiza |
 | `banco_dev3_estrutura24_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
 | `banco_dev3_estrutura25_e_recusado_como_outra_linha` | trava (era caracterização até a 2.4) | §4 |
 | `banco_de_estrutura_desconhecida_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
