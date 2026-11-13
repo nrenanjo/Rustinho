@@ -3,6 +3,9 @@
 //! briefing de correção da 0.9.11). Tudo com dados de mentira e sem esperar
 //! tempo: o resultado é sempre o mesmo.
 
+#[path = "apoio/resumo.rs"]
+mod apoio_resumo;
+
 use rustinho_nucleo::banco::Banco;
 use rustinho_nucleo::{caixa, config, estoque, produtos, sync, usuarios, vendas};
 
@@ -1099,5 +1102,45 @@ fn g05_a_mesma_nota_em_dois_caixas_vai_para_o_gerente() {
             )
             .unwrap();
         assert_eq!(entrou, 26_000, "depois do estorno, a nota entra uma vez");
+    }
+}
+
+/// 5.4, parte 1 (preparação; frente F54): o protótipo do resumo por tabela
+/// (`apoio/resumo.rs`) em dois caixas EM DIA um com o outro (trocaram até não
+/// ter mais nada novo), numa loja com peças e vendas, com o banco de B nascido
+/// depois do de A (como dois computadores instalados em dias diferentes). HOJE
+/// os resumos já diferem sem nenhuma divergência de verdade: o "Caixa geral"
+/// (`conta_loja`), que cada banco cria sozinho ao nascer (migração 0005, o
+/// mesmo id em todos, com a hora de cada um), só viaja quando alguém mexe
+/// nele. Um resumo ligado assim acusaria divergência em toda loja (veja
+/// `DECISOES_F54.md`, D54-3).
+#[test]
+fn g54_hoje_resumo_de_dois_caixas_em_dia_ja_difere() {
+    let a = Banco::em_memoria().unwrap();
+    let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "balcao-azul-2026", true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &u, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja de Teste").unwrap();
+    // O banco de B nasce num segundo depois do de A.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mut b = Banco::em_memoria().unwrap();
+    let mut a = a;
+    trocar(&mut a, &mut b);
+    let p1 = peca(&a, &u, "Filtro de óleo", "5");
+    let p2 = peca(&b, &u, "Filtro de ar", "5");
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 2", "0").unwrap();
+    vender_numa_operacao(&mut a, &u, &[&p1, &p2]);
+    vender_numa_operacao(&mut b, &u, &[&p2]);
+    trocar(&mut a, &mut b);
+    let (ra, rb) = (apoio_resumo::resumo(&a.conn), apoio_resumo::resumo(&b.conn));
+    let d = apoio_resumo::diferentes(&ra, &rb);
+    assert_eq!(d.len(), 1, "{d:#?}");
+    assert!(d[0].starts_with("conta_loja: 1 linhas"), "hoje só o Caixa geral difere: {d:#?}");
+    // Os dois caixas têm de fato os mesmos dados de negócio (nada pendente,
+    // nenhuma alteração por chegar).
+    assert_eq!(venda_vista(&a), venda_vista(&b));
+    for x in [&a, &b] {
+        assert_eq!(sync::pendencias(&x.conn).unwrap(), 0);
     }
 }

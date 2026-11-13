@@ -36,6 +36,9 @@
 //!   de consultas (`RUSTINHO_MEDIR_SAIDA=<arquivo>`), para provar que duas
 //!   versões dão os mesmos resultados nos mesmos dados.
 
+#[path = "apoio/resumo.rs"]
+mod apoio_resumo;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -955,4 +958,120 @@ fn medir_primeira_abertura_da_5_2() {
         println!("carga: {}", std::fs::read_to_string("/proc/loadavg").unwrap_or_default().trim());
         println!("{}", memoria());
     }
+}
+
+/// Passo 5.4, parte 1 (frente F54; só à mão, em release): quanto custa o
+/// resumo por tabela da troca (contagem e soma de verificação das linhas que
+/// viajam) na loja de teste deste medidor (`RUSTINHO_MEDIR_PECAS`, um número;
+/// a de 20 mil peças da 7.5). O cálculo aqui é um protótipo do desenho da F5
+/// (`RELATORIO_F5.md` §7.2): para cada tabela que viaja, as colunas que viajam
+/// em JSON (`json_array`, na ordem do esquema; na tabela com chave natural,
+/// sem o id; na `config`, só as da loja), SHA-256 de cada linha e a soma dos 8
+/// primeiros bytes (módulo 2^64; não depende da ordem). Mede também se o
+/// cálculo segura a escrita: uma segunda conexão grava (`BEGIN IMMEDIATE`, sem
+/// esperar) enquanto ele roda numa leitura. Imprime linhas `RESUMO`.
+#[test]
+#[ignore = "medidor do resumo por tabela (passo 5.4): rodar em release, com --ignored --nocapture"]
+fn medir_resumo_da_troca() {
+    use rustinho_nucleo::sync;
+    let pasta = std::env::var_os("RUSTINHO_MEDIR_PASTA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("rustinho-medir-busca"));
+    let quantas: usize =
+        std::env::var("RUSTINHO_MEDIR_PECAS").unwrap_or_else(|_| "20000".into()).trim().parse().expect("um número");
+    let rodadas: usize = std::env::var("RUSTINHO_MEDIR_RODADAS").ok().map(|r| r.parse().expect("rodadas")).unwrap_or(5);
+    if cfg!(debug_assertions) {
+        println!("RESUMO aviso=compilado_sem_release");
+    }
+    let gerado = banco_do_cenario(&pasta, quantas);
+    // Uma cópia por rodada de medição (o banco gerado fica como estava).
+    let caminho = pasta.join(format!("resumo_{quantas}.db"));
+    let _ = std::fs::remove_file(&caminho);
+    let _ = std::fs::remove_file(pasta.join(format!("resumo_{quantas}.db-wal")));
+    let _ = std::fs::remove_file(pasta.join(format!("resumo_{quantas}.db-shm")));
+    std::fs::copy(&gerado, &caminho).unwrap();
+    let b = Banco::abrir(&caminho).expect("abrir banco");
+    println!("RESUMO banco={} pecas={quantas}", caminho.display());
+
+    use apoio_resumo::resumo;
+    let contagens = |c: &rusqlite::Connection| -> f64 {
+        let t = Instant::now();
+        for tabela in sync::TABELAS {
+            let _: i64 = c.query_row(&format!("SELECT COUNT(*) FROM \"{tabela}\""), [], |l| l.get(0)).unwrap();
+        }
+        t.elapsed().as_secs_f64() * 1000.0
+    };
+
+    // 1. Tempo do resumo inteiro (e só das contagens), várias rodadas.
+    let mut tempos = Vec::new();
+    let mut ultimo = Vec::new();
+    for _ in 0..rodadas {
+        let t = Instant::now();
+        ultimo = resumo(&b.conn);
+        tempos.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    let linhas: u64 = ultimo.iter().map(|x| x.1).sum();
+    for (tabela, n, soma, ms) in ultimo.iter().filter(|x| x.1 > 0) {
+        println!("RESUMO tabela={tabela} linhas={n} soma={soma:016x} ms={ms:.1}");
+    }
+    let mut ordenados = tempos.clone();
+    ordenados.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mediana = ordenados[ordenados.len() / 2];
+    println!(
+        "RESUMO tabelas={} linhas={linhas} rodadas={rodadas} ms_min={:.0} ms_mediana={mediana:.0} ms_max={:.0} \
+         us_por_linha={:.2} so_contagens_ms={:.1} {}",
+        ultimo.len(),
+        ordenados[0],
+        ordenados[ordenados.len() - 1],
+        mediana * 1000.0 / linhas.max(1) as f64,
+        contagens(&b.conn),
+        memoria()
+    );
+    // O mesmo resumo duas vezes nos mesmos dados (não depende da ordem de leitura).
+    assert_eq!(resumo(&b.conn).iter().map(|x| (x.1, x.2)).collect::<Vec<_>>(), {
+        ultimo.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>()
+    });
+
+    // 2. O cálculo numa leitura não segura a escrita: outra conexão grava sem
+    // esperar (busy_timeout 0) enquanto ele roda.
+    b.conn.execute_batch("CREATE TABLE IF NOT EXISTS medir_escrita (n INTEGER)").unwrap();
+    let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let escritor = {
+        let (caminho, parar) = (caminho.clone(), parar.clone());
+        std::thread::spawn(move || {
+            let c = rusqlite::Connection::open(&caminho).unwrap();
+            rustinho_nucleo::banco::registrar_funcoes(&c).unwrap();
+            c.busy_timeout(std::time::Duration::from_millis(0)).unwrap();
+            let (mut feitas, mut recusadas, mut maior) = (0u64, 0u64, 0f64);
+            while !parar.load(std::sync::atomic::Ordering::Relaxed) {
+                let t = Instant::now();
+                match c.execute_batch("BEGIN IMMEDIATE; INSERT INTO medir_escrita VALUES (1); COMMIT;") {
+                    Ok(()) => feitas += 1,
+                    Err(_) => {
+                        recusadas += 1;
+                        let _ = c.execute_batch("ROLLBACK");
+                    }
+                }
+                maior = maior.max(t.elapsed().as_secs_f64() * 1000.0);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            (feitas, recusadas, maior)
+        })
+    };
+    let t = Instant::now();
+    b.conn.execute_batch("BEGIN").unwrap();
+    let durante = resumo(&b.conn);
+    b.conn.execute_batch("COMMIT").unwrap();
+    let ms = t.elapsed().as_secs_f64() * 1000.0;
+    parar.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (feitas, recusadas, maior) = escritor.join().unwrap();
+    println!(
+        "RESUMO durante_a_leitura ms={ms:.0} gravacoes_feitas={feitas} gravacoes_recusadas={recusadas} \
+         gravacao_mais_lenta_ms={maior:.1}"
+    );
+    assert_eq!(durante.len(), ultimo.len());
+    drop(b);
+    let _ = std::fs::remove_file(&caminho);
+    let _ = std::fs::remove_file(pasta.join(format!("resumo_{quantas}.db-wal")));
+    let _ = std::fs::remove_file(pasta.join(format!("resumo_{quantas}.db-shm")));
 }
