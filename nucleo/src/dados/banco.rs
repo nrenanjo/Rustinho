@@ -382,7 +382,8 @@ pub fn conferir_integridade(conn: &Connection) -> Resultado<()> {
 }
 
 /// Funções do Rustinho dentro do SQLite: `normalizar(texto)` (sem acento,
-/// minúsculas), `rustinho_id()` (UUID v7) e `rustinho_agora()` (UTC).
+/// minúsculas), `rustinho_id()` (UUID v7), `rustinho_agora()` (UTC) e
+/// `rustinho_conexao()` (o número desta conexão).
 /// Precisam ser registradas em toda conexão (os gatilhos da sincronização
 /// usam as duas últimas).
 pub fn registrar_funcoes(conn: &Connection) -> Resultado<()> {
@@ -393,6 +394,12 @@ pub fn registrar_funcoes(conn: &Connection) -> Resultado<()> {
         Ok(t.map(|t| crate::texto::normalizar(&t)).unwrap_or_default())
     })?;
     conn.create_scalar_function("rustinho_id", 0, FunctionFlags::SQLITE_UTF8, |_| Ok(tempo::novo_id()))?;
+    // PEND-39 (7.5): um número desta conexão, nunca repetido enquanto o
+    // programa roda. A busca guarda a contagem de peças por conexão e a refaz
+    // só quando o banco muda (`busca::total_guardado`).
+    static PROXIMA_CONEXAO: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+    let conexao = PROXIMA_CONEXAO.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    conn.create_scalar_function("rustinho_conexao", 0, deterministica, move |_| Ok(conexao))?;
     conn.create_scalar_function("rustinho_agora", 0, FunctionFlags::SQLITE_UTF8, |_| Ok(tempo::agora()))?;
     // Operação comercial (0.9.15): todas as alterações gravadas na mesma
     // transação recebem o mesmo id (uma venda com itens, pagamentos e

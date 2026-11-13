@@ -126,10 +126,12 @@ pub fn buscar(
     incluir_inativas: bool,
     limite: i64,
 ) -> Resultado<Vec<ProdutoResumo>> {
-    Ok(buscar_pagina(conn, texto_busca, incluir_inativas, limite, 0)?.itens)
+    // Quem só quer as peças (o leitor, as outras telas) não conta o cadastro.
+    Ok(pagina(conn, texto_busca, incluir_inativas, limite, 0, false)?.itens)
 }
 
-/// Busca peças com paginação determinística controlada pelo núcleo.
+/// Busca peças com paginação determinística controlada pelo núcleo: a tela
+/// de Peças lê a lista em partes seguidas, sem repetir nem omitir (N04).
 pub fn buscar_pagina(
     conn: &Connection,
     texto_busca: &str,
@@ -137,9 +139,22 @@ pub fn buscar_pagina(
     limite: i64,
     deslocamento: i64,
 ) -> Resultado<PaginaProdutos> {
+    pagina(conn, texto_busca, incluir_inativas, limite, deslocamento, true)
+}
+
+/// A busca; `contar`: o total de peças do cadastro (o cabeçalho de Peças), que
+/// vem da contagem guardada (`total_guardado`).
+fn pagina(
+    conn: &Connection,
+    texto_busca: &str,
+    incluir_inativas: bool,
+    limite: i64,
+    deslocamento: i64,
+    contar: bool,
+) -> Resultado<PaginaProdutos> {
     let limite = limite.clamp(1, 1000) as usize;
     let deslocamento = deslocamento.max(0) as usize;
-    let total_geral = total(conn, incluir_inativas)?;
+    let total_geral = if contar { total_guardado(conn, incluir_inativas)? } else { 0 };
     let normalizado = texto::normalizar(texto_busca);
     let tokens: Vec<&str> = normalizado.split(' ').filter(|t| !t.is_empty()).take(MAX_TERMOS).collect();
     let anos: Vec<(&str, i64)> = tokens.iter().filter_map(|t| como_ano(t).map(|a| (*t, a))).collect();
@@ -149,8 +164,11 @@ pub fn buscar_pagina(
     if tokens.is_empty() {
         let sql = if incluir_inativas { SQL_LISTA_TODAS } else { SQL_LISTA_ATIVAS };
         let mut c = conn.prepare_cached(sql)?;
-        let ids: Vec<String> =
-            c.query_map([limite as i64, deslocamento as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        // Uma peça a mais diz se há mais (sem depender da contagem).
+        let mut ids: Vec<String> =
+            c.query_map([limite as i64 + 1, deslocamento as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
+        let tem_mais = ids.len() > limite;
+        ids.truncate(limite);
         let mut carros = carros_das_pecas(conn, &ids.iter().map(String::as_str).collect::<Vec<_>>())?;
         let escolhidas = ids
             .into_iter()
@@ -160,7 +178,6 @@ pub fn buscar_pagina(
             })
             .collect();
         let itens = montar(conn, escolhidas, &compacto, &[])?;
-        let tem_mais = (deslocamento + itens.len()) < (total_geral.max(0) as usize);
         return Ok(PaginaProdutos {
             itens,
             total: total_geral,
@@ -1046,6 +1063,37 @@ pub fn esperando_pelo_codigo(conn: &Connection, codigo: &str) -> Resultado<usize
     Ok(n)
 }
 
+/// PEND-39 (7.5): a contagem de peças guardada por conexão, refeita só quando
+/// o banco mudou: nesta conexão (o número de mudanças dela) ou em outra
+/// (`PRAGMA data_version`: a troca de dados, o backup). Antes ela rodava a cada
+/// tecla da busca e a cada parte da lista. A conexão é reconhecida pelo número
+/// que `banco::registrar_funcoes` dá a cada uma (`rustinho_conexao()`); sem
+/// ele, conta sempre.
+fn total_guardado(conn: &Connection, incluir_inativas: bool) -> Resultado<i64> {
+    type Guardada = ((i64, bool), (i64, u64), i64);
+    static GUARDADAS: std::sync::Mutex<Vec<Guardada>> = std::sync::Mutex::new(Vec::new());
+    let Ok(conexao) = conn.prepare_cached("SELECT rustinho_conexao()").and_then(|mut c| c.query_row([], |l| l.get(0)))
+    else {
+        return total(conn, incluir_inativas);
+    };
+    let chave = (conexao, incluir_inativas);
+    let versao: i64 = conn.prepare_cached("PRAGMA data_version")?.query_row([], |l| l.get(0))?;
+    let marca = (versao, conn.total_changes());
+    let ja =
+        GUARDADAS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|g| g.0 == chave && g.1 == marca).map(|g| g.2);
+    if let Some(n) = ja {
+        return Ok(n);
+    }
+    let n = total(conn, incluir_inativas)?;
+    let mut guardadas = GUARDADAS.lock().unwrap_or_else(|e| e.into_inner());
+    guardadas.retain(|g| g.0 != chave);
+    if guardadas.len() >= 32 {
+        guardadas.remove(0);
+    }
+    guardadas.push((chave, marca, n));
+    Ok(n)
+}
+
 /// Quantas peças existem.
 pub fn total(conn: &Connection, incluir_inativas: bool) -> Resultado<i64> {
     let sql =
@@ -1710,6 +1758,7 @@ mod testes_75 {
     use std::sync::Arc;
 
     use rusqlite::functions::FunctionFlags;
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 
     use super::*;
     use crate::banco::Banco;
@@ -1852,6 +1901,64 @@ mod testes_75 {
         let pedaco: String = alvo.chars().skip(4).take(7).collect();
         assert!(buscar(&l.b.conn, &pedaco, false, 50).unwrap().iter().any(|p| p.id == ids[150]));
         assert!(lower < 20, "a busca leu os {} GTINs do cadastro com lower() ({lower} chamadas)", ids.len());
+    }
+
+    /// PEND-39 (contagem só quando muda): o total de peças do cabeçalho não é
+    /// contado de novo a cada tecla nem a cada parte da rolagem: só quando o
+    /// banco mudou (nesta conexão ou em outra). `buscar` (o leitor e as
+    /// outras telas) nem conta. Em `b3a171c`, todas as chamadas contavam.
+    #[test]
+    fn pend39_contagem_so_quando_muda() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-75-contagem-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        crate::faixas::assumir(&b.conn).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap().id;
+        let nova = |nome: &str| {
+            let mut f = produtos::ficha_nova(&b.conn).unwrap();
+            f.nome = nome.into();
+            f.custo = "10".into();
+            produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap()
+        };
+        for i in 0..20 {
+            nova(&format!("Peça {i}"));
+        }
+        let contagens = Arc::new(AtomicUsize::new(0));
+        let c2 = contagens.clone();
+        b.conn
+            .authorizer(Some(move |ctx: AuthContext<'_>| {
+                if let AuthAction::Function { function_name } = ctx.action {
+                    if function_name.eq_ignore_ascii_case("count") {
+                        c2.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        let contou = || contagens.swap(0, Ordering::Relaxed);
+        assert_eq!(buscar_pagina(&b.conn, "", false, 10, 0).unwrap().total, 20);
+        contou();
+        // A mesma lista, outras partes e outras buscas: nada mudou, não conta.
+        for (texto, deslocamento) in [("", 0), ("", 10), ("peca", 0), ("pec", 0), ("peca 1", 0)] {
+            assert_eq!(buscar_pagina(&b.conn, texto, false, 10, deslocamento).unwrap().total, 20);
+        }
+        assert_eq!(buscar(&b.conn, "peca", false, 10).unwrap().len(), 10);
+        assert_eq!(contou(), 0, "contou as peças de novo sem nada ter mudado no banco");
+        // Mudou nesta conexão: conta de novo, e o total é o novo.
+        nova("Peça nova");
+        assert_eq!(buscar_pagina(&b.conn, "", false, 10, 0).unwrap().total, 21);
+        assert!(contou() >= 1);
+        // Mudou em outra conexão (a troca de dados, o backup): também.
+        {
+            let outra = rusqlite::Connection::open(&caminho).unwrap();
+            crate::banco::registrar_funcoes(&outra).unwrap();
+            outra.execute("UPDATE produto SET ativo = 0 WHERE nome = 'Peça 3'", []).unwrap();
+        }
+        assert_eq!(buscar_pagina(&b.conn, "", false, 10, 0).unwrap().total, 20);
+        assert_eq!(buscar_pagina(&b.conn, "", true, 10, 0).unwrap().total, 21);
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     /// N04 (caracterização, passava antes): a lista lida em partes, como a
