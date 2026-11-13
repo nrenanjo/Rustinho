@@ -134,7 +134,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "encomendas" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
             // Caso 8 (C8, 0.9.18): o modo seguro leva ao Backup (restaurar).
-            "backup" | "backup_nuvem" | "banco_defeito" => "Ver backup",
+            "backup" | "backup_nuvem" | "backup_sem_tranca" | "banco_defeito" => "Ver backup",
             // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
             "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
@@ -698,6 +698,26 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             );
         }
     }
+    // F02 (passo 6.7, DP-32): já houve backup e a loja ainda não tem a chave
+    // (nenhum gerente entrou): as cópias saem sem tranca. O Drive recusa essas
+    // cópias, mas a do computador fica aberta; o aviso diz como resolver.
+    if !b.ultimo.is_empty() && backup::publica_da_loja(conn)?.is_none() {
+        let mut a = Aviso::simples(
+            "backup_sem_tranca",
+            &hoje,
+            "Backup".into(),
+            "Os backups ainda saem sem tranca".into(),
+            String::new(),
+            "configuracoes",
+        )
+        .categoria(ATENCAO)
+        .secao("backup");
+        a.descricao = "Enquanto nenhum gerente entrou no Rustinho, a loja não tem a chave que tranca os backups: \
+             quem tiver o arquivo abre os dados da loja. Entre uma vez como gerente para criar a chave; daí em \
+             diante os backups saem trancados."
+            .into();
+        avisos.push(a);
+    }
     // Crítica primeiro, depois atenção, depois informativa (ordem estável).
     let peso = |c: &str| match c {
         CRITICA => 0,
@@ -1229,6 +1249,24 @@ mod testes {
             let a = completar(&b.conn, a).unwrap();
             assert!(!a.acao.to_lowercase().contains("gerente") || a.secao == "gerente", "{id}: {}", a.acao);
         }
+    }
+
+    /// F02 (passo 6.7, DP-32): com backup feito e sem a chave da loja (nenhum
+    /// gerente entrou), o aviso do dia diz que os backups saem sem tranca e leva
+    /// ao Backup; sem backup ainda, ou com a chave, não avisa.
+    #[test]
+    fn f02_backup_sem_tranca_avisa_ate_o_gerente_entrar() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        let aviso = |c: &Connection| do_dia(c).unwrap().into_iter().find(|a| a.id == "backup_sem_tranca");
+        assert!(aviso(c).is_none(), "sem backup ainda: nada");
+        config::gravar(c, "backup_ultimo", "2026-11-12T10:00:00Z").unwrap();
+        let a = aviso(c).expect("backup feito sem a chave: avisa");
+        assert_eq!(a.categoria, ATENCAO);
+        assert_eq!((a.funcao.as_str(), a.secao.as_str(), a.acao.as_str()), ("configuracoes", "backup", "Ver backup"));
+        assert!(a.descricao.contains("Entre uma vez como gerente"), "{}", a.descricao);
+        config::gravar(c, "backup_publica", &"ab".repeat(32)).unwrap();
+        assert!(aviso(c).is_none(), "com a chave da loja: some");
     }
 
     /// T-07 (C8): caixa da loja sem trocar dados há um dia ou mais vira
