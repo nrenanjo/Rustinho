@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "rustinho_android"
-version = "0.9.18"
+version = "0.9.18-dev.3.2"
 dependencies = [
  "cxx",
  "cxx-qt",
