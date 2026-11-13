@@ -25,6 +25,9 @@ outros roteiros, e MEDE pelas posições que o próprio programa informa
                 (StyledText) recebe o nome escapado (&lt;i&gt;), e não a marcação.
   M11 H01/7.1   Início com 2 pendências XML: a pílula de Peças sem o selo
                 numérico; o aviso textual das pendências continua na Início.
+  M12 H16       Estoque › Encomendas: tocar na linha e tirar o mouse de cima; o
+                "Cancelar encomenda" (antes só com o mouse em cima) continua à vista.
+  M13 H16       Estoque › Comprar: o mesmo com o "Já pedi" da encomenda.
 
 O contraste é o da WCAG 2: fundo = a cor mais comum em volta e dentro do
 retângulo do texto (ou da caixa); frente = o pixel de maior contraste com o
@@ -58,6 +61,8 @@ CELULAR = (360, 780)
 # Item → (passo). Cada correção da 7.2 tira o seu.
 ESPERADAS = {
     "M5": "VIS33-05 (\"Salvar como orçamento\" cortado em 1366 × 768), passo 7.2",
+    "M12": "H16 (ações só com o mouse por cima: Encomendas), passo 7.2",
+    "M13": "H16 (ações só com o mouse por cima: Comprar), passo 7.2",
 }
 
 
@@ -446,6 +451,31 @@ def main():
                 else:
                     conferir("M11", "Início: NÃO MEDIDO (a pílula de Peças não apareceu)", False, "")
                     ESPERADAS.pop("M11", None)
+            finally:
+                rr.fechar()
+        # ---- M12 e M13: ações à vista na linha escolhida (sem o mouse em cima) ----
+        for codigo, secao, linha_texto, acao in (("M12", "encomendas", "Pastilha dianteira", "Cancelar encomenda"),
+                                                 ("M13", "comprar", "Pastilha dianteira", "Já pedi")):
+            if not quer(codigo):
+                continue
+            rr = abrir(nova(est), "TelaEstoque", {"secao": secao}, fotos, f"{codigo.lower()}_{secao}_toque")
+            logs.append(rr.saida)
+            try:
+                alvo = [(x, y) for x, y, s in rr.textos() if s == linha_texto]
+                if alvo:
+                    px, py = rr.ponto(*alvo[0])
+                    base.xdo("mousemove", str(px), str(py), "click", "1")
+                    time.sleep(1)
+                # textos() leva o mouse para o canto de baixo da janela, longe da linha.
+                t = rr.textos()
+                rr.foto("-sem-mouse")
+                visivel = any(s == acao for _, _, s in t)
+                if alvo:
+                    conferir(codigo, f"Estoque › {secao}: tocada a linha, \"{acao}\" à vista sem o mouse em cima", visivel,
+                             f"linha \"{linha_texto}\" em {alvo[0]}; \"{acao}\" na tela: {visivel}")
+                else:
+                    conferir(codigo, f"Estoque › {secao}: NÃO MEDIDO (a linha \"{linha_texto}\" não apareceu)", False, "")
+                    ESPERADAS.pop(codigo, None)
             finally:
                 rr.fechar()
     finally:
