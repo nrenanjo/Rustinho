@@ -281,7 +281,8 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto && varia.dinheiro ? "" : varia.modelData.variacao
-                                    color: varia.modelData.subiu ? Tema.verdeEscuro : Tema.vermelho
+                                    // H17 (7.3): verde quando a mudança é boa (despesa que sobe é piora).
+                                    color: varia.modelData.melhorou ? Tema.verdeEscuro : Tema.vermelho
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
                                     font.pixelSize: 13

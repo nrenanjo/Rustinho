@@ -654,3 +654,30 @@ fn vis33_12_deducao_sem_sinal_duplo() {
     let res = d.linhas.iter().find(|x| x.id == "resultado").unwrap();
     assert_eq!(res.valor, "-878,00");
 }
+
+/// H17 (passo 7.3): na comparação com o período anterior, a despesa que sobe é
+/// piora (vermelho), e a que desce é melhora (verde). O `subiu` continua dizendo
+/// só a direção; o `melhorou` diz se a mudança é boa para a loja.
+#[test]
+fn h17_despesa_que_sobe_vem_como_piora() {
+    let l = Loja::nova();
+    // "Mês anterior" (completo) comparado com o mês antes dele: as despesas
+    // mensais só se comparam entre meses completos.
+    let mes = l.mes();
+    let (m, a): (i32, i32) = (mes[..2].parse().unwrap(), mes[3..].parse().unwrap());
+    let antes = |n: i32| {
+        let t = a * 12 + (m - 1) - n;
+        format!("{:02}/{}", t % 12 + 1, t / 12)
+    };
+    l.conta("cat-aluguel", "Aluguel de dois meses atrás", "500", &antes(2));
+    l.conta("cat-aluguel", "Aluguel do mês passado", "800", &antes(1));
+    let d = l.dre("mes_anterior");
+    let desp = d.variacoes.iter().find(|v| v.nome == "Despesas registradas");
+    let Some(desp) = desp else {
+        panic!("sem a comparação das despesas: {:?}", d.variacoes.iter().map(|v| &v.nome).collect::<Vec<_>>())
+    };
+    assert_eq!((desp.variacao.as_str(), desp.subiu), ("+60%", true), "{desp:?}");
+    assert!(!desp.melhorou, "despesa que sobe veio como melhora: {desp:?}");
+    let res = d.variacoes.iter().find(|v| v.nome == "Resultado estimado").unwrap();
+    assert_eq!(res.melhorou, res.subiu, "no resultado, subir é bom: {res:?}");
+}
