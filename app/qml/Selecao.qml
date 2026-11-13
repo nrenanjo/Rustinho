@@ -18,11 +18,14 @@ ColumnLayout {
     Layout.alignment: Qt.AlignTop
     // Por padrão não estica; quem usar decide (Layout.fillWidth: true).
     Layout.fillWidth: false
+    // A superfície embaixo (0.9.18; veja Tema.superficie), como no Campo.
+    readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
 
     Rotulo {
         text: selecao.rotulo
         visible: text !== ""
-        color: selecao.erro !== "" ? Tema.vermelho : Tema.apagado
+        // H05 (7.2): pela superfície, como o Campo (no roxo escuro, claro).
+        color: selecao.erro !== "" ? Tema.vermelhoNo(selecao.superficie) : Tema.apagadoNo(selecao.superficie)
         Layout.fillWidth: true
         Layout.preferredWidth: 1
     }
