@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use rusqlite::types::Value;
-use rusqlite::{params_from_iter, Connection};
+use rusqlite::{params, params_from_iter, Connection};
 use serde::Serialize;
 
 use crate::erro::Resultado;
@@ -63,6 +63,13 @@ pub struct PaginaProdutos {
     pub deslocamento: i64,
     pub limite: i64,
     pub tem_mais: bool,
+    /// Onde a parte seguinte começa na numeração da lista inteira: o
+    /// deslocamento desta parte mais as linhas que vieram (R-2).
+    pub lidas: i64,
+    /// Na lista sem busca, a chave da última linha desta parte (opaca para a
+    /// tela): a parte seguinte vem depois dela, pela ordem do índice, e não
+    /// pelo deslocamento (R-2). Vazio na busca com texto e quando não veio nada.
+    pub continuar: String,
 }
 
 /// Um carro de uma peça, para filtrar por ano e montar o resumo.
@@ -96,11 +103,33 @@ fn como_ano(token: &str) -> Option<i64> {
 /// `normalizar(nome)` de antes), e a lista é lida pelo índice
 /// `produto_alteradas_por_ultimo` (0026), parte a parte, sem ordenar o
 /// cadastro inteiro nem chamar a função do Rustinho para cada peça.
-pub(crate) const SQL_LISTA_ATIVAS: &str = "SELECT p.id FROM produto p WHERE p.ativo = 1
+pub(crate) const SQL_LISTA_ATIVAS: &str = "SELECT p.id, p.atualizado_em, p.nome_normalizado, p.codigo
+     FROM produto p WHERE p.ativo = 1
      ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1 OFFSET ?2";
 /// A mesma lista com as inativas ("Mostrar inativas").
-pub(crate) const SQL_LISTA_TODAS: &str = "SELECT p.id FROM produto p
+pub(crate) const SQL_LISTA_TODAS: &str = "SELECT p.id, p.atualizado_em, p.nome_normalizado, p.codigo
+     FROM produto p
      ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1 OFFSET ?2";
+/// R-2 (revisão cruzada de 13/11): a parte seguinte da lista sem busca, depois
+/// da chave da última linha vista (?2 a ?5: alterada em, nome sem acento,
+/// código, id; a chave vai à tela como `[id, alterada em, nome sem acento,
+/// código]`, as colunas da consulta), na mesma ordem e pelo mesmo índice. Pelo deslocamento, uma
+/// peça já mostrada que saísse da lista entre duas partes (desativada em outro
+/// caixa, aplicada pela troca) fazia a da fronteira nunca aparecer.
+pub(crate) const SQL_LISTA_ATIVAS_DEPOIS: &str = "SELECT p.id, p.atualizado_em, p.nome_normalizado, p.codigo
+     FROM produto p WHERE p.ativo = 1 AND p.atualizado_em <= ?2
+      AND (p.atualizado_em < ?2 OR (p.nome_normalizado, p.codigo, p.id) > (?3, ?4, ?5))
+     ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1";
+/// A mesma, com as inativas.
+pub(crate) const SQL_LISTA_TODAS_DEPOIS: &str = "SELECT p.id, p.atualizado_em, p.nome_normalizado, p.codigo
+     FROM produto p WHERE p.atualizado_em <= ?2
+      AND (p.atualizado_em < ?2 OR (p.nome_normalizado, p.codigo, p.id) > (?3, ?4, ?5))
+     ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1";
+
+/// R-2: na busca com texto, a parte seguinte repete as últimas linhas da
+/// anterior (a tela descarta as que já tem): se até tantas peças já mostradas
+/// saírem da lista entre duas partes, nenhuma fica de fora.
+pub(crate) const SOBREPOSICAO: usize = 20;
 
 /// Quantos termos da busca contam (o resto é ignorado).
 const MAX_TERMOS: usize = 10;
@@ -127,11 +156,11 @@ pub fn buscar(
     limite: i64,
 ) -> Resultado<Vec<ProdutoResumo>> {
     // Quem só quer as peças (o leitor, as outras telas) não conta o cadastro.
-    Ok(pagina(conn, texto_busca, incluir_inativas, limite, 0, false)?.itens)
+    Ok(pagina(conn, texto_busca, incluir_inativas, limite, 0, false, None)?.itens)
 }
 
-/// Busca peças com paginação determinística controlada pelo núcleo: a tela
-/// de Peças lê a lista em partes seguidas, sem repetir nem omitir (N04).
+/// Busca peças com paginação determinística controlada pelo núcleo, pelo
+/// deslocamento (`deslocamento` linhas da lista inteira puladas).
 pub fn buscar_pagina(
     conn: &Connection,
     texto_busca: &str,
@@ -139,11 +168,38 @@ pub fn buscar_pagina(
     limite: i64,
     deslocamento: i64,
 ) -> Resultado<PaginaProdutos> {
-    pagina(conn, texto_busca, incluir_inativas, limite, deslocamento, true)
+    pagina(conn, texto_busca, incluir_inativas, limite, deslocamento, true, None)
+}
+
+/// A parte da lista contínua de Peças (N04) que vem depois das que a tela já
+/// tem (R-2, revisão cruzada de 13/11): `lidas` e `continuar` são os da parte
+/// anterior (0 e "" na primeira).
+/// - Sem busca: depois da chave da última linha vista (`continuar`), na ordem
+///   do índice. Uma peça já mostrada que sai da lista (ou uma que entra no
+///   topo) entre duas partes não faz nenhuma outra faltar nem repetir.
+/// - Com texto: pelo deslocamento, repetindo as últimas [`SOBREPOSICAO`]
+///   linhas da parte anterior; a tela descarta as que já tem (`vistas`).
+pub fn buscar_parte(
+    conn: &Connection,
+    texto_busca: &str,
+    incluir_inativas: bool,
+    limite: i64,
+    lidas: i64,
+    continuar: &str,
+) -> Resultado<PaginaProdutos> {
+    let lidas = lidas.max(0);
+    if texto::normalizar(texto_busca).split(' ').all(str::is_empty) {
+        // Uma chave que não dá para ler (de outra versão): pelo deslocamento.
+        let depois = serde_json::from_str::<[String; 4]>(continuar).ok();
+        return pagina(conn, texto_busca, incluir_inativas, limite, lidas, true, depois);
+    }
+    let desde = (lidas as usize).saturating_sub(SOBREPOSICAO) as i64;
+    pagina(conn, texto_busca, incluir_inativas, limite + (lidas - desde), desde, true, None)
 }
 
 /// A busca; `contar`: o total de peças do cadastro (o cabeçalho de Peças), que
-/// vem da contagem guardada (`total_guardado`).
+/// vem da contagem guardada (`total_guardado`); `depois`: na lista sem busca,
+/// a chave da última linha vista (R-2; o deslocamento então só informa).
 fn pagina(
     conn: &Connection,
     texto_busca: &str,
@@ -151,6 +207,7 @@ fn pagina(
     limite: i64,
     deslocamento: i64,
     contar: bool,
+    depois: Option<[String; 4]>,
 ) -> Resultado<PaginaProdutos> {
     let limite = limite.clamp(1, 1000) as usize;
     let deslocamento = deslocamento.max(0) as usize;
@@ -162,13 +219,28 @@ fn pagina(
     let compacto = texto::compactar(texto_busca);
 
     if tokens.is_empty() {
-        let sql = if incluir_inativas { SQL_LISTA_TODAS } else { SQL_LISTA_ATIVAS };
-        let mut c = conn.prepare_cached(sql)?;
         // Uma peça a mais diz se há mais (sem depender da contagem).
-        let mut ids: Vec<String> =
-            c.query_map([limite as i64 + 1, deslocamento as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
-        let tem_mais = ids.len() > limite;
-        ids.truncate(limite);
+        let ler =
+            |l: &rusqlite::Row| -> rusqlite::Result<[String; 4]> { Ok([l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?]) };
+        let mut linhas: Vec<[String; 4]> = match &depois {
+            None => {
+                let sql = if incluir_inativas { SQL_LISTA_TODAS } else { SQL_LISTA_ATIVAS };
+                let mut c = conn.prepare_cached(sql)?;
+                let linhas = c.query_map([limite as i64 + 1, deslocamento as i64], ler)?.collect::<Result<_, _>>()?;
+                linhas
+            }
+            Some([id, em, nome, codigo]) => {
+                let sql = if incluir_inativas { SQL_LISTA_TODAS_DEPOIS } else { SQL_LISTA_ATIVAS_DEPOIS };
+                let mut c = conn.prepare_cached(sql)?;
+                let linhas =
+                    c.query_map(params![limite as i64 + 1, em, nome, codigo, id], ler)?.collect::<Result<_, _>>()?;
+                linhas
+            }
+        };
+        let tem_mais = linhas.len() > limite;
+        linhas.truncate(limite);
+        let continuar = linhas.last().map(|l| serde_json::to_string(l).unwrap_or_default()).unwrap_or_default();
+        let ids: Vec<String> = linhas.into_iter().map(|[id, ..]| id).collect();
         let mut carros = carros_das_pecas(conn, &ids.iter().map(String::as_str).collect::<Vec<_>>())?;
         let escolhidas = ids
             .into_iter()
@@ -179,12 +251,14 @@ fn pagina(
             .collect();
         let itens = montar(conn, escolhidas, &compacto, &[])?;
         return Ok(PaginaProdutos {
+            lidas: (deslocamento + itens.len()) as i64,
             itens,
             total: total_geral,
             total_filtrado: total_geral,
             deslocamento: deslocamento as i64,
             limite: limite as i64,
             tem_mais,
+            continuar,
         });
     }
 
@@ -211,6 +285,8 @@ fn pagina(
                 deslocamento: deslocamento as i64,
                 limite: limite as i64,
                 tem_mais: false,
+                lidas: deslocamento as i64,
+                continuar: String::new(),
             });
         }
         ordenar_as_primeiras(&mut achadas, ate);
@@ -226,12 +302,14 @@ fn pagina(
         let itens = montar(conn, escolhidas, &compacto, &termos)?;
         let tem_mais = (deslocamento + itens.len()) < (total_filtrado as usize);
         return Ok(PaginaProdutos {
+            lidas: (deslocamento + itens.len()) as i64,
             itens,
             total: total_geral,
             total_filtrado,
             deslocamento: deslocamento as i64,
             limite: limite as i64,
             tem_mais,
+            continuar: String::new(),
         });
     }
 
@@ -260,12 +338,14 @@ fn pagina(
     let total_filtrado = correspondentes as i64;
     let tem_mais = (deslocamento + itens.len()) < correspondentes;
     Ok(PaginaProdutos {
+        lidas: (deslocamento + itens.len()) as i64,
         itens,
         total: total_geral,
         total_filtrado,
         deslocamento: deslocamento as i64,
         limite: limite as i64,
         tem_mais,
+        continuar: String::new(),
     })
 }
 
@@ -1178,8 +1258,16 @@ mod comandos {
 
     fn produtos_buscar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: BuscaProdutos = ler(dados)?;
-        let pagina =
-            busca::buscar_pagina(p.conn, &d.texto, d.inativas, d.limite.unwrap_or(200), d.deslocamento.unwrap_or(0))?;
+        // R-2: a lista contínua de Peças manda as `lidas` como deslocamento e a
+        // chave da última linha vista (`continuar`); as outras telas, nenhum.
+        let pagina = busca::buscar_parte(
+            p.conn,
+            &d.texto,
+            d.inativas,
+            d.limite.unwrap_or(200),
+            d.deslocamento.unwrap_or(0),
+            d.continuar.as_deref().unwrap_or(""),
+        )?;
         Ok(serde_json::to_value(pagina)?)
     }
 
@@ -2121,12 +2209,20 @@ mod testes_75 {
                     .then_with(|| a.3.cmp(&b.3))
             });
             let esperado: Vec<String> = esperado.into_iter().map(|e| e.3).collect();
-            for parte in [100, 37] {
+            // Pelo deslocamento (`buscar_pagina`) e, desde a R-2, como a tela
+            // lê: pela chave da última linha vista (`buscar_parte`).
+            for (parte, pela_chave) in [(100, false), (37, false), (100, true), (37, true)] {
                 let mut lidas = Vec::new();
+                let (mut n, mut continuar) = (0, String::new());
                 loop {
-                    let p = buscar_pagina(c, "", inativas, parte, lidas.len() as i64).unwrap();
+                    let p = if pela_chave {
+                        buscar_parte(c, "", inativas, parte, n, &continuar).unwrap()
+                    } else {
+                        buscar_pagina(c, "", inativas, parte, lidas.len() as i64).unwrap()
+                    };
                     assert_eq!(p.total_filtrado, esperado.len() as i64);
                     let fim = !p.tem_mais;
+                    (n, continuar) = (p.lidas, p.continuar.clone());
                     lidas.extend(p.itens.into_iter().map(|i| i.id));
                     if fim {
                         break;
@@ -2136,6 +2232,109 @@ mod testes_75 {
                 assert_eq!(unicas.len(), lidas.len(), "repetiu peça (partes de {parte}, inativas {inativas})");
                 assert_eq!(lidas, esperado, "a ordem das partes não é a da lista inteira (partes de {parte})");
             }
+        }
+    }
+
+    /// Uma loja num arquivo (outra conexão grava nela, como a troca de dados)
+    /// com `n` peças "Peça NNN", cada uma alterada num minuto diferente.
+    fn loja_em_arquivo(nome: &str, n: usize) -> (std::path::PathBuf, Banco) {
+        let pasta = std::env::temp_dir().join(format!("rustinho-r2-{nome}-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let b = Banco::abrir(&pasta.join("rustinho.db")).unwrap();
+        crate::faixas::assumir(&b.conn).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap().id;
+        for i in 0..n {
+            let mut f = produtos::ficha_nova(&b.conn).unwrap();
+            f.nome = format!("Peça {i:03}");
+            f.custo = "10".into();
+            produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        }
+        b.conn
+            .execute_batch(
+                "UPDATE produto SET atualizado_em = strftime('%Y-%m-%dT%H:%M:%SZ', '2026-11-01', '+' || rowid || ' minutes')",
+            )
+            .unwrap();
+        (pasta, b)
+    }
+
+    /// Outra conexão (a troca de dados aplicando o que veio de outro caixa)
+    /// desativa a peça, com a hora da alteração de lá.
+    fn desativar_por_fora(pasta: &std::path::Path, id: &str) {
+        let outra = Connection::open(pasta.join("rustinho.db")).unwrap();
+        crate::banco::registrar_funcoes(&outra).unwrap();
+        outra
+            .execute("UPDATE produto SET ativo = 0, atualizado_em = '2099-01-01T00:00:00Z' WHERE id = ?1", [id])
+            .unwrap();
+    }
+
+    /// R-2 (revisão cruzada de 13/11, sonda S3): 250 peças, partes de 100,
+    /// como a tela. Uma peça já mostrada sai da lista (desativada em outro
+    /// caixa) depois da parte 1: nenhuma outra falta nem repete. Pelo
+    /// deslocamento (`da963e1`), a parte 2 começava na antiga linha 101 e a
+    /// linha 100 nunca entrava.
+    #[test]
+    fn r2_lista_sem_busca_peca_que_sai_entre_duas_partes() {
+        let (pasta, b) = loja_em_arquivo("sem-busca", 250);
+        let ids = |p: &PaginaProdutos| p.itens.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
+        let inteira = ids(&buscar_pagina(&b.conn, "", false, 1000, 0).unwrap());
+        assert_eq!(inteira.len(), 250);
+        let parte1 = buscar_parte(&b.conn, "", false, 100, 0, "").unwrap();
+        assert_eq!(ids(&parte1)[..], inteira[..100]);
+        desativar_por_fora(&pasta, &inteira[10]);
+        let parte2 = buscar_parte(&b.conn, "", false, 100, parte1.lidas, &parte1.continuar).unwrap();
+        let vistas: HashSet<String> = ids(&parte1).into_iter().chain(ids(&parte2)).collect();
+        let faltaram: Vec<(usize, &String)> =
+            inteira[..200].iter().enumerate().filter(|(i, id)| *i != 10 && !vistas.contains(*id)).collect();
+        assert!(faltaram.is_empty(), "peças ativas que nunca entraram na lista contínua: {faltaram:?}");
+        assert_eq!(ids(&parte2)[..], inteira[100..200], "a parte 2 é a continuação da parte 1");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-2, na busca com texto: a parte seguinte repete as últimas
+    /// [`SOBREPOSICAO`] linhas da anterior; descartadas as repetidas (como a
+    /// tela faz com `vistas`), nenhuma peça falta quando uma já mostrada sai.
+    #[test]
+    fn r2_busca_com_texto_peca_que_sai_entre_duas_partes() {
+        let (pasta, b) = loja_em_arquivo("com-texto", 250);
+        let ids = |p: &PaginaProdutos| p.itens.iter().map(|x| x.id.clone()).collect::<Vec<_>>();
+        let inteira = ids(&buscar_pagina(&b.conn, "peca", false, 1000, 0).unwrap());
+        assert_eq!(inteira.len(), 250);
+        let parte1 = buscar_parte(&b.conn, "peca", false, 100, 0, "").unwrap();
+        assert_eq!(ids(&parte1)[..], inteira[..100]);
+        assert_eq!(parte1.lidas, 100);
+        desativar_por_fora(&pasta, &inteira[10]);
+        let parte2 = buscar_parte(&b.conn, "peca", false, 100, parte1.lidas, &parte1.continuar).unwrap();
+        let mut vistas: HashSet<String> = ids(&parte1).into_iter().collect();
+        let repetidas = ids(&parte2).into_iter().filter(|id| !vistas.insert(id.clone())).count();
+        let faltaram: Vec<(usize, &String)> =
+            inteira[..200].iter().enumerate().filter(|(i, id)| *i != 10 && !vistas.contains(*id)).collect();
+        assert!(faltaram.is_empty(), "peças que nunca entraram na busca contínua: {faltaram:?}");
+        assert!(repetidas <= SOBREPOSICAO, "a parte 2 repetiu {repetidas} (mais que a sobreposição)");
+        assert_eq!(parte2.lidas, parte2.deslocamento + parte2.itens.len() as i64);
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-2: a parte pela chave lê o índice da lista a partir da chave (SEARCH),
+    /// sem ordenar nada nem ler a tabela.
+    #[test]
+    fn r2_parte_pela_chave_pelo_indice() {
+        let b = Banco::em_memoria().unwrap();
+        for sql in [SQL_LISTA_ATIVAS_DEPOIS, SQL_LISTA_TODAS_DEPOIS] {
+            let plano: Vec<String> = b
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map(params![100, "2026-11-01T00:00:00Z", "a", "b", "c"], |l| l.get::<_, String>(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(
+                plano,
+                ["SEARCH p USING COVERING INDEX produto_alteradas_por_ultimo (atualizado_em<?)"],
+                "{sql}"
+            );
         }
     }
 }

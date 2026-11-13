@@ -243,6 +243,8 @@ pub struct BuscaProdutos {
     pub limite: Option<i64>,
     #[serde(alias = "offset")]
     pub deslocamento: Option<i64>,
+    /// R-2: a chave da última linha que a lista contínua de Peças já tem.
+    pub continuar: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
