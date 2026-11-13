@@ -405,6 +405,47 @@ fn n02_reimportar_nao_duplica() {
     assert_eq!(contar(&l), antes, "(vínculos, GTINs, pendências, peças) mudaram ao reimportar");
 }
 
+/// O-1 (ensaio de interrupção da fase 4, encaminhado ao passo 5.2):
+/// reimportar no "Trazer cadastros" não grava alteração que viaja quando nada
+/// mudou na peça. Em `b3a171c` grava uma (`produto`, "gravar"): a peça é
+/// regravada com o mesmo conteúdo. A mensagem da falha diz qual coluna o
+/// gatilho registrou como mudada (nenhuma = regravação sem mudança).
+#[test]
+#[ignore = "caracterização O-1: reimportar grava alteração sem mudança em b3a171c; passa no passo 5.2"]
+fn o1_reimportar_nao_grava_alteracao_sem_mudanca() {
+    let mut l = loja("o1-reimportar");
+    let pasta = pasta_com_exemplo(&l, "xml");
+    let entrada = json!({ "arquivos": [pasta], "clientes": false, "fornecedores": true,
+                          "pecasLoja": false, "pecasFornecedor": true });
+    l.ok("importar_cadastros", entrada.clone());
+    let ultima = l.numero("SELECT COALESCE(MAX(seq), 0) FROM alteracao");
+    l.ok("importar_cadastros", entrada);
+    let c = l.conexao();
+    let mut st = c
+        .prepare(
+            "SELECT n.tabela, n.operacao, n.dados,
+                    (SELECT v.dados FROM alteracao v WHERE v.tabela = n.tabela AND v.chave = n.chave AND v.seq < n.seq
+                      ORDER BY v.seq DESC LIMIT 1)
+               FROM alteracao n WHERE n.seq > ?1 ORDER BY n.seq",
+        )
+        .unwrap();
+    let novas: Vec<(String, String, Option<String>, Option<String>)> = st
+        .query_map([ultima], |x| Ok((x.get(0)?, x.get(1)?, x.get(2)?, x.get(3)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let explicar = |(tabela, operacao, nova, velha): &(String, String, Option<String>, Option<String>)| {
+        let ler = |t: &Option<String>| -> serde_json::Map<String, Value> {
+            t.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default()
+        };
+        let (n, v) = (ler(nova), ler(velha));
+        let mudou: Vec<&String> = n.keys().filter(|k| n.get(*k) != v.get(*k)).collect();
+        format!("{tabela} {operacao}: colunas diferentes da versão anterior {mudou:?}")
+    };
+    let texto: Vec<String> = novas.iter().map(explicar).collect();
+    assert!(novas.is_empty(), "reimportar sem mudança gravou {} alteração(ões): {texto:?}", novas.len());
+}
+
 // ===========================================================================
 // DP-51 (decisão do proprietário, 10/11/2026): o "CÓDIGO ORIGINAL /
 // FABRICANTE" é editável pelo operador; o código de cada fornecedor fica à
