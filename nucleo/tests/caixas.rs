@@ -732,11 +732,14 @@ fn venda_vista(b: &Banco) -> (i64, i64, i64) {
     )
 }
 
-/// 5.4 (preparação): a troca corta os lotes pela quantidade de alterações
-/// (`LOTE`), sem olhar a operação comercial. Cada lote é tudo ou nada (uma
-/// transação, `aplicar_de`), mas um lote que termina no meio de uma venda é
-/// aplicado: HOJE, até o lote seguinte chegar, o outro caixa mostra a venda
-/// com itens a menos. Quando o resto chega, fica igual.
+/// 5.4 (preparação): um lote que termina no meio de uma venda, se chegar, é
+/// aplicado (cada lote é tudo ou nada, uma transação, `aplicar_de`): até o
+/// lote seguinte, o outro caixa mostra a venda com itens a menos; quando o
+/// resto chega, fica igual. Desde o passo 5.4 o servidor não manda mais um lote
+/// assim quando a operação cabe na resposta
+/// (`g54_resposta_termina_no_fim_de_uma_operacao`); continua só para a
+/// operação maior que a resposta (D54-2,
+/// `g54_hoje_operacao_maior_que_a_resposta_vem_em_partes`).
 #[test]
 fn g54_hoje_lote_que_corta_uma_venda_mostra_a_venda_pela_metade() {
     let (mut a, mut b, u) = loja();
@@ -807,7 +810,6 @@ fn por_operacao(lista: &[sync::Alteracao]) -> std::collections::BTreeMap<String,
 /// vai só a primeira, inteira, e a segunda vem inteira na resposta seguinte.
 /// B nunca mostra uma venda pela metade.
 #[test]
-#[ignore = "passo 5.4: caracterização (falha hoje: a resposta corta a segunda venda)"]
 fn g54_resposta_termina_no_fim_de_uma_operacao() {
     let (mut a, mut b, u) = loja();
     let p1 = peca(&a, &u, "Filtro de óleo", "5");

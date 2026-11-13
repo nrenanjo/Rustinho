@@ -275,7 +275,6 @@ fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
 /// chegou inteira (nenhuma venda pela metade até a resposta seguinte). A
 /// resposta continua com no máximo o tamanho dado (T8.3).
 #[test]
-#[ignore = "passo 5.4: caracterização (falha hoje: a resposta corta uma venda no meio)"]
 fn t8_4_uma_resposta_nao_corta_uma_venda() {
     if std::env::var_os(FILHO).is_some() {
         return;
