@@ -57,7 +57,7 @@ Um número publicado **nunca muda de conteúdo**.
 
 | Nº | Arquivo | Conteúdo | Observação |
 |---|---|---|---|
-| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
+| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada, preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
 
 ## 3. A linha paralela dev.3: não é esta estrutura
 
@@ -165,7 +165,7 @@ Se a 6.5 ou a 7.5 entrarem antes da 5.x, a numeração segue a ordem real de ent
 | `b02_a_trava_pega_um_if_not_exists_ignorado` | trava (passo 7.5) | a trava acima acusa um caso de exemplo |
 | `b01_indice_composto_do_estoque_com_nome_novo` | trava (passo 7.5) | o índice `(produto_id, tipo, criado_em)` existe num banco novo e num atualizado |
 | `b01_parados_usa_o_indice_composto` | trava (passo 7.5) | o plano da conta dos parados usa o índice |
-| `banco::testes::m25_nao_muda_o_que_existia` | trava (passo 7.5) | §6, item 6: a 24 → 25 não muda as tabelas da loja nem grava no log da troca |
+| `banco::testes::m25_nao_muda_o_que_existia` | trava (passo 7.5) | §6, item 6: a 24 → 25 não muda as tabelas da loja nem grava no log da troca; o nome sem acento fica preenchido |
 | `banco::testes::m25_backup_da_estrutura_24_restaura_e_atualiza` | trava (passo 7.5) | §6, item 6: backup da estrutura 24 restaura e atualiza |
 | `banco_dev3_estrutura24_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
 | `banco_dev3_estrutura25_e_recusado_como_outra_linha` | trava (era caracterização até a 2.4) | §4 |

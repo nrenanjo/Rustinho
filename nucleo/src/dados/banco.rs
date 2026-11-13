@@ -585,9 +585,17 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
             }
         }
     }
-    // 0025 (passo 7.5): os índices de desempenho.
+    // 0025 (passo 7.5): os índices de desempenho e o nome sem acento gravado.
     if v >= 25 {
-        for indice in ["estoque_movimento_produto_tipo_data"] {
+        let tem_coluna: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('produto') WHERE name = 'nome_normalizado'",
+            [],
+            |l| l.get(0),
+        )?;
+        if !tem_coluna {
+            return Err(Erro::Interno("falta a coluna produto.nome_normalizado".into()));
+        }
+        for indice in ["estoque_movimento_produto_tipo_data", "produto_alteradas_por_ultimo"] {
             let tem: bool = conn.query_row(
                 "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'index' AND name = ?1",
                 [indice],
@@ -1095,8 +1103,25 @@ mod testes {
         for t in TABELAS_DA_LOJA {
             assert_eq!(antes[*t], depois[*t], "a tabela {t} mudou com a 0025");
         }
+        nome_normalizado_preenchido(&b.conn);
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// B04: a 0025 preenche o nome sem acento de todas as peças que já
+    /// existiam com o mesmo `normalizar` do programa.
+    fn nome_normalizado_preenchido(c: &Connection) {
+        let pecas: Vec<(String, String)> = c
+            .prepare("SELECT nome, nome_normalizado FROM produto ORDER BY rowid")
+            .unwrap()
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(pecas.len(), 5);
+        for (nome, normalizado) in pecas {
+            assert_eq!(normalizado, crate::texto::normalizar(&nome), "{nome}");
+        }
     }
 
     /// Repete enquanto outro teste estiver fazendo backup (a vez é uma só no
@@ -1143,6 +1168,7 @@ mod testes {
         let do_log =
             |c: &[String]| c.iter().filter(|l| l.contains("'produto'") || l.contains("'estoque_movimento'")).count();
         assert_eq!(do_log(&antes["alteracao"]), do_log(&depois["alteracao"]), "o log da troca ganhou registros");
+        nome_normalizado_preenchido(&b.conn);
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }

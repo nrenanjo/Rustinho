@@ -90,6 +90,18 @@ fn como_ano(token: &str) -> Option<i64> {
     None
 }
 
+/// A lista sem busca (a tela de Peças ao abrir), na ordem de sempre: alteradas
+/// por último; no empate, o nome sem acento, o código e o id. B04 e PEND-39
+/// (7.5): o desempate é a coluna gravada `nome_normalizado` (o mesmo
+/// `normalizar(nome)` de antes), e a lista é lida pelo índice
+/// `produto_alteradas_por_ultimo` (0025), parte a parte, sem ordenar o
+/// cadastro inteiro nem chamar a função do Rustinho para cada peça.
+pub(crate) const SQL_LISTA_ATIVAS: &str = "SELECT p.id FROM produto p WHERE p.ativo = 1
+     ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1 OFFSET ?2";
+/// A mesma lista com as inativas ("Mostrar inativas").
+pub(crate) const SQL_LISTA_TODAS: &str = "SELECT p.id FROM produto p
+     ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1 OFFSET ?2";
+
 /// Quantos termos da busca contam (o resto é ignorado).
 const MAX_TERMOS: usize = 10;
 
@@ -135,16 +147,7 @@ pub fn buscar_pagina(
     let compacto = texto::compactar(texto_busca);
 
     if tokens.is_empty() {
-        let sql = if incluir_inativas {
-            "SELECT p.id FROM produto p
-              ORDER BY p.atualizado_em DESC, normalizar(p.nome) ASC, p.codigo ASC, p.id ASC
-              LIMIT ?1 OFFSET ?2"
-        } else {
-            "SELECT p.id FROM produto p
-              WHERE p.ativo = 1
-              ORDER BY p.atualizado_em DESC, normalizar(p.nome) ASC, p.codigo ASC, p.id ASC
-              LIMIT ?1 OFFSET ?2"
-        };
+        let sql = if incluir_inativas { SQL_LISTA_TODAS } else { SQL_LISTA_ATIVAS };
         let mut c = conn.prepare_cached(sql)?;
         let ids: Vec<String> =
             c.query_map([limite as i64, deslocamento as i64], |l| l.get(0))?.collect::<Result<_, _>>()?;
@@ -1678,6 +1681,182 @@ mod testes_regressao {
             let obtido: Vec<String> =
                 r.iter().map(|p| format!("{}={}{}", p.codigo, p.nome, if p.codigo_exato { "!" } else { "" })).collect();
             assert_eq!(obtido.join(" ; "), *linha, "consulta {:?}", consulta);
+        }
+    }
+}
+
+#[cfg(test)]
+mod testes_75 {
+    //! Passo 7.5 (PEND-39, B04, N04; preparação de 13/11/2026). Os testes que
+    //! dizem "Em `b3a171c`…" FALHAVAM no código de lá, pelo motivo do item (a
+    //! evidência está em `producao_2026-11-13/f75/`); os de caracterização
+    //! passavam antes e têm de continuar passando.
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use rusqlite::functions::FunctionFlags;
+
+    use super::*;
+    use crate::banco::Banco;
+    use crate::{produtos, usuarios};
+
+    struct Loja {
+        b: Banco,
+        u: String,
+    }
+
+    impl Loja {
+        fn nova() -> Loja {
+            let b = Banco::em_memoria().unwrap();
+            crate::faixas::assumir(&b.conn).unwrap();
+            let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap().id;
+            Loja { b, u }
+        }
+
+        fn peca(&self, ajuste: impl FnOnce(&mut produtos::ProdutoFicha)) -> String {
+            let mut f = produtos::ficha_nova(&self.b.conn).unwrap();
+            f.custo = "10".into();
+            ajuste(&mut f);
+            produtos::salvar(&self.b.conn, &self.b.dispositivo, &self.u, &f).unwrap()
+        }
+    }
+
+    /// Conta as chamadas de uma função SQL de 1 argumento de texto, trocando a
+    /// função registrada por uma igual que conta (`normalizar` ou `lower`).
+    fn contar_chamadas(conn: &Connection, nome: &'static str) -> Arc<AtomicUsize> {
+        let n = Arc::new(AtomicUsize::new(0));
+        let contador = n.clone();
+        conn.create_scalar_function(
+            nome,
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            move |ctx| {
+                contador.fetch_add(1, Ordering::Relaxed);
+                let t: Option<String> = ctx.get(0)?;
+                Ok(t.map(|t| if nome == "lower" { t.to_lowercase() } else { texto::normalizar(&t) }))
+            },
+        )
+        .unwrap();
+        n
+    }
+
+    /// B04 + PEND-39: a lista sem busca (a tela de Peças ao abrir e a cada
+    /// parte da rolagem) não chama a função `normalizar` do Rustinho para cada
+    /// peça: o desempate é pela coluna gravada, com índice. Em `b3a171c` ela
+    /// era chamada uma vez por peça do cadastro, a cada parte.
+    #[test]
+    fn b04_lista_sem_busca_nao_chama_normalizar() {
+        let l = Loja::nova();
+        for i in 0..300 {
+            l.peca(|f| f.nome = format!("Peça {i:03} Ação"));
+        }
+        let chamadas = contar_chamadas(&l.b.conn, "normalizar");
+        let p = buscar_pagina(&l.b.conn, "", false, 50, 0).unwrap();
+        assert_eq!(p.itens.len(), 50);
+        let p = buscar_pagina(&l.b.conn, "", true, 100, 200).unwrap();
+        assert_eq!(p.itens.len(), 100);
+        assert_eq!(
+            chamadas.load(Ordering::Relaxed),
+            0,
+            "a lista sem busca chamou normalizar() no SQLite (uma vez por peça, a cada parte)"
+        );
+    }
+
+    /// B04 + PEND-39: a lista sem busca é lida pelo índice da 0025, na ordem
+    /// dele (sem ordenar o cadastro inteiro a cada parte), com e sem as
+    /// inativas.
+    #[test]
+    fn b04_lista_sem_busca_pelo_indice() {
+        let b = Banco::em_memoria().unwrap();
+        for sql in [SQL_LISTA_ATIVAS, SQL_LISTA_TODAS] {
+            let plano: Vec<String> = b
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([100, 0], |l| l.get::<_, String>(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert_eq!(plano, ["SCAN p USING COVERING INDEX produto_alteradas_por_ultimo"], "{sql}");
+        }
+    }
+
+    /// B04: o nome sem acento é gravado pelo dono junto com o nome, ao criar
+    /// e ao mudar a peça (e é o mesmo `normalizar` de antes).
+    #[test]
+    fn b04_nome_normalizado_gravado_com_o_nome() {
+        let l = Loja::nova();
+        let id = l.peca(|f| f.nome = "Óleo 5W-30 SINTÉTICO".into());
+        let gravado = |c: &Connection| -> (String, String) {
+            c.query_row("SELECT nome, nome_normalizado FROM produto WHERE id = ?1", [&id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap()
+        };
+        let (nome, normalizado) = gravado(&l.b.conn);
+        assert_eq!(normalizado, texto::normalizar(&nome));
+        assert_eq!(normalizado, "oleo 5w-30 sintetico");
+        let mut f = produtos::ficha(&l.b.conn, &id).unwrap();
+        f.nome = "ÁGUA Desmineralizada".into();
+        produtos::salvar(&l.b.conn, &l.b.dispositivo, &l.u, &f).unwrap();
+        assert_eq!(gravado(&l.b.conn).1, "agua desmineralizada");
+    }
+
+    /// N04 (caracterização, passava antes): a lista lida em partes, como a
+    /// tela rola, traz todas as peças na ordem da lista inteira, sem repetir
+    /// nem omitir, também com muitas peças alteradas no mesmo segundo (o
+    /// desempate é o nome sem acento, depois o código e o id), com nomes que só
+    /// diferem por acento ou maiúscula e com peças inativas.
+    #[test]
+    fn n04_partes_seguidas_sem_repetir_nem_omitir() {
+        let l = Loja::nova();
+        let nomes = ["Ácido {k}", "acido {k}", "ÓLEO-{k} 5W30", "oleo {k}", "Água {k}", "agua.{k}", "Zíper {k}"];
+        for k in 0..180 {
+            for n in &nomes {
+                l.peca(|f| f.nome = n.replace("{k}", &format!("{}", k % 23)));
+            }
+        }
+        // Seis "segundos" com muitas peças cada (como uma importação).
+        let c = &l.b.conn;
+        c.execute_batch(
+            "UPDATE produto SET atualizado_em = '2026-11-0' || (1 + rowid % 6) || 'T10:00:00Z';
+             UPDATE produto SET ativo = 0 WHERE rowid % 9 = 0;",
+        )
+        .unwrap();
+        for inativas in [false, true] {
+            let mut esperado: Vec<(String, String, String, String)> = c
+                .prepare(&format!(
+                    "SELECT atualizado_em, nome, codigo, id FROM produto {}",
+                    if inativas { "" } else { "WHERE ativo = 1" }
+                ))
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            esperado.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| texto::normalizar(&a.1).cmp(&texto::normalizar(&b.1)))
+                    .then_with(|| a.2.cmp(&b.2))
+                    .then_with(|| a.3.cmp(&b.3))
+            });
+            let esperado: Vec<String> = esperado.into_iter().map(|e| e.3).collect();
+            for parte in [100, 37] {
+                let mut lidas = Vec::new();
+                loop {
+                    let p = buscar_pagina(c, "", inativas, parte, lidas.len() as i64).unwrap();
+                    assert_eq!(p.total_filtrado, esperado.len() as i64);
+                    let fim = !p.tem_mais;
+                    lidas.extend(p.itens.into_iter().map(|i| i.id));
+                    if fim {
+                        break;
+                    }
+                }
+                let unicas: HashSet<&String> = lidas.iter().collect();
+                assert_eq!(unicas.len(), lidas.len(), "repetiu peça (partes de {parte}, inativas {inativas})");
+                assert_eq!(lidas, esperado, "a ordem das partes não é a da lista inteira (partes de {parte})");
+            }
         }
     }
 }
