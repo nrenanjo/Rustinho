@@ -7,6 +7,9 @@ import rustinho
 // WhatsApp) → entregue. Cada linha mostra o próximo passo.
 FocusScope {
     id: secao
+    // H16 (7.2, técnica DP-26): a linha tocada fica escolhida e mostra as ações
+    // que antes só apareciam com o mouse em cima (no toque não há "em cima").
+    property string linhaEscolhida: ""
     readonly property var janela: ApplicationWindow.window
     property var painel: null
     property string quais: "abertas"
@@ -133,6 +136,7 @@ FocusScope {
                 color: e.situacao === "chegou" ? Tema.verde : Tema.faixa(linha.par)
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobre }
+                TapHandler { onTapped: secao.linhaEscolhida = linha.e.id }
                 RowLayout {
                     id: conteudoEnc
                     anchors.left: parent.left
@@ -241,23 +245,23 @@ FocusScope {
                         altura: 36
                         onClicked: secao.avisar(linha.e)
                     }
-                    // O resto, só com o mouse em cima
+                    // O resto, com o mouse em cima ou com a linha escolhida (H16)
                     Botao {
-                        visible: linha.aberta && linha.e.pagamento === "falta" && (sobre.hovered || Tema.celular)
+                        visible: linha.aberta && linha.e.pagamento === "falta" && (sobre.hovered || Tema.celular || secao.linhaEscolhida === linha.e.id)
                         text: "Receber"
                         tipo: "discreto"
                         altura: 36
                         onClicked: secao.janela.abrir("TelaReceber", { clienteInicial: linha.e.clienteId })
                     }
                     Botao {
-                        visible: linha.e.situacao === "pedida" && (sobre.hovered || Tema.celular)
+                        visible: linha.e.situacao === "pedida" && (sobre.hovered || Tema.celular || secao.linhaEscolhida === linha.e.id)
                         text: "Não pedi"
                         tipo: "discreto"
                         altura: 36
                         onClicked: secao.acao("encomenda_pedir", { id: linha.e.id, desfazer: true }, "")
                     }
                     Botao {
-                        visible: linha.aberta && linha.e.situacao !== "chegou" && linha.e.temWhatsapp && (sobre.hovered || Tema.celular)
+                        visible: linha.aberta && linha.e.situacao !== "chegou" && linha.e.temWhatsapp && (sobre.hovered || Tema.celular || secao.linhaEscolhida === linha.e.id)
                         icone: "mensagem"
                         tipo: "discreto"
                         altura: 36
@@ -267,7 +271,7 @@ FocusScope {
                         onClicked: secao.avisar(linha.e)
                     }
                     Botao {
-                        visible: linha.aberta && (sobre.hovered || Tema.celular)
+                        visible: linha.aberta && (sobre.hovered || Tema.celular || secao.linhaEscolhida === linha.e.id)
                         text: "Cancelar encomenda"
                         tipo: "discreto"
                         altura: 36

@@ -7,6 +7,9 @@ import rustinho
 // aberto e as devoluções já feitas (que dá para desfazer).
 FocusScope {
     id: tela
+    // H16 (7.2, técnica DP-26): a linha tocada fica escolhida e mostra as ações
+    // que antes só apareciam com o mouse em cima (no toque não há "em cima").
+    property string linhaEscolhida: ""
     // Como esta tela aparece na orientação da navegação guiada ("Depois o
     // Rustinho volta para …").
     readonly property string nomeNaNavegacao: "Trocas e devoluções"
@@ -167,6 +170,7 @@ FocusScope {
                 color: Tema.faixa(lv.par, Tema.verde, Tema.azul)
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreVale }
+                TapHandler { onTapped: tela.linhaEscolhida = "vale:" + lv.modelData.id }
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 18
@@ -204,7 +208,7 @@ FocusScope {
                         }
                     }
                     Botao {
-                        visible: (sobreVale.hovered || Tema.celular)
+                        visible: (sobreVale.hovered || Tema.celular || tela.linhaEscolhida === "vale:" + lv.modelData.id)
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
@@ -212,7 +216,7 @@ FocusScope {
                         onClicked: tela.imprimir("vale", lv.modelData.id)
                     }
                     Botao {
-                        visible: (sobreVale.hovered || Tema.celular)
+                        visible: (sobreVale.hovered || Tema.celular || tela.linhaEscolhida === "vale:" + lv.modelData.id)
                         text: "Usar no Vender"
                         tipo: "secundario"
                         altura: 36
@@ -271,6 +275,7 @@ FocusScope {
                 color: lf.modelData.cancelada ? (Tema.roxo ? Tema.campoFixo : Tema.vela(0.3)) : Tema.faixa(lf.par)
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreFeita }
+                TapHandler { onTapped: tela.linhaEscolhida = "troca:" + lf.modelData.id }
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 18
@@ -301,7 +306,7 @@ FocusScope {
                         }
                     }
                     Botao {
-                        visible: (sobreFeita.hovered || Tema.celular)
+                        visible: (sobreFeita.hovered || Tema.celular || tela.linhaEscolhida === "troca:" + lf.modelData.id)
                         text: "Imprimir"
                         icone: "impressora"
                         tipo: "discreto"
@@ -309,7 +314,7 @@ FocusScope {
                         onClicked: tela.imprimir("devolucao", lf.modelData.id)
                     }
                     Botao {
-                        visible: (sobreFeita.hovered || Tema.celular) && !lf.modelData.cancelada
+                        visible: (sobreFeita.hovered || Tema.celular || tela.linhaEscolhida === "troca:" + lf.modelData.id) && !lf.modelData.cancelada
                         text: "Desfazer"
                         tipo: "discreto"
                         altura: 36

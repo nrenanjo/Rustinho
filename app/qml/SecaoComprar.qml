@@ -7,6 +7,9 @@ import rustinho
 // estoque, por prioridade, com a quantidade sugerida pelo ritmo de venda.
 FocusScope {
     id: secao
+    // H16 (7.2, técnica DP-26): a linha tocada fica escolhida e mostra as ações
+    // que antes só apareciam com o mouse em cima (no toque não há "em cima").
+    property string linhaEscolhida: ""
     readonly property var janela: ApplicationWindow.window
     property var dados: null
     property bool buscou: false
@@ -217,6 +220,7 @@ FocusScope {
             color: Tema.verde
             palette.window: Tema.superficie(color)
             HoverHandler { id: sobreE }
+            TapHandler { onTapped: secao.linhaEscolhida = le.e.id }
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 18
@@ -247,7 +251,7 @@ FocusScope {
                     }
                 }
                 Botao {
-                    visible: (sobreE.hovered || Tema.celular)
+                    visible: (sobreE.hovered || Tema.celular || secao.linhaEscolhida === le.e.id)
                     text: "Já pedi"
                     icone: "check"
                     tipo: "discreto"
