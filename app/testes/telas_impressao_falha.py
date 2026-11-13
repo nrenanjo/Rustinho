@@ -46,10 +46,19 @@ AVISO = "Não imprimiu na impressora; abri o PDF."
 
 
 def direto(pasta, ligado):
-    c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
-    c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES ('imprimir_direto', ?)", ("1" if ligado else "0",))
-    c.commit()
+    """Liga ou desliga a impressão direta por fora, pelo núcleo (os gatilhos
+    da troca de dados precisam das funções do Rustinho); com o programa aberto
+    também (o banco está em WAL e a impressão lê a configuração na hora)."""
+    sql = (f"INSERT INTO config (chave, valor) VALUES ('imprimir_direto', '{'1' if ligado else '0'}') "
+           "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;")
+    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_SQL=sql)
+    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
+                    "--ignored", "--exact", "executar_por_fora"],
+                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    c = sqlite3.connect(f"file:{os.path.join(pasta, 'rustinho.db')}?mode=ro", uri=True)
+    valor = c.execute("SELECT valor FROM config WHERE chave = 'imprimir_direto'").fetchone()
     c.close()
+    assert valor and valor[0] == ("1" if ligado else "0"), valor
 
 
 def pdfs(pasta):
