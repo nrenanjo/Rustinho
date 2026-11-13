@@ -134,7 +134,8 @@ e a 7.5 entrarem decide quem fica com a 0025.
 2. **Só aditiva:** colunas, tabelas e índices novos. Recriar tabela só com a primeira linha
    `-- rustinho: sem_chaves_estrangeiras`.
 3. **Nunca reaproveitar nome de índice.** Não vale apagar e criar de novo com outra definição: dê
-   outro nome.
+   outro nome. E nunca `CREATE INDEX IF NOT EXISTS` com um nome que já existe: o SQLite não faz
+   nada e não avisa (foi assim que o índice composto do estoque da 0006 nunca existiu, B01/B02).
 4. **Nunca usar nome da linha dev.3:** `produto_fornecedor_alternativo`,
    `produto_fornecedor_alternativo_produto`, `venda_cancelamento` (e qualquer objeto das amostras
    dev.3).
@@ -144,7 +145,7 @@ e a 7.5 entrarem decide quem fica com a 0025.
 8. Atualizar este documento: §2 (publicadas) e §5 (ordem prevista).
 9. Rodar `cargo test -p rustinho-nucleo --test migracoes_linhagem`. A numeração e os itens 3 e 4
    são conferidos automaticamente (`numeracao_das_migracoes_continua_e_igual_a_lista_do_banco`,
-   `nenhuma_migracao_reaproveita_nome`).
+   `nenhuma_migracao_reaproveita_nome`, `b02_nenhum_indice_if_not_exists_ignorado`).
 10. Testar só com bancos sintéticos ou com as amostras. **Nunca migrar banco real para testar.**
 
 ## 7. Testes
@@ -160,6 +161,8 @@ e a 7.5 entrarem decide quem fica com a 0025.
 | `banco_na_estrutura_23_atualiza_para_a_atual` | trava | 0.9.15 a 0.9.17 atualizam |
 | `numeracao_das_migracoes_continua_e_igual_a_lista_do_banco` | trava | §6, item 1; a 0024 é a desta linha |
 | `nenhuma_migracao_reaproveita_nome` | trava | §6, itens 3 e 4 |
+| `b02_nenhum_indice_if_not_exists_ignorado` | trava (passo 7.5) | §6, item 3: nenhum `IF NOT EXISTS` ignorado; o único da história (0006) tem o índice que o corrige |
+| `b02_a_trava_pega_um_if_not_exists_ignorado` | trava (passo 7.5) | a trava acima acusa um caso de exemplo |
 | `b01_indice_composto_do_estoque_com_nome_novo` | trava (passo 7.5) | o índice `(produto_id, tipo, criado_em)` existe num banco novo e num atualizado |
 | `b01_parados_usa_o_indice_composto` | trava (passo 7.5) | o plano da conta dos parados usa o índice |
 | `banco::testes::m26_nao_muda_o_que_existia` | trava (passo 7.5) | §6, item 6: a 25 → 26 (e a 24 → 26) não muda as tabelas da loja nem grava no log da troca |
