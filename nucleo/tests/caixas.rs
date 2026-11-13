@@ -841,6 +841,67 @@ fn g54_resposta_termina_no_fim_de_uma_operacao() {
     assert_eq!(venda_vista(&b), (2, 3, 3));
 }
 
+/// 5.4 (PEND-35), parte que espera a decisão D54-2 (DECISOES_F54.md): uma
+/// operação sozinha MAIOR que a resposta (aqui, três vendas numa transação só,
+/// e uma resposta menor que ela). HOJE ela vai em partes, cada parte numa
+/// transação (a resposta continua com no máximo o tamanho dado, T8.3), e até a
+/// última parte chegar o outro caixa mostra a operação pela metade. Aplicar a
+/// operação inteira numa transação seguraria a escrita do outro caixa pelo
+/// tempo da operação toda (o achado do t2_5): é a escolha da D54-2.
+#[test]
+fn g54_hoje_operacao_maior_que_a_resposta_vem_em_partes() {
+    let (mut a, mut b, u) = loja();
+    let p1 = peca(&a, &u, "Filtro de óleo", "5");
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    let antes = contar(&a, "SELECT MAX(seq) FROM alteracao");
+    {
+        let tx = a.conn.transaction().unwrap();
+        for _ in 0..3 {
+            let e = vendas::VendaEntrada {
+                itens: vec![vendas::ItemEntrada {
+                    produto_id: p1.clone(),
+                    quantidade: "1".into(),
+                    ..Default::default()
+                }],
+                tabela: 1,
+                pagamentos: vec![vendas::PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: "100".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            vendas::concluir(&tx, &a.dispositivo, &u, &e).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+    let (tudo, _) = sync::alteracoes_desde(&a.conn, antes, 10_000).unwrap();
+    let inteira = por_operacao(&tudo);
+    assert_eq!(inteira.len(), 1, "uma operação só: {inteira:?}");
+    let tamanho = *inteira.values().next().unwrap() as i64;
+    let limite = tamanho / 2;
+    let (lista, mais) = sync::alteracoes_desde(&a.conn, antes, limite).unwrap();
+    assert!(mais);
+    assert_eq!(lista.len() as i64, limite, "hoje a resposta leva o tamanho dado (a operação vai em partes)");
+    sync::aplicar(&mut b.conn, &lista).unwrap();
+    assert!(venda_vista(&b) != venda_vista(&a), "hoje B mostra a operação pela metade até a última parte");
+    let mut desde = lista.last().unwrap().seq;
+    loop {
+        let (resto, mais) = sync::alteracoes_desde(&a.conn, desde, limite).unwrap();
+        assert!(resto.len() as i64 <= limite);
+        if let Some(x) = resto.last() {
+            desde = x.seq;
+        }
+        sync::aplicar(&mut b.conn, &resto).unwrap();
+        if !mais {
+            break;
+        }
+    }
+    assert_eq!(venda_vista(&b), venda_vista(&a));
+    assert_eq!(venda_vista(&b), (3, 3, 3));
+}
+
 /// 5.4 (preparação): uma linha que viaja, mexida por fora do Rustinho num
 /// caixa (sem passar pela troca), fica diferente para sempre e HOJE ninguém
 /// percebe: nem conflito, nem pendência, nem aviso. (Um programa de SQLite
