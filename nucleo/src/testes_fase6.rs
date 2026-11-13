@@ -693,3 +693,129 @@ fn dp22_retrato_devolucao_depois_do_fechamento_nao_desconta_em_lugar_nenhum() {
     let novembro = comissoes::relatorio(c, "01/11/2026", "30/11/2026").unwrap();
     assert_eq!(novembro.vendedores[0].comissao, "0,00", "e o período seguinte não desconta");
 }
+
+// ---------------------------------------------------------------------------
+// 6.6: regras e limites já aprovados, fixados por teste (C03, C05/DP-34, C06).
+// ---------------------------------------------------------------------------
+
+fn pasta_nova(nome: &str) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("rustinho-f6-{nome}-{}-{}", std::process::id(), crate::tempo::novo_id()));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn arquivos_em(pasta: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(pasta)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// C05 · DP-34 (regra aprovada, Grupo I): as cópias de antes da atualização
+/// (`pre-migracao/`) e os bancos de uma atualização que falhou nunca são
+/// apagados: nem pela atualização seguinte, nem pela retenção dos backups
+/// (mesmo com a pasta do backup igual à dos dados e retenção de 1 dia), nem
+/// ao abrir de novo.
+#[test]
+fn dp34_copias_de_antes_da_atualizacao_nunca_sao_apagadas() {
+    let pasta = pasta_nova("dp34");
+    let db = pasta.join("rustinho.db");
+    {
+        let mut c = Connection::open(&db).unwrap();
+        c.pragma_update(None, "journal_mode", "WAL").unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        crate::banco::migrar_ate(&mut c, 22).unwrap();
+        c.execute("INSERT INTO config (chave, valor) VALUES ('dispositivo_id', 'disp-dp34')", []).unwrap();
+    }
+    // O que ficou de atualizações anteriores.
+    let pre = pasta.join("pre-migracao");
+    std::fs::create_dir_all(&pre).unwrap();
+    let antiga = "rustinho.db.antes-v20-20250101120000-abc123.db";
+    std::fs::write(pre.join(antiga), b"copia de antes da 0.9.12").unwrap();
+    let falha = "falha-migracao-20250102120000-def456.db";
+    std::fs::write(pasta.join(falha), b"banco de uma atualizacao que falhou").unwrap();
+    // A atualização de agora (22 → a desta versão) guarda mais uma cópia.
+    drop(Banco::abrir(&db).unwrap());
+    let copias = arquivos_em(&pre);
+    assert_eq!(copias.len(), 2, "a cópia nova e a antiga: {copias:?}");
+    assert!(copias.iter().any(|c| c == antiga));
+    // Backup na pasta dos dados, retenção de 1 dia, com backups velhos.
+    {
+        let b = Banco::abrir(&db).unwrap();
+        crate::config::gravar(&b.conn, "backup_pasta", &pasta.display().to_string()).unwrap();
+        crate::config::gravar(&b.conn, "backup_dias", "1").unwrap();
+    }
+    let velhos: Vec<String> = (1..=6).map(|d| format!("rustinho-2025010{d}-120000-caixa.rbk")).collect();
+    for v in &velhos {
+        std::fs::write(pasta.join(v), b"backup antigo").unwrap();
+    }
+    crate::backup::fazer(&db, false).unwrap();
+    assert!(velhos.iter().any(|v| !pasta.join(v).exists()), "a retenção dos backups rodou");
+    assert_eq!(arquivos_em(&pre), copias, "a retenção dos backups não mexe nas cópias de antes da atualização");
+    assert!(pasta.join(falha).exists(), "o banco da atualização que falhou fica");
+    drop(Banco::abrir(&db).unwrap());
+    assert_eq!(arquivos_em(&pre), copias);
+    assert!(pasta.join(falha).exists());
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+fn bruto(s: &mut crate::Servico, cmd: &str, d: Value) -> Value {
+    serde_json::from_str(&s.chamar(cmd, &d.to_string())).unwrap()
+}
+
+/// C03 (limite documentado): a chave da operação (FALHA-04) fica só na
+/// memória. Enquanto o programa está aberto, a mesma tentativa repetida não
+/// grava duas vezes; fechado e aberto de novo, a mesma chave volta a valer.
+/// Não há reenvio da operação antiga: as telas geram chave nova ao abrir
+/// cada janela de gravação.
+#[test]
+fn c03_chave_da_operacao_vale_enquanto_o_programa_esta_aberto() {
+    let pasta = pasta_nova("c03");
+    let db = pasta.join("rustinho.db");
+    let sup = json!({ "tipo": "suprimento", "valor": "10", "motivo": "troco", "chaveOperacao": "sup-1" });
+    {
+        let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+        let r = bruto(
+            &mut s,
+            "configurar_inicio",
+            json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(bruto(&mut s, "caixa_abrir", json!({ "valor": "0", "chaveOperacao": "abrir-1" }))["ok"], true);
+        assert_eq!(bruto(&mut s, "caixa_movimentar", sup.clone())["ok"], true);
+        let r = bruto(&mut s, "caixa_movimentar", sup.clone());
+        assert_eq!(r["campo"], "repetida", "{r}");
+    }
+    let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
+    let ana = texto(&s.banco_para_teste().conn, "SELECT id FROM usuario WHERE nome = 'Ana'", []);
+    assert_eq!(bruto(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }))["ok"], true);
+    let r = bruto(&mut s, "caixa_movimentar", sup);
+    assert_eq!(r["ok"], true, "programa aberto de novo: a chave antiga não é lembrada (limite C03): {r}");
+    assert_eq!(
+        contar(&s.banco_para_teste().conn, "SELECT COUNT(*) FROM caixa_movimento WHERE tipo = 'suprimento'", []),
+        2
+    );
+    drop(s);
+    // As janelas de gravação do Caixa pegam chave nova ao abrir.
+    let tela = include_str!("../../app/qml/TelaCaixa.qml");
+    assert!(tela.matches("chave = Api.novaChave()").count() >= 2, "movimento e fechamento");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// C06 (decisão técnica): "leitura não grava" só é fiscalizado nos testes
+/// (`LEITURA_ESTRITA`); por isso a suíte `so_leitura_nao_grava` tem de rodar
+/// no portão da CI: o filtro dos testes sem rede não pode pulá-la.
+#[test]
+fn c06_leitura_nao_grava_roda_no_portao_da_ci() {
+    let ci = include_str!("../../.github/workflows/validar.yml");
+    assert!(include_str!("servico/api.rs").contains("fn so_leitura_nao_grava()"));
+    let nome = "servico::api::testes::so_leitura_nao_grava";
+    let pular = ci.lines().find(|l| l.trim_start().starts_with("PULAR_REDE:")).expect("PULAR_REDE na CI");
+    let filtros: Vec<&str> = pular.split("--skip").skip(1).map(|f| f.trim().trim_matches('"').trim()).collect();
+    assert!(!filtros.is_empty());
+    for f in filtros {
+        assert!(!nome.contains(f), "a CI pula a suíte so_leitura_nao_grava pelo filtro {f:?}");
+    }
+    assert!(ci.contains("cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE"));
+}
