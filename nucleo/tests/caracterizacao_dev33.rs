@@ -921,6 +921,30 @@ fn f4_interrupcao_compra_desfaz_so_a_nota_da_falha() {
     assert_eq!(numeros_das_compras(&l).len(), 3, "{:?}", numeros_das_compras(&l));
 }
 
+/// O-2 (passo 7.3): na importação da compra, o erro de banco de uma nota vai
+/// para a lista "erros" com a mensagem amigável, como no "Trazer cadastros";
+/// o detalhe técnico (o texto do SQLite) fica só no registro técnico.
+#[test]
+fn o2_erro_de_banco_na_compra_com_mensagem_amigavel() {
+    let mut l = loja("o2-erro-amigavel");
+    let pasta = pasta_com_notas(&l, "pacote", &[("1.xml", NF601), ("2.xml", NF603)]);
+    l.executar(
+        "CREATE TRIGGER falha_de_teste BEFORE INSERT ON compra_item
+           WHEN (SELECT numero FROM compra WHERE id = NEW.compra_id) LIKE '%603'
+           BEGIN SELECT RAISE(ABORT, 'falha de teste no meio'); END",
+    );
+    let r = l.ok("compra_importar", json!({ "caminho": pasta }));
+    let erros = r["erros"].as_array().cloned().unwrap_or_default();
+    assert_eq!(erros.len(), 1, "{r}");
+    let texto = erros[0].as_str().unwrap_or("");
+    assert!(
+        !texto.contains("Erro no banco de dados") && !texto.contains("falha de teste"),
+        "o detalhe técnico foi para a tela: {texto}"
+    );
+    assert!(texto.contains("registro técnico"), "sem a mensagem amigável: {texto}");
+    assert!(texto.starts_with("2.xml"), "a tela continua dizendo qual arquivo: {texto}");
+}
+
 /// A01 — um código que compacta para vazio ("---", "***") não fecha a
 /// pendência de outro item: resolver uma não mexe na outra.
 #[test]

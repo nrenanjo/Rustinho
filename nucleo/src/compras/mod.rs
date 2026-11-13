@@ -1797,7 +1797,14 @@ mod comandos {
                 Err(e) if e.nome_do_campo() == Some(compras::CAMPO_OUTRO_CNPJ) => {
                     conflitos.push(compras::conflito_cnpj(&tx, &x.nome, &x.texto)?);
                 }
-                Err(e) => erros.push(format!("{}: {e}", x.nome)),
+                // O-2 (7.3): como no "Trazer cadastros", o erro do banco vai curto
+                // para a tela; o detalhe (o texto do SQLite) fica no registro técnico.
+                Err(e) => {
+                    if matches!(e, crate::erro::Erro::Banco(_) | crate::erro::Erro::Interno(_)) {
+                        crate::registro::anotar(&format!("compra_importar: {e}"));
+                    }
+                    erros.push(format!("{}: {}", x.nome, e.para_a_tela()));
+                }
             }
         }
         if fichas.is_empty() && erros.is_empty() && conflitos.is_empty() {
