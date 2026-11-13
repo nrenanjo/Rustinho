@@ -170,7 +170,13 @@ fn t2_5_vendas_simultaneas_com_a_troca_de_dados() {
 
     // A troca de dados aplica as vendas de B em A, em lotes pequenos, numa
     // tarefa à parte (como o Rustinho faz), enquanto A vende 30 no balcão.
-    let db = a.db.clone();
+    // A conexão da troca abre ANTES das vendas, como no programa: o motor da
+    // troca abre a dele sem a preparação do banco (`abrir_conexao`), e a
+    // preparação (gatilhos recriados, faixas, identidade) só roda quando o
+    // programa abre. Abrir um `Banco` completo no meio das vendas segurava a
+    // escrita por vários segundos e fazia a venda falhar num computador
+    // carregado (achado do t2_5, frente F89), coisa que o programa não faz.
+    let mut lado = Banco::abrir(&a.db).unwrap();
     let lotes: Vec<Vec<sync::Alteracao>> = {
         let mut todas = Vec::new();
         let mut desde = 0;
@@ -187,7 +193,6 @@ fn t2_5_vendas_simultaneas_com_a_troca_de_dados() {
         todas
     };
     let tarefa = std::thread::spawn(move || {
-        let mut lado = Banco::abrir(&db).unwrap();
         for lote in lotes {
             sync::aplicar(&mut lado.conn, &lote).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(5));
