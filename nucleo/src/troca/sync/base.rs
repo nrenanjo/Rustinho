@@ -39,8 +39,8 @@ pub const RECURSOS: &[&str] = &["pendencias-v1", crate::loja::RECURSO, RECURSO_C
 pub const RECURSO_PENDENCIAS: &str = "pendencias-v1";
 /// Passo 5.2 da dev.3.3 (DP-15): o caixa troca dados com as classes do
 /// `dados::esquema` — o `produto_gtin` viaja; o índice de busca da peça
-/// (`busca`, `codigos`) e o último acesso do usuário não viajam, e quem
-/// recebe refaz o índice.
+/// (`busca`, `codigos` e, com a 7.5, `nome_normalizado`) e o último acesso
+/// do usuário não viajam, e quem recebe refaz o índice.
 ///
 /// Regra de versão homogênea (`ARQUITETURA_ALVO_RUSTINHO.md` §5.3.4: "mudar
 /// a classe de uma tabela exige todos os caixas na mesma versão"): com um

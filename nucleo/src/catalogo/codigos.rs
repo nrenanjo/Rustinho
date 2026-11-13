@@ -327,8 +327,10 @@ pub fn indice(d: &TextoDaPeca) -> (String, String) {
     (busca.trim().to_string(), format!(" {} ", codigos.join(" ")))
 }
 
-/// Lê a peça gravada e refaz o índice de busca dela (o mesmo que a ficha
-/// grava ao salvar). `false` = a peça não existe (nada a fazer).
+/// Lê a peça gravada e refaz o índice de busca dela e o nome sem acento
+/// (`nome_normalizado`, 0026), o mesmo que a ficha grava ao salvar: são as
+/// colunas derivadas da peça (`dados::esquema::COLUNAS`), que não viajam e
+/// que quem recebe a peça refaz. `false` = a peça não existe (nada a fazer).
 pub fn refazer_indice(conn: &Connection, produto_id: &str) -> Resultado<bool> {
     let Some(mut d) = conn
         .query_row(
@@ -377,6 +379,10 @@ pub fn refazer_indice(conn: &Connection, produto_id: &str) -> Resultado<bool> {
         d.gtins.insert(0, d.codigo_barras.clone());
     }
     gravar_indice(conn, produto_id, &indice(&d))?;
+    conn.execute(
+        "UPDATE produto SET nome_normalizado = ?2 WHERE id = ?1",
+        params![produto_id, texto::normalizar(&d.nome)],
+    )?;
     Ok(true)
 }
 

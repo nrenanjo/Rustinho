@@ -1,16 +1,25 @@
-//! Passo 7.5 (DP-15): a coluna nova de `produto` (`nome_normalizado`, migração
-//! 0025, provisória) e a convivência com caixas de versão anterior na troca de
-//! dados. Lido no código da troca (`troca/sync/registro.rs` e `aplicacao.rs`):
+//! Passo 7.5 com o 5.2 (DP-15, D75-1): a coluna nova de `produto`
+//! (`nome_normalizado`, migração 0026, provisória) é derivada da peça e NÃO
+//! viaja: está em `dados::esquema::COLUNAS` (`Derivado::IndiceDaPeca`), os
+//! gatilhos da troca saem sem ela, quem recebe a ignora e a refaz
+//! (`catalogo::codigos::refazer_indice`), como `busca` e `codigos`.
 //!
-//! - quem manda: os gatilhos gravam no log TODAS as colunas da tabela (as que a
-//!   tabela tem quando o programa abre), então a coluna nova vai junto, como
-//!   `busca` e `codigos` vão hoje (até o passo 5.2, que aplica a DP-15);
-//! - quem recebe grava só as colunas que existem nele ("um caixa com versão mais
-//!   nova pode ter mais", `aplicacao.rs`), e a matriz de incompatibilidade só
-//!   olha tabela desconhecida e o rascunho de OS: nenhum dos dois lados recusa.
+//! Na preparação (ramo `prod-f75`, sem a 5.2) estes testes eram outros e
+//! fixavam o comportamento de então; na integração eles caíram de propósito
+//! com a D75-1 e foram trocados (registro em `RELATORIO_INTEGRACAO.md`):
 //!
-//! Estes testes provam os dois sentidos com o código de recebimento, que é o
-//! mesmo de `b3a171c` (a 7.5 não mexe na troca).
+//! - `a_coluna_nova_vai_no_log_da_troca_ate_a_5_2` (a coluna ia no log) virou
+//!   [`a_coluna_nova_nao_vai_no_log_da_troca`];
+//! - `peca_de_um_caixa_anterior_entra_sem_a_coluna_nova` (a coluna ficava
+//!   vazia em quem recebia) virou [`quem_recebe_refaz_a_coluna_nova`];
+//! - `caixa_da_estrutura_24_recebe_a_peca_com_a_coluna_nova` (o código de
+//!   recebimento de hoje num banco da estrutura 24) saiu: com a 5.2 um caixa
+//!   de versão anterior não troca dados com este (`classes-v1`, teste
+//!   `troca::sync::classes_caixa_de_versao_anterior_nao_troca_dados`), e o
+//!   programa atualiza o banco ao abrir, antes de qualquer troca, então o
+//!   código de hoje nunca recebe num banco da estrutura 24. O que ele
+//!   conferia do lado de quem recebe (a coluna que o caixa não tem é
+//!   ignorada) ficou em [`coluna_que_o_caixa_nao_tem_e_ignorada_ao_receber`].
 
 use rusqlite::Connection;
 use rustinho_nucleo::banco::Banco;
@@ -38,66 +47,20 @@ fn alteracao(id: &str, dados: Value) -> Alteracao {
 
 /// Uma peça como a troca manda (as colunas obrigatórias e algumas outras).
 fn peca(id: &str, nome: &str) -> Value {
-    json!({ "id": id, "codigo": format!("C{id}"), "nome": nome, "busca": nome.to_lowercase(),
-            "codigos": format!(" c{id} "), "custo": 1000, "ativo": 1, "criado_em": "2026-11-13T10:00:00Z",
-            "atualizado_em": "2026-11-13T10:00:00Z", "dispositivo": "caixa-outro" })
+    json!({ "id": id, "codigo": format!("C{id}"), "nome": nome, "custo": 1000, "ativo": 1,
+            "criado_em": "2026-11-13T10:00:00Z", "atualizado_em": "2026-11-13T10:00:00Z",
+            "dispositivo": "caixa-outro" })
 }
 
-fn um(c: &Connection, sql: &str) -> String {
+fn um<T: rusqlite::types::FromSql>(c: &Connection, sql: &str) -> T {
     c.query_row(sql, [], |l| l.get(0)).unwrap()
 }
 
-/// Um caixa desta versão (0025) recebe a peça de um caixa da estrutura 24 (sem
-/// a coluna nova): grava; a coluna derivada fica vazia (e a peça só desempata
-/// fora do lugar na lista "alteradas por último") até a 5.2 refazer as colunas
-/// derivadas ao receber. Este teste fixa o comportamento de hoje.
+/// O caixa que salva a peça grava o nome sem acento (o dono, `produtos`), mas
+/// a coluna não vai no conteúdo da alteração, e mudar só ela não gera
+/// alteração (o gatilho é `UPDATE OF` só das colunas que viajam).
 #[test]
-fn peca_de_um_caixa_anterior_entra_sem_a_coluna_nova() {
-    let mut b = Banco::em_memoria().unwrap();
-    let n = sync::aplicar(
-        &mut b.conn,
-        &[alteracao("01990000-0000-7000-8000-0000000000a1", peca("p24", "Óleo do caixa 24"))],
-    )
-    .unwrap();
-    assert_eq!(n, 1);
-    assert_eq!(um(&b.conn, "SELECT nome FROM produto WHERE id = 'p24'"), "Óleo do caixa 24");
-    assert_eq!(um(&b.conn, "SELECT nome_normalizado FROM produto WHERE id = 'p24'"), "");
-}
-
-/// Um caixa da estrutura 24 (montada pelas migrações 0001 a 0024, com o código
-/// de recebimento de hoje, que é o de `b3a171c`) recebe a peça de um caixa da
-/// 0025, com `nome_normalizado`: grava a peça e ignora a coluna que não tem.
-#[test]
-fn caixa_da_estrutura_24_recebe_a_peca_com_a_coluna_nova() {
-    let raiz = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/migracoes");
-    let mut arquivos: Vec<_> = std::fs::read_dir(&raiz).unwrap().flatten().map(|e| e.path()).collect();
-    arquivos.sort();
-    let mut c = Connection::open_in_memory().unwrap();
-    rustinho_nucleo::banco::registrar_funcoes(&c).unwrap();
-    for sql in arquivos.iter().take(24).map(|p| std::fs::read_to_string(p).unwrap()) {
-        let sem = sql.starts_with("-- rustinho: sem_chaves_estrangeiras");
-        c.pragma_update(None, "foreign_keys", !sem).unwrap();
-        c.pragma_update(None, "legacy_alter_table", sem).unwrap();
-        c.execute_batch(&sql).unwrap();
-    }
-    c.pragma_update(None, "foreign_keys", true).unwrap();
-    c.pragma_update(None, "legacy_alter_table", false).unwrap();
-    c.pragma_update(None, "user_version", 24).unwrap();
-    let colunas = um(&c, "SELECT group_concat(name) FROM pragma_table_info('produto')");
-    assert!(!colunas.contains("nome_normalizado"), "a estrutura 24 não tem a coluna");
-    let mut dados = peca("p25", "Água do caixa 25");
-    dados["nome_normalizado"] = json!("agua do caixa 25");
-    let n = sync::aplicar(&mut c, &[alteracao("01990000-0000-7000-8000-0000000000a2", dados)]).unwrap();
-    assert_eq!(n, 1);
-    assert_eq!(um(&c, "SELECT nome FROM produto WHERE id = 'p25'"), "Água do caixa 25");
-    let pendentes: i64 = c.query_row("SELECT COUNT(*) FROM sync_pendencia", [], |l| l.get(0)).unwrap();
-    assert_eq!(pendentes, 0, "nada ficou pendente");
-}
-
-/// E um caixa desta versão manda a coluna nova (até a 5.2): o gatilho grava
-/// todas as colunas da peça no log da troca.
-#[test]
-fn a_coluna_nova_vai_no_log_da_troca_ate_a_5_2() {
+fn a_coluna_nova_nao_vai_no_log_da_troca() {
     let b = Banco::em_memoria().unwrap();
     rustinho_nucleo::faixas::assumir(&b.conn).unwrap();
     let u = rustinho_nucleo::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap().id;
@@ -105,6 +68,9 @@ fn a_coluna_nova_vai_no_log_da_troca_ate_a_5_2() {
     f.nome = "Ácido".into();
     f.custo = "10".into();
     let id = rustinho_nucleo::produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+    let gravado: String =
+        b.conn.query_row("SELECT nome_normalizado FROM produto WHERE id = ?1", [&id], |l| l.get(0)).unwrap();
+    assert_eq!(gravado, "acido", "o dono grava a coluna ao salvar");
     let dados: String = b
         .conn
         .query_row(
@@ -114,5 +80,54 @@ fn a_coluna_nova_vai_no_log_da_troca_ate_a_5_2() {
         )
         .unwrap();
     let v: Value = serde_json::from_str(&dados).unwrap();
-    assert_eq!(v["nome_normalizado"], "acido");
+    assert_eq!(v["nome"], "Ácido", "a peça vai no log");
+    assert!(v.get("nome_normalizado").is_none(), "a coluna derivada foi no log: {dados}");
+
+    let antes: i64 = um(&b.conn, "SELECT COUNT(*) FROM alteracao");
+    b.conn.execute("UPDATE produto SET nome_normalizado = 'outra coisa' WHERE id = ?1", [&id]).unwrap();
+    let depois: i64 = um(&b.conn, "SELECT COUNT(*) FROM alteracao");
+    assert_eq!(depois, antes, "mudar só a coluna derivada gerou alteração");
+}
+
+/// Quem recebe a peça refaz o nome sem acento a partir do nome que chegou: a
+/// peça que vem sem a coluna (a regra da troca) e a que viesse com um valor
+/// qualquer nela (ignorado) ficam com o mesmo valor que o dono gravaria.
+#[test]
+fn quem_recebe_refaz_a_coluna_nova() {
+    let mut b = Banco::em_memoria().unwrap();
+    let mut com_valor_errado = peca("p2", "Água de bateria");
+    com_valor_errado["nome_normalizado"] = json!("valor que não sai do nome");
+    let n = sync::aplicar(
+        &mut b.conn,
+        &[
+            alteracao("01990000-0000-7000-8000-0000000000a1", peca("p1", "Óleo do caixa vizinho")),
+            alteracao("01990000-0000-7000-8000-0000000000a2", com_valor_errado),
+        ],
+    )
+    .unwrap();
+    assert_eq!(n, 2);
+    let p1: String = um(&b.conn, "SELECT nome_normalizado FROM produto WHERE id = 'p1'");
+    let p2: String = um(&b.conn, "SELECT nome_normalizado FROM produto WHERE id = 'p2'");
+    assert_eq!(p1, "oleo do caixa vizinho");
+    assert_eq!(p2, "agua de bateria");
+    let pendentes: i64 = um(&b.conn, "SELECT COUNT(*) FROM sync_pendencia");
+    assert_eq!(pendentes, 0, "nada ficou pendente");
+    let conflitos: i64 = um(&b.conn, "SELECT COUNT(*) FROM sync_conflito");
+    assert_eq!(conflitos, 0, "a coluna derivada não conta como conflito");
+}
+
+/// Uma coluna que este caixa não tem (de uma versão de estrutura mais nova)
+/// é ignorada ao receber: a peça entra e nada fica pendente. É o lado de quem
+/// recebe que o teste da estrutura 24 conferia na preparação.
+#[test]
+fn coluna_que_o_caixa_nao_tem_e_ignorada_ao_receber() {
+    let mut b = Banco::em_memoria().unwrap();
+    let mut dados = peca("p3", "Correia do caixa novo");
+    dados["coluna_de_uma_versao_futura"] = json!("qualquer");
+    let n = sync::aplicar(&mut b.conn, &[alteracao("01990000-0000-7000-8000-0000000000a3", dados)]).unwrap();
+    assert_eq!(n, 1);
+    let nome: String = um(&b.conn, "SELECT nome FROM produto WHERE id = 'p3'");
+    assert_eq!(nome, "Correia do caixa novo");
+    let pendentes: i64 = um(&b.conn, "SELECT COUNT(*) FROM sync_pendencia");
+    assert_eq!(pendentes, 0, "nada ficou pendente");
 }

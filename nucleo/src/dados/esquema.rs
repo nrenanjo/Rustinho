@@ -154,8 +154,9 @@ pub enum ClasseDaColuna {
 /// novo não compila sem dizer quem o refaz).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Derivado {
-    /// O índice de busca da peça (`produto.busca`, `produto.codigos`), que
-    /// sai da peça inteira: `catalogo::codigos::refazer_indice`.
+    /// O índice de busca da peça (`produto.busca`, `produto.codigos` e, desde
+    /// a 0026, o nome sem acento `produto.nome_normalizado`), que sai da peça
+    /// inteira: `catalogo::codigos::refazer_indice`.
     IndiceDaPeca,
 }
 
@@ -197,6 +198,9 @@ pub const COLUNAS: &[Coluna] = &[
     // dos GTINs, das aplicações e das equivalências) e é refeito em cada caixa.
     c("produto", "busca", ClasseDaColuna::Derivada(Derivado::IndiceDaPeca)),
     c("produto", "codigos", ClasseDaColuna::Derivada(Derivado::IndiceDaPeca)),
+    // B04 (passo 7.5, 0026): o nome sem acento, o desempate da lista de Peças,
+    // sai do nome da peça e é refeito com o índice (DP-15, D75-1).
+    c("produto", "nome_normalizado", ClasseDaColuna::Derivada(Derivado::IndiceDaPeca)),
 ];
 
 /// Tabelas que viajam cujas linhas alimentam um derivado: (tabela, coluna com
