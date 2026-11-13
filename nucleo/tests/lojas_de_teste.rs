@@ -260,3 +260,43 @@ fn montar_campanha_l5() {
     }
     l.fechar();
 }
+
+/// H24 (dev.3.3, passo 7.2) — o caixa do roteiro `app/testes/telas_juntar_h24.py`,
+/// no meio de uma entrada numa loja, com dado chegado:
+/// - o caixa novo começou a entrar pelo comando da tela (`sync_juntar`:
+///   "Caixa 2", a senha da rede, sem endereço);
+/// - recebeu parte de outra loja (a configuração dela, 3 peças e um cliente;
+///   nenhum usuário) pela mesma função que aplica o que chega pela rede
+///   (`sync::aplicar`). É o estado de uma entrada interrompida (o programa
+///   fechou, ou a rede caiu, antes de chegar o usuário): ao abrir, o Rustinho
+///   volta para a tela de juntar.
+///
+/// A outra loja fica numa pasta à parte, apagada no fim.
+#[test]
+#[ignore = "só à mão: monta o caixa do roteiro do Juntar com dado chegado (H24)"]
+fn montar_juncao_com_dado_chegado() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut origem = Loja::nova("juntar-h24-origem");
+    for nome in ["CORREIA DENTADA SINTETICA JUNTAR", "FILTRO DE OLEO SINTETICO JUNTAR", "PASTILHA SINTETICA JUNTAR"] {
+        origem.peca(nome, "10,00", "25,00", "5");
+    }
+    origem.pessoa("cliente", "Cliente Sintetico da Juncao");
+    let (lista, _) = rustinho_nucleo::sync::alteracoes_desde(&origem.conexao(), 0, 10_000_000).unwrap();
+    let sem_usuario: Vec<_> = lista.into_iter().filter(|a| a.tabela != "usuario").collect();
+    drop(origem);
+
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok("sync_juntar", json!({ "caixa": "Caixa 2", "senha": "rede-da-loja-teste", "enderecos": "" }));
+    l.fechar();
+    let mut b = rustinho_nucleo::banco::Banco::abrir(&pasta.join("rustinho.db")).unwrap();
+    assert!(rustinho_nucleo::sync::aplicar(&mut b.conn, &sem_usuario).unwrap() > 0, "chegou parte da loja");
+    drop(b);
+
+    let mut l = Loja::abrir_em(&pasta, false);
+    let e = l.ok("estado", json!({}));
+    assert_eq!(e["primeiraVez"], true, "sem usuário ainda: {e}");
+    assert_eq!(e["juntando"], true, "no meio da entrada: {e}");
+    assert_eq!(l.numero("SELECT COUNT(*) FROM produto"), 3, "as 3 peças chegaram");
+    l.fechar();
+}
