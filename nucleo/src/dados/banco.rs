@@ -430,6 +430,22 @@ pub fn registrar_funcoes(conn: &Connection) -> Resultado<()> {
     Ok(())
 }
 
+/// 7.6 (H09): uma conexão só de leitura com o banco, para a tarefa de leitura
+/// (`consulta::Leitor`). Duas travas: aberta só para leitura
+/// (`SQLITE_OPEN_READ_ONLY`) e com `query_only`, então nada que passe por ela
+/// grava. Espera a vez como as outras (5 s) e tem as funções do Rustinho (a
+/// busca usa `normalizar` e `rustinho_conexao`). Em WAL, ela lê o último
+/// retrato confirmado sem parar quem grava.
+pub fn conexao_de_leitura(caminho: &Path) -> Resultado<Connection> {
+    use rusqlite::OpenFlags;
+    let conn =
+        Connection::open_with_flags(caminho, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    conn.pragma_update(None, "query_only", true)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    registrar_funcoes(&conn)?;
+    Ok(conn)
+}
+
 /// Aplica as versões da estrutura que ainda não foram aplicadas.
 pub(crate) fn migrar(conn: &mut Connection) -> Resultado<()> {
     let versao: usize = conn.query_row("PRAGMA user_version", [], |l| l.get::<_, i64>(0))? as usize;

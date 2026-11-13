@@ -14,9 +14,9 @@ use crate::banco::Banco;
 use crate::despacho::{ler, Acesso, Classe, Comando, Estorno, Id, Pedido};
 use crate::erro::{Erro, Resultado};
 use crate::{
-    arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, devolucoes,
-    documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros, oficina,
-    pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
+    arquivos, auditoria, avisos, backup, busca, caixa, cheques, codigo, comissoes, compras, config, consulta,
+    devolucoes, documento, dre, encomendas, etiquetas, faixas, financeiro, fiscal, importar, impressao, menu, numeros,
+    oficina, pagar, painel, pessoas, produtos, receber, reposicao, requisitos, sync, texto, unidades, usuarios, vendas,
 };
 
 /// Versão do Rustinho. Mora na base (`rustinho_base::VERSAO`) para quem grava
@@ -418,6 +418,22 @@ pub fn so_leitura(comando: &str) -> bool {
     classe(comando).is_some_and(Classe::leitura)
 }
 
+/// 7.6 (H09, ARQ-08): as consultas que a tela pode pedir fora da linha da
+/// janela (`Servico::consultar`). Lista fechada: só comando de classe
+/// `Leitura` (qualquer usuário conectado; só lê) de um domínio. Nunca um do
+/// gerente (`ConsultaDoGerente`, `Gerente`), nunca um que funcione sem sessão,
+/// nunca uma gravação: o teste `t2_lista_fechada_so_de_leituras` confere, e
+/// o `consultar` recusa na hora o que não estiver aqui. Comando novo aqui
+/// precisa entrar também no teste de equivalência
+/// (`testes_consulta.rs`, `t1_mesma_resposta_que_o_chamar`).
+pub const CONSULTAS_FORA_DA_JANELA: &[&str] = &["produtos_buscar"];
+
+/// 7.6: comandos que trocam o banco por baixo (restaurar um backup) ou o mudam
+/// de dono (entrar numa loja ou desistir dela). Antes deles, a tarefa de
+/// leitura para e fecha a conexão; depois, abre uma nova
+/// (`consulta::Leitor::pausar`).
+pub const TROCAM_O_BANCO: &[&str] = &["backup_restaurar", "sync_juntar", "sync_desistir_juntar"];
+
 /// Comandos que funcionam sem ninguém conectado.
 pub fn sem_sessao(comando: &str) -> bool {
     classe(comando).is_some_and(Classe::sem_sessao)
@@ -487,6 +503,10 @@ impl Liberacao {
 
 /// O serviço que a interface usa. Guarda o banco e a sessão.
 pub struct Servico {
+    /// 7.6: a tarefa de leitura das consultas fora da linha da janela, criada
+    /// na primeira (só com banco em arquivo). Fica em primeiro lugar: ao
+    /// fechar, ela termina e fecha a conexão dela antes do banco e da trava.
+    leitor: Option<consulta::Leitor>,
     banco: Banco,
     sessao: Option<Sessao>,
     /// Senhas do gerente digitadas no aperto (D-09: cada uma vale só para
@@ -591,6 +611,77 @@ impl Drop for Servico {
     }
 }
 
+/// 7.6: o que uma consulta fora da linha da janela leva da sessão (uma cópia,
+/// tirada na hora do pedido, na linha da janela).
+struct Consulta {
+    sessao: Sessao,
+    disp: String,
+    modo_seguro: bool,
+    defeito: Option<String>,
+}
+
+impl Consulta {
+    /// Na tarefa de leitura, com a conexão só de leitura: a mesma função do
+    /// domínio que o `chamar` rodaria, com as mesmas regras de permissão,
+    /// menos as senhas do gerente digitadas (veja `SoSemSenha`). Um erro
+    /// inesperado (pânico) fica com a tarefa de leitura, que responde com erro
+    /// e fecha a conexão.
+    fn rodar(self, conn: &mut rusqlite::Connection, comando: &str, dados: &str) -> String {
+        let resultado = (|| -> Resultado<Value> {
+            let dados: Value = if dados.trim().is_empty() { json!({}) } else { serde_json::from_str(dados)? };
+            let c = do_dominio(comando).ok_or_else(|| Erro::Interno(format!("comando desconhecido: {comando}")))?;
+            let mut acesso = SoSemSenha { sessao: &self.sessao };
+            let mut pedido = Pedido::novo(
+                conn,
+                &self.disp,
+                &self.sessao.usuario_id,
+                self.sessao.gerente,
+                self.modo_seguro,
+                self.defeito.as_deref(),
+                &mut acesso,
+            );
+            (c.funcao)(&mut pedido, dados)
+        })();
+        let resultado = resultado.map_err(|e| {
+            if !crate::banco::erro_de_somente_leitura(&e) {
+                e
+            } else if self.modo_seguro {
+                erro_modo_seguro()
+            } else {
+                crate::registro::anotar(&format!("{comando}: comando de leitura tentou gravar (recusado)"));
+                Erro::Interno(format!("\"{comando}\" está em CONSULTAS_FORA_DA_JANELA mas tentou gravar no banco"))
+            }
+        });
+        envelope(comando, resultado).to_string()
+    }
+}
+
+/// 7.6: as perguntas de permissão de uma consulta fora da linha da janela. Só
+/// vale o que vale sem senha (é gerente, ou a loja liberou a ação para todos):
+/// as senhas do gerente digitadas ficam na linha da janela e não valem aqui.
+/// Assim a consulta nunca pode mais do que o `chamar`.
+struct SoSemSenha<'a> {
+    sessao: &'a Sessao,
+}
+
+impl Acesso for SoSemSenha<'_> {
+    fn pode_sem_senha(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+        pode_sem_senha(conn, acao, self.sessao)
+    }
+
+    fn pode_ler(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+        pode_sem_senha(conn, acao, self.sessao)
+    }
+
+    fn exigir(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<()> {
+        if pode_sem_senha(conn, acao, self.sessao)? {
+            Ok(())
+        } else {
+            Err(erro_so_do_gerente(acao))
+        }
+    }
+}
+
 /// A resposta de um comando para a tela: `{ok: true, dados}` ou `{ok: false,
 /// erro, campo}`.
 fn envelope(comando: &str, resultado: Resultado<Value>) -> Value {
@@ -668,6 +759,7 @@ impl Servico {
 
     fn com_banco(banco: Banco) -> Servico {
         Servico {
+            leitor: None,
             banco,
             sessao: None,
             liberacoes: Vec::new(),
@@ -694,6 +786,11 @@ impl Servico {
         if self.comprometido && !pode_depois_de_erro(comando) {
             return json!({ "ok": false, "erro": TEXTO_COMPROMETIDO, "campo": null }).to_string();
         }
+        // 7.6: o banco vai ser trocado (restaurar um backup, entrar numa loja ou
+        // desistir dela): a tarefa de leitura para e fecha a conexão até o
+        // comando acabar; depois, a próxima consulta abre uma nova.
+        let _pausa = if TROCAM_O_BANCO.contains(&comando) { self.leitor.as_ref().map(|l| l.pausar()) } else { None };
+        let quem_antes = self.quem();
         // RVI-01: depois de um pânico, uma consulta roda com o banco só para
         // leitura (`query_only`): se algum comando da lista de leituras
         // gravasse, o próprio SQLite recusaria. Nos testes vale sempre, para
@@ -747,9 +844,101 @@ impl Servico {
                 })
             }
         };
+        self.se_a_sessao_mudou(quem_antes);
         resposta.to_string()
     }
 
+    /// 7.6 (H09, ARQ-08): uma consulta fora da linha da janela. Aqui, na linha
+    /// da janela, só o que o `chamar` confere antes de rodar: o comando é da
+    /// lista `CONSULTAS_FORA_DA_JANELA`, há alguém conectado e ele continua
+    /// ativo (D-07). A leitura roda na tarefa de leitura (`consulta::Leitor`),
+    /// com a conexão só de leitura e uma cópia da sessão tirada agora.
+    /// `responder` recebe o mesmo JSON do `chamar`, uma vez (um pedido que
+    /// perdeu a vez é largado sem resposta). No mesmo `canal`, a última vence.
+    /// Gravação nunca passa por aqui: continua no `chamar`.
+    pub fn consultar(&mut self, canal: &str, comando: &str, dados: &str, responder: consulta::Responder) {
+        let quem_antes = self.quem();
+        let preparo = self.preparar_consulta(comando);
+        self.se_a_sessao_mudou(quem_antes);
+        let consulta = match preparo {
+            Ok(c) => c,
+            Err(e) => return responder(envelope(comando, Err(e)).to_string()),
+        };
+        let Some(caminho) = self.banco.caminho.clone() else {
+            // Banco em memória (só nos testes): não há arquivo para outra
+            // conexão; roda aqui mesmo, como o `chamar`.
+            return responder(self.chamar(comando, dados));
+        };
+        let leitor = self.leitor.get_or_insert_with(|| consulta::Leitor::novo(caminho));
+        let (comando, dados) = (comando.to_string(), dados.to_string());
+        leitor.pedir(canal, Box::new(move |conn| consulta.rodar(conn, &comando, &dados)), responder);
+    }
+
+    /// O que a consulta leva: confere como o `chamar` e tira a cópia da sessão.
+    fn preparar_consulta(&mut self, comando: &str) -> Resultado<Consulta> {
+        let da_lista = CONSULTAS_FORA_DA_JANELA.contains(&comando)
+            && classe(comando) == Some(Classe::Leitura)
+            && do_dominio(comando).is_some();
+        if !da_lista {
+            return Err(Erro::Interno(format!("\"{comando}\" não é uma consulta que roda fora da linha da janela")));
+        }
+        if self.banco.em_modo_seguro() && bloqueado_no_modo_seguro(comando) {
+            return Err(erro_modo_seguro());
+        }
+        self.sessao()?;
+        // O papel pode ter mudado em outro caixa (e o usuário, sido desativado).
+        self.atualizar_sessao()?;
+        let sessao = self.sessao()?.clone();
+        Ok(Consulta {
+            sessao,
+            disp: self.banco.dispositivo.clone(),
+            modo_seguro: self.banco.em_modo_seguro(),
+            defeito: self.banco.defeito.clone(),
+        })
+    }
+
+    /// Quem está conectado (o id), para saber se a sessão mudou.
+    fn quem(&self) -> Option<String> {
+        self.sessao.as_ref().map(|s| s.usuario_id.clone())
+    }
+
+    /// 7.6: a sessão mudou (entrar, sair, usuário desativado, restauração):
+    /// nenhuma consulta pedida antes chega depois.
+    fn se_a_sessao_mudou(&self, antes: Option<String>) {
+        if self.quem() != antes {
+            if let Some(l) = &self.leitor {
+                l.esquecer_tudo();
+            }
+        }
+    }
+
+    /// Só nos testes: a tarefa de leitura (se já existe).
+    #[cfg(test)]
+    pub(crate) fn leitor_para_teste(&self) -> Option<&consulta::Leitor> {
+        self.leitor.as_ref()
+    }
+}
+
+/// Só nos testes: as regras de permissão da consulta de fora para quem está
+/// conectado agora (`SoSemSenha`).
+#[cfg(test)]
+pub(crate) fn acesso_da_consulta_para_teste(s: &Servico) -> impl Acesso {
+    struct Com(Sessao);
+    impl Acesso for Com {
+        fn pode_sem_senha(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+            SoSemSenha { sessao: &self.0 }.pode_sem_senha(conn, acao)
+        }
+        fn pode_ler(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<bool> {
+            SoSemSenha { sessao: &self.0 }.pode_ler(conn, acao)
+        }
+        fn exigir(&mut self, conn: &rusqlite::Connection, acao: &str) -> Resultado<()> {
+            SoSemSenha { sessao: &self.0 }.exigir(conn, acao)
+        }
+    }
+    Com(s.sessao.clone().expect("alguém conectado"))
+}
+
+impl Servico {
     fn sessao(&self) -> Resultado<&Sessao> {
         self.sessao.as_ref().ok_or(Erro::SemSessao)
     }
