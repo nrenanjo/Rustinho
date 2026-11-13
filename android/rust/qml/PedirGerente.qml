@@ -3,16 +3,21 @@ import QtQuick.Layouts
 import rustinho
 
 // O "aperto": o gerente digita a senha na hora, sem trocar de usuário.
-// Duas formas (D-09):
+// Três formas (D-09 e DP-52 (b)):
 //   consultar(acao, nome, depois): só para ler a tela da ação, até sair dela;
 //   paraChamada(comando, dados, mensagem, depois, desistiu): para esta
-//   gravação, com estes dados exatos, uma vez. A senha não fica guardada.
+//   gravação, com estes dados exatos, uma vez;
+//   paraTela(tela, chave, nome, depois, desistiu): para usar esta tela do
+//   gerente ("Trazer cadastros") até fechá-la, com a chave que ela sorteou.
+// A senha não fica guardada.
 Painel {
     id: pedido
     property string acao: ""
     property var acoes: []
     property string comando: ""
     property var dados: null
+    property string tela: ""
+    property string chaveTela: ""
     property string oQue: ""
     property string mensagem: ""
     property var depois: null
@@ -36,6 +41,8 @@ Painel {
         pedido.acao = acao
         pedido.comando = ""
         pedido.dados = null
+        pedido.tela = ""
+        pedido.chaveTela = ""
         pedido.oQue = oQue
         pedido.mensagem = ""
         pedido.depois = depois
@@ -47,14 +54,31 @@ Painel {
         pedido.acao = ""
         pedido.comando = comando
         pedido.dados = dados
+        pedido.tela = ""
+        pedido.chaveTela = ""
         pedido.oQue = ""
         pedido.mensagem = mensagem
         pedido.depois = depois
         pedido.desistiu = desistiu
         abrirPedido()
     }
+    function paraTela(tela, chave, oQue, depois, desistiu) {
+        pedido.acoes = []
+        pedido.acao = ""
+        pedido.comando = ""
+        pedido.dados = null
+        pedido.tela = tela
+        pedido.chaveTela = chave
+        pedido.oQue = oQue
+        pedido.mensagem = ""
+        pedido.depois = depois
+        pedido.desistiu = desistiu
+        abrirPedido()
+    }
     function liberar() {
-        const r = Api.chamar("gerente_liberar", pedido.comando !== ""
+        const r = Api.chamar("gerente_liberar", pedido.tela !== ""
+                             ? { senha: senha.texto, tela: pedido.tela, chave: pedido.chaveTela }
+                             : pedido.comando !== ""
                              ? { senha: senha.texto, comando: pedido.comando, dados: pedido.dados }
                              : pedido.acoes.length > 0 ? { senha: senha.texto, acoes: pedido.acoes }
                              : { senha: senha.texto, acao: pedido.acao })
@@ -84,7 +108,9 @@ Painel {
         spacing: 14
         Titulo { text: "Senha do gerente"; font.pixelSize: 30; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         Nota {
-            text: pedido.comando !== ""
+            text: pedido.tela !== ""
+                  ? (pedido.oQue || "Esta tela") + ": só o gerente pode. Com a senha, você usa esta tela até fechá-la; o cadastro não pede a senha de novo."
+                  : pedido.comando !== ""
                   ? (pedido.mensagem || "Só o gerente pode.") + " A senha vale só para isto, uma vez; você continua no seu usuário."
                   : (pedido.oQue ? pedido.oQue + ": s" : "S") + "ó o gerente pode. Com a senha você só consulta "
                     + (pedido.acoes.length > 0 ? "estas telas" : "esta tela") + "; para gravar, ela é pedida de novo."
