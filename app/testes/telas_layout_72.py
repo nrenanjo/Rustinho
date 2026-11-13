@@ -162,8 +162,14 @@ def foto_e_ponto(rr, sufixo=""):
     return foto, (lambda x, y: (wx + x, wy + y))
 
 
-def por_carrinho_uma_peca(rr):
-    """Vender: digita o código 1 (Filtro de óleo) na busca e Enter."""
+def por_carrinho_uma_peca(rr, celular=False):
+    """Vender: digita o código 1 (Filtro de óleo) na busca e Enter. No celular
+    a busca não fica com o foco sozinha (o teclado não abre à toa): toca nela antes."""
+    if celular:
+        g = u.geos(rr.textos()).get("campoDeBusca")
+        if g:
+            rr.clicar_em(g)
+            time.sleep(0.8)
     base.xdo("type", "--delay", "80", "1")
     time.sleep(0.6)
     base.xdo("key", "Return")
@@ -349,7 +355,7 @@ def main():
             rr = abrir(nova(est, "roxo"), "TelaVender", {}, fotos, "m7_receber_celular", celular=True)
             logs.append(rr.saida)
             try:
-                por_carrinho_uma_peca(rr)
+                por_carrinho_uma_peca(rr, celular=True)
                 rr.foto("-carrinho")
                 if receber_no_crediario(rr, celular=True):
                     time.sleep(1.5)
