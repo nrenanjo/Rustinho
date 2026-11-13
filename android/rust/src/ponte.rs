@@ -122,6 +122,28 @@ pub struct SistemaRust {
 
 const AGUARDE: &str = "Aguarde: o Rustinho ainda está terminando a operação anterior.";
 
+/// J06 (dev.3.3): a impressão direta estava ligada e a impressora não
+/// imprimiu; o PDF abriu no lugar.
+const NAO_IMPRIMIU: &str = "Não imprimiu na impressora; abri o PDF.";
+
+/// J06: a resposta da impressão para a tela. Com a impressão direta ligada e
+/// a impressora que não imprimiu (ausente, desligada, sem papel...), o PDF abre
+/// no lugar e a tela avisa, com o aviso de erro de sempre (`ok: false`); antes,
+/// a pessoa achava que tinha impresso. Com a impressão direta desligada, o PDF
+/// é o esperado e não há aviso.
+fn resposta_da_impressao(caminho: &str, direto: bool, impresso: bool) -> String {
+    if direto && !impresso {
+        return serde_json::json!({
+            "ok": false,
+            "erro": NAO_IMPRIMIU,
+            "campo": "impressora",
+            "dados": { "caminho": caminho, "impresso": false }
+        })
+        .to_string();
+    }
+    serde_json::json!({ "ok": true, "dados": { "caminho": caminho, "impresso": impresso } }).to_string()
+}
+
 /// T-04 (duplo clique): começa uma operação demorada. `None` se já há outra
 /// rodando. A trava é solta quando a `Liberacao` sai de cena, inclusive se a
 /// tarefa parar por um erro inesperado.
@@ -337,8 +359,7 @@ impl qobject::Sistema {
         if !impresso {
             qobject::rustinho_abrir_arquivo(&QString::from(caminho));
         }
-        let r = serde_json::json!({ "ok": true, "dados": { "caminho": caminho, "impresso": impresso } });
-        QString::from(&r.to_string())
+        QString::from(&resposta_da_impressao(caminho, direto, impresso))
     }
 }
 
@@ -375,6 +396,24 @@ mod testes {
         termina.send(()).unwrap();
         tarefa.join().unwrap();
         assert!(!ocupado.load(Ordering::SeqCst));
+    }
+
+    /// J06: impressão direta que falha (impressora ausente) avisa que não
+    /// imprimiu e que o PDF abriu; com a impressão direta desligada, o PDF é o
+    /// esperado e não há aviso; impressa, "ok" como sempre.
+    #[test]
+    fn j06_impressao_direta_que_falha_avisa() {
+        let r: serde_json::Value = serde_json::from_str(&resposta_da_impressao("/x/venda.pdf", true, false)).unwrap();
+        assert_eq!(r["ok"], false, "{r}");
+        assert_eq!(r["erro"], NAO_IMPRIMIU);
+        assert_eq!(r["dados"]["caminho"], "/x/venda.pdf");
+        let r: serde_json::Value = serde_json::from_str(&resposta_da_impressao("/x/venda.pdf", false, false)).unwrap();
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["impresso"], false);
+        assert!(r["erro"].is_null());
+        let r: serde_json::Value = serde_json::from_str(&resposta_da_impressao("/x/venda.pdf", true, true)).unwrap();
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["impresso"], true);
     }
 
     #[test]
