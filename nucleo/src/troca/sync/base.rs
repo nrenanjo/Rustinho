@@ -7,7 +7,13 @@ use super::*;
 
 pub const PORTA_TCP: u16 = 47810;
 pub const PORTA_UDP: u16 = 47811;
-pub(super) const LOTE: i64 = 2000;
+/// Alterações em cada resposta da troca. O caixa que recebe aplica cada
+/// resposta numa transação só (tudo ou nada), segurando a escrita do banco
+/// enquanto isso, e o balcão espera a vez por 5 s (`Banco::preparar`, D-05).
+/// Com 2000, num computador carregado, a escrita ficou presa de 7 a 9 s e a
+/// venda do balcão falhou (achado do t2_5, frente F89). Com 200, a mesma
+/// troca vem em mais respostas, cada uma curta; o protocolo não muda.
+pub(super) const LOTE: i64 = 200;
 /// Resposta com um lote de alterações.
 pub(super) const TAMANHO_MAXIMO: usize = 64 * 1024 * 1024;
 /// Pedido de outro caixa (é sempre pequeno).

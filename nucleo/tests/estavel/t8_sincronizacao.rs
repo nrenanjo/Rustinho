@@ -225,7 +225,6 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
 /// Uma resposta, então, leva poucas alterações: aqui, no máximo 200 (a
 /// transação de cada uma continua inteira; só vêm mais respostas).
 #[test]
-#[ignore = "caracterização do achado t2_5: em b3a171c uma resposta traz todas as alterações (até 2000); passa com a correção"]
 fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
     if std::env::var_os(FILHO).is_some() {
         return;
