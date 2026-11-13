@@ -20,9 +20,12 @@ da 7.6):
   R4 nenhum TypeError/ReferenceError no registro.
 
 A digitação tem duas partes:
-  A. 30 teclas com 20 ms entre elas (o texto, cinco apagadas e o fim);
-  B. 9 teclas com 220 ms entre elas, mais que a espera de 160 ms da busca:
-     cada tecla dispara uma busca enquanto a pessoa continua digitando.
+  A. 30 teclas com 20 ms entre elas (o texto, cinco apagadas e o fim), como
+     no desenho da 7.6: só a última busca roda;
+  B. o campo limpo e 19 teclas com 220 ms entre elas, mais que a espera de
+     160 ms da busca: cada tecla dispara uma busca enquanto a pessoa continua
+     digitando, a começar pela primeira letra sozinha ("p"), que acha quase a
+     loja inteira (é o caso do H09: as letras esperam a busca anterior).
 
 Os tempos de cada busca (TESTE_BUSCA_PRONTA) e as pausas vão para o resultado.
 
@@ -52,13 +55,12 @@ TELA = u.TELA
 PECAS = int(os.environ.get("RUSTINHO_LOJA_PECAS", "20000"))
 PAUSA_MAXIMA_MS = 100
 
-# A: 30 teclas, 20 ms entre elas. B: 9 teclas, 220 ms entre elas.
+# A: 30 teclas, 20 ms entre elas. B: do campo limpo, 19 teclas, 220 ms entre elas.
 TEXTO_A = "pastilha lista 12341"          # 20 teclas
 APAGAR_A = 5                              # → "pastilha lista "
 FIM_A = "12346"                           # 5 teclas → "pastilha lista 12346"
-APAGAR_B = 5                              # → "pastilha lista "
-FIM_B = "1111"                            # → "pastilha lista 1111"
-TEXTO_FINAL = "pastilha lista " + FIM_B
+TEXTO_B = "pastilha lista 1111"           # 19 teclas, uma busca por tecla
+TEXTO_FINAL = TEXTO_B
 
 
 def chave_da_loja():
@@ -206,8 +208,10 @@ def main():
             teclar(FIM_A, 20)
             fim_a_ms = int(time.time() * 1000)
             time.sleep(0.4)
-            teclar("BackSpace", 220, tecla=True, vezes=APAGAR_B)
-            teclar(FIM_B, 220)
+            base.xdo("key", "ctrl+a")
+            base.xdo("key", "BackSpace")
+            time.sleep(0.4)
+            teclar(TEXTO_B, 220)
             ultima_tecla_ms = int(time.time() * 1000)
             time.sleep(5.0)
             fim_ms = int(time.time() * 1000)
@@ -247,7 +251,8 @@ def main():
             info.append(f"pausas da janela > 50 ms na digitação: {len(na_digitacao)}; maior "
                         f"{max(na_digitacao) if na_digitacao else 0} ms; todas {sorted(na_digitacao, reverse=True)[:12]}")
             if ultima:
-                info.append(f"a lista do texto final ficou pronta {max(ultima) - ultima_tecla_ms} ms depois da última tecla")
+                info.append(f"a lista do texto final ficou pronta {max(ultima) - ultima_tecla_ms} ms depois de o xdotool "
+                            "terminar (ele espera 220 ms depois da última tecla; a busca começa 160 ms depois dela)")
             info.append(f"lista depois de digitar: {l_rapida}, busca “{busca_da_lista}”, primeiras {n_rapida[:3]}")
             info.append(f"lista lida de novo: {l_de_novo}, primeiras {n_de_novo[:3]}")
 
