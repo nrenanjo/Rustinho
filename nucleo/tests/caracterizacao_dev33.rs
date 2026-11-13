@@ -411,7 +411,6 @@ fn n02_reimportar_nao_duplica() {
 /// regravada com o mesmo conteúdo. A mensagem da falha diz qual coluna o
 /// gatilho registrou como mudada (nenhuma = regravação sem mudança).
 #[test]
-#[ignore = "caracterização O-1: reimportar grava alteração sem mudança em b3a171c; passa no passo 5.2"]
 fn o1_reimportar_nao_grava_alteracao_sem_mudanca() {
     let mut l = loja("o1-reimportar");
     let pasta = pasta_com_exemplo(&l, "xml");
