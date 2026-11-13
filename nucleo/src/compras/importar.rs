@@ -512,7 +512,11 @@ fn previa_do_lido(conn: &Connection, e: &Entrada, lido: &Lido) -> Resultado<Prev
             DecisaoForn::Pendencia { motivo, .. }
                 if !matches!(
                     *motivo,
-                    "gtin_ambiguo" | "fornecedor_ambiguo" | "conflito_gtin_fornecedor" | "peca_pelo_gtin"
+                    "gtin_ambiguo"
+                        | "fornecedor_ambiguo"
+                        | "conflito_gtin_fornecedor"
+                        | "peca_pelo_gtin"
+                        | "peca_desativada"
                 ) => {}
             DecisaoForn::Nada => {}
             _ => p.pecas_ja += 1,
@@ -1150,6 +1154,14 @@ fn barras_da_peca_nova(conn: &Connection, plano: &Plano, it: &ItemXml) -> Result
     })
 }
 
+/// N06 (a): a peça está desativada? (A peça do plano é nova, então ativa.)
+fn desativada(conn: &Connection, pid: &str) -> Resultado<bool> {
+    if pid.starts_with(PLANEJADO) {
+        return Ok(false);
+    }
+    Ok(matches!(nome_e_ativo(conn, pid)?, Some((_, false))))
+}
+
 /// Uma pessoa das notas: o documento e se a importação a cadastra.
 struct DecisaoPessoa {
     doc: String,
@@ -1377,6 +1389,22 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
                     break 'decisao pendencia("conflito_gtin_fornecedor", vec![pid_g.clone(), pid_f.clone()]);
                 }
             }
+            // N06 (a): a peça achada (pelo GTIN ou pelo vínculo) está desativada.
+            // Nada é ligado nem gravado nela, e nenhuma pendência fecha nela; o
+            // item vira pendência, com ela como candidata. Resolver segue o A07:
+            // reativar a peça ou escolher outra.
+            let achada = match (&gtin_busca, &forn_busca) {
+                (BuscaId::Unico(p), _) | (_, BuscaId::Unico(p)) => Some(p.clone()),
+                _ => None,
+            };
+            if let Some(pid) = achada {
+                if desativada(conn, &pid)? {
+                    if fornecedor_id.is_some() || e.fornecedores {
+                        break 'decisao pendencia("peca_desativada", vec![pid]);
+                    }
+                    break 'decisao DecisaoForn::Nada;
+                }
+            }
             // 2. GTIN exato e inequívoco tem prioridade.
             if let BuscaId::Unico(pid) = &gtin_busca {
                 // A03a (DP-11): sem "Peças do fornecedor", nada é gravado na
@@ -1415,6 +1443,10 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
                 }
                 if repetido {
                     if let Some(pid) = por_descricao.achar(conn, &plano, it)? {
+                        // N06 (a): a peça de mesma descrição está desativada.
+                        if desativada(conn, &pid)? {
+                            break 'decisao pendencia("peca_desativada", vec![pid]);
+                        }
                         let gtins_novos = plano_registrar(conn, &mut plano, &pid, &gtins_ficha)?;
                         break 'decisao DecisaoForn::MesmaDescricao { pid, gtins_novos };
                     }
@@ -1498,8 +1530,9 @@ pub struct Resumo {
     /// Peças que JÁ existiam e recebem GTIN novo ou o código do fornecedor (A03b).
     pub pecas_que_mudam: i64,
     pub exemplos_pecas_que_mudam: Vec<String>,
-    /// Peças desativadas que a importação acha (pelo GTIN ou pelo vínculo).
-    /// Só informação: a regra para elas é a decisão N06, ainda aberta.
+    /// Peças desativadas que a importação acha (pelo GTIN, pelo vínculo ou pela
+    /// descrição). N06 (a): nada é gravado nelas; os itens vão para pendências
+    /// (`peca_desativada`).
     pub pecas_desativadas: i64,
     pub exemplos_pecas_desativadas: Vec<String>,
 }
@@ -1624,24 +1657,25 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
         let (it, _) = i.item;
         let desc = texto::limpar(&it.descricao);
         match &i.decisao {
-            DecisaoForn::Pendencia { motivo, .. } => {
+            DecisaoForn::Pendencia { motivo, candidatos } => {
                 conta("forn.pendencia", desc);
+                if *motivo == "peca_desativada" {
+                    for c in candidatos {
+                        achada(c, &mut desativadas)?;
+                    }
+                }
                 let m = motivos.entry(motivo).or_default();
                 m.0 += 1;
                 if pendencia_aberta(conn, &i.chave.0, &i.chave.1, &it.descricao)? {
                     m.1 += 1;
                 }
             }
-            DecisaoForn::JaLigadoFecha { pid } => {
-                conta("forn.ja_ligado", String::new());
-                achada(pid, &mut desativadas)?;
-            }
+            DecisaoForn::JaLigadoFecha { .. } => conta("forn.ja_ligado", String::new()),
             DecisaoForn::PeloGtin { pid, ligar, gtins_novos } => {
                 conta(if *ligar { "forn.ja_pelo_gtin_liga" } else { "forn.ja_pelo_gtin" }, desc);
                 if *ligar || !gtins_novos.is_empty() {
                     muda(pid, &mut que_mudam);
                 }
-                achada(pid, &mut desativadas)?;
             }
             DecisaoForn::PeloVinculo { pid, gtins_novos, .. } => {
                 if gtins_novos.is_empty() {
@@ -1650,7 +1684,6 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
                     conta("forn.ja_pelo_vinculo_gtin_novo", desc);
                     muda(pid, &mut que_mudam);
                 }
-                achada(pid, &mut desativadas)?;
             }
             DecisaoForn::MesmaDescricao { pid, gtins_novos } => {
                 conta("forn.mesma_descricao", desc);
@@ -1823,6 +1856,7 @@ fn motivo_legivel(motivo: &str) -> &'static str {
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
         "codigo_ambiguo" => "Código original/equivalente corresponde a mais de uma peça",
         "codigo_de_outra_peca" => "O código desta nota da loja já é de uma peça com outra descrição",
+        "peca_desativada" => "A peça achada pelo GTIN ou pelo código está desativada: reative-a ou escolha outra",
         "peca_pelo_gtin" => {
             "O GTIN aponta para uma peça cadastrada; a importação não estava marcada para mexer em peças"
         }
@@ -2677,11 +2711,141 @@ mod testes {
                     ));
                 }
             }
-            if e.pecas_fornecedor && p.resumo.pecas_desativadas != 1 {
+            // N06 (a): a peça desativada achada pelo GTIN não ganha nada e vira
+            // pendência própria, com ela como candidata, em toda combinação.
+            if p.resumo.pecas_desativadas != 1 {
                 erros.push(format!("{n:04b}: a peça desativada achada pelo GTIN não foi anunciada"));
+            }
+            let i3 = existentes.iter().position(|x| *x == p3).unwrap();
+            let pend3 = conta(&format!(
+                "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente' AND motivo = 'peca_desativada' AND candidatos_json LIKE '%{p3}%'"
+            ));
+            if codigos_de(&p3) != antes_codigos[i3] || vinculos_de(&p3) != antes_vinculos[i3] || pend3 != 1 {
+                erros
+                    .push(format!("{n:04b}: N06: a peça desativada mudou ou ficou sem pendência ({pend3} pendências)"));
             }
         }
         assert!(erros.is_empty(), "{}", erros.join("\n"));
+    }
+
+    /// N06 (a), decisão do proprietário de 12/11: "Trazer cadastros" nunca usa
+    /// uma peça desativada como destino. Achada pelo GTIN, pelo vínculo do
+    /// fornecedor ou pela descrição (código repetido), ela não ganha vínculo
+    /// nem GTIN, e nenhuma pendência fecha nela; o item vira pendência
+    /// `peca_desativada`, com ela como candidata. Resolver segue o A07: ligar à
+    /// desativada é recusado; reativada, liga. A peça ativa não muda nada.
+    #[test]
+    fn n06_importacao_nao_usa_peca_desativada() {
+        const FORN: &str = "11222333000181";
+        let g1 = ean13(789_200_000_001);
+        let g2 = ean13(789_200_000_002);
+        let gtin =
+            |g: &str| vec![nfe_xml::GtinXml { codigo: g.into(), tipo: "comercial".into(), origem: "cEAN".into() }];
+        let item = |codigo: &str, descricao: &str, gtins: Vec<nfe_xml::GtinXml>| ItemXml {
+            codigo: codigo.into(),
+            descricao: descricao.into(),
+            gtins,
+            quantidade: 1000,
+            valor_produtos: 5000,
+            ..Default::default()
+        };
+        for ativa in [false, true] {
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            crate::faixas::comecar_loja(c).unwrap();
+            config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+            let em = Emitente { documento: FORN.into(), nome: "FORNECEDOR".into(), ..Default::default() };
+            let (fid, _) = crate::pessoas::garantir_pela_nota(c, d, &u, &em, false, "teste").unwrap();
+            let peca = |nome: &str, barras: &str| {
+                let mut f = produtos::ficha_nova(c).unwrap();
+                f.nome = nome.into();
+                f.codigo_barras = barras.into();
+                f.precos[0].preco = "10,00".into();
+                produtos::salvar(c, d, &u, &f).unwrap()
+            };
+            let pelo_gtin = peca("PECA PELO GTIN", &g1);
+            let pelo_vinculo = peca("PECA PELO VINCULO", "");
+            let pela_descricao = peca("PECA REPETIDA", "");
+            crate::catalogo::codigos::vincular_fornecedor(
+                c,
+                &fid,
+                "V1",
+                &pelo_vinculo,
+                1000,
+                crate::catalogo::codigos::JaLigado::Manter,
+            )
+            .unwrap();
+            if !ativa {
+                c.execute("UPDATE produto SET ativo = 0", []).unwrap();
+            }
+            let mut lido = Lido::default();
+            lido.fornecedores.insert(FORN.into(), (em.clone(), "2026-11-01".into()));
+            for it in [
+                item("G1", "PECA PELO GTIN", gtin(&g1)),
+                item("V1", "PECA PELO VINCULO", gtin(&g2)),
+                item("R1", "PECA REPETIDA", Vec::new()),
+                item("R1", "OUTRA COISA R1", Vec::new()),
+            ] {
+                lido.pecas_fornecedor
+                    .insert((FORN.into(), it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
+            }
+            let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+            let gtins_de = |pid: &str| {
+                conta(&format!("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = '{pid}'"))
+                    + conta(&format!("SELECT COUNT(*) FROM produto WHERE id = '{pid}' AND codigo_barras <> ''"))
+            };
+            let antes: Vec<i64> = [&pelo_gtin, &pelo_vinculo, &pela_descricao].iter().map(|p| gtins_de(p)).collect();
+            let e = Entrada { fornecedores: true, pecas_fornecedor: true, ..Default::default() };
+            let p = previa_do_lido(c, &e, &lido).unwrap();
+            gravar(c, d, &u, &e, &lido).unwrap();
+            let vinculos_de =
+                |pid: &str| conta(&format!("SELECT COUNT(*) FROM produto_fornecedor WHERE produto_id = '{pid}'"));
+            let pendencia_de = |pid: &str| {
+                conta(&format!(
+                    "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'
+                      AND motivo = 'peca_desativada' AND candidatos_json LIKE '%{pid}%'"
+                ))
+            };
+            if ativa {
+                // Como antes: o GTIN liga o G1, o V1 ganha o GTIN da nota, o R1
+                // repetido entra na peça de mesma descrição.
+                assert_eq!(vinculos_de(&pelo_gtin), 1, "o G1 liga pelo GTIN");
+                assert!(gtins_de(&pelo_vinculo) > antes[1], "o V1 ganha o GTIN");
+                assert_eq!(
+                    conta("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE motivo = 'peca_desativada'"),
+                    0
+                );
+                assert_eq!(p.resumo.pecas_desativadas, 0);
+                continue;
+            }
+            assert_eq!(vinculos_de(&pelo_gtin), 0, "o G1 não liga na desativada");
+            assert_eq!(gtins_de(&pelo_gtin), antes[0], "o G1 não grava GTIN na desativada");
+            assert_eq!(gtins_de(&pelo_vinculo), antes[1], "o V1 não grava GTIN na desativada");
+            assert_eq!(vinculos_de(&pelo_vinculo), 1, "o vínculo de antes fica como está");
+            assert_eq!(gtins_de(&pela_descricao), antes[2]);
+            for (nome, pid) in [("G1", &pelo_gtin), ("V1", &pelo_vinculo), ("R1", &pela_descricao)] {
+                assert_eq!(pendencia_de(pid), 1, "{nome}: a pendência peca_desativada com a peça candidata");
+            }
+            assert_eq!(p.resumo.pecas_desativadas, 3, "a prévia anuncia as 3");
+            let motivo = p.resumo.pendencias_por_motivo.iter().find(|m| m.motivo == "peca_desativada").unwrap();
+            assert_eq!(motivo.quantidade, 3);
+            assert!(motivo.texto.contains("desativada"), "{}", motivo.texto);
+
+            // Resolver segue o A07: ligar à desativada é recusado; reativada, liga.
+            let pend: String = c
+                .query_row(
+                    "SELECT id FROM xml_pendencia_identificacao WHERE codigo_fornecedor = 'G1' AND situacao = 'pendente'",
+                    [],
+                    |l| l.get(0),
+                )
+                .unwrap();
+            let pedido = ResolverPendencia { id: pend.clone(), acao: "ligar".into(), produto_id: pelo_gtin.clone() };
+            assert!(resolver_pendencia(c, d, &u, &pedido).is_err(), "ligar à desativada é recusado");
+            c.execute("UPDATE produto SET ativo = 1 WHERE id = ?1", [&pelo_gtin]).unwrap();
+            resolver_pendencia(c, d, &u, &pedido).unwrap();
+            assert_eq!(vinculos_de(&pelo_gtin), 1, "reativada, liga");
+        }
     }
 
     /// Fornecedor implícito (achado da preparação de 12/11): as 16 combinações

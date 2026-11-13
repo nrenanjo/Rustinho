@@ -362,6 +362,35 @@ fn gtins_ambiguos(itens: &[ItemXml]) -> HashSet<String> {
     vistos.into_iter().filter(|(_, d)| d.len() > 1).map(|(g, _)| g).collect()
 }
 
+/// N06-b (a): a entrada de compra não liga sozinha uma peça desativada (o
+/// estoque entraria numa peça que não aparece na busca nem na reposição). O
+/// item vira pendência `peca_desativada`, com a peça como candidata; resolver
+/// segue o A07 (reativar a peça ou escolher outra).
+fn ligar_se_ativa(conn: &Connection, pid: String, achado_por: &str, fator: i64) -> Resultado<LigacaoAutomatica> {
+    let ativa: bool = conn
+        .query_row("SELECT ativo FROM produto WHERE id = ?1", [&pid], |l| l.get::<_, i64>(0))
+        .optional()?
+        .is_some_and(|a| a != 0);
+    if !ativa {
+        return Ok(LigacaoAutomatica {
+            acao: String::new(),
+            produto_id: None,
+            achado_por: String::new(),
+            fator: 1000,
+            motivo_pendencia: "peca_desativada".into(),
+            candidatos: vec![pid],
+        });
+    }
+    Ok(LigacaoAutomatica {
+        acao: "ligar".into(),
+        produto_id: Some(pid),
+        achado_por: achado_por.into(),
+        fator,
+        motivo_pendencia: String::new(),
+        candidatos: Vec::new(),
+    })
+}
+
 struct LigacaoAutomatica {
     acao: String,
     produto_id: Option<String>,
@@ -422,26 +451,12 @@ fn ligar_sozinho(
 
     // Vínculo prévio do mesmo fornecedor (com o seu fator) quando concorda com o GTIN ou quando não há GTIN.
     if let Some((pid, fator)) = forn_ligado {
-        return Ok(LigacaoAutomatica {
-            acao: "ligar".into(),
-            produto_id: Some(pid),
-            achado_por: "fornecedor".into(),
-            fator,
-            motivo_pendencia: String::new(),
-            candidatos: Vec::new(),
-        });
+        return ligar_se_ativa(conn, pid, "fornecedor", fator);
     }
 
     // GTIN exato e inequívoco antes de qualquer outra forma.
     if let BuscaId::Unico(pid) = gtin_busca {
-        return Ok(LigacaoAutomatica {
-            acao: "ligar".into(),
-            produto_id: Some(pid),
-            achado_por: "barras".into(),
-            fator: 1000,
-            motivo_pendencia: String::new(),
-            candidatos: Vec::new(),
-        });
+        return ligar_se_ativa(conn, pid, "barras", 1000);
     }
 
     if ambiguo {
@@ -458,14 +473,7 @@ fn ligar_sozinho(
     if compacto.len() >= 3 {
         let mut candidatos_cod = crate::catalogo::codigos::candidatos_por_codigo_original(conn, &compacto)?;
         if candidatos_cod.len() == 1 {
-            return Ok(LigacaoAutomatica {
-                acao: "ligar".into(),
-                produto_id: Some(candidatos_cod.remove(0)),
-                achado_por: "codigo".into(),
-                fator: 1000,
-                motivo_pendencia: String::new(),
-                candidatos: Vec::new(),
-            });
+            return ligar_se_ativa(conn, candidatos_cod.remove(0), "codigo", 1000);
         } else if candidatos_cod.len() > 1 {
             return Ok(LigacaoAutomatica {
                 acao: String::new(),
@@ -2408,5 +2416,60 @@ mod testes {
         let a = aviso_cnpj(&b.conn, "99888777000100").unwrap();
         assert!(a.contains("não é da LOJA MODELO") && !a.contains("9988"), "{a}");
         assert_eq!(aviso_cnpj(&b.conn, "").unwrap(), "");
+    }
+
+    /// N06-b (a), decisão do proprietário de 12/11: a entrada de compra pelo
+    /// XML não liga sozinha uma peça desativada, achada pelo GTIN, pelo código
+    /// original ou pelo vínculo do fornecedor. O item fica sem peça (a compra
+    /// não lança assim) e vira pendência `peca_desativada`, com a peça como
+    /// candidata. A peça ativa continua ligando como antes.
+    #[test]
+    fn n06b_compra_nao_liga_sozinha_peca_desativada() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let rolamento = peca(&b, &u, "Rolamento roda traseira", "7891234567895", "32206", "50,00");
+        let pastilha = peca(&b, &u, "Pastilha dianteira Cobreq", "", "N-1100", "38,00");
+        c.execute("UPDATE produto SET ativo = 0", []).unwrap();
+
+        let id = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        let f = ficha(c, &id).unwrap();
+        assert_eq!(f.itens.len(), 3);
+        for i in 0..2 {
+            assert_eq!(f.itens[i].acao, "", "item {i} ligou sozinho numa peça desativada");
+        }
+        assert!(lancar(c, &b.dispositivo, &u, &id).is_err(), "a compra não lança com o item sem peça");
+        let pend = |pid: &str| -> i64 {
+            c.query_row(
+                "SELECT COUNT(*) FROM xml_pendencia_identificacao
+                  WHERE situacao = 'pendente' AND motivo = 'peca_desativada' AND candidatos_json LIKE ?1",
+                [format!("%{pid}%")],
+                |l| l.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(pend(&rolamento), 1, "pelo GTIN");
+        assert_eq!(pend(&pastilha), 1, "pelo código original");
+
+        // Pelo vínculo do fornecedor (sem GTIN na nota).
+        let fid: String = c.query_row("SELECT fornecedor_id FROM compra WHERE id = ?1", [&id], |l| l.get(0)).unwrap();
+        crate::catalogo::codigos::vincular_fornecedor(
+            c,
+            &fid,
+            "XYZ-1",
+            &rolamento,
+            1000,
+            crate::catalogo::codigos::JaLigado::Manter,
+        )
+        .unwrap();
+        let item = ItemXml { codigo: "XYZ-1".into(), descricao: "ROLAMENTO".into(), ..Default::default() };
+        let l = ligar_sozinho(c, &fid, &item, false, false).unwrap();
+        assert_eq!((l.acao.as_str(), l.motivo_pendencia.as_str()), ("", "peca_desativada"));
+        assert_eq!(l.candidatos, vec![rolamento.clone()]);
+
+        // Reativada, a mesma busca liga como antes.
+        c.execute("UPDATE produto SET ativo = 1 WHERE id = ?1", [&rolamento]).unwrap();
+        let l = ligar_sozinho(c, &fid, &item, false, false).unwrap();
+        assert_eq!((l.acao.as_str(), l.produto_id.as_deref()), ("ligar", Some(rolamento.as_str())));
+        assert_eq!(l.achado_por, "fornecedor");
     }
 }
