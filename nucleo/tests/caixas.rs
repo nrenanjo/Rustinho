@@ -821,8 +821,10 @@ fn g54_resposta_termina_no_fim_de_uma_operacao() {
     let inteiras = por_operacao(&tudo);
     assert_eq!(inteiras.len(), 2, "duas operações: {inteiras:?}");
     let primeira = tudo[0].operacao_id.clone().expect("a venda é uma operação");
-    // Espaço para a primeira venda e mais uma alteração da segunda.
-    let limite = inteiras[&primeira] as i64 + 1;
+    // Cada venda cabe numa resposta, mas as duas juntas não: a resposta tem
+    // espaço para a primeira venda e só para o começo da segunda.
+    let limite = *inteiras.values().max().unwrap() as i64;
+    assert!(limite > inteiras[&primeira] as i64 && limite < tudo.len() as i64, "{inteiras:?}");
     let (lista, mais) = sync::alteracoes_desde(&a.conn, antes, limite).unwrap();
     assert!(mais, "a segunda venda ainda não foi");
     let cortadas: Vec<_> = por_operacao(&lista).into_iter().filter(|(o, n)| inteiras[o] != *n).collect();
