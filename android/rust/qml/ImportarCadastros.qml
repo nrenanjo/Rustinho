@@ -666,7 +666,8 @@ Painel {
                                 }
                                 Text {
                                     text: cartaoPend.modelData.motivoTexto || ""
-                                    color: Tema.vermelho
+                                    // H04 (7.2): o vermelho da faixa (claro na faixa escura do roxo).
+                                    color: Tema.vermelhoDaFaixa(cartaoPend.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 12
                                     wrapMode: Text.WordWrap
