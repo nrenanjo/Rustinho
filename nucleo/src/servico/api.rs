@@ -591,6 +591,23 @@ impl Drop for Servico {
     }
 }
 
+/// A resposta de um comando para a tela: `{ok: true, dados}` ou `{ok: false,
+/// erro, campo}`.
+fn envelope(comando: &str, resultado: Resultado<Value>) -> Value {
+    match resultado {
+        Ok(valor) => json!({ "ok": true, "dados": valor }),
+        Err(erro) => {
+            // Só o comando e o erro técnico; os dados digitados não.
+            if matches!(erro, Erro::Interno(_) | Erro::Banco(_)) {
+                crate::registro::anotar(&format!("{comando}: {erro}"));
+            }
+            // G02 (dev.3.3): o erro do banco vai curto para a tela; o
+            // detalhe ficou no registro (acima).
+            json!({ "ok": false, "erro": erro.para_a_tela(), "campo": erro.nome_do_campo() })
+        }
+    }
+}
+
 impl Servico {
     /// Abre o banco no arquivo indicado. Um Rustinho só por banco (C-12):
     /// um segundo, aberto sem querer, é recusado (restaurar um backup com
@@ -712,16 +729,7 @@ impl Servico {
             outro => outro,
         };
         let resposta = match resultado {
-            Ok(Ok(valor)) => json!({ "ok": true, "dados": valor }),
-            Ok(Err(erro)) => {
-                // Só o comando e o erro técnico; os dados digitados não.
-                if matches!(erro, Erro::Interno(_) | Erro::Banco(_)) {
-                    crate::registro::anotar(&format!("{comando}: {erro}"));
-                }
-                // G02 (dev.3.3): o erro do banco vai curto para a tela; o
-                // detalhe ficou no registro (acima).
-                json!({ "ok": false, "erro": erro.para_a_tela(), "campo": erro.nome_do_campo() })
-            }
+            Ok(r) => envelope(comando, r),
             Err(_) => {
                 self.comprometido = true;
                 self.liberacoes.clear();
@@ -2224,13 +2232,17 @@ impl Acesso for Permissoes<'_> {
         if leitura && self.consulta_aberta(acao) {
             return Ok(());
         }
-        // "precos" tem campo próprio: a tela sabe que é o preço da peça que
-        // pede a senha.
-        Err(Erro::campo(
-            if acao == "precos" { "precos" } else { "gerente" },
-            format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
-        ))
+        Err(erro_so_do_gerente(acao))
     }
+}
+
+/// O erro de uma ação do gerente sem a senha. "precos" tem campo próprio: a
+/// tela sabe que é o preço da peça que pede a senha.
+fn erro_so_do_gerente(acao: &str) -> Erro {
+    Erro::campo(
+        if acao == "precos" { "precos" } else { "gerente" },
+        format!("Só o gerente pode: {}. Peça para o gerente digitar a senha.", nome_da_acao(acao)),
+    )
 }
 
 /// Ações que a loja liberou para todos (as outras são só do gerente).
