@@ -1108,6 +1108,52 @@ mod testes {
         }
     }
 
+    /// Protocolo 4, etapa 2 (checklist das migrações, item 6: restaurar um
+    /// backup antigo): um backup feito numa estrutura anterior à 0026 (a 25 e
+    /// a 24, dev.3.1 a dev.3.3) restaura num Rustinho com a 0026. O banco do
+    /// backup volta inteiro, é atualizado na hora (o registro de caixas nasce
+    /// vazio) e abre de novo sem cair no modo seguro.
+    #[test]
+    fn p4_backup_de_estrutura_anterior_restaura_e_atualiza_para_a_26() {
+        let _vez = crate::backup::testes::um_por_vez();
+        for estrutura in [25, 24] {
+            let pasta = std::env::temp_dir().join(format!("rustinho-p4-backup{estrutura}-{}", tempo::novo_id()));
+            let antigo = pasta.join("antigo").join("rustinho.db");
+            let atual = pasta.join("atual").join("rustinho.db");
+            std::fs::create_dir_all(antigo.parent().unwrap()).unwrap();
+            {
+                let mut c = Connection::open(&antigo).unwrap();
+                registrar_funcoes(&c).unwrap();
+                migrar_ate(&mut c, estrutura).unwrap();
+                c.execute_batch(
+                    "INSERT INTO config (chave, valor) VALUES ('dispositivo_id', 'caixa-do-backup'),
+                            ('loja_nome', 'Loja do backup 24'), ('loja_id', 'loja-24');
+                     INSERT INTO sync_par (dispositivo, nome, endereco, cursor)
+                     VALUES ('d2', 'Caixa 2', '10.0.0.2:47810', 7);",
+                )
+                .unwrap();
+            }
+            let feito = crate::backup::fazer(&antigo, false).unwrap();
+            let mut b = Banco::abrir(&atual).unwrap();
+            let info = crate::backup::restaurar(&mut b.conn, Some(&atual), &feito.arquivo, false, "").unwrap();
+            assert_eq!(info.estrutura as usize, estrutura, "o backup é da estrutura {estrutura}");
+            let versao: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+            assert_eq!(versao as usize, MIGRACOES.len(), "atualizado na restauração");
+            conferir_estrutura(&b.conn).unwrap();
+            assert_eq!(crate::config::nome_loja(&b.conn).unwrap(), "Loja do backup 24");
+            for t in ["caixa_aprovado", "caixa_retirado"] {
+                let n: i64 = b.conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |l| l.get(0)).unwrap();
+                assert_eq!(n, 0, "{t} nasce vazia");
+            }
+            drop(b);
+            let b = Banco::abrir(&atual).unwrap();
+            assert!(!b.em_modo_seguro(), "{:?}", b.defeito);
+            assert_eq!(crate::config::nome_loja(&b.conn).unwrap(), "Loja do backup 24");
+            drop(b);
+            std::fs::remove_dir_all(pasta).ok();
+        }
+    }
+
     // ------------------------------------------------------------------
     // Passo 7.5: a migração 0025 (índices e busca normalizada).
     // ------------------------------------------------------------------
