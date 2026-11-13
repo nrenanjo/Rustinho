@@ -414,6 +414,15 @@ fn t2_5_diagnostico() {
 /// faz (até `LOTE` = 2000 alterações numa transação). Enquanto isso o balcão
 /// vende 30 vezes. `RUSTINHO_DIAG_VENDAS_B`: quantas vendas o outro caixa fez
 /// (padrão 300). Imprime linhas `DIAG`.
+///
+/// Passo 5.4 (frente F54): também conta as respostas que terminaram no meio de
+/// uma operação comercial do outro caixa (até a resposta seguinte, este caixa
+/// mostra a venda pela metade) e o tamanho de cada operação.
+/// `RUSTINHO_DIAG_VENDAS_POR_OPERACAO`: quantas vendas de B vão numa
+/// transação só, uma operação (padrão 1); com 300, uma operação maior que a
+/// resposta. `RUSTINHO_DIAG_ITENS_VARIADOS=1`: a venda n de B tem 1 + n % 3
+/// itens (operações de tamanhos diferentes, como numa loja; sem isso, todas do
+/// mesmo tamanho, e um tamanho que divide a resposta nunca corta no meio).
 #[test]
 #[ignore = "só à mão: diagnóstico do t2_5 com um lote grande (frente F89)"]
 fn t2_5_lote_grande() {
@@ -423,6 +432,9 @@ fn t2_5_lote_grande() {
     // entre uma resposta e a próxima (a ida e volta pela rede).
     let tamanho: i64 = std::env::var("RUSTINHO_DIAG_LOTE").ok().and_then(|v| v.parse().ok()).unwrap_or(2000);
     let intervalo: u64 = std::env::var("RUSTINHO_DIAG_INTERVALO_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    let por_operacao: usize =
+        std::env::var("RUSTINHO_DIAG_VENDAS_POR_OPERACAO").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
+    let variados = std::env::var("RUSTINHO_DIAG_ITENS_VARIADOS").is_ok_and(|v| v == "1");
     let mut a = Loja::nova("t2-5-lote");
     rustinho_nucleo::registro::iniciar(&a.pasta);
     let p = a.peca("Lâmpada H4", "10", "25", "100000");
@@ -433,19 +445,28 @@ fn t2_5_lote_grande() {
     let ana = b.conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get::<_, String>(0)).unwrap();
     caixa::abrir(&b.conn, &b.dispositivo, &ana, "Caixa 2", "0").unwrap();
     let desde: i64 = b.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0)).unwrap();
-    for _ in 0..vendas_b {
-        let e = vendas::VendaEntrada {
-            itens: vec![vendas::ItemEntrada { produto_id: p.clone(), quantidade: "1".into(), ..Default::default() }],
-            tabela: 1,
-            pagamentos: vec![vendas::PagamentoEntrada {
-                forma: "dinheiro".into(),
-                valor: "25".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
+    for grupo in (0..vendas_b).collect::<Vec<_>>().chunks(por_operacao) {
         let tx = b.conn.transaction().unwrap();
-        vendas::concluir(&tx, &b.dispositivo, &ana, &e).unwrap();
+        for n in grupo {
+            let itens = if variados { 1 + n % 3 } else { 1 };
+            let e = vendas::VendaEntrada {
+                itens: (0..itens)
+                    .map(|_| vendas::ItemEntrada {
+                        produto_id: p.clone(),
+                        quantidade: "1".into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                tabela: 1,
+                pagamentos: vec![vendas::PagamentoEntrada {
+                    forma: "dinheiro".into(),
+                    valor: format!("{}", 25 * itens),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            vendas::concluir(&tx, &b.dispositivo, &ana, &e).unwrap();
+        }
         tx.commit().unwrap();
     }
     let mut lotes: Vec<Vec<sync::Alteracao>> = Vec::new();
@@ -462,6 +483,20 @@ fn t2_5_lote_grande() {
             break;
         }
     }
+    // Tamanho de cada operação de B (alterações por operação comercial), até
+    // a última alteração levada (o teto de 2000 não conta como corte).
+    let tamanho_da_operacao: std::collections::HashMap<String, usize> = {
+        let mut c = b
+            .conn
+            .prepare(
+                "SELECT operacao_id, COUNT(*) FROM alteracao WHERE seq > ?1 AND seq <= ?2 AND operacao_id IS NOT NULL
+                  GROUP BY 1",
+            )
+            .unwrap();
+        let l = c.query_map([desde, d], |l| Ok((l.get::<_, String>(0)?, l.get::<_, i64>(1)? as usize))).unwrap();
+        l.collect::<Result<_, _>>().unwrap()
+    };
+    let maior_operacao = tamanho_da_operacao.values().max().copied().unwrap_or(0);
     let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let sonda = {
         let (db, parar) = (a.db.clone(), parar.clone());
@@ -473,14 +508,28 @@ fn t2_5_lote_grande() {
         std::thread::sleep(Duration::from_millis(200));
         let t = Instant::now();
         let mut maior_lote = 0u128;
+        // Passo 5.4: depois de cada resposta, quantas operações de B ficaram
+        // pela metade aqui (até a resposta seguinte).
+        let mut chegou: std::collections::HashMap<String, usize> = Default::default();
+        let mut respostas_no_meio = 0usize;
+        let mut maior_resposta = 0usize;
         for lote in lotes {
             let u = Instant::now();
             sync::aplicar(&mut lado.conn, &lote).unwrap();
             maior_lote = maior_lote.max(u.elapsed().as_millis());
+            maior_resposta = maior_resposta.max(lote.len());
+            for x in &lote {
+                if let Some(o) = &x.operacao_id {
+                    *chegou.entry(o.clone()).or_default() += 1;
+                }
+            }
+            if chegou.iter().any(|(o, n)| tamanho_da_operacao.get(o).is_some_and(|t| n < t)) {
+                respostas_no_meio += 1;
+            }
             std::thread::sleep(Duration::from_millis(intervalo));
         }
         sync::verificar_depois(&lado.conn).unwrap();
-        (maior_lote, t.elapsed().as_millis())
+        (maior_lote, t.elapsed().as_millis(), respostas_no_meio, maior_resposta)
     });
     let mut falhas = 0;
     let mut maior = 0u128;
@@ -503,7 +552,7 @@ fn t2_5_lote_grande() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let (maior_lote_ms, tudo_ms) = tarefa.join().unwrap();
+    let (maior_lote_ms, tudo_ms, respostas_no_meio, maior_resposta) = tarefa.join().unwrap();
     // Nada pela metade: cada venda do balcão que deu certo está inteira, e a
     // que falhou não deixou nada.
     let feitas: i64 = a.numero(&format!(
@@ -519,7 +568,9 @@ fn t2_5_lote_grande() {
     println!(
         "DIAG lote tamanho={tamanho} lotes={n_lotes} alteracoes={total_b} maior_lote_ms={maior_lote_ms} tudo_ms={tudo_ms} \
          trava_presa_max_ms={preso_max} trava_presa_soma_ms={preso_soma} vendas_falhas={falhas} venda_max_ms={maior} \
-         vendas_do_balcao_gravadas={feitas}"
+         vendas_do_balcao_gravadas={feitas} vendas_por_operacao={por_operacao} itens_variados={variados} \
+         maior_operacao={maior_operacao} \
+         maior_resposta={maior_resposta} respostas_no_meio_de_operacao={respostas_no_meio}"
     );
     assert_eq!(feitas, 30 - falhas as i64, "venda pela metade");
     assert_eq!(falhas, 0, "vendas que falharam durante a troca");
