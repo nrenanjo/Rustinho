@@ -1189,4 +1189,63 @@ mod testes {
         cancelar(c, d, &u, &id, "cliente desistiu").unwrap();
         assert!(crate::vendas::os_para_venda(c, &id).is_err());
     }
+
+    /// E14 (passo 6.5), caracterização: a OS guarda o código e o nome da peça
+    /// no item (`ordem_servico_item.codigo` e `.descricao`, desde a 0008), mas a
+    /// ficha e a reimpressão recalculam pelo cadastro de HOJE. Uma OS antiga sai
+    /// com o nome novo da peça. O certo: mostrar o que foi gravado na OS.
+    #[test]
+    #[ignore = "caracterização do E14 (6.5): falha hoje pelo motivo certo"]
+    fn e14_os_antiga_mostra_o_nome_e_o_codigo_gravados() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        caixa::abrir(c, d, &u, "Caixa 1", "0").unwrap();
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "Pastilha Antiga".into();
+        f.custo = "40".into();
+        let pastilha = produtos::salvar(c, d, &u, &f).unwrap();
+        let mut p = pessoas::ficha_nova(c, "cliente").unwrap();
+        p.nome = "Carlos".into();
+        let cliente = pessoas::salvar(c, d, &u, &p).unwrap();
+        let e = Entrada {
+            cliente_id: cliente,
+            placa: "abc1d23".into(),
+            veiculo: "Gol G5 1.6".into(),
+            defeito: "Barulho ao frear".into(),
+            itens: vec![ItemEntradaOs {
+                tipo: "peca".into(),
+                produto_id: pastilha.clone(),
+                quantidade: "1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let id = salvar(c, d, &u, &e).unwrap();
+        let (codigo_gravado, nome_gravado): (String, String) = c
+            .query_row("SELECT codigo, descricao FROM ordem_servico_item WHERE ordem_id = ?1", [&id], |l| {
+                Ok((l.get(0)?, l.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(nome_gravado, "Pastilha Antiga");
+        // Depois, a peça muda de nome e de código no cadastro.
+        let mut f = produtos::ficha(c, &pastilha).unwrap();
+        f.nome = "Pastilha Nova".into();
+        f.codigo = "PAST-NOVA".into();
+        produtos::salvar(c, d, &u, &f).unwrap();
+        let o = ficha(c, &id).unwrap();
+        let item = &o.calculo.itens[0];
+        let impresso = crate::impressao::ordem_servico(c, &id).unwrap();
+        let mut erros = Vec::new();
+        if item.descricao != nome_gravado {
+            erros.push(format!("ficha: nome {:?}, gravado {:?}", item.descricao, nome_gravado));
+        }
+        if item.codigo != codigo_gravado {
+            erros.push(format!("ficha: código {:?}, gravado {:?}", item.codigo, codigo_gravado));
+        }
+        if !impresso.contains("Pastilha Antiga") || impresso.contains("Pastilha Nova") {
+            erros.push("a reimpressão mostra o nome de hoje, não o gravado".into());
+        }
+        assert!(erros.is_empty(), "{}", erros.join("\n"));
+    }
 }
