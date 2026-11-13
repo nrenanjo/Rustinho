@@ -971,6 +971,16 @@ mod comandos {
         let d: financeiro::CategoriaEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = financeiro::salvar_categoria(&tx, &d)?;
+        // E10 (6.5): a categoria salva (nova ou mudada) entra na auditoria.
+        crate::auditoria::registrar(
+            &tx,
+            p.disp,
+            Some(p.usuario_id),
+            if d.id.trim().is_empty() { "categoria.criar" } else { "categoria.alterar" },
+            "categoria",
+            &id,
+            &[format!("Categoria \"{}\" ({}){}", d.nome.trim(), d.tipo.trim(), if d.ativo { "" } else { ", inativa" })],
+        )?;
         tx.commit()?;
         Ok(json!(id))
     }

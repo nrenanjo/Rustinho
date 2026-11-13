@@ -1127,7 +1127,6 @@ fn a07_peca_desativada_tem_campo_proprio() {
 /// automática pela compra, reabrir fechamento de comissão) ficam para o pedido
 /// da 6.5, com o preparo próprio de cada um.
 #[test]
-#[ignore = "caracterização E10 (6.5): estas mudanças não entram na auditoria hoje"]
 fn e10_mudancas_sem_registro_na_auditoria() {
     let mut l = Loja::nova("e10");
     l.abrir_caixa();

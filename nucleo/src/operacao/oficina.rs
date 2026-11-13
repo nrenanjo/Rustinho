@@ -393,6 +393,20 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
                 agora
             ],
         )?;
+        // E10 (6.5): a alteração de uma OS já salva entra na auditoria (antes,
+        // só a criação). O rascunho que vira orçamento já registra "os.criar".
+        if situacao != "rascunho" {
+            let (_, numero) = situacao_de(conn, &id)?;
+            auditoria::registrar(
+                conn,
+                dispositivo,
+                Some(usuario_id),
+                "os.alterar",
+                "ordem_servico",
+                &id,
+                &[format!("OS {numero} alterada")],
+            )?;
+        }
         conn.execute("DELETE FROM ordem_servico_item WHERE ordem_id = ?1", [&id])?;
     }
     for (ordem, it) in c.itens.iter().enumerate() {
