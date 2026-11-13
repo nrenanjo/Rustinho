@@ -34,6 +34,11 @@ Rectangle {
             Rotulo {
                 text: faixa.titulo
                 color: faixa.corTitulo
+                // H21 (7.2): no celular, o título comprido quebra a linha em vez de
+                // alargar a faixa além da tela (no computador, igual a antes).
+                wrapMode: Tema.estreito ? Text.WordWrap : Text.NoWrap
+                Layout.fillWidth: Tema.estreito
+                Layout.preferredWidth: Tema.estreito ? 1 : -1
             }
             Nota {
                 visible: faixa.subtitulo !== ""

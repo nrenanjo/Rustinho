@@ -310,9 +310,10 @@ FocusScope {
 
                 ColumnLayout {
                     spacing: 14
-                    Layout.preferredWidth: Math.min(500, Math.max(420, corpo.width * 0.36))
-                    Layout.minimumWidth: 420
-                    Layout.maximumWidth: 500
+                    // H21 (7.2): no celular, sem largura mínima maior que a tela.
+                    Layout.preferredWidth: Tema.fino ? -1 : Math.min(500, Math.max(420, corpo.width * 0.36))
+                    Layout.minimumWidth: Tema.fino ? 0 : 420
+                    Layout.maximumWidth: Tema.fino ? Number.POSITIVE_INFINITY : 500
                     Layout.alignment: Qt.AlignTop
 
                     Faixa {
