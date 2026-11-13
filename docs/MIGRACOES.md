@@ -57,7 +57,7 @@ Um número publicado **nunca muda de conteúdo**.
 
 | Nº | Arquivo | Conteúdo | Observação |
 |---|---|---|---|
-| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada, preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
+| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada da peça e que não viaja, em `dados::esquema::COLUNAS`: quem recebe a peça a refaz; preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
 
 ## 3. A linha paralela dev.3: não é esta estrutura
 
