@@ -341,6 +341,35 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     vendas.join(" e ")
                 );
             }
+            "nota" => {
+                // G05 (passo 5.4): a mesma nota em mais de um caixa.
+                let mut c = conn.prepare(
+                    "SELECT c.numero, c.situacao, c.dispositivo, COALESCE(p.nome, '') FROM compra c
+                       LEFT JOIN pessoa p ON p.id = c.fornecedor_id
+                      WHERE c.id IN (SELECT value FROM json_each('[\"' || replace(?1, ',', '\",\"') || '\"]')) ORDER BY c.id",
+                )?;
+                let compras: Vec<(String, String, String, String)> = c
+                    .query_map([&perdeu], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
+                    .collect::<Result<_, _>>()?;
+                let mut onde = Vec::new();
+                for (_, situacao, dispositivo, _) in &compras {
+                    let como = match situacao.as_str() {
+                        "lancada" => "lançada",
+                        "rascunho" => "em rascunho",
+                        _ => "estornada",
+                    };
+                    let caixa = nome_do_caixa(conn, dispositivo)?;
+                    onde.push(format!("{como} no {}", if caixa.is_empty() { "outro caixa".into() } else { caixa }));
+                }
+                let (numero, fornecedor) = compras.first().map(|x| (x.0.clone(), x.3.clone())).unwrap_or_default();
+                k.o_que = "Nota de compra".into();
+                k.texto = format!(
+                    "A nota Nº {numero}{} (chave {chave}) entrou em mais de um caixa sem rede: {}. Se é a mesma compra, \
+                     estorne a que sobrou (ou descarte, se estiver em rascunho) em Compras.",
+                    if fornecedor.is_empty() { String::new() } else { format!(" de {fornecedor}") },
+                    onde.join(" e ")
+                );
+            }
             "pago_a_mais" | "vale_a_mais" => {
                 k.o_que = match tabela.as_str() {
                     "conta_receber" => "Parcela recebida a mais",

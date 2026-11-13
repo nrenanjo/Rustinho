@@ -713,6 +713,8 @@ pub fn reaplicar_pendencias(conn: &mut Connection) -> Resultado<usize> {
 /// sozinha mostra:
 /// - o mesmo orçamento virou venda em dois caixas sem rede (F-12): fica
 ///   anotado para o gerente cancelar a que sobrou;
+/// - a mesma nota (chave da NF-e) entrou em mais de um caixa sem rede (G05,
+///   passo 5.4): fica anotado para o gerente, do mesmo jeito;
 /// - a loja ficou sem gerente (cada caixa tirou um, sem ver o outro, C-06):
 ///   o usuário mais antigo (quem configurou a loja) volta a ser gerente.
 ///   Todos os caixas escolhem o mesmo, então o resultado é igual em todos.
@@ -745,6 +747,7 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
             )?;
         }
     }
+    detectar_nota_repetida(conn)?;
     // R-03: parcela recebida (ou conta paga) mais de uma vez e vale-troca usado
     // além do valor, por caixas sem rede.
     detectar_pago_a_mais(conn)?;
@@ -761,6 +764,47 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
              VALUES ('usuario', ?1, '', '', '', ?2, 'gerente')",
             params![id, tempo::agora()],
         )?;
+    }
+    Ok(())
+}
+
+/// G05 (passo 5.4): a mesma nota (chave da NF-e) em mais de uma compra não
+/// estornada. No mesmo caixa a segunda importação é recusada
+/// (`compras::importar_xml`); em caixas sem rede as duas entram, porque a
+/// 0003 tirou a unicidade do banco de propósito (para os caixas trabalharem
+/// sem rede). Vira um item para o gerente, como o orçamento vendido duas
+/// vezes (F-12): sem "usar a do outro caixa", e nada é estornado nem
+/// descartado sozinho. O gerente corrige pela tela de Compras (estornar a
+/// lançada que sobrou, descartar o rascunho), o que já fica no histórico. O
+/// mesmo conjunto de compras não volta a ser anotado; um conjunto novo (uma
+/// terceira compra com a mesma chave) vira um item novo.
+pub(super) fn detectar_nota_repetida(conn: &Connection) -> Resultado<()> {
+    let repetidas: Vec<(String, String)> = {
+        let mut c = conn.prepare(
+            "SELECT chave, group_concat(id, ',') FROM
+               (SELECT chave, id FROM compra WHERE chave <> '' AND situacao <> 'estornada' ORDER BY id)
+              GROUP BY chave HAVING COUNT(*) > 1",
+        )?;
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
+    for (chave, compras) in repetidas {
+        let ja: bool = conn
+            .query_row(
+                "SELECT 1 FROM sync_conflito WHERE tipo = 'nota' AND chave = ?1 AND perdeu = ?2",
+                params![chave, compras],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !ja {
+            let primeira = compras.split(',').next().unwrap_or_default().to_string();
+            conn.execute(
+                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+                 VALUES ('compra', ?1, ?2, ?3, '', ?4, 'nota')",
+                params![chave, primeira, compras, tempo::agora()],
+            )?;
+        }
     }
     Ok(())
 }
