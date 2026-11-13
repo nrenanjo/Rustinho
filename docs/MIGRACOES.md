@@ -51,6 +51,7 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0023 | `0023_rascunho_e_pendencias.sql` | rascunho da OS e pendências da troca de dados (0.9.15) | recria tabelas (`sem_chaves_estrangeiras`) |
 | 0024 | `0024_gtins_e_pendencias_xml.sql` | vários GTINs por peça e pendências de identificação do XML (0.9.18-dev.3.1) | **publicada**; a dev.3 paralela tem outra 0024 (§3) |
 | 0025 | `0025_caixas_aprovados.sql` | registro assinado de caixas aprovados e retirados (protocolo 4, etapa 2; era a 0024 da `frente-p4`) | **não publicada**; número provisório até entrar na branch (§5). **Não é a 0025 da dev.3** (`venda_cancelamento`, §3): a linhagem (§4) recusa o banco dev.3/25 |
+| 0026 | `0026_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01) | **não publicada**; número provisório até entrar na branch (§5). Era a 0025 da preparação `prod-f75`, renumerada na integração (MIG-1 (a): quem entra depois renumera) |
 
 Um número publicado **nunca muda de conteúdo**.
 
@@ -118,7 +119,7 @@ A reserva de 05/11 é substituída: ela previa uma 0024 para os caixas aprovados
 | M-B: decisão de identificação por chave natural | 5.3 | conforme DP-41/42 |
 | M-C: caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | **preparada** como `0025_caixas_aprovados.sql` (ramo de preparação `prod-p4`, 13/11) |
 | M-D: demais registros do protocolo 4 e da recuperação, se precisarem de banco | 5.5 | conforme DP-44 |
-| M-E: índices de desempenho (inclui o composto da 0006, com nome novo) | 7.5 | só índices; preparada também como 0025 (ramo `prod-f75`) |
+| M-E: índices de desempenho (inclui o composto da 0006, com nome novo) e o nome sem acento gravado | 7.5 | **preparada** como `0026_indices_e_busca_normalizada.sql` (no ramo `prod-f75` era a 0025; renumerada na integração, 13/11, porque a 0025 do protocolo 4 entrou antes) |
 | M-F: nome e código gravados no item da OS, se o item não os tiver | 6.5 | só se preciso |
 
 O número sai **no commit**, como o próximo livre (MIG-1 (a), `PLANO_MIGRACOES.md`): a tabela é de
@@ -159,6 +160,10 @@ e a 7.5 entrarem decide quem fica com a 0025.
 | `banco_na_estrutura_23_atualiza_para_a_atual` | trava | 0.9.15 a 0.9.17 atualizam |
 | `numeracao_das_migracoes_continua_e_igual_a_lista_do_banco` | trava | §6, item 1; a 0024 é a desta linha |
 | `nenhuma_migracao_reaproveita_nome` | trava | §6, itens 3 e 4 |
+| `b01_indice_composto_do_estoque_com_nome_novo` | trava (passo 7.5) | o índice `(produto_id, tipo, criado_em)` existe num banco novo e num atualizado |
+| `b01_parados_usa_o_indice_composto` | trava (passo 7.5) | o plano da conta dos parados usa o índice |
+| `banco::testes::m26_nao_muda_o_que_existia` | trava (passo 7.5) | §6, item 6: a 25 → 26 (e a 24 → 26) não muda as tabelas da loja nem grava no log da troca |
+| `banco::testes::m26_backup_de_estrutura_anterior_restaura_e_atualiza` | trava (passo 7.5) | §6, item 6: backup da estrutura 25 (e da 24) restaura e atualiza para a 26 |
 | `banco_dev3_estrutura24_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |
 | `banco_dev3_estrutura25_e_recusado_como_outra_linha` | trava (era caracterização até a 2.4) | §4 |
 | `banco_de_estrutura_desconhecida_e_recusado_sem_gravar` | trava (era caracterização até a 2.4) | §4 |

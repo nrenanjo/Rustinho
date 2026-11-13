@@ -114,6 +114,9 @@ fn migracoes() -> Vec<(usize, String, String)> {
 }
 
 fn aplicar(c: &Connection, sql: &str) {
+    // As funções do Rustinho (`normalizar`...), como em toda conexão do
+    // programa: a 0025 preenche o nome sem acento com ela.
+    rustinho_nucleo::banco::registrar_funcoes(c).unwrap();
     let sem = sql.starts_with(SEM_CHAVES_ESTRANGEIRAS);
     c.pragma_update(None, "foreign_keys", !sem).unwrap();
     c.pragma_update(None, "legacy_alter_table", sem).unwrap();
@@ -148,6 +151,24 @@ fn estrutura_esperada(ate: usize) -> Estrutura {
     let c = Connection::open_in_memory().unwrap();
     montar(&c, ate);
     estrutura(&c)
+}
+
+/// (tabela, único, colunas) de um índice que existe no banco.
+fn definicao_do_indice(c: &Connection, nome: &str) -> Option<(String, bool, Vec<String>)> {
+    let tabela: String = c
+        .query_row("SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?1", [nome], |l| l.get(0))
+        .ok()?;
+    let unico: bool = c
+        .query_row("SELECT \"unique\" FROM pragma_index_list(?1) WHERE name = ?2", [&tabela, nome], |l| l.get(0))
+        .unwrap();
+    let colunas: Vec<String> = c
+        .prepare("SELECT coalesce(name, '(expressão)') FROM pragma_index_info(?1) ORDER BY seqno")
+        .unwrap()
+        .query_map([nome], |l| l.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    Some((tabela, unico, colunas))
 }
 
 fn estrutura_de(db: &Path) -> Estrutura {
@@ -335,6 +356,59 @@ fn nenhuma_migracao_reaproveita_nome() {
         let k = (tipo.to_string(), nome.to_string());
         assert!(nossa.contains_key(&k) && dev3.contains_key(&k) && nossa[&k] != dev3[&k], "{tipo} {nome}");
     }
+}
+
+/// B01 (passo 7.5): o índice composto do estoque `(produto_id, tipo,
+/// criado_em)`, que a 0006 quis criar com um nome já usado, existe com o nome
+/// novo num banco novo e num banco que vem da estrutura anterior.
+#[test]
+fn b01_indice_composto_do_estoque_com_nome_novo() {
+    let n = versao_da_estrutura();
+    let esperado =
+        Some(("estoque_movimento".to_string(), false, vec!["produto_id".into(), "tipo".into(), "criado_em".into()]));
+    let c = Connection::open_in_memory().unwrap();
+    montar(&c, n);
+    assert_eq!(
+        definicao_do_indice(&c, "estoque_movimento_produto_tipo_data"),
+        esperado,
+        "banco montado pelas migrações"
+    );
+    let p = Pasta::nova("b01");
+    let db = p.0.join("rustinho.db");
+    montar(&Connection::open(&db).unwrap(), n - 1);
+    drop(Banco::abrir(&db).expect("a estrutura anterior abre e atualiza"));
+    let c = Connection::open(&db).unwrap();
+    assert_eq!(definicao_do_indice(&c, "estoque_movimento_produto_tipo_data"), esperado, "banco atualizado");
+}
+
+/// B01 (passo 7.5): a conta dos "parados" usa o índice composto para a última
+/// entrada de cada peça (`ue`: compras e estoque inicial). O texto da consulta
+/// é o de `nucleo/src/compras/reposicao.rs` (conferido abaixo: mudou lá, este
+/// teste avisa).
+#[test]
+fn b01_parados_usa_o_indice_composto() {
+    let fonte = std::fs::read_to_string(raiz_do_nucleo().join("src/compras/reposicao.rs")).unwrap();
+    let inicio = fonte.find("pub fn parados(").expect("reposicao::parados");
+    let de = inicio + fonte[inicio..].find("conn.prepare(\n        \"").unwrap() + "conn.prepare(\n        \"".len();
+    let ate = de + fonte[de..].find("\",\n    )?;").unwrap();
+    let sql = &fonte[de..ate];
+    assert!(
+        sql.contains("WHERE tipo IN ('compra', 'inicial') GROUP BY produto_id"),
+        "a consulta dos parados mudou: {sql}"
+    );
+    let b = Banco::em_memoria().unwrap();
+    let plano: Vec<String> = b
+        .conn
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .unwrap()
+        .query_map(["2026-01-01"], |l| l.get::<_, String>(3))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(
+        plano.iter().any(|l| l.contains("USING COVERING INDEX estoque_movimento_produto_tipo_data")),
+        "os parados não usam o índice composto: {plano:#?}"
+    );
 }
 
 // ------------------------------------- recusas (caracterizações até o passo 2.4)

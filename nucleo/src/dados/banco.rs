@@ -37,6 +37,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0023_rascunho_e_pendencias.sql"),
     include_str!("../migracoes/0024_gtins_e_pendencias_xml.sql"),
     include_str!("../migracoes/0025_caixas_aprovados.sql"),
+    include_str!("../migracoes/0026_indices_e_busca_normalizada.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -598,6 +599,19 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
             }
         }
     }
+    // 0026 (passo 7.5): os índices de desempenho.
+    if v >= 26 {
+        for indice in ["estoque_movimento_produto_tipo_data"] {
+            let tem: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [indice],
+                |l| l.get(0),
+            )?;
+            if !tem {
+                return Err(Erro::Interno(format!("falta o índice {indice}")));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -971,8 +985,9 @@ mod testes {
             assert_eq!(n, 1, "{t}.{col}");
         }
         // A 0.9.15 acrescentou a 0023 e a 0.9.18 acrescentou a 0024; a
-        // dev.3.3, a 0025 (registro de caixas do protocolo 4, etapa 2).
-        assert_eq!(MIGRACOES.len(), 25);
+        // dev.3.3, a 0025 (registro de caixas do protocolo 4, etapa 2) e a 0026
+        // (passo 7.5: índices e busca). Números provisórios (MIG-1 (a)).
+        assert_eq!(MIGRACOES.len(), 26);
     }
 
     /// Protocolo 4, etapa 2: a migração 24 → 25 só cria o registro de caixas
@@ -1096,5 +1111,186 @@ mod testes {
         assert_eq!(crate::config::nome_loja(&b.conn).unwrap(), "Loja do backup 24");
         drop(b);
         std::fs::remove_dir_all(pasta).ok();
+    }
+
+    // ------------------------------------------------------------------
+    // Passo 7.5: a migração 0026 (índices e busca normalizada). Na preparação
+    // ela era a 0025; na integração a 0025 é a do protocolo 4, e os testes
+    // valem a partir da 25 (a estrutura de antes) e da 24 (a das lojas hoje).
+    // ------------------------------------------------------------------
+
+    /// Uma loja numa estrutura anterior à 0026 (`estrutura`: a 25, de antes
+    /// desta migração, ou a 24, a das lojas de hoje, dev.3.1 a dev.3.3): loja,
+    /// caixa, a gerente Ana (senha 1234) com a chave do backup, a troca de dados
+    /// ligada (os gatilhos e o log), e peças com acento e maiúsculas, com estoque.
+    fn loja_antiga(pasta: &Path, estrutura: usize) -> PathBuf {
+        let db = pasta.join("rustinho.db");
+        let mut c = Connection::open(&db).unwrap();
+        c.pragma_update(None, "journal_mode", "WAL").unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, estrutura).unwrap();
+        crate::config::gravar(&c, "dispositivo_id", "caixa-v24").unwrap();
+        crate::config::gravar(&c, "loja_nome", "Loja v24").unwrap();
+        crate::config::gravar(&c, "caixa_nome", "Caixa 1").unwrap();
+        crate::sync::criar_gatilhos(&c).unwrap();
+        crate::config::gravar(&c, "sync_inicio", "2026-11-01T00:00:00Z").unwrap();
+        let u = crate::usuarios::criar(&c, "caixa-v24", "Ana", "1234", true).unwrap();
+        crate::usuarios::definir_gerente(&c, &u.id, true).unwrap();
+        crate::backup::gerente_conferido(&c, &u.id, "1234", None).unwrap();
+        for (i, nome) in ["Óleo 5W30 sintético", "ÁGUA destilada", "pastilha FRAS-LE", "Correia 8PK 1515", "Ácido"]
+            .iter()
+            .enumerate()
+        {
+            c.execute(
+                "INSERT INTO produto (id, codigo, nome, busca, codigos, custo, criado_em, atualizado_em, dispositivo)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1000, '2026-10-01T10:00:00Z', '2026-10-01T10:00:00Z', 'caixa-v24')",
+                rusqlite::params![
+                    format!("p{i}"),
+                    format!("{}", 100 + i),
+                    nome,
+                    crate::texto::normalizar(nome),
+                    format!(" {} ", 100 + i)
+                ],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, dispositivo, criado_em)
+                 VALUES (?1, ?2, 5000, 'inicial', 'caixa-v24', '2026-10-01T10:00:00Z')",
+                [format!("m{i}"), format!("p{i}")],
+            )
+            .unwrap();
+        }
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+        db
+    }
+
+    /// As tabelas da loja que a 0026 não pode mudar, com as colunas que elas
+    /// têm antes dela: tabela → linhas (em ordem de rowid, como texto).
+    const TABELAS_DA_LOJA: &[&str] =
+        &["produto", "produto_preco", "estoque_movimento", "produto_gtin", "usuario", "pessoa", "alteracao"];
+
+    fn conteudo(c: &Connection, colunas: &BTreeMap<String, Vec<String>>) -> BTreeMap<String, Vec<String>> {
+        colunas
+            .iter()
+            .map(|(t, cols)| {
+                let lista = cols.iter().map(|x| format!("quote(\"{x}\")")).collect::<Vec<_>>().join(" || '|' || ");
+                let linhas: Vec<String> = c
+                    .prepare(&format!("SELECT {lista} FROM \"{t}\" ORDER BY rowid"))
+                    .unwrap()
+                    .query_map([], |l| l.get(0))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                (t.clone(), linhas)
+            })
+            .collect()
+    }
+
+    fn colunas_de(c: &Connection) -> BTreeMap<String, Vec<String>> {
+        TABELAS_DA_LOJA
+            .iter()
+            .map(|t| {
+                let cols: Vec<String> = c
+                    .prepare(&format!("SELECT name FROM pragma_table_info('{t}') ORDER BY cid"))
+                    .unwrap()
+                    .query_map([], |l| l.get(0))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                (t.to_string(), cols)
+            })
+            .collect()
+    }
+
+    fn pasta_75(nome: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("rustinho-m26-{nome}-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Passo 7.5: a migração 0026 não muda nada do que existia. Um banco na
+    /// estrutura 25 (e um na 24, a das lojas de hoje, que passa pela 0025 do
+    /// protocolo 4 e pela 0026) abre pelo caminho de sempre (cópia conferida e
+    /// atualização), sem modo seguro; as tabelas da loja ficam com os mesmos
+    /// registros e os mesmos valores nas colunas que já existiam; e o log da
+    /// troca de dados não ganha nada (o que a 0026 grava não é alteração da
+    /// loja e não vai para os outros caixas).
+    #[test]
+    fn m26_nao_muda_o_que_existia() {
+        for estrutura in [25, 24] {
+            let pasta = pasta_75(&format!("igual{estrutura}"));
+            let db = loja_antiga(&pasta, estrutura);
+            let (colunas, antes) = {
+                let c = Connection::open(&db).unwrap();
+                let colunas = colunas_de(&c);
+                let antes = conteudo(&c, &colunas);
+                (colunas, antes)
+            };
+            assert!(antes["alteracao"].len() > 5, "a loja de teste tem log da troca");
+            let b = Banco::abrir(&db).unwrap();
+            assert!(!b.em_modo_seguro(), "{:?}", b.defeito);
+            let v: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+            assert_eq!(v, 26, "da estrutura {estrutura}");
+            conferir_estrutura(&b.conn).unwrap();
+            let depois = conteudo(&b.conn, &colunas);
+            for t in TABELAS_DA_LOJA {
+                assert_eq!(antes[*t], depois[*t], "a tabela {t} mudou com a 0026 (da estrutura {estrutura})");
+            }
+            drop(b);
+            let _ = std::fs::remove_dir_all(&pasta);
+        }
+    }
+
+    /// Repete enquanto outro teste estiver fazendo backup (a vez é uma só no
+    /// programa inteiro, como na tela).
+    fn na_vez<T>(mut f: impl FnMut() -> Resultado<T>) -> T {
+        for _ in 0..1200 {
+            match f() {
+                Err(e) if e.to_string().contains("em andamento") => {
+                    std::thread::sleep(std::time::Duration::from_millis(50))
+                }
+                r => return r.unwrap(),
+            }
+        }
+        panic!("o backup ficou ocupado por um minuto")
+    }
+
+    /// Passo 7.5: um backup feito numa estrutura anterior à 0026 (a 25 e a 24)
+    /// restaura num Rustinho com a 0026: o banco do backup volta inteiro e é
+    /// atualizado para a 26 pelo caminho da restauração, sem gravar nada no
+    /// log da troca de dados.
+    #[test]
+    fn m26_backup_de_estrutura_anterior_restaura_e_atualiza() {
+        let _vez = crate::backup::testes::um_por_vez();
+        for estrutura in [25, 24] {
+            let pasta = pasta_75(&format!("backup{estrutura}"));
+            let db = loja_antiga(&pasta, estrutura);
+            let (colunas, antes) = {
+                let c = Connection::open(&db).unwrap();
+                let colunas = colunas_de(&c);
+                (colunas.clone(), conteudo(&c, &colunas))
+            };
+            let feito = na_vez(|| crate::backup::fazer(&db, false));
+            let mut b = Banco::abrir(&db).unwrap();
+            // Depois do backup e da atualização, a loja muda.
+            b.conn.execute("UPDATE produto SET nome = 'Outro nome' WHERE id = 'p0'", []).unwrap();
+            b.conn.execute("DELETE FROM estoque_movimento WHERE id = 'm1'", []).unwrap();
+            let info = na_vez(|| crate::backup::restaurar(&mut b.conn, Some(&db), &feito.arquivo, false, "1234"));
+            assert_eq!(info.estrutura as usize, estrutura, "o backup é da estrutura {estrutura}");
+            let v: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+            assert_eq!(v, 26);
+            conferir_estrutura(&b.conn).unwrap();
+            let depois = conteudo(&b.conn, &colunas);
+            for t in ["produto", "produto_preco", "estoque_movimento", "produto_gtin", "pessoa"] {
+                assert_eq!(antes[t], depois[t], "a tabela {t} não voltou igual ao backup da estrutura {estrutura}");
+            }
+            let do_log = |c: &[String]| {
+                c.iter().filter(|l| l.contains("'produto'") || l.contains("'estoque_movimento'")).count()
+            };
+            assert_eq!(do_log(&antes["alteracao"]), do_log(&depois["alteracao"]), "o log da troca ganhou registros");
+            drop(b);
+            let _ = std::fs::remove_dir_all(&pasta);
+        }
     }
 }
