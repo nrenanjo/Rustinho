@@ -1297,55 +1297,40 @@ fn nome_tabela(tabelas: &[config::TabelaPreco], numero: i64) -> String {
     format!("Preço {nome}")
 }
 
-/// Texto de busca da peça: nome primeiro (para a ordenação), depois o resto.
+/// Texto de busca da peça (o índice é do `catalogo::codigos`, passo 5.2).
 fn texto_busca(d: &Dados) -> (String, String) {
-    let mut partes: Vec<String> = vec![
-        d.nome.clone(),
-        d.marca.clone(),
-        d.codigo.clone(),
-        d.codigo_barras.clone(),
-        d.codigo_original.clone(),
-        d.categoria.clone(),
-        d.local.clone(),
-        d.variacao.clone(),
-        d.observacoes.clone(),
-    ];
-    for g in &d.gtins {
-        partes.push(g.gtin.clone());
-    }
-    for a in &d.aplicacoes {
-        partes.push(a.montadora.clone());
-        for s in texto::sinonimos_montadora(&texto::normalizar(&a.montadora)) {
-            partes.push(s.to_string());
-        }
-        partes.push(a.modelo.clone());
-        partes.push(a.motor.clone());
-        partes.push(a.observacao.clone());
-    }
-    for q in &d.equivalentes {
-        partes.push(q.marca.clone());
-        partes.push(q.codigo.clone());
-    }
-    let mut codigos: Vec<String> = Vec::new();
-    for c in [&d.codigo, &d.codigo_barras, &d.codigo_original]
-        .into_iter()
-        .chain(d.gtins.iter().map(|g| &g.gtin))
-        .chain(d.equivalentes.iter().map(|q| &q.codigo))
-    {
-        let compacto = texto::compactar(c);
-        if !compacto.is_empty() && !codigos.contains(&compacto) {
-            codigos.push(compacto);
-        }
-    }
-    let busca = format!("{} {}", texto::normalizar(&partes.join(" ")), codigos.join(" "));
-    (busca.trim().to_string(), format!(" {} ", codigos.join(" ")))
+    crate::catalogo::codigos::indice(&crate::catalogo::codigos::TextoDaPeca {
+        nome: d.nome.clone(),
+        marca: d.marca.clone(),
+        codigo: d.codigo.clone(),
+        codigo_barras: d.codigo_barras.clone(),
+        codigo_original: d.codigo_original.clone(),
+        categoria: d.categoria.clone(),
+        local: d.local.clone(),
+        variacao: d.variacao.clone(),
+        observacoes: d.observacoes.clone(),
+        gtins: d.gtins.iter().map(|g| g.gtin.clone()).collect(),
+        aplicacoes: d
+            .aplicacoes
+            .iter()
+            .map(|a| crate::catalogo::codigos::CarroDoIndice {
+                montadora: a.montadora.clone(),
+                modelo: a.modelo.clone(),
+                motor: a.motor.clone(),
+                observacao: a.observacao.clone(),
+            })
+            .collect(),
+        equivalentes: d.equivalentes.iter().map(|q| (q.marca.clone(), q.codigo.clone())).collect(),
+    })
 }
 
 /// Atualiza `produto.busca` e `produto.codigos` de uma peça após adicionar
 /// GTINs ou alterar vínculos externos.
 pub fn atualizar_indice_busca(conn: &Connection, produto_id: &str) -> Resultado<()> {
-    let dados = carregar(conn, produto_id)?;
-    crate::catalogo::codigos::gravar_indice(conn, produto_id, &texto_busca(&dados))
+    if !crate::catalogo::codigos::refazer_indice(conn, produto_id)? {
+        return Err(Erro::NaoEncontrado("Peça".into()));
+    }
+    Ok(())
 }
 
 /// Registra os GTINs / códigos de barras vindos do XML (`cEAN`, `cEANTrib`,
