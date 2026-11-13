@@ -502,16 +502,30 @@ fn codigos_de_fora(conn: &Connection, termos: &[Termo]) -> Resultado<CodigosDeFo
     }
     let condicao: Vec<String> = (1..=padroes.len()).map(|i| format!("codigo_compacto LIKE ?{i}")).collect();
     let condicao = condicao.join(" OR ");
-    let condicao_gtin: Vec<String> = (1..=padroes.len()).map(|i| format!("lower(gtin) LIKE ?{i}")).collect();
-    let condicao_gtin = condicao_gtin.join(" OR ");
+    // PEND-39 (7.5): o GTIN por igualdade exata, pelo índice `produto_gtin_codigo`,
+    // e não mais `lower(gtin) LIKE '%…%'`, que lia todos os GTINs do cadastro a
+    // cada busca. O GTIN da peça também está no texto de busca e nos códigos dela
+    // (`produtos::texto_busca`), por onde o pedaço de um GTIN continua achando a
+    // peça. Os termos vão em minúsculas (como o `compactar` deixa) e em
+    // maiúsculas (o código de barras próprio, `cBarra`, pode ter letras).
+    let n = padroes.len() + 1;
     let sql = format!(
         "SELECT produto_id, codigo_compacto FROM produto_fornecedor WHERE {condicao}
           UNION ALL
          SELECT produto_id, codigo_compacto FROM produto_codigo_antigo WHERE {condicao}
           UNION ALL
-         SELECT produto_id, lower(gtin) FROM produto_gtin WHERE {condicao_gtin}"
+         SELECT produto_id, lower(gtin) FROM produto_gtin WHERE gtin IN (SELECT value FROM json_each(?{n}))"
     );
-    let valores: Vec<String> = padroes.iter().map(|p| format!("%{p}%")).collect();
+    let mut gtins: Vec<String> = Vec::new();
+    for t in termos.iter().filter(|t| !t.compacto.is_empty()) {
+        for g in [t.compacto.clone(), t.compacto.to_uppercase()] {
+            if !gtins.contains(&g) {
+                gtins.push(g);
+            }
+        }
+    }
+    let mut valores: Vec<String> = padroes.iter().map(|p| format!("%{p}%")).collect();
+    valores.push(serde_json::to_string(&gtins)?);
     let mut c = conn.prepare_cached(&sql)?;
     let mut por_peca: HashMap<String, Vec<String>> = HashMap::new();
     let mut por_termo: Vec<Vec<String>> = vec![Vec::new(); termos.len()];
@@ -1741,6 +1755,13 @@ mod testes_75 {
         n
     }
 
+    fn ean13(serie: u64) -> String {
+        let base = format!("789{:09}", serie % 1_000_000_000);
+        let soma: u32 =
+            base.chars().enumerate().map(|(i, c)| c.to_digit(10).unwrap() * if i % 2 == 0 { 1 } else { 3 }).sum();
+        format!("{base}{}", (10 - soma % 10) % 10)
+    }
+
     /// B04 + PEND-39: a lista sem busca (a tela de Peças ao abrir e a cada
     /// parte da rolagem) não chama a função `normalizar` do Rustinho para cada
     /// peça: o desempate é pela coluna gravada, com índice. Em `b3a171c` ela
@@ -1801,6 +1822,36 @@ mod testes_75 {
         f.nome = "ÁGUA Desmineralizada".into();
         produtos::salvar(&l.b.conn, &l.b.dispositivo, &l.u, &f).unwrap();
         assert_eq!(gravado(&l.b.conn).1, "agua desmineralizada");
+    }
+
+    /// PEND-39 (GTIN exato): procurar um código não lê a tabela inteira dos
+    /// GTINs (`lower(gtin) LIKE '%…%'`, uma chamada de `lower` por GTIN do
+    /// cadastro em `b3a171c`): o GTIN é procurado por igualdade, pelo índice.
+    /// O GTIN inteiro e o pedaço do meio continuam achando a peça.
+    #[test]
+    fn pend39_gtin_exato_sem_ler_todos_os_gtins() {
+        let l = Loja::nova();
+        let mut ids = Vec::new();
+        for i in 0..300u64 {
+            ids.push(l.peca(|f| {
+                f.nome = format!("Peça com GTIN {i:03}");
+                f.gtins.push(produtos::GtinFicha {
+                    gtin: ean13(500_000 + i),
+                    tipo: "comercial".into(),
+                    origem: "cEAN".into(),
+                });
+            }));
+        }
+        let alvo = ean13(500_150);
+        let chamadas = contar_chamadas(&l.b.conn, "lower");
+        let r = buscar(&l.b.conn, &alvo, false, 50).unwrap();
+        let lower = chamadas.load(Ordering::Relaxed);
+        assert_eq!(r.first().map(|p| p.id.as_str()), Some(ids[150].as_str()));
+        assert!(r[0].codigo_exato);
+        assert_eq!((r[0].achou.as_str(), r[0].codigo_achado.as_str()), ("Cód. barras", alvo.as_str()));
+        let pedaco: String = alvo.chars().skip(4).take(7).collect();
+        assert!(buscar(&l.b.conn, &pedaco, false, 50).unwrap().iter().any(|p| p.id == ids[150]));
+        assert!(lower < 20, "a busca leu os {} GTINs do cadastro com lower() ({lower} chamadas)", ids.len());
     }
 
     /// N04 (caracterização, passava antes): a lista lida em partes, como a
