@@ -24,9 +24,12 @@ FocusScope {
     property int total: 0
     property bool temMais: false
     readonly property int tamanhoParte: 100
-    // Quantas linhas o núcleo já mandou nesta busca (é o deslocamento da
-    // próxima parte) e os ids que já estão na lista.
+    // Onde a próxima parte começa (as `lidas` e a chave da última linha,
+    // `continuar`, que o núcleo devolve com cada parte: R-2, a parte seguinte
+    // vem depois da última linha vista, e não pelo deslocamento) e os ids que
+    // já estão na lista.
     property int lidas: 0
+    property string continuar: ""
     property var vistas: ({})
     property int diferentes: 0
     property bool carregando: false
@@ -50,10 +53,11 @@ FocusScope {
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < pecas.count
                          ? pecas.get(lista.currentIndex).id : ""
         const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
-        const r = parte(0, Math.min(ate, 1000))
+        const r = parte(0, Math.min(ate, 1000), "")
         if (r.ok) {
             pecas.clear()
             lidas = 0
+            continuar = ""
             vistas = {}
             diferentes = 0
             total = r.dados.total || 0
@@ -80,13 +84,14 @@ FocusScope {
         buscou = true
     }
 
-    // Uma parte da lista, a partir de `desde` (na ordem da lista inteira).
-    function parte(desde, quantas) {
+    // Uma parte da lista, depois das que já vieram (na ordem da lista inteira).
+    function parte(desde, quantas, depois) {
         return Api.chamar("produtos_buscar", {
             texto: busca.texto,
             inativas: inativas.checked,
             limite: quantas,
-            deslocamento: desde
+            deslocamento: desde,
+            continuar: depois
         })
     }
 
@@ -99,7 +104,8 @@ FocusScope {
                 novas.push(p)
             }
         }
-        lidas += chegaram.length
+        lidas = dados.lidas || 0
+        continuar = dados.continuar || ""
         diferentes += novas.length
         if (novas.length > 0)
             pecas.append(novas)
@@ -111,7 +117,7 @@ FocusScope {
         if (!temMais || carregando)
             return false
         carregando = true
-        const r = parte(lidas, quantas || tamanhoParte)
+        const r = parte(lidas, quantas || tamanhoParte, continuar)
         if (r.ok)
             acrescentar(r.dados)
         else {
