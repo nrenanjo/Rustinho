@@ -643,8 +643,13 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
         }
     }
 
-    // Etapa 2: os fornecedores que faltam.
+    // Etapa 2: os fornecedores que faltam; FI-2: quem já existe e passa a ser
+    // fornecedor (a mesma função da compra: "Passou a ser fornecedor").
     for p in &d.fornecedores {
+        if p.vira_fornecedor {
+            let (pessoa, _) = &lido.fornecedores[&p.doc];
+            pessoas::garantir_pela_nota(conn, dispositivo, usuario_id, pessoa, false, "")?;
+        }
         if let Some(plano) = &p.nova {
             let (pessoa, _) = &lido.fornecedores[&p.doc];
             let (id, _) = pessoas::garantir_pela_nota(
@@ -1154,6 +1159,10 @@ fn barras_da_peca_nova(conn: &Connection, plano: &Plano, it: &ItemXml) -> Result
     })
 }
 
+/// FI-1 (a): o texto quando "Peças do fornecedor" vem sem "Fornecedores".
+const PECAS_EXIGEM_FORNECEDORES: &str = "\"Peças do fornecedor\" precisa de \"Fornecedores\" marcada: as peças ficam \
+     ligadas ao fornecedor, e ele só é cadastrado com a opção dele.";
+
 /// N06 (a): a peça está desativada? (A peça do plano é nova, então ativa.)
 fn desativada(conn: &Connection, pid: &str) -> Resultado<bool> {
     if pid.starts_with(PLANEJADO) {
@@ -1162,11 +1171,27 @@ fn desativada(conn: &Connection, pid: &str) -> Resultado<bool> {
     Ok(matches!(nome_e_ativo(conn, pid)?, Some((_, false))))
 }
 
+/// FI-2: a pessoa já é fornecedora? A do plano foi cadastrada como cliente
+/// nesta importação (etapa 1), então ainda não é.
+fn plano_e_fornecedor(conn: &Connection, id: &str) -> Resultado<bool> {
+    if id.starts_with(PLANEJADO) {
+        return Ok(false);
+    }
+    Ok(conn
+        .query_row("SELECT fornecedor FROM pessoa WHERE id = ?1", [id], |l| l.get::<_, i64>(0))
+        .optional()?
+        .is_some_and(|f| f != 0))
+}
+
 /// Uma pessoa das notas: o documento e se a importação a cadastra.
 struct DecisaoPessoa {
     doc: String,
     /// Id do plano quando a importação a cadastra.
     nova: Option<String>,
+    /// FI-2 (a): a pessoa já cadastrada (ou que esta importação cadastra como
+    /// cliente) que ainda não é fornecedora e passa a ser, com "Fornecedores"
+    /// marcada, como a entrada de compra pelo XML faz.
+    vira_fornecedor: bool,
 }
 
 /// O que acontece com uma peça das notas da loja.
@@ -1246,6 +1271,12 @@ struct Decisoes<'a> {
 
 /// Decide tudo, sem gravar. É a mesma função para a prévia e para a importação.
 fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Decisoes<'a>> {
+    // FI-1 (a): "Peças do fornecedor" exige "Fornecedores". As peças ficam
+    // ligadas ao fornecedor, que tem de estar marcado para ser cadastrado:
+    // nenhum fornecedor entra sem a opção dele (nada implícito).
+    if e.pecas_fornecedor && !e.fornecedores {
+        return Err(Erro::campo("fornecedores", PECAS_EXIGEM_FORNECEDORES));
+    }
     let mut plano = Plano::default();
     let mut d = Decisoes {
         opcoes: opcoes_de(e),
@@ -1262,27 +1293,29 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
     for doc in lista {
         let nova =
             if e.clientes && plano_pessoa(conn, &plano, doc)?.is_none() { Some(plano.nova_pessoa(doc)) } else { None };
-        d.clientes.push(DecisaoPessoa { doc: doc.clone(), nova });
+        d.clientes.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor: false });
     }
 
-    // Etapa 2: fornecedores (cadastrados também com "Peças do fornecedor": FI-1).
+    // Etapa 2: fornecedores (só com "Fornecedores"; FI-1). FI-2: a pessoa que
+    // já existe e não é fornecedora passa a ser.
     let mut ids_fornecedor: HashMap<String, String> = HashMap::new();
     let mut lista: Vec<_> = lido.fornecedores.keys().collect();
     lista.sort();
     for doc in lista {
-        let nova = match plano_pessoa(conn, &plano, doc)? {
+        let (nova, vira_fornecedor) = match plano_pessoa(conn, &plano, doc)? {
             Some(id) => {
+                let vira = e.fornecedores && !plano_e_fornecedor(conn, &id)?;
                 ids_fornecedor.insert(doc.clone(), id);
-                None
+                (None, vira)
             }
-            None if e.fornecedores || e.pecas_fornecedor => {
+            None if e.fornecedores => {
                 let id = plano.nova_pessoa(doc);
                 ids_fornecedor.insert(doc.clone(), id.clone());
-                Some(id)
+                (Some(id), false)
             }
-            None => None,
+            None => (None, false),
         };
-        d.fornecedores.push(DecisaoPessoa { doc: doc.clone(), nova });
+        d.fornecedores.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor });
     }
 
     // Etapa 3: peças das notas da loja.
@@ -1543,8 +1576,8 @@ const CATEGORIAS: &[(&str, &str)] = &[
     ("cliente.ja", "Clientes já cadastrados"),
     ("cliente.nao_cadastrado", "Clientes que não entram (opção desmarcada)"),
     ("fornecedor.novo", "Fornecedores novos"),
-    ("fornecedor.novo_implicito", "Fornecedores novos que entram porque \"Peças do fornecedor\" está marcada"),
     ("fornecedor.ja", "Fornecedores já cadastrados"),
+    ("fornecedor.ja_sem_papel", "Já cadastrados (como cliente) que passam a ser fornecedores"),
     ("fornecedor.nao_cadastrado", "Fornecedores que não entram (opções desmarcadas)"),
     ("loja.nova", "Peças novas (notas da loja)"),
     ("loja.ja", "Peças da loja já cadastradas (nada muda)"),
@@ -1607,8 +1640,8 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
     for p in &d.fornecedores {
         let (em, _) = &lido.fornecedores[&p.doc];
         match &p.nova {
-            Some(_) if d.opcoes.fornecedores => conta("fornecedor.novo", nome_pessoa(em)),
-            Some(_) => conta("fornecedor.novo_implicito", nome_pessoa(em)),
+            Some(_) => conta("fornecedor.novo", nome_pessoa(em)),
+            None if p.vira_fornecedor => conta("fornecedor.ja_sem_papel", nome_pessoa(em)),
             None if d.ids_fornecedor.contains_key(&p.doc) => conta("fornecedor.ja", String::new()),
             None => conta("fornecedor.nao_cadastrado", nome_pessoa(em)),
         }
@@ -2506,6 +2539,10 @@ mod testes {
     fn o3_previa_igual_ao_resultado() {
         let f1 = cnpj("112223330001");
         let f2 = cnpj("998887770001");
+        // FI-2: f3 já é cliente (só cliente) e vende para a loja; f4 aparece
+        // nas notas da loja (cliente) e nas de compra (fornecedor), sem cadastro.
+        let f3 = cnpj("554443330001");
+        let f4 = cnpj("776665550001");
         let cliente = "52998224725";
         let (g1, g2, g2b, g3, g4, g5, g6) = (
             ean13(789_100_000_001),
@@ -2527,14 +2564,18 @@ mod testes {
             ..Default::default()
         };
         let mut lido = Lido::default();
-        lido.clientes.insert(
-            cliente.into(),
-            (
-                Emitente { documento: cliente.into(), nome: "CLIENTE NOVO".into(), ..Default::default() },
-                "2026-11-01".into(),
-            ),
-        );
-        for (doc, nome) in [(&f1, "FORNECEDOR UM"), (&f2, "FORNECEDOR NOVO")] {
+        for (doc, nome) in [(cliente.to_string(), "CLIENTE NOVO"), (f4.clone(), "CLIENTE QUE TAMBEM VENDE")] {
+            lido.clientes.insert(
+                doc.clone(),
+                (Emitente { documento: doc, nome: nome.into(), ..Default::default() }, "2026-11-01".into()),
+            );
+        }
+        for (doc, nome) in [
+            (&f1, "FORNECEDOR UM"),
+            (&f2, "FORNECEDOR NOVO"),
+            (&f3, "CLIENTE ANTIGO QUE VENDE"),
+            (&f4, "CLIENTE QUE TAMBEM VENDE"),
+        ] {
             lido.fornecedores.insert(
                 doc.clone(),
                 (Emitente { documento: doc.clone(), nome: nome.into(), ..Default::default() }, "2026-11-01".into()),
@@ -2556,8 +2597,14 @@ mod testes {
             lido.pecas_fornecedor
                 .insert((f1.clone(), it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
         }
-        let n1 = item("N1", "PECA DO FORNECEDOR NOVO", Vec::new());
-        lido.pecas_fornecedor.insert((f2.clone(), "N1".into(), descricao_chave(&n1)), (n1, "2026-11-01".into()));
+        for (doc, it) in [
+            (&f2, item("N1", "PECA DO FORNECEDOR NOVO", Vec::new())),
+            (&f3, item("N3", "PECA DO CLIENTE ANTIGO", Vec::new())),
+            (&f4, item("N4", "PECA DO CLIENTE NOVO", Vec::new())),
+        ] {
+            lido.pecas_fornecedor
+                .insert((doc.clone(), it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
+        }
         for it in [item("LJ1", "OUTRA COISA NA LOJA", Vec::new()), item("LJ2", "PECA LOJA NOVA", gtin(&g6))] {
             lido.pecas_loja.insert((it.codigo.clone(), descricao_chave(&it)), (it, "2026-11-01".into()));
         }
@@ -2578,6 +2625,8 @@ mod testes {
             config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
             let em = Emitente { documento: f1.clone(), nome: "FORNECEDOR UM".into(), ..Default::default() };
             let (fid, _) = crate::pessoas::garantir_pela_nota(c, d, &u, &em, false, "teste").unwrap();
+            let em3 = Emitente { documento: f3.clone(), nome: "CLIENTE ANTIGO QUE VENDE".into(), ..Default::default() };
+            crate::pessoas::garantir_pela_nota(c, d, &u, &em3, true, "teste").unwrap();
             let peca = |nome: &str, barras: &str, codigo: &str| {
                 let mut f = produtos::ficha_nova(c).unwrap();
                 f.nome = nome.into();
@@ -2644,6 +2693,24 @@ mod testes {
             c.pragma_update(None, "query_only", true).unwrap();
             let p = previa_do_lido(c, &e, &lido);
             c.pragma_update(None, "query_only", false).unwrap();
+            // FI-1 (a): sem "Fornecedores", "Peças do fornecedor" é recusada, na
+            // prévia e na importação, com a mesma mensagem, sem gravar nada.
+            if e.pecas_fornecedor && !e.fornecedores {
+                let ep = p.err().map(|x| x.to_string()).unwrap_or_default();
+                let ei = gravar(c, d, &u, &e, &lido).err().map(|x| x.to_string()).unwrap_or_default();
+                let nada = antes
+                    == (
+                        conta("SELECT COUNT(*) FROM produto"),
+                        conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                        conta("SELECT COUNT(*) FROM pessoa WHERE cliente = 1"),
+                        conta("SELECT COUNT(*) FROM pessoa WHERE fornecedor = 1"),
+                        conta("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"),
+                    );
+                if !ep.contains("Fornecedores") || ep != ei || !nada {
+                    erros.push(format!("{n:04b}: FI-1: prévia {ep:?}, importação {ei:?}, nada gravado: {nada}"));
+                }
+                continue;
+            }
             let p = p.unwrap_or_else(|x| panic!("a prévia falhou (gravou?) com {n:04b}: {x}"));
             let r = gravar(c, d, &u, &e, &lido).unwrap();
             let cat =
@@ -2660,7 +2727,7 @@ mod testes {
                 cat("loja.nova") + cat("forn.nova") + cat("forn.nova_codigo_repetido"),
                 cat("forn.nova") + cat("forn.ja_pelo_gtin_liga"),
                 cat("cliente.novo"),
-                cat("fornecedor.novo") + cat("fornecedor.novo_implicito"),
+                cat("fornecedor.novo") + cat("fornecedor.ja_sem_papel"),
                 p.resumo.vao_para_pendencias - abertas,
             );
             let feito =
@@ -2723,6 +2790,22 @@ mod testes {
             if codigos_de(&p3) != antes_codigos[i3] || vinculos_de(&p3) != antes_vinculos[i3] || pend3 != 1 {
                 erros
                     .push(format!("{n:04b}: N06: a peça desativada mudou ou ficou sem pendência ({pend3} pendências)"));
+            }
+            // FI-2 (a): com "Fornecedores", quem já era só cliente (f3) passa a
+            // fornecedor, com a auditoria da compra; o f4, cadastrado como
+            // cliente nesta importação, também.
+            let e_forn =
+                |doc: &str| conta(&format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{doc}' AND fornecedor = 1"));
+            let passou = conta("SELECT COUNT(*) FROM auditoria WHERE acao = 'pessoa.alterar' AND detalhes LIKE '%Passou a ser fornecedor%'");
+            let esperado_f4 = e.fornecedores as i64;
+            if e_forn(&f3) != e.fornecedores as i64 || e_forn(&f4) != esperado_f4 {
+                erros.push(format!("{n:04b}: FI-2: f3 fornecedor {}, f4 fornecedor {}", e_forn(&f3), e_forn(&f4)));
+            }
+            let esperado_passou = e.fornecedores as i64 * (1 + e.clientes as i64);
+            if passou != esperado_passou {
+                erros.push(format!(
+                    "{n:04b}: FI-2: {passou} \"Passou a ser fornecedor\" na auditoria, esperado {esperado_passou}"
+                ));
             }
         }
         assert!(erros.is_empty(), "{}", erros.join("\n"));
@@ -2848,14 +2931,13 @@ mod testes {
         }
     }
 
-    /// Fornecedor implícito (achado da preparação de 12/11): as 16 combinações
-    /// das opções, num lote com um cliente novo, uma peça nova da loja e um
-    /// fornecedor novo com uma peça nova. É o RETRATO DE HOJE: "Peças do
-    /// fornecedor" cadastra o fornecedor mesmo com "Fornecedores" desmarcada
-    /// (`importar_fornecedores`). A regra é do proprietário (decisão FI); quando
-    /// ela vier, muda só a linha do fornecedor aqui, no mesmo commit da mudança.
+    /// FI-1 (a), decisão do proprietário de 12/11: as 16 combinações das opções,
+    /// num lote com um cliente novo, uma peça nova da loja e um fornecedor novo
+    /// com uma peça nova. "Peças do fornecedor" sem "Fornecedores" é recusada
+    /// (antes cadastrava o fornecedor em silêncio); nas outras, o fornecedor só
+    /// entra com "Fornecedores".
     #[test]
-    fn fi_as_16_combinacoes_das_opcoes_retrato_de_hoje() {
+    fn fi1_as_16_combinacoes_das_opcoes() {
         const FORN: &str = "11222333000181";
         const CLIENTE: &str = "52998224725";
         let mut erros = Vec::new();
@@ -2885,8 +2967,19 @@ mod testes {
                 .insert((FORN.into(), "F-200".into(), descricao_chave(&ifo)), (ifo, "2026-11-01".into()));
             let e =
                 Entrada { clientes: cl, fornecedores: fo, pecas_loja: lj, pecas_fornecedor: pf, ..Default::default() };
-            gravar(c, d, &u, &e, &lido).unwrap();
+            let gravou = gravar(c, d, &u, &e, &lido);
             let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+            if pf && !fo {
+                let nada = conta("SELECT COUNT(*) FROM pessoa") + conta("SELECT COUNT(*) FROM produto") == 0;
+                if !matches!(&gravou, Err(x) if x.to_string().contains("Fornecedores")) || !nada {
+                    erros.push(format!(
+                        "opções c{} f0 l{} p1: não foi recusada ({gravou:?}) ou gravou",
+                        cl as u8, lj as u8
+                    ));
+                }
+                continue;
+            }
+            gravou.unwrap();
             let obtido = (
                 conta("SELECT COUNT(*) FROM pessoa WHERE cliente = 1"),
                 conta("SELECT COUNT(*) FROM pessoa WHERE fornecedor = 1"),
@@ -2896,7 +2989,7 @@ mod testes {
             );
             let esperado = (
                 cl as i64,
-                (fo || pf) as i64, // ← o implícito: "Peças do fornecedor" cadastra o fornecedor
+                fo as i64, // FI-1 (a): só com "Fornecedores" (e "Peças do fornecedor" exige a opção)
                 lj as i64 + pf as i64,
                 pf as i64,
                 (fo && !pf) as i64,
