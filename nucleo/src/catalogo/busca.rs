@@ -805,6 +805,16 @@ fn montar(
     let mut fornecedores_por_peca = fornecedores_das_pecas(conn, &ids)?;
 
     let parece_codigo = compacto.len() >= 3 && compacto.chars().any(|c| c.is_ascii_digit());
+    // PEND-39 (7.5): os códigos do balão (GTINs, similares e antigos) de todas as
+    // peças da parte que podem mostrar o balão, numa leitura só (antes eram três
+    // consultas por peça).
+    let com_balao: Vec<&str> = escolhidas
+        .iter()
+        .filter(|(a, _)| (parece_codigo || a.por_codigo_de_fora) && a.tem_balao)
+        .map(|(a, _)| a.id.as_str())
+        .collect();
+    let mut codigos_do_balao = codigos_do_balao(conn, &com_balao)?;
+    let sem_codigos = CodigosDoBalao::default();
     let mut resultado = Vec::with_capacity(escolhidas.len());
     for (a, carros) in escolhidas {
         let Some((mut item, codigo_barras, esperando)) = detalhes.remove(&a.id) else { continue };
@@ -816,8 +826,16 @@ fn montar(
         let mut fornecedor_achado: Option<(String, String)> = None;
         if (parece_codigo || a.por_codigo_de_fora) && a.tem_balao {
             let de_fora: Vec<&Termo> = a.termos_de_fora.iter().filter_map(|i| termos.get(*i)).collect();
-            let (achou, codigo_achado, forn) =
-                achou_por(conn, &item, &codigo_barras, &fornecedores, compacto, termos, &de_fora)?;
+            let codigos = codigos_do_balao.remove(&a.id);
+            let (achou, codigo_achado, forn) = achou_por(
+                &item,
+                &codigo_barras,
+                &fornecedores,
+                codigos.as_ref().unwrap_or(&sem_codigos),
+                compacto,
+                termos,
+                &de_fora,
+            );
             item.achou = achou;
             item.codigo_achado = codigo_achado;
             fornecedor_achado = forn;
@@ -870,19 +888,65 @@ fn fornecedores_das_pecas(conn: &Connection, ids: &[&str]) -> Resultado<HashMap<
     Ok(por_peca)
 }
 
+/// Os códigos de uma peça que o balão confere, além dos da própria linha e dos
+/// fornecedores: os GTINs (na ordem da ficha), os similares (código compacto,
+/// código e marca) e os códigos antigos (compacto e código).
+#[derive(Default)]
+struct CodigosDoBalao {
+    gtins: Vec<String>,
+    similares: Vec<(String, String, String)>,
+    antigos: Vec<(String, String)>,
+}
+
+/// PEND-39 (7.5): os códigos do balão de várias peças, numa leitura por tipo
+/// (na mesma ordem das consultas por peça de antes: GTIN por ordem e rowid;
+/// similar por ordem; antigo pela ordem em que foi guardado).
+fn codigos_do_balao(conn: &Connection, ids: &[&str]) -> Resultado<HashMap<String, CodigosDoBalao>> {
+    let mut por_peca: HashMap<String, CodigosDoBalao> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(por_peca);
+    }
+    let lista = serde_json::to_string(ids)?;
+    let mut c = conn.prepare_cached(
+        "SELECT produto_id, gtin FROM produto_gtin WHERE produto_id IN (SELECT value FROM json_each(?1))
+          ORDER BY produto_id, ordem, rowid",
+    )?;
+    for linha in c.query_map([&lista], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
+        let (id, gtin) = linha?;
+        por_peca.entry(id).or_default().gtins.push(gtin);
+    }
+    let mut c = conn.prepare_cached(
+        "SELECT produto_id, codigo_compacto, codigo, marca FROM produto_equivalente
+          WHERE produto_id IN (SELECT value FROM json_each(?1)) ORDER BY produto_id, ordem, rowid",
+    )?;
+    for linha in c.query_map([&lista], |l| Ok((l.get::<_, String>(0)?, (l.get(1)?, l.get(2)?, l.get(3)?))))? {
+        let (id, similar) = linha?;
+        por_peca.entry(id).or_default().similares.push(similar);
+    }
+    let mut c = conn.prepare_cached(
+        "SELECT produto_id, codigo_compacto, codigo FROM produto_codigo_antigo
+          WHERE produto_id IN (SELECT value FROM json_each(?1)) ORDER BY produto_id, rowid",
+    )?;
+    for linha in c.query_map([&lista], |l| Ok((l.get::<_, String>(0)?, (l.get(1)?, l.get(2)?))))? {
+        let (id, antigo) = linha?;
+        por_peca.entry(id).or_default().antigos.push(antigo);
+    }
+    Ok(por_peca)
+}
+
 /// Por qual código a peça foi achada, para o balão: o código igual ao
 /// digitado; senão, o que começa com o digitado; senão, o que tem todos os
 /// termos ("01 TCF" → "TCF-01"); senão, o código de fornecedor ou antigo que
 /// tem um termo que não está no resto da peça ("terminal tcf").
 fn achou_por(
-    conn: &Connection,
     item: &ProdutoResumo,
     codigo_barras: &str,
     fornecedores: &[FornecedorResumo],
+    codigos: &CodigosDoBalao,
     compacto: &str,
     termos: &[Termo],
     termos_de_fora: &[&Termo],
-) -> Resultado<(String, String, Option<(String, String)>)> {
+) -> (String, String, Option<(String, String)>) {
     struct Candidato {
         compacto: String,
         rotulo: String,
@@ -909,29 +973,25 @@ fn achou_por(
             fornecedor: None,
         },
     ];
-    let mut c_gtin =
-        conn.prepare_cached("SELECT gtin FROM produto_gtin WHERE produto_id = ?1 ORDER BY ordem, rowid")?;
-    for linha in c_gtin.query_map([&item.id], |l| l.get::<_, String>(0))? {
-        let g = linha?;
-        let comp = texto::compactar(&g);
+    for g in &codigos.gtins {
+        let comp = texto::compactar(g);
         if !comp.is_empty() && !candidatos.iter().any(|x| x.compacto == comp && x.rotulo == "Cód. barras") {
             candidatos.push(Candidato {
                 compacto: comp,
                 rotulo: "Cód. barras".to_string(),
-                codigo_exibido: g,
+                codigo_exibido: g.clone(),
                 fornecedor: None,
             });
         }
     }
-    let mut c = conn.prepare_cached(
-        "SELECT codigo_compacto, codigo, marca FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem",
-    )?;
-    for linha in
-        c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?)))?
-    {
-        let (comp, codigo, marca) = linha?;
+    for (comp, codigo, marca) in &codigos.similares {
         let nome = if marca.trim().is_empty() { "Similar".to_string() } else { format!("Similar · {}", marca.trim()) };
-        candidatos.push(Candidato { compacto: comp, rotulo: nome, codigo_exibido: codigo, fornecedor: None });
+        candidatos.push(Candidato {
+            compacto: comp.clone(),
+            rotulo: nome,
+            codigo_exibido: codigo.clone(),
+            fornecedor: None,
+        });
     }
     for f in fornecedores {
         candidatos.push(Candidato {
@@ -941,14 +1001,11 @@ fn achou_por(
             fornecedor: Some((f.codigo.clone(), f.curto.clone())),
         });
     }
-    let mut c =
-        conn.prepare_cached("SELECT codigo_compacto, codigo FROM produto_codigo_antigo WHERE produto_id = ?1")?;
-    for linha in c.query_map([&item.id], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
-        let (comp, codigo) = linha?;
+    for (comp, codigo) in &codigos.antigos {
         candidatos.push(Candidato {
-            compacto: comp,
+            compacto: comp.clone(),
             rotulo: "Cód. antigo".to_string(),
-            codigo_exibido: codigo,
+            codigo_exibido: codigo.clone(),
             fornecedor: None,
         });
     }
@@ -958,10 +1015,10 @@ fn achou_por(
     let todos = || validos().find(|cand| !termos.is_empty() && termos.iter().all(|t| t.no_codigo(&cand.compacto)));
     let de_fora = || validos().find(|cand| termos_de_fora.iter().any(|t| cand.compacto.contains(t.compacto.as_str())));
     let achado = igual.or_else(comeca).or_else(todos).or_else(de_fora);
-    Ok(match achado {
+    match achado {
         Some(cand) => (cand.rotulo.clone(), cand.codigo_exibido.clone(), cand.fornecedor.clone()),
         None => (String::new(), String::new(), None),
-    })
+    }
 }
 
 /// A peça serve no ano buscado? O ano tem que ser do carro certo: em
@@ -1759,6 +1816,7 @@ mod testes_75 {
 
     use rusqlite::functions::FunctionFlags;
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use rusqlite::StatementStatus;
 
     use super::*;
     use crate::banco::Banco;
@@ -1959,6 +2017,35 @@ mod testes_75 {
         assert_eq!(buscar_pagina(&b.conn, "", true, 10, 0).unwrap().total, 21);
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// PEND-39 (uma leitura só): o balão de cada peça achada por código
+    /// (GTINs, similares e códigos antigos) é montado com uma leitura para
+    /// todas as peças da parte, não com três consultas por peça.
+    #[test]
+    fn pend39_codigos_do_balao_numa_leitura_so() {
+        let l = Loja::nova();
+        for i in 0..120 {
+            l.peca(|f| {
+                f.nome = format!("Válvula {i:03}");
+                f.codigo_original = format!("ZX-{i:04}");
+            });
+        }
+        let por_peca = [
+            "SELECT gtin FROM produto_gtin WHERE produto_id = ?1 ORDER BY ordem, rowid",
+            "SELECT codigo_compacto, codigo, marca FROM produto_equivalente WHERE produto_id = ?1 ORDER BY ordem",
+            "SELECT codigo_compacto, codigo FROM produto_codigo_antigo WHERE produto_id = ?1",
+        ];
+        let rodadas = |c: &Connection| -> Vec<i32> {
+            por_peca.iter().map(|sql| c.prepare_cached(sql).unwrap().get_status(StatementStatus::Run)).collect()
+        };
+        let antes = rodadas(&l.b.conn);
+        let r = buscar(&l.b.conn, "zx0", false, 50).unwrap();
+        let depois = rodadas(&l.b.conn);
+        assert_eq!(r.len(), 50);
+        assert!(r.iter().all(|p| p.achou == "Cód. original" && p.codigo_achado.starts_with("ZX-0")), "{:?}", r[0]);
+        let por_vez: Vec<i32> = depois.iter().zip(&antes).map(|(d, a)| d - a).collect();
+        assert!(por_vez.iter().all(|n| *n <= 1), "consultas por peça para o balão (50 peças): {por_vez:?}");
     }
 
     /// N04 (caracterização, passava antes): a lista lida em partes, como a
