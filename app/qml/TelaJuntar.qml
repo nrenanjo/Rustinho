@@ -28,9 +28,21 @@ FocusScope {
     }
     // A seta e o Esc fazem o mesmo: desistem e voltam às boas-vindas (o
     // botão "Voltar" saiu na correção definitiva do botão de retorno,
-    // 07/11/2026).
+    // 07/11/2026). H24 (DP-28, diretriz §7: confirmar o irreversível): se já
+    // chegou algum dado da loja, os dois perguntam antes (desistir apaga daqui
+    // o que chegou); sem dado chegado, desistem direto, como antes. O estado é
+    // lido na hora (pode ter chegado depois da última leitura); sem conseguir
+    // ler, pergunta.
     function aoEsc(daSeta) {
-        desistir()
+        const r = Api.chamar("sync_ler")
+        if (r.ok && !r.dados.chegouDado) {
+            desistir()
+            return
+        }
+        tela.janela.confirmar("Desistir de juntar este caixa?",
+                              "Parte dos dados da loja já chegou a este " + Tema.aparelho
+                              + ". Se desistir, o que chegou é apagado daqui; no outro caixa nada muda.",
+                              "Desistir", () => tela.desistir(), "perigo")
     }
 
     // Aberta de novo no meio de uma tentativa (o programa fechou): continua

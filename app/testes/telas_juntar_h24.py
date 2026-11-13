@@ -57,12 +57,7 @@ import telas_unidades as u  # noqa: E402  (traz o ambiente neutro e o Rustinho c
 base, tema = u.base, u.tema
 TELA = u.TELA
 
-ESPERADAS = {
-    "J3": "H24 (a seta desiste sem perguntar com dado chegado), passo 7.2",
-    "J4": "H24 (sem a pergunta, não há o que fechar), passo 7.2",
-    "J5": "H24 (o Esc desiste sem perguntar com dado chegado), passo 7.2",
-    "J6": "H24 (sem a pergunta, não há o \"Desistir\"), passo 7.2",
-}
+ESPERADAS = {}  # J3–J6 (H24) saíram com a correção do passo 7.2
 PERGUNTA = "Desistir de juntar este caixa?"
 TITULO_JUNTAR = "Juntar este caixa"
 SENHA_DA_REDE = "rede-da-loja-teste"
