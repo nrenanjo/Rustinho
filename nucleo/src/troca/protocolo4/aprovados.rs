@@ -837,3 +837,263 @@ mod testes {
         assert_eq!(gatilhos, 0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Juntar linhas vindas de fora (preparação da 5.5: comum a todas as
+// alternativas da A5; usada pela replicação das etapas 4 e 7 e pela
+// restauração de backup da etapa 6). Ninguém chama ainda.
+// ---------------------------------------------------------------------------
+
+/// O registro de uma loja como está gravado (linha fora do formato fica de
+/// fora), para mandar a outro caixa ou guardar antes de restaurar um backup.
+/// Nada aqui diz quem está autorizado: isso é sempre [`avaliar`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Linhas {
+    pub aprovacoes: Vec<Aprovacao>,
+    pub retiradas: Vec<Retirada>,
+}
+
+/// As linhas do registro da loja `loja_id` gravadas neste banco.
+pub fn linhas(conn: &Connection, loja_id: &str) -> Resultado<Linhas> {
+    Ok(Linhas { aprovacoes: ler_aprovacoes(conn, loja_id)?, retiradas: ler_retiradas(conn, loja_id)? })
+}
+
+/// O que [`juntar`] fez com cada linha que chegou.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Juntadas {
+    /// Não estava aqui: gravada.
+    pub novas: usize,
+    /// Já estava aqui igual, ou a daqui fica pelo desempate.
+    pub ja_tinha: usize,
+    /// Mesma chave primária com outro conteúdo, e a que chegou fica pelo desempate.
+    pub trocadas: usize,
+    /// Assinatura que não confere ou de outra loja: não gravada.
+    pub recusadas: usize,
+}
+
+/// Desempate entre duas linhas válidas com a mesma chave primária (o mesmo
+/// caixa aprovou ou retirou a mesma chave duas vezes): fica a de maior
+/// (data declarada, assinatura). Não depende da ordem de chegada, então todos
+/// os caixas guardam a mesma. Não muda quem está autorizado: a cadeia só olha
+/// quem aprovou ou retirou quem.
+fn fica(data: &str, assinatura: &Assinatura) -> (String, String) {
+    (data.to_string(), hex(assinatura))
+}
+
+fn aprovacao_gravada(conn: &Connection, chave: &Chave, aprovador: &Chave) -> Resultado<Option<Aprovacao>> {
+    let loja: Option<String> = conn
+        .query_row(
+            "SELECT loja_id FROM caixa_aprovado WHERE chave = ?1 AND aprovador = ?2",
+            [hex(chave), hex(aprovador)],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let Some(loja) = loja else { return Ok(None) };
+    Ok(ler_aprovacoes(conn, &loja)?.into_iter().find(|a| a.chave == *chave && a.aprovador == *aprovador))
+}
+
+fn retirada_gravada(conn: &Connection, chave: &Chave, retirador: &Chave) -> Resultado<Option<Retirada>> {
+    let loja: Option<String> = conn
+        .query_row(
+            "SELECT loja_id FROM caixa_retirado WHERE chave = ?1 AND retirador = ?2",
+            [hex(chave), hex(retirador)],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let Some(loja) = loja else { return Ok(None) };
+    Ok(ler_retiradas(conn, &loja)?.into_iter().find(|r| r.chave == *chave && r.retirador == *retirador))
+}
+
+fn gravar_retirada(conn: &Connection, r: &Retirada) -> Resultado<()> {
+    conn.execute(
+        "INSERT INTO caixa_retirado (chave, retirador, loja_id, motivo, gerente, retirado_em, assinatura)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT (chave, retirador) DO UPDATE SET
+            loja_id = excluded.loja_id, motivo = excluded.motivo, gerente = excluded.gerente,
+            retirado_em = excluded.retirado_em, assinatura = excluded.assinatura",
+        params![hex(&r.chave), hex(&r.retirador), r.loja_id, r.motivo, r.gerente, r.retirado_em, hex(&r.assinatura)],
+    )?;
+    Ok(())
+}
+
+/// Junta ao registro da loja `loja_id` as linhas que vieram de fora (outro
+/// caixa, um backup restaurado): **acrescenta, nunca tira**. Uma linha só é
+/// gravada se a assinatura de quem a fez confere e se é desta loja; quem está
+/// autorizado continua decidido por [`avaliar`] na hora da consulta (uma linha
+/// bem assinada por quem não é da loja é gravada e não vale nada, como uma
+/// gravada aqui). Uma linha daqui estragada (fora do formato) dá lugar à que
+/// chegou. Tudo ou nada (ponto de salvamento).
+pub fn juntar(conn: &Connection, loja_id: &str, de_fora: &Linhas) -> Resultado<Juntadas> {
+    em_bloco(conn, || {
+        let mut r = Juntadas::default();
+        for a in &de_fora.aprovacoes {
+            if a.loja_id != loja_id || !a.assinatura_confere() {
+                r.recusadas += 1;
+                continue;
+            }
+            match aprovacao_gravada(conn, &a.chave, &a.aprovador)? {
+                Some(x) if x == *a => r.ja_tinha += 1,
+                Some(x) if fica(&x.aprovado_em, &x.assinatura) >= fica(&a.aprovado_em, &a.assinatura) => {
+                    r.ja_tinha += 1
+                }
+                Some(_) => {
+                    gravar_aprovacao(conn, a)?;
+                    r.trocadas += 1;
+                }
+                None => {
+                    gravar_aprovacao(conn, a)?;
+                    r.novas += 1;
+                }
+            }
+        }
+        for t in &de_fora.retiradas {
+            if t.loja_id != loja_id || !t.assinatura_confere() {
+                r.recusadas += 1;
+                continue;
+            }
+            match retirada_gravada(conn, &t.chave, &t.retirador)? {
+                Some(x) if x == *t => r.ja_tinha += 1,
+                Some(x) if fica(&x.retirado_em, &x.assinatura) >= fica(&t.retirado_em, &t.assinatura) => {
+                    r.ja_tinha += 1
+                }
+                Some(_) => {
+                    gravar_retirada(conn, t)?;
+                    r.trocadas += 1;
+                }
+                None => {
+                    gravar_retirada(conn, t)?;
+                    r.novas += 1;
+                }
+            }
+        }
+        Ok(r)
+    })
+}
+
+#[cfg(test)]
+mod testes_juntar {
+    use super::*;
+    use crate::banco::Banco;
+
+    const LOJA: &str = "loja-teste-p4";
+
+    /// Duas cópias do registro: a "daqui" com raiz, Caixa 2, Caixa 3 (aprovado
+    /// pelo 2) e o 3 retirado; a "de lá" vazia, só com a mesma loja.
+    fn duas_lojas() -> (Banco, Banco, String, Identidade, [Identidade; 2]) {
+        let (aqui, u) = crate::faixas::para_testes::loja("Caixa 1");
+        let (la, _) = crate::faixas::para_testes::loja("Caixa 9");
+        let raiz = Identidade::gerar().unwrap();
+        let (c2, c3) = (Identidade::gerar().unwrap(), Identidade::gerar().unwrap());
+        let r = raiz.publica();
+        registrar_raiz(&aqui.conn, &raiz, LOJA, "Caixa 1", &u).unwrap();
+        aprovar(&aqui.conn, &raiz, &r, LOJA, &Pedido::de(&c2), "Caixa 2", &u).unwrap();
+        aprovar(&aqui.conn, &c2, &r, LOJA, &Pedido::de(&c3), "Caixa 3", &u).unwrap();
+        retirar(&aqui.conn, &raiz, &r, LOJA, &c3.publica(), "saiu", &u).unwrap();
+        (aqui, la, u, raiz, [c2, c3])
+    }
+
+    fn quadro(b: &Banco, raiz: &Identidade, chaves: &[Chave]) -> Vec<Situacao> {
+        let a = avaliar(&b.conn, &raiz.publica(), LOJA).unwrap();
+        chaves.iter().map(|c| a.situacao(c)).collect()
+    }
+
+    #[test]
+    fn juntar_traz_o_registro_inteiro_e_repetir_nao_muda_nada() {
+        let (aqui, la, _u, raiz, [c2, c3]) = duas_lojas();
+        let chaves = [raiz.publica(), c2.publica(), c3.publica()];
+        let todas = linhas(&aqui.conn, LOJA).unwrap();
+        assert_eq!((todas.aprovacoes.len(), todas.retiradas.len()), (3, 1));
+        let j = juntar(&la.conn, LOJA, &todas).unwrap();
+        assert_eq!(j, Juntadas { novas: 4, ..Juntadas::default() });
+        assert_eq!(quadro(&la, &raiz, &chaves), quadro(&aqui, &raiz, &chaves));
+        assert_eq!(
+            quadro(&la, &raiz, &chaves),
+            [Situacao::Autorizada, Situacao::Autorizada, Situacao::Retirada],
+            "a retirada veio junto e vence"
+        );
+        let de_novo = juntar(&la.conn, LOJA, &todas).unwrap();
+        assert_eq!(de_novo, Juntadas { ja_tinha: 4, ..Juntadas::default() });
+        assert_eq!(linhas(&la.conn, LOJA).unwrap().aprovacoes.len(), 3);
+    }
+
+    /// Juntar nunca tira: um registro velho (backup de antes da retirada)
+    /// juntado por cima do atual não traz o retirado de volta.
+    #[test]
+    fn juntar_nunca_tira_e_o_registro_velho_nao_ressuscita_o_retirado() {
+        let (aqui, la, u, raiz, [c2, c3]) = duas_lojas();
+        let r = raiz.publica();
+        // "Backup de antes": o registro de lá sem a retirada.
+        let velho = Linhas { retiradas: Vec::new(), ..linhas(&aqui.conn, LOJA).unwrap() };
+        // Lá também retiram o Caixa 2 (depois do backup).
+        juntar(&la.conn, LOJA, &linhas(&aqui.conn, LOJA).unwrap()).unwrap();
+        retirar(&la.conn, &raiz, &r, LOJA, &c2.publica(), "roubado", &u).unwrap();
+        let antes = linhas(&la.conn, LOJA).unwrap();
+        let j = juntar(&la.conn, LOJA, &velho).unwrap();
+        assert_eq!((j.novas, j.trocadas, j.recusadas), (0, 0, 0));
+        assert_eq!(linhas(&la.conn, LOJA).unwrap(), antes, "nada saiu nem mudou");
+        assert_eq!(quadro(&la, &raiz, &[c2.publica(), c3.publica()]), [Situacao::Retirada, Situacao::Retirada]);
+    }
+
+    #[test]
+    fn linha_adulterada_ou_de_outra_loja_nao_entra_e_nao_barra_as_outras() {
+        let (aqui, la, _u, raiz, [c2, c3]) = duas_lojas();
+        let mut l = linhas(&aqui.conn, LOJA).unwrap();
+        let i = l.aprovacoes.iter().position(|a| a.chave == c2.publica()).unwrap();
+        l.aprovacoes[i].nome = "Caixa 2 do intruso".into();
+        let mut outra = l.aprovacoes[0].clone();
+        outra.loja_id = "outra-loja".into();
+        l.aprovacoes.push(outra);
+        l.retiradas[0].motivo = "mexido".into();
+        let j = juntar(&la.conn, LOJA, &l).unwrap();
+        assert_eq!((j.novas, j.recusadas), (2, 3), "{j:?}");
+        let a = avaliar(&la.conn, &raiz.publica(), LOJA).unwrap();
+        assert_eq!(a.situacao(&raiz.publica()), Situacao::Autorizada);
+        assert_eq!(a.situacao(&c2.publica()), Situacao::Desconhecida, "a aprovação mexida não entrou");
+        assert_eq!(a.situacao(&c3.publica()), Situacao::Desconhecida, "sem o elo do Caixa 2, a raiz não o alcança");
+        let n: i64 =
+            la.conn.query_row("SELECT COUNT(*) FROM caixa_aprovado WHERE loja_id <> ?1", [LOJA], |x| x.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    /// Duas versões válidas da mesma linha (o mesmo caixa aprovou a mesma
+    /// chave duas vezes): os dois caixas ficam com a mesma, em qualquer ordem
+    /// de chegada.
+    #[test]
+    fn mesma_linha_em_duas_versoes_fica_a_mesma_em_qualquer_ordem() {
+        let (aqui, la, u, raiz, [c2, _]) = duas_lojas();
+        let r = raiz.publica();
+        let (outro, _) = crate::faixas::para_testes::loja("Caixa 8");
+        let base = linhas(&aqui.conn, LOJA).unwrap();
+        juntar(&la.conn, LOJA, &base).unwrap();
+        juntar(&outro.conn, LOJA, &base).unwrap();
+        let mut v1 = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2 (balcão)", &u);
+        let mut v2 = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2 (fundos)", &u);
+        v1.aprovado_em = "2026-11-13T10:00:00Z".into();
+        v1.assinatura = raiz.assinar(Dominio::Aprovacao, &v1.corpo());
+        v2.aprovado_em = "2026-11-13T11:00:00Z".into();
+        v2.assinatura = raiz.assinar(Dominio::Aprovacao, &v2.corpo());
+        let so = |a: &Aprovacao| Linhas { aprovacoes: vec![a.clone()], retiradas: Vec::new() };
+        juntar(&la.conn, LOJA, &so(&v1)).unwrap();
+        juntar(&la.conn, LOJA, &so(&v2)).unwrap();
+        juntar(&outro.conn, LOJA, &so(&v2)).unwrap();
+        let j = juntar(&outro.conn, LOJA, &so(&v1)).unwrap();
+        assert_eq!(j.ja_tinha, 1, "a de 11:00 fica; a de 10:00 não a troca");
+        assert_eq!(linhas(&la.conn, LOJA).unwrap(), linhas(&outro.conn, LOJA).unwrap());
+        let a = linhas(&la.conn, LOJA).unwrap().aprovacoes.into_iter().find(|a| a.chave == c2.publica()).unwrap();
+        assert_eq!(a.nome, "Caixa 2 (fundos)");
+        assert!(autorizada(&la.conn, &r, LOJA, &c2.publica()).unwrap());
+    }
+
+    /// Uma linha daqui estragada (fora do formato) dá lugar à válida que chega.
+    #[test]
+    fn linha_estragada_daqui_da_lugar_a_valida() {
+        let (aqui, la, _u, raiz, [c2, _]) = duas_lojas();
+        let base = linhas(&aqui.conn, LOJA).unwrap();
+        juntar(&la.conn, LOJA, &base).unwrap();
+        la.conn.execute("UPDATE caixa_aprovado SET assinatura = 'zz' WHERE chave = ?1", [hex(&c2.publica())]).unwrap();
+        assert_eq!(quadro(&la, &raiz, &[c2.publica()]), [Situacao::Desconhecida]);
+        let j = juntar(&la.conn, LOJA, &base).unwrap();
+        assert_eq!(j.novas, 1, "{j:?}");
+        assert_eq!(quadro(&la, &raiz, &[c2.publica()]), [Situacao::Autorizada]);
+    }
+}
