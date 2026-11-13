@@ -942,15 +942,17 @@ fn nome_de(b: &Banco, id: &str) -> String {
     produtos::ficha(&b.conn, id).unwrap().nome
 }
 
-/// G05 (preparação da 5.4): a 0003 tirou a unicidade da nota para os caixas
-/// trabalharem sem rede. No mesmo caixa, a segunda importação da mesma nota é
-/// recusada; em dois caixas sem rede, HOJE a mesma nota entra nos dois e,
-/// lançada nos dois, o estoque entra duas vezes. Depois de trocar, as duas
-/// compras (mesma chave) ficam nos dois caixas; o gerente vê só os conflitos
-/// genéricos do código de cada item (cada caixa cadastrou as suas peças
-/// novas), e nada diz que é a mesma nota.
+/// G05: a 0003 tirou a unicidade da nota para os caixas trabalharem sem rede.
+/// No mesmo caixa, a segunda importação da mesma nota é recusada; em dois
+/// caixas sem rede, a mesma nota entra nos dois e, lançada nos dois, o
+/// estoque entra duas vezes. Depois de trocar, as duas compras (mesma chave)
+/// ficam nos dois caixas (nada é estornado sozinho); o gerente vê os conflitos
+/// genéricos do código de cada item (cada caixa cadastrou as suas peças novas)
+/// e, desde o passo 5.4, o item "Nota de compra" que diz que é a mesma nota
+/// (era `g05_hoje_a_mesma_nota_em_dois_caixas`; o resto em
+/// `g05_a_mesma_nota_em_dois_caixas_vai_para_o_gerente`).
 #[test]
-fn g05_hoje_a_mesma_nota_em_dois_caixas() {
+fn g05_a_mesma_nota_em_dois_caixas() {
     let (mut a, mut b, u) = loja();
     config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
     trazer_so_o_fornecedor(&a, &u, &nota_numa_pasta("g05"));
@@ -983,18 +985,24 @@ fn g05_hoje_a_mesma_nota_em_dois_caixas() {
             .conn
             .query_row("SELECT COUNT(*) FROM compra WHERE chave = ?1 AND situacao = 'lancada'", [&chave], |l| l.get(0))
             .unwrap();
-        assert_eq!(n, 2, "hoje a mesma nota fica lançada duas vezes");
+        assert_eq!(n, 2, "a mesma nota fica lançada duas vezes (nada é estornado sozinho)");
         let entrou: i64 = x
             .conn
             .query_row("SELECT SUM(quantidade) FROM estoque_movimento WHERE tipo = 'compra'", [], |l| l.get(0))
             .unwrap();
-        assert_eq!(entrou, 2 * 26_000, "hoje o estoque da nota (10 + 4 + 12) entra duas vezes");
-        // Hoje o gerente só vê os conflitos genéricos do vínculo de cada item
-        // (cada caixa cadastrou as suas peças novas): nada diz que é a mesma nota.
+        assert_eq!(entrou, 2 * 26_000, "o estoque da nota (10 + 4 + 12) entra duas vezes até o gerente estornar");
+        // Os conflitos genéricos do vínculo de cada item (cada caixa cadastrou
+        // as suas peças novas) e o item que diz que é a mesma nota (5.4).
         let k = sync::conflitos(&x.conn).unwrap();
-        assert_eq!(k.len(), 3, "{k:#?}");
-        assert!(k.iter().all(|c| c.o_que == "Peça" && c.campos.iter().any(|f| f["campo"] == "produto_id")), "{k:#?}");
-        assert!(!k.iter().any(|c| c.texto.contains(&chave) || c.o_que == "Compra"), "{k:#?}");
+        assert_eq!(k.len(), 4, "{k:#?}");
+        let pecas: Vec<_> = k.iter().filter(|c| c.tipo != "nota").collect();
+        assert_eq!(pecas.len(), 3, "{k:#?}");
+        assert!(
+            pecas.iter().all(|c| c.o_que == "Peça" && c.campos.iter().any(|f| f["campo"] == "produto_id")),
+            "{k:#?}"
+        );
+        let nota: Vec<_> = k.iter().filter(|c| c.tipo == "nota").collect();
+        assert!(nota.len() == 1 && nota[0].o_que == "Nota de compra" && nota[0].texto.contains(&chave), "{k:#?}");
     }
 }
 
@@ -1036,7 +1044,6 @@ fn mesma_nota_lancada_nos_dois(nome: &str) -> (Banco, Banco, String, String, Str
 /// - o "Entendi" do gerente num caixa fecha o item nos outros;
 /// - quando a que sobrou é estornada, não aparece item novo.
 #[test]
-#[ignore = "passo 5.4: caracterização do G05 (falha hoje: nada vai para o gerente)"]
 fn g05_a_mesma_nota_em_dois_caixas_vai_para_o_gerente() {
     let (mut a, mut b, u, chave, ca, cb) = mesma_nota_lancada_nos_dois("g05-gerente");
     let numero = rustinho_nucleo::compras::ficha(&a.conn, &ca).unwrap().numero;
