@@ -63,23 +63,8 @@ Rectangle {
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
-                Rectangle {
-                    visible: (cartao.item.pendencias || 0) > 0
-                    radius: 10
-                    color: Tema.vermelho
-                    implicitWidth: Math.max(20, textoPendencias.implicitWidth + 12)
-                    implicitHeight: 20
-                    Layout.alignment: Qt.AlignVCenter
-                    Text {
-                        id: textoPendencias
-                        anchors.centerIn: parent
-                        text: "" + (cartao.item.pendencias || 0)
-                        color: "#ffffff"
-                        font.family: Tema.texto
-                        font.weight: Font.Bold
-                        font.pixelSize: 12
-                    }
-                }
+                // Selo numérico fora da pílula (diretriz do dono, C.1 reprovada;
+                // passo 7.1): o aviso textual das pendências fica na Início.
             }
             Text {
                 visible: !cartao.item.disponivel
