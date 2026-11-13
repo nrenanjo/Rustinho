@@ -2027,7 +2027,6 @@ mod testes {
     /// `b3a171c` o caixa de versão anterior recebe tudo e o de agora aplica
     /// o que vem dele.
     #[test]
-    #[ignore = "caracterização 5.2 (versão homogênea): b3a171c troca com caixa sem as classes da 5.2; passa no passo 5.2"]
     fn classes_caixa_de_versao_anterior_nao_troca_dados() {
         thread::spawn(|| {
             let senha = "senha-da-loja";
@@ -2043,7 +2042,7 @@ mod testes {
             let mut ma = Motor::iniciar(ca.clone(), 0, 0);
             let (pt_a, _) = ma.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
             // Os recursos que um caixa de antes da 5.2 manda (os de hoje, sem o das classes).
-            let antigos: Vec<&str> = RECURSOS.iter().copied().filter(|r| *r != "classes-v1").collect();
+            let antigos: Vec<&str> = RECURSOS.iter().copied().filter(|r| *r != RECURSO_CLASSES).collect();
 
             // 1. Um caixa de versão anterior pede ao caixa novo.
             let cb = temp("classes-antigo");

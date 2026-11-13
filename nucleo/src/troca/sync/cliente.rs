@@ -163,6 +163,11 @@ pub(crate) fn puxar_por(
         if retirado(&conn, &dispositivo)? {
             return Err(Erro::validacao(TEXTO_RETIRADO_AQUI));
         }
+        // Passo 5.2, regra de versão homogênea (veja `RECURSO_CLASSES`): nada
+        // de um caixa de versão anterior é aplicado aqui.
+        if !mesmas_classes(&resposta) {
+            return Err(Erro::validacao(PROTOCOLO_DIFERENTE));
+        }
         if sonda {
             // Só queria saber quem é; a resposta (sem alterações) não se aplica.
             sondou = true;
