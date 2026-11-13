@@ -716,3 +716,148 @@ fn dp42_hoje_a_mesma_peca_nova_nos_dois_caixas() {
         assert_eq!(k.iter().filter(|c| c.campos.iter().any(|f| f["campo"] == "produto_id")).count(), 1, "{k:?}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Preparação do passo 5.4 (consistência antes e depois; G05): estes testes
+// DOCUMENTAM o comportamento de hoje e passam. O commit da 5.4 inverte as
+// asserções marcadas "hoje".
+// ---------------------------------------------------------------------------
+
+/// (vendas, itens de venda, movimentos de estoque) do caixa.
+fn venda_vista(b: &Banco) -> (i64, i64, i64) {
+    (
+        contar(b, "SELECT COUNT(*) FROM venda WHERE tipo = 'venda'"),
+        contar(b, "SELECT COUNT(*) FROM venda_item"),
+        contar(b, "SELECT COUNT(*) FROM estoque_movimento WHERE tipo = 'venda'"),
+    )
+}
+
+/// 5.4 (preparação): a troca corta os lotes pela quantidade de alterações
+/// (`LOTE`), sem olhar a operação comercial. Cada lote é tudo ou nada (uma
+/// transação, `aplicar_de`), mas um lote que termina no meio de uma venda é
+/// aplicado: HOJE, até o lote seguinte chegar, o outro caixa mostra a venda
+/// com itens a menos. Quando o resto chega, fica igual.
+#[test]
+fn g54_hoje_lote_que_corta_uma_venda_mostra_a_venda_pela_metade() {
+    let (mut a, mut b, u) = loja();
+    let p1 = peca(&a, &u, "Filtro de óleo", "5");
+    let p2 = peca(&a, &u, "Filtro de ar", "5");
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    let antes = contar(&a, "SELECT MAX(seq) FROM alteracao");
+    let item = |p: &str| vendas::ItemEntrada { produto_id: p.into(), quantidade: "1".into(), ..Default::default() };
+    let e = vendas::VendaEntrada {
+        itens: vec![item(&p1), item(&p2)],
+        tabela: 1,
+        pagamentos: vec![vendas::PagamentoEntrada {
+            forma: "dinheiro".into(),
+            valor: "200".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    vendas::concluir(&a.conn, &a.dispositivo, &u, &e).unwrap();
+    let (lista, _) = sync::alteracoes_desde(&a.conn, antes, 10_000).unwrap();
+    let corte = lista.iter().position(|x| x.tabela == "venda_item").expect("um item") + 1;
+    assert!(corte < lista.len());
+    // O primeiro lote termina logo depois do primeiro item.
+    sync::aplicar(&mut b.conn, &lista[..corte]).unwrap();
+    assert_eq!(venda_vista(&a).1, 2);
+    assert_eq!(venda_vista(&b).0, 1, "hoje a venda já aparece em B");
+    assert_eq!(venda_vista(&b).1, 1, "hoje com um item só (de dois)");
+    // O resto chega no lote seguinte.
+    sync::aplicar(&mut b.conn, &lista[corte..]).unwrap();
+    assert_eq!(venda_vista(&b), venda_vista(&a));
+}
+
+/// 5.4 (preparação): uma linha que viaja, mexida por fora do Rustinho num
+/// caixa (sem passar pela troca), fica diferente para sempre e HOJE ninguém
+/// percebe: nem conflito, nem pendência, nem aviso. (Um programa de SQLite
+/// comum nem consegue mexer: os gatilhos da troca chamam funções do Rustinho;
+/// só quem desliga a troca ou os gatilhos muda sem rastro.)
+#[test]
+fn g54_hoje_linha_mexida_a_mao_ninguem_percebe() {
+    let (mut a, mut b, u) = loja();
+    let q = peca(&a, &u, "Vela", "1");
+    trocar(&mut a, &mut b);
+    b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    b.conn.execute("UPDATE produto SET nome = 'Vela (mexida à mão)' WHERE id = ?1", [&q]).unwrap();
+    b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+    trocar(&mut a, &mut b);
+    assert_ne!(nome_de(&a, &q), nome_de(&b, &q), "hoje os dois caixas ficam diferentes");
+    for x in [&a, &b] {
+        assert!(sync::conflitos(&x.conn).unwrap().is_empty(), "hoje nada vai para o gerente");
+        assert_eq!(sync::pendencias(&x.conn).unwrap(), 0);
+    }
+    // Um programa de SQLite comum (sem as funções do Rustinho): o gatilho recusa.
+    let pasta = std::env::temp_dir().join(format!("rustinho-caixas-mao-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let banco = Banco::abrir(&pasta.join("rustinho.db")).unwrap();
+    let pv = usuarios::criar(&banco.conn, &banco.dispositivo, "Ana", "balcao-azul-2026", true).unwrap().id;
+    let r = peca(&banco, &pv, "Junta", "1");
+    let comum = rusqlite::Connection::open(pasta.join("rustinho.db")).unwrap();
+    let e = comum.execute("UPDATE produto SET nome = 'x' WHERE id = ?1", [&r]).unwrap_err().to_string();
+    assert!(e.contains("rustinho_"), "{e}");
+    drop((comum, banco));
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+fn nome_de(b: &Banco, id: &str) -> String {
+    produtos::ficha(&b.conn, id).unwrap().nome
+}
+
+/// G05 (preparação da 5.4): a 0003 tirou a unicidade da nota para os caixas
+/// trabalharem sem rede. No mesmo caixa, a segunda importação da mesma nota é
+/// recusada; em dois caixas sem rede, HOJE a mesma nota entra nos dois e,
+/// lançada nos dois, o estoque entra duas vezes. Depois de trocar, as duas
+/// compras (mesma chave) ficam nos dois caixas; o gerente vê só os conflitos
+/// genéricos do código de cada item (cada caixa cadastrou as suas peças
+/// novas), e nada diz que é a mesma nota.
+#[test]
+fn g05_hoje_a_mesma_nota_em_dois_caixas() {
+    let (mut a, mut b, u) = loja();
+    config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
+    trazer_so_o_fornecedor(&a, &u, &nota_numa_pasta("g05"));
+    trocar(&mut a, &mut b);
+    let lancar = |x: &Banco| -> String {
+        let id = rustinho_nucleo::compras::importar_xml(&x.conn, &x.dispositivo, &u, NFE_EXEMPLO).unwrap();
+        assert!(
+            rustinho_nucleo::compras::importar_xml(&x.conn, &x.dispositivo, &u, NFE_EXEMPLO).is_err(),
+            "no mesmo caixa, recusa"
+        );
+        x.conn.execute("UPDATE compra_item SET acao = 'nova' WHERE compra_id = ?1", [&id]).unwrap();
+        let quando: String =
+            x.conn.query_row("SELECT strftime('%d/%m/%Y %H:%M', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
+        let c = rustinho_nucleo::compras::Conferencia {
+            id: id.clone(),
+            situacao: "autorizada".into(),
+            protocolo: "135260000000001".into(),
+            conferido_em: quando,
+        };
+        rustinho_nucleo::compras::registrar_conferencia(&x.conn, &x.dispositivo, &u, &c).unwrap();
+        rustinho_nucleo::compras::lancar(&x.conn, &x.dispositivo, &u, &id).unwrap();
+        id
+    };
+    let (ca, cb) = (lancar(&a), lancar(&b));
+    assert_ne!(ca, cb);
+    let chave = rustinho_nucleo::compras::ficha(&a.conn, &ca).unwrap().chave;
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        let n: i64 = x
+            .conn
+            .query_row("SELECT COUNT(*) FROM compra WHERE chave = ?1 AND situacao = 'lancada'", [&chave], |l| l.get(0))
+            .unwrap();
+        assert_eq!(n, 2, "hoje a mesma nota fica lançada duas vezes");
+        let entrou: i64 = x
+            .conn
+            .query_row("SELECT SUM(quantidade) FROM estoque_movimento WHERE tipo = 'compra'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(entrou, 2 * 26_000, "hoje o estoque da nota (10 + 4 + 12) entra duas vezes");
+        // Hoje o gerente só vê os conflitos genéricos do vínculo de cada item
+        // (cada caixa cadastrou as suas peças novas): nada diz que é a mesma nota.
+        let k = sync::conflitos(&x.conn).unwrap();
+        assert_eq!(k.len(), 3, "{k:#?}");
+        assert!(k.iter().all(|c| c.o_que == "Peça" && c.campos.iter().any(|f| f["campo"] == "produto_id")), "{k:#?}");
+        assert!(!k.iter().any(|c| c.texto.contains(&chave) || c.o_que == "Compra"), "{k:#?}");
+    }
+}
