@@ -40,6 +40,12 @@ ColumnLayout {
     // permanece visível ao lado do botão colar.
     property bool colarCopiar: icone === "busca"
     readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
+    // H01 (7.1): os controles da direita ficam lado a lado, cada um no seu
+    // espaço, da borda para dentro: Copiar, a câmera (ou o botão de ação), o
+    // atalho (F11) e o sufixo. Antes, todos se ancoravam no mesmo canto e o
+    // Copiar ficava em cima do F11 (computador) e da câmera (celular).
+    readonly property real larguraCopiar: colarCopiar ? ladoBotaoInterno + 8 : 0
+    readonly property real larguraBotao: comBotao ? 44 : 0
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
     // busca escura do Planeta Roxo (campo com a lupa).
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
@@ -292,8 +298,8 @@ ColumnLayout {
                      + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
-                      + (campo.comBotao ? 44 : 0)
-                      + (campo.colarCopiar ? campo.ladoBotaoInterno : 0)
+                      + campo.larguraBotao
+                      + campo.larguraCopiar
                       + (marcaValido.visible ? 26 : 0)
         selectByMouse: true
         // Celular: sem "texto previsto" (o teclado manda cada letra direto;
@@ -387,7 +393,7 @@ ColumnLayout {
             radius: 20
             color: toqueCamera.pressed ? Tema.verde : "transparent"
             anchors.right: parent.right
-            anchors.rightMargin: 6
+            anchors.rightMargin: 6 + campo.larguraCopiar
             anchors.verticalCenter: parent.verticalCenter
             Icone {
                 anchors.centerIn: parent
@@ -421,7 +427,7 @@ ColumnLayout {
             visible: campo.atalho !== "" && !Tema.celular && !Tema.estreito
             text: campo.atalho
             anchors.right: parent.right
-            anchors.rightMargin: 16
+            anchors.rightMargin: 16 + campo.larguraCopiar + campo.larguraBotao
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {
@@ -440,7 +446,8 @@ ColumnLayout {
             text: campo.sufixo
             visible: text !== ""
             anchors.right: parent.right
-            anchors.rightMargin: 12
+            anchors.rightMargin: 12 + campo.larguraCopiar + campo.larguraBotao
+                                 + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
             anchors.verticalCenter: parent.verticalCenter
             color: Tema.apagadoNo(campo.corDoCampo)
             font.family: Tema.texto

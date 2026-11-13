@@ -41,8 +41,6 @@ base = u.base
 TELA = u.TELA
 
 ESPERADAS = {
-    "G1": "H01 (Copiar e F11 sobrepostos), passo 7.1",
-    "G2": "H01 (câmera sobre o Copiar no celular), passo 7.1",
 }
 CELULAR = (360, 780)
 
