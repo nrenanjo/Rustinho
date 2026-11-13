@@ -529,3 +529,36 @@ fn t1_loja_grande_mesma_resposta_e_tempos() {
         }
     }
 }
+
+/// Integração 7.5 × 7.6 (R-3 e N-I1 com a tarefa de leitura): depois de
+/// restaurar um backup, o total de peças que a busca devolve (o cabeçalho de
+/// Peças) é o do banco restaurado pelos dois caminhos — a consulta fora da
+/// linha da janela (a tarefa fecha a conexão na pausa e abre outra depois; a
+/// contagem é guardada por conexão) e o `chamar` (a conexão da janela, onde a
+/// R-3 esquece a contagem guardada). E as duas respostas são iguais, byte a
+/// byte, com o campo `continuar` da R-2.
+#[test]
+fn integ_75_76_contagem_depois_de_restaurar_nos_dois_caminhos() {
+    let _vez = crate::backup::testes::um_por_vez();
+    let (pasta, db, mut s) = loja("integ-75-76", 4);
+    let feito = crate::backup::fazer(&db, false).unwrap();
+    peca(&mut s, "PECA DE DEPOIS DO BACKUP 1", "");
+    peca(&mut s, "PECA DE DEPOIS DO BACKUP 2", "");
+    let pedido = json!({ "texto": "", "inativas": false, "limite": 100, "deslocamento": 0 });
+    let total = |r: &Value| r["dados"]["total"].as_i64().unwrap();
+    for _ in 0..2 {
+        assert_eq!(total(&consultar(&mut s, "integ", "produtos_buscar", pedido.clone())), 6);
+        assert_eq!(total(&chamar(&mut s, "produtos_buscar", pedido.clone())), 6);
+    }
+    ok(&mut s, "backup_restaurar", json!({ "arquivo": feito.arquivo, "nuvem": false, "senha": "1234" }));
+    let ana = id_de(&mut s, "Ana");
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    let fora = consultar_texto(&mut s, "integ", "produtos_buscar", &pedido);
+    let normal = s.chamar("produtos_buscar", &pedido.to_string());
+    let v: Value = serde_json::from_str(&fora).unwrap();
+    assert_eq!(total(&v), 4, "a consulta fora da linha da janela ficou com a contagem de antes da troca: {v}");
+    assert_eq!(fora, normal, "a consulta e o chamar deram respostas diferentes depois de restaurar");
+    assert!(!v["dados"]["continuar"].as_str().unwrap_or_default().is_empty(), "a chave da R-2 veio: {v}");
+    drop(s);
+    let _ = std::fs::remove_dir_all(&pasta);
+}
