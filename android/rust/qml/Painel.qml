@@ -17,6 +17,12 @@ Popup {
     focus: true
     anchors.centerIn: T.Overlay.overlay
     width: Math.min(560, Tema.largura - 24)
+    // H06 (7.2): a janelinha nunca passa da janela (fica uma folga em cima e
+    // embaixo). A que pode ficar mais alta que isso rola o miolo e deixa os
+    // botões à vista (ex.: o Receber da venda, com crediário em 1366 × 768).
+    readonly property real alturaMaxima: Math.max(160, (T.Overlay.overlay ? T.Overlay.overlay.height : Tema.altura)
+                                                       - 2 * (Tema.estreito ? 8 : 16))
+    height: Math.min(implicitHeight, alturaMaxima)
     padding: Tema.estreito ? 18 : 30
     // O conteúdo começa logo abaixo da área de toque da seta.
     topPadding: comSeta ? setaDoPainel.y + setaDoPainel.height : padding

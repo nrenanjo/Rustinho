@@ -972,179 +972,210 @@ FocusScope {
 
         contentItem: ColumnLayout {
             spacing: 12
-            Titulo {
-                text: "Receber R$ " + receber.total
-                font.pixelSize: 34
+            // H06 (7.2): o miolo rola quando a janelinha não cabe na janela
+            // (crediário em 1366 × 768, celular); o que falta, o erro e o
+            // "Concluir venda" ficam sempre à vista, embaixo.
+            Flickable {
+                id: rolagemReceber
+                clip: true
+                contentWidth: width
+                contentHeight: mioloReceber.implicitHeight
+                implicitWidth: mioloReceber.implicitWidth
+                implicitHeight: mioloReceber.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
                 Layout.fillWidth: true
-            }
-            Nota {
-                text: "Clique no nome da forma para pôr nela o que falta. Dá para dividir entre várias."
-                font.pixelSize: 14
-                Layout.fillWidth: true
-            }
-            Rectangle {
-                visible: !!tela.calculo && tela.calculo.encomendas > 0
-                Layout.fillWidth: true
-                radius: Tema.raioCampo
-                color: Tema.verde
-                palette.window: Tema.superficie(color)
-                implicitHeight: linhaSinal.implicitHeight + 16
-                RowLayout {
-                    id: linhaSinal
-                    x: 14
-                    y: 8
-                    width: parent.width - 24
-                    spacing: 10
-                    Nota {
-                        text: "Tem encomenda. Recebeu um sinal? Digite o sinal na forma usada e deixe o resto para a entrega (fica no Receber)."
-                        font.pixelSize: 14
-                        Layout.fillWidth: true
-                    }
-                    Botao {
-                        text: "Resto na entrega"
-                        tipo: "secundario"
-                        altura: 36
-                        onClicked: {
-                            for (let i = 0; i < repFormas.count; i++) {
-                                const l = repFormas.itemAt(i)
-                                if (l.forma === "crediario") {
-                                    campoParcelas.texto = "1"
-                                    l.campo.texto = ""
-                                    receber.atualizar()
-                                    l.campo.texto = receber.calc ? receber.calc.falta : ""
-                                    receber.atualizar()
+                Layout.fillHeight: true
+                Layout.minimumHeight: Math.min(mioloReceber.implicitHeight, 120)
+
+                ColumnLayout {
+                    id: mioloReceber
+                    width: rolagemReceber.width
+                    spacing: 12
+                Titulo {
+                    text: "Receber R$ " + receber.total
+                    font.pixelSize: 34
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    text: "Clique no nome da forma para pôr nela o que falta. Dá para dividir entre várias."
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                Rectangle {
+                    visible: !!tela.calculo && tela.calculo.encomendas > 0
+                    Layout.fillWidth: true
+                    radius: Tema.raioCampo
+                    color: Tema.verde
+                    palette.window: Tema.superficie(color)
+                    implicitHeight: linhaSinal.implicitHeight + 16
+                    RowLayout {
+                        id: linhaSinal
+                        x: 14
+                        y: 8
+                        width: parent.width - 24
+                        spacing: 10
+                        Nota {
+                            text: "Tem encomenda. Recebeu um sinal? Digite o sinal na forma usada e deixe o resto para a entrega (fica no Receber)."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            text: "Resto na entrega"
+                            tipo: "secundario"
+                            altura: 36
+                            onClicked: {
+                                for (let i = 0; i < repFormas.count; i++) {
+                                    const l = repFormas.itemAt(i)
+                                    if (l.forma === "crediario") {
+                                        campoParcelas.texto = "1"
+                                        l.campo.texto = ""
+                                        receber.atualizar()
+                                        l.campo.texto = receber.calc ? receber.calc.falta : ""
+                                        receber.atualizar()
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            // Vale-troca (só quando há vale com saldo)
-            Linha {
-                visible: tela.vales.length > 0
-                spacing: 12
-                Layout.fillWidth: true
-                Botao {
-                    text: "Vale-troca"
-                    tipo: "secundario"
-                    Layout.preferredWidth: 220
-                    onClicked: receber.completarVale()
-                }
-                Selecao {
-                    id: escolhaVale
-                    modelo: tela.vales.map(v => v.rotulo)
-                    Layout.fillWidth: true
-                    onEscolhido: receber.atualizar()
-                }
-                Campo {
-                    id: campoVale
-                    prefixo: "R$"
-                    numerico: true
-                    maximo: 14
-                    Layout.preferredWidth: 150
-                    onEditado: receber.atualizar()
-                    onConfirmado: botaoConcluir.clicked()
-                }
-            }
-            Repeater {
-                id: repFormas
-                model: tela.formas
-                delegate: Linha {
-                    required property var modelData
-                    readonly property string forma: modelData.forma
-                    property alias campo: valor
+                // Vale-troca (só quando há vale com saldo)
+                Linha {
+                    visible: tela.vales.length > 0
                     spacing: 12
                     Layout.fillWidth: true
                     Botao {
-                        text: modelData.nome + (modelData.disponivel ? "" : " · em breve")
+                        text: "Vale-troca"
                         tipo: "secundario"
-                        enabled: modelData.disponivel
                         Layout.preferredWidth: 220
-                        onClicked: receber.completar(parent)
+                        onClicked: receber.completarVale()
+                    }
+                    Selecao {
+                        id: escolhaVale
+                        modelo: tela.vales.map(v => v.rotulo)
+                        Layout.fillWidth: true
+                        onEscolhido: receber.atualizar()
                     }
                     Campo {
-                        id: valor
+                        id: campoVale
                         prefixo: "R$"
                         numerico: true
                         maximo: 14
-                        somenteLeitura: !modelData.disponivel
-                        Layout.fillWidth: true
+                        Layout.preferredWidth: 150
                         onEditado: receber.atualizar()
                         onConfirmado: botaoConcluir.clicked()
                     }
                 }
-            }
-            // Crediário: parcelas e vencimentos
-            Rectangle {
-                id: painelCred
-                readonly property var cred: receber.calc ? receber.calc.crediario : null
-                visible: !!cred && cred.valor !== "0,00"
-                Layout.fillWidth: true
-                radius: Tema.raioCampo
-                color: Tema.azul
-                palette.window: Tema.superficie(color)
-                implicitHeight: colunaCred.implicitHeight + 24
-                ColumnLayout {
-                    id: colunaCred
-                    x: 14
-                    y: 12
-                    width: parent.width - 28
-                    spacing: 8
-                    RowLayout {
-                        spacing: 10
-                        Layout.fillWidth: true
-                        Rotulo { text: "Crediário"; Layout.fillWidth: true }
-                        Pilulas {
-                            pequenas: true
-                            modelo: [{ id: "1", nome: "30" }, { id: "2", nome: "30/60" }, { id: "3", nome: "30/60/90" }]
-                            atual: campoVencimento.texto === "" ? campoParcelas.texto : ""
-                            onEscolhido: id => {
-                                campoParcelas.texto = id
-                                campoVencimento.texto = ""
-                                receber.atualizar()
-                            }
-                        }
-                    }
-                    Linha {
+                Repeater {
+                    id: repFormas
+                    model: tela.formas
+                    delegate: Linha {
+                        required property var modelData
+                        readonly property string forma: modelData.forma
+                        property alias campo: valor
                         spacing: 12
                         Layout.fillWidth: true
-                        Campo {
-                            id: campoParcelas
-                            rotulo: "Parcelas"
-                            sufixo: "×"
-                            numerico: true
-                            maximo: 2
-                            Layout.preferredWidth: 110
-                            onEditado: receber.atualizar()
+                        Botao {
+                            text: modelData.nome + (modelData.disponivel ? "" : " · em breve")
+                            tipo: "secundario"
+                            enabled: modelData.disponivel
+                            Layout.preferredWidth: 220
+                            onClicked: receber.completar(parent)
                         }
                         Campo {
-                            id: campoVencimento
-                            rotulo: "1º vencimento"
-                            dica: "Vazio: daqui a 30 dias (ou o dia do convênio)"
-                            maximo: 10
+                            id: valor
+                            prefixo: "R$"
+                            numerico: true
+                            maximo: 14
+                            somenteLeitura: !modelData.disponivel
                             Layout.fillWidth: true
                             onEditado: receber.atualizar()
+                            onConfirmado: botaoConcluir.clicked()
                         }
                     }
-                    Flow {
-                        spacing: 14
-                        Layout.fillWidth: true
-                        Repeater {
-                            model: painelCred.cred ? painelCred.cred.parcelas : []
-                            delegate: Text {
-                                required property var modelData
-                                text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 14
+                }
+                // Crediário: parcelas e vencimentos
+                Rectangle {
+                    id: painelCred
+                    readonly property var cred: receber.calc ? receber.calc.crediario : null
+                    visible: !!cred && cred.valor !== "0,00"
+                    Layout.fillWidth: true
+                    radius: Tema.raioCampo
+                    color: Tema.azul
+                    palette.window: Tema.superficie(color)
+                    implicitHeight: colunaCred.implicitHeight + 24
+                    ColumnLayout {
+                        id: colunaCred
+                        x: 14
+                        y: 12
+                        width: parent.width - 28
+                        spacing: 8
+                        RowLayout {
+                            spacing: 10
+                            Layout.fillWidth: true
+                            Rotulo { text: "Crediário"; Layout.fillWidth: true }
+                            Pilulas {
+                                pequenas: true
+                                modelo: [{ id: "1", nome: "30" }, { id: "2", nome: "30/60" }, { id: "3", nome: "30/60/90" }]
+                                atual: campoVencimento.texto === "" ? campoParcelas.texto : ""
+                                onEscolhido: id => {
+                                    campoParcelas.texto = id
+                                    campoVencimento.texto = ""
+                                    receber.atualizar()
+                                }
                             }
                         }
-                    }
-                    Repeater {
-                        model: painelCred.cred ? painelCred.cred.avisos : []
-                        delegate: Text {
-                            required property var modelData
-                            text: "⚠ " + modelData
+                        Linha {
+                            spacing: 12
+                            Layout.fillWidth: true
+                            Campo {
+                                id: campoParcelas
+                                rotulo: "Parcelas"
+                                sufixo: "×"
+                                numerico: true
+                                maximo: 2
+                                Layout.preferredWidth: 110
+                                onEditado: receber.atualizar()
+                            }
+                            Campo {
+                                id: campoVencimento
+                                rotulo: "1º vencimento"
+                                dica: "Vazio: daqui a 30 dias (ou o dia do convênio)"
+                                maximo: 10
+                                Layout.fillWidth: true
+                                onEditado: receber.atualizar()
+                            }
+                        }
+                        Flow {
+                            spacing: 14
+                            Layout.fillWidth: true
+                            Repeater {
+                                model: painelCred.cred ? painelCred.cred.parcelas : []
+                                delegate: Text {
+                                    required property var modelData
+                                    text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
+                                    color: Tema.tinta
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                }
+                            }
+                        }
+                        Repeater {
+                            model: painelCred.cred ? painelCred.cred.avisos : []
+                            delegate: Text {
+                                required property var modelData
+                                text: "⚠ " + modelData
+                                color: Tema.vermelho
+                                font.family: Tema.texto
+                                font.weight: Font.DemiBold
+                                font.pixelSize: 14
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Text {
+                            visible: text !== ""
+                            text: painelCred.cred ? painelCred.cred.erro : ""
                             color: Tema.vermelho
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -1153,23 +1184,14 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                     }
-                    Text {
-                        visible: text !== ""
-                        text: painelCred.cred ? painelCred.cred.erro : ""
-                        color: Tema.vermelho
-                        font.family: Tema.texto
-                        font.weight: Font.DemiBold
-                        font.pixelSize: 14
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
                 }
-            }
-            PainelCheques {
-                id: painelCheque
-                calc: receber.calc ? receber.calc.cheques : null
-                Layout.fillWidth: true
-                onMudou: receber.atualizar()
+                PainelCheques {
+                    id: painelCheque
+                    calc: receber.calc ? receber.calc.cheques : null
+                    Layout.fillWidth: true
+                    onMudou: receber.atualizar()
+                }
+                }
             }
             RowLayout {
                 Layout.fillWidth: true
