@@ -268,6 +268,101 @@ fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
     let _ = std::fs::remove_dir_all(&pb);
 }
 
+/// T8.4 — Passo 5.4 (PEND-35): pela rede, uma resposta da troca termina no
+/// fim de uma operação comercial. A faz vendas de 1 a 3 itens (uma operação
+/// cada) e responde com um tamanho que, contado só pela quantidade, cortaria
+/// uma venda no meio; B puxa UMA resposta e cada operação de A que chegou a B
+/// chegou inteira (nenhuma venda pela metade até a resposta seguinte). A
+/// resposta continua com no máximo o tamanho dado (T8.3).
+#[test]
+#[ignore = "passo 5.4: caracterização (falha hoje: a resposta corta uma venda no meio)"]
+fn t8_4_uma_resposta_nao_corta_uma_venda() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let _vez = vez_da_troca();
+    let pa = pasta_nova("t8-4-a");
+    let pb = pasta_nova("t8-4-b");
+    let mut a = caixa_novo(&pa, "Caixa A");
+    let ana = usuarios::criar(&a.conn, &a.dispositivo, "Ana", SENHA_ANA, true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &ana, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja Teste").unwrap();
+    let peca = {
+        let mut f = rustinho_nucleo::produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Fusível".into();
+        f.custo = "1".into();
+        f.estoque_inicial = "1000".into();
+        f.precos[0].preco = "10".into();
+        f.precos[0].lucro = String::new();
+        rustinho_nucleo::produtos::salvar(&a.conn, &a.dispositivo, &ana, &f).unwrap()
+    };
+    caixa::abrir(&a.conn, &a.dispositivo, &ana, "Caixa A", "0").unwrap();
+    for n in 0..12 {
+        let itens = 1 + n % 3;
+        let e = vendas::VendaEntrada {
+            itens: (0..itens)
+                .map(|_| vendas::ItemEntrada { produto_id: peca.clone(), quantidade: "1".into(), ..Default::default() })
+                .collect(),
+            tabela: 1,
+            pagamentos: vec![vendas::PagamentoEntrada {
+                forma: "dinheiro".into(),
+                valor: format!("{}", 10 * itens),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let tx = a.conn.transaction().unwrap();
+        vendas::concluir(&tx, &a.dispositivo, &ana, &e).unwrap();
+        tx.commit().unwrap();
+    }
+    // O log de A: (seq, operação). O tamanho da resposta fica logo depois da
+    // primeira alteração de uma venda do meio (uma operação de 2 ou mais).
+    let log: Vec<(i64, Option<String>)> = {
+        let mut c = a.conn.prepare("SELECT seq, operacao_id FROM alteracao ORDER BY seq").unwrap();
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?))).unwrap();
+        l.collect::<Result<_, _>>().unwrap()
+    };
+    let tamanho_de = |o: &Option<String>| log.iter().filter(|x| x.1.is_some() && x.1 == *o).count();
+    let comeco = (log.len() / 2..log.len() - 1)
+        .find(|&i| log[i].1.is_some() && log[i].1 != log[i - 1].1 && tamanho_de(&log[i].1) >= 2)
+        .expect("uma venda no meio do log");
+    let limite = comeco + 1;
+    config::gravar(&a.conn, "sync_lote_teste", &limite.to_string()).unwrap();
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let b = caixa_novo(&pb, "Caixa B");
+    // B puxa uma resposta só.
+    config::gravar(&b.conn, "sync_lotes_teste", "1").unwrap();
+    drop(b);
+    let (_, novas) = puxar(&pb.join("rustinho.db"), &format!("127.0.0.1:{pt_a}"), 48694);
+    assert!(novas > 0, "B não recebeu nada");
+    assert!(novas <= limite, "a resposta passou do tamanho dado: {novas} de {limite}");
+    let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
+    let de_a: std::collections::BTreeMap<String, usize> =
+        log.iter().filter_map(|x| x.1.clone()).fold(Default::default(), |mut m, o| {
+            *m.entry(o).or_insert(0) += 1;
+            m
+        });
+    let em_b: Vec<(String, i64)> = {
+        let mut c = b
+            .conn
+            .prepare("SELECT operacao_id, COUNT(*) FROM alteracao WHERE operacao_id IS NOT NULL GROUP BY 1")
+            .unwrap();
+        let l = c.query_map([], |l| Ok((l.get(0)?, l.get(1)?))).unwrap();
+        l.collect::<Result<_, _>>().unwrap()
+    };
+    let pela_metade: Vec<_> =
+        em_b.iter().filter(|(o, n)| de_a.get(o).is_some_and(|t| *t as i64 != *n)).cloned().collect();
+    assert!(
+        pela_metade.is_empty(),
+        "B ficou com operação de A pela metade (resposta de {novas}, tamanho {limite}): {pela_metade:?}"
+    );
+    assert!(motor_a.encerrar(Duration::from_secs(20)));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(&pa);
+    let _ = std::fs::remove_dir_all(&pb);
+}
+
 /// T8.2 — Senha da rede errada: nada passa; com a certa, passa.
 #[test]
 fn t8_2_senha_da_rede_errada_nao_troca() {

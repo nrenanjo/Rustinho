@@ -770,6 +770,77 @@ fn g54_hoje_lote_que_corta_uma_venda_mostra_a_venda_pela_metade() {
     assert_eq!(venda_vista(&b), venda_vista(&a));
 }
 
+/// Uma venda de A numa transação (uma operação comercial, como o balcão faz).
+fn vender_numa_operacao(a: &mut Banco, u: &str, pecas: &[&str]) {
+    let e = vendas::VendaEntrada {
+        itens: pecas
+            .iter()
+            .map(|p| vendas::ItemEntrada { produto_id: p.to_string(), quantidade: "1".into(), ..Default::default() })
+            .collect(),
+        tabela: 1,
+        pagamentos: vec![vendas::PagamentoEntrada {
+            forma: "dinheiro".into(),
+            valor: "300".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let tx = a.conn.transaction().unwrap();
+    vendas::concluir(&tx, &a.dispositivo, u, &e).unwrap();
+    tx.commit().unwrap();
+}
+
+/// Quantas alterações cada operação comercial tem numa lista.
+fn por_operacao(lista: &[sync::Alteracao]) -> std::collections::BTreeMap<String, usize> {
+    let mut m = std::collections::BTreeMap::new();
+    for x in lista {
+        if let Some(o) = &x.operacao_id {
+            *m.entry(o.clone()).or_insert(0) += 1;
+        }
+    }
+    m
+}
+
+/// 5.4 (PEND-35): uma resposta da troca termina no fim de uma operação
+/// comercial. A faz duas vendas (uma operação cada, de tamanhos diferentes); a
+/// resposta tem espaço para a primeira venda e só para o começo da segunda:
+/// vai só a primeira, inteira, e a segunda vem inteira na resposta seguinte.
+/// B nunca mostra uma venda pela metade.
+#[test]
+#[ignore = "passo 5.4: caracterização (falha hoje: a resposta corta a segunda venda)"]
+fn g54_resposta_termina_no_fim_de_uma_operacao() {
+    let (mut a, mut b, u) = loja();
+    let p1 = peca(&a, &u, "Filtro de óleo", "5");
+    let p2 = peca(&a, &u, "Filtro de ar", "5");
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    let antes = contar(&a, "SELECT MAX(seq) FROM alteracao");
+    vender_numa_operacao(&mut a, &u, &[&p1]);
+    vender_numa_operacao(&mut a, &u, &[&p1, &p2]);
+    let (tudo, _) = sync::alteracoes_desde(&a.conn, antes, 10_000).unwrap();
+    let inteiras = por_operacao(&tudo);
+    assert_eq!(inteiras.len(), 2, "duas operações: {inteiras:?}");
+    let primeira = tudo[0].operacao_id.clone().expect("a venda é uma operação");
+    // Espaço para a primeira venda e mais uma alteração da segunda.
+    let limite = inteiras[&primeira] as i64 + 1;
+    let (lista, mais) = sync::alteracoes_desde(&a.conn, antes, limite).unwrap();
+    assert!(mais, "a segunda venda ainda não foi");
+    let cortadas: Vec<_> = por_operacao(&lista).into_iter().filter(|(o, n)| inteiras[o] != *n).collect();
+    assert!(
+        cortadas.is_empty(),
+        "a resposta ({} alterações) terminou no meio de uma operação: {cortadas:?} de {inteiras:?}",
+        lista.len()
+    );
+    sync::aplicar(&mut b.conn, &lista).unwrap();
+    assert_eq!(venda_vista(&b), (1, 1, 1), "em B, só a primeira venda, inteira");
+    // A resposta seguinte traz a segunda venda inteira.
+    let (resto, mais) = sync::alteracoes_desde(&a.conn, lista.last().unwrap().seq, limite).unwrap();
+    assert!(!mais);
+    sync::aplicar(&mut b.conn, &resto).unwrap();
+    assert_eq!(venda_vista(&b), venda_vista(&a));
+    assert_eq!(venda_vista(&b), (2, 3, 3));
+}
+
 /// 5.4 (preparação): uma linha que viaja, mexida por fora do Rustinho num
 /// caixa (sem passar pela troca), fica diferente para sempre e HOJE ninguém
 /// percebe: nem conflito, nem pendência, nem aviso. (Um programa de SQLite
