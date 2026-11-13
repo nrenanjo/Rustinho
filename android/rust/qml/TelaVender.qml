@@ -50,6 +50,10 @@ FocusScope {
     property var formas: []
     property var ultimaVenda: null
     readonly property bool caixaAberto: !!caixaEstado && caixaEstado.aberto
+    // VIS33-05 (7.2): janela baixa (1366 × 768, 1280 × 760): a coluna do
+    // cliente e do total fica mais compacta, para o "Salvar como orçamento"
+    // caber inteiro com peças no carrinho.
+    readonly property bool compacta: !Tema.estreito && Tema.altura < 820
 
     // ---------- Dados ----------
 
@@ -698,7 +702,7 @@ FocusScope {
             // No celular, fica numa "página" à parte (botão no rodapé).
             ColumnLayout {
                 visible: !Tema.estreito || tela.verLateral
-                spacing: 12
+                spacing: tela.compacta ? 8 : 12
                 Layout.preferredWidth: Tema.estreito ? -1 : 340
                 Layout.maximumWidth: Tema.estreito ? Number.POSITIVE_INFINITY : 340
                 Layout.fillWidth: Tema.estreito
@@ -708,6 +712,8 @@ FocusScope {
                     titulo: "Cliente"
                     subtitulo: tela.clienteId ? "cadastrado" : "opcional"
                     color: Tema.pergaminho
+                    preenchimento: tela.compacta ? 16 : (Tema.estreito ? 16 : 22)
+                    espacamento: tela.compacta ? 8 : 14
                     Layout.fillWidth: true
                     Campo {
                         id: campoCliente
@@ -766,6 +772,8 @@ FocusScope {
                     titulo: "Total"
                     color: Tema.verde
                     corTitulo: Tema.verdeEscuro
+                    preenchimento: tela.compacta ? 16 : (Tema.estreito ? 16 : 22)
+                    espacamento: tela.compacta ? 8 : 14
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
@@ -811,7 +819,7 @@ FocusScope {
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold
-                        font.pixelSize: 46
+                        font.pixelSize: tela.compacta ? 36 : 46
                         fontSizeMode: Text.HorizontalFit
                         minimumPixelSize: 24
                         Layout.fillWidth: true
@@ -820,7 +828,7 @@ FocusScope {
                         text: "Receber"
                         icone: "check"
                         atalho: "F2"
-                        altura: 52
+                        altura: tela.compacta ? 46 : 52
                         font.pixelSize: 18
                         enabled: tela.carrinho.length > 0 && tela.caixaAberto
                         Layout.fillWidth: true
