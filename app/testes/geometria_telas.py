@@ -12,7 +12,9 @@ revisão visual da auditoria viu nas fotos:
   G3  Entrada no celular com 5 usuários: tudo dentro da tela, ou a tela rola
       (H20, VIS33-06: título em y < 0 e "Eduarda" abaixo de 780);
   G4  Configurações › Simultaneidade › Fiscal no celular: nenhum texto mais largo que a tela
-      (H21, VIS33-07).
+      (H21, VIS33-07), na primeira vista e rolando a seção até o fim (passo 7.2);
+  G5  Entrada no celular com 5 usuários: escolhido o último nome, a senha e o
+      "Entrar" ficam inteiros dentro da tela (H20; passo 7.2).
 
 Em 4b253c6 as quatro são falhas ESPERADAS (H01 no passo 7.1; H20 e H21 no
 passo 7.2): o roteiro sai com 0 e lista as falhas. Se uma esperada passar, ele
@@ -43,6 +45,7 @@ ESPERADAS = {
     "G2": "H01 (câmera sobre o Copiar no celular), passo 7.1",
     "G3": "H20 (entrada no celular sem rolagem), passo 7.2",
     "G4": "H21 (Fiscal no celular cortado), passo 7.2",
+    "G5": "H20 (entrada no celular: senha e Entrar fora da tela), passo 7.2",
 }
 CELULAR = (360, 780)
 
@@ -176,6 +179,32 @@ def main():
         finally:
             rr.fechar()
 
+        # G5 — entrada no celular: o último nome, e a senha e o Entrar à vista (H20).
+        rr = u.Rustinho(modelo, "TelaPecas", {}, fotos, "g5_entrada_celular", celular=True)
+        try:
+            time.sleep(2)
+            alvo = [(x, y) for x, y, tx in rr.textos() if tx == "Eduarda"]
+            if alvo:
+                px, py = rr.ponto(*alvo[0])
+                base.xdo("mousemove", str(px), str(py), "click", "1")
+                time.sleep(1.5)
+            rr.foto("")
+            t = rr.textos()
+            tq = toques(t)
+            entrar = [r[4:] for r in tq if r[0] == "botao" and r[3].startswith("Entrar")]
+            senha = [r[4:] for r in tq if r[0] == "campo"]
+            dentro = [r for r in entrar + senha if r[1] >= 0 and r[1] + r[3] <= CELULAR[1] + 0.5]
+            medido = bool(alvo and entrar and senha)
+            conferir("G5", "entrada com 5 usuários: escolhida a Eduarda, a senha e o Entrar dentro da tela",
+                     medido and len(dentro) == len(entrar + senha),
+                     f"Entrar {[(round(r[1]), round(r[1] + r[3])) for r in entrar]}; "
+                     f"senha {[(round(r[1]), round(r[1] + r[3])) for r in senha]} (tela {CELULAR[1]})"
+                     + ("" if medido else " (NÃO MEDIDO)"))
+            if not medido:
+                ESPERADAS.pop("G5", None)
+        finally:
+            rr.fechar()
+
         # G4 — Configurações › Simultaneidade › Fiscal no celular. A tela calcula as abas do
         # gerente ao abrir: entra primeiro e vai pela Início (como a pessoa faz).
         rr = u.Rustinho(modelo, "TelaInicio", {}, fotos, "g4_fiscal_celular", celular=True)
@@ -194,8 +223,22 @@ def main():
             t = rr.textos()
             na_fiscal = bool(textos_com(t, "Emissão fiscal") or textos_com(t, "informe a UF"))
             largos = [(r[6][:40], round(r[0] + r[2])) for r in u.rets(t) if r[0] + r[2] > CELULAR[0] + 2]
+            medidos = len(u.rets(t))
+            # Rolando a seção até o fim (passo 7.2): o que fica abaixo da dobra também.
+            for i in range(8):
+                cx, cy = rr.ponto(180, CELULAR[1] // 2)
+                for _ in range(4):
+                    base.xdo("mousemove", str(cx), str(cy), "click", "5")
+                time.sleep(0.6)
+                t = rr.textos()
+                medidos += len(u.rets(t))
+                for r in u.rets(t):
+                    if r[0] + r[2] > CELULAR[0] + 2 and 0 <= r[1] <= CELULAR[1]:
+                        largos.append((r[6][:40], round(r[0] + r[2])))
+            rr.foto("-rolada")
+            largos = list(dict.fromkeys(largos))
             conferir("G4", "Fiscal no celular: nenhum texto mais largo que a tela", na_fiscal and not largos,
-                     f"na seção Fiscal: {na_fiscal}; {len(u.rets(t))} textos medidos; passam da borda: {largos[:3]}")
+                     f"na seção Fiscal: {na_fiscal}; {medidos} textos medidos (rolando); passam da borda: {largos[:3]}")
             if not na_fiscal:
                 resultados["G4"] = (False, "Fiscal no celular: NÃO MEDIDO (a seção Fiscal não abriu)", "")
                 ESPERADAS.pop("G4", None)
@@ -220,7 +263,7 @@ def main():
             print(f"  ✘ {codigo} {nome} — {detalhe}")
             reprovado = True
     print(f"\n{sum(1 for v in resultados.values() if v[0])} de {len(resultados)} certas; fotos em {fotos}")
-    sys.exit(1 if reprovado or len(resultados) != 4 else 0)
+    sys.exit(1 if reprovado or len(resultados) != 5 else 0)
 
 
 if __name__ == "__main__":
