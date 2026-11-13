@@ -1,5 +1,5 @@
 -- Protocolo 4, etapa 2 (D1, E5): registro assinado dos caixas aprovados e
--- dos retirados (veja `identidade_caixa::aprovados`).
+-- dos retirados (veja `troca::protocolo4::aprovados`).
 --
 -- O número é PROVISÓRIO: só se fixa no commit do projeto (MIG-1 (a)). Na
 -- preparação (ramo prod-p4) e na integração ela era a 0025; a 0025 ficou com

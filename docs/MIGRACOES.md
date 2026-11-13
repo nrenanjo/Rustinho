@@ -50,14 +50,10 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0022 | `0022_caixa_fechado.sql` | caixa fechado não muda mais (D-14, 0.9.14) | |
 | 0023 | `0023_rascunho_e_pendencias.sql` | rascunho da OS e pendências da troca de dados (0.9.15) | recria tabelas (`sem_chaves_estrangeiras`) |
 | 0024 | `0024_gtins_e_pendencias_xml.sql` | vários GTINs por peça e pendências de identificação do XML (0.9.18-dev.3.1) | **publicada**; a dev.3 paralela tem outra 0024 (§3) |
+| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada da peça e que não viaja, em `dados::esquema::COLUNAS`: quem recebe a peça a refaz; preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | **não publicada**; número provisório até entrar na branch (§5). **Não é a 0025 da dev.3** (`venda_cancelamento`, §3): a linhagem (§4) recusa o banco dev.3/25 |
+| 0026 | `0026_caixas_aprovados.sql` | registro assinado de caixas aprovados e retirados (protocolo 4, etapa 2; era a 0024 da `frente-p4`) | **não publicada**; número provisório até entrar na branch (§5). Era a 0025 da preparação `prod-p4` e da integração, renumerada porque a 7.5 entrou antes (MIG-1 (a): quem entra depois renumera) |
 
 Um número publicado **nunca muda de conteúdo**.
-
-**Preparada, ainda não publicada** (número provisório: só se fixa no commit do projeto, MIG-1 (a)):
-
-| Nº | Arquivo | Conteúdo | Observação |
-|---|---|---|---|
-| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada da peça e que não viaja, em `dados::esquema::COLUNAS`: quem recebe a peça a refaz; preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | não é a 0025 da dev.3 (§3); a preparação do protocolo 4 (5.5) também usa a 0025 provisória: quem entrar depois renumera |
 
 ## 3. A linha paralela dev.3: não é esta estrutura
 
@@ -117,16 +113,21 @@ A reserva de 05/11 é substituída: ela previa uma 0024 para os caixas aprovados
 0024 já foi publicada com os GTINs. A numeração continua da 0025, na ordem em que cada migração
 **entra** na branch. O número só fica definitivo ao entrar, e então este documento é atualizado.
 
-| Ordem | Conteúdo | Passo | Observação |
-|---|---|---|---|
-| 0025 | pendências: tipo de resolução, motivo, quem resolveu ou descartou, chaves de NF-e | 4.5 | só colunas novas; depois da 2.4 |
-| 0026 | decisão de identificação por chave natural | 5.3 | conforme DP-41/42 |
-| 0027 | caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | renumerar nome do arquivo, `MIGRACOES`, comentário, sentinela e `conferir_estrutura` |
-| 0028 | demais registros do protocolo 4 e da recuperação, se precisarem de banco | 5.5 | conforme DP-44 |
-| 0029 | índices de desempenho (inclui o composto da 0006, com nome novo) | 7.5 | preparada como 0025 (o próximo livre da árvore de preparação), com o nome sem acento gravado (B04); veja §2 |
-| 0030 | nome e código gravados no item da OS, se o item não os tiver | 6.5 | só se preciso |
+| Conteúdo | Passo | Observação |
+|---|---|---|
+| M-A: pendências: tipo de resolução, motivo, quem resolveu ou descartou, chaves de NF-e | 4.5 | só colunas novas; depois da 2.4 |
+| M-B: decisão de identificação por chave natural | 5.3 | conforme DP-41/42 |
+| M-C: caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | **preparada** como `0026_caixas_aprovados.sql` (no ramo `prod-p4` e na integração era a 0025; renumerada porque a 0025 da 7.5 entrou antes) |
+| M-D: demais registros do protocolo 4 e da recuperação, se precisarem de banco | 5.5 | conforme DP-44 |
+| M-E: índices de desempenho (inclui o composto da 0006, com nome novo) e o nome sem acento gravado | 7.5 | **preparada** como `0025_indices_e_busca_normalizada.sql` (ramo de preparação `prod-f75`, 13/11) |
+| M-F: nome e código gravados no item da OS, se o item não os tiver | 6.5 | só se preciso |
 
-Se a 6.5 ou a 7.5 entrarem antes da 5.x, a numeração segue a ordem real de entrada.
+O número sai **no commit**, como o próximo livre (MIG-1 (a), `PLANO_MIGRACOES.md`): a tabela é de
+conteúdos, não de números. Dois ramos com o mesmo número novo: quem entra depois renumera (nome do
+arquivo, linha em `MIGRACOES`, bloco em `conferir_estrutura`, sentinela e o teste da migração),
+antes da publicação. A M-C e a M-E foram preparadas, cada uma, como 0025; na ordem de incorporação
+(folha de decisões v3, C-4) a 7.5 entrou primeiro e ficou com a 0025, e a 5.5 foi renumerada para a
+0026 (na integração de ensaio, `prod-integ`, 13/11, a ordem tinha sido a inversa).
 
 ## 6. Checklist de uma migração nova
 
