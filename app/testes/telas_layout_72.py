@@ -23,6 +23,8 @@ outros roteiros, e MEDE pelas posições que o próprio programa informa
                 contraste de texto (>= 4,5:1), inclusive na faixa escura.
   M10 H10       Peça com variação de nome "<i>P</i>" na grade: o texto formatado
                 (StyledText) recebe o nome escapado (&lt;i&gt;), e não a marcação.
+  M11 H01/7.1   Início com 2 pendências XML: a pílula de Peças sem o selo
+                numérico; o aviso textual das pendências continua na Início.
 
 O contraste é o da WCAG 2: fundo = a cor mais comum em volta e dentro do
 retângulo do texto (ou da caixa); frente = o pixel de maior contraste com o
@@ -56,6 +58,7 @@ CELULAR = (360, 780)
 # Item → (passo). Cada correção da 7.2 tira o seu.
 ESPERADAS = {
     "M5": "VIS33-05 (\"Salvar como orçamento\" cortado em 1366 × 768), passo 7.2",
+    "M11": "H01 (selo numérico na pílula de Peças da Início), passo 7.1",
 }
 
 
@@ -421,6 +424,38 @@ def main():
                 else:
                     conferir("M10", "Grade da peça: NÃO MEDIDO (a grade não apareceu)", False, "")
                     ESPERADAS.pop("M10", None)
+            finally:
+                rr.fechar()
+        # ---- M11: o selo numérico fora da pílula; o aviso textual fica ----
+        if quer("M11"):
+            pasta = nova(est)
+            c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
+            for i in (1, 2):
+                c.execute(
+                    "INSERT INTO xml_pendencia_identificacao (id, fornecedor_documento, fornecedor_nome, numero_nfe,"
+                    " codigo_fornecedor, codigo_compacto, descricao, descricao_compacta, unidade, motivo, situacao,"
+                    " criado_em) VALUES (?, '11222333000181', 'FORNECEDOR DE TESTE', '1', ?, ?, ?, ?, 'PC',"
+                    " 'sem_vinculo', 'pendente', '2026-11-12T00:00:00Z')",
+                    (f"m11-{i}", f"S-{i}", f"s{i}", f"SELO {i}", f"selo{i}"))
+            c.commit()
+            c.close()
+            rr = abrir(pasta, "TelaInicio", {}, fotos, "m11_inicio_selo", tamanho=(1366, 768))
+            logs.append(rr.saida)
+            try:
+                rr.foto("")
+                t = rr.textos()
+                rs = rets_completos(t)
+                pecas = [r for r in rs if r[6] == "CartaoFuncao" and r[7] == "Peças"]
+                selos = [r for r in rs if pecas and r[6] == "CartaoFuncao" and r[7].strip().isdigit()
+                         and abs((r[1] + r[3] / 2) - (pecas[0][1] + pecas[0][3] / 2)) < 20
+                         and 0 < r[0] - pecas[0][0] < 400]
+                aviso = any("Pendências de identificação XML" in s for _, _, s in t)
+                if pecas:
+                    conferir("M11", "Início: a pílula de Peças sem selo numérico; o aviso textual das pendências fica",
+                             not selos and aviso, f"selos ao lado de Peças: {[r[7] for r in selos]}; aviso textual: {aviso}")
+                else:
+                    conferir("M11", "Início: NÃO MEDIDO (a pílula de Peças não apareceu)", False, "")
+                    ESPERADAS.pop("M11", None)
             finally:
                 rr.fechar()
     finally:
