@@ -351,6 +351,17 @@ pub fn resumo(conn: &Connection) -> Resultado<Resumo> {
 
 /// Formas de pagamento das vendas do período: (linhas, total, vendas).
 fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linha>, i64, i64)> {
+    let (somas, total, vendas) = somas_por_forma(conn, de, ate)?;
+    Ok((linhas_das_formas(somas, total), total, vendas))
+}
+
+/// Uma forma de pagamento no período: (identificador, o que entrou, vendas).
+type SomaDaForma = (String, i64, i64);
+
+/// E13: o que entrou por forma de pagamento, pelo IDENTIFICADOR da forma
+/// ("dinheiro", "pix"...), já sem o troco, da maior para a menor; o total e
+/// quantas vendas. O nome que a tela mostra sai daqui só no fim.
+fn somas_por_forma(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<SomaDaForma>, i64, i64)> {
     let desde = utc_desde(de);
     let mut c = conn.prepare(
         "SELECT p.forma, SUM(p.valor), COUNT(DISTINCT v.id) FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
@@ -358,7 +369,7 @@ fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linh
             AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2
           GROUP BY p.forma",
     )?;
-    let mut somas: Vec<(String, i64, i64)> =
+    let mut somas: Vec<SomaDaForma> =
         c.query_map(params![de, ate, desde], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<_, _>>()?;
     // O dinheiro recebido inclui o troco: tira para ficar o que entrou.
     let troco: i64 = conn.query_row(
@@ -374,8 +385,12 @@ fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linh
     let (_, vendas) = somar(conn, de, ate)?;
     somas.sort_by_key(|s| std::cmp::Reverse(s.1));
     let total = numeros::soma(somas.iter().map(|s| s.1))?;
+    Ok((somas, total, vendas))
+}
+
+fn linhas_das_formas(somas: Vec<SomaDaForma>, total: i64) -> Vec<Linha> {
     let maior = somas.first().map(|s| s.1).unwrap_or(0);
-    let linhas = somas
+    somas
         .into_iter()
         .filter(|s| s.1 > 0)
         .map(|(forma, valor, n)| Linha {
@@ -385,8 +400,7 @@ fn formas_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(Vec<Linh
             parte: proporcao(valor, maior),
             percentual: percentual(valor, total),
         })
-        .collect();
-    Ok((linhas, total, vendas))
+        .collect()
 }
 
 fn pecas_periodo(conn: &Connection, de: &str, ate: &str, limite: i64) -> Resultado<Vec<Linha>> {
@@ -432,7 +446,7 @@ fn vendedores_periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<Vec<L
           WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND v.criado_em >= ?3
             AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2
           GROUP BY v.vendedor_id
-          ORDER BY SUM(v.total) DESC",
+          ORDER BY 3 DESC, 1",
     )?;
     let linhas: Vec<(String, i64, i64)> = c
         .query_map(params![de, ate, utc_desde(de)], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
@@ -655,23 +669,20 @@ pub struct Pagamentos {
 
 pub fn pagamentos(conn: &Connection, dias: i64) -> Resultado<Pagamentos> {
     let (de, ate) = periodo(conn, dias)?;
-    let (itens, total, vendas) = formas_periodo(conn, &de, &ate)?;
+    let (somas, total, vendas) = somas_por_forma(conn, &de, &ate)?;
+    // E13: soma pelo identificador da forma (já sem o troco), não pelo nome
+    // que a tela mostra: mudar um rótulo não muda a conta.
     let mut na_hora = 0i64;
     let mut depois = 0i64;
-    // Recalcula pelas formas (já sem o troco).
-    for f in caixa::FORMAS {
-        let nome = f.1;
-        let v: i64 = itens
-            .iter()
-            .find(|l| l.nome == nome)
-            .and_then(|l| numeros::ler_dinheiro(&l.valor).ok().flatten())
-            .unwrap_or(0);
-        match f.0 {
+    for (forma, v, _) in &somas {
+        let v = (*v).max(0);
+        match forma.as_str() {
             "dinheiro" | "pix" | "debito" => na_hora += v,
             "credito" | "cheque" | "crediario" => depois += v,
             _ => {}
         }
     }
+    let itens = linhas_das_formas(somas, total);
 
     Ok(Pagamentos {
         dias,
@@ -811,5 +822,35 @@ mod testes {
         let cl = clientes(c, 30).unwrap();
         assert_eq!((cl.clientes, cl.itens.len()), (0, 0));
         assert_eq!(fornecedores(c, 30).unwrap().itens.len(), 0);
+    }
+
+    /// E13 (passo 6.5): os vendedores saem na ordem do valor que a tela mostra
+    /// (já sem as devoluções), e a barra cheia é a do primeiro. O "na hora /
+    /// depois" soma pelo identificador da forma, não pelo nome que a tela mostra.
+    #[test]
+    fn e13_vendedores_pelo_liquido_e_formas_pelo_identificador() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let maria = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        let joao = usuarios::criar(c, d, "Joao", "1234", false).unwrap().id;
+        caixa::abrir(c, d, &maria, "Caixa 1", "0").unwrap();
+        let filtro = peca(&b, &maria, "Filtro", "50"); // preço 100
+        vender(&b, &maria, &filtro, "3", "pix", "300");
+        vender(&b, &joao, &filtro, "1", "credito", "100");
+        let venda_maria: String =
+            c.query_row("SELECT id FROM venda WHERE vendedor_id = ?1", [&maria], |l| l.get(0)).unwrap();
+        // Maria devolveu R$ 250: vendeu mais no bruto (300), menos no líquido (50).
+        c.execute(
+            "INSERT INTO devolucao (id, numero, dispositivo, caixa_nome, venda_id, valor, criado_em)
+             VALUES ('dv-e13', 1, ?1, 'Caixa 1', ?2, 25000, ?3)",
+            rusqlite::params![d, venda_maria, crate::tempo::agora()],
+        )
+        .unwrap();
+        let v = resumo(c).unwrap().vendedores;
+        let lista: Vec<(&str, &str)> = v.iter().map(|l| (l.nome.as_str(), l.valor.as_str())).collect();
+        assert_eq!(lista, [("Joao", "100,00"), ("Maria", "50,00")], "a ordem tem de ser a do valor mostrado");
+        assert_eq!(v[0].parte, 1.0, "a barra cheia é a do primeiro");
+        let p = pagamentos(c, 30).unwrap();
+        assert_eq!((p.na_hora.as_str(), p.depois.as_str()), ("300,00", "100,00"));
     }
 }
