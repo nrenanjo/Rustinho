@@ -938,3 +938,47 @@ fn e10_revisao_a_venda_muda_encomenda_e_os_com_registro() {
     vendas::cancelar(c, &d, &l.u, &o, "cliente desistiu").unwrap();
     assert_eq!(auditado(c, "venda", &o, "orcamento.cancelar"), 1, "orçamento cancelado");
 }
+
+/// E13 · revisão (achado novo): a lista de compra impressa agrupa as peças
+/// pelo NOME do fornecedor que a tela mostra. Dois fornecedores diferentes
+/// com o mesmo nome (duas filiais com a mesma fantasia, por exemplo) saem
+/// juntos, num grupo só, e quem compra não sabe de quem pedir cada peça.
+#[test]
+#[ignore = "achado da revisão do E13: a lista de compra impressa junta fornecedores diferentes com o mesmo nome"]
+fn e13_revisao_lista_de_compra_separa_fornecedores_de_mesmo_nome() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    let mut pecas = Vec::new();
+    for nome in ["Filtro de ar", "Filtro de cabine"] {
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = nome.into();
+        f.custo = "20".into();
+        f.estoque_minimo = "2".into();
+        pecas.push(produtos::salvar(c, d, &l.u, &f).unwrap());
+    }
+    for (i, peca) in pecas.iter().enumerate() {
+        let mut f = pessoas::ficha_nova(c, "fornecedor").unwrap();
+        f.nome = format!("Distribuidora Sul Filial {i}");
+        f.fantasia = "Distribuidora Sul".into();
+        let forn = pessoas::salvar(c, d, &l.u, &f).unwrap();
+        let compra = format!("compra-e13-{i}");
+        c.execute(
+            "INSERT INTO compra (id, fornecedor_id, total, situacao, lancada_em, criado_em, dispositivo)
+             VALUES (?1, ?2, 4000, 'lancada', ?3, ?3, ?4)",
+            params![compra, forn, crate::tempo::agora(), d],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, quantidade, valor_produtos, produto_id)
+             VALUES (?1, ?2, 1, ?3, 2000, 4000, ?4)",
+            params![format!("{compra}-item"), compra, format!("SUL-{i}"), peca],
+        )
+        .unwrap();
+    }
+    let s = crate::reposicao::sugestao(c, "").unwrap();
+    assert_eq!(s.itens.len(), 2);
+    assert!(s.itens.iter().all(|i| i.fornecedor == "Distribuidora Sul"), "os dois aparecem com o mesmo nome");
+    let html = crate::reposicao::lista_compra_html(c).unwrap();
+    assert_eq!(html.matches(">Distribuidora Sul</p>").count(), 2, "um grupo para cada fornecedor: {html}");
+}
