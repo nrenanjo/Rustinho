@@ -6,6 +6,9 @@
 //! etapa que o deixa verde (dita no motivo do `#[ignore]`) e passa a ser
 //! exigido. Rode com `--ignored` para vê-los em vermelho.
 //!
+//! No fim, testes das peças do protocolo 4 já prontas (etapas 1 a 3) contra a
+//! troca de hoje: passam já, sem mudar o fio (`p4_*`).
+//!
 //! As demonstrações do ataque (`demo_*`) ficam em `demos_seguranca_caixas.rs`,
 //! fora do patch público (decisão A10 pendente: elas ensinam o ataque).
 //!
@@ -235,4 +238,61 @@ fn seguro_anuncio_nao_permite_teste_offline_da_senha() {
     let chave = derivar(&a.senha, &sal).unwrap();
     let abre = ChaCha20Poly1305::new_from_slice(&chave).unwrap().decrypt(&nonce.into(), &pacote[32..]).is_ok();
     assert!(!abre, "o anúncio não pode ser aberto com a chave derivada da senha (senão permite teste offline)");
+}
+
+// ===========================================================================
+// 3. Protocolo 4, peças prontas (ainda não ligadas ao fio) — PASSAM HOJE
+// ===========================================================================
+
+/// Etapa 3 (R-01): o anúncio **assinado** do protocolo 4 não tem nada da
+/// senha da rede. É o procedimento do atacante de `demo_r01_…` (ler o sal e o
+/// nonce do cabeçalho, derivar a chave com a senha e abrir o corpo) aplicado
+/// ao anúncio novo, com a senha **certa** e a chave **real** deste caixa: não
+/// há o que abrir. O anúncio é o mesmo com qualquer senha da rede (não depende
+/// dela) e se confere sem chave nenhuma (é público e assinado).
+///
+/// Isto **não** deixa verde o `seguro_anuncio_nao_permite_teste_offline_da_senha`:
+/// ele confere o anúncio que o `Motor` manda hoje (`anuncio` + `cifrar`, do
+/// protocolo 3), que só muda quando o anúncio novo for ligado (etapa 4, com o
+/// canal da decisão A5, e a convivência da A4). Até lá o R-01 continua aberto.
+#[test]
+fn p4_anuncio_assinado_nao_tem_nada_da_senha_da_rede() {
+    use crate::troca::protocolo4::{anuncio, Identidade};
+    const AGORA: i64 = 1_793_000_000_000;
+    let contem = |palheiro: &[u8], agulha: &[u8]| palheiro.windows(agulha.len()).any(|j| j == agulha);
+
+    let (b, _u) = crate::faixas::para_testes::loja("Caixa 1");
+    salvar_ajustes(&b.conn, true, SENHA_FRACA, "").unwrap();
+    let a = ajustes(&b.conn).unwrap();
+    let k = Chaves::de(&b.conn, &a.senha).unwrap();
+    let loja = crate::loja::criar(&b.conn).unwrap();
+    let id = Identidade::gerar().unwrap();
+    let pacote = anuncio::montar(&id, &loja, PORTA_TCP, AGORA).unwrap();
+
+    // Nem o sal desta rede nem a chave tirada da senha estão no anúncio.
+    assert!(!contem(&pacote, &k.sal), "o sal da senha da rede foi para o anúncio");
+    assert!(!contem(&pacote, &k.propria), "a chave da senha da rede foi para o anúncio");
+    assert_ne!(&pacote[..4], MAGICA, "não é uma mensagem cifrada do protocolo 3");
+
+    // O procedimento do atacante, com a senha CERTA, não abre nada: nem com
+    // o "sal" do lugar de sempre, nem com a chave real deste caixa.
+    let mut sal = [0u8; 16];
+    sal.copy_from_slice(&pacote[4..20]);
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&pacote[20..32]);
+    for chave in [derivar(&a.senha, &sal).unwrap(), k.propria] {
+        let abre = ChaCha20Poly1305::new_from_slice(&chave).unwrap().decrypt(&nonce.into(), &pacote[32..]).is_ok();
+        assert!(!abre, "a chave da senha da rede abriu o anúncio assinado");
+    }
+
+    // Não depende da senha: com o mesmo momento e nonce, trocar a senha da
+    // rede (ou desligar a troca) não muda um byte.
+    let antes = anuncio::montar_com(&id, &loja, PORTA_TCP, AGORA, [9; 16]).unwrap();
+    salvar_ajustes(&b.conn, true, "outra-senha-bem-maior", "").unwrap();
+    let com_outra = anuncio::montar_com(&id, &loja, PORTA_TCP, AGORA, [9; 16]).unwrap();
+    assert_eq!(antes, com_outra);
+
+    // E se confere sem chave nenhuma: tudo nele é público e assinado.
+    let lido = anuncio::abrir(&pacote, AGORA).unwrap();
+    assert_eq!((lido.chave, lido.loja_id.as_str(), lido.porta), (id.publica(), loja.as_str(), PORTA_TCP));
 }
