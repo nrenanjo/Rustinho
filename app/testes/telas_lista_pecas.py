@@ -12,7 +12,7 @@ proprietário (dossiê dev.3.3, Categoria A, itens 1, 2 e 5):
   L1  a lista carrega peças;
   L2  densidade: cerca de 10 peças visíveis em 1080p (8 a 13);
   L3  o nome da peça sempre visível (nunca colapsa);
-  L4  a primeira coluna se chama "Cód. forn." (H07: hoje "Código");
+  L4  a primeira coluna se chama "Cód. forn." (H07; antes "Código");
   L5  sem código de fornecedor, a primeira coluna mostra o traço "—";
   L6  a primeira coluna nunca mostra o código interno;
   L7  nada empilhado na primeira coluna (nenhum "Interno:");
@@ -34,9 +34,10 @@ proprietário (dossiê dev.3.3, Categoria A, itens 1, 2 e 5):
       texto novo não pode quebrar a largura da coluna).
 
 As falhas de achados já registrados, que ficam para passos seguintes, são
-ESPERADAS (não reprovam o roteiro, mas aparecem no resultado): L4 (H07, passo
-7.3) e L11 (H01, passo 7.1). Se uma esperada passar, o roteiro avisa e reprova
-(é hora de tirá-la da lista). Qualquer outra falha reprova.
+ESPERADAS (não reprovam o roteiro, mas aparecem no resultado); hoje não há
+nenhuma (L11/H01 saiu no passo 7.1 e L4/H07 no 7.3). Se uma esperada passar,
+o roteiro avisa e reprova (é hora de tirá-la da lista). Qualquer outra falha
+reprova.
 
     python3 app/testes/telas_lista_pecas.py [pasta para as fotos]
 
@@ -58,9 +59,7 @@ import telas_unidades as u  # noqa: E402
 base, tema = u.base, u.tema
 TELA = u.TELA
 
-ESPERADAS = {
-    "L4": "H07 (cabeçalho \"Código\" na coluna do código do fornecedor), passo 7.3",
-}
+ESPERADAS = {}
 LARGURA_1A_COLUNA = 152  # o nome da peça começa em x = 152 (GEO:nomePeca)
 LARGURA_COLUNA_CODIGO = 84  # a coluna do código do fornecedor (TelaPecas e LinhaPeca)
 
