@@ -84,6 +84,13 @@ pub use registro::*;
 pub use servidor::*;
 pub use versoes::*;
 
+/// Testes da frente de segurança (R-01 e D1): o comportamento seguro desejado
+/// (`seguro_*`, ignorados até a etapa do protocolo 4 que os deixa verdes).
+/// Submódulo de `sync` para alcançar `cifrar`, `derivar`, `anuncio` e
+/// `Chaves` — o anúncio dos testes é produzido pelo próprio código.
+#[cfg(test)]
+mod testes_seguranca_caixas;
+
 #[cfg(test)]
 mod testes {
     use super::*;
