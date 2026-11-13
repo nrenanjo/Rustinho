@@ -144,14 +144,33 @@ class Rustinho:
         xdo("mousemove", str(setas[-1][0]), str(setas[-1][1]), "click", "1")
         return True
 
+    def posicao_do_texto(self, texto):
+        """(x, y) do texto na tela agora, ou None."""
+        for x, y, t in self.textos():
+            if simples(t) == simples(texto):
+                return x, y
+        return None
+
     def entrar(self, usuario):
+        """Clica no nome na tela de entrada e digita a senha.
+
+        H20 × roteiros (integração 2, 13/11): desde a H20 (a entrada rola, com
+        os cartões de dois em dois), a primeira leitura da tela de entrada pode
+        pegar o layout ainda provisório (os cartões um sobre o outro, o nome
+        64 px abaixo de onde fica); o clique ali cai fora do cartão e a tela
+        continua na entrada. Antes de clicar, a posição do nome tem de ser a
+        mesma em duas leituras seguidas."""
+        anterior = None
         for _ in range(40):
             time.sleep(1)
             try:
-                if self.clicar(usuario):
-                    break
+                posicao = self.posicao_do_texto(usuario)
             except RuntimeError:
-                pass
+                posicao = None
+            if posicao is not None and posicao == anterior:
+                xdo("mousemove", str(posicao[0]), str(posicao[1]), "click", "1")
+                break
+            anterior = posicao
         else:
             raise RuntimeError(f"a tela de entrada não apareceu (veja {self.saida})")
         time.sleep(0.8)
