@@ -546,3 +546,21 @@ fn pend35_gtins_de_antes_viajam_uma_vez_sem_repetir() {
     sync::registrar_existentes(&a.conn).unwrap();
     assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao"), antes);
 }
+
+/// O-1 (o gatilho da troca): regravar uma linha com o mesmo conteúdo não grava
+/// alteração (nada viaja à toa, e uma regravação num caixa não vira conflito
+/// com a mudança de verdade feita no outro). Mudar de verdade continua
+/// gravando. Em `b3a171c` toda regravação grava uma alteração.
+#[test]
+#[ignore = "caracterização O-1: regravar sem mudança grava alteração em b3a171c; passa no passo 5.2"]
+fn o1_regravar_sem_mudanca_nao_grava_alteracao() {
+    let (a, _, u) = loja();
+    let p = peca(&a, &u, "Correia", "1");
+    let antes = contar(&a, "SELECT COUNT(*) FROM alteracao");
+    a.conn.execute("UPDATE produto SET nome = nome, custo = custo WHERE id = ?1", [&p]).unwrap();
+    a.conn.execute("UPDATE usuario SET nome = nome WHERE id = ?1", [&u]).unwrap();
+    a.conn.execute("UPDATE config SET valor = valor WHERE chave = 'loja_nome'", []).unwrap();
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao"), antes, "regravar sem mudança gravou alteração");
+    a.conn.execute("UPDATE produto SET nome = 'Correia dentada' WHERE id = ?1", [&p]).unwrap();
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao"), antes + 1, "a mudança de verdade tem de gravar");
+}
