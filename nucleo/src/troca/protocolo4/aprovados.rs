@@ -1,7 +1,7 @@
 //! Registro assinado dos caixas aprovados e retirados — protocolo 4, etapa 2
 //! (D1, E5).
 //!
-//! Duas tabelas (migração 0024): `caixa_aprovado` e `caixa_retirado`. Cada
+//! Duas tabelas (migração 0025): `caixa_aprovado` e `caixa_retirado`. Cada
 //! linha leva a assinatura Ed25519 de quem a fez, sobre todos os campos
 //! (veja [`Aprovacao::corpo`] e [`Retirada::corpo`]); nenhuma linha vale só
 //! por estar no banco.

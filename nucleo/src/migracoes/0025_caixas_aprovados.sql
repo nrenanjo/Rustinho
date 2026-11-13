@@ -1,5 +1,5 @@
 -- Protocolo 4, etapa 2 (D1, E5): registro assinado dos caixas aprovados e
--- dos retirados (veja `identidade_caixa::aprovados`).
+-- dos retirados (veja `troca::protocolo4::aprovados`).
 --
 -- Cada linha leva a assinatura Ed25519 de quem a fez sobre todos os campos.
 -- Nada vale só por estar aqui: a conferência refaz a cadeia de assinaturas
