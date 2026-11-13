@@ -19,12 +19,29 @@
 //! O `g2` é a versão do gerador: mudou o gerador, muda o nome (um banco do
 //! gerador antigo nunca é confundido com o novo). Sem `RUSTINHO_MEDIR_PASTA`,
 //! usa uma pasta no diretório temporário.
+//!
+//! Desde o passo 7.5 (PEND-39, N04; preparação de 13/11/2026):
+//! - **cenário dev.2** (`RUSTINHO_MEDIR_CENARIO=dev2`): mede o banco
+//!   `<pasta>/busca_<peças>.db` que o medidor da `v0.9.18-dev.2` gerou (ele não
+//!   é gerado aqui), só com as consultas que existiam lá. Assim a dev.2 e esta
+//!   versão são medidas com os mesmos dados e as mesmas consultas (o critério
+//!   "igual ou melhor que a dev.2"). O arquivo é atualizado para a estrutura
+//!   desta versão ao abrir: meça sempre numa cópia;
+//! - **lista contínua** (N04): a lista inteira, sem busca e com busca, lida em
+//!   partes de 100 até o fim, como a tela de Peças rola; confere que cada peça
+//!   vem uma vez só e que nenhuma falta;
+//! - a **contagem** de peças, **mais vendidos** e **parados** (B01);
+//! - a **memória máxima** do processo (VmHWM) no fim de cada banco;
+//! - `gravar_resultados`: grava os resultados completos de um conjunto grande
+//!   de consultas (`RUSTINHO_MEDIR_SAIDA=<arquivo>`), para provar que duas
+//!   versões dão os mesmos resultados nos mesmos dados.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use rustinho_nucleo::banco::Banco;
-use rustinho_nucleo::{busca, faixas, importar, pessoas, produtos, tempo, texto, usuarios};
+use rustinho_nucleo::{busca, faixas, importar, pessoas, produtos, reposicao, tempo, texto, usuarios};
 
 /// Sorteio determinístico (xorshift64*), sem dependência nova.
 struct Sorteio(u64);
@@ -422,13 +439,21 @@ fn medir_busca() {
 }
 
 fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
-    std::fs::create_dir_all(pasta).unwrap();
-    let caminho = pasta.join(format!("busca_g2_{quantas}.db"));
-    if !caminho.exists() {
-        gerar(&caminho, quantas);
-    }
+    let caminho = banco_do_cenario(pasta, quantas);
 
+    // Abrir pode atualizar a estrutura (um banco de uma versão anterior: a
+    // cópia conferida e as migrações que faltam). O tempo entra no relatório.
+    let estrutura_antes: i64 = rusqlite::Connection::open(&caminho)
+        .and_then(|c| c.query_row("PRAGMA user_version", [], |l| l.get(0)))
+        .unwrap();
+    let t = Instant::now();
     let b = Banco::abrir(&caminho).expect("abrir banco");
+    let abrir_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let estrutura_depois: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+    println!(
+        "# abrir o banco: {abrir_ms:.0} ms (estrutura {estrutura_antes} → {estrutura_depois}{})",
+        if estrutura_antes == estrutura_depois { ", sem atualização" } else { ", com a cópia e a atualização" }
+    );
     let pecas = um_valor(&b, "SELECT COUNT(*) || '' FROM produto");
     let contagens = um_valor(
         &b,
@@ -457,9 +482,16 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     let antigo = um_valor(&b, "SELECT codigo FROM produto_codigo_antigo ORDER BY rowid LIMIT 1 OFFSET 99");
     let similar = um_valor(&b, "SELECT codigo FROM produto_equivalente ORDER BY rowid LIMIT 1 OFFSET 321");
     // K03: GTINs que só estão em produto_gtin (a varredura LIKE da dev.3).
-    let gtin = um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'comercial' ORDER BY rowid LIMIT 1 OFFSET 333");
-    let gtin_trib =
-        um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'tributavel' ORDER BY rowid LIMIT 1 OFFSET 111");
+    // O banco da dev.2 não tem: no cenário dev.2 essas consultas ficam de fora.
+    let dev2 = cenario_dev2();
+    let (gtin, gtin_trib) = if dev2 {
+        (String::new(), String::new())
+    } else {
+        (
+            um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'comercial' ORDER BY rowid LIMIT 1 OFFSET 333"),
+            um_valor(&b, "SELECT gtin FROM produto_gtin WHERE tipo = 'tributavel' ORDER BY rowid LIMIT 1 OFFSET 111"),
+        )
+    };
     let gtin_parcial: String = gtin.chars().skip(4).take(7).collect();
 
     let consultas: Vec<String> = [
@@ -504,6 +536,13 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     .iter()
     .map(|s| s.to_string())
     .collect();
+    // No cenário dev.2, as três consultas de GTIN (K03) ficam de fora: a lista
+    // é a do medidor da dev.2, na mesma ordem.
+    let consultas: Vec<String> = if dev2 {
+        consultas.into_iter().enumerate().filter(|(i, _)| !(29..32).contains(i)).map(|(_, c)| c).collect()
+    } else {
+        consultas
+    };
 
     let mut todas: Vec<f64> = Vec::new();
     for limite in [200_i64, 30] {
@@ -548,6 +587,8 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
     println!("\n## leitor (pelo_codigo_exato)");
     for consulta in
         [&barras, &interno, &original, &do_fornecedor, &antigo, &similar, &gtin, &gtin_trib, &"tcf 01".to_string()]
+            .into_iter()
+            .filter(|c| !(dev2 && c.is_empty()))
     {
         let _ = busca::pelo_codigo_exato(&b.conn, consulta).unwrap();
         let mut tempos = Vec::new();
@@ -585,6 +626,9 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
         tempos.sort_by(f64::total_cmp);
         println!("{:<34} {:>7.2}ms  {n}", nome, percentil(&tempos, 0.5));
     }
+    medir_lista_continua(&b, rodadas);
+    medir_contagem_e_reposicao(&b, rodadas);
+    println!("\n# memória: {}", memoria());
     todas.sort_by(f64::total_cmp);
     println!(
         "RESUMO GERAL buscar (limites 200 e 30): {} amostras — p50 {:.2} ms, p95 {:.2} ms, máximo {:.2} ms",
@@ -593,4 +637,254 @@ fn medir(pasta: &std::path::Path, quantas: usize, rodadas: usize) {
         percentil(&todas, 0.95),
         todas[todas.len() - 1]
     );
+}
+
+/// O banco do cenário: o do gerador desta versão (gerado na primeira vez) ou,
+/// no cenário dev.2, o que o medidor da dev.2 gerou (nunca gerado aqui).
+fn banco_do_cenario(pasta: &std::path::Path, quantas: usize) -> PathBuf {
+    std::fs::create_dir_all(pasta).unwrap();
+    if cenario_dev2() {
+        let caminho = pasta.join(format!("busca_{quantas}.db"));
+        assert!(
+            caminho.exists(),
+            "cenário dev.2: falta {} (gere com o medidor da v0.9.18-dev.2 e meça numa cópia)",
+            caminho.display()
+        );
+        return caminho;
+    }
+    let caminho = pasta.join(format!("busca_g2_{quantas}.db"));
+    if !caminho.exists() {
+        gerar(&caminho, quantas);
+    }
+    caminho
+}
+
+fn cenario_dev2() -> bool {
+    std::env::var("RUSTINHO_MEDIR_CENARIO").is_ok_and(|c| c == "dev2")
+}
+
+/// O pico de memória do processo até agora (Linux: VmHWM; e o VmRSS de agora).
+fn memoria() -> String {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let campo = |nome: &str| {
+        status.lines().find(|l| l.starts_with(nome)).map(|l| l[nome.len()..].trim().to_string()).unwrap_or_default()
+    };
+    format!("VmHWM {} · VmRSS {}", campo("VmHWM:"), campo("VmRSS:"))
+}
+
+/// N04: a lista lida em partes de 100 até o fim, como a tela rola. Confere
+/// que cada peça vem uma vez só e que vieram todas (`total_filtrado`).
+fn medir_lista_continua(b: &Banco, rodadas: usize) {
+    const PARTE: i64 = 100;
+    println!("\n## lista contínua (N04): partes de {PARTE} até o fim ({} rodada(s) da lista inteira)", rodadas.min(3));
+    println!(
+        "{:<12} {:>7} {:>7} {:>10} {:>9} {:>9} {:>9} {:>11}  conferência",
+        "consulta", "peças", "partes", "1ª parte", "p50", "p95", "máximo", "lista toda"
+    );
+    for consulta in ["", "p", "filtro", "pastilha"] {
+        let mut por_parte: Vec<f64> = Vec::new();
+        let mut primeira: Vec<f64> = Vec::new();
+        let mut inteira: Vec<f64> = Vec::new();
+        let mut conferencia = String::new();
+        let mut quantas = 0usize;
+        let mut partes = 0usize;
+        for _ in 0..rodadas.min(3) {
+            let comeco = Instant::now();
+            let mut ids: Vec<String> = Vec::new();
+            let mut deslocamento = 0i64;
+            let mut total_filtrado;
+            partes = 0;
+            loop {
+                let t = Instant::now();
+                let pagina = busca::buscar_pagina(&b.conn, consulta, false, PARTE, deslocamento).unwrap();
+                let ms = t.elapsed().as_secs_f64() * 1000.0;
+                if deslocamento == 0 {
+                    primeira.push(ms);
+                }
+                por_parte.push(ms);
+                partes += 1;
+                total_filtrado = pagina.total_filtrado;
+                deslocamento += pagina.itens.len() as i64;
+                ids.extend(pagina.itens.into_iter().map(|p| p.id));
+                if !pagina.tem_mais {
+                    break;
+                }
+            }
+            inteira.push(comeco.elapsed().as_secs_f64() * 1000.0);
+            let unicas: std::collections::HashSet<&String> = ids.iter().collect();
+            quantas = ids.len();
+            conferencia = if unicas.len() == ids.len() && ids.len() as i64 == total_filtrado {
+                format!("ok: {} peças, cada uma uma vez", ids.len())
+            } else {
+                format!("ERRO: {} lidas, {} diferentes, total_filtrado {total_filtrado}", ids.len(), unicas.len())
+            };
+        }
+        por_parte.sort_by(f64::total_cmp);
+        primeira.sort_by(f64::total_cmp);
+        inteira.sort_by(f64::total_cmp);
+        println!(
+            "{:<12} {:>7} {:>7} {:>8.2}ms {:>7.2}ms {:>7.2}ms {:>7.2}ms {:>9.1}ms  {conferencia}",
+            format!("{consulta:?}"),
+            quantas,
+            partes,
+            percentil(&primeira, 0.5),
+            percentil(&por_parte, 0.5),
+            percentil(&por_parte, 0.95),
+            por_parte[por_parte.len() - 1],
+            percentil(&inteira, 0.5),
+        );
+    }
+}
+
+/// A contagem de peças (o cabeçalho da tela de Peças) e as contas de mais
+/// vendidos e parados (B01: o índice composto do estoque).
+fn medir_contagem_e_reposicao(b: &Banco, rodadas: usize) {
+    println!("\n## contagem e reposição");
+    let casos: [(&str, &dyn Fn() -> usize); 3] = [
+        ("total (contagem de peças)", &|| busca::total(&b.conn, false).unwrap() as usize),
+        ("mais_vendidos (3650 dias)", &|| reposicao::mais_vendidos(&b.conn, 3650, "valor", "").unwrap().itens.len()),
+        ("parados", &|| reposicao::parados(&b.conn, "").unwrap().itens.len()),
+    ];
+    for (nome, rodar) in casos {
+        let _ = rodar();
+        let mut tempos = Vec::new();
+        let mut n = 0;
+        for _ in 0..rodadas {
+            let t = Instant::now();
+            n = rodar();
+            tempos.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        tempos.sort_by(f64::total_cmp);
+        println!("{:<34} {:>7.2}ms  {n}", nome, percentil(&tempos, 0.5));
+    }
+}
+
+/// Grava os resultados completos de um conjunto grande de consultas (para
+/// comparar duas versões nos mesmos dados): `RUSTINHO_MEDIR_SAIDA=<arquivo>`,
+/// com o mesmo `RUSTINHO_MEDIR_PASTA`, `RUSTINHO_MEDIR_PECAS` (um número) e
+/// `RUSTINHO_MEDIR_CENARIO` da medição. Uma linha por peça achada, em JSON,
+/// na ordem da lista; a lista sem busca e as consultas de uma letra inteiras.
+#[test]
+#[ignore = "comparação de resultados entre versões: rodar em release, com --ignored"]
+fn gravar_resultados() {
+    let pasta = std::env::var_os("RUSTINHO_MEDIR_PASTA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("rustinho-medir-busca"));
+    let quantas: usize =
+        std::env::var("RUSTINHO_MEDIR_PECAS").unwrap_or_else(|_| "4000".into()).trim().parse().expect("um número");
+    let saida = std::env::var_os("RUSTINHO_MEDIR_SAIDA").map(PathBuf::from).expect("RUSTINHO_MEDIR_SAIDA");
+    let caminho = banco_do_cenario(&pasta, quantas);
+    let b = Banco::abrir(&caminho).expect("abrir banco");
+    let mut f = std::io::BufWriter::new(std::fs::File::create(&saida).unwrap());
+
+    // Consultas: as do medidor, mais termos tirados do próprio banco (sempre
+    // os mesmos: o banco é determinístico), em ordem de rowid.
+    let mut consultas: Vec<String> = [
+        "",
+        "tcf",
+        "tcf 01",
+        "01 tcf",
+        "rg08",
+        "rg-08",
+        "rg 08",
+        "pastilha",
+        "pastilha gol",
+        "pastilha diant gol 2012",
+        "filtro oleo",
+        "filtro de ar fiat uno",
+        "correia 8pk",
+        "8pk1515",
+        "rolamento roda",
+        "amortecedor dianteiro cofap",
+        "gol 1.6 2010",
+        "onix",
+        "bosch",
+        "terminal tcf",
+        "terminal 3/4",
+        "rele 24v",
+        "pa",
+        "p",
+        "xyzw",
+        "cargo 1114",
+        "kit embreagem vw",
+        "1.6",
+        "3/4",
+        "12v",
+        "fras-le",
+        "fras le",
+        "d'agua",
+        "c/ sensor",
+        "h4",
+        "a",
+        "1",
+        "20",
+        "2010",
+        "freio 2015",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let colunas = |sql: &str| -> Vec<String> {
+        b.conn.prepare(sql).unwrap().query_map([], |l| l.get::<_, String>(0)).unwrap().map(Result::unwrap).collect()
+    };
+    for nome in colunas("SELECT nome FROM produto WHERE rowid % 97 = 0 ORDER BY rowid") {
+        let palavras: Vec<&str> = nome.split_whitespace().collect();
+        if let Some(p) = palavras.first() {
+            consultas.push(p.to_string());
+            consultas.push(p.chars().take(3).collect());
+        }
+        if palavras.len() > 2 {
+            consultas.push(format!("{} {}", palavras[2], palavras[0]));
+        }
+    }
+    for sql in [
+        "SELECT codigo FROM produto WHERE rowid % 211 = 0 AND codigo <> '' ORDER BY rowid",
+        "SELECT codigo_barras FROM produto WHERE rowid % 211 = 0 AND codigo_barras <> '' ORDER BY rowid",
+        "SELECT codigo_original FROM produto WHERE rowid % 211 = 0 AND codigo_original <> '' ORDER BY rowid",
+        "SELECT codigo FROM produto_fornecedor WHERE rowid % 211 = 0 ORDER BY rowid",
+        "SELECT codigo FROM produto_codigo_antigo WHERE rowid % 23 = 0 ORDER BY rowid",
+        "SELECT codigo FROM produto_equivalente WHERE rowid % 211 = 0 ORDER BY rowid",
+        "SELECT gtin FROM produto_gtin WHERE rowid % 211 = 0 ORDER BY rowid",
+        "SELECT substr(gtin, 5, 7) FROM produto_gtin WHERE rowid % 997 = 0 ORDER BY rowid",
+        "SELECT substr(codigo_compacto, 1, 4) FROM produto_fornecedor WHERE rowid % 997 = 0 ORDER BY rowid",
+    ] {
+        consultas.extend(colunas(sql));
+    }
+    let mut vistas = std::collections::HashSet::new();
+    consultas.retain(|c| vistas.insert(c.clone()));
+    // As listas inteiras (sem busca e com uma letra); o resto, as 200 primeiras.
+    let inteiras = ["", "p", "pa", "a", "1"];
+    for inativas in [false, true] {
+        for consulta in &consultas {
+            let mut deslocamento = 0;
+            let mut linhas = 0usize;
+            loop {
+                let pagina = busca::buscar_pagina(&b.conn, consulta, inativas, 1000, deslocamento).unwrap();
+                if deslocamento == 0 {
+                    writeln!(
+                        f,
+                        "# {consulta:?} inativas={inativas} total={} total_filtrado={}",
+                        pagina.total, pagina.total_filtrado
+                    )
+                    .unwrap();
+                }
+                for p in &pagina.itens {
+                    writeln!(f, "{}", serde_json::to_string(p).unwrap()).unwrap();
+                }
+                linhas += pagina.itens.len();
+                deslocamento += pagina.itens.len() as i64;
+                if !pagina.tem_mais || (!inteiras.contains(&consulta.as_str()) && linhas >= 200) {
+                    break;
+                }
+            }
+        }
+    }
+    // O leitor (código exato), com todos os códigos tirados do banco.
+    for consulta in &consultas {
+        let r = busca::pelo_codigo_exato(&b.conn, consulta).unwrap();
+        let ids: Vec<&str> = r.iter().map(|p| p.id.as_str()).collect();
+        writeln!(f, "# leitor {consulta:?} → {ids:?}").unwrap();
+    }
+    f.flush().unwrap();
+    println!("{} consultas gravadas em {}", consultas.len(), saida.display());
 }
