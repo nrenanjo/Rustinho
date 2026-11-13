@@ -9,6 +9,12 @@
 //! chamada responde "aguarde" na hora, sem esperar (a janela nunca trava e
 //! nada roda duas vezes). A abertura do banco (que pode atualizar a
 //! estrutura) também roda assim: `abrirEmSegundoPlano()` e o sinal `aberto`.
+//!
+//! Consultas fora da linha da janela (dev.3.3, passo 7.6): `Sistema.consultar(
+//! canal, comando, dados)` devolve o número do pedido na hora, e a resposta
+//! chega no sinal `consultado(canal, pedido, resposta)`. Só as leituras da
+//! lista do núcleo (`api::CONSULTAS_FORA_DA_JANELA`); a tarefa de leitura e a
+//! regra "a última vence" são do núcleo (`consulta::Leitor`).
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -58,6 +64,16 @@ pub mod qobject {
         /// Um comando demorado terminou.
         #[qsignal]
         fn terminou(self: Pin<&mut Self>, pedido: i32, resposta: QString);
+
+        /// Uma consulta (só leitura) fora da linha da janela (7.6). Devolve o
+        /// número do pedido na hora; a resposta chega em `consultado`. No mesmo
+        /// canal, a última vence: um pedido mais velho não responde.
+        #[qinvokable]
+        fn consultar(self: Pin<&mut Self>, canal: &QString, comando: &QString, dados: &QString) -> i32;
+
+        /// A resposta de uma consulta (o mesmo JSON do `chamar`).
+        #[qsignal]
+        fn consultado(self: Pin<&mut Self>, canal: QString, pedido: i32, resposta: QString);
 
         /// Há um comando demorado (ou a abertura do banco) rodando.
         #[qinvokable]
@@ -184,6 +200,35 @@ impl qobject::Sistema {
         let resposta =
             com_servico(&self.guardado(), |s| s.chamar(&comando, &dados), rustinho_nucleo::api::resposta_de_erro);
         QString::from(&resposta)
+    }
+
+    pub fn consultar(mut self: Pin<&mut Self>, canal: &QString, comando: &QString, dados: &QString) -> i32 {
+        let pedido = {
+            let mut r = self.as_mut().rust_mut();
+            r.pedidos = r.pedidos.wrapping_add(1).max(1);
+            r.pedidos
+        };
+        let (canal, comando, dados) = (canal.to_string(), comando.to_string(), dados.to_string());
+        let linha = self.qt_thread();
+        let canal_da_resposta = canal.clone();
+        // A resposta volta pela fila da linha da janela (também a recusa feita
+        // aqui mesmo): a tela sempre a recebe no sinal, depois de pedir.
+        let devolver = move |resposta: String| {
+            let _ = linha
+                .queue(move |obj| obj.consultado(QString::from(&canal_da_resposta), pedido, QString::from(&resposta)));
+        };
+        if self.ocupado() {
+            devolver(rustinho_nucleo::api::resposta_de_erro(AGUARDE));
+            return pedido;
+        }
+        let guardado = self.guardado();
+        definir_computador_se_preciso(&guardado);
+        let mut s = travar(&guardado);
+        match s.get_or_insert_with(abrir_servico) {
+            Ok(servico) => servico.consultar(&canal, &comando, &dados, Box::new(devolver)),
+            Err(m) => devolver(rustinho_nucleo::api::resposta_de_erro(m)),
+        }
+        pedido
     }
 
     pub fn chamar_demorado(mut self: Pin<&mut Self>, comando: &QString, dados: &QString) -> i32 {
