@@ -4,6 +4,7 @@
 //! fora a visibilidade `pub(super)`, que tem o mesmo alcance de antes).
 
 use super::*;
+use crate::dados::esquema::Derivado;
 
 /// A chave (`["loja_nome"]`) é de uma configuração da loja?
 pub(super) fn config_da_loja(chave: &str) -> bool {
@@ -272,6 +273,9 @@ pub(super) fn aplicar_dentro(
     // próprias pendências estão sendo tentadas, na ordem em que chegaram).
     let mut pend = if modo == Modo::Normal { Pendentes::carregar(&tx)? } else { Pendentes::default() };
     let mut gravados_no_lote: std::collections::HashSet<(String, String)> = Default::default();
+    // Os derivados que as alterações aplicadas mudam (passo 5.2): refeitos
+    // aqui, antes do COMMIT, a partir do que ficou gravado.
+    let mut refazer: std::collections::BTreeSet<(Derivado, String)> = Default::default();
     let mut tabelas_tocadas: std::collections::BTreeSet<String> = Default::default();
     let ja_guardadas: i64 = tx.query_row(
         "SELECT COUNT(*) FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente' AND origem = ?1",
@@ -406,6 +410,11 @@ pub(super) fn aplicar_dentro(
             }
         }
         let valores_chave: Vec<Value> = serde_json::from_str(&a.chave).map_err(Erro::from)?;
+        if let Some((coluna, derivado)) = crate::dados::esquema::alimenta(&a.tabela) {
+            for id in donos_do_derivado(&tx, &a.tabela, chave, &valores_chave, coluna, dados.as_ref())? {
+                refazer.insert((derivado, id));
+            }
+        }
         let falha = |e: rusqlite::Error| -> Falha {
             if erro_dos_dados(&e) {
                 Falha::Lote { indice, erro: e.to_string() }
@@ -428,8 +437,13 @@ pub(super) fn aplicar_dentro(
             continue;
         }
         let Some(dados) = dados else { continue };
-        // Só as colunas que existem aqui (um caixa com versão mais nova pode ter mais).
-        let cols: Vec<&String> = todas.iter().filter(|c| dados.contains_key(c.as_str())).collect();
+        // Só as colunas que existem aqui (um caixa com versão mais nova pode ter
+        // mais) e que viajam: a derivada e a local que vierem (de um log de
+        // antes da 5.2) são ignoradas; a derivada é refeita aqui.
+        let cols: Vec<&String> = todas
+            .iter()
+            .filter(|c| dados.contains_key(c.as_str()) && crate::dados::esquema::coluna_viaja(&a.tabela, c))
+            .collect();
         let nomes = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
         let marcas = (1..=cols.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
         let atualizar: Vec<String> =
@@ -445,6 +459,9 @@ pub(super) fn aplicar_dentro(
             chave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
         );
         tx.execute(&sql, params_from_iter(cols.iter().map(|c| para_sql(&dados[c.as_str()])))).map_err(falha)?;
+    }
+    for (derivado, id) in &refazer {
+        refazer_derivado(&tx, *derivado, id)?;
     }
     // Antes do COMMIT: um registro que aponta para outro gravado neste mesmo
     // lote tem de encontrá-lo (o pai que ainda não chegou é normal: R-05).
@@ -478,6 +495,45 @@ pub(super) fn aplicar_dentro(
     tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
     tx.commit()?;
     Ok(Aplicacao { novas, pendentes: pendentes_agora, avancou, suspenso: false })
+}
+
+/// O dono refaz um derivado (passo 5.2, DP-15). Sem `_`: um derivado novo no
+/// `dados::esquema` não compila sem dizer aqui quem o refaz.
+pub(super) fn refazer_derivado(conn: &Connection, derivado: Derivado, id: &str) -> Resultado<()> {
+    match derivado {
+        // A peça pode ainda não ter chegado (R-05): refeito quando ela chegar.
+        Derivado::IndiceDaPeca => {
+            crate::catalogo::codigos::refazer_indice(conn, id)?;
+        }
+    }
+    Ok(())
+}
+
+/// As linhas donas do derivado que uma alteração de `tabela` muda: a da linha
+/// como está aqui (antes de aplicar) e a da que chegou.
+pub(super) fn donos_do_derivado(
+    conn: &Connection,
+    tabela: &str,
+    chave: &[String],
+    valores_chave: &[Value],
+    coluna: &str,
+    dados: Option<&serde_json::Map<String, Value>>,
+) -> Resultado<Vec<String>> {
+    let onde = chave.iter().enumerate().map(|(i, c)| format!("\"{c}\" = ?{}", i + 1)).collect::<Vec<_>>().join(" AND ");
+    let antes: Option<Option<String>> = conn
+        .query_row(
+            &format!("SELECT \"{coluna}\" FROM \"{tabela}\" WHERE {onde}"),
+            params_from_iter(valores_chave.iter().map(para_sql)),
+            |l| l.get(0),
+        )
+        .optional()?;
+    let mut ids: Vec<String> = antes.flatten().into_iter().collect();
+    if let Some(Value::String(id)) = dados.and_then(|d| d.get(coluna)) {
+        if !ids.contains(id) {
+            ids.push(id.clone());
+        }
+    }
+    Ok(ids)
 }
 
 pub(super) fn marcar_resolvida(conn: &Connection, id: &str) -> Resultado<()> {

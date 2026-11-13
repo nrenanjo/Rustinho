@@ -60,6 +60,12 @@ pub(super) fn colunas(conn: &Connection, tabela: &str) -> Resultado<(Vec<String>
     Ok((todas, linhas.into_iter().map(|l| l.0).collect()))
 }
 
+/// As colunas da tabela que viajam: todas, menos as que o `dados::esquema`
+/// diz que não viajam (derivadas e locais; passo 5.2, DP-15).
+pub(super) fn que_viajam(tabela: &str, todas: &[String]) -> Vec<String> {
+    todas.iter().filter(|c| crate::dados::esquema::coluna_viaja(tabela, c)).cloned().collect()
+}
+
 pub(super) fn expressoes(tabela: &str, todas: &[String], chave: &[String], prefixo: &str) -> (String, String) {
     let chave =
         format!("json_array({})", chave.iter().map(|c| format!("{prefixo}.\"{c}\"")).collect::<Vec<_>>().join(", "));
@@ -84,6 +90,11 @@ pub fn chave_da_loja(chave: &str) -> bool {
 }
 
 /// (Re)cria os gatilhos que registram as alterações. Roda ao abrir o banco.
+///
+/// Gerados do `dados::esquema` (passo 5.2, ARQ-10): as tabelas que viajam e,
+/// de cada uma, só as colunas que viajam. Numa tabela com coluna que não
+/// viaja, a alteração só é registrada quando alguma coluna que viaja está no
+/// `UPDATE` (`UPDATE OF`), e o conteúdo dela não leva a que não viaja.
 pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
     // 0.9.15: cada alteração leva a operação comercial (a transação) em que
     // foi feita. Banco de estrutura antiga (só nos testes) não tem a coluna.
@@ -98,6 +109,13 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
         if chave.is_empty() {
             return Err(Erro::Interno(format!("a tabela {tabela} não tem chave primária")));
         }
+        let viajam = que_viajam(tabela, &todas);
+        // Sem coluna que não viaja, o gatilho fica como sempre foi.
+        let de_update = if viajam.len() < todas.len() {
+            format!("UPDATE OF {}", viajam.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", "))
+        } else {
+            "UPDATE".to_string()
+        };
         let quando = "WHEN (SELECT aplicando FROM sync_estado WHERE id = 1) = 0";
         let disp = "(SELECT valor FROM config WHERE chave = 'dispositivo_id')";
         // A versão que vale agora deste registro (a base da nova).
@@ -111,8 +129,9 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
         for (sufixo, evento, prefixo, operacao) in
             [("i", "INSERT", "NEW", "gravar"), ("u", "UPDATE", "NEW", "gravar"), ("d", "DELETE", "OLD", "apagar")]
         {
-            let (k, d) = expressoes(tabela, &todas, &chave, prefixo);
+            let (k, d) = expressoes(tabela, &viajam, &chave, prefixo);
             let dados = if operacao == "apagar" { "NULL".to_string() } else { d };
+            let evento = if evento == "UPDATE" { de_update.as_str() } else { evento };
             let extra = if *tabela == "config" { filtro_config(prefixo) } else { String::new() };
             let (base, ordem, historia, base_da_base) =
                 (ultima(&k, "id"), ultima(&k, "ordem"), ultima(&k, "historia"), ultima(&k, "base"));
@@ -142,7 +161,7 @@ pub fn registrar_existentes(conn: &Connection) -> Resultado<()> {
     if usuarios > 0 {
         for tabela in TABELAS {
             let (todas, chave) = colunas(conn, tabela)?;
-            let (k, d) = expressoes(tabela, &todas, &chave, "t");
+            let (k, d) = expressoes(tabela, &que_viajam(tabela, &todas), &chave, "t");
             let filtro =
                 if *tabela == "config" { format!(" WHERE 1 = 1{}", filtro_config("t")) } else { String::new() };
             conn.execute(

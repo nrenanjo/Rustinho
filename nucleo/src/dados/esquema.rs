@@ -122,6 +122,92 @@ pub const TABELAS: &[Tabela] = &[
     t("vale_saldo", Derivada, &[]),
 ];
 
+// ---------------------------------------------------------------------------
+// Colunas que não seguem a classe da tabela (passo 5.2, DP-15; contrato C2).
+// ---------------------------------------------------------------------------
+
+/// Classe de uma coluna de tabela que viaja, quando ela não viaja junto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClasseDaColuna {
+    /// Calculada em cada caixa a partir de outras colunas e de outras tabelas
+    /// (ex.: o índice de busca da peça). Não viaja, não conta como conflito,
+    /// e quem recebe uma alteração (ou o gerente resolve um conflito) a refaz
+    /// pelo [`Derivado`] dito aqui.
+    Derivada(Derivado),
+    /// Só deste caixa (ex.: a hora do último acesso). Não viaja, não conta
+    /// como conflito, e o que chegar de outro caixa é ignorado.
+    Local,
+}
+
+/// Um valor derivado e quem o refaz. A troca de dados chama o dono (veja
+/// `troca::sync`, `refazer_derivado`: um `match` sem `_`, então um derivado
+/// novo não compila sem dizer quem o refaz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Derivado {
+    /// O índice de busca da peça (`produto.busca`, `produto.codigos`), que
+    /// sai da peça inteira: `catalogo::codigos::refazer_indice`.
+    IndiceDaPeca,
+}
+
+/// Uma coluna com classe própria.
+#[derive(Debug)]
+pub struct Coluna {
+    pub tabela: &'static str,
+    pub nome: &'static str,
+    pub classe: ClasseDaColuna,
+}
+
+#[allow(dead_code)]
+const fn c(tabela: &'static str, nome: &'static str, classe: ClasseDaColuna) -> Coluna {
+    Coluna { tabela, nome, classe }
+}
+
+/// As colunas de tabelas que viajam que NÃO viajam. Os gatilhos da troca
+/// são gerados sem elas (nem no conteúdo da alteração, nem como motivo para
+/// gravar uma alteração), quem recebe as ignora e as refaz, e elas não
+/// contam como conflito.
+///
+/// **Como registrar uma coluna derivada nova** (ex.: as colunas normalizadas
+/// da peça, passo 7.5):
+/// 1. a migração cria a coluna, e o dono a grava (como hoje);
+/// 2. uma linha aqui: `c("produto", "<coluna>", Derivada(Derivado::IndiceDaPeca))`,
+///    se ela sai da peça inteira e o `catalogo::codigos::refazer_indice` passa
+///    a gravá-la; ou um `Derivado` novo, com o dono que a refaz no `match` de
+///    `troca::sync::refazer_derivado`;
+/// 3. as tabelas que a alimentam em [`ALIMENTAM`] (as da peça já estão);
+/// 4. os testes deste módulo conferem que a coluna existe, não é da chave,
+///    tem quem a alimente e não vai nos gatilhos.
+///
+/// Mudar esta lista muda o que viaja: exige todos os caixas na mesma versão
+/// (o recurso de troca `classes-v1`, veja `troca::sync`).
+#[rustfmt::skip]
+pub const COLUNAS: &[Coluna] = &[
+];
+
+/// Tabelas que viajam cujas linhas alimentam um derivado: (tabela, coluna com
+/// o id da linha dona do derivado, derivado). Ex.: uma aplicação da peça que
+/// chega muda o índice da peça `produto_id`.
+#[rustfmt::skip]
+pub const ALIMENTAM: &[(&str, &str, Derivado)] = &[
+];
+
+/// A coluna viaja com a tabela?
+pub fn coluna_viaja(tabela: &str, coluna: &str) -> bool {
+    !COLUNAS.iter().any(|c| c.tabela == tabela && c.nome == coluna)
+}
+
+/// Algum caixa tem uma coluna com este nome que não viaja (para comparar
+/// versões sem saber a tabela: o nome basta, veja `sync::diferencas`)?
+pub fn nome_que_nao_viaja(coluna: &str) -> bool {
+    COLUNAS.iter().any(|c| c.nome == coluna)
+}
+
+/// Se as linhas da tabela alimentam um derivado: (coluna com o id da linha
+/// dona, derivado).
+pub fn alimenta(tabela: &str) -> Option<(&'static str, Derivado)> {
+    ALIMENTAM.iter().find(|a| a.0 == tabela).map(|a| (a.1, a.2))
+}
+
 /// Tabelas temporárias (TEMP): criadas na hora, só na conexão que as usa.
 #[rustfmt::skip]
 pub const TEMPORARIAS: &[Tabela] = &[
@@ -242,6 +328,59 @@ mod testes {
             assert!(vistas.insert(t.nome), "{} aparece duas vezes", t.nome);
             assert!(t.escritores.windows(2).all(|w| w[0] < w[1]), "{}: escritores fora de ordem", t.nome);
             assert_eq!(t.classe == Derivada, t.escritores.is_empty(), "{}: só a visão não tem escritor", t.nome);
+        }
+    }
+
+    /// Passo 5.2 (contrato C2): toda coluna com classe própria existe numa
+    /// tabela que viaja, não é da chave primária, e a derivada tem quem a
+    /// alimente.
+    #[test]
+    fn colunas_com_classe_existem_e_tem_quem_as_refaca() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let mut vistas = BTreeSet::new();
+        for col in COLUNAS {
+            assert!(vistas.insert((col.tabela, col.nome)), "{}.{} aparece duas vezes", col.tabela, col.nome);
+            assert!(QUE_VIAJAM.contains(&col.tabela), "{}: só tabela que viaja tem coluna com classe", col.tabela);
+            let (todas, chave) = crate::sync::colunas_da_tabela(&b.conn, col.tabela).unwrap();
+            assert!(todas.iter().any(|x| x == col.nome), "{}.{} não existe", col.tabela, col.nome);
+            assert!(!chave.iter().any(|x| x == col.nome), "{}.{} é da chave: tem de viajar", col.tabela, col.nome);
+            if let ClasseDaColuna::Derivada(d) = col.classe {
+                assert!(ALIMENTAM.iter().any(|a| a.2 == d), "{}.{}: ninguém alimenta {d:?}", col.tabela, col.nome);
+            }
+        }
+        for (tabela, coluna, _) in ALIMENTAM {
+            assert!(QUE_VIAJAM.contains(tabela), "{tabela} alimenta um derivado mas não viaja");
+            let (todas, _) = crate::sync::colunas_da_tabela(&b.conn, tabela).unwrap();
+            assert!(todas.iter().any(|x| x == coluna), "{tabela}.{coluna} não existe");
+        }
+    }
+
+    /// Passo 5.2 (ARQ-10, contrato C2: "coluna derivada no gatilho falha"):
+    /// os gatilhos da troca são gerados do esquema; nenhuma coluna que não
+    /// viaja vai no conteúdo da alteração.
+    #[test]
+    fn nenhuma_coluna_que_nao_viaja_vai_nos_gatilhos() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        let gatilhos: Vec<(String, String)> = b
+            .conn
+            .prepare(
+                "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sync\\_%' ESCAPE '\\'",
+            )
+            .unwrap()
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        for t in QUE_VIAJAM {
+            assert_eq!(gatilhos.iter().filter(|g| g.0 == *t).count(), 3, "{t}: os três gatilhos da troca");
+        }
+        for col in COLUNAS {
+            for (_, sql) in gatilhos.iter().filter(|g| g.0 == col.tabela) {
+                for prefixo in ["NEW", "OLD"] {
+                    let no_conteudo = format!("'{}', {prefixo}.\"{}\"", col.nome, col.nome);
+                    assert!(!sql.contains(&no_conteudo), "{}.{} vai no gatilho: {sql}", col.tabela, col.nome);
+                }
+            }
         }
     }
 

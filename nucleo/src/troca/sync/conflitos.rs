@@ -476,8 +476,18 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
         if valores_chave.len() != pk.len() {
             return Err(Erro::Interno("chave do conflito inválida".into()));
         }
+        // D05 (passo 5.2): os derivados da linha que volta são refeitos
+        // depois, a partir do que ficou gravado (a versão que perdeu pode
+        // trazer um índice velho).
+        let derivado = crate::dados::esquema::alimenta(&tabela);
+        let mut refazer: Vec<(crate::dados::esquema::Derivado, String)> = Vec::new();
         match dados.as_deref().map(serde_json::from_str::<Value>) {
             None => {
+                if let Some((coluna, d)) = derivado {
+                    for id in donos_do_derivado(conn, &tabela, &pk, &valores_chave, coluna, None)? {
+                        refazer.push((d, id));
+                    }
+                }
                 let onde = pk
                     .iter()
                     .enumerate()
@@ -490,8 +500,21 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
                 )?;
             }
             Some(Ok(Value::Object(m))) => {
-                let cols: Vec<&String> =
-                    todas.iter().filter(|c| m.contains_key(c.as_str()) && c.as_str() != "atualizado_em").collect();
+                if let Some((coluna, d)) = derivado {
+                    for id in donos_do_derivado(conn, &tabela, &pk, &valores_chave, coluna, Some(&m))? {
+                        refazer.push((d, id));
+                    }
+                }
+                // Só as colunas que viajam (a derivada e a local da versão
+                // guardada ficam como estão aqui).
+                let cols: Vec<&String> = todas
+                    .iter()
+                    .filter(|c| {
+                        m.contains_key(c.as_str())
+                            && c.as_str() != "atualizado_em"
+                            && crate::dados::esquema::coluna_viaja(&tabela, c)
+                    })
+                    .collect();
                 let mut nomes: Vec<String> = cols.iter().map(|c| format!("\"{c}\"")).collect();
                 let mut valores: Vec<SqlValor> = cols.iter().map(|c| para_sql(&m[c.as_str()])).collect();
                 if todas.iter().any(|c| c == "atualizado_em") {
@@ -525,6 +548,9 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
                 })?;
             }
             _ => return Err(Erro::Interno("versão do conflito inválida".into())),
+        }
+        for (d, id) in &refazer {
+            refazer_derivado(conn, *d, id)?;
         }
         // A alteração que o gerente acabou de fazer conhece as duas versões.
         if let Some(nova) = versao_atual(conn, &tabela, &chave)?.filter(|v| v.id != valia) {
