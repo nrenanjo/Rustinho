@@ -296,3 +296,39 @@ fn p4_anuncio_assinado_nao_tem_nada_da_senha_da_rede() {
     let lido = anuncio::abrir(&pacote, AGORA).unwrap();
     assert_eq!((lido.chave, lido.loja_id.as_str(), lido.porta), (id.publica(), loja.as_str(), PORTA_TCP));
 }
+
+// ===========================================================================
+// 4. Preparação da 5.5 (13/11): critério de aceitação da etapa 6 — FALHA HOJE
+// ===========================================================================
+
+/// (g) Restaurar um backup de antes de uma retirada não traz o caixa retirado
+/// de volta: a restauração **junta** o registro de caixas (nunca o substitui).
+/// Hoje o banco do backup entra inteiro e a retirada feita depois dele some
+/// (risco registrado pela frente-p4; B.5 da análise unificada de 05/11).
+/// Fica verde quando a restauração (`backup::restaurar`, o `Pendente` que já
+/// guarda "o que é deste computador") passar a guardar as linhas do registro
+/// antes e devolvê-las com `protocolo4::aprovados::juntar` depois.
+#[test]
+#[ignore = "D1/E5: protocolo 4, etapa 6 (revogação) — restaurar backup junta o registro de caixas (aprovados::juntar)"]
+fn seguro_restaurar_backup_nao_desfaz_retirada() {
+    use crate::troca::protocolo4::{aprovados, Identidade};
+    let _vez = crate::backup::testes::um_por_vez();
+    let caminho = temp("restaurar");
+    let b = Banco::abrir(&caminho).unwrap();
+    let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+    let loja = crate::loja::criar(&b.conn).unwrap();
+    let (raiz, c2) = (Identidade::gerar().unwrap(), Identidade::gerar().unwrap());
+    let r = raiz.publica();
+    aprovados::registrar_raiz(&b.conn, &raiz, &loja, "Caixa 1", &u).unwrap();
+    aprovados::aprovar(&b.conn, &raiz, &r, &loja, &aprovados::Pedido::de(&c2), "Caixa 2", &u).unwrap();
+    drop(b);
+    let feito = crate::backup::fazer(&caminho, false).unwrap();
+    let mut b = Banco::abrir(&caminho).unwrap();
+    aprovados::retirar(&b.conn, &raiz, &r, &loja, &c2.publica(), "computador roubado", &u).unwrap();
+    assert!(!aprovados::autorizada(&b.conn, &r, &loja, &c2.publica()).unwrap(), "retirado antes de restaurar");
+    crate::backup::restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1234").unwrap();
+    assert!(
+        !aprovados::autorizada(&b.conn, &r, &loja, &c2.publica()).unwrap(),
+        "restaurar o backup de antes trouxe de volta o caixa retirado"
+    );
+}
