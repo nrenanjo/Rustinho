@@ -13,3 +13,22 @@
 -- nunca existiu. Agora, com nome novo (nunca reaproveitar nome de índice, B02).
 -- Serve aos "parados" (a última entrada de cada peça, por tipo e data).
 CREATE INDEX estoque_movimento_produto_tipo_data ON estoque_movimento (produto_id, tipo, criado_em);
+
+-- B04 e PEND-39: o nome da peça sem acento e em minúsculas, gravado
+-- (`produto.nome_normalizado`, o mesmo `normalizar(nome)` que a lista usava),
+-- para a lista "alteradas por último" desempatar por uma coluna com índice, sem
+-- chamar a função do Rustinho para cada peça a cada parte. É derivada do nome
+-- (DP-15): quem grava a peça (`catalogo::produtos`) grava as duas juntas.
+ALTER TABLE produto ADD COLUMN nome_normalizado TEXT NOT NULL DEFAULT '';
+
+-- O preenchimento das peças que já existem não é alteração da loja: não entra
+-- no log da troca de dados (os gatilhos da troca ficam parados enquanto grava,
+-- como na marca da restauração do backup). Tudo na transação da migração.
+UPDATE sync_estado SET aplicando = 1 WHERE id = 1;
+UPDATE produto SET nome_normalizado = normalizar(nome);
+UPDATE sync_estado SET aplicando = 0 WHERE id = 1;
+
+-- A lista sem busca na ordem da tela (alteradas por último; empate: o nome sem
+-- acento, o código e o id), lida pelo índice, parte a parte. O `ativo` no fim
+-- serve ao filtro das inativas sem ler a tabela.
+CREATE INDEX produto_alteradas_por_ultimo ON produto (atualizado_em DESC, nome_normalizado, codigo, id, ativo);

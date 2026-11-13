@@ -60,6 +60,10 @@ pub const TABELAS: &[Tabela] = &[
     t("tabela_preco", Viaja, &["config"]),
     t("regra_st", Viaja, &["fiscal"]),
     t("unidade", Viaja, &["unidades"]),
+    // Colunas derivadas da peça (DP-15): `busca` e `codigos` (o índice de busca,
+    // do `catalogo::codigos`) e, desde a 0026 (passo 7.5), `nome_normalizado`
+    // (o nome sem acento, o desempate da lista de Peças). As que não viajam
+    // estão em `COLUNAS`, abaixo.
     t("produto", Viaja, &["codigos", "compras", "faixas", "fiscal", "produtos"]),
     t("produto_preco", Viaja, &["compras", "produtos"]),
     t("produto_aplicacao", Viaja, &["produtos"]),

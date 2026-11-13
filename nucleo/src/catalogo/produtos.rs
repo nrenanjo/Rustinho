@@ -686,6 +686,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     };
 
     let (busca, codigos) = texto_busca(&dados);
+    // B04 (7.5): o nome sem acento gravado junto com o nome (o desempate da
+    // lista de Peças, com índice); derivado, como a busca e os códigos.
+    let nome_normalizado = texto::normalizar(&dados.nome);
     let agora = tempo::agora();
     if novo {
         conn.execute(
@@ -693,9 +696,10 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                                   custo, estoque_minimo, local, ncm, cest, origem, anp_codigo, anp_descricao,
                                   peso_gramas, desconto_maximo, comissao, observacoes, ativo, busca, codigos,
                                   criado_em, criado_por, atualizado_em, atualizado_por, dispositivo, csosn, monofasico,
-                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal, codigo_validado)
+                                  tipo, oferta_preco, oferta_ate, preco_aberto, variacao, grade, fiscal, codigo_validado,
+                                  nome_normalizado)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36)",
+                     ?21, ?22, ?23, ?24, ?25, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37)",
             params![
                 id,
                 dados.codigo,
@@ -733,6 +737,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.grade,
                 dados.fiscal.para_json(),
                 confirmado,
+                nome_normalizado,
             ],
         )?;
     } else {
@@ -743,7 +748,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                     peso_gramas = ?17, desconto_maximo = ?18, comissao = ?19, observacoes = ?20, ativo = ?21,
                     busca = ?22, codigos = ?23, atualizado_em = ?24, atualizado_por = ?25, dispositivo = ?26,
                     csosn = ?27, monofasico = ?28, tipo = ?29, oferta_preco = ?30, oferta_ate = ?31,
-                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35, codigo_validado = ?36
+                    preco_aberto = ?32, variacao = ?33, grade = ?34, fiscal = ?35, codigo_validado = ?36,
+                    nome_normalizado = ?37
               WHERE id = ?1",
             params![
                 id,
@@ -782,6 +788,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                 dados.grade,
                 dados.fiscal.para_json(),
                 confirmado,
+                nome_normalizado,
             ],
         )?;
         conn.execute("DELETE FROM produto_preco WHERE produto_id = ?1", [&id])?;
