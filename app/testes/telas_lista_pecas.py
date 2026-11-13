@@ -54,7 +54,6 @@ TELA = u.TELA
 
 ESPERADAS = {
     "L4": "H07 (cabeçalho \"Código\" na coluna do código do fornecedor), passo 7.3",
-    "L11": "H01 (Copiar e F11 desenhados um sobre o outro), passo 7.1",
 }
 LARGURA_1A_COLUNA = 152  # o nome da peça começa em x = 152 (GEO:nomePeca)
 
