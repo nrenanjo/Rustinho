@@ -43,8 +43,6 @@ TELA = u.TELA
 ESPERADAS = {
     "G1": "H01 (Copiar e F11 sobrepostos), passo 7.1",
     "G2": "H01 (câmera sobre o Copiar no celular), passo 7.1",
-    "G3": "H20 (entrada no celular sem rolagem), passo 7.2",
-    "G5": "H20 (entrada no celular: senha e Entrar fora da tela), passo 7.2",
 }
 CELULAR = (360, 780)
 
