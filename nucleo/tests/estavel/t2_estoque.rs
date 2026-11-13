@@ -247,3 +247,245 @@ pub fn trocar(a: &mut Banco, b: &mut Banco) {
     }
     panic!("os caixas não pararam de trocar");
 }
+
+/// Sonda da trava de escrita (diagnóstico do t2_5): uma terceira conexão tenta
+/// `BEGIN IMMEDIATE` sem esperar (busy_timeout 0) a cada 2 ms e mede por quanto
+/// tempo seguido a escrita ficou presa por outra conexão. Devolve (maior
+/// intervalo preso em ms, tempo preso somado em ms, tentativas).
+fn sondar_trava(db: std::path::PathBuf, parar: std::sync::Arc<std::sync::atomic::AtomicBool>) -> (u128, u128, u64) {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+    let c = rusqlite::Connection::open(&db).unwrap();
+    c.busy_timeout(Duration::from_millis(0)).unwrap();
+    let (mut maior, mut soma, mut n) = (0u128, 0u128, 0u64);
+    let mut preso_desde: Option<Instant> = None;
+    while !parar.load(Ordering::Relaxed) {
+        n += 1;
+        let livre = c.execute_batch("BEGIN IMMEDIATE; ROLLBACK;").is_ok();
+        match (livre, preso_desde) {
+            (false, None) => preso_desde = Some(Instant::now()),
+            (true, Some(t)) => {
+                let ms = t.elapsed().as_millis();
+                maior = maior.max(ms);
+                soma += ms;
+                preso_desde = None;
+            }
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    if let Some(t) = preso_desde {
+        let ms = t.elapsed().as_millis();
+        maior = maior.max(ms);
+        soma += ms;
+    }
+    (maior, soma, n)
+}
+
+/// Diagnóstico do T2.5 (frente F89, achado do t2_5; só à mão): o mesmo cenário,
+/// medindo cada venda do balcão e cada lote aplicado pela troca, com o
+/// registro técnico ligado na pasta da loja. Imprime linhas `DIAG`. Rodar com
+/// `-- --ignored --exact t2_estoque::t2_5_diagnostico --nocapture`.
+/// `RUSTINHO_DIAG_SEGURAR_MS`: a troca segura o lock de escrita por mais esse
+/// tempo em cada lote (uma transação imediata aberta à parte), para reproduzir
+/// sem depender da carga da máquina.
+#[test]
+#[ignore = "só à mão: diagnóstico do t2_5 (frente F89)"]
+fn t2_5_diagnostico() {
+    use std::time::{Duration, Instant};
+    let segurar: u64 = std::env::var("RUSTINHO_DIAG_SEGURAR_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    let mut a = Loja::nova("t2-5-diag");
+    rustinho_nucleo::registro::iniciar(&a.pasta);
+    let p = a.peca("Lâmpada H4", "10", "25", "100");
+    a.abrir_caixa();
+    let mut b = Banco::em_memoria().unwrap();
+    {
+        let mut lado_a = Banco::abrir(&a.db).unwrap();
+        let espera: i64 = lado_a.conn.query_row("PRAGMA busy_timeout", [], |l| l.get(0)).unwrap();
+        let diario: String = lado_a.conn.query_row("PRAGMA journal_mode", [], |l| l.get(0)).unwrap();
+        println!("DIAG conexao_da_troca busy_timeout_ms={espera} journal_mode={diario}");
+        trocar(&mut lado_a, &mut b);
+    }
+    let ana = b.conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get::<_, String>(0)).unwrap();
+    caixa::abrir(&b.conn, &b.dispositivo, &ana, "Caixa 2", "0").unwrap();
+    for _ in 0..30 {
+        let e = vendas::VendaEntrada {
+            itens: vec![vendas::ItemEntrada { produto_id: p.clone(), quantidade: "1".into(), ..Default::default() }],
+            tabela: 1,
+            pagamentos: vec![vendas::PagamentoEntrada {
+                forma: "dinheiro".into(),
+                valor: "25".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let tx = b.conn.transaction().unwrap();
+        vendas::concluir(&tx, &b.dispositivo, &ana, &e).unwrap();
+        tx.commit().unwrap();
+    }
+    let db = a.db.clone();
+    let lotes: Vec<Vec<sync::Alteracao>> = {
+        let mut todas = Vec::new();
+        let mut desde = 0;
+        loop {
+            let (lista, mais) = sync::alteracoes_desde(&b.conn, desde, 5).unwrap();
+            if let Some(u) = lista.last() {
+                desde = u.seq;
+            }
+            todas.push(lista);
+            if !mais {
+                break;
+            }
+        }
+        todas
+    };
+    let comeco = Instant::now();
+    let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sonda = {
+        let (db, parar) = (db.clone(), parar.clone());
+        std::thread::spawn(move || sondar_trava(db, parar))
+    };
+    let tarefa = std::thread::spawn(move || {
+        let t = Instant::now();
+        let mut lado = Banco::abrir(&db).unwrap();
+        let abrir_ms = t.elapsed().as_millis();
+        let mut tempos = Vec::new();
+        for lote in lotes {
+            let t = Instant::now();
+            sync::aplicar(&mut lado.conn, &lote).unwrap();
+            if segurar > 0 {
+                let tx = lado.conn.transaction().unwrap();
+                tx.execute("UPDATE sync_estado SET aplicando = aplicando WHERE id = 1", []).unwrap();
+                std::thread::sleep(Duration::from_millis(segurar));
+                tx.commit().unwrap();
+            }
+            tempos.push(t.elapsed().as_millis());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        sync::verificar_depois(&lado.conn).unwrap();
+        let max = tempos.iter().max().copied().unwrap_or(0);
+        let soma: u128 = tempos.iter().sum();
+        println!(
+            "DIAG troca abrir_banco_ms={abrir_ms} lotes={} lote_max_ms={max} lotes_soma_ms={soma} fim_ms={}",
+            tempos.len(),
+            comeco.elapsed().as_millis()
+        );
+    });
+    let mut falhas = 0;
+    let mut maior = 0u128;
+    for n in 0..30 {
+        let t = Instant::now();
+        let r = a.chamar(
+            "venda_concluir",
+            json!({ "itens": [{ "produtoId": p, "quantidade": "1" }], "tabela": 1,
+                    "pagamentos": [{ "forma": "dinheiro", "valor": "25" }] }),
+        );
+        let ms = t.elapsed().as_millis();
+        maior = maior.max(ms);
+        if r["ok"] != true {
+            falhas += 1;
+            println!(
+                "DIAG venda {n} FALHOU em {ms} ms (aos {} ms do começo): {}",
+                comeco.elapsed().as_millis(),
+                r["erro"]
+            );
+        }
+    }
+    tarefa.join().unwrap();
+    parar.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (preso_max, preso_soma, tentativas) = sonda.join().unwrap();
+    println!("DIAG sonda trava_presa_max_ms={preso_max} trava_presa_soma_ms={preso_soma} tentativas={tentativas}");
+    let log = std::fs::read_to_string(a.pasta.join("registro/rustinho.log")).unwrap_or_default();
+    for l in log.lines() {
+        println!("DIAG registro: {l}");
+    }
+    println!("DIAG vendas falhas={falhas} venda_max_ms={maior} segurar_ms={segurar}");
+    assert_eq!(falhas, 0, "vendas que falharam durante a troca");
+}
+
+/// Diagnóstico do T2.5, como na troca de verdade (frente F89; só à mão): a
+/// conexão da troca é aberta ANTES das vendas do balcão (o programa abre a
+/// sua uma vez só) e recebe UM lote grande de uma vez, como o cliente da troca
+/// faz (até `LOTE` = 2000 alterações numa transação). Enquanto isso o balcão
+/// vende 30 vezes. `RUSTINHO_DIAG_VENDAS_B`: quantas vendas o outro caixa fez
+/// (padrão 300). Imprime linhas `DIAG`.
+#[test]
+#[ignore = "só à mão: diagnóstico do t2_5 com um lote grande (frente F89)"]
+fn t2_5_lote_grande() {
+    use std::time::{Duration, Instant};
+    let vendas_b: usize = std::env::var("RUSTINHO_DIAG_VENDAS_B").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let mut a = Loja::nova("t2-5-lote");
+    rustinho_nucleo::registro::iniciar(&a.pasta);
+    let p = a.peca("Lâmpada H4", "10", "25", "100000");
+    a.abrir_caixa();
+    let mut b = Banco::em_memoria().unwrap();
+    let mut lado = Banco::abrir(&a.db).unwrap();
+    trocar(&mut lado, &mut b);
+    let ana = b.conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get::<_, String>(0)).unwrap();
+    caixa::abrir(&b.conn, &b.dispositivo, &ana, "Caixa 2", "0").unwrap();
+    let desde: i64 = b.conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0)).unwrap();
+    for _ in 0..vendas_b {
+        let e = vendas::VendaEntrada {
+            itens: vec![vendas::ItemEntrada { produto_id: p.clone(), quantidade: "1".into(), ..Default::default() }],
+            tabela: 1,
+            pagamentos: vec![vendas::PagamentoEntrada {
+                forma: "dinheiro".into(),
+                valor: "25".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let tx = b.conn.transaction().unwrap();
+        vendas::concluir(&tx, &b.dispositivo, &ana, &e).unwrap();
+        tx.commit().unwrap();
+    }
+    let (lote, mais) = sync::alteracoes_desde(&b.conn, desde, 2000).unwrap();
+    let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sonda = {
+        let (db, parar) = (a.db.clone(), parar.clone());
+        std::thread::spawn(move || sondar_trava(db, parar))
+    };
+    let comeco = Instant::now();
+    let n_lote = lote.len();
+    let tarefa = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        let t = Instant::now();
+        sync::aplicar(&mut lado.conn, &lote).unwrap();
+        let ms = t.elapsed().as_millis();
+        sync::verificar_depois(&lado.conn).unwrap();
+        (ms, t.elapsed().as_millis())
+    });
+    let mut falhas = 0;
+    let mut maior = 0u128;
+    for n in 0..30 {
+        let t = Instant::now();
+        let r = a.chamar(
+            "venda_concluir",
+            json!({ "itens": [{ "produtoId": p, "quantidade": "1" }], "tabela": 1,
+                    "pagamentos": [{ "forma": "dinheiro", "valor": "25" }] }),
+        );
+        let ms = t.elapsed().as_millis();
+        maior = maior.max(ms);
+        if r["ok"] != true {
+            falhas += 1;
+            println!(
+                "DIAG venda {n} FALHOU em {ms} ms (aos {} ms do começo): {}",
+                comeco.elapsed().as_millis(),
+                r["erro"]
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (aplicar_ms, com_verificar_ms) = tarefa.join().unwrap();
+    parar.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (preso_max, preso_soma, _) = sonda.join().unwrap();
+    let log = std::fs::read_to_string(a.pasta.join("registro/rustinho.log")).unwrap_or_default();
+    for l in log.lines().filter(|l| l.contains("venda_concluir")) {
+        println!("DIAG registro: {l}");
+    }
+    println!(
+        "DIAG lote alteracoes={n_lote} (mais={mais}) aplicar_ms={aplicar_ms} com_verificar_ms={com_verificar_ms} \
+         trava_presa_max_ms={preso_max} trava_presa_soma_ms={preso_soma} vendas_falhas={falhas} venda_max_ms={maior}"
+    );
+    assert_eq!(falhas, 0, "vendas que falharam durante a troca");
+}
