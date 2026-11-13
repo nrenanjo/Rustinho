@@ -362,7 +362,8 @@ FocusScope {
             Layout.leftMargin: 18
             Layout.rightMargin: 20
             Layout.topMargin: 4
-            Rotulo { text: "Código"; Layout.preferredWidth: 84 }
+            // H07: a coluna é a do código do fornecedor (como no celular, "Cód. forn.: …").
+            Rotulo { text: "Cód. forn."; Layout.preferredWidth: 84 }
             Rotulo { text: busca.texto.trim() === "" ? "Peça · alteradas por último" : "Peça"; Layout.fillWidth: true }
             Rotulo { text: "Local"; Layout.preferredWidth: 90 }
             Rotulo { text: "Estoque"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 104 }
