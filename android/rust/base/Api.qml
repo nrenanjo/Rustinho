@@ -15,6 +15,9 @@ QtObject {
 
     // Pedidos demorados em andamento: número → { comando, depois }.
     property var _pendentes: ({})
+    // Consultas fora da linha da janela (7.6): o último pedido de cada canal
+    // → { pedido, comando, depois }.
+    property var _consultas: ({})
     property Connections _respostas: Connections {
         target: Sistema
         function onTerminou(pedido, resposta) {
@@ -24,6 +27,33 @@ QtObject {
             if (p && p.depois)
                 p.depois(interpretar(p.comando, resposta))
         }
+        function onConsultado(canal, pedido, resposta) {
+            const p = _consultas[canal]
+            // A última vence: a resposta de um pedido que já não é o último
+            // do canal (ou de um canal esquecido) não chega à tela.
+            if (!p || p.pedido !== pedido)
+                return
+            delete _consultas[canal]
+            if (p.depois)
+                p.depois(interpretar(p.comando, resposta))
+        }
+    }
+
+    // H09 (7.6): uma leitura fora da linha da janela. Devolve na hora; a
+    // resposta chega depois em depois(r), sem a espera com a barra e sem
+    // parar a janela. Um canal por tela: no mesmo canal, a última vence (a
+    // resposta de um pedido mais velho nunca chega ao depois). Só as leituras
+    // da lista do núcleo (CONSULTAS_FORA_DA_JANELA); o resto é recusado. Gravar
+    // continua em chamar e gravar.
+    function consultar(canal, comando, dados, depois) {
+        const n = Sistema.consultar(canal, comando, JSON.stringify(dados === undefined ? {} : dados))
+        _consultas[canal] = { pedido: n, comando: comando, depois: depois }
+    }
+
+    // A tela não quer mais a resposta do canal (fechou, ou leu de novo pelo
+    // caminho de sempre).
+    function esquecer(canal) {
+        delete _consultas[canal]
     }
 
     // Roda um comando demorado (restaurar backup, importar planilhas e XML)
