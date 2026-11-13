@@ -981,3 +981,95 @@ fn e13_revisao_lista_de_compra_separa_fornecedores_de_mesmo_nome() {
     let html = crate::reposicao::lista_compra_html(c).unwrap();
     assert_eq!(html.matches(">Distribuidora Sul</p>").count(), 2, "um grupo para cada fornecedor: {html}");
 }
+
+/// E01 · revisão (achado novo, pede decisão): o fluxo de caixa ainda conta a
+/// venda pela situação ATUAL. Venda em dinheiro de 3 dias atrás, caixa
+/// fechado, cancelada hoje sem gaveta aberta (D-14: os R$ 300 saem do Caixa
+/// geral): a entrada some do dia da venda e a saída de hoje não aparece (o
+/// movimento `caixa_fechado` não entra no fluxo). O mesmo vale para o
+/// recebimento estornado e a devolução desfeita. O saldo da conta muda.
+#[test]
+fn e01_revisao_venda_cancelada_depois_do_fechamento_some_do_fluxo() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
+    let v = vender(&l, d, "1", vec![pg("dinheiro", "300")], None);
+    let dia: String = c.query_row("SELECT date('now', 'localtime', '-3 days')", [], |x| x.get(0)).unwrap();
+    c.execute("UPDATE venda SET criado_em = datetime(?1 || ' 15:00:00', 'utc') WHERE id = ?2", params![dia, v])
+        .unwrap();
+    let centavos = |t: &str| crate::numeros::ler_dinheiro(t).unwrap().unwrap_or(0);
+    let fluxo = || {
+        let f = financeiro::fluxo(c, &crate::fiscal::data_br(&dia), "", 30).unwrap();
+        (centavos(&f.entradas), centavos(&f.saidas))
+    };
+    assert_eq!(fluxo(), (30_000, 0), "a venda no dia dela");
+    caixa::fechar(c, d, &l.u, "300", "").unwrap();
+    let geral = || financeiro::saldo(c, "caixa-geral", "9999-12-31").unwrap();
+    let antes = geral();
+    vendas::cancelar(c, d, &l.u, &v, "devolveu o dinheiro").unwrap();
+    assert_eq!(geral() - antes, -30_000, "os R$ 300 saíram do Caixa geral hoje (D-14)");
+    assert_eq!(fluxo(), (0, 0), "hoje: a entrada sumiu do dia da venda e a saída de hoje não aparece");
+}
+
+/// E14 · revisão (achado novo, pede decisão): o recibo do crediário
+/// reimpresso mostra o nome e o documento do cadastro de HOJE (o recebimento
+/// não guarda o nome); a venda reimpressa mostra o nome gravado nela.
+#[test]
+fn e14_revisao_recibo_reimpresso_com_o_cadastro_de_hoje() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
+    let v = vender(&l, d, "1", vec![pg("crediario", "300")], None);
+    let rec = receber::receber(
+        c,
+        d,
+        &l.u,
+        &receber::ReceberEntrada {
+            cliente_id: l.cliente.clone(),
+            forma: "dinheiro".into(),
+            valor: "300".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut f = pessoas::ficha(c, &l.cliente).unwrap();
+    f.nome = "Auto Center Zé Ltda".into();
+    pessoas::salvar(c, d, &l.u, &f).unwrap();
+    assert_eq!(receber::recibo(c, &rec).unwrap().cliente, "Auto Center Zé Ltda", "o recibo antigo com o nome de hoje");
+    assert!(crate::impressao::recibo(c, &rec).unwrap().contains("Auto Center Zé Ltda"));
+    assert_eq!(vendas::ficha(c, &v).unwrap().cliente, "Oficina do Zé", "a venda guarda o nome dela");
+}
+
+/// F02 · revisão (observação): depois que um gerente entra e a loja ganha a
+/// chave, o aviso do dia some, mas os backups feitos antes (sem tranca)
+/// continuam na pasta até a retenção apagá-los; a lista do Backup mostra
+/// cada um como "sem trancar". Nenhum outro caminho grava backup sem tranca
+/// com a chave criada.
+#[test]
+fn f02_revisao_backups_de_antes_da_chave_continuam_sem_tranca() {
+    let pasta = pasta_nova("f02");
+    let db = pasta.join("rustinho.db");
+    let u = {
+        let b = Banco::abrir(&db).unwrap();
+        usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id
+    };
+    crate::backup::fazer(&db, false).unwrap();
+    let backups = pasta.join("backups");
+    let aviso = |c: &Connection| crate::avisos::do_dia(c).unwrap().iter().any(|a| a.id == "backup_sem_tranca");
+    {
+        let b = Banco::abrir(&db).unwrap();
+        assert!(aviso(&b.conn), "sem a chave: avisa");
+        crate::backup::gerente_conferido(&b.conn, &u, "1234", None).unwrap();
+        assert!(!aviso(&b.conn), "com a chave: o aviso some");
+    }
+    // Garante um nome diferente para o backup novo (o nome tem a hora em segundos).
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    crate::backup::fazer(&db, false).unwrap();
+    let lista = crate::backup::listar(&backups);
+    assert_eq!(lista.len(), 2, "{:?}", lista.iter().map(|c| &c.nome).collect::<Vec<_>>());
+    assert_eq!(lista.iter().filter(|c| !c.tem_senha).count(), 1, "o de antes da chave continua sem tranca");
+    assert_eq!(lista.iter().filter(|c| c.tem_senha).count(), 1, "o novo sai trancado");
+    let _ = std::fs::remove_dir_all(&pasta);
+}
