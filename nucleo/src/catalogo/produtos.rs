@@ -636,15 +636,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     }
     let barras_mudou = antes.as_ref().map(|a| a.codigo_barras.as_str()) != Some(dados.codigo_barras.as_str());
     if !dados.codigo_barras.is_empty() && barras_mudou {
-        let mesmo_barras: Option<String> = conn
-            .query_row(
-                "SELECT nome FROM produto p
-                  WHERE p.id <> ?2
-                    AND (p.codigo_barras = ?1 OR EXISTS (SELECT 1 FROM produto_gtin g WHERE g.produto_id = p.id AND g.gtin = ?1))",
-                params![dados.codigo_barras, id],
-                |l| l.get(0),
-            )
-            .optional()?;
+        let mesmo_barras: Option<String> =
+            conn.query_row(SQL_BARRAS_DE_OUTRA_PECA, params![dados.codigo_barras, id], |l| l.get(0)).optional()?;
         if let Some(outro) = mesmo_barras {
             return Err(Erro::campo("codigoBarras", format!("Este código de barras já é da peça \"{outro}\".")));
         }
@@ -1366,6 +1359,15 @@ pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFic
     atualizar_indice_busca(conn, produto_id)?;
     Ok(gravados)
 }
+
+/// N07: o nome de outra peça (que não ?2) com o código de barras ?1, no código
+/// de barras principal ou num GTIN. Cada metade pelo seu índice: o de
+/// `produto.codigo_barras` é parcial e só vale com `codigo_barras <> ''`.
+pub(crate) const SQL_BARRAS_DE_OUTRA_PECA: &str =
+    "SELECT nome FROM produto WHERE id <> ?2 AND codigo_barras = ?1 AND codigo_barras <> ''
+     UNION ALL SELECT p.nome FROM produto_gtin g JOIN produto p ON p.id = g.produto_id
+      WHERE g.produto_id <> ?2 AND g.gtin = ?1
+     LIMIT 1";
 
 /// Frases com o que mudou, para o histórico.
 fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<String> {
