@@ -997,3 +997,100 @@ fn g05_hoje_a_mesma_nota_em_dois_caixas() {
         assert!(!k.iter().any(|c| c.texto.contains(&chave) || c.o_que == "Compra"), "{k:#?}");
     }
 }
+
+/// A nota de exemplo importada e lançada em cada caixa, sem rede (como o
+/// `g05_hoje_a_mesma_nota_em_dois_caixas`). Devolve (A, B, gerente, chave da
+/// nota, compra de A, compra de B), já depois de trocar.
+fn mesma_nota_lancada_nos_dois(nome: &str) -> (Banco, Banco, String, String, String, String) {
+    let (mut a, mut b, u) = loja();
+    config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
+    trazer_so_o_fornecedor(&a, &u, &nota_numa_pasta(nome));
+    trocar(&mut a, &mut b);
+    let lancar = |x: &Banco| -> String {
+        let id = rustinho_nucleo::compras::importar_xml(&x.conn, &x.dispositivo, &u, NFE_EXEMPLO).unwrap();
+        x.conn.execute("UPDATE compra_item SET acao = 'nova' WHERE compra_id = ?1", [&id]).unwrap();
+        let quando: String =
+            x.conn.query_row("SELECT strftime('%d/%m/%Y %H:%M', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
+        let c = rustinho_nucleo::compras::Conferencia {
+            id: id.clone(),
+            situacao: "autorizada".into(),
+            protocolo: "135260000000001".into(),
+            conferido_em: quando,
+        };
+        rustinho_nucleo::compras::registrar_conferencia(&x.conn, &x.dispositivo, &u, &c).unwrap();
+        rustinho_nucleo::compras::lancar(&x.conn, &x.dispositivo, &u, &id).unwrap();
+        id
+    };
+    let (ca, cb) = (lancar(&a), lancar(&b));
+    let chave = rustinho_nucleo::compras::ficha(&a.conn, &ca).unwrap().chave;
+    trocar(&mut a, &mut b);
+    (a, b, u, chave, ca, cb)
+}
+
+/// G05 (passo 5.4): a mesma nota lançada em dois caixas sem rede vira, depois
+/// de juntar os dados, um item para o gerente em Simultaneidade › Diferenças,
+/// nos dois caixas, do mesmo jeito que o orçamento vendido duas vezes (F-12):
+/// - diz que é a mesma nota (número, fornecedor, chave) e onde ela entrou;
+/// - sem "usar a do outro caixa": nada é estornado sozinho (as duas compras
+///   continuam lançadas e o estoque continua como está);
+/// - o "Entendi" do gerente num caixa fecha o item nos outros;
+/// - quando a que sobrou é estornada, não aparece item novo.
+#[test]
+#[ignore = "passo 5.4: caracterização do G05 (falha hoje: nada vai para o gerente)"]
+fn g05_a_mesma_nota_em_dois_caixas_vai_para_o_gerente() {
+    let (mut a, mut b, u, chave, ca, cb) = mesma_nota_lancada_nos_dois("g05-gerente");
+    let numero = rustinho_nucleo::compras::ficha(&a.conn, &ca).unwrap().numero;
+    for x in [&a, &b] {
+        let k = sync::conflitos(&x.conn).unwrap();
+        let notas: Vec<_> = k.iter().filter(|c| c.tipo == "nota").collect();
+        assert_eq!(notas.len(), 1, "a mesma nota vai para o gerente uma vez: {k:#?}");
+        let n = notas[0];
+        assert_eq!(n.o_que, "Nota de compra");
+        assert!(n.texto.contains(&chave) && n.texto.contains(&format!("Nº {numero}")), "{}", n.texto);
+        assert!(n.texto.contains("mais de um caixa"), "{}", n.texto);
+        assert!(!n.pode_usar, "sem usar a do outro caixa");
+        assert!(n.campos.is_empty() && n.resolvido.is_empty());
+        // Nada é estornado sozinho.
+        let lancadas: i64 = x
+            .conn
+            .query_row("SELECT COUNT(*) FROM compra WHERE chave = ?1 AND situacao = 'lancada'", [&chave], |l| l.get(0))
+            .unwrap();
+        assert_eq!(lancadas, 2);
+        let entrou: i64 = x
+            .conn
+            .query_row("SELECT SUM(quantidade) FROM estoque_movimento WHERE tipo = 'compra'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(entrou, 2 * 26_000);
+    }
+    // Conferir de novo não repete o item.
+    sync::verificar_depois(&a.conn).unwrap();
+    assert_eq!(sync::conflitos(&a.conn).unwrap().iter().filter(|c| c.tipo == "nota").count(), 1);
+    // O gerente diz "Entendi" em A: fecha em A e, depois de trocar, em B.
+    let id = sync::conflitos(&a.conn).unwrap().into_iter().find(|c| c.tipo == "nota").unwrap().id;
+    let abertos_b = sync::conflitos_abertos(&b.conn).unwrap();
+    sync::resolver_conflito(&a.conn, id, false, &u).unwrap();
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        let k = sync::conflitos(&x.conn).unwrap();
+        let n = k.iter().find(|c| c.tipo == "nota").expect("continua na lista dos resolvidos");
+        assert!(!n.resolvido.is_empty(), "{k:#?}");
+    }
+    assert_eq!(sync::conflitos_abertos(&b.conn).unwrap(), abertos_b - 1);
+    // O gerente estorna a que sobrou (em B): não aparece item novo.
+    rustinho_nucleo::compras::estornar(&b.conn, &b.dispositivo, &u, &cb, "nota lançada em dois caixas").unwrap();
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        let notas: Vec<_> = sync::conflitos(&x.conn).unwrap().into_iter().filter(|c| c.tipo == "nota").collect();
+        assert_eq!(notas.len(), 1);
+        assert!(!notas[0].resolvido.is_empty());
+        let entrou: i64 = x
+            .conn
+            .query_row(
+                "SELECT SUM(quantidade) FROM estoque_movimento WHERE tipo IN ('compra', 'estorno_compra')",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(entrou, 26_000, "depois do estorno, a nota entra uma vez");
+    }
+}
