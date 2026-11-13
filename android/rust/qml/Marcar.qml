@@ -29,8 +29,10 @@ CheckBox {
         y: (caixa.height - height) / 2
         radius: 5
         color: caixa.checked ? Tema.principal : Tema.papel
-        border.width: caixa.visualFocus ? 2 : 0
-        border.color: Tema.azulEscuroNo(caixa.superficie)
+        // VIS33-13 (7.2): desmarcada, a caixa tem contorno com contraste de
+        // componente (>= 3:1) sobre a superfície; com foco, o contorno de foco.
+        border.width: caixa.visualFocus ? 2 : caixa.checked ? 0 : 1.5
+        border.color: caixa.visualFocus ? Tema.azulEscuroNo(caixa.superficie) : Tema.apagadoNo(caixa.superficie)
         Icone {
             anchors.centerIn: parent
             nome: "check"
