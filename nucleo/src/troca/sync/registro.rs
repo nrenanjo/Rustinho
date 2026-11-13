@@ -197,6 +197,15 @@ fn registrar_linhas(conn: &Connection, tabela: &str) -> Resultado<()> {
     Ok(())
 }
 
+/// A marca de que as linhas de uma tabela que passou a viajar já viraram
+/// alteração neste banco (`sync_inicio:<tabela>`, passo 5.2)? Ela é do banco,
+/// e não do caixa (N-I1, integração 2: um backup de antes da 5.2 restaurado
+/// volta sem ela, e a abertura seguinte registra as linhas dele; veja
+/// `backup::Pendente`).
+pub fn marca_das_que_passaram_a_viajar(chave: &str) -> bool {
+    crate::dados::esquema::PASSARAM_A_VIAJAR.iter().any(|t| chave.strip_prefix("sync_inicio:") == Some(*t))
+}
+
 /// Passo 5.2 (PEND-35): num banco de antes, as linhas das tabelas que
 /// passaram a viajar nunca viraram alteração. Viram agora, uma vez só (a
 /// marca `sync_inicio:<tabela>` fica na configuração deste caixa, junto, numa

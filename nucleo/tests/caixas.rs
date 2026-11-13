@@ -1144,3 +1144,72 @@ fn g54_hoje_resumo_de_dois_caixas_em_dia_ja_difere() {
         assert_eq!(sync::pendencias(&x.conn).unwrap(), 0);
     }
 }
+
+/// Um GTIN gravado como num banco de antes da 5.2: sem passar pela troca.
+fn gtin_sem_troca(x: &Banco, produto: &str, gtin: &str) {
+    x.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+    x.conn
+        .execute(
+            "INSERT INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+             VALUES (?1, ?2, ?3, 'comercial', 'cEAN', 5, '2026-11-01T00:00:00Z')",
+            [rustinho_nucleo::tempo::novo_id(), produto.to_string(), gtin.to_string()],
+        )
+        .unwrap();
+    x.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+}
+
+/// N-I1, a marca (integração 2, 13/11): um caixa já na 5.2 restaura um
+/// backup de antes dela. A marca `sync_inicio:produto_gtin` acompanha o banco
+/// restaurado (e não o caixa): o backup não a tem, então a abertura seguinte
+/// registra os GTINs dele como a 5.2 faz na primeira abertura — cada um uma
+/// vez no log, e o mesmo GTIN já gravado no outro caixa fica uma vez só lá
+/// (pela chave natural, como em `pend35_gtins_de_antes_viajam_uma_vez_sem_repetir`).
+/// Em `bad5fb8` a marca é do caixa e volta com a restauração: os GTINs do
+/// backup nunca viram alteração e não chegam ao outro caixa.
+#[test]
+fn n_i1_backup_de_antes_da_5_2_restaurado_registra_os_gtins_uma_vez() {
+    let pasta = std::env::temp_dir().join(format!("rustinho-n-i1-b-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let db = pasta.join("a.db");
+    let senha = "balcao-azul-2026";
+    let mut a = Banco::abrir(&db).unwrap();
+    let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", senha, true).unwrap();
+    usuarios::definir_gerente(&a.conn, &u.id, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja de Teste").unwrap();
+    let mut b = Banco::em_memoria().unwrap();
+    trocar(&mut a, &mut b);
+    let p = peca(&a, &u.id, "Filtro de ar", "1");
+    trocar(&mut a, &mut b);
+    // A e B de antes da 5.2: o mesmo GTIN_1 nos dois, GTIN_2 só em A, e A sem a marca.
+    gtin_sem_troca(&a, &p, GTIN_1);
+    gtin_sem_troca(&b, &p, GTIN_1);
+    gtin_sem_troca(&a, &p, GTIN_2);
+    a.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+    let feito = rustinho_nucleo::backup::fazer(&db, false).unwrap();
+    // A atualiza para a 5.2 (abrir registra os GTINs e põe a marca) e, antes
+    // de trocar com B, restaura o backup de antes da 5.2.
+    drop(a);
+    let mut a = Banco::abrir(&db).unwrap();
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto_gtin'"), 2);
+    rustinho_nucleo::backup::restaurar(&mut a.conn, Some(&db), &feito.arquivo, false, senha).unwrap();
+    drop(a);
+    let mut a = Banco::abrir(&db).unwrap();
+    assert_eq!(
+        contar(&a, "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto_gtin'"),
+        2,
+        "os GTINs do backup de antes da 5.2 não viraram alteração (uma vez cada)"
+    );
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM config WHERE chave = 'sync_inicio:produto_gtin'"), 1);
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        assert_eq!(gtins_da_peca(x, &p), vec![GTIN_1.to_string(), GTIN_2.to_string()], "o GTIN do backup não chegou");
+        assert_eq!(contar(x, "SELECT COUNT(*) FROM produto_gtin"), 2, "o mesmo GTIN duas vezes");
+        assert_eq!(contar(x, "SELECT COUNT(*) FROM sync_pendencia"), 0, "a troca travou num GTIN repetido");
+    }
+    // Abrir de novo não manda outra vez.
+    drop(a);
+    let a = Banco::abrir(&db).unwrap();
+    assert_eq!(contar(&a, "SELECT COUNT(*) FROM alteracao WHERE tabela = 'produto_gtin'"), 2);
+    drop(a);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

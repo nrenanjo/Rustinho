@@ -1865,7 +1865,9 @@ impl Pendente {
             let mut c = conn.prepare("SELECT chave, valor FROM config")?;
             for l in c.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))? {
                 let (k, v) = l?;
-                if !da_loja.contains(&k.as_str()) {
+                // N-I1 (D-I2): a marca da 5.2 é do banco, e não deste caixa:
+                // fica a do banco que entra.
+                if !da_loja.contains(&k.as_str()) && !sync::marca_das_que_passaram_a_viajar(&k) {
                     locais.push((k, v));
                 }
             }
@@ -1919,7 +1921,15 @@ impl Pendente {
         let tx = conn.transaction()?;
         tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
         let lista_loja = da_loja.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
-        tx.execute(&format!("DELETE FROM config WHERE chave NOT IN ({lista_loja})"), [])?;
+        // N-I1 (D-I2): a marca da 5.2 do banco que entrou fica com ele. Sem
+        // ela (backup de antes da 5.2), a abertura seguinte registra as linhas
+        // que passaram a viajar, como a 5.2 faz na primeira abertura.
+        let marcas = crate::dados::esquema::PASSARAM_A_VIAJAR
+            .iter()
+            .map(|t| format!("'sync_inicio:{t}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        tx.execute(&format!("DELETE FROM config WHERE chave NOT IN ({lista_loja}) AND chave NOT IN ({marcas})"), [])?;
         tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
         for (k, v) in &self.locais {
             config::gravar(&tx, k, v)?;
