@@ -1033,3 +1033,89 @@ fn a04_codigo_interno_com_descricao_diferente_vira_pendencia() {
     let virou = lista.as_array().unwrap().iter().any(|x| x["codigoFornecedor"] == "4455");
     assert!(virou, "o 4455 da nota da loja (outra descrição) não virou pendência: {lista}");
 }
+
+// ===========================================================================
+// Lote 2 (fase 4): a senha ao abrir "Trazer cadastros" (PEND-38/H02, DP-52 (b),
+// T-2 (a)) e o A07 com campo próprio (item 06).
+// ===========================================================================
+
+/// A chave que a tela sorteia ao abrir (aqui, fixa).
+const CHAVE_TELA: &str = "chave-da-tela-de-teste-0001";
+
+/// Loja com a nota de exemplo numa pasta e a caixa Bia (não é gerente) conectada.
+fn loja_com_caixa(nome: &str) -> (Loja, String) {
+    let mut l = loja(nome);
+    l.usuario_caixa("Bia", SENHA_BIA);
+    let pasta = pasta_com_exemplo(&l, "xml");
+    l.entrar("Bia", SENHA_BIA);
+    (l, pasta)
+}
+
+fn so_o_gerente(l: &mut Loja, comando: &str, dados: Value) {
+    let e = l.erro(comando, dados.clone());
+    assert!(e.contains("Só o gerente"), "{comando} {dados}: devia pedir o gerente, deu: {e}");
+}
+
+/// Trava (já vale em 24ceb31 e tem de continuar, D-09): a senha do gerente para
+/// CONSULTAR as Configurações não deixa a caixa cadastrar pela importação.
+#[test]
+fn l2_consulta_do_gerente_nao_libera_trazer_cadastros() {
+    let (mut l, pasta) = loja_com_caixa("l2-consulta");
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "acao": "configuracoes" }));
+    so_o_gerente(&mut l, "importar_cadastros", json!({ "arquivos": [pasta], "fornecedores": true }));
+}
+
+/// PEND-38/H02 e DP-52 (b): a senha dada ao abrir "Trazer cadastros" vale só
+/// para a prévia e o "Cadastrar", só com a chave da tela, não abre outro
+/// comando do gerente (nem da mesma ação), sobrevive ao `gerente_encerrar` sem
+/// dados (a navegação guiada) e acaba quando a tela encerra ou a pessoa sai.
+#[test]
+fn pend38_senha_da_tela_vale_so_para_trazer_cadastros() {
+    let (mut l, pasta) = loja_com_caixa("l2-tela");
+    let dados = |chave: &str| json!({ "arquivos": [pasta.clone()], "fornecedores": true, "chaveTela": chave });
+    so_o_gerente(&mut l, "importar_previa", dados(CHAVE_TELA));
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "tela": "importar_cadastros", "chave": CHAVE_TELA }));
+    l.ok("importar_previa", dados(CHAVE_TELA));
+    so_o_gerente(&mut l, "importar_previa", dados("outra-chave-de-outra-tela-02"));
+    so_o_gerente(&mut l, "importar_previa", json!({ "arquivos": [pasta.clone()] }));
+    // Outro comando do gerente, da MESMA ação (Configurações), com a chave da tela.
+    so_o_gerente(&mut l, "config_salvar", json!({ "chaveTela": CHAVE_TELA }));
+    // A navegação guiada encerra as consultas sem fechar a tela: a liberação fica.
+    l.ok("gerente_encerrar", json!({}));
+    let r = l.ok("importar_cadastros", dados(CHAVE_TELA));
+    assert_eq!(r["fornecedores"], 1, "{r}");
+    // A tela fecha de vez: acabou.
+    l.ok("gerente_encerrar", json!({ "tela": "importar_cadastros", "chave": CHAVE_TELA }));
+    so_o_gerente(&mut l, "importar_previa", dados(CHAVE_TELA));
+    // Liberada de novo e a pessoa sai e entra: acabou.
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "tela": "importar_cadastros", "chave": CHAVE_TELA }));
+    l.entrar("Bia", SENHA_BIA);
+    so_o_gerente(&mut l, "importar_previa", dados(CHAVE_TELA));
+    // A liberação da tela fica na auditoria, com quem liberou e para quem.
+    let n = l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.liberar' AND detalhes LIKE '%Trazer cadastros (nesta tela%'");
+    assert_eq!(n, 2, "a liberação da tela não entrou na auditoria");
+}
+
+/// T-2 (a): sem a senha do gerente, a caixa não lê os arquivos pela prévia.
+#[test]
+fn pend38_sem_senha_a_previa_nao_le() {
+    let (mut l, pasta) = loja_com_caixa("l2-previa");
+    so_o_gerente(&mut l, "importar_previa", json!({ "arquivos": [pasta] }));
+}
+
+/// A07 (lote 2, item 06): a recusa de ligar a uma peça desativada vem com o
+/// campo próprio `pecaDesativada` (a tela oferece "Abrir a peça"); a mensagem
+/// e a pendência continuam como no lote 1.
+#[test]
+fn a07_peca_desativada_tem_campo_proprio() {
+    let mut l = loja("l2-a07");
+    importar_so_fornecedor(&mut l);
+    let inativa = l.peca("ROLAMENTO DESATIVADO", "", "10,00", "");
+    l.executar(&format!("UPDATE produto SET ativo = 0 WHERE id = '{inativa}'"));
+    let fag = pendencia(&mut l, "FAG-32206");
+    let r = l.chamar("xml_pendencia_resolver", json!({ "id": fag, "acao": "ligar", "produtoId": inativa }));
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["campo"], "pecaDesativada", "{r}");
+    assert!(r["erro"].as_str().unwrap_or("").contains("ROLAMENTO DESATIVADO"), "{r}");
+    assert_eq!(situacao_da_pendencia(&l, &fag), "pendente");
+}

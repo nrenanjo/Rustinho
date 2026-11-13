@@ -67,6 +67,14 @@ fn nome_da_acao(acao: &str) -> String {
 
 /// A ação pedida para consultar existe? (A senha do gerente só vale para
 /// uma ação certa; "precos" não tem consulta.)
+/// O nome da tela do gerente na auditoria da liberação.
+fn nome_da_tela(tela: &str) -> &'static str {
+    match tela {
+        "importar_cadastros" => "Trazer cadastros",
+        _ => "tela do gerente",
+    }
+}
+
 fn acao_de_consulta(acao: &str) -> Resultado<&'static str> {
     ACOES_DO_GERENTE
         .iter()
@@ -431,12 +439,26 @@ enum Liberacao {
     /// Uma gravação: este comando com estes dados exatos. Acaba quando dá
     /// certo; se der erro, só repete a mesma coisa.
     Uma { usuario_id: String, comando: String, resumo: [u8; 32], ate: Instant },
+    /// DP-52 (b): a senha dada ao ABRIR uma tela que só o gerente pode usar
+    /// ("Trazer cadastros"). Vale só para os comandos dessa tela
+    /// (`TELAS_DO_GERENTE`), só para quem estava usando e só com a chave que a
+    /// tela sorteou; acaba quando a tela encerra, depois de `LIBERACAO` sem
+    /// uso, ou ao sair. O `gerente_encerrar` sem dados não a apaga.
+    Tela { usuario_id: String, tela: &'static str, chave: String, ate: Instant },
+}
+
+/// DP-52 (b): as telas que pedem a senha do gerente ao abrir e os comandos
+/// que essa senha libera (T-2 (a): a prévia também).
+const TELAS_DO_GERENTE: &[(&str, &[&str])] = &[("importar_cadastros", &["importar_cadastros", "importar_previa"])];
+
+fn tela_do_gerente(tela: &str) -> Option<(&'static str, &'static [&'static str])> {
+    TELAS_DO_GERENTE.iter().find(|(t, _)| *t == tela.trim()).map(|(t, c)| (*t, *c))
 }
 
 impl Liberacao {
     fn ate(&self) -> Instant {
         match self {
-            Liberacao::Consulta { ate, .. } | Liberacao::Uma { ate, .. } => *ate,
+            Liberacao::Consulta { ate, .. } | Liberacao::Uma { ate, .. } | Liberacao::Tela { ate, .. } => *ate,
         }
     }
 }
@@ -449,7 +471,7 @@ pub struct Servico {
     /// o que foi pedido; veja `Liberacao`).
     liberacoes: Vec<Liberacao>,
     /// O comando que está rodando e o resumo dos dados dele.
-    chamada: Option<(String, [u8; 32])>,
+    chamada: Option<(String, [u8; 32], String)>,
     /// Sincronização com os outros caixas (só com banco em arquivo).
     _motor: Option<sync::Motor>,
     /// Houve um erro interno grave (pânico): não dá para provar que o que
@@ -922,7 +944,8 @@ impl Servico {
                 ));
             }
         }
-        self.chamada = Some((comando.to_string(), resumo));
+        let chave_tela = dados["chaveTela"].as_str().unwrap_or("").trim().to_string();
+        self.chamada = Some((comando.to_string(), resumo, chave_tela));
         let r = self.executar_comando(comando, dados, sessao);
         self.chamada = None;
         if let (Some(chave), Ok(_)) = (repeticao, &r) {
@@ -982,7 +1005,21 @@ impl Servico {
                 let d: SenhaGerente = ler(dados)?;
                 // Para uma gravação (o comando e os dados exatos) ou para
                 // consultar a tela de uma ação.
-                let pedido = if !d.comando.trim().is_empty() {
+                // DP-52 (b): a tela do gerente, com a chave que ela sorteou.
+                let tela = if d.tela.trim().is_empty() {
+                    None
+                } else {
+                    let Some((tela, _)) = tela_do_gerente(&d.tela) else {
+                        return Err(Erro::validacao("Diga para que é a senha do gerente."));
+                    };
+                    if d.chave.trim().chars().count() < 16 {
+                        return Err(Erro::validacao("A tela não mandou a chave dela. Feche e abra a tela de novo."));
+                    }
+                    Some((tela, d.chave.trim().to_string()))
+                };
+                let pedido = if tela.is_some() {
+                    Ok(Vec::new())
+                } else if !d.comando.trim().is_empty() {
                     if !comando_do_gerente(&d.comando) {
                         return Err(Erro::validacao("Diga para que é a senha do gerente."));
                     }
@@ -1010,6 +1047,20 @@ impl Servico {
                         self.segredo_backup = self.segredo_conferido(&g.id, &d.senha)?;
                         let usuario_id = sessao.usuario_id.clone();
                         let o_que = match &pedido {
+                            Ok(_) if tela.is_some() => {
+                                let (tela, chave) = tela.clone().unwrap_or_default();
+                                self.liberacoes.retain(|l| {
+                                    !matches!(l, Liberacao::Tela { tela: t, usuario_id: u, .. }
+                                        if *t == tela && *u == usuario_id)
+                                });
+                                self.liberacoes.push(Liberacao::Tela {
+                                    usuario_id: usuario_id.clone(),
+                                    tela,
+                                    chave,
+                                    ate: Instant::now() + LIBERACAO,
+                                });
+                                format!("{} (nesta tela, até fechar)", nome_da_tela(tela))
+                            }
                             Ok(acoes) => {
                                 for &acao in acoes.iter() {
                                     self.liberacoes.retain(|l| {
@@ -1060,7 +1111,21 @@ impl Servico {
                 }
             }
             "gerente_encerrar" => {
-                self.liberacoes.clear();
+                // DP-52 (b): com a tela e a chave, encerra só a liberação dessa
+                // tela; sem dados, as consultas e as gravações (como antes), e a
+                // da tela continua até ela fechar (a navegação guiada fecha e
+                // reabre painéis sem fechar a tela).
+                let tela = dados["tela"].as_str().unwrap_or("").trim().to_string();
+                let chave = dados["chave"].as_str().unwrap_or("").trim().to_string();
+                let usuario_id = sessao.usuario_id.clone();
+                if tela.is_empty() {
+                    self.liberacoes.retain(|l| matches!(l, Liberacao::Tela { .. }));
+                } else {
+                    self.liberacoes.retain(|l| {
+                        !matches!(l, Liberacao::Tela { tela: t, chave: c, usuario_id: u, .. }
+                            if *t == tela && *c == chave && *u == usuario_id)
+                    });
+                }
                 Ok(Value::Null)
             }
             "gerente_ler" => self.gerente_ler(),
@@ -1997,6 +2062,11 @@ struct SenhaGerente {
     comando: String,
     #[serde(default)]
     dados: Option<Value>,
+    /// Ou (DP-52 (b)): usar esta tela do gerente, com a chave que ela sorteou.
+    #[serde(default)]
+    tela: String,
+    #[serde(default)]
+    chave: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -2026,7 +2096,7 @@ fn pode_sem_senha(conn: &rusqlite::Connection, acao: &str, sessao: &Sessao) -> R
 /// regra de sempre; os comandos dos domínios a usam pelo `despacho::Acesso`.
 struct Permissoes<'a> {
     liberacoes: &'a mut Vec<Liberacao>,
-    chamada: Option<&'a (String, [u8; 32])>,
+    chamada: Option<&'a (String, [u8; 32], String)>,
     sessao: &'a Sessao,
 }
 
@@ -2045,12 +2115,33 @@ impl Permissoes<'_> {
         false
     }
 
+    /// DP-52 (b): a senha foi dada ao abrir a tela deste comando, por quem
+    /// está usando, com a mesma chave? Renova o prazo a cada uso.
+    fn liberada_pela_tela(&mut self) -> bool {
+        let agora = Instant::now();
+        self.liberacoes.retain(|l| agora < l.ate());
+        let Some((comando, _, chave)) = self.chamada else { return false };
+        if chave.is_empty() {
+            return false;
+        }
+        for l in self.liberacoes.iter_mut() {
+            if let Liberacao::Tela { usuario_id, tela, chave: c, ate } = l {
+                let cobre = tela_do_gerente(tela).is_some_and(|(_, comandos)| comandos.contains(&comando.as_str()));
+                if cobre && *usuario_id == self.sessao.usuario_id && c == chave {
+                    *ate = agora + LIBERACAO;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// A senha do gerente foi digitada para esta chamada (o mesmo comando,
     /// com os mesmos dados, pelo mesmo usuário)?
     fn liberada_esta_chamada(&mut self) -> bool {
         let agora = Instant::now();
         self.liberacoes.retain(|l| agora < l.ate());
-        let Some((comando, resumo)) = self.chamada else { return false };
+        let Some((comando, resumo, _)) = self.chamada else { return false };
         self.liberacoes.iter().any(|l| {
             matches!(l, Liberacao::Uma { usuario_id, comando: c, resumo: r, .. }
                 if usuario_id == &self.sessao.usuario_id && c == comando && r == resumo)
@@ -2078,7 +2169,10 @@ impl Acesso for Permissoes<'_> {
         if pode_sem_senha(conn, acao, self.sessao)? || self.liberada_esta_chamada() {
             return Ok(());
         }
-        let leitura = self.chamada.map(|(c, _)| so_leitura(c) && acao_do_comando(c) == Some(acao)).unwrap_or(false);
+        if self.liberada_pela_tela() {
+            return Ok(());
+        }
+        let leitura = self.chamada.map(|(c, _, _)| so_leitura(c) && acao_do_comando(c) == Some(acao)).unwrap_or(false);
         if leitura && self.consulta_aberta(acao) {
             return Ok(());
         }

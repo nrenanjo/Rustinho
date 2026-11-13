@@ -142,7 +142,9 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("gerente_liberar", "caixa", &["do_caixa"]),
     ("gerente_salvar", "gerente", &[]),
     ("importar_cadastros", "configuracoes", &["nao_repetir"]),
-    ("importar_previa", "leitura", &["leitura"]),
+    // T-2 (a), lote 2: a prévia lê os arquivos da importação, que é do gerente;
+    // passa a exigir a senha (a da tela, DP-52 (b)). Continua só lendo.
+    ("importar_previa", "configuracoes", &["leitura"]),
     ("impressao", "leitura", &["leitura"]),
     ("mecanicos", "leitura", &["leitura"]),
     ("menu", "leitura", &["leitura"]),
