@@ -1169,6 +1169,63 @@ fn e10_mudancas_sem_registro_na_auditoria() {
 // o resto do E10 (encomenda e compra).
 // ===========================================================================
 
+/// C04-a (a), decisão do proprietário de 12/11: cada senha do gerente digitada
+/// errada fica no histórico, com quem pediu, o caixa e para quê (tela, comando
+/// ou consulta), e o gerente vê no "Quem fez o quê". A senha digitada não fica
+/// gravada. A espera depois de 5 erros (D-09) continua igual, e a tentativa
+/// barrada pela espera não confere senha (não entra).
+#[test]
+fn c04a_senha_errada_do_gerente_fica_no_historico() {
+    const ERRADA: &str = "errada-c04a-9137";
+    let (mut l, _pasta) = loja_com_caixa("c04a");
+    let pedidos = [
+        json!({ "senha": ERRADA, "tela": "importar_cadastros", "chave": CHAVE_TELA }),
+        json!({ "senha": ERRADA, "comando": "config_salvar", "dados": {} }),
+        json!({ "senha": ERRADA, "acao": "configuracoes" }),
+    ];
+    for d in &pedidos {
+        let r = l.chamar("gerente_liberar", d.clone());
+        assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("senha")), "{r}");
+    }
+    let detalhes: Vec<String> = {
+        let c = l.conexao();
+        let mut s = c
+            .prepare(
+                "SELECT a.detalhes FROM auditoria a JOIN usuario u ON u.id = a.usuario_id
+                  WHERE a.acao = 'gerente.senha_errada' AND u.nome = 'Bia' ORDER BY a.quando, a.rowid",
+            )
+            .unwrap();
+        s.query_map([], |x| x.get(0)).unwrap().map(|x| x.unwrap()).collect()
+    };
+    assert_eq!(detalhes.len(), 3, "{detalhes:?}");
+    assert!(detalhes[0].contains("Para: Trazer cadastros (tela importar_cadastros)"), "{}", detalhes[0]);
+    assert!(detalhes[1].contains("(comando config_salvar)"), "{}", detalhes[1]);
+    assert!(detalhes[2].contains("Para: consultar"), "{}", detalhes[2]);
+    assert!(detalhes.iter().all(|d| d.contains("Bia digitou a senha do gerente errada") && d.contains("Caixa: ")));
+    // A senha digitada não fica em lugar nenhum da auditoria.
+    let com_senha = l.numero(&format!("SELECT COUNT(*) FROM auditoria WHERE detalhes LIKE '%{ERRADA}%'"));
+    assert_eq!(com_senha, 0, "a senha digitada foi gravada");
+    // D-09 igual: depois de 5 erros, a espera; a tentativa barrada não entra.
+    for _ in 0..2 {
+        l.chamar("gerente_liberar", pedidos[1].clone());
+    }
+    let r = l.chamar("gerente_liberar", pedidos[1].clone());
+    assert!(r["erro"].as_str().unwrap_or("").contains("Espere"), "{r}");
+    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'gerente.senha_errada'"), 5);
+    // O gerente vê no "Quem fez o quê", com o caixa e a frase própria.
+    l.entrar("Ana", SENHA_ANA);
+    let lista = l.ok("auditoria_listar", json!({}));
+    let vistos: Vec<&Value> =
+        lista.as_array().unwrap().iter().filter(|r| r["acao"] == "gerente.senha_errada").collect();
+    assert_eq!(vistos.len(), 5);
+    assert!(
+        vistos.iter().all(|r| r["usuario"] == "Bia"
+            && r["descricao"] == "errou a senha do gerente"
+            && !r["caixa"].as_str().unwrap_or("").is_empty()),
+        "{vistos:?}"
+    );
+}
+
 /// E10 (passo 6.5), o resto: voltar a encomenda para "falta pedir", a chegada
 /// automática pela compra lançada e a volta pelo estorno da compra ficam no
 /// histórico da encomenda, cada um com a sua frase. (O desfazer do fechamento

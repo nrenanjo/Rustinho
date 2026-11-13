@@ -68,6 +68,28 @@ fn nome_da_acao(acao: &str) -> String {
 /// A ação pedida para consultar existe? (A senha do gerente só vale para
 /// uma ação certa; "precos" não tem consulta.)
 /// O nome da tela do gerente na auditoria da liberação.
+/// C04-a: a senha do gerente digitada errada fica no histórico: quem pediu,
+/// em que caixa e para quê. A senha digitada nunca é gravada; a espera depois
+/// de muitos erros (D-09) continua a mesma.
+fn senha_errada_na_auditoria(
+    conn: &rusqlite::Connection,
+    disp: &str,
+    usuario_id: &str,
+    nome: &str,
+    para: &str,
+) -> Resultado<()> {
+    let caixa = config::nome_caixa(conn)?;
+    auditoria::registrar(
+        conn,
+        disp,
+        Some(usuario_id),
+        "gerente.senha_errada",
+        "usuario",
+        usuario_id,
+        &[format!("{nome} digitou a senha do gerente errada"), format!("Para: {para}"), format!("Caixa: {caixa}")],
+    )
+}
+
 fn nome_da_tela(tela: &str) -> &'static str {
     match tela {
         "importar_cadastros" => "Trazer cadastros",
@@ -1106,6 +1128,25 @@ impl Servico {
                     }
                     None => {
                         self.gravar_se_der(usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS))?;
+                        let para = match (&tela, &pedido) {
+                            (Some((t, _)), _) => format!("{} (tela {t})", nome_da_tela(t)),
+                            (None, Err((comando, _))) => format!(
+                                "{} (comando {comando})",
+                                nome_da_acao(acao_do_comando(comando).unwrap_or("precos"))
+                            ),
+                            (None, Ok(acoes)) => format!(
+                                "consultar {} ({})",
+                                acoes.iter().map(|a| nome_da_acao(a)).collect::<Vec<_>>().join("; "),
+                                acoes.join(", ")
+                            ),
+                        };
+                        self.gravar_se_der(senha_errada_na_auditoria(
+                            &self.banco.conn,
+                            &disp,
+                            &sessao.usuario_id,
+                            &sessao.nome,
+                            &para,
+                        ))?;
                         Err(Erro::campo("senha", "Senha do gerente errada."))
                     }
                 }
@@ -1378,6 +1419,13 @@ impl Servico {
                     }
                     None => {
                         usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS)?;
+                        senha_errada_na_auditoria(
+                            &self.banco.conn,
+                            &disp,
+                            &sessao.usuario_id,
+                            &sessao.nome,
+                            "conferir a autorização da nota de compra (comando compra_conferir_autorizacao)",
+                        )?;
                         return Err(Erro::campo("senha", "Senha do gerente errada."));
                     }
                 };

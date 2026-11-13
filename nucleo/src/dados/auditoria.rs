@@ -173,6 +173,7 @@ fn descrever(acao: &str) -> &'static str {
         "dre.classificacao" => "classificou as categorias do resultado",
         "dre.meta" => "mudou uma meta do resultado",
         "gerente.liberar" => "digitou a senha do gerente",
+        "gerente.senha_errada" => "errou a senha do gerente",
         "gerente.salvar" => "mudou quem é gerente ou o que só o gerente pode",
         "os.criar" => "abriu a OS",
         "os.situacao" => "mudou a etapa da OS",
