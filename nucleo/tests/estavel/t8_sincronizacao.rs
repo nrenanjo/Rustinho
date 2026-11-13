@@ -216,6 +216,59 @@ fn t8_1_rede_com_queda_no_meio_e_retomada() {
     let _ = std::fs::remove_dir_all(&pb);
 }
 
+/// T8.3 — Achado do t2_5 (frente F89): o caixa que recebe aplica cada
+/// resposta da troca numa transação só, segurando a escrita do banco enquanto
+/// isso; o balcão espera a vez por 5 s (`Banco::preparar`, D-05) e depois
+/// falha com "erro no banco de dados". Medido num computador carregado
+/// (compilação de teste, 2 núcleos ocupados), uma resposta de 2000 alterações
+/// segurou a escrita de 7,3 a 9,2 s, e a venda do balcão falhou nas 3 vezes.
+/// Uma resposta, então, leva poucas alterações: aqui, no máximo 200 (a
+/// transação de cada uma continua inteira; só vêm mais respostas).
+#[test]
+#[ignore = "caracterização do achado t2_5: em b3a171c uma resposta traz todas as alterações (até 2000); passa com a correção"]
+fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let _vez = vez_da_troca();
+    let pa = pasta_nova("t8-3-a");
+    let pb = pasta_nova("t8-3-b");
+    let mut a = caixa_novo(&pa, "Caixa A");
+    let ana = usuarios::criar(&a.conn, &a.dispositivo, "Ana", SENHA_ANA, true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &ana, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja Teste").unwrap();
+    let peca = {
+        let mut f = rustinho_nucleo::produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Fusível".into();
+        f.custo = "1".into();
+        f.estoque_inicial = "1000".into();
+        f.precos[0].preco = "10".into();
+        f.precos[0].lucro = String::new();
+        rustinho_nucleo::produtos::salvar(&a.conn, &a.dispositivo, &ana, &f).unwrap()
+    };
+    caixa::abrir(&a.conn, &a.dispositivo, &ana, "Caixa A", "0").unwrap();
+    vender(&mut a, &ana, &peca, 150);
+    let em_a = contar(&a, "SELECT COUNT(*) FROM alteracao");
+    assert!(em_a > 400, "a loja de teste tem de ter mais alterações que uma resposta ({em_a})");
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let b = caixa_novo(&pb, "Caixa B");
+    // B puxa uma resposta só (o que chega numa transação).
+    config::gravar(&b.conn, "sync_lotes_teste", "1").unwrap();
+    drop(b);
+    let (_, novas) = puxar(&pb.join("rustinho.db"), &format!("127.0.0.1:{pt_a}"), 48693);
+    assert!(novas > 0, "B não recebeu nada");
+    assert!(
+        novas <= 200,
+        "uma resposta da troca trouxe {novas} das {em_a} alterações de A: aplicada numa transação só, ela segura \
+         a escrita do caixa que recebe por tempo demais para a espera do balcão (achado do t2_5)"
+    );
+    assert!(motor_a.encerrar(Duration::from_secs(20)));
+    drop(a);
+    let _ = std::fs::remove_dir_all(&pa);
+    let _ = std::fs::remove_dir_all(&pb);
+}
+
 /// T8.2 — Senha da rede errada: nada passa; com a certa, passa.
 #[test]
 fn t8_2_senha_da_rede_errada_nao_troca() {
