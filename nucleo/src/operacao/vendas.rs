@@ -664,7 +664,7 @@ pub fn concluir(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Vend
         .collect();
     encomendas::criar_da_venda(conn, dispositivo, usuario_id, &id, &e.cliente_id, &pedir)?;
     if !e.encomenda_id.is_empty() {
-        encomendas::entregue_na_venda(conn, &e.encomenda_id, &id)?;
+        encomendas::entregue_na_venda(conn, dispositivo, usuario_id, &e.encomenda_id, &id)?;
     }
     if !e.os_id.is_empty() {
         crate::oficina::entregue_na_venda(conn, dispositivo, usuario_id, &e.os_id, &id)?;
@@ -774,8 +774,8 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             ));
         }
         cheques::cancelar_de(conn, usuario_id, "venda_id", id)?;
-        encomendas::cancelar_da_venda(conn, id)?;
-        crate::oficina::cancelar_da_venda(conn, id)?;
+        encomendas::cancelar_da_venda(conn, dispositivo, usuario_id, id)?;
+        crate::oficina::cancelar_da_venda(conn, dispositivo, usuario_id, id)?;
         receber::cancelar_da_venda(conn, usuario_id, id, &motivo)?;
         let itens: Vec<(String, i64)> = conn
             .prepare("SELECT produto_id, quantidade FROM venda_item WHERE venda_id = ?1 AND produto_id IS NOT NULL")?
@@ -833,6 +833,12 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             "UPDATE venda SET situacao = 'cancelado', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4 WHERE id = ?1",
             params![id, tempo::agora(), usuario_id, motivo],
         )?;
+        // E10 (revisão da fase 6): o orçamento cancelado fica no histórico.
+        let mut detalhes = vec![format!("Orçamento {numero} · {caixa_nome}")];
+        if !motivo.is_empty() {
+            detalhes.push(format!("Motivo: {motivo}"));
+        }
+        auditoria::registrar(conn, dispositivo, Some(usuario_id), "orcamento.cancelar", "venda", id, &detalhes)?;
     }
     Ok(())
 }

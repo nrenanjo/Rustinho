@@ -967,12 +967,32 @@ pub fn entregue_na_venda(
 }
 
 /// A venda da OS foi cancelada: a OS volta para "pronta".
-pub fn cancelar_da_venda(conn: &Connection, venda_id: &str) -> Resultado<()> {
+pub fn cancelar_da_venda(conn: &Connection, dispositivo: &str, usuario_id: &str, venda_id: &str) -> Resultado<()> {
+    // E10 (revisão da fase 6): a volta a "pronta" fica no histórico da OS.
+    let voltam: Vec<(String, i64)> = conn
+        .prepare("SELECT id, numero FROM ordem_servico WHERE venda_id = ?1 AND situacao = 'entregue'")?
+        .query_map([venda_id], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     conn.execute(
         "UPDATE ordem_servico SET situacao = 'pronta', venda_id = NULL, entregue_em = NULL, atualizado_em = ?2
           WHERE venda_id = ?1 AND situacao = 'entregue'",
         params![venda_id, tempo::agora()],
     )?;
+    for (id, numero) in voltam {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "os.situacao",
+            "ordem_servico",
+            &id,
+            &[format!(
+                "OS {numero}: {} → {} (a venda da entrega foi cancelada)",
+                nome_situacao("entregue"),
+                nome_situacao("pronta")
+            )],
+        )?;
+    }
     Ok(())
 }
 

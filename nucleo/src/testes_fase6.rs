@@ -839,7 +839,6 @@ fn auditado(c: &Connection, entidade: &str, id: &str, acao: &str) -> i64 {
 /// cancelada), e o orçamento cancelado também. O E10 cobriu as mesmas
 /// mudanças feitas pela compra e pelas telas da encomenda e da OS.
 #[test]
-#[ignore = "achado da revisão do E10: a venda muda encomenda e OS (e o orçamento é cancelado) sem auditoria"]
 fn e10_revisao_a_venda_muda_encomenda_e_os_com_registro() {
     let l = loja();
     let c = &l.b.conn;
