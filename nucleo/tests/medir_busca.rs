@@ -888,3 +888,71 @@ fn gravar_resultados() {
     f.flush().unwrap();
     println!("{} consultas gravadas em {}", consultas.len(), saida.display());
 }
+
+/// R-1 (revisão cruzada de 13/11, 7.5 × 5.2): o custo de refazer o índice de
+/// todas as peças na primeira abertura com a 5.2. Mede, numa cópia do banco do
+/// gerador (`busca_g2_<peças>.db`, gerado na primeira vez):
+/// - abrir com a marca `sync_inicio:produto_gtin` (como em toda abertura);
+/// - abrir sem a marca (a primeira abertura com a 5.2: os GTINs viram
+///   alteração e o índice de todas as peças é refeito);
+/// - só refazer o índice de todas as peças, numa transação desfeita.
+///
+/// ```text
+/// RUSTINHO_MEDIR_PASTA=/tmp/medir RUSTINHO_MEDIR_PECAS=20000 \
+///   cargo test --release -p rustinho-nucleo --test medir_busca medir_primeira_abertura_da_5_2 -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "medidor de desempenho: rodar em release, com --ignored --nocapture"]
+fn medir_primeira_abertura_da_5_2() {
+    let pasta = std::env::var_os("RUSTINHO_MEDIR_PASTA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("rustinho-medir-busca"));
+    let pecas = std::env::var("RUSTINHO_MEDIR_PECAS").unwrap_or_else(|_| "20000".into());
+    if cfg!(debug_assertions) {
+        println!("# AVISO: compilado sem --release; os tempos não valem para comparar.");
+    }
+    for quantas in pecas.split(',') {
+        let quantas: usize = quantas.trim().parse().expect("número de peças");
+        let original = banco_do_cenario(&pasta, quantas);
+        println!("\n## R-1: primeira abertura com a 5.2, {quantas} peças ({})", original.display());
+        for rodada in 0..3 {
+            for sem_marca in [false, true] {
+                let copia = pasta.join(format!("r1_copia_{quantas}.db"));
+                let _ = std::fs::remove_file(&copia);
+                std::fs::copy(&original, &copia).unwrap();
+                {
+                    let c = rusqlite::Connection::open(&copia).unwrap();
+                    // Os gatilhos da troca (a `config` viaja) usam as funções do Rustinho.
+                    rustinho_nucleo::banco::registrar_funcoes(&c).unwrap();
+                    if sem_marca {
+                        c.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+                    }
+                }
+                let inicio = Instant::now();
+                let b = Banco::abrir(&copia).unwrap();
+                let gasto = inicio.elapsed();
+                let gtins = um_valor(&b, "SELECT CAST(COUNT(*) AS TEXT) FROM alteracao WHERE tabela = 'produto_gtin'");
+                println!(
+                    "rodada {rodada}: abrir {} a marca: {:.0} ms (alterações de produto_gtin no log: {gtins})",
+                    if sem_marca { "SEM" } else { "com" },
+                    gasto.as_secs_f64() * 1000.0
+                );
+                if sem_marca {
+                    let tx = b.conn.unchecked_transaction().unwrap();
+                    let inicio = Instant::now();
+                    let n = rustinho_nucleo::catalogo::codigos::refazer_todos_os_indices(&tx).unwrap();
+                    let so_refazer = inicio.elapsed();
+                    tx.rollback().unwrap();
+                    println!(
+                        "rodada {rodada}: só refazer o índice de {n} peças: {:.0} ms",
+                        so_refazer.as_secs_f64() * 1000.0
+                    );
+                }
+                drop(b);
+                let _ = std::fs::remove_file(&copia);
+            }
+        }
+        println!("carga: {}", std::fs::read_to_string("/proc/loadavg").unwrap_or_default().trim());
+        println!("{}", memoria());
+    }
+}

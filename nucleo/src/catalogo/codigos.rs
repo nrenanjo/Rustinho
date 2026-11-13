@@ -386,6 +386,21 @@ pub fn refazer_indice(conn: &Connection, produto_id: &str) -> Resultado<bool> {
     Ok(true)
 }
 
+/// Refaz o índice de busca (e o nome sem acento) de todas as peças. Só mexe
+/// nas colunas derivadas, que não viajam: não grava alteração da troca. Usado
+/// uma vez, na primeira abertura com a 5.2 (R-1, veja
+/// `troca::sync::registro`). Devolve quantas peças.
+pub fn refazer_todos_os_indices(conn: &Connection) -> Resultado<usize> {
+    let ids: Vec<String> = conn
+        .prepare("SELECT id FROM produto ORDER BY rowid")?
+        .query_map([], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    for id in &ids {
+        refazer_indice(conn, id)?;
+    }
+    Ok(ids.len())
+}
+
 // ---------------------------------------------------------------------------
 // Consultas (as mesmas de antes; as mudanças de política são da fase 4)
 // ---------------------------------------------------------------------------

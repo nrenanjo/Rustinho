@@ -519,6 +519,15 @@ pub(super) fn refazer_derivado(conn: &Connection, derivado: Derivado, id: &str) 
     Ok(())
 }
 
+/// Refaz o derivado de todas as linhas donas (R-1: na primeira abertura com a
+/// 5.2, veja `registro::registrar_as_que_passaram_a_viajar`). Sem `_`, como
+/// [`refazer_derivado`].
+pub(super) fn refazer_derivado_de_todas(conn: &Connection, derivado: Derivado) -> Resultado<usize> {
+    match derivado {
+        Derivado::IndiceDaPeca => crate::catalogo::codigos::refazer_todos_os_indices(conn),
+    }
+}
+
 /// As linhas donas do derivado que uma alteração de `tabela` muda: a da linha
 /// como está aqui (antes de aplicar) e a da que chegou.
 pub(super) fn donos_do_derivado(
