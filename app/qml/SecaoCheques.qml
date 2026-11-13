@@ -7,6 +7,9 @@ import rustinho
 // devolvido.
 FocusScope {
     id: secao
+    // H16 (7.2, técnica DP-26): a linha tocada fica escolhida e mostra as ações
+    // que antes só apareciam com o mouse em cima (no toque não há "em cima").
+    property string linhaEscolhida: ""
     readonly property var janela: ApplicationWindow.window
     property var painel: null
     property string quais: "carteira"
@@ -117,6 +120,7 @@ FocusScope {
                 readonly property color corChip: ch.situacao === "devolvido" || ch.atrasado ? Tema.rosa
                                                  : ch.podeDepositar || ch.situacao === "depositado" ? Tema.verde : Tema.papel
                 HoverHandler { id: sobreLinha }
+                TapHandler { onTapped: secao.linhaEscolhida = linha.ch.id }
                 RowLayout {
                     id: conteudoCh
                     anchors.left: parent.left
@@ -207,14 +211,14 @@ FocusScope {
                             onClicked: deposito.abrirCom(linha.ch)
                         }
                         Botao {
-                            visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && (sobreLinha.hovered || Tema.celular)
+                            visible: (linha.ch.situacao === "carteira" || linha.ch.situacao === "depositado") && (sobreLinha.hovered || Tema.celular || secao.linhaEscolhida === linha.ch.id)
                             text: "Devolvido"
                             tipo: "discreto"
                             altura: 36
                             onClicked: devolucao.abrirCom(linha.ch)
                         }
                         Botao {
-                            visible: linha.ch.situacao === "carteira" && (sobreLinha.hovered || Tema.celular)
+                            visible: linha.ch.situacao === "carteira" && (sobreLinha.hovered || Tema.celular || secao.linhaEscolhida === linha.ch.id)
                             text: "Repassar"
                             tipo: "discreto"
                             altura: 36
@@ -223,7 +227,7 @@ FocusScope {
                                                         (m, pronto) => secao.janela.chamarGerente("cheque_repassar", { id: linha.ch.id, motivo: m }, pronto), "Para quem", "principal")
                         }
                         Botao {
-                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular)
+                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular || secao.linhaEscolhida === linha.ch.id)
                             text: "Desfazer"
                             tipo: "discreto"
                             altura: 36
