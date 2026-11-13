@@ -189,12 +189,14 @@ def main():
             entrar = [r[4:] for r in tq if r[0] == "botao" and r[3].startswith("Entrar")]
             senha = [r[4:] for r in tq if r[0] == "campo"]
             dentro = [r for r in entrar + senha if r[1] >= 0 and r[1] + r[3] <= CELULAR[1] + 0.5]
-            medido = bool(alvo and entrar and senha)
+            # Achado o nome, o que conta é a senha e o Entrar aparecerem dentro da tela
+            # (com o nome fora da tela, o toque não escolhe ninguém: também é falha).
+            medido = bool(alvo)
             conferir("G5", "entrada com 5 usuários: escolhida a Eduarda, a senha e o Entrar dentro da tela",
-                     medido and len(dentro) == len(entrar + senha),
-                     f"Entrar {[(round(r[1]), round(r[1] + r[3])) for r in entrar]}; "
+                     medido and entrar and senha and len(dentro) == len(entrar + senha),
+                     f"Eduarda em {alvo[:1]}; Entrar {[(round(r[1]), round(r[1] + r[3])) for r in entrar]}; "
                      f"senha {[(round(r[1]), round(r[1] + r[3])) for r in senha]} (tela {CELULAR[1]})"
-                     + ("" if medido else " (NÃO MEDIDO)"))
+                     + ("" if medido else " (NÃO MEDIDO: o nome não apareceu)"))
             if not medido:
                 ESPERADAS.pop("G5", None)
         finally:
