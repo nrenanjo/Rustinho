@@ -448,7 +448,6 @@ fn d02_gtins_diferentes_nos_dois_caixas_sem_conflito_de_derivado() {
 /// `b3a171c` a versão que volta traz o índice velho de A (sem o Corsa): a
 /// busca por "corsa" não acha a peça.
 #[test]
-#[ignore = "caracterização D05: o índice velho volta com a versão que perdeu em b3a171c; passa no passo 5.2"]
 fn d05_usar_a_versao_que_perdeu_refaz_o_indice() {
     let (mut a, mut b, u) = loja();
     let p = peca(&a, &u, "Pastilha", "5");

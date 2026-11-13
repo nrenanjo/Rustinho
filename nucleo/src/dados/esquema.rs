@@ -183,6 +183,10 @@ const fn c(tabela: &'static str, nome: &'static str, classe: ClasseDaColuna) -> 
 pub const COLUNAS: &[Coluna] = &[
     // C07: a hora da última entrada é de cada caixa (entrar não gera troca).
     c("usuario", "ultimo_acesso", ClasseDaColuna::Local),
+    // D01, D02, D05: o índice de busca da peça sai da peça inteira (inclusive
+    // dos GTINs, das aplicações e das equivalências) e é refeito em cada caixa.
+    c("produto", "busca", ClasseDaColuna::Derivada(Derivado::IndiceDaPeca)),
+    c("produto", "codigos", ClasseDaColuna::Derivada(Derivado::IndiceDaPeca)),
 ];
 
 /// Tabelas que viajam cujas linhas alimentam um derivado: (tabela, coluna com
@@ -190,6 +194,9 @@ pub const COLUNAS: &[Coluna] = &[
 /// chega muda o índice da peça `produto_id`.
 #[rustfmt::skip]
 pub const ALIMENTAM: &[(&str, &str, Derivado)] = &[
+    ("produto", "id", Derivado::IndiceDaPeca),
+    ("produto_aplicacao", "produto_id", Derivado::IndiceDaPeca),
+    ("produto_equivalente", "produto_id", Derivado::IndiceDaPeca),
 ];
 
 /// A coluna viaja com a tabela?
