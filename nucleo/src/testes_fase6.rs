@@ -944,7 +944,6 @@ fn e10_revisao_a_venda_muda_encomenda_e_os_com_registro() {
 /// com o mesmo nome (duas filiais com a mesma fantasia, por exemplo) saem
 /// juntos, num grupo só, e quem compra não sabe de quem pedir cada peça.
 #[test]
-#[ignore = "achado da revisão do E13: a lista de compra impressa junta fornecedores diferentes com o mesmo nome"]
 fn e13_revisao_lista_de_compra_separa_fornecedores_de_mesmo_nome() {
     let l = loja();
     let c = &l.b.conn;

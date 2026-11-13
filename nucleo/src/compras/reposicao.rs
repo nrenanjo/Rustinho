@@ -133,6 +133,9 @@ pub struct ItemCompra {
     pub v_sugerido: i64,
     #[serde(skip)]
     pub v_custo_total: i64,
+    /// E13 (revisão da fase 6): quem é o fornecedor (o nome pode repetir).
+    #[serde(skip)]
+    pub v_fornecedor_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +154,9 @@ pub struct EncomendaPedir {
     pub desde: String,
     pub fornecedor: String,
     pub codigo_fornecedor: String,
+    /// E13 (revisão da fase 6): quem é o fornecedor (o nome pode repetir).
+    #[serde(skip)]
+    pub v_fornecedor_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -282,7 +288,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
         if b.minimo > 0 {
             obs.push(format!("mínimo {}", numeros::escrever_quantidade(b.minimo)));
         }
-        let (_, fornecedor, codigo_fornecedor) = forn.get(&b.id).cloned().unwrap_or_default();
+        let (fornecedor_id, fornecedor, codigo_fornecedor) = forn.get(&b.id).cloned().unwrap_or_default();
         let tem = if b.estoque <= 0 {
             "sem estoque".to_string()
         } else {
@@ -318,6 +324,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
                 observacao: obs.join(" · "),
                 v_sugerido: sugerido,
                 v_custo_total: custo_total,
+                v_fornecedor_id: fornecedor_id,
             },
         ));
     }
@@ -357,7 +364,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let mut nomes = encomendas::NomesDosCaixas::default();
     for linha in linhas {
         let (id, numero, cliente, pid, codigo, descricao, q, unidade, criado, dispositivo) = linha?;
-        let (_, fornecedor, codigo_fornecedor) = forn.get(&pid).cloned().unwrap_or_default();
+        let (fornecedor_id, fornecedor, codigo_fornecedor) = forn.get(&pid).cloned().unwrap_or_default();
         if !filtro.is_empty()
             && !texto::normalizar(&format!("{codigo} {descricao} {cliente} {fornecedor}")).contains(&filtro)
         {
@@ -381,6 +388,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
             },
             fornecedor,
             codigo_fornecedor,
+            v_fornecedor_id: fornecedor_id,
         });
     }
 
@@ -684,16 +692,19 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
 pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
     use crate::impressao::escapar;
     let s = sugestao(conn, "")?;
-    let mut grupos: Vec<(String, Vec<String>)> = Vec::new();
-    let mut add = |forn: &str, linha: String| {
+    // E13 (revisão da fase 6): um grupo por fornecedor (pelo identificador,
+    // não pelo nome: dois fornecedores com o mesmo nome saem separados).
+    let mut grupos: Vec<(String, String, Vec<String>)> = Vec::new();
+    let mut add = |id: &str, forn: &str, linha: String| {
         let nome = if forn.is_empty() { "Sem fornecedor anterior".to_string() } else { forn.to_string() };
-        match grupos.iter_mut().find(|g| g.0 == nome) {
-            Some(g) => g.1.push(linha),
-            None => grupos.push((nome, vec![linha])),
+        match grupos.iter_mut().find(|g| g.0 == id) {
+            Some(g) => g.2.push(linha),
+            None => grupos.push((id.to_string(), nome, vec![linha])),
         }
     };
     for e in &s.encomendas {
         add(
+            &e.v_fornecedor_id,
             &e.fornecedor,
             format!(
                 "<tr><td>{}</td><td>{}</td><td><b>{}</b><br/><span class=\"nota\">Encomenda nº {} ({}) · {}</span></td><td class=\"num\"><b>{} {}</b></td><td class=\"num\">—</td></tr>",
@@ -710,6 +721,7 @@ pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
     }
     for i in &s.itens {
         add(
+            &i.v_fornecedor_id,
             &i.fornecedor,
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}{}<br/><span class=\"nota\">{} · {} · {}</span></td><td class=\"num\"><b>{} {}</b></td><td class=\"num\">{}</td></tr>",
@@ -736,7 +748,7 @@ pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
     if grupos.is_empty() {
         h.push_str("<p>Nada a comprar agora.</p>");
     }
-    for (forn, linhas) in grupos {
+    for (_, forn, linhas) in grupos {
         h.push_str(&format!(
             "<p style=\"font-family:'Cormorant Garamond Ajustada'; font-size:15pt; font-weight:600; margin:12pt 0 2pt 0\">{}</p>",
             escapar(&forn)
