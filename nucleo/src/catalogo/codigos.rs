@@ -68,24 +68,7 @@ pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFic
         .unwrap_or(0);
 
     for (idx, g) in gtins.iter().enumerate() {
-        let tipo = if g.tipo == "tributavel" { "tributavel" } else { "comercial" };
-        let origem = match g.origem.as_str() {
-            "cEAN" | "cEANTrib" | "cBarra" | "cBarraTrib" => g.origem.as_str(),
-            _ => "cEAN",
-        };
-        let limpo: String = g.gtin.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
-        let codigo_valido = if gtin::gtin_valido(&limpo) {
-            limpo
-        } else if matches!(origem, "cBarra" | "cBarraTrib") {
-            let alfa: String = limpo.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-            if alfa.len() >= 4 {
-                alfa
-            } else {
-                continue;
-            }
-        } else {
-            continue;
-        };
+        let Some((codigo_valido, tipo, origem)) = codigo_do_xml(g) else { continue };
         let de_outra: bool = conn
             .query_row(SQL_GTIN_DE_OUTRA_PECA, params![produto_id, codigo_valido], |_| Ok(true))
             .optional()?
@@ -121,6 +104,33 @@ pub fn registrar_gtins_xml(conn: &Connection, produto_id: &str, gtins: &[GtinFic
         )?;
     }
     Ok(gravados)
+}
+
+/// O código que o `registrar_gtins_xml` grava para um GTIN da nota, com o
+/// tipo e a origem como ficam gravados; `None` quando ele não entra. O GTIN
+/// válido (sem espaço e traço) entra; de `cBarra`/`cBarraTrib`, as letras e os
+/// números, se forem 4 ou mais. Uma regra só para a gravação e para o plano da
+/// importação de cadastros (lote 2, 03a), que precisa saber, sem gravar, o
+/// que cada peça vai passar a ter.
+pub(crate) fn codigo_do_xml(g: &GtinFicha) -> Option<(String, &'static str, &'static str)> {
+    let tipo = if g.tipo == "tributavel" { "tributavel" } else { "comercial" };
+    let origem = match g.origem.as_str() {
+        "cEANTrib" => "cEANTrib",
+        "cBarra" => "cBarra",
+        "cBarraTrib" => "cBarraTrib",
+        _ => "cEAN",
+    };
+    let limpo: String = g.gtin.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    if gtin::gtin_valido(&limpo) {
+        return Some((limpo, tipo, origem));
+    }
+    if matches!(origem, "cBarra" | "cBarraTrib") {
+        let alfa: String = limpo.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        if alfa.len() >= 4 {
+            return Some((alfa, tipo, origem));
+        }
+    }
+    None
 }
 
 /// O que fazer quando o fornecedor já tem esse código ligado a uma peça.
@@ -247,7 +257,7 @@ pub(crate) enum BuscaId {
     Ambiguo(Vec<String>),
 }
 
-fn por_quantidade(mut achados: Vec<String>) -> BuscaId {
+pub(crate) fn por_quantidade(mut achados: Vec<String>) -> BuscaId {
     match achados.len() {
         0 => BuscaId::Nenhum,
         1 => BuscaId::Unico(achados.remove(0)),
