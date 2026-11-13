@@ -411,7 +411,13 @@ pub fn entregar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
 }
 
 /// A venda feita na entrega encerra a encomenda.
-pub fn entregue_na_venda(conn: &Connection, id: &str, venda_id: &str) -> Resultado<()> {
+pub fn entregue_na_venda(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    venda_id: &str,
+) -> Resultado<()> {
     let a = atual(conn, id)?;
     if a.situacao == "entregue" || a.situacao == "cancelada" {
         return Err(Erro::validacao(format!("A encomenda {} já foi encerrada.", a.numero)));
@@ -420,7 +426,27 @@ pub fn entregue_na_venda(conn: &Connection, id: &str, venda_id: &str) -> Resulta
         "UPDATE encomenda SET situacao = 'entregue', entregue_em = ?2, venda_entrega_id = ?3, atualizado_em = ?2 WHERE id = ?1",
         params![id, tempo::agora(), venda_id],
     )?;
+    // E10 (revisão da fase 6): a entrega pela venda fica no histórico da
+    // encomenda, como a entrega pela tela da encomenda.
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "encomenda.entregar",
+        "encomenda",
+        id,
+        &[format!("Encomenda {}: {} · entregue na venda {}", a.numero, a.descricao, numero_da_venda(conn, venda_id)?)],
+    )?;
     Ok(())
+}
+
+/// O número da venda, para o histórico ("12 · Caixa 1").
+fn numero_da_venda(conn: &Connection, venda_id: &str) -> Resultado<String> {
+    let (numero, caixa): (i64, String) =
+        conn.query_row("SELECT numero, caixa_nome FROM venda WHERE id = ?1", [venda_id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })?;
+    Ok(format!("{numero} · {caixa}"))
 }
 
 /// Cancela a encomenda. A que foi paga na venda só cancela junto com a venda
@@ -461,8 +487,20 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
 
 /// A venda foi cancelada: as encomendas pagas nela são canceladas, e a que
 /// foi entregue por ela volta a "chegou".
-pub fn cancelar_da_venda(conn: &Connection, venda_id: &str) -> Resultado<()> {
+pub fn cancelar_da_venda(conn: &Connection, dispositivo: &str, usuario_id: &str, venda_id: &str) -> Resultado<()> {
     let agora = tempo::agora();
+    // E10 (revisão da fase 6): o que muda em cada encomenda fica no
+    // histórico dela (antes, só a venda registrava o cancelamento).
+    let lista = |sql: &str| -> Resultado<Vec<(String, i64, String)>> {
+        let mut c = conn.prepare(sql)?;
+        let l = c.query_map([venda_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?;
+        Ok(l.collect::<Result<_, _>>()?)
+    };
+    let canceladas = lista(
+        "SELECT id, numero, descricao FROM encomenda WHERE venda_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
+    )?;
+    let voltam =
+        lista("SELECT id, numero, descricao FROM encomenda WHERE venda_entrega_id = ?1 AND situacao = 'entregue'")?;
     conn.execute(
         "UPDATE encomenda SET situacao = 'cancelada', cancelada_em = ?2, motivo = 'Venda cancelada', atualizado_em = ?2
           WHERE venda_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
@@ -473,6 +511,32 @@ pub fn cancelar_da_venda(conn: &Connection, venda_id: &str) -> Resultado<()> {
           WHERE venda_entrega_id = ?1 AND situacao = 'entregue'",
         params![venda_id, agora],
     )?;
+    if canceladas.is_empty() && voltam.is_empty() {
+        return Ok(());
+    }
+    let venda = numero_da_venda(conn, venda_id)?;
+    for (id, numero, descricao) in canceladas {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "encomenda.cancelar",
+            "encomenda",
+            &id,
+            &[format!("Encomenda {numero}: {descricao}"), format!("Motivo: a venda {venda} foi cancelada")],
+        )?;
+    }
+    for (id, numero, descricao) in voltam {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "encomenda.voltou_venda",
+            "encomenda",
+            &id,
+            &[format!("Encomenda {numero}: {descricao} · voltou a “chegou”: a venda {venda} da entrega foi cancelada")],
+        )?;
+    }
     Ok(())
 }
 
