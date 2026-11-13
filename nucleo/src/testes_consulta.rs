@@ -489,3 +489,43 @@ fn banco_em_memoria_roda_na_hora() {
     assert_eq!(consultar_texto(&mut s, "m", "produtos_buscar", &d), normal);
     assert!(s.leitor_para_teste().is_none());
 }
+
+/// T1 na loja grande (as 20.000 peças da 7.5, a mesma do roteiro da digitação
+/// rápida). Só à mão, numa CÓPIA da loja:
+/// `RUSTINHO_LOJA_TESTE=/copia cargo test --release -p rustinho-nucleo --lib -- --ignored t1_loja_grande`.
+/// Confere a mesma resposta do `chamar`, byte a byte, nos textos que a pessoa
+/// digita (a primeira letra sozinha, cada prefixo, o texto inteiro) e mostra
+/// quanto cada busca leva pelos dois caminhos.
+#[test]
+#[ignore = "só à mão: precisa da loja grande (RUSTINHO_LOJA_TESTE)"]
+fn t1_loja_grande_mesma_resposta_e_tempos() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(PathBuf::from) else { return };
+    let mut s = Servico::abrir_para_teste(&pasta.join("rustinho.db"), false).unwrap();
+    let ana = id_de(&mut s, "Ana");
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    let mut textos: Vec<String> = Vec::new();
+    for fim in 1..="pastilha lista 1111".len() {
+        textos.push("pastilha lista 1111"[..fim].to_string());
+    }
+    textos.extend(["", "8pk", "correia generica", "agua lista 0000", "filtro lista 19995"].map(String::from));
+    for texto in &textos {
+        for (limite, deslocamento) in [(100, 0), (100, 100)] {
+            let d = json!({ "texto": texto, "inativas": false, "limite": limite, "deslocamento": deslocamento });
+            let t0 = std::time::Instant::now();
+            let normal = s.chamar("produtos_buscar", &d.to_string());
+            let t_chamar = t0.elapsed();
+            let t0 = std::time::Instant::now();
+            let fora = consultar_texto(&mut s, "grande", "produtos_buscar", &d);
+            let t_fora = t0.elapsed();
+            assert_eq!(fora, normal, "{d}: a consulta fora deu outra resposta");
+            let v: Value = serde_json::from_str(&normal).unwrap();
+            println!(
+                "TEMPO\t{texto:?}\t{deslocamento}\tchamar {:.1} ms\tconsultar {:.1} ms\t{} itens de {}",
+                t_chamar.as_secs_f64() * 1000.0,
+                t_fora.as_secs_f64() * 1000.0,
+                v["dados"]["itens"].as_array().map(|a| a.len()).unwrap_or(0),
+                v["dados"]["totalFiltrado"]
+            );
+        }
+    }
+}
