@@ -1737,6 +1737,10 @@ pub fn restaurar_por(
         }
         return Err(e.into());
     }
+    // R-3: o banco desta conexão é outro; a contagem de peças guardada dela
+    // (a do cabeçalho de Peças) não vale mais. A troca não muda as marcas que
+    // a refariam (data_version, total_changes).
+    crate::catalogo::contagem::esquecer(conn);
     // Só nos testes de queda (T6.3): cai aqui, como numa falta de luz.
     #[cfg(feature = "ancoras-de-teste")]
     if std::env::var("RUSTINHO_TESTE_CAIR_RESTAURANDO").is_ok_and(|v| v == "1") {
@@ -2804,6 +2808,49 @@ pub(crate) mod testes {
         // O backup bom continua restaurando.
         restaurar(&mut b.conn, Some(&caminho), &feito.arquivo, false, "1111").unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Antes");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// R-3 (revisão cruzada de 13/11, 7.5 × restaurar; sonda S2): a contagem
+    /// de peças guardada da conexão (PEND-39) é esquecida logo depois de trocar
+    /// o banco (`conn.restore`, na mesma conexão da tela). Antes ela só era
+    /// refeita porque alguma gravação na conexão vinha antes (`anotar`, com o
+    /// caminho do banco) ou depois (`Pendente::aplicar`). Aqui não há nenhuma:
+    /// sem o caminho do banco (sem a cópia de antes) e parando logo depois da
+    /// troca (`depois_da_troca`). Em `da963e1`: cabeçalho 30 com 20 peças.
+    #[test]
+    fn r3_contagem_esquecida_ao_trocar_o_banco() {
+        let _vez = um_por_vez();
+        let pasta = pasta_teste("r3");
+        let caminho = pasta.join("rustinho.db");
+        let mut b = Banco::abrir(&caminho).unwrap();
+        crate::faixas::assumir(&b.conn).unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        crate::usuarios::definir_gerente(&b.conn, &u, true).unwrap();
+        let nova = |b: &Banco, nome: String| {
+            let mut f = crate::produtos::ficha_nova(&b.conn).unwrap();
+            f.nome = nome;
+            f.custo = "10".into();
+            crate::produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        };
+        for i in 0..20 {
+            nova(&b, format!("Peça {i}"));
+        }
+        let feito = fazer(&caminho, false).unwrap();
+        for i in 20..30 {
+            nova(&b, format!("Peça {i}"));
+        }
+        let cabecalho = |c: &Connection| crate::busca::buscar_pagina(c, "", false, 10, 0).unwrap().total;
+        assert_eq!(cabecalho(&b.conn), 30);
+        assert_eq!(cabecalho(&b.conn), 30, "a segunda vem da contagem guardada");
+        queda_de_teste::ETAPA.with(|e| e.set("depois_da_troca"));
+        let r = restaurar(&mut b.conn, None, &feito.arquivo, false, "1234");
+        queda_de_teste::ETAPA.with(|e| e.set(""));
+        assert!(r.is_err(), "a queda simulada não aconteceu");
+        let real: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto WHERE ativo = 1", [], |l| l.get(0)).unwrap();
+        assert_eq!(real, 20, "o banco é o do backup");
+        assert_eq!(cabecalho(&b.conn), real, "a contagem guardada ficou a do banco de antes da troca");
+        drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 }

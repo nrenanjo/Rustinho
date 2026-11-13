@@ -2,6 +2,7 @@
 
 pub mod busca;
 pub mod codigos;
+pub mod contagem;
 pub mod estoque;
 pub mod etiquetas;
 pub mod faixas;
