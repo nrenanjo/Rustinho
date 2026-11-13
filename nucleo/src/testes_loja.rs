@@ -389,6 +389,54 @@ fn telas_desfazem_e_retomam_a_juncao() {
     assert!(iniciar.contains("estado.juntando ? \"TelaJuntar\" : \"TelaBoasVindas\""), "{iniciar}");
 }
 
+/// H24 (DP-28): o `sync_ler` diz se já chegou algum dado de outro caixa no
+/// meio de uma entrada numa loja (`chegouDado`), para a seta e o Esc do
+/// Juntar perguntarem antes de desistir. Só lê o estado da junção (a mesma
+/// conta da desistência): sem tentativa, com a tentativa sem nada recebido e
+/// depois de desistir, false; com parte da loja recebida (sem usuário ainda),
+/// true, e ler não muda nada; com os usuários da loja recebidos (a entrada
+/// terminou, o caixa tem usuários), false.
+#[test]
+fn h24_sync_ler_diz_se_ja_chegou_dado_na_juncao() {
+    let chegou = |s: &mut crate::Servico| {
+        let l = chamar(s, "sync_ler", json!({}));
+        assert_eq!(l["ok"], true, "{l}");
+        assert!(l["dados"]["chegouDado"].is_boolean(), "o sync_ler diz se já chegou dado: {l}");
+        l["dados"]["chegouDado"].as_bool().unwrap()
+    };
+    let (outra, u) = para_testes::loja("Caixa 1");
+    para_testes::peca(&outra, &u, "Peça da loja");
+    let (lista, _) = sync::alteracoes_desde(&outra.conn, 0, 10_000_000).unwrap();
+    let (do_usuario, resto): (Vec<_>, Vec<_>) = lista.into_iter().partition(|a| a.tabela == "usuario");
+    assert!(!do_usuario.is_empty() && !resto.is_empty());
+
+    // Entrada desfeita.
+    let mut s = crate::Servico::em_memoria().unwrap();
+    assert!(!chegou(&mut s), "sem tentativa");
+    let r = chamar(&mut s, "sync_juntar", json!({ "caixa": "Caixa 2", "senha": "rede-da-loja", "enderecos": "" }));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(!chegou(&mut s), "tentativa começada, nada recebido");
+    sync::aplicar(&mut s.banco_para_teste().conn, &resto).unwrap();
+    let antes = contar(&s.banco_para_teste().conn, "SELECT COUNT(*) FROM alteracao");
+    assert!(chegou(&mut s), "chegou parte da loja (sem usuário)");
+    assert!(chegou(&mut s), "ler de novo dá o mesmo");
+    assert_eq!(contar(&s.banco_para_teste().conn, "SELECT COUNT(*) FROM alteracao"), antes, "ler não muda nada");
+    assert_eq!(chamar(&mut s, "estado", json!({}))["dados"]["juntando"], true, "continua no meio da entrada");
+    let r = chamar(&mut s, "sync_desistir_juntar", json!({}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(!chegou(&mut s), "depois de desistir, nada do que chegou ficou");
+
+    // Entrada terminada: os usuários da loja chegaram.
+    let mut t = crate::Servico::em_memoria().unwrap();
+    let r = chamar(&mut t, "sync_juntar", json!({ "caixa": "Caixa 2", "senha": "rede-da-loja", "enderecos": "" }));
+    assert_eq!(r["ok"], true, "{r}");
+    sync::aplicar(&mut t.banco_para_teste().conn, &resto).unwrap();
+    assert!(chegou(&mut t));
+    sync::aplicar(&mut t.banco_para_teste().conn, &do_usuario).unwrap();
+    assert!(usuarios::quantidade(&t.banco_para_teste().conn).unwrap() > 0);
+    assert!(!chegou(&mut t), "com usuários a entrada terminou: não há o que desistir");
+}
+
 // ---------------------------------------------------------------------------
 // A2 (complemento da 0.9.15): a senha da rede só muda com o gerente, ligada
 // ou desligada, e sempre com o mínimo de 4 caracteres.

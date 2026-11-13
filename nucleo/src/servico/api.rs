@@ -1936,6 +1936,7 @@ impl Servico {
     fn sync_ler(&self) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let a = sync::ajustes(conn)?;
+        let usuarios = usuarios::quantidade(conn)?;
         // O-3 / RVI-02: tarefas da troca de dados que não estão rodando.
         let situacao = self.banco.caminho.as_deref().map(crate::supervisao::situacao).unwrap_or_default();
         Ok(json!({
@@ -1949,7 +1950,13 @@ impl Servico {
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),
             "porta": crate::portatil::portas().0,
-            "usuarios": usuarios::quantidade(conn)?,
+            "usuarios": usuarios,
+            // H24 (DP-28): no meio de uma entrada numa loja (sem usuários),
+            // já chegou algum dado de outro caixa. Desistir apagaria o que
+            // chegou: a seta e o Esc do Juntar perguntam antes. Só lê (a
+            // mesma conta da desistência, `loja::recebeu_de_outro`); num caixa
+            // com usuários é sempre false, sem ler o registro das alterações.
+            "chegouDado": usuarios == 0 && crate::loja::recebeu_de_outro(conn)?,
             "pendencias": config::ler(conn, "sync_pendencias")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "quebradas": config::ler(conn, "sync_quebradas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
             "atrasadas": config::ler(conn, "sync_atrasadas")?.and_then(|t| t.parse::<i64>().ok()).unwrap_or(0),
