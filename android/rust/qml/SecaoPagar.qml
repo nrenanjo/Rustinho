@@ -132,13 +132,18 @@ FocusScope {
                 onPagar: pagamento.abrirCom(modelData)
             }
             ColumnLayout {
-                anchors.centerIn: parent
+                // VIS33-09 (7.2): no celular, logo abaixo dos filtros (no meio da
+                // lista, que lá é baixa, ficava por baixo deles).
+                anchors.centerIn: Tema.estreito ? undefined : parent
+                anchors.top: Tema.estreito ? parent.top : undefined
+                anchors.topMargin: Tema.estreito ? 12 : 0
+                anchors.horizontalCenter: Tema.estreito ? parent.horizontalCenter : undefined
                 width: Math.min(parent.width - 40, 620)
                 visible: secao.buscou && lista.count === 0
                 spacing: 8
                 Titulo {
                     text: busca.texto !== "" ? "Nada encontrado" : secao.quais === "abertas" ? "Nenhuma conta em aberto" : "Nada por aqui"
-                    font.pixelSize: 30
+                    font.pixelSize: Tema.estreito ? 24 : 30
                     horizontalAlignment: Text.AlignHCenter
                     Layout.fillWidth: true
                 }
