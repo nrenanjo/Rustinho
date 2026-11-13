@@ -21,6 +21,8 @@ outros roteiros, e MEDE pelas posições que o próprio programa informa
                 da tela.
   M8  H04       Roxo, pendências XML: o motivo (vermelho) de cada cartão tem
                 contraste de texto (>= 4,5:1), inclusive na faixa escura.
+  M10 H10       Peça com variação de nome "<i>P</i>" na grade: o texto formatado
+                (StyledText) recebe o nome escapado (&lt;i&gt;), e não a marcação.
 
 O contraste é o da WCAG 2: fundo = a cor mais comum em volta e dentro do
 retângulo do texto (ou da caixa); frente = o pixel de maior contraste com o
@@ -61,6 +63,7 @@ ESPERADAS = {
     "M6": "H06 (janelinha do Receber sem rolagem em 1366 × 768), passo 7.2",
     "M7": "H06 (janelinha do Receber sem rolagem no celular), passo 7.2",
     "M8": "H04 (vermelho sobre a faixa escura nas pendências), passo 7.2",
+    "M10": "H10 (texto formatado com dados sem escapar), passo 7.2",
 }
 
 
@@ -401,6 +404,31 @@ def main():
                          f"(cartão, motivo, razão, frente, fundo): {medidas}")
                 if len(medidas) != 2:
                     ESPERADAS.pop("M8", None)
+            finally:
+                rr.fechar()
+        # ---- M10: nome com "<" num texto formatado (a grade da peça) ----
+        if quer("M10"):
+            pasta = nova(est)
+            c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
+            c.execute("UPDATE produto SET grade = 'GRADE-M10', variacao = '<i>P</i>' WHERE id = ?", (filtro,))
+            outra = c.execute("SELECT id FROM produto WHERE id <> ? AND tipo = 'produto' AND ativo = 1 LIMIT 1",
+                              (filtro,)).fetchone()[0]
+            c.execute("UPDATE produto SET grade = 'GRADE-M10', variacao = 'M' WHERE id = ?", (outra,))
+            c.commit()
+            c.close()
+            rr = abrir(pasta, "TelaPeca", {"produtoId": filtro}, fotos, "m10_grade_escapada")
+            logs.append(rr.saida)
+            try:
+                rr.foto("")
+                rs = rets_completos(rr.textos())
+                grade = [r for r in rs if "P</i>" in r[7] or "P&lt;/i&gt;" in r[7]]
+                escapado = [r for r in grade if "&lt;i&gt;P&lt;/i&gt;" in r[7]]
+                if grade:
+                    conferir("M10", "Grade da peça: a variação \"<i>P</i>\" vai escapada para o texto formatado",
+                             bool(escapado) and len(escapado) == len(grade), f"textos: {[r[7] for r in grade]}")
+                else:
+                    conferir("M10", "Grade da peça: NÃO MEDIDO (a grade não apareceu)", False, "")
+                    ESPERADAS.pop("M10", None)
             finally:
                 rr.fechar()
     finally:
