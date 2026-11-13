@@ -95,3 +95,87 @@ fn h05_contraste_do_rotulo_nas_superficies_escuras_do_roxo() {
     }
 }
 
+/// Os textos formatados (`textFormat: Text.StyledText`) de um QML: a expressão
+/// do `text:` logo antes de cada um (até a linha do `textFormat`).
+fn textos_formatados(qml: &str) -> Vec<String> {
+    let linhas: Vec<&str> = qml.lines().collect();
+    let mut lista = Vec::new();
+    for (i, l) in linhas.iter().enumerate() {
+        if l.trim() != "textFormat: Text.StyledText" {
+            continue;
+        }
+        let Some(inicio) = (0..i).rev().find(|&k| linhas[k].trim_start().starts_with("text:")) else { continue };
+        lista.push(linhas[inicio..i].join("\n"));
+    }
+    lista
+}
+
+/// Tira da expressão os trechos já escapados: `Tema.escapar( … )`, com os
+/// parênteses equilibrados.
+fn sem_escapados(expr: &str) -> String {
+    let mut saida = String::new();
+    let mut resto = expr;
+    while let Some(i) = resto.find("Tema.escapar(") {
+        saida.push_str(&resto[..i]);
+        let depois = &resto[i + "Tema.escapar(".len()..];
+        let mut nivel = 1;
+        let mut fim = depois.len();
+        for (k, c) in depois.char_indices() {
+            match c {
+                '(' => nivel += 1,
+                ')' => {
+                    nivel -= 1;
+                    if nivel == 0 {
+                        fim = k + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        resto = &depois[fim..];
+    }
+    saida.push_str(resto);
+    saida
+}
+
+/// H10: nos textos formatados das telas citadas na auditoria, todo dado que
+/// vem do núcleo e é impresso (`modelData.…`, `aviso.…`, `tela.ficha.…`) passa
+/// por `Tema.escapar(…)`. Fora dele, o dado só pode aparecer como condição
+/// (`=== `, `!== `, `> `, `?`). O roteiro `telas_layout_72.py` (M10) mostra na
+/// tela a variação "<i>P</i>" chegando escapada.
+#[test]
+fn h10_textos_formatados_escapam_os_dados() {
+    let mut fora = Vec::new();
+    let mut vistos = 0;
+    for arquivo in ["app/qml/Notificacao.qml", "app/qml/TelaPeca.qml", "app/qml/TelaConfiguracoes.qml"] {
+        let qml = ler(arquivo);
+        // A Notificacao monta o texto numa função (linha()).
+        let mut exprs = textos_formatados(&qml);
+        if let Some(i) = qml.find("function linha()") {
+            exprs.push(qml[i..i + qml[i..].find("\n    }").unwrap()].to_string());
+        }
+        for expr in exprs {
+            let resto = sem_escapados(&expr);
+            for marca in ["modelData.", "aviso.texto", "aviso.atraso", "tela.ficha."] {
+                for (i, _) in resto.match_indices(marca) {
+                    vistos += 1;
+                    let cauda: String = resto[i + marca.len()..]
+                        .trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '.')
+                        .trim_start()
+                        .chars()
+                        .take(3)
+                        .collect();
+                    let condicao = ["===", "!==", ">", "<", "?", "|"].iter().any(|p| cauda.starts_with(p))
+                        || resto[..i].trim_end().ends_with("if (");
+                    if !condicao {
+                        let trecho: String = resto[i..].chars().take(40).collect();
+                        fora.push(format!("{arquivo}: {trecho}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(vistos >= 10, "a leitura achou poucos dados nos textos formatados ({vistos})");
+    assert!(fora.is_empty(), "dado impresso sem escapar num texto formatado (H10): {fora:#?}");
+}

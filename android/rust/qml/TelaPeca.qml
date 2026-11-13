@@ -651,7 +651,9 @@ FocusScope {
                                             Text {
                                                 id: textoGrade
                                                 anchors.centerIn: parent
-                                                text: "<b>" + (itemGrade.modelData.variacao || "—") + "</b>  " + itemGrade.modelData.estoque + " " + tela.ficha.unidade
+                                                // H10 (7.2): os dados vão escapados (o texto é formatado).
+                                                text: "<b>" + Tema.escapar(itemGrade.modelData.variacao || "—") + "</b>  " + Tema.escapar(itemGrade.modelData.estoque)
+                                                      + " " + Tema.escapar(tela.ficha.unidade)
                                                 textFormat: Text.StyledText
                                                 color: itemGrade.este ? Tema.claro : Tema.tinta
                                                 font.family: Tema.texto

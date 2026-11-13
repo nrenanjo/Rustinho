@@ -209,6 +209,14 @@ QtObject {
     // Começa sempre escondido e vale para todas as telas.
     property bool oculto: true
 
+    // H10 (7.2): o dado que entra num texto formatado (Text.StyledText) vai
+    // escapado: "<", ">" e "&" aparecem como foram digitados, sem virar
+    // marcação (uma variação "<i>P</i>" não deixa o resto em itálico).
+    function escapar(t) {
+        return String(t === undefined || t === null ? "" : t)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+
     // CPF/CNPJ escondido, mantendo o formato ("•••.•••.•••-••").
     function sigilo(t) {
         return oculto && t ? String(t).replace(/[0-9A-Za-z]/g, "•") : (t || "")

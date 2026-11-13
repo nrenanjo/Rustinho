@@ -57,10 +57,11 @@ Item {
     // Texto da informativa expandida: o que é e o atraso em vermelho.
     function linha() {
         const partes = []
+        // H10 (7.2): os dados vão escapados (o texto é formatado).
         if (aviso.texto)
-            partes.push(aviso.texto)
+            partes.push(Tema.escapar(aviso.texto))
         if (aviso.atraso)
-            partes.push("<font color='" + Tema.vermelho + "'>" + aviso.atraso + "</font>")
+            partes.push("<font color='" + Tema.vermelho + "'>" + Tema.escapar(aviso.atraso) + "</font>")
         return partes.join("  ·  ")
     }
 
