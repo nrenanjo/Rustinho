@@ -170,9 +170,16 @@ def por_carrinho_uma_peca(rr):
     time.sleep(2)
 
 
-def receber_no_crediario(rr):
-    """Abre o Receber (F2), esvazia o dinheiro e põe tudo no crediário."""
-    base.xdo("key", "F2")
+def receber_no_crediario(rr, celular=False):
+    """Abre o Receber (F2; no celular, o botão Receber do rodapé), esvazia o
+    dinheiro e põe tudo no crediário."""
+    if celular:
+        rodape = [r for r in toques(rr.textos()) if r[0] == "botao" and r[3].startswith("Receber")]
+        if not rodape:
+            return False
+        rr.clicar_em(max(rodape, key=lambda r: r[5])[4:])
+    else:
+        base.xdo("key", "F2")
     time.sleep(2)
     base.xdo("key", "ctrl+a")
     base.xdo("key", "BackSpace")
@@ -344,7 +351,7 @@ def main():
             try:
                 por_carrinho_uma_peca(rr)
                 rr.foto("-carrinho")
-                if receber_no_crediario(rr):
+                if receber_no_crediario(rr, celular=True):
                     time.sleep(1.5)
                     rr.foto("-receber-crediario")
                     t = rr.textos()
@@ -455,7 +462,13 @@ def main():
                                                  ("M13", "comprar", "Pastilha dianteira", "Já pedi")):
             if not quer(codigo):
                 continue
-            rr = abrir(nova(est), "TelaEstoque", {"secao": secao}, fotos, f"{codigo.lower()}_{secao}_toque")
+            pasta = nova(est)
+            # Uma encomenda aberta (a loja de teste não tem nenhuma), pelo núcleo.
+            tema.por_fora(pasta, "INSERT INTO encomenda (id, numero, cliente_nome, telefone, descricao, quantidade,"
+                                 " situacao, criado_em, atualizado_em, dispositivo) VALUES ('m12-enc', 9001,"
+                                 " 'Maria Souza', '(15) 99808-0000', 'Pastilha dianteira', 1000, 'aberta',"
+                                 " strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 'teste');")
+            rr = abrir(pasta, "TelaEstoque", {"secao": secao}, fotos, f"{codigo.lower()}_{secao}_toque")
             logs.append(rr.saida)
             try:
                 alvo = [(x, y) for x, y, s in rr.textos() if s == linha_texto]
