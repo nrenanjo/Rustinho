@@ -155,27 +155,59 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
 /// tudo dos outros.
 pub fn registrar_existentes(conn: &Connection) -> Resultado<()> {
     if config::ler(conn, "sync_inicio")?.is_some() {
-        return Ok(());
+        return registrar_as_que_passaram_a_viajar(conn);
     }
     let usuarios: i64 = conn.query_row("SELECT COUNT(*) FROM usuario", [], |l| l.get(0))?;
     if usuarios > 0 {
         for tabela in TABELAS {
-            let (todas, chave) = colunas(conn, tabela)?;
-            let (k, d) = expressoes(tabela, &que_viajam(tabela, &todas), &chave, "t");
-            let filtro =
-                if *tabela == "config" { format!(" WHERE 1 = 1{}", filtro_config("t")) } else { String::new() };
-            conn.execute(
-                &format!(
-                    "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
-                     SELECT rustinho_id(), '{tabela}', {k}, 'gravar', {d},
-                            (SELECT valor FROM config WHERE chave = 'dispositivo_id'), rustinho_agora()
-                       FROM \"{tabela}\" t{filtro}"
-                ),
-                [],
-            )?;
+            registrar_linhas(conn, tabela)?;
         }
     }
     config::gravar(conn, "sync_inicio", &tempo::agora())?;
+    for tabela in crate::dados::esquema::PASSARAM_A_VIAJAR {
+        config::gravar(conn, &format!("sync_inicio:{tabela}"), &tempo::agora())?;
+    }
+    Ok(())
+}
+
+/// Registra como alteração cada linha que a tabela tem agora.
+fn registrar_linhas(conn: &Connection, tabela: &str) -> Resultado<()> {
+    let (todas, chave) = colunas(conn, tabela)?;
+    let (k, d) = expressoes(tabela, &que_viajam(tabela, &todas), &chave, "t");
+    let filtro = if tabela == "config" { format!(" WHERE 1 = 1{}", filtro_config("t")) } else { String::new() };
+    conn.execute(
+        &format!(
+            "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando)
+             SELECT rustinho_id(), '{tabela}', {k}, 'gravar', {d},
+                    (SELECT valor FROM config WHERE chave = 'dispositivo_id'), rustinho_agora()
+               FROM \"{tabela}\" t{filtro}"
+        ),
+        [],
+    )?;
+    Ok(())
+}
+
+/// Passo 5.2 (PEND-35): num banco de antes, as linhas das tabelas que
+/// passaram a viajar nunca viraram alteração. Viram agora, uma vez só (a
+/// marca `sync_inicio:<tabela>` fica na configuração deste caixa, junto, numa
+/// gravação só). O mesmo dado já gravado nos outros caixas com outro id é
+/// reconhecido lá pela chave natural (veja `dados::esquema::CHAVES_NATURAIS`).
+fn registrar_as_que_passaram_a_viajar(conn: &Connection) -> Resultado<()> {
+    for tabela in crate::dados::esquema::PASSARAM_A_VIAJAR {
+        let marca = format!("sync_inicio:{tabela}");
+        if config::ler(conn, &marca)?.is_some() {
+            continue;
+        }
+        conn.execute_batch("SAVEPOINT passou_a_viajar")?;
+        let r = registrar_linhas(conn, tabela).and_then(|_| config::gravar(conn, &marca, &tempo::agora()));
+        match r {
+            Ok(()) => conn.execute_batch("RELEASE passou_a_viajar")?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK TO passou_a_viajar; RELEASE passou_a_viajar");
+                return Err(e);
+            }
+        }
+    }
     Ok(())
 }
 

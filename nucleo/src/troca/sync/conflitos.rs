@@ -171,7 +171,8 @@ pub(super) fn nome_da_tabela(t: &str) -> &'static str {
         | "produto_aplicacao"
         | "produto_equivalente"
         | "produto_fornecedor"
-        | "produto_codigo_antigo" => "Peça",
+        | "produto_codigo_antigo"
+        | "produto_gtin" => "Peça",
         "faixa_codigo" => "Faixa de códigos das peças",
         "pessoa" | "pessoa_veiculo" => "Cliente ou fornecedor",
         "usuario" => "Usuário",

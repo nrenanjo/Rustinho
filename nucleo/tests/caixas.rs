@@ -369,7 +369,6 @@ fn gtins_da_peca(b: &Banco, id: &str) -> Vec<String> {
 /// índice que B refaz ao salvar não tem, e a peça some da busca pelo GTIN em
 /// B (e, pela troca, o índice sem o GTIN volta para A).
 #[test]
-#[ignore = "caracterização D01/PEND-35: o GTIN não viaja em b3a171c; passa no passo 5.2 (produto_gtin viaja)"]
 fn d01_gtin_achado_em_b_mesmo_depois_de_b_mexer_na_peca() {
     let (mut a, mut b, u) = loja();
     let p = peca_com_gtin(&a, &u, "Rolamento roda", GTIN_1, GTIN_PATRAL);
@@ -389,7 +388,6 @@ fn d01_gtin_achado_em_b_mesmo_depois_de_b_mexer_na_peca() {
 /// GTIN, como cairia em A. Em `b3a171c` o GTIN não chegou a B: o item não é
 /// ligado sozinho.
 #[test]
-#[ignore = "caracterização D01: a compra em B não acha a peça pelo GTIN em b3a171c; passa no passo 5.2"]
 fn d01_ligacao_automatica_da_compra_em_b_pelo_gtin() {
     let (mut a, mut b, u) = loja();
     config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
@@ -417,7 +415,6 @@ fn d01_ligacao_automatica_da_compra_em_b_pelo_gtin() {
 /// e o campo derivado `codigos` vira conflito para o gerente (e cada caixa
 /// fica só com o seu GTIN).
 #[test]
-#[ignore = "caracterização D02: conflito falso em `codigos` em b3a171c; passa no passo 5.2 (derivados não viajam)"]
 fn d02_gtins_diferentes_nos_dois_caixas_sem_conflito_de_derivado() {
     let (mut a, mut b, u) = loja();
     let p = peca_com_gtin(&a, &u, "Pastilha", GTIN_PATRAL, GTIN_PATRAL);
@@ -438,7 +435,17 @@ fn d02_gtins_diferentes_nos_dois_caixas_sem_conflito_de_derivado() {
         assert_eq!(achou_pelo_codigo(x, GTIN_1), vec![p.clone()]);
         assert_eq!(achou_pelo_codigo(x, GTIN_2), vec![p.clone()]);
     }
-    assert_eq!(indice(&a, &p), indice(&b, &p), "o índice é o mesmo nos dois caixas");
+    // O mesmo índice nos dois caixas. A ordem dos GTINs dentro dele segue a
+    // ordem em que chegaram a cada caixa (a busca não depende dela).
+    let palavras = |x: &Banco| -> (Vec<String>, Vec<String>) {
+        let (busca, codigos) = indice(x, &p);
+        let mut b: Vec<String> = busca.split_whitespace().map(str::to_string).collect();
+        let mut c: Vec<String> = codigos.split_whitespace().map(str::to_string).collect();
+        b.sort();
+        c.sort();
+        (b, c)
+    };
+    assert_eq!(palavras(&a), palavras(&b), "o índice é o mesmo nos dois caixas");
 }
 
 /// D05: "usar a versão que perdeu" deixa o índice coerente com a peça como
@@ -502,7 +509,6 @@ fn c07_entrar_nao_gera_alteracao_que_viaja() {
 /// fica uma vez só em cada um, sem travar a troca. Em `b3a171c` nada disso
 /// viaja.
 #[test]
-#[ignore = "caracterização PEND-35: produto_gtin é local em b3a171c; passa no passo 5.2"]
 fn pend35_gtins_de_antes_viajam_uma_vez_sem_repetir() {
     let (mut a, mut b, u) = loja();
     let p = peca(&a, &u, "Filtro de ar", "1");
@@ -522,8 +528,9 @@ fn pend35_gtins_de_antes_viajam_uma_vez_sem_repetir() {
     gravar_sem_troca(&a, GTIN_1);
     gravar_sem_troca(&b, GTIN_1);
     gravar_sem_troca(&b, GTIN_2);
-    // O que o Rustinho faz ao abrir o banco.
+    // O que o Rustinho faz ao abrir o banco (de antes da 5.2: sem a marca).
     for x in [&a, &b] {
+        x.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
         sync::criar_gatilhos(&x.conn).unwrap();
         sync::registrar_existentes(&x.conn).unwrap();
     }

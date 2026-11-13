@@ -174,6 +174,12 @@ pub fn incompatibilidade(esquema: i64, a: &Alteracao) -> Option<String> {
     if !TABELAS.contains(&a.tabela.as_str()) {
         return Some(format!("a tabela {} não existe na versão dele", a.tabela));
     }
+    // 0.9.18 (estrutura 24): os GTINs da peça viajam desde o passo 5.2; antes
+    // da 24 a tabela não existe. (Com a regra de versão homogênea, um caixa
+    // assim nem troca dados; a matriz fica certa para quem a consulta.)
+    if esquema < ESQUEMA_GTINS && a.tabela == "produto_gtin" {
+        return Some("GTINs da peça: o caixa precisa da versão 0.9.18 ou mais nova".into());
+    }
     // 0.9.15 (estrutura 23): rascunho de OS. Na estrutura 22 o CHECK de
     // ordem_servico.situacao recusa 'rascunho'.
     if esquema < ESQUEMA_RASCUNHO && a.tabela == "ordem_servico" && a.operacao == "gravar" {
@@ -453,8 +459,12 @@ pub(super) fn aplicar_dentro(
         } else {
             format!("DO UPDATE SET {}", atualizar.join(", "))
         };
+        // A mesma linha (pela chave natural) já gravada aqui com outro id: fica
+        // a daqui; a que chegou fica só no log (passo 5.2, PEND-35).
+        let repetida =
+            if crate::dados::esquema::chave_natural(&a.tabela).is_some() { " ON CONFLICT DO NOTHING" } else { "" };
         let sql = format!(
-            "INSERT INTO \"{}\" ({nomes}) VALUES ({marcas}) ON CONFLICT ({}) {conflito}",
+            "INSERT INTO \"{}\" ({nomes}) VALUES ({marcas}) ON CONFLICT ({}) {conflito}{repetida}",
             a.tabela,
             chave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ")
         );

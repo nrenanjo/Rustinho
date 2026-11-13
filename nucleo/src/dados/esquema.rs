@@ -7,8 +7,9 @@
 //! Agora as duas listas saem daqui, e um teste confere que toda tabela e
 //! visão criada pelas migrações tem a sua linha (tabela sem classe falha).
 //!
-//! Nada muda no que viaja: as tabelas de classe `Viaja` são as mesmas e estão
-//! na mesma ordem de antes (é a ordem em que a troca as percorre).
+//! As tabelas de classe `Viaja` são as de antes, na mesma ordem (é a ordem em
+//! que a troca as percorre), e no fim as que passaram a viajar no passo 5.2
+//! (DP-15: o `produto_gtin`; veja [`PASSARAM_A_VIAJAR`]).
 
 /// Como a tabela participa da troca de dados entre os caixas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,12 +100,13 @@ pub const TABELAS: &[Tabela] = &[
     t("auditoria", Viaja, &["auditoria"]),
     // Decisões do gerente sobre conflitos (vão para todos os caixas).
     t("sync_resolucao", Viaja, &["sync"]),
+    // Os GTINs da peça (PEND-35, DP-15: viajam desde o passo 5.2).
+    t("produto_gtin", Viaja, &["codigos"]),
 
     // Só deste caixa.
     t("alteracao", Local, &["loja", "sync"]),
     t("entrada_falha", Local, &["usuarios"]),
     t("menu_uso", Local, &["menu"]),
-    t("produto_gtin", Local, &["codigos"]),
     t("senha_situacao", Local, &["usuarios"]),
     // Interna do SQLite (contadores do AUTOINCREMENT).
     t("sqlite_sequence", Local, &["sync"]),
@@ -197,6 +199,7 @@ pub const ALIMENTAM: &[(&str, &str, Derivado)] = &[
     ("produto", "id", Derivado::IndiceDaPeca),
     ("produto_aplicacao", "produto_id", Derivado::IndiceDaPeca),
     ("produto_equivalente", "produto_id", Derivado::IndiceDaPeca),
+    ("produto_gtin", "produto_id", Derivado::IndiceDaPeca),
 ];
 
 /// A coluna viaja com a tabela?
@@ -214,6 +217,25 @@ pub fn nome_que_nao_viaja(coluna: &str) -> bool {
 /// dona, derivado).
 pub fn alimenta(tabela: &str) -> Option<(&'static str, Derivado)> {
     ALIMENTAM.iter().find(|a| a.0 == tabela).map(|a| (a.1, a.2))
+}
+
+/// Tabelas que passaram a viajar depois que a troca de dados já existia (no
+/// fim de [`TABELAS`], entre as que viajam). Num banco de antes, as linhas que
+/// elas já tinham nunca viraram alteração: ao abrir, viram uma vez só (veja
+/// `sync::registrar_existentes`; a marca fica na configuração deste caixa).
+pub const PASSARAM_A_VIAJAR: &[&str] = &["produto_gtin"];
+
+/// Chave natural de uma tabela que viaja e cuja chave primária é um id
+/// sorteado: o mesmo dado pode nascer em dois caixas com ids diferentes (o
+/// mesmo GTIN na mesma peça, gravado pelas notas de cada caixa). Ao receber,
+/// a linha com a mesma chave natural já gravada aqui fica; a que chegou entra
+/// só no log (não trava o lote nem vira pendência). Hoje essas linhas só são
+/// criadas e apagadas junto com a peça (nunca alteradas).
+pub const CHAVES_NATURAIS: &[(&str, &[&str])] = &[("produto_gtin", &["produto_id", "gtin", "tipo", "origem"])];
+
+/// A chave natural da tabela, se ela tem (veja [`CHAVES_NATURAIS`]).
+pub fn chave_natural(tabela: &str) -> Option<&'static [&'static str]> {
+    CHAVES_NATURAIS.iter().find(|c| c.0 == tabela).map(|c| c.1)
 }
 
 /// Tabelas temporárias (TEMP): criadas na hora, só na conexão que as usa.
@@ -309,10 +331,42 @@ mod testes {
         "sync_resolucao",
     ];
 
+    /// As de antes, na mesma ordem; no fim, as que passaram a viajar (5.2).
     #[test]
     fn o_que_viaja_e_o_de_antes_na_mesma_ordem() {
-        assert_eq!(QUE_VIAJAM, VIAJAVAM);
-        assert_eq!(crate::sync::TABELAS, VIAJAVAM);
+        let esperado: Vec<&str> = VIAJAVAM.iter().chain(PASSARAM_A_VIAJAR).copied().collect();
+        assert_eq!(QUE_VIAJAM.to_vec(), esperado);
+        assert_eq!(crate::sync::TABELAS.to_vec(), esperado);
+    }
+
+    /// A chave natural declarada é um índice único da tabela (é ele que faz
+    /// a linha repetida ser reconhecida ao receber).
+    #[test]
+    fn chave_natural_e_um_indice_unico() {
+        let b = crate::banco::Banco::em_memoria().unwrap();
+        for (tabela, cols) in CHAVES_NATURAIS {
+            assert!(QUE_VIAJAM.contains(tabela), "{tabela}");
+            let indices: Vec<(String, bool)> = b
+                .conn
+                .prepare(&format!("PRAGMA index_list(\"{tabela}\")"))
+                .unwrap()
+                .query_map([], |l| Ok((l.get(1)?, l.get(2)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let achou = indices.iter().filter(|i| i.1).any(|(nome, _)| {
+                let colunas: Vec<String> = b
+                    .conn
+                    .prepare(&format!("PRAGMA index_info(\"{nome}\")"))
+                    .unwrap()
+                    .query_map([], |l| l.get(2))
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                colunas == *cols
+            });
+            assert!(achou, "{tabela}: nenhum índice único com {cols:?}");
+        }
     }
 
     /// Toda tabela e visão de um banco novo (todas as migrações) tem linha

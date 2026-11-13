@@ -514,11 +514,28 @@ fn matriz_bate_com_a_estrutura_22_real() {
     let mut v22 = Connection::open_in_memory().unwrap();
     banco::registrar_funcoes(&v22).unwrap();
     banco::migrar_ate(&mut v22, 22).unwrap();
+    // Passo 5.2: as que a 22 não tem (o `produto_gtin`, da 24) são as que a
+    // matriz não manda para ela.
     for t in sync::TABELAS {
-        assert!(
-            contar(&v22, &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{t}'")) == 1,
-            "{t} existe na 22"
-        );
+        let existe =
+            contar(&v22, &format!("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{t}'")) == 1;
+        let a = Alteracao {
+            seq: 1,
+            id: "x".into(),
+            tabela: t.to_string(),
+            chave: "[\"x\"]".into(),
+            operacao: "gravar".into(),
+            dados: Some("{}".into()),
+            dispositivo: "d".into(),
+            quando: String::new(),
+            base: None,
+            ordem: 1,
+            historia: None,
+            compactada: false,
+            operacao_id: None,
+            incompativel: None,
+        };
+        assert_eq!(existe, sync::incompatibilidade(22, &a).is_none(), "{t}: existe na 22 x matriz");
     }
     let (_, lista) = log_com_rascunho();
     for a in lista.iter().filter(|a| a.tabela == "ordem_servico") {
