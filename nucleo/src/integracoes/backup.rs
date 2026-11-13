@@ -1943,6 +1943,11 @@ impl Pendente {
         // caixa recomeça do zero com os outros e ganha geração nova (os outros
         // também recomeçam com ele).
         sync::depois_de_restaurar(&tx, self.seq)?;
+        // N-I1: o banco que entrou pode ser de antes da 5.2, com o índice da
+        // peça velho (D01); a marca da 5.2 é deste caixa e volta com ele, então
+        // a primeira abertura não o refaria. Refaz aqui os derivados de todas
+        // as linhas (só colunas que não viajam: nada vai para os outros caixas).
+        sync::refazer_todos_os_derivados(&tx)?;
         // Backup de antes da identidade da loja: a loja continua com a dela.
         // (Backup de outra loja traz a identidade dela: é outra loja.)
         if !self.loja.is_empty() && crate::loja::id(&tx)?.is_empty() {
