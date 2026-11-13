@@ -122,7 +122,7 @@ fn migracoes() -> Vec<(usize, String, String)> {
 
 fn aplicar(c: &Connection, sql: &str) {
     // As funções do Rustinho (`normalizar`...), como em toda conexão do
-    // programa: a 0025 preenche o nome sem acento com ela.
+    // programa: a 0026 preenche o nome sem acento com ela.
     rustinho_nucleo::banco::registrar_funcoes(c).unwrap();
     let sem = sql.starts_with(SEM_CHAVES_ESTRANGEIRAS);
     c.pragma_update(None, "foreign_keys", !sem).unwrap();

@@ -94,7 +94,7 @@ fn como_ano(token: &str) -> Option<i64> {
 /// por último; no empate, o nome sem acento, o código e o id. B04 e PEND-39
 /// (7.5): o desempate é a coluna gravada `nome_normalizado` (o mesmo
 /// `normalizar(nome)` de antes), e a lista é lida pelo índice
-/// `produto_alteradas_por_ultimo` (0025), parte a parte, sem ordenar o
+/// `produto_alteradas_por_ultimo` (0026), parte a parte, sem ordenar o
 /// cadastro inteiro nem chamar a função do Rustinho para cada peça.
 pub(crate) const SQL_LISTA_ATIVAS: &str = "SELECT p.id FROM produto p WHERE p.ativo = 1
      ORDER BY p.atualizado_em DESC, p.nome_normalizado ASC, p.codigo ASC, p.id ASC LIMIT ?1 OFFSET ?2";
@@ -1891,7 +1891,7 @@ mod testes_75 {
         );
     }
 
-    /// B04 + PEND-39: a lista sem busca é lida pelo índice da 0025, na ordem
+    /// B04 + PEND-39: a lista sem busca é lida pelo índice da 0026, na ordem
     /// dele (sem ordenar o cadastro inteiro a cada parte), com e sem as
     /// inativas.
     #[test]

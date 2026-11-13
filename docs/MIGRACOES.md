@@ -125,8 +125,8 @@ A reserva de 05/11 é substituída: ela previa uma 0024 para os caixas aprovados
 O número sai **no commit**, como o próximo livre (MIG-1 (a), `PLANO_MIGRACOES.md`): a tabela é de
 conteúdos, não de números. Dois ramos com o mesmo número novo: quem entra depois renumera (nome do
 arquivo, linha em `MIGRACOES`, bloco em `conferir_estrutura`, sentinela e o teste da migração),
-antes da publicação. Hoje a M-C e a M-E estão preparadas, cada uma, como 0025: a ordem em que a 5.5
-e a 7.5 entrarem decide quem fica com a 0025.
+antes da publicação. A M-C e a M-E foram preparadas, cada uma, como 0025; na integração (`prod-integ`,
+13/11) a 5.5 entrou primeiro e ficou com a 0025, e a 7.5 foi renumerada para a 0026.
 
 ## 6. Checklist de uma migração nova
 
