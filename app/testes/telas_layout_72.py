@@ -55,7 +55,6 @@ CELULAR = (360, 780)
 
 # Item → (passo). Cada correção da 7.2 tira o seu.
 ESPERADAS = {
-    "M2": "VIS33-13 (caixa de marcar sem contraste no AMOLED), passo 7.2",
     "M5": "VIS33-05 (\"Salvar como orçamento\" cortado em 1366 × 768), passo 7.2",
     "M6": "H06 (janelinha do Receber sem rolagem em 1366 × 768), passo 7.2",
     "M7": "H06 (janelinha do Receber sem rolagem no celular), passo 7.2",
