@@ -1118,6 +1118,9 @@ pub struct Variacao {
     /// "+12%", "−3 p.p." (vazio se não houver base).
     pub variacao: String,
     pub subiu: bool,
+    /// H17 (7.3): a mudança é boa para a loja (a tela pinta de verde). Subir é
+    /// bom em tudo, menos nas despesas, em que subir é piora.
+    pub melhorou: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1164,7 +1167,14 @@ fn variacao_valor(nome: &str, atual: i64, anterior: i64) -> Variacao {
     } else {
         (String::new(), true)
     };
-    Variacao { nome: nome.into(), atual: dinheiro(atual), anterior: dinheiro(anterior), variacao, subiu }
+    Variacao {
+        nome: nome.into(),
+        atual: dinheiro(atual),
+        anterior: dinheiro(anterior),
+        variacao,
+        subiu,
+        melhorou: subiu,
+    }
 }
 
 fn variacao_pontos(nome: &str, atual: Option<i64>, anterior: Option<i64>) -> Variacao {
@@ -1185,7 +1195,14 @@ fn variacao_pontos(nome: &str, atual: Option<i64>, anterior: Option<i64>) -> Var
         }
         _ => (String::new(), true),
     };
-    Variacao { nome: nome.into(), atual: texto_pct(atual), anterior: texto_pct(anterior), variacao, subiu }
+    Variacao {
+        nome: nome.into(),
+        atual: texto_pct(atual),
+        anterior: texto_pct(anterior),
+        variacao,
+        subiu,
+        melhorou: subiu,
+    }
 }
 
 fn variacao_numero(nome: &str, atual: i64, anterior: i64) -> Variacao {
@@ -1204,7 +1221,14 @@ fn variacao_numero(nome: &str, atual: i64, anterior: i64) -> Variacao {
     } else {
         (String::new(), true)
     };
-    Variacao { nome: nome.into(), atual: atual.to_string(), anterior: anterior.to_string(), variacao, subiu }
+    Variacao {
+        nome: nome.into(),
+        atual: atual.to_string(),
+        anterior: anterior.to_string(),
+        variacao,
+        subiu,
+        melhorou: subiu,
+    }
 }
 
 fn tem_dados(a: &Apurado, com: &Comercial) -> bool {
@@ -1293,7 +1317,10 @@ pub fn apurar_dre(conn: &Connection, f: &Filtro) -> Resultado<Dre> {
         && a.meses_incluidos == b.meses_incluidos
         && p.mensais;
     if comparavel {
-        variacoes.push(variacao_valor("Despesas registradas", n.despesas, b.numeros.despesas));
+        // H17 (7.3): despesa que sobe é piora; "igual" continua bom.
+        let mut desp = variacao_valor("Despesas registradas", n.despesas, b.numeros.despesas);
+        desp.melhorou = !desp.subiu || desp.variacao == "igual";
+        variacoes.push(desp);
         let mut r = variacao_valor("Resultado estimado", n.resultado, b.numeros.resultado);
         if b.numeros.resultado <= 0 {
             r.variacao = String::new();
