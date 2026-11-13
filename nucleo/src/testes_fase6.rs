@@ -819,3 +819,123 @@ fn c06_leitura_nao_grava_roda_no_portao_da_ci() {
     }
     assert!(ci.contains("cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE"));
 }
+
+// ---------------------------------------------------------------------------
+// Revisão de consistência das correções já feitas (E01, E10, E13, E14, F02).
+// ---------------------------------------------------------------------------
+
+fn auditado(c: &Connection, entidade: &str, id: &str, acao: &str) -> i64 {
+    contar(
+        c,
+        "SELECT COUNT(*) FROM auditoria WHERE entidade = ?1 AND entidade_id = ?2 AND acao = ?3",
+        params![entidade, id, acao],
+    )
+}
+
+/// E10 · revisão (achado novo): o que a VENDA faz nas encomendas e na OS
+/// fica sem registro no histórico delas (a encomenda entregue pela venda; a
+/// encomenda paga na venda cancelada junto com ela; a encomenda entregue que
+/// volta a "chegou" e a OS entregue que volta a "pronta" quando a venda é
+/// cancelada), e o orçamento cancelado também. O E10 cobriu as mesmas
+/// mudanças feitas pela compra e pelas telas da encomenda e da OS.
+#[test]
+#[ignore = "achado da revisão do E10: a venda muda encomenda e OS (e o orçamento é cancelado) sem auditoria"]
+fn e10_revisao_a_venda_muda_encomenda_e_os_com_registro() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = l.b.dispositivo.clone();
+    caixa::abrir(c, &d, &l.u, "Caixa 1", "0").unwrap();
+    // 1. Encomenda paga na venda (faltaram 2) e cancelada com ela.
+    let e = VendaEntrada {
+        itens: vec![ItemEntrada {
+            produto_id: l.peca.clone(),
+            quantidade: "12".into(),
+            encomendar: true,
+            ..Default::default()
+        }],
+        tabela: 1,
+        cliente_id: l.cliente.clone(),
+        pagamentos: vec![pg("pix", "3600")],
+        ..Default::default()
+    };
+    let v1 = vendas::concluir(c, &d, &l.u, &e).unwrap();
+    let enc1 = texto(c, "SELECT id FROM encomenda WHERE venda_id = ?1", [&v1]);
+    vendas::cancelar(c, &d, &l.u, &v1, "desistiu").unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM encomenda WHERE id = ?1", [&enc1]), "cancelada");
+    assert_eq!(auditado(c, "encomenda", &enc1, "encomenda.cancelar"), 1, "encomenda cancelada pela venda");
+    // 2. Encomenda que chegou, entregue na venda, e a venda cancelada.
+    let enc2 = crate::encomendas::criar(
+        c,
+        &d,
+        &l.u,
+        &crate::encomendas::EncomendaEntrada {
+            cliente_id: l.cliente.clone(),
+            produto_id: l.peca.clone(),
+            quantidade: "1".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    crate::encomendas::chegou(c, &d, &l.u, &enc2).unwrap();
+    let e = VendaEntrada {
+        itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+        tabela: 1,
+        cliente_id: l.cliente.clone(),
+        pagamentos: vec![pg("pix", "300")],
+        encomenda_id: enc2.clone(),
+        ..Default::default()
+    };
+    let v2 = vendas::concluir(c, &d, &l.u, &e).unwrap();
+    assert_eq!(auditado(c, "encomenda", &enc2, "encomenda.entregar"), 1, "encomenda entregue pela venda");
+    vendas::cancelar(c, &d, &l.u, &v2, "engano").unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM encomenda WHERE id = ?1", [&enc2]), "chegou");
+    assert_eq!(auditado(c, "encomenda", &enc2, "encomenda.voltou_venda"), 1, "voltou a chegou pela venda cancelada");
+    // 3. OS entregue na venda, e a venda cancelada.
+    let os = crate::oficina::salvar(
+        c,
+        &d,
+        &l.u,
+        &crate::oficina::Entrada {
+            cliente_id: l.cliente.clone(),
+            placa: "ABC1D23".into(),
+            defeito: "Barulho".into(),
+            itens: vec![crate::oficina::ItemEntradaOs {
+                tipo: "servico".into(),
+                descricao: "Revisão".into(),
+                preco: "50".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let pv = vendas::os_para_venda(c, &os).unwrap();
+    let e = VendaEntrada {
+        itens: pv.itens,
+        tabela: 1,
+        cliente_id: pv.cliente_id,
+        os_id: os.clone(),
+        pagamentos: vec![pg("pix", "50")],
+        ..Default::default()
+    };
+    let v3 = vendas::concluir(c, &d, &l.u, &e).unwrap();
+    assert_eq!(auditado(c, "ordem_servico", &os, "os.entregar"), 1);
+    vendas::cancelar(c, &d, &l.u, &v3, "engano").unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM ordem_servico WHERE id = ?1", [&os]), "pronta");
+    assert_eq!(auditado(c, "ordem_servico", &os, "os.situacao"), 1, "a OS voltou a pronta pela venda cancelada");
+    // 4. Orçamento cancelado.
+    let o = vendas::salvar_orcamento(
+        c,
+        &d,
+        &l.u,
+        "Caixa 1",
+        &VendaEntrada {
+            itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+            tabela: 1,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    vendas::cancelar(c, &d, &l.u, &o, "cliente desistiu").unwrap();
+    assert_eq!(auditado(c, "venda", &o, "orcamento.cancelar"), 1, "orçamento cancelado");
+}
