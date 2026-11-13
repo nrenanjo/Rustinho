@@ -1666,6 +1666,73 @@ mod testes {
         assert_eq!(nomes, ["PECA AAA", "PECA BBB", "PECA CCC"], "uma peça por descrição, sem a AAA repetida");
     }
 
+    /// Fornecedor implícito (achado da preparação de 12/11): as 16 combinações
+    /// das opções, num lote com um cliente novo, uma peça nova da loja e um
+    /// fornecedor novo com uma peça nova. É o RETRATO DE HOJE: "Peças do
+    /// fornecedor" cadastra o fornecedor mesmo com "Fornecedores" desmarcada
+    /// (`importar_fornecedores`). A regra é do proprietário (decisão FI); quando
+    /// ela vier, muda só a linha do fornecedor aqui, no mesmo commit da mudança.
+    #[test]
+    fn fi_as_16_combinacoes_das_opcoes_retrato_de_hoje() {
+        const FORN: &str = "11222333000181";
+        const CLIENTE: &str = "52998224725";
+        let mut erros = Vec::new();
+        for n in 0..16u8 {
+            let (cl, fo, lj, pf) = (n & 8 != 0, n & 4 != 0, n & 2 != 0, n & 1 != 0);
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            crate::faixas::comecar_loja(c).unwrap();
+            config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+            let mut lido = Lido::default();
+            let cliente = Emitente { documento: CLIENTE.into(), nome: "CLIENTE DE TESTE".into(), ..Default::default() };
+            lido.clientes.insert(CLIENTE.into(), (cliente, "2026-11-01".into()));
+            let forn = Emitente { documento: FORN.into(), nome: "FORNECEDOR DE TESTE".into(), ..Default::default() };
+            lido.fornecedores.insert(FORN.into(), (forn, "2026-11-01".into()));
+            let item = |codigo: &str, descricao: &str| ItemXml {
+                codigo: codigo.into(),
+                descricao: descricao.into(),
+                quantidade: 1000,
+                valor_produtos: 5000,
+                ..Default::default()
+            };
+            let il = item("L100", "PECA DA LOJA");
+            lido.pecas_loja.insert(("L100".into(), descricao_chave(&il)), (il, "2026-11-01".into()));
+            let ifo = item("F-200", "PECA DO FORNECEDOR");
+            lido.pecas_fornecedor
+                .insert((FORN.into(), "F-200".into(), descricao_chave(&ifo)), (ifo, "2026-11-01".into()));
+            let e =
+                Entrada { clientes: cl, fornecedores: fo, pecas_loja: lj, pecas_fornecedor: pf, ..Default::default() };
+            gravar(c, d, &u, &e, &lido).unwrap();
+            let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+            let obtido = (
+                conta("SELECT COUNT(*) FROM pessoa WHERE cliente = 1"),
+                conta("SELECT COUNT(*) FROM pessoa WHERE fornecedor = 1"),
+                conta("SELECT COUNT(*) FROM produto"),
+                conta("SELECT COUNT(*) FROM produto_fornecedor"),
+                conta("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente' AND motivo = 'sem_vinculo'"),
+            );
+            let esperado = (
+                cl as i64,
+                (fo || pf) as i64, // ← o implícito: "Peças do fornecedor" cadastra o fornecedor
+                lj as i64 + pf as i64,
+                pf as i64,
+                (fo && !pf) as i64,
+            );
+            if obtido != esperado {
+                erros.push(format!(
+                    "opções c{} f{} l{} p{}: esperado {esperado:?}, obtido {obtido:?}",
+                    cl as u8, fo as u8, lj as u8, pf as u8
+                ));
+            }
+        }
+        assert!(
+            erros.is_empty(),
+            "(clientes, fornecedores, peças, vínculos, pendências sem vínculo)\n{}",
+            erros.join("\n")
+        );
+    }
+
     /// Nota de venda da própria loja, assinada pela PKI de teste, sem
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
     const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
