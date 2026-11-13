@@ -480,7 +480,6 @@ fn d05_usar_a_versao_que_perdeu_refaz_o_indice() {
 /// caixa). Em `b3a171c`, cada entrada grava uma alteração de `usuario` que
 /// vai para todos os caixas.
 #[test]
-#[ignore = "caracterização C07: entrar gera alteração replicada em b3a171c; passa no passo 5.2 (ultimo_acesso local)"]
 fn c07_entrar_nao_gera_alteracao_que_viaja() {
     let (mut a, mut b, u) = loja();
     let antes = contar(&a, "SELECT COUNT(*) FROM alteracao");
