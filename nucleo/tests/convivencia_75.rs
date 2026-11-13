@@ -189,3 +189,27 @@ fn indice_velho_de_antes_da_5_2_refeito_na_primeira_abertura() {
     drop(b);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// Integração 5.4 + 7.5 (D75-1): o resumo por tabela da troca (5.4,
+/// `sync::resumo_das_tabelas`) só soma as colunas que viajam. As derivadas da
+/// peça (`busca`, `codigos`, `nome_normalizado`), que cada caixa refaz e que
+/// num deles podem estar velhas (R-1), não fazem dois caixas em dia parecerem
+/// diferentes. Mudar o nome (que viaja) muda o resumo.
+#[test]
+fn resumo_da_troca_deixa_de_fora_as_colunas_derivadas() {
+    let b = Banco::em_memoria().unwrap();
+    faixas::assumir(&b.conn).unwrap();
+    let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+    let mut f = produtos::ficha_nova(&b.conn).unwrap();
+    f.nome = "Ácido".into();
+    f.custo = "10".into();
+    let id = produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+    let produto = |c: &Connection| sync::resumo_das_tabelas(c).unwrap()["produto"].clone();
+    let antes = produto(&b.conn);
+    b.conn
+        .execute("UPDATE produto SET busca = 'x', codigos = ' x ', nome_normalizado = 'x' WHERE id = ?1", [&id])
+        .unwrap();
+    assert_eq!(produto(&b.conn), antes, "uma coluna derivada entrou no resumo da troca");
+    b.conn.execute("UPDATE produto SET nome = 'Outro nome' WHERE id = ?1", [&id]).unwrap();
+    assert_ne!(produto(&b.conn), antes, "o nome (que viaja) não mudou o resumo");
+}
