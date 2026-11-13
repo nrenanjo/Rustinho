@@ -171,3 +171,52 @@ fn montar_numeros_das_telas() {
     l.ok("caixa_abrir", json!({ "valor": "50" }));
     l.fechar();
 }
+
+/// Campanha L5 (preparação da fase 9, ensaio) — a loja com os dados de
+/// demonstração que `app/testes/captura/percorrer.sh` procura (veja o LEIA-ME
+/// de `app/testes/captura/`): "Auto Pecas Modelo", Caixa 1, Ana (gerente,
+/// 1234) e mais 4 usuários; "Amortecedor dianteiro Onix", "Pastilha de freio
+/// dianteira Gol" e mais duas peças; a cliente "Oficina do Joao" e um
+/// fornecedor; o caixa aberto com R$ 100,00; uma venda em dinheiro e uma no
+/// crediário da "Oficina do Joao"; um recebimento estornado; dois backups.
+///
+/// Diferença declarada do LEIA-ME: os dados são criados pelos comandos das
+/// telas (o mesmo caminho do núcleo), não clicando na interface.
+#[test]
+#[ignore = "só à mão: monta a loja da campanha L5 (ensaio da fase 9)"]
+fn montar_campanha_l5() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Auto Pecas Modelo", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    l.executar(&format!("INSERT INTO config (chave, valor) VALUES ('loja_cnpj', '{LOJA_CNPJ}')"));
+    for nome in ["Bia", "Carlos", "Dani", "Eduarda"] {
+        l.usuario_caixa(nome, "1111");
+    }
+    let amortecedor = l.peca("Amortecedor dianteiro Onix", "120,00", "250,00", "6");
+    let pastilha = l.peca("Pastilha de freio dianteira Gol", "40,00", "90,00", "10");
+    l.peca("Filtro de oleo do motor", "15,00", "35,00", "20");
+    l.peca("Correia dentada", "50,00", "110,00", "4");
+    let joao = l.pessoa("cliente", "Oficina do Joao");
+    l.pessoa("fornecedor", "Distribuidora Vale");
+    l.ok("caixa_abrir", json!({ "valor": "100" }));
+    l.vender(&[(&pastilha, "1")], &[("dinheiro", "90")]);
+    l.vender_com(&[(&amortecedor, "1")], &[("crediario", "250")], json!({ "clienteId": joao, "parcelas": 2 }));
+    let rec = l.ok("receber_baixar", json!({ "clienteId": joao, "contas": [], "valor": "50", "forma": "dinheiro" }));
+    let rid = rec["id"].as_str().unwrap().to_string();
+    l.ok("recebimento_estornar", json!({ "id": rid, "motivo": "lançado errado (teste)" }));
+    let backups = pasta.join("backups");
+    std::fs::create_dir_all(&backups).unwrap();
+    let b = l.ok("backup_ler", json!({}));
+    l.ok("backup_salvar", json!({ "pasta": backups.display().to_string(), "hora": b["hora"], "dias": b["dias"] }));
+    for _ in 0..2 {
+        rustinho_nucleo::backup::fazer(&l.db, false).unwrap();
+        // Nomes dos arquivos pela hora: um segundo entre os dois.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+    }
+    l.fechar();
+}
