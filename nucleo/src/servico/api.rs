@@ -3221,8 +3221,12 @@ mod testes {
         assert_eq!(r["ok"], true, "{r}");
         // Ver continua; fechar o caixa não é bloqueado por isso.
         assert_eq!(chamar(&mut s, "receber_cliente", &json!({ "id": cliente, "todas": true }).to_string())["ok"], true);
-        let r = chamar(&mut s, "caixa_fechar", r#"{"contado":"150","observacoes":""}"#);
-        assert!(!r.to_string().contains("inconsistente"), "{r}");
+        // O campo do valor contado é "valor" (o da tela, `TelaCaixa.qml`): com
+        // outro nome, o fechamento era recusado por falta do valor e o teste
+        // não provava nada sobre o bloqueio (achado da revisão da fase 6).
+        let r = chamar(&mut s, "caixa_fechar", r#"{"valor":"150","motivo":""}"#);
+        assert_eq!(r["ok"], true, "o fechamento do caixa não pode ser bloqueado pela parcela inconsistente: {r}");
+        assert_eq!(r["dados"]["diferenca"], "0,00", "{r}");
     }
 
     /// R5-9 pela API: aceitar é comando de gerente, exige motivo e grava a auditoria.
