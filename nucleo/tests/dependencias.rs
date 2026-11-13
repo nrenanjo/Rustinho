@@ -430,6 +430,9 @@ struct Analise {
     escritas: Vec<Escrita>,
     /// Lugares que abrem uma transação (contrato C5, passo 3.5).
     transacoes: Vec<Transacao>,
+    /// Tabelas que um texto de SQL lê (FROM/JOIN; veja `leituras_sql`). Só
+    /// para o inventário da fase 8 (`RUSTINHO_DEPENDENCIAS_LUGARES`).
+    leituras: Vec<Escrita>,
 }
 
 /// Uma abertura de transação: `.transaction()`, `.unchecked_transaction()`,
@@ -557,6 +560,9 @@ fn analisar(fonte: &str, onde: &str, base: &[String], teste_inicial: bool) -> An
             for (tabela, minuscula) in escritas_sql_com_caixa(&t[i].texto) {
                 a.escritas.push(Escrita { de: caminho.clone(), tabela, teste, linha: t[i].linha, minuscula });
             }
+            for tabela in leituras_sql(&t[i].texto) {
+                a.leituras.push(Escrita { de: caminho.clone(), tabela, teste, linha: t[i].linha, minuscula: false });
+            }
         }
         i += 1;
     }
@@ -683,6 +689,33 @@ fn escritas_sql_com_caixa(texto: &str) -> Vec<(String, bool)> {
     v
 }
 
+/// As tabelas que um texto de SQL lê: o nome depois de FROM ou JOIN (em
+/// maiúsculas ou minúsculas), menos o `DELETE FROM` (gravação). Subconsulta
+/// (`FROM (SELECT`) e nome montado na hora não contam. Só para o inventário
+/// da fase 8: o filtro pelas tabelas do esquema fica com quem imprime.
+fn leituras_sql(texto: &str) -> Vec<String> {
+    let p: Vec<&str> = texto
+        .split(|c: char| c.is_whitespace() || c == ')' || c == ',' || c == ';')
+        .filter(|x| !x.is_empty())
+        .collect();
+    let mut v = Vec::new();
+    for k in 0..p.len() {
+        let w = p[k];
+        let chave = w == "FROM" || w == "from" || w == "JOIN" || w == "join";
+        if !chave || (k > 0 && (p[k - 1] == "DELETE" || p[k - 1] == "delete")) {
+            continue;
+        }
+        let Some(t) = p.get(k + 1) else { continue };
+        let t = t.strip_prefix("main.").unwrap_or(t).trim_matches('"');
+        if t.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            v.push(t.to_string());
+        }
+    }
+    v
+}
+
 // ----------------------------------------------------------------- grafo
 
 #[derive(Debug, Default)]
@@ -700,6 +733,10 @@ struct Grafo {
     escritores: BTreeMap<(String, String), String>,
     /// Toda gravação de produção: (lugar, tabela, módulo, em minúsculas).
     gravacoes: Vec<(String, String, String, bool)>,
+    /// Toda referência de produção entre módulos daqui: (de, para, lugar, alvo).
+    lugares: Vec<(String, String, String, String)>,
+    /// Toda leitura de produção: (lugar, tabela, módulo).
+    leituras: Vec<(String, String, String)>,
     /// Módulo que abre a própria transação no código de produção, com o primeiro lugar.
     transacoes: BTreeMap<String, String>,
     /// Problemas de leitura (o teste falha se houver).
@@ -744,6 +781,7 @@ fn ler_crate(src: &Path) -> Grafo {
     let mut refs: Vec<(Referencia, String)> = Vec::new();
     let mut escritas: Vec<(Escrita, String)> = Vec::new();
     let mut transacoes: Vec<(Transacao, String)> = Vec::new();
+    let mut leituras: Vec<(Escrita, String)> = Vec::new();
     let mut fila: VecDeque<(PathBuf, Vec<String>, bool)> = VecDeque::from([(lib.clone(), Vec::new(), false)]);
     while let Some((arq, caminho, teste)) = fila.pop_front() {
         let real = arq.canonicalize().unwrap_or_else(|e| panic!("{}: {e}", arq.display()));
@@ -788,6 +826,7 @@ fn ler_crate(src: &Path) -> Grafo {
         refs.extend(a.refs.into_iter().map(|r| (r, onde.clone())));
         escritas.extend(a.escritas.into_iter().map(|e| (e, onde.clone())));
         transacoes.extend(a.transacoes.into_iter().map(|x| (x, onde.clone())));
+        leituras.extend(a.leituras.into_iter().map(|e| (e, onde.clone())));
     }
     // Todo arquivo .rs da pasta tem de ter sido lido (senão o leitor perdeu algum).
     let mut pendentes = vec![src.to_path_buf()];
@@ -841,6 +880,7 @@ fn ler_crate(src: &Path) -> Grafo {
                 g.problemas.push(format!("{onde}:{}: código de produção usa o módulo de teste {}", r.linha, chave.1));
             }
             g.exemplo.entry(chave.clone()).or_insert_with(|| format!("{onde}:{}", r.linha));
+            g.lugares.push((chave.0.clone(), chave.1.clone(), format!("{onde}:{}", r.linha), r.alvo.clone()));
             *g.producao.entry(chave).or_default() += 1;
         }
     }
@@ -851,6 +891,13 @@ fn ler_crate(src: &Path) -> Grafo {
         }
         g.gravacoes.push((format!("{onde}:{}", e.linha), e.tabela.clone(), de.clone(), e.minuscula));
         g.escritores.entry((e.tabela, de)).or_insert_with(|| format!("{onde}:{}", e.linha));
+    }
+    for (e, onde) in leituras {
+        let Some(de) = modulo_de(&e.de, &reexp, &g.modulos) else { continue };
+        if e.teste || g.modulos.get(&de).copied().unwrap_or(false) {
+            continue;
+        }
+        g.leituras.push((format!("{onde}:{}", e.linha), e.tabela, de));
     }
     for (x, onde) in transacoes {
         let Some(de) = modulo_de(&x.de, &reexp, &g.modulos) else { continue };
@@ -1238,6 +1285,47 @@ fn nenhum_escritor_novo_por_tabela() {
     assert!(atuais.len() > 40, "o leitor achou poucas gravações: {}", atuais.len());
 }
 
+/// Inventário da fase 8 (preparação, prep 8/9): com
+/// `RUSTINHO_DEPENDENCIAS_LUGARES=1 … -- --nocapture lugares_da_fase_8`
+/// imprime cada referência das setas em ciclo (LC), cada gravação das tabelas
+/// com mais de um escritor (LW) e cada leitura de tabela do esquema feita fora
+/// dos escritores dela (LR). Sem a variável não faz nada.
+#[test]
+fn lugares_da_fase_8() {
+    if std::env::var_os("RUSTINHO_DEPENDENCIAS_LUGARES").is_none() {
+        return;
+    }
+    let g = ler_crate(&raiz().join("nucleo/src"));
+    assert!(g.problemas.is_empty(), "o leitor de fontes não entendeu tudo: {:#?}", g.problemas);
+    let setas: BTreeSet<_> = g.producao.keys().cloned().collect();
+    let em_ciclo = setas_em_ciclo(&setas);
+    println!("== LC: referências das setas em ciclo (de, para, lugar, alvo)");
+    for (de, para, lugar, alvo) in &g.lugares {
+        if em_ciclo.contains(&(de.clone(), para.clone())) {
+            println!("LC\t{de}\t{para}\t{lugar}\t{alvo}");
+        }
+    }
+    let mut por_tabela: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (t, m) in g.escritores.keys() {
+        por_tabela.entry(t).or_default().insert(m);
+    }
+    println!("== LW: gravações das tabelas com mais de um escritor (tabela, módulo, lugar)");
+    for (lugar, t, m, _) in &g.gravacoes {
+        if por_tabela.get(t.as_str()).is_some_and(|ms| ms.len() > 1) {
+            println!("LW\t{t}\t{m}\t{lugar}");
+        }
+    }
+    let tabelas: BTreeMap<&str, &[&str]> = escritores().into_iter().collect();
+    println!("== LR: leituras fora dos escritores da tabela (tabela, módulo, escritores, lugar)");
+    for (lugar, t, m) in &g.leituras {
+        if let Some(ms) = tabelas.get(t.as_str()) {
+            if *t != "*" && !ms.contains(&m.as_str()) {
+                println!("LR\t{t}\t{m}\t{}\t{lugar}", ms.join(","));
+            }
+        }
+    }
+}
+
 // ------------------------------------------------- conferência do leitor
 
 fn refs(fonte: &str) -> Vec<(String, bool)> {
@@ -1346,6 +1434,14 @@ fn leitor_acha_ciclos() {
     let setas = s(&[("a", "b"), ("b", "c"), ("c", "a"), ("c", "d"), ("d", "e"), ("e", "d"), ("f", "a")]);
     assert_eq!(setas_em_ciclo(&setas), s(&[("a", "b"), ("b", "c"), ("c", "a"), ("d", "e"), ("e", "d")]));
     assert_eq!(caminho(&setas, "b", "a"), ["b", "c", "a"]);
+}
+
+#[test]
+fn leitor_acha_leituras_sql() {
+    assert_eq!(leituras_sql("SELECT a FROM venda v JOIN venda_item i ON 1"), ["venda", "venda_item"]);
+    assert_eq!(leituras_sql("select x from main.pessoa where id in (select y from cheque)"), ["pessoa", "cheque"]);
+    assert!(leituras_sql("DELETE FROM venda WHERE id = 1").is_empty());
+    assert!(leituras_sql("SELECT 1 FROM (SELECT 2)").is_empty());
 }
 
 #[test]
