@@ -20,7 +20,8 @@
 //! (junto com o serviço de senhas do sistema, D4) são de quem chama: aqui a
 //! senha e o caminho chegam como parâmetro.
 //!
-//! Nada disto é chamado pela troca de dados ainda: ligar exige o canal
+//! Submódulo: [`aprovados`] (etapa 2, registro assinado de caixas aprovados e
+//! retirados). Nada disto é chamado pela troca de dados ainda: ligar exige o canal
 //! autenticado (A5) e a convivência com o protocolo 3 (A4), etapas 4 a 7.
 
 use std::io::Write;
@@ -32,6 +33,8 @@ use ring::signature::{self, Ed25519KeyPair, KeyPair};
 use sha2::{Digest, Sha256};
 
 use crate::erro::{Erro, Resultado};
+
+pub mod aprovados;
 
 /// Uma chave pública (Ed25519 ou X25519): 32 bytes.
 pub type Chave = [u8; 32];
@@ -521,7 +524,8 @@ mod testes {
     }
 
     /// O banco copiado não leva a chave: a identidade fica num arquivo fora
-    /// do banco, e nada da parte privada (nem o selo) vai para o banco.
+    /// do banco, e nada da parte privada (nem o selo) vai para o banco, mesmo
+    /// com o caixa registrado como raiz da loja (etapa 2).
     #[test]
     fn banco_copiado_nao_leva_a_chave() {
         let dir = pasta("copia");
@@ -534,7 +538,9 @@ mod testes {
         let selo = std::fs::read(&caminho_id).unwrap();
         {
             let b = Banco::abrir(&caminho_db).unwrap();
-            crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+            let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+            let loja = crate::loja::criar(&b.conn).unwrap();
+            aprovados::registrar_raiz(&b.conn, &id, &loja, "Caixa 1", &u).unwrap();
             b.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         }
         // "Copiar o banco": a pasta dos dados inteira, para outro lugar.
@@ -554,9 +560,14 @@ mod testes {
             assert!(!contem(&bytes, &selo[CABECALHO..]), "o selo da chave foi junto com os dados");
         }
         assert!(copiados >= 1);
-        // O banco copiado abre, mas não tem como assinar por este caixa: a
-        // chave não está em lugar nenhum da cópia.
+        // O banco copiado abre, sabe quem é a raiz (dado público), mas não tem
+        // como assinar por ela: a chave não está em lugar nenhum da cópia.
         let b = Banco::abrir(&copia.join("rustinho.db")).unwrap();
+        let raizes: i64 = b
+            .conn
+            .query_row("SELECT COUNT(*) FROM caixa_aprovado WHERE chave = ?1", [hex(&id.publica())], |l| l.get(0))
+            .unwrap();
+        assert_eq!(raizes, 1, "o registro público foi junto");
         let texto: i64 = b
             .conn
             .query_row(

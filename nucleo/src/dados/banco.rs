@@ -36,6 +36,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0022_caixa_fechado.sql"),
     include_str!("../migracoes/0023_rascunho_e_pendencias.sql"),
     include_str!("../migracoes/0024_gtins_e_pendencias_xml.sql"),
+    include_str!("../migracoes/0025_caixas_aprovados.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -584,6 +585,19 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
             }
         }
     }
+    // 0025 (protocolo 4, etapa 2): o registro de caixas aprovados e retirados.
+    if v >= 25 {
+        for tabela in ["caixa_aprovado", "caixa_retirado"] {
+            let tem: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [tabela],
+                |l| l.get(0),
+            )?;
+            if !tem {
+                return Err(Erro::Interno(format!("falta a tabela {tabela}")));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -956,7 +970,87 @@ mod testes {
                 .unwrap();
             assert_eq!(n, 1, "{t}.{col}");
         }
-        // A 0.9.15 acrescentou a 0023 e a 0.9.18 acrescentou a 0024.
-        assert_eq!(MIGRACOES.len(), 24);
+        // A 0.9.15 acrescentou a 0023 e a 0.9.18 acrescentou a 0024; a
+        // dev.3.3, a 0025 (registro de caixas do protocolo 4, etapa 2).
+        assert_eq!(MIGRACOES.len(), 25);
+    }
+
+    /// Protocolo 4, etapa 2: a migração 24 → 25 só cria o registro de caixas
+    /// aprovados e retirados, vazio; nenhuma tabela que existia ganha ou perde
+    /// registros. E um banco na estrutura 24 (dev.3.1 a dev.3.3) abre pelo
+    /// caminho de sempre (cópia, conferência, atualização) sem cair no modo
+    /// seguro. (Na frente-p4, bbeac46, era a migração 23 → 24.)
+    #[test]
+    fn p4_migracao_25_cria_o_registro_de_caixas_sem_mexer_no_resto() {
+        let semear = |c: &Connection| {
+            c.execute_batch(
+                "INSERT INTO config (chave, valor) VALUES ('dispositivo_id', 'caixa-dev32'),
+                        ('loja_nome', 'Loja dev.3.2'), ('loja_id', 'loja-dev32');
+                 INSERT INTO sync_par (dispositivo, nome, endereco, cursor)
+                 VALUES ('d2', 'Caixa 2', '10.0.0.2:47810', 5);",
+            )
+            .unwrap();
+        };
+        let novas = ["caixa_aprovado", "caixa_retirado"];
+        // A migração sozinha (em memória).
+        let mut c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", true).unwrap();
+        registrar_funcoes(&c).unwrap();
+        migrar_ate(&mut c, 24).unwrap();
+        semear(&c);
+        let antes = crate::migracao::contagens(&c).unwrap();
+        assert!(antes.iter().all(|(t, _)| !novas.contains(&t.as_str())), "as tabelas ainda não existem na 24");
+        migrar(&mut c).unwrap();
+        let depois: std::collections::HashMap<String, i64> =
+            crate::migracao::contagens(&c).unwrap().into_iter().collect();
+        for (t, n) in &antes {
+            assert_eq!(depois.get(t), Some(n), "{t}");
+        }
+        for t in novas {
+            assert_eq!(depois.get(t), Some(&0), "{t} criada vazia");
+        }
+        let colunas = |t: &str| -> Vec<String> {
+            c.prepare(&format!("SELECT name FROM pragma_table_info('{t}') ORDER BY cid"))
+                .unwrap()
+                .query_map([], |l| l.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            colunas("caixa_aprovado"),
+            ["chave", "aprovador", "chave_troca", "loja_id", "nome", "gerente", "aprovado_em", "assinatura"]
+        );
+        assert_eq!(
+            colunas("caixa_retirado"),
+            ["chave", "retirador", "loja_id", "motivo", "gerente", "retirado_em", "assinatura"]
+        );
+        conferir_estrutura(&c).unwrap();
+        assert!(MIGRACOES.len() >= 25);
+        // Um arquivo na estrutura 24 de verdade, aberto pelo caminho de sempre.
+        let pasta = std::env::temp_dir().join(format!("rustinho-migracao-25-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db");
+        {
+            let mut c = Connection::open(&caminho).unwrap();
+            registrar_funcoes(&c).unwrap();
+            migrar_ate(&mut c, 24).unwrap();
+            semear(&c);
+        }
+        let b = Banco::abrir(&caminho).unwrap();
+        assert!(!b.em_modo_seguro());
+        let versao: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
+        assert_eq!(versao as usize, MIGRACOES.len());
+        assert_eq!(b.dispositivo, "caixa-dev32");
+        assert_eq!(crate::loja::id(&b.conn).unwrap(), "loja-dev32");
+        let cursor: i64 =
+            b.conn.query_row("SELECT cursor FROM sync_par WHERE dispositivo = 'd2'", [], |l| l.get(0)).unwrap();
+        assert_eq!(cursor, 5);
+        for t in novas {
+            let n: i64 = b.conn.query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |l| l.get(0)).unwrap();
+            assert_eq!(n, 0, "{t}");
+        }
+        drop(b);
+        std::fs::remove_dir_all(pasta).ok();
     }
 }

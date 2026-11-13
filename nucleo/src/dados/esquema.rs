@@ -105,6 +105,10 @@ pub const TABELAS: &[Tabela] = &[
 
     // Só deste caixa.
     t("alteracao", Local, &["loja", "sync"]),
+    // Registro assinado de caixas do protocolo 4 (etapa 2). Fica fora da
+    // troca do protocolo 3: a replicação é das etapas 4 e 7 (5.5, DP-44).
+    t("caixa_aprovado", Local, &["protocolo4"]),
+    t("caixa_retirado", Local, &["protocolo4"]),
     t("entrada_falha", Local, &["usuarios"]),
     t("menu_uso", Local, &["menu"]),
     t("senha_situacao", Local, &["usuarios"]),
