@@ -214,9 +214,14 @@ Painel {
                 painel.previa = r.dados
                 const e = painel.escolhas
                 painel.qClientes = r.dados.clientesNovos > 0 && (!e || e.qClientes)
-                painel.qFornecedores = r.dados.fornecedoresNovos > 0 && (!e || e.qFornecedores)
+                painel.qFornecedores = (r.dados.fornecedoresNovos > 0 || painel.cat("fornecedor.ja_sem_papel") > 0)
+                                       && (!e || e.qFornecedores)
                 painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
                 painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
+                // FI-1 (a): "Peças das notas de fornecedores" exige "Fornecedores"
+                // (as peças ficam ligadas ao fornecedor, cadastrado com elas).
+                if (painel.qPecasFornecedor)
+                    painel.qFornecedores = true
                 // A primeira leitura supõe todas as opções (P-5); com outras
                 // marcadas, a prévia é refeita para mostrar o que elas fazem.
                 if (!(painel.qClientes && painel.qFornecedores && painel.qPecasLoja && painel.qPecasFornecedor))
@@ -468,7 +473,14 @@ Painel {
                         { chave: "qClientes", titulo: "Clientes", novos: painel.previa.clientesNovos, ja: painel.previa.clientesJa,
                           exemplos: painel.previa.exemplosClientes, cor: Tema.verde },
                         { chave: "qFornecedores", titulo: "Fornecedores", novos: painel.previa.fornecedoresNovos, ja: painel.previa.fornecedoresJa,
-                          exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul },
+                          mudam: painel.cat("fornecedor.ja_sem_papel"), exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul,
+                          // FI-2: quem já está cadastrado (como cliente) passa a ser fornecedor.
+                          extra: painel.cat("fornecedor.ja_sem_papel") > 0
+                                 ? painel.texto(painel.cat("fornecedor.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
+                                   + " a ser fornecedor" : "",
+                          // FI-1 (a): travada enquanto "Peças das notas de fornecedores" estiver marcada.
+                          presa: painel.qPecasFornecedor,
+                          porque: "Marcada junto com \"Peças das notas de fornecedores\": as peças ficam ligadas ao fornecedor, que é cadastrado com elas." },
                         { chave: "qPecasLoja", titulo: "Peças das notas da loja", novos: painel.previa.pecasLojaNovas, ja: -1,
                           mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
                         { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
@@ -494,10 +506,14 @@ Painel {
                                 spacing: 6
                                 Layout.fillWidth: true
                                 Marcar {
-                                    visible: linha.modelData.novos > 0 || (linha.modelData.mudam || 0) > 0
+                                    visible: linha.modelData.novos > 0 || (linha.modelData.mudam || 0) > 0 || !!linha.modelData.presa
+                                    enabled: !linha.modelData.presa
                                     checked: painel[linha.modelData.chave]
                                     onToggled: {
                                         painel[linha.modelData.chave] = checked
+                                        // FI-1 (a): as peças do fornecedor levam o fornecedor junto.
+                                        if (linha.modelData.chave === "qPecasFornecedor" && checked)
+                                            painel.qFornecedores = true
                                         painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
                                                             qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
                                         painel.refazerPrevia(false)
@@ -531,6 +547,16 @@ Painel {
                                 font.italic: true
                                 font.pixelSize: 13
                                 elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                visible: text !== ""
+                                text: [linha.modelData.extra || "", linha.modelData.presa ? linha.modelData.porque : ""]
+                                      .filter(x => !!x).join("  ·  ")
+                                color: Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 13
+                                wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
                             }
                         }
