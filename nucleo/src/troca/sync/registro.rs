@@ -95,6 +95,10 @@ pub fn chave_da_loja(chave: &str) -> bool {
 /// de cada uma, só as colunas que viajam. Numa tabela com coluna que não
 /// viaja, a alteração só é registrada quando alguma coluna que viaja está no
 /// `UPDATE` (`UPDATE OF`), e o conteúdo dela não leva a que não viaja.
+///
+/// O-1 (passo 5.2): um `UPDATE` que regrava a linha com o mesmo conteúdo (as
+/// colunas que viajam iguais) não grava alteração: nada viaja à toa, e a
+/// regravação não vira conflito com a mudança feita em outro caixa.
 pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
     // 0.9.15: cada alteração leva a operação comercial (a transação) em que
     // foi feita. Banco de estrutura antiga (só nos testes) não tem a coluna.
@@ -132,12 +136,18 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
             let (k, d) = expressoes(tabela, &viajam, &chave, prefixo);
             let dados = if operacao == "apagar" { "NULL".to_string() } else { d };
             let evento = if evento == "UPDATE" { de_update.as_str() } else { evento };
+            let mudou = if sufixo == "u" {
+                let cols: Vec<String> = viajam.iter().map(|c| format!("OLD.\"{c}\" IS NOT NEW.\"{c}\"")).collect();
+                format!(" AND ({})", cols.join(" OR "))
+            } else {
+                String::new()
+            };
             let extra = if *tabela == "config" { filtro_config(prefixo) } else { String::new() };
             let (base, ordem, historia, base_da_base) =
                 (ultima(&k, "id"), ultima(&k, "ordem"), ultima(&k, "historia"), ultima(&k, "base"));
             sql.push_str(&format!(
                 "DROP TRIGGER IF EXISTS sync_{tabela}_{sufixo};
-                 CREATE TRIGGER sync_{tabela}_{sufixo} AFTER {evento} ON \"{tabela}\" {quando}{extra}
+                 CREATE TRIGGER sync_{tabela}_{sufixo} AFTER {evento} ON \"{tabela}\" {quando}{extra}{mudou}
                  BEGIN
                    INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando, base, ordem, historia{col_op})
                    VALUES (rustinho_id(), '{tabela}', {k}, '{operacao}', {dados}, {disp}, rustinho_agora(),

@@ -552,7 +552,6 @@ fn pend35_gtins_de_antes_viajam_uma_vez_sem_repetir() {
 /// com a mudança de verdade feita no outro). Mudar de verdade continua
 /// gravando. Em `b3a171c` toda regravação grava uma alteração.
 #[test]
-#[ignore = "caracterização O-1: regravar sem mudança grava alteração em b3a171c; passa no passo 5.2"]
 fn o1_regravar_sem_mudanca_nao_grava_alteracao() {
     let (a, _, u) = loja();
     let p = peca(&a, &u, "Correia", "1");
