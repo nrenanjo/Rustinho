@@ -1017,7 +1017,14 @@ fn g05_a_mesma_nota_em_dois_caixas() {
 /// `g05_hoje_a_mesma_nota_em_dois_caixas`). Devolve (A, B, gerente, chave da
 /// nota, compra de A, compra de B), já depois de trocar.
 fn mesma_nota_lancada_nos_dois(nome: &str) -> (Banco, Banco, String, String, String, String) {
-    let (mut a, mut b, u) = loja();
+    mesma_nota_lancada_nos_dois_em(loja(), nome)
+}
+
+/// O mesmo, numa loja dada (por exemplo, com o caixa A num arquivo).
+fn mesma_nota_lancada_nos_dois_em(
+    (mut a, mut b, u): (Banco, Banco, String),
+    nome: &str,
+) -> (Banco, Banco, String, String, String, String) {
     config::gravar(&a.conn, "loja_cnpj", LOJA_CNPJ).unwrap();
     trazer_so_o_fornecedor(&a, &u, &nota_numa_pasta(nome));
     trocar(&mut a, &mut b);
@@ -1313,6 +1320,27 @@ fn n_f54_2_f12_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     assert_eq!(n, 1, "duas conferências ao mesmo tempo anotaram {n} itens do mesmo orçamento");
     let k = sync::conflitos(&a.conn).unwrap();
     assert_eq!(k.iter().filter(|c| c.tipo == "orcamento").count(), 1, "{k:#?}");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+}
+
+/// N-F54-2, G05: a mesma nota lançada em dois caixas sem rede; duas
+/// conferências ao mesmo tempo em A anotam o item uma vez só.
+#[test]
+#[ignore = "N-F54-2: caracterização do G05 (falha hoje: duas conferências ao mesmo tempo anotam dois itens)"]
+fn n_f54_2_g05_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
+    let (a, b, u, caminho) = loja_em_arquivo("nf542-g05");
+    let (a, b, _u, chave, _ca, _cb) = mesma_nota_lancada_nos_dois_em((a, b, u), "nf542-g05");
+    // A troca já anotou o item; a conferência de agora é a que importa.
+    a.conn.execute("DELETE FROM sync_conflito WHERE tipo = 'nota'", []).unwrap();
+    assert_eq!(conferir_ao_mesmo_tempo(&a, &caminho), 1, "a segunda conferência rodou no meio da primeira");
+    let n: i64 = a
+        .conn
+        .query_row("SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'nota' AND chave = ?1", [&chave], |l| l.get(0))
+        .unwrap();
+    assert_eq!(n, 1, "duas conferências ao mesmo tempo anotaram {n} itens da mesma nota");
+    let k = sync::conflitos(&a.conn).unwrap();
+    assert_eq!(k.iter().filter(|c| c.tipo == "nota").count(), 1, "{k:#?}");
     drop((a, b));
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
 }
