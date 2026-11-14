@@ -534,10 +534,19 @@ pub fn refazer_todos_os_derivados(conn: &Connection) -> Resultado<usize> {
     Ok(n)
 }
 
+// Só nos testes (RC2-5): quantas vezes um derivado foi refeito para todas as
+// linhas, nesta linha de execução (o teste e o que ele chama rodam nela).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static REFEITOS_DE_TODAS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Refaz o derivado de todas as linhas donas (R-1: na primeira abertura com a
 /// 5.2, veja `registro::registrar_as_que_passaram_a_viajar`). Sem `_`, como
 /// [`refazer_derivado`].
 pub(super) fn refazer_derivado_de_todas(conn: &Connection, derivado: Derivado) -> Resultado<usize> {
+    #[cfg(test)]
+    REFEITOS_DE_TODAS.with(|c| c.set(c.get() + 1));
     match derivado {
         Derivado::IndiceDaPeca => crate::catalogo::codigos::refazer_todos_os_indices(conn),
     }
