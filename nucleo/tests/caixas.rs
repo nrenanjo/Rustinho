@@ -1289,7 +1289,6 @@ fn conferir_ao_mesmo_tempo(a: &Banco, caminho: &std::path::Path) -> usize {
 /// N-F54-2, F-12: o mesmo orçamento vendido em dois caixas sem rede; duas
 /// conferências ao mesmo tempo em A anotam o item uma vez só.
 #[test]
-#[ignore = "N-F54-2: caracterização do F-12 (falha hoje: duas conferências ao mesmo tempo anotam dois itens)"]
 fn n_f54_2_f12_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     let (mut a, mut b, u, caminho) = loja_em_arquivo("nf542-f12");
     let p = peca(&a, &u, "Amortecedor", "5");
