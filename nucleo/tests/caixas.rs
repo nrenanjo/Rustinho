@@ -1343,3 +1343,118 @@ fn n_f54_2_g05_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     drop((a, b));
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
 }
+
+/// Como `conferir_ao_mesmo_tempo`, mas a segunda conferência roda quando o
+/// SQLite prepara, na conexão de A, a instrução que `gatilho` reconhece (RC3-1:
+/// o C-06 grava no `usuario` antes do item).
+fn conferir_ao_mesmo_tempo_quando(
+    a: &Banco,
+    caminho: &std::path::Path,
+    gatilho: fn(&rusqlite::hooks::AuthAction<'_>) -> bool,
+) -> usize {
+    use rusqlite::hooks::{AuthContext, Authorization};
+    let outra = std::sync::Mutex::new(Some(Banco::abrir(caminho).unwrap()));
+    let rodou = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let contador = rodou.clone();
+    a.conn
+        .authorizer(Some(move |ctx: AuthContext<'_>| {
+            if gatilho(&ctx.action) {
+                if let Some(b) = outra.lock().unwrap().take() {
+                    sync::verificar_depois(&b.conn).unwrap();
+                    contador.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    a.conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>).unwrap();
+    rodou.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// RC3-1 (revisão cruzada 3), R-03: a mesma parcela recebida em dois caixas
+/// sem rede vira um item "pago a mais" para o gerente. Pela troca, uma vez (o
+/// controle); com duas conferências ao mesmo tempo em A, também uma vez (a
+/// mesma corrida da N-F54-2). Era a sonda `sonda_rev3_r03_…` da revisão.
+#[test]
+#[ignore = "RC3-1: falha hoje (o R-03 pergunta \"já anotado?\" e grava em duas instruções)"]
+fn rc3_1_r03_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
+    let (mut a, mut b, u, caminho) = loja_em_arquivo("rc3-1-r03");
+    let mut f = rustinho_nucleo::pessoas::ficha_nova(&a.conn, "cliente").unwrap();
+    f.nome = "Zé da Silva".into();
+    let cliente = rustinho_nucleo::pessoas::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+    let contas = rustinho_nucleo::receber::lancar(
+        &a.conn,
+        &a.dispositivo,
+        &u,
+        &rustinho_nucleo::receber::LancamentoEntrada {
+            cliente_id: cliente.clone(),
+            descricao: "caderno".into(),
+            valor: "50".into(),
+            parcelas: 1,
+            primeiro_vencimento: String::new(),
+        },
+    )
+    .unwrap();
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 2", "0").unwrap();
+    let e = rustinho_nucleo::receber::ReceberEntrada {
+        cliente_id: cliente.clone(),
+        contas: contas.clone(),
+        forma: "dinheiro".into(),
+        ..Default::default()
+    };
+    rustinho_nucleo::receber::receber(&a.conn, &a.dispositivo, &u, &e).unwrap();
+    rustinho_nucleo::receber::receber(&b.conn, &b.dispositivo, &u, &e).unwrap();
+    trocar(&mut a, &mut b);
+    let pago_a_mais = |x: &Banco| contar(x, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'pago_a_mais'");
+    assert_eq!(pago_a_mais(&a), 1, "controle: a troca anota o item uma vez");
+    a.conn.execute("DELETE FROM sync_conflito WHERE tipo = 'pago_a_mais'", []).unwrap();
+    let rodou = conferir_ao_mesmo_tempo(&a, &caminho);
+    assert_eq!(rodou, 1, "a segunda conferência rodou no meio da primeira");
+    let n = pago_a_mais(&a);
+    let na_lista = sync::conflitos(&a.conn).unwrap().iter().filter(|c| c.tipo == "pago_a_mais").count();
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!(n, 1, "duas conferências ao mesmo tempo anotaram {n} itens da mesma parcela (R-03)");
+    assert_eq!(na_lista, 1, "a lista do gerente mostra {na_lista} itens da mesma parcela");
+}
+
+/// RC3-1, C-06: a loja que ficou sem gerente (o usuário mais antigo volta a
+/// ser gerente) vira um item. Com duas conferências ao mesmo tempo em A (a
+/// segunda roda quando a primeira vai gravar no `usuario`), um item só e um
+/// gerente. Era a sonda `sonda_rev3_c06_…` da revisão.
+#[test]
+#[ignore = "RC3-1: falha hoje (o C-06 conta os gerentes e grava em instruções separadas)"]
+fn rc3_1_c06_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
+    let (a, b, _u, caminho) = loja_em_arquivo("rc3-1-c06");
+    // Sem gerente, como depois de cada caixa tirar um sem ver o outro.
+    a.conn.execute("UPDATE usuario SET gerente = 0", []).unwrap();
+    let rodou = conferir_ao_mesmo_tempo_quando(&a, &caminho, |acao| {
+        matches!(acao, rusqlite::hooks::AuthAction::Update { table_name: "usuario", .. })
+    });
+    assert_eq!(rodou, 1, "a segunda conferência rodou no meio da primeira");
+    let n = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'gerente'");
+    let gerentes = contar(&a, "SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND gerente = 1");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!(gerentes, 1, "a loja ficou com {gerentes} gerentes");
+    assert_eq!(n, 1, "duas conferências ao mesmo tempo anotaram {n} itens 'a loja ficou sem gerente' (C-06)");
+}
+
+/// RC3-1, controle do C-06: uma conferência só (sem corrida) anota um item e
+/// deixa um gerente.
+#[test]
+fn rc3_1_c06_uma_conferencia_anota_um_item() {
+    let (a, b, _u, caminho) = loja_em_arquivo("rc3-1-c06-um");
+    a.conn.execute("UPDATE usuario SET gerente = 0", []).unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    let n = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'gerente'");
+    let gerentes = contar(&a, "SELECT COUNT(*) FROM usuario WHERE ativo = 1 AND gerente = 1");
+    sync::verificar_depois(&a.conn).unwrap();
+    let de_novo = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'gerente'");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!((n, gerentes, de_novo), (1, 1, 1), "itens, gerentes, itens depois de conferir de novo");
+}
