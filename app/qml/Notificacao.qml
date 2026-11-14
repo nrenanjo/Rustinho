@@ -103,6 +103,7 @@ Item {
                     Layout.fillWidth: true
                     Text {
                         text: raiz.aviso.tituloLongo || raiz.aviso.titulo || ""
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold

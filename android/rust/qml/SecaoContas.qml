@@ -101,6 +101,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: cartao.modelData.nome
+                                textFormat: Text.PlainText
                                 color: cartao.escolhida ? Tema.tintaAtual : Tema.tintaDaFaixa(cartao.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -118,6 +119,7 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + Tema.valor(cartao.modelData.saldo)
+                            textFormat: Text.PlainText
                             color: cartao.escolhida ? (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoSobre : Tema.tintaAtual)
                                                     : (cartao.modelData.saldo.startsWith("-") ? Tema.vermelhoDaFaixa(cartao.par) : Tema.tintaDaFaixa(cartao.par))
                             font.family: Tema.texto
@@ -186,6 +188,7 @@ FocusScope {
                         Rotulo { text: "Saldo hoje"; Layout.alignment: Qt.AlignRight }
                         Text {
                             text: secao.atual ? "R$ " + Tema.valor(secao.atual.saldo) : ""
+                            textFormat: Text.PlainText
                             color: secao.atual && secao.atual.saldo.startsWith("-") ? Tema.vermelho : Tema.tinta
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -234,6 +237,7 @@ FocusScope {
                             opacity: mov.modelData.estornado ? 0.5 : 1
                             Text {
                                 text: mov.modelData.data
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -245,6 +249,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: mov.modelData.descricao
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(mov.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -255,6 +260,7 @@ FocusScope {
                                 Text {
                                     text: [mov.modelData.tipo, mov.modelData.categoria, mov.modelData.futuro ? "ainda não saiu" : "",
                                            mov.modelData.estornado ? "ESTORNADO: " + mov.modelData.motivoEstorno : ""].filter(x => !!x).join("  ·  ")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuaveDaFaixa(mov.par)
                                     font.family: Tema.serifa
                                     font.italic: true
@@ -265,6 +271,7 @@ FocusScope {
                             }
                             Text {
                                 text: (mov.modelData.entrada ? "+ " : "− ") + "R$ " + mov.modelData.valor
+                                textFormat: Text.PlainText
                                 color: mov.modelData.entrada ? Tema.verdeEscuroDaFaixa(mov.par) : Tema.vermelhoDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
@@ -275,6 +282,7 @@ FocusScope {
                             }
                             Text {
                                 text: mov.modelData.estornado ? "" : "R$ " + Tema.valor(mov.modelData.saldo)
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(mov.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13

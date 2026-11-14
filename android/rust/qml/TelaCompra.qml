@@ -274,6 +274,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: tela.compra ? tela.compra.assinaturaTexto : ""
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuave
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -283,6 +284,7 @@ FocusScope {
                                 Text {
                                     visible: text !== ""
                                     text: tela.compra ? tela.compra.autorizacaoTexto : ""
+                                    textFormat: Text.PlainText
                                     color: avisoConferencia.negada ? Tema.vermelho : Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: avisoConferencia.aguardando || avisoConferencia.negada ? Font.DemiBold : Font.Normal
@@ -316,6 +318,7 @@ FocusScope {
                             text: tela.compra ? (tela.compra.situacao === "estornada"
                                                  ? "Esta compra foi estornada: as peças saíram do estoque. O custo das peças não voltou ao valor de antes."
                                                  : tela.compra.avisoDestinatario) : ""
+                            textFormat: Text.PlainText
                             color: avisoTopo.soLembrete ? Tema.tintaSuave : Tema.vermelho
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -372,6 +375,7 @@ FocusScope {
                                   : !tela.compra.podeLancar
                                     ? (tela.compra.autorizacao === "negada" ? "Não pode ser lançada" : "Falta a conferência da autorização")
                                     : "Tudo pronto"
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -422,6 +426,7 @@ FocusScope {
                             Rotulo { text: "Custo das peças"; Layout.fillWidth: true }
                             Text {
                                 text: tela.compra ? "R$ " + Tema.valor(tela.compra.custoTotal) : ""
+                                textFormat: Text.PlainText
                                 color: Tema.tinta
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
@@ -455,6 +460,7 @@ FocusScope {
                                     y: 4
                                     width: faixaDaLista.width - 16
                                     text: modelData
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -516,6 +522,7 @@ FocusScope {
                                 Rotulo { text: modelData[0]; Layout.preferredWidth: 100 }
                                 Text {
                                     text: modelData[1]
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -528,6 +535,7 @@ FocusScope {
                         Text {
                             visible: !!tela.compra && tela.compra.chave !== ""
                             text: tela.compra ? tela.compra.chave.replace(/(\d{4})/g, "$1 ").trim() : ""
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuave
                             font.family: Tema.texto
                             font.pixelSize: 12

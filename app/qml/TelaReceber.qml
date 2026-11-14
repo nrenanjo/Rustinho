@@ -161,6 +161,7 @@ FocusScope {
                         Rotulo { text: modelData[0] }
                         Text {
                             text: Tema.sigiloTexto("R$ " + modelData[1])
+                            textFormat: Text.PlainText
                             color: modelData[3]
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -295,6 +296,7 @@ FocusScope {
                             Rotulo { text: "Deve"; Layout.alignment: Qt.AlignRight }
                             Text {
                                 text: tela.conta ? Tema.sigiloTexto("R$ " + tela.conta.situacao.emAberto) : ""
+                                textFormat: Text.PlainText
                                 color: tela.conta && tela.conta.situacao.vencido !== "0,00" ? Tema.vermelho : Tema.tinta
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -391,6 +393,7 @@ FocusScope {
                                         Text {
                                             text: modelData.quando + "  ·  " + modelData.forma + "  ·  " + modelData.caixa + " nº " + modelData.numero
                                                   + (modelData.estornado ? "  ·  ESTORNADO: " + modelData.motivoEstorno : "")
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 13
@@ -399,6 +402,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: Tema.sigiloTexto("R$ " + modelData.valor)
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaDaFaixa(faixaDaLista.par)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
@@ -574,6 +578,7 @@ FocusScope {
                     required property var modelData
                     text: Tema.sigiloTexto(modelData.descricao + " · " + modelData.parcela + " (vence " + modelData.vencimento + "): R$ " + modelData.valor
                           + (modelData.resta === "0,00" ? "  → quitada" : "  → ainda falta R$ " + modelData.resta))
+                    textFormat: Text.PlainText
                     color: Tema.tintaSuave
                     font.family: Tema.texto
                     font.pixelSize: 13
@@ -588,6 +593,7 @@ FocusScope {
                       : sobra ? Tema.sigiloTexto("Troco R$ " + pagar.calc.troco)
                       : resta ? Tema.sigiloTexto("Continua devendo R$ " + pagar.calc.continuaDevendo)
                       : tela.marcadas.length > 0 ? "Quita as parcelas escolhidas" : "Quita tudo"
+                textFormat: Text.PlainText
                 color: !pagar.calc || pagar.calc.erro ? Tema.vermelho : resta ? Tema.dourado : Tema.verdeEscuro
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -598,6 +604,7 @@ FocusScope {
             Text {
                 visible: pagar.erro !== ""
                 text: pagar.erro
+                textFormat: Text.PlainText
                 color: Tema.vermelho
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -631,6 +638,7 @@ FocusScope {
             Text {
                 visible: !!feito.recibo && feito.recibo.troco !== "0,00"
                 text: feito.recibo ? Tema.sigiloTexto("Troco R$ " + feito.recibo.troco) : ""
+                textFormat: Text.PlainText
                 color: Tema.verdeEscuro
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -761,6 +769,7 @@ FocusScope {
                         anchors.verticalCenter: parent.verticalCenter
                         x: 12
                         text: modelData.nome + (modelData.documento ? "  ·  " + Tema.sigilo(modelData.documento) : "")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 15
@@ -816,6 +825,7 @@ FocusScope {
                     delegate: Text {
                         required property var modelData
                         text: Tema.sigiloTexto(modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor)
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -825,6 +835,7 @@ FocusScope {
             Text {
                 visible: lancar.erro !== ""
                 text: lancar.erro
+                textFormat: Text.PlainText
                 color: Tema.vermelho
                 font.family: Tema.texto
                 font.weight: Font.DemiBold

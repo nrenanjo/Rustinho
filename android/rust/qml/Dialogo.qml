@@ -25,6 +25,7 @@ Painel {
         }
         Text {
             text: dialogo.mensagem
+            textFormat: Text.PlainText
             visible: text !== ""
             color: Tema.tinta
             font.family: Tema.serifa

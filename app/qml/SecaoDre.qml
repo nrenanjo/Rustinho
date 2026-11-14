@@ -106,6 +106,7 @@ FocusScope {
                         Rotulo { text: secao.d ? secao.d.periodo.rotulo + (secao.d.vendedor ? " · " + secao.d.vendedor : "") : "" }
                         Text {
                             text: secao.d ? secao.d.estadoTexto : ""
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -163,6 +164,7 @@ FocusScope {
                                 spacing: 10
                                 Text {
                                     text: linhaDre.modelData.nome
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(linhaDre.par)
                                     font.family: linhaDre.modelData.subtotal ? Tema.titulo : Tema.texto
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
@@ -172,6 +174,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto ? "" : linhaDre.modelData.percentual
+                                    textFormat: Text.PlainText
                                     color: Tema.apagadoDaFaixa(linhaDre.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 12
@@ -180,6 +183,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(linhaDre.modelData.valor)
+                                    textFormat: Text.PlainText
                                     color: linhaDre.modelData.subtotal && linhaDre.modelData.v < 0 && !Tema.oculto ? Tema.vermelhoDaFaixa(linhaDre.par) : Tema.tintaDaFaixa(linhaDre.par)
                                     font.family: Tema.texto
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
@@ -229,6 +233,7 @@ FocusScope {
                                 required property var modelData
                                 readonly property bool abre: modelData.codigo === "sem_custo" || modelData.codigo === "sem_classificacao"
                                 text: "• " + secao.sigilo(modelData.texto) + (abre ? "  (toque para ver)" : "")
+                                textFormat: Text.PlainText
                                 color: Tema.tinta
                                 font.family: Tema.texto
                                 font.pixelSize: 14
@@ -256,6 +261,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: varia.modelData.nome
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -264,6 +270,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto && varia.dinheiro ? "•••" : (varia.dinheiro ? "R$ " : "") + varia.modelData.atual
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: Font.Bold
@@ -273,6 +280,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto && varia.dinheiro ? "•••" : "antes " + (varia.dinheiro && varia.modelData.anterior ? "R$ " : "") + (varia.modelData.anterior || "—")
+                                    textFormat: Text.PlainText
                                     color: Tema.apagado
                                     font.family: Tema.texto
                                     font.pixelSize: 12
@@ -281,6 +289,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: Tema.oculto && varia.dinheiro ? "" : varia.modelData.variacao
+                                    textFormat: Text.PlainText
                                     // H17 (7.3): verde quando a mudança é boa (despesa que sobe é piora).
                                     color: varia.modelData.melhorou ? Tema.verdeEscuro : Tema.vermelho
                                     font.family: Tema.texto
@@ -319,8 +328,8 @@ FocusScope {
                                 required property var modelData
                                 spacing: 8
                                 Layout.fillWidth: true
-                                Text { text: modelData[0]; color: Tema.tintaSuave; font.family: Tema.texto; font.pixelSize: 14; Layout.fillWidth: true }
-                                Text { text: Tema.sigiloTexto(modelData[1]); color: Tema.tinta; font.family: Tema.texto; font.weight: Font.Bold; font.pixelSize: 14 }
+                                Text { text: modelData[0]; textFormat: Text.PlainText; color: Tema.tintaSuave; font.family: Tema.texto; font.pixelSize: 14; Layout.fillWidth: true }
+                                Text { text: Tema.sigiloTexto(modelData[1]); textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.weight: Font.Bold; font.pixelSize: 14 }
                             }
                         }
                     }
@@ -381,14 +390,16 @@ FocusScope {
                                 y: 3
                                 width: mes.width - 16
                                 spacing: 8
-                                Text { text: mes.modelData.rotulo; color: Tema.apagadoDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.preferredWidth: 56 }
+                                Text { text: mes.modelData.rotulo; textFormat: Text.PlainText; color: Tema.apagadoDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.preferredWidth: 56 }
                                 Text {
                                     text: mes.modelData.estado === "sem_dados" ? "sem dados" : "vendas R$ " + Tema.valor(mes.modelData.vendas)
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.fillWidth: true
                                 }
                                 Text {
                                     visible: mes.modelData.estado !== "sem_dados"
                                     text: "resultado R$ " + Tema.valor(mes.modelData.resultado)
+                                    textFormat: Text.PlainText
                                     color: mes.modelData.vResultado < 0 && !Tema.oculto ? Tema.vermelhoDaFaixa(mes.par) : Tema.tintaDaFaixa(mes.par)
                                     font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 13
                                 }

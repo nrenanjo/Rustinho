@@ -32,6 +32,7 @@ Rectangle {
 
         Text {
             text: (linha.item.codigo || "") + (linha.item.codigoPendente ? " (?)" : "")
+            textFormat: Text.PlainText
             color: linha.item.codigoPendente ? (linha.atual ? Tema.tintaAtual : Tema.vermelhoDaFaixa(linha.par)) : linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold
@@ -46,6 +47,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativo)")
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -62,6 +64,7 @@ Rectangle {
                         partes.push("cliente e fornecedor")
                     return partes.filter(x => !!x).join("  ·  ")
                 }
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: linha.corSuave
                 font.family: Tema.serifa
@@ -74,6 +77,7 @@ Rectangle {
 
         Text {
             text: Tema.sigilo(linha.item.documento)
+            textFormat: Text.PlainText
             color: linha.corSuave
             font.family: Tema.texto
             font.pixelSize: 15
@@ -84,6 +88,7 @@ Rectangle {
 
         Text {
             text: linha.item.telefone || ""
+            textFormat: Text.PlainText
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.DemiBold

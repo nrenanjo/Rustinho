@@ -163,6 +163,7 @@ FocusScope {
                         Rotulo { text: "Próximos 30 dias"; Layout.fillWidth: true }
                         Text {
                             text: secao.fluxo ? "termina com R$ " + Tema.valor(secao.fluxo.saldoPrevisto) : ""
+                            textFormat: Text.PlainText
                             color: secao.fluxo && secao.fluxo.saldoPrevistoNegativo ? Tema.vermelho : Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -172,6 +173,7 @@ FocusScope {
                     Text {
                         visible: !!secao.fluxo && (secao.fluxo.atrasadoReceber !== "0,00" || secao.fluxo.atrasadoPagar !== "0,00")
                         text: secao.fluxo ? "Atrasado (fora da conta): a receber R$ " + secao.fluxo.atrasadoReceber + "  ·  a pagar R$ " + secao.fluxo.atrasadoPagar : ""
+                        textFormat: Text.PlainText
                         color: Tema.vermelho
                         font.family: Tema.texto
                         font.pixelSize: 13

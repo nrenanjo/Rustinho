@@ -326,6 +326,7 @@ FocusScope {
                         Text {
                             visible: !!tela.ficha && !!tela.ficha.codigoAviso
                             text: tela.ficha ? tela.ficha.codigoAviso : ""
+                            textFormat: Text.PlainText
                             color: tela.ficha && tela.ficha.codigo && tela.ficha.codigoAviso ? Tema.vermelho : Tema.tintaSuave
                             font.family: Tema.texto
                             font.pixelSize: 13
@@ -594,6 +595,7 @@ FocusScope {
                                     spacing: 1
                                     Text {
                                         text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold

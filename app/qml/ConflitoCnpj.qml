@@ -98,6 +98,7 @@ Painel {
                         Layout.preferredWidth: 1
                         Text {
                             text: Tema.sigilo(janelaConflito.conflito ? janelaConflito.conflito.lojaDocumento : "")
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -117,6 +118,7 @@ Painel {
                         Layout.preferredWidth: 1
                         Text {
                             text: Tema.sigilo(janelaConflito.conflito ? janelaConflito.conflito.destinatarioDocumento : "")
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -162,6 +164,7 @@ Painel {
                                 }
                                 Text {
                                     text: modelData[1]
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.pixelSize: 15
@@ -207,6 +210,7 @@ Painel {
                                 spacing: 12
                                 Text {
                                     text: modelData.codigo
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -215,6 +219,7 @@ Painel {
                                 }
                                 Text {
                                     text: modelData.descricao
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -223,6 +228,7 @@ Painel {
                                 }
                                 Text {
                                     text: modelData.quantidade + " " + modelData.unidade
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -231,6 +237,7 @@ Painel {
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(modelData.total)
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14

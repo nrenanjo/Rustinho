@@ -92,6 +92,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.modelData.nome
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -102,6 +103,7 @@ FocusScope {
                         Text {
                             text: linha.modelData.percentual ? Tema.pct(linha.modelData.percentual) + "% nas peças sem comissão própria"
                                                              : "sem % no cadastro (só as peças com comissão própria)"
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -114,6 +116,7 @@ FocusScope {
                         Layout.preferredWidth: 150
                         Text {
                             text: "R$ " + linha.modelData.vendido
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -122,6 +125,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.modelData.vendas + (linha.modelData.vendas === 1 ? " venda" : " vendas")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
@@ -130,6 +134,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + Tema.valor(linha.modelData.comissao)
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
@@ -194,6 +199,7 @@ FocusScope {
                             Text {
                                 text: [modelData.nome, modelData.periodo, modelData.vendas + " vendas · R$ " + modelData.vendido,
                                        "fechada em " + modelData.criadoEm, modelData.cancelado ? "DESFEITA" : modelData.pago ? "paga" : "no A pagar"].join("  ·  ")
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
@@ -202,6 +208,7 @@ FocusScope {
                             }
                             Text {
                                 text: "R$ " + Tema.valor(modelData.valor)
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold

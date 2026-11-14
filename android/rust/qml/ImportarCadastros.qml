@@ -522,6 +522,7 @@ Painel {
                                 }
                                 Text {
                                     text: linha.modelData.titulo
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
@@ -531,6 +532,7 @@ Painel {
                                 }
                                 Text {
                                     text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, "novo", "novos") : "nada novo"
+                                    textFormat: Text.PlainText
                                     color: linha.modelData.novos > 0 ? Tema.verdeEscuro : Tema.apagado
                                     font.family: Tema.texto
                                     font.weight: Font.Bold
@@ -542,6 +544,7 @@ Painel {
                                 text: [linha.modelData.ja > 0 ? linha.modelData.ja + " já cadastrados" : "",
                                        linha.modelData.exemplos.length > 0 ? linha.modelData.exemplos.join(", ") + (linha.modelData.novos > linha.modelData.exemplos.length ? "..." : "") : ""]
                                       .filter(x => !!x).join("  ·  ")
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuave
                                 font.family: Tema.serifa
                                 font.italic: true
@@ -553,6 +556,7 @@ Painel {
                                 visible: text !== ""
                                 text: [linha.modelData.extra || "", linha.modelData.presa ? linha.modelData.porque : ""]
                                       .filter(x => !!x).join("  ·  ")
+                                textFormat: Text.PlainText
                                 color: Tema.tinta
                                 font.family: Tema.texto
                                 font.pixelSize: 13
@@ -593,6 +597,7 @@ Painel {
                     delegate: Text {
                         required property var modelData
                         text: modelData
+                        textFormat: Text.PlainText
                         color: Tema.apagado
                         font.family: Tema.texto
                         font.pixelSize: 12
@@ -645,6 +650,7 @@ Painel {
                                 Layout.fillWidth: true
                                 Text {
                                     text: cartaoPend.modelData.descricao || ""
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(cartaoPend.par)
                                     font.family: Tema.texto
                                     font.weight: Font.Bold
@@ -658,6 +664,7 @@ Painel {
                                         cartaoPend.modelData.fornecedorNome || cartaoPend.modelData.fornecedorDocumento,
                                         cartaoPend.modelData.gtinComercial ? "GTIN: " + cartaoPend.modelData.gtinComercial + " (" + cartaoPend.modelData.origemComercial + ")" : "SEM GTIN"
                                     ].filter(x => !!x).join("  ·  ")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuaveDaFaixa(cartaoPend.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 13
@@ -666,6 +673,7 @@ Painel {
                                 }
                                 Text {
                                     text: cartaoPend.modelData.motivoTexto || ""
+                                    textFormat: Text.PlainText
                                     // H04 (7.2): o vermelho da faixa (claro na faixa escura do roxo).
                                     color: Tema.vermelhoDaFaixa(cartaoPend.par)
                                     font.family: Tema.texto
@@ -700,6 +708,7 @@ Painel {
                         spacing: 8
                         Text {
                             text: painel.pendenciaAberta ? painel.pendenciaAberta.descricao : ""
+                            textFormat: Text.PlainText
                             color: Tema.tintaNo(Tema.pergaminho)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -710,6 +719,7 @@ Painel {
                         Text {
                             visible: !!painel.pendenciaAberta && !!painel.pendenciaAberta.motivoTexto
                             text: painel.pendenciaAberta ? painel.pendenciaAberta.motivoTexto : ""
+                            textFormat: Text.PlainText
                             color: Tema.vermelho
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -736,6 +746,7 @@ Painel {
                                 "Quantidade: " + (painel.pendenciaAberta.quantidade || "1") + " " + (painel.pendenciaAberta.unidade || "UN")
                                     + "  ·  Valor unitário: R$ " + (painel.pendenciaAberta.valorUnitario || "0,00")
                             ].join("\n")
+                            textFormat: Text.PlainText
                             color: Tema.tintaNo(Tema.pergaminho)
                             font.family: Tema.texto
                             font.pixelSize: 13
@@ -779,6 +790,7 @@ Painel {
                                         Layout.fillWidth: true
                                         Text {
                                             text: candItem.modelData.nome || ""
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaDaFaixa(candItem.par)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
@@ -792,6 +804,7 @@ Painel {
                                                 candItem.modelData.marca,
                                                 candItem.modelData.codigoBarras ? "GTIN: " + candItem.modelData.codigoBarras : ""
                                             ].filter(x => !!x).join("  ·  ")
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaSuaveDaFaixa(candItem.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 12

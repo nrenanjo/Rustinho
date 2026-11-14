@@ -569,6 +569,7 @@ FocusScope {
                         Text {
                             visible: !!tela.ficha && !!tela.ficha.codigoAviso
                             text: tela.ficha ? tela.ficha.codigoAviso : ""
+                            textFormat: Text.PlainText
                             color: tela.ficha && tela.ficha.codigo && tela.ficha.codigoAviso ? Tema.vermelho : Tema.tintaSuave
                             font.family: Tema.texto
                             font.pixelSize: 13
@@ -954,6 +955,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: tela.ficha ? tela.ficha.estoque + " " + tela.ficha.unidade : ""
+                                    textFormat: Text.PlainText
                                     color: tela.ficha && tela.ficha.estoqueValor <= 0 ? Tema.vermelho : Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: Font.Bold
@@ -1121,6 +1123,7 @@ FocusScope {
                                     Text {
                                         text: tela.tributacao ? "Venda no estado: CSOSN " + tela.tributacao.csosn + " · CFOP " + tela.tributacao.cfop
                                                                 + (tela.tributacao.automatico ? "  (automático)" : "") : ""
+                                        textFormat: Text.PlainText
                                         color: Tema.tinta
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
@@ -1348,6 +1351,7 @@ FocusScope {
                                     spacing: 1
                                     Text {
                                         text: tela.dataHora(modelData.quando) + " · " + (modelData.usuario || "alguém") + " " + modelData.descricao
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaDaFaixa(faixaDaLista2.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold

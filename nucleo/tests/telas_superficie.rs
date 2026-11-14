@@ -520,6 +520,144 @@ fn h10_componentes_de_texto_em_texto_puro() {
     assert!(fora.is_empty(), "componente de texto sem texto puro (H10, extensão): {fora:#?}");
 }
 
+/// Os textos formatados de propósito (`textFormat` diferente de texto puro):
+/// arquivo e um pedaço da expressão do texto. Os dados deles passam por
+/// `Tema.escapar()` (trava `h10_textos_formatados_escapam_os_dados`) ou não
+/// têm dado (o link "Mostrar todos (n)" da seção de backup: texto fixo e uma
+/// contagem). Um texto formatado só com texto fixo não precisa estar aqui.
+const FORMATADOS_DE_PROPOSITO: &[(&str, &str)] = &[
+    ("app/qml/Notificacao.qml", "raiz.linha()"),
+    ("app/qml/TelaPeca.qml", "Tema.escapar(itemGrade.modelData.variacao"),
+    ("app/qml/TelaConfiguracoes.qml", "Tema.escapar(linhaRef.modelData.oQue)"),
+    ("app/qml/TelaConfiguracoes.qml", "Tema.escapar(linhaPend.modelData.textoMotivo)"),
+    ("app/qml/TelaConfiguracoes.qml", "\"<b>\" + Tema.escapar(modelData.oQue)"),
+    ("app/qml/TelaConfiguracoes.qml", "\"<b>\" + Tema.escapar(modelData.quando)"),
+    ("app/qml/SecaoBackup.qml", "Mostrar todos (\" + lista.length"),
+];
+
+/// Exceções (lista fechada): arquivo, um pedaço da expressão e o porquê.
+const EXCECOES: &[(&str, &str, &str)] = &[
+    (
+        "app/qml/Main.qml",
+        "janela.erroGeral",
+        "o Main.qml não muda sem pedido próprio (regra 8 do plano); é a mensagem de erro ao abrir o programa",
+    ),
+    (
+        "app/qml/Campo.qml",
+        "dica",
+        "dica do botão Copiar/Colar do próprio Campo: só recebe texto fixo (\"Colar na busca\", \"Copiar a busca\")",
+    ),
+    ("app/qml/GraficoBarras.qml", "Tema.valor(col.modelData.valor)", "dica da barra: só número e unidade"),
+];
+
+/// Os controles do Qt que, sem `contentItem` próprio, desenham o texto com o
+/// rótulo padrão do estilo (`IconLabel`/`CheckLabel`/`Text`, todos AutoText).
+const CONTROLES_COM_ROTULO_PADRAO: &[&str] = &[
+    "Button",
+    "ItemDelegate",
+    "CheckBox",
+    "RadioButton",
+    "Switch",
+    "MenuItem",
+    "MenuBarItem",
+    "TabButton",
+    "ToolButton",
+    "RoundButton",
+    "DelayButton",
+    "CheckDelegate",
+    "RadioDelegate",
+    "SwitchDelegate",
+    "SwipeDelegate",
+    "ToolTip",
+];
+
+/// H10 (extensão): todo texto que mostra dado declara o formato. `Text` e
+/// `Label` com dado têm `textFormat` (o texto puro, ou um dos formatados de
+/// propósito); os componentes de texto já são puros; um controle do Qt com
+/// dado tem o `contentItem` próprio (o rótulo padrão é AutoText); uma dica
+/// (`ToolTip.text`) com dado só entre as exceções. Texto fixo do programa (uma
+/// string, ou um ternário de strings) não precisa: não tem marcação.
+#[test]
+fn h10_textos_de_dado_declaram_o_formato() {
+    let puros: Vec<String> = componentes_de_texto()
+        .into_iter()
+        .filter(|(_, f)| f.as_deref() == Some("Text.PlainText"))
+        .map(|(n, _)| n)
+        .collect();
+    let todos_comps: Vec<String> = componentes_de_texto().into_iter().map(|(n, _)| n).collect();
+    let mut fora = Vec::new();
+    let mut vistos = 0;
+    let mut excecoes_usadas = vec![false; EXCECOES.len()];
+    let mut formatados_usados = vec![false; FORMATADOS_DE_PROPOSITO.len()];
+    for arquivo in todos_os_qml() {
+        let limpo = sem_comentarios(&ler(&arquivo));
+        for obj in objetos(&limpo) {
+            let texto_ou_comp = obj.tipo == "Text" || obj.tipo == "Label" || todos_comps.contains(&obj.tipo);
+            let controle = CONTROLES_COM_ROTULO_PADRAO.contains(&obj.tipo.as_str());
+            // A dica (ToolTip.text) em qualquer objeto.
+            if let Some(dica) = obj.prop("ToolTip.text") {
+                if !so_texto_fixo(&String::from_utf8(mascarado(dica)).unwrap()) {
+                    vistos += 1;
+                    match EXCECOES.iter().position(|(a, p, _)| *a == arquivo && dica.contains(p)) {
+                        Some(i) => excecoes_usadas[i] = true,
+                        None => {
+                            fora.push(format!("{arquivo}:{}: {} › ToolTip.text com dado: {dica}", obj.linha, obj.tipo))
+                        }
+                    }
+                }
+            }
+            if !texto_ou_comp && !controle {
+                continue;
+            }
+            // O texto: o `text:` ou, sem ele, o atribuído por código (`id.text = …`).
+            let expr = match obj.prop("text") {
+                Some(e) => e.to_string(),
+                None => match obj.prop("id") {
+                    Some(id) if limpo.contains(&format!("{id}.text = ")) => format!("{id}.text = …"),
+                    _ => continue,
+                },
+            };
+            if so_texto_fixo(&String::from_utf8(mascarado(&expr)).unwrap()) {
+                continue;
+            }
+            vistos += 1;
+            let resumo: String = expr.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(90).collect();
+            if let Some(i) = EXCECOES.iter().position(|(a, p, _)| *a == arquivo && expr.contains(p)) {
+                excecoes_usadas[i] = true;
+                continue;
+            }
+            if controle {
+                if obj.prop("contentItem").is_none() {
+                    fora.push(format!(
+                        "{arquivo}:{}: {} com o rótulo padrão do Qt (AutoText; sem contentItem próprio): {resumo}",
+                        obj.linha, obj.tipo
+                    ));
+                }
+                continue;
+            }
+            match obj.prop("textFormat") {
+                Some("Text.PlainText") => {}
+                None if puros.contains(&obj.tipo) => {}
+                None => fora.push(format!("{arquivo}:{}: {} sem textFormat: {resumo}", obj.linha, obj.tipo)),
+                Some(f) => match FORMATADOS_DE_PROPOSITO.iter().position(|(a, p)| *a == arquivo && expr.contains(p)) {
+                    Some(i) => formatados_usados[i] = true,
+                    None => fora.push(format!(
+                        "{arquivo}:{}: {} formatado ({f}) fora da lista dos formatados de propósito: {resumo}",
+                        obj.linha, obj.tipo
+                    )),
+                },
+            }
+        }
+    }
+    assert!(vistos >= 300, "a leitura achou poucos textos com dado ({vistos}): a leitura dos QML quebrou?");
+    let sobrando: Vec<_> = EXCECOES.iter().zip(&excecoes_usadas).filter(|(_, u)| !**u).map(|(e, _)| e).collect();
+    assert!(sobrando.is_empty(), "exceção que não existe mais (tire da lista): {sobrando:#?}");
+    let sobrando: Vec<_> =
+        FORMATADOS_DE_PROPOSITO.iter().zip(&formatados_usados).filter(|(_, u)| !**u).map(|(e, _)| e).collect();
+    assert!(sobrando.is_empty(), "formatado de propósito que não existe mais (tire da lista): {sobrando:#?}");
+    assert!(fora.is_empty(), "{} texto(s) com dado no formato automático do Qt (H10, extensão): {fora:#?}", fora.len());
+}
+
 /// A leitura dos QML desta trava, nos casos que importam (para a trava não
 /// passar por engano).
 #[test]

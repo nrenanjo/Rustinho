@@ -28,6 +28,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.dia.data
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -36,6 +37,7 @@ Rectangle {
             }
             Text {
                 text: linha.dia.hoje ? "hoje" : linha.dia.diaSemana
+                textFormat: Text.PlainText
                 color: Tema.apagadoDaFaixa(linha.escura)
                 font.family: Tema.serifa
                 font.italic: true
@@ -68,6 +70,7 @@ Rectangle {
             }
             Text {
                 text: linha.dia.entradas !== "0,00" ? "+ " + Tema.valor(linha.dia.entradas) : ""
+                textFormat: Text.PlainText
                 color: Tema.verdeEscuroDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -77,6 +80,7 @@ Rectangle {
             }
             Text {
                 text: linha.dia.saidas !== "0,00" ? "− " + Tema.valor(linha.dia.saidas) : ""
+                textFormat: Text.PlainText
                 color: Tema.vermelhoDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -87,6 +91,7 @@ Rectangle {
             Text {
                 visible: linha.mostrarSaldo
                 text: "R$ " + Tema.valor(linha.dia.saldo)
+                textFormat: Text.PlainText
                 color: linha.dia.negativo ? Tema.vermelhoDaFaixa(linha.escura) : Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -97,6 +102,7 @@ Rectangle {
         }
         Text {
             text: (linha.dia.detalhes || []).join("  ·  ")
+            textFormat: Text.PlainText
             visible: text !== ""
             color: Tema.tintaSuaveDaFaixa(linha.escura)
             font.family: Tema.serifa

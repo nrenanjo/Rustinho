@@ -59,6 +59,7 @@ Button {
             Text {
                 visible: botao.text !== ""
                 text: botao.text
+                textFormat: Text.PlainText
                 font: botao.font
                 color: botao.corTexto
                 anchors.verticalCenter: parent.verticalCenter
@@ -66,6 +67,7 @@ Button {
             Text {
                 visible: botao.atalho !== "" && !Tema.celular && !Tema.estreito
                 text: botao.atalho
+                textFormat: Text.PlainText
                 font.family: Tema.texto
                 font.pixelSize: 12
                 font.weight: Font.Bold

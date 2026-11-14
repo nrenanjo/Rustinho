@@ -116,6 +116,7 @@ FocusScope {
                             x: 18
                             y: 6
                             text: cartao.modelData.nome.charAt(0).toUpperCase()
+                            textFormat: Text.PlainText
                             font.family: Tema.titulo
                             font.italic: true
                             font.weight: Font.DemiBold
@@ -129,6 +130,7 @@ FocusScope {
                             anchors.bottom: parent.bottom
                             anchors.margins: Tema.estreito ? 14 : 18
                             text: cartao.modelData.nome
+                            textFormat: Text.PlainText
                             font.family: Tema.titulo
                             font.weight: Font.Bold
                             font.pixelSize: Tema.estreito ? 22 : 26

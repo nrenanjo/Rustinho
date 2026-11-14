@@ -163,6 +163,7 @@ FocusScope {
                             spacing: 8
                             Text {
                                 text: v.modelData.nome
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(v.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -177,6 +178,7 @@ FocusScope {
                                     required property var modelData
                                     required property int index
                                     text: index === 5 && Tema.oculto && modelData !== "—" ? "••" : Tema.sigiloTexto(modelData)
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(v.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 13

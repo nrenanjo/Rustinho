@@ -69,6 +69,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.ordem
+                textFormat: Text.PlainText
                 color: Tema.dourado
                 font.family: Tema.titulo
                 font.weight: Font.Bold
@@ -81,6 +82,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Text {
                     text: linha.item.descricao
+                    textFormat: Text.PlainText
                     color: Tema.tinta
                     font.family: Tema.fonteLinha
                     font.weight: Font.Bold
@@ -105,6 +107,7 @@ Rectangle {
                 Layout.alignment: Qt.AlignTop
                 Text {
                     text: linha.item.quantidade + " " + linha.item.unidade + " × R$ " + Tema.valor(linha.item.valorUnitario)
+                    textFormat: Text.PlainText
                     color: Tema.tintaSuave
                     font.family: Tema.texto
                     font.pixelSize: 15
@@ -112,6 +115,7 @@ Rectangle {
                 }
                 Text {
                     text: "R$ " + Tema.valor(linha.item.valorProdutos)
+                    textFormat: Text.PlainText
                     color: Tema.tinta
                     font.family: Tema.texto
                     font.weight: Font.Bold
@@ -158,6 +162,7 @@ Rectangle {
                                     return "Vai ser cadastrada como peça nova"
                                 return linha.peca ? linha.peca.codigo + " · " + linha.peca.nome + (linha.peca.marca ? " (" + linha.peca.marca + ")" : "") : "Peça não encontrada"
                             }
+                            textFormat: Text.PlainText
                             color: linha.pendente ? Tema.vermelho : Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -220,6 +225,7 @@ Rectangle {
                     Layout.leftMargin: Tema.estreito ? 0 : 30
                     Text {
                         text: "Cada " + linha.item.unidade + " da nota tem"
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -239,6 +245,7 @@ Rectangle {
                     Text {
                         text: (linha.item.fator === "1" ? "peça" : "peças") + "  →  entram " + linha.item.quantidadePecas
                               + " " + (linha.peca ? linha.peca.unidade : "") + " no estoque"
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -250,6 +257,7 @@ Rectangle {
                         spacing: 0
                         Text {
                             text: "Custo R$ " + Tema.valor(linha.item.custoUnitario) + " cada"
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -259,6 +267,7 @@ Rectangle {
                         Text {
                             visible: linha.editavel && !!linha.peca && linha.peca.custoAtual !== ""
                             text: linha.peca ? "antes R$ " + Tema.valor(linha.peca.custoAtual) + (linha.peca.variacaoCusto && !Tema.oculto ? "  (" + linha.peca.variacaoCusto + "%)" : "") : ""
+                            textFormat: Text.PlainText
                             color: linha.peca && linha.peca.custoSubiu ? Tema.vermelho : Tema.tintaSuave
                             font.family: Tema.texto
                             font.pixelSize: 13
@@ -271,6 +280,7 @@ Rectangle {
                         Layout.leftMargin: 8
                         Text {
                             text: linha.peca ? (linha.editavel ? "Revenda R$ " + linha.peca.precoNovo : "Revenda hoje R$ " + linha.peca.precoAtual) : ""
+                            textFormat: Text.PlainText
                             color: Tema.verdeEscuro
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -280,6 +290,7 @@ Rectangle {
                         Text {
                             visible: linha.editavel && !!linha.peca && linha.peca.precoAtual !== linha.peca.precoNovo
                             text: linha.peca ? "era R$ " + linha.peca.precoAtual : ""
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuave
                             font.family: Tema.texto
                             font.pixelSize: 13

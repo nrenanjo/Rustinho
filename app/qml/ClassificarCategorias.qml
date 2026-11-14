@@ -96,6 +96,7 @@ Painel {
                         Layout.fillWidth: true
                         Text {
                             text: linha.modelData.nome
+                            textFormat: Text.PlainText
                             color: linha.modelData.ativo ? Tema.tintaDaFaixa(linha.par) : Tema.apagadoDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold

@@ -59,6 +59,7 @@ ColumnLayout {
     }
     Text {
         text: area.erro
+        textFormat: Text.PlainText
         visible: text !== ""
         color: Tema.vermelho
         font.family: Tema.texto

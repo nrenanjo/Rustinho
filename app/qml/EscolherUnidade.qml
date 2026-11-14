@@ -126,6 +126,7 @@ Painel {
                                     Text {
                                         width: parent.width
                                         text: botaoUnidade.modelData.sigla
+                                        textFormat: Text.PlainText
                                         horizontalAlignment: Text.AlignHCenter
                                         wrapMode: Text.WrapAnywhere
                                         color: botaoUnidade.ativa ? Tema.tintaAtual : Tema.tinta
@@ -136,6 +137,7 @@ Painel {
                                     Text {
                                         width: parent.width
                                         text: botaoUnidade.modelData.descricao
+                                        textFormat: Text.PlainText
                                         horizontalAlignment: Text.AlignHCenter
                                         wrapMode: Text.Wrap
                                         color: botaoUnidade.ativa ? Tema.tintaAtual : Tema.tinta

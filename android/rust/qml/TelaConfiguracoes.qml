@@ -903,6 +903,7 @@ FocusScope {
                             Text {
                                 property bool manterLargura: true
                                 text: linhaTabela.numero
+                                textFormat: Text.PlainText
                                 color: Tema.dourado
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -1029,6 +1030,7 @@ FocusScope {
                             x: 14
                             width: parent.width - 28
                             text: tela.exemploJuros
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.pixelSize: 15
@@ -1194,6 +1196,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: (modelData.nome || "Caixa") + " · " + (modelData.erro ? modelData.erro : "sincronizado " + tela.quandoFoi(modelData.sincronizadoEm) + (modelData.via ? " · via " + modelData.via : ""))
+                                    textFormat: Text.PlainText
                                     color: modelData.erro ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaDaFaixa(faixaDaLista.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1217,6 +1220,7 @@ FocusScope {
                         visible: !!tela.sync && tela.sync.quebradas > 0
                         text: tela.sync ? tela.sync.quebradas + (tela.sync.quebradas === 1 ? " registro com problema." : " registros com problema.")
                                           + " Só o dinheiro desses registros fica bloqueado até o gerente resolver; o resto da loja funciona normalmente." : ""
+                        textFormat: Text.PlainText
                         color: Tema.vermelho
                         font.family: Tema.texto
                         font.pixelSize: 13
@@ -1318,6 +1322,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                     Text {
                                         text: linhaCaixa.modelData.nome
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaDaFaixa(linhaCaixa.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
@@ -1331,6 +1336,7 @@ FocusScope {
                                                  + " alteração(ões) esperam a atualização dele." : "")
                                               + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
                                                  + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
+                                        textFormat: Text.PlainText
                                         color: linhaCaixa.modelData.bloqueia ? Tema.vermelhoDaFaixa(linhaCaixa.par) : Tema.tintaSuaveDaFaixa(linhaCaixa.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 13
@@ -1550,6 +1556,7 @@ FocusScope {
                                 spacing: 6
                                 Text {
                                     text: modelData.oQue + " · " + modelData.quando + (modelData.caixa ? " · " + modelData.caixa : "")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -1559,6 +1566,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: modelData.texto
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1570,6 +1578,7 @@ FocusScope {
                                     delegate: Text {
                                         required property var modelData
                                         text: modelData.nome + ": ficou " + modelData.ficou + " · a outra versão tinha " + modelData.perdeu
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaSuaveDaFaixa(faixaDaLista5.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14
@@ -1580,6 +1589,7 @@ FocusScope {
                                 Text {
                                     visible: !!modelData.resolvido
                                     text: "Resolvido: " + modelData.resolvido
+                                    textFormat: Text.PlainText
                                     color: Tema.verdeEscuroDaFaixa(faixaDaLista5.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1623,6 +1633,7 @@ FocusScope {
                     Text {
                         visible: !!tela.codigos && !!tela.codigos.bloqueio
                         text: tela.codigos && tela.codigos.bloqueio ? tela.codigos.bloqueio.texto : ""
+                        textFormat: Text.PlainText
                         color: Tema.vermelho
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -1679,6 +1690,7 @@ FocusScope {
                             return "Este caixa: " + livres.map(f => tela.milhar(f.inicio) + " a " + tela.milhar(f.fim)).join(", ")
                                    + " · próximo código " + tela.milhar(livres[0].proximo) + " · restam " + tela.milhar(c.restantes)
                         }
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -1689,6 +1701,7 @@ FocusScope {
                         visible: !!tela.codigos && tela.codigos.pendentes > 0
                         text: tela.codigos ? tela.codigos.pendentes + (tela.codigos.pendentes === 1 ? " peça está" : " peças estão")
                                              + " com código a definir (" + tela.codigos.pendentesDeste + " deste caixa). Cada caixa dá o código das dele quando recebe a faixa." : ""
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -1734,6 +1747,7 @@ FocusScope {
                                 Text {
                                     text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
                                           + (modelData.conflito ? " · já é da peça “" + modelData.outraPeca + "”" : " · esperando a confirmação")
+                                    textFormat: Text.PlainText
                                     color: modelData.conflito ? Tema.vermelhoDaFaixa(faixaDaLista6.par) : Tema.tintaDaFaixa(faixaDaLista6.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1762,6 +1776,7 @@ FocusScope {
                             required property var modelData
                             text: "Os códigos de " + tela.milhar(modelData.inicio) + " a " + tela.milhar(modelData.fim) + " são de dois caixas ("
                                   + modelData.caixas.join(" e ") + "). Nenhum caixa dá código novo nesse pedaço; as peças que já têm código dele ficam como estão."
+                            textFormat: Text.PlainText
                             color: Tema.vermelho
                             font.family: Tema.texto
                             font.pixelSize: 14
@@ -1797,6 +1812,7 @@ FocusScope {
                                 spacing: 4
                                 Text {
                                     text: (grupo.modelData.tipo === "barras" ? "Código de barras " : "Código ") + grupo.modelData.codigo
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(grupo.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -1811,6 +1827,7 @@ FocusScope {
                                         Layout.fillWidth: true
                                         Text {
                                             text: modelData.nome + (modelData.antigo ? " (era o código dela; agora é " + modelData.codigo + ")" : "")
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaDaFaixa(grupo.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 14
@@ -1839,6 +1856,7 @@ FocusScope {
                         visible: !!tela.codigos && tela.codigos.pessoasPendentes > 0
                         text: tela.codigos ? tela.codigos.pessoasPendentes + (tela.codigos.pessoasPendentes === 1 ? " cliente ou fornecedor está" : " clientes ou fornecedores estão")
                                              + " com código a definir. Cada caixa dá o código dos dele quando recebe a faixa." : ""
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -1877,6 +1895,7 @@ FocusScope {
                                 Text {
                                     text: modelData.nome + " · código " + modelData.codigo + " (" + modelData.caixa + ")"
                                           + (modelData.conflito ? " · já é de “" + modelData.outraPessoa + "”" : " · esperando a confirmação")
+                                    textFormat: Text.PlainText
                                     color: modelData.conflito ? Tema.vermelhoDaFaixa(faixaDaLista7.par) : Tema.tintaDaFaixa(faixaDaLista7.par)
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1925,6 +1944,7 @@ FocusScope {
                                 spacing: 4
                                 Text {
                                     text: "Código " + grupoPessoas.modelData.codigo
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(grupoPessoas.par)
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -1939,6 +1959,7 @@ FocusScope {
                                         Layout.fillWidth: true
                                         Text {
                                             text: modelData.nome + " · " + modelData.papel + " (" + modelData.caixa + ")"
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaDaFaixa(grupoPessoas.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 14
@@ -1972,6 +1993,7 @@ FocusScope {
                                    + i.foraDoPadrao + " com zero na frente ou muito longos; " + i.repetidos + " códigos repetidos ("
                                    + i.pecasRepetidas + " peças). Nada foi renumerado."
                         }
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 13
@@ -2049,6 +2071,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                     Text {
                                         text: linhaTroca.modelData.nome + (linhaTroca.modelData.situacao === "retirado" ? " (retirado da loja)" : "")
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaDaFaixa(linhaTroca.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
@@ -2059,6 +2082,7 @@ FocusScope {
                                         text: "Última troca: " + (linhaTroca.modelData.sincronizadoEm || "nunca")
                                               + " · visto na rede: " + (linhaTroca.modelData.vistoEm || "nunca")
                                               + (linhaTroca.modelData.erro ? " · último erro: " + linhaTroca.modelData.erro : "")
+                                        textFormat: Text.PlainText
                                         color: linhaTroca.modelData.erro ? Tema.vermelhoDaFaixa(linhaTroca.par) : Tema.tintaSuaveDaFaixa(linhaTroca.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 13
@@ -2205,6 +2229,7 @@ FocusScope {
                     Layout.fillWidth: true
                     Text {
                         text: "Rustinho " + (tela.config ? tela.config.versao : "") + " · Etapa " + (tela.janela && tela.janela.estado.etapa ? tela.janela.estado.etapa : "")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.titulo
                         font.weight: Font.Bold

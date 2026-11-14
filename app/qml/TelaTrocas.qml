@@ -178,6 +178,7 @@ FocusScope {
                     spacing: 14
                     Text {
                         text: "nº " + lv.modelData.numero
+                        textFormat: Text.PlainText
                         color: Tema.douradoDaFaixa(lv.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -189,6 +190,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: lv.modelData.cliente || "Sem cliente"
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(lv.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -199,6 +201,7 @@ FocusScope {
                         Text {
                             text: [lv.modelData.quando, lv.modelData.caixa, lv.modelData.vendaNumero ? "da venda " + lv.modelData.vendaNumero : "",
                                    lv.modelData.valor !== lv.modelData.saldo ? "era R$ " + lv.modelData.valor : ""].filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(lv.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -224,6 +227,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + lv.modelData.saldo
+                        textFormat: Text.PlainText
                         color: Tema.verdeEscuroDaFaixa(lv.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
@@ -287,6 +291,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: "Devolução " + lf.modelData.numero + " · venda " + lf.modelData.vendaNumero + (lf.modelData.cliente ? " · " + lf.modelData.cliente : "")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(lf.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -297,6 +302,7 @@ FocusScope {
                         }
                         Text {
                             text: [lf.modelData.quando, lf.modelData.itens, lf.modelData.motivo, lf.modelData.cancelada ? "desfeita" : ""].filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(lf.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -329,6 +335,7 @@ FocusScope {
                         Layout.preferredWidth: 190
                         Text {
                             text: "R$ " + lf.modelData.valor
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(lf.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -337,6 +344,7 @@ FocusScope {
                         }
                         Text {
                             text: lf.modelData.como
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(lf.par)
                             font.family: Tema.texto
                             font.pixelSize: 12

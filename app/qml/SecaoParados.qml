@@ -139,6 +139,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.p.nome + (linha.p.marca ? " · " + linha.p.marca : "")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -151,6 +152,7 @@ FocusScope {
                         Text {
                             text: [Tema.estreito ? linha.p.ha : "", "cód. " + linha.p.codigo, linha.p.local ? "local " + linha.p.local : "", linha.p.ultimaVenda, linha.p.ultimaCompra]
                                   .filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -171,6 +173,7 @@ FocusScope {
                         Text {
                             visible: linha.p.valor !== ""
                             text: "R$ " + Tema.valor(linha.p.valor)
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -179,6 +182,7 @@ FocusScope {
                         }
                         Text {
                             text: "tem " + linha.p.estoque + " " + linha.p.unidade
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12

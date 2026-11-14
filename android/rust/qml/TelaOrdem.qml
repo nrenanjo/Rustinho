@@ -397,6 +397,7 @@ FocusScope {
                 Text {
                     visible: tela.situacao === "cancelada"
                     text: "Cancelada" + (tela.ficha && tela.ficha.motivoCancelamento ? ": " + tela.ficha.motivoCancelamento : "")
+                    textFormat: Text.PlainText
                     color: Tema.vermelho
                     font.family: Tema.texto
                     font.weight: Font.Bold
@@ -543,6 +544,7 @@ FocusScope {
                                     x: 12
                                     width: parent.width - 24
                                     text: modelData.nome + (modelData.telefone ? "  ·  " + modelData.telefone : "") + (modelData.veiculos ? "  ·  " + modelData.veiculos : "")
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -628,6 +630,7 @@ FocusScope {
                                             id: rotuloPrev
                                             anchors.centerIn: parent
                                             text: celulaPrev.modelData[0]
+                                            textFormat: Text.PlainText
                                             color: Tema.tintaSuave
                                             font.family: Tema.texto
                                             font.pixelSize: 13
@@ -731,6 +734,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: li.c.descricao || ""
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(li.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
@@ -741,6 +745,7 @@ FocusScope {
                                 Text {
                                     text: ["cód. " + (li.c.codigo || ""), li.c.estoque !== undefined && li.c.estoque !== "" ? "tem " + li.c.estoque + " " + (li.c.unidade || "") : ""]
                                           .filter(x => !!x).join("  ·  ")
+                                    textFormat: Text.PlainText
                                     color: li.c.falta ? Tema.vermelhoDaFaixa(li.par) : Tema.tintaSuaveDaFaixa(li.par)
                                     font.family: Tema.serifa
                                     font.italic: true
@@ -797,6 +802,7 @@ FocusScope {
                             }
                             Text {
                                 text: li.c.total ? "R$ " + li.c.total : ""
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(li.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
@@ -848,6 +854,7 @@ FocusScope {
                                         id: rotuloServ
                                         anchors.centerIn: parent
                                         text: "+ " + modelData
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaSuave
                                         font.family: Tema.texto
                                         font.pixelSize: 13
@@ -875,12 +882,12 @@ FocusScope {
                         ColumnLayout {
                             spacing: 0
                             Rotulo { text: "Peças" }
-                            Text { text: "R$ " + (tela.calc ? tela.calc.pecas : "0,00"); color: Tema.tinta; font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 17 }
+                            Text { text: "R$ " + (tela.calc ? tela.calc.pecas : "0,00"); textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 17 }
                         }
                         ColumnLayout {
                             spacing: 0
                             Rotulo { text: "Mão de obra" }
-                            Text { text: "R$ " + (tela.calc ? tela.calc.servicos : "0,00"); color: Tema.tinta; font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 17 }
+                            Text { text: "R$ " + (tela.calc ? tela.calc.servicos : "0,00"); textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.weight: Font.DemiBold; font.pixelSize: 17 }
                         }
                         Campo {
                             id: desconto
@@ -898,6 +905,7 @@ FocusScope {
                             Rotulo { text: "Total"; Layout.alignment: Qt.AlignRight }
                             Text {
                                 text: "R$ " + (tela.calc ? tela.calc.total : "0,00")
+                                textFormat: Text.PlainText
                                 color: Tema.tinta
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -912,6 +920,7 @@ FocusScope {
                 Text {
                     visible: !!tela.ficha && tela.ficha.historico.length > 0
                     text: tela.ficha ? "Este carro já veio: " + tela.ficha.historico.slice(0, 4).map(h => "OS " + h.numero + " (" + (h.caixa ? h.caixa + ", " : "") + h.quando + ")").join(", ") : ""
+                    textFormat: Text.PlainText
                     color: Tema.tintaSuaveNo(palette.window)
                     font.family: Tema.serifa
                     font.italic: true
@@ -958,6 +967,7 @@ FocusScope {
             Text {
                 visible: saida.bloqueio !== ""
                 text: saida.bloqueio
+                textFormat: Text.PlainText
                 color: Tema.vermelho
                 font.family: Tema.texto
                 font.pixelSize: 15

@@ -33,6 +33,7 @@ Rectangle {
 
         Text {
             text: linha.item.numero
+            textFormat: Text.PlainText
             color: linha.atual ? Tema.tintaAtual : Tema.douradoDaFaixa(linha.par)
             font.family: Tema.titulo
             font.weight: Font.Bold
@@ -42,6 +43,7 @@ Rectangle {
         Text {
             visible: !Tema.estreito
             text: Qt.formatDateTime(new Date(linha.item.criadoEm), "dd/MM HH:mm")
+            textFormat: Text.PlainText
             color: linha.corSuave
             font.family: Tema.texto
             font.pixelSize: 14
@@ -52,6 +54,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.cliente || (linha.orcamento ? "Sem cliente" : "Consumidor")
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -63,6 +66,7 @@ Rectangle {
                 text: [Tema.estreito ? Qt.formatDateTime(new Date(linha.item.criadoEm), "dd/MM HH:mm") : "",
                        linha.item.itens + (linha.item.itens === 1 ? " item" : " itens"), linha.item.caixa, linha.item.vendedor,
                        linha.orcamento ? "válido até " + linha.item.validade : linha.item.formas].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 color: linha.corSuave
                 font.family: Tema.serifa
                 font.italic: true
@@ -92,6 +96,7 @@ Rectangle {
         }
         Text {
             text: "R$ " + linha.item.total
+            textFormat: Text.PlainText
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.Bold

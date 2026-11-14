@@ -56,6 +56,7 @@ ColumnLayout {
             leftPadding: 12
             rightPadding: 34
             text: combo.displayText
+            textFormat: Text.PlainText
             font: combo.font
             color: Tema.tinta
             verticalAlignment: Text.AlignVCenter
@@ -81,6 +82,7 @@ ColumnLayout {
             // sobre o azul claro, sem contraste (Nova OS › Serviço, 0.9.15).
             contentItem: Text {
                 text: parent.text
+                textFormat: Text.PlainText
                 font: parent.font
                 color: Tema.tinta
                 elide: Text.ElideRight
@@ -117,6 +119,7 @@ ColumnLayout {
 
     Text {
         text: selecao.erro
+        textFormat: Text.PlainText
         visible: text !== ""
         color: Tema.vermelho
         font.family: Tema.texto

@@ -38,6 +38,7 @@ Rectangle {
             Text {
                 visible: linha.posicao > 0
                 text: linha.posicao
+                textFormat: Text.PlainText
                 color: Tema.douradoDaFaixa(linha.par)
                 font.family: Tema.titulo
                 font.weight: Font.Bold
@@ -46,6 +47,7 @@ Rectangle {
             }
             Text {
                 text: linha.item.nome || ""
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -55,6 +57,7 @@ Rectangle {
             }
             Text {
                 text: Tema.sigiloTexto(linha.item.detalhe || "")
+                textFormat: Text.PlainText
                 color: Tema.apagadoDaFaixa(linha.par)
                 font.family: Tema.serifa
                 font.italic: true
@@ -63,6 +66,7 @@ Rectangle {
             Text {
                 text: (linha.dinheiro ? "R$ " + Tema.valor(linha.item.valor)
                        : linha.sensivel && Tema.oculto ? "••" : linha.item.valor || "")
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -91,6 +95,7 @@ Rectangle {
             }
             Text {
                 text: linha.item.percentual || ""
+                textFormat: Text.PlainText
                 color: Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12

@@ -130,6 +130,7 @@ FocusScope {
                     spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.v.posicao
+                        textFormat: Text.PlainText
                         color: Tema.douradoDaFaixa(linha.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -142,6 +143,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.v.nome + (linha.v.marca ? " · " + linha.v.marca : "")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -175,6 +177,7 @@ FocusScope {
                         Layout.preferredWidth: 130
                         Text {
                             text: linha.v.quantidade + " " + linha.v.unidade
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -183,6 +186,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.v.vendas + (linha.v.vendas === 1 ? " venda" : " vendas")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
@@ -194,6 +198,7 @@ FocusScope {
                         Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + linha.v.total
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -203,6 +208,7 @@ FocusScope {
                         Text {
                             visible: linha.v.lucro !== ""
                             text: "lucro R$ " + Tema.valor(linha.v.lucro) + (linha.v.margem && !Tema.oculto ? " (" + linha.v.margem + ")" : "")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
