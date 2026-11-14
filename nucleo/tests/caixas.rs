@@ -43,7 +43,11 @@ fn contar(b: &Banco, sql: &str) -> i64 {
 }
 
 fn loja() -> (Banco, Banco, String) {
-    let a = Banco::em_memoria().unwrap();
+    loja_com(Banco::em_memoria().unwrap())
+}
+
+/// A loja de `loja()` com o caixa A dado (por exemplo, num arquivo).
+fn loja_com(a: Banco) -> (Banco, Banco, String) {
     let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "balcao-azul-2026", true).unwrap();
     usuarios::definir_gerente(&a.conn, &u.id, true).unwrap();
     config::gravar(&a.conn, "loja_nome", "Loja de Teste").unwrap();
@@ -1237,4 +1241,79 @@ fn rc21_conferencia_diz_a_tabela_de_verdade() {
         r[0].texto
     );
     assert!(r[0].texto.contains("21369 registro(s) aqui e 21368 lá"), "{}", r[0].texto);
+}
+
+// ---------------------------------------------------------------------------
+// N-F54-2 (passo 5.4): a conferência depois de juntar os dados
+// (`verificar_depois`) rodando em duas conexões ao mesmo tempo no mesmo banco
+// (o motor e uma troca pedida à mão) não anota o mesmo item duas vezes.
+// ---------------------------------------------------------------------------
+
+/// A loja de `loja()` com o caixa A num arquivo (para abrir uma segunda
+/// conexão nele). Devolve também o caminho do arquivo.
+fn loja_em_arquivo(nome: &str) -> (Banco, Banco, String, std::path::PathBuf) {
+    let pasta = std::env::temp_dir().join(format!("rustinho-caixas-{nome}-{}", rustinho_nucleo::tempo::novo_id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let caminho = pasta.join("rustinho.db");
+    let (a, b, u) = loja_com(Banco::abrir(&caminho).unwrap());
+    (a, b, u, caminho)
+}
+
+/// Roda a conferência em A e, no meio dela, uma segunda conferência inteira
+/// numa outra conexão com o mesmo banco: depois de a primeira ver que o item
+/// ainda não está anotado e antes de ela gravar. O ponto é determinístico: o
+/// SQLite pergunta ao `authorizer` da conexão de A, ao preparar a gravação na
+/// `sync_conflito`, e a segunda roda ali (a de A não segura nada nesse
+/// momento). Devolve quantas vezes a segunda rodou.
+fn conferir_ao_mesmo_tempo(a: &Banco, caminho: &std::path::Path) -> usize {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    let outra = std::sync::Mutex::new(Some(Banco::abrir(caminho).unwrap()));
+    let rodou = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let contador = rodou.clone();
+    a.conn
+        .authorizer(Some(move |ctx: AuthContext<'_>| {
+            if let AuthAction::Insert { table_name: "sync_conflito" } = ctx.action {
+                if let Some(b) = outra.lock().unwrap().take() {
+                    sync::verificar_depois(&b.conn).unwrap();
+                    contador.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    a.conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>).unwrap();
+    rodou.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// N-F54-2, F-12: o mesmo orçamento vendido em dois caixas sem rede; duas
+/// conferências ao mesmo tempo em A anotam o item uma vez só.
+#[test]
+#[ignore = "N-F54-2: caracterização do F-12 (falha hoje: duas conferências ao mesmo tempo anotam dois itens)"]
+fn n_f54_2_f12_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
+    let (mut a, mut b, u, caminho) = loja_em_arquivo("nf542-f12");
+    let p = peca(&a, &u, "Amortecedor", "5");
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    let mut e = vendas::VendaEntrada {
+        itens: vec![vendas::ItemEntrada { produto_id: p.clone(), quantidade: "1".into(), ..Default::default() }],
+        tabela: 1,
+        ..Default::default()
+    };
+    let orc = vendas::salvar_orcamento(&a.conn, &a.dispositivo, &u, "Caixa 1", &e).unwrap();
+    trocar(&mut a, &mut b);
+    caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 2", "0").unwrap();
+    e.orcamento_id = orc.clone();
+    e.pagamentos = vec![vendas::PagamentoEntrada { forma: "pix".into(), valor: "80".into(), ..Default::default() }];
+    vendas::concluir(&a.conn, &a.dispositivo, &u, &e).unwrap();
+    vendas::concluir(&b.conn, &b.dispositivo, &u, &e).unwrap();
+    trocar(&mut a, &mut b);
+    // A troca já anotou o item; a conferência de agora é a que importa.
+    a.conn.execute("DELETE FROM sync_conflito WHERE tipo = 'orcamento'", []).unwrap();
+    assert_eq!(conferir_ao_mesmo_tempo(&a, &caminho), 1, "a segunda conferência rodou no meio da primeira");
+    let n = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'orcamento'");
+    assert_eq!(n, 1, "duas conferências ao mesmo tempo anotaram {n} itens do mesmo orçamento");
+    let k = sync::conflitos(&a.conn).unwrap();
+    assert_eq!(k.iter().filter(|c| c.tipo == "orcamento").count(), 1, "{k:#?}");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
 }
