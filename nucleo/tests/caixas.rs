@@ -1377,7 +1377,6 @@ fn conferir_ao_mesmo_tempo_quando(
 /// controle); com duas conferências ao mesmo tempo em A, também uma vez (a
 /// mesma corrida da N-F54-2). Era a sonda `sonda_rev3_r03_…` da revisão.
 #[test]
-#[ignore = "RC3-1: falha hoje (o R-03 pergunta \"já anotado?\" e grava em duas instruções)"]
 fn rc3_1_r03_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     let (mut a, mut b, u, caminho) = loja_em_arquivo("rc3-1-r03");
     let mut f = rustinho_nucleo::pessoas::ficha_nova(&a.conn, "cliente").unwrap();
@@ -1426,7 +1425,6 @@ fn rc3_1_r03_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
 /// segunda roda quando a primeira vai gravar no `usuario`), um item só e um
 /// gerente. Era a sonda `sonda_rev3_c06_…` da revisão.
 #[test]
-#[ignore = "RC3-1: falha hoje (o C-06 conta os gerentes e grava em instruções separadas)"]
 fn rc3_1_c06_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     let (a, b, _u, caminho) = loja_em_arquivo("rc3-1-c06");
     // Sem gerente, como depois de cada caixa tirar um sem ver o outro.
