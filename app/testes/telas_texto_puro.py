@@ -58,8 +58,6 @@ ESPERADAS = {
     "T1": "H10 ext.: o nome da peça (LinhaPeca) no formato automático",
     "T2": "H10 ext.: o nome do cliente (LinhaPessoa) no formato automático",
     "T3": "H10 ext.: o nome do fornecedor (LinhaPessoa) no formato automático",
-    "T4": "H10 ext.: a observação da venda (Nota) no formato automático",
-    "T5": "H10 ext.: o título da venda (Cabecalho › Titulo) no formato automático",
     "T6": "H10 ext.: a sugestão do Campo (ItemDelegate, rótulo padrão do Qt) no formato automático",
 }
 
