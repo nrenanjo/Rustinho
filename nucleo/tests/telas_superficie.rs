@@ -8,6 +8,11 @@
 //!   fica quase invisível. Nenhuma tela de hoje põe um `Selecao` ou `AreaTexto`
 //!   com rótulo sobre uma superfície escura (a revisão visual não achou), então
 //!   a trava é do componente, e o contraste é calculado das cores do `Tema.qml`.
+//! - **H10**: um dado (nome, observação, código…) num texto do Qt nunca vira
+//!   formatação. Os textos formatados de propósito escapam os dados
+//!   (`Tema.escapar`); os outros declaram o texto puro (extensão da f7c: o
+//!   formato automático do Qt, o `Text.AutoText`, lia como HTML o dado que
+//!   parecia HTML).
 //!
 //! A igualdade das duas cópias (computador e Android) é do `copias_android.rs`.
 
@@ -178,4 +183,359 @@ fn h10_textos_formatados_escapam_os_dados() {
     }
     assert!(vistos >= 10, "a leitura achou poucos dados nos textos formatados ({vistos})");
     assert!(fora.is_empty(), "dado impresso sem escapar num texto formatado (H10): {fora:#?}");
+}
+
+// ---------------------------------------------------------------------------
+// H10, extensão (f7c; observação P-4 da revisão cruzada de 13/11): o formato
+// automático do Qt.
+//
+// Um `Text` (ou `Label`) sem `textFormat` usa o `Text.AutoText`: se o texto
+// "parece" HTML (`Qt::mightBeRichText`: a primeira marca da primeira linha é
+// uma marca conhecida, como `<b>`, `<i>`, `<img …>` ou `<a …>`), ele é
+// desenhado como HTML. Um nome de peça, de cliente ou de fornecedor, uma
+// observação ou um código vindo da nota, de outro caixa ou digitado vira então
+// negrito, imagem ou link, e o resto some ou muda. Os controles do Qt com o
+// rótulo padrão (`Button`, `ItemDelegate`…: `IconLabel`) também usam o
+// AutoText, e no Qt 6.12 um `<img src=…>` no texto deles fecha o programa
+// (sonda da f7c). O roteiro `telas_texto_puro.py` mostra isso na tela.
+
+/// O QML sem comentários (`//` e `/* */`); as strings e as quebras de linha ficam.
+fn sem_comentarios(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut saida = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'"' || c == b'\'' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != c && b[j] != b'\n' {
+                j += if b[j] == b'\\' { 2 } else { 1 };
+            }
+            let fim = (j + 1).min(b.len());
+            saida.extend_from_slice(&b[i..fim]);
+            i = fim;
+        } else if b[i..].starts_with(b"//") {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if b[i..].starts_with(b"/*") {
+            let fim = b[i + 2..].windows(2).position(|w| w == b"*/").map_or(b.len(), |p| i + 2 + p + 2);
+            saida.extend(b[i..fim].iter().filter(|&&x| x == b'\n'));
+            i = fim;
+        } else {
+            saida.push(c);
+            i += 1;
+        }
+    }
+    String::from_utf8(saida).expect("o QML sem comentários continua UTF-8")
+}
+
+/// O mesmo texto com o miolo das strings trocado por `S` (byte a byte, para as
+/// posições continuarem as mesmas): chaves, `;` e `:` dentro de um texto não
+/// contam como código.
+fn mascarado(limpo: &str) -> Vec<u8> {
+    let mut b = limpo.as_bytes().to_vec();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == b'"' || c == b'\'' {
+            let mut j = i + 1;
+            while j < b.len() && b[j] != c && b[j] != b'\n' {
+                let passo = if b[j] == b'\\' { 2 } else { 1 };
+                for k in j..(j + passo).min(b.len()) {
+                    b[k] = b'S';
+                }
+                j += passo;
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    b
+}
+
+/// Um objeto do QML: o tipo, a linha e as propriedades diretas
+/// (nome → expressão, do texto sem comentários).
+struct Objeto {
+    tipo: String,
+    linha: usize,
+    props: Vec<(String, String)>,
+}
+
+impl Objeto {
+    fn prop(&self, nome: &str) -> Option<&str> {
+        self.props.iter().find(|(n, _)| n == nome).map(|(_, e)| e.as_str())
+    }
+}
+
+fn eh_ident(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_' || c == b'.'
+}
+
+/// Os objetos (`Tipo { … }`, com o tipo começando por maiúscula) de um QML.
+fn objetos(limpo: &str) -> Vec<Objeto> {
+    let m = mascarado(limpo);
+    let mut lista = Vec::new();
+    for k in 0..m.len() {
+        if m[k] != b'{' {
+            continue;
+        }
+        let mut fim_id = k;
+        while fim_id > 0 && m[fim_id - 1].is_ascii_whitespace() {
+            fim_id -= 1;
+        }
+        let mut ini_id = fim_id;
+        while ini_id > 0 && eh_ident(m[ini_id - 1]) {
+            ini_id -= 1;
+        }
+        if ini_id == fim_id
+            || (ini_id > 0 && !(m[ini_id - 1].is_ascii_whitespace() || b":;[{,".contains(&m[ini_id - 1])))
+        {
+            continue;
+        }
+        let tipo = &limpo[ini_id..fim_id];
+        let ultimo = tipo.rsplit('.').next().unwrap_or("");
+        if !ultimo.starts_with(|c: char| c.is_ascii_uppercase()) {
+            continue;
+        }
+        let mut nivel = 0i32;
+        let mut fim = m.len();
+        for (j, &c) in m.iter().enumerate().skip(k) {
+            match c {
+                b'{' => nivel += 1,
+                b'}' => {
+                    nivel -= 1;
+                    if nivel == 0 {
+                        fim = j;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        lista.push(Objeto {
+            tipo: ultimo.to_string(),
+            linha: limpo[..k].matches('\n').count() + 1,
+            props: propriedades(limpo, &m, k + 1, fim),
+        });
+    }
+    lista
+}
+
+/// As instruções diretas do corpo `[ini, fim)` de um objeto: separadas por `;`
+/// ou por quebra de linha fora de parênteses, colchetes e chaves; a linha
+/// continua quando termina num operador ou a seguinte começa com um (os
+/// ternários quebrados em várias linhas).
+fn propriedades(limpo: &str, m: &[u8], ini: usize, fim: usize) -> Vec<(String, String)> {
+    const TERMINA: [&str; 13] = ["?", ":", "+", "-", "||", "&&", "(", ",", "=", "*", "/", "<", ">"];
+    const COMECA: [&str; 9] = ["?", ":", "+", "||", "&&", ".", ")", "*", "/"];
+    let mut partes = Vec::new();
+    let mut nivel = 0i32;
+    let mut inicio = ini;
+    let mut i = ini;
+    while i < fim {
+        match m[i] {
+            b'(' | b'[' | b'{' => nivel += 1,
+            b')' | b']' | b'}' => nivel -= 1,
+            b';' if nivel == 0 => {
+                partes.push((inicio, i));
+                inicio = i + 1;
+            }
+            b'\n' if nivel == 0 => {
+                let atual = std::str::from_utf8(&m[inicio..i]).unwrap_or("").trim_end();
+                let resto = std::str::from_utf8(&m[i + 1..fim]).unwrap_or("").trim_start();
+                let continua = !atual.trim().is_empty()
+                    && (TERMINA.iter().any(|t| atual.ends_with(t)) || COMECA.iter().any(|t| resto.starts_with(t)));
+                if !continua {
+                    partes.push((inicio, i));
+                    inicio = i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    partes.push((inicio, fim));
+    let mut props = Vec::new();
+    for (a, b) in partes {
+        let trecho_m = std::str::from_utf8(&m[a..b]).unwrap_or("");
+        let Some(dois_pontos) = trecho_m.find(':') else { continue };
+        // O nome: o último pedaço antes do ":" ("readonly property string x").
+        let antes = trecho_m[..dois_pontos].trim();
+        let nome = antes.rsplit(char::is_whitespace).next().unwrap_or("");
+        let valido = !nome.is_empty()
+            && nome.bytes().all(eh_ident)
+            && (antes == nome
+                || ["property ", "readonly ", "required ", "default "].iter().any(|p| antes.starts_with(p)));
+        if !valido {
+            continue;
+        }
+        let expr = limpo[a + dois_pontos + 1..b].trim().to_string();
+        props.push((nome.to_string(), expr));
+    }
+    props
+}
+
+/// Tira os parênteses que envolvem a expressão inteira.
+fn sem_parenteses_de_fora(e: &str) -> &str {
+    let mut e = e.trim();
+    while e.starts_with('(') && e.ends_with(')') {
+        let mut nivel = 0;
+        let mut fecha_no_fim = true;
+        for (k, c) in e.char_indices() {
+            match c {
+                '(' => nivel += 1,
+                ')' => {
+                    nivel -= 1;
+                    if nivel == 0 && k != e.len() - 1 {
+                        fecha_no_fim = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !fecha_no_fim {
+            break;
+        }
+        e = e[1..e.len() - 1].trim();
+    }
+    e
+}
+
+/// A expressão (mascarada) só pode dar texto fixo do programa: uma string,
+/// `qsTr("…")`, uma soma só de textos fixos ou um ternário cujos ramos são
+/// todos assim. Qualquer outra coisa (um campo, uma função, uma soma com um
+/// campo) é dado.
+fn so_texto_fixo(e: &str) -> bool {
+    let e = sem_parenteses_de_fora(e);
+    let literal = |s: &str| {
+        s.len() >= 2
+            && (s.starts_with('"') || s.starts_with('\''))
+            && s.ends_with(&s[..1])
+            && s[1..s.len() - 1].bytes().all(|c| c == b'S')
+    };
+    if literal(e) || (e.starts_with("qsTr(") && e.ends_with(')') && literal(e[5..e.len() - 1].trim())) {
+        return true;
+    }
+    // Soma de textos fixos ("a" + "b": um texto comprido quebrado em linhas).
+    let mut partes = Vec::new();
+    let (mut nivel, mut inicio) = (0, 0);
+    for (k, c) in e.char_indices() {
+        match c {
+            '(' | '[' | '{' => nivel += 1,
+            ')' | ']' | '}' => nivel -= 1,
+            '+' if nivel == 0 => {
+                partes.push(&e[inicio..k]);
+                inicio = k + 1;
+            }
+            _ => {}
+        }
+    }
+    partes.push(&e[inicio..]);
+    if partes.len() > 1 && partes.iter().all(|p| so_texto_fixo(p)) {
+        return true;
+    }
+    // Ternário: a condição pode ser qualquer coisa; os ramos, só texto fixo.
+    let mut nivel = 0;
+    let mut pergunta = None;
+    for (k, c) in e.char_indices() {
+        match c {
+            '(' | '[' | '{' => nivel += 1,
+            ')' | ']' | '}' => nivel -= 1,
+            '?' if nivel == 0 => {
+                pergunta = Some(k);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(q) = pergunta else { return false };
+    let resto = &e[q + 1..];
+    let (mut nivel, mut aninhados) = (0, 0);
+    for (k, c) in resto.char_indices() {
+        match c {
+            '(' | '[' | '{' => nivel += 1,
+            ')' | ']' | '}' => nivel -= 1,
+            '?' if nivel == 0 => aninhados += 1,
+            ':' if nivel == 0 => {
+                if aninhados == 0 {
+                    return so_texto_fixo(&resto[..k]) && so_texto_fixo(&resto[k + 1..]);
+                }
+                aninhados -= 1;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Os QML do programa (computador; as cópias do Android são iguais, `copias_android.rs`).
+fn todos_os_qml() -> Vec<String> {
+    let mut lista = Vec::new();
+    for pasta in ["app/qml", "app/base", "app/qml_android"] {
+        let mut nomes: Vec<String> = std::fs::read_dir(raiz().join(pasta))
+            .unwrap_or_else(|e| panic!("{pasta}: {e}"))
+            .filter_map(|x| x.ok()?.file_name().into_string().ok())
+            .filter(|n| n.ends_with(".qml"))
+            .collect();
+        nomes.sort();
+        lista.extend(nomes.into_iter().map(|n| format!("{pasta}/{n}")));
+    }
+    lista
+}
+
+/// Os componentes cuja raiz é um `Text` (`Rotulo`, `Titulo`, `TextoErro`,
+/// `Nota`…), com o formato que a raiz declara.
+fn componentes_de_texto() -> Vec<(String, Option<String>)> {
+    let mut lista = Vec::new();
+    for arquivo in todos_os_qml() {
+        let limpo = sem_comentarios(&ler(&arquivo));
+        if let Some(raiz) = objetos(&limpo).into_iter().next() {
+            if raiz.tipo == "Text" || raiz.tipo == "Label" {
+                let nome = arquivo.rsplit('/').next().unwrap().trim_end_matches(".qml").to_string();
+                lista.push((nome, raiz.prop("textFormat").map(str::to_string)));
+            }
+        }
+    }
+    lista
+}
+
+/// H10 (extensão): os componentes de texto do programa desenham o texto puro.
+/// Uma mudança só em cada um cobre todos os usos (inclusive os do `Main.qml`,
+/// que não muda sem pedido próprio: o título e o detalhe da espera).
+#[test]
+fn h10_componentes_de_texto_em_texto_puro() {
+    let comps = componentes_de_texto();
+    let nomes: Vec<&str> = comps.iter().map(|(n, _)| n.as_str()).collect();
+    for esperado in ["Rotulo", "Titulo", "TextoErro", "Nota"] {
+        assert!(nomes.contains(&esperado), "{esperado} deixou de ser um componente de texto? {nomes:?}");
+    }
+    let fora: Vec<String> = comps
+        .iter()
+        .filter(|(_, f)| f.as_deref() != Some("Text.PlainText"))
+        .map(|(n, f)| format!("{n}.qml: textFormat {}", f.as_deref().unwrap_or("(não declarado: AutoText)")))
+        .collect();
+    assert!(fora.is_empty(), "componente de texto sem texto puro (H10, extensão): {fora:#?}");
+}
+
+/// A leitura dos QML desta trava, nos casos que importam (para a trava não
+/// passar por engano).
+#[test]
+fn h10_leitura_dos_qml_da_trava() {
+    let qml = "Item {\n    Text {\n        text: a.b\n              ? \"x\"\n              : c\n        color: \"red\" // { não conta\n    }\n    Text { text: \"fixo\"; font.bold: true }\n    Rotulo {\n        text: cond ? \"A\" : (outra ? \"B\" : \"C\")\n    }\n    Text {\n        id: msg\n    }\n    function f() { msg.text = x }\n    ItemDelegate { text: modelData }\n}\n";
+    let objs = objetos(&sem_comentarios(qml));
+    let tipos: Vec<&str> = objs.iter().map(|o| o.tipo.as_str()).collect();
+    assert_eq!(tipos, ["Item", "Text", "Text", "Rotulo", "Text", "ItemDelegate"]);
+    assert_eq!(objs.iter().map(|o| o.linha).collect::<Vec<_>>(), [1, 2, 8, 9, 12, 16]);
+    let fixo = |e: &str| so_texto_fixo(&String::from_utf8(mascarado(e)).unwrap());
+    assert_eq!(objs[1].prop("text"), Some("a.b\n              ? \"x\"\n              : c"));
+    assert!(!fixo(objs[1].prop("text").unwrap()), "um ramo com campo é dado");
+    assert_eq!(objs[1].prop("color"), Some("\"red\""));
+    assert!(fixo(objs[2].prop("text").unwrap()));
+    assert!(fixo(objs[3].prop("text").unwrap()), "ternário de strings é texto fixo");
+    assert_eq!(objs[4].prop("id"), Some("msg"));
+    assert!(!fixo("\"R$ \" + x") && !fixo("x || \"—\"") && fixo("qsTr(\"Ok\")") && fixo("''"));
+    assert!(fixo("\"Um texto \" + \"comprido\"") && fixo("c ? \"a\" + \"b\" : \"d\"") && !fixo("\"a\" + n + \"b\""));
 }
