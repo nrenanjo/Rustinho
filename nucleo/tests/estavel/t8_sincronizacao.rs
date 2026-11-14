@@ -507,8 +507,13 @@ fn resumo_com_o_mesmo_gtin_nos_dois(
         puxar(&pb.join("rustinho.db"), &end_a, pt_b);
         puxar(&pa.join("rustinho.db"), &end_b, pt_a);
     }
-    // Antes da 5.2: o mesmo GTIN gravado em cada caixa, sem viajar, cada um
-    // com a sua hora e a sua ordem; nenhum dos dois com a marca da 5.2.
+    // Os dois caixas fecham (o motor para) e voltam na 5.2. Enquanto isso,
+    // "antes da 5.2": o mesmo GTIN gravado em cada caixa, sem viajar, cada um
+    // com a sua hora e a sua ordem; nenhum dos dois com a marca da 5.2. (Com o
+    // motor ligado, ele compararia no meio da gravação à mão, que é de fato
+    // uma linha mexida por fora, e anotaria essa diferença de passagem.)
+    assert!(motor_a.encerrar(Duration::from_secs(20)));
+    assert!(motor_b.encerrar(Duration::from_secs(20)));
     let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
     let gravar = |x: &Banco, criado: &str, ordem: i64| {
         x.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
@@ -532,6 +537,11 @@ fn resumo_com_o_mesmo_gtin_nos_dois(
     // Os dois abrem na 5.2: cada um registra o seu GTIN uma vez; trocam até ficar em dia.
     let a = Banco::abrir(&pa.join("rustinho.db")).unwrap();
     let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let mut motor_b = sync::Motor::iniciar(pb.join("rustinho.db"), 0, 0);
+    let (pt_b, _) = motor_b.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let (end_a, end_b) = (format!("127.0.0.1:{pt_a}"), format!("127.0.0.1:{pt_b}"));
     for _ in 0..4 {
         puxar(&pb.join("rustinho.db"), &end_a, pt_b);
         puxar(&pa.join("rustinho.db"), &end_b, pt_a);
