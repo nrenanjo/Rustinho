@@ -754,22 +754,15 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
         l.collect::<Result<_, _>>()?
     };
     for (orcamento, vendas) in repetidos {
-        let ja: bool = conn
-            .query_row(
-                "SELECT 1 FROM sync_conflito WHERE tipo = 'orcamento' AND chave = ?1 AND perdeu = ?2",
-                params![orcamento, vendas],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-        if !ja {
-            let primeira = vendas.split(',').next().unwrap_or_default().to_string();
-            conn.execute(
-                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
-                 VALUES ('venda', ?1, ?2, ?3, '', ?4, 'orcamento')",
-                params![orcamento, primeira, vendas, tempo::agora()],
-            )?;
-        }
+        // Numa gravação só (N-F54-2): duas conferências ao mesmo tempo no
+        // mesmo banco (o motor e uma troca pedida à mão) não anotam duas vezes.
+        let primeira = vendas.split(',').next().unwrap_or_default().to_string();
+        conn.execute(
+            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+             SELECT 'venda', ?1, ?2, ?3, '', ?4, 'orcamento'
+              WHERE NOT EXISTS (SELECT 1 FROM sync_conflito WHERE tipo = 'orcamento' AND chave = ?1 AND perdeu = ?3)",
+            params![orcamento, primeira, vendas, tempo::agora()],
+        )?;
     }
     detectar_nota_repetida(conn)?;
     // R-03: parcela recebida (ou conta paga) mais de uma vez e vale-troca usado
