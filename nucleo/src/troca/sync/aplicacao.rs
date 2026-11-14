@@ -919,20 +919,23 @@ pub(super) fn resumo_comparado(caminho: &Path, outro: &str) {
 }
 
 /// Contagem e soma de verificação de cada tabela que viaja: as colunas que
-/// viajam em JSON (na ordem da tabela; na tabela com chave natural, sem o id,
-/// que pode ser diferente de propósito em cada caixa; na `config`, só as da
-/// loja), SHA-256 de cada linha e a soma dos 8 primeiros bytes, módulo 2^64
-/// (não depende da ordem; uma linha a mais, a menos ou diferente muda a soma).
+/// viajam em JSON (na ordem da tabela; na `config`, só as da loja), SHA-256 de
+/// cada linha e a soma dos 8 primeiros bytes, módulo 2^64 (não depende da
+/// ordem; uma linha a mais, a menos ou diferente muda a soma).
+///
+/// Na tabela com chave natural, só as colunas da chave natural (RC2-1): o
+/// mesmo dado pode estar gravado em cada caixa com o seu id, a sua hora e a
+/// sua ordem (o mesmo GTIN gravado pelas notas de cada caixa; ao receber, a
+/// linha daqui fica, veja `dados::esquema::CHAVES_NATURAIS`), e só a chave
+/// natural é igual nos caixas em dia.
 pub fn resumo_das_tabelas(conn: &Connection) -> Resultado<Value> {
     let mut tabelas = serde_json::Map::new();
     for tabela in TABELAS {
         let (todas, chave) = colunas(conn, tabela)?;
-        let natural = crate::dados::esquema::chave_natural(tabela).is_some();
-        let cols: Vec<String> = que_viajam(tabela, &todas)
-            .into_iter()
-            .filter(|c| !(natural && chave.contains(c)))
-            .map(|c| format!("\"{c}\""))
-            .collect();
+        let cols: Vec<String> = match crate::dados::esquema::chave_natural(tabela) {
+            Some(natural) => natural.iter().map(|c| format!("\"{c}\"")).collect(),
+            None => que_viajam(tabela, &todas).into_iter().map(|c| format!("\"{c}\"")).collect(),
+        };
         let chave_sql = chave.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
         let mut c = conn.prepare(&format!(
             "SELECT json_array({}), json_array({chave_sql}){} FROM \"{tabela}\"",
