@@ -775,12 +775,21 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
     if usuarios > 0 && gerentes == 0 {
         let id: String =
             conn.query_row("SELECT id FROM usuario WHERE ativo = 1 ORDER BY criado_em, id LIMIT 1", [], |l| l.get(0))?;
-        conn.execute("UPDATE usuario SET gerente = 1, atualizado_em = ?2 WHERE id = ?1", params![id, tempo::agora()])?;
-        conn.execute(
-            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
-             VALUES ('usuario', ?1, '', '', '', ?2, 'gerente')",
+        // RC3-1: a volta do gerente só acontece se ainda não há nenhum (numa
+        // instrução só), e o item só se ela aconteceu: duas conferências ao
+        // mesmo tempo no mesmo banco não anotam duas vezes.
+        let mudou = conn.execute(
+            "UPDATE usuario SET gerente = 1, atualizado_em = ?2
+              WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM usuario WHERE ativo = 1 AND gerente = 1)",
             params![id, tempo::agora()],
         )?;
+        if mudou == 1 {
+            conn.execute(
+                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+                 VALUES ('usuario', ?1, '', '', '', ?2, 'gerente')",
+                params![id, tempo::agora()],
+            )?;
+        }
     }
     Ok(())
 }
@@ -835,21 +844,14 @@ pub(super) fn detectar_pago_a_mais(conn: &Connection) -> Resultado<()> {
     for (tabela, tipo, achar, operacoes) in CONTAS_A_MAIS {
         let ids: Vec<String> = conn.prepare(achar)?.query_map([], |l| l.get(0))?.collect::<Result<_, _>>()?;
         for id in ids {
-            let ja: bool = conn
-                .query_row(
-                    "SELECT 1 FROM sync_conflito WHERE tipo = ?1 AND tabela = ?2 AND chave = ?3 AND resolvido_em IS NULL",
-                    params![tipo, tabela, id],
-                    |_| Ok(true),
-                )
-                .optional()?
-                .unwrap_or(false);
-            if ja {
-                continue;
-            }
+            // Numa gravação só (RC3-1, como a N-F54-2): duas conferências ao
+            // mesmo tempo no mesmo banco não anotam a mesma conta duas vezes.
             let ops: String = conn.query_row(operacoes, [&id], |l| l.get::<_, Option<String>>(0))?.unwrap_or_default();
             conn.execute(
                 "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
-                 VALUES (?1, ?2, '', ?3, '', ?4, ?5)",
+                 SELECT ?1, ?2, '', ?3, '', ?4, ?5
+                  WHERE NOT EXISTS (SELECT 1 FROM sync_conflito
+                                     WHERE tipo = ?5 AND tabela = ?1 AND chave = ?2 AND resolvido_em IS NULL)",
                 params![tabela, id, ops, agora, tipo],
             )?;
         }
