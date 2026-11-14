@@ -733,6 +733,36 @@ fn h10_combobox_e_componentes_com_raiz_de_controle() {
     assert!(fora.is_empty(), "{} lugar(es) com o rótulo padrão do Qt (H10, extensão; RC3-2): {fora:#?}", fora.len());
 }
 
+/// H10, extensão (revisão cruzada 4, RC4-3): a faixa de atenção e a crítica
+/// (`Notificacao.qml`) mostram a `descricao` em texto puro; só a informativa
+/// é formatada, e o texto dela sai do `linha()`, que escapa os dados. Desde a
+/// RC3-3 o motivo do erro do backup chega como está (sem escape do núcleo),
+/// e na descrição também vão o nome do caixa, o nome que vem da rede e as
+/// mensagens do Guia: com a faixa sempre formatada (a mutação MN1 da revisão)
+/// o "<loja>" sumia do desenho, e nada caía. Esta trava fixa as duas linhas.
+#[test]
+fn h10_faixa_de_atencao_e_critica_em_texto_puro() {
+    let arquivo = "app/qml/Notificacao.qml";
+    let limpo = sem_comentarios(&ler(arquivo));
+    let junto = |e: &str| e.split_whitespace().collect::<String>();
+    let faixa: Vec<Objeto> =
+        objetos(&limpo).into_iter().filter(|o| o.prop("text").is_some_and(|t| t.contains("aviso.descricao"))).collect();
+    assert_eq!(faixa.len(), 1, "{arquivo}: o texto da descrição da faixa (um só)");
+    let o = &faixa[0];
+    assert_eq!(
+        junto(o.prop("text").unwrap()),
+        "raiz.categoria===\"informativa\"?raiz.linha():(raiz.aviso.descricao||\"\")",
+        "{arquivo}:{}: o texto da faixa mudou; a informativa sai do linha() (que escapa) e as outras da descrição",
+        o.linha
+    );
+    assert_eq!(
+        junto(o.prop("textFormat").unwrap_or("")),
+        "raiz.categoria===\"informativa\"?Text.StyledText:Text.PlainText",
+        "{arquivo}:{}: a faixa de atenção e a crítica têm de ser texto puro (só a informativa é formatada)",
+        o.linha
+    );
+}
+
 /// A leitura dos QML desta trava, nos casos que importam (para a trava não
 /// passar por engano).
 #[test]
