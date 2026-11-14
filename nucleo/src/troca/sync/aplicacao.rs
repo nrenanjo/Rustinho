@@ -777,10 +777,11 @@ pub fn verificar_depois(conn: &Connection) -> Resultado<()> {
             conn.query_row("SELECT id FROM usuario WHERE ativo = 1 ORDER BY criado_em, id LIMIT 1", [], |l| l.get(0))?;
         // RC3-1: a volta do gerente só acontece se ainda não há nenhum (numa
         // instrução só), e o item só se ela aconteceu: duas conferências ao
-        // mesmo tempo no mesmo banco não anotam duas vezes.
+        // mesmo tempo no mesmo banco não anotam duas vezes. RC4-4: e só se o
+        // escolhido continua ativo (a troca pode tê-lo desativado no meio).
         let mudou = conn.execute(
             "UPDATE usuario SET gerente = 1, atualizado_em = ?2
-              WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM usuario WHERE ativo = 1 AND gerente = 1)",
+              WHERE id = ?1 AND ativo = 1 AND NOT EXISTS (SELECT 1 FROM usuario WHERE ativo = 1 AND gerente = 1)",
             params![id, tempo::agora()],
         )?;
         if mudou == 1 {
