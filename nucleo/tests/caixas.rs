@@ -1456,3 +1456,94 @@ fn rc3_1_c06_uma_conferencia_anota_um_item() {
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
     assert_eq!((n, gerentes, de_novo), (1, 1, 1), "itens, gerentes, itens depois de conferir de novo");
 }
+
+/// A parcela recebida em dois caixas sem rede (o caso do R-03), com A num
+/// arquivo. Devolve os dois caixas e o caminho do banco de A.
+fn parcela_recebida_nos_dois(nome: &str) -> (Banco, Banco, std::path::PathBuf) {
+    let (mut a, mut b, u, caminho) = loja_em_arquivo(nome);
+    let mut f = rustinho_nucleo::pessoas::ficha_nova(&a.conn, "cliente").unwrap();
+    f.nome = "Zé da Silva".into();
+    let cliente = rustinho_nucleo::pessoas::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+    let contas = rustinho_nucleo::receber::lancar(
+        &a.conn,
+        &a.dispositivo,
+        &u,
+        &rustinho_nucleo::receber::LancamentoEntrada {
+            cliente_id: cliente.clone(),
+            descricao: "caderno".into(),
+            valor: "50".into(),
+            parcelas: 1,
+            primeiro_vencimento: String::new(),
+        },
+    )
+    .unwrap();
+    trocar(&mut a, &mut b);
+    caixa::abrir(&a.conn, &a.dispositivo, &u, "Caixa 1", "0").unwrap();
+    caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 2", "0").unwrap();
+    let e = rustinho_nucleo::receber::ReceberEntrada {
+        cliente_id: cliente,
+        contas,
+        forma: "dinheiro".into(),
+        ..Default::default()
+    };
+    rustinho_nucleo::receber::receber(&a.conn, &a.dispositivo, &u, &e).unwrap();
+    rustinho_nucleo::receber::receber(&b.conn, &b.dispositivo, &u, &e).unwrap();
+    trocar(&mut a, &mut b);
+    (a, b, caminho)
+}
+
+/// RC4-2 (revisão cruzada 4), C-06 com a gerente inativa: um caixa desativou
+/// a gerente Ana (o `gerente` continua 1) e outro tirou o gerente da Bia. A
+/// conferência não conta a gerente inativa: a Bia volta a ser gerente e sai
+/// um item. Segura o `ativo = 1` do `NOT EXISTS` do C-06 (RC3-1): sem ele a
+/// loja ficaria sem gerente ativo para sempre.
+#[test]
+fn rc4_2_c06_gerente_inativa_nao_conta() {
+    let (a, b, ana, caminho) = loja_em_arquivo("rc4-2-c06");
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "oficina-verde-77", true).unwrap().id;
+    a.conn.execute("UPDATE usuario SET ativo = 0, gerente = 1 WHERE id = ?1", [&ana]).unwrap();
+    a.conn.execute("UPDATE usuario SET gerente = 0 WHERE id = ?1", [&bia]).unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    let gerente_ativo: Vec<String> = a
+        .conn
+        .prepare("SELECT id FROM usuario WHERE ativo = 1 AND gerente = 1")
+        .unwrap()
+        .query_map([], |l| l.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let itens = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'gerente'");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!(gerente_ativo, vec![bia], "a loja ficou sem gerente ativo (a gerente inativa contou)");
+    assert_eq!(itens, 1);
+}
+
+/// RC4-2, R-03 resolvido e ainda a mais: o gerente deu por resolvido o item
+/// da parcela recebida duas vezes, mas a conta continua paga a mais; a
+/// conferência seguinte anota um item novo. Segura o `resolvido_em IS NULL`
+/// do `NOT EXISTS` do R-03 (RC3-1): sem ele o item fechado impediria o novo.
+#[test]
+fn rc4_2_r03_resolvido_e_ainda_a_mais_anota_de_novo() {
+    let (a, b, caminho) = parcela_recebida_nos_dois("rc4-2-r03");
+    let abertos =
+        |x: &Banco| contar(x, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'pago_a_mais' AND resolvido_em IS NULL");
+    assert_eq!(abertos(&a), 1, "a troca anotou o item");
+    a.conn
+        .execute(
+            "UPDATE sync_conflito SET resolvido_em = '2026-11-14T10:00:00Z', resolucao = 'resolvido pelo gerente'
+              WHERE tipo = 'pago_a_mais'",
+            [],
+        )
+        .unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    let novos = abertos(&a);
+    let todos = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'pago_a_mais'");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!(
+        (novos, todos),
+        (1, 2),
+        "a conta continua paga a mais: tem de haver um item aberto (e o resolvido fica)"
+    );
+}
