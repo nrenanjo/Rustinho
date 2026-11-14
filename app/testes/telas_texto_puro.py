@@ -215,7 +215,8 @@ def main():
         logs.append(rr.saida)
         try:
             t = rr.textos()
-            rotulo = [r for r in rets(t) if r[7] == "Campo" and base.simples(r[8]) == "marca"]
+            # O rótulo "Marca" (um Rotulo dentro do Campo) e, logo abaixo, o campo.
+            rotulo = [r for r in rets(t) if r[7] in ("Rotulo", "Campo") and base.simples(r[8]) == "marca"]
             campos = []
             for _, _, s in t:
                 if s.startswith("TOQUE:campo|"):
