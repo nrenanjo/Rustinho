@@ -806,22 +806,15 @@ pub(super) fn detectar_nota_repetida(conn: &Connection) -> Resultado<()> {
         l.collect::<Result<_, _>>()?
     };
     for (chave, compras) in repetidas {
-        let ja: bool = conn
-            .query_row(
-                "SELECT 1 FROM sync_conflito WHERE tipo = 'nota' AND chave = ?1 AND perdeu = ?2",
-                params![chave, compras],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-        if !ja {
-            let primeira = compras.split(',').next().unwrap_or_default().to_string();
-            conn.execute(
-                "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
-                 VALUES ('compra', ?1, ?2, ?3, '', ?4, 'nota')",
-                params![chave, primeira, compras, tempo::agora()],
-            )?;
-        }
+        // Numa gravação só (N-F54-2): duas conferências ao mesmo tempo no
+        // mesmo banco não anotam duas vezes.
+        let primeira = compras.split(',').next().unwrap_or_default().to_string();
+        conn.execute(
+            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+             SELECT 'compra', ?1, ?2, ?3, '', ?4, 'nota'
+              WHERE NOT EXISTS (SELECT 1 FROM sync_conflito WHERE tipo = 'nota' AND chave = ?1 AND perdeu = ?3)",
+            params![chave, primeira, compras, tempo::agora()],
+        )?;
     }
     Ok(())
 }
