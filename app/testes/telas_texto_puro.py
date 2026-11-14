@@ -18,6 +18,10 @@ outros roteiros, com dados SINTÉTICOS gravados pelo núcleo na loja de teste:
       como texto e o programa continua aberto (no Qt 6.12, o rótulo padrão dos
       botões e das listas do Qt fecha o programa com um <img …>).
   T7  Nenhum TypeError/ReferenceError nos registros.
+  T8  Início › faixa "Atenção: Backup" (RC3-3, revisão cruzada 3): o motivo
+      do erro do backup com "&" e "<" no caminho aparece como está, sem
+      "&amp;" nem "&lt;" (a faixa de atenção é texto puro; até a rodada 5 da
+      integração 2 o núcleo escapava o motivo para HTML).
 
 Cada dado tem a forma
   <início> <b>F7C</b> &amp; <i>teste</i> <img src="f7c-<campo>.png"> <a href="https://exemplo.invalid/f7c-<campo>">ver</a>
@@ -70,6 +74,10 @@ FORNECEDOR = marcado("Fornecedor", "fornecedor")
 OBSERVACAO = marcado("Obs.", "observacao")
 TITULO = marcado("Comprador", "titulo")
 MARCA = marcado("Marca", "marca")
+# T8 (RC3-3): o motivo do erro do backup, com & e < no caminho (sem aspas
+# simples: vai numa string SQL). A faixa de atenção começa aberta (a marca
+# aviso_minimizado.backup = "0" deste computador).
+ERRO_BACKUP = "Não deu para gravar na pasta /tmp/f7c & Cia <loja>"
 
 
 def rets(textos):
@@ -164,7 +172,11 @@ def main():
                               f"UPDATE pessoa SET nome = '{CLIENTE}' WHERE id = '{ze}';"
                               f"UPDATE pessoa SET nome = '{FORNECEDOR}' WHERE id = '{fornecedor}';"
                               f"UPDATE venda SET observacoes = '{OBSERVACAO}', cliente_nome = '{TITULO}'"
-                              f" WHERE id = '{venda}';")
+                              f" WHERE id = '{venda}';"
+                              f"INSERT INTO config (chave, valor) VALUES ('backup_erro', '{ERRO_BACKUP}')"
+                              f" ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor;"
+                              f"INSERT INTO config (chave, valor) VALUES ('aviso_minimizado.backup', '0')"
+                              f" ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor;")
 
         listas = [
             ("T1", "Peças: o nome da peça na lista", "TelaPecas", {}, "peca", PECA, "t1_pecas"),
@@ -245,6 +257,23 @@ def main():
                             nao_medido("T6", nome, detalhe)
                         else:
                             conferir("T6", nome, certo, detalhe)
+        finally:
+            rr.fechar()
+
+        # ---- T8: o erro do backup na faixa de atenção da Início (RC3-3) ----
+        nome = "Início › Backup: o motivo do erro do backup aparece como está (sem \"&amp;\" nem \"&lt;\")"
+        rr = abrir(nova(modelo), "TelaInicio", {}, fotos, "t8_faixa_backup")
+        logs.append(rr.saida)
+        try:
+            t = rr.textos()
+            rr.foto("")
+            faixa = [s for _, _, s in t if "O último backup não deu certo" in s and not s.startswith(("GEO:", "RET:"))]
+            if not faixa:
+                nao_medido("T8", nome, f"a faixa do backup não apareceu aberta na Início (veja {rr.saida})")
+            else:
+                certo = (any(ERRO_BACKUP in s for s in faixa)
+                         and not any(e in s for s in faixa for e in ("&amp;", "&lt;", "&gt;")))
+                conferir("T8", nome, certo, f"texto da faixa: {faixa[0][:160]!r}")
         finally:
             rr.fechar()
     finally:
