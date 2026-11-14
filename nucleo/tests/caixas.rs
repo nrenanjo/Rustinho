@@ -1555,7 +1555,6 @@ fn rc4_2_r03_resolvido_e_ainda_a_mais_anota_de_novo() {
 /// seguinte a Bia volta e sai um item só. Corrida provocada pelo authorizer,
 /// como nos `n_f54_2_*` e `rc3_1_*`.
 #[test]
-#[ignore = "RC4-4: falha hoje (o UPDATE do C-06 não confere se o escolhido continua ativo)"]
 fn rc4_4_c06_escolhido_desativado_no_meio_nao_vira_gerente() {
     let (a, b, ana, caminho) = loja_em_arquivo("rc4-4-c06");
     let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "oficina-verde-77", true).unwrap().id;
