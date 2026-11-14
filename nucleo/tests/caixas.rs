@@ -1213,3 +1213,29 @@ fn n_i1_backup_de_antes_da_5_2_restaurado_registra_os_gtins_uma_vez() {
     drop(a);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// RC2-1 (passo 5.4): o item "Conferência entre caixas" diz a tabela de
+/// verdade. Uma diferença no resumo da tabela dos GTINs aparece como a lista
+/// de códigos de barras (GTIN) das peças, não como "Peça" (que é o nome do
+/// grupo, usado pelas pendências, referências e conflitos de registro).
+#[test]
+#[ignore = "RC2-1: caracterização (falha hoje: o item diz \"Peça\")"]
+fn rc21_conferencia_diz_a_tabela_de_verdade() {
+    let (a, _b, _u) = loja();
+    a.conn
+        .execute(
+            "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando, tipo)
+             VALUES ('produto_gtin', 'outro-caixa', '', '21369|aa|21368|bb', 'outro-caixa', '2026-11-13T10:00:00Z', 'resumo')",
+            [],
+        )
+        .unwrap();
+    let k = sync::conflitos(&a.conn).unwrap();
+    let r: Vec<_> = k.iter().filter(|c| c.tipo == "resumo").collect();
+    assert_eq!(r.len(), 1, "{k:#?}");
+    assert!(
+        r[0].texto.starts_with("Lista de códigos de barras (GTIN) das peças está diferente neste caixa"),
+        "{}",
+        r[0].texto
+    );
+    assert!(r[0].texto.contains("21369 registro(s) aqui e 21368 lá"), "{}", r[0].texto);
+}
