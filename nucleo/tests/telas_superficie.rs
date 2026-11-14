@@ -658,6 +658,54 @@ fn h10_textos_de_dado_declaram_o_formato() {
     assert!(fora.is_empty(), "{} texto(s) com dado no formato automático do Qt (H10, extensão): {fora:#?}", fora.len());
 }
 
+/// H10, extensão (revisão cruzada 3, RC3-2): o que a trava acima não via.
+/// - Todo `ComboBox` tem `delegate:` próprio. O delegate do Qt é um
+///   `ItemDelegate` com o rótulo padrão (AutoText): com um `<img …>` no texto
+///   de uma opção, o programa fecha ao abrir a lista (Qt 6.12, sonda da
+///   revisão). Hoje a `Selecao` tem o dela (desde a 0.9.15).
+/// - Todo componente do programa cuja raiz é um controle do Qt com rótulo
+///   padrão (hoje `Botao`, `Marcar` e `Seta`) tem `contentItem` na raiz. Os
+///   usos (`Botao { text: dado }`) têm o tipo do componente, e a trava acima
+///   só confere o controle do Qt usado direto.
+#[test]
+fn h10_combobox_e_componentes_com_raiz_de_controle() {
+    let mut fora = Vec::new();
+    let mut combos = 0;
+    let mut raizes = Vec::new();
+    for arquivo in todos_os_qml() {
+        let limpo = sem_comentarios(&ler(&arquivo));
+        let objs = objetos(&limpo);
+        for obj in &objs {
+            if obj.tipo == "ComboBox" {
+                combos += 1;
+                if obj.prop("delegate").is_none() {
+                    fora.push(format!(
+                        "{arquivo}:{}: ComboBox sem delegate próprio (o do Qt é AutoText; com um <img> numa opção o programa fecha ao abrir a lista)",
+                        obj.linha
+                    ));
+                }
+            }
+        }
+        if let Some(raiz) = objs.first() {
+            if CONTROLES_COM_ROTULO_PADRAO.contains(&raiz.tipo.as_str()) {
+                let nome = arquivo.rsplit('/').next().unwrap().trim_end_matches(".qml").to_string();
+                if raiz.prop("contentItem").is_none() {
+                    fora.push(format!(
+                        "{arquivo}:{}: o componente {nome} tem a raiz {} sem contentItem (os usos `{nome} {{ text: … }}` desenhariam o texto em AutoText)",
+                        raiz.linha, raiz.tipo
+                    ));
+                }
+                raizes.push(nome);
+            }
+        }
+    }
+    assert!(combos >= 1, "a leitura não achou nenhum ComboBox (a Selecao tem um): a leitura dos QML quebrou?");
+    for nome in ["Botao", "Marcar", "Seta"] {
+        assert!(raizes.iter().any(|r| r == nome), "a leitura não viu a raiz do {nome}: a leitura dos QML quebrou?");
+    }
+    assert!(fora.is_empty(), "{} lugar(es) com o rótulo padrão do Qt (H10, extensão; RC3-2): {fora:#?}", fora.len());
+}
+
 /// A leitura dos QML desta trava, nos casos que importam (para a trava não
 /// passar por engano).
 #[test]
