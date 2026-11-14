@@ -94,6 +94,19 @@ mod testes_seguranca_caixas;
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// RC2-1: o item "Conferência entre caixas" diz a tabela de verdade, para
+    /// cada tabela que viaja (nenhuma cai no nome genérico).
+    #[test]
+    fn nome_no_resumo_para_cada_tabela_que_viaja() {
+        for t in TABELAS {
+            let n = conflitos::nome_no_resumo(t);
+            assert!(n.starts_with("Lista de") || n == "Histórico", "{t}: {n}");
+        }
+        assert_eq!(conflitos::nome_no_resumo("produto_gtin"), "Lista de códigos de barras (GTIN) das peças");
+        // As pendências, as referências e os conflitos de registro continuam juntando a peça.
+        assert_eq!(conflitos::nome_da_tabela("produto_gtin"), "Peça");
+    }
     use crate::banco::Banco;
 
     /// D-16: configuração só deste computador que chega pela rede é

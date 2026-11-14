@@ -431,7 +431,7 @@ fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
     for (nome, x) in [("A", &a), ("B", &b)] {
         let k = conferencias(x);
         assert_eq!(k.len(), 1, "{nome}: a diferença vai para o gerente uma vez: {k:#?}");
-        assert!(k[0].texto.contains("Peça"), "{nome}: diz a tabela: {}", k[0].texto);
+        assert!(k[0].texto.starts_with("Lista de peças está diferente"), "{nome}: diz a tabela: {}", k[0].texto);
         assert!(!k[0].pode_usar, "não decide nada sozinha");
     }
     // Nada é mudado sozinho.
@@ -607,6 +607,7 @@ fn t8_6c_resumo_acusa_gtin_mexido_a_mao() {
     for (nome, k) in [("A", &ka), ("B", &kb)] {
         assert_eq!(k.len(), 1, "{nome}: a diferença vai para o gerente uma vez: {k:#?}");
         assert_eq!(k[0].0, "produto_gtin", "{nome}: {k:#?}");
+        assert!(k[0].1.starts_with("Lista de códigos de barras (GTIN) das peças está diferente"), "{nome}: {}", k[0].1);
     }
 }
 
