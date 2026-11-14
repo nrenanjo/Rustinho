@@ -1219,7 +1219,6 @@ fn n_i1_backup_de_antes_da_5_2_restaurado_registra_os_gtins_uma_vez() {
 /// de códigos de barras (GTIN) das peças, não como "Peça" (que é o nome do
 /// grupo, usado pelas pendências, referências e conflitos de registro).
 #[test]
-#[ignore = "RC2-1: caracterização (falha hoje: o item diz \"Peça\")"]
 fn rc21_conferencia_diz_a_tabela_de_verdade() {
     let (a, _b, _u) = loja();
     a.conn

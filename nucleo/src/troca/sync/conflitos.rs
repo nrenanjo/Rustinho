@@ -164,6 +164,59 @@ pub(super) const PODE_USAR: &[&str] = &[
     "config",
 ];
 
+/// O nome de cada tabela no item "Conferência entre caixas" (passo 5.4; RC2-1).
+/// O resumo é por tabela, então o item diz a tabela de verdade (o
+/// [`nome_da_tabela`] junta várias tabelas num nome só, como "Peça" para a
+/// peça, os preços, os GTINs etc., e é o que as pendências, as referências e
+/// os conflitos de registro mostram; esses não mudam).
+pub(super) fn nome_no_resumo(t: &str) -> &'static str {
+    match t {
+        "config" => "Lista de configurações da loja",
+        "usuario" => "Lista de usuários",
+        "tabela_preco" => "Lista de tabelas de preço",
+        "regra_st" => "Lista de regras de substituição tributária",
+        "unidade" => "Lista de unidades",
+        "produto" => "Lista de peças",
+        "produto_preco" => "Lista de preços das peças",
+        "produto_aplicacao" => "Lista de aplicações das peças",
+        "produto_equivalente" => "Lista de equivalências das peças",
+        "produto_fornecedor" => "Lista de códigos dos fornecedores das peças",
+        "produto_codigo_antigo" => "Lista de códigos antigos das peças",
+        "produto_gtin" => "Lista de códigos de barras (GTIN) das peças",
+        "faixa_codigo" => "Lista de faixas de códigos das peças",
+        "estoque_movimento" => "Lista de movimentos de estoque",
+        "pessoa" => "Lista de clientes e fornecedores",
+        "pessoa_veiculo" => "Lista de veículos dos clientes",
+        "compra" => "Lista de compras",
+        "compra_item" => "Lista de itens das compras",
+        "caixa_sessao" => "Lista de aberturas e fechamentos de caixa",
+        "caixa_movimento" => "Lista de sangrias e suprimentos",
+        "venda" => "Lista de vendas",
+        "venda_item" => "Lista de itens das vendas",
+        "venda_pagamento" => "Lista de pagamentos das vendas",
+        "conta_receber" => "Lista de contas a receber",
+        "recebimento" => "Lista de recebimentos",
+        "recebimento_parcela" => "Lista de parcelas recebidas",
+        "conta_loja" => "Lista de contas da loja",
+        "categoria" => "Lista de categorias",
+        "conta_pagar" => "Lista de contas a pagar",
+        "pagamento" => "Lista de pagamentos de contas",
+        "movimento_conta" => "Lista de movimentos das contas",
+        "cheque" => "Lista de cheques",
+        "comissao_fechamento" => "Lista de fechamentos de comissão",
+        "meta" => "Lista de metas",
+        "encomenda" => "Lista de encomendas",
+        "devolucao" => "Lista de trocas e devoluções",
+        "devolucao_item" => "Lista de itens das trocas e devoluções",
+        "vale" => "Lista de vales-troca",
+        "ordem_servico" => "Lista de ordens de serviço",
+        "ordem_servico_item" => "Lista de itens das ordens de serviço",
+        "auditoria" => "Histórico",
+        "sync_resolucao" => "Lista de decisões do gerente sobre diferenças entre caixas",
+        outra => nome_da_tabela(outra),
+    }
+}
+
 pub(super) fn nome_da_tabela(t: &str) -> &'static str {
     match t {
         "produto"
@@ -379,7 +432,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     "{} está diferente neste caixa e no {caixa}: {} registro(s) aqui e {} lá, com os dois em dia (cada um \
                      já tinha recebido tudo do outro). Nada foi mudado. Pode ser um registro mexido por fora do Rustinho; \
                      se ninguém souber o motivo, avise o suporte.",
-                    nome_da_tabela(&tabela),
+                    nome_no_resumo(&tabela),
                     partes.first().unwrap_or(&"?"),
                     partes.get(2).unwrap_or(&"?")
                 );
