@@ -160,6 +160,22 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
     Ok(())
 }
 
+/// RC2-5: a restauração de um banco de antes da 5.2 já refez os derivados de
+/// todas as linhas; a abertura seguinte, que registra as linhas que passaram a
+/// viajar, não os refaz de novo (e apaga a anotação). Configuração deste caixa.
+pub const DERIVADOS_REFEITOS: &str = "restauracao_derivados_refeitos";
+
+/// O banco tem todas as marcas `sync_inicio:<tabela>` da 5.2 (as linhas das
+/// tabelas que passaram a viajar já viraram alteração)?
+pub fn tem_as_marcas_da_5_2(conn: &Connection) -> Resultado<bool> {
+    for tabela in crate::dados::esquema::PASSARAM_A_VIAJAR {
+        if config::ler(conn, &format!("sync_inicio:{tabela}"))?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Registra como alteração tudo que já existia antes da sincronização (só
 /// uma vez). Num caixa novo, sem usuários, não precisa: ele vai receber
 /// tudo dos outros.
@@ -227,6 +243,11 @@ fn registrar_as_que_passaram_a_viajar(conn: &Connection) -> Resultado<()> {
         conn.execute_batch("SAVEPOINT passou_a_viajar")?;
         let r = registrar_linhas(conn, tabela)
             .and_then(|_| match crate::dados::esquema::alimenta(tabela) {
+                // RC2-5: a restauração já refez (veja DERIVADOS_REFEITOS).
+                Some(_) if config::ler(conn, DERIVADOS_REFEITOS)?.is_some() => conn
+                    .execute("DELETE FROM config WHERE chave = ?1", [DERIVADOS_REFEITOS])
+                    .map(|_| ())
+                    .map_err(Into::into),
                 Some((_, derivado)) => super::aplicacao::refazer_derivado_de_todas(conn, derivado).map(|_| ()),
                 None => Ok(()),
             })

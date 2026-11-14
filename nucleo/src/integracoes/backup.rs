@@ -1922,6 +1922,10 @@ impl Pendente {
     fn aplicar(&self, conn: &mut Connection) -> Resultado<()> {
         let da_loja: Vec<&str> = sync::CONFIG_DA_LOJA.to_vec();
         let tx = conn.transaction()?;
+        // RC2-5: o banco que entrou já é da 5.2 (tem as marcas
+        // sync_inicio:<tabela>)? Então o índice dele já está certo. Lido antes
+        // de mexer na configuração.
+        let ja_da_5_2 = sync::tem_as_marcas_da_5_2(&tx)?;
         tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
         let lista_loja = da_loja.iter().map(|c| format!("'{c}'")).collect::<Vec<_>>().join(", ");
         // N-I1 (D-I2): a marca da 5.2 do banco que entrou fica com ele. Sem
@@ -1957,10 +1961,19 @@ impl Pendente {
         // também recomeçam com ele).
         sync::depois_de_restaurar(&tx, self.seq)?;
         // N-I1: o banco que entrou pode ser de antes da 5.2, com o índice da
-        // peça velho (D01); a marca da 5.2 é deste caixa e volta com ele, então
-        // a primeira abertura não o refaria. Refaz aqui os derivados de todas
-        // as linhas (só colunas que não viajam: nada vai para os outros caixas).
-        sync::refazer_todos_os_derivados(&tx)?;
+        // peça velho (D01). Refaz aqui os derivados de todas as linhas (só
+        // colunas que não viajam: nada vai para os outros caixas).
+        // RC2-5: só quando o banco que entrou não é da 5.2, e uma vez só: se
+        // depois de pôr de volta a configuração deste caixa a marca continua
+        // faltando (D-I2), a abertura seguinte registra as linhas e não refaz
+        // os derivados de novo (sync::DERIVADOS_REFEITOS).
+        tx.execute("DELETE FROM config WHERE chave = ?1", [sync::DERIVADOS_REFEITOS])?;
+        if !ja_da_5_2 {
+            sync::refazer_todos_os_derivados(&tx)?;
+            if !sync::tem_as_marcas_da_5_2(&tx)? {
+                config::gravar(&tx, sync::DERIVADOS_REFEITOS, &tempo::agora())?;
+            }
+        }
         // Backup de antes da identidade da loja: a loja continua com a dela.
         // (Backup de outra loja traz a identidade dela: é outra loja.)
         if !self.loja.is_empty() && crate::loja::id(&tx)?.is_empty() {
@@ -2868,6 +2881,90 @@ pub(crate) mod testes {
         let real: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto WHERE ativo = 1", [], |l| l.get(0)).unwrap();
         assert_eq!(real, 20, "o banco é o do backup");
         assert_eq!(cabecalho(&b.conn), real, "a contagem guardada ficou a do banco de antes da troca");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// RC2-5 (revisão cruzada 2): quantas vezes o índice de todas as peças
+    /// foi refeito nesta linha de execução, desde zerar.
+    fn refeitos() -> usize {
+        crate::sync::REFEITOS_DE_TODAS.with(|c| c.get())
+    }
+
+    fn zerar_refeitos() {
+        crate::sync::REFEITOS_DE_TODAS.with(|c| c.set(0));
+    }
+
+    /// Loja num arquivo com a gerente Ana (1234) e uma peça com um GTIN só no
+    /// `produto_gtin`. Devolve (pasta, banco, banco aberto, id da peça, GTIN).
+    fn loja_com_gtin(nome: &str) -> (PathBuf, PathBuf, Banco, String, String) {
+        let pasta = pasta_teste(nome);
+        let db = pasta.join("rustinho.db");
+        let b = Banco::abrir(&db).unwrap();
+        crate::faixas::assumir(&b.conn).unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        crate::usuarios::definir_gerente(&b.conn, &u, true).unwrap();
+        let gtin = "7895551234560".to_string();
+        let mut f = crate::produtos::ficha_nova(&b.conn).unwrap();
+        f.nome = "Rolamento traseiro".into();
+        f.custo = "10".into();
+        f.gtins = vec![crate::catalogo::codigos::GtinFicha {
+            gtin: gtin.clone(),
+            tipo: "comercial".into(),
+            origem: "manual".into(),
+        }];
+        let id = crate::produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        (pasta, db, b, id, gtin)
+    }
+
+    /// RC2-5: um backup já da 5.2 (com a marca `sync_inicio:produto_gtin`, o
+    /// índice certo) restaurado não refaz o índice de todas as peças, nem na
+    /// restauração nem na abertura seguinte. Em `1606ad0`: refazia uma vez.
+    #[test]
+    fn rc2_5_backup_da_5_2_nao_refaz_o_indice() {
+        let _vez = um_por_vez();
+        let (pasta, db, mut b, id, gtin) = loja_com_gtin("rc2-5-com-marca");
+        let feito = fazer(&db, false).unwrap();
+        zerar_refeitos();
+        restaurar(&mut b.conn, Some(&db), &feito.arquivo, false, "1234").unwrap();
+        let acha =
+            |b: &Banco| crate::busca::buscar(&b.conn, &gtin[4..12], true, 50).unwrap().iter().any(|p| p.id == id);
+        assert!(acha(&b), "o pedaço do GTIN acha depois de restaurar");
+        drop(b);
+        let b = Banco::abrir(&db).unwrap();
+        assert!(acha(&b));
+        assert_eq!(refeitos(), 0, "um backup da 5.2 refez o índice de todas as peças");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// RC2-5: um backup de antes da 5.2 (índice velho do D01, sem a marca)
+    /// restaurado refaz o índice uma vez só: na restauração (o pedaço do GTIN
+    /// acha logo depois), e não de novo na abertura seguinte, quando a 5.2
+    /// registra os GTINs dele (D-I2). Em `1606ad0`: refazia duas vezes.
+    #[test]
+    fn rc2_5_backup_de_antes_da_5_2_refaz_o_indice_uma_vez() {
+        let _vez = um_por_vez();
+        let (pasta, db, b, id, gtin) = loja_com_gtin("rc2-5-sem-marca");
+        b.conn
+            .execute(
+                "UPDATE produto SET busca = 'rolamento traseiro', codigos = ' ' || codigo || ' ' WHERE id = ?1",
+                [&id],
+            )
+            .unwrap();
+        b.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+        let feito = fazer(&db, false).unwrap();
+        drop(b);
+        let mut b = Banco::abrir(&db).unwrap(); // atualiza para a 5.2 (R-1)
+        zerar_refeitos();
+        restaurar(&mut b.conn, Some(&db), &feito.arquivo, false, "1234").unwrap();
+        let acha =
+            |b: &Banco| crate::busca::buscar(&b.conn, &gtin[4..12], true, 50).unwrap().iter().any(|p| p.id == id);
+        assert!(acha(&b), "logo depois de restaurar, o pedaço do GTIN não acha");
+        drop(b);
+        let b = Banco::abrir(&db).unwrap();
+        assert!(acha(&b), "ao abrir de novo, o pedaço do GTIN não acha");
+        assert_eq!(refeitos(), 1, "o índice de todas as peças não foi refeito uma vez só");
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
