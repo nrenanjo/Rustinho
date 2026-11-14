@@ -667,14 +667,40 @@ fn h10_textos_de_dado_declaram_o_formato() {
 ///   padrão (hoje `Botao`, `Marcar` e `Seta`) tem `contentItem` na raiz. Os
 ///   usos (`Botao { text: dado }`) têm o tipo do componente, e a trava acima
 ///   só confere o controle do Qt usado direto.
+/// - RC4-1 (revisão cruzada 4): **todo objeto** de um controle com rótulo
+///   padrão tem `contentItem` próprio, onde quer que esteja (raiz, componente
+///   em linha `component X: Button {…}`, filho de um `Item` com `alias` para
+///   o `text`, delegate), com ou sem `text:`. E nenhum QML importa
+///   `QtQuick.Controls.impl` (o `IconLabel` e o `CheckLabel`, o próprio
+///   rótulo do Qt, AutoText), que como `contentItem` passaria pela regra.
 #[test]
 fn h10_combobox_e_componentes_com_raiz_de_controle() {
     let mut fora = Vec::new();
     let mut combos = 0;
+    let mut controles = 0;
     let mut raizes = Vec::new();
     for arquivo in todos_os_qml() {
         let limpo = sem_comentarios(&ler(&arquivo));
+        for linha in limpo.lines() {
+            let l = linha.trim();
+            if l.starts_with("import ") && l.split_whitespace().nth(1) == Some("QtQuick.Controls.impl") {
+                fora.push(format!(
+                    "{arquivo}: importa QtQuick.Controls.impl (IconLabel/CheckLabel: o rótulo do Qt, AutoText)"
+                ));
+            }
+        }
         let objs = objetos(&limpo);
+        for obj in &objs {
+            if CONTROLES_COM_ROTULO_PADRAO.contains(&obj.tipo.as_str()) {
+                controles += 1;
+                if obj.prop("contentItem").is_none() {
+                    fora.push(format!(
+                        "{arquivo}:{}: {} sem contentItem próprio (o rótulo padrão do Qt é AutoText; com ou sem text:, ele pode receber dado por fora)",
+                        obj.linha, obj.tipo
+                    ));
+                }
+            }
+        }
         for obj in &objs {
             if obj.tipo == "ComboBox" {
                 combos += 1;
@@ -700,6 +726,7 @@ fn h10_combobox_e_componentes_com_raiz_de_controle() {
         }
     }
     assert!(combos >= 1, "a leitura não achou nenhum ComboBox (a Selecao tem um): a leitura dos QML quebrou?");
+    assert!(controles >= 5, "a leitura achou poucos controles do Qt ({controles}): a leitura dos QML quebrou?");
     for nome in ["Botao", "Marcar", "Seta"] {
         assert!(raizes.iter().any(|r| r == nome), "a leitura não viu a raiz do {nome}: a leitura dos QML quebrou?");
     }
@@ -724,4 +751,12 @@ fn h10_leitura_dos_qml_da_trava() {
     assert_eq!(objs[4].prop("id"), Some("msg"));
     assert!(!fixo("\"R$ \" + x") && !fixo("x || \"—\"") && fixo("qsTr(\"Ok\")") && fixo("''"));
     assert!(fixo("\"Um texto \" + \"comprido\"") && fixo("c ? \"a\" + \"b\" : \"d\"") && !fixo("\"a\" + n + \"b\""));
+    // RC4-1: o componente em linha, o Button de dentro de um alias e o
+    // contentItem com o IconLabel são lidos como objetos (com o tipo certo).
+    let qml = "Item {\n    component BotaoLinha: Button {\n        flat: true\n    }\n    property alias text: b.text\n    Button {\n        id: b\n    }\n    Button {\n        contentItem: IconLabel { text: \"x\" }\n    }\n}\n";
+    let objs = objetos(&sem_comentarios(qml));
+    let tipos: Vec<&str> = objs.iter().map(|o| o.tipo.as_str()).collect();
+    assert_eq!(tipos, ["Item", "Button", "Button", "Button", "IconLabel"]);
+    assert!(objs[1].prop("contentItem").is_none() && objs[2].prop("contentItem").is_none());
+    assert!(objs[3].prop("contentItem").is_some());
 }
