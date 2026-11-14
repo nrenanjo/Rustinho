@@ -455,6 +455,151 @@ fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
     let _ = std::fs::remove_dir_all(&pb);
 }
 
+/// Os itens "Conferência entre caixas" do caixa: (tabela, texto).
+fn conferencias_por_tabela(b: &Banco) -> Vec<(String, String)> {
+    let textos: Vec<String> = conferencias(b).into_iter().map(|k| k.texto).collect();
+    let mut c = b.conn.prepare("SELECT tabela FROM sync_conflito WHERE tipo = 'resumo' ORDER BY id DESC").unwrap();
+    let tabelas: Vec<String> = c.query_map([], |l| l.get(0)).unwrap().map(Result::unwrap).collect();
+    tabelas.into_iter().zip(textos).collect()
+}
+
+/// RC2-1 (revisão cruzada 2; passo 5.4 × 5.2): dois caixas com o MESMO GTIN
+/// na mesma peça, gravado em cada um antes da 5.2 (o caso D01: a mesma nota
+/// importada nos dois), cada um com a sua hora (`criado_em`) e a sua ordem,
+/// sem a marca da 5.2. Os dois abrem de novo (cada um registra o seu GTIN uma
+/// vez), trocam pela rede até ficar em dia (a linha do outro fica só no log,
+/// pela chave natural) e comparam o resumo das tabelas. Se `mexer_gtin_em_b`,
+/// depois de em dia o GTIN de B é mudado por fora do Rustinho (uma coluna da
+/// chave natural) e os dois trocam de novo. Devolve os itens "Conferência
+/// entre caixas" de A e de B: (tabela, texto).
+#[allow(clippy::type_complexity)]
+fn resumo_com_o_mesmo_gtin_nos_dois(
+    mesma_hora_e_ordem: bool,
+    mexer_gtin_em_b: bool,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let _vez = vez_da_troca();
+    let pa = pasta_nova("t8-6-a");
+    let pb = pasta_nova("t8-6-b");
+    let a = caixa_novo(&pa, "Caixa A");
+    let ana = usuarios::criar(&a.conn, &a.dispositivo, "Ana", SENHA_ANA, true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &ana, true).unwrap();
+    config::gravar(&a.conn, "loja_nome", "Loja Teste").unwrap();
+    let peca = {
+        let mut f = rustinho_nucleo::produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Filtro de óleo".into();
+        f.custo = "1".into();
+        f.precos[0].preco = "10".into();
+        f.precos[0].lucro = String::new();
+        rustinho_nucleo::produtos::salvar(&a.conn, &a.dispositivo, &ana, &f).unwrap()
+    };
+    std::thread::sleep(Duration::from_millis(1100));
+    drop(caixa_novo(&pb, "Caixa B"));
+    for c in [&pa, &pb] {
+        let x = Banco::abrir(&c.join("rustinho.db")).unwrap();
+        config::gravar(&x.conn, "sync_resumo_teste", "sempre").unwrap();
+    }
+    let mut motor_a = sync::Motor::iniciar(pa.join("rustinho.db"), 0, 0);
+    let (pt_a, _) = motor_a.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let mut motor_b = sync::Motor::iniciar(pb.join("rustinho.db"), 0, 0);
+    let (pt_b, _) = motor_b.portas(Duration::from_secs(10)).expect("as portas do motor abriram");
+    let (end_a, end_b) = (format!("127.0.0.1:{pt_a}"), format!("127.0.0.1:{pt_b}"));
+    for _ in 0..2 {
+        puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+        puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    }
+    // Antes da 5.2: o mesmo GTIN gravado em cada caixa, sem viajar, cada um
+    // com a sua hora e a sua ordem; nenhum dos dois com a marca da 5.2.
+    let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
+    let gravar = |x: &Banco, criado: &str, ordem: i64| {
+        x.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+        x.conn
+            .execute(
+                "INSERT INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+                 VALUES (?1, ?2, '7891000000090', 'comercial', 'cEAN', ?3, ?4)",
+                rusqlite::params![rustinho_nucleo::tempo::novo_id(), peca, ordem, criado],
+            )
+            .unwrap();
+        x.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+        x.conn.execute("DELETE FROM config WHERE chave = 'sync_inicio:produto_gtin'", []).unwrap();
+    };
+    gravar(&a, "2026-10-01T10:00:00Z", 0);
+    if mesma_hora_e_ordem {
+        gravar(&b, "2026-10-01T10:00:00Z", 0);
+    } else {
+        gravar(&b, "2026-10-05T15:30:00Z", 1);
+    }
+    drop((a, b));
+    // Os dois abrem na 5.2: cada um registra o seu GTIN uma vez; trocam até ficar em dia.
+    let a = Banco::abrir(&pa.join("rustinho.db")).unwrap();
+    let b = Banco::abrir(&pb.join("rustinho.db")).unwrap();
+    for _ in 0..4 {
+        puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+        puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    }
+    for x in [&a, &b] {
+        assert_eq!(
+            contar(x, "SELECT COUNT(*) FROM produto_gtin WHERE gtin = '7891000000090'"),
+            1,
+            "o mesmo GTIN, uma vez"
+        );
+        assert_eq!(sync::pendencias(&x.conn).unwrap(), 0);
+    }
+    if mexer_gtin_em_b {
+        b.conn.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", []).unwrap();
+        b.conn.execute("UPDATE produto_gtin SET gtin = '7891000000106' WHERE gtin = '7891000000090'", []).unwrap();
+        b.conn.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", []).unwrap();
+        puxar(&pb.join("rustinho.db"), &end_a, pt_b);
+        puxar(&pa.join("rustinho.db"), &end_b, pt_a);
+    }
+    let r = (conferencias_por_tabela(&a), conferencias_por_tabela(&b));
+    assert!(motor_a.encerrar(Duration::from_secs(20)));
+    assert!(motor_b.encerrar(Duration::from_secs(20)));
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(&pa);
+    let _ = std::fs::remove_dir_all(&pb);
+    r
+}
+
+/// T8.6a — RC2-1, controle: o mesmo GTIN nos dois caixas com a mesma hora e a
+/// mesma ordem. Em dia e iguais: nada para o gerente.
+#[test]
+fn t8_6a_resumo_gtin_nos_dois_com_a_mesma_hora_e_ordem() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(true, false);
+    assert!(ka.is_empty() && kb.is_empty(), "controle: {ka:#?} {kb:#?}");
+}
+
+/// T8.6b — RC2-1: o mesmo GTIN nos dois caixas, cada um com a sua hora e a
+/// sua ordem (o caso de verdade: a mesma nota importada nos dois antes da
+/// 5.2). Em dia e com os mesmos GTINs: nada para o gerente. HOJE vem um item
+/// "Conferência entre caixas" em cada caixa, da tabela `produto_gtin`.
+#[test]
+#[ignore = "RC2-1: caracterização (falha hoje: falso alarme do resumo nos dois caixas)"]
+fn t8_6b_resumo_gtin_nos_dois_com_a_hora_e_a_ordem_de_cada_um() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(false, false);
+    assert!(ka.is_empty() && kb.is_empty(), "dois caixas em dia, os mesmos GTINs: falso alarme {ka:#?} {kb:#?}");
+}
+
+/// T8.6c — RC2-1: depois de em dia (o mesmo GTIN nos dois, com a mesma hora e
+/// ordem), o GTIN de B é mudado por fora do Rustinho (uma coluna da chave
+/// natural). Os dois caixas acusam, na tabela dos GTINs.
+#[test]
+fn t8_6c_resumo_acusa_gtin_mexido_a_mao() {
+    if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(true, true);
+    for (nome, k) in [("A", &ka), ("B", &kb)] {
+        assert_eq!(k.len(), 1, "{nome}: a diferença vai para o gerente uma vez: {k:#?}");
+        assert_eq!(k[0].0, "produto_gtin", "{nome}: {k:#?}");
+    }
+}
+
 /// T8.2 — Senha da rede errada: nada passa; com a certa, passa.
 #[test]
 fn t8_2_senha_da_rede_errada_nao_troca() {
