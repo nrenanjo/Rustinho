@@ -573,10 +573,10 @@ fn t8_6a_resumo_gtin_nos_dois_com_a_mesma_hora_e_ordem() {
 
 /// T8.6b — RC2-1: o mesmo GTIN nos dois caixas, cada um com a sua hora e a
 /// sua ordem (o caso de verdade: a mesma nota importada nos dois antes da
-/// 5.2). Em dia e com os mesmos GTINs: nada para o gerente. HOJE vem um item
-/// "Conferência entre caixas" em cada caixa, da tabela `produto_gtin`.
+/// 5.2). Em dia e com os mesmos GTINs: nada para o gerente (antes da correção
+/// da RC2-1 vinha um item "Conferência entre caixas" em cada caixa, da tabela
+/// `produto_gtin`).
 #[test]
-#[ignore = "RC2-1: caracterização (falha hoje: falso alarme do resumo nos dois caixas)"]
 fn t8_6b_resumo_gtin_nos_dois_com_a_hora_e_a_ordem_de_cada_um() {
     if std::env::var_os(FILHO).is_some() {
         return;

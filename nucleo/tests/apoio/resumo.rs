@@ -1,9 +1,10 @@
 //! Protótipo do resumo por tabela da troca (passo 5.4, parte 1; frente F54),
 //! só para medir: não é código do programa. Desenho da F5 (`RELATORIO_F5.md`
 //! §7.2): para cada tabela que viaja, as colunas que viajam em JSON
-//! (`json_array`, na ordem da tabela; na tabela com chave natural, sem o id;
-//! na `config`, só as configurações da loja), SHA-256 de cada linha e a soma
-//! dos 8 primeiros bytes, módulo 2^64 (não depende da ordem das linhas).
+//! (`json_array`, na ordem da tabela; na tabela com chave natural, só as
+//! colunas da chave natural, como o programa desde a RC2-1; na `config`, só as
+//! configurações da loja), SHA-256 de cada linha e a soma dos 8 primeiros
+//! bytes, módulo 2^64 (não depende da ordem das linhas).
 
 // Cada teste que inclui este arquivo usa só uma parte dele.
 #![allow(dead_code)]
@@ -17,11 +18,10 @@ pub fn colunas_do_resumo(c: &rusqlite::Connection, tabela: &str) -> Vec<String> 
     let mut st = c.prepare(&format!("PRAGMA table_info(\"{tabela}\")")).unwrap();
     let todas: Vec<(String, i64)> =
         st.query_map([], |l| Ok((l.get(1)?, l.get(5)?))).unwrap().collect::<Result<_, _>>().unwrap();
-    todas
-        .into_iter()
-        .filter(|(n, pk)| esquema::coluna_viaja(tabela, n) && !(esquema::chave_natural(tabela).is_some() && *pk > 0))
-        .map(|(n, _)| n)
-        .collect()
+    if let Some(natural) = esquema::chave_natural(tabela) {
+        return natural.iter().map(|c| c.to_string()).collect();
+    }
+    todas.into_iter().filter(|(n, _)| esquema::coluna_viaja(tabela, n)).map(|(n, _)| n).collect()
 }
 
 /// (tabela, linhas, soma, milissegundos) de cada tabela que viaja.
