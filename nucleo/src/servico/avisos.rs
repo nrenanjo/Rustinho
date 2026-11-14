@@ -1219,6 +1219,36 @@ mod testes {
         assert!(do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup_nuvem"));
     }
 
+    /// RC3-3 (revisão cruzada 3; H10, extensão): o motivo do erro do backup
+    /// e o da nuvem chegam à faixa sem entidades HTML. A faixa de atenção (e a
+    /// crítica) mostra a `descricao` em texto puro (`Notificacao.qml`, desde a
+    /// 0.9.17), e a informativa escapa no QML (`Tema.escapar`); o leitor de
+    /// tela lê o `resumo`. Um caminho com "&" ou "<" aparecia como "&amp;" e
+    /// "&lt;". Era a sonda `sonda_rev3_erro_do_backup_…` da revisão.
+    #[test]
+    #[ignore = "RC3-3: falha hoje (o avisos::curto escapa o motivo para HTML)"]
+    fn rc3_3_erro_do_backup_chega_sem_entidades() {
+        let b = Banco::em_memoria().unwrap();
+        let erro = "Não deu para gravar na pasta /home/ze/Peças & Cia <loja>";
+        config::gravar(&b.conn, "backup_erro", erro).unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem_desde", &crate::tempo::dias_atras(9)).unwrap();
+        config::gravar(&b.conn, "backup_nuvem_erro", "rclone: pasta \"Loja & Cia\" <sem acesso>").unwrap();
+        let lista = do_dia(&b.conn).unwrap();
+        let a = lista.iter().find(|a| a.id == "backup").expect("o aviso do backup");
+        assert_eq!(a.categoria, ATENCAO);
+        assert_eq!(a.atraso, erro);
+        assert_eq!(a.descricao, format!("O último backup não deu certo · {erro}"));
+        assert!(a.resumo.ends_with(erro), "o resumo (o leitor de tela) com entidades: {:?}", a.resumo);
+        let n = lista.iter().find(|a| a.id == "backup_nuvem").expect("o aviso da nuvem");
+        assert_eq!(n.atraso, "rclone: pasta \"Loja & Cia\" <sem acesso>");
+        for x in [a, n] {
+            for t in [&x.atraso, &x.descricao, &x.resumo] {
+                assert!(!t.contains("&amp;") && !t.contains("&lt;") && !t.contains("&gt;"), "com entidades: {t:?}");
+            }
+        }
+    }
+
     /// NOTIF-01 (0.9.18): o texto do botão diz o que ele faz. Os avisos de
     /// diferenças entre caixas e de códigos abrem Simultaneidade ›
     /// Duplicatas: o botão é "Ver duplicatas" (antes: "Resolver no Gerente").
