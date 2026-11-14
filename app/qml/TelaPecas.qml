@@ -67,10 +67,13 @@ FocusScope {
             buscando = false
             mostrar(r, texto, "", tamanhoParte)
             anotarBusca(comeco, texto)
-            if (abrirAoChegar) {
-                abrirAoChegar = false
+            // RC2-4: o Enter dado com a busca a caminho só abre a peça se a
+            // busca deu certo; com erro, a lista na tela ainda é a do texto
+            // anterior, e a peça marcada nela não é a que a pessoa procurou.
+            const abrir = abrirAoChegar && r.ok
+            abrirAoChegar = false
+            if (abrir)
                 abrirPeca(lista.currentIndex)
-            }
         })
     }
 
