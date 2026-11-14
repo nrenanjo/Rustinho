@@ -1327,7 +1327,6 @@ fn n_f54_2_f12_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
 /// N-F54-2, G05: a mesma nota lançada em dois caixas sem rede; duas
 /// conferências ao mesmo tempo em A anotam o item uma vez só.
 #[test]
-#[ignore = "N-F54-2: caracterização do G05 (falha hoje: duas conferências ao mesmo tempo anotam dois itens)"]
 fn n_f54_2_g05_duas_conferencias_ao_mesmo_tempo_anotam_uma_vez() {
     let (a, b, u, caminho) = loja_em_arquivo("nf542-g05");
     let (a, b, _u, chave, _ca, _cb) = mesma_nota_lancada_nos_dois_em((a, b, u), "nf542-g05");
