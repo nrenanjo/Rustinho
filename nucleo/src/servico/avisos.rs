@@ -891,10 +891,12 @@ fn aviso_sem_contato(hoje: &str, c: &SemContato) -> Aviso {
     a
 }
 
-/// Motivo curto e seguro para a faixa (que aceita um pouco de HTML).
+/// Motivo curto para a faixa, como está. RC3-3: não escapa: a faixa de
+/// atenção e a crítica mostram a descrição em texto puro, a informativa
+/// escapa no QML (`Tema.escapar`, H10) e o leitor de tela lê o resumo; com o
+/// escape aqui, um "&" aparecia como "&amp;".
 fn curto(t: &str) -> String {
-    let t: String = t.chars().take(90).collect();
-    t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    t.chars().take(90).collect()
 }
 
 /// A3: o aviso do modo seguro (banco com defeito), crítico, com o que fazer.
@@ -1213,7 +1215,8 @@ mod testes {
         assert!(!do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup"));
         config::gravar(&b.conn, "backup_erro", "Não deu para gravar na pasta <x>").unwrap();
         let a = do_dia(&b.conn).unwrap();
-        assert!(a.iter().any(|a| a.id == "backup" && a.atraso.contains("&lt;x&gt;")));
+        // RC3-3: o motivo vem como está (a faixa é texto puro).
+        assert!(a.iter().any(|a| a.id == "backup" && a.atraso.contains("<x>")));
         config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
         config::gravar(&b.conn, "backup_nuvem_desde", &crate::tempo::dias_atras(2)).unwrap();
         assert!(do_dia(&b.conn).unwrap().iter().any(|a| a.id == "backup_nuvem"));
@@ -1226,7 +1229,6 @@ mod testes {
     /// tela lê o `resumo`. Um caminho com "&" ou "<" aparecia como "&amp;" e
     /// "&lt;". Era a sonda `sonda_rev3_erro_do_backup_…` da revisão.
     #[test]
-    #[ignore = "RC3-3: falha hoje (o avisos::curto escapa o motivo para HTML)"]
     fn rc3_3_erro_do_backup_chega_sem_entidades() {
         let b = Banco::em_memoria().unwrap();
         let erro = "Não deu para gravar na pasta /home/ze/Peças & Cia <loja>";
