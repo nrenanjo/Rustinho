@@ -231,6 +231,7 @@ FocusScope {
                     Layout.fillWidth: true
                     Text {
                         text: le.e.descricao
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -242,6 +243,7 @@ FocusScope {
                         text: ["Nº " + le.e.numero + (le.e.caixa ? " (" + le.e.caixa + ")" : "") + " · " + le.e.cliente, le.e.desde, le.e.codigo ? "cód. " + le.e.codigo : "",
                                le.e.fornecedor ? le.e.fornecedor + (le.e.codigoFornecedor ? " (" + le.e.codigoFornecedor + ")" : "") : ""]
                               .filter(x => !!x).join("  ·  ")
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.serifa
                         font.italic: true
@@ -260,6 +262,7 @@ FocusScope {
                 }
                 Text {
                     text: "Comprar " + le.e.quantidade + " " + le.e.unidade
+                    textFormat: Text.PlainText
                     color: Tema.verdeEscuro
                     font.family: Tema.texto
                     font.weight: Font.Bold
@@ -303,6 +306,7 @@ FocusScope {
                     Layout.fillWidth: true
                     Text {
                         text: lp.p.nome + (lp.p.marca ? " · " + lp.p.marca : "")
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -315,6 +319,7 @@ FocusScope {
                     Text {
                         text: ["cód. " + lp.p.codigo, lp.p.fornecedor ? lp.p.fornecedor + (lp.p.codigoFornecedor ? " (" + lp.p.codigoFornecedor + ")" : "") : "",
                                lp.p.observacao].filter(x => !!x).join("  ·  ")
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.serifa
                         font.italic: true
@@ -328,6 +333,7 @@ FocusScope {
                     Layout.preferredWidth: 150
                     Text {
                         text: lp.p.tem
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -336,6 +342,7 @@ FocusScope {
                     }
                     Text {
                         text: lp.p.ritmo
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.pixelSize: 12
@@ -347,6 +354,7 @@ FocusScope {
                     Layout.preferredWidth: 150
                     Text {
                         text: "Comprar " + lp.p.sugerido + " " + lp.p.unidade
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold
@@ -355,6 +363,7 @@ FocusScope {
                     }
                     Text {
                         text: lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : "sem custo"
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)
                         font.family: Tema.texto
                         font.pixelSize: 12

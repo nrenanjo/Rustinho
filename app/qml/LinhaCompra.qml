@@ -32,6 +32,7 @@ Rectangle {
 
         Text {
             text: linha.item.emissao || ""
+            textFormat: Text.PlainText
             color: linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold
@@ -45,6 +46,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.fornecedor || "Fornecedor não identificado"
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -54,6 +56,7 @@ Rectangle {
             }
             Text {
                 text: (Tema.estreito && linha.item.emissao ? linha.item.emissao + "  ·  " : "") + "NF " + (linha.item.numero || "—") + "  ·  " + linha.item.itens + (linha.item.itens === 1 ? " item" : " itens")
+                textFormat: Text.PlainText
                 color: linha.corSuave
                 font.family: Tema.serifa
                 font.italic: true
@@ -92,6 +95,7 @@ Rectangle {
                         default: return "Estornada"
                         }
                     }
+                    textFormat: Text.PlainText
                     color: linha.atual ? Tema.tintaAtual : linha.item.situacao === "rascunho" ? Tema.vermelho : linha.item.situacao === "lancada" ? Tema.verdeEscuro : Tema.tintaSuave
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
@@ -102,6 +106,7 @@ Rectangle {
 
         Text {
             text: "R$ " + Tema.valor(linha.item.total || "0,00")
+            textFormat: Text.PlainText
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.Bold

@@ -94,6 +94,7 @@ FocusScope {
                       : tela.v.vencido ? "Este orçamento passou da validade. Ao vender, os preços de hoje serão conferidos."
                       : (tela.orcamento ? "Orçamento cancelado" : "Venda cancelada: as peças voltaram ao estoque")
                         + (tela.v.motivoCancelamento ? ". Motivo: " + tela.v.motivoCancelamento : ".")
+                textFormat: Text.PlainText
                 color: tela.v && tela.v.situacao === "vendido" ? Tema.verdeEscuro : Tema.vermelho
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -141,6 +142,7 @@ FocusScope {
                         spacing: 14
                         Text {
                             text: modelData.codigo
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -153,6 +155,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: modelData.descricao
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(faixaDaLista.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -164,6 +167,7 @@ FocusScope {
                                 visible: Tema.estreito
                                 text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
                                       + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
@@ -175,12 +179,14 @@ FocusScope {
                             visible: !Tema.estreito
                             text: modelData.quantidade + " " + modelData.unidade + " × R$ " + modelData.preco
                                   + (modelData.desconto ? "  − R$ " + modelData.desconto : "")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.pixelSize: 15
                         }
                         Text {
                             text: "R$ " + modelData.total
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -210,13 +216,14 @@ FocusScope {
                     delegate: RowLayout {
                         required property var modelData
                         Layout.fillWidth: true
-                        Text { text: modelData[0]; color: Tema.tintaSuave; font.family: Tema.texto; font.pixelSize: 15; Layout.fillWidth: true }
-                        Text { text: modelData[1]; color: Tema.tinta; font.family: Tema.texto; font.pixelSize: 15 }
+                        Text { text: modelData[0]; textFormat: Text.PlainText; color: Tema.tintaSuave; font.family: Tema.texto; font.pixelSize: 15; Layout.fillWidth: true }
+                        Text { text: modelData[1]; textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.pixelSize: 15 }
                     }
                 }
                 Rotulo { text: "Total"; color: Tema.verdeEscuro; Layout.topMargin: 6 }
                 Text {
                     text: tela.v ? "R$ " + tela.v.total : ""
+                    textFormat: Text.PlainText
                     color: Tema.tinta
                     font.family: Tema.texto
                     font.weight: Font.Bold
@@ -249,6 +256,7 @@ FocusScope {
                             width: faixaDaLista2.width - 16
                             Text {
                                 text: modelData.parcela + "  vence " + modelData.vencimento
+                                textFormat: Text.PlainText
                                 color: modelData.situacao === "vencida" ? Tema.vermelhoDaFaixa(faixaDaLista2.par) : Tema.tintaSuaveDaFaixa(faixaDaLista2.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 14
@@ -256,6 +264,7 @@ FocusScope {
                             }
                             Text {
                                 text: modelData.situacao === "paga" ? "paga" : modelData.situacao === "cancelada" ? "cancelada" : "R$ " + modelData.saldo
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(faixaDaLista2.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 14
@@ -295,6 +304,7 @@ FocusScope {
                             y: 3
                             width: faixaDaLista3.width - 16
                             text: modelData
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(faixaDaLista3.par)
                             font.family: Tema.texto
                             font.pixelSize: 14

@@ -55,9 +55,6 @@ TELA = u.TELA
 
 # Item → motivo. A correção tira os que resolve.
 ESPERADAS = {
-    "T1": "H10 ext.: o nome da peça (LinhaPeca) no formato automático",
-    "T2": "H10 ext.: o nome do cliente (LinhaPessoa) no formato automático",
-    "T3": "H10 ext.: o nome do fornecedor (LinhaPessoa) no formato automático",
 }
 
 

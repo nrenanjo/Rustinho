@@ -137,6 +137,7 @@ FocusScope {
                         Layout.preferredWidth: 96
                         Text {
                             text: linha.ch.bomPara
+                            textFormat: Text.PlainText
                             color: linha.ch.atrasado ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -154,6 +155,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: "Nº " + linha.ch.numero + "  ·  " + (linha.ch.emitente || "sem nome")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -165,6 +167,7 @@ FocusScope {
                             text: [Tema.estreito ? "bom para " + linha.ch.bomPara : "", Tema.estreito ? linha.chip : "",
                                    linha.ch.banco, linha.ch.cliente && linha.ch.cliente !== linha.ch.emitente ? "cliente " + linha.ch.cliente : "",
                                    linha.ch.conta ? "em " + linha.ch.conta : "", linha.ch.situacaoEm, linha.ch.observacoes].filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             visible: text !== ""
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
@@ -182,6 +185,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + linha.ch.valor
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold

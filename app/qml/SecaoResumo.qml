@@ -141,6 +141,7 @@ FocusScope {
                     delegate: Text {
                         required property var modelData
                         text: "• " + (Tema.oculto ? String(modelData).replace(/R\$ ?-?[\d.]+,\d\d/g, "R$ •••") : modelData)
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -248,6 +249,7 @@ FocusScope {
                                     Text {
                                         visible: conta.modelData.vencido !== "0,00"
                                         text: "vencido R$ " + Tema.valor(conta.modelData.vencido)
+                                        textFormat: Text.PlainText
                                         color: Tema.vermelho
                                         font.family: Tema.serifa
                                         font.italic: true
@@ -256,6 +258,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(conta.modelData.valor)
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold

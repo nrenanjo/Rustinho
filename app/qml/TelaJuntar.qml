@@ -175,6 +175,7 @@ FocusScope {
                             y: 4
                             width: faixaDaLista.width - 16
                             text: (modelData.nome || "Caixa") + " (" + modelData.endereco + ")" + (modelData.erro ? " · " + modelData.erro : "")
+                            textFormat: Text.PlainText
                             color: modelData.erro ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.pixelSize: 15

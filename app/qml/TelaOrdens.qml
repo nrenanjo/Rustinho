@@ -144,6 +144,7 @@ FocusScope {
                         Text {
                             // Rascunho ainda não tem número.
                             text: linha.o.situacao === "rascunho" ? "—" : linha.o.numero
+                            textFormat: Text.PlainText
                             color: Tema.douradoDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -153,6 +154,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.o.caixa
+                            textFormat: Text.PlainText
                             visible: text !== ""
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
@@ -174,6 +176,7 @@ FocusScope {
                             id: textoPlaca
                             anchors.centerIn: parent
                             text: linha.o.placa
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -186,6 +189,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: [linha.o.veiculo, linha.o.cliente].filter(x => !!x).join(" · ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -197,6 +201,7 @@ FocusScope {
                             text: [Tema.estreito ? linha.o.nomeSituacao : "",
                                    Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao) ? "previsão " + linha.o.previsao : "",
                                    linha.o.defeito, linha.o.mecanico ? "mecânico " + linha.o.mecanico : "", "aberta " + linha.o.quando].filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -208,6 +213,7 @@ FocusScope {
                     Text {
                         visible: !Tema.estreito && linha.o.previsao !== "" && ["orcamento", "aprovada"].includes(linha.o.situacao)
                         text: "previsão " + linha.o.previsao
+                        textFormat: Text.PlainText
                         color: linha.o.atrasada ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: linha.o.atrasada ? Font.Bold : Font.Normal
@@ -221,6 +227,7 @@ FocusScope {
                     }
                     Text {
                         text: "R$ " + linha.o.total
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(linha.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold

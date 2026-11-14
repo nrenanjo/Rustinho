@@ -46,6 +46,7 @@ CheckBox {
     contentItem: Text {
         leftPadding: caixa.indicator.width + caixa.spacing
         text: caixa.text
+        textFormat: Text.PlainText
         font: caixa.font
         color: Tema.tintaNo(caixa.superficie)
         verticalAlignment: Text.AlignVCenter

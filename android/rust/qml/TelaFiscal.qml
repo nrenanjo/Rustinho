@@ -120,6 +120,7 @@ FocusScope {
                     spacing: 12
                     Text {
                         text: modelData.codigo
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -129,6 +130,7 @@ FocusScope {
                     }
                     Text {
                         text: modelData.nome + (modelData.marca ? "  ·  " + modelData.marca : "")
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.pixelSize: 15
@@ -138,6 +140,7 @@ FocusScope {
                     Text {
                         text: listaPecas.mostrarCsosn ? "CSOSN " + modelData.csosn + "  →  " + modelData.sugerido
                                                       : (modelData.ncm ? "NCM " + modelData.ncm : "")
+                        textFormat: Text.PlainText
                         color: listaPecas.mostrarCsosn ? Tema.vermelhoDaFaixa(faixaDaLista.par) : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -247,6 +250,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: faixaConflitos.n === 0 ? "Nenhuma peça com CSOSN errado" : faixaConflitos.n + (faixaConflitos.n === 1 ? " peça com CSOSN para conferir" : " peças com CSOSN para conferir")
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.titulo
                             font.weight: Font.Bold

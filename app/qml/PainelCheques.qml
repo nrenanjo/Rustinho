@@ -104,6 +104,7 @@ Rectangle {
                 delegate: Text {
                     required property var modelData
                     text: (modelData.numero ? "nº " + modelData.numero + "  " : "") + modelData.bomPara + "  R$ " + modelData.valor
+                    textFormat: Text.PlainText
                     color: Tema.tinta
                     font.family: Tema.texto
                     font.pixelSize: 14
@@ -113,6 +114,7 @@ Rectangle {
         Text {
             visible: text !== ""
             text: painel.calc && painel.calc.erro && painel.calc.campo !== "chequeNumero" ? painel.calc.erro : ""
+            textFormat: Text.PlainText
             color: Tema.vermelho
             font.family: Tema.texto
             font.weight: Font.DemiBold

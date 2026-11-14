@@ -49,6 +49,7 @@ Rectangle {
             Text {
                 visible: !cartao._embaixo
                 text: cartao.nota
+                textFormat: Text.PlainText
                 color: cartao.corNota
                 font.family: Tema.serifa
                 font.italic: true
@@ -59,6 +60,7 @@ Rectangle {
         }
         Text {
             text: cartao.prefixo + (cartao.sensivel ? Tema.valor(cartao.valor) : cartao.valor)
+            textFormat: Text.PlainText
             color: cartao.corValor
             font.family: Tema.titulo
             font.weight: Font.Bold
@@ -70,6 +72,7 @@ Rectangle {
         Text {
             visible: cartao._embaixo && cartao.nota !== ""
             text: cartao.nota
+            textFormat: Text.PlainText
             color: cartao.corNota
             font.family: Tema.serifa
             font.italic: true

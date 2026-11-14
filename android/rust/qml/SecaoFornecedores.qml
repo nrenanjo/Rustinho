@@ -60,6 +60,7 @@ FocusScope {
                     spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.f.posicao
+                        textFormat: Text.PlainText
                         color: Tema.douradoDaFaixa(linha.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -75,6 +76,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: linha.f.nome
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(linha.par)
                                 font.family: Tema.titulo
                                 font.weight: Font.Bold
@@ -87,6 +89,7 @@ FocusScope {
                             }
                             Text {
                                 text: linha.f.cidade
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(linha.par)
                                 font.family: Tema.serifa
                                 font.italic: true
@@ -113,6 +116,7 @@ FocusScope {
                         Layout.preferredWidth: 170
                         Text {
                             text: linha.f.notas + (linha.f.notas === 1 ? " nota" : " notas") + " · " + linha.f.pecas + (linha.f.pecas === 1 ? " peça" : " peças")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -121,6 +125,7 @@ FocusScope {
                         }
                         Text {
                             text: "última " + linha.f.ultima
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
@@ -132,6 +137,7 @@ FocusScope {
                         Layout.preferredWidth: Tema.estreito ? -1 : 150
                         Text {
                             text: "R$ " + Tema.valor(linha.f.total)
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -140,6 +146,7 @@ FocusScope {
                         }
                         Text {
                             text: linha.f.percentual ? linha.f.percentual + " das compras" : ""
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12

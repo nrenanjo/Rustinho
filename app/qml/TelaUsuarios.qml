@@ -165,6 +165,7 @@ FocusScope {
                         x: 16
                         y: -2
                         text: linha.modelData.nome.charAt(0).toUpperCase()
+                        textFormat: Text.PlainText
                         font.family: Tema.titulo
                         font.italic: true
                         font.weight: Font.DemiBold
@@ -180,6 +181,7 @@ FocusScope {
                         spacing: 0
                         Text {
                             text: linha.modelData.nome + (linha.modelData.voce ? "  (você)" : "") + (linha.modelData.ativo ? "" : "  · desativado")
+                            textFormat: Text.PlainText
                             color: linha.aberto ? Tema.tintaAtual : Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -189,6 +191,7 @@ FocusScope {
                         }
                         Text {
                             text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha curta" : "")
+                            textFormat: Text.PlainText
                             color: linha.aberto ? Tema.claroSuave(0.75) : Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true

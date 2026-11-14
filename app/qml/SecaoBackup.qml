@@ -255,6 +255,7 @@ ColumnLayout {
                     text: !secao.b ? "" : secao.b.situacao.ultimo
                           ? "Último backup " + secao.quando(secao.b.situacao.ultimo)
                           : "Ainda não teve nenhum backup"
+                    textFormat: Text.PlainText
                     color: Tema.tinta
                     font.family: Tema.titulo
                     font.weight: Font.Bold
@@ -290,6 +291,7 @@ ColumnLayout {
                         }
                         Text {
                             text: modelData.texto
+                            textFormat: Text.PlainText
                             color: modelData.ruim ? Tema.vermelho : Tema.tinta
                             font.family: Tema.texto
                             font.pixelSize: 15
@@ -629,6 +631,7 @@ ColumnLayout {
                     spacing: 12
                     Text {
                         text: modelData.quando
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -641,6 +644,7 @@ ColumnLayout {
                     }
                     Text {
                         text: secao.nomeCaixa(modelData.caixa) + " · " + secao.tamanho(modelData.tamanho) + (modelData.temSenha ? " · trancado" : " · sem trancar")
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                         font.family: Tema.texto
                         font.pixelSize: 15

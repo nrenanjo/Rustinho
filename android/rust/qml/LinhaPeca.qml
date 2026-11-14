@@ -58,6 +58,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativa)")
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -69,6 +70,7 @@ Rectangle {
             }
             Text {
                 text: (linha.item.oferta ? "oferta  " : "") + (linha.item.preco ? "R$ " + linha.item.preco : "—")
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -78,6 +80,7 @@ Rectangle {
         }
         Text {
             text: [linha.item.marca, linha.item.codigoOriginal, linha.item.aplicacoes].filter(x => !!x).join("  ·  ")
+            textFormat: Text.PlainText
             visible: text !== ""
             color: linha.corSuave
             font.family: Tema.serifa
@@ -91,6 +94,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: ["Cód. forn.: " + linha.codigoFornecedorExibido, linha.item.local].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 color: linha.corSuave
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -111,6 +115,7 @@ Rectangle {
                     id: estoqueC
                     anchors.centerIn: parent
                     text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
+                    textFormat: Text.PlainText
                     color: linha.item.estoqueBaixo ? (linha.atual ? Tema.vermelhoSobre : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
@@ -132,6 +137,7 @@ Rectangle {
         // Coluna 1: CÓD. FORNECEDOR em uma única linha, largura 84 px (idêntico à dev.2)
         Text {
             text: linha.codigoFornecedorExibido
+            textFormat: Text.PlainText
             color: linha.corSuave
             font.family: Tema.texto
             font.weight: Font.DemiBold
@@ -153,6 +159,7 @@ Rectangle {
                     objectName: "nomePeca"
                     width: Math.min(implicitWidth, parent.width - (achou.visible ? achou.implicitWidth + 10 : 0))
                     text: (linha.item.nome || "") + (linha.item.ativo ? "" : "  (inativa)")
+                    textFormat: Text.PlainText
                     color: linha.corTexto
                     font.family: Tema.fonteLinha
                     font.weight: Font.Bold
@@ -170,6 +177,7 @@ Rectangle {
             }
             Text {
                 text: [linha.item.marca, linha.item.codigoOriginal, linha.item.aplicacoes].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: linha.corSuave
                 font.family: Tema.serifa
@@ -182,6 +190,7 @@ Rectangle {
 
         Text {
             text: linha.item.local || ""
+            textFormat: Text.PlainText
             color: linha.corSuave
             font.family: Tema.texto
             font.pixelSize: 15
@@ -204,6 +213,7 @@ Rectangle {
                     id: estoque
                     anchors.centerIn: parent
                     text: linha.item.servico ? "serviço" : (linha.item.estoque || "0") + " " + (linha.item.unidade || "")
+                    textFormat: Text.PlainText
                     color: linha.item.estoqueBaixo ? (linha.atual ? Tema.vermelhoSobre : Tema.vermelho) : linha.corTexto
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
@@ -214,6 +224,7 @@ Rectangle {
 
         Text {
             text: (linha.item.oferta ? "oferta  " : "") + (linha.item.preco ? "R$ " + linha.item.preco : "—")
+            textFormat: Text.PlainText
             color: linha.corTexto
             font.family: Tema.texto
             font.weight: Font.Bold

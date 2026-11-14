@@ -69,6 +69,7 @@ FocusScope {
                     spacing: Tema.estreito ? 8 : 14
                     Text {
                         text: linha.c.posicao
+                        textFormat: Text.PlainText
                         color: Tema.douradoDaFaixa(linha.par)
                         font.family: Tema.titulo
                         font.weight: Font.Bold
@@ -81,6 +82,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: linha.c.nome
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -114,6 +116,7 @@ FocusScope {
                         Layout.preferredWidth: 150
                         Text {
                             text: linha.c.compras + (linha.c.compras === 1 ? " compra" : " compras")
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -122,6 +125,7 @@ FocusScope {
                         }
                         Text {
                             text: "última " + linha.c.ultima
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12
@@ -133,6 +137,7 @@ FocusScope {
                         Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
                             text: "R$ " + Tema.valor(linha.c.total)
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -141,6 +146,7 @@ FocusScope {
                         }
                         Text {
                             text: "média R$ " + Tema.valor(linha.c.ticket)
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.texto
                             font.pixelSize: 12

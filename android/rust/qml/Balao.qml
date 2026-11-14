@@ -22,6 +22,7 @@ Rectangle {
         anchors.centerIn: parent
         width: Math.min(implicitWidth, balao.width - 18)
         text: balao.texto
+        textFormat: Text.PlainText
         color: balao.escuro ? Tema.tintaAtual : Tema.azulEscuro
         font.family: Tema.texto
         font.weight: Font.DemiBold

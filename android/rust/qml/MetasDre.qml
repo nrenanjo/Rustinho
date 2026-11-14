@@ -88,6 +88,7 @@ Painel {
                         Layout.fillWidth: true
                         Text {
                             text: meta.modelData.indicadorNome + " · " + meta.modelData.vendedor
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(meta.par)
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -97,6 +98,7 @@ Painel {
                         }
                         Text {
                             text: meta.modelData.percentual || "—"
+                            textFormat: Text.PlainText
                             color: meta.modelData.atingida ? Tema.verdeEscuroDaFaixa(meta.par) : Tema.tintaDaFaixa(meta.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -126,6 +128,7 @@ Painel {
                         text: meta.modelData.periodoRotulo + "  ·  realizado " + (Tema.oculto && meta.modelData.unidade === "R$" ? "•••" : meta.modelData.realizado)
                               + " de " + (Tema.oculto && meta.modelData.unidade === "R$" ? "•••" : meta.modelData.meta)
                               + (meta.modelData.diferenca && !Tema.oculto ? "  ·  diferença " + meta.modelData.diferenca : "")
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(meta.par)
                         font.family: Tema.serifa
                         font.italic: true

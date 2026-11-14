@@ -342,6 +342,7 @@ FocusScope {
                                ? "1 item de XML aguardando associação com peça"
                                : tela.pendenciasXml + " itens de XML aguardando associação com peças")
                               + " · associe a uma peça existente ou cadastre como nova para concluir."
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 14

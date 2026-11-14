@@ -37,6 +37,7 @@ Rectangle {
             Layout.preferredWidth: 96
             Text {
                 text: linha.item.vencimento || ""
+                textFormat: Text.PlainText
                 color: linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -44,6 +45,7 @@ Rectangle {
             }
             Text {
                 text: linha.item.diasAtraso > 0 ? linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " atrasada" : (linha.item.parcela !== "1/1" ? "parcela " + linha.item.parcela : "")
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: linha.item.diasAtraso > 0 ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
@@ -56,6 +58,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.descricao || ""
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -67,6 +70,7 @@ Rectangle {
                 text: [Tema.estreito ? "vence " + (linha.item.vencimento || "") + (linha.item.diasAtraso > 0 ? " (" + linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " atrasada)" : "") : "",
                        linha.item.fornecedor && linha.item.descricao.indexOf(linha.item.fornecedor) < 0 ? linha.item.fornecedor : "",
                        linha.item.categoria, linha.item.documento].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 visible: text !== ""
                 color: Tema.estreito && linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.serifa
@@ -89,6 +93,7 @@ Rectangle {
             Layout.preferredWidth: Tema.estreito ? -1 : 120
             Text {
                 text: "R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo)
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -98,6 +103,7 @@ Rectangle {
             Text {
                 visible: !linha.fechada && linha.item.pago !== "0,00"
                 text: "de R$ " + linha.item.valor
+                textFormat: Text.PlainText
                 color: Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12

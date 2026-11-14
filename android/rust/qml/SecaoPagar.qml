@@ -273,6 +273,7 @@ FocusScope {
                         anchors.verticalCenter: parent.verticalCenter
                         x: 12
                         text: modelData.nome + (modelData.documento ? "  ·  " + Tema.sigilo(modelData.documento) : "")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 15
@@ -334,6 +335,7 @@ FocusScope {
                     delegate: Text {
                         required property var modelData
                         text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuave
                         font.family: Tema.texto
                         font.pixelSize: 14
@@ -505,6 +507,7 @@ FocusScope {
             }
             Text {
                 text: "Sai R$ " + pagamento.total
+                textFormat: Text.PlainText
                 color: Tema.tinta
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -610,6 +613,7 @@ FocusScope {
                                    modelData.juros !== "0,00" ? "juros R$ " + modelData.juros : "",
                                    modelData.desconto !== "0,00" ? "desconto R$ " + modelData.desconto : "",
                                    modelData.estornado ? "ESTORNADO: " + modelData.motivoEstorno : ""].filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.pixelSize: 13
@@ -618,6 +622,7 @@ FocusScope {
                         }
                         Text {
                             text: "R$ " + modelData.total
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(faixaDaLista.par)
                             font.family: Tema.texto
                             font.weight: Font.Bold

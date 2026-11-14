@@ -47,6 +47,7 @@ Item {
                         id: rotulo
                         anchors.centerIn: parent
                         text: parent.feita ? "✓ " + modelData.nome : modelData.nome
+                        textFormat: Text.PlainText
                         color: parent.agora ? Tema.claro : parent.feita ? Tema.verdeEscuro : Tema.apagado
                         font.family: Tema.texto
                         font.weight: Font.DemiBold

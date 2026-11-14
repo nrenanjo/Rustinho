@@ -24,6 +24,7 @@ Rectangle {
         id: rotulo
         anchors.centerIn: parent
         text: chip.texto
+        textFormat: Text.PlainText
         color: chip.corTexto
         font.family: Tema.texto
         font.weight: Font.DemiBold

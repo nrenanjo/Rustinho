@@ -61,6 +61,7 @@ Painel {
                     spacing: 12
                     Text {
                         text: registro.modelData.data
+                        textFormat: Text.PlainText
                         color: Tema.apagadoDaFaixa(registro.par)
                         font.family: Tema.texto
                         font.pixelSize: 13
@@ -71,6 +72,7 @@ Painel {
                         Layout.fillWidth: true
                         Text {
                             text: registro.modelData.descricao
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(registro.par)
                             font.family: Tema.texto
                             font.pixelSize: 14
@@ -82,6 +84,7 @@ Painel {
                             visible: text !== ""
                             text: [m.categoria, m.fornecedor, m.semCompetencia ? "sem mês de referência (usado o vencimento)" : ""]
                                   .filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: m.semCompetencia ? Tema.vermelhoDaFaixa(registro.par) : Tema.apagadoDaFaixa(registro.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -91,6 +94,7 @@ Painel {
                     }
                     Text {
                         text: "R$ " + Tema.valor(registro.modelData.valor)
+                        textFormat: Text.PlainText
                         color: Tema.tintaDaFaixa(registro.par)
                         font.family: Tema.texto
                         font.weight: Font.Bold

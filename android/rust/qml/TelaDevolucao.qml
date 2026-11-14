@@ -210,6 +210,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.it.descricao
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
@@ -221,6 +222,7 @@ FocusScope {
                                     text: ["cód. " + linha.it.codigo, "vendeu " + linha.it.vendido + " " + linha.it.unidade,
                                            linha.it.devolvido ? "já voltou " + linha.it.devolvido : "",
                                            "R$ " + linha.it.valorUnitario + " cada"].filter(x => !!x).join("  ·  ")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
@@ -288,6 +290,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: "R$ " + (tela.calc ? tela.calc.valor : "0,00")
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -348,8 +351,8 @@ FocusScope {
                             delegate: RowLayout {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                Text { text: modelData.nome; color: Tema.tinta; font.family: Tema.texto; font.pixelSize: 15; Layout.fillWidth: true }
-                                Text { text: "R$ " + modelData.valor; color: Tema.tinta; font.family: Tema.texto; font.weight: Font.Bold; font.pixelSize: 15 }
+                                Text { text: modelData.nome; textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.pixelSize: 15; Layout.fillWidth: true }
+                                Text { text: "R$ " + modelData.valor; textFormat: Text.PlainText; color: Tema.tinta; font.family: Tema.texto; font.weight: Font.Bold; font.pixelSize: 15 }
                             }
                         }
                     }
@@ -381,6 +384,7 @@ FocusScope {
                                         id: rotuloMotivo
                                         anchors.centerIn: parent
                                         text: modelData
+                                        textFormat: Text.PlainText
                                         color: motivo.texto === modelData ? Tema.claro : Tema.tintaSuave
                                         font.family: Tema.texto
                                         font.pixelSize: 13

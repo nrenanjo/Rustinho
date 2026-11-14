@@ -163,6 +163,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: (linha.e.quantidade !== "1" ? linha.e.quantidade + " × " : "") + linha.e.descricao
+                            textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.titulo
                             font.weight: Font.Bold
@@ -176,6 +177,7 @@ FocusScope {
                                    linha.e.avisado ? "avisado " + linha.e.avisadoEm : "",
                                    linha.e.situacao === "cancelada" ? linha.e.motivo : linha.e.observacoes]
                                   .filter(x => !!x).join("  ·  ")
+                            textFormat: Text.PlainText
                             color: Tema.tintaSuaveDaFaixa(linha.par)
                             font.family: Tema.serifa
                             font.italic: true
@@ -408,6 +410,7 @@ FocusScope {
                         x: 12
                         width: parent.width - 24
                         text: modelData.nome + (modelData.telefone ? "  ·  " + modelData.telefone : "")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.pixelSize: 14

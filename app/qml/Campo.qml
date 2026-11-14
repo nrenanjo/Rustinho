@@ -433,6 +433,7 @@ ColumnLayout {
         Text {
             id: textoPrefixo
             text: campo.prefixo
+            textFormat: Text.PlainText
             visible: text !== ""
             anchors.left: parent.left
             anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12
@@ -444,6 +445,7 @@ ColumnLayout {
         Text {
             id: textoSufixo
             text: campo.sufixo
+            textFormat: Text.PlainText
             visible: text !== ""
             anchors.right: parent.right
             anchors.rightMargin: 12 + campo.larguraCopiar + campo.larguraBotao
@@ -509,6 +511,7 @@ ColumnLayout {
 
     Text {
         text: campo.erro
+        textFormat: Text.PlainText
         visible: text !== ""
         color: Tema.vermelhoNo(campo.superficie)
         font.family: Tema.texto

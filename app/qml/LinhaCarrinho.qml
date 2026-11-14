@@ -51,6 +51,7 @@ Rectangle {
                 Layout.row: 0
                 Layout.column: 0
                 text: linha.indice + 1
+                textFormat: Text.PlainText
                 color: Tema.douradoDaFaixa(linha.escura)
                 font.family: Tema.titulo
                 font.weight: Font.Bold
@@ -65,6 +66,7 @@ Rectangle {
                 Layout.columnSpan: parent.e ? 3 : 1
                 Text {
                     text: linha.item.descricao || ""
+                    textFormat: Text.PlainText
                     color: Tema.tintaDaFaixa(linha.escura)
                     font.family: Tema.fonteLinha
                     font.weight: Font.Bold
@@ -80,6 +82,7 @@ Rectangle {
                     Text {
                         width: Math.min(implicitWidth, Tema.estreito ? parent.width : 320)
                         text: [linha.item.codigo, linha.item.marca, linha.item.local ? "local " + linha.item.local : ""].filter(x => !!x).join("  ·  ")
+                        textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(linha.escura)
                         font.family: Tema.serifa
                         font.italic: true
@@ -98,6 +101,7 @@ Rectangle {
                             text: linha.item.servico ? (linha.item.produtoId ? "serviço" : "serviço (mão de obra)")
                                   : linha.item.faltaEstoque && semNada ? "sem estoque"
                                   : (linha.item.faltaEstoque ? "só " : "") + (linha.item.estoque || "0") + " " + (linha.item.unidade || "") + " no estoque"
+                            textFormat: Text.PlainText
                             color: linha.item.servico ? Tema.verdeEscuro : linha.item.faltaEstoque ? Tema.vermelho : Tema.tintaSuave
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -125,6 +129,7 @@ Rectangle {
                             }
                             Text {
                                 text: linha.item.encomendar ? "Encomendar " + linha.item.falta + " " + (linha.item.unidade || "") : "Encomendar?"
+                                textFormat: Text.PlainText
                                 color: linha.item.encomendar ? Tema.verdeEscuro : Tema.tintaSuave
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -178,6 +183,7 @@ Rectangle {
             }
             Text {
                 text: "R$ " + (linha.item.total || "0,00")
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.escura)
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -202,6 +208,7 @@ Rectangle {
         Text {
             visible: !!linha.item.erro
             text: linha.item.erro || ""
+            textFormat: Text.PlainText
             color: Tema.vermelhoDaFaixa(linha.escura)
             font.family: Tema.texto
             font.weight: Font.DemiBold

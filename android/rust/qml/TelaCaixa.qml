@@ -157,6 +157,7 @@ FocusScope {
                         Layout.fillWidth: true
                         Text {
                             text: tela.r ? "R$ " + tela.r.esperado : ""
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.Bold
@@ -189,6 +190,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: modelData[0]
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuave
                                     font.family: Tema.texto
                                     font.pixelSize: 15
@@ -196,6 +198,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: modelData[1]
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -265,6 +268,7 @@ FocusScope {
                                     width: faixaDaLista2.width - 16
                                     Text {
                                         text: tela.hora(modelData.abertoEm) + " · " + modelData.abertoPor
+                                        textFormat: Text.PlainText
                                         color: Tema.tintaDaFaixa(faixaDaLista2.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14

@@ -48,6 +48,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.descricao + "  ·  " + linha.item.parcela
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -66,6 +67,7 @@ Rectangle {
                 text: [Tema.estreito ? (linha.nomes[linha.item.situacao] || "") : "", "vence " + linha.item.vencimento,
                        linha.item.pago !== "0,00" ? Tema.sigiloTexto("pago R$ " + linha.item.pago + " de R$ " + linha.item.valor) : "",
                        linha.item.diasAtraso > 0 ? linha.item.diasAtraso + " dias de atraso" : ""].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 color: linha.item.situacao === "vencida" ? Tema.vermelhoDaFaixa(linha.par) : Tema.tintaSuaveDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 13
@@ -83,6 +85,7 @@ Rectangle {
                 id: chip
                 anchors.centerIn: parent
                 text: linha.nomes[linha.item.situacao] || ""
+                textFormat: Text.PlainText
                 color: linha.item.situacao === "vencida" ? Tema.vermelho : Tema.tinta
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -94,6 +97,7 @@ Rectangle {
             Layout.preferredWidth: Tema.estreito ? 77 : 110
             Text {
                 text: Tema.sigiloTexto("R$ " + (linha.fechada ? linha.item.valor : linha.item.saldo))
+                textFormat: Text.PlainText
                 color: Tema.tintaDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -103,6 +107,7 @@ Rectangle {
             Text {
                 visible: linha.item.juros !== ""
                 text: Tema.sigiloTexto("+ R$ " + linha.item.juros + " juros")
+                textFormat: Text.PlainText
                 color: Tema.vermelhoDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.pixelSize: 12

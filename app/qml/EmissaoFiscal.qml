@@ -50,6 +50,7 @@ ColumnLayout {
                         spacing: 8
                         Text {
                             text: parent.parent.modelData
+                            textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
                             font.weight: Font.Bold

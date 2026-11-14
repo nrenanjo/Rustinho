@@ -447,6 +447,7 @@ FocusScope {
                                 id: textoVale
                                 anchors.centerIn: parent
                                 text: tela.valeTroca ? "Vale-troca nº " + tela.valeTroca.numero + " · R$ " + tela.valeTroca.saldo + " (vai no Receber)" : ""
+                                textFormat: Text.PlainText
                                 color: Tema.verdeEscuro
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -611,6 +612,7 @@ FocusScope {
                                     spacing: Tema.estreito ? 8 : 14
                                     Text {
                                         text: modelData.codigo
+                                        textFormat: Text.PlainText
                                         color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.DemiBold
@@ -628,6 +630,7 @@ FocusScope {
                                                 id: nomeVenda
                                                 width: Math.min(implicitWidth, parent.width - (achouVenda.visible ? achouVenda.implicitWidth + 8 : 0))
                                                 text: modelData.nome
+                                                textFormat: Text.PlainText
                                                 color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                                 font.family: Tema.titulo
                                                 font.weight: Font.Bold
@@ -644,6 +647,7 @@ FocusScope {
                                         }
                                         Text {
                                             text: [Tema.estreito ? modelData.codigo : "", Tema.estreito ? modelData.local : "", modelData.marca, modelData.codigoOriginal, modelData.aplicacoes].filter(x => !!x).join("  ·  ")
+                                            textFormat: Text.PlainText
                                             color: atual ? Tema.claroSuave(0.75) : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                             font.family: Tema.serifa
                                             font.italic: true
@@ -654,6 +658,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: modelData.local
+                                        textFormat: Text.PlainText
                                         color: atual ? Tema.tintaAtual : Tema.tintaSuaveDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.pixelSize: 14
@@ -669,6 +674,7 @@ FocusScope {
                                             id: txtEst
                                             anchors.centerIn: parent
                                             text: modelData.servico ? "serviço" : modelData.estoque + " " + modelData.unidade
+                                            textFormat: Text.PlainText
                                             color: modelData.estoqueBaixo ? (atual ? Tema.vermelhoSobre : Tema.vermelho) : (atual ? Tema.tintaAtual : Tema.tinta)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
@@ -677,6 +683,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: (modelData.oferta ? "oferta  " : "") + (modelData.preco ? "R$ " + modelData.preco : "—")
+                                        textFormat: Text.PlainText
                                         color: atual ? Tema.tintaAtual : Tema.tintaDaFaixa(faixaDaLista.par)
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
@@ -736,6 +743,7 @@ FocusScope {
                                 spacing: 0
                                 Text {
                                     text: modelData.nome
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -745,6 +753,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: [Tema.sigilo(modelData.documento), modelData.telefone, modelData.veiculos].filter(x => !!x).join(" · ")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuave
                                     font.family: Tema.texto
                                     font.pixelSize: 12
@@ -788,6 +797,7 @@ FocusScope {
                             Layout.fillWidth: true
                             Text {
                                 text: modelData[0]
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuave
                                 font.family: Tema.texto
                                 font.pixelSize: 15
@@ -795,6 +805,7 @@ FocusScope {
                             }
                             Text {
                                 text: modelData[1]
+                                textFormat: Text.PlainText
                                 color: Tema.tinta
                                 font.family: Tema.texto
                                 font.pixelSize: 15
@@ -816,6 +827,7 @@ FocusScope {
                     Rotulo { text: "Total a pagar"; color: Tema.verdeEscuro }
                     Text {
                         text: "R$ " + (tela.calculo ? tela.calculo.total : "0,00")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold
@@ -868,6 +880,7 @@ FocusScope {
                     TapHandler { onTapped: tela.verLateral = true }
                     Text {
                         text: "R$ " + (tela.calculo ? tela.calculo.total : "0,00")
+                        textFormat: Text.PlainText
                         color: Tema.tinta
                         font.family: Tema.texto
                         font.weight: Font.Bold
@@ -878,6 +891,7 @@ FocusScope {
                     }
                     Text {
                         text: (tela.clienteId || campoCliente.texto ? campoCliente.texto : "Cliente e desconto") + "  ›"
+                        textFormat: Text.PlainText
                         color: Tema.verdeEscuro
                         font.family: Tema.texto
                         font.weight: Font.DemiBold
@@ -1162,6 +1176,7 @@ FocusScope {
                                 delegate: Text {
                                     required property var modelData
                                     text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
+                                    textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
                                     font.pixelSize: 14
@@ -1173,6 +1188,7 @@ FocusScope {
                             delegate: Text {
                                 required property var modelData
                                 text: "⚠ " + modelData
+                                textFormat: Text.PlainText
                                 color: Tema.vermelho
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -1184,6 +1200,7 @@ FocusScope {
                         Text {
                             visible: text !== ""
                             text: painelCred.cred ? painelCred.cred.erro : ""
+                            textFormat: Text.PlainText
                             color: Tema.vermelho
                             font.family: Tema.texto
                             font.weight: Font.DemiBold
@@ -1208,6 +1225,7 @@ FocusScope {
                     readonly property bool falta: !!receber.calc && receber.calc.falta !== "0,00"
                     text: !receber.calc ? "" : falta ? "Falta R$ " + receber.calc.falta
                           : receber.calc.troco !== "0,00" ? "Troco R$ " + receber.calc.troco : "Valor certo"
+                    textFormat: Text.PlainText
                     color: falta ? Tema.vermelho : Tema.verdeEscuro
                     font.family: Tema.texto
                     font.weight: Font.Bold
@@ -1218,6 +1236,7 @@ FocusScope {
             Text {
                 visible: receber.erro !== ""
                 text: receber.erro
+                textFormat: Text.PlainText
                 color: Tema.vermelho
                 font.family: Tema.texto
                 font.weight: Font.DemiBold
@@ -1256,6 +1275,7 @@ FocusScope {
             Text {
                 visible: !!tela.ultimaVenda && tela.ultimaVenda.troco !== "0,00"
                 text: tela.ultimaVenda ? "Troco R$ " + tela.ultimaVenda.troco : ""
+                textFormat: Text.PlainText
                 color: Tema.verdeEscuro
                 font.family: Tema.texto
                 font.weight: Font.Bold

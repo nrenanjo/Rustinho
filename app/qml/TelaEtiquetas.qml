@@ -296,6 +296,7 @@ FocusScope {
                                 Layout.fillWidth: true
                                 Text {
                                     text: linha.e.nome
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(linha.par)
                                     font.family: Tema.titulo
                                     font.weight: Font.Bold
@@ -305,6 +306,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: ["cód. " + linha.e.codigo, linha.e.textoBarras !== linha.e.codigo ? "barras " + linha.e.textoBarras : ""].filter(x => !!x).join("  ·  ")
+                                    textFormat: Text.PlainText
                                     color: Tema.tintaSuaveDaFaixa(linha.par)
                                     font.family: Tema.serifa
                                     font.italic: true
@@ -320,6 +322,7 @@ FocusScope {
                             }
                             Text {
                                 text: linha.e.semPreco ? "" : "R$ " + linha.e.preco
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(linha.par)
                                 font.family: Tema.texto
                                 font.weight: Font.Bold
@@ -402,6 +405,7 @@ FocusScope {
                             Text {
                                 text: travada.modelData.etiqueta.nome + " · " + travada.modelData.quantidade
                                       + (travada.modelData.quantidade === 1 ? " etiqueta" : " etiquetas")
+                                textFormat: Text.PlainText
                                 color: Tema.tintaDaFaixa(travada.par)
                                 font.family: Tema.texto
                                 font.weight: Font.DemiBold
@@ -411,6 +415,7 @@ FocusScope {
                             }
                             Text {
                                 text: travada.modelData.etiqueta.bloqueio
+                                textFormat: Text.PlainText
                                 color: Tema.tintaSuaveDaFaixa(travada.par)
                                 font.family: Tema.texto
                                 font.pixelSize: 13
@@ -551,6 +556,7 @@ FocusScope {
                                 Text {
                                     visible: tela.comLoja
                                     text: tela.janela ? (tela.janela.estado.loja || "").toUpperCase() : ""
+                                    textFormat: Text.PlainText
                                     color: "#5C534A"
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -560,6 +566,7 @@ FocusScope {
                                 }
                                 Text {
                                     text: previa.e ? previa.e.nome : ""
+                                    textFormat: Text.PlainText
                                     color: "#2A2622"
                                     font.family: Tema.texto
                                     font.weight: Font.DemiBold
@@ -574,6 +581,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                     Text {
                                         text: previa.e && !previa.e.semPreco ? "R$ " + previa.e.preco : ""
+                                        textFormat: Text.PlainText
                                         color: "#2A2622"
                                         font.family: Tema.texto
                                         font.weight: Font.Bold
@@ -582,6 +590,7 @@ FocusScope {
                                     }
                                     Text {
                                         text: previa.e ? "cód. " + previa.e.codigo : ""
+                                        textFormat: Text.PlainText
                                         color: "#5C534A"
                                         font.family: Tema.texto
                                         font.pixelSize: Math.max(6, 2.0 * previa.escala)
@@ -611,6 +620,7 @@ FocusScope {
                                 Text {
                                     visible: tela.comBarras
                                     text: previa.e ? previa.e.textoBarras : ""
+                                    textFormat: Text.PlainText
                                     // H22 (7.2): a prévia é sempre branca (o papel): cor fixa
                                     // escura, como as outras linhas dela (no AMOLED, Tema.tinta
                                     // é clara e o número sumia).

@@ -18,6 +18,7 @@ Rectangle {
 
     Text {
         id: mensagem
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         width: Math.min(implicitWidth, aviso.parent.width - 128)
         color: Tema.claro

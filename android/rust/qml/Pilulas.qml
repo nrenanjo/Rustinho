@@ -65,6 +65,7 @@ Item {
                         id: rotulo
                         anchors.centerIn: parent
                         text: celula.modelData.nome
+                        textFormat: Text.PlainText
                         color: celula.ativa ? (pilulas.noFundo ? Tema.sobrePilulaAtiva : Tema.sobreSubpilulaAtiva)
                                             : Tema.tintaNo(pilulas.superficie)
                         font.family: Tema.texto

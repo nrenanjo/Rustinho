@@ -34,6 +34,7 @@ Rectangle {
             Layout.fillWidth: true
             Text {
                 text: linha.item.nome
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.fonteLinha
                 font.weight: Font.Bold
@@ -45,6 +46,7 @@ Rectangle {
                 text: [linha.item.parcelas + (linha.item.parcelas === 1 ? " parcela" : " parcelas"),
                        (linha.atrasado ? "venceu " : "vence ") + linha.item.proximoVencimento,
                        linha.item.telefone].filter(x => !!x).join("  ·  ")
+                textFormat: Text.PlainText
                 color: linha.corSuave
                 font.family: Tema.serifa
                 font.italic: true
@@ -57,6 +59,7 @@ Rectangle {
             spacing: 0
             Text {
                 text: Tema.sigiloTexto("R$ " + linha.item.emAberto)
+                textFormat: Text.PlainText
                 color: linha.corTexto
                 font.family: Tema.texto
                 font.weight: Font.Bold
@@ -66,6 +69,7 @@ Rectangle {
             Text {
                 visible: linha.atrasado
                 text: linha.item.diasAtraso + (linha.item.diasAtraso === 1 ? " dia" : " dias") + " de atraso"
+                textFormat: Text.PlainText
                 color: linha.atual ? Tema.vermelhoSobre : Tema.vermelhoDaFaixa(linha.par)
                 font.family: Tema.texto
                 font.weight: Font.DemiBold

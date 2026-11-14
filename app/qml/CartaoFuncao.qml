@@ -54,6 +54,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Text {
                     text: cartao.item.titulo || ""
+                    textFormat: Text.PlainText
                     color: cartao.item.disponivel ? Tema.tintaNo(cartao.base) : Tema.tintaSuaveNo(cartao.base)
                     font.family: Tema.texto
                     font.weight: Font.DemiBold
