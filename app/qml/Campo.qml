@@ -539,6 +539,7 @@ ColumnLayout {
             currentIndex: -1
             boundsBehavior: Flickable.StopAtBounds
             delegate: ItemDelegate {
+                id: sugestao
                 required property var modelData
                 required property int index
                 width: vista.width
@@ -548,6 +549,19 @@ ColumnLayout {
                 font.family: Tema.texto
                 font.pixelSize: 15
                 highlighted: vista.currentIndex === index
+                // H10 (extensão): a sugestão é um dado (uma marca, um local...).
+                // O rótulo padrão do Qt lê como HTML o texto que parece HTML (e,
+                // no Qt 6.12, um "<img …>" nele fecha o programa) e some com o
+                // "&". Aqui é texto puro, com o desenho do padrão: as cores do
+                // estilo, uma linha, reticências no fim.
+                contentItem: Text {
+                    text: sugestao.text
+                    textFormat: Text.PlainText
+                    font: sugestao.font
+                    color: sugestao.highlighted ? sugestao.palette.highlightedText : sugestao.palette.text
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
+                }
                 background: Rectangle {
                     radius: 6
                     color: parent.highlighted ? Tema.azul : (parent.hovered ? Tema.sombra(0.06) : "transparent")
