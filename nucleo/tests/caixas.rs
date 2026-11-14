@@ -1547,3 +1547,56 @@ fn rc4_2_r03_resolvido_e_ainda_a_mais_anota_de_novo() {
         "a conta continua paga a mais: tem de haver um item aberto (e o resolvido fica)"
     );
 }
+
+/// RC4-4 (revisão cruzada 4), C-06 com o escolhido desativado no meio: entre
+/// a escolha do usuário que volta a ser gerente (o mais antigo ativo, a Ana) e
+/// o UPDATE, outro caixa desativa a Ana (a troca grava por outra conexão). A
+/// Ana não pode virar gerente inativa: nenhum item nessa conferência, e na
+/// seguinte a Bia volta e sai um item só. Corrida provocada pelo authorizer,
+/// como nos `n_f54_2_*` e `rc3_1_*`.
+#[test]
+#[ignore = "RC4-4: falha hoje (o UPDATE do C-06 não confere se o escolhido continua ativo)"]
+fn rc4_4_c06_escolhido_desativado_no_meio_nao_vira_gerente() {
+    let (a, b, ana, caminho) = loja_em_arquivo("rc4-4-c06");
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "oficina-verde-77", true).unwrap().id;
+    a.conn.execute("UPDATE usuario SET gerente = 0", []).unwrap();
+    let outra = rusqlite::Connection::open(&caminho).unwrap();
+    rustinho_nucleo::banco::registrar_funcoes(&outra).unwrap();
+    let outra = std::sync::Mutex::new(Some(outra));
+    let desativou = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let contador = desativou.clone();
+    let ana_id = ana.clone();
+    {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        a.conn
+            .authorizer(Some(move |ctx: AuthContext<'_>| {
+                if let AuthAction::Update { table_name: "usuario", .. } = ctx.action {
+                    if let Some(c) = outra.lock().unwrap().take() {
+                        c.execute("UPDATE usuario SET ativo = 0 WHERE id = ?1", [&ana_id]).unwrap();
+                        contador.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                Authorization::Allow
+            }))
+            .unwrap();
+        sync::verificar_depois(&a.conn).unwrap();
+        a.conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>).unwrap();
+    }
+    assert_eq!(desativou.load(std::sync::atomic::Ordering::SeqCst), 1, "a Ana foi desativada no meio");
+    let ana_gerente: i64 = a.conn.query_row("SELECT gerente FROM usuario WHERE id = ?1", [&ana], |l| l.get(0)).unwrap();
+    sync::verificar_depois(&a.conn).unwrap();
+    let gerentes_ativos: Vec<String> = a
+        .conn
+        .prepare("SELECT id FROM usuario WHERE ativo = 1 AND gerente = 1")
+        .unwrap()
+        .query_map([], |l| l.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let itens = contar(&a, "SELECT COUNT(*) FROM sync_conflito WHERE tipo = 'gerente'");
+    drop((a, b));
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+    assert_eq!(ana_gerente, 0, "a Ana, desativada no meio, virou gerente inativa");
+    assert_eq!(gerentes_ativos, vec![bia], "a Bia volta a ser gerente na conferência seguinte");
+    assert_eq!(itens, 1, "a loja ficou sem gerente uma vez: um item só");
+}
