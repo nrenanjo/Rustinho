@@ -28,6 +28,12 @@ mod testes_modo_seguro;
 #[cfg(test)]
 mod testes_nav;
 #[cfg(test)]
+mod testes_qt1b_rerevisao;
+#[cfg(test)]
+mod testes_qt1b_revisao;
+#[cfg(test)]
+mod testes_r0;
+#[cfg(test)]
 mod testes_r03;
 #[cfg(test)]
 mod testes_rvi03;
@@ -48,7 +54,7 @@ pub mod troca;
 pub use cadastros::{pessoas, usuarios};
 pub use catalogo::{busca, estoque, etiquetas, faixas, fiscal, produtos, unidades};
 pub use compras::{importar, nfe_xml, reposicao};
-pub use dados::{auditoria, banco, computador, config, migracao, portatil, registro, tempo};
+pub use dados::{auditoria, banco, computador, config, migracao, operacoes, portatil, registro, tempo};
 pub use integracoes::{arquivos, backup, codigo, impressao, nfe_assinatura};
 pub use operacao::{
     caixa, cheques, comissoes, devolucoes, dre, encomendas, financeiro, oficina, pagar, painel, receber, vendas,

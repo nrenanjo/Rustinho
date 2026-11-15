@@ -80,6 +80,9 @@ pub struct RegistroGeral {
     pub acao: String,
     pub descricao: String,
     pub detalhes: Vec<String>,
+    /// 9b (C8, dev3.3): de que registro é o evento (para o Histórico filtrar pelo registro exato).
+    pub entidade: String,
+    pub entidade_id: String,
 }
 
 /// Os últimos registros da loja toda (de todos os caixas que já trocaram
@@ -87,7 +90,7 @@ pub struct RegistroGeral {
 pub fn recentes(conn: &Connection, limite: i64) -> Resultado<Vec<RegistroGeral>> {
     let mut consulta = conn.prepare_cached(
         "SELECT COALESCE(strftime('%d/%m/%Y %H:%M', a.quando, 'localtime'), a.quando),
-                COALESCE(u.nome, ''), a.dispositivo, a.acao, a.detalhes
+                COALESCE(u.nome, ''), a.dispositivo, a.acao, a.detalhes, a.entidade, a.entidade_id
            FROM auditoria a LEFT JOIN usuario u ON u.id = a.usuario_id
           ORDER BY a.quando DESC, a.id DESC
           LIMIT ?1",
@@ -102,6 +105,8 @@ pub fn recentes(conn: &Connection, limite: i64) -> Resultado<Vec<RegistroGeral>>
             descricao: descrever(&acao).to_string(),
             acao,
             detalhes: serde_json::from_str(&detalhes).unwrap_or_default(),
+            entidade: l.get(5)?,
+            entidade_id: l.get(6)?,
         })
     })?;
     Ok(linhas.collect::<Result<_, _>>()?)

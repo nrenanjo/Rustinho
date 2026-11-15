@@ -326,6 +326,25 @@ pub fn aceitar_inconsistencia(
     Ok(n)
 }
 
+/// Caso 7 da navegação contextual (C8, dev3.3): o `campo` da recusa por
+/// registro inconsistente. Leva o registro exato (`<tabela>|<chave JSON>`),
+/// para a tela levar a Simultaneidade › Caixas com ele destacado e para
+/// `requisitos::conferir` dizer, pelo banco, quando ele deixou de bloquear.
+pub const CAMPO_REFERENCIA: &str = "requisito:caixas.referencia";
+
+/// O registro (`tabela` + `chave` JSON, como em `sync_referencia`) ainda está
+/// comprovadamente inconsistente (e não aceito pelo gerente)?
+pub fn referencia_inconsistente(conn: &Connection, tabela: &str, chave: &str) -> Resultado<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sync_referencia WHERE tabela = ?1 AND chave = ?2 AND estado = 'inconsistente' LIMIT 1",
+            params![tabela, chave],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// R-05: recusa mexer no dinheiro de um registro **comprovadamente
 /// inconsistente** (`sync_referencia.estado = 'inconsistente'`). Registro
 /// esperando, apagado ou aceito pelo gerente passa; ver e imprimir nunca
@@ -357,29 +376,33 @@ pub(super) fn exigir_sem_inconsistencia(
     onde: &str,
     valores: impl rusqlite::Params,
 ) -> Resultado<()> {
-    let achada: Option<(String, String, String)> = conn
+    let achada: Option<(String, String, String, String)> = conn
         .query_row(
             &format!(
-                "SELECT r.tabela, r.pai, r.motivo FROM sync_referencia r
+                "SELECT r.tabela, r.chave, r.pai, r.motivo FROM sync_referencia r
                   WHERE r.estado = 'inconsistente' AND {onde} LIMIT 1"
             ),
             valores,
-            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
         )
         .optional()?;
-    let Some((tabela, pai, motivo)) = achada else { return Ok(()) };
+    let Some((tabela, chave, pai, motivo)) = achada else { return Ok(()) };
     let prova = if motivo == "pares" {
         "todos os outros caixas já entregaram tudo e nenhum tem esse dado"
     } else {
         "o registro de alterações diz que ele existe e o banco não tem"
     };
-    Err(Erro::validacao(format!(
-        "Este registro ({}) ficou inconsistente: falta {} ({prova}). Por segurança o Rustinho não deixa mexer no \
-         dinheiro dele até o gerente resolver. Configurações › Caixas da loja mostra o que fazer: restaurar o backup do \
-         caixa de origem, ou o gerente aceitar como está.",
-        nome_da_tabela(&tabela).to_lowercase(),
-        nome_da_tabela(&pai).to_lowercase(),
-    )))
+    // Caso 7 (C8): a recusa diz qual é o registro, para a tela levar até ele (a decisão continua do gerente).
+    Err(Erro::campo(
+        &format!("{CAMPO_REFERENCIA}|{tabela}|{chave}"),
+        format!(
+            "Este registro ({}) ficou inconsistente: falta {} ({prova}). Por segurança o Rustinho não deixa mexer no \
+             dinheiro dele até o gerente resolver. Configurações › Caixas da loja mostra o que fazer: restaurar o backup \
+             do caixa de origem, ou o gerente aceitar como está.",
+            nome_da_tabela(&tabela).to_lowercase(),
+            nome_da_tabela(&pai).to_lowercase(),
+        ),
+    ))
 }
 
 /// Tira os dados das versões velhas de cada registro (fica a que vale).

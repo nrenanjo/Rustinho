@@ -53,9 +53,11 @@ fn duas_vendas_iguais_ficam_e_a_repetida_nao() {
                 "pagamentos": [{ "forma": "dinheiro", "valor": "100" }], "chaveOperacao": k })
     };
     ok(&mut s, "venda_concluir", venda("venda-1"));
-    ok(&mut s, "venda_concluir", venda("venda-2"));
+    let segunda = ok(&mut s, "venda_concluir", venda("venda-2"));
+    // R0 / DR-7 (b): a mesma tentativa de novo devolve o resultado da primeira vez, sem gravar.
     let r = chamar(&mut s, "venda_concluir", venda("venda-2"));
-    assert_eq!(r["campo"], "repetida", "a mesma tentativa de novo: {r}");
+    assert_eq!((r["ok"].clone(), r["repetida"].clone()), (json!(true), json!(true)), "a mesma tentativa de novo: {r}");
+    assert_eq!(r["dados"], segunda, "o resultado da primeira vez");
     assert_eq!(contar(&mut s, "SELECT COUNT(*) FROM venda WHERE tipo = 'venda'"), 2);
 }
 
@@ -74,13 +76,13 @@ fn comandos_criticos_respeitam_a_chave() {
                 "primeiroVencimento": "", "chaveOperacao": k })
     };
     ok(&mut s, "receber_lancar", lancar("cr-1"));
-    assert_eq!(chamar(&mut s, "receber_lancar", lancar("cr-1"))["campo"], "repetida");
+    assert_eq!(chamar(&mut s, "receber_lancar", lancar("cr-1"))["repetida"], true);
     ok(&mut s, "receber_lancar", lancar("cr-2"));
     assert_eq!(contar(&mut s, "SELECT COUNT(*) FROM conta_receber"), 2);
     // Contas a pagar (gerente).
     let pagar = |k: &str| json!({ "descricao": "Aluguel", "valor": "100", "primeiroVencimento": "", "parcelas": 1, "chaveOperacao": k });
     ok(&mut s, "pagar_lancar", pagar("cp-1"));
-    assert_eq!(chamar(&mut s, "pagar_lancar", pagar("cp-1"))["campo"], "repetida");
+    assert_eq!(chamar(&mut s, "pagar_lancar", pagar("cp-1"))["repetida"], true);
     ok(&mut s, "pagar_lancar", pagar("cp-2"));
     assert_eq!(contar(&mut s, "SELECT COUNT(*) FROM conta_pagar"), 2);
     // OS.
@@ -89,7 +91,7 @@ fn comandos_criticos_respeitam_a_chave() {
                 "itens": [{ "tipo": "servico", "descricao": "Revisão", "preco": "50" }], "chaveOperacao": k })
     };
     ok(&mut s, "os_salvar", os("os-1"));
-    assert_eq!(chamar(&mut s, "os_salvar", os("os-1"))["campo"], "repetida");
+    assert_eq!(chamar(&mut s, "os_salvar", os("os-1"))["repetida"], true);
     ok(&mut s, "os_salvar", os("os-2"));
     assert_eq!(contar(&mut s, "SELECT COUNT(*) FROM ordem_servico"), 2);
 }

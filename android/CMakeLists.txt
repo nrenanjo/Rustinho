@@ -48,6 +48,13 @@ target_link_libraries(Rustinho PRIVATE
     rustinho_qml
     Qt::Core Qt::Gui Qt::Qml Qt::Quick Qt::QuickControls2 Qt::Network Qt::Multimedia
 )
+# Páginas de 16 KB (aparelhos ARM64 novos com Android 15 ou mais): a biblioteca do Rustinho (o C++ daqui e o Rust,
+# que entra como biblioteca estática nesta mesma ligação) com os segmentos alinhados a 16 KB. O NDK r28 já faz isso
+# sozinho; com o r26 e o r27, só com esta opção. As bibliotecas do Qt (e o FFmpeg do Qt Multimedia) e a libc++ do
+# NDK vêm prontas: dependem das versões delas (_reversa_sdd/auditoria_dev33/android/paginas_16kb/).
+if(ANDROID)
+    target_link_options(Rustinho PRIVATE "LINKER:-z,max-page-size=16384")
+endif()
 
 set_target_properties(Rustinho PROPERTIES
     QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/pacote"

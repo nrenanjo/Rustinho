@@ -1078,7 +1078,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
     use crate::erro::{Erro, Resultado};
     use crate::{numeros, receber};
 
@@ -1113,16 +1113,20 @@ mod comandos {
         let d: receber::ReceberEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = receber::receber(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(receber::recibo(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(receber::recibo(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn recebimento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         receber::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn receber_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1135,16 +1139,20 @@ mod comandos {
         let d: receber::LancamentoEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         receber::lancar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn conta_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         receber::cancelar_conta(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn situacao_cliente(p: &mut Pedido, dados: Value) -> Resultado<Value> {

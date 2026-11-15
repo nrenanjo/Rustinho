@@ -327,10 +327,11 @@ fn chave_da_operacao_recusa_o_clique_repetido() {
         "chaveOperacao": "op-1"
     }))
     .unwrap();
-    ok(&mut s, "os_salvar", e.clone());
+    let primeira = ok(&mut s, "os_salvar", e.clone());
     let r: Value = serde_json::from_str(&s.chamar("os_salvar", &e.to_string())).unwrap();
-    assert_eq!(r["ok"], false);
-    assert_eq!(r["campo"], "repetida", "{r}");
+    // R0 / DR-7 (b): a repetição devolve o resultado da primeira vez, sem gravar de novo.
+    assert_eq!((r["ok"].clone(), r["repetida"].clone()), (json!(true), json!(true)), "{r}");
+    assert_eq!(r["dados"], primeira);
     e["chaveOperacao"] = json!("op-2");
     ok(&mut s, "os_salvar", e.clone());
     let n: Value = ok(&mut s, "os_listar", json!({ "quais": "todas" }));

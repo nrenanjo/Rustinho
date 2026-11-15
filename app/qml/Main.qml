@@ -6,6 +6,9 @@ import rustinho
 
 // Janela principal: controla qual tela aparece (pilha de telas).
 ApplicationWindow {
+    // QT-1b, N-01 da re-revisão (parte 2): o quadro com o resultado da gravação foi desenhado; a entrega é
+    // confirmada ao núcleo (veja Api.confirmarEntrega).
+    onFrameSwapped: Api.confirmarEntrega()
     id: janela
     width: 1280
     height: 760
@@ -340,17 +343,34 @@ ApplicationWindow {
             nome: "a confirmação de versão de todos os caixas",
             titulo: "Rascunho de OS bloqueado por um caixa desatualizado",
             texto: "Atualize o Rustinho no caixa destacado e deixe trocar dados, ou retire-o da loja (decisão do gerente). Quando nenhum caixa bloquear, o Rustinho volta para %1 e você salva o rascunho."
+        },
+        // Caso 7 (dev3.3): operação com dinheiro de um registro
+        // comprovadamente inconsistente. O id traz o registro exato
+        // ("caixas.referencia|<tabela>|<chave>"); a linha dele fica destacada.
+        // Só a pedido ("Ver o registro"); a decisão é do gerente (aceitar como
+        // está ou restaurar o backup do caixa de origem). Na volta, a operação
+        // NÃO é refeita: a janelinha dela reabre como estava.
+        "caixas.referencia": {
+            tela: "TelaConfiguracoes", propriedades: { secao: "caixas" }, campos: ["referencia"],
+            nome: "a decisão do gerente sobre o registro inconsistente",
+            titulo: "Registro inconsistente: o dinheiro dele está bloqueado",
+            texto: "O registro destacado precisa de uma decisão do gerente: aceitar como está ou restaurar o backup do caixa de origem. Depois o Rustinho volta para %1 e você conclui a operação."
         }
     })
     property var guiaAtiva: null
     // Chamada pela tela de origem com a resposta recusada do núcleo. Devolve
     // true se a guia começou (ou já estava em andamento): a tela não precisa
     // fazer mais nada além de guardar o próprio estado.
-    function guiar(campo, motivo, aoVoltar) {
+    // textoSatisfeito (B-2 da revisão): a mensagem da volta quando não há operação a concluir (a guia veio de
+    // uma notificação do Início).
+    function guiar(campo, motivo, aoVoltar, textoSatisfeito) {
         if (typeof campo !== "string" || campo.indexOf("requisito:") !== 0)
             return false
         const id = campo.slice("requisito:".length)
-        const req = requisitos[id]
+        // Um requisito pode trazer o registro exato depois de "|" (caso 7):
+        // o mapa é pela primeira parte; o núcleo confere pelo id inteiro.
+        const partes = id.split("|")
+        const req = requisitos[partes[0]]
         if (!req)
             return false
         if (guiaAtiva)
@@ -360,6 +380,8 @@ ApplicationWindow {
                           && typeof origem.iniciarGuiaNaMesmaTela === "function"
         const g = {
             id: id, requisito: req, origem: origem, motivo: motivo || "", aoVoltar: aoVoltar,
+            textoSatisfeito: textoSatisfeito || "",
+            alvo: partes.length > 2 ? { tabela: partes[1], chave: partes.slice(2).join("|") } : null,
             mesmaTela: !!mesmaTela,
             // Para a orientação ("Depois o Rustinho volta para Compras"): toda
             // tela tem nomeNaNavegacao.
@@ -378,6 +400,21 @@ ApplicationWindow {
         if (guiaAtiva)
             guia.destacar(item, rolagem)
     }
+    // 9a, 9c e 10a (C8, dev3.3): a notificação levou ao registro exato (um
+    // só). Só o destaque visual, sem guia e sem orientação; some sozinho em
+    // alguns segundos ou quando a tela sai. Nada é escolhido nem resolvido por
+    // aqui: a decisão continua com a pessoa (e, no que é dele, com o gerente).
+    function destacarAlvo(item, rolagem) {
+        if (guiaAtiva || !item)
+            return
+        guia.destacar(item, rolagem)
+        fimDoDestaque.restart()
+    }
+    Timer {
+        id: fimDoDestaque
+        interval: 6000
+        onTriggered: if (!janela.guiaAtiva) guia.semDestaque()
+    }
     // O destino muda a orientação (vazio = a de sempre do requisito).
     function guiaOrientar(texto) {
         if (guiaAtiva)
@@ -391,7 +428,7 @@ ApplicationWindow {
     }
     function finalizarRetornoGuia(g, satisfeito) {
         if (satisfeito)
-            guia.mostrar("satisfeito", "Requisito satisfeito — conclua a operação.", "")
+            guia.mostrar("satisfeito", g.textoSatisfeito || "Requisito satisfeito — conclua a operação.", "")
         else
             guia.mostrar("pendente", "A operação ainda não foi concluída",
                          "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true)
@@ -478,6 +515,60 @@ ApplicationWindow {
         guia.esconder()
     }
 
+    // Caso 7 da navegação contextual (dev3.3): a operação com dinheiro foi
+    // recusada porque o registro ficou inconsistente. Decisão do gerente:
+    // aqui só se oferece o caminho ("Ver o registro"); nada muda de tela sem a
+    // pessoa escolher. A janelinha da operação fecha guardando o que foi
+    // digitado e, na volta (resolvido ou não), reabre igual: a operação nunca
+    // é repetida sozinha. Devolve true quando a recusa era essa.
+    function ehReferenciaInconsistente(r) {
+        return !!r && !r.ok && typeof r.campo === "string" && r.campo.indexOf("requisito:caixas.referencia|") === 0
+    }
+    function oferecerReferencia(r, janelinha, aoVoltar) {
+        if (!ehReferenciaInconsistente(r))
+            return false
+        // B-5 da revisão: com uma guia já em andamento, não há segunda oferta; quem chamou mostra o erro.
+        if (guiaAtiva)
+            return false
+        // B-3 da revisão: curto (o motivo completo já está na janelinha, em vermelho).
+        dialogo.perguntar("Registro inconsistente",
+                          "A operação não foi feita. O gerente decide em Simultaneidade › Caixas, com o registro destacado; depois você volta e conclui.",
+                          "Ver o registro", () => {
+            // A-1 da revisão: fecha a cadeia inteira de janelinhas abertas (a ficha e a pergunta), guardando o que
+            // foi digitado, e reabre na mesma ordem na volta. O fechamento por causa da guia não dispara a ação de
+            // fechar de nenhuma delas (fechandoParaGuia).
+            const cadeia = janelinhasAbertas.slice()
+            if (janelinha && cadeia.indexOf(janelinha) < 0)
+                cadeia.push(janelinha)
+            fechandoParaGuia = true
+            for (let i = cadeia.length - 1; i >= 0; i--)
+                cadeia[i].close()
+            fechandoParaGuia = false
+            guiar(r.campo, r.erro, satisfeito => {
+                for (const p of cadeia) {
+                    try {
+                        if (p && typeof p.open === "function")
+                            p.open()
+                    } catch (e) {
+                        // A janelinha já não existe (a tela dela saiu): nada a reabrir.
+                    }
+                }
+                if (aoVoltar)
+                    aoVoltar(satisfeito)
+            })
+        }, "principal")
+        return true
+    }
+    // As janelinhas (Painel) abertas, na ordem em que abriram (A-1 da revisão).
+    property var janelinhasAbertas: []
+    property bool fechandoParaGuia: false
+    function registrarJanelinha(p, aberta) {
+        const lista = janelinhasAbertas.filter(x => x !== p && x !== null)
+        if (aberta)
+            lista.push(p)
+        janelinhasAbertas = lista
+    }
+
     // Caso 8 da navegação contextual (0.9.18): a faixa do modo seguro leva a
     // Configurações › Simultaneidade › Backup. Só navega: escolher o backup,
     // confirmar e digitar a senha do gerente continuam lá, como sempre; nada
@@ -536,7 +627,8 @@ ApplicationWindow {
         id: pilha
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: faixaModoSeguro.bottom }
         // A orientação da navegação guiada fica no alto, no espaço dela.
-        anchors.topMargin: guia.alturaNoAlto
+        // A orientação da guia e o aviso rápido ficam no alto, cada um no seu espaço: as telas descem por eles.
+        anchors.topMargin: guia.alturaNoAlto + aviso.alturaNoAlto
         Behavior on anchors.topMargin { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
         focus: true
 
@@ -768,7 +860,11 @@ ApplicationWindow {
         }
     }
 
-    Aviso { id: aviso }
+    // O aviso rápido, no alto: abaixo da faixa do modo seguro e da orientação da guia.
+    Aviso {
+        id: aviso
+        topo: faixaModoSeguro.height + guia.alturaNoAlto
+    }
 
     Guia {
         id: guia

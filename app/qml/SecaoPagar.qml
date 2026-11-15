@@ -417,6 +417,8 @@ FocusScope {
             }, r => {
                 if (!r.ok) {
                     erro = r.erro
+                    // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                    secao.janela.oferecerReferencia(r, pagamento)
                     return
                 }
                 close()
@@ -524,11 +526,19 @@ FocusScope {
         onClosed: busca.focar()
     }
 
+    // 10b (C8, dev3.3): outra seção (Comissões) pede a ficha de uma conta;
+    // aoFechar roda quando a ficha fecha (a volta para lá).
+    function abrirConta(id, aoFechar) {
+        ficha.aoFechar = aoFechar || null
+        ficha.abrirCom(id)
+    }
+
     // ---------- Ficha da conta ----------
     Painel {
         id: ficha
         property string contaId: ""
         property var dados: null
+        property var aoFechar: null
         width: Math.min(660, Tema.largura - 24)
 
         function abrirCom(id) {
@@ -678,6 +688,16 @@ FocusScope {
                 }
             }
         }
+        // 10b (C8): a ficha foi aberta por outra seção (Comissões): ao fechar, volta para lá.
+        onClosed: {
+            // A-1 da revisão: fechada pela guia do caso 7 (vai reabrir na volta), não é a volta do 10b.
+            if (secao.janela && secao.janela.fechandoParaGuia)
+                return
+            const f = aoFechar
+            aoFechar = null
+            if (f)
+                f()
+        }
     }
 
     // ---------- Corrigir ----------
@@ -705,6 +725,8 @@ FocusScope {
                                                     competencia: cCompetencia.texto, observacoes: cObs.texto }, r => {
                 if (!r.ok) {
                     erro = r.erro
+                    // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                    secao.janela.oferecerReferencia(r, correcao)
                     return
                 }
                 close()

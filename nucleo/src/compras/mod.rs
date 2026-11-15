@@ -1740,7 +1740,7 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
     use crate::erro::{Erro, Resultado};
     use crate::{arquivos, compras};
 
@@ -1810,7 +1810,13 @@ mod comandos {
         if fichas.is_empty() && erros.is_empty() && conflitos.is_empty() {
             return Err(Erro::validacao("Não achei nenhuma NF-e nesse arquivo."));
         }
-        Ok(json!({ "compras": fichas, "erros": erros, "conflitos": conflitos }))
+        let resposta = json!({ "compras": fichas, "erros": erros, "conflitos": conflitos });
+        // R0, EXCEÇÃO documentada: um pacote grava uma transação por nota; a marca vai numa transação
+        // própria no fim. Cada nota já é recusada se repetida (a chave de acesso de 44 dígitos, acima).
+        let tx = p.conn.transaction()?;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
+        tx.commit()?;
+        Ok(resposta)
     }
 
     fn compra_abrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1842,16 +1848,20 @@ mod comandos {
                 return Err(e);
             }
         }
+        let resposta = json!({ "resumo": r, "compra": compras::ficha(&tx, &d.id)? });
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!({ "resumo": r, "compra": compras::ficha(p.conn, &d.id)? }))
+        Ok(resposta)
     }
 
     fn compra_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         compras::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = json!(compras::ficha(&tx, &d.id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(compras::ficha(p.conn, &d.id)?))
+        Ok(resposta)
     }
 
     fn compra_descartar(p: &mut Pedido, dados: Value) -> Resultado<Value> {

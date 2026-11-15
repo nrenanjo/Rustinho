@@ -38,6 +38,15 @@ FocusScope {
         }
     }
 
+    // QT-1b: "Conferi" (a pessoa conferiu o que foi e o que não foi gravado). Só resolve a notificação: não
+    // grava, não refaz e não desfaz nenhuma operação.
+    function resolverAviso(aviso) {
+        const r = Api.chamar("aviso_resolver", { id: aviso.id })
+        if (!r.ok)
+            janela.avisar(r.erro, "info")
+        carregar()
+    }
+
     // Minimizar/expandir é só apresentação (fica anotado neste computador).
     // Uma faixa não crítica aberta por vez: abrir uma fecha a outra.
     // O núcleo grava tudo de uma vez: as outras não críticas ficam minimizadas.
@@ -58,13 +67,20 @@ FocusScope {
         const f = funcao(aviso.funcao)
         if (!f)
             return
+        // 9e (C8, dev3.3): UF ou CNPJ da loja faltando. Auto: a guia leva
+        // direto ao campo, e a volta ao Início só acontece quando o núcleo
+        // confirma o que foi salvo (a notificação some sozinha).
+        if (aviso.id === "fiscal_loja"
+                && janela.guiar("requisito:loja.uf_cnpj", "", ok => tela.carregar(), "UF e CNPJ da loja salvos."))
+            return
         if (aviso.id.indexOf("senha.") === 0) {
             janela.abrir("TelaConfiguracoes", { secao: "loja" })
         } else if (aviso.id === "xml_pendencias") {
             Api.chamar("menu_usar", { id: f.id })
             janela.abrir("TelaPecas", { abrirPendenciasXml: true })
         } else if (aviso.secao) {
-            janela.abrir("TelaConfiguracoes", { secao: aviso.secao })
+            // 9a/9c (C8): com um registro só, ele vem destacado (alvo).
+            janela.abrir("TelaConfiguracoes", { secao: aviso.secao, alvo: aviso.alvo || "" })
         } else if (aviso.id === "receber") {
             Api.chamar("menu_usar", { id: f.id })
             janela.abrir("TelaReceber", {})
@@ -76,7 +92,8 @@ FocusScope {
             janela.abrir("TelaOrdens", { quais: aviso.texto !== "" ? "prontas" : "abertas" })
         } else if (aviso.id === "encomendas") {
             Api.chamar("menu_usar", { id: f.id })
-            janela.abrir("TelaEstoque", { secao: "encomendas" })
+            // 10a (C8): com uma encomenda só, a linha dela vem destacada.
+            janela.abrir("TelaEstoque", { secao: "encomendas", alvo: aviso.alvo || "" })
         } else {
             janela.abrirFuncao(f)
         }
@@ -128,13 +145,42 @@ FocusScope {
                 ColumnLayout {
                     spacing: 0
                     Layout.fillWidth: true
+                    // Ajuste visual de 15/11/2026: a saudação e a data sem serifa (a Source Sans 3 do resto do
+                    // Início), só nesta tela; tamanho, peso e estilo de antes. A altura de cada uma é a de antes,
+                    // para o cabeçalho não crescer (a Source Sans tem a linha mais alta que a Cormorant e a Source Serif).
+                    // As mesmas duas linhas com as fontes de antes, invisíveis (fora do layout): a altura delas é a altura
+                    // de antes, medida pelo próprio Qt.
                     Titulo {
+                        id: saudacaoAntes
+                        visible: false
+                        text: saudacao.text
+                        font.pixelSize: saudacao.font.pixelSize
+                        wrapMode: saudacao.wrapMode
+                        width: saudacao.width
+                    }
+                    Nota {
+                        id: dataAntes
+                        visible: false
+                        text: data.text
+                        font.pixelSize: data.font.pixelSize
+                        width: data.width
+                    }
+                    Titulo {
+                        id: saudacao
+                        font.family: Tema.texto
+                        // A altura de antes (a da cópia invisível), com o texto centrado nela.
+                        Layout.preferredHeight: saudacaoAntes.implicitHeight
+                        verticalAlignment: Text.AlignVCenter
                         text: tela.saudacao() + ", " + (tela.janela && tela.janela.estado.usuario ? tela.janela.estado.usuario.nome : "")
                         font.pixelSize: Tema.fino ? 36 : Tema.baixo ? 38 : 50
                         wrapMode: Tema.fino ? Text.WordWrap : Text.NoWrap
                         Layout.fillWidth: true
                     }
                     Nota {
+                        id: data
+                        font.family: Tema.texto
+                        Layout.preferredHeight: dataAntes.implicitHeight
+                        verticalAlignment: Text.AlignVCenter
                         text: new Date().toLocaleDateString(Qt.locale("pt_BR"), "dddd, d 'de' MMMM")
                         font.pixelSize: 17
                         Layout.fillWidth: true
@@ -229,6 +275,7 @@ FocusScope {
                             onAbrir: tela.abrirAviso(modelData)
                             onMinimizar: (m) => tela.minimizarAviso(modelData, m)
                             onEsconder: tela.esconderAviso(modelData)
+                            onResolver: tela.resolverAviso(modelData)
                         }
                     }
                     Flow {
@@ -246,6 +293,7 @@ FocusScope {
                                 onAbrir: tela.abrirAviso(modelData)
                                 onMinimizar: (m) => tela.minimizarAviso(modelData, m)
                                 onEsconder: tela.esconderAviso(modelData)
+                                onResolver: tela.resolverAviso(modelData)
                             }
                         }
                     }

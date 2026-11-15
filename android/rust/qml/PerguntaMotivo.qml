@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
@@ -14,6 +15,7 @@ Painel {
     property var acao: null
     property string erro: ""
     signal feito()
+    readonly property var janela: ApplicationWindow.window
     width: Math.min(500, Tema.largura - 24)
 
     function perguntar(titulo, mensagem, textoBotao, acao, rotulo, tipoBotao) {
@@ -38,6 +40,11 @@ Painel {
     function terminar(r) {
         if (!r.ok) {
             erro = r.erro
+            // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do
+            // gerente). Esta pergunta fecha guardando o motivo digitado e reabre
+            // igual na volta: a operação nunca é refeita sozinha.
+            if (janela && typeof janela.oferecerReferencia === "function")
+                janela.oferecerReferencia(r, motivo)
             return
         }
         close()

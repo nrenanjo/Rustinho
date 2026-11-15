@@ -86,6 +86,33 @@ FocusScope {
         }
     }
 
+    // 10b (C8, dev3.3): de Comissões, "Ver no A pagar" abre a ficha da conta
+    // da comissão; ao fechar a ficha, volta a Comissões com o fechamento
+    // destacado. Só navega: nada muda de valor por aqui.
+    function abrirContaPagar(contaId, fechamentoId) {
+        // M-4 da revisão: o período de Comissões volta igual.
+        const antes = conteudo.item && typeof conteudo.item.estado === "function" ? conteudo.item.estado() : null
+        secao = "pagar"
+        Qt.callLater(() => {
+            if (!conteudo.item || typeof conteudo.item.abrirConta !== "function")
+                return
+            conteudo.item.abrirConta(contaId, () => {
+                tela.secao = "comissoes"
+                Qt.callLater(() => {
+                    if (conteudo.item && typeof conteudo.item.restaurar === "function")
+                        conteudo.item.restaurar(antes)
+                    if (conteudo.item && typeof conteudo.item.mostrarFechamento === "function")
+                        conteudo.item.mostrarFechamento(fechamentoId)
+                })
+            })
+        })
+    }
+    Connections {
+        target: conteudo.item
+        ignoreUnknownSignals: true
+        function onVerConta(contaId, fechamentoId) { tela.abrirContaPagar(contaId, fechamentoId) }
+    }
+
     StackView.onActivated: {
         carregarResumo()
         if (conteudo.item && typeof conteudo.item.carregar === "function")

@@ -1233,7 +1233,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Id, Pedido};
     use crate::erro::Resultado;
     use crate::{config, vendas};
 
@@ -1258,8 +1258,10 @@ mod comandos {
         let d: vendas::VendaEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = vendas::concluir(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(vendas::ficha(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(vendas::ficha(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn orcamento_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1267,8 +1269,10 @@ mod comandos {
         let caixa_nome = config::nome_caixa(p.conn)?;
         let tx = p.conn.transaction()?;
         let id = vendas::salvar_orcamento(&tx, p.disp, p.usuario_id, &caixa_nome, &d)?;
+        let resposta = json!(vendas::ficha(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(vendas::ficha(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn orcamento_carregar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -1290,8 +1294,10 @@ mod comandos {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         vendas::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = json!(vendas::ficha(&tx, &d.id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(vendas::ficha(p.conn, &d.id)?))
+        Ok(resposta)
     }
 
     fn os_para_venda(p: &mut Pedido, dados: Value) -> Resultado<Value> {

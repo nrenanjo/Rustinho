@@ -2238,7 +2238,7 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Pedido};
     use crate::erro::Resultado;
     use crate::{importar, requisitos};
 
@@ -2272,8 +2272,10 @@ mod comandos {
         let d: importar::Entrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let r = importar::importar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(r);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(r))
+        Ok(resposta)
     }
 
     fn arquivos_conferir(_p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -2289,8 +2291,10 @@ mod comandos {
         let d: importar::ResolverPendencia = ler(dados)?;
         let tx = p.conn.transaction()?;
         let r = importar::resolver_pendencia(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(r);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(r))
+        Ok(resposta)
     }
 }
 

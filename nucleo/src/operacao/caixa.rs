@@ -561,7 +561,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Id, Pedido};
     use crate::erro::Resultado;
     use crate::{caixa, config};
 
@@ -593,24 +593,30 @@ mod comandos {
         let nome = config::nome_caixa(p.conn)?;
         let tx = p.conn.transaction()?;
         caixa::abrir(&tx, p.disp, p.usuario_id, &nome, &d.valor)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn caixa_movimentar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Valor = ler(dados)?;
         let tx = p.conn.transaction()?;
         caixa::movimentar_com_conta(&tx, p.disp, p.usuario_id, &d.tipo, &d.valor, &d.motivo, Some(&d.conta))?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn caixa_fechar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Valor = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = caixa::fechar(&tx, p.disp, p.usuario_id, &d.valor, &d.motivo)?;
+        let resposta = json!(caixa::resumo(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(caixa::resumo(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn caixa_resumo(p: &mut Pedido, dados: Value) -> Resultado<Value> {

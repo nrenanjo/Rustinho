@@ -38,6 +38,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0024_gtins_e_pendencias_xml.sql"),
     include_str!("../migracoes/0025_indices_e_busca_normalizada.sql"),
     include_str!("../migracoes/0026_caixas_aprovados.sql"),
+    include_str!("../migracoes/0027_operacao_feita.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -270,6 +271,8 @@ impl Banco {
 
     fn preparar(mut conn: Connection, caminho: Option<PathBuf>, computador: Option<String>) -> Resultado<Banco> {
         conn.pragma_update(None, "foreign_keys", true)?;
+        // R0 (QT-1): o que foi respondido como feito está no disco (o `COMMIT` só volta depois de gravado).
+        conn.pragma_update(None, "synchronous", "FULL")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         // D-05: a transação já começa reservando a gravação. Assim, se outra
         // conexão (a troca de dados, o backup) estiver gravando, esta espera
@@ -282,6 +285,8 @@ impl Banco {
         if let Some(c) = &caminho {
             crate::backup::terminar_restauracao_pela_metade(&mut conn, c)?;
         }
+        // R0 (QT-1): as chaves das operações feitas há mais de 30 dias saem, só na abertura.
+        crate::operacoes::limpar_antigas(&conn, crate::operacoes::RETENCAO_DIAS)?;
         let dispositivo = garantir_dispositivo(&conn)?;
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
@@ -1017,9 +1022,10 @@ mod testes {
             assert_eq!(n, 1, "{t}.{col}");
         }
         // A 0.9.15 acrescentou a 0023 e a 0.9.18 acrescentou a 0024; a
-        // dev.3.3, a 0025 (passo 7.5: índices e busca) e a 0026 (registro de
-        // caixas do protocolo 4, etapa 2). Números provisórios (MIG-1 (a)).
-        assert_eq!(MIGRACOES.len(), 26);
+        // dev.3.3, a 0025 (passo 7.5: índices e busca), a 0026 (registro de
+        // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
+        // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
+        assert_eq!(MIGRACOES.len(), 27);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas
@@ -1274,7 +1280,8 @@ mod testes {
         let b = Banco::abrir(&db).unwrap();
         assert!(!b.em_modo_seguro(), "{:?}", b.defeito);
         let v: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
-        assert_eq!(v, 26);
+        // A estrutura final é a da última migração (integração: a 0027 do QT-1 veio depois da 0026).
+        assert_eq!(v, MIGRACOES.len() as i64);
         conferir_estrutura(&b.conn).unwrap();
         let depois = conteudo(&b.conn, &colunas);
         for t in TABELAS_DA_LOJA {
@@ -1362,7 +1369,8 @@ mod testes {
         b.conn.execute("DELETE FROM estoque_movimento WHERE id = 'm1'", []).unwrap();
         na_vez(|| crate::backup::restaurar(&mut b.conn, Some(&db), &feito.arquivo, false, "1234"));
         let v: i64 = b.conn.query_row("PRAGMA user_version", [], |l| l.get(0)).unwrap();
-        assert_eq!(v, 26);
+        // A estrutura final é a da última migração (integração: a 0027 do QT-1 veio depois da 0026).
+        assert_eq!(v, MIGRACOES.len() as i64);
         conferir_estrutura(&b.conn).unwrap();
         let depois = conteudo(&b.conn, &colunas);
         for t in ["produto", "produto_preco", "estoque_movimento", "produto_gtin", "pessoa"] {

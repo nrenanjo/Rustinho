@@ -963,7 +963,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Id, Pedido};
     use crate::erro::Resultado;
     use crate::pessoas;
 
@@ -995,8 +995,10 @@ mod comandos {
         let ficha: pessoas::PessoaFicha = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = pessoas::salvar(&tx, p.disp, p.usuario_id, &ficha)?;
+        let resposta = json!(pessoas::ficha(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(pessoas::ficha(p.conn, &id)?))
+        Ok(resposta)
     }
 
     #[derive(Deserialize, Default)]

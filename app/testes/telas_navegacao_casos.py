@@ -25,6 +25,15 @@ mais) e, quando há dinheiro ou dados, que nada é gravado sem um clique.
      caixa destacado; desistir (Esc, ou a senha do gerente) volta à OS com
      tudo; retirar o caixa (decisão do gerente, com motivo) volta à OS só
      quando o núcleo confirma, e o rascunho só é salvo com o clique.
+  7. recebimento de um registro inconsistente (dev3.3): a recusa mostra o
+     motivo e "Ver o registro" (nada muda de tela sozinho); "Ver o registro"
+     leva a Simultaneidade › Caixas com a guia e o registro em primeiro;
+     desistir (Esc) volta ao Receber com a janelinha reaberta e o valor de
+     antes; aceitar como está (decisão do gerente, com motivo) volta só quando
+     o núcleo confirma, e o recebimento só acontece com o clique.
+  9b. Duplicatas → "Ver no histórico" filtra pelo registro do conflito; a pílula volta.
+  9e. Início → a notificação Fiscal leva à Loja pela guia; desistir volta.
+  10b. Comissões: o fechamento pago → "Ver no A pagar" → volta; nada muda.
   9. conferência (9a, 9c, 9d, já feitos na 0.9.17): do Início, "Ver
      duplicatas", "Ver caixas" e "Ver backup" levam à parte certa da
      Simultaneidade, e o "voltar" (Esc) devolve ao Início; o caixa que
@@ -40,6 +49,7 @@ sem Wayland antes de qualquer clique. Nada abre na área de trabalho.
 
 import hashlib
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -110,13 +120,101 @@ def conferir_ambiente(pid):
     return False
 
 
+# Lacuna 14 da C8 (dev3.3): os mesmos casos no desenho do celular (janela estreita), com
+# RUSTINHO_CASOS_CELULAR=1. A janela fica com RUSTINHO_CASOS_CELULAR_DP (padrão 360x780), densidade 1 (os pontos
+# dos textos e os cliques valem o mesmo).
+CELULAR = os.environ.get("RUSTINHO_CASOS_CELULAR") == "1"
+CELULAR_DP = tuple(int(v) for v in os.environ.get("RUSTINHO_CASOS_CELULAR_DP", "360x780").split("x"))
+
+
 class Rustinho(base.Rustinho):
     def __init__(self, pasta, tela, props, fotos, nome):
-        super().__init__(pasta, tela, props, fotos, nome)
+        if CELULAR:
+            self._abrir_celular(pasta, tela, props, fotos, nome)
+        else:
+            super().__init__(pasta, tela, props, fotos, nome)
+        if CELULAR and conferir_ambiente(self.p.pid):
+            self._preparar_janela_celular(*CELULAR_DP)
         if not conferir_ambiente(self.p.pid):
             self.fechar()
             raise RuntimeError("o Rustinho do teste não está na tela virtual (ou tem Wayland): parei antes de clicar")
         self.ambiente_ok = True
+
+    def _abrir_celular(self, pasta, tela, props, fotos, nome):
+        """Como base.Rustinho, com o desenho do celular (--celular)."""
+        import json
+        self.fotos, self.nome = fotos, nome
+        self.saida = os.path.join(fotos, nome + ".log")
+        env = dict(os.environ, DISPLAY=TELA, QT_QUICK_BACKEND="software", RUSTINHO_DADOS=pasta,
+                   QT_LOGGING_RULES="qml.info=true;js.info=true;default.info=true", QT_SCALE_FACTOR="1")
+        env.pop("WAYLAND_DISPLAY", None)
+        self.log = open(self.saida, "w")
+        self.p = subprocess.Popen(
+            # --medir-toque: as linhas TOQUE dizem onde está cada campo (para tocar nele antes de digitar).
+            [PROGRAMA, "--textos-da-tela", "--celular", "--medir-toque", "--abrir", tela, "--props", json.dumps(props)],
+            env=env, stdout=self.log, stderr=self.log,
+        )
+
+    # Instrumentação do modo celular (lacuna 14). Na tela virtual não há gerenciador de janelas: o teclado vai para a
+    # janela que tem o foco (ou, sem foco definido, para a que está embaixo do ponteiro), e o Xvfb começa com o
+    # ponteiro no meio da tela (x = 720), fora da janela estreita. Sem isto, o Ctrl+Shift+F12 dos textos da tela se
+    # perdia e o roteiro nunca lia a tela (1ª rodada, c8_casos_celular_v1: "a tela de entrada não apareceu").
+    def _geometria(self, janela):
+        g = subprocess.run(["xdotool", "getwindowgeometry", "--shell", janela],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        d = dict(x.split("=", 1) for x in g.stdout.split() if "=" in x)
+        return int(d.get("X", -1)), int(d.get("Y", -1)), int(d.get("WIDTH", 0)), int(d.get("HEIGHT", 0))
+
+    def _esperar_janela(self):
+        """A janela de verdade deste Rustinho (visível, de mais de 200 px), em até 30 s."""
+        for _ in range(150):
+            s = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(self.p.pid)],
+                               env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+            for j in s.stdout.split():
+                if self._geometria(j)[2] > 200:
+                    return j
+            time.sleep(0.2)
+        raise RuntimeError(f"INSTRUMENTAÇÃO: a janela do Rustinho não apareceu em 30 s (veja {self.saida})")
+
+    def _preparar_janela_celular(self, largura, altura):
+        """Espera a janela, põe no canto (os pontos dos textos valem como pontos da tela), dá o tamanho do
+        celular e o foco do teclado, e confere lendo a geometria de volta."""
+        janela = self._esperar_janela()
+        for _ in range(20):
+            xdo("windowmove", janela, "0", "0")
+            xdo("windowsize", janela, str(largura), str(altura))
+            time.sleep(0.5)
+            x, y, w, h = self._geometria(janela)
+            if (x, y, w, h) == (0, 0, largura, altura):
+                break
+        else:
+            raise RuntimeError(f"INSTRUMENTAÇÃO: a janela ficou em {x},{y} {w}×{h}, e não em 0,0 {largura}×{altura}")
+        self._janela = janela
+        self._altura = altura
+        xdo("windowfocus", "--sync", janela)
+        self._ponteiro_dentro()
+        time.sleep(1.5)  # o desenho assenta no tamanho novo
+        print(f"INSTRUMENTAÇÃO {self.nome}: janela {janela} em 0,0 com {largura}×{altura}, foco e ponteiro nela",
+              flush=True)
+
+    def _ponteiro_dentro(self):
+        """O ponteiro no canto de baixo, à direita, da janela (como no roteiro de toque), e o foco de volta nela:
+        as teclas vão para o Rustinho mesmo depois de uma foto ou de um clique fora."""
+        largura, altura = CELULAR_DP
+        xdo("mousemove", str(largura - 4), str(altura - 4))
+        if getattr(self, "_janela", None):
+            xdo("windowfocus", "--sync", self._janela)
+        time.sleep(0.15)
+
+    def textos(self):
+        """Os textos da tela. No celular, as linhas da medição de toque (TOQUE:, RET:) ficam à parte, em
+        self._medidas: elas trazem nomes de botões e não podem contar como texto escrito na tela."""
+        if not CELULAR:
+            return super().textos()
+        self._ponteiro_dentro()
+        tudo = super().textos()
+        self._medidas = [l for l in tudo if l[2].startswith(("TOQUE:", "RET:"))]
+        return [l for l in tudo if not l[2].startswith(("TOQUE:", "RET:"))]
 
     def pilha(self):
         for _, _, t in self.textos():
@@ -176,6 +274,8 @@ class Rustinho(base.Rustinho):
 
     def rolar_ate(self, texto, x=600, y=500, vezes=25):
         """Rola (roda do mouse) até o texto ficar dentro da janela."""
+        if CELULAR:
+            return self._rolar_ate_arrastando(texto, vezes)
         for _ in range(vezes):
             pontos = self.onde(texto)
             if any(60 <= p[1] < self.altura() - 30 for p in pontos):
@@ -185,6 +285,27 @@ class Rustinho(base.Rustinho):
                 xdo("click", "5")
             time.sleep(0.4)
         return any(60 <= p[1] < self.altura() - 30 for p in self.onde(texto))
+
+    def _rolar_ate_arrastando(self, texto, vezes=25):
+        """No celular, rolar é arrastar o dedo (a roda do mouse não rolou a tela no desenho do celular, 3ª execução
+        do caso 8). O arrasto começa na margem esquerda (x = 6), fora dos cartões e dos botões, e sobe 40% da
+        altura; nada é tocado no caminho."""
+        largura, altura = CELULAR_DP
+        def a_vista():
+            return any(60 <= p[1] < self.altura() - 30 for p in self.onde(texto))
+        for _ in range(vezes):
+            if a_vista():
+                return True
+            x, y0, y1 = 6, int(altura * 0.75), int(altura * 0.35)
+            xdo("mousemove", str(x), str(y0))
+            xdo("mousedown", "1")
+            for i in range(1, 9):
+                xdo("mousemove", str(x), str(y0 - (y0 - y1) * i // 8))
+                time.sleep(0.03)
+            time.sleep(0.15)  # parado antes de soltar: sem o impulso que joga a lista longe
+            xdo("mouseup", "1")
+            time.sleep(0.6)
+        return a_vista()
 
     def esperar(self, condicao, segundos=8):
         fim = time.time() + segundos
@@ -198,7 +319,27 @@ class Rustinho(base.Rustinho):
         return condicao()
 
     def digitar(self, texto):
+        if CELULAR:
+            self._tocar_no_campo()
         xdo("type", "--delay", "70", texto)
+
+    def _tocar_no_campo(self):
+        """No celular, de propósito, o campo não ganha o foco sozinho (Campo.qml, podeFocar: trocar de tela não abre
+        o teclado). A pessoa toca no campo antes de digitar; o roteiro faz o mesmo: toca no centro do último campo de
+        texto à vista (a janelinha aberta é desenhada por último, então o campo dela vem por último)."""
+        campos = []
+        self.textos()
+        for _, _, t in self._medidas:
+            if t.startswith("TOQUE:campo|"):
+                partes = t.split("|")
+                x, y, w, h = (float(v) for v in partes[4].split(","))
+                if partes[5] == "1" and 0 <= y and y + h <= CELULAR_DP[1] and 0 <= x and x + w <= CELULAR_DP[0]:
+                    campos.append((round(x + w / 2), round(y + h / 2)))
+        if not campos:
+            raise RuntimeError("INSTRUMENTAÇÃO: nenhum campo de texto à vista para tocar antes de digitar")
+        cx, cy = campos[-1]
+        xdo("mousemove", str(cx), str(cy), "click", "1")
+        time.sleep(0.5)
 
 
 class Placar:
@@ -683,7 +824,382 @@ def caso9(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "9": caso9}
+# ---------------------------------------------------------------------------
+# Caso 7 (dev3.3): operação com dinheiro de um registro inconsistente.
+# ---------------------------------------------------------------------------
+TITULO_7 = "Registro inconsistente: o dinheiro dele está bloqueado"
+
+
+def caso7(placar, fotos):
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7-")
+    try:
+        montar_loja(pasta)
+        # O caixa aberto, uma parcela do Zé e a prova de que ela ficou
+        # inconsistente (sem troca de dados no teste: nada recalcula a lista).
+        por_fora(pasta, """
+            INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, aberto_por, valor_inicial)
+              SELECT 'sessao-nav7', valor, 'Caixa 1', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                     (SELECT id FROM usuario WHERE nome = 'Ana'), 0
+                FROM config WHERE chave = 'dispositivo_id';
+            INSERT INTO conta_receber (id, cliente_id, descricao, valor, vencimento, criado_em, dispositivo)
+              SELECT 'cr-nav7', id, 'Caderno', 5000, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                     (SELECT valor FROM config WHERE chave = 'dispositivo_id')
+                FROM pessoa WHERE nome = 'Zé da Oficina';
+            INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+              VALUES ('conta_receber', '["cr-nav7"]', 'pessoa', '["sumiu"]', 'inconsistente',
+                      '2026-01-01T00:00:00Z', 'log');""")
+        ze = ler(pasta, "SELECT id FROM pessoa WHERE nome = 'Zé da Oficina'")[0][0]
+        # A loja de teste já tem recebimentos: conta a partir do que existe.
+        ja_havia = ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0]
+        recebimentos = lambda: ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] - ja_havia  # noqa: E731
+        valores = {}
+
+        def dinheiro(r):
+            """Os valores em dinheiro à vista (os da janelinha do recebimento)."""
+            return sorted(t for _, _, t in r.textos() if re.fullmatch(r"(R\$ )?[\d.]+,\d\d", t.strip()))
+
+        def receber(r):
+            r.clicar("Receber tudo")
+            r.esperar(lambda: r.tem("Receber de"))
+            time.sleep(0.6)
+            valores["antes"] = dinheiro(r)
+            xdo("key", "Return")
+            return r.esperar(lambda: r.tem_igual("Ver o registro"))
+
+        r = placar.abrir(pasta, "TelaReceber", {"clienteInicial": ze}, fotos, "7-gerente")
+        try:
+            r.entrar("Ana")
+            r.esperar(lambda: r.tem("Receber tudo"))
+            base_pilha = r.pilha()
+            f = r.foto("-1")
+            ok("7: receber o registro inconsistente mostra o motivo e Ver o registro", receber(r), f)
+            f = r.foto("-2")
+            ok("7: o motivo diz o lugar (Caixas da loja) e que a operação não foi feita",
+               r.tem("Caixas da loja") and r.tem("não foi feita"), f)
+            ok("7: nada mudou de tela sozinho", r.pilha() == base_pilha, f)
+            ok("7: nada recebido", recebimentos() == 0)
+            r.clicar("Ver o registro")
+            f = r.foto("-3")
+            ok("7: Ver o registro leva a Simultaneidade › Caixas com a orientação",
+               r.esperar(lambda: r.tem(TITULO_7)), f)
+            ok("7: o registro aparece, com Aceitar como está", r.rolar_ate("Aceitar como está"), f)
+            ok("7: uma tela por cima do Receber (sem ciclo)", r.pilha() == base_pilha + 1, f)
+            ok("7: a seta é só o desenho", r.seta_so_desenho(), f)
+            ok("7: a janelinha do recebimento fechou", not r.tem("Receber de"), f)
+            xdo("key", "Escape")
+            f = r.foto("-4")
+            ok("7: desistir (Esc) volta ao Receber com a janelinha reaberta",
+               r.esperar(lambda: r.pilha() == base_pilha and r.tem("Receber de")), f)
+            ok("7: com os valores de antes", bool(valores["antes"]) and dinheiro(r) == valores["antes"],
+               f"{f} antes={valores['antes']} depois={dinheiro(r)}")
+            ok("7: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
+            ok("7: nada recebido", recebimentos() == 0)
+            # Resolver: o gerente aceita como está (com motivo).
+            xdo("key", "Return")
+            r.esperar(lambda: r.tem_igual("Ver o registro"))
+            r.clicar("Ver o registro")
+            r.esperar(lambda: r.tem(TITULO_7))
+            r.rolar_ate("Aceitar como está")
+            r.clicar_ultimo("Aceitar como está")
+            r.esperar(lambda: r.tem("Aceitar como está?"))
+            time.sleep(0.5)
+            r.digitar("Caixa de origem perdido")
+            time.sleep(0.3)
+            f = r.foto("-5")
+            ok("7: aceitar pede o motivo (decisão do gerente)", r.tem("Caixa de origem perdido"), f)
+            ok("7: ainda nada recebido", recebimentos() == 0)
+            xdo("key", "Return")
+            f = r.foto("-6")
+            ok("7: resolvido, volta ao Receber (o núcleo confirmou), com a janelinha",
+               r.esperar(lambda: r.pilha() == base_pilha and r.tem("Receber de"), 12), f)
+            ok("7: avisa \"Requisito satisfeito — conclua a operação.\"", r.tem("Requisito satisfeito"), f)
+            ok("7: o recebimento NÃO foi feito sozinho", recebimentos() == 0)
+            ok("7: o registro ficou aceito pelo gerente",
+               ler(pasta, "SELECT estado FROM sync_referencia WHERE chave = '[\"cr-nav7\"]'") == [("aceito",)])
+            xdo("key", "Return")
+            f = r.foto("-7")
+            ok("7: com o clique, recebe", r.esperar(lambda: recebimentos() == 1), f)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 9b, 9e e 10b (dev3.3).
+# ---------------------------------------------------------------------------
+AGORA = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+DISPOSITIVO = "(SELECT valor FROM config WHERE chave = 'dispositivo_id')"
+
+
+def caso9b(placar, fotos):
+    """Duplicatas → "Ver no histórico" filtra pelo registro do conflito (ligação inequívoca); "Ver tudo"; a pílula
+    Duplicatas volta (sem botão de texto que só volta); nada é gravado e nenhuma tela é empilhada."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav9b-")
+    try:
+        montar_loja(pasta)
+        por_fora(pasta, "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando) "
+                        "SELECT 'produto', json_array(id), 'v1', 'v2', 'caixa-2', datetime('now') FROM produto "
+                        "ORDER BY criado_em LIMIT 1")
+        conflitos = lambda: ler(pasta, "SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL")[0][0]  # noqa: E731
+        antes = conflitos()
+        r = placar.abrir(pasta, "TelaConfiguracoes", {"secao": "duplicatas"}, fotos, "9b-gerente")
+        try:
+            r.entrar("Ana")
+            ok("9b: Duplicatas mostra o conflito com Ver no histórico",
+               r.esperar(lambda: r.rolar_ate("Ver no histórico")), r.foto("-1"))
+            base_pilha = r.pilha()
+            r.clicar("Ver no histórico")
+            f = r.foto("-2")
+            ok("9b: o Histórico mostra só o registro do conflito",
+               r.esperar(lambda: r.tem("Só o que aconteceu com este registro")), f)
+            ok("9b: com o evento do cadastro da peça", r.tem("cadastrou a peça"), f)
+            ok("9b: a mesma tela (sem empilhar)", r.pilha() == base_pilha, f)
+            ok("9b: sem botão de texto que só volta (a seta e as pílulas fazem isso)", not r.tem("Voltar às"), f)
+            r.clicar("Duplicatas")
+            f = r.foto("-3")
+            ok("9b: a pílula Duplicatas volta à lista", r.esperar(lambda: r.tem_igual("Ver no histórico")), f)
+            r.rolar_ate("Ver no histórico")
+            r.clicar("Ver no histórico")
+            r.esperar(lambda: r.tem_igual("Ver tudo"))
+            r.clicar("Ver tudo")
+            f = r.foto("-4")
+            ok("9b: Ver tudo tira o filtro do registro",
+               r.esperar(lambda: not r.tem("Só o que aconteceu com este registro")), f)
+            ok("9b: nada foi resolvido nem gravado", conflitos() == antes)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def caso9e(placar, fotos):
+    """Início → a notificação Fiscal (UF/CNPJ faltando numa loja com nota de compra) → "Informar UF e CNPJ" leva
+    à Loja pela guia; desistir volta ao Início sem gravar. (Salvar e voltar é o mesmo requisito do caso 3,
+    conferido em telas_navegacao_etapa1.py, F.)"""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav9e-")
+    try:
+        montar_loja(pasta)
+        com_xml = ler(pasta, "SELECT COUNT(*) FROM compra WHERE xml <> ''")[0][0]
+        if not com_xml:
+            por_fora(pasta, "UPDATE compra SET xml = '<nfe/>' WHERE id = (SELECT id FROM compra LIMIT 1)")
+        cnpj = lambda: ler(pasta, "SELECT COALESCE((SELECT valor FROM config WHERE chave = 'loja_cnpj'), '')")[0][0]  # noqa: E731
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, "9e-gerente")
+        try:
+            r.entrar("Ana")
+            inicio = r.pilha()
+            if not r.tem_igual("Informar UF e CNPJ"):
+                r.clicar("Fiscal")
+            f = r.foto("-1")
+            ok("9e: a notificação Fiscal oferece Informar UF e CNPJ", r.esperar(lambda: r.tem_igual("Informar UF e CNPJ")), f)
+            ok("9e: não sugere emissão", r.tem("não emite nota fiscal") or not r.tem("emitir"), f)
+            time.sleep(1.2)
+            r.clicar("Informar UF e CNPJ")
+            f = r.foto("-2")
+            ok("9e: leva à Loja com a orientação da guia",
+               r.esperar(lambda: r.tem("Para continuar, informe a UF e o CNPJ da loja")), f)
+            ok("9e: uma tela por cima do Início (sem ciclo)", r.pilha() == inicio + 1, f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("9e: desistir (Esc) volta ao Início", r.esperar(lambda: r.pilha() == inicio), f)
+            # O aviso vem depois que a troca de tela termina (Main.depoisDaTroca): espera por ele, em vez de olhar uma
+            # vez só logo depois da volta (com a máquina carregada, a troca demora e o aviso chega depois da leitura).
+            ok("9e: avisa que não foi concluída", r.esperar(lambda: r.tem("ainda não foi concluída"), 8), f)
+            ok("9e: nada gravado", cnpj() == "")
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def caso10b(placar, fotos):
+    """Comissões: o fechamento já pago oferece "Ver no A pagar" (Opções); abre a ficha da conta; ao fechar, volta a
+    Comissões. Nada muda de valor (o pagamento não é estornado, o fechamento não é desfeito)."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav10b-")
+    try:
+        montar_loja(pasta)
+        por_fora(pasta, f"""
+            INSERT INTO conta_pagar (id, categoria_id, descricao, valor, vencimento, criado_em, dispositivo, competencia)
+              VALUES ('cp-nav10b', 'cat-comissoes', 'Comissão de Ana · teste', 1000, date('now'), {AGORA}, {DISPOSITIVO},
+                      strftime('%Y-%m', 'now'));
+            INSERT INTO pagamento (id, conta_pagar_id, data, valor, forma, criado_em, dispositivo)
+              VALUES ('pg-nav10b', 'cp-nav10b', date('now'), 1000, 'dinheiro', {AGORA}, {DISPOSITIVO});
+            INSERT INTO comissao_fechamento (id, usuario_id, de, ate, vendas, total_vendido, valor, conta_pagar_id,
+                                             criado_em, dispositivo)
+              SELECT 'cf-nav10b', id, date('now', 'start of month'), date('now'), 1, 10000, 1000, 'cp-nav10b',
+                     {AGORA}, {DISPOSITIVO} FROM usuario WHERE nome = 'Ana';""")
+        intacto = lambda: ler(pasta, "SELECT (SELECT estornado_em FROM pagamento WHERE id = 'pg-nav10b'), "  # noqa: E731
+                                     "(SELECT cancelado_em FROM comissao_fechamento WHERE id = 'cf-nav10b'), "
+                                     "(SELECT valor FROM conta_pagar WHERE id = 'cp-nav10b')") == [(None, None, 1000)]
+        r = placar.abrir(pasta, "TelaFinanceiro", {"secao": "comissoes"}, fotos, "10b-gerente")
+        try:
+            r.entrar("Ana")
+            f = r.foto("-1")
+            ok("10b: o fechamento pago oferece Ver no A pagar (e não Desfazer)",
+               r.esperar(lambda: r.rolar_ate("Ver no A pagar")) and not r.tem_igual("Desfazer"), f)
+            base_pilha = r.pilha()
+            r.clicar("Ver no A pagar")
+            f = r.foto("-2")
+            ok("10b: abre a ficha da conta da comissão", r.esperar(lambda: r.tem("Comissão de Ana · teste")), f)
+            ok("10b: na mesma tela (sem empilhar)", r.pilha() == base_pilha, f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("10b: fechar a ficha volta a Comissões", r.esperar(lambda: r.tem_igual("Ver no A pagar")), f)
+            time.sleep(1.0)
+            r.foto("-d")  # a volta, com o fechamento destacado (conferência visual)
+            ok("10b: nada mudou de valor", intacto())
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def caso_destaque(placar, fotos):
+    """9a, 9c e 10a: com o registro exato (alvo), a parte abre com a linha à vista e destacada (as fotos "-d"
+    mostram o véu e a luz em volta da linha; o roteiro não enxerga o destaque, a foto sim); nada é gravado."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-navdest-")
+    try:
+        montar_loja(pasta, avisos=True)
+        por_fora(pasta, "INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando) "
+                        "SELECT 'produto', json_array(id), 'v1', 'v2', 'caixa-2', datetime('now') FROM produto "
+                        "ORDER BY criado_em LIMIT 1")
+        conflito = ler(pasta, "SELECT MAX(id) FROM sync_conflito")[0][0]
+        encomenda = ler(pasta, "SELECT id FROM encomenda WHERE situacao = 'aberta' LIMIT 1")[0][0]
+        antes = ler(pasta, "SELECT (SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL), "
+                           "(SELECT COUNT(*) FROM encomenda WHERE situacao = 'aberta')")
+        r = placar.abrir(pasta, "TelaConfiguracoes", {"secao": "duplicatas", "alvo": f"conflito:{conflito}"}, fotos,
+                         "destaque-9a")
+        try:
+            r.entrar("Ana")
+            ok("9a: Duplicatas abre com o conflito à vista", r.esperar(lambda: r.tem_igual("Ver no histórico")), r.foto("-1"))
+            time.sleep(1.5)
+            r.foto("-d")
+        finally:
+            r.fechar()
+        r = placar.abrir(pasta, "TelaEstoque", {"secao": "encomendas", "alvo": f"encomenda:{encomenda}"}, fotos,
+                         "destaque-10a")
+        try:
+            r.entrar("Ana")
+            ok("10a: Encomendas abre com a encomenda à vista", r.esperar(lambda: r.tem("Pastilha dianteira")), r.foto("-1"))
+            time.sleep(1.5)
+            r.foto("-d")
+        finally:
+            r.fechar()
+        ok("9a/10a: nada resolvido nem gravado", ler(pasta, "SELECT (SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em "
+                                                           "IS NULL), (SELECT COUNT(*) FROM encomenda WHERE situacao = "
+                                                           "'aberta')") == antes)
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def caso10a(placar, fotos):
+    """10a pelo Início: "Ver encomendas" (uma encomenda só) leva à linha dela em Estoque › Encomendas; o Esc
+    (cancelar) volta ao Início sem empilhar nada e sem mudar a encomenda."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav10a-")
+    try:
+        montar_loja(pasta, avisos=True)
+        situacao = lambda: ler(pasta, "SELECT id, situacao FROM encomenda ORDER BY id")  # noqa: E731
+        antes = situacao()
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, "10a-gerente")
+        try:
+            r.entrar("Ana")
+            inicio = r.pilha()
+            if not r.tem_igual("Ver encomendas"):
+                r.clicar("Encomendas")
+            ok("10a: a notificação oferece Ver encomendas", r.esperar(lambda: r.tem_igual("Ver encomendas")), r.foto("-1"))
+            time.sleep(1.2)
+            r.clicar("Ver encomendas")
+            f = r.foto("-2")
+            ok("10a: leva a Estoque › Encomendas com a encomenda à vista",
+               r.esperar(lambda: r.tem("Pastilha dianteira") and r.pilha() == inicio + 1), f)
+            ok("10a: com as ações dela à vista (a linha escolhida)", r.tem_igual("Cancelar encomenda"), f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("10a: cancelar (Esc) volta ao Início, sem empilhar", r.esperar(lambda: r.pilha() == inicio), f)
+            ok("10a: a encomenda não mudou", situacao() == antes)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def desativar(pasta, nome):
+    """Como a troca de dados faria ao receber de outro caixa: o usuário fica inativo (o mesmo de
+    telas_estab_sessao.py)."""
+    # Ao ser importado, telas_estab_sessao troca base.TELA pela tela virtual dele (:65): sem devolver a nossa, as
+    # teclas e os próximos Rustinhos iriam para uma tela que não existe (foi o que derrubou o 7i e os casos seguintes).
+    tela = base.TELA
+    import telas_estab_sessao
+    base.TELA = tela
+    telas_estab_sessao.desativar(pasta, nome)
+
+
+def caso7i(placar, fotos):
+    """Caso 7 com interrupção: um caixa (Bia) é recusado pelo registro inconsistente, pede "Ver o registro" (a guia
+    pede a senha do gerente) e, no meio, é desativado em outro caixa. Ao tentar concluir, a sessão acaba: volta à
+    entrada, **nada é recebido**, nenhuma janelinha nem faixa da guia sobra por cima, e a próxima pessoa entra
+    normalmente. (A sessão encerrada descarta a tela de origem por segurança, de propósito: não é perda da
+    navegação; a recuperação do trabalho é da 0.9.19.)"""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7i-")
+    try:
+        montar_loja(pasta)
+        por_fora(pasta, """
+            INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, aberto_por, valor_inicial)
+              SELECT 'sessao-nav7i', valor, 'Caixa 1', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                     (SELECT id FROM usuario WHERE nome = 'Ana'), 0
+                FROM config WHERE chave = 'dispositivo_id';
+            INSERT INTO conta_receber (id, cliente_id, descricao, valor, vencimento, criado_em, dispositivo)
+              SELECT 'cr-nav7i', id, 'Caderno', 5000, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                     (SELECT valor FROM config WHERE chave = 'dispositivo_id')
+                FROM pessoa WHERE nome = 'Zé da Oficina';
+            INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+              VALUES ('conta_receber', '["cr-nav7i"]', 'pessoa', '["sumiu"]', 'inconsistente',
+                      '2026-01-01T00:00:00Z', 'log');""")
+        ze = ler(pasta, "SELECT id FROM pessoa WHERE nome = 'Zé da Oficina'")[0][0]
+        ja_havia = ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0]
+        r = placar.abrir(pasta, "TelaReceber", {"clienteInicial": ze}, fotos, "7i-caixa")
+        try:
+            r.entrar("Bia")
+            r.esperar(lambda: r.tem("Receber tudo"))
+            r.clicar("Receber tudo")
+            r.esperar(lambda: r.tem("Receber de"))
+            time.sleep(0.6)
+            xdo("key", "Return")
+            ok("7i: a recusa oferece Ver o registro ao caixa", r.esperar(lambda: r.tem_igual("Ver o registro")), r.foto("-1"))
+            r.clicar("Ver o registro")
+            ok("7i: a guia pede a senha do gerente ao caixa", r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar")), r.foto("-2"))
+            desativar(pasta, "Bia")
+            xdo("key", "Escape")  # desiste da senha: volta ao Receber, com a janelinha reaberta
+            r.esperar(lambda: r.tem("Receber de"))
+            time.sleep(0.6)
+            xdo("key", "Return")  # tenta concluir: a sessão já acabou
+            f = r.foto("-3")
+            ok("7i: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15), f)
+            ok("7i: nenhuma janelinha do recebimento nem faixa da guia sobra por cima",
+               not r.tem("Receber de") and not r.tem("Registro inconsistente") and not r.tem("conclua a operação"), f)
+            ok("7i: nada foi recebido", ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] == ja_havia)
+            r.entrar("Ana")
+            f = r.foto("-4")
+            # Depois de entrar, o programa abre de novo a tela de partida do roteiro (Vender / Receber), onde o nome da
+            # pessoa não aparece: a prova é a entrada ter saído e nada da guia ter sobrado.
+            ok("7i: a próxima pessoa entra normalmente, sem resto da guia",
+               r.esperar(lambda: not r.tem("Quem está usando?") and r.pilha() is not None)
+               and not r.tem("Registro inconsistente") and not r.tem("conclua a operação"), f)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "7": caso7, "7i": caso7i, "9": caso9, "9b": caso9b,
+         "9e": caso9e, "10a": caso10a, "10b": caso10b, "destaque": caso_destaque}
 
 
 def main():

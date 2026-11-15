@@ -138,8 +138,10 @@ FocusScope {
 
     // Onde resolver: a causa (Simultaneidade › Duplicatas › Códigos das
     // peças) ou o cadastro da peça. Esta tela fica na pilha, com a lista.
-    function verDuplicatas() {
-        janela.abrir("TelaConfiguracoes", { secao: "duplicatas" })
+    // B-1 da revisão (C8): com o código da etiqueta bloqueada, a linha dele vem destacada em Duplicatas.
+    function verDuplicatas(codigo, barras) {
+        const alvo = codigo || barras ? "codigo:|" + (codigo || "") + "|" + (barras || "") : ""
+        janela.abrir("TelaConfiguracoes", { secao: "duplicatas", alvo: alvo })
     }
     function abrirPeca(id) {
         janela.abrir("TelaPeca", { produtoId: id })
@@ -429,7 +431,7 @@ FocusScope {
                                     text: "Ver duplicatas"
                                     tipo: "secundario"
                                     altura: 36
-                                    onClicked: tela.verDuplicatas()
+                                    onClicked: tela.verDuplicatas(travada.modelData.etiqueta.codigo, travada.modelData.etiqueta.textoBarras)
                                 }
                                 Botao {
                                     text: "Abrir a peça"

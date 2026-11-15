@@ -933,7 +933,7 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Filtro, Id, Pedido};
     use crate::erro::Resultado;
     use crate::pagar;
 
@@ -967,8 +967,10 @@ mod comandos {
         let d: pagar::LancamentoEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let ids = pagar::lancar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(ids);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(ids))
+        Ok(resposta)
     }
 
     fn pagar_alterar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -983,23 +985,29 @@ mod comandos {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         pagar::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn pagar_pagar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: pagar::PagamentoEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         pagar::pagar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(pagar::ficha(&tx, &d.conta_id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(pagar::ficha(p.conn, &d.conta_id)?))
+        Ok(resposta)
     }
 
     fn pagamento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         pagar::estornar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 }

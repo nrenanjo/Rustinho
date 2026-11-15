@@ -27,6 +27,21 @@ Popup {
     // O conteúdo começa logo abaixo da área de toque da seta.
     topPadding: comSeta ? setaDoPainel.y + setaDoPainel.height : padding
     closePolicy: Popup.CloseOnEscape
+    // A-1 da revisão (C8, caso 7): a janela sabe quais janelinhas estão abertas, na ordem, para fechar e reabrir a
+    // cadeia inteira (a ficha da conta e a pergunta do motivo) quando a guia leva a outra tela.
+    Connections {
+        target: painel
+        function onOpened() {
+            const j = painel.ApplicationWindow.window
+            if (j && typeof j.registrarJanelinha === "function")
+                j.registrarJanelinha(painel, true)
+        }
+        function onClosed() {
+            const j = painel.ApplicationWindow.window
+            if (j && typeof j.registrarJanelinha === "function")
+                j.registrarJanelinha(painel, false)
+        }
+    }
     // O pop-up herda as cores da janela, não da tela: diz a sua superfície.
     palette.window: Tema.superficie(painel.cor)
     T.Overlay.modal: Rectangle { color: Tema.veu }

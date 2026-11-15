@@ -6,6 +6,7 @@ pub mod computador;
 pub mod config;
 pub mod esquema;
 pub mod migracao;
+pub mod operacoes;
 pub mod portatil;
 pub mod registro;
 pub mod tempo;

@@ -764,13 +764,14 @@ fn bruto(s: &mut crate::Servico, cmd: &str, d: Value) -> Value {
     serde_json::from_str(&s.chamar(cmd, &d.to_string())).unwrap()
 }
 
-/// C03 (limite documentado): a chave da operação (FALHA-04) fica só na
-/// memória. Enquanto o programa está aberto, a mesma tentativa repetida não
-/// grava duas vezes; fechado e aberto de novo, a mesma chave volta a valer.
-/// Não há reenvio da operação antiga: as telas geram chave nova ao abrir
-/// cada janela de gravação.
+/// C03 (o limite antigo, resolvido pelo R0 do QT-1): a chave da operação
+/// (FALHA-04) ficava só na memória e, fechado e aberto o programa, voltava a
+/// valer. Com o R0 ela fica no banco, na transação da própria operação: a
+/// mesma tentativa repetida não grava de novo, nem com o programa aberto nem
+/// depois de reabrir, e devolve o resultado da primeira vez (DR-7 (b)). As
+/// telas continuam gerando chave nova ao abrir cada janela de gravação.
 #[test]
-fn c03_chave_da_operacao_vale_enquanto_o_programa_esta_aberto() {
+fn c03_chave_da_operacao_vale_tambem_depois_de_reabrir() {
     let pasta = pasta_nova("c03");
     let db = pasta.join("rustinho.db");
     let sup = json!({ "tipo": "suprimento", "valor": "10", "motivo": "troco", "chaveOperacao": "sup-1" });
@@ -785,16 +786,21 @@ fn c03_chave_da_operacao_vale_enquanto_o_programa_esta_aberto() {
         assert_eq!(bruto(&mut s, "caixa_abrir", json!({ "valor": "0", "chaveOperacao": "abrir-1" }))["ok"], true);
         assert_eq!(bruto(&mut s, "caixa_movimentar", sup.clone())["ok"], true);
         let r = bruto(&mut s, "caixa_movimentar", sup.clone());
-        assert_eq!(r["campo"], "repetida", "{r}");
+        assert_eq!((r["ok"].clone(), r["repetida"].clone()), (json!(true), json!(true)), "{r}");
     }
     let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
     let ana = texto(&s.banco_para_teste().conn, "SELECT id FROM usuario WHERE nome = 'Ana'", []);
     assert_eq!(bruto(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }))["ok"], true);
     let r = bruto(&mut s, "caixa_movimentar", sup);
-    assert_eq!(r["ok"], true, "programa aberto de novo: a chave antiga não é lembrada (limite C03): {r}");
+    assert_eq!(
+        (r["ok"].clone(), r["repetida"].clone()),
+        (json!(true), json!(true)),
+        "programa aberto de novo: a chave antiga é lembrada (R0): {r}"
+    );
     assert_eq!(
         contar(&s.banco_para_teste().conn, "SELECT COUNT(*) FROM caixa_movimento WHERE tipo = 'suprimento'", []),
-        2
+        1,
+        "um suprimento só"
     );
     drop(s);
     // As janelas de gravação do Caixa pegam chave nova ao abrir.

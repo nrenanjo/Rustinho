@@ -874,7 +874,7 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Filtro, Id, Pedido};
     use crate::devolucoes;
     use crate::erro::Resultado;
 
@@ -901,19 +901,21 @@ mod comandos {
         let d: devolucoes::Entrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = devolucoes::devolver(&tx, p.disp, p.usuario_id, &d)?;
+        let vale: Option<String> = tx.query_row("SELECT vale_id FROM devolucao WHERE id = ?1", [&id], |l| l.get(0))?;
+        let resposta = json!({ "id": id, "valeId": vale, "venda": devolucoes::da_venda(&tx, &d.venda_id)? });
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        let conn = &*p.conn;
-        let vale: Option<String> =
-            conn.query_row("SELECT vale_id FROM devolucao WHERE id = ?1", [&id], |l| l.get(0))?;
-        Ok(json!({ "id": id, "valeId": vale, "venda": devolucoes::da_venda(conn, &d.venda_id)? }))
+        Ok(resposta)
     }
 
     fn devolucao_desfazer(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         devolucoes::desfazer(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn devolucoes_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {

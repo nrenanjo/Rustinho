@@ -17,6 +17,7 @@
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::erro::{Erro, Resultado};
 use crate::{backup, config, fiscal, numeros};
@@ -65,6 +66,12 @@ pub struct Aviso {
     /// Botão de ação ("Ver caixas") e onde ele leva (função + seção).
     pub acao: String,
     pub secao: String,
+    /// C8 (9a, 9c, 10a; dev3.3): o registro exato, quando a notificação é sobre UM só
+    /// ("conflito:<id>", "codigo:<tipo>|<código>", "caixa:<dispositivo>", "referencia:<tabela>|<chave>",
+    /// "pendencia:<id>", "encomenda:<id>"). A tela o destaca; vazio = a lista (mais de um, ou sem registro).
+    pub alvo: String,
+    /// QT-1b: uma 2ª ação, que resolve o aviso pela pessoa ("Conferi"), pelo comando `aviso_resolver` (vazio = não há).
+    pub resolver: String,
     /// Minimizada neste computador (só apresentação).
     pub minimizado: bool,
 }
@@ -86,8 +93,15 @@ impl Aviso {
             detalhes: Vec::new(),
             acao: String::new(),
             secao: String::new(),
+            alvo: String::new(),
+            resolver: String::new(),
             minimizado: false,
         }
+    }
+
+    fn alvo(mut self, alvo: String) -> Aviso {
+        self.alvo = alvo;
+        self
     }
 
     fn categoria(mut self, c: &str) -> Aviso {
@@ -99,6 +113,36 @@ impl Aviso {
         self.secao = s.into();
         self
     }
+}
+
+/// 9a (C8): o conflito aberto, quando há um só (senão, a lista).
+fn um_conflito(conn: &Connection) -> Resultado<String> {
+    let abertos: Vec<i64> =
+        crate::sync::conflitos(conn)?.into_iter().filter(|c| c.resolvido.is_empty()).map(|c| c.id).collect();
+    Ok(match abertos.as_slice() {
+        [id] => format!("conflito:{id}"),
+        _ => String::new(),
+    })
+}
+
+/// 9a (C8): o código repetido, quando é o único caso a ver em Duplicatas.
+fn um_codigo(conn: &Connection) -> Resultado<String> {
+    Ok(match crate::faixas::repetidos(conn)?.as_slice() {
+        [r] => format!("codigo:{}|{}", r.tipo, r.codigo),
+        _ => String::new(),
+    })
+}
+
+/// 9c (C8): o registro incompleto (apagado ou comprovadamente inconsistente), quando há um só.
+fn uma_referencia(conn: &Connection) -> Resultado<String> {
+    let quebradas: Vec<_> = crate::sync::referencias(conn)?
+        .into_iter()
+        .filter(|r| r.estado == "apagado" || r.estado == "inconsistente")
+        .collect();
+    Ok(match quebradas.as_slice() {
+        [r] => format!("referencia:{}|{}", r.tabela, r.chave),
+        _ => String::new(),
+    })
 }
 
 /// Completa o que a tela precisa (título, resumo, estado minimizado).
@@ -166,6 +210,26 @@ pub fn uma_aberta(avisos: &mut [Aviso]) {
 /// outra, e uma marca antiga de "aberta" não reabre nada depois. Quem chama
 /// passa uma transação, para gravar tudo ou nada.
 pub fn minimizar(conn: &Connection, atuais: &[Aviso], id: &str, minimizado: bool) -> Resultado<()> {
+    minimizar_por(conn, atuais, id, minimizado, None)
+}
+
+/// A marca de "minimizado" de um aviso. N-05 da re-revisão: a do aviso de fechamento inesperado é POR PESSOA (como
+/// o "visto"): o caixa minimizar não faz o gerente receber o aviso já minimizado. As outras são deste computador.
+pub fn chave_minimizado(id: &str, usuario_id: Option<&str>) -> String {
+    match usuario_id {
+        Some(u) if id.starts_with(FECHAMENTO_INESPERADO) => format!("aviso_minimizado.{id}.{u}"),
+        _ => format!("aviso_minimizado.{id}"),
+    }
+}
+
+/// `minimizar`, sabendo quem está usando (para a marca por pessoa do aviso de fechamento inesperado).
+pub fn minimizar_por(
+    conn: &Connection,
+    atuais: &[Aviso],
+    id: &str,
+    minimizado: bool,
+    usuario_id: Option<&str>,
+) -> Resultado<()> {
     let Some(aviso) = atuais.iter().find(|a| a.id == id) else {
         return Err(Erro::validacao("Esta notificação já não está aparecendo."));
     };
@@ -173,9 +237,9 @@ pub fn minimizar(conn: &Connection, atuais: &[Aviso], id: &str, minimizado: bool
         return Err(Erro::validacao("A notificação crítica fica aberta até o problema ser resolvido."));
     }
     for outra in atuais.iter().filter(|a| a.id != id && a.categoria != CRITICA) {
-        config::gravar(conn, &format!("aviso_minimizado.{}", outra.id), "1")?;
+        config::gravar(conn, &chave_minimizado(&outra.id, usuario_id), "1")?;
     }
-    config::gravar(conn, &format!("aviso_minimizado.{id}"), if minimizado { "1" } else { "0" })
+    config::gravar(conn, &chave_minimizado(id, usuario_id), if minimizado { "1" } else { "0" })
 }
 
 /// Esconde neste computador, até a meia-noite, uma das notificações que
@@ -202,6 +266,153 @@ fn escondida_hoje(conn: &Connection, a: &Aviso, hoje: &str) -> Resultado<bool> {
 
 fn plural(n: i64, um: &str, varios: &str) -> String {
     format!("{n} {}", if n == 1 { um } else { varios })
+}
+
+/// QT-1b: o aviso de fechamento inesperado, para quem entrou. Para as aberturas do programa que caíram (não
+/// fecharam pelo caminho normal, ou tiveram erro interno) e que esta pessoa não conferiu, mostra o que FOI GRAVADO
+/// e a tela não chegou a mostrar, o que NÃO foi concluído (nada gravado) e o que precisa ser CONFERIDO (operação de
+/// várias transações). Nunca diz que um rascunho ou formulário foi salvo, e não repete nada: a pessoa confere e dá
+/// "Conferi". O id leva o número da abertura mais nova (`fechamento_inesperado.<n>`): uma queda nova começa aberta;
+/// minimizar pega (passa por `completar`, como os outros).
+pub fn do_fechamento(conn: &Connection, usuario_id: &str, gerente: bool) -> Resultado<Option<Aviso>> {
+    let atual = crate::operacoes::abertura_atual(conn)?;
+    let Some((desde, ultima, linhas)) = crate::operacoes::fechamento(conn, usuario_id, gerente, atual)? else {
+        return Ok(None);
+    };
+    // Os momentos são gravados em UTC; o aviso mostra a hora do computador, e o dia quando não é hoje (F-12).
+    let quando = |q: &str| -> String {
+        conn.query_row(
+            "SELECT CASE WHEN date(?1, 'localtime') = date('now', 'localtime') THEN strftime('%H:%M', ?1, 'localtime')
+                         ELSE strftime('%d/%m %H:%M', ?1, 'localtime') END",
+            [q],
+            |l| l.get::<_, Option<String>>(0),
+        )
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+    };
+    let dia_hora = |q: &str| -> String {
+        conn.query_row("SELECT strftime('%d/%m às %H:%M', ?1, 'localtime')", [q], |l| l.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+    };
+    let detalhes = linhas
+        .iter()
+        .map(|l| {
+            let mut partes = vec![nome_da_operacao(&l.comando)];
+            let r = l.resultado.clone().unwrap_or(Value::Null);
+            let numero = r.get("numero").and_then(Value::as_i64).filter(|n| *n > 0);
+            let total = r.get("total").and_then(Value::as_str).filter(|s| !s.is_empty());
+            if let Some(n) = numero {
+                partes.push(format!("nº {n}"));
+            }
+            if let Some(t) = total {
+                partes.push(format!("R$ {t}"));
+            }
+            // F-12: quando a resposta não identifica a operação, o tipo e o valor do pedido.
+            if numero.is_none() && total.is_none() && !l.resumo.is_empty() {
+                partes.push(l.resumo.clone());
+            }
+            partes.push(quando(&l.quando));
+            let (rotulo, fim) = match l.classe {
+                "gravada" => ("Gravada", ""),
+                "confira" => ("Confira", " · pode ter gravado só uma parte"),
+                _ => ("Não concluída", " · nada foi gravado"),
+            };
+            Detalhe { rotulo: rotulo.to_string(), valor: format!("{}{fim}", partes.join(" · ")) }
+        })
+        .collect::<Vec<_>>();
+    let id = format!("{FECHAMENTO_INESPERADO}.{ultima}");
+    let mut a = Aviso::simples(
+        &id,
+        &fiscal::hoje(conn)?,
+        "Fechamento inesperado".into(),
+        "o Rustinho fechou sem o encerramento normal · confira antes de refazer".into(),
+        String::new(),
+        "caixa",
+    )
+    .categoria(ATENCAO);
+    a.titulo_longo = "Atenção: o Rustinho fechou sem o encerramento normal".into();
+    a.descricao = format!(
+        "Desde {}, o Rustinho não fechou pelo caminho normal. Veja abaixo o que foi gravado sem a tela confirmar e o \
+         que não foi gravado, e confira antes de refazer qualquer venda, recebimento ou pagamento. O que estava só na \
+         tela (uma venda sendo montada, um formulário) não foi guardado.",
+        dia_hora(&desde)
+    );
+    a.detalhes = detalhes;
+    a.acao = "Ver vendas do caixa".into();
+    a.resolver = "Conferi".into();
+    // F-05 (revisão): pelo mesmo caminho dos outros (resumo, ação); começa ABERTO (uma queda nova precisa ser
+    // vista) e respeita o minimizar da pessoa.
+    let mut a = completar(conn, a)?;
+    // N-05 da re-revisão: o minimizar desta pessoa (o de outra não vale para ela).
+    a.minimizado = config::ler(conn, &chave_minimizado(&id, Some(usuario_id)))?.as_deref() == Some("1");
+    Ok(Some(a))
+}
+
+/// O começo do id do aviso de fechamento inesperado (o resto é o número da abertura).
+pub const FECHAMENTO_INESPERADO: &str = "fechamento_inesperado";
+
+/// O nome de cada operação no aviso de fechamento inesperado. Todo comando de `NAO_REPETIR` (menos as
+/// exceções do R0) tem o seu (teste `todo_comando_que_nao_se_repete_tem_nome_no_aviso`).
+pub const NOMES_DAS_OPERACOES: &[(&str, &str)] = &[
+    ("caixa_abrir", "Abertura do caixa"),
+    ("caixa_fechar", "Fechamento do caixa"),
+    ("caixa_movimentar", "Movimento do caixa"),
+    ("caixa_readmitir", "Caixa readmitido na loja"),
+    ("caixa_retirar", "Caixa retirado da loja"),
+    ("categoria_salvar", "Categoria do financeiro"),
+    ("cheque_depositar", "Depósito de cheque"),
+    ("cheque_desfazer", "Cheque de volta à carteira"),
+    ("cheque_devolver", "Cheque devolvido"),
+    ("cheque_repassar", "Cheque repassado"),
+    ("comissao_fechar", "Fechamento de comissão"),
+    ("comissao_reabrir", "Comissão reaberta"),
+    ("compra_estornar", "Estorno de compra"),
+    ("compra_importar", "Importação de compras"),
+    ("compra_lancar", "Compra lançada"),
+    ("conta_cancelar", "Dívida tirada do crediário"),
+    ("conta_loja_salvar", "Conta da loja"),
+    ("devolucao_desfazer", "Devolução desfeita"),
+    ("devolucao_gravar", "Devolução"),
+    ("encomenda_cancelar", "Encomenda cancelada"),
+    ("encomenda_chegou", "Encomenda que chegou"),
+    ("encomenda_criar", "Encomenda"),
+    ("encomenda_entregar", "Encomenda entregue"),
+    ("encomenda_pedir", "Encomenda pedida"),
+    ("estoque_ajustar", "Ajuste de estoque"),
+    ("importar_cadastros", "Importação de cadastros"),
+    ("movimento_estornar", "Estorno de movimento da conta"),
+    ("movimento_lancar", "Movimento da conta"),
+    ("orcamento_salvar", "Orçamento"),
+    ("os_cancelar", "Cancelamento de OS"),
+    ("os_rascunho_excluir", "Rascunho de OS excluído"),
+    ("os_rascunho_salvar", "Rascunho de OS"),
+    ("os_salvar", "Ordem de serviço"),
+    ("os_situacao", "Situação da OS"),
+    ("pagamento_estornar", "Estorno de pagamento"),
+    ("pagar_cancelar", "Conta a pagar tirada"),
+    ("pagar_lancar", "Conta a pagar"),
+    ("pagar_pagar", "Pagamento de conta"),
+    ("pendencia_arquivar", "Pendência arquivada"),
+    ("pessoa_salvar", "Cadastro de pessoa"),
+    ("produto_salvar", "Cadastro de peça"),
+    ("produto_variacao_criar", "Variação de peça"),
+    ("receber_baixar", "Recebimento"),
+    ("receber_lancar", "Crediário"),
+    ("recebimento_estornar", "Estorno de recebimento"),
+    ("transferir", "Transferência"),
+    ("unidade_salvar", "Unidade"),
+    ("usuario_salvar", "Cadastro de usuário"),
+    ("venda_cancelar", "Cancelamento de venda"),
+    ("venda_concluir", "Venda"),
+    ("xml_pendencia_resolver", "Pendência de XML resolvida"),
+];
+
+/// O nome da operação no aviso (um comando sem nome, que não deveria existir, aparece como "Operação").
+fn nome_da_operacao(comando: &str) -> String {
+    NOMES_DAS_OPERACOES.iter().find(|(c, _)| *c == comando).map(|(_, n)| *n).unwrap_or("Operação").to_string()
 }
 
 /// Aviso de quem entrou com uma senha antiga fora da política (F-17). Não
@@ -320,14 +531,22 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         if a_pedir > 0 {
             partes.push(format!("{} para pedir", plural(a_pedir, "encomenda", "encomendas")));
         }
-        avisos.push(Aviso::simples(
-            "encomendas",
-            &hoje,
-            "Encomendas".into(),
-            partes.join(" · "),
-            String::new(),
-            "estoque",
-        ));
+        // 10a (C8): uma só → a linha dela destacada em Estoque › Encomendas.
+        let alvo = if chegaram + a_pedir == 1 {
+            conn.query_row(
+                "SELECT id FROM encomenda WHERE (situacao = 'chegou' AND avisado_em IS NULL) OR situacao = 'aberta'",
+                [],
+                |l| l.get::<_, String>(0),
+            )
+            .map(|id| format!("encomenda:{id}"))
+            .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        avisos.push(
+            Aviso::simples("encomendas", &hoje, "Encomendas".into(), partes.join(" · "), String::new(), "estoque")
+                .alvo(alvo),
+        );
     }
 
     // Oficina: carros prontos para entregar e OS que passaram da previsão
@@ -370,7 +589,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 "configuracoes",
             )
             .categoria(ATENCAO)
-            .secao("duplicatas"),
+            .secao("duplicatas")
+            .alvo(if conflitos == 1 { um_conflito(conn)? } else { String::new() }),
         );
     }
 
@@ -409,8 +629,59 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 "configuracoes",
             )
             .categoria(ATENCAO)
-            .secao("duplicatas"),
+            .secao("duplicatas")
+            .alvo(if codigos == 1 { um_codigo(conn)? } else { String::new() }),
         );
+    }
+
+    // 9e (C8, dev3.3): o fiscal da loja. Nunca sugere que o Rustinho emite nota.
+    // UF ou CNPJ faltando, numa loja que já usa o fiscal (tem nota de compra pelo XML; as regras de imposto
+    // vêm prontas em toda loja e não contam):
+    // Auto — o botão leva direto ao campo (navegação guiada) e volta ao Início quando o núcleo confirma.
+    let usa_fiscal: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM compra WHERE xml <> '')", [], |l| l.get(0))?;
+    if usa_fiscal {
+        let loja = crate::requisitos::conferir(conn, crate::requisitos::UF_E_CNPJ_DA_LOJA)?;
+        if !loja.satisfeito {
+            let mut a = Aviso::simples(
+                "fiscal_loja",
+                &hoje,
+                "Fiscal".into(),
+                "faltam dados da loja para a conferência fiscal".into(),
+                String::new(),
+                "configuracoes",
+            )
+            .secao("loja");
+            a.descricao = format!(
+                "{} O estado e o CNPJ servem para conferir as regras de imposto das notas de compra e para separar \
+                 as notas da loja das de fornecedores. O Rustinho não emite nota fiscal.",
+                loja.falta
+            );
+            a.acao = "Informar UF e CNPJ".into();
+            avisos.push(a);
+        }
+    }
+    // NF-e de compra cuja autorização na SEFAZ ainda não foi conferida (PEND-09): Opções — a lista de
+    // compras; o gerente confere cada uma no portal da NF-e e registra (nada é lançado por aqui).
+    let aguardando: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM compra WHERE situacao = 'rascunho' AND xml <> ''
+            AND autorizacao NOT IN ('confirmada_gerente', 'comprovada_sefaz', 'anterior', 'negada')",
+        [],
+        |l| l.get(0),
+    )?;
+    if aguardando > 0 {
+        let mut a = Aviso::simples(
+            "fiscal_notas",
+            &hoje,
+            "Notas de compra".into(),
+            format!(
+                "{} aguardando a conferência da autorização",
+                plural(aguardando, "nota de compra", "notas de compra")
+            ),
+            "o gerente confere a chave no portal da NF-e antes de lançar".into(),
+            "compras",
+        );
+        a.acao = "Ver compras".into();
+        avisos.push(a);
     }
 
     // Pendências persistentes de identificação XML (Fase 4.D): ficam visíveis
@@ -572,7 +843,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 "configuracoes",
             )
             .categoria(ATENCAO)
-            .secao("caixas"),
+            .secao("caixas")
+            .alvo(uma_referencia(conn)?),
         );
     } else if atrasadas > 0 {
         // Atraso não é erro: só pede para olhar se os outros caixas estão ligados.
@@ -594,7 +866,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
 
     // 0.9.15: caixas sem compatibilidade confirmada (bloqueiam rascunhos de OS).
     for c in crate::sync::bloqueios_de_rascunho(conn)? {
-        avisos.push(aviso_de_compatibilidade(&hoje, &c));
+        avisos.push(aviso_de_compatibilidade(&hoje, &c).alvo(format!("caixa:{}", c.dispositivo)));
     }
     // Alterações que não vão para um caixa de versão antiga.
     for c in crate::sync::caixas_conhecidos(conn)?.iter().filter(|c| c.nao_enviadas > 0 && c.situacao != "retirado") {
@@ -615,6 +887,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             c.nome
         );
         a.acao = "Ver caixas".into();
+        a.alvo = format!("caixa:{}", c.dispositivo);
         avisos.push(a);
     }
     // T-07 (C8): caixa da loja que não troca dados com este há um dia ou
@@ -622,7 +895,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     // sozinha na primeira troca que der certo.
     if crate::sync::ajustes(conn).map(|a| a.ligado).unwrap_or(false) {
         for c in caixas_sem_contato(conn, HORAS_SEM_CONTATO)? {
-            avisos.push(aviso_sem_contato(&hoje, &c));
+            let alvo = format!("caixa:{}", c.dispositivo);
+            avisos.push(aviso_sem_contato(&hoje, &c).alvo(alvo));
         }
     }
     // Alterações recebidas guardadas sem aplicar (o gerente olha).
@@ -652,6 +926,16 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
              em Configurações › Caixas da loja."
             .into();
         a.acao = "Ver pendências".into();
+        if pendentes == 1 {
+            a.alvo = conn
+                .query_row(
+                    "SELECT alteracao_id FROM sync_pendencia WHERE lado = 'recebida' AND estado = 'pendente'",
+                    [],
+                    |l| l.get::<_, String>(0),
+                )
+                .map(|id| format!("pendencia:{id}"))
+                .unwrap_or_default();
+        }
         avisos.push(a);
     }
 
@@ -948,6 +1232,8 @@ mod comandos {
         Comando { nome: "avisos_do_dia", classe: Classe::Leitura, funcao: avisos_do_dia },
         Comando { nome: "aviso_minimizar", classe: Classe::Caixa, funcao: aviso_minimizar },
         Comando { nome: "aviso_esconder", classe: Classe::Caixa, funcao: aviso_esconder },
+        // QT-1b: a 2ª ação de um aviso ("Conferi"), que o resolve para quem conferiu.
+        Comando { nome: "aviso_resolver", classe: Classe::Caixa, funcao: aviso_resolver },
     ];
 
     fn avisos_do_dia(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
@@ -958,14 +1244,29 @@ mod comandos {
         let d: Value = ler(dados)?;
         let atuais = avisos_de(p)?;
         let tx = p.conn.transaction()?;
-        crate::avisos::minimizar(
+        crate::avisos::minimizar_por(
             &tx,
             &atuais,
             d["id"].as_str().unwrap_or_default(),
             d["minimizado"].as_bool().unwrap_or(true),
+            Some(p.usuario_id),
         )?;
         tx.commit()?;
         Ok(json!(true))
+    }
+
+    fn aviso_resolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Value = ler(dados)?;
+        match d["id"].as_str().unwrap_or_default() {
+            id if id.starts_with(crate::avisos::FECHAMENTO_INESPERADO) => {
+                let tx = p.conn.transaction()?;
+                let atual = crate::operacoes::abertura_atual(&tx)?;
+                crate::operacoes::fechamento_visto(&tx, p.usuario_id, atual)?;
+                tx.commit()?;
+                Ok(json!(true))
+            }
+            _ => Err(crate::erro::Erro::validacao("Esta notificação não tem o que conferir.")),
+        }
     }
 
     fn aviso_esconder(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -996,6 +1297,12 @@ mod comandos {
         }
         if let Some(a) = crate::avisos::da_senha(p.conn, p.usuario_id)? {
             avisos.push(a);
+        }
+        // QT-1b: o fechamento inesperado vem primeiro (é o que conferir antes de refazer qualquer coisa).
+        if !p.modo_seguro {
+            if let Some(a) = crate::avisos::do_fechamento(p.conn, p.usuario_id, p.gerente)? {
+                avisos.insert(0, a);
+            }
         }
         crate::avisos::uma_aberta(&mut avisos);
         Ok(avisos)

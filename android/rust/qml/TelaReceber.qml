@@ -492,6 +492,8 @@ FocusScope {
             const r = Api.gravar("receber_baixar", entrada(), chave)
             if (!r.ok) {
                 erro = r.erro
+                // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                tela.janela.oferecerReferencia(r, pagar)
                 return
             }
             close()

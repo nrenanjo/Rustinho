@@ -23,6 +23,12 @@ pub const UF_E_CNPJ_DA_LOJA: &str = "loja.uf_cnpj";
 /// Simultaneidade › Caixas (atualizar o caixa ou retirá-lo da loja).
 pub const RASCUNHO_DE_OS: &str = "caixas.rascunho";
 pub const CAMPO_RASCUNHO_DE_OS: &str = "requisito:caixas.rascunho";
+/// Caso 7 (C8, dev3.3): operação com dinheiro de um registro comprovadamente
+/// inconsistente. O id leva o registro exato: `caixas.referencia|<tabela>|<chave JSON>`
+/// (o `campo` da recusa é `sync::CAMPO_REFERENCIA` com esse final). Resolve-se em
+/// Configurações › Simultaneidade › Caixas, por decisão do gerente (aceitar como
+/// está ou restaurar o backup do caixa de origem).
+pub const REFERENCIA: &str = "caixas.referencia";
 
 /// Por que a importação de cadastros (Peças) precisa do CNPJ da loja.
 pub const PARA_CADASTROS: &str = "É por ele que o Rustinho separa as notas da loja das notas de fornecedores.";
@@ -40,6 +46,20 @@ pub struct Situacao {
 
 /// O requisito está satisfeito pelo que está gravado no banco?
 pub fn conferir(conn: &Connection, id: &str) -> Resultado<Situacao> {
+    // Caso 7: o requisito com o registro exato.
+    if let Some(resto) = id.strip_prefix(REFERENCIA).and_then(|r| r.strip_prefix('|')) {
+        let Some((tabela, chave)) = resto.split_once('|').filter(|(t, c)| !t.is_empty() && !c.is_empty()) else {
+            return Err(Erro::validacao(format!("Requisito desconhecido: {id}.")));
+        };
+        let bloqueia = crate::sync::referencia_inconsistente(conn, tabela, chave)?;
+        let falta = if bloqueia {
+            "O registro continua inconsistente: o gerente precisa aceitar como está ou restaurar o backup do caixa de origem."
+                .to_string()
+        } else {
+            String::new()
+        };
+        return Ok(Situacao { id: id.to_string(), satisfeito: !bloqueia, falta });
+    }
     let (satisfeito, falta) = match id {
         CNPJ_DA_LOJA => match documento_da_loja(conn)? {
             Ok(_) => (true, String::new()),

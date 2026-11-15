@@ -173,6 +173,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "aparencia_salvar",
     "aviso_esconder",
     "aviso_minimizar",
+    "aviso_resolver",
     "backup_conectar_drive",
     "backup_desligar_drive",
     "backup_salvar",
@@ -217,6 +218,16 @@ fn bloqueado_no_modo_seguro(comando: &str) -> bool {
         c => NAO_REPETIR.contains(&c) || GRAVAM_TAMBEM.contains(&c),
     }
 }
+
+/// F-14 (revisão): a chave de operação já foi usada (outro pedido, ou um pedido com senha). A primeira operação
+/// com essa chave FOI gravada: o texto manda conferir, não refazer.
+/// A tela já desenhou o resultado das gravações anteriores (N-01 da re-revisão, parte 2): fora do contrato dos
+/// comandos, tratado no começo de `chamar`.
+pub const ENTREGA_CONFIRMAR: &str = "entrega_confirmar";
+
+pub const TEXTO_CHAVE_REUSADA: &str =
+    "Uma operação desta tela já foi gravada antes com esta identificação. Nada foi gravado agora. Confira o que foi \
+     gravado antes de refazer (feche e abra a tela para uma operação nova).";
 
 /// A3: o motivo, igual em toda gravação recusada.
 pub const TEXTO_MODO_SEGURO: &str = "O banco de dados deste caixa está com defeito (a conferência de integridade \
@@ -282,6 +293,11 @@ pub const NAO_REPETIR: &[&str] = &[
     "pendencia_arquivar",
     "xml_pendencia_resolver",
 ];
+
+/// R0 (QT-1): comandos de `NAO_REPETIR` cuja operação NÃO é marcada no banco. `backup_restaurar` troca o
+/// banco inteiro (um backup de antes do R0 nem tem a `operacao_feita`): a repetição dele continua recusada
+/// pela lista na memória, como antes. Comando novo aqui só com justificativa (o teste gerado confere).
+pub const EXCECOES_R0: &[&str] = &["backup_restaurar"];
 
 /// Quantas chaves de operação já feitas ficam guardadas (as mais antigas saem).
 const CHAVES_GUARDADAS: usize = 2000;
@@ -527,9 +543,18 @@ pub struct Servico {
     _trava: Option<std::fs::File>,
     /// Quanto esperar as tarefas da sincronização ao fechar.
     prazo_encerrar: Duration,
-    /// Chaves das operações já gravadas (comando + chave + usuário), para
-    /// recusar a mesma repetida (duplo clique).
+    /// Só para as exceções do R0 (`EXCECOES_R0`): as chaves já feitas, na memória, como antes. As outras
+    /// operações de `NAO_REPETIR` ficam no banco (`operacao_feita`), na transação da própria operação.
     feitas: std::collections::VecDeque<[u8; 32]>,
+    /// R0 (QT-1): a operação da chamada em andamento (a chave que a tela mandou), para o atendente marcar.
+    operacao_atual: Option<crate::operacoes::Operacao>,
+    /// R0 / DR-7 (b): a resposta desta chamada é a da primeira vez (a mesma operação repetida).
+    repetida: bool,
+    /// QT-1b: o número desta abertura do programa (0 = nenhuma: banco em memória, modo seguro).
+    abertura: i64,
+    /// QT-1b (F-02 da revisão): as operações gravadas cuja resposta ainda não se sabe se chegou à tela. Na chamada
+    /// seguinte (as chamadas são uma de cada vez), elas ficam "entregues".
+    por_entregar: Vec<[u8; 32]>,
 }
 
 /// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
@@ -600,6 +625,11 @@ impl Drop for Servico {
     /// trava fica presa até o programa fechar: outro Rustinho neste banco é
     /// recusado em vez de gravar junto.
     fn drop(&mut self) {
+        // QT-1b: encerramento limpo (o programa fechou pelo caminho normal).
+        if !self.banco.em_modo_seguro() && self.abertura > 0 {
+            self.entregar();
+            let _ = crate::operacoes::fechar_sessao(&self.banco.conn, self.abertura);
+        }
         if let Some(mut m) = self._motor.take() {
             if !m.encerrar(self.prazo_encerrar) {
                 crate::registro::anotar("sync: tarefas não terminaram no prazo; a trava fica até fechar");
@@ -713,6 +743,15 @@ impl Servico {
         Self::abrir_com(caminho, com_motor)
     }
 
+    /// Só nos testes (QT-1b): o programa morre como no reinício do Qt ou numa queda: nada do encerramento limpo
+    /// roda (nem o `Drop`, nem o `backup_ao_fechar`). Só a trava sai, para o teste poder abrir de novo.
+    #[cfg(test)]
+    pub(crate) fn cair_para_teste(mut self) {
+        assert!(self._motor.is_none(), "abra com abrir_para_teste(_, false)");
+        drop(self._trava.take());
+        std::mem::forget(self);
+    }
+
     /// Só nos testes: a troca de dados está rodando?
     #[cfg(test)]
     pub(crate) fn tem_motor(&self) -> bool {
@@ -727,6 +766,13 @@ impl Servico {
         }
         let trava = travar(caminho)?;
         let mut s = Self::com_banco(Banco::abrir(caminho)?);
+        // QT-1b: esta abertura do programa (e, se a anterior não fechou direito, o aviso de fechamento inesperado).
+        if !s.banco.em_modo_seguro() {
+            match crate::operacoes::abrir_sessao(&s.banco.conn) {
+                Ok(n) => s.abertura = n,
+                Err(e) => crate::registro::anotar(&format!("QT-1b: abertura do programa: {e}")),
+            }
+        }
         // O banco e os arquivos que o SQLite cria ao lado: só do usuário.
         for (fim, o_que) in [("", "banco"), ("-wal", "banco (-wal)"), ("-shm", "banco (-shm)"), (".trava", "trava")] {
             let mut nome = caminho.as_os_str().to_owned();
@@ -770,6 +816,10 @@ impl Servico {
             _trava: None,
             prazo_encerrar: PRAZO_PARA_ENCERRAR,
             feitas: std::collections::VecDeque::new(),
+            operacao_atual: None,
+            repetida: false,
+            abertura: 0,
+            por_entregar: Vec::new(),
         }
     }
 
@@ -783,6 +833,14 @@ impl Servico {
     /// errado. (Isto vale porque o perfil de compilação usa `panic = unwind`,
     /// o padrão; com `abort` o programa fecharia na hora.)
     pub fn chamar(&mut self, comando: &str, dados: &str) -> String {
+        // QT-1b, N-01 da re-revisão (parte 2): a operação gravada só fica "entregue" quando a TELA confirma que já
+        // desenhou o resultado (`entrega_confirmar`, mandado pelo Api.qml depois de um quadro desenhado). Antes,
+        // qualquer chamada seguinte valia como prova, e as telas chamam de novo antes de mostrar (recarregar o caixa,
+        // imprimir). Nenhuma outra chamada entrega: uma leitura volta a não gravar nada.
+        if comando == ENTREGA_CONFIRMAR {
+            self.entregar();
+            return json!({ "ok": true, "dados": null }).to_string();
+        }
         if self.comprometido && !pode_depois_de_erro(comando) {
             return json!({ "ok": false, "erro": TEXTO_COMPROMETIDO, "campo": null }).to_string();
         }
@@ -805,6 +863,7 @@ impl Servico {
                 }
             }
         }
+        self.repetida = false;
         let resultado = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let dados: Value = if dados.trim().is_empty() { json!({}) } else { serde_json::from_str(dados)? };
             self.executar(comando, dados)
@@ -826,6 +885,8 @@ impl Servico {
             outro => outro,
         };
         let resposta = match resultado {
+            // R0 / DR-7 (b): a mesma operação repetida volta com o resultado da primeira vez e a marca.
+            Ok(Ok(valor)) if self.repetida => json!({ "ok": true, "dados": valor, "repetida": true }),
             Ok(r) => envelope(comando, r),
             Err(_) => {
                 self.comprometido = true;
@@ -833,6 +894,14 @@ impl Servico {
                 // Se algo ficou no meio de uma transação, desfaz.
                 if !self.banco.conn.is_autocommit() {
                     let _ = self.banco.conn.execute_batch("ROLLBACK");
+                }
+                // QT-1b (F-04 da revisão): a operação fica "em curso" (não concluída) e a abertura fica com erro:
+                // a abertura seguinte avisa, mesmo que esta feche pela janela.
+                self.por_entregar.clear();
+                if self.abertura > 0 && !self.banco.em_modo_seguro() {
+                    if let Err(e) = crate::operacoes::marcar_erro(&self.banco.conn, self.abertura) {
+                        crate::registro::anotar(&format!("QT-1b: marca do erro interno: {e}"));
+                    }
                 }
                 crate::registro::anotar(&format!(
                     "{comando}: pânico (veja a linha anterior); só consultas até reabrir"
@@ -943,6 +1012,21 @@ impl Servico {
         self.sessao.as_ref().ok_or(Erro::SemSessao)
     }
 
+    /// QT-1b: marca como entregues as gravações cuja resposta a tela já recebeu. Um erro aqui só é registrado: o
+    /// pior caso é a operação aparecer no aviso de uma queda (o lado seguro). É uma gravação de controle do serviço,
+    /// no começo da chamada seguinte e fora do comando (uma vez por gravação): não muda dado da loja, não acontece
+    /// depois de um pânico (serviço comprometido) nem no modo seguro, e não vale como gravação de um comando de
+    /// leitura (R-04).
+    fn entregar(&mut self) {
+        if self.por_entregar.is_empty() || self.comprometido || self.banco.em_modo_seguro() {
+            return;
+        }
+        if let Err(e) = crate::operacoes::entregar(&self.banco.conn, &self.por_entregar) {
+            crate::registro::anotar(&format!("QT-1b: entrega das operações: {e}"));
+        }
+        self.por_entregar.clear();
+    }
+
     /// A3: em modo seguro (banco com defeito) as gravações são recusadas
     /// com o motivo antes de começar; e qualquer gravação que escape (o banco
     /// está só para leitura) volta com o mesmo motivo.
@@ -1046,10 +1130,21 @@ impl Servico {
                 }
                 Ok(Value::Null)
             }
-            "backup_ao_fechar" => match &self.banco.caminho {
-                Some(c) if usuarios::quantidade(&self.banco.conn)? > 0 => Ok(json!({ "feito": backup::ao_fechar(c)? })),
-                _ => Ok(json!({ "feito": false })),
-            },
+            "backup_ao_fechar" => {
+                // QT-1b: o fechar da janela é o encerramento limpo (no Android, o Qt sai por System.exit depois). Um
+                // erro aqui só é registrado: o backup acontece de qualquer jeito.
+                if !self.banco.em_modo_seguro() && self.abertura > 0 {
+                    if let Err(e) = crate::operacoes::fechar_sessao(&self.banco.conn, self.abertura) {
+                        crate::registro::anotar(&format!("QT-1b: encerramento limpo: {e}"));
+                    }
+                }
+                match &self.banco.caminho {
+                    Some(c) if usuarios::quantidade(&self.banco.conn)? > 0 => {
+                        Ok(json!({ "feito": backup::ao_fechar(c)? }))
+                    }
+                    _ => Ok(json!({ "feito": false })),
+                }
+            }
             "sair" => {
                 self.liberacoes.clear();
                 if let Some(s) = self.sessao.take() {
@@ -1132,45 +1227,90 @@ impl Servico {
     /// (mesmos dados) acaba: não fica aberta para outra coisa (D-09).
     fn executar_conectado(&mut self, comando: &str, dados: Value, sessao: &Sessao) -> Resultado<Value> {
         let resumo = resumo_da_chamada(comando, &dados);
-        // Duplo clique: a mesma operação (a mesma chave) chegando de novo.
-        let repeticao = match dados["chaveOperacao"].as_str().map(str::trim) {
+        // A operação: a chave que a tela mandou (duplo clique, repetição depois de um erro, de um reinício).
+        let operacao = match dados["chaveOperacao"].as_str().map(str::trim) {
             Some(k) if !k.is_empty() && NAO_REPETIR.contains(&comando) => {
-                use sha2::Digest;
-                let mut h = sha2::Sha256::new();
-                h.update(comando.as_bytes());
-                h.update([0u8]);
-                h.update(k.as_bytes());
-                h.update([0u8]);
-                h.update(sessao.usuario_id.as_bytes());
-                let chave: [u8; 32] = h.finalize().into();
-                Some(chave)
+                let mut op = crate::operacoes::identificar(comando, k, &sessao.usuario_id, &dados);
+                op.abertura = self.abertura;
+                Some(op)
             }
             _ => None,
         };
         // FALHA-04: todas as telas mandam a chave nestes comandos; sem ela
         // não dá para saber se é a mesma operação de novo, então nada é gravado.
-        if repeticao.is_none() && NAO_REPETIR.contains(&comando) {
+        if operacao.is_none() && NAO_REPETIR.contains(&comando) {
             return Err(Erro::campo(
                 "chave",
                 "Operação sem identificação (chave da operação): nada foi gravado. Feche e abra a tela e tente de novo.",
             ));
         }
-        if let Some(chave) = repeticao {
-            if self.feitas.contains(&chave) {
-                return Err(Erro::campo(
-                    "repetida",
-                    "Esta operação já foi feita (clique repetido): nada foi gravado de novo.",
-                ));
+        if let Some(op) = &operacao {
+            if EXCECOES_R0.contains(&comando) {
+                if self.feitas.contains(&op.chave) {
+                    return Err(Erro::campo(
+                        "repetida",
+                        "Esta operação já foi feita (clique repetido): nada foi gravado de novo.",
+                    ));
+                }
+            } else {
+                // R0 (QT-1): quem decide é o banco, que sobrevive a um reinício.
+                match crate::operacoes::consultar(&self.banco.conn, op)? {
+                    // F-09 (revisão): com senha no pedido, a senha não entra no resumo; "a mesma operação" poderia ser
+                    // outra senha. Recusa em vez de responder "ok" sem trocar.
+                    crate::operacoes::Anterior::Mesma(_) if op.tem_senha => {
+                        return Err(Erro::campo("chave", TEXTO_CHAVE_REUSADA))
+                    }
+                    crate::operacoes::Anterior::Mesma(resultado) => {
+                        self.repetida = true;
+                        self.por_entregar.push(op.chave);
+                        return Ok(resultado);
+                    }
+                    crate::operacoes::Anterior::Outra => return Err(Erro::campo("chave", TEXTO_CHAVE_REUSADA)),
+                    crate::operacoes::Anterior::Nenhuma => {}
+                }
             }
         }
         let chave_tela = dados["chaveTela"].as_str().unwrap_or("").trim().to_string();
         self.chamada = Some((comando.to_string(), resumo, chave_tela));
+        self.operacao_atual = operacao.clone();
+        // QT-1b: a operação fica "em curso" antes de começar (sai na transação que a grava).
+        let em_curso = operacao.as_ref().filter(|_| !EXCECOES_R0.contains(&comando));
+        if let Some(op) = em_curso {
+            crate::operacoes::iniciar(&self.banco.conn, op)?;
+        }
         let r = self.executar_comando(comando, dados, sessao);
         self.chamada = None;
-        if let (Some(chave), Ok(_)) = (repeticao, &r) {
-            self.feitas.push_back(chave);
-            while self.feitas.len() > CHAVES_GUARDADAS {
-                self.feitas.pop_front();
+        self.operacao_atual = None;
+        if let (Some(op), Err(_)) = (em_curso, &r) {
+            // Falhou de forma limpa (nada gravado): não é "não concluída".
+            if let Err(e) = crate::operacoes::desistir(&self.banco.conn, op) {
+                crate::registro::anotar(&format!("QT-1b: {comando}: não tirei a operação em curso: {e}"));
+            }
+        }
+        if let (Some(op), Ok(resposta)) = (&operacao, &r) {
+            if EXCECOES_R0.contains(&comando) {
+                self.feitas.push_back(op.chave);
+                while self.feitas.len() > CHAVES_GUARDADAS {
+                    self.feitas.pop_front();
+                }
+            } else if let Ok(false) = crate::operacoes::marcada(&self.banco.conn, op).inspect(|_| {
+                // QT-1b (F-02): a resposta desta gravação vai para a tela agora; na próxima chamada, entregue.
+                self.por_entregar.push(op.chave);
+            }) {
+                // Rede de segurança: o atendente não marcou na própria transação (o teste gerado da lista
+                // não deixa isso chegar a uma versão). Marca agora, fora da transação, e registra.
+                crate::registro::anotar(&format!(
+                    "R0: {comando} não marcou a operação na própria transação; marcada depois"
+                ));
+                let mut marcar = || -> Resultado<()> {
+                    let tx = self.banco.conn.transaction()?;
+                    crate::operacoes::marcar(&tx, op, resposta)?;
+                    tx.commit()?;
+                    Ok(())
+                };
+                if let Err(e) = marcar() {
+                    crate::registro::anotar(&format!("R0: {comando}: não foi possível marcar depois: {e}"));
+                }
             }
         }
         if r.is_ok() {
@@ -1207,7 +1347,8 @@ impl Servico {
                 modo_seguro,
                 self.banco.defeito.as_deref(),
                 &mut acesso,
-            );
+            )
+            .com_operacao(self.operacao_atual.clone());
             return (c.funcao)(&mut pedido, dados);
         }
         match comando {
@@ -1356,7 +1497,20 @@ impl Servico {
                 let tela = dados["tela"].as_str().unwrap_or("").trim().to_string();
                 let chave = dados["chave"].as_str().unwrap_or("").trim().to_string();
                 let usuario_id = sessao.usuario_id.clone();
-                if tela.is_empty() {
+                // A-2 da revisão (C8): com `acoes`, encerra só as consultas dessas ações (e as gravações liberadas):
+                // a tela que sai (Configurações aberta por cima do Financeiro, por uma guia) não derruba a consulta
+                // da tela de baixo.
+                let acoes: Vec<String> = dados["acoes"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                if !acoes.is_empty() {
+                    self.liberacoes.retain(|l| match l {
+                        Liberacao::Consulta { acao, .. } => !acoes.iter().any(|a| a == acao),
+                        Liberacao::Uma { .. } => false,
+                        Liberacao::Tela { .. } => true,
+                    });
+                } else if tela.is_empty() {
                     self.liberacoes.retain(|l| matches!(l, Liberacao::Tela { .. }));
                 } else {
                     self.liberacoes.retain(|l| {
@@ -1649,8 +1803,10 @@ impl Servico {
                     &d.dispositivo,
                     &[format!("Caixa retirado da loja · {}", texto::limpar(&d.motivo))],
                 )?;
+                let resposta = json!(sync::caixas_conhecidos(&tx)?);
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
-                Ok(json!(sync::caixas_conhecidos(&self.banco.conn)?))
+                Ok(resposta)
             }
             "caixa_readmitir" => {
                 let d: CaixaDaLoja = ler(dados)?;
@@ -1665,8 +1821,10 @@ impl Servico {
                     &d.dispositivo,
                     &["Caixa readmitido na loja".into()],
                 )?;
+                let resposta = json!(sync::caixas_conhecidos(&tx)?);
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
-                Ok(json!(sync::caixas_conhecidos(&self.banco.conn)?))
+                Ok(resposta)
             }
             "pendencias_listar" => Ok(json!(sync::pendencias_da_troca(&self.banco.conn)?)),
             // Simultaneidade › Histórico (0.9.15): só leitura.
@@ -1700,8 +1858,10 @@ impl Servico {
                     &d.id,
                     &[format!("Pendência da troca de dados arquivada · {}", texto::limpar(&d.motivo))],
                 )?;
+                let resposta = json!(sync::pendencias_da_troca(&tx)?);
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
-                Ok(json!(sync::pendencias_da_troca(&self.banco.conn)?))
+                Ok(resposta)
             }
             "pendencias_reaplicar" => {
                 let n = sync::reaplicar_pendencias(&mut self.banco.conn)?;
@@ -1882,6 +2042,15 @@ impl Servico {
                     self.liberacoes.clear();
                 }
                 let info = r?;
+                // QT-1b: as aberturas que vieram no backup ficaram encerradas (`depois_de_restaurar`); daqui em
+                // diante é uma abertura nova do banco restaurado.
+                self.por_entregar.clear();
+                if !seguro {
+                    match crate::operacoes::abrir_sessao(&self.banco.conn) {
+                        Ok(n) => self.abertura = n,
+                        Err(e) => crate::registro::anotar(&format!("QT-1b: abertura depois de restaurar: {e}")),
+                    }
+                }
                 // Os usuários podem ser outros agora: entra de novo.
                 self.sessao = None;
                 let mut v = json!(info);
@@ -2223,9 +2392,11 @@ impl Servico {
             }
             u
         };
+        let resposta = json!(usuarios::buscar(&tx, &u.id)?);
+        crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
         tx.commit()?;
         self.atualizar_sessao()?;
-        Ok(json!(usuarios::buscar(&self.banco.conn, &u.id)?))
+        Ok(resposta)
     }
 
     /// Pode ver custo e % de lucro das peças (D-09): quem vê os resultados.
@@ -2920,6 +3091,9 @@ mod testes {
         );
         // RVI-01: uma encomenda que chegou (o aviso dela grava).
         let eid = encomenda_que_chegou(&mut s);
+        // QT-1b: a entrega das gravações acima (marca de controle do serviço, não dado da loja) acontece no
+        // começo da chamada seguinte; a medição abaixo é só dos comandos de leitura.
+        ok(&mut s, "estado", json!({}));
         let entradas = [
             json!({}),
             json!({ "id": eid }),

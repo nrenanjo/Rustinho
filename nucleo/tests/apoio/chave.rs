@@ -24,7 +24,9 @@ fn nova() -> String {
         c.set(c.get() + 1);
         c.get()
     });
-    format!("teste-{:?}-{n}", std::thread::current().id())
+    // R0 (QT-1): a chave da operação agora fica no banco e vale entre processos; o número do processo entra
+    // para um filho novo (os testes de queda) não repetir as chaves do anterior, como as telas não repetem.
+    format!("teste-{}-{:?}-{n}", std::process::id(), std::thread::current().id())
 }
 
 fn escrever(v: &Value, saida: &mut String) {

@@ -25,6 +25,8 @@ Item {
     signal abrir()
     signal minimizar(bool minimizado)
     signal esconder()
+    // QT-1b: a 2ª ação ("Conferi"), que resolve a notificação para quem conferiu.
+    signal resolver()
 
     readonly property string categoria: aviso.categoria || "informativa"
     readonly property bool critica: categoria === "critica"
@@ -41,6 +43,7 @@ Item {
     Accessible.name: aviso.tituloLongo || aviso.titulo || ""
     Accessible.description: minimizado ? "" : (aviso.resumo || "")
     readonly property bool temAcao: (aviso.acao || "") !== ""
+    readonly property bool temResolver: (aviso.resolver || "") !== ""
     property bool saindo: false
 
     implicitWidth: minimizado ? lado : 0
@@ -131,6 +134,14 @@ Item {
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: raiz.abrir()
                 }
+                Botao {
+                    id: resolverLarga
+                    visible: raiz.temResolver && !Tema.estreito
+                    text: raiz.aviso.resolver || ""
+                    tipo: "secundario"
+                    Layout.alignment: Qt.AlignVCenter
+                    onClicked: raiz.resolver()
+                }
             }
 
             // Quadro de detalhes (só na expandida e só quando há).
@@ -168,13 +179,24 @@ Item {
                 }
             }
 
-            Botao {
-                id: acaoEstreita
-                visible: raiz.temAcao && Tema.estreito
-                text: raiz.aviso.acao || ""
-                tipo: "principal"
+            RowLayout {
+                visible: Tema.estreito && (raiz.temAcao || raiz.temResolver)
+                spacing: 8
                 Layout.topMargin: 4
-                onClicked: raiz.abrir()
+                Botao {
+                    id: acaoEstreita
+                    visible: raiz.temAcao && Tema.estreito
+                    text: raiz.aviso.acao || ""
+                    tipo: "principal"
+                    onClicked: raiz.abrir()
+                }
+                Botao {
+                    id: resolverEstreita
+                    visible: raiz.temResolver && Tema.estreito
+                    text: raiz.aviso.resolver || ""
+                    tipo: "secundario"
+                    onClicked: raiz.resolver()
+                }
             }
         }
 
@@ -225,8 +247,8 @@ Item {
         // fica com o próprio clique).
         TapHandler {
             onTapped: (ponto) => {
-                // O clique no botão de ação é só dele: não alterna.
-                for (const b of [acaoLarga, acaoEstreita]) {
+                // O clique num botão de ação é só dele: não alterna.
+                for (const b of [acaoLarga, acaoEstreita, resolverLarga, resolverEstreita]) {
                     if (b.visible && b.contains(b.mapFromItem(cartao, ponto.position.x, ponto.position.y)))
                         return
                 }

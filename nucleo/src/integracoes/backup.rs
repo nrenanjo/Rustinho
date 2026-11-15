@@ -1985,6 +1985,8 @@ impl Pendente {
             let dispositivo = config::ler(&tx, "dispositivo_id")?.unwrap_or_default();
             crate::auditoria::registrar(&tx, &dispositivo, Some(usuario), "backup.restaurar", "config", quando, &[])?;
         }
+        // QT-1b: o "programa aberto" e as operações em curso da hora do backup não valem para este banco.
+        crate::operacoes::depois_de_restaurar(&tx)?;
         tx.commit()?;
         Ok(())
     }

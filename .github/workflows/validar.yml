@@ -684,6 +684,20 @@ jobs:
           echo "| APK | versionCode | certificado (SHA-256) | arquivo (SHA-256) |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| $(basename "$APK") ($(cat saida/assinatura.txt)) | $CODIGO | $DO_APK | $(cat saida/arquivo.txt) |" >> "$GITHUB_STEP_SUMMARY"
+      # Páginas de 16 KB (relatório; ainda não reprova): o alinhamento das bibliotecas do APK e das da instalação do Qt
+      # usada aqui (android/verificar_16kb.py). Pronto para 16 KB só quando o app, a libc++ do NDK e o Qt estiverem.
+      - name: Páginas de 16 KB (relatório)
+        run: |
+          APK=$(ls saida/*.apk | head -1)
+          python3 android/verificar_16kb.py "$APK" > saida/paginas_16kb_apk.txt || true
+          python3 android/verificar_16kb.py "$RUNNER_TEMP/qt/$QT_VERSAO/${{ matrix.qt }}" > saida/paginas_16kb_qt.txt || true
+          {
+            echo "### Páginas de 16 KB (Qt $QT_VERSAO, NDK $NDK_VERSAO)"
+            echo '```'
+            tail -6 saida/paginas_16kb_apk.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -6 saida/paginas_16kb_apk.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Rustinho-Android${{ matrix.sufixo }}

@@ -265,6 +265,10 @@ pub struct Conflito {
     pub campos: Vec<Value>,
     pub pode_usar: bool,
     pub resolvido: String,
+    /// 9b (C8, dev3.3): a tabela e o id do registro, quando a chave é de um id só (senão, vazio): o
+    /// Histórico filtra por eles quando a ligação é inequívoca.
+    pub tabela: String,
+    pub registro_id: String,
 }
 
 /// Nome do campo para a tela.
@@ -376,6 +380,11 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
             campos: Vec::new(),
             pode_usar: false,
             resolvido: resolucao.unwrap_or_default(),
+            tabela: tabela.clone(),
+            registro_id: match serde_json::from_str::<Vec<Value>>(&chave).ok().as_deref() {
+                Some([Value::String(id)]) => id.clone(),
+                _ => String::new(),
+            },
         };
         match tipo.as_str() {
             "orcamento" => {

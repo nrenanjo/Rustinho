@@ -35,6 +35,7 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("auditoria_listar", "simultaneidade", &["leitura"]),
     ("aviso_esconder", "caixa", &["do_caixa"]),
     ("aviso_minimizar", "caixa", &["do_caixa"]),
+    ("aviso_resolver", "caixa", &["do_caixa"]),
     ("avisos_do_dia", "leitura", &["leitura"]),
     ("backup_agora", "backup", &[]),
     ("backup_ao_fechar", "caixa", &["sem_sessao"]),

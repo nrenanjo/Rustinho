@@ -79,12 +79,32 @@ QtObject {
     // chave só para esta chamada (ações sobre um registro que já existe, como
     // estornar ou cancelar, que o núcleo não deixa fazer duas vezes).
     function gravar(comando, dados, chave) {
-        return chamar(comando, comChave(dados, chave))
+        const r = chamar(comando, comChave(dados, chave))
+        if (r.ok)
+            _entregaPendente = true
+        return r
     }
 
     // O mesmo, para um comando demorado.
     function gravarDemorado(comando, dados, texto, depois, chave) {
-        chamarDemorado(comando, comChave(dados, chave), texto, depois)
+        chamarDemorado(comando, comChave(dados, chave), texto, r => {
+            if (r.ok)
+                _entregaPendente = true
+            if (depois)
+                depois(r)
+        })
+    }
+
+    // QT-1b, N-01 da re-revisão (parte 2): a gravação só conta como "a pessoa viu" depois que a janela desenhou um
+    // quadro com o resultado. A janela (Main.qml) chama confirmarEntrega() a cada quadro desenhado; aqui, só quando
+    // houve gravação. Se o núcleo estiver ocupado (comando demorado), tenta de novo no próximo quadro.
+    property bool _entregaPendente: false
+    function confirmarEntrega() {
+        if (!_entregaPendente)
+            return
+        const r = interpretar("entrega_confirmar", Sistema.chamar("entrega_confirmar", "{}"))
+        if (r.ok)
+            _entregaPendente = false
     }
 
     // Os dados com a chave da operação (a que já vier neles fica).

@@ -115,6 +115,12 @@ pub const TABELAS: &[Tabela] = &[
     t("caixa_retirado", Local, &["protocolo4"]),
     t("entrada_falha", Local, &["usuarios"]),
     t("menu_uso", Local, &["menu"]),
+    // R0 (QT-1): a operação já feita, gravada na transação da própria operação; não viaja.
+    // QT-1b: o aviso de fechamento inesperado (não viajam).
+    t("fechamento_visto", Local, &["operacoes"]),
+    t("operacao_em_curso", Local, &["operacoes"]),
+    t("operacao_feita", Local, &["operacoes"]),
+    t("programa_abertura", Local, &["operacoes"]),
     t("senha_situacao", Local, &["usuarios"]),
     // Interna do SQLite (contadores do AUTOINCREMENT).
     t("sqlite_sequence", Local, &["sync"]),

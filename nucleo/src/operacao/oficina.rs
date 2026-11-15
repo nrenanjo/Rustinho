@@ -1039,7 +1039,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Filtro, Id, Pedido};
     use crate::erro::Resultado;
     use crate::{oficina, sync};
 
@@ -1078,24 +1078,30 @@ mod comandos {
         let d: oficina::Entrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = oficina::salvar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(oficina::ficha(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(oficina::ficha(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn os_rascunho_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: oficina::Entrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = oficina::salvar_rascunho(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(oficina::ficha(&tx, &id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(oficina::ficha(p.conn, &id)?))
+        Ok(resposta)
     }
 
     fn os_rascunho_excluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Id = ler(dados)?;
         let tx = p.conn.transaction()?;
         oficina::excluir_rascunho(&tx, p.disp, p.usuario_id, &d.id)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn os_rascunho_pode(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
@@ -1107,16 +1113,20 @@ mod comandos {
         let d: Situacao = ler(dados)?;
         let tx = p.conn.transaction()?;
         oficina::mudar(&tx, p.disp, p.usuario_id, &d.id, &d.situacao)?;
+        let resposta = json!(oficina::ficha(&tx, &d.id)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(oficina::ficha(p.conn, &d.id)?))
+        Ok(resposta)
     }
 
     fn os_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         oficina::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn os_placa(p: &mut Pedido, dados: Value) -> Resultado<Value> {

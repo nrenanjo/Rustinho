@@ -1453,7 +1453,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Id, Pedido};
     use crate::erro::Resultado;
     use crate::{estoque, fiscal, produtos};
 
@@ -1490,11 +1490,13 @@ mod comandos {
         if produtos::muda_preco(p.conn, &ficha)? {
             p.exigir("precos")?;
         }
+        let ve = p.ve_custos()?;
         let tx = p.conn.transaction()?;
         let id = produtos::salvar(&tx, p.disp, p.usuario_id, &ficha)?;
+        let resposta = peca_com_custos(produtos::ficha(&tx, &id)?, ve);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        let f = produtos::ficha(p.conn, &id)?;
-        peca_para_tela(p, f)
+        Ok(resposta)
     }
 
     fn produto_sugestoes(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
@@ -1511,31 +1513,42 @@ mod comandos {
 
     fn produto_variacao_criar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: VariacaoEntrada = ler(dados)?;
+        let ve = p.ve_custos()?;
         let tx = p.conn.transaction()?;
         let id = produtos::criar_variacao(&tx, p.disp, p.usuario_id, &d.id, &d.atual, &d.nova)?;
+        let resposta = peca_com_custos(produtos::ficha(&tx, &id)?, ve);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        let f = produtos::ficha(p.conn, &id)?;
-        peca_para_tela(p, f)
+        Ok(resposta)
     }
 
     fn estoque_ajustar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: AjusteEstoque = ler(dados)?;
+        let ve = p.ve_custos()?;
         let tx = p.conn.transaction()?;
         produtos::ficha(&tx, &d.produto_id)?; // confere se a peça existe
         estoque::ajustar(&tx, p.disp, p.usuario_id, &d.produto_id, &d.quantidade, &d.motivo)?;
+        let resposta = peca_com_custos(produtos::ficha(&tx, &d.produto_id)?, ve);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        let f = produtos::ficha(p.conn, &d.produto_id)?;
-        peca_para_tela(p, f)
+        Ok(resposta)
     }
 
     /// Ficha da peça para a tela: sem custo, % de lucro e histórico do
     /// custo para quem não vê os resultados (D-09).
-    fn peca_para_tela(p: &mut Pedido, mut f: produtos::ProdutoFicha) -> Resultado<Value> {
-        f.ver_custos = p.ve_custos()?;
+    fn peca_para_tela(p: &mut Pedido, f: produtos::ProdutoFicha) -> Resultado<Value> {
+        let ve = p.ve_custos()?;
+        Ok(peca_com_custos(f, ve))
+    }
+
+    /// A peça como vai para a tela, sabendo se quem pediu vê custo e lucro (D-09). R0: a permissão é lida
+    /// ANTES da transação, para a resposta completa ser montada dentro dela.
+    fn peca_com_custos(mut f: produtos::ProdutoFicha, ve: bool) -> Value {
+        f.ver_custos = ve;
         if !f.ver_custos {
             produtos::esconder_custos(&mut f);
         }
-        Ok(json!(f))
+        json!(f)
     }
 
     #[derive(Deserialize, Default)]

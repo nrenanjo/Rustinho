@@ -168,6 +168,9 @@ pub struct Pedido<'a> {
     /// A3: o banco abriu em modo seguro (com este defeito).
     pub modo_seguro: bool,
     pub defeito: Option<&'a str>,
+    /// R0 (QT-1): a operação de `NAO_REPETIR` desta chamada (a chave que a tela mandou). O atendente a
+    /// marca como feita DENTRO da própria transação, antes do `commit` (veja [`marcar_feita`]).
+    pub operacao: Option<crate::operacoes::Operacao>,
     acesso: &'a mut dyn Acesso,
 }
 
@@ -181,7 +184,13 @@ impl<'a> Pedido<'a> {
         defeito: Option<&'a str>,
         acesso: &'a mut dyn Acesso,
     ) -> Pedido<'a> {
-        Pedido { conn, disp, usuario_id, gerente, modo_seguro, defeito, acesso }
+        Pedido { conn, disp, usuario_id, gerente, modo_seguro, defeito, operacao: None, acesso }
+    }
+
+    /// R0: o mesmo pedido, levando a operação desta chamada.
+    pub fn com_operacao(mut self, operacao: Option<crate::operacoes::Operacao>) -> Pedido<'a> {
+        self.operacao = operacao;
+        self
     }
 
     /// Veja [`Acesso::pode_sem_senha`].
@@ -204,6 +213,16 @@ impl<'a> Pedido<'a> {
     /// resultados com a senha do gerente, o cadastro não abre (é outra tela).
     pub fn ve_custos(&mut self) -> Resultado<bool> {
         self.pode_sem_senha("resultados")
+    }
+}
+
+/// R0 (QT-1): marca a operação desta chamada como feita, com a resposta completa que vai para a tela.
+/// Chamar DENTRO da transação do comando, depois de gravar e antes do `commit`; sem operação (comando fora
+/// de `NAO_REPETIR`), não faz nada. Todo atendente de `NAO_REPETIR` chama (teste gerado da lista).
+pub fn marcar_feita(tx: &Connection, operacao: Option<&crate::operacoes::Operacao>, resposta: &Value) -> Resultado<()> {
+    match operacao {
+        Some(op) => crate::operacoes::marcar(tx, op, resposta),
+        None => Ok(()),
     }
 }
 

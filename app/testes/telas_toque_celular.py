@@ -191,6 +191,30 @@ def compra_pendente(pasta):
     return "compra-pend17"
 
 
+def estados_da_c8(pasta):
+    """C8 (dev3.3): os estados que mostram os controles novos da navegação contextual, para o toque e a largura
+    deles serem medidos no celular: um conflito com o registro de um id só ("Ver no histórico"), um registro
+    inconsistente ("Aceitar como está") e uma comissão já paga ("Ver no A pagar"). O conflito também serve ao
+    VIS-C8-01: Duplicatas mostra a faixa com "1 para ver" (na frente VIS sozinha, quem o planta é
+    conflito_para_duplicatas)."""
+    agora = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+    disp = "(SELECT valor FROM config WHERE chave = 'dispositivo_id')"
+    tema.por_fora(pasta, f"""
+    INSERT INTO sync_conflito (tabela, chave, ficou, perdeu, dispositivo, quando)
+      SELECT 'produto', json_array(id), 'v1', 'v2', 'caixa-2', datetime('now') FROM produto ORDER BY criado_em LIMIT 1;
+    INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+      SELECT 'conta_receber', json_array(id), 'pessoa', '["sumiu"]', 'inconsistente', '2026-01-01T00:00:00Z', 'log'
+        FROM conta_receber ORDER BY rowid LIMIT 1;
+    INSERT INTO conta_pagar (id, categoria_id, descricao, valor, vencimento, criado_em, dispositivo, competencia)
+      VALUES ('cp-toque', 'cat-comissoes', 'Comissão de Ana', 1000, date('now'), {agora}, {disp}, strftime('%Y-%m', 'now'));
+    INSERT INTO pagamento (id, conta_pagar_id, data, valor, forma, criado_em, dispositivo)
+      VALUES ('pg-toque', 'cp-toque', date('now'), 1000, 'dinheiro', {agora}, {disp});
+    INSERT INTO comissao_fechamento (id, usuario_id, de, ate, vendas, total_vendido, valor, conta_pagar_id, criado_em,
+                                     dispositivo)
+      SELECT 'cf-toque', id, date('now', 'start of month'), date('now'), 1, 10000, 1000, 'cp-toque', {agora}, {disp}
+        FROM usuario WHERE nome = 'Ana';""")
+
+
 def ids_da_loja(pasta):
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
     try:
@@ -247,6 +271,7 @@ TELAS = [
     ("config-vendas", "TelaConfiguracoes", {"secao": "vendas"}),
     ("config-crediario", "TelaConfiguracoes", {"secao": "receber"}),
     ("config-impressao", "TelaConfiguracoes", {"secao": "impressao"}),
+    ("config-duplicatas", "TelaConfiguracoes", {"secao": "duplicatas"}),
     ("config-caixas", "TelaConfiguracoes", {"secao": "caixas"}),
     ("config-historico", "TelaConfiguracoes", {"secao": "historico"}),
     ("config-backup", "TelaConfiguracoes", {"secao": "backup"}),
@@ -315,6 +340,38 @@ def desenho_do_texto(r):
     return (x, r["y"], w, min(r["ch"], r["h"]) if r["h"] > 0 else r["ch"])
 
 
+def sobreposicoes(rets):
+    """VIS-C8-01 (dev3.3): pares de textos desenhados um por cima do outro (o desenho de cada um, como
+    `desenho_do_texto`: inclui a palavra comprida que passa da largura do item)."""
+    vistos, achados = set(), []
+    desenhos = []
+    for r in rets:
+        d = desenho_do_texto(r)
+        chave = (round(d[0]), round(d[1]), r["texto"])
+        if d[2] <= 0.5 or d[3] <= 0.5 or chave in vistos:
+            continue
+        vistos.add(chave)
+        desenhos.append((d, r))
+    for i, (a, ra) in enumerate(desenhos):
+        for b, rb in desenhos[i + 1:]:
+            if sobrepoe(a, b):
+                achados.append((ra, rb))
+    return achados
+
+
+def descrever(par):
+    ra, rb = par
+    return f"\"{ra['texto'][:32]}\" × \"{rb['texto'][:32]}\" ({ra['componente']}/{rb['componente']})"
+
+
+def da_faixa(par):
+    """O título (Rotulo) e o subtítulo (Nota) do cabeçalho de uma faixa."""
+    return {par[0]["componente"], par[1]["componente"]} == {"Rotulo", "Nota"}
+
+
+SO_LISTAR_SOBREPOSICAO = os.environ.get("RUSTINHO_TOQUE_SOBREPOSICAO_SO_LISTAR") == "1"
+
+
 BOTOES_DA_DECISAO = {"escolher peca", "trocar peca", "cadastrar nova", "nao lancar"}
 
 
@@ -371,6 +428,16 @@ def medir_tela(res, fotos, pasta, nome, tela, props, ids, inventario, qual=None)
             inventario.append(dict(t, tela=nome))
         if nome == "compra-pendente":
             pend17(res, toques, rets, foto)
+        # VIS-C8-01: o título da faixa nunca por cima do subtítulo (em toda tela medida sem janelinha aberta: com
+        # uma janelinha, os textos da tela embaixo dela também aparecem e não contam). As outras sobreposições
+        # vão para o inventário (sobreposicoes-<tema>.txt), para triagem, sem reprovar.
+        sobre = sobreposicoes(rets)
+        with open(os.path.join(fotos, f"sobreposicoes-{TEMA}.txt"), "a", encoding="utf-8") as fh:
+            for s in sobre:
+                fh.write(f"{nome}\t{'FAIXA' if da_faixa(s) else 'outra'}\t{descrever(s)}\n")
+        faixa = [descrever(s) for s in sobre if da_faixa(s)] if not qual else []
+        res.conferir(f"{nome}: nenhum título de faixa por cima do subtítulo (VIS-C8-01)",
+                     not faixa or SO_LISTAR_SOBREPOSICAO, "; ".join(faixa[:4]) + (f" (foto {foto})" if faixa else ""))
         return largura
     finally:
         r.fechar()
@@ -427,6 +494,7 @@ def main():
             sys.exit(f"o Xvfb não abriu na tela {TELA} (ocupada?)")
         base.montar_loja(modelo)
         compra_pendente(modelo)
+        estados_da_c8(modelo)
         if TEMA != "cinza":
             chave, valor = tema.TEMA_NO_BANCO[TEMA]
             tema.gravar_tema(modelo, chave, valor)

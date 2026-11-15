@@ -251,7 +251,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Pedido};
     use crate::erro::Resultado;
     use crate::unidades;
 
@@ -291,8 +291,10 @@ mod comandos {
                 if d.fracionada { " (vende quebrado)" } else { "" }
             )],
         )?;
+        let resposta = json!({ "sigla": sigla, "lista": unidades::listar(&tx)? });
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!({ "sigla": sigla, "lista": unidades::listar(p.conn)? }))
+        Ok(resposta)
     }
 
     #[derive(Deserialize, Default)]

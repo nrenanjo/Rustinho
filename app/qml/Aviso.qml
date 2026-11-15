@@ -1,19 +1,28 @@
 import QtQuick
 import rustinho
 
-// Mensagem rápida que aparece embaixo e some sozinha.
+// Mensagem rápida que aparece NO ALTO e some sozinha (regra do topo para as notificações globais: auditoria de
+// 31/10, bloco 3, e diretriz de 15/11). Fica abaixo da faixa do modo seguro e da orientação da guia e, como a
+// orientação, reserva o próprio espaço: enquanto aparece, a janela desce as telas por `alturaNoAlto`, então ela
+// não cobre o cabeçalho, os campos nem os botões. As cores, a fonte, os tempos e o toque para fechar são os de antes.
 Rectangle {
     id: aviso
     property string tipo: "info"
+    // Onde começa: abaixo da faixa do modo seguro e da orientação da guia (Main.qml).
+    property real topo: 0
+    readonly property real espaco: 10
+    // Aparecendo agora. O espaço reservado depende disto, e não da animação da opacidade (não oscila).
+    property bool ativo: false
+    readonly property real alturaNoAlto: ativo ? height + 2 * espaco : 0
 
     anchors.horizontalCenter: parent.horizontalCenter
-    y: parent.height - height - 30
+    y: topo + espaco
     z: 1000
     radius: 10
     color: tipo === "erro" ? Tema.vermelho : tipo === "ok" ? Tema.verdeEscuro : Tema.tinta
     width: Math.min(mensagem.implicitWidth + 48, parent.width - 80)
     height: mensagem.implicitHeight + 26
-    opacity: 0
+    opacity: ativo ? 1 : 0
     visible: opacity > 0
 
     Text {
@@ -33,15 +42,15 @@ Rectangle {
 
     Timer {
         id: tempo
-        onTriggered: aviso.opacity = 0
+        onTriggered: aviso.ativo = false
     }
 
-    TapHandler { onTapped: aviso.opacity = 0 }
+    TapHandler { onTapped: aviso.ativo = false }
 
     function mostrar(texto, tipoAviso) {
         mensagem.text = texto
         aviso.tipo = tipoAviso || "info"
-        aviso.opacity = 1
+        aviso.ativo = true
         tempo.interval = aviso.tipo === "erro" ? 5500 : 3000
         tempo.restart()
     }

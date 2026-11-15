@@ -10,6 +10,24 @@ FocusScope {
     property var dados: null
     property string periodo: "mes"
     property string erro: ""
+    // 10b (C8, dev3.3): a comissão paga leva à conta dela no A pagar (quem
+    // abre é o Financeiro); na volta, o fechamento fica destacado. Nada aqui
+    // muda valor: estornar, se for o caso, continua lá, com a senha.
+    signal verConta(string contaId, string fechamentoId)
+    function mostrarFechamento(id) {
+        lista.positionViewAtEnd()
+        Qt.callLater(() => {
+            // A lista dos fechamentos fica no rodapé da lista (outro escopo): pelo footerItem.
+            const rep = lista.footerItem ? lista.footerItem.fechamentos : null
+            for (let i = 0; rep && i < rep.count; i++) {
+                const l = rep.itemAt(i)
+                if (l && l.modelData.id === id) {
+                    janela.destacarAlvo(l, null)
+                    return
+                }
+            }
+        })
+    }
 
     function datas(p) {
         const h = new Date()
@@ -29,6 +47,18 @@ FocusScope {
         const d = datas(p)
         de.texto = d[0]
         ate.texto = d[1]
+        carregar()
+    }
+    // M-4 da revisão (C8): o período escolhido, para a volta do A pagar (10b) devolver a tela como estava.
+    function estado() {
+        return { periodo: periodo, de: de.texto, ate: ate.texto }
+    }
+    function restaurar(e) {
+        if (!e)
+            return
+        periodo = e.periodo
+        de.texto = e.de
+        ate.texto = e.ate
         carregar()
     }
     function carregar() {
@@ -164,6 +194,8 @@ FocusScope {
                 }
             }
             footer: ColumnLayout {
+                // 10b: para mostrarFechamento achar a linha.
+                property alias fechamentos: listaFechamentos
                 width: lista.width
                 spacing: 5
                 Nota {
@@ -178,6 +210,7 @@ FocusScope {
                     Layout.topMargin: 16
                 }
                 Repeater {
+                    id: listaFechamentos
                     model: secao.dados ? secao.dados.fechamentos : []
                     delegate: Rectangle {
                         id: faixaDaLista
@@ -216,14 +249,30 @@ FocusScope {
                                 font.strikeout: modelData.cancelado
                             }
                             Botao {
+                                // 10b (C8): paga → a conta no A pagar (Opções; não mexe em valor).
+                                visible: !modelData.cancelado && modelData.pago && modelData.contaPagarId !== ""
+                                text: "Ver no A pagar"
+                                tipo: "discreto"
+                                altura: 32
+                                onClicked: secao.verConta(modelData.contaPagarId, modelData.id)
+                            }
+                            Botao {
                                 visible: !modelData.cancelado && !modelData.pago
                                 text: "Desfazer"
                                 tipo: "discreto"
                                 altura: 32
                                 onClicked: janela.confirmar("Desfazer o fechamento?", "A conta da comissão sai do A pagar.", "Desfazer",
                                                             () => janela.chamarGerente("comissao_reabrir", { id: modelData.id }, r => {
-                                    if (!r.ok)
+                                    // M-1 da revisão: a conta da comissão com registro inconsistente → o caso 7.
+                                    if (!r.ok && janela.oferecerReferencia(r, null, () => secao.carregar())) {
+                                        // a oferta já está à vista
+                                    } else if (!r.ok && typeof r.campo === "string" && r.campo.indexOf("conta_paga:") === 0) {
+                                        // 10b (C8): paga em outro caixa depois de a lista abrir → as opções.
+                                        const conta = r.campo.slice("conta_paga:".length), fid = modelData.id
+                                        janela.confirmar("A comissão já foi paga", r.erro, "Ver no A pagar", () => secao.verConta(conta, fid))
+                                    } else if (!r.ok) {
                                         janela.avisar(r.erro, "erro")
+                                    }
                                     secao.carregar()
                                 }))
                             }
@@ -240,11 +289,14 @@ FocusScope {
         property string chave: ""
         property var vendedor: null
         property string erro: ""
+        // 10b (C8): o fechamento que já cobre o período (vem na recusa).
+        property string jaFechado: ""
         width: Math.min(520, Tema.largura - 24)
         function abrirCom(v) {
             chave = Api.novaChave()
             vendedor = v
             erro = ""
+            jaFechado = ""
             vencimento.texto = Qt.formatDate(new Date(), "dd/MM/yyyy")
             open()
             vencimento.focar()
@@ -253,6 +305,8 @@ FocusScope {
             secao.janela.chamarGerente("comissao_fechar", { usuarioId: vendedor.usuarioId, de: de.texto, ate: ate.texto, vencimento: vencimento.texto }, r => {
                 if (!r.ok) {
                     erro = r.erro
+                    jaFechado = typeof r.campo === "string" && r.campo.indexOf("fechamento:") === 0
+                                ? r.campo.slice("fechamento:".length) : ""
                     return
                 }
                 close()
@@ -273,6 +327,16 @@ FocusScope {
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
+                Botao {
+                    visible: fechamento.jaFechado !== ""
+                    text: "Ver o fechamento"
+                    tipo: "secundario"
+                    onClicked: {
+                        const id = fechamento.jaFechado
+                        fechamento.close()
+                        secao.mostrarFechamento(id)
+                    }
+                }
                 Botao { text: "Fechar e lançar"; icone: "check"; onClicked: fechamento.salvar() }
             }
         }

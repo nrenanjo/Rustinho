@@ -900,7 +900,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Filtro, Id, Pedido};
     use crate::encomendas;
     use crate::erro::Resultado;
 
@@ -925,8 +925,10 @@ mod comandos {
         let d: encomendas::EncomendaEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = encomendas::criar(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(id);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(id))
+        Ok(resposta)
     }
 
     fn encomenda_pedir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -935,32 +937,40 @@ mod comandos {
         for id in d.ids.iter().chain(std::iter::once(&d.id)).filter(|i| !i.is_empty()) {
             encomendas::pedir(&tx, p.disp, p.usuario_id, id, d.desfazer)?;
         }
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn encomenda_chegou(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Id = ler(dados)?;
         let tx = p.conn.transaction()?;
         encomendas::chegou(&tx, p.disp, p.usuario_id, &d.id)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn encomenda_entregar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Id = ler(dados)?;
         let tx = p.conn.transaction()?;
         encomendas::entregar(&tx, p.disp, p.usuario_id, &d.id)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn encomenda_cancelar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         encomendas::cancelar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn encomenda_whatsapp(p: &mut Pedido, dados: Value) -> Resultado<Value> {

@@ -238,7 +238,8 @@ FocusScope {
                             // D-09: a senha da consulta do Financeiro não vale para desfazer.
                             onClicked: janela.confirmar("Devolver o cheque à carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
                                                         "Devolver à carteira", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
-                                                            if (!r.ok)
+                                                            // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                                                            if (!r.ok && !janela.oferecerReferencia(r, null))
                                                                 janela.avisar(r.erro, "erro")
                                                             secao.carregar()
                                                         }))
@@ -285,6 +286,8 @@ FocusScope {
             secao.janela.chamarGerente("cheque_depositar", { id: cheque.id, conta: c ? c.id : "" }, r => {
                 if (!r.ok) {
                     erro = r.erro
+                    // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                    secao.janela.oferecerReferencia(r, deposito)
                     return
                 }
                 close()
@@ -329,6 +332,8 @@ FocusScope {
             secao.janela.chamarGerente("cheque_devolver", { id: cheque.id, motivo: dMotivo.texto, divida: divida.checked }, r => {
                 if (!r.ok) {
                     erro = r.erro
+                    // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                    secao.janela.oferecerReferencia(r, devolucao)
                     return
                 }
                 close()

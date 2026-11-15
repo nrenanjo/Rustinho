@@ -13,6 +13,8 @@ FocusScope {
     readonly property string nomeNaNavegacao: "Estoque"
     readonly property var janela: ApplicationWindow.window
     property string secao: "comprar"
+    // 10a (C8): a encomenda que a notificação pediu ("encomenda:<id>").
+    property string alvo: ""
 
     // O Esc e a seta fazem o mesmo (D-V3, decidida pelo dono em 07/11/2026:
     // os dois voltam direto). limparBuscaAntes só deixaria a seção limpar a
@@ -87,7 +89,13 @@ FocusScope {
                 vendidos: "SecaoVendidos.qml",
                 parados: "SecaoParados.qml"
             })[tela.secao]
-            onLoaded: item.forceActiveFocus()
+            onLoaded: {
+                if (tela.alvo !== "" && item.alvo !== undefined) {
+                    item.alvo = tela.alvo
+                    tela.alvo = ""
+                }
+                item.forceActiveFocus()
+            }
         }
     }
 

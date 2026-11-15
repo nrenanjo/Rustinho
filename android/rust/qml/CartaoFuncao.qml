@@ -23,14 +23,19 @@ Rectangle {
     signal abrir()
     signal fixar()
 
+    // As funções que têm ladrilho próprio (os ids do menu).
+    readonly property var ladrilhos: ["vender", "pecas", "orcamentos", "caixa", "trocas", "notas", "clientes", "compras",
+                                      "estoque", "financeiro", "oficina", "painel", "usuarios", "configuracoes"]
+
     readonly property bool mostraPino: cartao.item.fixo === true || (cartao.item.podeFixar !== false && sobre.hovered && !Tema.celular)
 
     radius: Tema.raio
     opacity: item.disponivel ? 1 : 0.78
     color: sobre.hovered && item.disponivel ? Qt.darker(base, Tema.escuro || Tema.escura(base) ? 0.85 : 1.03) : base
     palette.window: Tema.superficie(base)
-    border.width: foco.activeFocus ? 2 : 1
-    border.color: foco.activeFocus ? Tema.azulEscuro : Tema.bordaCartao
+    // Ajuste visual de 15/11/2026: sem o contorno; só o foco do teclado continua desenhado (2 px).
+    border.width: foco.activeFocus ? 2 : 0
+    border.color: Tema.azulEscuro
     implicitHeight: Tema.estreito ? 64 : 72
 
     RowLayout {
@@ -39,7 +44,27 @@ Rectangle {
         anchors.rightMargin: 34
         spacing: Tema.estreito ? 12 : 16
 
+        // Ajuste visual de 15/11/2026 (referência purpp.png do dono): os 14 ladrilhos roxos em PNG
+        // (icone/inicio-<id>.png), na proporção da referência (100 × 82). No computador, 40 de altura (49 de
+        // largura): a pílula de 1280 px continua com "Estoque / Fornecedores" numa linha só (antes, o ícone ocupava
+        // 48; com 49 sobram 1,5 px). No estreito e no celular, 42 (51 de largura), com espaço de sobra.
+        // Função sem ladrilho próprio: o ícone desenhado de antes.
+        Image {
+            id: ladrilho
+            readonly property bool tem: cartao.ladrilhos.indexOf(cartao.item.id) >= 0
+            readonly property real altura: Tema.estreito ? 42 : 40
+            visible: tem
+            source: tem ? "qrc:/qt/qml/rustinho/icone/inicio-" + cartao.item.id + ".png" : ""
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            mipmap: true
+            Layout.preferredHeight: altura
+            // Todos os ladrilhos têm 100 × 82 px: a mesma largura em todas as pílulas.
+            Layout.preferredWidth: Math.round(altura * 100 / 82)
+            Layout.alignment: Qt.AlignVCenter
+        }
         IconeFuncao {
+            visible: !ladrilho.tem
             funcao: cartao.item.id || ""
             nome: cartao.item.icone || "caixa"
             Layout.alignment: Qt.AlignVCenter
@@ -71,7 +96,7 @@ Rectangle {
                 visible: !cartao.item.disponivel
                 text: "em breve"
                 color: Tema.apagadoNo(cartao.base)
-                font.family: Tema.serifa
+                font.family: Tema.texto
                 font.italic: true
                 font.pixelSize: 13
             }

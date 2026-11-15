@@ -871,7 +871,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Estorno, Filtro, Id, Pedido, Periodo};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Filtro, Id, Pedido, Periodo};
     use crate::erro::Resultado;
     use crate::{caixa, financeiro, numeros, pagar};
 
@@ -921,8 +921,10 @@ mod comandos {
         let d: financeiro::ContaEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         let id = financeiro::salvar_conta(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = json!(id);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(id))
+        Ok(resposta)
     }
 
     fn conta_loja_extrato(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -934,24 +936,30 @@ mod comandos {
         let d: financeiro::MovimentoEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         financeiro::lancar_movimento(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn movimento_estornar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Estorno = ler(dados)?;
         let tx = p.conn.transaction()?;
         financeiro::estornar_movimento(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn transferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: financeiro::TransferenciaEntrada = ler(dados)?;
         let tx = p.conn.transaction()?;
         financeiro::transferir(&tx, p.disp, p.usuario_id, &d)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn conta_loja_conferir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
@@ -981,8 +989,10 @@ mod comandos {
             &id,
             &[format!("Categoria \"{}\" ({}){}", d.nome.trim(), d.tipo.trim(), if d.ativo { "" } else { ", inativa" })],
         )?;
+        let resposta = json!(id);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(id))
+        Ok(resposta)
     }
 
     fn fluxo_caixa(p: &mut Pedido, dados: Value) -> Resultado<Value> {

@@ -14,6 +14,9 @@ FocusScope {
     property var painel: null
     property string quais: "abertas"
     property bool buscou: false
+    // 10a (C8, dev3.3): a encomenda que a notificação pediu ("encomenda:<id>"):
+    // a linha fica escolhida (com as ações à vista) e destacada. Só mostra.
+    property string alvo: ""
 
     function carregar() {
         const r = Api.chamar("encomendas_painel", { texto: busca.texto, quais: quais })
@@ -22,6 +25,18 @@ FocusScope {
         else
             janela.avisar(r.erro, "erro")
         buscou = true
+        if (alvo.indexOf("encomenda:") === 0)
+            Qt.callLater(mostrarAlvo)
+    }
+    function mostrarAlvo() {
+        const id = alvo.slice("encomenda:".length)
+        alvo = ""
+        const i = painel ? painel.encomendas.findIndex(e => e.id === id) : -1
+        if (i < 0)
+            return
+        lista.positionViewAtIndex(i, ListView.Contain)
+        linhaEscolhida = id
+        Qt.callLater(() => janela.destacarAlvo(lista.itemAtIndex(i), null))
     }
     function nova() {
         nova_.abrir()

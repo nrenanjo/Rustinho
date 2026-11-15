@@ -17,7 +17,36 @@ FocusScope {
     readonly property var partesSimultaneidade: ["duplicatas", "historico", "caixas", "backup", "fiscal"]
     readonly property string grupo: partesSimultaneidade.includes(secao) ? "simultaneidade" : secao
     property string ultimaSimultaneidade: "duplicatas"
-    onSecaoChanged: if (partesSimultaneidade.includes(secao)) ultimaSimultaneidade = secao
+    onSecaoChanged: {
+        if (partesSimultaneidade.includes(secao))
+            ultimaSimultaneidade = secao
+        // 9b: o filtro do registro vale só para a ida ao Histórico que o pediu.
+        if (secao !== "historico") {
+            filtroRegistro = null
+            avisoHistorico = ""
+            historicoVeioDeDuplicatas = false
+        }
+    }
+    // 9b (C8, dev3.3): "Ver no histórico" de um conflito em Duplicatas.
+    // Auto só quando a ligação é inequívoca (o registro tem um id só e há
+    // eventos dele); senão, todo o histórico, dizendo por quê. Só consulta.
+    property var filtroRegistro: null
+    property string avisoHistorico: ""
+    function verHistoricoDe(c) {
+        const temEventos = !!c.registroId && auditoria.some(r => r.entidade === c.tabela && r.entidadeId === c.registroId)
+        secao = "historico"
+        // M-5 da revisão: o filtro de texto que já estava digitado fica (vale de novo em "Ver tudo"); o Esc e a
+        // seta voltam às Duplicatas, de onde a pessoa veio.
+        historicoVeioDeDuplicatas = true
+        if (temEventos) {
+            filtroRegistro = { entidade: c.tabela, id: c.registroId, nome: c.oQue }
+        } else {
+            filtroRegistro = null
+            avisoHistorico = "Não há evento só deste registro (" + c.oQue + ") entre os " + auditoria.length
+                             + " mais recentes: mostrando todo o histórico."
+        }
+    }
+    property bool historicoVeioDeDuplicatas: false
     // Simultaneidade › Histórico (0.9.15).
     property var historicoTroca: null
     property var auditoria: []
@@ -42,6 +71,11 @@ FocusScope {
     // Navegação guiada (0.9.16): aberta por janela.guiar para resolver um
     // requisito de outra tela. Sem guia, tudo funciona como sempre.
     property var guia: null
+    // 9a e 9c (C8, dev3.3): aberta por uma notificação sobre UM registro: ele
+    // fica destacado ("conflito:<id>", "codigo:<tipo>|<código>",
+    // "caixa:<dispositivo>", "referencia:<tabela>|<chave>", "pendencia:<id>").
+    // Só mostra: a decisão continua do gerente, na própria linha.
+    property string alvo: ""
     // Fiscal → Loja reutiliza esta instância; guarda a seção para restaurá-la
     // quando o requisito for salvo ou a pessoa desistir.
     property string secaoAntesDaGuia: ""
@@ -55,7 +89,9 @@ FocusScope {
     // guardada desde a criação (Component.onCompleted).
     property var janelaAoSair: null
     Component.onDestruction: {
-        Api.chamar("gerente_encerrar")
+        // A-2 da revisão (C8): encerra só as consultas que esta tela pede (e as gravações liberadas). Aberta por
+        // cima do Financeiro (caso 7, caso 8), não derruba a consulta do gerente da tela de baixo.
+        Api.chamar("gerente_encerrar", { acoes: ["configuracoes", "backup", "gerente", "simultaneidade"] })
         if (guia)
             janelaAoSair.abandonarGuia(guia)
     }
@@ -70,8 +106,18 @@ FocusScope {
                   rodapeOrcamento: [rodapeOrcamento, "impressao"], rodapeOs: [rodapeOs, "impressao"] })[nome] || null
     }
     // O que a guia destaca: um campo, ou (caso 6, 0.9.18) a linha do primeiro
-    // caixa que bloqueia o rascunho de OS, em Simultaneidade › Caixas.
+    // caixa que bloqueia o rascunho de OS, em Simultaneidade › Caixas, ou
+    // (caso 7, dev3.3) a linha do registro inconsistente que a operação pediu.
     function alvoDaGuia(nome) {
+        if (nome === "referencia") {
+            const alvo = guia ? guia.alvo : null
+            for (let i = 0; alvo && i < listaReferencias.count; i++) {
+                const linha = listaReferencias.itemAt(i)
+                if (linha && linha.modelData.tabela === alvo.tabela && linha.modelData.chave === alvo.chave)
+                    return [linha, "caixas"]
+            }
+            return null
+        }
         if (nome === "caixa_bloqueando") {
             for (let i = 0; i < versaoDosCaixas.count; i++) {
                 const linha = versaoDosCaixas.itemAt(i)
@@ -81,6 +127,67 @@ FocusScope {
             return null
         }
         return campoChamado(nome)
+    }
+    function linhaDoAlvo() {
+        const sep = alvo.indexOf(":")
+        if (sep < 0)
+            return null
+        const tipo = alvo.slice(0, sep), valor = alvo.slice(sep + 1)
+        const procurarCodigo = codigos => {
+            for (let i = 0; i < listaRepetidos.count; i++) {
+                const l = listaRepetidos.itemAt(i)
+                if (l && codigos.some(c => c !== "" && c === l.modelData.codigo))
+                    return l
+            }
+            return null
+        }
+        const procurar = (rep, chave) => {
+            for (let i = 0; rep && i < rep.count; i++) {
+                const l = rep.itemAt(i)
+                if (l && chave(l.modelData) === valor)
+                    return l
+            }
+            return null
+        }
+        const busca = ({
+            conflito: () => procurar(listaConflitos, m => String(m.id)),
+            // "tipo|código" (a notificação) ou "|código|barras" (a etiqueta bloqueada, B-1): o primeiro que bater.
+            codigo: () => valor.startsWith("|")
+                          ? procurarCodigo(valor.slice(1).split("|"))
+                          : procurar(listaRepetidos, m => m.tipo + "|" + m.codigo),
+            caixa: () => procurar(versaoDosCaixas, m => m.dispositivo),
+            referencia: () => procurar(listaReferencias, m => m.tabela + "|" + m.chave),
+            pendencia: () => procurar(listaPendencias, m => m.alteracaoId)
+        })[tipo]
+        return busca ? busca() : null
+    }
+    // M-2 da revisão (C8): a parte acabou de trocar e ainda está montando; destacar na hora deixava a linha fora
+    // da área visível (a rolagem media posições velhas). Espera a linha existir com tamanho e a altura da rolagem
+    // parar de mudar; aí rola até ela e destaca.
+    function mostrarAlvo() {
+        if (!alvo || guia)
+            return
+        esperaDoAlvo.tentativas = 0
+        esperaDoAlvo.alturaAntes = -1
+        esperaDoAlvo.restart()
+    }
+    Timer {
+        id: esperaDoAlvo
+        interval: 120
+        repeat: true
+        property int tentativas: 0
+        property real alturaAntes: -1
+        onTriggered: {
+            const linha = tela.linhaDoAlvo()
+            const assentou = rolagem.contentHeight > 0 && rolagem.contentHeight === alturaAntes
+            alturaAntes = rolagem.contentHeight
+            if ((linha && linha.height > 0 && assentou) || ++tentativas >= 25) {
+                stop()
+                tela.alvo = ""
+                if (linha)
+                    janela.destacarAlvo(linha, rolagem)
+            }
+        }
     }
     // Guia: abre a parte do requisito e destaca o primeiro campo que falta.
     // Os campos da loja só aparecem com a senha do gerente: sem ela, pede a
@@ -594,6 +701,11 @@ FocusScope {
         }
         if (secao === "duplicatas" && confirmarAssumir) {
             confirmarAssumir = false
+            return
+        }
+        // M-5 da revisão (9b): o Histórico aberto por "Ver no histórico" volta às Duplicatas (a origem).
+        if (secao === "historico" && historicoVeioDeDuplicatas) {
+            secao = "duplicatas"
             return
         }
         if (secao === "backup" && parteBackup.item && parteBackup.item.aoEsc())
@@ -1229,7 +1341,14 @@ FocusScope {
                     }
                     // Cada registro incompleto: o que é, o que falta e o que fazer.
                     Repeater {
-                        model: tela.sync && tela.sync.referencias ? tela.sync.referencias.filter(r => r.estado !== "esperando" || r.atrasada).slice(0, 20) : []
+                        id: listaReferencias
+                        // Caso 7: o registro que a guia procura vem primeiro (mesmo depois dos 20).
+                        model: {
+                            const todas = tela.sync && tela.sync.referencias ? tela.sync.referencias.filter(r => r.estado !== "esperando" || r.atrasada) : []
+                            const alvo = tela.guia ? tela.guia.alvo : null
+                            const daGuia = alvo ? todas.filter(r => r.tabela === alvo.tabela && r.chave === alvo.chave) : []
+                            return daGuia.concat(todas.filter(r => daGuia.indexOf(r) < 0)).slice(0, 20)
+                        }
                         delegate: Rectangle {
                             id: linhaRef
                             required property var modelData
@@ -1272,8 +1391,26 @@ FocusScope {
                                     onClicked: motivoReferencia.perguntar(
                                         "Aceitar como está?",
                                         "O que falta não vai aparecer por isso: só libera o dinheiro deste registro. Fica no histórico com o seu nome e o motivo.",
-                                        "Aceitar", (m, pronto) => janela.chamarGerente("referencia_aceitar",
-                                                                 { tabela: linhaRef.modelData.tabela, chave: linhaRef.modelData.chave, motivo: m }, pronto),
+                                        "Aceitar", (m, pronto) => {
+                                            // O registro desta linha, guardado antes: a linha é recriada ao recarregar.
+                                            const tabelaAceita = linhaRef.modelData.tabela, chaveAceita = linhaRef.modelData.chave
+                                            janela.chamarGerente("referencia_aceitar",
+                                                                 { tabela: tabelaAceita, chave: chaveAceita, motivo: m }, r => {
+                                            // Caso 7: a guia volta à operação só se o núcleo confirmar
+                                            // que o registro dela deixou de bloquear; a operação não é refeita.
+                                            // Decide ANTES do pronto(r): ele recarrega a lista e esta linha
+                                            // (o contexto desta função) é destruída.
+                                            const t = tela, j = janela
+                                            // B-2 da revisão: só volta se o aceito foi o registro da guia (outro
+                                            // registro aceito não é "continua inconsistente").
+                                            const daGuia = !!t.guia && !!t.guia.alvo && t.guia.alvo.tabela === tabelaAceita
+                                                           && t.guia.alvo.chave === chaveAceita
+                                            const comGuia = r.ok && daGuia
+                                            pronto(r)
+                                            if (comGuia && !j.concluirGuia(true))
+                                                Qt.callLater(t.mostrarCampoDaGuia)
+                                        })
+                                        },
                                         "Motivo (por que aceitar?)", "secundario")
                                 }
                             }
@@ -1391,6 +1528,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Repeater {
+                        id: listaPendencias
                         model: tela.verSimultaneidade ? tela.pendencias : []
                         delegate: Rectangle {
                             id: linhaPend
@@ -1537,6 +1675,7 @@ FocusScope {
                         })
                     }
                     Repeater {
+                        id: listaConflitos
                         model: tela.conflitos
                         delegate: Rectangle {
                             id: faixaDaLista5
@@ -1572,6 +1711,13 @@ FocusScope {
                                     font.pixelSize: 14
                                     wrapMode: Text.WordWrap
                                     Layout.fillWidth: true
+                                }
+                                // 9b (C8): o que aconteceu com este registro (só consulta).
+                                Botao {
+                                    text: "Ver no histórico"
+                                    tipo: "discreto"
+                                    altura: 32
+                                    onClicked: tela.verHistoricoDe(modelData)
                                 }
                                 Repeater {
                                     model: modelData.campos
@@ -1793,6 +1939,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Repeater {
+                        id: listaRepetidos
                         model: tela.codigos ? tela.codigos.repetidos.slice(0, 50) : []
                         delegate: Rectangle {
                             required property int index
@@ -2145,8 +2292,26 @@ FocusScope {
                     subtitulo: "auditoria da loja: os " + tela.auditoria.length + " registros mais recentes"
                     color: Tema.pergaminho
                     Layout.fillWidth: true
+                    // 9b (C8): veio de um conflito em Duplicatas.
+                    Nota {
+                        visible: !!tela.filtroRegistro || tela.avisoHistorico !== ""
+                        text: tela.filtroRegistro ? "Só o que aconteceu com este registro (" + tela.filtroRegistro.nome + "), entre os "
+                                                    + tela.auditoria.length + " eventos mais recentes." : tela.avisoHistorico
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    // Voltar às Duplicatas é a pílula delas (sem botão de texto que só volta:
+                    // decisão definitiva do dono sobre a seta de retorno, 07/11/2026).
+                    Botao {
+                        visible: !!tela.filtroRegistro
+                        text: "Ver tudo"
+                        tipo: "discreto"
+                        altura: 32
+                        onClicked: tela.filtroRegistro = null
+                    }
                     Campo {
                         id: filtroAuditoria
+                        visible: !tela.filtroRegistro
                         dica: "Filtrar por usuário, caixa ou o que foi feito"
                         icone: "busca"
                         Layout.fillWidth: true
@@ -2159,6 +2324,9 @@ FocusScope {
                     }
                     Repeater {
                         model: {
+                            const g = tela.filtroRegistro
+                            if (g)
+                                return tela.auditoria.filter(r => r.entidade === g.entidade && r.entidadeId === g.id)
                             const f = filtroAuditoria.texto.trim().toLowerCase()
                             if (!f)
                                 return tela.auditoria
@@ -2298,7 +2466,7 @@ FocusScope {
                                  guia ? () => {
                                      janela.guiaOrientar("")
                                      tela.comecarGuia()
-                                 } : null)
+                                 } : () => Qt.callLater(tela.mostrarAlvo))
             return
         } else if (soComGerente && !completo) {
             const destino = secao

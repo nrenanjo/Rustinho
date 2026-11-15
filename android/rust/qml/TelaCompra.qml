@@ -58,10 +58,21 @@ FocusScope {
         return r.ok
     }
 
+    // B-8 da revisão (C8): na compra em edição, cada campo grava; a oferta do caso 7 aparece uma vez por tela (as
+    // seguintes só avisam), em vez de a cada campo.
+    property bool referenciaOferecida: false
     function mostrarErro(r) {
         if (r.campo === "freteExtra")
             freteExtra.erro = r.erro
-        janela.avisar(r.erro, "erro")
+        if (janela.ehReferenciaInconsistente(r) && referenciaOferecida) {
+            janela.avisar(r.erro, "erro")
+            return
+        }
+        if (janela.ehReferenciaInconsistente(r))
+            referenciaOferecida = true
+        // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+        if (!janela.oferecerReferencia(r, null))
+            janela.avisar(r.erro, "erro")
     }
 
     function lancar() {
@@ -137,6 +148,13 @@ FocusScope {
             senhaConferencia.erro = r.erro
             senhaConferencia.focar()
             senhaConferencia.entrada.selectAll()
+        } else if (janela.ehReferenciaInconsistente(r)) {
+            // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+            // M-7 da revisão: a senha do gerente não fica guardada na janelinha durante a guia (na volta, pede de
+            // novo).
+            senhaConferencia.texto = ""
+            if (!janela.oferecerReferencia(r, conferencia))
+                janela.avisar(r.erro, "erro")
         } else {
             janela.avisar(r.erro, "erro")
         }
@@ -688,6 +706,8 @@ FocusScope {
                                 tela.janela.avisar("Compra estornada.", "ok")
                             } else {
                                 motivoEstorno.erro = r.erro
+                                // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
+                                tela.janela.oferecerReferencia(r, caixaEstorno)
                             }
                         })
                     }

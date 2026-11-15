@@ -588,7 +588,7 @@ mod comandos {
     use serde::Deserialize;
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, Classe, Comando, Filtro, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Filtro, Pedido};
     use crate::erro::{Erro, Resultado};
     use crate::{cheques, numeros};
 
@@ -616,32 +616,40 @@ mod comandos {
         let d: ChequeAcao = ler(dados)?;
         let tx = p.conn.transaction()?;
         cheques::depositar(&tx, p.disp, p.usuario_id, &d.id, &d.conta)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn cheque_repassar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: ChequeAcao = ler(dados)?;
         let tx = p.conn.transaction()?;
         cheques::repassar(&tx, p.disp, p.usuario_id, &d.id, &d.motivo)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn cheque_devolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: ChequeAcao = ler(dados)?;
         let tx = p.conn.transaction()?;
         cheques::devolver(&tx, p.disp, p.usuario_id, &d.id, &d.motivo, d.divida)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     fn cheque_desfazer(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: ChequeAcao = ler(dados)?;
         let tx = p.conn.transaction()?;
         cheques::desfazer(&tx, p.disp, p.usuario_id, &d.id)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 
     #[derive(Deserialize, Default)]

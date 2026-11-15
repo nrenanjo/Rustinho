@@ -40,6 +40,8 @@ pub struct Fechamento {
     pub criado_em: String,
     pub pago: bool,
     pub cancelado: bool,
+    /// 10b (C8, dev3.3): a conta a pagar do fechamento ("Ver no A pagar").
+    pub conta_pagar_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,13 +108,14 @@ fn calcular(
     Ok((vendas.len() as i64, vendido, comissao))
 }
 
-fn ja_fechado(conn: &Connection, usuario_id: &str, de: &str, ate: &str) -> Resultado<Option<(String, String)>> {
+/// O fechamento que já cobre o período: (id, de, até).
+fn ja_fechado(conn: &Connection, usuario_id: &str, de: &str, ate: &str) -> Resultado<Option<(String, String, String)>> {
     Ok(conn
         .query_row(
-            "SELECT de, ate FROM comissao_fechamento
+            "SELECT id, de, ate FROM comissao_fechamento
               WHERE usuario_id = ?1 AND cancelado_em IS NULL AND de <= ?3 AND ate >= ?2 LIMIT 1",
             params![usuario_id, de, ate],
-            |l| Ok((l.get(0)?, l.get(1)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
         )
         .optional()?)
 }
@@ -137,7 +140,7 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
     for (id, nome, padrao) in usuarios {
         let (vendas, vendido, comissao) = calcular(conn, &id, padrao, &de, &ate)?;
         let fechado = ja_fechado(conn, &id, &de, &ate)?
-            .map(|(a, b)| format!("{} a {}", curto(&a), curto(&b)))
+            .map(|(_, a, b)| format!("{} a {}", curto(&a), curto(&b)))
             .unwrap_or_default();
         total += comissao;
         vendedores.push(Vendedor {
@@ -155,7 +158,7 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
     let mut c = conn.prepare(
         "SELECT f.id, u.nome, f.de, f.ate, f.vendas, f.total_vendido, f.valor, f.criado_em,
                 COALESCE((SELECT pago > 0 FROM conta_pagar_saldo WHERE id = f.conta_pagar_id), 0),
-                f.cancelado_em IS NOT NULL
+                f.cancelado_em IS NOT NULL, COALESCE(f.conta_pagar_id, '')
            FROM comissao_fechamento f JOIN usuario u ON u.id = f.usuario_id
           ORDER BY f.criado_em DESC LIMIT 30",
     )?;
@@ -173,6 +176,7 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
                 criado_em: l.get(7)?,
                 pago: l.get(8)?,
                 cancelado: l.get(9)?,
+                conta_pagar_id: l.get(10)?,
             })
         })?
         .collect::<Result<_, _>>()?;
@@ -205,12 +209,16 @@ pub fn fechar(
         .query_row("SELECT nome, comissao FROM usuario WHERE id = ?1", [vendedor_id], |l| Ok((l.get(0)?, l.get(1)?)))
         .optional()?
         .ok_or_else(|| Erro::NaoEncontrado("Vendedor".into()))?;
-    if let Some((a, b)) = ja_fechado(conn, vendedor_id, &de, &ate)? {
-        return Err(Erro::validacao(format!(
-            "A comissão de {nome} já foi fechada de {} a {}. Escolha outro período.",
-            fiscal::data_br(&a),
-            fiscal::data_br(&b)
-        )));
+    if let Some((id, a, b)) = ja_fechado(conn, vendedor_id, &de, &ate)? {
+        // 10b (C8): a recusa diz qual fechamento já cobre o período (a tela o mostra destacado).
+        return Err(Erro::campo(
+            &format!("fechamento:{id}"),
+            format!(
+                "A comissão de {nome} já foi fechada de {} a {}. Escolha outro período.",
+                fiscal::data_br(&a),
+                fiscal::data_br(&b)
+            ),
+        ));
     }
     let (vendas, vendido, comissao) = calcular(conn, vendedor_id, padrao, &de, &ate)?;
     if comissao <= 0 {
@@ -281,8 +289,19 @@ pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str)
         if cancelada.is_none() {
             pagar::cancelar(conn, dispositivo, usuario_id, &c, "Fechamento de comissão desfeito").map_err(
                 |e| match e {
+                    // M-1 da revisão (C8): a recusa do registro inconsistente (caso 7) passa como está; só a de "conta
+                    // com pagamento" vira "já foi paga".
+                    Erro::Validacao { campo: Some(ref campo), .. }
+                        if campo.starts_with(crate::sync::CAMPO_REFERENCIA) =>
+                    {
+                        e
+                    }
                     Erro::Validacao { .. } => {
-                        Erro::validacao("A comissão já foi paga. Estorne o pagamento no A pagar antes.")
+                        // 10b (C8): a recusa diz qual é a conta paga (a tela oferece "Ver no A pagar").
+                        Erro::campo(
+                            &format!("conta_paga:{c}"),
+                            "A comissão já foi paga. Estorne o pagamento no A pagar antes.",
+                        )
                     }
                     outro => outro,
                 },
@@ -319,7 +338,7 @@ mod comandos {
     use serde_json::{json, Value};
 
     use crate::comissoes;
-    use crate::despacho::{ler, Classe, Comando, Id, Pedido, Periodo};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Id, Pedido, Periodo};
     use crate::erro::Resultado;
 
     pub const COMANDOS: &[Comando] = &[
@@ -337,15 +356,19 @@ mod comandos {
         let d: Periodo = ler(dados)?;
         let tx = p.conn.transaction()?;
         comissoes::fechar(&tx, p.disp, p.usuario_id, &d.usuario_id, &d.de, &d.ate, &d.vencimento)?;
+        let resposta = json!(comissoes::relatorio(&tx, &d.de, &d.ate)?);
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(json!(comissoes::relatorio(p.conn, &d.de, &d.ate)?))
+        Ok(resposta)
     }
 
     fn comissao_reabrir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Id = ler(dados)?;
         let tx = p.conn.transaction()?;
         comissoes::reabrir(&tx, p.disp, p.usuario_id, &d.id)?;
+        let resposta = Value::Null;
+        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
-        Ok(Value::Null)
+        Ok(resposta)
     }
 }
