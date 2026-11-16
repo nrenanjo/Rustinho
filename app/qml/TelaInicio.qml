@@ -90,7 +90,7 @@ FocusScope {
         } else if (aviso.id === "oficina") {
             Api.chamar("menu_usar", { id: f.id })
             janela.abrir("TelaOrdens", { quais: aviso.texto !== "" ? "prontas" : "abertas" })
-        } else if (aviso.id === "encomendas") {
+        } else if (aviso.id === "encomendas" || aviso.id === "encomendas_numero_repetido") {
             Api.chamar("menu_usar", { id: f.id })
             // 10a (C8): com uma encomenda só, a linha dela vem destacada.
             janela.abrir("TelaEstoque", { secao: "encomendas", alvo: aviso.alvo || "" })

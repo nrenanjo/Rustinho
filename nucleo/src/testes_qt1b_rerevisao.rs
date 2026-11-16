@@ -250,3 +250,133 @@ fn rr_n01p2_leitura_depois_de_gravar_nao_grava() {
     ok(&mut s, "caixa_estado", json!({}));
     assert_eq!(s.banco_para_teste().conn.total_changes(), antes, "a leitura gravou algo");
 }
+
+// ---- S2 (decisão de 15/11/2026; ON-03 da revisão): depois de uma queda SEM nada pendente, uma linha informativa,
+// só no computador. Estes testes rodam no computador (no Android, `da_queda_sem_pendencia` devolve sempre `None`).
+
+fn informativa(s: &mut crate::Servico) -> Option<Value> {
+    let avisos = ok(s, "avisos_do_dia", json!({}));
+    avisos
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"].as_str().unwrap_or("").starts_with("queda_sem_pendencia"))
+        .cloned()
+}
+
+/// A queda sem nada pendente (a tela confirmou tudo o que foi gravado): a linha informativa aparece, aberta, e o
+/// aviso de atenção não.
+#[test]
+fn s2_queda_sem_pendencia_mostra_a_linha_informativa() {
+    let caminho = temp("s2a");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    let p = preparar_venda(&mut s);
+    ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
+    ok(&mut s, "entrega_confirmar", json!({}));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Ana", "1234");
+    assert!(aviso(&mut s).is_none(), "nada pendente: sem o aviso de atenção");
+    let a = informativa(&mut s).expect("S2: a linha informativa depois da queda sem nada pendente");
+    assert_eq!(a["categoria"], "informativa");
+    assert_eq!(a["resolver"], "Entendi");
+    assert_eq!(a["minimizado"], false);
+    assert!(a["detalhes"].as_array().unwrap().is_empty());
+    let d = a["descricao"].as_str().unwrap();
+    assert!(d.contains("Nenhuma venda, recebimento ou pagamento ficou para conferir"), "{d}");
+    assert!(d.contains("não foi guardado"), "S2 não pode dizer que o que estava só na tela foi salvo: {d}");
+    fim(s, &caminho);
+}
+
+/// "Entendi" tira a linha só para quem conferiu (sem gravar nenhuma operação); outra pessoa ainda vê; reabrir sem
+/// queda nova não a traz de volta.
+#[test]
+fn s2_entendi_tira_so_para_quem_conferiu() {
+    let caminho = temp("s2b");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "Bia", "senha": "mesa-verde", "senha2": "mesa-verde", "ativo": true, "gerente": false,
+                "chaveOperacao": "bia-1" }),
+    );
+    ok(&mut s, "entrega_confirmar", json!({}));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Ana", "1234");
+    let a = informativa(&mut s).expect("a linha informativa");
+    let antes =
+        s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
+    ok(&mut s, "aviso_resolver", json!({ "id": a["id"] }));
+    let depois =
+        s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
+    assert_eq!(antes, depois, "o Entendi não grava operação");
+    assert!(informativa(&mut s).is_none(), "o Entendi tira a linha para a Ana");
+    ok(&mut s, "sair", json!({}));
+    entrar(&mut s, "Bia", "mesa-verde");
+    assert!(informativa(&mut s).is_some(), "a Bia ainda não conferiu");
+    fim(s, &caminho);
+}
+
+/// Com algo pendente (a venda sem a tela confirmar), vale o aviso de atenção, e a linha informativa não aparece.
+#[test]
+fn s2_com_pendencia_so_o_aviso_de_atencao() {
+    let caminho = temp("s2c");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    let p = preparar_venda(&mut s);
+    ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Ana", "1234");
+    assert!(aviso(&mut s).is_some());
+    assert!(informativa(&mut s).is_none(), "S2: a linha informativa não aparece junto do aviso de atenção");
+    fim(s, &caminho);
+}
+
+/// A venda pendente é da Ana; a Bia (não gerente) não vê o aviso de atenção da Ana, e também não recebe a linha
+/// "nada ficou para conferir" (seria falso para a loja).
+#[test]
+fn s2_pendencia_de_outra_pessoa_nao_vira_nada_ficou_para_conferir() {
+    let caminho = temp("s2d");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    let p = preparar_venda(&mut s);
+    ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "Bia", "senha": "mesa-verde", "senha2": "mesa-verde", "ativo": true, "gerente": false,
+                "chaveOperacao": "bia-1" }),
+    );
+    ok(&mut s, "venda_concluir", venda(&p, "venda-ana"));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Bia", "mesa-verde");
+    assert!(aviso(&mut s).is_none(), "a Bia não vê a venda da Ana");
+    assert!(informativa(&mut s).is_none(), "S2: há pendência na loja; a Bia não recebe 'nada ficou para conferir'");
+    fim(s, &caminho);
+}
+
+/// A queda vista em outro dia (a abertura seguinte começou ontem) não traz a linha informativa hoje.
+#[test]
+fn s2_queda_de_outro_dia_nao_mostra() {
+    let caminho = temp("s2e");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    ok(&mut s, "entrega_confirmar", json!({}));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "UPDATE programa_abertura SET aberta_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-2 days')
+              WHERE numero = (SELECT MAX(numero) FROM programa_abertura)",
+            [],
+        )
+        .unwrap();
+    entrar(&mut s, "Ana", "1234");
+    assert!(informativa(&mut s).is_none(), "S2: só a queda vista hoje");
+    fim(s, &caminho);
+}

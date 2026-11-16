@@ -10,11 +10,19 @@ geometrias com nome: a busca do Início e a seta de retorno):
   B. Configurações › Backup: "Fazer backup agora" → o aviso acima da seta de retorno, sem cobri-la.
   C. A orientação da guia e o aviso juntos (o aviso do Início e, logo em seguida, a guia): a orientação em cima, o
      aviso abaixo dela, a tela abaixo dos dois.
-  D. Fechar o aviso (toque) não fecha a orientação da guia.
+  D. Fechar o aviso (toque) não fecha a orientação da guia: com a guia aberta em Configurações › Loja, o aviso da
+     "Minha senha" ("Senha trocada."); o toque fecha só ele, antes dos 3 s, e a orientação continua.
+  E. AV-1 (decisão de 15/11/2026): quando o aviso some, a tela volta à posição de antes, sem mudar a rolagem
+     interna: em Configurações › Backup, rolado até "Fazer backup agora", o botão desce com o aviso e volta ao mesmo
+     lugar, quando o aviso some sozinho e quando é fechado com um toque.
+  F. AV-1: o foco do teclado e o que foi digitado continuam: na busca do Início, digitar, copiar (o aviso aparece),
+     esperar o aviso sumir e continuar digitando: o texto junta as duas partes. O mesmo fechando o aviso com um toque
+     e digitando logo em seguida (durante a volta de 140 ms).
 
     RUSTINHO_TELA=:88 python3 app/testes/telas_avisos_topo.py [pasta das fotos]
     RUSTINHO_AVISOS_JANELA=estreita   (a janela de 700 × 1000; o padrão é a larga, 1280 × 760)
     RUSTINHO_CASOS_CELULAR=1          (o desenho do celular, 360 × 780)
+    RUSTINHO_AVISOS_CENARIOS=E,F      (só esses cenários; o padrão é todos)
 """
 
 import os
@@ -42,8 +50,16 @@ def geo(r, nome):
     return None
 
 
-def onde(r, pedaco):
-    return [(x, y) for x, y, t in r.textos() if pedaco in t and not t.startswith(("GEO:", "TOQUE:", "RET:"))]
+def onde(r, pedaco, textos=None):
+    textos = r.textos() if textos is None else textos
+    return [(x, y) for x, y, t in textos if pedaco in t and not t.startswith(("GEO:", "TOQUE:", "RET:"))]
+
+
+def geo_em(textos, nome):
+    for _, _, t in textos:
+        if t.startswith(f"GEO:{nome}:"):
+            return tuple(int(v) for v in t.rsplit(":", 1)[1].split(","))
+    return None
 
 
 def ajustar(r):
@@ -121,9 +137,62 @@ def cenario_b(placar, fotos, pasta):
         r.fechar()
 
 
-def cenario_c_d(placar, fotos, pasta):
+def cenario_c(placar, fotos, pasta):
+    """C. O aviso do Início (3 s) e, logo em seguida, a guia: o aviso é da janela e atravessa a troca de tela; as
+    posições saem de UMA leitura. Se a sequência passar dos 3 s (máquina lenta), a tentativa não vale e é repetida."""
     ok = placar.ok
-    r = placar.abrir(pasta, "TelaInicio", {}, fotos, f"C-guia-{JANELA}")
+    for tentativa in (1, 2, 3):
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, f"C-guia-{JANELA}-{tentativa}")
+        try:
+            r.entrar("Ana")
+            ajustar(r)
+            if not r.tem_igual("Informar UF e CNPJ"):
+                r.clicar("Fiscal", comeca=True)
+            r.esperar(lambda: r.tem_igual("Informar UF e CNPJ"))
+            time.sleep(1)
+            pre = r.textos()
+            copiar = [(x, y) for x, y, t in pre if t == "Copiar a busca"]
+            r.clicar_em(*copiar[0])
+            t0 = time.time()
+            time.sleep(0.3)  # a descida (140 ms)
+            informar = [(x, y) for x, y, t in r.textos() if nav.simples(t) == nav.simples("Informar UF e CNPJ")]
+            r.clicar_em(*informar[0])
+            # As posições só valem paradas: a orientação da guia, ao aparecer, empurra o aviso e a tela (140 ms). Duas
+            # leituras seguidas iguais (o aviso e a seta no mesmo lugar).
+            retrato, anterior = None, None
+            while time.time() - t0 < 2.95:
+                tx = r.textos()
+                av, st = onde(r, VAZIA, tx), geo_em(tx, "setaDeRetorno")
+                if onde(r, GUIA, tx) and av and st:
+                    if (av[0], st) == anterior:
+                        retrato = tx
+                        break
+                    anterior = (av[0], st)
+            f = r.foto("-guia-e-aviso")
+            if retrato is None:
+                print(f"INSTRUMENTAÇÃO C: a sequência passou dos 3 s do aviso (tentativa {tentativa}, "
+                      f"{time.time() - t0:.1f} s); repetindo", flush=True)
+                continue
+            g, t, seta = onde(r, GUIA, retrato)[0], onde(r, VAZIA, retrato)[0], geo_em(retrato, "setaDeRetorno")
+            ok("C: a orientação da guia e o aviso aparecem juntos", True, f)
+            ok("C: a orientação em cima, o aviso abaixo dela, a tela abaixo dos dois (nada sobreposto)",
+               g[1] + 30 <= t[1] - MEIO_AVISO and t[1] + MEIO_AVISO <= seta[1],
+               f"{f} guia y={g[1]} aviso y={t[1]} seta y={seta[1]}")
+            return
+        finally:
+            r.fechar()
+    ok("C: a sequência coube nos 3 s do aviso em alguma das 3 tentativas", False, "INSTRUMENTAÇÃO: máquina lenta")
+
+
+SENHA_TROCADA = "Senha trocada."
+
+
+def cenario_d(placar, fotos, pasta):
+    """D. Com a guia aberta (Configurações › Loja, "informe a UF e o CNPJ"), um aviso na mesma tela ("Senha trocada.",
+    da "Minha senha"): o toque fecha só o aviso, antes dos 3 s dele, e a orientação da guia continua. Começar na tela da
+    guia tira a corrida contra os 3 s (a navegação ficava no meio)."""
+    ok = placar.ok
+    r = placar.abrir(pasta, "TelaInicio", {}, fotos, f"D-toque-{JANELA}")
     try:
         r.entrar("Ana")
         ajustar(r)
@@ -131,23 +200,163 @@ def cenario_c_d(placar, fotos, pasta):
             r.clicar("Fiscal", comeca=True)
         r.esperar(lambda: r.tem_igual("Informar UF e CNPJ"))
         time.sleep(1)
-        # O aviso (3 s) e, logo em seguida, a guia: o aviso é da janela e atravessa a troca de tela.
-        r.clicar("Copiar a busca")
         r.clicar("Informar UF e CNPJ")
-        guia = r.esperar(lambda: onde(r, GUIA), 3)
-        apareceu = bool(onde(r, VAZIA))
-        time.sleep(0.3)
-        f = r.foto("-guia-e-aviso")
-        if not ok("C: a orientação da guia e o aviso aparecem juntos", guia and apareceu and onde(r, VAZIA), f):
+        if not ok("D: a guia abre em Configurações", r.esperar(lambda: onde(r, GUIA), 8), r.foto("-guia")):
             return
-        g, t, seta = onde(r, GUIA)[0], onde(r, VAZIA)[0], geo(r, "setaDeRetorno")
-        ok("C: a orientação em cima, o aviso abaixo dela, a tela abaixo dos dois (nada sobreposto)",
-           g[1] + 30 <= t[1] - MEIO_AVISO and t[1] + MEIO_AVISO <= seta[1],
-           f"{f} guia y={g[1]} aviso y={t[1]} seta y={seta[1]}")
-        r.clicar("A busca está vazia: nada para copiar.")  # D: o toque fecha o aviso
-        fechou = r.esperar(lambda: not onde(r, VAZIA), 4)
+        time.sleep(1)
+        # Os três campos da "Minha senha": o rótulo fica em cima do campo; o toque vai no campo, logo abaixo (antes,
+        # rola até o rótulo e o campo ficarem à vista).
+        def campo(rotulo):
+            for _ in range(3):
+                r.rolar_ate(rotulo)
+                time.sleep(0.4)
+                achados = [(x, y) for x, y, t in r.textos() if nav.simples(t) == nav.simples(rotulo)]
+                for x, y in achados:
+                    if y + 50 < r.altura():
+                        return x, y + 28
+                if not achados:
+                    return None
+                # O rótulo entrou na janela, mas o campo dele ficou cortado pela borda de baixo: o rolar_ate para
+                # com o rótulo a até 30 px da borda, e o campo vem uns 50 px abaixo dele (integ6, janela estreita,
+                # 15/11: "Nova senha" em y = 951 de 1000). Rola mais um pouco, como a pessoa faria, e confere de novo.
+                if nav.CELULAR:
+                    r.arrastar_para_cima(0.15)
+                else:
+                    xdo("mousemove", "300", str(r.altura() // 2))
+                    for _ in range(2):
+                        xdo("click", "5")
+                    time.sleep(0.4)
+            return None
+        senha = nav.SENHA["Ana"]
+        for rotulo, texto in (("Senha atual", senha), ("Nova senha", senha + "9"), ("Repita a nova senha", senha + "9")):
+            pos = campo(rotulo)
+            if not ok(f"D: achei o campo {rotulo}", pos is not None, r.foto("-campos")):
+                return
+            r.clicar_em(*pos)
+            time.sleep(0.3)
+            xdo("type", "--delay", "60", texto)
+        r.rolar_ate("Trocar minha senha")
+        time.sleep(0.4)
+        botao = [(x, y) for x, y, t in r.textos() if t == "Trocar minha senha"]
+        r.clicar_em(*botao[0])
+        t0 = time.time()
+        # Aqui a guia já está assentada: o aviso aparece e não se move. O toque vem logo que ele aparece.
+        aviso = None
+        while time.time() - t0 < 2.0:
+            agora = onde(r, SENHA_TROCADA, r.textos())
+            if agora:
+                aviso = agora[0]
+                break
+        if not ok("D: o aviso da senha trocada aparece (com a guia aberta)", aviso is not None, r.foto("-aviso")):
+            return
+        r.clicar_em(*aviso)  # o toque no aviso
+        # Acompanha até sumir. Cada retrato é do instante em que o atalho chega ao programa: se o aviso sumiu antes
+        # dos 3 s dele (contados do clique que o fez aparecer), quem fechou foi o toque, e não o tempo.
+        sumiu_em, depois = None, []
+        while time.time() - t0 < 4.5:
+            t_retrato = time.time()
+            depois = r.textos()
+            if not onde(r, SENHA_TROCADA, depois):
+                sumiu_em = t_retrato - t0
+                break
+            time.sleep(0.1)
         f = r.foto("-depois-do-toque")
-        ok("D: o toque fecha só o aviso; a orientação da guia continua", fechou and onde(r, GUIA), f)
+        pelo_toque = sumiu_em is not None and sumiu_em < 2.9
+        ok("D: o toque fecha só o aviso (antes dos 3 s dele); a orientação da guia continua",
+           pelo_toque and bool(onde(r, GUIA, depois)),
+           f"{f} sumiu em {sumiu_em if sumiu_em is None else round(sumiu_em, 2)} s; guia={bool(onde(r, GUIA, depois))}")
+    finally:
+        r.fechar()
+
+
+def valor_da_busca(r):
+    """O texto digitado na busca do Início (o campo mostra o que foi digitado)."""
+    for _, _, t in r.textos():
+        if t.startswith("fil"):
+            return t
+    return ""
+
+
+def cenario_e(placar, fotos, pasta):
+    ok = placar.ok
+    r = placar.abrir(pasta, "TelaConfiguracoes", {"secao": "backup"}, fotos, f"E-rolagem-{JANELA}")
+    try:
+        r.entrar("Ana")
+        ajustar(r)
+        r.esperar(lambda: r.tem("Fazer backup agora"), 15)
+        r.rolar_ate("Fazer backup agora")
+        # O primeiro backup muda o texto acima do botão ("Ainda não teve nenhum backup" → "Último backup hoje às …"):
+        # um backup antes, para a posição de referência ser a do conteúdo que não muda mais.
+        r.clicar("Fazer backup agora")
+        r.esperar(lambda: onde(r, BACKUP), 20)
+        r.esperar(lambda: not onde(r, BACKUP), 8)
+        time.sleep(0.8)
+        b0 = onde(r, "Fazer backup agora")[0][1]
+        r.foto("-antes")
+        for jeito in ("sozinho", "toque"):
+            r.clicar("Fazer backup agora")
+            apareceu = r.esperar(lambda: onde(r, BACKUP), 20)
+            time.sleep(0.4)
+            f = r.foto(f"-{jeito}-com-aviso")
+            b1 = onde(r, "Fazer backup agora")[0][1] if apareceu else None
+            if not ok(f"E ({jeito}): com o aviso, o botão desce pelo espaço do aviso", apareceu and b1 >= b0 + 20,
+                      f"{f} botão {b0} → {b1}"):
+                return
+            if jeito == "toque":
+                r.clicar(BACKUP)
+            sumiu = r.esperar(lambda: not onde(r, BACKUP), 8)
+            time.sleep(0.5)  # a volta de 140 ms
+            f = r.foto(f"-{jeito}-depois")
+            b2 = onde(r, "Fazer backup agora")[0][1]
+            ok(f"E ({jeito}): o aviso some e o botão volta ao mesmo lugar (a rolagem interna não mudou)",
+               sumiu and abs(b2 - b0) <= 2, f"{f} botão {b0} → {b1} → {b2}")
+    finally:
+        r.fechar()
+
+
+def cenario_f(placar, fotos, pasta):
+    ok = placar.ok
+    r = placar.abrir(pasta, "TelaInicio", {}, fotos, f"F-foco-{JANELA}")
+    try:
+        r.entrar("Ana")
+        ajustar(r)
+        r.esperar(lambda: r.tem("Vender / Receber"), 15)
+        time.sleep(1)
+        busca = geo(r, "buscaDaInicio")
+        r.clicar_em(busca[0] + busca[2] // 2, busca[1] + busca[3] // 2)
+        time.sleep(0.4)
+        xdo("type", "--delay", "70", "fil")
+        time.sleep(0.4)
+        # 1) O aviso some sozinho; depois, continuar digitando.
+        r.clicar("Copiar a busca")
+        apareceu = r.esperar(lambda: onde(r, "Copiado: fil"), 4)
+        f = r.foto("-sozinho-com-aviso")
+        if not ok("F (sozinho): o aviso aparece com a busca digitada", apareceu, f):
+            return
+        sumiu = r.esperar(lambda: not onde(r, "Copiado: fil"), 8)
+        time.sleep(0.5)
+        xdo("type", "--delay", "70", "tro")
+        time.sleep(0.6)
+        f = r.foto("-sozinho-depois")
+        ok("F (sozinho): o aviso some, o foco continua na busca e o texto digitado fica (fil + tro)",
+           sumiu and valor_da_busca(r) == "filtro", f"{f} busca={valor_da_busca(r)!r}")
+        busca1 = geo(r, "buscaDaInicio")
+        ok("F (sozinho): a busca voltou ao lugar de antes", abs(busca1[1] - busca[1]) <= 2,
+           f"{f} busca y {busca[1]} → {busca1[1]}")
+        # 2) Fechar com um toque e digitar logo em seguida (durante a volta de 140 ms).
+        r.clicar("Copiar a busca")
+        apareceu = r.esperar(lambda: onde(r, "Copiado: filtro"), 4)
+        if not ok("F (toque): o aviso aparece de novo", apareceu, r.foto("-toque-com-aviso")):
+            return
+        r.clicar("Copiado: filtro")
+        xdo("type", "--delay", "40", "s")
+        time.sleep(0.8)
+        f = r.foto("-toque-depois")
+        ok("F (toque): fechado com o toque, o que se digita logo em seguida vai para a busca (filtros)",
+           not onde(r, "Copiado: filtro") and valor_da_busca(r) == "filtros", f"{f} busca={valor_da_busca(r)!r}")
+        busca2 = geo(r, "buscaDaInicio")
+        ok("F (toque): a busca voltou ao lugar de antes", abs(busca2[1] - busca[1]) <= 2,
+           f"{f} busca y {busca[1]} → {busca2[1]}")
     finally:
         r.fechar()
 
@@ -167,7 +376,10 @@ def main():
     placar = Placar()
     print(f"janela: {'celular 360 × 780' if nav.CELULAR else JANELA}", flush=True)
     try:
-        for nome, cenario in (("A", cenario_a), ("B", cenario_b), ("C e D", cenario_c_d)):
+        escolhidos = [c for c in os.environ.get("RUSTINHO_AVISOS_CENARIOS", "").split(",") if c]
+        todos = (("A", cenario_a), ("B", cenario_b), ("C", cenario_c), ("D", cenario_d), ("E", cenario_e),
+                 ("F", cenario_f))
+        for nome, cenario in [t for t in todos if not escolhidos or t[0] in escolhidos]:
             print(f"--- {nome}", flush=True)
             pasta = tempfile.mkdtemp(prefix="rustinho-loja-avisos-")
             try:

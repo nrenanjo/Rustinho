@@ -37,6 +37,15 @@ os.environ.setdefault("RUSTINHO_TELA", ":75")
 os.environ["CUPS_SERVER"] = "/nao-existe/rustinho-teste/cups.sock"
 os.environ.pop("PRINTER", None)
 os.environ.pop("LPDEST", None)
+# Hermético (CI de ensaio de 14/11 e de 15/11): o "abrir o PDF" do programa chama o xdg-open, que abria um navegador
+# dentro da tela virtual; ele roubava o foco e o roteiro deixava de ler os textos ("o Rustinho não escreveu os textos
+# da tela"). Um xdg-open falso, só deste roteiro e só para o Rustinho aberto por ele, anota o pedido e não abre nada.
+XDG_FALSO = tempfile.mkdtemp(prefix="rustinho-xdg-open-")
+PEDIDOS_ABRIR = os.path.join(XDG_FALSO, "pedidos.txt")
+with open(os.path.join(XDG_FALSO, "xdg-open"), "w", encoding="utf-8") as _f:
+    _f.write('#!/bin/sh\nprintf "%s\\n" "$*" >> "' + PEDIDOS_ABRIR + '"\nexit 0\n')
+os.chmod(os.path.join(XDG_FALSO, "xdg-open"), 0o755)
+os.environ["PATH"] = XDG_FALSO + os.pathsep + os.environ.get("PATH", "")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import telas_unidades as u  # noqa: E402
 
@@ -108,6 +117,8 @@ def main():
             novos = pdfs(pasta) - antes
             info.append(f"textos com “imprimiu”/“impressora” na tela: {avisos}")
             info.append(f"PDFs novos: {sorted(os.path.basename(p) for p in novos)}")
+            pedidos = open(PEDIDOS_ABRIR, encoding="utf-8").read().split() if os.path.exists(PEDIDOS_ABRIR) else []
+            info.append(f"pedidos de abrir (xdg-open falso): {[os.path.basename(x) for x in pedidos]}")
             conferir("I1", "impressão direta ligada e sem impressora: a tela avisa que não imprimiu e abriu o PDF",
                      AVISO in [tx for _, _, tx in t], f"textos {avisos}")
             conferir("I2", "o PDF foi criado", len(novos) == 1, f"{novos}")

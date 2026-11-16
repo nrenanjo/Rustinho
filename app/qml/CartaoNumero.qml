@@ -23,7 +23,10 @@ Rectangle {
     color: cor
     palette.window: Tema.superficie(color)
     // VIS33-08 (7.2): cresce se o rótulo quebrar em duas linhas no celular.
-    implicitHeight: Math.max(Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72, conteudoCartao.implicitHeight + 20)
+    // I8 (VIS-C8-02, 15/11/2026): quem quer o cartão mais alto dá a altura mínima (e não fixa o `implicitHeight`):
+    // fixar impedia o cartão de crescer, e a nota passava da borda de baixo quando o rótulo quebrava.
+    property real alturaMinima: Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72
+    implicitHeight: Math.max(alturaMinima, conteudoCartao.implicitHeight + 20)
     Layout.fillWidth: true
 
     ColumnLayout {

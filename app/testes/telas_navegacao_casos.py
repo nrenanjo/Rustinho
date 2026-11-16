@@ -288,7 +288,7 @@ class Rustinho(base.Rustinho):
 
     def _rolar_ate_arrastando(self, texto, vezes=25):
         """No celular, rolar é arrastar o dedo (a roda do mouse não rolou a tela no desenho do celular, 3ª execução
-        do caso 8). O arrasto começa na margem esquerda (x = 6), fora dos cartões e dos botões, e sobe 40% da
+        do caso 8). O arrasto começa perto da margem esquerda (x = 20, já dentro da rolagem), e sobe 40% da
         altura; nada é tocado no caminho."""
         largura, altura = CELULAR_DP
         def a_vista():
@@ -296,7 +296,9 @@ class Rustinho(base.Rustinho):
         for _ in range(vezes):
             if a_vista():
                 return True
-            x, y0, y1 = 6, int(altura * 0.75), int(altura * 0.35)
+            # x = 20: dentro da área que rola (a margem da tela no celular é 14; em x = 6, o arrasto caía fora da
+            # rolagem e nada rolava: a parte de instrumentação do 8b "inconclusivo", 15/11).
+            x, y0, y1 = 20, int(altura * 0.75), int(altura * 0.35)
             xdo("mousemove", str(x), str(y0))
             xdo("mousedown", "1")
             for i in range(1, 9):
@@ -317,6 +319,20 @@ class Rustinho(base.Rustinho):
                 pass
             time.sleep(0.5)
         return condicao()
+
+    def arrastar_para_cima(self, fracao=0.3):
+        """No celular: um arrasto curto para cima (x = 20, dentro da rolagem), como a pessoa faz para ver inteiro o
+        campo que apareceu no pé da tela antes de tocar nele."""
+        largura, altura = CELULAR_DP
+        y0 = int(altura * 0.75)
+        y1 = int(y0 - altura * fracao)
+        xdo("mousemove", "20", str(y0))
+        xdo("mousedown", "1")
+        for i in range(1, 9):
+            xdo("mousemove", "20", str(y0 - (y0 - y1) * i // 8))
+            time.sleep(0.03)
+        xdo("mouseup", "1")
+        time.sleep(0.8)
 
     def digitar(self, texto):
         if CELULAR:
@@ -467,6 +483,9 @@ def caso8(placar, fotos):
                r.esperar(lambda: r.tem("Senha de um gerente (backup de antes")), f)
             ok("8b: ainda nada restaurado sem a senha", sha(db) == antes, f)
             time.sleep(0.5)
+            if CELULAR:
+                # O campo da senha aparece no pé da tela, cortado: a pessoa rola um pouco antes de tocar nele.
+                r.arrastar_para_cima()
             r.digitar(SENHA["Ana"])
             xdo("key", "Return")
             f = r.foto("-6")
@@ -1129,6 +1148,46 @@ def caso10a(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
+def caso10a_repetido(placar, fotos):
+    """I1 (decisão do proprietário, 15/11/2026; 0915-M): o mesmo número de encomenda em dois caixas. O Início avisa
+    ("Mesmo número em caixas diferentes"), e "Ver encomendas" leva à encomenda do OUTRO caixa, à vista e com as ações
+    dela; o Esc volta ao Início sem empilhar; nenhuma encomenda muda."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav10a2-")
+    try:
+        montar_loja(pasta, avisos=True)
+        # Como a troca de dados traria: a encomenda do Caixa 2, com o mesmo número de uma deste caixa.
+        por_fora(pasta, "CREATE TEMP TABLE outra AS SELECT * FROM encomenda WHERE situacao = 'aberta' LIMIT 1; "
+                        "UPDATE outra SET id = 'enc-caixa-2', dispositivo = 'caixa-2', cliente_nome = 'Cliente do Caixa 2', "
+                        "descricao = 'Correia dentada'; INSERT INTO encomenda SELECT * FROM outra;")
+        situacao = lambda: ler(pasta, "SELECT id, situacao FROM encomenda ORDER BY id")  # noqa: E731
+        antes = situacao()
+        r = placar.abrir(pasta, "TelaInicio", {}, fotos, "10a2-gerente")
+        try:
+            r.entrar("Ana")
+            inicio = r.pilha()
+            aviso = "Mesmo número em caixas diferentes"
+            if not r.tem(aviso):
+                r.clicar("Atenção: Número de encomenda repetido")  # minimizada: o quadrado com o nome
+            ok("10a (I1): o Início avisa o número repetido em caixas diferentes", r.esperar(lambda: r.tem(aviso)),
+               r.foto("-1"))
+            time.sleep(1.2)
+            # O botão da notificação aberta (a das encomendas pendentes fica minimizada: uma aberta por vez).
+            r.clicar("Ver encomendas")
+            f = r.foto("-2")
+            ok("10a (I1): leva a Estoque › Encomendas com a encomenda do outro caixa à vista",
+               r.esperar(lambda: r.tem("Correia dentada") and r.pilha() == inicio + 1), f)
+            ok("10a (I1): com as ações dela à vista (a linha escolhida)", r.tem_igual("Cancelar encomenda"), f)
+            xdo("key", "Escape")
+            f = r.foto("-3")
+            ok("10a (I1): cancelar (Esc) volta ao Início, sem empilhar", r.esperar(lambda: r.pilha() == inicio), f)
+            ok("10a (I1): nenhuma encomenda mudou", situacao() == antes)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
 def desativar(pasta, nome):
     """Como a troca de dados faria ao receber de outro caixa: o usuário fica inativo (o mesmo de
     telas_estab_sessao.py)."""
@@ -1199,7 +1258,7 @@ def caso7i(placar, fotos):
 
 
 CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "7": caso7, "7i": caso7i, "9": caso9, "9b": caso9b,
-         "9e": caso9e, "10a": caso10a, "10b": caso10b, "destaque": caso_destaque}
+         "9e": caso9e, "10a": caso10a, "10a2": caso10a_repetido, "10b": caso10b, "destaque": caso_destaque}
 
 
 def main():

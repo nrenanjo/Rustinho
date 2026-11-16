@@ -77,59 +77,66 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        Linha {
-            colunasEstreito: 2
+        ColumnLayout {
+            id: topo
             spacing: 12
             Layout.fillWidth: true
-            CartaoNumero {
-                rotulo: "Falta pedir"
-                prefixo: ""
-                valor: secao.painel ? String(secao.painel.aPedir) : ""
-                cor: Tema.rosa
-                corValor: secao.painel && secao.painel.aPedir > 0 ? Tema.vermelho : Tema.tinta
-            }
-            CartaoNumero {
-                rotulo: "Pedidas"
-                prefixo: ""
-                valor: secao.painel ? String(secao.painel.pedidas) : ""
-                nota: "esperando chegar"
-                cor: Tema.azul
-            }
-            CartaoNumero {
-                rotulo: "Chegaram"
-                prefixo: ""
-                valor: secao.painel ? String(secao.painel.chegaram) : ""
-                nota: secao.painel && secao.painel.semAviso > 0 ? secao.painel.semAviso + " sem avisar" : ""
-                cor: Tema.verde
-                corValor: Tema.verdeEscuro
-            }
-        }
 
-        Linha {
-            spacing: 14
-            Layout.fillWidth: true
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Procurar: cliente, peça, código ou número"
+            Linha {
+                colunasEstreito: 2
+                spacing: 12
                 Layout.fillWidth: true
-                onEditado: espera.restart()
+                CartaoNumero {
+                    rotulo: "Falta pedir"
+                    prefixo: ""
+                    valor: secao.painel ? String(secao.painel.aPedir) : ""
+                    cor: Tema.rosa
+                    corValor: secao.painel && secao.painel.aPedir > 0 ? Tema.vermelho : Tema.tinta
+                }
+                CartaoNumero {
+                    rotulo: "Pedidas"
+                    prefixo: ""
+                    valor: secao.painel ? String(secao.painel.pedidas) : ""
+                    nota: "esperando chegar"
+                    cor: Tema.azul
+                }
+                CartaoNumero {
+                    rotulo: "Chegaram"
+                    prefixo: ""
+                    valor: secao.painel ? String(secao.painel.chegaram) : ""
+                    nota: secao.painel && secao.painel.semAviso > 0 ? secao.painel.semAviso + " sem avisar" : ""
+                    cor: Tema.verde
+                    corValor: Tema.verdeEscuro
+                }
             }
-            Pilulas {
-                pequenas: true
-                modelo: [{ id: "abertas", nome: "Em andamento" }, { id: "todas", nome: "Todas" }]
-                atual: secao.quais
-                onEscolhido: id => {
-                    secao.quais = id
-                    secao.carregar()
+
+            Linha {
+                spacing: 14
+                Layout.fillWidth: true
+                Campo {
+                    id: busca
+                    icone: "busca"
+                    altura: 46
+                    tamanhoFonte: 16
+                    dica: "Procurar: cliente, peça, código ou número"
+                    Layout.fillWidth: true
+                    onEditado: espera.restart()
+                }
+                Pilulas {
+                    pequenas: true
+                    modelo: [{ id: "abertas", nome: "Em andamento" }, { id: "todas", nome: "Todas" }]
+                    atual: secao.quais
+                    onEscolhido: id => {
+                        secao.quais = id
+                        secao.carregar()
+                    }
                 }
             }
         }
 
         ListView {
             id: lista
+            header: Tema.celular ? espacoDoTopo : null
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -299,6 +306,9 @@ FocusScope {
                 }
             }
             ColumnLayout {
+                // O estado vazio. I8: no celular, vai para o fim do topo (rola junto com ele; fixo na lista,
+                // ficava abaixo da borda, cortado e sem como rolar até ele).
+                id: vazio
                 anchors.centerIn: parent
                 width: Math.min(parent.width - 40, 640)
                 visible: secao.buscou && lista.count === 0
@@ -499,7 +509,28 @@ FocusScope {
 
     PerguntaMotivo { id: motivo; onFeito: secao.carregar() }
 
+    // I8 (VIS-C8-02, 15/11/2026): no celular, o cabeçalho fixo da tela tomava quase toda a altura e a lista ficava
+    // com poucos dp (as linhas e o estado vazio escondidos). Lá, o topo desta seção (cartões, busca e filtros) rola
+    // junto com a lista: fica dentro dela, no lugar do cabeçalho (`espacoDoTopo`). No computador, nada muda. As
+    // linhas continuam sob demanda (o ListView só cria as que aparecem), mesmo com milhares de peças.
+    Component {
+        id: espacoDoTopo
+        Item { width: lista.width; height: topo.implicitHeight + 12 }
+    }
+    function topoNaLista() {
+        topo.parent = lista.contentItem
+        topo.x = 0
+        topo.width = Qt.binding(() => lista.width)
+        topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
+        vazio.anchors.centerIn = undefined
+        vazio.parent = topo
+        vazio.Layout.fillWidth = true
+        vazio.Layout.topMargin = 20
+    }
+
     Component.onCompleted: {
+        if (Tema.celular)
+            topoNaLista()
         carregar()
         busca.focar()
     }

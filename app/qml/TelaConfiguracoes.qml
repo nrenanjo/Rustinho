@@ -42,8 +42,12 @@ FocusScope {
             filtroRegistro = { entidade: c.tabela, id: c.registroId, nome: c.oQue }
         } else {
             filtroRegistro = null
+            // N-9 da re-revisão: o filtro de texto digitado antes continua valendo (M-5); o aviso diz isso, em vez
+            // de "todo o histórico" com uma lista filtrada.
+            const filtro = filtroAuditoria.texto.trim()
             avisoHistorico = "Não há evento só deste registro (" + c.oQue + ") entre os " + auditoria.length
-                             + " mais recentes: mostrando todo o histórico."
+                             + " mais recentes: mostrando "
+                             + (filtro !== "" ? "o histórico com o filtro \u201c" + filtro + "\u201d." : "todo o histórico.")
         }
     }
     property bool historicoVeioDeDuplicatas: false
@@ -218,15 +222,41 @@ FocusScope {
         if (!c)
             return
         secao = c[1]
-        Qt.callLater(() => {
-            janela.guiaDestacar(c[0], rolagem)
-            // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
-            const foco = c[0] === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : c[0]
-            if (typeof foco.focarSempre === "function")
-                foco.focarSempre()
-            else if (foco.combo)
-                foco.combo.forceActiveFocus()
-        })
+        // N-2 da re-revisão (C8): a mesma espera do M-2. A parte acabou de trocar e ainda está montando; destacar
+        // no próximo quadro deixava o registro do caso 7 fora da área visível (y = 813 numa janela de 760).
+        esperaDaGuia.tentativas = 0
+        esperaDaGuia.alturaAntes = -1
+        esperaDaGuia.restart()
+    }
+    Timer {
+        id: esperaDaGuia
+        interval: 120
+        repeat: true
+        property int tentativas: 0
+        property real alturaAntes: -1
+        onTriggered: {
+            if (!tela.guia) {
+                stop()
+                return
+            }
+            const c = tela.alvoDaGuia(tela.guia.requisito.campos[0])
+            const assentou = rolagem.contentHeight > 0 && rolagem.contentHeight === alturaAntes
+            alturaAntes = rolagem.contentHeight
+            if ((c && c[0] && c[0].height > 0 && assentou) || ++tentativas >= 25) {
+                stop()
+                if (c && c[0])
+                    tela.destacarCampoDaGuia(c[0])
+            }
+        }
+    }
+    function destacarCampoDaGuia(campo) {
+        janela.guiaDestacar(campo, rolagem)
+        // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
+        const foco = campo === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : campo
+        if (typeof foco.focarSempre === "function")
+            foco.focarSempre()
+        else if (foco.combo)
+            foco.combo.forceActiveFocus()
     }
     function iniciarGuiaNaMesmaTela(g) {
         secaoAntesDaGuia = secao
@@ -726,6 +756,9 @@ FocusScope {
         onActivated: tela.salvar()
     }
 
+    // I8: no celular, as pílulas rolam junto com o conteúdo (menos na parte Fiscal, que tem a rolagem dela).
+    readonly property bool topoNaRolagem: Tema.celular && tela.secao !== "fiscal"
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Tema.margem
@@ -774,51 +807,69 @@ FocusScope {
             }
         }
 
-        Pilulas {
-            modelo: tela.completo ? [
-                { id: "loja", nome: "Loja" },
-                { id: "vendas", nome: "Vendas" },
-                { id: "receber", nome: "Crediário" },
-                { id: "impressao", nome: "Impressão" },
-                { id: "simultaneidade", nome: "Simultaneidade" },
-                { id: "gerente", nome: "Gerente" },
-                { id: "sobre", nome: "Sobre" }
-            ] : [
-                { id: "loja", nome: "Este computador" },
-                { id: "impressao", nome: "Impressão" },
-                { id: "simultaneidade", nome: "Simultaneidade" },
-                { id: "sobre", nome: "Sobre" }
-            ]
-            atual: tela.grupo
-            onEscolhido: id => tela.escolherSecao(id)
-        }
+        // I8 (VIS-C8-02, 15/11/2026): no celular, as pílulas (as partes e as subpartes) tomavam a altura e, em
+        // modo seguro (com a faixa vermelha em cima), o Backup ficava numa tira de uns 85 px. Lá, elas rolam junto
+        // com o conteúdo (ficam no alto da rolagem); a seta e o título continuam fixos. Na parte Fiscal (que tem a
+        // rolagem dela) e no computador, ficam fixas aqui, como antes.
+        Item {
+            id: lugarDoTopo
+            visible: !tela.topoNaRolagem
+            Layout.fillWidth: true
+            implicitHeight: topoConfig.implicitHeight
+            ColumnLayout {
+                id: topoConfig
+                parent: tela.topoNaRolagem ? rolagem.contentItem : lugarDoTopo
+                width: tela.topoNaRolagem ? corpo.width : lugarDoTopo.width
+                y: tela.topoNaRolagem ? 4 : 0
+                spacing: 14
 
-        // Subpílulas de Simultaneidade, numa faixa clara (no roxo, magenta).
-        Rectangle {
-            visible: tela.grupo === "simultaneidade"
-            color: Tema.faixaSubpilulas
-            palette.window: Tema.superficie(color)
-            radius: 14
-            Layout.preferredWidth: Math.min(subpilulas.implicitWidth + 8, parent.width)
-            implicitHeight: subpilulas.implicitHeight + 8
-            Layout.topMargin: -6
-            Pilulas {
-                id: subpilulas
-                x: 4
-                y: 4
-                width: parent.width - 8
-                modelo: [
-                    { id: "duplicatas", nome: "Duplicatas" },
-                    { id: "historico", nome: "Histórico" },
-                    { id: "caixas", nome: "Caixas" },
-                    { id: "backup", nome: "Backup" },
-                    { id: "fiscal", nome: "Fiscal" }
-                ]
-                atual: tela.secao
-                onEscolhido: id => {
-                    if (id === "historico")
-                        tela.carregarHistorico()
-                    tela.secao = id
+                Pilulas {
+                    modelo: tela.completo ? [
+                        { id: "loja", nome: "Loja" },
+                        { id: "vendas", nome: "Vendas" },
+                        { id: "receber", nome: "Crediário" },
+                        { id: "impressao", nome: "Impressão" },
+                        { id: "simultaneidade", nome: "Simultaneidade" },
+                        { id: "gerente", nome: "Gerente" },
+                        { id: "sobre", nome: "Sobre" }
+                    ] : [
+                        { id: "loja", nome: "Este computador" },
+                        { id: "impressao", nome: "Impressão" },
+                        { id: "simultaneidade", nome: "Simultaneidade" },
+                        { id: "sobre", nome: "Sobre" }
+                    ]
+                    atual: tela.grupo
+                    onEscolhido: id => tela.escolherSecao(id)
+                }
+
+                // Subpílulas de Simultaneidade, numa faixa clara (no roxo, magenta).
+                Rectangle {
+                    visible: tela.grupo === "simultaneidade"
+                    color: Tema.faixaSubpilulas
+                    palette.window: Tema.superficie(color)
+                    radius: 14
+                    Layout.preferredWidth: Math.min(subpilulas.implicitWidth + 8, parent.width)
+                    implicitHeight: subpilulas.implicitHeight + 8
+                    Layout.topMargin: -6
+                    Pilulas {
+                        id: subpilulas
+                        x: 4
+                        y: 4
+                        width: parent.width - 8
+                        modelo: [
+                            { id: "duplicatas", nome: "Duplicatas" },
+                            { id: "historico", nome: "Histórico" },
+                            { id: "caixas", nome: "Caixas" },
+                            { id: "backup", nome: "Backup" },
+                            { id: "fiscal", nome: "Fiscal" }
+                        ]
+                        atual: tela.secao
+                        onEscolhido: id => {
+                            if (id === "historico")
+                                tela.carregarHistorico()
+                            tela.secao = id
+                        }
+                    }
                 }
             }
         }
@@ -844,14 +895,14 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            contentHeight: corpo.implicitHeight + Tema.margem
+            contentHeight: corpo.y - 4 + corpo.implicitHeight + Tema.margem
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
             ColumnLayout {
                 id: corpo
                 width: Math.min(rolagem.width - 14, 960)
-                y: 4
+                y: tela.topoNaRolagem ? topoConfig.y + topoConfig.height + 14 : 4
                 spacing: 14
 
                 // ---------------- Loja ----------------
@@ -1408,6 +1459,10 @@ FocusScope {
                                             const comGuia = r.ok && daGuia
                                             pronto(r)
                                             if (comGuia && !j.concluirGuia(true))
+                                                Qt.callLater(t.mostrarCampoDaGuia)
+                                            else if (r.ok && !daGuia && !!t.guia)
+                                                // N-7 da re-revisão: outro registro aceito com a guia aberta; a lista
+                                                // recarregou e o destaque do registro da guia tinha sumido.
                                                 Qt.callLater(t.mostrarCampoDaGuia)
                                         })
                                         },

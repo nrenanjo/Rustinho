@@ -82,6 +82,7 @@ QtObject {
         const r = chamar(comando, comChave(dados, chave))
         if (r.ok)
             _entregaPendente = true
+        _marcarRepetida(r)
         return r
     }
 
@@ -90,10 +91,24 @@ QtObject {
         chamarDemorado(comando, comChave(dados, chave), texto, r => {
             if (r.ok)
                 _entregaPendente = true
+            _marcarRepetida(r)
             if (depois)
                 depois(r)
         })
     }
+
+    // I6 (decisão de 15/11/2026): a mesma operação repetida (duplo clique, Enter repetido) volta "ok" com a marca
+    // `repetida`, sem gravar de novo. O aviso verde que a tela mostra em seguida, no mesmo tratamento, começa com
+    // "Já estava feito" (Main.qml, avisar). A marca vale só até o fim desse tratamento, para não ir parar no aviso
+    // de outra ação.
+    property bool repetidaAgora: false
+    function _marcarRepetida(r) {
+        if (!r.ok || r.repetida !== true)
+            return
+        repetidaAgora = true
+        Qt.callLater(() => { repetidaAgora = false })
+    }
+
 
     // QT-1b, N-01 da re-revisão (parte 2): a gravação só conta como "a pessoa viu" depois que a janela desenhou um
     // quadro com o resultado. A janela (Main.qml) chama confirmarEntrega() a cada quadro desenhado; aqui, só quando

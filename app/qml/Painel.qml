@@ -29,18 +29,27 @@ Popup {
     closePolicy: Popup.CloseOnEscape
     // A-1 da revisão (C8, caso 7): a janela sabe quais janelinhas estão abertas, na ordem, para fechar e reabrir a
     // cadeia inteira (a ficha da conta e a pergunta do motivo) quando a guia leva a outra tela.
+    // N-1 da re-revisão: a janela é guardada ao abrir, para a janelinha sair do registro também quando é destruída
+    // aberta (a tela dela saiu sem o `closed`: a seção trocada pela volta do 10b, ou a sessão encerrada).
+    property var _janelaDoRegistro: null
     Connections {
         target: painel
         function onOpened() {
             const j = painel.ApplicationWindow.window
-            if (j && typeof j.registrarJanelinha === "function")
+            if (j && typeof j.registrarJanelinha === "function") {
+                painel._janelaDoRegistro = j
                 j.registrarJanelinha(painel, true)
+            }
         }
         function onClosed() {
-            const j = painel.ApplicationWindow.window
+            const j = painel._janelaDoRegistro || painel.ApplicationWindow.window
             if (j && typeof j.registrarJanelinha === "function")
                 j.registrarJanelinha(painel, false)
         }
+    }
+    Component.onDestruction: {
+        if (painel._janelaDoRegistro && typeof painel._janelaDoRegistro.registrarJanelinha === "function")
+            painel._janelaDoRegistro.registrarJanelinha(painel, false)
     }
     // O pop-up herda as cores da janela, não da tela: diz a sua superfície.
     palette.window: Tema.superficie(painel.cor)

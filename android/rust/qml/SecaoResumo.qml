@@ -55,7 +55,7 @@ FocusScope {
                     nota: secao.r ? secao.r.hoje.vendas + (secao.r.hoje.vendas === 1 ? " venda" : " vendas") : ""
                     cor: Tema.verde
                     corValor: Tema.verdeEscuro
-                    implicitHeight: 96
+                    alturaMinima: 96
                     notaEmbaixo: true
                 }
                 CartaoNumero {
@@ -64,7 +64,7 @@ FocusScope {
                     valor: secao.r ? secao.r.mes.total : ""
                     nota: secao.r ? (secao.r.comparacao || secao.r.mes.vendas + " vendas") : ""
                     corNota: secao.r && secao.r.comparacao ? (secao.r.comparacaoSubiu ? Tema.verdeEscuro : Tema.vermelho) : Tema.apagado
-                    implicitHeight: 96
+                    alturaMinima: 96
                     notaEmbaixo: true
                 }
                 CartaoNumero {
@@ -73,7 +73,7 @@ FocusScope {
                     valor: secao.r ? secao.r.ano.total : ""
                     nota: secao.r ? secao.r.ano.vendas + " vendas" : ""
                     cor: Tema.azul
-                    implicitHeight: 96
+                    alturaMinima: 96
                     notaEmbaixo: true
                 }
                 // D-10: um cartão só, que troca o conteúdo (lucro para quem pode
@@ -89,7 +89,7 @@ FocusScope {
                                            + (secao.r.semCusto > 0 ? (secao.r.margemMes && !Tema.oculto ? " · " : "") + "incompleto" : "")
                     corNota: lucro && secao.r.semCusto > 0 ? Tema.vermelho : Tema.apagado
                     cor: Tema.rosa
-                    implicitHeight: 96
+                    alturaMinima: 96
                     notaEmbaixo: true
                 }
             }
@@ -105,7 +105,7 @@ FocusScope {
                     sensivel: true
                     valor: secao.dre ? secao.dre.despesas : ""
                     nota: "no mês, por competência"
-                    implicitHeight: 86
+                    alturaMinima: 86
                     notaEmbaixo: true
                 }
                 CartaoNumero {
@@ -117,7 +117,7 @@ FocusScope {
                                        : secao.dre.estado === "incompleto" ? "incompleto: veja as pendências" : "sem dados") : ""
                     corNota: secao.dre && secao.dre.estado === "incompleto" ? Tema.vermelho : Tema.apagado
                     cor: secao.dre && secao.dre.estado === "completo" ? Tema.verde : Tema.amarelo
-                    implicitHeight: 86
+                    alturaMinima: 86
                     notaEmbaixo: true
                 }
                 CartaoNumero {
@@ -125,7 +125,7 @@ FocusScope {
                     sensivel: true
                     valor: secao.dre ? secao.dre.ticket : ""
                     nota: secao.dre && secao.dre.devolucoes !== "0,00" ? "devoluções R$ " + Tema.valor(secao.dre.devolucoes) : "vendas do mês"
-                    implicitHeight: 86
+                    alturaMinima: 86
                     notaEmbaixo: true
                 }
             }

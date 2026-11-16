@@ -175,7 +175,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "receber" => "Ver crediário",
             "pagar" => "Ver contas a pagar",
             "cheques" => "Ver cheques",
-            "encomendas" => "Ver encomendas",
+            "encomendas" | "encomendas_numero_repetido" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
             // Caso 8 (C8, 0.9.18): o modo seguro leva ao Backup (restaurar).
             "backup" | "backup_nuvem" | "backup_sem_tranca" | "banco_defeito" => "Ver backup",
@@ -217,7 +217,9 @@ pub fn minimizar(conn: &Connection, atuais: &[Aviso], id: &str, minimizado: bool
 /// o "visto"): o caixa minimizar não faz o gerente receber o aviso já minimizado. As outras são deste computador.
 pub fn chave_minimizado(id: &str, usuario_id: Option<&str>) -> String {
     match usuario_id {
-        Some(u) if id.starts_with(FECHAMENTO_INESPERADO) => format!("aviso_minimizado.{id}.{u}"),
+        Some(u) if id.starts_with(FECHAMENTO_INESPERADO) || id.starts_with(QUEDA_SEM_PENDENCIA) => {
+            format!("aviso_minimizado.{id}.{u}")
+        }
         _ => format!("aviso_minimizado.{id}"),
     }
 }
@@ -353,6 +355,46 @@ pub fn do_fechamento(conn: &Connection, usuario_id: &str, gerente: bool) -> Resu
 
 /// O começo do id do aviso de fechamento inesperado (o resto é o número da abertura).
 pub const FECHAMENTO_INESPERADO: &str = "fechamento_inesperado";
+
+/// S2 (decisão de 15/11/2026; ON-03 da revisão do QT-1): depois de uma queda SEM nada pendente (o caso mais comum:
+/// uma venda sendo montada), uma linha informativa, **só no computador** (no Android, onde a morte em segundo plano
+/// é comum, nada). Só para a queda vista hoje; "Entendi" tira para esta pessoa (como o "Conferi"); minimizar é por
+/// pessoa. Não diz que nada se perdeu: o que estava só na tela não foi guardado.
+pub fn da_queda_sem_pendencia(conn: &Connection, usuario_id: &str) -> Resultado<Option<Aviso>> {
+    if cfg!(target_os = "android") {
+        return Ok(None);
+    }
+    let atual = crate::operacoes::abertura_atual(conn)?;
+    let Some((ultima, vista)) = crate::operacoes::queda_sem_pendencia(conn, usuario_id, atual)? else {
+        return Ok(None);
+    };
+    let hora = conn
+        .query_row("SELECT strftime('%H:%M', ?1, 'localtime')", [&vista], |l| l.get::<_, Option<String>>(0))?
+        .unwrap_or_default();
+    let id = format!("{QUEDA_SEM_PENDENCIA}.{ultima}");
+    let mut a = Aviso::simples(
+        &id,
+        &fiscal::hoje(conn)?,
+        "Fechamento inesperado".into(),
+        "nada ficou para conferir · o que estava só na tela não foi guardado".into(),
+        String::new(),
+        "caixa",
+    );
+    a.titulo_longo = "O Rustinho fechou sem o encerramento normal".into();
+    a.descricao = format!(
+        "O Rustinho fechou sem o encerramento normal e foi aberto de novo às {hora}. Nenhuma venda, recebimento ou \
+         pagamento ficou para conferir. O que estava só na tela (uma venda sendo montada, um formulário) não foi \
+         guardado."
+    );
+    a.acao = "Ver vendas do caixa".into();
+    a.resolver = "Entendi".into();
+    let mut a = completar(conn, a)?;
+    a.minimizado = config::ler(conn, &chave_minimizado(&id, Some(usuario_id)))?.as_deref() == Some("1");
+    Ok(Some(a))
+}
+
+/// O começo do id da linha informativa do S2 (o resto é o número da abertura).
+pub const QUEDA_SEM_PENDENCIA: &str = "queda_sem_pendencia";
 
 /// O nome de cada operação no aviso de fechamento inesperado. Todo comando de `NAO_REPETIR` (menos as
 /// exceções do R0) tem o seu (teste `todo_comando_que_nao_se_repete_tem_nome_no_aviso`).
@@ -546,6 +588,41 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         avisos.push(
             Aviso::simples("encomendas", &hoje, "Encomendas".into(), partes.join(" · "), String::new(), "estoque")
                 .alvo(alvo),
+        );
+    }
+
+    // I1 (decisão do proprietário, 15/11; 0915-M): o mesmo número de encomenda em caixas diferentes. Cada caixa
+    // numera as suas (o maior + 1), então dois caixas sem conexão dão o mesmo número; depois da troca de dados,
+    // aparecem dois "nº X". Só as que ainda estão andando. Leva à encomenda do OUTRO caixa, destacada.
+    let repetidas: Vec<(i64, String, String)> = {
+        let mut s = conn.prepare(
+            "SELECT e.numero, e.id, e.dispositivo FROM encomenda e
+              WHERE e.situacao IN ('aberta', 'pedida', 'chegou')
+                AND EXISTS (SELECT 1 FROM encomenda o WHERE o.numero = e.numero AND o.dispositivo <> e.dispositivo
+                              AND o.situacao IN ('aberta', 'pedida', 'chegou'))
+              ORDER BY e.numero, e.criado_em, e.id",
+        )?;
+        let lista = s.query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?.collect::<Result<Vec<_>, _>>()?;
+        lista
+    };
+    if !repetidas.is_empty() {
+        let mut numeros: Vec<i64> = repetidas.iter().map(|r| r.0).collect();
+        numeros.dedup();
+        let este = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+        let alvo = repetidas.iter().find(|r| r.2 != este).map(|r| format!("encomenda:{}", r.1)).unwrap_or_default();
+        let lista = numeros.iter().map(|n| format!("nº {n}")).collect::<Vec<_>>().join(", ");
+        avisos.push(
+            Aviso::simples(
+                "encomendas_numero_repetido",
+                &hoje,
+                // Um título próprio: o quadrado minimizado não se confunde com o das encomendas pendentes.
+                "Número de encomenda repetido".into(),
+                format!("Mesmo número em caixas diferentes: {lista}. Confira de qual cliente é cada uma."),
+                String::new(),
+                "estoque",
+            )
+            .categoria(ATENCAO)
+            .alvo(alvo),
         );
     }
 
@@ -1258,7 +1335,9 @@ mod comandos {
     fn aviso_resolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Value = ler(dados)?;
         match d["id"].as_str().unwrap_or_default() {
-            id if id.starts_with(crate::avisos::FECHAMENTO_INESPERADO) => {
+            id if id.starts_with(crate::avisos::FECHAMENTO_INESPERADO)
+                || id.starts_with(crate::avisos::QUEDA_SEM_PENDENCIA) =>
+            {
                 let tx = p.conn.transaction()?;
                 let atual = crate::operacoes::abertura_atual(&tx)?;
                 crate::operacoes::fechamento_visto(&tx, p.usuario_id, atual)?;
@@ -1302,6 +1381,9 @@ mod comandos {
         if !p.modo_seguro {
             if let Some(a) = crate::avisos::do_fechamento(p.conn, p.usuario_id, p.gerente)? {
                 avisos.insert(0, a);
+            } else if let Some(a) = crate::avisos::da_queda_sem_pendencia(p.conn, p.usuario_id)? {
+                // S2: só informa; fica depois das outras (não toma o lugar de uma de atenção).
+                avisos.push(a);
             }
         }
         crate::avisos::uma_aberta(&mut avisos);

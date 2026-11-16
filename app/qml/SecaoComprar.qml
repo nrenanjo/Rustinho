@@ -74,75 +74,83 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        Linha {
-            colunasEstreito: 2
+        ColumnLayout {
+            id: topo
             spacing: 12
             Layout.fillWidth: true
-            CartaoNumero {
-                rotulo: "Acabou"
-                prefixo: ""
-                valor: secao.dados ? String(secao.dados.acabou) : ""
-                nota: "peças que vendem"
-                cor: Tema.rosa
-                corValor: secao.dados && secao.dados.acabou > 0 ? Tema.vermelho : Tema.tinta
-            }
-            CartaoNumero {
-                rotulo: "Acabando"
-                prefixo: ""
-                valor: secao.dados ? String(secao.dados.acabando) : ""
-                nota: secao.dados ? "antes de " + secao.dados.diasCompra + " dias" : ""
-            }
-            CartaoNumero {
-                rotulo: "Encomendas a pedir"
-                prefixo: ""
-                valor: secao.dados ? String(secao.dados.encomendas.length) : ""
-                cor: Tema.verde
-                corValor: Tema.verdeEscuro
-            }
-            CartaoNumero {
-                rotulo: "Custo estimado"
-                sensivel: true
-                valor: secao.dados ? secao.dados.custoTotal : ""
-                nota: "sem as encomendas"
-                cor: Tema.azul
-            }
-        }
 
-        Linha {
-            spacing: 14
-            Layout.fillWidth: true
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Filtrar por peça, código ou fornecedor"
+            Linha {
+                colunasEstreito: 2
+                spacing: 12
                 Layout.fillWidth: true
-                onEditado: espera.restart()
+                CartaoNumero {
+                    rotulo: "Acabou"
+                    prefixo: ""
+                    valor: secao.dados ? String(secao.dados.acabou) : ""
+                    nota: "peças que vendem"
+                    cor: Tema.rosa
+                    corValor: secao.dados && secao.dados.acabou > 0 ? Tema.vermelho : Tema.tinta
+                }
+                CartaoNumero {
+                    rotulo: "Acabando"
+                    prefixo: ""
+                    valor: secao.dados ? String(secao.dados.acabando) : ""
+                    nota: secao.dados ? "antes de " + secao.dados.diasCompra + " dias" : ""
+                }
+                CartaoNumero {
+                    rotulo: "Encomendas a pedir"
+                    prefixo: ""
+                    valor: secao.dados ? String(secao.dados.encomendas.length) : ""
+                    cor: Tema.verde
+                    corValor: Tema.verdeEscuro
+                }
+                CartaoNumero {
+                    rotulo: "Custo estimado"
+                    sensivel: true
+                    valor: secao.dados ? secao.dados.custoTotal : ""
+                    nota: "sem as encomendas"
+                    cor: Tema.azul
+                }
             }
-            Text {
-                text: "Comprar para"
-                color: Tema.tintaSuaveNo(palette.window)
-                font.family: Tema.serifa
-                font.italic: true
-                font.pixelSize: 15
-            }
-            Campo {
-                id: dias
-                numerico: true
-                maximo: 3
-                sufixo: "dias"
-                altura: 46
-                tamanhoFonte: 16
-                erro: secao.erroDias
-                Layout.preferredWidth: 120
-                onConfirmado: secao.salvarDias()
-                onSaiu: secao.salvarDias()
+
+            Linha {
+                spacing: 14
+                Layout.fillWidth: true
+                Campo {
+                    id: busca
+                    icone: "busca"
+                    altura: 46
+                    tamanhoFonte: 16
+                    dica: "Filtrar por peça, código ou fornecedor"
+                    Layout.fillWidth: true
+                    onEditado: espera.restart()
+                }
+                Text {
+                    text: "Comprar para"
+                    color: Tema.tintaSuaveNo(palette.window)
+                    font.family: Tema.serifa
+                    font.italic: true
+                    font.pixelSize: 15
+                }
+                Campo {
+                    id: dias
+                    numerico: true
+                    maximo: 3
+                    sufixo: "dias"
+                    altura: 46
+                    tamanhoFonte: 16
+                    erro: secao.erroDias
+                    Layout.preferredWidth: 120
+                    onConfirmado: secao.salvarDias()
+                    onSaiu: secao.salvarDias()
+                }
             }
         }
 
         ListView {
             id: lista
+            header: Tema.celular ? espacoDoTopo : null
+            footer: Tema.celular ? espacoDoRodape : null
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -158,6 +166,9 @@ FocusScope {
             }
 
             ColumnLayout {
+                // O estado vazio. I8: no celular, vai para o fim do topo (rola junto com ele; fixo na lista,
+                // ficava abaixo da borda, cortado e sem como rolar até ele).
+                id: vazio
                 anchors.centerIn: parent
                 width: Math.min(parent.width - 40, 620)
                 visible: secao.buscou && lista.count === 0
@@ -178,6 +189,7 @@ FocusScope {
             }
         }
         Nota {
+            id: rodape
             text: secao.dados ? "A quantidade sugerida é o ritmo de venda dos últimos " + secao.dados.janela + " dias para "
                                 + secao.dados.diasCompra + " dias, menos o que já tem. Venda de encomenda não entra na conta." : ""
             font.pixelSize: 12
@@ -374,7 +386,38 @@ FocusScope {
         }
     }
 
+    // I8 (VIS-C8-02, 15/11/2026): no celular, o cabeçalho fixo da tela tomava quase toda a altura e a lista ficava
+    // com poucos dp (as linhas e o estado vazio escondidos). Lá, o topo desta seção (cartões, busca e filtros) rola
+    // junto com a lista: fica dentro dela, no lugar do cabeçalho (`espacoDoTopo`). No computador, nada muda. As
+    // linhas continuam sob demanda (o ListView só cria as que aparecem), mesmo com milhares de peças.
+    Component {
+        id: espacoDoTopo
+        Item { width: lista.width; height: topo.implicitHeight + 12 }
+    }
+    // A nota de rodapé também vai para dentro da lista (no fim), no celular: fora dela, tomava altura e ficava
+    // por cima das linhas cortadas na borda.
+    Component {
+        id: espacoDoRodape
+        Item { width: lista.width; height: rodape.implicitHeight + 12 }
+    }
+    function topoNaLista() {
+        rodape.parent = lista.contentItem
+        rodape.x = 0
+        rodape.width = Qt.binding(() => lista.width)
+        rodape.y = Qt.binding(() => lista.footerItem ? lista.footerItem.y + 12 : 0)
+        topo.parent = lista.contentItem
+        topo.x = 0
+        topo.width = Qt.binding(() => lista.width)
+        topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
+        vazio.anchors.centerIn = undefined
+        vazio.parent = topo
+        vazio.Layout.fillWidth = true
+        vazio.Layout.topMargin = 20
+    }
+
     Component.onCompleted: {
+        if (Tema.celular)
+            topoNaLista()
         carregar()
         busca.focar()
     }

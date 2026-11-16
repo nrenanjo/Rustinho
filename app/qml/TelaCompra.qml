@@ -61,10 +61,12 @@ FocusScope {
     // B-8 da revisão (C8): na compra em edição, cada campo grava; a oferta do caso 7 aparece uma vez por tela (as
     // seguintes só avisam), em vez de a cada campo.
     property bool referenciaOferecida: false
-    function mostrarErro(r) {
+    // N-5 da re-revisão: a regra de "uma vez por tela" vale só para a gravação campo a campo; a ação explícita
+    // (lançar) sempre oferece "Ver o registro" (`explicita`).
+    function mostrarErro(r, explicita) {
         if (r.campo === "freteExtra")
             freteExtra.erro = r.erro
-        if (janela.ehReferenciaInconsistente(r) && referenciaOferecida) {
+        if (janela.ehReferenciaInconsistente(r) && referenciaOferecida && !explicita) {
             janela.avisar(r.erro, "erro")
             return
         }
@@ -108,7 +110,7 @@ FocusScope {
                                   + (s.precosAtualizados > 0 ? ", " + s.precosAtualizados + " preços atualizados" : "")
                                   + (s.parcelasPagar > 0 ? ", " + s.parcelasPagar + (s.parcelasPagar === 1 ? " parcela" : " parcelas") + " no A pagar" : "") + ".", "ok")
                 } else {
-                    mostrarErro(r)
+                    mostrarErro(r, true)
                 }
             }, chaveLancar)
         })

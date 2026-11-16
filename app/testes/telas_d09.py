@@ -283,6 +283,15 @@ def main():
                   + ("" if ok else f" (foto: {foto})"))
             tudo_certo &= ok
             # A senha foi usada: mudar de novo pede outra vez.
+            # AV-1 (notificações no alto, decisão de 15/11/2026; não é o D-09r): o aviso "Alterações salvas." reserva o
+            # espaço dele no alto e, quando some (3 s), a tela volta com a animação de 140 ms. A posição do preço é
+            # lida depois disso (antes, o clique chegava junto da volta e caía fora do campo). Só espera: nenhuma
+            # conferência muda.
+            for _ in range(40):
+                if not any("Alterações salvas" in t for _, _, t in r.textos()):
+                    break
+                time.sleep(0.25)
+            time.sleep(0.4)
             if not r.clicar("120,00"):
                 raise RuntimeError(f"não achei o preço novo (veja {r.saida})")
             xdo("key", "ctrl+a")

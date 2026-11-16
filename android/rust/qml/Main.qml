@@ -289,6 +289,11 @@ ApplicationWindow {
     PedirGerente { id: pedirGerente }
 
     function avisar(texto, tipo) {
+        // I6: a repetição devolveu "ok" sem gravar de novo (a operação já estava feita).
+        if (tipo === "ok" && Api.repetidaAgora) {
+            Api.repetidaAgora = false
+            texto = "Já estava feito. " + texto
+        }
         aviso.mostrar(texto, tipo)
     }
 
@@ -407,7 +412,7 @@ ApplicationWindow {
     function destacarAlvo(item, rolagem) {
         if (guiaAtiva || !item)
             return
-        guia.destacar(item, rolagem)
+        guia.destacar(item, rolagem, true)   // o véu leve (I4)
         fimDoDestaque.restart()
     }
     Timer {
@@ -504,6 +509,8 @@ ApplicationWindow {
         pedirGerente.desistiu = null
         pedirGerente.depois = null
         pedirGerente.close()
+        // N-1 da re-revisão: as janelinhas das telas que saem não voltam (a pilha inteira vai ser trocada).
+        janelinhasAbertas = []
     }
     // A tela de destino saiu por outro caminho (Início, trocar de usuário):
     // a guia acaba sem voltar e sem marcar nada.
@@ -530,20 +537,37 @@ ApplicationWindow {
         // B-5 da revisão: com uma guia já em andamento, não há segunda oferta; quem chamou mostra o erro.
         if (guiaAtiva)
             return false
-        // B-3 da revisão: curto (o motivo completo já está na janelinha, em vermelho).
+        // B-3 da revisão: curto (o motivo completo já está na janelinha, em vermelho). N-6 da re-revisão: sem
+        // janelinha (o campo da compra, lançar a compra, desfazer cheque, desfazer fechamento de comissão), a
+        // primeira frase do motivo vem na oferta (qual registro e o que falta).
+        let motivo = ""
+        if (!janelinha && typeof r.erro === "string" && r.erro !== "") {
+            const fim = r.erro.indexOf(". ")
+            motivo = (fim >= 0 ? r.erro.slice(0, fim + 1) : r.erro) + " "
+        }
         dialogo.perguntar("Registro inconsistente",
-                          "A operação não foi feita. O gerente decide em Simultaneidade › Caixas, com o registro destacado; depois você volta e conclui.",
+                          motivo + "A operação não foi feita. O gerente decide em Simultaneidade › Caixas, com o registro destacado; depois você volta e conclui.",
                           "Ver o registro", () => {
             // A-1 da revisão: fecha a cadeia inteira de janelinhas abertas (a ficha e a pergunta), guardando o que
             // foi digitado, e reabre na mesma ordem na volta. O fechamento por causa da guia não dispara a ação de
             // fechar de nenhuma delas (fechandoParaGuia).
-            const cadeia = janelinhasAbertas.slice()
-            if (janelinha && cadeia.indexOf(janelinha) < 0)
+            // N-1 da re-revisão: só as janelinhas que ainda existem e estão abertas (o registro pode ter guardado
+            // uma destruída), e o `fechandoParaGuia` volta a false aconteça o que acontecer.
+            const cadeia = janelinhasAbertas.filter(janelinhaViva)
+            if (janelinhaViva(janelinha) && cadeia.indexOf(janelinha) < 0)
                 cadeia.push(janelinha)
             fechandoParaGuia = true
-            for (let i = cadeia.length - 1; i >= 0; i--)
-                cadeia[i].close()
-            fechandoParaGuia = false
+            try {
+                for (let i = cadeia.length - 1; i >= 0; i--) {
+                    try {
+                        cadeia[i].close()
+                    } catch (e) {
+                        // Destruída entre a conferência e o fechamento: nada a fechar.
+                    }
+                }
+            } finally {
+                fechandoParaGuia = false
+            }
             guiar(r.campo, r.erro, satisfeito => {
                 for (const p of cadeia) {
                     try {
@@ -563,10 +587,19 @@ ApplicationWindow {
     property var janelinhasAbertas: []
     property bool fechandoParaGuia: false
     function registrarJanelinha(p, aberta) {
-        const lista = janelinhasAbertas.filter(x => x !== p && x !== null)
+        // N-1 da re-revisão: a janelinha destruída não vale `null` no JavaScript do Qt; `janelinhaViva` a reconhece.
+        const lista = janelinhasAbertas.filter(x => x !== p && janelinhaViva(x))
         if (aberta)
             lista.push(p)
         janelinhasAbertas = lista
+    }
+    // A janelinha existe (não foi destruída) e está aberta.
+    function janelinhaViva(p) {
+        try {
+            return !!p && typeof p.close === "function" && typeof p.open === "function" && p.opened === true
+        } catch (e) {
+            return false
+        }
     }
 
     // Caso 8 da navegação contextual (0.9.18): a faixa do modo seguro leva a

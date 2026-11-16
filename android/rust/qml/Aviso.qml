@@ -17,7 +17,9 @@ Rectangle {
 
     anchors.horizontalCenter: parent.horizontalCenter
     y: topo + espaco
-    z: 1000
+    // Acima do véu do destaque da guia (Guia.qml, z 1400): o véu escurecia o aviso, e a regra do topo diz que nada
+    // o cobre (15/11/2026). A orientação da guia fica na camada das janelinhas, acima dos dois.
+    z: 1500
     radius: 10
     color: tipo === "erro" ? Tema.vermelho : tipo === "ok" ? Tema.verdeEscuro : Tema.tinta
     width: Math.min(mensagem.implicitWidth + 48, parent.width - 80)

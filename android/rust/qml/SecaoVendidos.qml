@@ -36,71 +36,79 @@ FocusScope {
         anchors.fill: parent
         spacing: 12
 
-        Linha {
-            colunasEstreito: 2
+        ColumnLayout {
+            id: topo
             spacing: 12
             Layout.fillWidth: true
-            CartaoNumero { rotulo: "Vendido"; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
-            // D-01: o lucro só para quem pode ver os resultados. O cartão fica
-            // sempre (trocar "visible" dentro da linha embaralha no Qt 6.4, D-10).
-            CartaoNumero {
-                readonly property bool pode: !!secao.dados && secao.dados.resultados
-                rotulo: "Lucro bruto"
-                sensivel: pode
-                prefixo: pode ? "R$ " : ""
-                valor: !secao.dados ? "" : pode ? secao.dados.lucro : "—"
-                nota: secao.dados && !pode ? "só o gerente" : ""
-            }
-            CartaoNumero {
-                rotulo: "Peças vendidas"
-                prefixo: ""
-                valor: secao.dados ? String(secao.dados.pecas) : ""
-                nota: "diferentes"
-                cor: Tema.azul
-            }
-            CartaoNumero {
-                rotulo: "Curva A"
-                prefixo: ""
-                valor: secao.dados ? String(secao.dados.curvaA) : ""
-                nota: "fazem 80% do valor"
-                cor: Tema.pergaminho
-            }
-        }
 
-        Linha {
-            spacing: 14
-            Layout.fillWidth: true
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Procurar peça na lista"
+            Linha {
+                colunasEstreito: 2
+                spacing: 12
                 Layout.fillWidth: true
-                onEditado: espera.restart()
-            }
-            Pilulas {
-                pequenas: true
-                modelo: [{ id: "30", nome: "30 dias" }, { id: "90", nome: "90 dias" }, { id: "365", nome: "12 meses" }]
-                atual: String(secao.dias)
-                onEscolhido: id => {
-                    secao.dias = parseInt(id)
-                    secao.carregar()
+                CartaoNumero { rotulo: "Vendido"; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
+                // D-01: o lucro só para quem pode ver os resultados. O cartão fica
+                // sempre (trocar "visible" dentro da linha embaralha no Qt 6.4, D-10).
+                CartaoNumero {
+                    readonly property bool pode: !!secao.dados && secao.dados.resultados
+                    rotulo: "Lucro bruto"
+                    sensivel: pode
+                    prefixo: pode ? "R$ " : ""
+                    valor: !secao.dados ? "" : pode ? secao.dados.lucro : "—"
+                    nota: secao.dados && !pode ? "só o gerente" : ""
+                }
+                CartaoNumero {
+                    rotulo: "Peças vendidas"
+                    prefixo: ""
+                    valor: secao.dados ? String(secao.dados.pecas) : ""
+                    nota: "diferentes"
+                    cor: Tema.azul
+                }
+                CartaoNumero {
+                    rotulo: "Curva A"
+                    prefixo: ""
+                    valor: secao.dados ? String(secao.dados.curvaA) : ""
+                    nota: "fazem 80% do valor"
+                    cor: Tema.pergaminho
                 }
             }
-            Pilulas {
-                pequenas: true
-                modelo: [{ id: "valor", nome: "Por valor" }, { id: "quantidade", nome: "Por quantidade" }]
-                atual: secao.ordem
-                onEscolhido: id => {
-                    secao.ordem = id
-                    secao.carregar()
+
+            Linha {
+                spacing: 14
+                Layout.fillWidth: true
+                Campo {
+                    id: busca
+                    icone: "busca"
+                    altura: 46
+                    tamanhoFonte: 16
+                    dica: "Procurar peça na lista"
+                    Layout.fillWidth: true
+                    onEditado: espera.restart()
+                }
+                Pilulas {
+                    pequenas: true
+                    modelo: [{ id: "30", nome: "30 dias" }, { id: "90", nome: "90 dias" }, { id: "365", nome: "12 meses" }]
+                    atual: String(secao.dias)
+                    onEscolhido: id => {
+                        secao.dias = parseInt(id)
+                        secao.carregar()
+                    }
+                }
+                Pilulas {
+                    pequenas: true
+                    modelo: [{ id: "valor", nome: "Por valor" }, { id: "quantidade", nome: "Por quantidade" }]
+                    atual: secao.ordem
+                    onEscolhido: id => {
+                        secao.ordem = id
+                        secao.carregar()
+                    }
                 }
             }
         }
 
         ListView {
             id: lista
+            header: Tema.celular ? espacoDoTopo : null
+            footer: Tema.celular ? espacoDoRodape : null
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -230,6 +238,9 @@ FocusScope {
                 }
             }
             ColumnLayout {
+                // O estado vazio. I8: no celular, vai para o fim do topo (rola junto com ele; fixo na lista,
+                // ficava abaixo da borda, cortado e sem como rolar até ele).
+                id: vazio
                 anchors.centerIn: parent
                 width: Math.min(parent.width - 40, 600)
                 visible: secao.buscou && lista.count === 0
@@ -243,13 +254,45 @@ FocusScope {
             }
         }
         Nota {
+            id: rodape
             text: "Curva ABC pelo valor vendido: A = as peças que somam 80% do faturamento, B = os 15% seguintes, C = o resto."
             font.pixelSize: 12
             Layout.fillWidth: true
         }
     }
 
+    // I8 (VIS-C8-02, 15/11/2026): no celular, o cabeçalho fixo da tela tomava quase toda a altura e a lista ficava
+    // com poucos dp (as linhas e o estado vazio escondidos). Lá, o topo desta seção (cartões, busca e filtros) rola
+    // junto com a lista: fica dentro dela, no lugar do cabeçalho (`espacoDoTopo`). No computador, nada muda. As
+    // linhas continuam sob demanda (o ListView só cria as que aparecem), mesmo com milhares de peças.
+    Component {
+        id: espacoDoTopo
+        Item { width: lista.width; height: topo.implicitHeight + 12 }
+    }
+    // A nota de rodapé também vai para dentro da lista (no fim), no celular: fora dela, tomava altura e ficava
+    // por cima das linhas cortadas na borda.
+    Component {
+        id: espacoDoRodape
+        Item { width: lista.width; height: rodape.implicitHeight + 12 }
+    }
+    function topoNaLista() {
+        rodape.parent = lista.contentItem
+        rodape.x = 0
+        rodape.width = Qt.binding(() => lista.width)
+        rodape.y = Qt.binding(() => lista.footerItem ? lista.footerItem.y + 12 : 0)
+        topo.parent = lista.contentItem
+        topo.x = 0
+        topo.width = Qt.binding(() => lista.width)
+        topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
+        vazio.anchors.centerIn = undefined
+        vazio.parent = topo
+        vazio.Layout.fillWidth = true
+        vazio.Layout.topMargin = 20
+    }
+
     Component.onCompleted: {
+        if (Tema.celular)
+            topoNaLista()
         carregar()
         busca.focar()
     }

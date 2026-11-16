@@ -578,3 +578,42 @@ fn rev_b6_fiscal_notas_nao_conta_compra_lancada() {
     let ids = crate::avisos::do_dia(&s.banco_para_teste().conn).unwrap().into_iter().map(|a| a.id).collect::<Vec<_>>();
     assert!(!ids.contains(&"fiscal_notas".to_string()), "B-6: compra lançada contada: {ids:?}");
 }
+
+/// I1 (decisão do proprietário, 15/11; 0915-M): o mesmo número de encomenda em caixas diferentes vira um aviso de
+/// atenção próprio, que leva à encomenda do OUTRO caixa (destacada em Estoque › Encomendas). Um caixa só, nada;
+/// cancelada a outra, o aviso sai.
+#[test]
+fn nav13_encomenda_com_o_mesmo_numero_em_caixas_diferentes() {
+    let (mut s, _pasta) = loja();
+    let sql = |s: &mut crate::Servico, q: &str| s.banco_para_teste().conn.execute_batch(q).unwrap();
+    let criar = |s: &mut crate::Servico, d: &str| {
+        ok(
+            s,
+            "encomenda_criar",
+            json!({ "clienteNome": "Maria Souza", "telefone": "(15) 99808-0000", "descricao": d, "quantidade": "1" }),
+        )
+    };
+    let repetido = |s: &mut crate::Servico| {
+        crate::avisos::do_dia(&s.banco_para_teste().conn)
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == "encomendas_numero_repetido")
+    };
+    criar(&mut s, "Pastilha dianteira");
+    criar(&mut s, "Filtro de óleo");
+    assert!(repetido(&mut s).is_none(), "números diferentes, um caixa só: nada");
+    // A segunda veio de outro caixa com o mesmo número (como a troca de dados traria).
+    sql(&mut s, "UPDATE encomenda SET numero = 1, dispositivo = 'caixa-2' WHERE numero = 2");
+    let outra: String = s
+        .banco_para_teste()
+        .conn
+        .query_row("SELECT id FROM encomenda WHERE dispositivo = 'caixa-2'", [], |l| l.get(0))
+        .unwrap();
+    let a = repetido(&mut s).expect("o mesmo número em dois caixas: avisa");
+    assert_eq!(a.categoria, crate::avisos::ATENCAO);
+    assert_eq!(a.alvo, format!("encomenda:{outra}"), "leva à encomenda do outro caixa");
+    assert_eq!((a.funcao.as_str(), a.acao.as_str()), ("estoque", "Ver encomendas"));
+    assert!(a.texto.contains("nº 1"), "{}", a.texto);
+    sql(&mut s, "UPDATE encomenda SET situacao = 'cancelada' WHERE dispositivo = 'caixa-2'");
+    assert!(repetido(&mut s).is_none(), "cancelada: não conta");
+}

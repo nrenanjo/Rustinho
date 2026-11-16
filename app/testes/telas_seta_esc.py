@@ -679,12 +679,26 @@ def inicio(res, fotos, modelo, nome_tema, cores):
             time.sleep(0.5)
             r.clicar_em(px, py)
             time.sleep(0.8)
-            r.clicar_geo(g)
+            # AV-1 (notificações no alto, decisão de 15/11/2026): o aviso "Copiado" reserva o espaço dele no alto e a
+            # tela desce enquanto ele aparece (e volta, com a animação de 140 ms, quando ele some). As posições da
+            # busca e do "colar" são lidas de novo agora; as de antes do aviso já não valem.
+            textos2 = r.textos()
+            campo2 = r.geo("buscaDaInicio", textos2)
+            pos2 = {t: (x, y) for x, y, t in textos2 if t == "Colar na busca"}
+            g2 = campo2[0] if campo2 else g
+            cx2, cy2 = pos2.get("Colar na busca", (cx, cy))
+            r.clicar_geo(g2)
             xdo("key", "ctrl+a")
             xdo("key", "BackSpace")
             time.sleep(0.5)
             vazio = not r.tem_igual("8PK1515")
-            r.clicar_em(cx, cy)
+            # Antes de colar: o aviso some e a tela volta (140 ms); só então a posição do "colar" é lida de novo.
+            r.esperar(lambda: not any("Copiado:" in t for _, _, t in r.textos()), 6)
+            time.sleep(0.4)
+            textos3 = r.textos()
+            pos3 = {t: (x, y) for x, y, t in textos3 if t == "Colar na busca"}
+            cx3, cy3 = pos3.get("Colar na busca", (cx2, cy2))
+            r.clicar_em(cx3, cy3)
             time.sleep(0.8)
             textos = r.textos()
             r.foto_janela("-2-colou")

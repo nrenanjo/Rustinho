@@ -39,13 +39,15 @@ Item {
     property string texto: ""
     readonly property bool temAviso: estado !== ""
 
-    function destacar(item, rolagem) {
+    function destacar(item, rolagem, leve) {
+        veuLeve = leve === true
         alvo = item
         if (item && rolagem)
             mostrarNaRolagem(item, rolagem)
         medir()
     }
     function semDestaque() {
+        veuLeve = false
         alvo = null
         area = Qt.rect(0, 0, 0, 0)
     }
@@ -97,8 +99,13 @@ Item {
     // ---- Destaque: véu suave e luz difusa em volta do campo ----
     // No roxo (0.9.18): véu roxo-escuro e luz rosada; o fundo roxo já é
     // escuro, então o véu é um pouco mais forte para o destaque aparecer.
-    readonly property color corVeu: Tema.roxo ? Qt.rgba(0.09, 0, 0.09, 0.5)
-                                    : Tema.escuro ? Qt.rgba(0, 0, 0, 0.55) : Qt.rgba(0.16, 0.15, 0.13, 0.30)
+    // I4 (decisão de 15/11/2026): o destaque que vem de uma notificação, sem
+    // guia (`janela.destacarAlvo`), usa o véu pela metade; os 6 s continuam.
+    property bool veuLeve: false
+    readonly property real forcaVeu: veuLeve ? 0.5 : 1
+    readonly property color corVeu: Tema.roxo ? Qt.rgba(0.09, 0, 0.09, 0.5 * forcaVeu)
+                                    : Tema.escuro ? Qt.rgba(0, 0, 0, 0.55 * forcaVeu)
+                                    : Qt.rgba(0.16, 0.15, 0.13, 0.30 * forcaVeu)
     Rectangle {   // em cima
         visible: guia.destacando
         x: 0; y: 0; width: guia.width; height: Math.max(0, guia.area.y)

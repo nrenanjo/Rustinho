@@ -331,6 +331,30 @@ pub fn fechamento(
     Ok(Some((desde, ultima, linhas)))
 }
 
+/// S2 (decisão de 15/11/2026; ON-03 da revisão do QT-1): a queda mais nova que esta pessoa não conferiu, vista HOJE
+/// (a abertura seguinte começou hoje), quando as quedas que ela não conferiu não deixaram nada a mostrar para
+/// NINGUÉM (nem gravada sem a tela confirmar, nem começada e não terminada). Devolve (número da abertura, quando a
+/// queda foi vista); `None` no resto (aí vale o aviso de fechamento inesperado, ou nada).
+pub fn queda_sem_pendencia(conn: &Connection, usuario_id: &str, atual: i64) -> Resultado<Option<(i64, String)>> {
+    if fechamento(conn, usuario_id, true, atual)?.is_some() {
+        return Ok(None);
+    }
+    let Some((ultima, _)) = caidas(conn, atual, usuario_id)?.pop() else {
+        return Ok(None);
+    };
+    let vista = conn
+        .query_row(
+            &format!(
+                "SELECT {VISTA_EM} FROM programa_abertura a
+                  WHERE a.numero = ?1 AND date({VISTA_EM}, 'localtime') = date('now', 'localtime')"
+            ),
+            [ultima],
+            |l| l.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(vista.map(|v| (ultima, v)))
+}
+
 /// Esta pessoa conferiu o aviso: as aberturas que caíram e que ela via somem PARA ELA. Nada é apagado (F-10: o
 /// "Conferi" do caixa não tira do gerente a operação interrompida do caixa); a limpeza é por prazo.
 pub fn fechamento_visto(conn: &Connection, usuario_id: &str, atual: i64) -> Resultado<()> {

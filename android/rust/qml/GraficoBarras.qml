@@ -22,6 +22,34 @@ Item {
 
     readonly property real coluna: barras.length > 0 ? width / barras.length : width
 
+    // I8 (VIS-C8-02, 15/11/2026): no celular, as colunas ficam estreitas (30 dias a 360 dp: uns 10 dp cada; 12 meses
+    // no DRE: uns 23 dp) e os rótulos se sobrepunham ("10" × "11", "dez/25" × "jan/26"). O passo dos rótulos é o
+    // `rotuloCada` ou o necessário para o maior rótulo caber com folga, o que for maior; o destacado (hoje, o mês
+    // atual) sempre aparece, e os vizinhos que encostariam nele, não. Onde já cabe (no computador), nada muda.
+    FontMetrics { id: medida; font.family: Tema.texto; font.pixelSize: 11; font.bold: true }
+    readonly property real larguraRotulo: {
+        let m = 0
+        for (let i = 0; i < barras.length; i++)
+            m = Math.max(m, medida.advanceWidth(String(barras[i].rotulo)))
+        return m
+    }
+    // Quantas colunas o maior rótulo ocupa (1 quando cabe na própria coluna).
+    readonly property int ocupa: coluna > 0 ? Math.max(1, Math.ceil((larguraRotulo + 4) / coluna)) : 1
+    readonly property int passo: Math.max(rotuloCada, ocupa)
+    readonly property int destacada: {
+        for (let i = 0; i < barras.length; i++)
+            if (barras[i].destaque)
+                return i
+        return -1
+    }
+    function mostraRotulo(i) {
+        if (barras[i].destaque)
+            return true
+        if (destacada >= 0 && Math.abs(i - destacada) < ocupa)
+            return false
+        return i % passo === 0
+    }
+
     Row {
         anchors.fill: parent
         Repeater {
@@ -58,7 +86,7 @@ Item {
                     anchors.top: trilho.bottom
                     anchors.topMargin: 5
                     anchors.horizontalCenter: parent.horizontalCenter
-                    visible: col.modelData.destaque || col.index % grafico.rotuloCada === 0
+                    visible: grafico.mostraRotulo(col.index)
                     text: col.modelData.rotulo
                     textFormat: Text.PlainText
                     color: col.modelData.destaque ? Tema.tintaNo(palette.window) : Tema.apagadoNo(palette.window)

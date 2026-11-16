@@ -562,3 +562,59 @@ fn integ_75_76_contagem_depois_de_restaurar_nos_dois_caminhos() {
     drop(s);
     let _ = std::fs::remove_dir_all(&pasta);
 }
+
+/// N-3 da re-revisão (teste escrito pelo Fable, C8, A-2): `gerente_encerrar` com `acoes` fecha só as consultas pedidas (e as gravações
+/// liberadas); as outras continuam; `acoes` vazio ou malformado fecha tudo (o padrão seguro); sair e entrar limpa.
+#[test]
+fn fable_a2_gerente_encerrar_com_acoes_fecha_so_as_pedidas() {
+    let (pasta, _db, mut s) = loja("fable-a2", 1);
+    entrar(&mut s, "Bia", "1111");
+    fn pode(s: &mut Servico, a: &str) -> bool {
+        ok(s, "permissao", json!({ "acao": a, "consulta": true }))["pode"] == true
+    }
+    let todas = ["financeiro", "configuracoes", "backup", "simultaneidade", "gerente"];
+    for a in todas {
+        assert!(!pode(&mut s, a), "{a}: o caixa não devia poder sem a senha");
+    }
+    // O Financeiro aberto com a senha; por cima, Configurações › Simultaneidade (a guia do caso 7) e a pílula Gerente.
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acoes": ["configuracoes", "backup", "simultaneidade"] }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "gerente" }));
+    for a in todas {
+        assert!(pode(&mut s, a), "{a}: liberada");
+    }
+    // Configurações sai (a volta da guia): só as dela fecham.
+    ok(&mut s, "gerente_encerrar", json!({ "acoes": ["configuracoes", "backup", "gerente", "simultaneidade"] }));
+    assert!(pode(&mut s, "financeiro"), "a consulta do Financeiro (a tela de baixo) continua");
+    for a in ["configuracoes", "backup", "simultaneidade", "gerente"] {
+        assert!(!pode(&mut s, a), "{a}: devia ter fechado com a tela");
+    }
+    // Uma gravação liberada (uma vez) também cai com `acoes`.
+    let estorno = json!({ "id": "nao-existe", "motivo": "teste" });
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "movimento_estornar", "dados": estorno }));
+    ok(&mut s, "gerente_encerrar", json!({ "acoes": ["configuracoes"] }));
+    let r = chamar(&mut s, "movimento_estornar", estorno.clone());
+    assert_eq!(r["campo"], "gerente", "a gravação liberada devia ter caído: {r}");
+    assert!(pode(&mut s, "financeiro"), "e a consulta do Financeiro continua");
+    // Sem dados: tudo fecha (o Financeiro saiu).
+    ok(&mut s, "gerente_encerrar", json!({}));
+    assert!(!pode(&mut s, "financeiro"));
+    // `acoes` vazio ou malformado: fecha tudo (o padrão seguro), não "nada".
+    for ruim in [json!({ "acoes": [] }), json!({ "acoes": "configuracoes" }), json!({ "acoes": [1, null] })] {
+        ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
+        ok(&mut s, "gerente_encerrar", ruim.clone());
+        assert!(!pode(&mut s, "financeiro"), "{ruim}: devia fechar tudo");
+    }
+    // Ação que não existe: não fecha nenhuma consulta (e não dá erro).
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
+    ok(&mut s, "gerente_encerrar", json!({ "acoes": ["nao_existe"] }));
+    assert!(pode(&mut s, "financeiro"));
+    // Trocar de pessoa na tela de entrada: nada sobra.
+    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acoes": ["configuracoes", "backup", "simultaneidade"] }));
+    entrar(&mut s, "Bia", "1111");
+    for a in todas {
+        assert!(!pode(&mut s, a), "{a}: depois de sair e entrar, nada liberado");
+    }
+    drop(s);
+    let _ = std::fs::remove_dir_all(&pasta);
+}

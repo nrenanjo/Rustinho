@@ -343,7 +343,11 @@ def b1(placar, fotos):
                 dentro = luz(com, x, y) / luz(sem, x, y)
                 escuro = [round(luz(com, *p) / luz(sem, *p), 2) for p in fora]
                 medidas.append((com, round(dentro, 2), escuro))
-            achou = [m for m in medidas if all(e < 0.85 for e in m[2]) and m[1] > 0.9]
+            # I4 (decisão de 15/11/2026): o destaque que vem de uma notificação usa o véu pela metade. Medido: com o véu
+            # cheio, o resto da tela fica a uns 0,75 da luz sem véu; com o leve, a 0,87–0,88. O limite (0,93) pega os
+            # dois; o destaque continua visível porque a linha do código fica na luz (> 0,9) e o resto, não.
+            print(f"B-1 medidas (luz com o destaque / sem): {[(m[1], m[2]) for m in medidas]}", flush=True)
+            achou = [m for m in medidas if all(e < 0.93 for e in m[2]) and m[1] > 0.9 and m[1] - max(m[2]) >= 0.05]
             ok("B-1: com o destaque, o resto da tela escurece (o véu) e a linha do código não (é ela a destacada)",
                bool(achou), f"{achou[0][0] if achou else sem} medidas={[(m[1], m[2]) for m in medidas]}")
         finally:
