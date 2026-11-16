@@ -31,7 +31,31 @@ FocusScope {
         return l
     }
 
+    // A-1 da revisão do VIS2 (16/11/2026): no celular a busca fica dentro da lista (topoNaLista), e a lista, quando
+    // troca o modelo, dá o foco à 1ª linha: a busca perdia o foco a cada recarga (200 ms depois da tecla), e só 1 ou 2
+    // letras entravam. Se a busca tinha o foco, ele e o cursor voltam depois da troca (sem selecionar o texto).
     function carregar() {
+        const comFoco = busca.entrada.activeFocus
+        const cursor = busca.entrada.cursorPosition
+        carregarDados()
+        if (comFoco)
+            Qt.callLater(() => {
+                if (busca.entrada.activeFocus)
+                    return
+                busca.entrada.forceActiveFocus()
+                busca.entrada.cursorPosition = Math.min(cursor, busca.entrada.text.length)
+            })
+    }
+    // B-4 da revisão do VIS2: no celular, depois de uma ação numa linha a lista voltava ao começo (o topo ocupa a área
+    // toda) e as linhas sumiam da vista. Nas recargas por ação, a lista volta à mesma LINHA (e não ao mesmo pixel: as
+    // linhas têm alturas diferentes e são criadas sob demanda, e o mesmo contentY caía sete linhas adiante).
+    function recarregarNoLugar() {
+        const i = Tema.celular ? lista.indexAt(lista.width / 2, lista.contentY + 1) : -1
+        carregar()
+        if (i >= 0)
+            Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
+    }
+    function carregarDados() {
         const r = Api.chamar("estoque_sugestao", { texto: busca.texto })
         if (r.ok) {
             dados = r.dados
@@ -57,7 +81,7 @@ FocusScope {
             return
         }
         janela.avisar(ids.length === 1 ? "Encomenda marcada como pedida." : ids.length + " encomendas marcadas como pedidas.", "ok")
-        carregar()
+        recarregarNoLugar()
     }
     function aoEsc() {
         if (busca.texto !== "") {
@@ -227,13 +251,68 @@ FocusScope {
         Rectangle {
             id: le
             readonly property var e: parent ? parent.dado.e : ({})
-            implicitHeight: 62
+            implicitHeight: Tema.celular ? 98 : 62
             radius: Tema.raio
             color: Tema.verde
             palette.window: Tema.superficie(color)
             HoverHandler { id: sobreE }
             TapHandler { onTapped: secao.linhaEscolhida = le.e.id }
+            // M-1 da revisão do VIS2: no celular, a linha em três andares, como Encomendas e Parados já fazem. As colunas
+            // de largura fixa do computador tomavam a largura toda do celular, e o nome ficava com largura zero.
+            ColumnLayout {
+                visible: Tema.celular
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 12
+                anchors.topMargin: 6
+                anchors.bottomMargin: 6
+                spacing: 0
+                Text {
+                    text: le.e.descricao
+                    textFormat: Text.PlainText
+                    color: Tema.tinta
+                    font.family: Tema.titulo
+                    font.weight: Font.Bold
+                    font.pixelSize: 18
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: ["Nº " + le.e.numero + (le.e.caixa ? " (" + le.e.caixa + ")" : "") + " · " + le.e.cliente, le.e.desde, le.e.codigo ? "cód. " + le.e.codigo : "",
+                           le.e.fornecedor ? le.e.fornecedor + (le.e.codigoFornecedor ? " (" + le.e.codigoFornecedor + ")" : "") : ""]
+                          .filter(x => !!x).join("  ·  ")
+                    textFormat: Text.PlainText
+                    color: Tema.tintaSuave
+                    font.family: Tema.serifa
+                    font.italic: true
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    spacing: 10
+                    Layout.fillWidth: true
+                    Text {
+                        text: "Comprar " + le.e.quantidade + " " + le.e.unidade
+                        textFormat: Text.PlainText
+                        color: Tema.verdeEscuro
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 16
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        text: "Já pedi"
+                        icone: "check"
+                        tipo: "discreto"
+                        altura: 36
+                        onClicked: secao.pedidas([le.e.id])
+                    }
+                }
+            }
             RowLayout {
+                visible: !Tema.celular
                 anchors.fill: parent
                 anchors.leftMargin: 18
                 anchors.rightMargin: 12
@@ -292,13 +371,74 @@ FocusScope {
             id: lp
             readonly property var p: parent ? parent.dado.p : ({})
             readonly property int i: parent ? parent.dado.i : 0
-            implicitHeight: 64
+            implicitHeight: Tema.celular ? 100 : 64
             radius: Tema.raio
             // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
             readonly property bool par: (i + 1) % 2 === 0
             color: Tema.faixa(lp.par)
             palette.window: Tema.superficie(color)
+            // M-1 da revisão do VIS2: no celular, a linha em três andares, como Encomendas e Parados já fazem. As colunas
+            // de largura fixa do computador tomavam a largura toda do celular, e o nome ficava com largura zero.
+            ColumnLayout {
+                visible: Tema.celular
+                anchors.fill: parent
+                anchors.leftMargin: 14
+                anchors.rightMargin: 12
+                anchors.topMargin: 6
+                anchors.bottomMargin: 6
+                spacing: 0
+                Text {
+                    text: lp.p.nome + (lp.p.marca ? " · " + lp.p.marca : "")
+                    textFormat: Text.PlainText
+                    color: Tema.tintaDaFaixa(lp.par)
+                    font.family: Tema.titulo
+                    font.weight: Font.Bold
+                    font.pixelSize: 18
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                    TapHandler { onTapped: secao.janela.abrir("TelaPeca", { produtoId: lp.p.produtoId }) }
+                }
+                Text {
+                    text: ["cód. " + lp.p.codigo, lp.p.fornecedor ? lp.p.fornecedor + (lp.p.codigoFornecedor ? " (" + lp.p.codigoFornecedor + ")" : "") : "",
+                           lp.p.observacao].filter(x => !!x).join("  ·  ")
+                    textFormat: Text.PlainText
+                    color: Tema.tintaSuaveDaFaixa(lp.par)
+                    font.family: Tema.serifa
+                    font.italic: true
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    spacing: 8
+                    Layout.fillWidth: true
+                    Chip {
+                        texto: lp.p.nomePrioridade
+                        color: lp.p.prioridade === "acabou" ? Tema.rosa : Tema.papel
+                        corTexto: lp.p.prioridade === "minimo" ? Tema.tintaSuave : Tema.vermelho
+                    }
+                    Text {
+                        text: [lp.p.tem, lp.p.ritmo, lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : ""]
+                              .filter(x => !!x).join(" · ")
+                        textFormat: Text.PlainText
+                        color: Tema.tintaSuaveDaFaixa(lp.par)
+                        font.family: Tema.texto
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: "Comprar " + lp.p.sugerido + " " + lp.p.unidade
+                        textFormat: Text.PlainText
+                        color: Tema.tintaDaFaixa(lp.par)
+                        font.family: Tema.texto
+                        font.weight: Font.Bold
+                        font.pixelSize: 15
+                    }
+                }
+            }
             RowLayout {
+                visible: !Tema.celular
                 anchors.fill: parent
                 anchors.leftMargin: 18
                 anchors.rightMargin: 16
@@ -408,6 +548,9 @@ FocusScope {
         topo.parent = lista.contentItem
         topo.x = 0
         topo.width = Qt.binding(() => lista.width)
+        // B-1 da revisão do VIS2: dentro da lista, o topo seguia com a altura que o arranjo de fora lhe deu no começo,
+        // e não com a natural; os blocos se espalhavam e as pílulas passavam por cima da 1ª linha.
+        topo.height = Qt.binding(() => topo.implicitHeight)
         topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
         vazio.anchors.centerIn = undefined
         vazio.parent = topo

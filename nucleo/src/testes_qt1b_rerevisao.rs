@@ -380,3 +380,38 @@ fn s2_queda_de_outro_dia_nao_mostra() {
     assert!(informativa(&mut s).is_none(), "S2: só a queda vista hoje");
     fim(s, &caminho);
 }
+
+/// T-04 da 2ª re-revisão do QT-1 (16/11/2026): a linha do S2 arrastada para o lado (aviso_esconder) vale como o
+/// "Entendi" desta pessoa: não volta quando ela sai e entra de novo no mesmo dia; outra pessoa ainda a vê. Antes, o
+/// núcleo gravava a marca de "escondida" do computador, que quem monta a linha do S2 não lia.
+#[test]
+fn rr2_t04_s2_arrastada_nao_volta_para_quem_escondeu() {
+    let caminho = temp("rr2t04");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    ok(
+        &mut s,
+        "usuario_salvar",
+        json!({ "nome": "Bia", "senha": "mesa-verde", "senha2": "mesa-verde", "ativo": true, "gerente": false,
+                "chaveOperacao": "bia-t04" }),
+    );
+    ok(&mut s, "entrega_confirmar", json!({}));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Ana", "1234");
+    let a = informativa(&mut s).expect("a linha informativa do S2");
+    let antes =
+        s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
+    ok(&mut s, "aviso_esconder", json!({ "id": a["id"] }));
+    let depois =
+        s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
+    assert_eq!(antes, depois, "esconder não grava operação");
+    assert!(informativa(&mut s).is_none(), "escondida: a linha sai para a Ana");
+    ok(&mut s, "sair", json!({}));
+    entrar(&mut s, "Ana", "1234");
+    assert!(informativa(&mut s).is_none(), "a Ana saiu e entrou de novo no mesmo dia: a linha continua fora");
+    ok(&mut s, "sair", json!({}));
+    entrar(&mut s, "Bia", "mesa-verde");
+    assert!(informativa(&mut s).is_some(), "a Bia não escondeu: ainda vê");
+    fim(s, &caminho);
+}

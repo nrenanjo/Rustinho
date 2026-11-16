@@ -18,7 +18,31 @@ FocusScope {
     // a linha fica escolhida (com as ações à vista) e destacada. Só mostra.
     property string alvo: ""
 
+    // A-1 da revisão do VIS2 (16/11/2026): no celular a busca fica dentro da lista (topoNaLista), e a lista, quando
+    // troca o modelo, dá o foco à 1ª linha: a busca perdia o foco a cada recarga (200 ms depois da tecla), e só 1 ou 2
+    // letras entravam. Se a busca tinha o foco, ele e o cursor voltam depois da troca (sem selecionar o texto).
     function carregar() {
+        const comFoco = busca.entrada.activeFocus
+        const cursor = busca.entrada.cursorPosition
+        carregarDados()
+        if (comFoco)
+            Qt.callLater(() => {
+                if (busca.entrada.activeFocus)
+                    return
+                busca.entrada.forceActiveFocus()
+                busca.entrada.cursorPosition = Math.min(cursor, busca.entrada.text.length)
+            })
+    }
+    // B-4 da revisão do VIS2: no celular, depois de uma ação numa linha a lista voltava ao começo (o topo ocupa a área
+    // toda) e as linhas sumiam da vista. Nas recargas por ação, a lista volta à mesma LINHA (e não ao mesmo pixel: as
+    // linhas têm alturas diferentes e são criadas sob demanda, e o mesmo contentY caía sete linhas adiante).
+    function recarregarNoLugar() {
+        const i = Tema.celular ? lista.indexAt(lista.width / 2, lista.contentY + 1) : -1
+        carregar()
+        if (i >= 0)
+            Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
+    }
+    function carregarDados() {
         const r = Api.chamar("encomendas_painel", { texto: busca.texto, quais: quais })
         if (r.ok)
             painel = r.dados
@@ -50,7 +74,7 @@ FocusScope {
         }
         if (mensagem)
             janela.avisar(mensagem, "ok")
-        carregar()
+        recarregarNoLugar()
         return true
     }
     function avisar(e) {
@@ -60,7 +84,7 @@ FocusScope {
             return
         }
         Qt.openUrlExternally(r.dados.url)
-        carregar()
+        recarregarNoLugar()
     }
     function aoEsc() {
         if (busca.texto !== "") {
@@ -216,7 +240,9 @@ FocusScope {
                     }
                     Item {
                         visible: !Tema.estreito
-                        Layout.preferredWidth: 330
+                        // S-4 da 2ª re-revisão: com a linha escolhida (o 10a e o I1 chegam assim), os botões passam
+                        // de 330 px e cobriam a etiqueta do pagamento; o espaço é o da largura real deles.
+                        Layout.preferredWidth: Math.max(330, acoesEnc.width)
                         implicitHeight: 36
                     }
                 }
@@ -507,7 +533,7 @@ FocusScope {
         onEscolhida: id => nova_.escolherPeca(id)
     }
 
-    PerguntaMotivo { id: motivo; onFeito: secao.carregar() }
+    PerguntaMotivo { id: motivo; onFeito: secao.recarregarNoLugar() }
 
     // I8 (VIS-C8-02, 15/11/2026): no celular, o cabeçalho fixo da tela tomava quase toda a altura e a lista ficava
     // com poucos dp (as linhas e o estado vazio escondidos). Lá, o topo desta seção (cartões, busca e filtros) rola
@@ -521,6 +547,9 @@ FocusScope {
         topo.parent = lista.contentItem
         topo.x = 0
         topo.width = Qt.binding(() => lista.width)
+        // B-1 da revisão do VIS2: dentro da lista, o topo seguia com a altura que o arranjo de fora lhe deu no começo,
+        // e não com a natural; os blocos se espalhavam e as pílulas passavam por cima da 1ª linha.
+        topo.height = Qt.binding(() => topo.implicitHeight)
         topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
         vazio.anchors.centerIn = undefined
         vazio.parent = topo

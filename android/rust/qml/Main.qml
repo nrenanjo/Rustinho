@@ -531,7 +531,7 @@ ApplicationWindow {
     function ehReferenciaInconsistente(r) {
         return !!r && !r.ok && typeof r.campo === "string" && r.campo.indexOf("requisito:caixas.referencia|") === 0
     }
-    function oferecerReferencia(r, janelinha, aoVoltar) {
+    function oferecerReferencia(r, janelinha, aoVoltar, comMotivo) {
         if (!ehReferenciaInconsistente(r))
             return false
         // B-5 da revisão: com uma guia já em andamento, não há segunda oferta; quem chamou mostra o erro.
@@ -539,9 +539,10 @@ ApplicationWindow {
             return false
         // B-3 da revisão: curto (o motivo completo já está na janelinha, em vermelho). N-6 da re-revisão: sem
         // janelinha (o campo da compra, lançar a compra, desfazer cheque, desfazer fechamento de comissão), a
-        // primeira frase do motivo vem na oferta (qual registro e o que falta).
+        // primeira frase do motivo vem na oferta (qual registro e o que falta). S-1 da 2ª re-revisão: a janelinha
+        // que não mostra o erro (a conferência da compra) pede o motivo na oferta com `comMotivo`.
         let motivo = ""
-        if (!janelinha && typeof r.erro === "string" && r.erro !== "") {
+        if ((!janelinha || comMotivo) && typeof r.erro === "string" && r.erro !== "") {
             const fim = r.erro.indexOf(". ")
             motivo = (fim >= 0 ? r.erro.slice(0, fim + 1) : r.erro) + " "
         }

@@ -300,6 +300,10 @@ Painel {
             if (d.codigosLigados > 0)
                 msg += " " + d.codigosLigados + " códigos de fornecedor ligados às peças."
             painel.carregarPendencias()
+            // T-05 da 2ª re-revisão: a resposta é tratada depois (Qt.callLater), quando a marca da repetição (I6) já
+            // caiu; aqui ela vem da própria resposta.
+            if (r.repetida === true)
+                Api.repetidaAgora = true
             painel.janela.avisar(msg, "ok")
             painel.close()
             painel.importou()

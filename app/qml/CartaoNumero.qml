@@ -25,8 +25,12 @@ Rectangle {
     // VIS33-08 (7.2): cresce se o rótulo quebrar em duas linhas no celular.
     // I8 (VIS-C8-02, 15/11/2026): quem quer o cartão mais alto dá a altura mínima (e não fixa o `implicitHeight`):
     // fixar impedia o cartão de crescer, e a nota passava da borda de baixo quando o rótulo quebrava.
-    property real alturaMinima: Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72
-    implicitHeight: Math.max(alturaMinima, conteudoCartao.implicitHeight + 20)
+    // B-2 da revisão do VIS2: no computador, em qualquer largura de janela, quem dá a altura (o Resumo: 96 e 86) a tem
+    // FIXA, como antes do I8 (o conteúdo pede 90, e a 2ª fila do Resumo crescia 4 px); no celular, ela é só o mínimo,
+    // para o cartão crescer quando o rótulo quebra (o I8).
+    property real alturaDada: 0
+    property real alturaMinima: alturaDada > 0 ? alturaDada : (Tema.estreito && nota !== "" && !notaEmbaixo ? 88 : 72)
+    implicitHeight: !Tema.celular && alturaDada > 0 ? alturaDada : Math.max(alturaMinima, conteudoCartao.implicitHeight + 20)
     Layout.fillWidth: true
 
     ColumnLayout {

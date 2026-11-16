@@ -12,7 +12,22 @@ FocusScope {
     property bool buscou: false
     property string erroDias: ""
 
+    // A-1 da revisão do VIS2 (16/11/2026): no celular a busca fica dentro da lista (topoNaLista), e a lista, quando
+    // troca o modelo, dá o foco à 1ª linha: a busca perdia o foco a cada recarga (200 ms depois da tecla), e só 1 ou 2
+    // letras entravam. Se a busca tinha o foco, ele e o cursor voltam depois da troca (sem selecionar o texto).
     function carregar() {
+        const comFoco = busca.entrada.activeFocus
+        const cursor = busca.entrada.cursorPosition
+        carregarDados()
+        if (comFoco)
+            Qt.callLater(() => {
+                if (busca.entrada.activeFocus)
+                    return
+                busca.entrada.forceActiveFocus()
+                busca.entrada.cursorPosition = Math.min(cursor, busca.entrada.text.length)
+            })
+    }
+    function carregarDados() {
         const r = Api.chamar("estoque_parados", { texto: busca.texto })
         if (r.ok) {
             dados = r.dados
@@ -251,6 +266,9 @@ FocusScope {
         topo.parent = lista.contentItem
         topo.x = 0
         topo.width = Qt.binding(() => lista.width)
+        // B-1 da revisão do VIS2: dentro da lista, o topo seguia com a altura que o arranjo de fora lhe deu no começo,
+        // e não com a natural; os blocos se espalhavam e as pílulas passavam por cima da 1ª linha.
+        topo.height = Qt.binding(() => topo.implicitHeight)
         topo.y = Qt.binding(() => lista.headerItem ? lista.headerItem.y : 0)
         vazio.anchors.centerIn = undefined
         vazio.parent = topo

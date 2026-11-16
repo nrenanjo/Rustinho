@@ -11,7 +11,7 @@ conferências são estritas (✔/✘), para FALHAR na versão congelada e passar
   M-2  9c pelo clique real: a linha do caixa destacado fica à vista (o botão dela aparece sem rolar).
   M-5  9b: o Esc no Histórico aberto por "Ver no histórico" volta às Duplicatas.
   M-7  caso 7 na conferência da compra: a senha do gerente não volta preenchida da guia (pede de novo); o
-       protocolo digitado fica; nada é registrado sozinho.
+       protocolo digitado fica; nada é registrado sozinho. S-1 (2ª re-revisão): a oferta diz o motivo.
   B-1  caso 4: Etiquetas › "Ver duplicatas" chega com a linha do código destacada. O roteiro não enxerga o
        destaque nos textos; ele mede a foto: com o destaque, o resto da tela escurece (o véu) e a linha do código
        não; seis segundos depois, o véu sai.
@@ -287,6 +287,10 @@ def m7(placar, fotos):
             xdo("key", "Return")
             ok("M-7: o registro inconsistente oferece Ver o registro", r.esperar(lambda: r.tem_igual("Ver o registro")),
                r.foto("-2"))
+            # S-1 (2ª re-revisão): a janelinha da conferência não mostra o erro; a oferta traz o motivo (qual
+            # registro e o que falta).
+            ok("M-7 (S-1): a oferta diz o motivo (o registro que ficou inconsistente)", r.tem("ficou inconsistente"),
+               r.foto("-2b"))
             r.clicar("Ver o registro")
             ok("M-7: a guia leva a Caixas da loja", r.esperar(lambda: r.tem(TITULO_7)), r.foto("-3"))
             xdo("key", "Escape")  # desiste da guia: volta à compra

@@ -43,11 +43,10 @@ FocusScope {
         } else {
             filtroRegistro = null
             // N-9 da re-revisão: o filtro de texto digitado antes continua valendo (M-5); o aviso diz isso, em vez
-            // de "todo o histórico" com uma lista filtrada.
-            const filtro = filtroAuditoria.texto.trim()
+            // de "todo o histórico" com uma lista filtrada. S-2 da 2ª re-revisão: aqui fica só o começo; o fim
+            // ("com o filtro …" ou "todo o histórico") acompanha o campo do filtro, na Nota do Histórico.
             avisoHistorico = "Não há evento só deste registro (" + c.oQue + ") entre os " + auditoria.length
                              + " mais recentes: mostrando "
-                             + (filtro !== "" ? "o histórico com o filtro \u201c" + filtro + "\u201d." : "todo o histórico.")
         }
     }
     property bool historicoVeioDeDuplicatas: false
@@ -2351,7 +2350,10 @@ FocusScope {
                     Nota {
                         visible: !!tela.filtroRegistro || tela.avisoHistorico !== ""
                         text: tela.filtroRegistro ? "Só o que aconteceu com este registro (" + tela.filtroRegistro.nome + "), entre os "
-                                                    + tela.auditoria.length + " eventos mais recentes." : tela.avisoHistorico
+                                                    + tela.auditoria.length + " eventos mais recentes."
+                                                  : tela.avisoHistorico + (filtroAuditoria.texto.trim() !== ""
+                                                        ? "o histórico com o filtro “" + filtroAuditoria.texto.trim() + "”."
+                                                        : "todo o histórico.")
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }

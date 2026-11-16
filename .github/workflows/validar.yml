@@ -747,6 +747,10 @@ jobs:
       - name: Emulador
         id: emulador
         continue-on-error: ${{ !matrix.bloqueia }}
+        # CI-3 (16/11/2026): o passo tem limite próprio, abaixo do limite do job (60 min). Se o emulador travar, o passo
+        # falha: o de 32 bits continua "não bloqueia" (continue-on-error), em vez de o job inteiro ser cancelado. O de
+        # 64 bits levou 21 min (job inteiro) na 2ª CI de ensaio.
+        timeout-minutes: 40
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         env:
           CURTO: ${{ matrix.curto }}

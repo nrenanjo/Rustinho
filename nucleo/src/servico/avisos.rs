@@ -1350,9 +1350,23 @@ mod comandos {
 
     fn aviso_esconder(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Value = ler(dados)?;
+        let id = d["id"].as_str().unwrap_or_default();
         // A categoria da notificação que esta pessoa está vendo decide.
         let atuais = avisos_de(p)?;
-        crate::avisos::esconder(p.conn, &atuais, d["id"].as_str().unwrap_or_default())?;
+        // T-04 da 2ª re-revisão do QT-1: a linha do S2 arrastada para o lado vale como o "Entendi" desta pessoa
+        // (a marca de "escondida" do computador não era lida por quem monta a linha, e ela voltava na entrada
+        // seguinte). Ela só aparece quando as quedas não deixaram nada a conferir, então nada que peça atenção some.
+        if id.starts_with(crate::avisos::QUEDA_SEM_PENDENCIA) {
+            if !atuais.iter().any(|a| a.id == id) {
+                return Err(crate::erro::Erro::validacao("Esta notificação já não está aparecendo."));
+            }
+            let tx = p.conn.transaction()?;
+            let atual = crate::operacoes::abertura_atual(&tx)?;
+            crate::operacoes::fechamento_visto(&tx, p.usuario_id, atual)?;
+            tx.commit()?;
+            return Ok(json!(true));
+        }
+        crate::avisos::esconder(p.conn, &atuais, id)?;
         Ok(json!(true))
     }
 

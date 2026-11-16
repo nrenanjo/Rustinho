@@ -36,17 +36,22 @@ Item {
     // Quantas colunas o maior rótulo ocupa (1 quando cabe na própria coluna).
     readonly property int ocupa: coluna > 0 ? Math.max(1, Math.ceil((larguraRotulo + 4) / coluna)) : 1
     readonly property int passo: Math.max(rotuloCada, ocupa)
-    readonly property int destacada: {
+    // B-5 da revisão do VIS2: com várias colunas destacadas (horas empatadas no pico), os vizinhos de CADA uma saem, e
+    // duas destacadas que se cruzariam não aparecem juntas (fica a primeira). Onde o rótulo cabe na coluna (ocupa 1),
+    // nada muda.
+    readonly property var destaquesVisiveis: {
+        const v = []
         for (let i = 0; i < barras.length; i++)
-            if (barras[i].destaque)
-                return i
-        return -1
+            if (barras[i].destaque && (v.length === 0 || i - v[v.length - 1] >= ocupa))
+                v.push(i)
+        return v
     }
     function mostraRotulo(i) {
         if (barras[i].destaque)
-            return true
-        if (destacada >= 0 && Math.abs(i - destacada) < ocupa)
-            return false
+            return destaquesVisiveis.indexOf(i) >= 0
+        for (let k = 0; k < destaquesVisiveis.length; k++)
+            if (Math.abs(i - destaquesVisiveis[k]) < ocupa)
+                return false
         return i % passo === 0
     }
 

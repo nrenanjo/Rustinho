@@ -22,6 +22,13 @@ PACOTE=io.github.nrenanjo.rustinho
 ATIVIDADE=$PACOTE/org.qtproject.qt.android.bindings.QtActivity
 
 falhou() { echo "FALHA: $*" | tee -a fotos/falhas.txt; }
+
+# CI-3 (16/11/2026, CI de ensaio do G1b): cada chamada do adb tem um limite de tempo. Na 2ª CI de ensaio, o emulador
+# de 32 bits (a tela cinza do PEND-18) parou de responder depois da primeira falha, e o roteiro ficou preso até o
+# limite de 60 min do job, que foi cancelado (o cancelamento reprovou a CI, embora o 32 bits não bloqueie). Com o
+# limite, a chamada presa falha e o roteiro segue até o fim, como na 1ª CI. 300 s cobre a instalação do APK no
+# emulador lento. O `timeout` roda o adb de verdade (o executável), não esta função.
+adb() { timeout "${LIMITE_ADB:-300}" adb "$@"; }
 foto() { sleep "${2:-4}"; adb exec-out screencap -p > "fotos/$1.png" || falhou "foto $1"; }
 tecla() { adb shell input keyevent "$1"; sleep 1; }
 texto() { adb shell input text "$1"; sleep 1; }

@@ -155,7 +155,8 @@ FocusScope {
             // M-7 da revisão: a senha do gerente não fica guardada na janelinha durante a guia (na volta, pede de
             // novo).
             senhaConferencia.texto = ""
-            if (!janela.oferecerReferencia(r, conferencia))
+            // S-1 da 2ª re-revisão: a janelinha da conferência não tem onde mostrar o erro; o motivo vai na oferta.
+            if (!janela.oferecerReferencia(r, conferencia, undefined, true))
                 janela.avisar(r.erro, "erro")
         } else {
             janela.avisar(r.erro, "erro")

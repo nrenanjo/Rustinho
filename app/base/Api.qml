@@ -24,8 +24,15 @@ QtObject {
             const p = _pendentes[pedido]
             delete _pendentes[pedido]
             esperaTerminou()
-            if (p && p.depois)
-                p.depois(interpretar(p.comando, resposta))
+            // Como antes: só interpreta quando há quem use a resposta (o gravarDemorado sempre usava).
+            if (!p || (!p.depois && !p.comChave))
+                return
+            const r = interpretar(p.comando, resposta)
+            // T-01/T-05 da 2ª re-revisão: a gravação com a chave da operação, venha de onde vier.
+            if (p.comChave)
+                _depoisDeGravar(r)
+            if (p.depois)
+                p.depois(r)
         }
         function onConsultado(canal, pedido, resposta) {
             const p = _consultas[canal]
@@ -66,7 +73,7 @@ QtObject {
                 depois({ ok: false, erro: "Aguarde: o Rustinho ainda está terminando a operação anterior.", campo: "ocupado" })
             return
         }
-        _pendentes[n] = { comando: comando, depois: depois }
+        _pendentes[n] = { comando: comando, depois: depois, comChave: !!(dados && dados.chaveOperacao) }
         esperaComecou(texto || "Espere um pouco…")
     }
 
@@ -79,22 +86,22 @@ QtObject {
     // chave só para esta chamada (ações sobre um registro que já existe, como
     // estornar ou cancelar, que o núcleo não deixa fazer duas vezes).
     function gravar(comando, dados, chave) {
-        const r = chamar(comando, comChave(dados, chave))
-        if (r.ok)
-            _entregaPendente = true
-        _marcarRepetida(r)
-        return r
+        return chamar(comando, comChave(dados, chave))
     }
 
     // O mesmo, para um comando demorado.
     function gravarDemorado(comando, dados, texto, depois, chave) {
-        chamarDemorado(comando, comChave(dados, chave), texto, r => {
-            if (r.ok)
-                _entregaPendente = true
-            _marcarRepetida(r)
-            if (depois)
-                depois(r)
-        })
+        chamarDemorado(comando, comChave(dados, chave), texto, depois)
+    }
+
+    // T-01 e T-05 da 2ª re-revisão do QT-1 (16/11/2026): a confirmação de entrega (S1) e a marca da repetição (I6)
+    // num lugar só, por onde passa toda chamada com a chave da operação: o gravar, o gravarDemorado, o
+    // chamarGerente e a repetição com a senha do gerente (antes, só o gravar e o gravarDemorado; 27 comandos do
+    // gerente ficavam sem confirmação e viravam "Gravada" no aviso depois de uma queda).
+    function _depoisDeGravar(r) {
+        if (r.ok)
+            _entregaPendente = true
+        _marcarRepetida(r)
     }
 
     // I6 (decisão de 15/11/2026): a mesma operação repetida (duplo clique, Enter repetido) volta "ok" com a marca
@@ -132,7 +139,10 @@ QtObject {
 
     function chamar(comando, dados) {
         const texto = Sistema.chamar(comando, JSON.stringify(dados === undefined ? {} : dados))
-        return interpretar(comando, texto)
+        const r = interpretar(comando, texto)
+        if (dados && dados.chaveOperacao)
+            _depoisDeGravar(r)
+        return r
     }
 
     function interpretar(comando, texto) {
