@@ -62,7 +62,10 @@ CASOS = {
       VALUES ('conta_receber', '["cr-alt-1"]', 'pessoa', '["sumiu"]', 'inconsistente', '2026-01-01T00:00:00Z', 'log');""",
     # R8 da revisão da T040: uma recusa comum (sem a janela "Registro inconsistente" por cima, que no "erro longo"
     # pega o segundo Enter e bloqueia a rolagem): sem caixa aberto, "Abra o caixa antes de receber.", duas vezes.
-    "caixa fechado": conta("cr-alt-1", "Caderno", 5000),
+    # A loja de ensaio já vem com um caixa aberto (1ª rodada, v4: o recebimento deu certo): fecha todos.
+    "caixa fechado": conta("cr-alt-1", "Caderno", 5000) + """
+    UPDATE caixa_sessao SET fechado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), contado = 0, esperado = 0
+     WHERE fechado_em IS NULL;""",
     "muitas parcelas": SQL_BASE + "".join(conta(f"cr-alt-{i}", f"Venda a prazo {i:02d}", 1000 + 100 * i, -i)
                                           for i in range(1, 13)),
 }
