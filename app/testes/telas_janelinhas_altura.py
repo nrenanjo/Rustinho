@@ -85,8 +85,38 @@ def rotulo_ret(r, rotulo):
     return achados
 
 
+def miolo_geo(r):
+    """O retângulo do miolo que rola na janelinha (GEO:rolagemDoLancar / rolagemDoLancamento), se houver."""
+    for linha in alt.medidas(r):
+        for nome in ("GEO:rolagemDoLancar:", "GEO:rolagemDoLancamento:"):
+            if linha.startswith(nome):
+                return tuple(float(v) for v in linha[len(nome):].split(",")[:4])
+    return None
+
+
 def preencher(r, rotulo, texto):
-    """Toca no campo logo abaixo do rótulo (o da janelinha, desenhado por último) e troca o texto dele."""
+    """Toca no campo logo abaixo do rótulo (o da janelinha, desenhado por último) e troca o texto dele. Se a janelinha
+    tem miolo que rola e o campo está fora do recorte dele, rola o miolo até o campo aparecer (R6 da revisão da T040:
+    tocar fora do recorte mandava o texto para outro campo)."""
+    for _ in range(5):
+        rs = rotulo_ret(r, rotulo)
+        m = miolo_geo(r)
+        if not rs or not m:
+            break
+        ly = rs[-1][1]
+        mx, my, mw, mh = m
+        if my <= ly and ly + 90 <= my + mh:
+            break
+        cx, cy = int(mx + mw / 2), int(my + mh / 2)
+        passo = int(min(mh * 0.6, max(40, abs(ly + 45 - cy)))) * (1 if ly + 45 > cy else -1)
+        xdo("mousemove", str(cx), str(cy))
+        xdo("mousedown", "1")
+        for i in range(1, 9):
+            xdo("mousemove", str(cx), str(cy - passo * i // 8))
+            time.sleep(0.03)
+        time.sleep(0.15)
+        xdo("mouseup", "1")
+        time.sleep(0.5)
     rs = rotulo_ret(r, rotulo)
     if not rs:
         raise RuntimeError(f"INSTRUMENTAÇÃO: o rótulo {rotulo!r} não está à vista")
@@ -129,6 +159,9 @@ def caso(placar, fotos, modelo, nome_j, j, nome_caso, nome_tam, celular, tamanho
             for rot, txt in j["campos"]:
                 preencher(r, rot, txt)
             time.sleep(1.0)
+            # R6: o caso só vale se a prévia mostrou as 12 parcelas (senão a medida seria da janelinha quase vazia)
+            if not ok(f"{rotulo}: a prévia mostra as 12 parcelas (o caso aconteceu)", any(t.strip().startswith("12ª") for _x, _y, t in r.textos()), r.foto("-p")):
+                return
         f = r.foto("-2")
         b = alt.botoes(r, "Lançar")
         if not ok(f"{rotulo}: a janelinha tem o botão Lançar", bool(b), f):

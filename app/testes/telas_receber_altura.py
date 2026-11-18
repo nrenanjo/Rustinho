@@ -152,6 +152,39 @@ def rolar_miolo(r, largura, altura, celular):
             time.sleep(0.4)
 
 
+def rolar_miolo_ao_topo(r):
+    """Leva o miolo da janelinha de volta ao começo (arrasta para baixo dentro dele, GEO:rolagemDoReceber), como a
+    pessoa que subiu para conferir o valor depois da recusa."""
+    area = None
+    for t in medidas(r):
+        if t.startswith("GEO:rolagemDoReceber:"):
+            area = tuple(int(v) for v in t.rsplit(":", 1)[1].split(","))
+    if area is None:
+        return
+    x, y, w, h = area
+    cx = x + w // 2
+    for _ in range(4):
+        y0, y1 = y + int(h * 0.15), y + int(h * 0.9)
+        xdo("mousemove", str(cx), str(y0))
+        xdo("mousedown", "1")
+        for i in range(1, 9):
+            xdo("mousemove", str(cx), str(y0 + (y1 - y0) * i // 8))
+            time.sleep(0.03)
+        time.sleep(0.15)
+        xdo("mouseup", "1")
+        time.sleep(0.4)
+
+
+def tentar_receber(r, largura, altura, celular):
+    """Tenta receber: no celular, o toque no botão (se estiver à vista); senão, o Enter."""
+    b = botoes(r, "Receber")
+    if celular and b and dentro(b[-1], largura, altura):
+        x, y, w, h = b[-1]
+        xdo("mousemove", str(int(x + w / 2)), str(int(y + h / 2)), "click", "1")
+    else:
+        xdo("key", "Return")
+
+
 def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
     ok = placar.ok
     largura, altura = tamanho
@@ -175,12 +208,7 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
         if nome_caso == "erro longo":
             # Tenta receber (o Enter, como a pessoa faz no teclado; no celular o toque no botão, se ele estiver à vista):
             # a conta é de registro inconsistente, e a janelinha mostra a mensagem longa.
-            b = botoes(r, "Receber")
-            if celular and b and dentro(b[-1], largura, altura):
-                x, y, w, h = b[-1]
-                xdo("mousemove", str(int(x + w / 2)), str(int(y + h / 2)), "click", "1")
-            else:
-                xdo("key", "Return")
+            tentar_receber(r, largura, altura, celular)
             r.esperar(lambda: r.tem("inconsistente"), 8)
             time.sleep(0.8)
         f = r.foto("-2")
@@ -205,6 +233,17 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
             # da dobra do miolo. Medido logo depois da recusa, antes de qualquer rolagem do roteiro.
             ok(f"{rotulo}: a mensagem do recebimento recusado fica à vista, dentro do miolo", erro_visto[0],
                f"{f} {erro_visto[1]}")
+            # R8 da revisão da T040: a pessoa sobe o miolo e tenta de novo; a MESMA recusa (o texto não muda) também
+            # tem de levar o miolo até a mensagem.
+            rolar_miolo_ao_topo(r)
+            escondida = not erro_a_vista(r)[0]
+            f3 = r.foto("-4")
+            tentar_receber(r, largura, altura, celular)
+            time.sleep(1.5)
+            de_novo = erro_a_vista(r)
+            f4 = r.foto("-5")
+            ok(f"{rotulo}: na segunda tentativa (mesma recusa), a mensagem volta à vista", de_novo[0],
+               f"{f4} {de_novo[1]}; depois de subir o miolo a mensagem estava {'escondida' if escondida else 'ainda à vista'} ({f3})")
     finally:
         r.fechar()
         shutil.rmtree(pasta, ignore_errors=True)

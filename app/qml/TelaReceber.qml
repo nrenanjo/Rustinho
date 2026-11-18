@@ -115,8 +115,9 @@ FocusScope {
         anchors.fill: parent
         clip: true
         contentWidth: width
-        // No celular, o pé fica fora da faixa do gesto do Android (32 px): o Receber tudo nunca cai nela.
-        readonly property real pe: Tema.celular ? 32 : Tema.margem
+        // O pé de sempre (Tema.margem). A janela do app fica entre as barras do sistema no Android (alvo SDK 34, sem
+        // desenho por baixo delas): a faixa do gesto fica fora da janela (T041, classificado em 18/11).
+        readonly property real pe: Tema.margem
         contentHeight: corpoDaTela.y + corpoDaTela.height + pe
         interactive: contentHeight > height + 1
         boundsBehavior: Flickable.StopAtBounds
@@ -220,6 +221,11 @@ FocusScope {
                         id: lista
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        // T040 (R1 da revisão): pelo menos um cliente inteiro (64) e o começo do seguinte, para a tela
+                        // rolar em vez de espremer a lista a 0 px no celular deitado sem cliente aberto.
+                        Layout.minimumHeight: 90
+                        // A geometria da lista para os roteiros (GEO:listaDeClientes).
+                        objectName: "listaDeClientes"
                         clip: true
                         spacing: 6
                         model: tela.painel ? tela.painel.clientes : []
@@ -364,6 +370,9 @@ FocusScope {
 
                         ListView {
                             id: listaParcelas
+                            // A geometria da lista para os roteiros (GEO:listaDeParcelas): a parcela "à vista" é a que
+                            // está dentro do recorte dela (R2 da revisão da T040).
+                            objectName: "listaDeParcelas"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             // T040: pelo menos uma parcela inteira à vista (58 px) e o começo da seguinte.
@@ -523,6 +532,9 @@ FocusScope {
             const r = Api.gravar("receber_baixar", entrada(), chave)
             if (!r.ok) {
                 erro = r.erro
+                // R8 da revisão da T040: a mesma recusa de novo (o texto não muda) também leva o miolo até a mensagem.
+                rolagemPagar.irAoFim = true
+                Qt.callLater(rolagemPagar.mostrarFim)
                 // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
                 tela.janela.oferecerReferencia(r, pagar)
                 return
