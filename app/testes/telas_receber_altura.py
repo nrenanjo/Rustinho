@@ -9,8 +9,9 @@ não fazia.
 Para cada caso e cada tamanho, abre a tela de receber do Zé da Oficina, pede "Receber tudo" e confere:
   - o botão "Receber" da janelinha está inteiro dentro da janela, ou fica, depois de rolar o miolo da janelinha;
   - no caso do erro longo, a mensagem do recebimento recusado fica à vista, dentro do miolo que rola.
-Casos: normal (uma conta); erro longo (a conta de registro inconsistente, depois de tentar receber); muitas parcelas
-(12 contas). Tamanhos: celular 360×780 e 320×640, celular deitado 780×360, computador 1280×760 e 1024×600.
+Casos: normal (uma conta); erro longo (a conta de registro inconsistente, depois de tentar receber); caixa fechado
+(sem caixa aberto: a recusa comum, duas vezes, com o miolo levado ao começo entre elas: R8 da revisão da T040); muitas
+parcelas (12 contas). Tamanhos: celular 360×780 e 320×640, celular deitado 780×360, computador 1280×760 e 1024×600.
 Mede pelo que o programa informa (--medir-toque: as linhas TOQUE: com o retângulo de cada botão).
 
     RUSTINHO_TELA=:68 python3 app/testes/telas_receber_altura.py [pasta das fotos]
@@ -59,6 +60,9 @@ CASOS = {
     "erro longo": SQL_BASE + conta("cr-alt-1", "Caderno", 5000) + """
     INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
       VALUES ('conta_receber', '["cr-alt-1"]', 'pessoa', '["sumiu"]', 'inconsistente', '2026-01-01T00:00:00Z', 'log');""",
+    # R8 da revisão da T040: uma recusa comum (sem a janela "Registro inconsistente" por cima, que no "erro longo"
+    # pega o segundo Enter e bloqueia a rolagem): sem caixa aberto, "Abra o caixa antes de receber.", duas vezes.
+    "caixa fechado": conta("cr-alt-1", "Caderno", 5000),
     "muitas parcelas": SQL_BASE + "".join(conta(f"cr-alt-{i}", f"Venda a prazo {i:02d}", 1000 + 100 * i, -i)
                                           for i in range(1, 13)),
 }
@@ -108,8 +112,12 @@ def botoes(r, nome):
     return achados
 
 
-def erro_a_vista(r):
-    """A mensagem longa do recebimento recusado está inteira dentro do miolo que rola (GEO:rolagemDoReceber)?
+MENSAGEM = {"erro longo": "Este registro (contas a receber) ficou inconsistente",
+            "caixa fechado": "Abra o caixa antes de receber"}
+
+
+def erro_a_vista(r, trecho=MENSAGEM["erro longo"]):
+    """A mensagem do recebimento recusado está inteira dentro do miolo que rola (GEO:rolagemDoReceber)?
     Devolve (sim ou não, detalhe)."""
     m = medidas(r)
     area = None
@@ -119,7 +127,7 @@ def erro_a_vista(r):
             area = (y, y + h)
     texto = None
     for t in m:
-        if t.startswith("RET:") and "Este registro (contas a receber) ficou inconsistente" in t:
+        if t.startswith("RET:") and trecho in t:
             v = [float(a) for a in t[4:].split("|", 1)[0].split(",")]
             texto = (v[1], v[1] + v[3])
     if area is None or texto is None:
@@ -205,14 +213,14 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
         if not ok(f"{rotulo}: a janelinha abriu", r.esperar(lambda: r.tem("Receber de"), 10), r.foto("-1")):
             return
         time.sleep(0.8)
-        if nome_caso == "erro longo":
+        if nome_caso in MENSAGEM:
             # Tenta receber (o Enter, como a pessoa faz no teclado; no celular o toque no botão, se ele estiver à vista):
-            # a conta é de registro inconsistente, e a janelinha mostra a mensagem longa.
+            # a conta é de registro inconsistente (a mensagem longa) ou não há caixa aberto.
             tentar_receber(r, largura, altura, celular)
-            r.esperar(lambda: r.tem("inconsistente"), 8)
+            r.esperar(lambda: r.tem(MENSAGEM[nome_caso][:20]), 8)
             time.sleep(0.8)
         f = r.foto("-2")
-        erro_visto = erro_a_vista(r) if nome_caso == "erro longo" else (True, "")
+        erro_visto = erro_a_vista(r, MENSAGEM[nome_caso]) if nome_caso in MENSAGEM else (True, "")
         b = botoes(r, "Receber")
         if not ok(f"{rotulo}: a janelinha tem o botão Receber", bool(b), f):
             return
@@ -228,19 +236,21 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
         ok(f"{rotulo}: o botão Receber fica inteiro dentro da janela (à vista ou rolando o miolo da janelinha)", a_vista,
            f"{f2} janela {largura}×{altura}; botão {tuple(round(v) for v in ret)}"
            + ("" if rolou is None else f" → depois de rolar {tuple(round(v) for v in rolou)}"))
-        if nome_caso == "erro longo":
+        if nome_caso in MENSAGEM:
             # A mensagem do recebimento recusado tem de estar à vista (o miolo rolou até ela), e não escondida abaixo
             # da dobra do miolo. Medido logo depois da recusa, antes de qualquer rolagem do roteiro.
             ok(f"{rotulo}: a mensagem do recebimento recusado fica à vista, dentro do miolo", erro_visto[0],
                f"{f} {erro_visto[1]}")
+        if nome_caso == "caixa fechado":
             # R8 da revisão da T040: a pessoa sobe o miolo e tenta de novo; a MESMA recusa (o texto não muda) também
-            # tem de levar o miolo até a mensagem.
+            # tem de levar o miolo até a mensagem. (No "erro longo" não: a janela "Registro inconsistente" fica por
+            # cima, pega o Enter e bloqueia a rolagem; ela mesma avisa.)
             rolar_miolo_ao_topo(r)
-            escondida = not erro_a_vista(r)[0]
+            escondida = not erro_a_vista(r, MENSAGEM[nome_caso])[0]
             f3 = r.foto("-4")
             tentar_receber(r, largura, altura, celular)
             time.sleep(1.5)
-            de_novo = erro_a_vista(r)
+            de_novo = erro_a_vista(r, MENSAGEM[nome_caso])
             f4 = r.foto("-5")
             ok(f"{rotulo}: na segunda tentativa (mesma recusa), a mensagem volta à vista", de_novo[0],
                f"{f4} {de_novo[1]}; depois de subir o miolo a mensagem estava {'escondida' if escondida else 'ainda à vista'} ({f3})")

@@ -6,14 +6,14 @@ a altura que sobra e rola sozinha) e a linha de baixo com "Receber tudo". Com po
 fica sem altura (nenhuma parcela à vista) e a linha de baixo passa da janela. Só MEDE; não muda nada no programa.
 
 Para cada caso e tamanho, abre a tela de receber do Zé da Oficina e confere, pelo que o programa informa:
-  - o botão "Receber tudo" está inteiro dentro da janela e acima da faixa de 30 pontos do pé (a do gesto do Android);
+  - o botão "Receber tudo" está inteiro dentro da janela (à vista ou rolando a tela, quando ela rola);
   - pelo menos uma parcela está à vista (o texto da conta, inteiro dentro da janela).
   (a parcela "à vista" é a que está dentro do recorte da lista: entre a linha "Todas em aberto" e o "Receber tudo" e,
    no programa que informa a GEO:listaDeParcelas, dentro dela; R2 da revisão da T040)
 Casos: normal (uma conta, "Caderno"); muitas parcelas (12 contas, "Venda a prazo NN"); e, antes deles, a tela aberta
 SEM cliente (um cliente à vista na lista "Quem deve", abaixo da busca; R1 da revisão da T040).
-A faixa de 30 pontos do pé: o app não é de borda a borda (targetSdk 34, showMaximized), então a barra de gestos do
-Android fica FORA da janela (T041). A faixa fica como folga de segurança, não como a barra de gestos.
+Sem faixa no pé: o app não é de borda a borda (alvo SDK 34, showMaximized), então a barra de gestos do Android fica
+FORA da janela (T041).
 
     RUSTINHO_TELA=:68 python3 telas_receber_tela_altura.py [pasta das fotos]      (rodar da raiz da árvore testada)
     RUSTINHO_CASOS_CELULAR=1   (os tamanhos de celular; sem ela, os de computador)
@@ -105,9 +105,11 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
             f = r.foto("-2")
         b = alt.botoes(r, "Receber tudo")
         ret = b[-1] if b else None
-        pe = 30 if celular else 0  # a faixa do gesto do Android só existe no celular
-        dentro = bool(ret) and alt.dentro(ret, largura, altura) and ret[1] + ret[3] <= altura - pe
-        ok(f"{rotulo}: o botão Receber tudo fica inteiro dentro da janela" + (", acima da faixa do pé" if celular else ""), dentro,
+        # T041 (18/11): a barra de gestos do Android fica FORA da janela do app (alvo SDK 34, sem desenho de borda a
+        # borda): o critério é o botão inteiro dentro da janela. A faixa de 30 px que havia aqui supunha o contrário (e
+        # levou ao pé de 32 px do 567178e, desfeito: R3 da revisão da T040).
+        dentro = bool(ret) and alt.dentro(ret, largura, altura)
+        ok(f"{rotulo}: o botão Receber tudo fica inteiro dentro da janela", dentro,
            f"{f} janela {largura}×{altura}; botão {None if ret is None else tuple(round(v) for v in ret)}")
         # R2 da revisão da T040: a parcela "à vista" é a que está DENTRO do recorte da lista: abaixo da linha de cima da
         # conta ("Todas em aberto") e acima do "Receber tudo". A linha RET do programa não sabe do recorte.
