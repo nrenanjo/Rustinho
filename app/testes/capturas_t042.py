@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""T042 (barras de pesquisa em cápsula): fotos de TODAS as barras de pesquisa, nos três temas.
+"""T042 (barras de pesquisa em cápsula): fotos de TODAS as barras de pesquisa, nos três temas. Não é roteiro da CI
+(só fotografa; o nome fica fora do padrão telas_*.py: R16 da 3ª conferência da T042).
 
 Usa a mesma loja de ensaio, o mesmo ambiente neutro e a mesma foto da janela de `telas_tema_0918.py`. Rodar com o
 programa de ANTES e com o de DEPOIS (prefixos diferentes) e comparar com `conferir_t042.py` (ferramenta, não roteiro: fora do padrão telas_*.py que a CI roda).
 
-    RUSTINHO_TELA=:68 RUSTINHO_PROGRAMA=<binário> RUSTINHO_TEMA_PREFIXO=antes python3 app/testes/telas_t042_capturas.py <pasta>
+    RUSTINHO_TELA=:68 RUSTINHO_PROGRAMA=<binário> RUSTINHO_TEMA_PREFIXO=antes python3 app/testes/capturas_t042.py <pasta>
     RUSTINHO_T042_CELULAR=1 ...   o celular: --celular (toque de 48 dp) numa janela de telefone de 360x780 (tela estreita:
                                   margem de 14 px, halo de 14 px), como o POCO C85 em pé
 
@@ -128,10 +129,21 @@ def capturas(fotos, modelo):
                     time.sleep(1.5)
                 for b in botao or ():
                     if b.startswith("@digitar:"):
-                        base.xdo("type", "--delay", "40", b.split(":", 1)[1])
+                        texto = b.split(":", 1)[1]
+                        if CELULAR:
+                            # R15 da 3ª conferência: no celular o campo não pega o foco sozinho (podeFocar exige o
+                            # teclado aberto): a pessoa toca na barra antes de digitar.
+                            g = geo_da_barra(r)
+                            if g:
+                                wx, wy, _w, _h = tema.janela_do_rustinho()
+                                base.xdo("mousemove", str(int(wx + g[0] + g[2] / 2)), str(int(wy + g[1] + g[3] / 2)), "click", "1")
+                                time.sleep(0.8)
+                        base.xdo("type", "--delay", "40", texto)
                         time.sleep(0.6)
                         base.xdo("key", "ctrl+a")
                         time.sleep(0.6)
+                        if not any(texto in txt for _x, _y, txt in r.textos()):
+                            faltou.append(f"{nome_tema}-{nome}: o texto digitado não apareceu na barra")
                         continue
                     if not r.clicar(b):
                         faltou.append(f"{nome_tema}-{nome}: o botão {b!r} não apareceu")
