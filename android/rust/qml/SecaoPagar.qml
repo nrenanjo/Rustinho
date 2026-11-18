@@ -183,6 +183,7 @@ FocusScope {
             lVencimento.texto = ""
             lCompetencia.texto = ""
             previa = []
+            rolagemLancamento.contentY = 0
             open()
             lDescricao.focar()
         }
@@ -222,125 +223,149 @@ FocusScope {
 
         contentItem: ColumnLayout {
             spacing: 12
-            Titulo { text: "Lançar conta a pagar"; font.pixelSize: 32; Layout.fillWidth: true }
-            Campo {
-                id: lDescricao
-                rotulo: "Do que é"
-                dica: "Ex.: aluguel de outubro, energia, boleto da distribuidora"
-                maximo: 80
+            // T040 (BUG-20261117-DXN3, padrão H06, o mesmo da janelinha de receber): o miolo rola quando a janelinha
+            // não cabe na janela (celular, celular deitado, muitas parcelas na prévia); a mensagem e o botão Lançar
+            // ficam sempre à vista, embaixo. Antes, o Lançar ficava abaixo da borda, sem rolagem que o trouxesse.
+            Flickable {
+                id: rolagemLancamento
+                // A geometria do miolo para os roteiros (GEO:rolagemDoLancamento).
+                objectName: "rolagemDoLancamento"
+                clip: true
+                contentWidth: width
+                contentHeight: mioloLancamento.implicitHeight
+                implicitWidth: mioloLancamento.implicitWidth
+                implicitHeight: mioloLancamento.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
                 Layout.fillWidth: true
-                onConfirmado: lValor.focar()
-            }
-            Linha {
-                spacing: 12
-                Layout.fillWidth: true
-                Selecao {
-                    id: lCategoria
-                    rotulo: "Categoria"
-                    modelo: secao.nomesCategorias()
-                    Layout.fillWidth: true
-                }
-                Campo {
-                    id: lDocumento
-                    rotulo: "Nº da nota ou boleto"
-                    dica: "opcional"
-                    maximo: 40
-                    Layout.preferredWidth: 200
-                }
-            }
-            Campo {
-                id: campoFornecedor
-                rotulo: "Fornecedor (opcional)"
-                dica: "Nome ou CNPJ"
-                Layout.fillWidth: true
-                onEditado: esperaFornecedor.restart()
-                onConfirmado: if (lancamento.achados.length > 0) linhasFornecedor.itemAt(0).escolher()
-            }
-            Repeater {
-                id: linhasFornecedor
-                model: lancamento.fornecedor ? [] : lancamento.achados
-                delegate: Rectangle {
-                    required property var modelData
-                    function escolher() {
-                        lancamento.fornecedor = modelData.id
-                        campoFornecedor.texto = modelData.nome
-                        lancamento.achados = []
-                        lValor.focar()
+                Layout.fillHeight: true
+                Layout.minimumHeight: Math.min(mioloLancamento.implicitHeight, 120)
+
+                ColumnLayout {
+                    id: mioloLancamento
+                    width: rolagemLancamento.width
+                    spacing: 12
+                    Titulo { text: "Lançar conta a pagar"; font.pixelSize: 32; Layout.fillWidth: true }
+                    Campo {
+                        id: lDescricao
+                        rotulo: "Do que é"
+                        dica: "Ex.: aluguel de outubro, energia, boleto da distribuidora"
+                        maximo: 80
+                        Layout.fillWidth: true
+                        onConfirmado: lValor.focar()
                     }
-                    Layout.fillWidth: true
-                    radius: Tema.raioCampo
-                    color: sobreF.hovered ? Tema.azul : Tema.vela(0.5)
-                    implicitHeight: 36
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: 12
-                        text: modelData.nome + (modelData.documento ? "  ·  " + Tema.sigilo(modelData.documento) : "")
-                        textFormat: Text.PlainText
-                        color: Tema.tinta
-                        font.family: Tema.texto
-                        font.pixelSize: 15
+                    Linha {
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Selecao {
+                            id: lCategoria
+                            rotulo: "Categoria"
+                            modelo: secao.nomesCategorias()
+                            Layout.fillWidth: true
+                        }
+                        Campo {
+                            id: lDocumento
+                            rotulo: "Nº da nota ou boleto"
+                            dica: "opcional"
+                            maximo: 40
+                            Layout.preferredWidth: 200
+                        }
                     }
-                    HoverHandler { id: sobreF; cursorShape: Qt.PointingHandCursor }
-                    TapHandler { onTapped: parent.escolher() }
-                }
-            }
-            Linha {
-                spacing: 12
-                Layout.fillWidth: true
-                Campo {
-                    id: lValor
-                    rotulo: "Valor total"
-                    prefixo: "R$"
-                    numerico: true
-                    maximo: 14
-                    Layout.fillWidth: true
-                    onEditado: lancamento.atualizar()
-                }
-                Campo {
-                    id: lParcelas
-                    rotulo: "Parcelas"
-                    sufixo: "×"
-                    numerico: true
-                    maximo: 2
-                    Layout.preferredWidth: 110
-                    onEditado: lancamento.atualizar()
-                }
-                Campo {
-                    id: lVencimento
-                    rotulo: "Vencimento"
-                    dica: "Vazio: hoje"
-                    maximo: 10
-                    Layout.preferredWidth: 160
-                    onEditado: lancamento.atualizar()
-                    onConfirmado: lCompetencia.focar()
-                }
-                Campo {
-                    id: lCompetencia
-                    rotulo: "Mês de referência"
-                    dica: "mm/aaaa"
-                    maximo: 7
-                    Layout.preferredWidth: 150
-                    onConfirmado: lancamento.salvar()
-                }
-            }
-            Nota {
-                text: "Mês de referência: o mês a que a conta se refere (o aluguel de outubro pago em novembro é de 10/aaaa). Vazio: o mês do vencimento. Serve para o resultado (DRE) do Painel."
-                font.pixelSize: 13
-                Layout.fillWidth: true
-            }
-            Flow {
-                spacing: 14
-                visible: lancamento.previa.length > 1
-                Layout.fillWidth: true
-                Repeater {
-                    model: lancamento.previa
-                    delegate: Text {
-                        required property var modelData
-                        text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
-                        textFormat: Text.PlainText
-                        color: Tema.tintaSuave
-                        font.family: Tema.texto
-                        font.pixelSize: 14
+                    Campo {
+                        id: campoFornecedor
+                        rotulo: "Fornecedor (opcional)"
+                        dica: "Nome ou CNPJ"
+                        Layout.fillWidth: true
+                        onEditado: esperaFornecedor.restart()
+                        onConfirmado: if (lancamento.achados.length > 0) linhasFornecedor.itemAt(0).escolher()
+                    }
+                    Repeater {
+                        id: linhasFornecedor
+                        model: lancamento.fornecedor ? [] : lancamento.achados
+                        delegate: Rectangle {
+                            required property var modelData
+                            function escolher() {
+                                lancamento.fornecedor = modelData.id
+                                campoFornecedor.texto = modelData.nome
+                                lancamento.achados = []
+                                lValor.focar()
+                            }
+                            Layout.fillWidth: true
+                            radius: Tema.raioCampo
+                            color: sobreF.hovered ? Tema.azul : Tema.vela(0.5)
+                            implicitHeight: 36
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: 12
+                                text: modelData.nome + (modelData.documento ? "  ·  " + Tema.sigilo(modelData.documento) : "")
+                                textFormat: Text.PlainText
+                                color: Tema.tinta
+                                font.family: Tema.texto
+                                font.pixelSize: 15
+                            }
+                            HoverHandler { id: sobreF; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: parent.escolher() }
+                        }
+                    }
+                    Linha {
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            id: lValor
+                            rotulo: "Valor total"
+                            prefixo: "R$"
+                            numerico: true
+                            maximo: 14
+                            Layout.fillWidth: true
+                            onEditado: lancamento.atualizar()
+                        }
+                        Campo {
+                            id: lParcelas
+                            rotulo: "Parcelas"
+                            sufixo: "×"
+                            numerico: true
+                            maximo: 2
+                            Layout.preferredWidth: 110
+                            onEditado: lancamento.atualizar()
+                        }
+                        Campo {
+                            id: lVencimento
+                            rotulo: "Vencimento"
+                            dica: "Vazio: hoje"
+                            maximo: 10
+                            Layout.preferredWidth: 160
+                            onEditado: lancamento.atualizar()
+                            onConfirmado: lCompetencia.focar()
+                        }
+                        Campo {
+                            id: lCompetencia
+                            rotulo: "Mês de referência"
+                            dica: "mm/aaaa"
+                            maximo: 7
+                            Layout.preferredWidth: 150
+                            onConfirmado: lancamento.salvar()
+                        }
+                    }
+                    Nota {
+                        text: "Mês de referência: o mês a que a conta se refere (o aluguel de outubro pago em novembro é de 10/aaaa). Vazio: o mês do vencimento. Serve para o resultado (DRE) do Painel."
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
+                    Flow {
+                        spacing: 14
+                        visible: lancamento.previa.length > 1
+                        Layout.fillWidth: true
+                        Repeater {
+                            model: lancamento.previa
+                            delegate: Text {
+                                required property var modelData
+                                text: modelData.numero + "ª  " + modelData.vencimento + "  R$ " + modelData.valor
+                                textFormat: Text.PlainText
+                                color: Tema.tintaSuave
+                                font.family: Tema.texto
+                                font.pixelSize: 14
+                            }
+                        }
                     }
                 }
             }
