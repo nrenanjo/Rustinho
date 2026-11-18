@@ -53,7 +53,12 @@ ColumnLayout {
     // ícones brancos e o halo magenta amplo (as cores em Tema.busca...). Os
     // campos de formulário continuam como estão.
     readonly property bool busca: icone === "busca" || colarCopiar
-    readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : busca ? Tema.buscaFundo : Tema.papel
+    readonly property color corDoCampo: busca ? Tema.buscaFundo : somenteLeitura ? Tema.campoFixo : Tema.papel
+    // Na barra de pesquisa (escura nos três temas), erro, validado, prefixo e sufixo usam as cores claras (T042);
+    // nos campos de formulário, as de sempre.
+    readonly property color corDeErro: busca ? Tema.roxoVermelhoClaro : Tema.vermelhoNo(corDoCampo)
+    readonly property color corDeValido: busca ? Tema.roxoVerdeClaro : Tema.verdeEscuroNo(corDoCampo)
+    readonly property color corApagadaDentro: busca ? Tema.buscaDica : Tema.apagadoNo(corDoCampo)
     // O halo da barra de pesquisa: camadas de cápsulas magenta, cada uma um
     // pouco maior e mais transparente, que somadas fazem a luz cair aos poucos
     // do contorno até Tema.buscaAlcance, como a referência (Tema.buscaLuzEm).
@@ -62,9 +67,9 @@ ColumnLayout {
     readonly property int camadasDoHalo: 30
     // Com o foco, o halo fica mais forte (o foco continua visível).
     readonly property real forcaDoHalo: estado === "focado" ? 1 : 0.8
-    readonly property color corDoHalo: estado === "invalido" ? Tema.vermelhoNo(corDoCampo) : Tema.buscaLuz
+    readonly property color corDoHalo: estado === "invalido" ? corDeErro : Tema.buscaLuz
     // A luz por dentro do contorno é a do próprio contorno.
-    readonly property color corDoContorno: estado === "invalido" ? Tema.vermelhoNo(corDoCampo) : Tema.buscaBorda
+    readonly property color corDoContorno: estado === "invalido" ? corDeErro : Tema.buscaBorda
     function _haloAlvo(d) { return Math.min(0.97, forcaDoHalo * Tema.buscaLuzEm(d)) }
     // Transparência da camada i (0 = a de fora): a soma das camadas que cobrem
     // a faixa da camada i dá _haloAlvo no meio da faixa.
@@ -373,9 +378,9 @@ ColumnLayout {
                               : campo.estado === "normal" || campo.estado === "preenchido" || campo.estado === "desabilitado" ? 1 : 2
                 border.color: {
                     switch (campo.estado) {
-                    case "invalido": return Tema.vermelhoNo(campo.corDoCampo)
+                    case "invalido": return campo.corDeErro
                     case "focado": return campo.busca ? Tema.buscaBorda : Tema.foco
-                    case "valido": return Tema.verdeEscuroNo(campo.corDoCampo)
+                    case "valido": return campo.corDeValido
                     }
                     if (campo.busca)
                         return Tema.buscaBorda
@@ -415,7 +420,7 @@ ColumnLayout {
                      && !campo.colarCopiar
             nome: "check"
             tamanho: 18
-            cor: Tema.verdeEscuroNo(campo.corDoCampo)
+            cor: campo.corDeValido
             anchors.right: parent.right
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
@@ -456,7 +461,7 @@ ColumnLayout {
             width: 40
             height: 40
             radius: 20
-            color: toqueCamera.pressed ? Tema.verde : "transparent"
+            color: toqueCamera.pressed ? (campo.busca ? Qt.rgba(1, 1, 1, 0.18) : Tema.verde) : "transparent"
             anchors.right: parent.right
             anchors.rightMargin: 6 + campo.larguraCopiar
             anchors.verticalCenter: parent.verticalCenter
@@ -505,7 +510,7 @@ ColumnLayout {
             anchors.left: parent.left
             anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagadoNo(campo.corDoCampo)
+            color: campo.corApagadaDentro
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }
@@ -518,7 +523,7 @@ ColumnLayout {
             anchors.rightMargin: 12 + campo.larguraCopiar + campo.larguraBotao
                                  + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
             anchors.verticalCenter: parent.verticalCenter
-            color: Tema.apagadoNo(campo.corDoCampo)
+            color: campo.corApagadaDentro
             font.family: Tema.texto
             font.pixelSize: campo.tamanhoFonte - 2
         }

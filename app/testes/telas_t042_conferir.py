@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """T042 (barras de pesquisa em cápsula): confere as fotos de `telas_t042_capturas.py`.
 
-A posição de cada barra vem do próprio programa (linhas GEO:campoDeBusca / GEO:buscaDaInicio do registro da foto).
+A posição de cada barra vem do próprio programa (linhas GEO:campoDeBusca / GEO:buscaDaInicio da ÚLTIMA leitura da tela
+no registro da foto). Na foto da janelinha "Qual é a peça?", só a barra da janelinha (a de trás fica sob o véu).
 
-  estilo PASTA PREFIXO   em cada foto PREFIXO-<tema>-<tela>.png, a barra de pesquisa tem de estar como a referência
-                         definitiva do dono (17/11/2026, 16h50):
-                           E1. o fundo da barra (a cor mais comum no miolo dela) é o cinza-escuro #3F3B44 (±10), nos três temas;
-                           E2. as pontas são de cápsula: o ponto a 15% da altura, perto do canto do retângulo, fica FORA da
-                               barra (não é o fundo dela);
-                           E3. o halo magenta: a 12 px à esquerda da barra, na altura do meio, a luz é magenta
-                               (vermelho e azul pelo menos 40 acima do verde).
+  estilo PASTA PREFIXO   em cada foto PREFIXO-<tema>-<tela>.png, a barra tem de estar como a referência definitiva do
+                         dono (17/11/2026, 16h50):
+                           E1. o fundo da barra (a cor mais comum no miolo) é o cinza-escuro #3F3B44 (±10), nos 3 temas;
+                           E2. pontas de cápsula: o ponto a 15% da altura, perto do canto do retângulo, fica FORA da barra;
+                           E3. o halo magenta em volta, sem corte: a "magentice" m = (R + B)/2 − G sobe, no MESMO ponto,
+                               em relação à foto do par (antes ↔ depois, sem halo no antes), nas 8 direções (cima, baixo,
+                               lados e os 4 cantos) a 20% do alcance (no mínimo 5 px, fora do anel de foco antigo), e dos
+                               dois lados também a 40%; à esquerda (a margem da tela), também a 66%. Alcance: 30 px; 14 no
+                               celular. Sem a foto do par, a referência é a superfície (a cor mais comum a 36–44 px).
                          Com o programa de antes, tem de REPROVAR; com o de depois, passar.
-  vizinhos PASTA         para cada par antes-/depois-: na faixa do halo (34 px em volta da barra, sem a barra e o anel de
-                         foco antigo), o MIOLO sólido de qualquer outro componente (o pixel e os 8 vizinhos iguais no antes)
-                         fica igual no depois (±24). O halo passa ATRÁS dos vizinhos, nunca por cima. A superfície onde a
-                         barra está (a janela, ou o painel dela, a cor mais comum da faixa no antes) não é vizinho.
+  vizinhos PASTA         para cada par antes-/depois-: a barra fica no mesmo lugar e com o mesmo tamanho (GEO); na faixa do halo (alcance + 4 px em volta da barra, sem a barra e o
+                         anel de foco antigo), nenhum pixel de outro componente (texto inclusive) pode ter mudado "rumo
+                         ao magenta a partir dele mesmo" (o halo POR CIMA). A mudança "rumo ao magenta a partir da
+                         superfície" é o halo ATRÁS (certo: bordas suavizadas, vãos, superfícies translúcidas).
 
 Sai com 0 se tudo conferiu.
 """
+import math
 import re
 import sys
 from collections import Counter
@@ -26,32 +30,66 @@ from pathlib import Path
 from PIL import Image
 
 FUNDO_DA_BUSCA = (0x3F, 0x3B, 0x44)
+LUZ = (0xF8, 0x2E, 0xF2)  # Tema.buscaLuz
 
 
 def dist(a, b):
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
 
 
-def barras(log):
+def magentice(c):
+    return (c[0] + c[2]) / 2 - c[1]
+
+
+def _barras_do_bloco(bloco):
     out = set()
-    for l in Path(log).read_text(errors="replace").splitlines():
+    for l in bloco.splitlines():
         m = re.search(r"GEO:(campoDeBusca|buscaDaInicio):(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)", l)
         if m:
             out.add((m.group(1),) + tuple(round(float(v)) for v in m.groups()[1:]))
+    return out
+
+
+def barras(log, foto):
+    blocos = Path(log).read_text(errors="replace").split("TEXTOS-DA-TELA-INICIO")
+    out = _barras_do_bloco(blocos[-1])
+    if "janelinha" in Path(foto).name:  # só a barra da janelinha: a que aparece só na última leitura (a de trás já estava)
+        antes = set().union(*(_barras_do_bloco(b) for b in blocos[1:-1])) if len(blocos) > 2 else set()
+        out = out - antes
     return sorted(out)
+
+
+def alcance(foto):
+    return 14 if "-celular-" in Path(foto).name else 30
+
+
+def superficie(px, w, h, x, y, bw, bh, r0, r1):
+    cont = Counter()
+    for yy in range(max(0, y - r1), min(h, y + bh + r1), 2):
+        for xx in range(max(0, x - r1), min(w, x + bw + r1), 2):
+            if not (x - r0 <= xx <= x + bw + r0 and y - r0 <= yy <= y + bh + r0):
+                cont[px[xx, yy]] += 1
+    return cont.most_common(1)[0][0] if cont else (0, 0, 0)
 
 
 def estilo(pasta, prefixo):
     ruins = conferidas = 0
     for foto in sorted(Path(pasta).glob(f"{prefixo}-*.png")):
         log = foto.with_suffix(".log")
-        bs = barras(log) if log.exists() else []
+        bs = barras(log, foto) if log.exists() else []
         if not bs:
             print(f"{foto.name}: nenhuma barra de pesquisa no registro")
+            ruins += 1
             continue
         im = Image.open(foto).convert("RGB")
         px = im.load()
         w, h = im.size
+        A = alcance(foto)
+        outro = foto.with_name(foto.name.replace("antes", "depois", 1) if foto.name.startswith("antes") else foto.name.replace("depois", "antes", 1))
+        po = None
+        if outro.exists():
+            io = Image.open(outro).convert("RGB")
+            po = io.load() if io.size == im.size else None
         for nome, x, y, bw, bh in bs:
             conferidas += 1
             miolo = Counter(px[xx, yy] for xx in range(x + 12, x + bw - 12, 3) for yy in range(y + 10, y + bh - 10, 2)
@@ -61,47 +99,83 @@ def estilo(pasta, prefixo):
             cx, cy = x + round(bh * 0.15), y + round(bh * 0.15)
             canto = px[cx, cy] if 0 <= cx < w and 0 <= cy < h else (0, 0, 0)
             e2 = dist(canto, fundo) > 30
-            lx, ly = x - 12, y + bh // 2
-            luz = px[lx, ly] if 0 <= lx < w else (0, 0, 0)
-            e3 = luz[0] - luz[1] >= 40 and luz[2] - luz[1] >= 40
+            sup = superficie(px, w, h, x, y, bw, bh, A + 6, A + 14)
+            r = bh / 2
+            # (nome, ponto da borda da cápsula, direção para fora)
+            d45 = math.sqrt(0.5)
+            dirs = [("esq", (x, y + r), (-1, 0)), ("dir", (x + bw, y + r), (1, 0)),
+                    ("cima", (x + bw / 2, y), (0, -1)), ("baixo", (x + bw / 2, y + bh), (0, 1)),
+                    ("cantoNO", (x + r - r * d45, y + r - r * d45), (-d45, -d45)), ("cantoNE", (x + bw - r + r * d45, y + r - r * d45), (d45, -d45)),
+                    ("cantoSO", (x + r - r * d45, y + r + r * d45), (-d45, d45)), ("cantoSE", (x + bw - r + r * d45, y + r + r * d45), (d45, d45))]
+            exigido = {"esq": (0.2, 0.4, 0.66), "dir": (0.2, 0.4)}
+            minimo = {0.2: 20, 0.4: 8, 0.66: 2}
+            faltas = []
+            for nd, (bx, by), (dx, dy) in dirs:
+                for f in exigido.get(nd, (0.2,)):
+                    d = max(5, round(A * f))
+                    qx, qy = round(bx + dx * d), round(by + dy * d)
+                    if not (0 <= qx < w and 0 <= qy < h):
+                        continue
+                    ref = (qx, qy)
+                    if x - 5 <= qx <= x + bw + 4 and y - 5 <= qy <= y + bh + 4:
+                        # o ponto fica dentro do retângulo da barra ANTIGA (os cantos da cápsula): no par, a referência é o
+                        # fundo logo fora dele, no mesmo canto
+                        ref = (x - 7 if dx < 0 else x + bw + 6, y - 7 if dy < 0 else y + bh + 6)
+                    subida = magentice(px[qx, qy]) - magentice(po[ref] if po is not None else sup)
+                    if subida < minimo[f]:
+                        faltas.append(f"{nd}@{d}px:{subida:+.0f}")
+            e3 = not faltas
             ok = e1 and e2 and e3
             ruins += not ok
             print(f"{foto.name} [{nome} {x},{y},{bw}x{bh}]: E1 fundo {fundo} {'ok' if e1 else 'ERRADO'} · "
-                  f"E2 canto {canto} {'ok' if e2 else 'ERRADO'} · E3 luz {luz} {'ok' if e3 else 'ERRADO'}")
+                  f"E2 canto {canto} {'ok' if e2 else 'ERRADO'} · E3 halo {'ok' if e3 else 'FALTA ' + ' '.join(faltas[:6])} (superfície {sup})")
     print(f"ESTILO ({prefixo}): {conferidas} barra(s), {ruins} fora da referência")
     return conferidas > 0 and ruins == 0
 
 
+def cos(a, b):
+    na = math.sqrt(sum(v * v for v in a))
+    nb = math.sqrt(sum(v * v for v in b))
+    return sum(p * q for p, q in zip(a, b)) / (na * nb) if na and nb else 0.0
+
+
 def vizinhos(pasta):
     ruins = conferidas = 0
-    for dep in sorted(Path(pasta).glob("depois-*.png")):
-        ant = dep.with_name(dep.name.replace("depois-", "antes-", 1))
+    for dep in sorted(Path(pasta).glob("depois*.png")):
+        ant = dep.with_name(dep.name.replace("depois", "antes", 1))
         log = dep.with_suffix(".log")
         if not ant.exists() or not log.exists():
             continue
         A = Image.open(ant).convert("RGB")
         D = Image.open(dep).convert("RGB")
+        if A.size != D.size:
+            print(f"{dep.name}: tamanho diferente do antes")
+            ruins += 1
+            continue
         w, h = A.size
         pa, pd = A.load(), D.load()
-        fundo = Counter(pa[x, y] for x in range(0, w, 7) for y in range(0, h, 7)).most_common(1)[0][0]
-        for nome, x, y, bw, bh in barras(log):
+        m = alcance(dep) + 4
+        geo_a, geo_d = barras(ant.with_suffix(".log"), ant) if ant.with_suffix(".log").exists() else None, barras(log, dep)
+        if geo_a is not None and geo_a != geo_d:  # a posição e o tamanho da barra não mudam (o pedido do dono)
+            print(f"{dep.name}: a barra MUDOU de lugar ou de tamanho: antes {geo_a}, depois {geo_d}")
+            ruins += 1
+        janela = Counter(pa[xx, yy] for xx in range(0, w, 7) for yy in range(0, h, 7)).most_common(1)[0][0]
+        for nome, x, y, bw, bh in barras(log, dep):
             conferidas += 1
-            m, marcados = 34, []
-            # a superfície onde a barra está (a janela, ou um painel, como no Histórico): a cor mais comum da faixa em
-            # volta da barra, no antes. O halo sobre ela é o desenho pedido; sobre outro componente, não.
-            faixa = Counter(pa[xx, yy] for yy in range(max(0, y - m), min(h, y + bh + m), 2) for xx in range(max(0, x - m), min(w, x + bw + m), 2)
-                            if not (x - 5 <= xx <= x + bw + 4 and y - 5 <= yy <= y + bh + 4))
-            superficie = faixa.most_common(1)[0][0] if faixa else fundo
-            for yy in range(max(1, y - m), min(h - 1, y + bh + m)):
-                for xx in range(max(1, x - m), min(w - 1, x + bw + m)):
+            sup = superficie(pa, w, h, x, y, bw, bh, 5, m)
+            marcados = []
+            for yy in range(max(0, y - m), min(h, y + bh + m)):
+                for xx in range(max(0, x - m), min(w, x + bw + m)):
                     if x - 5 <= xx <= x + bw + 4 and y - 5 <= yy <= y + bh + 4:
                         continue  # a barra e o anel de foco da barra antiga (4 px)
-                    c = pa[xx, yy]
-                    if dist(c, fundo) <= 30 or dist(c, superficie) <= 30:
+                    c, n = pa[xx, yy], pd[xx, yy]
+                    if dist(c, sup) <= 30 or dist(c, janela) <= 30 or dist(c, n) <= 24:  # a superfície da barra e o fundo da janela
                         continue
-                    if any(dist(pa[xx + i, yy + j], c) > 6 for i in (-1, 0, 1) for j in (-1, 0, 1)):
-                        continue  # borda suavizada ou texto fino: muda quando a luz passa ATRÁS, o que é certo
-                    if dist(c, pd[xx, yy]) > 24:
+                    delta = tuple(n[i] - c[i] for i in range(3))
+                    por_cima = cos(delta, tuple(LUZ[i] - c[i] for i in range(3)))
+                    atras = cos(delta, tuple(LUZ[i] - sup[i] for i in range(3)))
+                    # o halo sempre deixa o pixel mais magenta; texto que mudou de verdade (a hora no Histórico) não
+                    if por_cima > 0.8 and por_cima > atras + 0.1 and magentice(n) - magentice(c) >= 15:
                         marcados.append((xx, yy))
             ok = len(marcados) <= 20
             ruins += not ok
@@ -109,7 +183,7 @@ def vizinhos(pasta):
             if marcados:
                 xs, ys = sorted(p[0] for p in marcados), sorted(p[1] for p in marcados)
                 onde = f" (x de {xs[0]} a {xs[-1]}, y de {ys[0]} a {ys[-1]})"
-            print(f"{dep.name} [{nome} {x},{y},{bw}x{bh}]: {len(marcados)} pixel(s) de vizinho mudados{onde} → "
+            print(f"{dep.name} [{nome} {x},{y},{bw}x{bh}]: {len(marcados)} pixel(s) com o halo por cima{onde} → "
                   f"{'ok' if ok else 'O HALO PINTA POR CIMA'}")
     print(f"VIZINHOS: {conferidas} barra(s), {ruins} com o halo por cima de outro componente")
     return conferidas > 0 and ruins == 0

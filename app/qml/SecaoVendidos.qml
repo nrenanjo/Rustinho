@@ -126,6 +126,15 @@ FocusScope {
             id: lista
             // A geometria da lista para os roteiros (GEO:listaDoEstoque; R-5 da re-revisão 3).
             objectName: "listaDoEstoque"
+            // T042: no celular, o topo (cartões e barra de pesquisa) rola dentro desta lista, que recorta o que passa da
+            // borda (o halo da barra era cortado). A lista começa Tema.buscaAlcance antes e acaba depois, com essa margem
+            // por dentro: o conteúdo fica no mesmo lugar e com a mesma largura (larguraUtil). No computador, nada muda.
+            readonly property real folgaDoHalo: Tema.celular ? Tema.buscaAlcance : 0
+            readonly property real larguraUtil: width - 2 * folgaDoHalo
+            Layout.leftMargin: -folgaDoHalo
+            Layout.rightMargin: -folgaDoHalo
+            leftMargin: folgaDoHalo
+            rightMargin: folgaDoHalo
             header: Tema.celular ? espacoDoTopo : null
             footer: Tema.celular ? espacoDoRodape : null
             Layout.fillWidth: true
@@ -140,7 +149,7 @@ FocusScope {
                 required property var modelData
                 required property int index
                 readonly property var v: modelData
-                width: lista.width
+                width: lista.larguraUtil
                 implicitHeight: 64
                 radius: Tema.raio
                 // A15 (0.9.18): a linha inteira (64 dp) abre a peça; antes, só o
@@ -286,22 +295,22 @@ FocusScope {
     // linhas continuam sob demanda (o ListView só cria as que aparecem), mesmo com milhares de peças.
     Component {
         id: espacoDoTopo
-        Item { width: lista.width; height: topo.implicitHeight + 12 }
+        Item { width: lista.larguraUtil; height: topo.implicitHeight + 12 }
     }
     // A nota de rodapé também vai para dentro da lista (no fim), no celular: fora dela, tomava altura e ficava
     // por cima das linhas cortadas na borda.
     Component {
         id: espacoDoRodape
-        Item { width: lista.width; height: rodape.implicitHeight + 12 }
+        Item { width: lista.larguraUtil; height: rodape.implicitHeight + 12 }
     }
     function topoNaLista() {
         rodape.parent = lista.contentItem
         rodape.x = 0
-        rodape.width = Qt.binding(() => lista.width)
+        rodape.width = Qt.binding(() => lista.larguraUtil)
         rodape.y = Qt.binding(() => lista.footerItem ? lista.footerItem.y + 12 : 0)
         topo.parent = lista.contentItem
         topo.x = 0
-        topo.width = Qt.binding(() => lista.width)
+        topo.width = Qt.binding(() => lista.larguraUtil)
         // B-1 da revisão do VIS2: dentro da lista, o topo seguia com a altura que o arranjo de fora lhe deu no começo,
         // e não com a natural; os blocos se espalhavam e as pílulas passavam por cima da 1ª linha.
         topo.height = Qt.binding(() => topo.implicitHeight)

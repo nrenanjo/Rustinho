@@ -55,11 +55,14 @@ Painel {
         Keys.onUpPressed: lista.currentIndex = Math.max(lista.currentIndex - 1, 0)
 
         Titulo {
+            // T042: por cima da barra de pesquisa logo abaixo: o halo dela passa atrás, não por cima.
+            z: 1
             text: "Qual é a peça?"
             font.pixelSize: 34
             Layout.fillWidth: true
         }
         Nota {
+            z: 1
             text: "Na nota: " + janela.referencia
             font.pixelSize: 15
             elide: Text.ElideRight

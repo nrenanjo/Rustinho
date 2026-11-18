@@ -138,6 +138,8 @@ FocusScope {
             Layout.topMargin: Tema.margem - 4
 
             GridLayout {
+                // T042: por cima da barra de pesquisa logo abaixo: o halo dela passa atrás, não por cima.
+                z: 1
                 columns: Tema.fino ? 1 : 2
                 columnSpacing: 16
                 rowSpacing: 6

@@ -44,6 +44,8 @@ Rectangle {
 
         GridLayout {
             id: cabecalho
+            // T042: por cima da barra de pesquisa logo abaixo: o halo dela passa atrás, não por cima.
+            z: 1
             visible: faixa.titulo !== ""
             columns: faixa.cabeNaLinha ? 2 : 1
             columnSpacing: 12
