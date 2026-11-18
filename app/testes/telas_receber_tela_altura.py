@@ -40,6 +40,25 @@ def ret_de(r, comeco):
     return out
 
 
+def rolar_tela(largura, altura):
+    """Rola a tela inteira para baixo: arrasta para cima a partir do alto (fora das listas, que rolariam sozinhas) e, no
+    computador, gira a roda do mouse no mesmo lugar."""
+    x, y0 = max(20, largura // 5), int(altura * 0.32)
+    for _ in range(4):
+        alt.xdo("mousemove", str(x), str(y0))
+        alt.xdo("mousedown", "1")
+        for i in range(1, 9):
+            alt.xdo("mousemove", str(x), str(max(2, y0 - int(altura * 0.3) * i // 8)))
+            time.sleep(0.03)
+        time.sleep(0.15)
+        alt.xdo("mouseup", "1")
+        time.sleep(0.4)
+        alt.xdo("mousemove", str(x), str(y0))
+        for _ in range(5):
+            alt.xdo("click", "5")
+        time.sleep(0.4)
+
+
 def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
     ok = placar.ok
     largura, altura = tamanho
@@ -57,6 +76,12 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
             return
         time.sleep(1.0)
         f = r.foto("-1")
+        # T040 (BUG-20261117-ULCJ): quando a TELA rola (a rolagem informa a geometria, GEO:rolagemDaTelaReceber), o
+        # critério é ALCANÇAR: rola a tela até o fim, arrastando numa área sem lista (o alto, à esquerda), e então mede.
+        # O programa de antes não tem essa rolagem: é medido parado, como sempre.
+        if any(t.startswith("GEO:rolagemDaTelaReceber:") for t in alt.medidas(r)):
+            rolar_tela(largura, altura)
+            f = r.foto("-2")
         b = alt.botoes(r, "Receber tudo")
         ret = b[-1] if b else None
         pe = 30 if celular else 0  # a faixa do gesto do Android só existe no celular

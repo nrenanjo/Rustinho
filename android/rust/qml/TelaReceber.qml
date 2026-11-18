@@ -115,7 +115,9 @@ FocusScope {
         anchors.fill: parent
         clip: true
         contentWidth: width
-        contentHeight: corpoDaTela.y + corpoDaTela.height + Tema.margem
+        // No celular, o pé fica fora da faixa do gesto do Android (32 px): o Receber tudo nunca cai nela.
+        readonly property real pe: Tema.celular ? 32 : Tema.margem
+        contentHeight: corpoDaTela.y + corpoDaTela.height + pe
         interactive: contentHeight > height + 1
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
@@ -125,7 +127,7 @@ FocusScope {
             x: Tema.margem
             y: Tema.margem - 12
             width: rolagemDaTela.width - 2 * Tema.margem
-            height: Math.max(rolagemDaTela.height - y - Tema.margem, implicitHeight)
+            height: Math.max(rolagemDaTela.height - y - rolagemDaTela.pe, implicitHeight)
             spacing: 14
 
             Cabecalho {
