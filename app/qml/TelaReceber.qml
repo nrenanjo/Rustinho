@@ -470,6 +470,7 @@ FocusScope {
         function abrirCom() {
             chave = Api.novaChave()
             erro = ""
+            rolagemPagar.contentY = 0
             forma = "dinheiro"
             chequesReceber.limpar()
             valor.texto = ""
@@ -486,6 +487,8 @@ FocusScope {
             valor.entrada.selectAll()
         }
         function atualizar() {
+            // A pessoa mexeu num campo ou na forma: o miolo não é mais levado sozinho até a mensagem.
+            rolagemPagar.irAoFim = false
             const r = Api.chamar("receber_calcular", entrada())
             if (r.ok)
                 calc = r.dados
@@ -506,88 +509,139 @@ FocusScope {
 
         contentItem: ColumnLayout {
             spacing: 12
-            Titulo {
-                text: pagar.calc ? "Receber de " + (tela.conta ? tela.conta.nome : "") : ""
-                font.pixelSize: 30
-                elide: Text.ElideRight
+            // H06 (o mesmo do Receber da venda): o miolo rola quando a janelinha não cabe na janela (celular, celular
+            // deitado, muitas parcelas, a mensagem longa de registro inconsistente); o resultado da conta e o botão
+            // Receber ficam sempre à vista, embaixo. Achado na validação da integ8 (16/11/2026; lacuna 14, caso 7 no
+            // celular: o Receber cortado no pé da tela, sem como rolar).
+            Flickable {
+                id: rolagemPagar
+                clip: true
+                contentWidth: width
+                contentHeight: mioloPagar.implicitHeight
+                implicitWidth: mioloPagar.implicitWidth
+                implicitHeight: mioloPagar.implicitHeight
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
                 Layout.fillWidth: true
-            }
-            Nota {
-                text: pagar.calc ? Tema.sigiloTexto("Deve R$ " + pagar.calc.saldo + (pagar.calc.jurosSugerido !== "0,00" ? " · juros e multa até hoje R$ " + pagar.calc.jurosSugerido : "")) : ""
-                font.pixelSize: 15
-                Layout.fillWidth: true
-            }
-            Linha {
-                spacing: 12
-                Layout.fillWidth: true
-                Campo {
-                    id: juros
-                    rotulo: "Juros e multa"
-                    prefixo: "R$"
-                    numerico: true
-                    maximo: 12
-                    Layout.fillWidth: true
-                    onEditado: pagar.atualizar()
+                Layout.fillHeight: true
+                Layout.minimumHeight: Math.min(mioloPagar.implicitHeight, 120)
+                // A geometria do miolo para os roteiros (GEO:rolagemDoReceber).
+                objectName: "rolagemDoReceber"
+                // A mensagem do recebimento recusado fica no fim do miolo. Quando ela aparece, o miolo rola até ela, e
+                // de novo quando a altura assenta (a mensagem só ganha o tamanho dela no quadro seguinte). Deixa de
+                // valer quando a pessoa mexe: rola o miolo ou edita um campo.
+                property bool irAoFim: false
+                function mostrarFim() {
+                    contentY = Math.max(0, contentHeight - height)
                 }
-                Campo {
-                    id: desconto
-                    rotulo: "Desconto"
-                    prefixo: "R$"
-                    numerico: true
-                    maximo: 12
-                    Layout.fillWidth: true
-                    onEditado: pagar.atualizar()
-                }
-            }
-            Campo {
-                id: valor
-                rotulo: "Valor pago" + (pagar.calc ? Tema.sigiloTexto(" (total R$ " + pagar.calc.total + ")") : "")
-                prefixo: "R$"
-                numerico: true
-                maximo: 14
-                altura: 52
-                tamanhoFonte: 22
-                Layout.fillWidth: true
-                onEditado: pagar.atualizar()
-                onConfirmado: pagar.concluir()
-            }
-            Flow {
-                spacing: 8
-                Layout.fillWidth: true
-                Repeater {
-                    model: tela.formas.filter(f => f.forma !== "crediario" && f.disponivel)
-                    delegate: Botao {
-                        required property var modelData
-                        text: modelData.nome
-                        tipo: pagar.forma === modelData.forma ? "principal" : "secundario"
-                        implicitHeight: 36
-                        onClicked: {
-                            pagar.forma = modelData.forma
-                            pagar.erro = ""
-                            pagar.atualizar()
+                onContentHeightChanged: if (irAoFim) mostrarFim()
+                onHeightChanged: if (irAoFim) mostrarFim()
+                onMovementStarted: irAoFim = false
+
+                ColumnLayout {
+                    id: mioloPagar
+                    width: rolagemPagar.width
+                    spacing: 12
+                    Titulo {
+                        text: pagar.calc ? "Receber de " + (tela.conta ? tela.conta.nome : "") : ""
+                        font.pixelSize: 30
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Nota {
+                        text: pagar.calc ? Tema.sigiloTexto("Deve R$ " + pagar.calc.saldo + (pagar.calc.jurosSugerido !== "0,00" ? " · juros e multa até hoje R$ " + pagar.calc.jurosSugerido : "")) : ""
+                        font.pixelSize: 15
+                        Layout.fillWidth: true
+                    }
+                    Linha {
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            id: juros
+                            rotulo: "Juros e multa"
+                            prefixo: "R$"
+                            numerico: true
+                            maximo: 12
+                            Layout.fillWidth: true
+                            onEditado: pagar.atualizar()
+                        }
+                        Campo {
+                            id: desconto
+                            rotulo: "Desconto"
+                            prefixo: "R$"
+                            numerico: true
+                            maximo: 12
+                            Layout.fillWidth: true
+                            onEditado: pagar.atualizar()
                         }
                     }
-                }
-            }
-            PainelCheques {
-                id: chequesReceber
-                calc: pagar.calc && pagar.forma === "cheque" ? pagar.calc.cheques : null
-                Layout.fillWidth: true
-                onMudou: pagar.atualizar()
-            }
-            // Para onde vai o dinheiro
-            Repeater {
-                model: pagar.calc ? pagar.calc.abates : []
-                delegate: Text {
-                    required property var modelData
-                    text: Tema.sigiloTexto(modelData.descricao + " · " + modelData.parcela + " (vence " + modelData.vencimento + "): R$ " + modelData.valor
-                          + (modelData.resta === "0,00" ? "  → quitada" : "  → ainda falta R$ " + modelData.resta))
-                    textFormat: Text.PlainText
-                    color: Tema.tintaSuave
-                    font.family: Tema.texto
-                    font.pixelSize: 13
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
+                    Campo {
+                        id: valor
+                        rotulo: "Valor pago" + (pagar.calc ? Tema.sigiloTexto(" (total R$ " + pagar.calc.total + ")") : "")
+                        prefixo: "R$"
+                        numerico: true
+                        maximo: 14
+                        altura: 52
+                        tamanhoFonte: 22
+                        Layout.fillWidth: true
+                        onEditado: pagar.atualizar()
+                        onConfirmado: pagar.concluir()
+                    }
+                    Flow {
+                        spacing: 8
+                        Layout.fillWidth: true
+                        Repeater {
+                            model: tela.formas.filter(f => f.forma !== "crediario" && f.disponivel)
+                            delegate: Botao {
+                                required property var modelData
+                                text: modelData.nome
+                                tipo: pagar.forma === modelData.forma ? "principal" : "secundario"
+                                implicitHeight: 36
+                                onClicked: {
+                                    pagar.forma = modelData.forma
+                                    pagar.erro = ""
+                                    pagar.atualizar()
+                                }
+                            }
+                        }
+                    }
+                    PainelCheques {
+                        id: chequesReceber
+                        calc: pagar.calc && pagar.forma === "cheque" ? pagar.calc.cheques : null
+                        Layout.fillWidth: true
+                        onMudou: pagar.atualizar()
+                    }
+                    // Para onde vai o dinheiro
+                    Repeater {
+                        model: pagar.calc ? pagar.calc.abates : []
+                        delegate: Text {
+                            required property var modelData
+                            text: Tema.sigiloTexto(modelData.descricao + " · " + modelData.parcela + " (vence " + modelData.vencimento + "): R$ " + modelData.valor
+                                  + (modelData.resta === "0,00" ? "  → quitada" : "  → ainda falta R$ " + modelData.resta))
+                            textFormat: Text.PlainText
+                            color: Tema.tintaSuave
+                            font.family: Tema.texto
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Text {
+                        visible: pagar.erro !== ""
+                        text: pagar.erro
+                        textFormat: Text.PlainText
+                        color: Tema.vermelho
+                        font.family: Tema.texto
+                        font.weight: Font.DemiBold
+                        font.pixelSize: 15
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                        onTextChanged: {
+                            rolagemPagar.irAoFim = text !== ""
+                            if (text !== "")
+                                Qt.callLater(rolagemPagar.mostrarFim)
+                        }
+                    }
                 }
             }
             Text {
@@ -602,17 +656,6 @@ FocusScope {
                 font.family: Tema.texto
                 font.weight: Font.Bold
                 font.pixelSize: pagar.calc && pagar.calc.erro ? 16 : 26
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            Text {
-                visible: pagar.erro !== ""
-                text: pagar.erro
-                textFormat: Text.PlainText
-                color: Tema.vermelho
-                font.family: Tema.texto
-                font.weight: Font.DemiBold
-                font.pixelSize: 15
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
