@@ -133,6 +133,8 @@ FocusScope {
 
         // Números do crediário
         Linha {
+            // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
+            z: 1
             visible: !Tema.estreito || !tela.conta
             colunasEstreito: 2
             spacing: 12

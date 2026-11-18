@@ -7,6 +7,9 @@ import rustinho
 // Quando não cabem numa linha (celular), as pílulas passam para a de baixo.
 Item {
     id: pilulas
+    // T042: por cima do que vem depois (em várias telas, a barra de pesquisa ao lado ou logo abaixo): o halo
+    // da barra passa atrás das pílulas, não por cima.
+    z: 1
     property var modelo: []
     property string atual: ""
     property bool pequenas: false

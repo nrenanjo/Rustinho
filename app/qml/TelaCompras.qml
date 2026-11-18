@@ -196,6 +196,8 @@ FocusScope {
 
         // Arquivos esperando o CNPJ da loja (navegação guiada).
         Faixa {
+            // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
+            z: 1
             visible: tela.pendentes.length > 0
             titulo: "Esperando para importar"
             corTitulo: Tema.apagado
@@ -232,6 +234,8 @@ FocusScope {
 
         // Notas de outro CNPJ: não entraram; dá para ver de novo ou descartar.
         Faixa {
+            // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
+            z: 1
             visible: tela.naoImportadas.length > 0
             titulo: tela.naoImportadas.length === 1 ? "Não importada: nota de outro CNPJ"
                                                      : "Não importadas: " + tela.naoImportadas.length + " notas de outro CNPJ"

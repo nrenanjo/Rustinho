@@ -39,14 +39,22 @@ FocusScope {
     Flickable {
         id: rolagem
         anchors.fill: parent
+        // T042: a barra de pesquisa fica no alto, à esquerda, da rolagem, e a
+        // rolagem recorta o que passa da borda: o halo da barra era cortado. A
+        // rolagem começa antes, na margem vazia da tela (à esquerda) e no vão
+        // até as pílulas (em cima); o corpo fica no mesmo lugar de antes.
+        anchors.leftMargin: -Tema.buscaAlcance
+        anchors.topMargin: -12
         clip: true
-        contentHeight: corpo.implicitHeight + 24
+        contentHeight: corpo.y + corpo.implicitHeight + 24
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: ScrollBar {}
 
         ColumnLayout {
             id: corpo
-            width: rolagem.width - 14
+            x: Tema.buscaAlcance
+            y: 12
+            width: rolagem.width - Tema.buscaAlcance - 14
             spacing: 14
 
             Linha {

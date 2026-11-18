@@ -88,10 +88,34 @@ QtObject {
     readonly property color sobreSubpilulaAtiva: roxo ? "#FFFFFF" : escuro ? "#1E0B1D" : "#FFFFFF"
     // A faixa das subpílulas (Configurações › Simultaneidade).
     readonly property color faixaSubpilulas: roxo ? "#F22EB6" : escuro ? "#2C1F31" : "#F1DDEC"
-    // Busca das telas (campo com a lupa): borda magenta nos três temas; no
-    // roxo, o campo escuro.
-    readonly property color buscaFundo: roxo ? "#4E114B" : papel
+    // Barras de pesquisa (campo com a lupa e a busca da Início). T042
+    // (17/11/2026), a referência definitiva do dono: a mesma cápsula nos três
+    // temas, cinza-escura (a cor medida na imagem), com o texto, o texto
+    // indicativo e os ícones brancos, o contorno magenta com o fio claro no
+    // meio e o halo magenta difuso e amplo em volta (Campo.qml).
+    readonly property color buscaFundo: "#3F3B44"
     readonly property color buscaBorda: escuro || roxo ? "#F038D0" : "#D123AB"
+    readonly property color buscaTexto: "#FFFFFF"
+    readonly property color buscaDica: "#DCD7E0"
+    readonly property color buscaIcone: "#FFFFFF"
+    readonly property color buscaFio: "#FFF2FD"
+    // O halo: a luz magenta da referência (mais viva que o contorno), até
+    // buscaAlcance px do contorno. Na tela estreita (celular), o halo cabe na
+    // margem da tela (Tema.margem), para não ser cortado na borda.
+    readonly property color buscaLuz: "#F82EF2"
+    readonly property real buscaAlcance: estreito ? 14 : 30
+    // Quanto da luz (0 a 1) chega a d px do contorno, como medido na
+    // referência em cada tema: no claro, mais curta; no escuro e no Planeta
+    // Roxo, mais forte e mais longa (no roxo, quase inteira até uns 8 px).
+    // Nos últimos pixels do alcance, a luz vai a zero, sem degrau.
+    function buscaLuzEm(d) {
+        const x = d * 30 / buscaAlcance
+        const fim = 1 - Math.pow(Math.min(1, x / 30), 6)
+        const luz = roxo ? 1.3 * Math.exp(-Math.pow(x / 18, 1.8))
+                  : escuro ? Math.exp(-Math.pow(x / 14, 1.1))
+                  : 0.78 * Math.exp(-Math.pow(x / 11, 1.4))
+        return Math.min(1, luz) * fim
+    }
     // Pílula do olho ("Mostrar valores") e do tema (sol, lua, planeta).
     readonly property color pilulaClara: roxo ? "#E4D1E5" : escuro ? "#28232B" : "#F1E6F2"
     readonly property color pilulaClaraSobre: roxo ? "#ECDDED" : escuro ? "#352E39" : "#F7EFF8"

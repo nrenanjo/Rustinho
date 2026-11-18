@@ -7,6 +7,10 @@ import rustinho
 // grande e, à direita, os botões.
 ColumnLayout {
     id: cabecalho
+    // T042: o cabeçalho fica por cima do que vem logo abaixo dele (em quase
+    // todas as telas, a barra de pesquisa): o halo da barra passa ATRÁS dos
+    // botões e do título, como na referência, e não por cima deles.
+    z: 1
     property string titulo: ""
     property string subtitulo: ""
     property bool mostrarVoltar: true

@@ -826,6 +826,9 @@ FocusScope {
             ColumnLayout {
                 id: topoConfig
                 parent: tela.topoNaRolagem ? rolagem.contentItem : lugarDoTopo
+                // Na rolagem, na mesma coluna do corpo (T042: a rolagem começa
+                // Tema.buscaAlcance antes, à esquerda).
+                x: tela.topoNaRolagem ? corpo.x : 0
                 width: tela.topoNaRolagem ? corpo.width : lugarDoTopo.width
                 y: tela.topoNaRolagem ? 4 : 0
                 spacing: 14
@@ -901,6 +904,11 @@ FocusScope {
             visible: tela.secao !== "fiscal"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // T042: a rolagem recorta o que passa da borda, e o halo da barra de
+            // pesquisa (o filtro da auditoria, no Histórico) passava da borda da
+            // esquerda. A rolagem começa antes, na margem vazia da tela; o corpo
+            // (e o topo, quando rola junto) fica no mesmo lugar de antes.
+            Layout.leftMargin: -Tema.buscaAlcance
             clip: true
             contentHeight: corpo.y - 4 + corpo.implicitHeight + Tema.margem
             boundsBehavior: Flickable.StopAtBounds
@@ -908,7 +916,8 @@ FocusScope {
 
             ColumnLayout {
                 id: corpo
-                width: Math.min(rolagem.width - 14, 960)
+                x: Tema.buscaAlcance
+                width: Math.min(rolagem.width - Tema.buscaAlcance - 14, 960)
                 y: tela.topoNaRolagem ? topoConfig.y + topoConfig.height + 14 : 4
                 spacing: 14
 
@@ -2356,6 +2365,8 @@ FocusScope {
                     Layout.fillWidth: true
                     // 9b (C8): veio de um conflito em Duplicatas.
                     Nota {
+                        // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
+                        z: 1
                         visible: !!tela.filtroRegistro || tela.avisoHistorico !== ""
                         text: tela.filtroRegistro ? "Só o que aconteceu com este registro (" + tela.filtroRegistro.nome + "), entre os "
                                                     + tela.auditoria.length + " eventos mais recentes."

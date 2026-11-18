@@ -507,7 +507,9 @@ def a3_cores_do_roxo(res, fotos, modelo, cores):
             else:
                 x, y = onde(r, "F11")
             amostra(res, "A3 Início: fundo da busca", foto, x - 70, y, cores["buscaFundo"])
-            amostra(res, "A3 Início: borda da busca", foto, x - 70, y + 27, cores["buscaBorda"], r=0)
+            # T042 (17/11/2026): o contorno da barra de pesquisa tem o fio claro
+            # nos 2 px de fora e o magenta (buscaBorda) nos 2 px de dentro dele.
+            amostra(res, "A3 Início: borda da busca", foto, x - 70, y + 25, cores["buscaBorda"], r=0)
             x, y = onde(r, "Planeta Roxo")
             amostra(res, "A3 Início: planeta escolhido (anel)", foto, x, y - 14, cores["seletorAtivo"], r=0)
         finally:

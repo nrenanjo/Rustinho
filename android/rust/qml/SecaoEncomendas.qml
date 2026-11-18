@@ -115,6 +115,8 @@ FocusScope {
             Layout.fillWidth: true
 
             Linha {
+                // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
+                z: 1
                 colunasEstreito: 2
                 spacing: 12
                 Layout.fillWidth: true

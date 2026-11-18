@@ -46,12 +46,34 @@ ColumnLayout {
     // Copiar ficava em cima do F11 (computador) e da câmera (celular).
     readonly property real larguraCopiar: colarCopiar ? ladoBotaoInterno + 8 : 0
     readonly property real larguraBotao: comBotao ? 44 : 0
-    // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo) e a
-    // busca escura do Planeta Roxo (campo com a lupa).
+    // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo).
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
+    // T042 (17/11/2026): as barras de pesquisa (campo com a lupa e a busca da
+    // Início) são uma cápsula cinza-escura nos três temas, com o texto e os
+    // ícones brancos e o halo magenta amplo (as cores em Tema.busca...). Os
+    // campos de formulário continuam como estão.
     readonly property bool busca: icone === "busca" || colarCopiar
-    readonly property bool buscaEscura: Tema.roxo && busca
-    readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : buscaEscura ? Tema.buscaFundo : Tema.papel
+    readonly property color corDoCampo: somenteLeitura ? Tema.campoFixo : busca ? Tema.buscaFundo : Tema.papel
+    // O halo da barra de pesquisa: camadas de cápsulas magenta, cada uma um
+    // pouco maior e mais transparente, que somadas fazem a luz cair aos poucos
+    // do contorno até Tema.buscaAlcance, como a referência (Tema.buscaLuzEm).
+    // Sem efeito do Qt (QtQuick.Effects): o mesmo desenho no computador, no
+    // celular e nos testes.
+    readonly property int camadasDoHalo: 30
+    // Com o foco, o halo fica mais forte (o foco continua visível).
+    readonly property real forcaDoHalo: estado === "focado" ? 1 : 0.8
+    readonly property color corDoHalo: estado === "invalido" ? Tema.vermelhoNo(corDoCampo) : Tema.buscaLuz
+    // A luz por dentro do contorno é a do próprio contorno.
+    readonly property color corDoContorno: estado === "invalido" ? Tema.vermelhoNo(corDoCampo) : Tema.buscaBorda
+    function _haloAlvo(d) { return Math.min(0.97, forcaDoHalo * Tema.buscaLuzEm(d)) }
+    // Transparência da camada i (0 = a de fora): a soma das camadas que cobrem
+    // a faixa da camada i dá _haloAlvo no meio da faixa.
+    function _haloAlfa(i) {
+        const passo = Tema.buscaAlcance / camadasDoHalo
+        const dentro = _haloAlvo((camadasDoHalo - i) * passo - passo / 2)
+        const fora = i === 0 ? 0 : _haloAlvo((camadasDoHalo - i + 1) * passo - passo / 2)
+        return Math.max(0, 1 - (1 - dentro) / (1 - fora))
+    }
 
     // ---- Os seis estados do campo (0.9.18, ordem visual §6) ----
     // normal, focado, preenchido, inválido, desabilitado e validado. Validado:
@@ -126,7 +148,6 @@ ColumnLayout {
         id: botaoInterno
         property string nome: ""
         property string dica: ""
-        property color fundo: Tema.papel
         property real lado: 40
         // Para leitores de tela e para os testes das telas (--textos-da-tela).
         readonly property string nomeAcessivel: dica
@@ -135,12 +156,14 @@ ColumnLayout {
         height: lado
         radius: height / 2
         anchors.verticalCenter: parent.verticalCenter
-        color: toque.pressed ? Tema.sombraNo(0.13, fundo) : toque.containsMouse ? Tema.sombraNo(0.07, fundo) : "transparent"
+        // Só existe na barra de pesquisa, que é escura nos três temas (T042):
+        // o ícone branco e, com o mouse em cima ou apertado, um véu branco.
+        color: toque.pressed ? Qt.rgba(1, 1, 1, 0.18) : toque.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent"
         Icone {
             anchors.centerIn: parent
             nome: botaoInterno.nome
             tamanho: 22
-            cor: Tema.tintaSuaveNo(botaoInterno.fundo)
+            cor: Tema.buscaIcone
         }
         // MouseArea (e não TapHandler): fica com o toque só para si, sem o
         // campo de texto embaixo roubar o toque para abrir o teclado.
@@ -262,6 +285,9 @@ ColumnLayout {
         text: campo.rotulo
         visible: text !== ""
         color: campo.erro !== "" ? Tema.vermelhoNo(campo.superficie) : Tema.apagadoNo(campo.superficie)
+        // T042: o halo da barra de pesquisa fica ATRÁS do rótulo, como na
+        // referência (sem isto, o halo, desenhado depois, pintava por cima).
+        z: 1
         Layout.fillWidth: true
         Layout.preferredWidth: 1
     }
@@ -280,8 +306,8 @@ ColumnLayout {
         bottomInset: topInset
         font.family: Tema.texto
         font.pixelSize: campo.tamanhoFonte
-        color: Tema.tintaNo(campo.corDoCampo)
-        placeholderTextColor: campo.buscaEscura ? Tema.roxoTintaSuaveClara : Tema.dica
+        color: campo.busca ? Tema.buscaTexto : Tema.tintaNo(campo.corDoCampo)
+        placeholderTextColor: campo.busca ? Tema.buscaDica : Tema.dica
         // O que fica dentro do campo (o atalho "F11") sabe a cor embaixo.
         palette.window: Tema.superficie(campo.corDoCampo)
         selectionColor: Tema.atual
@@ -309,8 +335,22 @@ ColumnLayout {
                           | (campo.maiusculas ? Qt.ImhPreferUppercase : Qt.ImhNone)
 
         background: Item {
+            // Barra de pesquisa (T042): o halo magenta, sempre aceso, fora do
+            // contorno; da camada de fora (a maior e mais transparente) para
+            // a de dentro.
+            Repeater {
+                model: campo.busca ? campo.camadasDoHalo : 0
+                Rectangle {
+                    required property int index
+                    anchors.fill: parent
+                    anchors.margins: -Tema.buscaAlcance * (campo.camadasDoHalo - index) / campo.camadasDoHalo
+                    radius: height / 2
+                    color: Qt.rgba(campo.corDoHalo.r, campo.corDoHalo.g, campo.corDoHalo.b, campo._haloAlfa(index))
+                }
+            }
             // O brilho em volta (foco magenta, erro vermelho), como na
             // referência aprovada do CNPJ: fora do campo, sem cobrir o texto.
+            // Na barra de pesquisa, o halo faz esse papel.
             Rectangle {
                 objectName: campo.objectName !== "" ? campo.objectName + "Brilho" : ""
                 anchors.fill: parent
@@ -319,15 +359,18 @@ ColumnLayout {
                 color: "transparent"
                 border.width: 4
                 border.color: campo.estado === "invalido" ? Tema.erroBrilhoNo(campo.corDoCampo) : Tema.focoBrilho
-                visible: campo.estado === "invalido" || campo.estado === "focado"
+                visible: !campo.busca && (campo.estado === "invalido" || campo.estado === "focado")
             }
             Rectangle {
                 objectName: campo.objectName !== "" ? campo.objectName + "Caixa" : ""
                 anchors.fill: parent
-                radius: Tema.raioCampo
+                // A barra de pesquisa é uma cápsula (as pontas inteiras redondas).
+                radius: campo.busca ? height / 2 : Tema.raioCampo
                 color: campo.corDoCampo
-                border.width: campo.estado === "normal" || campo.estado === "preenchido" || campo.estado === "desabilitado"
-                              ? (campo.busca ? 2 : 1) : 2
+                // Na barra de pesquisa: o fio claro por fora (2 px, abaixo) e
+                // 2 px magenta por dentro dele, como na referência.
+                border.width: campo.busca ? 4
+                              : campo.estado === "normal" || campo.estado === "preenchido" || campo.estado === "desabilitado" ? 1 : 2
                 border.color: {
                     switch (campo.estado) {
                     case "invalido": return Tema.vermelhoNo(campo.corDoCampo)
@@ -337,6 +380,30 @@ ColumnLayout {
                     if (campo.busca)
                         return Tema.buscaBorda
                     return campo.estado === "preenchido" ? Tema.bordaPreenchido : Tema.bordaCampo
+                }
+            }
+            // Barra de pesquisa (T042): o fio claro do contorno, entre o halo e
+            // o magenta, e a luz magenta por dentro, que some em 8 px, como na
+            // referência.
+            Rectangle {
+                visible: campo.busca
+                anchors.fill: parent
+                radius: height / 2
+                color: "transparent"
+                border.width: 2
+                border.color: Tema.buscaFio
+            }
+            Repeater {
+                model: campo.busca ? 4 : 0
+                Rectangle {
+                    required property int index
+                    anchors.fill: parent
+                    anchors.margins: 4 + 2 * index
+                    radius: height / 2
+                    color: "transparent"
+                    border.width: 2
+                    border.color: Qt.rgba(campo.corDoContorno.r, campo.corDoContorno.g, campo.corDoContorno.b,
+                                          [0.45, 0.25, 0.13, 0.06][index])
                 }
             }
         }
@@ -358,7 +425,7 @@ ColumnLayout {
             visible: campo.icone !== ""
             nome: campo.icone
             tamanho: 22
-            cor: campo.buscaEscura ? Tema.buscaBorda : Tema.apagado
+            cor: campo.busca ? Tema.buscaIcone : Tema.apagado
             anchors.left: parent.left
             anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 8 : 15
             anchors.verticalCenter: parent.verticalCenter
@@ -368,7 +435,6 @@ ColumnLayout {
             visible: campo.colarCopiar
             nome: "colar"
             dica: "Colar na busca"
-            fundo: campo.corDoCampo
             lado: campo.ladoBotaoInterno
             anchors.left: parent.left
             anchors.leftMargin: 6
@@ -378,7 +444,6 @@ ColumnLayout {
             visible: campo.colarCopiar
             nome: "copiar"
             dica: "Copiar a busca"
-            fundo: campo.corDoCampo
             lado: campo.ladoBotaoInterno
             anchors.right: parent.right
             anchors.rightMargin: 6
@@ -399,7 +464,7 @@ ColumnLayout {
                 anchors.centerIn: parent
                 nome: campo.comCamera ? "camera" : campo.acao
                 tamanho: 24
-                cor: Tema.tintaNo(campo.corDoCampo)
+                cor: campo.busca ? Tema.buscaIcone : Tema.tintaNo(campo.corDoCampo)
             }
             // MouseArea (e não TapHandler): fica com o toque só para si, sem o
             // campo de texto embaixo roubar o toque para abrir o teclado.
@@ -426,6 +491,8 @@ ColumnLayout {
             id: textoAtalho
             visible: campo.atalho !== "" && !Tema.celular && !Tema.estreito
             text: campo.atalho
+            // Na barra de pesquisa (escura nos três temas, T042), branco suavizado.
+            color: campo.busca ? Tema.buscaDica : Tema.roxo ? Tema.apagadoNo(palette.window) : Tema.apagado
             anchors.right: parent.right
             anchors.rightMargin: 16 + campo.larguraCopiar + campo.larguraBotao
             anchors.verticalCenter: parent.verticalCenter
