@@ -81,6 +81,11 @@ def roteiro(placar, fotos):
                 if p == "Notas fiscais":
                     ok("Notas fiscais (em breve): só avisa e fica no Início",
                        r.esperar(lambda: r.tem("chega na etapa")) and r.pilha() == inicio)
+                    # N6 (decisão 1a do proprietário, 18/11/2026): quando o aviso some, a tela volta ao lugar, e um
+                    # clique nesse instante é descartado (validação da N6: o clique em "Compras" caiu nele). O
+                    # roteiro espera o aviso sumir e a tela parar antes da próxima pílula (o programa não muda).
+                    r.esperar(lambda: not r.tem("chega na etapa"), 10)
+                    time.sleep(0.6)
                     continue
                 abriu = r.esperar(lambda: r.pilha() == inicio + 1, 10)
                 ok(f"{p}: abre a sua tela por cima do Início", abriu, "" if abriu else r.foto("-" + p[:6]))

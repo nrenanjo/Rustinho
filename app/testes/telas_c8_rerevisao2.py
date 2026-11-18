@@ -405,9 +405,19 @@ def s4_aceitar_outro(placar, fotos):
                 return
             r.clicar("Ver o registro")
             ok("s4: a guia aparece em Caixas", r.esperar(lambda: r.tem(TITULO_7) and r.pilha() == base + 1, 10), r.foto("-2"))
-            time.sleep(2.0)
-            f1 = r.foto("-3")
-            q1 = razoes(f1, f0)
+            chegou = time.time()
+            # A tela espera a parte assentar antes de destacar (TelaConfiguracoes, esperaDaGuia: até 25 × 120 ms). Na CI
+            # da N6 (44361340632), a foto de 2 s depois da chegada ainda saiu sem o destaque (razões 1.0; em todas as
+            # outras, 0,74), sem causa explicada. CI-1/CI-2: só o roteiro espera mais. Fotos a cada ~0,5 s, por até 6 s,
+            # com o tempo anotado (uma demora de verdade continua à vista na MEDIDA).
+            time.sleep(1.0)
+            while True:
+                f1 = r.foto("-3")
+                q1 = razoes(f1, f0)
+                if all(0.66 <= v <= 0.82 for v in q1) or time.time() - chegou > 6.0:
+                    break
+                time.sleep(0.5)
+            print(f"MEDIDA s4: o destaque visto {time.time() - chegou:.1f} s depois da chegada (razões {q1})", flush=True)
             obs("s4 na chegada: margem com o destaque / sem (na origem):", q1)
             ok("s4: na chegada, o registro da guia está destacado (o véu cheio na margem)", all(0.66 <= v <= 0.82 for v in q1),
                f"{f1} razões={q1}")

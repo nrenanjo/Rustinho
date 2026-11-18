@@ -94,9 +94,13 @@ def ler_botao(r, ls, nome):
 
 
 def seta_y(t):
-    for _, _, tx in t:
-        if tx.startswith("GEO:setaDeRetorno:"):
-            return int(tx.rsplit(":", 1)[1].split(",")[1])
+    """O topo da tela: a seta de retorno; no celular, sem a seta desde a T047 (pedido de 18/11/2026), o cabeçalho
+    da tela, onde a seta ficava (move-se com a tela do mesmo jeito)."""
+    # (Um programa de antes da T047 ainda tem a seta no celular e não dá o nome do cabeçalho: vale a seta.)
+    for nome in (("cabecalhoDaTela", "setaDeRetorno") if nav.CELULAR else ("setaDeRetorno",)):
+        for _, _, tx in t:
+            if tx.startswith(f"GEO:{nome}:"):
+                return int(tx.rsplit(":", 1)[1].split(",")[1])
     return None
 
 
@@ -160,21 +164,31 @@ def cenario(placar, fotos):
                 return
             r.clicar_em(b[1], b[0])
             com = esperar_textos(r, aviso_em, 6)
+            visto = time.time()
             if not ok("J1: o aviso aparece e a 1ª encomenda fica pedida", com is not None and pedidas(pasta) == [primeira],
                       f"{r.foto('-2')} pedidas={pedidas(pasta)}"):
                 return
-            d = deslocamento(sem, com)
             ls2 = linhas(com)
             # A linha seguinte (a que a pessoa marcaria em seguida): a primeira abaixo de onde estava a 1ª.
             abaixo = [v for v in ls2 if v[2] != primeira and v[0] > ls[1][0] + 10]
-            if not ok("J1: com o aviso, as telas desceram e há uma linha seguinte à vista", d > 20 and abaixo,
-                      f"{r.foto('-2')} descida={d} linhas={[(y, n) for y, _, n in ls2]}"):
+            if not ok("J1: com o aviso, há uma linha seguinte à vista", abaixo,
+                      f"{r.foto('-2')} linhas={[(y, n) for y, _, n in ls2]}"):
                 return
             alvo = abaixo[0][2]
             com, b2 = ler_botao(r, ls2, alvo)
+            # N6-R6 da revisão: a 1ª leitura com o aviso pode cair no meio da descida (140 ms; na validação, 57 px em vez
+            # de 66). A descida vale só com a tela parada: a seta de retorno no mesmo lugar em duas leituras seguidas,
+            # com o aviso à vista.
+            depois_de = r.textos()
+            d = deslocamento(sem, depois_de)
+            if os.environ.get("RUSTINHO_CLIQUE_PROVA_D"):
+                # Só para a prova do próprio critério (n6_evid): uma descida errada de propósito; o J1 não pode passar.
+                d = int(os.environ["RUSTINHO_CLIQUE_PROVA_D"])
+            parada = seta_y(com) is not None and seta_y(com) == seta_y(depois_de) and aviso_em(depois_de)
             avisos = aviso_em(com)
-            if not ok(f"J1: com o aviso à vista, o \"Já pedi\" de \"{alvo}\" à vista", b2 is not None and avisos,
-                      r.foto("-3")):
+            if not ok(f"J1: com o aviso à vista e a tela parada, o \"Já pedi\" de \"{alvo}\" à vista",
+                      b2 is not None and avisos and parada and d > 20,
+                      f"{r.foto('-3')} INSTRUMENTAÇÃO: seta {seta_y(com)} e {seta_y(depois_de)}; descida {d}"):
                 return
             by, bx = b2
             # Depois da volta, cada linha sobe `d`: se outra linha cair no lugar da seguinte, o clique vai no ponto
@@ -193,14 +207,31 @@ def cenario(placar, fotos):
             # clique sai 0,2 s depois do toque. Tudo num comando só do xdotool, sem esperar pela leitura da tela. (No
             # computador, o "Já pedi" só aparece com o ponteiro em cima da linha: com o ponteiro parado no ponto, a
             # linha que chega embaixo dele mostra o botão dela.)
+            # O aviso fica 3 s: numa máquina lenta, ele pode sumir sozinho antes do toque (como no cenário D da CI do
+            # bb32ea2). Com mais de 2,5 s desde que foi visto, o J1 não decide (inconclusivo por tempo, sem aprovar).
+            espera = time.time() - visto
+            print(f"MEDIDA J1 ({JANELA}): o toque {espera:.1f} s depois de ver o aviso", flush=True)
+            if not ok("J1: o toque vem antes de o aviso sumir sozinho (menos de 2,5 s depois de visto)", espera < 2.5,
+                      f"INSTRUMENTAÇÃO (tempo): {espera:.1f} s"):
+                return
             xdo("mousemove", str(ax), str(ay), "click", "1", "mousemove", str(bx), str(py),
                 "sleep", str(ATRASO_DO_CLIQUE), "click", "1")
             time.sleep(1.5)
             f = r.foto("-4-depois-do-clique-no-movimento")
             agora = pedidas(pasta)
-            print(f"MEDIDA J1 ({JANELA}): pedidas depois do clique no movimento: {agora}", flush=True)
-            ok("J1: o clique dado enquanto as telas voltam é descartado (nenhuma outra encomenda muda)",
-               agora == [primeira], f"{f} pedidas={agora}")
+            # N6-R6: o clique de prova só prova algo se o ponto dele cai num "Já pedi" com a tela parada depois da
+            # volta (senão, sem a correção, ele cairia num vão e nada mudaria: um verde falso). No computador, o
+            # ponteiro continua no ponto, e a linha embaixo dele mostra o botão.
+            sobre = [(y, x) for y, x in botoes(r.textos()) if abs(x - bx) < 40 and abs(y - py) <= 14]
+            print(f"MEDIDA J1 ({JANELA}): pedidas depois do clique no movimento: {agora}; um \"Já pedi\" no ponto do "
+                  f"clique depois da volta: {sobre or 'nenhum'}", flush=True)
+            if agora == [primeira]:
+                ok("J1: o clique dado enquanto as telas voltam é descartado (nenhuma outra encomenda muda; o ponto do "
+                   "clique cai num \"Já pedi\")", bool(sobre),
+                   f"{f} INSTRUMENTAÇÃO: o ponto ({bx}, {py}) não cai em nenhum \"Já pedi\" depois da volta")
+            else:
+                ok("J1: o clique dado enquanto as telas voltam é descartado (nenhuma outra encomenda muda)", False,
+                   f"{f} pedidas={agora}")
 
             # J2. Passado o instante, o clique vale: o "Já pedi" de alvo, lido de novo, marca ela.
             if not esperar_textos(r, lambda t: not aviso_em(t), 8):
