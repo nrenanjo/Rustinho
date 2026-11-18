@@ -411,13 +411,17 @@ FocusScope {
                 spacing: 10
                 Layout.fillWidth: true
                 Layout.topMargin: 4
+                // No celular (Android), sem a seta (pedido do proprietário,
+                // 18/11/2026): o "voltar" do Android faz o mesmo. A linha
+                // fica pelo olho.
                 Seta {
                     id: seta
+                    visible: !Tema.celular
                     Layout.leftMargin: 4
                     Layout.topMargin: seta.descida
                     onClicked: tela.janela.retornar(true)
                 }
-                Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }
+                Item { Layout.fillWidth: true; implicitHeight: seta.visible ? Tema.toqueSeta : 0 }
                 Olho {}
             }
             GridLayout {

@@ -407,6 +407,24 @@ preencher() {
     falhou "$AMBIENTE campo $n: não deu para digitar \"$palavra\" em 3 tentativas (veja instabilidade.txt)"
     return 1
 }
+# T047 (pedido do proprietário, 18/11/2026): no Android, as telas não têm a
+# seta de voltar (o "voltar" do Android faz o mesmo). A seta tem o nome
+# acessível "Voltar". Só conclui com a árvore do app de verdade (um texto
+# dele, além do nome do pacote); sem ela, a falha é do ambiente.
+sem_seta() {
+    local onde=$1 nome=$2
+    arvore "$nome"
+    if ! grep -q "package=\"$PACOTE\"" "fotos/$nome.xml" 2> /dev/null \
+       || ! grep -q -E 'text="[^"]+"' "fotos/$nome.xml"; then
+        falhou "$AMBIENTE $onde: a árvore de acessibilidade veio vazia (não deu para conferir a seta)"
+        return 1
+    fi
+    if grep -q -E '(text|content-desc)="Voltar"' "fotos/$nome.xml"; then
+        falhou "$onde: a seta de voltar ainda aparece no Android (T047)"
+        return 1
+    fi
+    echo "$onde: sem a seta de voltar (T047)"
+}
 # Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
 # chegou <Tela> <segundos>: espera sem reprovar (quem chama decide).
 chegou() {
@@ -626,6 +644,7 @@ TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel T
 for t in $TELAS; do
     abrir $t
     foto "10-$t" 3
+    sem_seta "$t" "12-$t-arvore"
     adb shell input swipe 540 1700 540 700 500
     foto "11-$t-rolada" 3
     conferir "$t"
@@ -654,6 +673,48 @@ tecla KEYCODE_BACK
 esperar_tela TelaInicio 30 "voltar do Android"
 foto 30-voltar 3
 conferir "voltar do Android"
+# T047: o voltar com contexto, no Android. Na ficha de uma peça nova com algo
+# digitado, o voltar pergunta antes de descartar (a janelinha "Descartar
+# alterações?"); um 2º voltar fecha a janelinha (o Qt fecha o Popup com o
+# voltar no Android), e a ficha continua.
+abrir TelaPeca
+if preencher 1 teste texto; then
+    fechar_teclado
+    tecla KEYCODE_BACK
+    sleep 2
+    arvore 33-voltar-pergunta
+    if grep -q 'Descartar' fotos/33-voltar-pergunta.xml && [ "$(tela_atual)" = TelaPeca ]; then
+        echo "voltar com contexto: perguntou antes de descartar (T047)"
+    else
+        falhou "voltar com contexto: a ficha alterada não perguntou antes de descartar (está em: $(tela_atual))"
+    fi
+    foto 33-voltar-pergunta 1
+    tecla KEYCODE_BACK
+    sleep 2
+    arvore 34-voltar-fecha-janelinha
+    if ! grep -q 'Descartar' fotos/34-voltar-fecha-janelinha.xml && [ "$(tela_atual)" = TelaPeca ]; then
+        echo "voltar com a janelinha aberta: fechou a janelinha, e a ficha continua (T047)"
+    else
+        falhou "voltar com a janelinha aberta: a janelinha não fechou ou a ficha saiu (está em: $(tela_atual))"
+    fi
+    foto 34-voltar-fecha-janelinha 1
+    conferir "voltar com contexto"
+fi
+# T047: o gesto de voltar (navegação por gestos), só a partir da API 29 (o de
+# 32 bits é a API 28): do canto esquerdo para o meio, na altura do meio.
+if [ -z "${CURTO:-}" ]; then
+    adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
+    sleep 5
+    abrir TelaPecas
+    sem_seta "TelaPecas (gestos)" 31-gestos-pecas-arvore
+    foto 31-gestos-pecas 2
+    adb shell input swipe 1 1200 600 1200 300
+    esperar_tela TelaInicio 30 "gesto de voltar do Android"
+    foto 32-gesto-voltar 3
+    conferir "gesto de voltar"
+    adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
+    sleep 3
+fi
 # A câmera por último (no emulador, ela mostra uma sala de mentira):
 # um toque no botão da câmera, no fim do campo de busca da venda.
 abrir TelaVender

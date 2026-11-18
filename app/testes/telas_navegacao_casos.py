@@ -73,6 +73,12 @@ def xdo(*args):
     subprocess.run(["xdotool", *args], env=dict(os.environ, DISPLAY=TELA), check=True)
 
 
+def tecla_voltar_android():
+    """O "voltar" do Android (botão e gesto chegam ao Qt como a tecla Voltar, Qt.Key_Back). Na tela virtual, a tecla
+    XF86Back, que o Qt traduz para Qt.Key_Back (Main.qml, Keys.onBackPressed)."""
+    xdo("key", "XF86Back")
+
+
 def cargo_teste(env_extra, *filtro):
     env = dict(os.environ, CARGO_NET_OFFLINE="true", **env_extra)
     subprocess.run(
@@ -236,9 +242,40 @@ class Rustinho(base.Rustinho):
 
     def seta_so_desenho(self):
         """A seta da tela é só o desenho, sem texto ao lado (D-V1, correção definitiva do dono, 07/11/2026):
-        a área de toque fica quadrada."""
+        a área de toque fica quadrada. No celular (T047, pedido do dono de 18/11/2026), a tela NÃO tem a seta (o
+        "voltar" do Android faz o mesmo): confere que não há seta nenhuma (sem janelinha aberta)."""
         s = self.setas()
+        if CELULAR:
+            return not s
         return bool(s) and s[0][2] == s[0][3]
+
+    def clicar_seta_de_cima(self):
+        """A seta de cima (a da janelinha aberta, ou a da tela). No celular, nem a tela (T047) nem a janelinha
+        (decisão 1a, 18/11/2026) têm a seta: vai o "voltar" do Android (voltar_android)."""
+        if CELULAR and not self.setas():
+            self.voltar_android()
+            return True
+        return super().clicar_seta_de_cima()
+
+    def janelinha_aberta(self, tx=None):
+        return any(t.startswith("GEO:fundoDaJanelinha:") for _, _, t in (tx if tx is not None else self.textos()))
+
+    def voltar_android(self):
+        """O "voltar" do Android, no desenho do celular da tela virtual. Sem janelinha: a tecla Voltar (Qt.Key_Back),
+        que chega ao Keys.onBackPressed do Main, como o botão e o gesto do aparelho. Com uma janelinha aberta: no
+        Android, o Qt fecha a janelinha com a tecla Voltar como se fosse o Esc (CloseOnEscape); o Qt do computador só
+        faz isso com o Esc. Aqui, então, a tecla Voltar e, se a janelinha não fechar, o Esc (avisado na saída). O
+        fechar com o Voltar de verdade é conferido no emulador da CI (android/testar.sh) e no POCO."""
+        tx = self.textos_para_clicar()
+        if not self.janelinha_aberta(tx):
+            tecla_voltar_android()
+            return
+        tecla_voltar_android()
+        time.sleep(0.6)
+        if self.janelinha_aberta():
+            print("INSTRUMENTAÇÃO: no computador, o Qt não fecha a janelinha com a tecla Voltar (só no Android); "
+                  "usei o Esc", flush=True)
+            xdo("key", "Escape")
 
     def onde(self, texto):
         """[(x, y)] de cada texto igual a este."""
@@ -270,7 +307,7 @@ class Rustinho(base.Rustinho):
         if not CELULAR:
             return super().clicar(texto, comeca)
         for _ in range(12):
-            pontos = [(x, y) for x, y, t in self.textos()
+            pontos = [(x, y) for x, y, t in self.textos_para_clicar()
                       if simples(t) == simples(texto) or (comeca and simples(t).startswith(simples(texto)))]
             if not pontos:
                 return False
@@ -297,8 +334,9 @@ class Rustinho(base.Rustinho):
         time.sleep(0.8)
 
     def clicar_ultimo(self, texto):
-        """O último (mais embaixo) texto igual a este, dentro da janela."""
-        pontos = [p for p in self.onde(texto) if 0 <= p[1] < self.altura() - 10]
+        """O último (mais embaixo) texto igual a este, dentro da janela (lido quando o clique vale: N6 e YVZ4)."""
+        pontos = [(x, y) for x, y, t in self.textos_para_clicar()
+                  if simples(t) == simples(texto) and 0 <= y < self.altura() - 10]
         if not pontos:
             return False
         x, y = max(pontos, key=lambda p: p[1])
@@ -797,7 +835,7 @@ def caso6(placar, fotos):
             # 0.9.18 (V-4): o "Continuar sem rascunho" (só fechava) virou a
             # seta da janelinha (nome "Voltar"), igual ao Esc.
             ok("6a: opções: Ver caixas, a seta (continuar sem rascunho), Sair sem salvar",
-               r.tem_igual("Ver caixas") and len(r.setas()) == 2 and r.tem_igual("Sair sem salvar"), f)
+               r.tem_igual("Ver caixas") and len(r.setas()) == (0 if CELULAR else 2) and r.tem_igual("Sair sem salvar"), f)
             ok("6a: o motivo diz o caixa e o lugar", r.tem("Caixa 2") and r.tem("Simultaneidade › Caixas"), f)
             ok("6a: nada mudou de tela sozinho", r.pilha() == os_pilha, f)
             r.clicar_seta_de_cima()

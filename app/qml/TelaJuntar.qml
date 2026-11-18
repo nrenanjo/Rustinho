@@ -94,8 +94,9 @@ FocusScope {
             id: coluna
             width: Math.min(620, parent.width - 2 * Tema.margem)
             x: (parent.width - width) / 2
-            // Abaixo da seta de retorno, mesmo numa tela baixa.
-            y: Math.max(Tema.margem + Tema.toqueSeta + 8, (tela.height - implicitHeight) / 2 - 20)
+            // Abaixo da seta de retorno, mesmo numa tela baixa (no celular,
+            // sem a seta, só a margem).
+            y: Math.max(Tema.margem + (seta.visible ? Tema.toqueSeta + 8 : 0), (tela.height - implicitHeight) / 2 - 20)
             spacing: 18
 
             ColumnLayout {
@@ -203,6 +204,9 @@ FocusScope {
     // cima da rolagem, sempre à vista.
     Seta {
         id: seta
+        // No celular (Android), sem a seta (pedido do proprietário,
+        // 18/11/2026): o "voltar" do Android faz o mesmo.
+        visible: !Tema.celular
         x: Tema.margem
         y: Tema.margem - 12 + seta.descida
         z: 1

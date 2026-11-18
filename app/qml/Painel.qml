@@ -13,6 +13,11 @@ Popup {
     id: painel
     property color cor: Tema.pergaminho
     property bool comSeta: true
+    // Decisão 1a do proprietário (18/11/2026): no celular (Android), a
+    // janelinha não tem a seta. O "voltar" do Android (botão e gesto) a fecha:
+    // o Qt do Android trata a tecla Voltar como o Esc (CloseOnEscape). O
+    // conteúdo sobe para o lugar da seta. O computador continua com ela.
+    readonly property bool mostraSeta: comSeta && !Tema.celular
     modal: true
     focus: true
     anchors.centerIn: T.Overlay.overlay
@@ -25,7 +30,7 @@ Popup {
     height: Math.min(implicitHeight, alturaMaxima)
     padding: Tema.estreito ? 18 : 30
     // O conteúdo começa logo abaixo da área de toque da seta.
-    topPadding: comSeta ? setaDoPainel.y + setaDoPainel.height : padding
+    topPadding: mostraSeta ? setaDoPainel.y + setaDoPainel.height : padding
     closePolicy: Popup.CloseOnEscape
     // A-1 da revisão (C8, caso 7): a janela sabe quais janelinhas estão abertas, na ordem, para fechar e reabrir a
     // cadeia inteira (a ficha da conta e a pergunta do motivo) quando a guia leva a outra tela.
@@ -55,11 +60,13 @@ Popup {
     palette.window: Tema.superficie(painel.cor)
     T.Overlay.modal: Rectangle { color: Tema.veu }
     background: Rectangle {
+        // Os testes das telas sabem por este nome que há uma janelinha aberta.
+        objectName: "fundoDaJanelinha"
         color: painel.cor
         radius: Tema.raio + 3
         Seta {
             id: setaDoPainel
-            visible: painel.comSeta
+            visible: painel.mostraSeta
             // O vidro da seta um pouco à esquerda do conteúdo, como no print,
             // com folga das bordas da janelinha (0.9.18: a seta tem vidro).
             x: Math.max(8, painel.leftPadding - 12)

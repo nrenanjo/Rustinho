@@ -263,7 +263,14 @@ FocusScope {
                     tipo: "discreto"
                     altura: 32
                     font.pixelSize: 14
-                    onClicked: secao.pedidas(secao.dados.encomendas.map(e => e.id))
+                    // Decisão 2c do proprietário (18/11/2026, bug YVZ4): pede
+                    // confirmação antes de marcar todas.
+                    onClicked: {
+                        const ids = secao.dados.encomendas.map(e => e.id)
+                        secao.janela.confirmar("Marcar as " + ids.length + " encomendas como pedidas?",
+                            "Todas as encomendas desta lista ficam como pedidas ao fornecedor.",
+                            "Marcar todas", () => secao.pedidas(ids))
+                    }
                 }
             }
         }

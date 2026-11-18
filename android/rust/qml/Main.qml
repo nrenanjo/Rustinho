@@ -731,10 +731,26 @@ ApplicationWindow {
         // A volta das telas (140 ms) e um instante depois (300 ms), o tempo de quem já ia clicar.
         interval: 440
     }
+    // Decisão 2c do proprietário (18/11/2026, bug YVZ4): depois de uma
+    // operação gravada, a lista muda no lugar sem as telas se moverem (a linha
+    // marcada sai e a de baixo sobe para o lugar dela), e um 2º clique no mesmo
+    // ponto caía na linha de baixo. Por 0,4 s depois de gravar, o clique nas
+    // telas também é descartado (a mesma MouseArea).
+    Timer {
+        id: cliqueDescartadoNaLista
+        interval: 400
+    }
+    Connections {
+        target: Api
+        function onGravou() {
+            cliqueDescartadoNaLista.restart()
+        }
+    }
+    readonly property bool descartandoClique: cliqueDescartado.running || cliqueDescartadoNaLista.running
     MouseArea {
         objectName: "cliqueDescartadoNoMovimento"
         anchors.fill: pilha
-        enabled: cliqueDescartado.running
+        enabled: janela.descartandoClique
         acceptedButtons: Qt.AllButtons
         // Segura o clique (o pressionar e o soltar) e não faz nada com ele.
     }
@@ -860,6 +876,9 @@ ApplicationWindow {
         // TESTE_PILHA é consumido pelo teste visual da Etapa 1 (caso F) para
         // confirmar que Fiscal → Loja reutiliza Configurações sem empilhar outra tela.
         linhas.push("0\t0\tTESTE_PILHA:" + pilha.depth)
+        // N6 e YVZ4 (18/11/2026): os roteiros esperam o fim do instante em que
+        // o clique é descartado antes de clicar. Só para os testes.
+        linhas.push("0\t0\tTESTE_CLIQUE_DESCARTADO:" + (janela.descartandoClique ? 1 : 0))
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
     // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas

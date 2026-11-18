@@ -51,10 +51,7 @@ FAIXA_ABAIXO_DA_ABA = 38
 
 
 def geo(r, nome):
-    for _, _, t in r.textos():
-        if t.startswith(f"GEO:{nome}:"):
-            return tuple(int(v) for v in t.rsplit(":", 1)[1].split(","))
-    return None
+    return geo_em(r.textos(), nome)
 
 
 def onde(r, pedaco, textos=None):
@@ -62,10 +59,19 @@ def onde(r, pedaco, textos=None):
     return [(x, y) for x, y, t in textos if pedaco in t and not t.startswith(("GEO:", "TOQUE:", "RET:"))]
 
 
+# O topo da tela: a seta de retorno (o primeiro item da tela, no canto de cima). No celular, desde o pedido do
+# proprietário de 18/11/2026 (T047), as telas não têm a seta (o "voltar" do Android faz o mesmo): a referência é o
+# cabeçalho da tela (Cabecalho.qml, onde a seta ficava), que se move com a tela do mesmo jeito.
+# (Um programa de antes da T047 ainda tem a seta no celular e não dá o nome do cabeçalho: vale a seta.)
+TOPO = "cabecalhoDaTela" if nav.CELULAR else "setaDeRetorno"
+
+
 def geo_em(textos, nome):
     for _, _, t in textos:
         if t.startswith(f"GEO:{nome}:"):
             return tuple(int(v) for v in t.rsplit(":", 1)[1].split(","))
+    if nome == "cabecalhoDaTela":
+        return geo_em(textos, "setaDeRetorno")
     return None
 
 
@@ -157,7 +163,7 @@ def cenario_b(placar, fotos, pasta):
         ajustar(r)
         r.esperar(lambda: r.tem("Fazer backup agora"), 15)
         r.rolar_ate("Fazer backup agora")
-        seta0 = geo(r, "setaDeRetorno")
+        seta0 = geo(r, TOPO)
         r.clicar("Fazer backup agora")
         apareceu = r.esperar(lambda: onde(r, BACKUP), 20)
         time.sleep(0.4)
@@ -165,7 +171,7 @@ def cenario_b(placar, fotos, pasta):
         if not ok("B: o aviso do backup aparece", apareceu, f):
             return
         t = onde(r, BACKUP)[0]
-        seta1 = geo(r, "setaDeRetorno")
+        seta1 = geo(r, TOPO)
         ok("B: o aviso fica acima da seta de retorno, sem cobri-la", t[1] + MEIO_AVISO <= seta1[1],
            f"{f} aviso y={t[1]} seta y={seta1[1]}")
         ok("B: a tela desceu pelo espaço do aviso", seta1[1] >= seta0[1] + 20, f"{f} seta {seta0[1]} → {seta1[1]}")
@@ -224,7 +230,7 @@ CURVAS_QUE_PASSAM = ("Back", "Elastic", "Bounce", "Bezier")
 
 def posicoes_de(tx):
     """(guia, aviso, seta) de uma leitura com a orientação da guia, o aviso e a seta; senão None."""
-    g, av, st = onde(None, GUIA, tx), onde(None, SENHA_TROCADA, tx), geo_em(tx, "setaDeRetorno")
+    g, av, st = onde(None, GUIA, tx), onde(None, SENHA_TROCADA, tx), geo_em(tx, TOPO)
     return (g[0], av[0], st) if g and av and st else None
 
 
@@ -438,7 +444,7 @@ def cenario_d(placar, fotos, pasta):
         elif retrato is None:
             ok("D: posições lidas com o aviso na tela", False, f"{f} INSTRUMENTAÇÃO: nenhuma leitura com a orientação, o aviso e a seta")
         else:
-            g, a2, seta = onde(r, GUIA, retrato)[0], onde(r, SENHA_TROCADA, retrato)[0], geo_em(retrato, "setaDeRetorno")
+            g, a2, seta = onde(r, GUIA, retrato)[0], onde(r, SENHA_TROCADA, retrato)[0], geo_em(retrato, TOPO)
             print(f"MEDIDA D: posições por {modo}: guia y={g[1]} aviso y={a2[1]} seta y={seta[1]}", flush=True)
             ok("D: a orientação em cima, o aviso abaixo dela, a tela abaixo dos dois (nada sobreposto)",
                g[1] + 30 <= a2[1] - MEIO_AVISO and a2[1] + MEIO_AVISO <= seta[1],

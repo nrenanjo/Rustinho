@@ -303,11 +303,15 @@ def acao(r, qual):
         xdo("type", "--delay", "60", "Teste")
         time.sleep(0.4)
         seta = [t for t in toques if t["classe"] == "Seta"]
-        if not seta:
-            raise RuntimeError("sem seta na ficha")
-        s = seta[0]
-        px, py = r.tela_fisica(s["x"] + s["w"] / 2, s["y"] + s["h"] / 2)
-        xdo("mousemove", str(px), str(py), "click", "1")
+        if seta:
+            s = seta[0]
+            px, py = r.tela_fisica(s["x"] + s["w"] / 2, s["y"] + s["h"] / 2)
+            xdo("mousemove", str(px), str(py), "click", "1")
+        else:
+            # T047 (pedido do proprietário, 18/11/2026): no celular, a ficha não tem a seta; o "voltar" do Android
+            # (a tecla Voltar, Qt.Key_Back) faz o mesmo caminho. A ausência da seta é conferida em
+            # telas_voltar_android.py.
+            xdo("key", "XF86Back")
         time.sleep(1)
     elif qual == "sangria":
         if not (r.clicar("Sangria") or r.clicar("Sangria / suprimento", comeca=True)):

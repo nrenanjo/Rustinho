@@ -11,6 +11,9 @@ Em Estoque › O que comprar, com seis encomendas abertas:
       clique tem de ser descartado: nenhuma outra encomenda muda.
   J2  Passado o instante, o clique vale: o "Já pedi" da mesma linha, lido de novo, marca ela, e só ela.
   J3  Clique duplo no "Já pedi" de outra linha (o 2º clique sai quando as telas descem com o aviso): marca uma só.
+  J4  (Decisão 2c, bug YVZ4) Com o aviso JÁ à vista (as telas não se movem), clique duplo no "Já pedi" de uma linha: a
+      linha sai da lista, a de baixo sobe para o lugar dela, e o 2º clique cairia nela. Marca uma só.
+  J5  (Decisão 2c) "Marcar todas como pedidas" pede confirmação: nada muda antes de confirmar; confirmado, marca todas.
 Roda no computador e, num 2º processo, no desenho do celular (360 × 780).
 
     RUSTINHO_TELA=:88 python3 app/testes/telas_clique_no_movimento.py [pasta das fotos]
@@ -31,10 +34,10 @@ from telas_navegacao_casos import PROGRAMA, TELA, Placar, ler, montar_loja, por_
 JANELA = "celular" if nav.CELULAR else "computador"
 AVISO = "marcada como pedida"
 NOME = "Encomenda do roteiro "
-# Seis encomendas abertas (a mesma loja da sonda L do revisor).
+# Dez encomendas abertas (a loja da sonda L do revisor, com mais linhas para o J4 e o J5).
 SQL_ENCOMENDAS = """
 CREATE TEMP TABLE s(n INTEGER PRIMARY KEY);
-WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 6) INSERT INTO s SELECT n FROM c;
+WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM c WHERE n < 10) INSERT INTO s SELECT n FROM c;
 INSERT INTO encomenda (id, numero, cliente_nome, telefone, descricao, quantidade, situacao, criado_em, atualizado_em, dispositivo)
 SELECT 'roteiro-e-' || n, 1000 + n, 'Cliente do roteiro ' || n, '', 'Encomenda do roteiro ' || n,
        1000, 'aberta', strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-' || n || ' minutes'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
@@ -146,12 +149,21 @@ def cenario(placar, fotos):
                 return
             time.sleep(1.2)
             ALTURA[0] = r.altura()
-            # No celular, a lista fica abaixo dos cartões: rolar até três linhas dentro da janela.
-            for n in (3, 4, 5):
+            # No celular, a lista fica abaixo dos cartões: rolar até três linhas dentro da janela (as mais novas vêm
+            # primeiro: 10, 9, 8…), só o necessário, e esperar a lista parar (um toque na lista ainda deslizando só a
+            # para, e não aciona o botão).
+            for n in (8, 7, 6):
                 if len(linhas(r.textos())) >= 3:
                     break
                 r.rolar_ate(NOME + str(n))
                 time.sleep(0.8)
+            antes_parar = None
+            for _ in range(10):
+                agora_l = [(y, n) for y, _, n in linhas(r.textos())]
+                if agora_l == antes_parar:
+                    break
+                antes_parar = agora_l
+                time.sleep(0.4)
             sem = r.textos()
             ls = linhas(sem)
             if not ok("J: há pelo menos 3 encomendas à vista", len(ls) >= 3, f"{r.foto('-0')} {len(ls)} linhas"):
@@ -271,6 +283,67 @@ def cenario(placar, fotos):
             print(f"MEDIDA J3 ({JANELA}): pedidas antes {antes}; depois do clique duplo {agora}", flush=True)
             ok("J3: o clique duplo no \"Já pedi\" marca uma encomenda só (a clicada)",
                sorted(agora) == sorted(antes + [outra]), f"{r.foto('-8')} antes={antes} depois={agora}")
+
+            # J4. Com o aviso JÁ à vista: "Já pedi" numa linha (o aviso aparece); passado o instante da N6, clique duplo
+            # no "Já pedi" de outra linha, com outra aberta logo abaixo. A altura do aviso não muda (as telas não se
+            # movem): sem a proteção da 2c, o 2º clique caía na linha que sobe.
+            esperar_textos(r, lambda t: not aviso_em(t), 8)
+            time.sleep(0.6)
+            t = r.textos()
+            abertas = [v for v in linhas(t) if v[2] not in pedidas(pasta)]
+            if not ok("J4: há pelo menos três encomendas abertas à vista", len(abertas) >= 3, r.foto("-9")):
+                return
+            t, b5 = ler_botao(r, linhas(t), abertas[0][2])
+            if not ok(f"J4: o \"Já pedi\" de \"{abertas[0][2]}\" à vista", b5 is not None, r.foto("-9")):
+                return
+            r.clicar_em(b5[1], b5[0])
+            if not ok("J4: o aviso aparece", esperar_textos(r, aviso_em, 6) is not None, r.foto("-9")):
+                return
+            visto4 = time.time()
+            time.sleep(0.8)
+            t = r.textos()
+            abertas = [v for v in linhas(t) if v[2] not in pedidas(pasta)]
+            alvo4 = abertas[0][2] if len(abertas) >= 2 else None
+            t, b6 = ler_botao(r, linhas(t), alvo4) if alvo4 else (t, None)
+            if not ok(f"J4: com o aviso à vista, o \"Já pedi\" de \"{alvo4}\" e outra encomenda abaixo dela",
+                      b6 is not None and aviso_em(t), r.foto("-10")):
+                return
+            antes = pedidas(pasta)
+            espera = time.time() - visto4
+            if not ok("J4: o clique duplo vem com o aviso ainda à vista (menos de 2,5 s depois de visto)", espera < 2.5,
+                      f"INSTRUMENTAÇÃO (tempo): {espera:.1f} s"):
+                return
+            xdo("mousemove", str(b6[1]), str(b6[0]), "click", "--repeat", "2", "--delay", "200", "1")
+            time.sleep(1.5)
+            agora = pedidas(pasta)
+            print(f"MEDIDA J4 ({JANELA}): pedidas antes {antes}; depois do clique duplo com o aviso à vista {agora}",
+                  flush=True)
+            ok("J4: com o aviso já à vista, o clique duplo no \"Já pedi\" marca uma encomenda só (a clicada)",
+               sorted(agora) == sorted(antes + [alvo4]), f"{r.foto('-11')} antes={antes} depois={agora}")
+
+            # J5. "Marcar todas como pedidas" pede confirmação antes de gravar.
+            esperar_textos(r, lambda t: not aviso_em(t), 8)
+            time.sleep(0.6)
+            todas = [(x, y) for x, y, tx in r.textos() if tx == "Marcar todas como pedidas" and na_janela(y)]
+            if not ok("J5: o botão \"Marcar todas como pedidas\" à vista", todas, r.foto("-12")):
+                return
+            x, y = todas[0]
+            if nav.CELULAR:
+                x = min(x, nav.CELULAR_DP[0] - 20)  # no celular, o botão sai cortado pela direita (bug 3M90)
+            antes = pedidas(pasta)
+            r.clicar_em(x, y)
+            time.sleep(1.2)
+            agora = pedidas(pasta)
+            perguntou = r.tem("encomendas como pedidas?")
+            print(f"MEDIDA J5 ({JANELA}): pedidas antes {len(antes)}; depois do clique em Marcar todas {len(agora)}; "
+                  f"perguntou={perguntou}", flush=True)
+            if not ok("J5: \"Marcar todas como pedidas\" pergunta antes, e nada muda sem a confirmação",
+                      perguntou and agora == antes, f"{r.foto('-13')} antes={len(antes)} depois={len(agora)}"):
+                return
+            r.clicar("Marcar todas")
+            time.sleep(1.5)
+            sobrou = ler(pasta, "SELECT COUNT(*) FROM encomenda WHERE situacao = 'aberta'")[0][0]
+            ok("J5: confirmado, marca todas", sobrou == 0, f"{r.foto('-14')} abertas={sobrou}")
         finally:
             r.fechar()
     finally:

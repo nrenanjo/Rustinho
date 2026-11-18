@@ -125,8 +125,21 @@ class Rustinho:
                 return lista
         raise RuntimeError(f"o Rustinho não escreveu os textos da tela (veja {self.saida})")
 
+    def textos_para_clicar(self, limite=4.0):
+        """Os textos da tela, lidos quando o clique vale. N6 e YVZ4 (decisões do proprietário de 18/11/2026): enquanto
+        as telas descem ou voltam com o aviso ou a guia, e logo depois de uma operação gravada, o programa descarta o
+        clique nas telas (o programa diz TESTE_CLIQUE_DESCARTADO:1 na leitura, só nos testes). O roteiro espera esse
+        instante passar e só então lê onde clicar (as posições de durante o movimento também não valem). Um programa
+        de antes da N6 não diz nada: lê uma vez só, como sempre."""
+        fim = time.time() + limite
+        while True:
+            tx = self.textos()
+            if not any(t == "TESTE_CLIQUE_DESCARTADO:1" for _, _, t in tx) or time.time() > fim:
+                return tx
+            time.sleep(0.15)
+
     def clicar(self, texto, comeca=False):
-        for x, y, t in self.textos():
+        for x, y, t in self.textos_para_clicar():
             if simples(t) == simples(texto) or (comeca and simples(t).startswith(simples(texto))):
                 xdo("mousemove", str(x), str(y), "click", "1")
                 return True
@@ -138,7 +151,7 @@ class Rustinho:
         retorno (0.9.18, 07/11/2026) todas as setas são só o desenho, com o
         mesmo nome acessível ("Voltar"); a da tela vem antes na lista dos
         textos e a da janelinha (por cima), depois."""
-        setas = [(x, y) for x, y, t in self.textos() if t.startswith("GEO:setaDeRetorno:")]
+        setas = [(x, y) for x, y, t in self.textos_para_clicar() if t.startswith("GEO:setaDeRetorno:")]
         if not setas:
             return False
         xdo("mousemove", str(setas[-1][0]), str(setas[-1][1]), "click", "1")

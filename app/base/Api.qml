@@ -12,6 +12,10 @@ QtObject {
     // não deixa clicar em nada enquanto isso: também evita o clique repetido).
     signal esperaComecou(string texto)
     signal esperaTerminou()
+    // Decisão 2c do proprietário (18/11/2026, bug YVZ4): uma operação gravou
+    // (a lista da tela pode mudar no lugar). O Main descarta o clique nas
+    // telas por 0,4 s.
+    signal gravou()
 
     // Pedidos demorados em andamento: número → { comando, depois }.
     property var _pendentes: ({})
@@ -102,6 +106,8 @@ QtObject {
         if (r.ok)
             _entregaPendente = true
         _marcarRepetida(r)
+        if (r.ok)
+            gravou()
     }
 
     // I6 (decisão de 15/11/2026): a mesma operação repetida (duplo clique, Enter repetido) volta "ok" com a marca

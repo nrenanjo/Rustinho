@@ -7,6 +7,9 @@ import rustinho
 // grande e, à direita, os botões.
 ColumnLayout {
     id: cabecalho
+    // Os testes das telas acham o topo da tela por este nome (no celular, sem
+    // a seta, ele é a referência do lugar da tela). Não muda nada na tela.
+    objectName: "cabecalhoDaTela"
     // T042: o cabeçalho fica por cima do que vem logo abaixo dele (em quase
     // todas as telas, a barra de pesquisa): o halo da barra passa ATRÁS dos
     // botões e do título, como na referência, e não por cima deles.
@@ -14,6 +17,11 @@ ColumnLayout {
     property string titulo: ""
     property string subtitulo: ""
     property bool mostrarVoltar: true
+    // Pedido do proprietário (18/11/2026): no celular (Android), sem a seta.
+    // O "voltar" do Android (botão e gesto) faz o mesmo, pelo mesmo caminho
+    // (Keys.onBackPressed → janela.retornar, no Main). O computador continua
+    // com ela.
+    readonly property bool comSeta: mostrarVoltar && !Tema.celular
     // Tela com CPF/CNPJ, custo, lucro ou saldos: mostra o olho no canto.
     property bool sensivel: false
     default property alias acoes: linhaAcoes.data
@@ -23,18 +31,21 @@ ColumnLayout {
     RowLayout {
         spacing: 10
         Layout.fillWidth: true
-        visible: cabecalho.mostrarVoltar || cabecalho.sensivel
+        // Sem a seta, a linha só fica se houver o olho; senão, o título sobe.
+        visible: cabecalho.comSeta || cabecalho.sensivel
         // V-2/V-3 (0.9.18): a seta faz o mesmo que o Esc, pelo mesmo caminho
         // (janela.retornar): a tela decide com aoEsc, se tiver; senão, volta.
         // Nenhuma tela trata a seta à parte.
         Seta {
             id: seta
-            visible: cabecalho.mostrarVoltar
+            visible: cabecalho.comSeta
             // O vidro alinhado com o conteúdo e um pouco mais abaixo (Seta.descida).
             Layout.topMargin: seta.descida
             onClicked: ApplicationWindow.window.retornar(true)
         }
-        Item { Layout.fillWidth: true; implicitHeight: Tema.toqueSeta }
+        // A altura da seta só quando ela está lá (com o olho sozinho, a linha
+        // fica da altura dele).
+        Item { Layout.fillWidth: true; implicitHeight: cabecalho.comSeta ? Tema.toqueSeta : 0 }
         Olho { visible: cabecalho.sensivel }
     }
 
