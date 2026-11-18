@@ -407,7 +407,9 @@ def confirmar(r, botao):
     (o campo não ganha o foco sozinho no celular, e o Enter não chega: lacuna 14, 16/11/2026)."""
     if CELULAR:
         if not r.clicar_ultimo(botao):
-            raise RuntimeError(f"INSTRUMENTAÇÃO: o botão {botao!r} não está à vista para confirmar")
+            # Lacuna 14 (18/11/2026): onde o botão está (fora da janela ou ausente) e a foto, para classificar.
+            raise RuntimeError(f"INSTRUMENTAÇÃO: o botão {botao!r} não está à vista para confirmar "
+                               f"(posições {r.onde(botao)}, janela de altura {r.altura()}; foto {r.foto('-sem-botao')})")
         time.sleep(0.4)
     else:
         xdo("key", "Return")
@@ -579,7 +581,13 @@ def caso5(placar, fotos):
         r = placar.abrir(pasta, "TelaFinanceiro", {"secao": "contas"}, fotos, "5-transferir")
         try:
             r.entrar("Ana")
-            r.esperar(lambda: r.tem_igual("Transferir"))
+            # Lacuna 14 (18/11/2026): no celular, Contas da loja mostra uma parte
+            # por vez (pílulas Contas e Extrato) e o Transferir fica no Extrato.
+            # Sem trocar de parte, o roteiro não achava o botão (não é defeito).
+            if CELULAR:
+                r.esperar(lambda: r.tem_igual("Extrato"))
+                r.clicar("Extrato")
+            ok("5: o botão Transferir está à vista", r.esperar(lambda: r.tem_igual("Transferir")))
             pilha = r.pilha()
             r.clicar("Transferir")
             f = r.foto("-1")
@@ -587,12 +595,14 @@ def caso5(placar, fotos):
                r.esperar(lambda: r.tem_igual("Cadastrar conta")), f)
             ok("5: e diz que o que foi digitado continua", r.tem("o que você já digitou aqui continua"), f)
             ok("5: o botão Transferir fica desligado (não há destino)", r.tem("Transferir de Caixa geral"), f)
-            # O que a pessoa já digitou: valor e observação.
-            r.digitar("123,45")
+            # O que a pessoa já digitou: valor e observação. No celular, o roteiro toca no campo antes de digitar
+            # (sem rótulo, no último campo à vista: o valor caía na observação); com o rótulo, no campo certo
+            # (lacuna 14, 18/11/2026). No computador o rótulo não muda nada (o Tab, como sempre).
+            r.digitar("123,45", rotulo="Valor")
             xdo("key", "Tab")
             xdo("key", "Tab")
             time.sleep(0.3)
-            r.digitar("Deposito do cofre")
+            r.digitar("Deposito do cofre", rotulo="Observação (opcional)")
             time.sleep(0.5)
             f = r.foto("-2")
             ok("5: valor e observação digitados", campo_com(r, "123,45") and campo_com(r, "Deposito do cofre"), f)
@@ -612,7 +622,7 @@ def caso5(placar, fotos):
             r.clicar("Cadastrar conta")
             r.esperar(lambda: r.tem("Nova conta da loja"))
             time.sleep(0.5)
-            r.digitar("Banco Teste")
+            r.digitar("Banco Teste", rotulo="Nome")
             time.sleep(0.3)
             r.clicar("Salvar")
             f = r.foto("-5")
@@ -625,7 +635,13 @@ def caso5(placar, fotos):
             ok("5: a conta nova está gravada", len(ler(pasta, "SELECT 1 FROM conta_loja WHERE nome = 'Banco Teste'")) == 1)
             ok("5: nada transferido sozinho depois de cadastrar", movimentos() == antes)
             ok("5: nenhuma tela empilhada (sem ciclo)", r.pilha() == pilha, f)
-            r.clicar_ultimo("Transferir")
+            if CELULAR:
+                # Lacuna 14 (18/11/2026): no celular, o Transferir da página (por baixo do véu) fica mais embaixo que
+                # o da janelinha; o da janelinha é o último na ordem da tela (desenhado por cima).
+                x, y = r.onde("Transferir")[-1]
+                r.clicar_em(x, y)
+            else:
+                r.clicar_ultimo("Transferir")
             f = r.foto("-6")
             ok("5: só o clique em Transferir transfere",
                r.esperar(lambda: movimentos() > antes and not r.tem("Transferir de Caixa geral")), f)
@@ -988,7 +1004,9 @@ def caso7(placar, fotos):
             f = r.foto("-5")
             ok("7: aceitar pede o motivo (decisão do gerente)", r.tem("Caixa de origem perdido"), f)
             ok("7: ainda nada recebido", recebimentos() == 0)
-            confirmar(r, "Aceitar como está")
+            # Lacuna 14 (18/11/2026): o botão da janelinha do motivo é "Aceitar"; no celular, tocar em
+            # "Aceitar como está" tocava no botão da página, por baixo do véu, e nada acontecia.
+            confirmar(r, "Aceitar" if CELULAR else "Aceitar como está")
             f = r.foto("-6")
             ok("7: resolvido, volta ao Receber (o núcleo confirmou), com a janelinha",
                r.esperar(lambda: r.pilha() == base_pilha and r.tem("Receber de"), 12), f)
@@ -1299,9 +1317,14 @@ def caso7i(placar, fotos):
             ok("7i: a guia pede a senha do gerente ao caixa", r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar")), r.foto("-2"))
             desativar(pasta, "Bia")
             xdo("key", "Escape")  # desiste da senha: volta ao Receber, com a janelinha reaberta
-            r.esperar(lambda: r.tem("Receber de"))
-            time.sleep(0.6)
-            confirmar(r, "Receber")  # tenta concluir: a sessão já acabou
+            # Lacuna 14 (18/11/2026): o programa pode notar a sessão encerrada já ao desistir (volta direto à
+            # entrada) ou só ao tentar concluir (volta ao Receber com a janelinha). Os dois caminhos são seguros;
+            # o que o caso exige vem depois: entrada, nada recebido, nada da guia por cima.
+            ok("7i: desistir da senha volta ao Receber (com a janelinha) ou, com a sessão já encerrada, à entrada",
+               r.esperar(lambda: r.tem("Receber de") or r.tem("Quem está usando?")), r.foto("-2b"))
+            if r.tem("Receber de"):
+                time.sleep(0.6)
+                confirmar(r, "Receber")  # tenta concluir: a sessão já acabou
             f = r.foto("-3")
             ok("7i: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15), f)
             ok("7i: nenhuma janelinha do recebimento nem faixa da guia sobra por cima",
@@ -1320,8 +1343,111 @@ def caso7i(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "7": caso7, "7i": caso7i, "9": caso9, "9b": caso9b,
-         "9e": caso9e, "10a": caso10a, "10a2": caso10a_repetido, "10b": caso10b, "destaque": caso_destaque}
+def _loja_7j(pasta, sufixo):
+    """A loja do 7j/7k: caixa aberto, uma conta do Zé de registro inconsistente."""
+    montar_loja(pasta)
+    por_fora(pasta, f"""
+        INSERT INTO caixa_sessao (id, dispositivo, caixa_nome, aberto_em, aberto_por, valor_inicial)
+          SELECT 'sessao-nav{sufixo}', valor, 'Caixa 1', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                 (SELECT id FROM usuario WHERE nome = 'Ana'), 0
+            FROM config WHERE chave = 'dispositivo_id';
+        INSERT INTO conta_receber (id, cliente_id, descricao, valor, vencimento, criado_em, dispositivo)
+          SELECT 'cr-nav{sufixo}', id, 'Caderno', 5000, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+                 (SELECT valor FROM config WHERE chave = 'dispositivo_id')
+            FROM pessoa WHERE nome = 'Zé da Oficina';
+        INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo)
+          VALUES ('conta_receber', '["cr-nav{sufixo}"]', 'pessoa', '["sumiu"]', 'inconsistente',
+                  '2026-01-01T00:00:00Z', 'log');""")
+    return ler(pasta, "SELECT id FROM pessoa WHERE nome = 'Zé da Oficina'")[0][0]
+
+
+def _desistir_com_faixa(r, rotulo):
+    """No Receber: tenta receber (recusa do registro inconsistente), "Ver o registro", desiste da senha do gerente
+    (Esc) ainda ativo; volta ao Receber com a janelinha e a faixa "A operação ainda não foi concluída" (9 s).
+    Devolve a hora em que a faixa foi vista."""
+    r.esperar(lambda: r.tem("Receber tudo"))
+    r.clicar("Receber tudo")
+    r.esperar(lambda: r.tem("Receber de"))
+    time.sleep(0.6)
+    confirmar(r, "Receber")
+    r.esperar(lambda: r.tem_igual("Ver o registro"))
+    r.clicar("Ver o registro")
+    r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar"))
+    xdo("key", "Escape")  # desiste da senha, ainda ativo: volta ao Receber com a janelinha e a faixa
+    inicio = time.time()
+    placar_ok = r.esperar(lambda: r.tem("Receber de") and r.tem("ainda não foi concluída"))
+    return inicio, placar_ok
+
+
+def caso7j(placar, fotos):
+    """Lacuna 14 (18/11/2026), a outra ordem do 7i: o caixa (Bia) desiste da senha do gerente ainda ativo, volta ao
+    Receber com a janelinha e a faixa "A operação ainda não foi concluída" (que some sozinha em 9 s); é desativado em
+    outro caixa e, ao tentar concluir, a sessão cai. A faixa que estava à vista NÃO vai junto para a entrada (a tela de
+    origem foi descartada; BUG-20261118-SJ7F)."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7j-")
+    try:
+        ze = _loja_7j(pasta, "7j")
+        ja_havia = ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0]
+        r = placar.abrir(pasta, "TelaReceber", {"clienteInicial": ze}, fotos, "7j-caixa")
+        try:
+            r.entrar("Bia")
+            inicio, viu = _desistir_com_faixa(r, "7j")
+            ok("7j: desistir volta ao Receber com a janelinha e a faixa \"ainda não foi concluída\"", viu, r.foto("-1"))
+            desativar(pasta, "Bia")
+            time.sleep(0.6)
+            confirmar(r, "Receber")  # tenta concluir: a sessão cai
+            ok("7j: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15))
+            # R4 da revisão do condutor: o tempo medido logo que a entrada é vista (antes da foto).
+            decorrido = time.time() - inicio
+            f = r.foto("-2")
+            # A faixa some sozinha em 9 s: só vale como prova se a entrada chegou antes disso.
+            ok(f"7j: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
+            ok("7j: nenhuma faixa da guia vai junto para a entrada",
+               not r.tem("ainda não foi concluída") and not r.tem("Registro inconsistente")
+               and not r.tem("conclua a operação"), f)
+            ok("7j: nada foi recebido", ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] == ja_havia)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def caso7k(placar, fotos):
+    """BUG-20261118-SJ7F, achado 1 da revisão do condutor: a mesma faixa por outra troca da pilha inteira. O caixa
+    desiste da senha do gerente, volta ao Receber com a faixa "ainda não foi concluída" (9 s), fecha a janelinha, volta
+    ao Início e toca em "Trocar usuário" antes de a faixa sumir: a faixa NÃO vai junto para a tela de entrada."""
+    ok = placar.ok
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7k-")
+    try:
+        ze = _loja_7j(pasta, "7k")
+        r = placar.abrir(pasta, "TelaReceber", {"clienteInicial": ze}, fotos, "7k-caixa")
+        try:
+            r.entrar("Bia")
+            inicio, viu = _desistir_com_faixa(r, "7k")
+            ok("7k: desistir volta ao Receber com a janelinha e a faixa \"ainda não foi concluída\"", viu, r.foto("-1"))
+            xdo("key", "Escape")  # fecha a janelinha
+            time.sleep(0.5)
+            xdo("key", "Escape")  # volta ao Início
+            ok("7k: no Início, com a faixa ainda à vista",
+               r.esperar(lambda: r.tem("Trocar usuário") and r.tem("ainda não foi concluída"), 5), r.foto("-2"))
+            r.clicar("Trocar usuário")
+            ok("7k: trocar de usuário vai para a tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 10))
+            decorrido = time.time() - inicio
+            f = r.foto("-3")
+            ok(f"7k: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
+            ok("7k: nenhuma faixa da guia vai junto para a entrada",
+               not r.tem("ainda não foi concluída") and not r.tem("Registro inconsistente")
+               and not r.tem("conclua a operação"), f)
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+CASOS = {"8": caso8, "5": caso5, "4": caso4, "6": caso6, "7": caso7, "7i": caso7i, "7j": caso7j, "7k": caso7k,
+         "9": caso9, "9b": caso9b, "9e": caso9e, "10a": caso10a, "10a2": caso10a_repetido, "10b": caso10b,
+         "destaque": caso_destaque}
 
 
 def main():

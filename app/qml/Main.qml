@@ -131,6 +131,14 @@ ApplicationWindow {
 
     function trocarPara(tela, propriedades) {
         largarGuia()
+        // BUG-20261118-SJ7F (casos 7j e 7k): a guia que acabou de terminar
+        // deixa a faixa por alguns segundos ("A operação ainda não foi
+        // concluída… O que você já tinha feito continua lá"), e o destaque leve
+        // de uma notificação dura 6 s. A pilha inteira vai ser trocada (sessão
+        // encerrada, trocar de usuário, backup restaurado): a tela de origem
+        // sai, e nada disso vai junto para a tela seguinte.
+        guia.semDestaque()
+        guia.esconder()
         fecharJanelinhas()
         pilha.clear(StackView.Immediate)
         pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {}, StackView.Immediate)
@@ -432,6 +440,12 @@ ApplicationWindow {
             guia.mostrar("erro", "Não foi salvo", mensagem)
     }
     function finalizarRetornoGuia(g, satisfeito) {
+        // BUG-20261118-SJ7F (lacuna 14, caso 7i): a volta termina depois da
+        // troca de tela (depoisDaTroca). Se a sessão caiu nesse meio-tempo, a
+        // tela de origem foi descartada e a entrada está (ou vai estar) na
+        // tela: nada da guia vai junto para a entrada.
+        if (janela.voltandoParaEntrada || !(g.origem && pilha.find(item => item === g.origem) !== null))
+            return
         if (satisfeito)
             guia.mostrar("satisfeito", g.textoSatisfeito || "Requisito satisfeito — conclua a operação.", "")
         else
