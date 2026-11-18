@@ -1317,18 +1317,30 @@ def caso7i(placar, fotos):
             ok("7i: a guia pede a senha do gerente ao caixa", r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar")), r.foto("-2"))
             desativar(pasta, "Bia")
             xdo("key", "Escape")  # desiste da senha: volta ao Receber, com a janelinha reaberta
+            desde_esc = time.time()
             # Lacuna 14 (18/11/2026): o programa pode notar a sessão encerrada já ao desistir (volta direto à
             # entrada) ou só ao tentar concluir (volta ao Receber com a janelinha). Os dois caminhos são seguros;
             # o que o caso exige vem depois: entrada, nada recebido, nada da guia por cima.
             ok("7i: desistir da senha volta ao Receber (com a janelinha) ou, com a sessão já encerrada, à entrada",
                r.esperar(lambda: r.tem("Receber de") or r.tem("Quem está usando?")), r.foto("-2b"))
-            if r.tem("Receber de"):
+            alternativo = r.tem("Receber de")
+            if alternativo:
                 time.sleep(0.6)
                 confirmar(r, "Receber")  # tenta concluir: a sessão já acabou
+            chegou = r.esperar(lambda: r.tem("Quem está usando?"), 15)
+            # T043-R2: o tempo medido logo que a entrada é vista (antes da foto), como no 7j.
+            decorrido = time.time() - desde_esc
             f = r.foto("-3")
-            ok("7i: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15), f)
+            ok("7i: a sessão encerrada volta à tela de entrada", chegou, f)
+            print(f"MEDIDA 7i: caminho {'Receber primeiro' if alternativo else 'direto à entrada'}; "
+                  f"entrada {decorrido:.1f} s depois do Esc", flush=True)
+            if alternativo:
+                # Pelo Receber, a faixa "ainda não foi concluída" (9 s) pode ter estado à vista: só vale como prova se a
+                # entrada chegou antes de ela sumir sozinha.
+                ok(f"7i: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
             ok("7i: nenhuma janelinha do recebimento nem faixa da guia sobra por cima",
-               not r.tem("Receber de") and not r.tem("Registro inconsistente") and not r.tem("conclua a operação"), f)
+               not r.tem("Receber de") and not r.tem("Registro inconsistente") and not r.tem("conclua a operação")
+               and not r.tem("ainda não foi concluída"), f)
             ok("7i: nada foi recebido", ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] == ja_havia)
             r.entrar("Ana")
             f = r.foto("-4")

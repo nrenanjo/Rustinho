@@ -331,21 +331,34 @@ def cenario_d(placar, fotos, pasta):
         # lugar), enquanto o aviso está na tela.
         # CI de 18/11 (44232537886 e 44243237034): com cada leitura levando ~2,5 s, o aviso aparece em só DUAS leituras,
         # iguais; a primeira era gasta pelo ver_aviso e o laço só via uma. A leitura do ver_aviso conta como a 1ª.
-        retrato = None
-        anterior = posicoes_paradas(primeira.get("textos") or [])
+        # CI de 18/11 (44262875318): numa máquina mais lenta, o aviso (~3,2 s) apareceu numa leitura SÓ. Duas iguais
+        # seguidas continuam sendo o "parado"; com uma leitura só, vale a última com a orientação, o aviso e a seta: o
+        # aviso fica sempre no mesmo lugar e a tela só DESCE (animação de 140 ms, Main.qml), então, se nada se sobrepõe
+        # nela, nada se sobrepõe depois (a conferência não vira aprovação no meio da animação; só deixa de reprovar
+        # pela lentidão). Prova: t042_evid/ci_44262875318/replay_posicoes_v2.py.
+        lidas = [primeira["textos"]] if primeira.get("textos") else []
+        retrato, modo = None, ""
+        anterior = posicoes_paradas(lidas[0]) if lidas else None
         while retrato is None and onde(r, SENHA_TROCADA, tx := r.textos()):
             agora = posicoes_paradas(tx)
-            if agora is not None and agora == anterior:
-                retrato = tx
+            if agora is not None:
+                lidas.append(tx)
+                if agora == anterior:
+                    retrato, modo = tx, "duas leituras iguais"
             anterior = agora
+        if retrato is None:
+            validas = [tx for tx in lidas if posicoes_paradas(tx)]
+            if validas:
+                retrato, modo = validas[-1], "uma leitura só (a tela só desce)"
         f = r.foto("-posicoes")
         if retrato is None:
-            ok("D: posições lidas paradas, com o aviso na tela", False, f"{f} INSTRUMENTAÇÃO: o aviso sumiu antes")
+            ok("D: posições lidas com o aviso na tela", False, f"{f} INSTRUMENTAÇÃO: nenhuma leitura com a orientação, o aviso e a seta")
         else:
             g, a2, seta = onde(r, GUIA, retrato)[0], onde(r, SENHA_TROCADA, retrato)[0], geo_em(retrato, "setaDeRetorno")
+            print(f"MEDIDA D: posições por {modo}: guia y={g[1]} aviso y={a2[1]} seta y={seta[1]}", flush=True)
             ok("D: a orientação em cima, o aviso abaixo dela, a tela abaixo dos dois (nada sobreposto)",
                g[1] + 30 <= a2[1] - MEIO_AVISO and a2[1] + MEIO_AVISO <= seta[1],
-               f"{f} guia y={g[1]} aviso y={a2[1]} seta y={seta[1]}")
+               f"{f} guia y={g[1]} aviso y={a2[1]} seta y={seta[1]} ({modo})")
         sumiu, depois = ate_sumir(visto)
         natural = None if sumiu is None else sumiu - visto
         ok("D (controle): sem toque, o aviso some sozinho e a orientação da guia continua",
