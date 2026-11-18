@@ -15,6 +15,8 @@ no registro da foto). Na foto da janelinha "Qual é a peça?", só a barra da ja
                                em relação à foto do par (antes ↔ depois, sem halo no antes), nas 8 direções (cima, baixo,
                                lados e os 4 cantos) a 20% do alcance (no mínimo 5 px, fora do anel de foco antigo), e dos
                                dois lados, em cima e embaixo também a 40%; à esquerda (a margem da tela), também a 66%.
+                               O de 20% é sempre exigido; um ponto mais longe que, na foto do par, já cai em OUTRO
+                               componente (o cartão logo abaixo da barra) e não mudou fica dispensado: o halo está atrás dele.
                                Alcance: 30 px; 14 na tela estreita (pelo tamanho da foto, com a regra do Tema.qml). Sem a foto do par, a referência é a superfície (a cor mais comum a 36–44 px).
                          Com o programa de antes, tem de REPROVAR; com o de depois, passar.
   vizinhos PASTA         para cada par antes-/depois-: a barra fica no mesmo lugar e com o mesmo tamanho (GEO); na faixa do halo (alcance + 4 px em volta da barra, sem a barra e o
@@ -131,8 +133,9 @@ def estilo(pasta, prefixo):
                     ("cantoSO", (x + r - r * d45, y + r + r * d45), (-d45, d45)), ("cantoSE", (x + bw - r + r * d45, y + r + r * d45), (d45, d45))]
             exigido = {"esq": (0.2, 0.4, 0.66), "dir": (0.2, 0.4), "cima": (0.2, 0.4), "baixo": (0.2, 0.4)}
             minimo = {0.2: 20, 0.4: 8, 0.66: 2}
-            faltas = []
+            faltas, atras = [], []
             for nd, (bx, by), (dx, dy) in dirs:
+                perto = None  # o pixel do par no ponto de 20% desta direção (no fundo)
                 for f in exigido.get(nd, (0.2,)):
                     d = max(5, round(A * f))
                     qx, qy = round(bx + dx * d), round(by + dy * d)
@@ -143,6 +146,15 @@ def estilo(pasta, prefixo):
                         # o ponto fica dentro do retângulo da barra ANTIGA (os cantos da cápsula): no par, a referência é o
                         # fundo logo fora dele, no mesmo canto
                         ref = (x - 7 if dx < 0 else x + bw + 6, y - 7 if dy < 0 else y + bh + 6)
+                    if f == 0.2 and po is not None:
+                        perto = po[ref]
+                    # Mais longe que 20%: se no par o ponto já é OUTRO componente (cor diferente da do ponto de 20%, que é
+                    # o fundo) e o pixel não mudou, o halo está ATRÁS dele, como deve (o cartão ou a linha logo abaixo da
+                    # barra). O de 20% é sempre exigido; o halo por cima é a conferência dos vizinhos.
+                    if (f > 0.2 and po is not None and perto is not None and dist(po[ref], perto) > 6
+                            and dist(px[qx, qy], po[ref]) <= 6):
+                        atras.append(f"{nd}@{d}px")
+                        continue
                     subida = magentice(px[qx, qy]) - magentice(po[ref] if po is not None else sup)
                     if subida < minimo[f]:
                         faltas.append(f"{nd}@{d}px:{subida:+.0f}")
@@ -151,7 +163,8 @@ def estilo(pasta, prefixo):
             ruins += not ok
             desenho = "" if (nome, x, y, bw, bh) == barra else f" (área de toque {barra[1]},{barra[2]},{barra[3]}x{barra[4]})"
             print(f"{foto.name} [{nome} {x},{y},{bw}x{bh}{desenho}]: E1 fundo {fundo} {'ok' if e1 else 'ERRADO'} · "
-                  f"E2 canto {canto} {'ok' if e2 else 'ERRADO'} · E3 halo {'ok' if e3 else 'FALTA ' + ' '.join(faltas[:6])} (superfície {sup})")
+                  f"E2 canto {canto} {'ok' if e2 else 'ERRADO'} · E3 halo {'ok' if e3 else 'FALTA ' + ' '.join(faltas[:6])}"
+                  f"{' (atrás de outro componente: ' + ' '.join(atras) + ')' if atras else ''} (superfície {sup})")
     print(f"ESTILO ({prefixo}): {conferidas} barra(s), {ruins} fora da referência")
     return conferidas > 0 and ruins == 0
 
