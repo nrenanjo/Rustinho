@@ -280,8 +280,20 @@ def premissa_do_d(raiz=RAIZ):
             for curva in re.findall(r"Easing\.(\w+)", corpo):
                 if any(c in curva for c in CURVAS_QUE_PASSAM):
                     problemas.append(f"{pasta}/Main.qml: a descida da tela usa a curva {curva}, que passa do alvo")
-        if re.search(r"Behavior on y\b|property:\s*\"y\"|properties:\s*\"[^\"]*\by\b", aviso):
-            problemas.append(f"{pasta}/Aviso.qml: o aviso anima o y")
+        # INT9-R9: qualquer animação do y ou do topo (Behavior on, NumberAnimation/SmoothedAnimation on, YAnimator,
+        # property/properties de uma animação), o y fora da conta `topo + espaco` e o aviso preso por âncora vertical.
+        if re.search(r"\bon\s+(y|topo)\b|YAnimator|property:\s*\"(y|topo)\"|properties:\s*\"[^\"]*\b(y|topo)\b", aviso):
+            problemas.append(f"{pasta}/Aviso.qml: o aviso anima o y ou o topo")
+        if not re.search(r"(?m)^    y: topo \+ espaco$", aviso):
+            problemas.append(f"{pasta}/Aviso.qml: o y do aviso não é mais `topo + espaco`")
+        if re.search(r"(?m)^    anchors\.(top|bottom|verticalCenter|fill|centerIn|baseline)\b", aviso):
+            problemas.append(f"{pasta}/Aviso.qml: o aviso está preso por âncora vertical")
+        instancia = re.findall(r"(?m)^    Aviso \{([^{}]*)\}", main)
+        if len(instancia) != 1:
+            problemas.append(f"{pasta}/Main.qml: {len(instancia)} avisos rápidos (esperado 1, sem blocos dentro)")
+        for corpo in instancia:
+            if re.search(r"Behavior|Animation|Animator|anchors\.|\by\s*:", corpo):
+                problemas.append(f"{pasta}/Main.qml: o aviso rápido ganhou animação, âncora ou y próprio")
         for alvo, corpo in re.findall(r"Behavior on (\w+)\s*\{([^{}]*\{[^{}]*\}[^{}]*)\}", notif):
             if alvo in ("height", "implicitHeight"):
                 for curva in re.findall(r"Easing\.(\w+)", corpo):
@@ -416,7 +428,8 @@ def cenario_d(placar, fotos, pasta):
         validas = [tx for tx in lidas if posicoes_de(tx)]
         print(f"MEDIDA D: {len(validas)} leitura(s) válida(s) com o aviso na tela", flush=True)
         problemas = premissa_do_d()
-        ok("D (premissa): enquanto o aviso entra, a tela só desce e nada passa do alvo (Main, Aviso e Notificacao)",
+        ok("D (premissa, no código QML da árvore): enquanto o aviso entra, a tela só desce e nada passa do alvo "
+           "(Main, Aviso e Notificacao)",
            not problemas, "; ".join(problemas))
         f = r.foto("-posicoes")
         if nao_pararam:
