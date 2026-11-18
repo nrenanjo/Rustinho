@@ -144,6 +144,8 @@ FocusScope {
             Layout.rightMargin: -folgaDoHalo
             leftMargin: folgaDoHalo
             rightMargin: folgaDoHalo
+            // R11: se a folga muda com a seção aberta (girar o tablet, mudar o tamanho da janela), o conteúdo volta ao lugar.
+            onFolgaDoHaloChanged: contentX = -folgaDoHalo
             header: Tema.celular ? espacoDoTopo : null
             footer: Tema.celular ? espacoDoRodape : null
             Layout.fillWidth: true

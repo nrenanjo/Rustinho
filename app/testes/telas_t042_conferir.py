@@ -11,8 +11,8 @@ no registro da foto). Na foto da janelinha "Qual é a peça?", só a barra da ja
                            E3. o halo magenta em volta, sem corte: a "magentice" m = (R + B)/2 − G sobe, no MESMO ponto,
                                em relação à foto do par (antes ↔ depois, sem halo no antes), nas 8 direções (cima, baixo,
                                lados e os 4 cantos) a 20% do alcance (no mínimo 5 px, fora do anel de foco antigo), e dos
-                               dois lados também a 40%; à esquerda (a margem da tela), também a 66%. Alcance: 30 px; 14 no
-                               celular. Sem a foto do par, a referência é a superfície (a cor mais comum a 36–44 px).
+                               dois lados, em cima e embaixo também a 40%; à esquerda (a margem da tela), também a 66%.
+                               Alcance: 30 px; 14 na tela estreita (pelo tamanho da foto, com a regra do Tema.qml). Sem a foto do par, a referência é a superfície (a cor mais comum a 36–44 px).
                          Com o programa de antes, tem de REPROVAR; com o de depois, passar.
   vizinhos PASTA         para cada par antes-/depois-: a barra fica no mesmo lugar e com o mesmo tamanho (GEO); na faixa do halo (alcance + 4 px em volta da barra, sem a barra e o
                          anel de foco antigo), nenhum pixel de outro componente (texto inclusive) pode ter mudado "rumo
@@ -60,7 +60,10 @@ def barras(log, foto):
 
 
 def alcance(foto):
-    return 14 if "-celular-" in Path(foto).name else 30
+    """O alcance do halo pela tela da foto, com a regra do Tema.qml (estreito: largura < 760, ou altura < 560 com largura
+    < 1100): 14 px na tela estreita, 30 nas outras. A foto é a da janela inteira."""
+    w, h = Image.open(foto).size
+    return 14 if (w < 760 or (h < 560 and w < 1100)) else 30
 
 
 def superficie(px, w, h, x, y, bw, bh, r0, r1):
@@ -107,7 +110,7 @@ def estilo(pasta, prefixo):
                     ("cima", (x + bw / 2, y), (0, -1)), ("baixo", (x + bw / 2, y + bh), (0, 1)),
                     ("cantoNO", (x + r - r * d45, y + r - r * d45), (-d45, -d45)), ("cantoNE", (x + bw - r + r * d45, y + r - r * d45), (d45, -d45)),
                     ("cantoSO", (x + r - r * d45, y + r + r * d45), (-d45, d45)), ("cantoSE", (x + bw - r + r * d45, y + r + r * d45), (d45, d45))]
-            exigido = {"esq": (0.2, 0.4, 0.66), "dir": (0.2, 0.4)}
+            exigido = {"esq": (0.2, 0.4, 0.66), "dir": (0.2, 0.4), "cima": (0.2, 0.4), "baixo": (0.2, 0.4)}
             minimo = {0.2: 20, 0.4: 8, 0.66: 2}
             faltas = []
             for nd, (bx, by), (dx, dy) in dirs:
@@ -169,13 +172,13 @@ def vizinhos(pasta):
                     if x - 5 <= xx <= x + bw + 4 and y - 5 <= yy <= y + bh + 4:
                         continue  # a barra e o anel de foco da barra antiga (4 px)
                     c, n = pa[xx, yy], pd[xx, yy]
-                    if dist(c, sup) <= 30 or dist(c, janela) <= 30 or dist(c, n) <= 24:  # a superfície da barra e o fundo da janela
+                    if dist(c, sup) <= 6 or dist(c, janela) <= 6 or dist(c, n) <= 10:  # a superfície da barra e o fundo da janela
                         continue
                     delta = tuple(n[i] - c[i] for i in range(3))
                     por_cima = cos(delta, tuple(LUZ[i] - c[i] for i in range(3)))
                     atras = cos(delta, tuple(LUZ[i] - sup[i] for i in range(3)))
                     # o halo sempre deixa o pixel mais magenta; texto que mudou de verdade (a hora no Histórico) não
-                    if por_cima > 0.8 and por_cima > atras + 0.1 and magentice(n) - magentice(c) >= 15:
+                    if por_cima > 0.8 and por_cima > atras + 0.1 and magentice(n) - magentice(c) >= 8:
                         marcados.append((xx, yy))
             ok = len(marcados) <= 20
             ruins += not ok
