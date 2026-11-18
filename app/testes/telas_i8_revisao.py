@@ -10,6 +10,11 @@ programa DESENHA (as linhas RET: e TOQUE: do --medir-toque), e a rolagem só con
   B-4  O que comprar e Encomendas: com a lista rolada, depois de "Já pedi" numa linha, as linhas vizinhas continuam na
        área da lista (antes, a lista voltava ao começo e só o topo ficava à vista).
   B-5  Painel › Movimento por hora com três horas empatadas no pico: nenhum par de rótulos de hora se cruza.
+  R-5  (re-revisão 3, 16/11/2026) As quatro listas (O que comprar, Encomendas, Mais vendidos, Parados): a área da lista é
+       a que o programa informa (GEO:listaDoEstoque), e não "abaixo das pílulas até o pé da janela"; a lista ocupa pelo
+       menos metade da janela e rola de verdade. Sem o I8 (a lista numa tira no pé), reprova nas quatro.
+  R-2  (re-revisão 3) O que comprar e Encomendas com a lista POUCO rolada (o topo da seção ainda no alto da área): depois
+       de "Já pedi", o botão da linha vizinha continua na área da lista (antes, a lista voltava ao começo).
 
     RUSTINHO_TELA=:88 python3 app/testes/telas_i8_revisao.py [pasta das fotos]
     RUSTINHO_PROGRAMA=/caminho/rustinho   (outro binário: o congelado, para o "antes")
@@ -87,11 +92,14 @@ def ponto_livre(toques, topo, base, x=24):
     return None
 
 
-def area_da_lista(toques):
-    """(topo, base) da área que rola: abaixo das pílulas das partes do Estoque, até o pé da janela."""
-    partes = [t for t in toques if t["nome"] in ("O que comprar", "Encomendas", "Mais vendidos", "Parados")
-              and t["y"] < H / 2]
-    return (max(t["y"] + t["h"] for t in partes) + 14 if partes else 400), H - 14
+def area_da_lista(textos):
+    """(topo, base) da área que rola, como o programa a informa (GEO:listaDoEstoque, o recorte de verdade da lista),
+    cortada pela janela. R-5 da re-revisão 3: antes, "abaixo das pílulas até o pé da janela" passava sem o I8."""
+    for _, _, t in textos:
+        if t.startswith("GEO:listaDoEstoque:"):
+            x, y, w, h = (int(v) for v in t.rsplit(":", 1)[1].split(","))
+            return max(y, 0), min(y + h, H)
+    raise RuntimeError("INSTRUMENTAÇÃO: a lista não informou a geometria (GEO:listaDoEstoque)")
 
 
 def abrir_secao(placar, modelo, secao, fotos, nome):
@@ -107,8 +115,8 @@ def abrir_secao(placar, modelo, secao, fotos, nome):
 
 def rolar_lista(r, n=3):
     """Rola a lista n vezes; devolve (antes, depois): o y do 1º texto de linha visto, para provar que andou."""
-    _, toques, rets = medir(r)
-    topo, base = area_da_lista(toques)
+    textos, toques, rets = medir(r)
+    topo, base = area_da_lista(textos)
     antes = min((t["y"] for t in rets if "da sonda" in t["texto"]), default=None)
     for _ in range(n):
         y0 = ponto_livre(toques, topo + 12, base - 6)
@@ -195,6 +203,81 @@ def caso_b4(placar, modelo, fotos, secao):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
+def caso_area(placar, modelo, fotos, secao):
+    """R-5: a lista ocupa a tela (pelo menos metade da janela) e rola de verdade, com linhas dentro da área."""
+    ok = placar.ok
+    r, pasta = abrir_secao(placar, modelo, secao, fotos, f"area-{secao}")
+    try:
+        textos, _, _ = medir(r)
+        topo, base = area_da_lista(textos)
+        f = r.foto("-0")
+        # Calibrado na integ8 (16/11): com o I8, a área da lista vai de 374 px (O que comprar, Encomendas) a mais; sem
+        # o I8, ela vira uma tira de 0 a 68 px. O limite de 35% da janela separa os dois com folga.
+        ok(f"R-5 ({secao}): a lista ocupa pelo menos 35% da janela", base - topo >= H * 0.35,
+           f"{f} área {topo}..{base} de {H}")
+        topo, base, antes, depois = rolar_lista(r)
+        _, _, rets = medir(r)
+        dentro = [t["texto"] for t in rets if "da sonda" in t["texto"] and topo <= t["y"] and t["y"] + t["h"] <= base]
+        ok(f"R-5 ({secao}): a lista rolou e há linhas dentro da área", antes is not None and depois is not None and
+           depois < antes - 40 and len(dentro) >= 2, f"{r.foto('-1')} y {antes} → {depois}; {len(dentro)} linhas")
+    finally:
+        r.fechar()
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
+def botoes_ja_pedi(textos, topo, base):
+    """Os botões "Já pedi" dentro da área, um por linha: o texto de um botão sai mais de uma vez nos textos da tela (a
+    poucos px um do outro), e o roteiro contava o mesmo botão duas vezes (integ8, 1ª rodada)."""
+    fica = []
+    for y, x in sorted((y, x) for x, y, t in textos if t == "Já pedi" and topo + 10 < y < base - 10):
+        if not any(abs(y - y2) <= 20 for y2, _ in fica):
+            fica.append((y, x))
+    return fica
+
+
+def caso_b4_topo(placar, modelo, fotos, secao, quanto=200):
+    """R-2: a lista rolada pouco (o topo da seção ainda no alto da área); "Já pedi" na 1ª linha com botão à vista; o
+    botão "Já pedi" de uma linha vizinha continua na área da lista. Tirado da sonda do revisor (telas_fable3_b4_topo)."""
+    ok = placar.ok
+    r, pasta = abrir_secao(placar, modelo, secao, fotos, f"b4topo-{secao}")
+    try:
+        textos, toques, rets = medir(r)
+        topo, base = area_da_lista(textos)
+        antes = min((t["y"] for t in rets if "Encomenda da sonda" in t["texto"]), default=None)
+        y0 = ponto_livre(toques, topo + 12, base - 6)
+        arrasto(24, y0, y0 - quanto)
+        textos, toques, rets = medir(r)
+        f = r.foto("-1")
+        depois = min((t["y"] for t in rets if "Encomenda da sonda" in t["texto"]), default=None)
+        campos = [round(t["y"]) for t in toques if t["tipo"] == "campo" and t["w"] > 250]
+        botoes = botoes_ja_pedi(textos, topo, base)
+        # Um "Já pedi" à vista com a busca ainda à vista é o que cabe no celular (as linhas têm ~100 px; 2ª rodada da
+        # integ8: com os botões contados uma vez, "dois" não cabia em O que comprar).
+        if not ok(f"R-2 ({secao}): a lista rolou pouco (a busca ainda à vista) e há um \"Já pedi\" na área",
+                  antes is not None and depois is not None and depois < antes - 20 and len(botoes) >= 1
+                  and any(topo - 60 <= y <= base for y in campos), f"{f} y {antes} → {depois}; busca {campos[:1]}; "
+                  f"botões {botoes[:3]}"):
+            return
+        y, x = botoes[0]
+        nav.xdo("mousemove", str(x), str(y), "click", "1")
+        # O aviso do alto ("… marcada como pedida.") desce a tela 68 px enquanto está à vista (AV-1); mede depois
+        # que ele some e a tela volta (na 1ª rodada da integ8, a medida durante o aviso reprovava o O que comprar).
+        r.esperar(lambda: r.tem("marcada como pedida"), 4)
+        r.esperar(lambda: not r.tem("marcada como pedida"), 10)
+        time.sleep(0.8)
+        textos2, toques2, _ = medir(r)
+        f2 = r.foto("-2-depois")
+        campos2 = [round(t["y"]) for t in toques2 if t["tipo"] == "campo" and t["w"] > 250]
+        botoes2 = botoes_ja_pedi(textos2, topo, base)
+        ok(f"R-2 ({secao}): depois de \"Já pedi\", a lista fica no lugar (a busca, o topo da seção, na mesma altura)",
+           bool(campos) and bool(campos2) and abs(campos2[0] - campos[0]) <= 4, f"{f2} busca {campos[:1]} → {campos2[:1]}")
+        ok(f"R-2 ({secao}): depois de \"Já pedi\", o botão de uma linha vizinha continua na área da lista",
+           len(botoes2) >= 1, f"{f2} botões antes={botoes[:3]} depois={botoes2[:3]}")
+    finally:
+        r.fechar()
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
 def caso_b5(placar, modelo, fotos):
     ok = placar.ok
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-i8rev-")
@@ -254,7 +337,13 @@ def main():
                            ("B-1", lambda: caso_b1(placar, modelo, fotos)),
                            ("B-4 comprar", lambda: caso_b4(placar, modelo, fotos, "comprar")),
                            ("B-4 encomendas", lambda: caso_b4(placar, modelo, fotos, "encomendas")),
-                           ("B-5", lambda: caso_b5(placar, modelo, fotos))):
+                           ("B-5", lambda: caso_b5(placar, modelo, fotos)),
+                           ("R-5 comprar", lambda: caso_area(placar, modelo, fotos, "comprar")),
+                           ("R-5 encomendas", lambda: caso_area(placar, modelo, fotos, "encomendas")),
+                           ("R-5 vendidos", lambda: caso_area(placar, modelo, fotos, "vendidos")),
+                           ("R-5 parados", lambda: caso_area(placar, modelo, fotos, "parados")),
+                           ("R-2 comprar", lambda: caso_b4_topo(placar, modelo, fotos, "comprar")),
+                           ("R-2 encomendas", lambda: caso_b4_topo(placar, modelo, fotos, "encomendas"))):
             print(f"--- {nome}", flush=True)
             try:
                 caso()

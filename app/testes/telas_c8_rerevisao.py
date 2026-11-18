@@ -556,6 +556,9 @@ def main():
         except subprocess.TimeoutExpired:
             xvfb.kill()
     print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados")
+    # R-1 da re-revisão 3 do Fable (16/11/2026): a saída diz o resultado (a CI e a roteiros_tela.sh decidem pelo
+    # código de saída; antes, este roteiro saía com 0 mesmo com ✘).
+    sys.exit(0 if placar.errados == 0 else 1)
 
 
 if __name__ == "__main__":

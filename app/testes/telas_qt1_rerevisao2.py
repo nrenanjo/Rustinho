@@ -125,7 +125,7 @@ def parte_a(placar, fotos, pasta):
             f = r.foto("-5-entrou-de-novo")
             voltou = na_tela(r, S2) or na_tela(r, S2_TITULO)
             print(f"QT1-RR2 A: saiu e entrou de novo (mesmo dia, sem queda nova): a linha voltou = {voltou}", flush=True)
-            ok("A8: a linha escondida continua escondida até a meia-noite (como as outras informativas)", not voltou, f)
+            ok("A8: a linha escondida continua escondida para quem a escondeu (vale como o Entendi dela: T-04)", not voltou, f)
             if voltou:
                 if not na_tela(r, "Entendi"):
                     r.clicar(S2_TITULO)

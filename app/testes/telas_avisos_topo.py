@@ -289,13 +289,17 @@ def cenario_d(placar, fotos, pasta):
             return None, None
 
         def ate_sumir(desde, limite=12.0):
-            sumiu, ultimo = None, []
+            # R-3 da re-revisão 3: a hora do sumiço é o meio entre o fim da última leitura que ainda viu o aviso e o
+            # fim da primeira que não o viu (antes, a hora de ANTES da leitura que não viu: com leituras lentas, o
+            # tempo saía até uma leitura mais curto).
+            sumiu, ultimo, visto_por_ultimo = None, [], desde
             while time.time() - desde < limite:
-                t_retrato = time.time()
                 ultimo = r.textos()
+                fim = time.time()
                 if not onde(r, SENHA_TROCADA, ultimo):
-                    sumiu = t_retrato
+                    sumiu = (visto_por_ultimo + fim) / 2
                     break
+                visto_por_ultimo = fim
                 time.sleep(0.1)
             return sumiu, ultimo
 
@@ -341,13 +345,18 @@ def cenario_d(placar, fotos, pasta):
         if t0 is None:
             return
         aviso, visto = ver_aviso(t0)
+        # R-3 da re-revisão 3: o toque vem logo depois de ver o aviso, e a foto depois (antes, a foto do "aviso-2" era
+        # tirada entre ver e tocar, e o tempo dela entrava no "com toque").
+        tocou = visto
+        if aviso is not None and not os.environ.get("RUSTINHO_AVISOS_SEM_TOQUE"):
+            # RUSTINHO_AVISOS_SEM_TOQUE=1: prova do próprio critério (o roteiro não toca; o D tem de reprovar).
+            r.clicar_em(*aviso)  # o toque no aviso
+            tocou = time.time()
         if not ok("D: o aviso aparece de novo (a senha voltou à de antes)", aviso is not None, r.foto("-aviso-2")):
             return
-        # RUSTINHO_AVISOS_SEM_TOQUE=1: prova do próprio critério (o roteiro não toca; o D tem de reprovar).
-        if not os.environ.get("RUSTINHO_AVISOS_SEM_TOQUE"):
-            r.clicar_em(*aviso)  # o toque no aviso
         sumiu, depois = ate_sumir(visto)
-        com_toque = None if sumiu is None else sumiu - visto
+        # Contado do toque (sem o toque, do momento em que foi visto, como no controle).
+        com_toque = None if sumiu is None else sumiu - tocou
         f = r.foto("-depois-do-toque")
         print(f"MEDIDA D: na tela sem toque {round(natural, 2)} s; com toque "
               f"{com_toque if com_toque is None else round(com_toque, 2)} s", flush=True)
@@ -401,12 +410,19 @@ def cenario_e(placar, fotos, pasta):
         # volta da roda (72 px) leva o botão de 346 a 274, com a metade de cima sob a faixa (que vai até 275: o texto
         # da aba "Backup" + 38 px, medido na foto), e o clique no meio do texto caía na faixa (integ7, 16/11/2026). O
         # clique vai na parte de baixo do botão (ABAIXO_DO_MEIO), e é ela que tem de estar à vista.
-        abas = [y for _, y, t in r.textos() if t == "Backup"]
-        corte = min(abas) + FAIXA_ABAIXO_DA_ABA if abas else None
+        # OR-1 da re-revisão 3: no celular as abas rolam com o conteúdo (a conta pela aba ficava sempre verdadeira); o
+        # que fica fixo é o cabeçalho com a seta de retorno. No computador, a faixa fixa das abas.
+        tx = r.textos()
+        if nav.CELULAR:
+            seta = geo_em(tx, "setaDeRetorno")
+            corte = seta[1] + seta[3] + 4 if seta else None
+        else:
+            abas = [y for _, y, t in tx if t == "Backup"]
+            corte = min(abas) + FAIXA_ABAIXO_DA_ABA if abas else None
         clique = b0 + ABAIXO_DO_MEIO
         if not ok("E: a página rolou antes de medir (o botão subiu pelo menos 40 px e o ponto do clique, na parte de "
                   "baixo dele, está à vista, abaixo da faixa fixa das abas)",
-                  b_topo - b0 >= 40 and corte is not None and corte + 4 <= clique < r.altura() - 30,
+                  b_topo - b0 >= 40 and corte is not None and max(corte + 4, 60) <= clique < r.altura() - 30,
                   f"{f} botão {b_topo} → {b0}; a faixa vai até {corte}; o clique em {clique}"):
             return
         for jeito in ("sozinho", "toque"):

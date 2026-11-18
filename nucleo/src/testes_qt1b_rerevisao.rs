@@ -415,3 +415,30 @@ fn rr2_t04_s2_arrastada_nao_volta_para_quem_escondeu() {
     assert!(informativa(&mut s).is_some(), "a Bia não escondeu: ainda vê");
     fim(s, &caminho);
 }
+
+/// OR-8 da re-revisão 3 do Fable (16/11/2026): a proteção do T-04. Com algo pendente, a linha do S2 não aparece (vale o
+/// aviso de atenção). Um pedido de esconder com o id do S2 (o mesmo número de abertura do aviso de atenção) é recusado
+/// ("já não está aparecendo"), não vale como o "Conferi" desta pessoa, e o aviso de atenção continua.
+#[test]
+fn rr3_or8_esconder_o_s2_que_nao_aparece_e_recusado() {
+    let caminho = temp("rr3or8");
+    let mut s = abrir(&caminho);
+    configurar(&mut s);
+    let p = preparar_venda(&mut s);
+    ok(&mut s, "venda_concluir", venda(&p, "venda-or8"));
+    s.cair_para_teste();
+    let mut s = abrir(&caminho);
+    entrar(&mut s, "Ana", "1234");
+    let atencao = aviso(&mut s).expect("o aviso de atenção");
+    assert!(informativa(&mut s).is_none(), "com pendência, a linha do S2 não aparece");
+    let numero = atencao["id"].as_str().unwrap().split_once('.').unwrap().1.to_string();
+    let id_s2 = format!("{}.{numero}", crate::avisos::QUEDA_SEM_PENDENCIA);
+    let r = chamar(&mut s, "aviso_esconder", json!({ "id": id_s2 }));
+    assert_eq!(r["ok"], false, "esconder o S2 que não aparece é recusado: {r}");
+    assert!(r["erro"].as_str().unwrap_or("").contains("já não está aparecendo"), "{r}");
+    assert!(aviso(&mut s).is_some(), "o aviso de atenção continua");
+    ok(&mut s, "sair", json!({}));
+    entrar(&mut s, "Ana", "1234");
+    assert!(aviso(&mut s).is_some(), "e continua depois de sair e entrar de novo");
+    fim(s, &caminho);
+}

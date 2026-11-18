@@ -263,6 +263,39 @@ class Rustinho(base.Rustinho):
                 return self._altura
         return 760
 
+    def clicar(self, texto, comeca=False):
+        """No celular (lacuna 14, 16/11/2026): o alvo pode estar fora da janela, abaixo (os quadrados das notificações
+        no Início) ou acima. Arrasta até ele aparecer e só então toca; antes, o toque caía fora da janela. No
+        computador, como sempre."""
+        if not CELULAR:
+            return super().clicar(texto, comeca)
+        for _ in range(12):
+            pontos = [(x, y) for x, y, t in self.textos()
+                      if simples(t) == simples(texto) or (comeca and simples(t).startswith(simples(texto)))]
+            if not pontos:
+                return False
+            x, y = pontos[0]
+            if 60 <= y < self.altura() - 30:
+                xdo("mousemove", str(x), str(y), "click", "1")
+                return True
+            self.arrastar(para_cima=y >= self.altura() - 30)
+        return False
+
+    def arrastar(self, para_cima=True, fracao=0.35):
+        """No celular: um arrasto sem impulso (x = 20, dentro da rolagem). Para cima mostra o que está abaixo; para
+        baixo, o que está acima."""
+        largura, altura = CELULAR_DP
+        y0, y1 = (int(altura * 0.75), int(altura * (0.75 - fracao))) if para_cima else \
+                 (int(altura * 0.35), int(altura * (0.35 + fracao)))
+        xdo("mousemove", "20", str(y0))
+        xdo("mousedown", "1")
+        for i in range(1, 9):
+            xdo("mousemove", "20", str(y0 + (y1 - y0) * i // 8))
+            time.sleep(0.03)
+        time.sleep(0.15)
+        xdo("mouseup", "1")
+        time.sleep(0.8)
+
     def clicar_ultimo(self, texto):
         """O último (mais embaixo) texto igual a este, dentro da janela."""
         pontos = [p for p in self.onde(texto) if 0 <= p[1] < self.altura() - 10]
@@ -334,12 +367,12 @@ class Rustinho(base.Rustinho):
         xdo("mouseup", "1")
         time.sleep(0.8)
 
-    def digitar(self, texto):
+    def digitar(self, texto, rotulo=None):
         if CELULAR:
-            self._tocar_no_campo()
+            self._tocar_no_campo(rotulo)
         xdo("type", "--delay", "70", texto)
 
-    def _tocar_no_campo(self):
+    def _tocar_no_campo(self, rotulo=None):
         """No celular, de propósito, o campo não ganha o foco sozinho (Campo.qml, podeFocar: trocar de tela não abre
         o teclado). A pessoa toca no campo antes de digitar; o roteiro faz o mesmo: toca no centro do último campo de
         texto à vista (a janelinha aberta é desenhada por último, então o campo dela vem por último)."""
@@ -354,8 +387,30 @@ class Rustinho(base.Rustinho):
         if not campos:
             raise RuntimeError("INSTRUMENTAÇÃO: nenhum campo de texto à vista para tocar antes de digitar")
         cx, cy = campos[-1]
+        # Lacuna 14 (16/11/2026): com o rótulo, o campo logo abaixo dele (o último campo à vista era o do km, e a placa
+        # do caso 6 ia parar lá).
+        if rotulo:
+            r = [(x, y) for x, y, t in self.textos() if simples(t) == simples(rotulo)]
+            if not r:
+                raise RuntimeError(f"INSTRUMENTAÇÃO: o rótulo {rotulo!r} não está à vista para achar o campo dele")
+            rx, ry = r[0]
+            abaixo = sorted((cy2 - ry, abs(cx2 - rx), cx2, cy2) for cx2, cy2 in campos if 0 < cy2 - ry < 90)
+            if not abaixo:
+                raise RuntimeError(f"INSTRUMENTAÇÃO: nenhum campo logo abaixo do rótulo {rotulo!r}")
+            cx, cy = abaixo[0][2], abaixo[0][3]
         xdo("mousemove", str(cx), str(cy), "click", "1")
         time.sleep(0.5)
+
+
+def confirmar(r, botao):
+    """Confirma a janelinha: no computador, o Enter (como a pessoa faz no teclado); no celular, o toque no botão dela
+    (o campo não ganha o foco sozinho no celular, e o Enter não chega: lacuna 14, 16/11/2026)."""
+    if CELULAR:
+        if not r.clicar_ultimo(botao):
+            raise RuntimeError(f"INSTRUMENTAÇÃO: o botão {botao!r} não está à vista para confirmar")
+        time.sleep(0.4)
+    else:
+        xdo("key", "Return")
 
 
 class Placar:
@@ -673,6 +728,11 @@ def caso4(placar, fotos):
 TITULO_6 = "Rascunho de OS bloqueado por um caixa desatualizado"
 
 
+# A placa do caso 6. Antes era "ABC1D23", o mesmo texto da dica do campo vazio: "com a placa digitada" passava mesmo
+# sem nada digitado (achado na 1ª rodada do celular, 16/11/2026).
+PLACA = "QRS4T56"
+
+
 def caso6(placar, fotos):
     ok = placar.ok
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav6-")
@@ -685,7 +745,7 @@ def caso6(placar, fotos):
         def preencher_e_sair(r):
             r.esperar(lambda: r.tem("Nova OS"))
             time.sleep(0.8)
-            r.digitar("ABC1D23")
+            r.digitar(PLACA, rotulo="Placa")
             time.sleep(0.5)
             xdo("key", "Escape")
             r.esperar(lambda: r.tem("Sair da OS?"))
@@ -705,7 +765,7 @@ def caso6(placar, fotos):
             xdo("key", "Escape")
             f = r.foto("-3")
             ok("6b: desistir da senha volta à OS", r.esperar(lambda: r.pilha() == os_pilha and r.tem("Nova OS")), f)
-            ok("6b: com a placa digitada", r.tem("ABC1D23"), f)
+            ok("6b: com a placa digitada", r.tem(PLACA), f)
             ok("6b: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
             ok("6b: nenhum rascunho salvo", rascunhos() == 0)
         finally:
@@ -728,7 +788,7 @@ def caso6(placar, fotos):
             time.sleep(1)
             f = r.foto("-2")
             ok("6a: a seta da janelinha volta à OS, com o que foi digitado",
-               not r.tem("Sair da OS?") and r.tem("ABC1D23") and r.pilha() == os_pilha, f)
+               not r.tem("Sair da OS?") and r.tem(PLACA) and r.pilha() == os_pilha, f)
             xdo("key", "Escape")
             r.esperar(lambda: r.tem("Sair da OS?"))
             r.clicar("Salvar rascunho")
@@ -742,7 +802,7 @@ def caso6(placar, fotos):
             ok("6a: uma tela por cima da OS (sem ciclo)", r.pilha() == os_pilha + 1, f)
             xdo("key", "Escape")
             f = r.foto("-4")
-            ok("6a: desistir (Esc) volta à OS", r.esperar(lambda: r.pilha() == os_pilha and r.tem("ABC1D23")), f)
+            ok("6a: desistir (Esc) volta à OS", r.esperar(lambda: r.pilha() == os_pilha and r.tem(PLACA)), f)
             ok("6a: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
             ok("6a: nenhum rascunho salvo", rascunhos() == 0)
             # Resolver: o gerente retira o caixa da loja (com motivo).
@@ -772,7 +832,7 @@ def caso6(placar, fotos):
             r.clicar("Salvar rascunho")
             f = r.foto("-7")
             ok("6a: com o clique, o rascunho é salvo (com a placa)",
-               r.esperar(lambda: rascunhos() == 1) and ler(pasta, "SELECT placa FROM ordem_servico WHERE situacao = 'rascunho'") == [("ABC1D23",)], f)
+               r.esperar(lambda: rascunhos() == 1) and ler(pasta, "SELECT placa FROM ordem_servico WHERE situacao = 'rascunho'") == [(PLACA,)], f)
         finally:
             r.fechar()
     finally:
@@ -883,7 +943,7 @@ def caso7(placar, fotos):
             r.esperar(lambda: r.tem("Receber de"))
             time.sleep(0.6)
             valores["antes"] = dinheiro(r)
-            xdo("key", "Return")
+            confirmar(r, "Receber")
             return r.esperar(lambda: r.tem_igual("Ver o registro"))
 
         r = placar.abrir(pasta, "TelaReceber", {"clienteInicial": ze}, fotos, "7-gerente")
@@ -915,7 +975,7 @@ def caso7(placar, fotos):
             ok("7: avisa que a operação não foi concluída", r.tem("ainda não foi concluída"), f)
             ok("7: nada recebido", recebimentos() == 0)
             # Resolver: o gerente aceita como está (com motivo).
-            xdo("key", "Return")
+            confirmar(r, "Receber")
             r.esperar(lambda: r.tem_igual("Ver o registro"))
             r.clicar("Ver o registro")
             r.esperar(lambda: r.tem(TITULO_7))
@@ -928,7 +988,7 @@ def caso7(placar, fotos):
             f = r.foto("-5")
             ok("7: aceitar pede o motivo (decisão do gerente)", r.tem("Caixa de origem perdido"), f)
             ok("7: ainda nada recebido", recebimentos() == 0)
-            xdo("key", "Return")
+            confirmar(r, "Aceitar como está")
             f = r.foto("-6")
             ok("7: resolvido, volta ao Receber (o núcleo confirmou), com a janelinha",
                r.esperar(lambda: r.pilha() == base_pilha and r.tem("Receber de"), 12), f)
@@ -936,7 +996,7 @@ def caso7(placar, fotos):
             ok("7: o recebimento NÃO foi feito sozinho", recebimentos() == 0)
             ok("7: o registro ficou aceito pelo gerente",
                ler(pasta, "SELECT estado FROM sync_referencia WHERE chave = '[\"cr-nav7\"]'") == [("aceito",)])
-            xdo("key", "Return")
+            confirmar(r, "Receber")
             f = r.foto("-7")
             ok("7: com o clique, recebe", r.esperar(lambda: recebimentos() == 1), f)
         finally:
@@ -977,6 +1037,9 @@ def caso9b(placar, fotos):
             ok("9b: com o evento do cadastro da peça", r.tem("cadastrou a peça"), f)
             ok("9b: a mesma tela (sem empilhar)", r.pilha() == base_pilha, f)
             ok("9b: sem botão de texto que só volta (a seta e as pílulas fazem isso)", not r.tem("Voltar às"), f)
+            if CELULAR:  # lacuna 14: volta ao alto da página, onde as pílulas ficam à vista
+                for _ in range(4):
+                    r.arrastar(para_cima=False)
             r.clicar("Duplicatas")
             f = r.foto("-3")
             ok("9b: a pílula Duplicatas volta à lista", r.esperar(lambda: r.tem_igual("Ver no histórico")), f)
@@ -1230,7 +1293,7 @@ def caso7i(placar, fotos):
             r.clicar("Receber tudo")
             r.esperar(lambda: r.tem("Receber de"))
             time.sleep(0.6)
-            xdo("key", "Return")
+            confirmar(r, "Receber")
             ok("7i: a recusa oferece Ver o registro ao caixa", r.esperar(lambda: r.tem_igual("Ver o registro")), r.foto("-1"))
             r.clicar("Ver o registro")
             ok("7i: a guia pede a senha do gerente ao caixa", r.esperar(lambda: r.tem(PEDIDO) or r.tem("Liberar")), r.foto("-2"))
@@ -1238,7 +1301,7 @@ def caso7i(placar, fotos):
             xdo("key", "Escape")  # desiste da senha: volta ao Receber, com a janelinha reaberta
             r.esperar(lambda: r.tem("Receber de"))
             time.sleep(0.6)
-            xdo("key", "Return")  # tenta concluir: a sessão já acabou
+            confirmar(r, "Receber")  # tenta concluir: a sessão já acabou
             f = r.foto("-3")
             ok("7i: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15), f)
             ok("7i: nenhuma janelinha do recebimento nem faixa da guia sobra por cima",

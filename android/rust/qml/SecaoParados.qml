@@ -131,6 +131,8 @@ FocusScope {
 
         ListView {
             id: lista
+            // A geometria da lista para os roteiros (GEO:listaDoEstoque; R-5 da re-revisão 3).
+            objectName: "listaDoEstoque"
             header: Tema.celular ? espacoDoTopo : null
             footer: Tema.celular ? espacoDoRodape : null
             Layout.fillWidth: true

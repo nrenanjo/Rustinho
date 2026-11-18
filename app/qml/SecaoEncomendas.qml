@@ -38,9 +38,17 @@ FocusScope {
     // linhas têm alturas diferentes e são criadas sob demanda, e o mesmo contentY caía sete linhas adiante).
     function recarregarNoLugar() {
         const i = Tema.celular ? lista.indexAt(lista.width / 2, lista.contentY + 1) : -1
+        // R-2 da re-revisão 3 do Fable: com a lista pouco rolada, o alto da área ainda é o topo da seção (o cabeçalho
+        // da lista: a busca e as pílulas), e ali não há linha (i < 0). Nesse caso a lista volta ao mesmo deslocamento
+        // em pixels, que vale porque o topo não muda de altura com a ação.
+        const deslocamento = Tema.celular && i < 0 ? lista.contentY - lista.originY : -1
         carregar()
         if (i >= 0)
             Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
+        else if (deslocamento > 0)
+            Qt.callLater(() => {
+                lista.contentY = lista.originY + Math.min(deslocamento, Math.max(0, lista.contentHeight - lista.height))
+            })
     }
     function carregarDados() {
         const r = Api.chamar("encomendas_painel", { texto: busca.texto, quais: quais })
@@ -160,6 +168,8 @@ FocusScope {
 
         ListView {
             id: lista
+            // A geometria da lista para os roteiros (GEO:listaDoEstoque; R-5 da re-revisão 3).
+            objectName: "listaDoEstoque"
             header: Tema.celular ? espacoDoTopo : null
             Layout.fillWidth: true
             Layout.fillHeight: true

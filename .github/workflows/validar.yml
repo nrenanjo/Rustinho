@@ -219,6 +219,28 @@ jobs:
             echo "::error title=Roteiros das telas::falharam:$falhou"
             exit 1
           fi
+      # R4-CI (decisão do proprietário, 16/11/2026; R-4 da re-revisão 3): os testes de QML (T-01, T-05 e I6), que antes
+      # só rodavam à mão. Sem janela (offscreen), com o qmltestrunner do Qt instalado acima. Rodam mesmo que algum
+      # roteiro das telas tenha falhado (uma falha não esconde a outra), e reprovam o job se falharem.
+      - name: Testes de QML
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          echo "commit: $GITHUB_SHA" > qml.txt
+          export QT_QPA_PLATFORM=offscreen RUSTINHO_QMLTESTRUNNER="$QT_ROOT_DIR/bin/qmltestrunner"
+          falhou=""
+          for t in app/testes/qml_*.py; do
+            nome=$(basename "$t" .py)
+            echo "=== $nome" | tee -a qml.txt
+            if ! timeout 600 /usr/bin/python3 -I "$t" "$PWD" 2>&1 | tee -a qml.txt; then
+              falhou="$falhou $nome"
+            fi
+          done
+          if [ -n "$falhou" ]; then
+            echo "::error title=Testes de QML::falharam:$falhou"
+            exit 1
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -227,6 +249,7 @@ jobs:
             telas.txt
             telas-resultado.txt
             testes-programa.txt
+            qml.txt
             fotos/
           retention-days: 90
 

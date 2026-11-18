@@ -92,6 +92,8 @@ FocusScope {
     // guardada desde a criação (Component.onCompleted).
     property var janelaAoSair: null
     Component.onDestruction: {
+        // OS-2 da 2ª re-revisão (C8): o relógio da guia não toca mais depois que a tela saiu.
+        esperaDaGuia.stop()
         // A-2 da revisão (C8): encerra só as consultas que esta tela pede (e as gravações liberadas). Aberta por
         // cima do Financeiro (caso 7, caso 8), não derruba a consulta do gerente da tela de baixo.
         Api.chamar("gerente_encerrar", { acoes: ["configuracoes", "backup", "gerente", "simultaneidade"] })
@@ -249,6 +251,9 @@ FocusScope {
         }
     }
     function destacarCampoDaGuia(campo) {
+        // OS-2: a tela pode estar saindo (a janela vale null quando a pilha a tira) ou a guia já ter acabado.
+        if (!janela || !tela.guia)
+            return
         janela.guiaDestacar(campo, rolagem)
         // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
         const foco = campo === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : campo
@@ -289,6 +294,9 @@ FocusScope {
     }
     // Sair: com guia, volta à tela de origem sem marcar nada.
     function sair() {
+        // OS-2 da 2ª re-revisão (C8): desistir para o relógio da guia; antes, um toque dele durante a saída chamava o
+        // destaque com a janela já nula (TypeError no registro; o s2 do telas_c8_rerevisao2 reprovou na integ8).
+        esperaDaGuia.stop()
         if (guia)
             janela.concluirGuia(false)
         else

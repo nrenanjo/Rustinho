@@ -431,8 +431,16 @@ def s4_aceitar_outro(placar, fotos):
             time.sleep(0.3)
             xdo("key", "Return")
             aceitou = r.esperar(lambda: "aceito" in estados().values(), 8)
+            # A falha do s4 na CI da integ7 (16/11): neste computador o destaque volta de 2,5 a 2,7 s depois de aceitar
+            # (sonda, validacao/integ8_provas/sonda_s4_*), e a CI é cerca de duas vezes mais lenta; a espera fixa de 2 s
+            # não bastava lá. O roteiro espera o destaque voltar, até 10 s, e continua EXIGINDO que ele volte (a
+            # conferência N-7 abaixo é a mesma). O programa não muda.
+            t_aceito = time.time()
             time.sleep(2.0)
             f2 = r.foto("-4")
+            while not all(0.66 <= v <= 0.82 for v in razoes(f2, f0)) and time.time() - t_aceito < 10:
+                time.sleep(0.25)
+                f2 = r.foto("-4")
             e = estados()
             obs("s4 estados depois de aceitar o de baixo:", e)
             ok("s4: o aceito foi o OUTRO registro (cp-b); o da guia (cp-a) continua inconsistente",
@@ -857,6 +865,9 @@ def main():
         except subprocess.TimeoutExpired:
             xvfb.kill()
     print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados")
+    # R-1 da re-revisão 3 do Fable (16/11/2026): a saída diz o resultado (a CI e a roteiros_tela.sh decidem pelo
+    # código de saída; antes, este roteiro saía com 0 mesmo com ✘).
+    sys.exit(0 if placar.errados == 0 else 1)
 
 
 if __name__ == "__main__":
