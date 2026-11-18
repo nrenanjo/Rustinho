@@ -591,10 +591,20 @@ jobs:
           distribution: temurin
           java-version: "17"
           # Guarda as bibliotecas do Gradle entre execuções (D-05). Os arquivos do Gradle só nascem na compilação
-          # (androiddeployqt); sem um arquivo que exista no checkout, o setup-java para com erro. A chave vem do
-          # android/CMakeLists.txt: o cache velho só tem bibliotecas a mais, e o Gradle baixa o que faltar.
-          cache: gradle
-          cache-dependency-path: android/CMakeLists.txt
+          # (androiddeployqt); sem um arquivo que exista no checkout, o setup-java para com erro. A chave é o hash
+          # do android/CMakeLists.txt e DESTE arquivo (INT9-R4, revisão da integ9): a versão do Qt (QT_VERSAO) e o
+          # que mais muda as bibliotecas do Gradle moram aqui. O setup-java só restaura com a chave exata e não grava
+          # quando acerta: com a chave antiga, um Qt novo ficaria com um cache velho e inútil para sempre, e a
+          # proteção contra o 429 sumiria sem aviso. Com a chave nova, a 1ª execução depois de uma mudança baixa e
+          # grava (o APK de 64 bits, que vem primeiro pelo max-parallel), e a 2ª já encontra o cache.
+          # Em etiqueta de versão (a versão de loja, com a chave e a senha), SEM cache (INT9-R5): a versão de loja não
+          # roda código do Gradle (AGP, plugins) que outra execução deixou. No setup-java v6.1.0, o valor vazio não
+          # restaura nem grava nada (src/setup-java.ts: `cache ? startCacheRestore(...)`; o cache do JDK também
+          # depende dele: `isJdkCacheEnabled` = Boolean(cache)). O preço: a versão de loja baixa tudo do Maven.
+          cache: ${{ !startsWith(github.ref, 'refs/tags/v') && 'gradle' || '' }}
+          cache-dependency-path: |
+            android/CMakeLists.txt
+            .github/workflows/validar.yml
       - name: Versão (raiz) e versionCode (DP-36)
         run: |
           set -eu

@@ -1321,26 +1321,23 @@ def caso7i(placar, fotos):
             # Lacuna 14 (18/11/2026): o programa pode notar a sessão encerrada já ao desistir (volta direto à
             # entrada) ou só ao tentar concluir (volta ao Receber com a janelinha). Os dois caminhos são seguros;
             # o que o caso exige vem depois: entrada, nada recebido, nada da guia por cima.
+            # A mesma leitura decide o caminho (INT9-R3: uma leitura a menos numa CI lenta).
+            tx, decorrido = _ler_ate(r, lambda tx: _tem(tx, "Receber de") or _tem(tx, "Quem está usando?"), desde_esc, 8)
             ok("7i: desistir da senha volta ao Receber (com a janelinha) ou, com a sessão já encerrada, à entrada",
-               r.esperar(lambda: r.tem("Receber de") or r.tem("Quem está usando?")), r.foto("-2b"))
-            alternativo = r.tem("Receber de")
+               tx is not None, r.foto("-2b"))
+            alternativo = tx is not None and not _tem(tx, "Quem está usando?")
             if alternativo:
                 time.sleep(0.6)
                 confirmar(r, "Receber")  # tenta concluir: a sessão já acabou
-            chegou = r.esperar(lambda: r.tem("Quem está usando?"), 15)
-            # T043-R2: o tempo medido logo que a entrada é vista (antes da foto), como no 7j.
-            decorrido = time.time() - desde_esc
+                tx, decorrido = _ler_ate(r, lambda tx: _tem(tx, "Quem está usando?"), desde_esc)
             f = r.foto("-3")
-            ok("7i: a sessão encerrada volta à tela de entrada", chegou, f)
+            ok("7i: a sessão encerrada volta à tela de entrada", tx is not None and _tem(tx, "Quem está usando?"), f)
             print(f"MEDIDA 7i: caminho {'Receber primeiro' if alternativo else 'direto à entrada'}; "
-                  f"entrada {decorrido:.1f} s depois do Esc", flush=True)
-            if alternativo:
-                # Pelo Receber, a faixa "ainda não foi concluída" (9 s) pode ter estado à vista: só vale como prova se a
-                # entrada chegou antes de ela sumir sozinha.
-                ok(f"7i: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
-            ok("7i: nenhuma janelinha do recebimento nem faixa da guia sobra por cima",
-               not r.tem("Receber de") and not r.tem("Registro inconsistente") and not r.tem("conclua a operação")
-               and not r.tem("ainda não foi concluída"), f)
+                  f"entrada lida {decorrido:.1f} s depois do Esc", flush=True)
+            # T043-R2 e INT9-R3: nos DOIS caminhos, a faixa (9 s) pode estar à vista; a entrada é conferida na leitura
+            # que a mostrou, e essa leitura tem de vir antes de 8 s do Esc.
+            _entrada_sem_sobras(ok, "7i", tx if tx is not None and _tem(tx, "Quem está usando?") else None,
+                                decorrido, f)
             ok("7i: nada foi recebido", ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] == ja_havia)
             r.entrar("Ana")
             f = r.foto("-4")
@@ -1371,6 +1368,43 @@ def _loja_7j(pasta, sufixo):
           VALUES ('conta_receber', '["cr-nav{sufixo}"]', 'pessoa', '["sumiu"]', 'inconsistente',
                   '2026-01-01T00:00:00Z', 'log');""")
     return ler(pasta, "SELECT id FROM pessoa WHERE nome = 'Zé da Oficina'")[0][0]
+
+
+
+# INT9-R3 (revisão da integ9, 18/11/2026): o que não pode sobrar na tela de entrada nos casos 7i, 7j e 7k.
+SOBRAS_DA_GUIA = ("Receber de", "Registro inconsistente", "conclua a operação", "ainda não foi concluída")
+
+
+def _tem(tx, pedaco):
+    return any(simples(pedaco) in simples(t) for _, _, t in tx)
+
+
+def _ler_ate(r, condicao, desde, segundos=15):
+    """Lê a tela até uma leitura satisfazer `condicao(leitura)`. Devolve (a leitura, os segundos desde `desde` até o
+    fim dela) ou (None, segundos). O tempo é tomado logo depois da leitura, antes de qualquer foto."""
+    fim = time.time() + segundos
+    while time.time() < fim:
+        try:
+            tx = r.textos()
+        except RuntimeError:
+            tx = []
+        if condicao(tx):
+            return tx, time.time() - desde
+        time.sleep(0.2)
+    return None, time.time() - desde
+
+
+def _entrada_sem_sobras(ok, rotulo, tx, decorrido, f):
+    """INT9-R3: a entrada e as sobras são conferidas NA MESMA leitura, e essa leitura tem de ter vindo antes de 8 s
+    (a faixa "ainda não foi concluída" some sozinha em 9 s; numa CI lenta, de 2,5 a 3,5 s por leitura, leituras
+    separadas depois da foto podiam chegar quando ela já tinha sumido)."""
+    sobras = [s for s in SOBRAS_DA_GUIA if tx and _tem(tx, s)]
+    print(f"MEDIDA {rotulo}: entrada lida {decorrido:.1f} s depois do início da faixa; sobras na mesma leitura: "
+          f"{sobras or 'nenhuma'}", flush=True)
+    ok(f"{rotulo}: a entrada foi lida antes de a faixa poder sumir sozinha ({decorrido:.1f} s de 9)",
+       tx is not None and decorrido < 8, f)
+    ok(f"{rotulo}: nenhuma janelinha do recebimento nem faixa da guia na tela de entrada (na leitura que a mostrou)",
+       tx is not None and not sobras, f"{f} sobras: {sobras}")
 
 
 def _desistir_com_faixa(r, rotulo):
@@ -1409,15 +1443,11 @@ def caso7j(placar, fotos):
             desativar(pasta, "Bia")
             time.sleep(0.6)
             confirmar(r, "Receber")  # tenta concluir: a sessão cai
-            ok("7j: a sessão encerrada volta à tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 15))
-            # R4 da revisão do condutor: o tempo medido logo que a entrada é vista (antes da foto).
-            decorrido = time.time() - inicio
+            # R4 da revisão do condutor e INT9-R3: o tempo e as sobras na mesma leitura que mostrou a entrada.
+            tx, decorrido = _ler_ate(r, lambda tx: _tem(tx, "Quem está usando?"), inicio)
             f = r.foto("-2")
-            # A faixa some sozinha em 9 s: só vale como prova se a entrada chegou antes disso.
-            ok(f"7j: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
-            ok("7j: nenhuma faixa da guia vai junto para a entrada",
-               not r.tem("ainda não foi concluída") and not r.tem("Registro inconsistente")
-               and not r.tem("conclua a operação"), f)
+            ok("7j: a sessão encerrada volta à tela de entrada", tx is not None, f)
+            _entrada_sem_sobras(ok, "7j", tx, decorrido, f)
             ok("7j: nada foi recebido", ler(pasta, "SELECT COUNT(*) FROM recebimento")[0][0] == ja_havia)
         finally:
             r.fechar()
@@ -1448,13 +1478,11 @@ def caso7k(placar, fotos):
             ok("7k: no Início, com a faixa ainda à vista",
                r.esperar(lambda: r.tem("Trocar usuário") and r.tem("ainda não foi concluída"), 5), r.foto("-2"))
             r.clicar("Trocar usuário")
-            ok("7k: trocar de usuário vai para a tela de entrada", r.esperar(lambda: r.tem("Quem está usando?"), 10))
-            decorrido = time.time() - inicio
+            # INT9-R3: o tempo e as sobras na mesma leitura que mostrou a entrada.
+            tx, decorrido = _ler_ate(r, lambda tx: _tem(tx, "Quem está usando?"), inicio, 10)
             f = r.foto("-3")
-            ok(f"7k: a entrada chegou antes de a faixa sumir sozinha ({decorrido:.1f} s de 9)", decorrido < 8, f)
-            ok("7k: nenhuma faixa da guia vai junto para a entrada",
-               not r.tem("ainda não foi concluída") and not r.tem("Registro inconsistente")
-               and not r.tem("conclua a operação"), f)
+            ok("7k: trocar de usuário vai para a tela de entrada", tx is not None, f)
+            _entrada_sem_sobras(ok, "7k", tx, decorrido, f)
         finally:
             r.fechar()
     finally:

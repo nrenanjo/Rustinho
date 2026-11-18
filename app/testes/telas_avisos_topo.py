@@ -216,6 +216,80 @@ def cenario_c(placar, fotos, pasta):
 
 
 SENHA_TROCADA = "Senha trocada."
+RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Curvas que passam do alvo e voltam (ou feitas à mão): com elas, uma leitura no meio da animação não vale pelo fim.
+CURVAS_QUE_PASSAM = ("Back", "Elastic", "Bounce", "Bezier")
+
+
+
+def posicoes_de(tx):
+    """(guia, aviso, seta) de uma leitura com a orientação da guia, o aviso e a seta; senão None."""
+    g, av, st = onde(None, GUIA, tx), onde(None, SENHA_TROCADA, tx), geo_em(tx, "setaDeRetorno")
+    return (g[0], av[0], st) if g and av and st else None
+
+
+def decidir_posicoes(lidas):
+    """As posições do D (O-1, CI de 18/11 e INT9-R1), sem tela: `lidas` são as leituras em ordem, todas com o aviso à
+    vista (a 1ª é a do ver_aviso). Devolve (retrato, modo, nao_pararam):
+    - duas leituras SEGUIDAS com o aviso e a seta no mesmo lugar: o "parado" (O-1); o retrato é a 2ª;
+    - sem par igual e UMA leitura válida: vale ela (enquanto o aviso entra, o aviso não se move e a tela só desce,
+      sem passar do alvo: a premissa, conferida no código pelo premissa_do_d);
+    - sem par igual e DUAS OU MAIS válidas: só valem se a orientação e o aviso ficaram no mesmo lugar e a seta só
+      desceu (a animação em curso), e julga-se a última; senão, `nao_pararam` descreve as posições (reprova);
+    - nenhuma válida: (None, "", "").
+    O roteiro e a prova (t042_evid/ci_44262875318/replay_posicoes_v3.py) usam esta mesma função."""
+    anterior = None
+    for k, tx in enumerate(lidas):
+        agora = posicoes_de(tx)
+        par = agora[1:] if agora else None
+        if k > 0 and par is not None and par == anterior:
+            return tx, "duas leituras iguais", ""
+        anterior = par
+    validas = [tx for tx in lidas if posicoes_de(tx)]
+    if len(validas) == 1:
+        return validas[0], "uma leitura só (a tela só desce enquanto o aviso entra)", ""
+    if len(validas) >= 2:
+        serie = [posicoes_de(tx) for tx in validas]
+        g0, a0 = serie[0][0], serie[0][1]
+        ys = [s[2][1] for s in serie]
+        if all(g == g0 and a == a0 for g, a, _ in serie) and all(y1 <= y2 for y1, y2 in zip(ys, ys[1:])):
+            return validas[-1], f"{len(validas)} leituras diferentes, a seta só desceu", ""
+        return None, "", "; ".join(f"guia y={g[1]} aviso y={a[1]} seta y={s[1]}" for g, a, s in serie)
+    return None, "", ""
+
+
+def premissa_do_d(raiz=RAIZ):
+    """INT9-R2 (revisão da integ9, 18/11/2026): as posições do D podem ser julgadas por uma leitura tirada no meio da
+    animação porque, enquanto o aviso ENTRA, nada passa do alvo: a tela só desce (Main.qml, a margem de cima da pilha),
+    o aviso não anima o y (Aviso.qml) e a orientação da guia só muda de altura com curva que não volta
+    (Notificacao.qml). Confere isso no código das duas cópias. Devolve a lista de problemas (vazia: a premissa vale).
+    (Quando o aviso SAI, a tela sobe com o aviso ainda à vista: isso só pode reprovar à toa, nunca aprovar.)"""
+    import re
+    problemas = []
+    for pasta in ("app/qml", "android/rust/qml"):
+        def ler_qml(nome):
+            with open(os.path.join(raiz, pasta, nome), encoding="utf-8") as f:
+                return f.read()
+        main, aviso, notif = ler_qml("Main.qml"), ler_qml("Aviso.qml"), ler_qml("Notificacao.qml")
+        descida = re.findall(r"Behavior on anchors\.topMargin\s*\{([^{}]*\{[^{}]*\}[^{}]*)\}", main)
+        if len(descida) != 1:
+            problemas.append(f"{pasta}/Main.qml: {len(descida)} animações da margem de cima (esperada 1)")
+        for corpo in descida:
+            if "NumberAnimation" not in corpo:
+                problemas.append(f"{pasta}/Main.qml: a descida da tela não é um NumberAnimation")
+            for curva in re.findall(r"Easing\.(\w+)", corpo):
+                if any(c in curva for c in CURVAS_QUE_PASSAM):
+                    problemas.append(f"{pasta}/Main.qml: a descida da tela usa a curva {curva}, que passa do alvo")
+        if re.search(r"Behavior on y\b|property:\s*\"y\"|properties:\s*\"[^\"]*\by\b", aviso):
+            problemas.append(f"{pasta}/Aviso.qml: o aviso anima o y")
+        for alvo, corpo in re.findall(r"Behavior on (\w+)\s*\{([^{}]*\{[^{}]*\}[^{}]*)\}", notif):
+            if alvo in ("height", "implicitHeight"):
+                for curva in re.findall(r"Easing\.(\w+)", corpo):
+                    if any(c in curva for c in CURVAS_QUE_PASSAM):
+                        problemas.append(f"{pasta}/Notificacao.qml: a altura ({alvo}) usa a curva {curva}, que passa do alvo")
+                if "SpringAnimation" in corpo:
+                    problemas.append(f"{pasta}/Notificacao.qml: a altura ({alvo}) usa SpringAnimation")
+    return problemas
 
 
 def cenario_d(placar, fotos, pasta):
@@ -281,11 +355,6 @@ def cenario_d(placar, fotos, pasta):
 
         primeira = {}
 
-        def posicoes_paradas(tx):
-            """(aviso, seta) de uma leitura com a orientação da guia, o aviso e a seta; senão None."""
-            av, st = onde(r, SENHA_TROCADA, tx), geo_em(tx, "setaDeRetorno")
-            return (av[0], st) if onde(r, GUIA, tx) and av and st else None
-
         def ver_aviso(t0, limite=8.0):
             """O aviso e quando foi visto pela 1ª vez. A troca da senha leva tempo (a senha é guardada com uma conta
             lenta de propósito), e na máquina da CI o aviso apareceu depois de 2 s: o prazo é de 8 s. Guarda a leitura
@@ -332,26 +401,28 @@ def cenario_d(placar, fotos, pasta):
         # CI de 18/11 (44232537886 e 44243237034): com cada leitura levando ~2,5 s, o aviso aparece em só DUAS leituras,
         # iguais; a primeira era gasta pelo ver_aviso e o laço só via uma. A leitura do ver_aviso conta como a 1ª.
         # CI de 18/11 (44262875318): numa máquina mais lenta, o aviso (~3,2 s) apareceu numa leitura SÓ. Duas iguais
-        # seguidas continuam sendo o "parado"; com uma leitura só, vale a última com a orientação, o aviso e a seta: o
-        # aviso fica sempre no mesmo lugar e a tela só DESCE (animação de 140 ms, Main.qml), então, se nada se sobrepõe
-        # nela, nada se sobrepõe depois (a conferência não vira aprovação no meio da animação; só deixa de reprovar
-        # pela lentidão). Prova: t042_evid/ci_44262875318/replay_posicoes_v2.py.
+        # seguidas continuam sendo o "parado". Sem par igual (INT9-R1, revisão da integ9):
+        # - UMA leitura válida: vale ela. Enquanto o aviso ENTRA, o aviso não se move e a tela só desce, sem passar do
+        #   alvo (a premissa, conferida no código pelo premissa_do_d): se nada se sobrepõe nela, nada se sobrepõe no fim.
+        # - DUAS OU MAIS, diferentes: só valem se a orientação e o aviso ficaram no mesmo lugar e a seta só desceu
+        #   (a animação em curso); julga-se a última. Posições que vão e voltam reprovam ("não pararam").
+        # (Quando o aviso SAI, a tela sobe com ele ainda à vista: isso só pode reprovar à toa, nunca aprovar.)
+        # Prova: t042_evid/ci_44262875318/replay_posicoes_v3.py.
         lidas = [primeira["textos"]] if primeira.get("textos") else []
-        retrato, modo = None, ""
-        anterior = posicoes_paradas(lidas[0]) if lidas else None
-        while retrato is None and onde(r, SENHA_TROCADA, tx := r.textos()):
-            agora = posicoes_paradas(tx)
-            if agora is not None:
-                lidas.append(tx)
-                if agora == anterior:
-                    retrato, modo = tx, "duas leituras iguais"
-            anterior = agora
-        if retrato is None:
-            validas = [tx for tx in lidas if posicoes_paradas(tx)]
-            if validas:
-                retrato, modo = validas[-1], "uma leitura só (a tela só desce)"
+        while not (lidas and decidir_posicoes(lidas)[1] == "duas leituras iguais") \
+                and onde(r, SENHA_TROCADA, tx := r.textos()):
+            lidas.append(tx)
+        retrato, modo, nao_pararam = decidir_posicoes(lidas)
+        validas = [tx for tx in lidas if posicoes_de(tx)]
+        print(f"MEDIDA D: {len(validas)} leitura(s) válida(s) com o aviso na tela", flush=True)
+        problemas = premissa_do_d()
+        ok("D (premissa): enquanto o aviso entra, a tela só desce e nada passa do alvo (Main, Aviso e Notificacao)",
+           not problemas, "; ".join(problemas))
         f = r.foto("-posicoes")
-        if retrato is None:
+        if nao_pararam:
+            ok("D: as posições pararam (ou a seta só desceu) com o aviso na tela", False,
+               f"{f} as posições NÃO pararam em {len(validas)} leituras: {nao_pararam}")
+        elif retrato is None:
             ok("D: posições lidas com o aviso na tela", False, f"{f} INSTRUMENTAÇÃO: nenhuma leitura com a orientação, o aviso e a seta")
         else:
             g, a2, seta = onde(r, GUIA, retrato)[0], onde(r, SENHA_TROCADA, retrato)[0], geo_em(retrato, "setaDeRetorno")

@@ -16,6 +16,8 @@ Mede pelo que o programa informa (--medir-toque: as linhas TOQUE: com o retângu
 
     RUSTINHO_TELA=:68 python3 app/testes/telas_receber_altura.py [pasta das fotos]
     RUSTINHO_PROGRAMA=/caminho/rustinho   (outro binário: o de antes da correção)
+    RUSTINHO_SONDA_ANTES=1                 (o programa de antes da T013, sem o miolo que rola: a mensagem de erro é
+                                            medida dentro da janela; sem ela, a falta da GEO do miolo reprova)
     RUSTINHO_CASOS_CELULAR=1               (os tamanhos de celular; sem ela, os de computador)
 """
 import json
@@ -115,6 +117,7 @@ def botoes(r, nome):
     return achados
 
 
+SONDA_ANTES = os.environ.get("RUSTINHO_SONDA_ANTES") == "1"
 MENSAGEM = {"erro longo": "Este registro (contas a receber) ficou inconsistente",
             "caixa fechado": "Abra o caixa antes de receber"}
 
@@ -134,10 +137,16 @@ def erro_a_vista(r, trecho=MENSAGEM["erro longo"], altura=None):
         if t.startswith("RET:") and trecho in t:
             v = [float(a) for a in t[4:].split("|", 1)[0].split(",")]
             texto = (v[1], v[1] + v[3])
-    if area is None and altura is not None:
+    # INT9-R6 (revisão da integ9): o caminho pela janela vale SÓ para o programa de antes (RUSTINHO_SONDA_ANTES=1). No
+    # programa atual, a falta da GEO do miolo reprova: se o objectName "rolagemDoReceber" se perdesse, a conferência
+    # afrouxaria sem avisar (a medida pela janela ignora o recorte do miolo).
+    if area is None and altura is not None and SONDA_ANTES:
         area = (0, altura)
         if texto is not None:
             return 0 <= texto[0] and texto[1] <= altura, f"sem miolo que rola: janela 0–{altura} mensagem={texto}"
+    if area is None and not SONDA_ANTES:
+        return False, (f"INSTRUMENTAÇÃO: sem a GEO do miolo que rola (rolagemDoReceber), mensagem={texto}; o caminho "
+                       "pela janela só vale com RUSTINHO_SONDA_ANTES=1 (o programa de antes da T013)")
     if area is None or texto is None:
         return False, f"área do miolo={area} mensagem={texto}"
     return area[0] - 2 <= texto[0] and texto[1] <= area[1] + 2, f"área do miolo={area} mensagem={texto}"
