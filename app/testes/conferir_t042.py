@@ -58,9 +58,16 @@ def _barras_do_bloco(bloco):
 def barras(log, foto):
     blocos = Path(log).read_text(errors="replace").split("TEXTOS-DA-TELA-INICIO")
     out = _barras_do_bloco(blocos[-1])
-    if "janelinha" in Path(foto).name:  # só a barra da janelinha: a que aparece só na última leitura (a de trás já estava)
-        antes = set().union(*(_barras_do_bloco(b) for b in blocos[1:-1])) if len(blocos) > 2 else set()
-        out = out - antes
+    if "janelinha" in Path(foto).name:
+        # só a barra da janelinha: tira as da tela de trás, as da última leitura ANTES de o conjunto de barras mudar
+        # (anda das leituras finais para trás enquanto elas mostram as mesmas barras da última: a captura do telefone
+        # lê de novo depois do clique, para ver se precisa rolar; e a primeira leitura pode ser de antes de a janela
+        # virar telefone, com a barra de trás em outro lugar).
+        conjuntos = [_barras_do_bloco(b) for b in blocos[1:]]
+        i = len(conjuntos) - 1
+        while i > 0 and conjuntos[i - 1] == out:
+            i -= 1
+        out = out - (conjuntos[i - 1] if i > 0 else set())
     return sorted(out)
 
 
