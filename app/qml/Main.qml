@@ -719,6 +719,26 @@ ApplicationWindow {
         }
     }
 
+    // N6 (decisão do proprietário, 18/11/2026: "1a"). Quando a orientação da guia ou o aviso entram ou saem, as telas
+    // descem ou voltam pela altura deles (um aviso de uma linha: 66 px, quase o passo das linhas de encomenda). Um
+    // clique dado nesse instante caía em outra linha: o "Já pedi" marcava a encomenda vizinha (M-2 da revisão do VIS2).
+    // Enquanto as telas se movem, e por um instante depois, o clique e o toque nelas são DESCARTADOS (não vão para
+    // lugar nenhum). O teclado, a roda do mouse, o próprio aviso, a guia e as janelinhas continuam valendo.
+    readonly property real descidaDasTelas: guia.alturaNoAlto + aviso.alturaNoAlto
+    onDescidaDasTelasChanged: cliqueDescartado.restart()
+    Timer {
+        id: cliqueDescartado
+        // A volta das telas (140 ms) e um instante depois (300 ms), o tempo de quem já ia clicar.
+        interval: 440
+    }
+    MouseArea {
+        objectName: "cliqueDescartadoNoMovimento"
+        anchors.fill: pilha
+        enabled: cliqueDescartado.running
+        acceptedButtons: Qt.AllButtons
+        // Segura o clique (o pressionar e o soltar) e não faz nada com ele.
+    }
+
     // F11: ir para a busca de peças de qualquer lugar.
     Shortcut {
         sequence: "F11"
