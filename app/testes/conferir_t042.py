@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""T042 (barras de pesquisa em cápsula): confere as fotos de `telas_t042_capturas.py`.
+"""T042 (barras de pesquisa em cápsula): confere as fotos de `telas_t042_capturas.py`. Não é roteiro (a CI roda os
+telas_*.py sem argumentos de modo; por isso este nome).
 
 A posição de cada barra vem do próprio programa (linhas GEO:campoDeBusca / GEO:buscaDaInicio da ÚLTIMA leitura da tela
 no registro da foto). Na foto da janelinha "Qual é a peça?", só a barra da janelinha (a de trás fica sob o véu).

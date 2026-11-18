@@ -2,7 +2,7 @@
 """T042 (barras de pesquisa em cápsula): fotos de TODAS as barras de pesquisa, nos três temas.
 
 Usa a mesma loja de ensaio, o mesmo ambiente neutro e a mesma foto da janela de `telas_tema_0918.py`. Rodar com o
-programa de ANTES e com o de DEPOIS (prefixos diferentes) e comparar com `telas_t042_conferir.py`.
+programa de ANTES e com o de DEPOIS (prefixos diferentes) e comparar com `conferir_t042.py` (ferramenta, não roteiro: fora do padrão telas_*.py que a CI roda).
 
     RUSTINHO_TELA=:68 RUSTINHO_PROGRAMA=<binário> RUSTINHO_TEMA_PREFIXO=antes python3 app/testes/telas_t042_capturas.py <pasta>
     RUSTINHO_T042_CELULAR=1 ...   o celular: --celular (toque de 48 dp) numa janela de telefone de 360x780 (tela estreita:
