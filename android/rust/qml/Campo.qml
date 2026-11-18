@@ -367,7 +367,10 @@ ColumnLayout {
                 visible: !campo.busca && (campo.estado === "invalido" || campo.estado === "focado")
             }
             Rectangle {
-                objectName: campo.objectName !== "" ? campo.objectName + "Caixa" : ""
+                // Para os testes: o desenho do campo (na barra de pesquisa, a cápsula). No celular, a área de toque
+                // (a entrada) pode ser mais alta que o desenho (48 dp de toque); o halo é em volta do desenho.
+                objectName: campo.objectName !== "" ? campo.objectName + "Caixa"
+                            : entrada.objectName !== "" ? entrada.objectName + "Caixa" : ""
                 anchors.fill: parent
                 // A barra de pesquisa é uma cápsula (as pontas inteiras redondas).
                 radius: campo.busca ? height / 2 : Tema.raioCampo

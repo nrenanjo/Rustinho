@@ -13,6 +13,7 @@ As 19 barras: as 18 que abrem direto e a da janelinha "Qual é a peça?", aberta
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -73,6 +74,38 @@ class Rustinho(tema.Rustinho):
         self.conferir_ambiente()
 
 
+def geo_da_barra(r):
+    """A área da barra de pesquisa na leitura de agora (a última informada: na janelinha, a dela)."""
+    achadas = []
+    for _x, _y, txt in r.textos():
+        m = re.match(r"GEO:(campoDeBusca|buscaDaInicio):(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)$", txt)
+        if m:
+            achadas.append(tuple(float(v) for v in m.groups()[1:]))
+    return achadas[-1] if achadas else None
+
+
+def trazer_barra_a_vista(r):
+    """No telefone, a barra pode ficar abaixo do fim da tela (Configurações › Histórico: as seções vêm antes dela).
+    Rola a página como a pessoa faz (arrasta para cima no meio da tela, para e solta: sem "jogada") até a barra e o
+    halo (14 px) caberem. Mesma conta no antes e no depois (a barra fica no mesmo lugar nos dois)."""
+    largura, alto = TELEFONE
+    for _ in range(6):
+        g = geo_da_barra(r)
+        if g is None or g[1] + g[3] + 14 + 8 <= alto:
+            return
+        wx, wy, _w, _h = tema.janela_do_rustinho()
+        passo = int(min(g[1] + g[3] + 14 + 40 - alto, alto * 0.5))
+        x, y0 = wx + largura // 2, wy + int(alto * 0.75)
+        base.xdo("mousemove", str(x), str(y0))
+        base.xdo("mousedown", "1")
+        for i in range(1, 11):
+            base.xdo("mousemove", str(x), str(y0 - passo * i // 10))
+            time.sleep(0.03)
+        time.sleep(0.4)
+        base.xdo("mouseup", "1")
+        time.sleep(0.8)
+
+
 def capturas(fotos, modelo):
     prefixo = os.environ.get("RUSTINHO_TEMA_PREFIXO", "captura") + ("-celular" if CELULAR else "")
     so = [t for t in os.environ.get("RUSTINHO_TEMA_TELAS", "").split(",") if t]
@@ -103,8 +136,10 @@ def capturas(fotos, modelo):
                     if not r.clicar(b):
                         faltou.append(f"{nome_tema}-{nome}: o botão {b!r} não apareceu")
                     time.sleep(1.5)
+                if CELULAR:
+                    trazer_barra_a_vista(r)
                 if botao or CELULAR:
-                    r.textos()  # o registro ganha a geometria da barra depois do clique ou do novo tamanho
+                    r.textos()  # o registro ganha a geometria da barra depois do clique, do novo tamanho ou da rolagem
                 print("foto:", r.foto_janela())
             finally:
                 r.fechar()

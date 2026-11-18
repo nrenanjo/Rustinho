@@ -7,6 +7,8 @@ no registro da foto). Na foto da janelinha "Qual é a peça?", só a barra da ja
 
   estilo PASTA PREFIXO   em cada foto PREFIXO-<tema>-<tela>.png, a barra tem de estar como a referência definitiva do
                          dono (17/11/2026, 16h50):
+                         A barra medida é o DESENHO (a cápsula, GEO:<nome>Caixa), não a área de toque (no celular, 48 dp,
+                         mais alta que o desenho em barras de 40 px); sem essa linha, a área de toque.
                            E1. o fundo da barra (a cor mais comum no miolo) é o cinza-escuro #3F3B44 (±10), nos 3 temas;
                            E2. pontas de cápsula: o ponto a 15% da altura, perto do canto do retângulo, fica FORA da barra;
                            E3. o halo magenta em volta, sem corte: a "magentice" m = (R + B)/2 − G sobe, no MESMO ponto,
@@ -60,6 +62,21 @@ def barras(log, foto):
     return sorted(out)
 
 
+def capsula(log, barra):
+    """O desenho da barra (a cápsula), informado na MESMA leitura como GEO:<nome>Caixa, dentro da área de toque `barra`.
+    No celular a área de toque tem pelo menos 48 dp e o desenho fica com a altura de sempre, no meio (Campo.qml, A15):
+    o halo é em volta do desenho. Sem a linha (o programa de antes não a informa), a própria área de toque."""
+    nome, x, y, bw, bh = barra
+    bloco = Path(log).read_text(errors="replace").split("TEXTOS-DA-TELA-INICIO")[-1]
+    for l in bloco.splitlines():
+        m = re.search(rf"GEO:{nome}Caixa:(-?[\d.]+),(-?[\d.]+),([\d.]+),([\d.]+)", l)
+        if m:
+            cx, cy, cw, ch = (round(float(v)) for v in m.groups())
+            if abs(cx - x) <= 1 and abs(cw - bw) <= 1 and y - 1 <= cy and cy + ch <= y + bh + 1:
+                return (nome, cx, cy, cw, ch)
+    return barra
+
+
 def alcance(foto):
     """O alcance do halo pela tela da foto, com a regra do Tema.qml (estreito: largura < 760, ou altura < 560 com largura
     < 1100): 14 px na tela estreita, 30 nas outras. A foto é a da janela inteira."""
@@ -94,7 +111,8 @@ def estilo(pasta, prefixo):
         if outro.exists():
             io = Image.open(outro).convert("RGB")
             po = io.load() if io.size == im.size else None
-        for nome, x, y, bw, bh in bs:
+        for barra in bs:
+            nome, x, y, bw, bh = capsula(log, barra)
             conferidas += 1
             miolo = Counter(px[xx, yy] for xx in range(x + 12, x + bw - 12, 3) for yy in range(y + 10, y + bh - 10, 2)
                             if 0 <= xx < w and 0 <= yy < h)
@@ -131,7 +149,8 @@ def estilo(pasta, prefixo):
             e3 = not faltas
             ok = e1 and e2 and e3
             ruins += not ok
-            print(f"{foto.name} [{nome} {x},{y},{bw}x{bh}]: E1 fundo {fundo} {'ok' if e1 else 'ERRADO'} · "
+            desenho = "" if (nome, x, y, bw, bh) == barra else f" (área de toque {barra[1]},{barra[2]},{barra[3]}x{barra[4]})"
+            print(f"{foto.name} [{nome} {x},{y},{bw}x{bh}{desenho}]: E1 fundo {fundo} {'ok' if e1 else 'ERRADO'} · "
                   f"E2 canto {canto} {'ok' if e2 else 'ERRADO'} · E3 halo {'ok' if e3 else 'FALTA ' + ' '.join(faltas[:6])} (superfície {sup})")
     print(f"ESTILO ({prefixo}): {conferidas} barra(s), {ruins} fora da referência")
     return conferidas > 0 and ruins == 0
