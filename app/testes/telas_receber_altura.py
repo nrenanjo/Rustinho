@@ -119,9 +119,10 @@ MENSAGEM = {"erro longo": "Este registro (contas a receber) ficou inconsistente"
             "caixa fechado": "Abra o caixa antes de receber"}
 
 
-def erro_a_vista(r, trecho=MENSAGEM["erro longo"]):
-    """A mensagem do recebimento recusado está inteira dentro do miolo que rola (GEO:rolagemDoReceber)?
-    Devolve (sim ou não, detalhe)."""
+def erro_a_vista(r, trecho=MENSAGEM["erro longo"], altura=None):
+    """A mensagem do recebimento recusado está inteira dentro do miolo que rola (GEO:rolagemDoReceber)? Sem o miolo que
+    rola (o programa de antes da T013), dentro da janela (N3 da revisão da T040: antes, a falta da GEO reprovava mesmo
+    com a mensagem à vista). Devolve (sim ou não, detalhe)."""
     m = medidas(r)
     area = None
     for t in m:
@@ -133,6 +134,10 @@ def erro_a_vista(r, trecho=MENSAGEM["erro longo"]):
         if t.startswith("RET:") and trecho in t:
             v = [float(a) for a in t[4:].split("|", 1)[0].split(",")]
             texto = (v[1], v[1] + v[3])
+    if area is None and altura is not None:
+        area = (0, altura)
+        if texto is not None:
+            return 0 <= texto[0] and texto[1] <= altura, f"sem miolo que rola: janela 0–{altura} mensagem={texto}"
     if area is None or texto is None:
         return False, f"área do miolo={area} mensagem={texto}"
     return area[0] - 2 <= texto[0] and texto[1] <= area[1] + 2, f"área do miolo={area} mensagem={texto}"
@@ -223,7 +228,7 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
             r.esperar(lambda: r.tem(MENSAGEM[nome_caso][:20]), 8)
             time.sleep(0.8)
         f = r.foto("-2")
-        erro_visto = erro_a_vista(r, MENSAGEM[nome_caso]) if nome_caso in MENSAGEM else (True, "")
+        erro_visto = erro_a_vista(r, MENSAGEM[nome_caso], altura) if nome_caso in MENSAGEM else (True, "")
         b = botoes(r, "Receber")
         if not ok(f"{rotulo}: a janelinha tem o botão Receber", bool(b), f):
             return
@@ -249,11 +254,14 @@ def caso(placar, fotos, modelo, nome_caso, nome_tam, celular, tamanho):
             # tem de levar o miolo até a mensagem. (No "erro longo" não: a janela "Registro inconsistente" fica por
             # cima, pega o Enter e bloqueia a rolagem; ela mesma avisa.)
             rolar_miolo_ao_topo(r)
-            escondida = not erro_a_vista(r, MENSAGEM[nome_caso])[0]
+            escondida = not erro_a_vista(r, MENSAGEM[nome_caso], altura)[0]
             f3 = r.foto("-4")
             tentar_receber(r, largura, altura, celular)
             time.sleep(1.5)
-            de_novo = erro_a_vista(r, MENSAGEM[nome_caso])
+            de_novo = erro_a_vista(r, MENSAGEM[nome_caso], altura)
+            # N4 da revisão da T040: a pré-condição sempre no registro (o R8 só prova algo onde a mensagem ficou escondida).
+            print(f"MEDIDA R8 {rotulo}: depois de subir o miolo a mensagem estava {'ESCONDIDA' if escondida else 'ainda à vista (sem prova do R8 neste tamanho)'}; "
+                  f"na 2ª tentativa: {de_novo[1]}", flush=True)
             f4 = r.foto("-5")
             ok(f"{rotulo}: na segunda tentativa (mesma recusa), a mensagem volta à vista", de_novo[0],
                f"{f4} {de_novo[1]}; depois de subir o miolo a mensagem estava {'escondida' if escondida else 'ainda à vista'} ({f3})")
