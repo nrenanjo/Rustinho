@@ -1426,9 +1426,13 @@ def caso7k(placar, fotos):
             r.entrar("Bia")
             inicio, viu = _desistir_com_faixa(r, "7k")
             ok("7k: desistir volta ao Receber com a janelinha e a faixa \"ainda não foi concluída\"", viu, r.foto("-1"))
-            xdo("key", "Escape")  # fecha a janelinha
-            time.sleep(0.5)
-            xdo("key", "Escape")  # volta ao Início
+            # Esc até o Início: fecha a janelinha e volta (no celular, com o cliente aberto, há um nível a mais: a
+            # janelinha, o cliente, a lista "Quem deve"; no computador, dois).
+            for _ in range(4):
+                xdo("key", "Escape")
+                time.sleep(0.5)
+                if r.tem("Trocar usuário"):
+                    break
             ok("7k: no Início, com a faixa ainda à vista",
                r.esperar(lambda: r.tem("Trocar usuário") and r.tem("ainda não foi concluída"), 5), r.foto("-2"))
             r.clicar("Trocar usuário")
