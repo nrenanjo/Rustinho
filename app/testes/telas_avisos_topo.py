@@ -279,12 +279,22 @@ def cenario_d(placar, fotos, pasta):
             r.clicar_em(*botao[0])
             return time.time()
 
+        primeira = {}
+
+        def posicoes_paradas(tx):
+            """(aviso, seta) de uma leitura com a orientação da guia, o aviso e a seta; senão None."""
+            av, st = onde(r, SENHA_TROCADA, tx), geo_em(tx, "setaDeRetorno")
+            return (av[0], st) if onde(r, GUIA, tx) and av and st else None
+
         def ver_aviso(t0, limite=8.0):
             """O aviso e quando foi visto pela 1ª vez. A troca da senha leva tempo (a senha é guardada com uma conta
-            lenta de propósito), e na máquina da CI o aviso apareceu depois de 2 s: o prazo é de 8 s."""
+            lenta de propósito), e na máquina da CI o aviso apareceu depois de 2 s: o prazo é de 8 s. Guarda a leitura
+            em que o viu (primeira["textos"]): ela também conta para as "posições paradas"."""
             while time.time() - t0 < limite:
-                agora = onde(r, SENHA_TROCADA, r.textos())
+                tx = r.textos()
+                agora = onde(r, SENHA_TROCADA, tx)
                 if agora:
+                    primeira["textos"] = tx
                     return agora[0], time.time()
             return None, None
 
@@ -319,13 +329,15 @@ def cenario_d(placar, fotos, pasta):
             return
         # O-1: as posições do C, aqui, com a guia já parada: duas leituras seguidas iguais (o aviso e a seta no mesmo
         # lugar), enquanto o aviso está na tela.
-        retrato, anterior = None, None
+        # CI de 18/11 (44232537886 e 44243237034): com cada leitura levando ~2,5 s, o aviso aparece em só DUAS leituras,
+        # iguais; a primeira era gasta pelo ver_aviso e o laço só via uma. A leitura do ver_aviso conta como a 1ª.
+        retrato = None
+        anterior = posicoes_paradas(primeira.get("textos") or [])
         while retrato is None and onde(r, SENHA_TROCADA, tx := r.textos()):
-            av, st = onde(r, SENHA_TROCADA, tx), geo_em(tx, "setaDeRetorno")
-            if onde(r, GUIA, tx) and av and st:
-                if (av[0], st) == anterior:
-                    retrato = tx
-                anterior = (av[0], st)
+            agora = posicoes_paradas(tx)
+            if agora is not None and agora == anterior:
+                retrato = tx
+            anterior = agora
         f = r.foto("-posicoes")
         if retrato is None:
             ok("D: posições lidas paradas, com o aviso na tela", False, f"{f} INSTRUMENTAÇÃO: o aviso sumiu antes")
