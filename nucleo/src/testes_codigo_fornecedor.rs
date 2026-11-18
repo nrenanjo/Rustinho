@@ -128,7 +128,11 @@ impl Loja {
     }
 
     fn ultima_alteracao(&mut self) -> i64 {
-        self.s.banco_para_teste().conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0)).unwrap()
+        self.s
+            .banco_para_teste()
+            .conn
+            .query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))
+            .unwrap()
     }
 
     /// As alterações da troca de dados de `produto_fornecedor` depois de `seq`: (operação, chave).
@@ -439,9 +443,11 @@ fn corrigir_o_codigo_nao_muda_a_data_da_ligacao() {
             .unwrap();
         q.query_map([seq], |x| Ok((x.get(0)?, x.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
     };
-    let da_patral = dados.iter().find(|(chave, _)| chave.contains("00008374")).expect("a ligação nova vai aos outros caixas");
+    let da_patral =
+        dados.iter().find(|(chave, _)| chave.contains("00008374")).expect("a ligação nova vai aos outros caixas");
     assert!(da_patral.1.contains(data_patral), "a data que vai aos outros caixas é a de antes: {da_patral:?}");
-    let da_ricartti = dados.iter().find(|(chave, _)| chave.contains("258500")).expect("a troca de forma vai aos outros caixas");
+    let da_ricartti =
+        dados.iter().find(|(chave, _)| chave.contains("258500")).expect("a troca de forma vai aos outros caixas");
     assert!(da_ricartti.1.contains(data_ricartti), "{da_ricartti:?}");
     assert!(dados.iter().all(|(_, d)| !d.is_empty()), "{dados:?}");
 
@@ -498,17 +504,16 @@ fn troca_de_outra_forma_mantem_o_fator() {
         "a ligação nova com o fator 6000: {:?}",
         l.ligacoes()
     );
-    let dados: String = l
-        .s
-        .banco_para_teste()
-        .conn
-        .query_row(
-            "SELECT dados FROM alteracao WHERE tabela = 'produto_fornecedor' AND operacao = 'gravar' AND seq > ?1
+    let dados: String =
+        l.s.banco_para_teste()
+            .conn
+            .query_row(
+                "SELECT dados FROM alteracao WHERE tabela = 'produto_fornecedor' AND operacao = 'gravar' AND seq > ?1
               AND chave LIKE '%rc77%'",
-            [seq],
-            |x| x.get(0),
-        )
-        .unwrap();
+                [seq],
+                |x| x.get(0),
+            )
+            .unwrap();
     assert!(dados.contains("\"fator\":6000"), "o fator vai aos outros caixas: {dados}");
 }
 

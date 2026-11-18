@@ -92,7 +92,9 @@ fn ordem(b: &Banco, p: &str) -> Vec<String> {
 fn datas(b: &Banco, f: &str) -> Vec<(String, String)> {
     let mut c = b
         .conn
-        .prepare("SELECT codigo, atualizado_em FROM produto_fornecedor WHERE fornecedor_id = ?1 ORDER BY codigo_compacto")
+        .prepare(
+            "SELECT codigo, atualizado_em FROM produto_fornecedor WHERE fornecedor_id = ?1 ORDER BY codigo_compacto",
+        )
         .unwrap();
     c.query_map([f], |l| Ok((l.get(0)?, l.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
 }
@@ -190,7 +192,8 @@ fn empate_entre_fornecedores_mesmo_resultado_em_todos_os_caixas() {
     }
     trocar(&mut d.a, &mut d.b);
     let rowids = |b: &Banco| -> Vec<String> {
-        let mut c = b.conn.prepare("SELECT fornecedor_id || ':' || codigo FROM produto_fornecedor ORDER BY rowid").unwrap();
+        let mut c =
+            b.conn.prepare("SELECT fornecedor_id || ':' || codigo FROM produto_fornecedor ORDER BY rowid").unwrap();
         c.query_map([], |l| l.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
     };
     assert_ne!(rowids(&d.a), rowids(&d.b), "as linhas estão em ordens diferentes nos dois caixas (o cenário vale)");
@@ -200,7 +203,9 @@ fn empate_entre_fornecedores_mesmo_resultado_em_todos_os_caixas() {
     };
     assert_eq!(ficha(&d.a), ficha(&d.b), "a ficha na mesma ordem nos dois caixas");
     let mut esperada = ficha(&d.a);
-    esperada.sort_by(|x, y| (x.0.as_str(), crate::texto::compactar(&x.1)).cmp(&(y.0.as_str(), crate::texto::compactar(&y.1))));
+    esperada.sort_by(|x, y| {
+        (x.0.as_str(), crate::texto::compactar(&x.1)).cmp(&(y.0.as_str(), crate::texto::compactar(&y.1)))
+    });
     assert_eq!(ficha(&d.a), esperada, "a ordem da chave da ligação");
     // A busca pelo código: o balão mostra o mesmo fornecedor nos dois caixas.
     let balao = |b: &Banco| -> Option<String> {

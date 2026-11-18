@@ -232,7 +232,8 @@ pub fn conferir_codigos_fornecedor(
     let mudou = |l: &LinhaCodigoFornecedor| {
         let codigo = texto::limpar(&l.codigo);
         codigo != texto::limpar(&l.antes)
-            && !(texto::tamanho(&l.antes) > 60 && codigo == texto::limpar(&l.antes.chars().take(60).collect::<String>()))
+            && !(texto::tamanho(&l.antes) > 60
+                && codigo == texto::limpar(&l.antes.chars().take(60).collect::<String>()))
     };
     // Os códigos que saem desta peça neste mesmo salvar (para a mensagem do B-4).
     let saindo: Vec<(&str, String)> = linhas
