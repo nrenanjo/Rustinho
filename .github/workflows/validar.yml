@@ -562,6 +562,9 @@ jobs:
   apk:
     strategy:
       fail-fast: false
+      # Um APK de cada vez (D-05, 16/11/2026): num ramo novo o cache do Gradle começa vazio; assim só o primeiro baixa
+      # as bibliotecas do Maven Central (o 429 da CI de ensaio da integ7) e o segundo já as encontra no cache.
+      max-parallel: 1
       matrix:
         include:
           - nome: "64bits"
@@ -587,6 +590,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          # Guarda as bibliotecas do Gradle entre execuções (D-05). Os arquivos do Gradle só nascem na compilação
+          # (androiddeployqt); sem um arquivo que exista no checkout, o setup-java para com erro. A chave vem do
+          # android/CMakeLists.txt: o cache velho só tem bibliotecas a mais, e o Gradle baixa o que faltar.
+          cache: gradle
+          cache-dependency-path: android/CMakeLists.txt
       - name: Versão (raiz) e versionCode (DP-36)
         run: |
           set -eu

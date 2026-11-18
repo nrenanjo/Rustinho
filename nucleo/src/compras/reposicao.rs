@@ -66,13 +66,15 @@ fn inteiro_acima(q: f64) -> i64 {
 }
 
 /// Último fornecedor de cada peça (pela última compra lançada) e o código
-/// da peça nesse fornecedor.
+/// da peça nesse fornecedor: o da ligação mais recente; no empate (o mesmo
+/// segundo), o de menor código compacto, igual em todos os caixas (F-2,
+/// decisão do proprietário, 16/11/2026).
 fn fornecedores(conn: &Connection) -> Resultado<HashMap<String, (String, String, String)>> {
     let mut c = conn.prepare(
         "SELECT ci.produto_id, COALESCE(c.fornecedor_id, ''), COALESCE(f.fantasia, ''), COALESCE(f.nome, ''),
                 COALESCE((SELECT pf.codigo FROM produto_fornecedor pf
                            WHERE pf.produto_id = ci.produto_id AND pf.fornecedor_id = c.fornecedor_id
-                           ORDER BY pf.atualizado_em DESC LIMIT 1), ci.codigo_fornecedor)
+                           ORDER BY pf.atualizado_em DESC, pf.codigo_compacto LIMIT 1), ci.codigo_fornecedor)
            FROM compra_item ci
            JOIN compra c ON c.id = ci.compra_id
            LEFT JOIN pessoa f ON f.id = c.fornecedor_id
@@ -924,5 +926,53 @@ mod testes {
         assert_eq!(p.itens.len(), 1);
         assert_eq!((p.valor.as_str(), p.itens[0].ultima_venda.as_str()), ("400,00", "Nunca vendeu"));
         assert!(lista_compra_html(c).unwrap().contains("Filtro de óleo"));
+    }
+
+    /// F-2 (decisão do proprietário, 16/11/2026): duas ligações do mesmo fornecedor gravadas no mesmo segundo. O
+    /// código do "O que comprar" sai de um desempate fixo (o menor código compacto), e não da ordem em que as linhas
+    /// estão no banco, que muda de um caixa para outro (aqui, as duas ordens de gravação) e quando um código é
+    /// corrigido (a ligação corrigida é regravada no fim da tabela).
+    #[test]
+    fn empate_de_data_no_codigo_do_fornecedor_e_fixo() {
+        use crate::catalogo::codigos::{vincular_fornecedor, JaLigado, LinhaCodigoFornecedor};
+        for ordem in [["00008373", "ZZ-2"], ["ZZ-2", "00008373"]] {
+            let b = Banco::em_memoria().unwrap();
+            let (c, d) = (&b.conn, b.dispositivo.as_str());
+            let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+            let p = peca(&b, &u, "Filtro de óleo", "10", "0");
+            let mut fp = crate::pessoas::ficha_nova(c, "fornecedor").unwrap();
+            fp.nome = "Patral Peças".into();
+            let f = crate::pessoas::salvar(c, d, &u, &fp).unwrap();
+            for codigo in ordem {
+                assert!(vincular_fornecedor(c, &f, codigo, &p, 1000, JaLigado::Manter).unwrap());
+            }
+            c.execute("UPDATE produto_fornecedor SET atualizado_em = '2026-01-02T03:04:05Z'", []).unwrap();
+            c.execute(
+                "INSERT INTO compra (id, fornecedor_id, situacao, lancada_em, criado_em, dispositivo)
+                 VALUES ('c1', ?1, 'lancada', '2026-01-02T03:04:05Z', '2026-01-02T03:04:05Z', ?2)",
+                rusqlite::params![f, d],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO compra_item (id, compra_id, ordem, quantidade, valor_produtos, produto_id)
+                 VALUES ('i1', 'c1', 1, 1000, 1000, ?1)",
+                [&p],
+            )
+            .unwrap();
+            assert_eq!(fornecedores(c).unwrap()[&p].2, "00008373", "gravadas na ordem {ordem:?}");
+            // Corrigir o 00008373 (outra forma compacta): a ligação é regravada no fim, e a escolha não muda.
+            let mut ficha = produtos::ficha(c, &p).unwrap();
+            ficha.codigos_fornecedor = ficha
+                .fornecedores
+                .iter()
+                .map(|x| LinhaCodigoFornecedor {
+                    fornecedor_id: x.fornecedor_id.clone(),
+                    antes: x.codigo.clone(),
+                    codigo: if x.codigo == "00008373" { "00008374".into() } else { x.codigo.clone() },
+                })
+                .collect();
+            produtos::salvar(c, d, &u, &ficha).unwrap();
+            assert_eq!(fornecedores(c).unwrap()[&p].2, "00008374", "depois da correção, gravadas na ordem {ordem:?}");
+        }
     }
 }

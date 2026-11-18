@@ -14,7 +14,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::erro::Resultado;
+use crate::erro::{Erro, Resultado};
 use crate::{gtin, tempo, texto};
 
 /// Um código GTIN / barras associado à peça, com tipo (`comercial` ou
@@ -185,6 +185,178 @@ pub fn vincular_fornecedor(
     };
     let n = conn.execute(sql, params![fornecedor_id, compacto, codigo, produto_id, fator, tempo::agora()])?;
     Ok(n > 0)
+}
+
+/// Uma linha de "Código nos fornecedores" como a ficha da peça a manda ao salvar (pedido do proprietário,
+/// 16/11/2026): o fornecedor, o código que a tela abriu (`antes`) e o que está escrito agora.
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LinhaCodigoFornecedor {
+    pub fornecedor_id: String,
+    pub antes: String,
+    pub codigo: String,
+}
+
+/// Um código de fornecedor que a ficha troca, já conferido (veja [`conferir_codigos_fornecedor`]).
+#[derive(Debug, Clone)]
+pub struct TrocaCodigoFornecedor {
+    pub fornecedor_id: String,
+    pub fornecedor: String,
+    pub antes: String,
+    antes_compacto: String,
+    pub codigo: String,
+    compacto: String,
+}
+
+impl TrocaCodigoFornecedor {
+    /// A frase do histórico da peça.
+    pub fn detalhe(&self) -> String {
+        format!("Código no fornecedor {}: {} → {}", self.fornecedor, self.antes, self.codigo)
+    }
+}
+
+/// Confere as linhas de "Código nos fornecedores" da ficha antes de gravar qualquer coisa. Só o código muda: o
+/// fornecedor, a peça e o fator ficam, e nada vai para o código original nem vem dele. Linha igual à que a tela
+/// abriu não é trocada (nem a que o campo cortou em 60 caracteres). Recusa (com a linha, `codigosFornecedor.<n>`):
+/// código vazio, sem letras nem números ou comprido demais, a ligação que não está mais nesta peça (outro caixa mudou
+/// com a tela aberta), a mesma ligação em duas linhas, o código que já é de outra peça nesse fornecedor, o que esta
+/// peça já tem nele (com texto próprio quando ele também está sendo trocado: uma troca de cada vez), e o mesmo código
+/// novo em duas linhas.
+pub fn conferir_codigos_fornecedor(
+    conn: &Connection,
+    produto_id: &str,
+    linhas: &[LinhaCodigoFornecedor],
+) -> Resultado<Vec<TrocaCodigoFornecedor>> {
+    // A linha não mudou: igual à que a tela abriu, ou o mesmo código cortado em 60 caracteres pelo campo (um código
+    // gravado mais comprido não é cortado em silêncio: B-6 da revisão do Fable).
+    let mudou = |l: &LinhaCodigoFornecedor| {
+        let codigo = texto::limpar(&l.codigo);
+        codigo != texto::limpar(&l.antes)
+            && !(texto::tamanho(&l.antes) > 60 && codigo == texto::limpar(&l.antes.chars().take(60).collect::<String>()))
+    };
+    // Os códigos que saem desta peça neste mesmo salvar (para a mensagem do B-4).
+    let saindo: Vec<(&str, String)> = linhas
+        .iter()
+        .filter(|l| mudou(l) && texto::compactar(&l.codigo) != texto::compactar(&l.antes))
+        .map(|l| (l.fornecedor_id.as_str(), texto::compactar(&l.antes)))
+        .collect();
+    let mut trocas: Vec<TrocaCodigoFornecedor> = Vec::new();
+    for (i, l) in linhas.iter().enumerate() {
+        let campo = format!("codigosFornecedor.{i}");
+        if !mudou(l) {
+            continue;
+        }
+        let codigo = texto::limpar(&l.codigo);
+        let fornecedor: String = conn
+            .query_row("SELECT nome FROM pessoa WHERE id = ?1", [&l.fornecedor_id], |r| r.get(0))
+            .optional()?
+            .unwrap_or_else(|| "um fornecedor sem cadastro".into());
+        if texto::tamanho(&codigo) > 60 {
+            return Err(Erro::campo(&campo, "Código no fornecedor: use no máximo 60 caracteres."));
+        }
+        let compacto = texto::compactar(&codigo);
+        if codigo.is_empty() {
+            return Err(Erro::campo(&campo, "O código no fornecedor não pode ficar vazio."));
+        }
+        if compacto.is_empty() {
+            return Err(Erro::campo(&campo, "O código no fornecedor precisa ter letras ou números."));
+        }
+        let antes_compacto = texto::compactar(&l.antes);
+        // A mesma ligação em duas linhas (a tela não manda assim): recusa com texto, e não o erro do banco (O-4).
+        if trocas.iter().any(|t| t.fornecedor_id == l.fornecedor_id && t.antes_compacto == antes_compacto) {
+            return Err(Erro::campo(
+                &campo,
+                format!("O código {} de {fornecedor} veio em duas linhas. Abra a peça de novo.", l.antes),
+            ));
+        }
+        let ligada: Option<String> = conn
+            .query_row(
+                "SELECT produto_id FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+                params![l.fornecedor_id, antes_compacto],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if ligada.as_deref() != Some(produto_id) {
+            return Err(Erro::campo(
+                &campo,
+                format!("O código {} de {fornecedor} não está mais nesta peça. Abra a peça de novo.", l.antes),
+            ));
+        }
+        if compacto != antes_compacto {
+            // LEFT JOIN: a ligação de uma peça que ainda não chegou pela troca de dados também conta (O-4).
+            let de_quem: Option<(String, String, Option<String>)> = conn
+                .query_row(
+                    "SELECT f.produto_id, f.codigo, p.nome FROM produto_fornecedor f LEFT JOIN produto p ON p.id = f.produto_id
+                      WHERE f.fornecedor_id = ?1 AND f.codigo_compacto = ?2",
+                    params![l.fornecedor_id, compacto],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            match de_quem {
+                Some((peca, ja, _)) if peca == produto_id => {
+                    // Trocar dois códigos entre si no mesmo salvar (B-4): o outro ainda está gravado aqui.
+                    if saindo.iter().any(|(f, c)| *f == l.fornecedor_id && *c == compacto) {
+                        return Err(Erro::campo(
+                            &campo,
+                            format!(
+                                "O código {ja} de {fornecedor} também está sendo trocado neste salvar. Salve uma troca de cada vez."
+                            ),
+                        ));
+                    }
+                    return Err(Erro::campo(&campo, format!("Esta peça já tem o código {ja} de {fornecedor}.")));
+                }
+                Some((_, ja, Some(nome))) => {
+                    return Err(Erro::campo(&campo, format!("O código {ja} de {fornecedor} já é da peça \"{nome}\".")));
+                }
+                Some((_, ja, None)) => {
+                    return Err(Erro::campo(&campo, format!("O código {ja} de {fornecedor} já é de outra peça.")));
+                }
+                None => {}
+            }
+            if trocas.iter().any(|t| t.fornecedor_id == l.fornecedor_id && t.compacto == compacto) {
+                return Err(Erro::campo(&campo, format!("O código {codigo} de {fornecedor} está em duas linhas.")));
+            }
+        }
+        trocas.push(TrocaCodigoFornecedor {
+            fornecedor_id: l.fornecedor_id.clone(),
+            fornecedor,
+            antes: l.antes.clone(),
+            antes_compacto,
+            codigo,
+            compacto,
+        });
+    }
+    Ok(trocas)
+}
+
+/// Grava um código de fornecedor trocado (conferido por [`conferir_codigos_fornecedor`]). Mesma forma compacta:
+/// só o texto muda. Outra: apaga a ligação velha e grava a nova, com o mesmo fornecedor, peça, fator e data (a
+/// chave muda, e a troca de dados registra o UPDATE só com a chave nova: o código velho ficaria nos outros
+/// caixas). A data fica a de antes: corrigir o código não faz deste o código mais recente do fornecedor (o "O que
+/// comprar" mostra o mais recente).
+pub fn trocar_codigo_fornecedor(conn: &Connection, t: &TrocaCodigoFornecedor) -> Resultado<()> {
+    if t.compacto == t.antes_compacto {
+        conn.execute(
+            "UPDATE produto_fornecedor SET codigo = ?3 WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+            params![t.fornecedor_id, t.antes_compacto, t.codigo],
+        )?;
+        return Ok(());
+    }
+    let (produto_id, fator, quando): (String, i64, String) = conn.query_row(
+        "SELECT produto_id, fator, atualizado_em FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+        params![t.fornecedor_id, t.antes_compacto],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    conn.execute(
+        "DELETE FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+        params![t.fornecedor_id, t.antes_compacto],
+    )?;
+    conn.execute(
+        "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![t.fornecedor_id, t.compacto, t.codigo, produto_id, fator, quando],
+    )?;
+    Ok(())
 }
 
 /// Guarda um código que a peça teve (`produto_codigo_antigo`): a etiqueta

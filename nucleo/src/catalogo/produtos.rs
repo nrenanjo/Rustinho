@@ -107,6 +107,10 @@ pub struct ProdutoFicha {
     /// Fornecedores e códigos que eles usam para esta peça.
     #[serde(skip_deserializing)]
     pub fornecedores: Vec<CodigoFornecedor>,
+    /// "Código nos fornecedores" como está na tela ao salvar (16/11/2026): o código de cada fornecedor é editado
+    /// ali mesmo. Só as linhas que mudaram são gravadas (veja `codigos::conferir_codigos_fornecedor`).
+    #[serde(skip_serializing)]
+    pub codigos_fornecedor: Vec<crate::catalogo::codigos::LinhaCodigoFornecedor>,
     /// Todos os códigos GTIN / barras associados à peça (comercial e tributável, com origem).
     #[serde(default)]
     pub gtins: Vec<GtinFicha>,
@@ -137,6 +141,8 @@ pub struct ItemGrade {
 #[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodigoFornecedor {
+    /// Qual fornecedor (a tela manda de volta com o código editado).
+    pub fornecedor_id: String,
     pub fornecedor: String,
     pub codigo: String,
     pub fator: String,
@@ -643,6 +649,10 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         }
     }
 
+    // Código nos fornecedores (16/11/2026): conferido aqui, antes de gravar qualquer coisa da peça.
+    let trocas_fornecedor =
+        crate::catalogo::codigos::conferir_codigos_fornecedor(conn, &id, &ficha.codigos_fornecedor)?;
+
     if dados.codigo.is_empty() {
         dados.codigo = faixas::gerar_para_peca(conn)?.unwrap_or_default();
     }
@@ -667,7 +677,8 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     let tabelas = config::tabelas_preco(conn)?;
     let detalhes = match &antes {
         Some(a) => {
-            let d = diferencas(&tabelas, a, &dados);
+            let mut d = diferencas(&tabelas, a, &dados);
+            d.extend(trocas_fornecedor.iter().map(|t| t.detalhe()));
             if d.is_empty() {
                 return Ok(id); // nada mudou
             }
@@ -822,6 +833,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
         )?;
     }
     crate::catalogo::codigos::registrar_gtins_da_ficha(conn, &id, &dados.gtins, &agora)?;
+    for t in &trocas_fornecedor {
+        crate::catalogo::codigos::trocar_codigo_fornecedor(conn, t)?;
+    }
 
     if novo && estoque_inicial != 0 {
         estoque::lancar(conn, dispositivo, Some(usuario_id), &id, estoque_inicial, "inicial", "Estoque inicial")?;
@@ -1007,13 +1021,16 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
     let grade_itens = if d.grade.is_empty() { Vec::new() } else { itens_grade(conn, &d.grade)? };
     let fracionada = unidades::fracionada(conn, &d.unidade)?;
     let tributacao = fiscal::tributacao(conn, &fiscal::uf_loja(conn)?, &d.cest, &d.csosn, &fiscal::hoje(conn)?)?;
+    // A mais recente primeiro. No empate (o mesmo segundo), um desempate fixo pela chave da ligação, igual em todos
+    // os caixas (F-2, decisão do proprietário, 16/11/2026): a ordem não depende da ordem das linhas no banco.
     let mut consulta = conn.prepare_cached(
-        "SELECT p.nome, f.codigo, f.fator FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
-          WHERE f.produto_id = ?1 ORDER BY f.atualizado_em DESC",
+        "SELECT p.nome, f.codigo, f.fator, f.fornecedor_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+          WHERE f.produto_id = ?1 ORDER BY f.atualizado_em DESC, f.fornecedor_id, f.codigo_compacto",
     )?;
     let fornecedores = consulta
         .query_map([id], |l| {
             Ok(CodigoFornecedor {
+                fornecedor_id: l.get(3)?,
                 fornecedor: l.get(0)?,
                 codigo: l.get(1)?,
                 fator: numeros::escrever_quantidade(l.get(2)?),
@@ -1094,6 +1111,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         historico: auditoria::historico(conn, "produto", id, 30)?,
         tributacao: Some(tributacao),
         fornecedores,
+        codigos_fornecedor: Vec::new(),
         gtins: d.gtins,
         oferta_valendo: oferta_vale(d.oferta_preco, &d.oferta_ate, &hoje),
         oferta_preco: d.oferta_preco.map(numeros::escrever_dinheiro).unwrap_or_default(),

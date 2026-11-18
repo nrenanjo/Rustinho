@@ -625,7 +625,15 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
                 let mut valores: Vec<SqlValor> = cols.iter().map(|c| para_sql(&m[c.as_str()])).collect();
                 if todas.iter().any(|c| c == "atualizado_em") {
                     nomes.push("\"atualizado_em\"".into());
-                    valores.push(SqlValor::Text(tempo::agora()));
+                    // F-3 (decisão do proprietário, 16/11/2026): na ligação do código do fornecedor, a data é a da
+                    // ligação (a ficha e o "O que comprar" mostram a mais recente), e a versão que volta mantém a dela.
+                    // Nas outras tabelas, a data de agora, como sempre.
+                    let guardada = if tabela == "produto_fornecedor" {
+                        m.get("atualizado_em").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                    } else {
+                        None
+                    };
+                    valores.push(SqlValor::Text(guardada.map(str::to_string).unwrap_or_else(tempo::agora)));
                 }
                 let marcas = (1..=nomes.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
                 let atualizar: Vec<String> = nomes

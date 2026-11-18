@@ -130,6 +130,13 @@ FocusScope {
         // foi digitado no outro tipo continua na tela (voltar o tipo antes de
         // salvar devolve tudo), mas não é conferido nem gravado.
         const deServico = tela.servico
+        // Código nos fornecedores (16/11/2026): cada linha com o fornecedor, o código que abriu e o de agora.
+        const listaCodigosFornecedor = []
+        for (let i = 0; i < repFornecedores.count; i++) {
+            const linha = repFornecedores.itemAt(i)
+            listaCodigosFornecedor.push({ fornecedorId: linha.modelData.fornecedorId, antes: linha.modelData.codigo,
+                                          codigo: linha.campoCodigo.texto })
+        }
         return {
             id: ficha ? ficha.id : "",
             codigo: codigo.texto,
@@ -164,7 +171,8 @@ FocusScope {
             comissao: comissao.texto,
             observacoes: observacoes.texto,
             aplicacoes: listaAplicacoes,
-            equivalentes: listaEquivalentes
+            equivalentes: listaEquivalentes,
+            codigosFornecedor: listaCodigosFornecedor
         }
     }
 
@@ -287,6 +295,8 @@ FocusScope {
             repPrecos.itemAt(i).campoLucro.erro = ""
             repPrecos.itemAt(i).campoPreco.erro = ""
         }
+        for (let i = 0; i < repFornecedores.count; i++)
+            repFornecedores.itemAt(i).campoCodigo.erro = ""
     }
 
     function mostrarErro(campo, mensagem) {
@@ -319,6 +329,7 @@ FocusScope {
             const p = campo.match(/^(preco|lucro)(\d)$/)
             const a = campo.match(/^aplicacoes\.(\d+)\.(\w+)$/)
             const e = campo.match(/^equivalentes\.(\d+)\.(\w+)$/)
+            const cf = campo.match(/^codigosFornecedor\.(\d+)$/)
             if (p) {
                 const numero = parseInt(p[2])
                 if (numero > 1)
@@ -336,6 +347,10 @@ FocusScope {
                 const linha = repEquivalentes.itemAt(parseInt(e[1]))
                 if (linha)
                     alvo = linha.campo(e[2])
+            } else if (cf) {
+                const linha = repFornecedores.itemAt(parseInt(cf[1]))
+                if (linha)
+                    alvo = linha.campoCodigo
             }
         }
         if (alvo) {
@@ -1018,11 +1033,15 @@ FocusScope {
                             text: "Código nos fornecedores"
                             Layout.topMargin: 4
                         }
+                        // 16/11/2026: o código de cada fornecedor é editável aqui (só o código: o fornecedor e o
+                        // fator ficam), e grava com o Salvar da peça. Nunca vai para o código original.
                         Repeater {
+                            id: repFornecedores
                             model: tela.ficha && tela.ficha.fornecedores ? tela.ficha.fornecedores : []
                             delegate: Rectangle {
                                 id: faixaDaLista
                                 required property var modelData
+                                property alias campoCodigo: campoCodigoFornecedor
                                 Layout.fillWidth: true
                                 required property int index
                                 // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
@@ -1032,15 +1051,34 @@ FocusScope {
                                 radius: Tema.raioCampo
                                 implicitHeight: conteudoDaFaixa.implicitHeight + 8
                                 implicitWidth: conteudoDaFaixa.implicitWidth + 16
-                                Nota {
+                                // O fornecedor (e a caixa) em cima, inteiro: quebra a linha, nunca corta (M-1 da
+                                // revisão do Fable). O campo do código embaixo, na largura da faixa: cabe mais do
+                                // código, e o erro dele cabe embaixo sem empurrar o nome (B-5).
+                                ColumnLayout {
                                     id: conteudoDaFaixa
                                     x: 8
                                     y: 4
                                     width: faixaDaLista.width - 16
-                                    text: modelData.codigo + "  ·  " + modelData.fornecedor + (modelData.fator !== "1" ? "  ·  caixa com " + modelData.fator : "")
-                                    font.pixelSize: 14
-                                    elide: Text.ElideRight
-                                    wrapMode: Text.NoWrap
+                                    spacing: 4
+                                    Nota {
+                                        text: faixaDaLista.modelData.fornecedor + (faixaDaLista.modelData.fator !== "1" ? "  ·  caixa com " + faixaDaLista.modelData.fator : "")
+                                        font.pixelSize: 14
+                                        elide: Text.ElideNone
+                                        wrapMode: Text.Wrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Campo {
+                                        id: campoCodigoFornecedor
+                                        dica: "Código"
+                                        maximo: 60
+                                        Layout.fillWidth: true
+                                        onEditado: tela.marcarAlterado()
+                                        // O começo do código à vista (o campo mostraria o fim de um código comprido).
+                                        Component.onCompleted: {
+                                            texto = faixaDaLista.modelData.codigo
+                                            entrada.cursorPosition = 0
+                                        }
+                                    }
                                 }
                             }
                         }

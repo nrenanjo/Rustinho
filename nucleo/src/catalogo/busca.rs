@@ -942,6 +942,8 @@ struct FornecedorResumo {
     curto: String,
 }
 
+/// Os fornecedores de cada peça: a ligação mais recente primeiro; no empate, pelo código e, por fim, pela chave da
+/// ligação (o fornecedor e o código compacto), igual em todos os caixas (F-2; N-6 da conferência do 5º congelamento).
 fn fornecedores_das_pecas(conn: &Connection, ids: &[&str]) -> Resultado<HashMap<String, Vec<FornecedorResumo>>> {
     let mut por_peca: HashMap<String, Vec<FornecedorResumo>> = HashMap::new();
     if ids.is_empty() {
@@ -951,7 +953,7 @@ fn fornecedores_das_pecas(conn: &Connection, ids: &[&str]) -> Resultado<HashMap<
         "SELECT f.produto_id, f.codigo_compacto, f.codigo, COALESCE(NULLIF(p.fantasia, ''), p.nome)
            FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
           WHERE f.produto_id IN (SELECT value FROM json_each(?1))
-          ORDER BY f.produto_id, f.atualizado_em DESC, f.codigo ASC",
+          ORDER BY f.produto_id, f.atualizado_em DESC, f.codigo ASC, f.fornecedor_id, f.codigo_compacto",
     )?;
     let linhas = c.query_map([serde_json::to_string(ids)?], |l| {
         let produto_id: String = l.get(0)?;
