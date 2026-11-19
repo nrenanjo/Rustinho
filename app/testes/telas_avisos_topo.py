@@ -527,10 +527,13 @@ def cenario_e(placar, fotos, pasta):
         # clique vai na parte de baixo do botão (ABAIXO_DO_MEIO), e é ela que tem de estar à vista.
         # OR-1 da re-revisão 3: no celular as abas rolam com o conteúdo (a conta pela aba ficava sempre verdadeira); o
         # que fica fixo é o cabeçalho com a seta de retorno. No computador, a faixa fixa das abas.
+        # T047 (18/11/2026): no celular não há mais a seta; o que fica fixo é o cabeçalho inteiro (a linha do olho, o
+        # título e os botões), e o corte é o fim dele. Um programa de antes da T047 não dá o nome do cabeçalho: vale a
+        # seta, como antes (geo_em).
         tx = r.textos()
         if nav.CELULAR:
-            seta = geo_em(tx, "setaDeRetorno")
-            corte = seta[1] + seta[3] + 4 if seta else None
+            cab = geo_em(tx, TOPO)
+            corte = cab[1] + cab[3] + 4 if cab else None
         else:
             abas = [y for _, y, t in tx if t == "Backup"]
             corte = min(abas) + FAIXA_ABAIXO_DA_ABA if abas else None

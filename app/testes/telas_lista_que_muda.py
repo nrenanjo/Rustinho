@@ -5,10 +5,10 @@ a rolagem por gesto continua livre.
 
 Em Estoque › Encomendas ("Em andamento": as que chegaram, as abertas e as pedidas, cada grupo da mais nova para a mais
 antiga). "Já pedi" ali não mostra aviso: as telas não se movem (a N6 fica fora do caminho).
-  K3  A lista NÃO muda: a única encomenda aberta é a mais nova de todas; "Já pedi" nela e, 0,25 s depois, outro clique
+  K3  A lista NÃO muda: a única encomenda aberta é a mais nova de todas; "Já pedi" nela e, 0,35 s depois, outro clique
       no mesmo ponto. Ela vira pedida e continua no mesmo lugar (a 1ª das pedidas), agora com "Chegou": o 2º clique
       VALE e abre "A peça chegou?". (Antes do ajuste, qualquer gravação bloqueava a tela inteira por 0,4 s.)
-  K1  A lista MUDA: duas abertas no alto; "Já pedi" na 1ª e, 0,25 s depois, outro clique no mesmo ponto, onde a 2ª
+  K1  A lista MUDA: duas abertas no alto; "Já pedi" na 1ª e, 0,35 s depois, outro clique no mesmo ponto, onde a 2ª
       subiu: o 2º clique é ignorado (a 2ª continua aberta).
   K2  A lista MUDA e, logo em seguida, um arrasto na lista (fora dos botões): a lista rola. (Antes do ajuste, o
       bloqueio pegava a tela inteira e engolia o arrasto.)
@@ -49,6 +49,9 @@ def sql_encomendas(abertas, pedidas):
 
 
 ALTURA = [0]
+# O 2º clique: dentro dos 0,4 s da regra (se a lista mudou, ele tem de ser ignorado; se não mudou, tem de valer), com
+# folga para a linha se refazer numa máquina lenta.
+INTERVALO = 0.35
 
 
 def na_janela(y):
@@ -89,6 +92,15 @@ def achar_botao(r, nome, texto="Já pedi"):
     for _ in range(4):
         t = r.textos()
         b = botao_da_linha(t, nome, texto)
+        if b is not None and not nav.CELULAR:
+            # No computador, os botões extras da linha (Receber, Cancelar encomenda…) aparecem com o ponteiro em
+            # cima dela, e a linha se rearruma. Na CI 44429969283, o clique logo depois de levar o ponteiro caiu em
+            # "Cancelar encomenda" no meio da rearrumação. Como uma pessoa: o ponteiro na linha, os botões
+            # assentam, e só então a posição é lida de novo.
+            xdo("mousemove", str(b[1]), str(b[0]))
+            time.sleep(0.8)
+            t = r.textos()
+            b = botao_da_linha(t, nome, texto)
         if b is not None:
             return t, b
         if nav.CELULAR:
@@ -149,8 +161,8 @@ def cenario_k3(placar, fotos):
                 return
             n0 = contador(t)
             by, bx = b
-            # O clique e, 0,25 s depois, outro no mesmo ponto (num comando só do xdotool).
-            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", "0.25", "click", "1")
+            # O clique e, 0,35 s depois, outro no mesmo ponto (num comando só do xdotool).
+            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
             time.sleep(1.5)
             t = r.textos()
             f = r.foto("-2")
@@ -159,7 +171,7 @@ def cenario_k3(placar, fotos):
             print(f"MEDIDA K3 ({JANELA}): X {situacao(pasta, 'X')}; o 2º clique abriu \"A peça chegou?\": {perguntou}; "
                   f"listas que mudaram {n0} → {n1}", flush=True)
             ok("K3: \"Já pedi\" vale (a encomenda fica pedida, no mesmo lugar)", situacao(pasta, "X") == "pedida", f)
-            ok("K3: a lista não mudou: o 2º clique, 0,25 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
+            ok("K3: a lista não mudou: o 2º clique, 0,35 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
             ok("K3: o programa não contou mudança de lista (nada bloqueado)", n0 is not None and n1 == n0,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")
             xdo("key", "Escape")
@@ -187,7 +199,7 @@ def cenario_k12(placar, fotos):
                 return
             n0 = contador(t)
             by, bx = b
-            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", "0.25", "click", "1")
+            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
             time.sleep(1.5)
             t = r.textos()
             f = r.foto("-2")
@@ -195,7 +207,7 @@ def cenario_k12(placar, fotos):
             print(f"MEDIDA K1 ({JANELA}): A {situacao(pasta, 'A')}, B {situacao(pasta, 'B')}; listas que mudaram "
                   f"{n0} → {n1}", flush=True)
             ok("K1: \"Já pedi\" vale para a clicada (A fica pedida)", situacao(pasta, "A") == "pedida", f)
-            ok("K1: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,25 s depois, é ignorado (B continua aberta)",
+            ok("K1: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,35 s depois, é ignorado (B continua aberta)",
                situacao(pasta, "B") == "aberta", f"{f} B={situacao(pasta, 'B')}")
             ok("K1: o programa contou a mudança da lista", n0 is not None and n1 == n0 + 1,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")
