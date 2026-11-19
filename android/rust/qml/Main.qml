@@ -826,9 +826,21 @@ ApplicationWindow {
         function onGravou() {
             if (janela.toqueNoBotao && Date.now() - janela.toqueNoBotao.quando < 1500) {
                 conferirLinhaDoToque.vezes = 0
+                conferirLinhaDoToque.interval = janela.atrasoConferenciaTeste > 0 ? janela.atrasoConferenciaTeste : 25
                 conferirLinhaDoToque.restart()
             }
         }
+    }
+    // Só para os testes (com --textos-da-tela): --atraso-conferencia-lista=N faz
+    // a 1ª volta da conferência vir N ms depois da gravação, como numa máquina
+    // lenta em que o desenho da lista nova segura a janela e o 2º toque é
+    // atendido antes da conferência (CI 44450377052, K1 no celular). Sem a
+    // opção, 0: nada muda.
+    readonly property int atrasoConferenciaTeste: {
+        if (!textosDaTela)
+            return 0
+        const a = Qt.application.arguments.find(x => x.startsWith("--atraso-conferencia-lista="))
+        return a ? Math.max(0, parseInt(a.slice(a.indexOf("=") + 1)) || 0) : 0
     }
     // A lista se refaz depois da gravação (no próximo quadro; com o desenho
     // lento, pode levar mais). A conferência espera a linha naquele ponto ser
@@ -837,37 +849,63 @@ ApplicationWindow {
     // Sem linha nenhuma no ponto, espera a lista se refazer; se continuar sem
     // linha até o fim (a linha sumiu e nada ficou no lugar), conta como mudou.
     // Se a mesma instância continua lá até o fim, a lista não se refez: não
-    // mudou.
+    // mudou. null = ainda não dá para dizer.
+    function mudouALinhaDoToque(t, fim) {
+        const item = linhaNoPonto(t)
+        if (item && item === t.item)
+            return fim ? false : null
+        if (item)
+            return linhaDe(item) !== t.linha
+        return fim ? true : null
+    }
+    function concluirConferenciaDoToque(mudou) {
+        conferirLinhaDoToque.stop()
+        toqueNoBotao = null
+        if (mudou) {
+            listasQueMudaram++
+            cliqueDescartadoNaLista.restart()
+        }
+    }
+    readonly property bool conferindoLinhaDoToque: conferirLinhaDoToque.running
+    // Um novo toque num botão enquanto a conferência ainda espera (CI
+    // 44450377052: com o desenho lento, o 2º toque foi atendido antes da 1ª
+    // volta do relógio e caiu na linha que tinha subido). O botão pergunta
+    // AQUI, na hora do toque: a lista já trocada é posta em ordem
+    // (forceLayout) e o registro naquele ponto é comparado. Mudou: o bloqueio
+    // começa e o toque é descartado (true). Não mudou, ou a lista ainda não
+    // se refez: o toque passa (false).
+    function conferirToqueAgora() {
+        if (!conferirLinhaDoToque.running)
+            return false
+        const t = toqueNoBotao
+        if (!t || t.linha === "") {
+            concluirConferenciaDoToque(false)
+            return false
+        }
+        if (t.vista && typeof t.vista.forceLayout === "function")
+            t.vista.forceLayout()
+        const mudou = mudouALinhaDoToque(t, false)
+        if (mudou === null)
+            return false
+        concluirConferenciaDoToque(mudou)
+        return mudou
+    }
     Timer {
         id: conferirLinhaDoToque
         interval: 25
         repeat: true
         property int vezes: 0
         onTriggered: {
+            interval = 25
             const t = janela.toqueNoBotao
             if (!t || t.linha === "") {
-                stop()
-                janela.toqueNoBotao = null
+                janela.concluirConferenciaDoToque(false)
                 return
             }
             vezes++
-            const fim = vezes >= 24
-            const item = janela.linhaNoPonto(t)
-            let mudou = null
-            if (item && item === t.item)
-                mudou = fim ? false : null
-            else if (item)
-                mudou = janela.linhaDe(item) !== t.linha
-            else
-                mudou = fim ? true : null
-            if (mudou === null)
-                return
-            stop()
-            janela.toqueNoBotao = null
-            if (mudou) {
-                janela.listasQueMudaram++
-                cliqueDescartadoNaLista.restart()
-            }
+            const mudou = janela.mudouALinhaDoToque(t, vezes >= 24)
+            if (mudou !== null)
+                janela.concluirConferenciaDoToque(mudou)
         }
     }
     readonly property bool descartandoClique: cliqueDescartado.running || cliqueDescartadoNaLista.running

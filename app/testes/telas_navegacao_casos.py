@@ -157,7 +157,9 @@ class Rustinho(base.Rustinho):
         self.log = open(self.saida, "w")
         self.p = subprocess.Popen(
             # --medir-toque: as linhas TOQUE dizem onde está cada campo (para tocar nele antes de digitar).
-            [PROGRAMA, "--textos-da-tela", "--celular", "--medir-toque", "--abrir", tela, "--props", json.dumps(props)],
+            # RUSTINHO_ARGS_TESTE: opções a mais, só de teste (como em telas_d09.Rustinho).
+            [PROGRAMA, "--textos-da-tela", "--celular", "--medir-toque", *os.environ.get("RUSTINHO_ARGS_TESTE", "").split(),
+             "--abrir", tela, "--props", json.dumps(props)],
             env=env, stdout=self.log, stderr=self.log,
         )
 

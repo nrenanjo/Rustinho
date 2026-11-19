@@ -101,8 +101,11 @@ class Rustinho:
         env = dict(os.environ, DISPLAY=TELA, QT_QUICK_BACKEND="software", RUSTINHO_DADOS=pasta,
                    QT_LOGGING_RULES="qml.info=true;js.info=true;default.info=true")
         self.log = open(self.saida, "w")
+        # RUSTINHO_ARGS_TESTE: opções a mais, só de teste (ex.: --atraso-conferencia-lista=1000 no
+        # telas_lista_que_muda.py). Sem a variável, nada muda.
+        extras = os.environ.get("RUSTINHO_ARGS_TESTE", "").split()
         self.p = subprocess.Popen(
-            [PROGRAMA, "--textos-da-tela", "--abrir", tela, "--props", json.dumps(props)],
+            [PROGRAMA, "--textos-da-tela", *extras, "--abrir", tela, "--props", json.dumps(props)],
             env=env, stdout=self.log, stderr=self.log,
         )
 

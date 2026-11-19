@@ -111,11 +111,20 @@ Button {
         if (j && typeof j.registrarToqueNoBotao === "function")
             j.registrarToqueNoBotao(botao)
     }
+    // Ligada no bloqueio e também enquanto a janela ainda confere se a lista
+    // mudou (com o desenho lento, o toque pode chegar antes da conferência).
     MouseArea {
         anchors.fill: parent
         z: 1000
-        enabled: !!ApplicationWindow.window && ApplicationWindow.window.descartandoCliqueNaLista === true
+        readonly property var janela: ApplicationWindow.window
+        enabled: !!janela && (janela.descartandoCliqueNaLista === true || janela.conferindoLinhaDoToque === true)
         acceptedButtons: Qt.AllButtons
-        // Segura o clique (o pressionar e o soltar) e não faz nada com ele.
+        // No bloqueio, segura o clique (o pressionar e o soltar) e não faz nada
+        // com ele. Com a conferência esperando, confere na hora: se a lista
+        // mudou, segura; senão, o toque passa para o botão (accepted = false).
+        onPressed: (mouse) => {
+            mouse.accepted = janela.descartandoCliqueNaLista === true
+                || (typeof janela.conferirToqueAgora === "function" && janela.conferirToqueAgora() === true)
+        }
     }
 }

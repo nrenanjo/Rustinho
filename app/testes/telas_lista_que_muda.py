@@ -12,6 +12,10 @@ antiga). "Já pedi" ali não mostra aviso: as telas não se movem (a N6 fica for
       subiu: o 2º clique é ignorado (a 2ª continua aberta).
   K2  A lista MUDA e, logo em seguida, um arrasto na lista (fora dos botões): a lista rola. (Antes do ajuste, o
       bloqueio pegava a tela inteira e engolia o arrasto.)
+  K4  Como o K1, com a conferência atrasada (1 s), como numa máquina lenta: o 2º clique chega ANTES da conferência
+      e, mesmo assim, é ignorado (o botão confere na hora do toque). Sem a conferência no toque, B ficava pedida
+      (CI 44450377052, K1 no celular).
+  K5  Como o K3, com a mesma conferência atrasada: a lista não muda, e o 2º clique VALE.
 Roda no computador e, num 2º processo, no desenho do celular (360 × 780).
 
     RUSTINHO_TELA=:88 python3 app/testes/telas_lista_que_muda.py [pasta das fotos]
@@ -52,6 +56,10 @@ ALTURA = [0]
 # O 2º clique: dentro dos 0,4 s da regra (se a lista mudou, ele tem de ser ignorado; se não mudou, tem de valer), com
 # folga para a linha se refazer numa máquina lenta.
 INTERVALO = 0.35
+# K4 e K5: a 1ª conferência da lista vem 1 s depois da gravação (a opção de teste --atraso-conferencia-lista), como
+# numa máquina lenta em que o desenho da lista nova segura a janela (CI 44450377052: o 2º clique foi atendido antes da
+# conferência e marcou B). O 2º clique, 0,35 s depois, chega antes da conferência: o botão tem de conferir na hora.
+ATRASO_LENTO = 1000
 
 
 def na_janela(y):
@@ -133,8 +141,17 @@ def esperar_parada(r):
         time.sleep(0.4)
 
 
-def abrir(placar, fotos, pasta, nome, mostrar):
-    r = placar.abrir(pasta, "TelaEstoque", {"secao": "encomendas"}, fotos, f"{nome}-{JANELA}")
+def abrir(placar, fotos, pasta, nome, mostrar, atraso=0):
+    # atraso > 0: a conferência da lista vem atrasada (opção de teste do programa), como numa máquina lenta.
+    antes = os.environ.pop("RUSTINHO_ARGS_TESTE", None)
+    if atraso:
+        os.environ["RUSTINHO_ARGS_TESTE"] = f"--atraso-conferencia-lista={atraso}"
+    try:
+        r = placar.abrir(pasta, "TelaEstoque", {"secao": "encomendas"}, fotos, f"{nome}-{JANELA}")
+    finally:
+        os.environ.pop("RUSTINHO_ARGS_TESTE", None)
+        if antes is not None:
+            os.environ["RUSTINHO_ARGS_TESTE"] = antes
     r.entrar("Ana")
     ALTURA[0] = r.altura()
     if not placar.ok(f"{nome}: a lista de encomendas aparece", r.esperar(lambda: r.tem(NOME + mostrar), 15), r.foto("-0")):
@@ -146,71 +163,74 @@ def abrir(placar, fotos, pasta, nome, mostrar):
     return r, True
 
 
-def cenario_k3(placar, fotos):
+def cenario_k3(placar, fotos, rot="K3", atraso=0):
     ok = placar.ok
-    pasta = tempfile.mkdtemp(prefix="rustinho-loja-k3-")
+    pasta = tempfile.mkdtemp(prefix=f"rustinho-loja-{rot.lower()}-")
     try:
         montar_loja(pasta)
         por_fora(pasta, sql_encomendas(["X"], 8))
-        r, aberta = abrir(placar, fotos, pasta, "K3", "X")
+        r, aberta = abrir(placar, fotos, pasta, rot, "X", atraso)
         try:
             if not aberta:
                 return
             t, b = achar_botao(r, NOME + "X")
-            if not ok("K3: o \"Já pedi\" da única aberta (a mais nova) à vista", b is not None, r.foto("-1")):
+            if not ok(f"{rot}: o \"Já pedi\" da única aberta (a mais nova) à vista", b is not None, r.foto("-1")):
                 return
             n0 = contador(t)
             by, bx = b
             # O clique e, 0,35 s depois, outro no mesmo ponto (num comando só do xdotool).
             xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
-            time.sleep(1.5)
+            time.sleep(1.5 + atraso / 1000)
             t = r.textos()
             f = r.foto("-2")
             perguntou = r.tem("A peça chegou?")
             n1 = contador(t)
-            print(f"MEDIDA K3 ({JANELA}): X {situacao(pasta, 'X')}; o 2º clique abriu \"A peça chegou?\": {perguntou}; "
+            print(f"MEDIDA {rot} ({JANELA}): X {situacao(pasta, 'X')}; o 2º clique abriu \"A peça chegou?\": {perguntou}; "
                   f"listas que mudaram {n0} → {n1}", flush=True)
-            ok("K3: \"Já pedi\" vale (a encomenda fica pedida, no mesmo lugar)", situacao(pasta, "X") == "pedida", f)
-            ok("K3: a lista não mudou: o 2º clique, 0,35 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
-            ok("K3: o programa não contou mudança de lista (nada bloqueado)", n0 is not None and n1 == n0,
+            ok(f"{rot}: \"Já pedi\" vale (a encomenda fica pedida, no mesmo lugar)", situacao(pasta, "X") == "pedida", f)
+            ok(f"{rot}: a lista não mudou: o 2º clique, 0,35 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
+            ok(f"{rot}: o programa não contou mudança de lista (nada bloqueado)", n0 is not None and n1 == n0,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")
             xdo("key", "Escape")
             time.sleep(0.8)
-            ok("K3: desistir da pergunta não muda nada (continua pedida)", situacao(pasta, "X") == "pedida", r.foto("-3"))
+            ok(f"{rot}: desistir da pergunta não muda nada (continua pedida)", situacao(pasta, "X") == "pedida",
+               r.foto("-3"))
         finally:
             r.fechar()
     finally:
         shutil.rmtree(pasta, ignore_errors=True)
 
 
-def cenario_k12(placar, fotos):
+def cenario_k12(placar, fotos, rot="K1", atraso=0, com_k2=True):
     ok = placar.ok
-    pasta = tempfile.mkdtemp(prefix="rustinho-loja-k12-")
+    pasta = tempfile.mkdtemp(prefix=f"rustinho-loja-{rot.lower()}-")
     try:
         montar_loja(pasta)
         por_fora(pasta, sql_encomendas(["A", "B"], 14))
-        r, aberta = abrir(placar, fotos, pasta, "K1", "A")
+        r, aberta = abrir(placar, fotos, pasta, rot, "A", atraso)
         try:
             if not aberta:
                 return
-            # K1: a lista muda debaixo do ponteiro.
+            # K1 (K4 com a conferência atrasada): a lista muda debaixo do ponteiro.
             t, b = achar_botao(r, NOME + "A")
-            if not ok("K1: o \"Já pedi\" da 1ª aberta à vista", b is not None, r.foto("-1")):
+            if not ok(f"{rot}: o \"Já pedi\" da 1ª aberta à vista", b is not None, r.foto("-1")):
                 return
             n0 = contador(t)
             by, bx = b
             xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
-            time.sleep(1.5)
+            time.sleep(1.5 + atraso / 1000)
             t = r.textos()
             f = r.foto("-2")
             n1 = contador(t)
-            print(f"MEDIDA K1 ({JANELA}): A {situacao(pasta, 'A')}, B {situacao(pasta, 'B')}; listas que mudaram "
+            print(f"MEDIDA {rot} ({JANELA}): A {situacao(pasta, 'A')}, B {situacao(pasta, 'B')}; listas que mudaram "
                   f"{n0} → {n1}", flush=True)
-            ok("K1: \"Já pedi\" vale para a clicada (A fica pedida)", situacao(pasta, "A") == "pedida", f)
-            ok("K1: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,35 s depois, é ignorado (B continua aberta)",
-               situacao(pasta, "B") == "aberta", f"{f} B={situacao(pasta, 'B')}")
-            ok("K1: o programa contou a mudança da lista", n0 is not None and n1 == n0 + 1,
+            ok(f"{rot}: \"Já pedi\" vale para a clicada (A fica pedida)", situacao(pasta, "A") == "pedida", f)
+            ok(f"{rot}: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,35 s depois, é ignorado (B continua "
+               "aberta)", situacao(pasta, "B") == "aberta", f"{f} B={situacao(pasta, 'B')}")
+            ok(f"{rot}: o programa contou a mudança da lista", n0 is not None and n1 == n0 + 1,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")
+            if not com_k2:
+                return
             # K2: a lista muda de novo e, logo em seguida, um arrasto na lista (fora dos botões): ela rola.
             esperar_parada(r)
             time.sleep(0.6)
@@ -262,7 +282,10 @@ def main():
     placar = Placar()
     print(f"janela: {'celular 360 × 780' if nav.CELULAR else 'computador'}", flush=True)
     try:
-        for nome, cenario in (("K3", cenario_k3), ("K1/K2", cenario_k12)):
+        cenarios = (("K3", cenario_k3), ("K1/K2", cenario_k12),
+                    ("K5", lambda p, f: cenario_k3(p, f, "K5", ATRASO_LENTO)),
+                    ("K4", lambda p, f: cenario_k12(p, f, "K4", ATRASO_LENTO, com_k2=False)))
+        for nome, cenario in cenarios:
             try:
                 cenario(placar, fotos)
             except Exception as e:
