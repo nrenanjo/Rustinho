@@ -394,6 +394,34 @@ def cenario_d(placar, fotos, pasta):
                     return agora[0], time.time()
             return None, None
 
+        def ler_e_tocar(t0, alvo, limite=8.0):
+            """A leitura dos textos e o toque no ponto do aviso, num comando só do xdotool (o programa atende os dois em
+            ordem). Devolve o aviso e a hora, quando a leitura feita junto com o toque o mostra; senão, (None, None)."""
+            while time.time() - t0 < limite:
+                with open(r.saida) as fh:
+                    antes = fh.read().count("TEXTOS-DA-TELA-FIM")
+                xdo("key", "ctrl+shift+F12", "mousemove", str(alvo[0]), str(alvo[1]), "mousedown", "1", "mouseup", "1")
+                tx = None
+                for _ in range(50):
+                    time.sleep(0.2)
+                    with open(r.saida) as fh:
+                        tudo = fh.read()
+                    if tudo.count("TEXTOS-DA-TELA-FIM") > antes:
+                        bloco = tudo.split("TEXTOS-DA-TELA-INICIO")[-1].split("TEXTOS-DA-TELA-FIM")[0]
+                        tx = []
+                        for linha in bloco.splitlines():
+                            p = linha.split("\t")
+                            if len(p) == 3 and p[0].lstrip("-").isdigit() and p[1].lstrip("-").isdigit():
+                                tx.append((int(p[0]), int(p[1]), p[2]))
+                        break
+                if tx is None:
+                    return None, None
+                agora = onde(r, SENHA_TROCADA, tx)
+                if agora:
+                    return agora[0], time.time()
+                time.sleep(0.2)
+            return None, None
+
         def ate_sumir(desde, limite=12.0):
             # R-3 da re-revisão 3: a hora do sumiço é o meio entre o fim da última leitura que ainda viu o aviso e o
             # fim da primeira que não o viu (antes, a hora de ANTES da leitura que não viu: com leituras lentas, o
@@ -423,6 +451,7 @@ def cenario_d(placar, fotos, pasta):
         aviso, visto = ver_aviso(t0)
         if not ok("D: o aviso da senha trocada aparece (com a guia aberta)", aviso is not None, r.foto("-aviso")):
             return
+        alvo_do_toque = aviso  # onde o aviso aparece; a rodada com o toque toca aqui (ler_e_tocar)
         # O-1: as posições do C, aqui, com a guia já parada: duas leituras seguidas iguais (o aviso e a seta no mesmo
         # lugar), enquanto o aviso está na tela.
         # CI de 18/11 (44232537886 e 44243237034): com cada leitura levando ~2,5 s, o aviso aparece em só DUAS leituras,
@@ -474,14 +503,18 @@ def cenario_d(placar, fotos, pasta):
         t0 = trocar(senha + "9", senha, "toque")
         if t0 is None:
             return
-        aviso, visto = ver_aviso(t0)
-        # R-3 da re-revisão 3: o toque vem logo depois de ver o aviso, e a foto depois (antes, a foto do "aviso-2" era
-        # tirada entre ver e tocar, e o tempo dela entrava no "com toque").
+        # RUSTINHO_AVISOS_SEM_TOQUE=1: prova do próprio critério (o roteiro não toca; o D tem de reprovar).
+        if os.environ.get("RUSTINHO_AVISOS_SEM_TOQUE"):
+            aviso, visto = ver_aviso(t0)
+        else:
+            # INT9-R7 (CI 44560815402: o programa disse "fechou pelo tempo"): na máquina da CI, com a guia aberta, o
+            # programa atende os acontecimentos com segundos de atraso; o roteiro via o aviso numa leitura e só então
+            # tocava, e o toque era atendido depois de o aviso vencer (3 s). Agora a leitura e o toque vão juntos, num
+            # comando só: o programa atende os dois em ordem, e a leitura (feita logo antes do toque) diz se o aviso
+            # estava lá quando o toque chegou. Sem o aviso ainda, o toque cai no espaço vazio do cabeçalho (o aviso
+            # aparece no meio, acima do título, que fica à esquerda) e a dupla se repete.
+            aviso, visto = ler_e_tocar(t0, alvo_do_toque)
         tocou = visto
-        if aviso is not None and not os.environ.get("RUSTINHO_AVISOS_SEM_TOQUE"):
-            # RUSTINHO_AVISOS_SEM_TOQUE=1: prova do próprio critério (o roteiro não toca; o D tem de reprovar).
-            r.clicar_em(*aviso)  # o toque no aviso
-            tocou = time.time()
         if not ok("D: o aviso aparece de novo (a senha voltou à de antes)", aviso is not None, r.foto("-aviso-2")):
             return
         sumiu, depois = ate_sumir(visto)
