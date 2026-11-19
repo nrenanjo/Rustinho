@@ -5,16 +5,16 @@ a rolagem por gesto continua livre.
 
 Em Estoque › Encomendas ("Em andamento": as que chegaram, as abertas e as pedidas, cada grupo da mais nova para a mais
 antiga). "Já pedi" ali não mostra aviso: as telas não se movem (a N6 fica fora do caminho).
-  K3  A lista NÃO muda: a única encomenda aberta é a mais nova de todas; "Já pedi" nela e, 0,35 s depois, outro clique
+  K3  A lista NÃO muda: a única encomenda aberta é a mais nova de todas; "Já pedi" nela e, 0,2 s depois, outro clique
       no mesmo ponto. Ela vira pedida e continua no mesmo lugar (a 1ª das pedidas), agora com "Chegou": o 2º clique
       VALE e abre "A peça chegou?". (Antes do ajuste, qualquer gravação bloqueava a tela inteira por 0,4 s.)
-  K1  A lista MUDA: duas abertas no alto; "Já pedi" na 1ª e, 0,35 s depois, outro clique no mesmo ponto, onde a 2ª
+  K1  A lista MUDA: duas abertas no alto; "Já pedi" na 1ª e, 0,2 s depois, outro clique no mesmo ponto, onde a 2ª
       subiu: o 2º clique é ignorado (a 2ª continua aberta).
   K2  A lista MUDA e, logo em seguida, um arrasto na lista (fora dos botões): a lista rola. (Antes do ajuste, o
       bloqueio pegava a tela inteira e engolia o arrasto.)
   K4  Como o K1, com a conferência atrasada (1 s), como numa máquina lenta: o 2º clique chega ANTES da conferência
-      e, mesmo assim, é ignorado (o botão confere na hora do toque). Sem a conferência no toque, B ficava pedida
-      (CI 44450377052, K1 no celular).
+      e, mesmo assim, é ignorado (o botão confere na hora do toque). Sem a conferência no toque, B fica pedida (o
+      mutante de prod13/k4_evid/).
   K5  Como o K3, com a mesma conferência atrasada: a lista não muda, e o 2º clique VALE.
 Roda no computador e, num 2º processo, no desenho do celular (360 × 780).
 
@@ -53,13 +53,34 @@ def sql_encomendas(abertas, pedidas):
 
 
 ALTURA = [0]
-# O 2º clique: dentro dos 0,4 s da regra (se a lista mudou, ele tem de ser ignorado; se não mudou, tem de valer), com
-# folga para a linha se refazer numa máquina lenta.
-INTERVALO = 0.35
+# O 2º clique: dentro dos 0,4 s da regra (se a lista mudou, ele tem de ser ignorado; se não mudou, tem de valer).
+# O `xdotool click` espera 100 ms DEPOIS de cada clique (o --delay padrão, mesmo sem --repeat; medido em 19/11/2026:
+# "click 1" leva 105 ms). Até o ab68b2c, o "click, 0,35 s, click" dava 0,45 s entre os dois, fora dos 0,4 s, e o K1
+# reprovava ou passava conforme a corrida com o fim do bloqueio (CIs 44450377052, 44451182365 e 44473141430; o
+# diagnóstico em prod13/k5_evid/diag/: o 2º toque chegou ao programa 450 ms depois do 1º, e o bloqueio acabou em
+# +444 a +452 ms). Agora o apertar e o soltar são mandados à parte (clique_duplo), com 0,2 s entre os dois cliques,
+# e o programa diz em quantos ms depois da mudança o 2º toque chegou (a premissa do tempo, conferida no K1 e no K4).
+INTERVALO = 0.2
 # K4 e K5: a 1ª conferência da lista vem 1 s depois da gravação (a opção de teste --atraso-conferencia-lista), como
-# numa máquina lenta em que o desenho da lista nova segura a janela (CI 44450377052: o 2º clique foi atendido antes da
-# conferência e marcou B). O 2º clique, 0,35 s depois, chega antes da conferência: o botão tem de conferir na hora.
+# numa máquina lenta em que a janela fica ocupada e o 2º clique é atendido antes da conferência. O 2º clique, 0,2 s
+# depois, chega antes da conferência: o botão tem de conferir na hora.
 ATRASO_LENTO = 1000
+
+
+def clique_duplo(bx, by):
+    """O clique e, INTERVALO s depois, outro no mesmo ponto, num comando só do xdotool (apertar e soltar à parte: o
+    "click" esperaria mais 100 ms)."""
+    xdo("mousemove", str(bx), str(by), "mousedown", "1", "mouseup", "1", "sleep", str(INTERVALO),
+        "mousedown", "1", "mouseup", "1")
+
+
+def toque_depois(t):
+    """Em quantos ms depois de a mudança da lista ser vista o último toque num botão chegou ao programa (None: o
+    programa não diz; -1: nenhum toque depois de uma mudança)."""
+    for _, _, tx in t:
+        if tx.startswith("TESTE_TOQUE_DEPOIS_DA_MUDANCA:"):
+            return int(tx.split(":")[1])
+    return None
 
 
 def na_janela(y):
@@ -178,8 +199,8 @@ def cenario_k3(placar, fotos, rot="K3", atraso=0):
                 return
             n0 = contador(t)
             by, bx = b
-            # O clique e, 0,35 s depois, outro no mesmo ponto (num comando só do xdotool).
-            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
+            # O clique e, 0,2 s depois, outro no mesmo ponto.
+            clique_duplo(bx, by)
             time.sleep(1.5 + atraso / 1000)
             t = r.textos()
             f = r.foto("-2")
@@ -188,7 +209,7 @@ def cenario_k3(placar, fotos, rot="K3", atraso=0):
             print(f"MEDIDA {rot} ({JANELA}): X {situacao(pasta, 'X')}; o 2º clique abriu \"A peça chegou?\": {perguntou}; "
                   f"listas que mudaram {n0} → {n1}", flush=True)
             ok(f"{rot}: \"Já pedi\" vale (a encomenda fica pedida, no mesmo lugar)", situacao(pasta, "X") == "pedida", f)
-            ok(f"{rot}: a lista não mudou: o 2º clique, 0,35 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
+            ok(f"{rot}: a lista não mudou: o 2º clique, 0,2 s depois, VALE (abre \"A peça chegou?\")", perguntou, f)
             ok(f"{rot}: o programa não contou mudança de lista (nada bloqueado)", n0 is not None and n1 == n0,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")
             xdo("key", "Escape")
@@ -217,15 +238,19 @@ def cenario_k12(placar, fotos, rot="K1", atraso=0, com_k2=True):
                 return
             n0 = contador(t)
             by, bx = b
-            xdo("mousemove", str(bx), str(by), "click", "1", "sleep", str(INTERVALO), "click", "1")
+            clique_duplo(bx, by)
             time.sleep(1.5 + atraso / 1000)
             t = r.textos()
             f = r.foto("-2")
             n1 = contador(t)
+            d = toque_depois(t)
             print(f"MEDIDA {rot} ({JANELA}): A {situacao(pasta, 'A')}, B {situacao(pasta, 'B')}; listas que mudaram "
-                  f"{n0} → {n1}", flush=True)
+                  f"{n0} → {n1}; o 2º toque chegou {d} ms depois de a mudança ser vista", flush=True)
+            ok(f"{rot} (premissa do tempo): o 2º clique chegou ao programa dentro dos 0,4 s depois de a mudança ser vista "
+               "(fora disso, o resultado abaixo é INCONCLUSIVO POR TEMPO)", d is not None and 0 <= d < 400,
+               f"{f} {d} ms (INSTRUMENTAÇÃO se None: o programa não diz)")
             ok(f"{rot}: \"Já pedi\" vale para a clicada (A fica pedida)", situacao(pasta, "A") == "pedida", f)
-            ok(f"{rot}: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,35 s depois, é ignorado (B continua "
+            ok(f"{rot}: a lista mudou (B subiu para o lugar de A): o 2º clique, 0,2 s depois, é ignorado (B continua "
                "aberta)", situacao(pasta, "B") == "aberta", f"{f} B={situacao(pasta, 'B')}")
             ok(f"{rot}: o programa contou a mudança da lista", n0 is not None and n1 == n0 + 1,
                f"{f} INSTRUMENTAÇÃO se None: {n0} → {n1}")

@@ -108,11 +108,13 @@ Button {
     // gesto e o resto continuam.
     onPressed: {
         const j = ApplicationWindow.window
+        if (j && typeof j.anotarToqueNoBotao === "function")
+            j.anotarToqueNoBotao()
         if (j && typeof j.registrarToqueNoBotao === "function")
             j.registrarToqueNoBotao(botao)
     }
     // Ligada no bloqueio e também enquanto a janela ainda confere se a lista
-    // mudou (com o desenho lento, o toque pode chegar antes da conferência).
+    // mudou (numa máquina lenta, o toque pode chegar antes da conferência).
     MouseArea {
         anchors.fill: parent
         z: 1000
@@ -125,6 +127,10 @@ Button {
         onPressed: (mouse) => {
             mouse.accepted = janela.descartandoCliqueNaLista === true
                 || (typeof janela.conferirToqueAgora === "function" && janela.conferirToqueAgora() === true)
+            // Segurado: o toque também conta para a premissa dos testes (o que
+            // passa é anotado no onPressed do botão).
+            if (mouse.accepted && typeof janela.anotarToqueNoBotao === "function")
+                janela.anotarToqueNoBotao()
         }
     }
 }

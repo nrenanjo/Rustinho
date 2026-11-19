@@ -745,6 +745,17 @@ ApplicationWindow {
         interval: 400
     }
     readonly property bool descartandoCliqueNaLista: cliqueDescartadoNaLista.running
+    // Para os testes (a premissa do tempo, linha TESTE_TOQUE_DEPOIS_DA_MUDANCA):
+    // quantos ms depois de a mudança da lista ser vista chegou o último toque
+    // num botão (-1: nenhum depois de uma mudança). Um 2º toque que o roteiro
+    // mandou "logo depois" e que chega ao programa fora dos 0,4 s não prova
+    // nada sobre o bloqueio: o resultado é inconclusivo por tempo.
+    property real mudancaDaListaEm: 0
+    property real toqueDepoisDaMudanca: -1
+    function anotarToqueNoBotao() {
+        if (mudancaDaListaEm > 0)
+            toqueDepoisDaMudanca = Date.now() - mudancaDaListaEm
+    }
     // Para os testes: quantas vezes a lista mudou debaixo do ponteiro.
     property int listasQueMudaram: 0
     property var toqueNoBotao: null
@@ -833,9 +844,9 @@ ApplicationWindow {
     }
     // Só para os testes (com --textos-da-tela): --atraso-conferencia-lista=N faz
     // a 1ª volta da conferência vir N ms depois da gravação, como numa máquina
-    // lenta em que o desenho da lista nova segura a janela e o 2º toque é
-    // atendido antes da conferência (CI 44450377052, K1 no celular). Sem a
-    // opção, 0: nada muda.
+    // lenta em que a janela fica ocupada e o 2º toque é atendido antes da
+    // conferência (o caso K4 do telas_lista_que_muda). Sem a opção, 0: nada
+    // muda.
     readonly property int atrasoConferenciaTeste: {
         if (!textosDaTela)
             return 0
@@ -863,13 +874,14 @@ ApplicationWindow {
         toqueNoBotao = null
         if (mudou) {
             listasQueMudaram++
+            mudancaDaListaEm = Date.now()
             cliqueDescartadoNaLista.restart()
         }
     }
     readonly property bool conferindoLinhaDoToque: conferirLinhaDoToque.running
-    // Um novo toque num botão enquanto a conferência ainda espera (CI
-    // 44450377052: com o desenho lento, o 2º toque foi atendido antes da 1ª
-    // volta do relógio e caiu na linha que tinha subido). O botão pergunta
+    // Um novo toque num botão enquanto a conferência ainda espera (numa
+    // máquina lenta, o 2º toque pode ser atendido antes da 1ª volta do relógio
+    // e cair na linha que subiu; o K4 prova esse caso). O botão pergunta
     // AQUI, na hora do toque: a lista já trocada é posta em ordem
     // (forceLayout) e o registro naquele ponto é comparado. Mudou: o bloqueio
     // começa e o toque é descartado (true). Não mudou, ou a lista ainda não
@@ -1076,6 +1088,7 @@ ApplicationWindow {
         // o clique é descartado antes de clicar. Só para os testes.
         linhas.push("0\t0\tTESTE_CLIQUE_DESCARTADO:" + (janela.descartandoClique ? 1 : 0))
         linhas.push("0\t0\tTESTE_LISTA_MUDOU:" + janela.listasQueMudaram)
+        linhas.push("0\t0\tTESTE_TOQUE_DEPOIS_DA_MUDANCA:" + Math.round(janela.toqueDepoisDaMudanca))
         linhas.push("0\t0\tTESTE_SETAS_VISIVEIS:" + janela.setasVisiveis())
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
