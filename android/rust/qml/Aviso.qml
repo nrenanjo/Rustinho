@@ -42,14 +42,32 @@ Rectangle {
 
     Behavior on opacity { NumberAnimation { duration: 160 } }
 
+    // Só para os testes (INT9-R7, 19/11/2026): como o último aviso fechou, "toque" ou "tempo", dito na leitura dos
+    // textos da tela (TESTE_AVISO_FECHADO, Main.escreverTextos). Numa máquina lenta, o teste do toque não consegue
+    // separar pelo tempo o aviso fechado pelo toque do que fechou sozinho; o programa diz. O comportamento não muda.
+    property string fechadoPor: ""
+
     Timer {
         id: tempo
-        onTriggered: aviso.ativo = false
+        onTriggered: {
+            if (!aviso.ativo)
+                return
+            aviso.fechadoPor = "tempo"
+            aviso.ativo = false
+        }
     }
 
-    TapHandler { onTapped: aviso.ativo = false }
+    TapHandler {
+        onTapped: {
+            if (!aviso.ativo)
+                return
+            aviso.fechadoPor = "toque"
+            aviso.ativo = false
+        }
+    }
 
     function mostrar(texto, tipoAviso) {
+        aviso.fechadoPor = ""
         mensagem.text = texto
         aviso.tipo = tipoAviso || "info"
         aviso.ativo = true

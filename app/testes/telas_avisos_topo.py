@@ -66,6 +66,15 @@ def onde(r, pedaco, textos=None):
 TOPO = "cabecalhoDaTela" if nav.CELULAR else "setaDeRetorno"
 
 
+def fechado_por(textos):
+    """Como o último aviso fechou, pelo programa ("toque" ou "tempo"; "" se ainda não fechou); None se o programa não diz
+    (um programa de antes da linha TESTE_AVISO_FECHADO)."""
+    for _, _, t in textos or []:
+        if t.startswith("TESTE_AVISO_FECHADO:"):
+            return t.split(":", 1)[1]
+    return None
+
+
 def geo_em(textos, nome):
     for _, _, t in textos:
         if t.startswith(f"GEO:{nome}:"):
@@ -456,6 +465,12 @@ def cenario_d(placar, fotos, pasta):
            f"{r.foto('-controle')} na tela por {natural if natural is None else round(natural, 2)} s")
         if natural is None:
             return
+        # INT9-R7 (19/11/2026): o programa diz como o aviso fechou (TESTE_AVISO_FECHADO). No controle, "tempo": prova que a
+        # linha separa os dois casos. Um programa de antes não diz nada (None): vale o critério antigo, pelo tempo.
+        como_controle = fechado_por(depois)
+        if como_controle is not None:
+            ok("D (controle): o programa diz que o aviso fechou pelo tempo", como_controle == "tempo",
+               f"{r.foto('-controle-como')} TESTE_AVISO_FECHADO:{como_controle}")
         t0 = trocar(senha + "9", senha, "toque")
         if t0 is None:
             return
@@ -473,12 +488,24 @@ def cenario_d(placar, fotos, pasta):
         # Contado do toque (sem o toque, do momento em que foi visto, como no controle).
         com_toque = None if sumiu is None else sumiu - tocou
         f = r.foto("-depois-do-toque")
+        como = fechado_por(depois)
         print(f"MEDIDA D: na tela sem toque {round(natural, 2)} s; com toque "
-              f"{com_toque if com_toque is None else round(com_toque, 2)} s", flush=True)
-        ok("D: o toque fecha só o aviso (no máximo 70% do tempo dele, medido no controle); a orientação da guia continua",
-           com_toque is not None and com_toque <= 0.7 * natural and bool(onde(r, GUIA, depois)),
-           f"{f} com o toque: {com_toque if com_toque is None else round(com_toque, 2)} s; sem o toque: "
-           f"{round(natural, 2)} s; guia={bool(onde(r, GUIA, depois))}")
+              f"{com_toque if com_toque is None else round(com_toque, 2)} s; o programa diz que fechou por: {como}",
+              flush=True)
+        if como is not None and como_controle is not None:
+            # INT9-R7: pelo que o programa diz, e não pelo tempo. Na máquina da CI, com a guia aberta, o programa atende
+            # o toque e a leitura com segundos de atraso, e o aviso vive 3 s: o tempo não separa os dois casos
+            # (s2_evid/d/RESULTADO_R7v4.md). Os tempos ficam na linha MEDIDA, só para informação.
+            ok("D: o toque fecha só o aviso (o programa diz que fechou pelo toque; no controle, pelo tempo); a "
+               "orientação da guia continua", sumiu is not None and como == "toque" and bool(onde(r, GUIA, depois)),
+               f"{f} TESTE_AVISO_FECHADO:{como}; com o toque: {com_toque if com_toque is None else round(com_toque, 2)} "
+               f"s; sem o toque: {round(natural, 2)} s; guia={bool(onde(r, GUIA, depois))}")
+        else:
+            ok("D: o toque fecha só o aviso (no máximo 70% do tempo dele, medido no controle); a orientação da guia "
+               "continua (programa sem a linha TESTE_AVISO_FECHADO: pelo tempo)",
+               com_toque is not None and com_toque <= 0.7 * natural and bool(onde(r, GUIA, depois)),
+               f"{f} com o toque: {com_toque if com_toque is None else round(com_toque, 2)} s; sem o toque: "
+               f"{round(natural, 2)} s; guia={bool(onde(r, GUIA, depois))}")
     finally:
         r.fechar()
 

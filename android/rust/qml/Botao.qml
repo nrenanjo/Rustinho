@@ -125,8 +125,15 @@ Button {
         // com ele. Com a conferência esperando, confere na hora: se a lista
         // mudou, segura; senão, o toque passa para o botão (accepted = false).
         onPressed: (mouse) => {
-            mouse.accepted = janela.descartandoCliqueNaLista === true
-                || (typeof janela.conferirToqueAgora === "function" && janela.conferirToqueAgora() === true)
+            // S2-R1 da conferência Sonnet: começa deixando passar; só segura
+            // com o bloqueio ou com a lista mudada. Um erro não engole o toque.
+            mouse.accepted = false
+            try {
+                mouse.accepted = janela.descartandoCliqueNaLista === true
+                    || (typeof janela.conferirToqueAgora === "function" && janela.conferirToqueAgora() === true)
+            } catch (e) {
+                mouse.accepted = false
+            }
             // Segurado: o toque também conta para a premissa dos testes (o que
             // passa é anotado no onPressed do botão).
             if (mouse.accepted && typeof janela.anotarToqueNoBotao === "function")

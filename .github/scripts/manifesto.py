@@ -189,6 +189,10 @@ def montar(pasta, necessarios):
                       "situacao": "aprovada" if all(x == "success" for x in r) else "reprovada"}
     ressalvas = [f"APK {n} no emulador {kv.get('resultado')} ({kv.get('observacao')})"
                  for n, kv in m["emulador"].items() if kv.get("resultado") != "aprovado"]
+    # S2-R2 da conferência Sonnet: uma conferência inconclusiva do emulador (a árvore de acessibilidade sem nomes) não
+    # pode virar "aprovada" em silêncio.
+    ressalvas += [f"APK {n} no emulador: {kv['inconclusivos']} conferência(s) inconclusiva(s) (inconclusivos.txt)"
+                  for n, kv in m["emulador"].items() if kv.get("inconclusivos", "0") not in ("", "0")]
     if ressalvas and camadas["L4"]["situacao"] == "aprovada":
         camadas["L4"]["situacao"] = "aprovada, com ressalva"
         camadas["L4"]["ressalvas"] = ressalvas
@@ -233,6 +237,8 @@ def notas(m):
             extra += f"; causa: {kv['causa']}"
         if kv.get("instabilidades", "0") not in ("", "0"):
             extra += f"; {kv['instabilidades']} instabilidades do emulador contornadas e registradas"
+        if kv.get("inconclusivos", "0") not in ("", "0"):
+            extra += f"; {kv['inconclusivos']} conferência(s) INCONCLUSIVA(S), que não contam como aprovadas"
         linhas.append(f"- emulador {nome}: {kv.get('resultado', '?')}{extra}" +
                       (f" — {kv['observacao']}" if kv.get("observacao") else ""))
     linhas += [
@@ -249,6 +255,9 @@ def notas(m):
     for nome, kv in m["emulador"].items():
         if kv.get("resultado") != "aprovado":
             linhas.append(f"- APK {nome} no emulador: {kv.get('resultado', '?')} — {kv.get('observacao', '')}")
+        if kv.get("inconclusivos", "0") not in ("", "0"):
+            linhas.append(f"- APK {nome} no emulador: {kv['inconclusivos']} conferência(s) inconclusiva(s) "
+                          "(veja inconclusivos.txt nas fotos do job)")
     linhas += [
         "- O emulador da CI não substitui o Moto e6i; o Windows da CI não tem firewall, SmartScreen e impressora "
         "reais; a troca de dados da CI roda em 127.0.0.1.",

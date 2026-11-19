@@ -752,8 +752,10 @@ ApplicationWindow {
     // nada sobre o bloqueio: o resultado é inconclusivo por tempo.
     property real mudancaDaListaEm: 0
     property real toqueDepoisDaMudanca: -1
+    // S2-R3 da conferência Sonnet: só com --textos-da-tela (os testes); o
+    // programa de verdade não mede nada.
     function anotarToqueNoBotao() {
-        if (mudancaDaListaEm > 0)
+        if (textosDaTela && mudancaDaListaEm > 0)
             toqueDepoisDaMudanca = Date.now() - mudancaDaListaEm
     }
     // Para os testes: quantas vezes a lista mudou debaixo do ponteiro.
@@ -785,7 +787,10 @@ ApplicationWindow {
     // lista (itemAt, nas coordenadas do conteúdo); senão, descendo pelos itens.
     function linhaNoPonto(t) {
         if (t.vista) {
-            const p = t.vista.contentItem.mapFromItem(null, t.x, t.y)
+            const c = t.vista.contentItem
+            if (!c)
+                return null
+            const p = c.mapFromItem(null, t.x, t.y)
             return t.vista.itemAt(p.x, p.y)
         }
         return itemDaLinha(itemNoPonto(t.x, t.y))
@@ -862,6 +867,11 @@ ApplicationWindow {
     // Se a mesma instância continua lá até o fim, a lista não se refez: não
     // mudou. null = ainda não dá para dizer.
     function mudouALinhaDoToque(t, fim) {
+        // S2-R1 da conferência Sonnet: a lista já não existe (a tela saiu da
+        // pilha antes de a conferência terminar). Não há o que conferir: não
+        // mudou debaixo do ponteiro.
+        if (t.vista && !t.vista.contentItem)
+            return false
         const item = linhaNoPonto(t)
         if (item && item === t.item)
             return fim ? false : null
@@ -894,13 +904,21 @@ ApplicationWindow {
             concluirConferenciaDoToque(false)
             return false
         }
-        if (t.vista && typeof t.vista.forceLayout === "function")
-            t.vista.forceLayout()
-        const mudou = mudouALinhaDoToque(t, false)
-        if (mudou === null)
+        // S2-R1: um erro aqui não pode deixar os botões mortos. A conferência
+        // termina como "não mudou" e o toque passa (falha aberta).
+        try {
+            if (t.vista && t.vista.contentItem && typeof t.vista.forceLayout === "function")
+                t.vista.forceLayout()
+            const mudou = mudouALinhaDoToque(t, false)
+            if (mudou === null)
+                return false
+            concluirConferenciaDoToque(mudou)
+            return mudou
+        } catch (e) {
+            console.warn("Rustinho: a conferência da lista falhou e foi encerrada: " + e)
+            concluirConferenciaDoToque(false)
             return false
-        concluirConferenciaDoToque(mudou)
-        return mudou
+        }
     }
     Timer {
         id: conferirLinhaDoToque
@@ -915,9 +933,16 @@ ApplicationWindow {
                 return
             }
             vezes++
-            const mudou = janela.mudouALinhaDoToque(t, vezes >= 24)
-            if (mudou !== null)
-                janela.concluirConferenciaDoToque(mudou)
+            // S2-R1: um erro não pode deixar a conferência rodando para sempre
+            // (com ela, a área de cada botão fica ligada).
+            try {
+                const mudou = janela.mudouALinhaDoToque(t, vezes >= 24)
+                if (mudou !== null)
+                    janela.concluirConferenciaDoToque(mudou)
+            } catch (e) {
+                console.warn("Rustinho: a conferência da lista falhou e foi encerrada: " + e)
+                janela.concluirConferenciaDoToque(false)
+            }
         }
     }
     readonly property bool descartandoClique: cliqueDescartado.running || cliqueDescartadoNaLista.running
@@ -1089,6 +1114,7 @@ ApplicationWindow {
         linhas.push("0\t0\tTESTE_CLIQUE_DESCARTADO:" + (janela.descartandoClique ? 1 : 0))
         linhas.push("0\t0\tTESTE_LISTA_MUDOU:" + janela.listasQueMudaram)
         linhas.push("0\t0\tTESTE_TOQUE_DEPOIS_DA_MUDANCA:" + Math.round(janela.toqueDepoisDaMudanca))
+        linhas.push("0\t0\tTESTE_AVISO_FECHADO:" + aviso.fechadoPor)
         linhas.push("0\t0\tTESTE_SETAS_VISIVEIS:" + janela.setasVisiveis())
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
@@ -1323,6 +1349,11 @@ ApplicationWindow {
     Connections {
         target: pilha
         function onCurrentItemChanged() {
+            // S2-R1: a conferência da lista é da tela que estava em cima; com
+            // outra tela, ela termina (sem bloquear nada) e o toque guardado sai.
+            if (conferirLinhaDoToque.running)
+                janela.concluirConferenciaDoToque(false)
+            janela.toqueNoBotao = null
             if (pilha.currentItem && typeof diagnostico !== "undefined") {
                 diagnostico.telaPronta(String(pilha.currentItem).split("(")[0])
                 contarSetasNoRegistro.restart()

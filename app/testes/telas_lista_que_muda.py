@@ -16,6 +16,8 @@ antiga). "Já pedi" ali não mostra aviso: as telas não se movem (a N6 fica for
       e, mesmo assim, é ignorado (o botão confere na hora do toque). Sem a conferência no toque, B fica pedida (o
       mutante de prod13/k4_evid/).
   K5  Como o K3, com a mesma conferência atrasada: a lista não muda, e o 2º clique VALE.
+  K7  A lista some (Esc) enquanto a conferência atrasada ainda espera: os botões do resto do programa continuam
+      respondendo, sem erro de script (S2-R1 da conferência Sonnet).
 Roda no computador e, num 2º processo, no desenho do celular (360 × 780).
 
     RUSTINHO_TELA=:88 python3 app/testes/telas_lista_que_muda.py [pasta das fotos]
@@ -292,6 +294,43 @@ def cenario_k12(placar, fotos, rot="K1", atraso=0, com_k2=True):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
+def cenario_k7(placar, fotos):
+    """K7 (S2-R1 da conferência Sonnet): a lista é destruída enquanto a conferência ainda espera. Com a conferência
+    atrasada (1,5 s), "Já pedi" e, 0,3 s depois, o Esc (a tela do Estoque sai da pilha, e a lista com ela). Quando a
+    conferência roda, a lista já não existe: os botões do resto do programa têm de continuar respondendo (aqui, o
+    "Trocar usuário" do Início), sem erro de script."""
+    ok = placar.ok
+    rot = "K7"
+    pasta = tempfile.mkdtemp(prefix="rustinho-loja-k7-")
+    try:
+        montar_loja(pasta)
+        por_fora(pasta, sql_encomendas(["A", "B"], 14))
+        r, aberta = abrir(placar, fotos, pasta, rot, "A", 1500)
+        try:
+            if not aberta:
+                return
+            t, b = achar_botao(r, NOME + "A")
+            if not ok(f"{rot}: o \"Já pedi\" da 1ª aberta à vista", b is not None, r.foto("-1")):
+                return
+            by, bx = b
+            xdo("mousemove", str(bx), str(by), "mousedown", "1", "mouseup", "1", "sleep", "0.3", "key", "Escape")
+            time.sleep(2.5)
+            f = r.foto("-2")
+            no_inicio = r.esperar(lambda: r.tem("Trocar usuário"), 5)
+            ok(f"{rot}: \"Já pedi\" vale (A pedida) e o Esc volta ao Início", situacao(pasta, "A") == "pedida" and no_inicio,
+               f"{f} A={situacao(pasta, 'A')}")
+            if not no_inicio:
+                return
+            r.clicar("Trocar usuário")
+            saiu = r.esperar(lambda: not r.tem("Trocar usuário"), 5)
+            ok(f"{rot}: depois de a lista sumir com a conferência esperando, os botões continuam respondendo (o \"Trocar "
+               "usuário\" do Início leva à entrada)", saiu, r.foto("-3"))
+        finally:
+            r.fechar()
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
 def main():
     for p in ("Xvfb", "xdotool", "import"):
         if not shutil.which(p):
@@ -309,7 +348,8 @@ def main():
     try:
         cenarios = (("K3", cenario_k3), ("K1/K2", cenario_k12),
                     ("K5", lambda p, f: cenario_k3(p, f, "K5", ATRASO_LENTO)),
-                    ("K4", lambda p, f: cenario_k12(p, f, "K4", ATRASO_LENTO, com_k2=False)))
+                    ("K4", lambda p, f: cenario_k12(p, f, "K4", ATRASO_LENTO, com_k2=False)),
+                    ("K7", cenario_k7))
         for nome, cenario in cenarios:
             try:
                 cenario(placar, fotos)
