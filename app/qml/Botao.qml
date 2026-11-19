@@ -99,4 +99,23 @@ Button {
     Keys.onEnterPressed: botao.clicked()
 
     HoverHandler { cursorShape: Qt.PointingHandCursor }
+
+    // Decisão 2c do proprietário (18/11/2026, bug YVZ4): o botão apertado diz à
+    // janela onde estava e em que linha de lista (Main, registrarToqueNoBotao).
+    // Se a lista mudar debaixo do ponteiro depois da operação gravada, os botões
+    // não aceitam o clique por 0,4 s (descartandoCliqueNaLista): um 2º clique
+    // no mesmo ponto não cai na linha que subiu. Só os botões: a rolagem por
+    // gesto e o resto continuam.
+    onPressed: {
+        const j = ApplicationWindow.window
+        if (j && typeof j.registrarToqueNoBotao === "function")
+            j.registrarToqueNoBotao(botao)
+    }
+    MouseArea {
+        anchors.fill: parent
+        z: 1000
+        enabled: !!ApplicationWindow.window && ApplicationWindow.window.descartandoCliqueNaLista === true
+        acceptedButtons: Qt.AllButtons
+        // Segura o clique (o pressionar e o soltar) e não faz nada com ele.
+    }
 }

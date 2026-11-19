@@ -731,28 +731,186 @@ ApplicationWindow {
         // A volta das telas (140 ms) e um instante depois (300 ms), o tempo de quem já ia clicar.
         interval: 440
     }
-    // Decisão 2c do proprietário (18/11/2026, bug YVZ4): depois de uma
-    // operação gravada, a lista muda no lugar sem as telas se moverem (a linha
-    // marcada sai e a de baixo sobe para o lugar dela), e um 2º clique no mesmo
-    // ponto caía na linha de baixo. Por 0,4 s depois de gravar, o clique nas
-    // telas também é descartado (a mesma MouseArea).
+    // Decisão 2c do proprietário (18/11/2026, bug YVZ4), no escopo que ele
+    // aprovou (ajuste depois do S1-R4 da revisão Sonnet): ignorar novos cliques
+    // QUANDO A LISTA MUDA debaixo do ponteiro. O botão apertado guarda o ponto e
+    // o registro da linha em que estava (registrarToqueNoBotao, no Botao). Logo
+    // depois da operação gravada, se o registro que fica naquele ponto não é
+    // mais o mesmo (a linha marcada saiu e a de baixo subiu para o lugar dela),
+    // os botões (Botao) não aceitam o clique por 0,4 s. Gravação que não muda a
+    // lista não bloqueia nada, e o bloqueio não pega a rolagem por gesto nem o
+    // que não é botão.
     Timer {
         id: cliqueDescartadoNaLista
         interval: 400
     }
+    readonly property bool descartandoCliqueNaLista: cliqueDescartadoNaLista.running
+    // Para os testes: quantas vezes a lista mudou debaixo do ponteiro.
+    property int listasQueMudaram: 0
+    property var toqueNoBotao: null
+    function registrarToqueNoBotao(botao) {
+        let dentro = false
+        for (let i = botao; i; i = i.parent)
+            if (i === pilha) {
+                dentro = true
+                break
+            }
+        if (!dentro) {
+            toqueNoBotao = null
+            return
+        }
+        const p = botao.mapToItem(null, botao.width / 2, botao.height / 2)
+        const item = itemDaLinha(botao)
+        toqueNoBotao = { x: p.x, y: p.y, linha: linhaDe(botao), item: item, vista: vistaDe(item), quando: Date.now() }
+    }
+    // A ListView da linha (o item da linha fica no contentItem dela), ou null
+    // (uma lista feita com Repeater).
+    function vistaDe(item) {
+        const v = item && item.parent ? item.parent.parent : null
+        return v && typeof v.itemAt === "function" && typeof v.indexAt === "function" && v.contentItem === item.parent
+            ? v : null
+    }
+    // O item da linha que está agora no ponto: numa ListView, pela própria
+    // lista (itemAt, nas coordenadas do conteúdo); senão, descendo pelos itens.
+    function linhaNoPonto(t) {
+        if (t.vista) {
+            const p = t.vista.contentItem.mapFromItem(null, t.x, t.y)
+            return t.vista.itemAt(p.x, p.y)
+        }
+        return itemDaLinha(itemNoPonto(t.x, t.y))
+    }
+    // O item da linha de lista (o 1º acima com um modelData que seja um
+    // registro); null fora de lista.
+    function itemDaLinha(item) {
+        for (let i = item; i; i = i.parent)
+            if (i.modelData && typeof i.modelData === "object")
+                return i
+        return null
+    }
+    // O registro da linha de lista em que o item está: o 1º acima dele com um
+    // modelData que seja um registro (objeto), pela chave dele (id, chave ou
+    // número; senão, o conteúdo). "" quando não está numa lista.
+    function linhaDe(item) {
+        for (let i = item; i; i = i.parent) {
+            const m = i.modelData
+            if (m && typeof m === "object") {
+                if (m.id !== undefined)
+                    return "id:" + m.id
+                if (m.chave !== undefined)
+                    return "chave:" + m.chave
+                if (m.numero !== undefined)
+                    return "numero:" + m.numero
+                // A linha que embrulha o registro (ex.: { tipo, e } em O que comprar).
+                for (const k in m)
+                    if (m[k] && typeof m[k] === "object" && m[k].id !== undefined)
+                        return k + ":" + m[k].id
+                return JSON.stringify(m)
+            }
+        }
+        return ""
+    }
+    // O item mais de dentro da pilha naquele ponto da janela.
+    function itemNoPonto(x, y) {
+        let item = pilha
+        for (let k = 0; k < 200; k++) {
+            const p = item.mapFromItem(null, x, y)
+            const filho = item.childAt(p.x, p.y)
+            if (!filho)
+                return item
+            item = filho
+        }
+        return item
+    }
     Connections {
         target: Api
         function onGravou() {
-            cliqueDescartadoNaLista.restart()
+            if (janela.toqueNoBotao && Date.now() - janela.toqueNoBotao.quando < 1500) {
+                conferirLinhaDoToque.vezes = 0
+                conferirLinhaDoToque.restart()
+            }
+        }
+    }
+    // A lista se refaz depois da gravação (no próximo quadro; com o desenho
+    // lento, pode levar mais). A conferência espera a linha naquele ponto ser
+    // OUTRA instância (a lista já se refez) e só então compara o registro: o
+    // mesmo, a lista não mudou (nada é bloqueado); outro, mudou (bloqueia).
+    // Sem linha nenhuma no ponto, espera a lista se refazer; se continuar sem
+    // linha até o fim (a linha sumiu e nada ficou no lugar), conta como mudou.
+    // Se a mesma instância continua lá até o fim, a lista não se refez: não
+    // mudou.
+    Timer {
+        id: conferirLinhaDoToque
+        interval: 25
+        repeat: true
+        property int vezes: 0
+        onTriggered: {
+            const t = janela.toqueNoBotao
+            if (!t || t.linha === "") {
+                stop()
+                janela.toqueNoBotao = null
+                return
+            }
+            vezes++
+            const fim = vezes >= 24
+            const item = janela.linhaNoPonto(t)
+            let mudou = null
+            if (item && item === t.item)
+                mudou = fim ? false : null
+            else if (item)
+                mudou = janela.linhaDe(item) !== t.linha
+            else
+                mudou = fim ? true : null
+            if (mudou === null)
+                return
+            stop()
+            janela.toqueNoBotao = null
+            if (mudou) {
+                janela.listasQueMudaram++
+                cliqueDescartadoNaLista.restart()
+            }
         }
     }
     readonly property bool descartandoClique: cliqueDescartado.running || cliqueDescartadoNaLista.running
     MouseArea {
         objectName: "cliqueDescartadoNoMovimento"
         anchors.fill: pilha
-        enabled: janela.descartandoClique
+        // Só a N6 (as telas se movendo). A 2c fica nos botões (Botao).
+        enabled: cliqueDescartado.running
         acceptedButtons: Qt.AllButtons
         // Segura o clique (o pressionar e o soltar) e não faz nada com ele.
+    }
+
+    // T047 (decisão do proprietário de 18/11, sobre a tela Painel no
+    // emulador): quantas setas de voltar estão visíveis agora (telas e
+    // janelinhas). No Android, o programa diz isso no registro do sistema
+    // depois de cada tela pronta, para o teste do emulador conferir sem
+    // depender da árvore de acessibilidade; nos testes do computador, vai na
+    // leitura dos textos (TESTE_SETAS_VISIVEIS). Só a contagem, nada dos dados.
+    function setasVisiveis() {
+        let n = 0
+        function andar(item) {
+            if (!item || !item.visible || item.opacity === 0)
+                return
+            if (item.objectName === "setaDeRetorno")
+                n++
+            for (let i = 0; i < item.children.length; i++)
+                andar(item.children[i])
+        }
+        let raiz = janela.contentItem
+        while (raiz.parent)
+            raiz = raiz.parent
+        andar(raiz)
+        return n
+    }
+    Timer {
+        id: contarSetasNoRegistro
+        interval: 1500
+        // Pelo mesmo caminho da "tela pronta" (o qInfo do diagnóstico, que o
+        // android/testar.sh já lê): "tela pronta: TelaPecas · setas visíveis: 0".
+        // O nome da tela continua o primeiro (o tela_atual do teste só lê ele).
+        onTriggered: if (pilha.currentItem && typeof diagnostico !== "undefined")
+                         diagnostico.telaPronta(String(pilha.currentItem).split("(")[0].split("_")[0]
+                                                + " · setas visíveis: " + janela.setasVisiveis())
     }
 
     // F11: ir para a busca de peças de qualquer lugar.
@@ -879,6 +1037,8 @@ ApplicationWindow {
         // N6 e YVZ4 (18/11/2026): os roteiros esperam o fim do instante em que
         // o clique é descartado antes de clicar. Só para os testes.
         linhas.push("0\t0\tTESTE_CLIQUE_DESCARTADO:" + (janela.descartandoClique ? 1 : 0))
+        linhas.push("0\t0\tTESTE_LISTA_MUDOU:" + janela.listasQueMudaram)
+        linhas.push("0\t0\tTESTE_SETAS_VISIVEIS:" + janela.setasVisiveis())
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
     // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas
@@ -1112,8 +1272,10 @@ ApplicationWindow {
     Connections {
         target: pilha
         function onCurrentItemChanged() {
-            if (pilha.currentItem && typeof diagnostico !== "undefined")
+            if (pilha.currentItem && typeof diagnostico !== "undefined") {
                 diagnostico.telaPronta(String(pilha.currentItem).split("(")[0])
+                contarSetasNoRegistro.restart()
+            }
         }
     }
     // No Android também vai para o registro do sistema (logcat): o teste do

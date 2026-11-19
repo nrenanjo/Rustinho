@@ -818,15 +818,20 @@ jobs:
           causa=$(cat fotos/causa.txt 2> /dev/null || echo "não informada")
           inst=0
           [ -f fotos/instabilidade.txt ] && inst=$(wc -l < fotos/instabilidade.txt)
+          # T047 (S1-R1 da revisão Sonnet): telas em que a ausência da seta não pôde ser conferida (árvore de
+          # acessibilidade sem nomes): ficam à vista no resultado, como inconclusivas, e não como conferidas.
+          inc=0
+          [ -f fotos/inconclusivos.txt ] && inc=$(wc -l < fotos/inconclusivos.txt)
           if [ "$SAIU" = success ]; then r=aprovado; else r="reprovado ($SAIU)"; fi
           if [ "$BLOQUEIA" = true ]; then
             obs="bloqueia o pipeline"
           else
             obs="não bloqueia: limitação conhecida do emulador x86 da API 28 (tela cinza, PEND-18); só o Moto e6i (L6) valida o APK de 32 bits"
           fi
-          printf 'resultado=%s\nbloqueia=%s\nobservacao=%s\ncausa=%s\ninstabilidades=%s\n' \
-            "$r" "$BLOQUEIA" "$obs" "$causa" "$inst" > fotos/resultado.txt
+          printf 'resultado=%s\nbloqueia=%s\nobservacao=%s\ncausa=%s\ninstabilidades=%s\ninconclusivos=%s\n' \
+            "$r" "$BLOQUEIA" "$obs" "$causa" "$inst" "$inc" > fotos/resultado.txt
           cat fotos/resultado.txt
+          [ "$inc" = 0 ] || echo "::warning title=Emulador ${{ matrix.nome }}::$inc conferência(s) inconclusiva(s) (veja inconclusivos.txt)"
           [ "$SAIU" = success ] || echo "::warning title=Emulador ${{ matrix.nome }}::$r (causa: $causa) — $obs"
           if [ -f fotos/erros.txt ]; then
             python3 -c "t=open('fotos/erros.txt',errors='replace').read()[-6000:] or 'nenhum'; print('::warning title=registro do app::'+t.replace('%','%25').replace('\r','').replace('\n','%0A'))"

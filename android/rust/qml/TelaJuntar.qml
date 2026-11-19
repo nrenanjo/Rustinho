@@ -96,7 +96,8 @@ FocusScope {
             x: (parent.width - width) / 2
             // Abaixo da seta de retorno, mesmo numa tela baixa (no celular,
             // sem a seta, só a margem).
-            y: Math.max(Tema.margem + (seta.visible ? Tema.toqueSeta + 8 : 0), (tela.height - implicitHeight) / 2 - 20)
+            // (S1-R5 da revisão Sonnet: pela regra, e não pela visibilidade efetiva da seta.)
+            y: Math.max(Tema.margem + (Tema.celular ? 0 : Tema.toqueSeta + 8), (tela.height - implicitHeight) / 2 - 20)
             spacing: 18
 
             ColumnLayout {

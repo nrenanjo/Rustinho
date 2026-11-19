@@ -421,7 +421,9 @@ FocusScope {
                     Layout.topMargin: seta.descida
                     onClicked: tela.janela.retornar(true)
                 }
-                Item { Layout.fillWidth: true; implicitHeight: seta.visible ? Tema.toqueSeta : 0 }
+                // S1-R5 da revisão Sonnet: pela regra (o celular), e não pela visibilidade
+                // efetiva da seta, que fica falsa quando a tela é coberta na pilha.
+                Item { Layout.fillWidth: true; implicitHeight: Tema.celular ? 0 : Tema.toqueSeta }
                 Olho {}
             }
             GridLayout {

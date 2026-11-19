@@ -409,21 +409,55 @@ preencher() {
 }
 # T047 (pedido do proprietário, 18/11/2026): no Android, as telas não têm a
 # seta de voltar (o "voltar" do Android faz o mesmo). A seta tem o nome
-# acessível "Voltar". Só conclui com a árvore do app de verdade (um texto
-# dele, além do nome do pacote); sem ela, a falha é do ambiente.
+# acessível "Voltar". Só conclui com a árvore do app de verdade: o nome do
+# pacote e pelo menos um nome de item. O Qt do Android põe os nomes em
+# content-desc; o atributo text fica vazio (S1-R1 da revisão Sonnet: antes,
+# exigir um text não vazio reprovava sempre, como se fosse do ambiente).
 sem_seta() {
-    local onde=$1 nome=$2
-    arvore "$nome"
-    if ! grep -q "package=\"$PACOTE\"" "fotos/$nome.xml" 2> /dev/null \
-       || ! grep -q -E 'text="[^"]+"' "fotos/$nome.xml"; then
-        falhou "$AMBIENTE $onde: a árvore de acessibilidade veio vazia (não deu para conferir a seta)"
-        return 1
-    fi
+    local onde=$1 nome=$2 t
+    # A árvore pode sair antes de o Qt dar os nomes dos itens (na CI 44411509147,
+    # a do Painel veio só com a pilha e a barra de rolagem, com a tela já
+    # desenhada): até 3 tentativas. Sem nomes nas 3, a tela fica INCONCLUSIVA
+    # (anotada como instabilidade do ambiente; não conta como conferida).
+    for t in 1 2 3; do
+        arvore "$nome"
+        grep -q "package=\"$PACOTE\"" "fotos/$nome.xml" 2> /dev/null \
+            && grep -q -E '(content-desc|text)="[^"]+"' "fotos/$nome.xml" && break
+        [ $t = 3 ] && {
+            instavel "$onde: a árvore de acessibilidade veio sem nenhum nome de item em 3 tentativas"
+            echo "INCONCLUSIVO: $onde: a ausência da seta não foi conferida (árvore sem nomes)" | tee -a fotos/inconclusivos.txt
+            return 1
+        }
+        sleep 3
+    done
     if grep -q -E '(text|content-desc)="Voltar"' "fotos/$nome.xml"; then
         falhou "$onde: a seta de voltar ainda aparece no Android (T047)"
         return 1
     fi
     echo "$onde: sem a seta de voltar (T047)"
+}
+# T047 (decisão do proprietário de 18/11, sobre a tela Painel): a contagem das
+# setas de voltar visíveis, dita pelo próprio programa no registro do Android
+# 1,5 s depois de a tela ficar pronta ("tela pronta: <Tela> · setas visíveis:
+# N"). Não depende da árvore de acessibilidade. Tem de ser 0.
+setas_pelo_registro() {
+    local onde=$1 tela=$2 pid linha n i
+    for i in 1 2 3 4 5 6; do
+        pid=$(adb shell pidof $PACOTE | tr -d '\r')
+        linha=$(adb logcat -d | awk -v p="$pid" '$3 == p' | grep -o "tela pronta: $tela · setas visíveis: [0-9]*" | tail -1)
+        [ -n "$linha" ] && break
+        sleep 1
+    done
+    if [ -z "$linha" ]; then
+        falhou "$onde: o programa não disse quantas setas estão visíveis (\"tela pronta: $tela · setas visíveis\")"
+        return 1
+    fi
+    n=${linha##*: }
+    if [ "$n" != 0 ]; then
+        falhou "$onde: $n seta(s) de voltar visível(is) no Android, pelo registro do programa (T047)"
+        return 1
+    fi
+    echo "$onde: 0 setas de voltar visíveis, pelo registro do programa (T047)"
 }
 # Espera o app chegar à tela pedida; se não chegar no prazo, reprova.
 # chegou <Tela> <segundos>: espera sem reprovar (quem chama decide).
@@ -644,6 +678,7 @@ TELAS="TelaVender TelaPecas TelaCaixa TelaCompras TelaConfiguracoes TelaPainel T
 for t in $TELAS; do
     abrir $t
     foto "10-$t" 3
+    setas_pelo_registro "$t" "$t"
     sem_seta "$t" "12-$t-arvore"
     adb shell input swipe 540 1700 540 700 500
     foto "11-$t-rolada" 3
@@ -685,6 +720,12 @@ if preencher 1 teste texto; then
     arvore 33-voltar-pergunta
     if grep -q 'Descartar' fotos/33-voltar-pergunta.xml && [ "$(tela_atual)" = TelaPeca ]; then
         echo "voltar com contexto: perguntou antes de descartar (T047)"
+        # Decisão 1a: a janelinha da pergunta também sem a seta.
+        if grep -q -E '(text|content-desc)="Voltar"' fotos/33-voltar-pergunta.xml; then
+            falhou "voltar com contexto: a janelinha da pergunta ainda tem a seta (decisão 1a)"
+        else
+            echo "voltar com contexto: a janelinha da pergunta sem a seta (decisão 1a)"
+        fi
     else
         falhou "voltar com contexto: a ficha alterada não perguntou antes de descartar (está em: $(tela_atual))"
     fi
@@ -706,6 +747,7 @@ if [ -z "${CURTO:-}" ]; then
     adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
     sleep 5
     abrir TelaPecas
+    setas_pelo_registro "TelaPecas (gestos)" TelaPecas
     sem_seta "TelaPecas (gestos)" 31-gestos-pecas-arvore
     foto 31-gestos-pecas 2
     adb shell input swipe 1 1200 600 1200 300

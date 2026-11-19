@@ -87,6 +87,11 @@ def levantamento():
                     r"readonly property bool mostraSeta: comSeta && !Tema\.celular", texto):
                 continue
             problemas.append(f"{nome}: uma seta sem a regra do celular (visible: {regra or 'nenhum'})")
+    # S1-R5 da revisão Sonnet: o espaço da seta segue a regra (Tema.celular), e não a visibilidade efetiva da seta
+    # (`seta.visible`), que fica falsa quando a tela é coberta na pilha e mexia no layout no computador também.
+    for nome in sorted(os.listdir(pasta)):
+        if nome.endswith(".qml") and re.search(r"\bseta\.visible\b", open(os.path.join(pasta, nome), encoding="utf-8").read()):
+            problemas.append(f"{nome}: o espaço depende de seta.visible (a visibilidade efetiva), e não da regra do celular")
     contagem = sum(len(re.findall(r"^\s*Seta \{", open(os.path.join(pasta, n), encoding="utf-8").read(), re.M))
                    for n in os.listdir(pasta) if n.endswith(".qml") and n != "Seta.qml")
     return problemas, contagem
@@ -119,6 +124,13 @@ def cenario_tela(placar, fotos, pasta, nome):
         else:
             ok(f"V1 {nome}: no computador, a seta está lá (só o desenho)", bool(s) and s[0][2] == s[0][3],
                f"{f} setas={s}")
+        # A contagem que o programa dá no registro do Android (Main.setasVisiveis, a mesma função; o emulador lê por
+        # ela, sem depender da árvore de acessibilidade): aqui, na leitura dos textos, tem de bater com as setas
+        # vistas. No computador, acha a seta (o controle positivo da contagem); no celular, 0.
+        contagem = next((int(tx.split(":")[1]) for _, _, tx in t if tx.startswith("TESTE_SETAS_VISIVEIS:")), None)
+        if contagem is not None:
+            ok(f"V1 {nome}: a contagem de setas do programa ({contagem}) bate com as setas vistas ({len(s)})",
+               contagem == len(s) and (contagem == 0 if nav.CELULAR else contagem >= 1), f"{f} contagem={contagem}")
         cab = geo(t, "cabecalhoDaTela")
         if cab is None and s and nav.CELULAR:
             # Um programa de antes da T047 não dá o nome do cabeçalho: o alto dele é o da seta (o 1º item do
