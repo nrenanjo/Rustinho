@@ -15,6 +15,14 @@ Regras:
 4. No validar.yml, o "manifesto" depende de TODOS os outros jobs, e nenhum job
    ignora falha (continue-on-error só no passo do emulador de 32 bits).
 5. Nenhum outro workflow publica versão.
+6. A chave do Android (T050, 19/11/2026) é uma só e igual nos quatro lugares:
+   a entrada `android` do validar.yml (booleana, padrão false), o `android` que
+   o ci.yml passa, o RUSTINHO_ANDROID do portão e do rascunho ("sim"/"nao") e o
+   do passo do manifesto (tirado da entrada). Só os jobs apk e emulador podem
+   ser pulados por ela (if: inputs.android); nenhum outro job do validar.yml
+   tem `if`, a não ser o manifesto (always()).
+
+A pasta dos workflows pode vir como argumento (para os testes).
 """
 import glob
 import os
@@ -23,7 +31,9 @@ import sys
 
 import yaml
 
-PASTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "workflows")
+PASTA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                                             "workflows")
+JOBS_ANDROID = ("apk", "emulador")
 ESCAPES = re.compile(r"always\(\)|failure\(\)|cancelled\(\)")
 
 
@@ -105,11 +115,33 @@ def main():
     gatilhos_validar = gatilhos(validar)
     exigir(set(gatilhos_validar) == {"workflow_call"}, f"validar.yml só pode ser chamado (workflow_call): {set(gatilhos_validar)}")
 
+    # 6. A chave do Android.
+    entrada = (((gatilhos_validar.get("workflow_call") or {}).get("inputs") or {}).get("android") or {})
+    exigir(entrada.get("type") == "boolean" and entrada.get("default") is False,
+           f"validar.yml: a entrada android tem de ser booleana com padrão false: {entrada}")
+    for nome, job in vjobs.items():
+        se = job.get("if")
+        if nome in JOBS_ANDROID:
+            exigir(se == "inputs.android", f"validar.yml: o job {nome} tem de ter if: inputs.android (tem {se!r})")
+        elif nome != "manifesto":
+            exigir(se is None, f"validar.yml: o job {nome} não pode ter if (tem {se!r}); só os do Android são pulados")
+    passos = [p for p in (vjobs.get("manifesto", {}).get("steps") or []) if p.get("id") == "manifesto"]
+    exigir(len(passos) == 1 and (passos[0].get("env") or {}).get("RUSTINHO_ANDROID")
+           == "${{ inputs.android && 'sim' || 'nao' }}",
+           "validar.yml: o passo do manifesto tem de ter RUSTINHO_ANDROID: ${{ inputs.android && 'sim' || 'nao' }}")
+    ligado = (jobs.get("validar", {}).get("with") or {}).get("android")
+    exigir(isinstance(ligado, bool), f"ci.yml: o validar tem de passar android: true ou false (passa {ligado!r})")
+    for nome, job in (("portao", portao), ("rascunho", rascunho)):
+        valor = (job.get("env") or {}).get("RUSTINHO_ANDROID")
+        exigir(isinstance(ligado, bool) and valor == ("sim" if ligado else "nao"),
+               f"ci.yml: o {nome} tem RUSTINHO_ANDROID {valor!r}, diferente do android: {ligado!r} do validar")
+
     if erros:
         for e in erros:
             print(f"::error title=Forma do portão::{e}")
         sys.exit(1)
-    print(f"conferir_portao: ok ({len(vjobs)} jobs no Validar; rascunho só em tag v*, no ambiente publicacao)")
+    print(f"conferir_portao: ok ({len(vjobs)} jobs no Validar; rascunho só em tag v*, no ambiente publicacao; "
+          f"Android {'ligado' if ligado else 'fora do escopo'})")
 
 
 if __name__ == "__main__":

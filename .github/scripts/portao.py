@@ -11,6 +11,13 @@ Confere, com os artefatos desta mesma execução:
    desta execução; os APKs têm a assinatura da loja com a impressão digital
    esperada (variável ANDROID_CHAVE_IMPRESSAO).
 
+A chave do Android (T050, 19/11/2026; RUSTINHO_ANDROID=sim|nao, a mesma do
+manifesto): desligada (o escopo atual, por decisão do proprietário), os jobs
+`apk` e `emulador` têm de vir pulados, os pacotes têm de ser EXATAMENTE os 3 do
+computador (nenhum APK) e os itens 3 e 4 do Android não se aplicam. Ligada, é o
+comportamento de antes, agora com os 5 pacotes exatos. Ausente, com outro valor
+ou diferente da do manifesto: reprova.
+
     python3 .github/scripts/portao.py artefatos
 """
 import hashlib
@@ -21,6 +28,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from versao_android import codigo  # noqa: E402
+from manifesto import (FORA_DO_ESCOPO, PACOTES_ANDROID, PACOTES_COMPUTADOR, chave_android,  # noqa: E402
+                       resultado_esperado)
 
 
 def sha256(caminho):
@@ -49,9 +58,16 @@ def main():
              f"manifesto de outro commit: {o['commit']} (esta execução: {env['GITHUB_SHA']})")
     conferir(o["run_id"] == env["GITHUB_RUN_ID"], f"manifesto da execução {o['run_id']}",
              f"manifesto de outra execução: {o['run_id']} (esta: {env['GITHUB_RUN_ID']})")
-    fora = {j: r for j, r in m["jobs"].items() if r != "success"}
-    conferir(m["aprovado"] and not fora and m["jobs"], f"{len(m['jobs'])} jobs aprovados",
-             f"manifesto não aprovado: {fora or m.get('problemas')}")
+    valor = env.get("RUSTINHO_ANDROID")
+    android = chave_android(valor)
+    conferir(android is not None, f"chave do Android: {valor}",
+             f"chave do Android (RUSTINHO_ANDROID) ausente ou fora de sim/nao: {valor!r}")
+    conferir(android is not None and m.get("android") is android,
+             "Android " + ("ligado" if android else "fora do escopo") + " no manifesto e no Portão",
+             f"a chave do Android do manifesto ({m.get('android')!r}) é diferente da do Portão ({valor!r})")
+    fora = {j: r for j, r in m["jobs"].items() if r != resultado_esperado(j, android)}
+    conferir(m["aprovado"] and not fora and m["jobs"], f"{len(m['jobs'])} jobs como deviam (pulados só os do "
+             f"Android, se desligado)", f"manifesto não aprovado: {fora or m.get('problemas')}")
 
     # Pacotes: os arquivos baixados são os do manifesto.
     somas = {}
@@ -60,8 +76,14 @@ def main():
             if linha.strip():
                 h, nome = linha.split(None, 1)
                 somas[nome.strip()] = h
-    conferir(len(m["pacotes"]) >= 5, f"{len(m['pacotes'])} pacotes no manifesto",
-             f"faltam pacotes no manifesto: {[p['arquivo'] for p in m['pacotes']]}")
+    esperados = sorted(a for a, _ in PACOTES_COMPUTADOR + (PACOTES_ANDROID if android else []))
+    tem = sorted(p["artefato"] for p in m["pacotes"])
+    conferir(tem == esperados, f"{len(tem)} pacotes no manifesto, um de cada: {', '.join(tem)}",
+             f"os pacotes do manifesto não são os esperados: faltam {sorted(set(esperados) - set(tem))}, "
+             f"sobram {sorted(set(tem) - set(esperados))}, repetidos {sorted({a for a in tem if tem.count(a) > 1})}")
+    if not android:
+        apks = [p["arquivo"] for p in m["pacotes"] if p["arquivo"].lower().endswith(".apk")]
+        conferir(not apks, "nenhum APK no manifesto", f"APK no manifesto com o Android desligado: {apks}")
     for p in m["pacotes"]:
         arq = os.path.join(pasta, p["artefato"], p["arquivo"])
         if not os.path.exists(arq):
@@ -71,11 +93,15 @@ def main():
         conferir(h == p["sha256"] == somas.get(p["arquivo"]), f"{p['arquivo']}: SHA-256 conferido",
                  f"{p['arquivo']}: SHA-256 {h}, manifesto {p['sha256']}, SHA256SUMS {somas.get(p['arquivo'])}")
 
-    # Versões (I06, J08).
+    # Versões (I06, J08): só com o Android ligado.
     v = m["versao"]
-    conferir(v["raiz"] and v["raiz"] == v["android_rust"], f"versão {v['raiz']} na raiz e no app de Android",
-             f"versão da raiz {v['raiz']} ≠ android/rust/Cargo.toml {v['android_rust']} (AUD33-I06)")
-    for nome in ("Rustinho-Android", "Rustinho-Android-32bits"):
+    conferir(bool(v["raiz"]), f"versão da raiz {v['raiz']}", "Cargo.toml da raiz sem versão")
+    if not android:
+        ok.append(FORA_DO_ESCOPO + "; sem a conferência de versão e de assinatura do Android")
+    else:
+        conferir(v["raiz"] and v["raiz"] == v["android_rust"], f"versão {v['raiz']} na raiz e no app de Android",
+                 f"versão da raiz {v['raiz']} ≠ android/rust/Cargo.toml {v['android_rust']} (AUD33-I06)")
+    for nome in [a for a, _ in PACOTES_ANDROID] if android else []:
         apk = v.get(nome)
         if not apk:
             erros.append(f"{nome}: sem versao.txt")
@@ -98,7 +124,7 @@ def main():
                  f"a tag aponta para {alvo or '(tag não encontrada no checkout)'}, não para o commit desta "
                  f"execução {env['GITHUB_SHA']}")
         esperada = "".join(c for c in env.get("ANDROID_CHAVE_IMPRESSAO", "").upper() if c in "0123456789ABCDEF")
-        for nome in ("Rustinho-Android", "Rustinho-Android-32bits"):
+        for nome in [a for a, _ in PACOTES_ANDROID] if android else []:
             apk = v.get(nome) or {}
             conferir(apk.get("assinatura") == "loja" and esperada and apk.get("certificado") == esperada,
                      f"{nome}: assinatura da loja conferida",

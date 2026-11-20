@@ -10,6 +10,12 @@
 #   L4 pacote-linux, pacote-windows, verificar, apk, emulador.
 # O manifesto depende de TODOS os jobs (conferido por
 # .github/scripts/conferir_portao.py, no job formato).
+#
+# Android (T050, 19/11/2026): fora do escopo por decisão do proprietário, até
+# ele pedir de volta. A chave é a entrada `android` (o ci.yml passa false):
+# desligada, os jobs apk e emulador são pulados, o manifesto não lista APK e o
+# Portão exige exatamente os 3 pacotes do computador. Para voltar: `android:
+# true` no ci.yml e RUSTINHO_ANDROID "sim" no portão e no rascunho.
 name: Validar
 
 on:
@@ -20,6 +26,11 @@ on:
         type: string
         required: false
         default: automatico
+      android:
+        description: "Monta e testa o Android (T050: fora do escopo desde 19/11/2026)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -69,6 +80,7 @@ jobs:
           python3 -c "import yaml" 2>/dev/null || sudo apt-get install -y python3-yaml
           python3 .github/scripts/conferir_portao.py
           python3 .github/scripts/versao_android.py --testar
+          python3 .github/scripts/testar_portao.py
 
   # L1/L2: testes do núcleo no Linux, como o programa de teste (debug) e como
   # o programa final (release); os de rede em série.
@@ -560,6 +572,7 @@ jobs:
   # L4: APKs de 64 e 32 bits, com a versão da raiz (I06) e o versionCode da
   # DP-36 (J08). Sem a chave da loja, o APK sai assinado só para teste.
   apk:
+    if: inputs.android
     strategy:
       fail-fast: false
       # Um APK de cada vez (D-05, 16/11/2026): num ramo novo o cache do Gradle começa vazio; assim só o primeiro baixa
@@ -752,6 +765,7 @@ jobs:
   # O alvo de verdade é o aparelho (L6); o emulador não o substitui.
   emulador:
     needs: apk
+    if: inputs.android
     strategy:
       fail-fast: false
       matrix:
@@ -859,6 +873,7 @@ jobs:
         id: manifesto
         env:
           NECESSARIOS: ${{ toJSON(needs) }}
+          RUSTINHO_ANDROID: ${{ inputs.android && 'sim' || 'nao' }}
           FERRAMENTA_RUST: ${{ env.RUST_VERSAO }}
           FERRAMENTA_QT: ${{ env.QT_VERSAO }}
           FERRAMENTA_NDK: ${{ env.NDK_VERSAO }}

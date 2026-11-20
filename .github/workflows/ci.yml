@@ -9,6 +9,9 @@
 # - Rascunho de versão: só em tag v*, depende do pipeline e do portão (sem
 #   always()), e espera a aprovação do dono no ambiente "publicacao". Sai
 #   como RASCUNHO; publicar é ato do dono. Nenhum outro workflow publica.
+# - Android (T050, 19/11/2026): FORA DO ESCOPO por decisão do proprietário,
+#   até ele pedir de volta. A chave é uma só: `android` no validar e
+#   RUSTINHO_ANDROID no portão e no rascunho, sempre iguais (conferido).
 #
 # A forma deste arquivo é conferida por .github/scripts/conferir_portao.py.
 name: CI
@@ -37,6 +40,7 @@ jobs:
     uses: ./.github/workflows/validar.yml
     with:
       desenho: ${{ inputs.desenho || 'automatico' }}
+      android: false
     secrets: inherit
 
   portao:
@@ -44,6 +48,7 @@ jobs:
     needs: validar
     runs-on: ubuntu-24.04
     env:
+      RUSTINHO_ANDROID: "nao"
       ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,6 +67,7 @@ jobs:
     permissions:
       contents: write
     env:
+      RUSTINHO_ANDROID: "nao"
       ANDROID_CHAVE_IMPRESSAO: ${{ vars.ANDROID_CHAVE_IMPRESSAO }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

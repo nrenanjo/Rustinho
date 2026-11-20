@@ -12,6 +12,12 @@ do manifesto). Registra:
 - SHA-256 de cada pacote (conferido com o que o job que montou anotou);
 - versão da raiz, versão do app de Android e versionCode.
 
+A chave do Android (T050, 19/11/2026): RUSTINHO_ANDROID=sim|nao, vinda do
+`android` do ci.yml. Desligada (o escopo atual, por decisão do proprietário),
+os jobs `apk` e `emulador` têm de vir pulados ("skipped"), nenhum APK entra
+no manifesto e as notas dizem que o Android está fora do escopo. Ausente ou
+com outro valor, o manifesto sai REPROVADO.
+
 Nunca falha por conta própria: quem reprova é o passo seguinte do job, que lê
 `aprovado` (para o manifesto sair mesmo quando algo falhou).
 
@@ -38,13 +44,29 @@ NAO_EXECUTADAS = {
     "L6": "aparelhos reais: Moto e6i, Windows 10/11, dois computadores (proprietário)",
     "L7": "uso assistido na loja, com dados de mentira (proprietário)",
 }
-PACOTES = [
+L6_SEM_ANDROID = "aparelhos reais: Windows 10/11, dois computadores (proprietário)"
+PACOTES_COMPUTADOR = [
     ("Rustinho-Linux", "*.AppImage"),
     ("Rustinho-Windows", "*-Windows-instalador.exe"),
     ("Rustinho-Windows-portatil", "*.zip"),
+]
+PACOTES_ANDROID = [
     ("Rustinho-Android", "*.apk"),
     ("Rustinho-Android-32bits", "*.apk"),
 ]
+JOBS_ANDROID = ("apk", "emulador")
+FORA_DO_ESCOPO = ("Android: fora do escopo (decisão do proprietário, 19/11/2026): nenhum APK é montado, "
+                  "testado ou publicado")
+
+
+def chave_android(valor):
+    """RUSTINHO_ANDROID: "sim" → True, "nao" → False; ausente ou outro valor → None (reprova)."""
+    return {"sim": True, "nao": False}.get(valor)
+
+
+def resultado_esperado(job, android):
+    """Com o Android desligado, os jobs dele têm de vir pulados; todo o resto, aprovado."""
+    return "skipped" if android is False and job in JOBS_ANDROID else "success"
 
 
 def sha256(caminho):
@@ -101,13 +123,17 @@ def montar(pasta, necessarios):
         },
         "jobs": {j: v.get("result", "?") for j, v in sorted(necessarios.items())},
     }
-    m["aprovado"] = bool(necessarios) and all(r == "success" for r in m["jobs"].values())
+    android = chave_android(env.get("RUSTINHO_ANDROID"))
+    m["android"] = android
+    m["aprovado"] = (bool(necessarios) and android is not None
+                     and all(r == resultado_esperado(j, android) for j, r in m["jobs"].items()))
 
     # Versões: raiz, app de Android e versionCode.
     raiz = re.search(r'^version\s*=\s*"([^"]+)"', ler("Cargo.toml"), re.M)
-    android = re.search(r'^version\s*=\s*"([^"]+)"', ler("android/rust/Cargo.toml"), re.M)
-    m["versao"] = {"raiz": raiz.group(1) if raiz else None, "android_rust": android.group(1) if android else None}
-    for nome in ("Rustinho-Android", "Rustinho-Android-32bits"):
+    versao_android = re.search(r'^version\s*=\s*"([^"]+)"', ler("android/rust/Cargo.toml"), re.M)
+    m["versao"] = {"raiz": raiz.group(1) if raiz else None,
+                   "android_rust": versao_android.group(1) if versao_android else None}
+    for nome in [a for a, _ in PACOTES_ANDROID] if android else []:
         kv = chave_valor(ler(os.path.join(pasta, nome, "versao.txt")))
         if kv:
             m["versao"][nome] = {"nome": kv.get("VERSAO"), "versionCode": kv.get("CODIGO"),
@@ -133,14 +159,17 @@ def montar(pasta, necessarios):
 
     # Emulador: o resultado de verdade (o de 32 bits não bloqueia: PEND-18).
     m["emulador"] = {}
-    for nome in ("64bits", "32bits"):
+    for nome in ("64bits", "32bits") if android else ():
         kv = chave_valor(ler(os.path.join(pasta, f"Emulador-{nome}", "resultado.txt")))
         if kv:
             m["emulador"][nome] = kv
 
     # Pacotes.
     pacotes, problemas = [], []
-    for artefato, padrao in PACOTES:
+    if android is None:
+        problemas.append(f"chave do Android (RUSTINHO_ANDROID) ausente ou fora de sim/nao: "
+                         f"{env.get('RUSTINHO_ANDROID')!r}")
+    for artefato, padrao in PACOTES_COMPUTADOR + (PACOTES_ANDROID if android else []):
         for arq in sorted(glob.glob(os.path.join(pasta, artefato, padrao))):
             h = sha256(arq)
             nome = os.path.basename(arq)
@@ -184,6 +213,9 @@ def montar(pasta, necessarios):
     # Camadas.
     camadas = {}
     for c, (o_que, jobs) in CAMADAS.items():
+        if not android:
+            jobs = [j for j in jobs if j not in JOBS_ANDROID]
+            o_que = o_que.replace(", APK no emulador", "")
         r = [m["jobs"].get(j, "não rodou") for j in jobs]
         camadas[c] = {"o_que": o_que, "jobs": dict(zip(jobs, r)),
                       "situacao": "aprovada" if all(x == "success" for x in r) else "reprovada"}
@@ -197,6 +229,8 @@ def montar(pasta, necessarios):
         camadas["L4"]["situacao"] = "aprovada, com ressalva"
         camadas["L4"]["ressalvas"] = ressalvas
     for c, o_que in NAO_EXECUTADAS.items():
+        if c == "L6" and not android:
+            o_que = L6_SEM_ANDROID
         camadas[c] = {"o_que": o_que, "situacao": "não executado"}
     m["camadas"] = camadas
     return m
@@ -211,6 +245,10 @@ def notas(m):
         (f" · branch `{o['branch']}`" if o["branch"] else ""),
         f"- Execução: {o['endereco']} (tentativa {o['run_attempt']}, evento `{o['evento']}`)",
         f"- Resultado da execução: **{'APROVADA' if m['aprovado'] else 'REPROVADA'}**",
+    ]
+    if m.get("android") is False:
+        linhas.append(f"- {FORA_DO_ESCOPO}.")
+    linhas += [
         "",
         "## Validado automaticamente",
         "",
@@ -259,8 +297,8 @@ def notas(m):
             linhas.append(f"- APK {nome} no emulador: {kv['inconclusivos']} conferência(s) inconclusiva(s) "
                           "(veja inconclusivos.txt nas fotos do job)")
     linhas += [
-        "- O emulador da CI não substitui o Moto e6i; o Windows da CI não tem firewall, SmartScreen e impressora "
-        "reais; a troca de dados da CI roda em 127.0.0.1.",
+        ("- O emulador da CI não substitui o Moto e6i; o" if m.get("android") else "- O") +
+        " Windows da CI não tem firewall, SmartScreen e impressora reais; a troca de dados da CI roda em 127.0.0.1.",
         "",
         "## Arquivos (SHA-256)",
         "",
