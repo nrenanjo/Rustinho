@@ -50,7 +50,8 @@ Pendências de identificação XML, sobre Peças (T058):
       identificação" muda só a janela: Peças não abre peça nenhuma;
   P3  a pendência aberta não tem mais o "Todas as pendências";
   P4  a seta volta da pendência para a lista;
-  P5  o Esc faz o mesmo e, na lista, fecha a janela; Peças fica intacta.
+  P5  o Esc faz o mesmo e, na lista, fecha a janela; Peças fica intacta;
+  P6  com outra janelinha por cima ("Qual é a peça?"), o Esc fecha só ela.
 
     python3 app/testes/telas_compras_trocas_t054.py [pasta para as fotos]
     RUSTINHO_CASOS=F python3 app/testes/telas_compras_trocas_t054.py   (só alguns grupos: C, T, O, F, P)
@@ -600,6 +601,23 @@ def casos_pendencias(modelo, fotos):
         if abrir:
             tela.clicar_ponto(abrir[0][0], abrir[0][1])
             time.sleep(1.2)
+        # P6: o Esc na janelinha de cima (Qual é a peça?) fecha só ela.
+        t = rr.textos()
+        escolher = igual(t, "Escolher peça existente")
+        if escolher:
+            tela.clicar_ponto(escolher[0][0], escolher[0][1])
+            time.sleep(1.5)
+        t = rr.textos()
+        abriu_escolher = bool(achar(t, "Qual é a peça?"))
+        xdo("key", "Escape")
+        time.sleep(1.2)
+        t = rr.textos()
+        rr.foto("-3b-esc-de-cima")
+        conferir("P6", "com outra janelinha por cima (Qual é a peça?), o Esc fecha só ela; a pendência continua aberta",
+                 abriu_escolher and not achar(t, "Qual é a peça?") and igual(t, "Escolher peça existente")
+                 and titulo(t) == "pendencias" and not peca_atras(t),
+                 f"abriu a de cima {abriu_escolher}, de cima ainda aberta {bool(achar(t, 'Qual é a peça?'))}, "
+                 f"pendência aberta {bool(igual(t, 'Escolher peça existente'))}, título {titulo(t)}")
         xdo("key", "Escape")
         time.sleep(1.2)
         t = rr.textos()
