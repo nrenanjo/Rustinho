@@ -85,6 +85,21 @@ def rotulo_ret(r, rotulo):
     return achados
 
 
+def campos_da_janelinha(r):
+    """Os campos (TOQUE:campo) da janelinha aberta: os informados depois da linha GEO:Painel (o programa informa
+    primeiro a tela de trás, depois a janelinha e os itens dela). None se não há janelinha nas medidas. Lê as linhas
+    na ordem do programa nos dois desenhos (no celular, alt.medidas junta as GEO: no fim e perde a ordem)."""
+    if nav.CELULAR:
+        r._ponteiro_dentro()
+    out, achou = [], False
+    for _x, _y, t in nav.base.Rustinho.textos(r):
+        if t.startswith("GEO:Painel:"):
+            out, achou = [], True
+        elif achou and t.startswith("TOQUE:campo|"):
+            out.append(tuple(float(v) for v in t.split("|")[4].split(",")))
+    return out if achou else None
+
+
 def miolo_geo(r):
     """O retângulo do miolo que rola na janelinha (GEO:rolagemDoLancar / rolagemDoLancamento), se houver."""
     for linha in alt.medidas(r):
@@ -121,8 +136,14 @@ def preencher(r, rotulo, texto):
     if not rs:
         raise RuntimeError(f"INSTRUMENTAÇÃO: o rótulo {rotulo!r} não está à vista")
     lx, ly, lw, lh = rs[-1]
+    # Só os campos da janelinha: as medidas também trazem os da tela de trás, cobertos pelo véu. Na T056 (20/11) a
+    # busca de A pagar passou a ficar 16 abaixo do rótulo "Valor total", mais perto que o campo dele, e o toque ia
+    # para um ponto da janelinha sem campo (o texto caía no campo que já tinha o foco).
+    campos = campos_da_janelinha(r)
+    if campos is None:
+        raise RuntimeError("INSTRUMENTAÇÃO: a janelinha (GEO:Painel) não está nas medidas")
     cands = []
-    for x, y, w, h in campos_toque(r):
+    for x, y, w, h in campos:
         cy = y + h / 2
         if 0 < cy - ly < 90:
             cands.append((cy - ly, abs((x + w / 2) - (lx + lw / 2)), x, y, w, h))

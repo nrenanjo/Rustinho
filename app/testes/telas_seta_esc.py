@@ -254,6 +254,28 @@ def botoes(arquivo):
     return lista
 
 
+# A camada do olho do Cabecalho (T054 a T058), linha por linha, sem os comentários: o único Popup fora das bases.
+CAMADA_DO_OLHO = [
+    "id: camadaDoOlho", "x: 0", "y: 0", "width: lugarDoOlho.width", "height: lugarDoOlho.height",
+    "padding: 0", "margins: 0", "modal: false", "dim: false", "focus: false",
+    "closePolicy: Popup.NoAutoClose", "background: null", "contentItem: Item { id: casaDoOlho }",
+]
+
+
+def blocos_popup(texto):
+    """O miolo de cada `Popup { … }` do arquivo (chaves casadas), como a lista das linhas não vazias e sem
+    comentário."""
+    blocos = []
+    for m in re.finditer(r"\bPopup\s*\{", texto):
+        i, prof = m.end(), 1
+        while prof and i < len(texto):
+            prof += {"{": 1, "}": -1}.get(texto[i], 0)
+            i += 1
+        linhas = [l.split("//")[0].strip() for l in texto[m.end():i - 1].splitlines()]
+        blocos.append([l for l in linhas if l])
+    return blocos
+
+
 def estatico(res):
     arquivos = sorted(f for f in os.listdir(QML) if f.endswith(".qml"))
     conteudo = {f: open(os.path.join(QML, f), encoding="utf-8").read() for f in arquivos}
@@ -291,9 +313,18 @@ def estatico(res):
                  and "readonly property int toqueSeta: celular ? 48 : 40" in tema_qml, str(com_destino))
 
     # Janelinhas: todas pelo Painel (que tem a seta); Popup só nas bases e menus.
+    # T054 a T058 (20/11/2026): a única exceção é a camada do olho do Cabecalho (camadaDoOlho), que põe o
+    # "Mostrar valores" por cima de uma janelinha aberta. Ela não é janelinha: sem véu, não modal, sem fundo, sem
+    # teclado, sem fechar sozinha e só com o lugar do olho dentro. A exceção vale só para esse bloco exato: qualquer
+    # outra linha nele (modal, véu, fundo, conteúdo, seta) ou outro Popup no Cabecalho volta a falhar.
     popups = {f: len(re.findall(r"\bPopup\s*\{", t)) for f, t in conteudo.items()}
-    fora = {f: n for f, n in popups.items() if n and f not in ("Painel.qml", "Selecao.qml", "Campo.qml")}
+    camada_ok = blocos_popup(conteudo["Cabecalho.qml"]) == [CAMADA_DO_OLHO]
+    fora = {f: n for f, n in popups.items()
+            if n and f not in ("Painel.qml", "Selecao.qml", "Campo.qml") and not (f == "Cabecalho.qml" and camada_ok)}
     res.conferir("ESTÁTICO: nenhuma janelinha em Popup direto (todas pelo Painel, com a seta)", not fora, str(fora))
+    if popups.get("Cabecalho.qml"):
+        res.conferir("ESTÁTICO: o Popup do Cabecalho é só a camada do olho (sem véu, não modal, sem fundo, só o olho)",
+                     camada_ok, str(blocos_popup(conteudo["Cabecalho.qml"])))
     res.conferir("ESTÁTICO: a seta está no Painel e o Dialogo é um Painel",
                  "Seta {" in conteudo["Painel.qml"] and re.search(r"^Painel\s*\{", conteudo["Dialogo.qml"], re.M) is not None)
 
