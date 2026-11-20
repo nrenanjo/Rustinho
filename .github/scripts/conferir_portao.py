@@ -20,7 +20,7 @@ Regras:
    o ci.yml passa, o RUSTINHO_ANDROID do portão e do rascunho ("sim"/"nao") e o
    do passo do manifesto (tirado da entrada). Só os jobs apk e emulador podem
    ser pulados por ela (if: inputs.android); nenhum outro job do validar.yml
-   tem `if`, a não ser o manifesto (always()).
+   tem `if`, e o do manifesto é exatamente always() (T050-R3c).
 
 A pasta dos workflows pode vir como argumento (para os testes).
 """
@@ -123,7 +123,9 @@ def main():
         se = job.get("if")
         if nome in JOBS_ANDROID:
             exigir(se == "inputs.android", f"validar.yml: o job {nome} tem de ter if: inputs.android (tem {se!r})")
-        elif nome != "manifesto":
+        elif nome == "manifesto":
+            exigir(se == "always()", f"validar.yml: o manifesto tem de ter if: always() (tem {se!r})")
+        else:
             exigir(se is None, f"validar.yml: o job {nome} não pode ter if (tem {se!r}); só os do Android são pulados")
     passos = [p for p in (vjobs.get("manifesto", {}).get("steps") or []) if p.get("id") == "manifesto"]
     exigir(len(passos) == 1 and (passos[0].get("env") or {}).get("RUSTINHO_ANDROID")
