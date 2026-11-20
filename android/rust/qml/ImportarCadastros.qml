@@ -43,6 +43,17 @@ Painel {
     property string pecaDesativadaId: ""
     // A aba de importar, já com a senha (ou sem precisar dela).
     readonly property bool naImportacao: aba === "importar" && liberada
+    // T058 (pedido do proprietário, 20/11/2026): com uma pendência aberta e
+    // outras na lista, a seta e o Esc voltam à lista (no lugar do antigo
+    // "Todas as pendências"); sem passo para voltar, fecham a janela.
+    voltarUmPasso: function () {
+        if (painel.aba === "pendencias" && painel.pendenciaAberta && painel.pendencias.length > 1) {
+            painel.pendenciaAberta = null
+            painel.erro = ""
+            return true
+        }
+        return false
+    }
 
     signal importou()
 
@@ -829,12 +840,8 @@ Painel {
                             spacing: 10
                             Layout.fillWidth: true
                             Layout.topMargin: 4
-                            Botao {
-                                visible: painel.pendencias.length > 1
-                                text: "Todas as pendências"
-                                tipo: "discreto"
-                                onClicked: painel.pendenciaAberta = null
-                            }
+                            // T058: o "Todas as pendências" saiu; a seta e o Esc
+                            // voltam à lista (voltarUmPasso, lá em cima).
                             Item { Layout.fillWidth: true }
                             Botao {
                                 text: "Escolher peça existente"

@@ -31,7 +31,25 @@ Popup {
     padding: Tema.estreito ? 18 : 30
     // O conteúdo começa logo abaixo da área de toque da seta.
     topPadding: mostraSeta ? setaDoPainel.y + setaDoPainel.height : padding
-    closePolicy: Popup.CloseOnEscape
+    // T058 (pedido do proprietário, 20/11/2026): a janelinha com passos (ex.:
+    // a pendência aberta dentro da lista de pendências) dá a função
+    // voltarUmPasso, que volta um passo e devolve true; quando não há passo
+    // para voltar, devolve false e a seta e o Esc fecham, como sempre. Sem a
+    // função, nada muda.
+    property var voltarUmPasso: null
+    function retornar() {
+        if (typeof painel.voltarUmPasso === "function" && painel.voltarUmPasso())
+            return
+        painel.close()
+    }
+    closePolicy: typeof voltarUmPasso === "function" ? Popup.NoAutoClose : Popup.CloseOnEscape
+    Shortcut {
+        // O "voltar" do Android chega como Back (com CloseOnEscape, o Qt o
+        // tratava como o Esc).
+        sequences: ["Esc", "Back"]
+        enabled: painel.opened && typeof painel.voltarUmPasso === "function"
+        onActivated: painel.retornar()
+    }
     // A-1 da revisão (C8, caso 7): a janela sabe quais janelinhas estão abertas, na ordem, para fechar e reabrir a
     // cadeia inteira (a ficha da conta e a pergunta do motivo) quando a guia leva a outra tela.
     // N-1 da re-revisão: a janela é guardada ao abrir, para a janelinha sair do registro também quando é destruída
@@ -71,7 +89,7 @@ Popup {
             // com folga das bordas da janelinha (0.9.18: a seta tem vidro).
             x: Math.max(8, painel.leftPadding - 12)
             y: Tema.estreito ? 8 : 12
-            onClicked: painel.close()
+            onClicked: painel.retornar()
         }
     }
 }

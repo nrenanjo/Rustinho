@@ -80,33 +80,31 @@ FocusScope {
             Layout.fillWidth: true
         }
 
-        Linha {
-            spacing: 14
+        // T055 (pedido do proprietário, 20/11/2026, com Orçamentos como
+        // referência): os três botões em cima e, embaixo deles, a busca na
+        // largura toda da tela. Vales-troca continua sem busca.
+        Pilulas {
+            modelo: [
+                { id: "devolver", nome: "Devolver" },
+                { id: "vales", nome: "Vales-troca" },
+                { id: "feitas", nome: "Já devolvidas" }
+            ]
+            atual: tela.secao
+            onEscolhido: id => tela.secao = id
+        }
+        Campo {
+            id: busca
+            visible: tela.secao !== "vales"
+            icone: "busca"
+            altura: 46
+            tamanhoFonte: 16
+            dica: tela.secao === "devolver" ? "Número da venda (está no comprovante), cliente ou peça" : "Cliente, número da venda ou peça"
             Layout.fillWidth: true
-            Pilulas {
-                modelo: [
-                    { id: "devolver", nome: "Devolver" },
-                    { id: "vales", nome: "Vales-troca" },
-                    { id: "feitas", nome: "Já devolvidas" }
-                ]
-                atual: tela.secao
-                onEscolhido: id => tela.secao = id
+            onEditado: espera.restart()
+            onConfirmado: {
+                if (tela.secao === "devolver" && tela.vendas.length === 1)
+                    tela.janela.abrir("TelaDevolucao", { vendaId: tela.vendas[0].id })
             }
-            Campo {
-                id: busca
-                visible: tela.secao !== "vales"
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: tela.secao === "devolver" ? "Número da venda (está no comprovante), cliente ou peça" : "Cliente, número da venda ou peça"
-                Layout.fillWidth: true
-                onEditado: espera.restart()
-                onConfirmado: {
-                    if (tela.secao === "devolver" && tela.vendas.length === 1)
-                        tela.janela.abrir("TelaDevolucao", { vendaId: tela.vendas[0].id })
-                }
-            }
-            Item { visible: tela.secao === "vales"; Layout.fillWidth: true }
         }
 
         // ---------- Devolver: escolher a venda ----------

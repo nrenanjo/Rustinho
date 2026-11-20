@@ -87,18 +87,12 @@ FocusScope {
             }
         }
 
-        Linha {
+        // T056 (pedido do proprietário, 20/11/2026, com Orçamentos como
+        // referência): os filtros numa linha própria, com Categorias à direita
+        // (fora da busca); embaixo, a busca na largura toda.
+        RowLayout {
             spacing: 14
             Layout.fillWidth: true
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Procurar: descrição, fornecedor, nota ou categoria"
-                Layout.fillWidth: true
-                onEditado: espera.restart()
-            }
             Pilulas {
                 pequenas: true
                 modelo: [{ id: "abertas", nome: "Em aberto" }, { id: "pagas", nome: "Pagas" }, { id: "todas", nome: "Todas" }]
@@ -113,6 +107,15 @@ FocusScope {
                 tipo: "discreto"
                 onClicked: categorias.abrirCom()
             }
+        }
+        Campo {
+            id: busca
+            icone: "busca"
+            altura: 46
+            tamanhoFonte: 16
+            dica: "Procurar: descrição, fornecedor, nota ou categoria"
+            Layout.fillWidth: true
+            onEditado: espera.restart()
         }
 
         ListView {

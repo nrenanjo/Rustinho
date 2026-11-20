@@ -121,7 +121,12 @@ FocusScope {
         conflitoCnpj.mostrar(novas[0])
     }
     function descartarNaoImportada(c) {
+        // T054: a lista não volta para o começo depois de descartar uma nota.
+        const onde = listaNaoImportadas.contentY
         naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))
+        Qt.callLater(() => {
+            listaNaoImportadas.contentY = Math.max(0, Math.min(onde, listaNaoImportadas.contentHeight - listaNaoImportadas.height))
+        })
     }
 
     function nomeArquivo(url) {
@@ -173,6 +178,11 @@ FocusScope {
     ConflitoCnpj {
         id: conflitoCnpj
         onDescartar: (c) => tela.descartarNaoImportada(c)
+        // T054 (pedido do proprietário, 20/11/2026): com a janelinha aberta, o
+        // "Mostrar valores" do canto da tela continua à vista e clicável, no
+        // mesmo lugar (é o mesmo controle, que passa para cima do véu).
+        onOpened: cabecalhoDeCompras.levarOlho(conflitoCnpj)
+        onClosed: cabecalhoDeCompras.devolverOlho()
     }
 
     ColumnLayout {
@@ -182,6 +192,7 @@ FocusScope {
         spacing: 14
 
         Cabecalho {
+            id: cabecalhoDeCompras
             sensivel: true
             titulo: "Compras"
             subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
@@ -234,6 +245,7 @@ FocusScope {
 
         // Notas de outro CNPJ: não entraram; dá para ver de novo ou descartar.
         Faixa {
+            id: notasDeOutroCnpj
             // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
             z: 1
             visible: tela.naoImportadas.length > 0
@@ -242,12 +254,28 @@ FocusScope {
             corTitulo: Tema.vermelho
             color: Tema.rosa
             Layout.fillWidth: true
-            Repeater {
+            // T054 (pedido do proprietário, 20/11/2026): com centenas de notas, a
+            // lista rola por conta própria numa altura limitada, e a busca e as
+            // compras continuam à vista. Antes, um Repeater desenhava todas as
+            // notas e empurrava o resto da tela para fora. Sem paginação nem
+            // "carregar mais" (simplicidade funcional): a lista inteira rola.
+            ListView {
+                id: listaNaoImportadas
+                Layout.fillWidth: true
+                // Até 40% da tela (no mínimo umas duas linhas e meia); com
+                // poucas notas, só a altura delas.
+                Layout.preferredHeight: Math.min(contentHeight, Math.max(150, tela.height * 0.4 - 90))
+                clip: true
+                spacing: notasDeOutroCnpj.espacamento
+                boundsBehavior: Flickable.StopAtBounds
                 model: tela.naoImportadas
+                ScrollBar.vertical: ScrollBar { id: barraNaoImportadas }
                 delegate: Rectangle {
                     id: faixaDaLista
                     required property var modelData
-                    Layout.fillWidth: true
+                    // A barra de rolagem fica ao lado, sem cobrir o Descartar.
+                    width: listaNaoImportadas.width
+                           - (listaNaoImportadas.contentHeight > listaNaoImportadas.height ? barraNaoImportadas.width + 4 : 0)
                     required property int index
                     // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
                     readonly property bool par: (index + 1) % 2 === 0

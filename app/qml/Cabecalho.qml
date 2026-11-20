@@ -46,7 +46,57 @@ ColumnLayout {
         // A altura da seta só quando ela está lá (com o olho sozinho, a linha
         // fica da altura dele).
         Item { Layout.fillWidth: true; implicitHeight: cabecalho.comSeta ? Tema.toqueSeta : 0 }
-        Olho { visible: cabecalho.sensivel }
+        // T054 (pedido do proprietário, 20/11/2026): o lugar do olho fica na
+        // linha; o olho em si sobe para cima do véu enquanto uma janelinha que
+        // pediu (levarOlho) está aberta, no mesmo lugar e com a mesma cara. É o
+        // mesmo controle: nada de outro olho.
+        Item {
+            id: lugarDoOlho
+            visible: cabecalho.sensivel
+            implicitWidth: olho.implicitWidth
+            implicitHeight: olho.implicitHeight
+            Olho { id: olho }
+            // A camada do olho: do tamanho dele, exatamente no lugar dele, por
+            // cima da janelinha (aberta depois dela), sem véu, sem pegar o
+            // teclado e sem fechar sozinha. Fora da área de uma janelinha, o
+            // toque só chega ao que está dentro de uma camada; por isso o olho
+            // vai para esta, e não para a janelinha.
+            Popup {
+                id: camadaDoOlho
+                x: 0
+                y: 0
+                width: lugarDoOlho.width
+                height: lugarDoOlho.height
+                padding: 0
+                margins: 0
+                modal: false
+                dim: false
+                focus: false
+                closePolicy: Popup.NoAutoClose
+                background: null
+                contentItem: Item { id: casaDoOlho }
+            }
+        }
+    }
+
+    property var _janelinhaDoOlho: null
+    Binding {
+        target: olho
+        property: "parent"
+        when: cabecalho._janelinhaDoOlho !== null && cabecalho.sensivel
+        value: casaDoOlho
+    }
+    // A janelinha (um Painel aberto) que mostra valores chama ao abrir e ao
+    // fechar. Sem ela, o olho fica na linha, como sempre.
+    function levarOlho(janelinha) {
+        if (!cabecalho.sensivel)
+            return
+        cabecalho._janelinhaDoOlho = janelinha
+        camadaDoOlho.open()
+    }
+    function devolverOlho() {
+        cabecalho._janelinhaDoOlho = null
+        camadaDoOlho.close()
     }
 
     // Título e botões lado a lado; na tela estreita, os botões vão para

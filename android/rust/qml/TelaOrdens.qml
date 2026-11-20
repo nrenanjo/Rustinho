@@ -81,29 +81,28 @@ FocusScope {
             }
         }
 
-        Linha {
-            spacing: 14
+        // T057 (pedido do proprietário, 20/11/2026, com Orçamentos como
+        // referência): os filtros numa linha própria; embaixo, a busca na
+        // largura toda.
+        Pilulas {
+            modelo: [
+                { id: "abertas", nome: "Abertas" + (tela.contagem.abertas ? " · " + tela.contagem.abertas : "") },
+                { id: "prontas", nome: "Prontas" + (tela.contagem.prontas ? " · " + tela.contagem.prontas : "") },
+                { id: "entregues", nome: "Entregues" },
+                { id: "todas", nome: "Todas" }
+            ]
+            atual: tela.quais
+            onEscolhido: id => tela.quais = id
+        }
+        Campo {
+            id: busca
+            icone: "busca"
+            altura: 46
+            tamanhoFonte: 16
+            dica: "Placa, cliente, carro ou número da OS"
             Layout.fillWidth: true
-            Pilulas {
-                modelo: [
-                    { id: "abertas", nome: "Abertas" + (tela.contagem.abertas ? " · " + tela.contagem.abertas : "") },
-                    { id: "prontas", nome: "Prontas" + (tela.contagem.prontas ? " · " + tela.contagem.prontas : "") },
-                    { id: "entregues", nome: "Entregues" },
-                    { id: "todas", nome: "Todas" }
-                ]
-                atual: tela.quais
-                onEscolhido: id => tela.quais = id
-            }
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Placa, cliente, carro ou número da OS"
-                Layout.fillWidth: true
-                onEditado: espera.restart()
-                onConfirmado: if (tela.itens.length === 1) tela.janela.abrir("TelaOrdem", { osId: tela.itens[0].id })
-            }
+            onEditado: espera.restart()
+            onConfirmado: if (tela.itens.length === 1) tela.janela.abrir("TelaOrdem", { osId: tela.itens[0].id })
         }
 
         ListView {

@@ -70,27 +70,26 @@ FocusScope {
             }
         }
 
-        Linha {
-            spacing: 14
+        // T056 (pedido do proprietário, 20/11/2026, com Orçamentos como
+        // referência): os filtros numa linha própria; embaixo, a busca na
+        // largura toda.
+        Pilulas {
+            pequenas: true
+            modelo: [{ id: "carteira", nome: "Em carteira" }, { id: "todos", nome: "Todos" }]
+            atual: secao.quais
+            onEscolhido: id => {
+                secao.quais = id
+                secao.carregar()
+            }
+        }
+        Campo {
+            id: busca
+            icone: "busca"
+            altura: 46
+            tamanhoFonte: 16
+            dica: "Procurar: número, quem assinou, cliente ou banco"
             Layout.fillWidth: true
-            Campo {
-                id: busca
-                icone: "busca"
-                altura: 46
-                tamanhoFonte: 16
-                dica: "Procurar: número, quem assinou, cliente ou banco"
-                Layout.fillWidth: true
-                onEditado: espera.restart()
-            }
-            Pilulas {
-                pequenas: true
-                modelo: [{ id: "carteira", nome: "Em carteira" }, { id: "todos", nome: "Todos" }]
-                atual: secao.quais
-                onEscolhido: id => {
-                    secao.quais = id
-                    secao.carregar()
-                }
-            }
+            onEditado: espera.restart()
         }
 
         ListView {

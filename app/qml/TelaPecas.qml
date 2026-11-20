@@ -201,6 +201,13 @@ FocusScope {
     }
 
     function abrirPeca(indice) {
+        // T058 (pedido do proprietário, 20/11/2026): com uma janelinha aberta
+        // por cima (ex.: Pendências de identificação), o toque que passa por
+        // ela não abre a peça da linha de trás. O Qt entrega o toque também às
+        // linhas de baixo da janelinha (TapHandler); a tela de trás fica como
+        // estava.
+        if ((janela.janelinhasAbertas || []).some(j => janela.janelinhaViva(j)))
+            return
         if (indice >= 0 && indice < pecas.count)
             janela.abrir("TelaPeca", { produtoId: pecas.get(indice).id })
     }
