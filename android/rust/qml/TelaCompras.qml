@@ -125,6 +125,8 @@ FocusScope {
         const onde = listaNaoImportadas.contentY
         naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))
         Qt.callLater(() => {
+            // T054-R3 da revisão: refaz a lista antes de ler a altura dela.
+            listaNaoImportadas.forceLayout()
             listaNaoImportadas.contentY = Math.max(0, Math.min(onde, listaNaoImportadas.contentHeight - listaNaoImportadas.height))
         })
     }
@@ -261,6 +263,8 @@ FocusScope {
             // "carregar mais" (simplicidade funcional): a lista inteira rola.
             ListView {
                 id: listaNaoImportadas
+                // Os testes leem onde a lista fica (T054-R6 da revisão).
+                objectName: "listaNaoImportadas"
                 Layout.fillWidth: true
                 // Até 40% da tela (no mínimo umas duas linhas e meia); com
                 // poucas notas, só a altura delas.

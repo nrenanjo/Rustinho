@@ -43,11 +43,20 @@ Popup {
         painel.close()
     }
     closePolicy: typeof voltarUmPasso === "function" ? Popup.NoAutoClose : Popup.CloseOnEscape
+    // T054-R1 da revisão: o Esc desta janelinha só vale quando ela é a de cima
+    // de todas (a última do registro da janela). Com outra por cima (a senha
+    // do gerente, "Qual é a peça?"), o Esc é só da de cima, sem depender da
+    // ordem em que o Qt entrega a tecla.
+    readonly property bool _eDeCima: {
+        const j = painel._janelaDoRegistro
+        const lista = j ? j.janelinhasAbertas : null
+        return !lista || lista.length === 0 || lista[lista.length - 1] === painel
+    }
     Shortcut {
         // O "voltar" do Android chega como Back (com CloseOnEscape, o Qt o
         // tratava como o Esc).
         sequences: ["Esc", "Back"]
-        enabled: painel.opened && typeof painel.voltarUmPasso === "function"
+        enabled: painel.opened && typeof painel.voltarUmPasso === "function" && painel._eDeCima
         onActivated: painel.retornar()
     }
     // A-1 da revisão (C8, caso 7): a janela sabe quais janelinhas estão abertas, na ordem, para fechar e reabrir a

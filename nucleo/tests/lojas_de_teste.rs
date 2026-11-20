@@ -85,6 +85,21 @@ fn montar_lista_de_pecas() {
     l.fechar();
 }
 
+/// T058 (20/11/2026) — a loja do grupo P do roteiro `app/testes/telas_compras_trocas_t054.py`:
+/// a de `montar_lista_de_pecas` (com as 2 pendências de identificação XML) mais a
+/// Bia (caixa, senha 1111), para a senha do gerente abrir por cima da janela de
+/// pendências ao trocar para "Trazer cadastros".
+#[test]
+#[ignore = "só à mão: monta a loja do grupo P do roteiro da T054 a T058"]
+fn montar_pendencias_com_caixa() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    montar_lista_de_pecas();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.entrar("Ana", SENHA_ANA);
+    l.usuario_caixa("Bia", SENHA_BIA);
+    l.fechar();
+}
+
 /// N04 (dev.3.3, passo 7.5) — a loja do roteiro `app/testes/telas_lista_continua.py`:
 /// - Ana (gerente, senha 1234);
 /// - `RUSTINHO_LOJA_PECAS` peças (20.000 se não disser), cada uma com um nome

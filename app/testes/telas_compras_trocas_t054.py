@@ -10,7 +10,7 @@ Compras (T054):
       volta para o começo (a nota de cima continua à vista);
   C4  Ver numa nota abre a janelinha daquela nota;
   C5  com a janelinha aberta, o "Mostrar valores" do canto da tela continua no
-      mesmo lugar e responde ao clique: os números aparecem na janelinha e o
+      mesmo lugar, um só (não duplicado), e responde ao clique: os números aparecem na janelinha e o
       controle vira "Esconder"; outro clique esconde de novo;
   C6  "Descartar nota" na janelinha tira a nota da lista na hora;
   C7  fechada a janelinha, o controle volta ao lugar de sempre e funciona;
@@ -51,7 +51,9 @@ Pendências de identificação XML, sobre Peças (T058):
   P3  a pendência aberta não tem mais o "Todas as pendências";
   P4  a seta volta da pendência para a lista;
   P5  o Esc faz o mesmo e, na lista, fecha a janela; Peças fica intacta;
-  P6  com outra janelinha por cima ("Qual é a peça?"), o Esc fecha só ela.
+  P6  com outra janelinha por cima ("Qual é a peça?"), o Esc fecha só ela;
+  P7  como caixa, a senha do gerente abre por cima ao trocar para "Trazer
+      cadastros", e o Esc fecha só a senha.
 
     python3 app/testes/telas_compras_trocas_t054.py [pasta para as fotos]
     RUSTINHO_CASOS=F python3 app/testes/telas_compras_trocas_t054.py   (só alguns grupos: C, T, O, F, P)
@@ -91,6 +93,10 @@ ESPERADAS = {
 
 def conferir(codigo, nome, certo, detalhe=""):
     resultados.append((codigo, bool(certo), nome, detalhe))
+    if not certo and codigo in ESPERADAS:
+        # O mesmo formato dos outros roteiros: o manifesto da CI conta "falha ESPERADA" (T054-R5 da revisão).
+        print(f"  ✘ {codigo} {nome} — falha ESPERADA: {ESPERADAS[codigo]} · {detalhe}", flush=True)
+        return
     print(("✔ " if certo else "✘ ") + f"{codigo} {nome}" + ("" if certo else f" — {detalhe}"), flush=True)
 
 
@@ -167,12 +173,18 @@ class Tela:
 
 def faixa_visivel(t):
     """(alto, baixo) da área em que o meio de uma linha de "Não importadas"
-    fica com folga dentro da lista: do título (meia altura e o espaço até a
+    fica com folga dentro da lista. Com o programa novo, pela geometria da
+    lista (objectName "listaNaoImportadas"); com o de antes, do título (meia altura e o espaço até a
     lista, 23) até a borda de cima da busca (meia busca, 27, e o espaço, 14),
     menos o acabamento da faixa (16 nas janelas baixas, 22 nas outras: usa o
     menor) e 20 de folga (as linhas têm 50 de altura). Uma linha cortada pela
     borda da lista além disso não conta como à vista (o clique nela pode cair
     fora da lista)."""
+    lista = u.geos(t).get("listaNaoImportadas")
+    if lista:
+        # A lista de verdade (T054-R6 da revisão): o meio da linha com 20 de folga dentro dela.
+        return lista[1] + 20, lista[1] + lista[3] - 20
+    # O programa de antes (06520fa) não tem a lista: a conta pelas medidas do layout.
     titulo = achar(t, "Não importad")
     busca = achar(t, "Fornecedor, número da nota ou peça")
     if not titulo or not busca:
@@ -276,6 +288,8 @@ def casos_compras(modelo, fotos, w, h, completo):
 
         # C5: o controle do canto com a janelinha aberta.
         olho = igual(t, "Mostrar valores")
+        # T054-R4 da revisão: um controle só ("não duplicar o controle").
+        um_so = len(olho) + len(igual(t, "Esconder")) == 1
         mesmo_lugar = olho and olho_antes and abs(olho[0][0] - olho_antes[0][0]) <= 2 \
             and abs(olho[0][1] - olho_antes[0][1]) <= 2
         dentro = olho and 0 < olho[0][0] < ww and 0 < olho[0][1] < wh
@@ -287,6 +301,7 @@ def casos_compras(modelo, fotos, w, h, completo):
             rr.foto("-4-olho-aberto")
             clicou = bool(achar(t2, "11.222.333/0001-81") and igual(t2, "Esconder")
                           and achar(t2, "CNPJ da nota é diferente"))
+            um_so = um_so and len(igual(t2, "Esconder")) + len(igual(t2, "Mostrar valores")) == 1
             esc = igual(t2, "Esconder")
             if esc:
                 tela.clicar_ponto(esc[0][0], esc[0][1])
@@ -298,8 +313,8 @@ def casos_compras(modelo, fotos, w, h, completo):
             fechou_de_novo = False
         conferir(pre + ("5" if completo else "5"),
                  "com a janelinha aberta, o Mostrar valores fica no lugar e responde" + sufixo,
-                 abriu and mesmo_lugar and dentro and clicou and fechou_de_novo,
-                 f"janelinha {bool(abriu)}, olho {olho[:1]} (antes {olho_antes[:1]}), "
+                 abriu and um_so and mesmo_lugar and dentro and clicou and fechou_de_novo,
+                 f"janelinha {bool(abriu)}, um controle só {um_so}, olho {olho[:1]} (antes {olho_antes[:1]}), "
                  f"clique mostrou {clicou}, esconder de novo {fechou_de_novo}")
 
         if completo and abriu:
@@ -530,10 +545,10 @@ def casos_ordens(modelo, fotos, w, h, completo):
 
 
 def montar_loja_pecas(pasta):
-    """A loja do roteiro da lista de peças (K06): 120 peças e 2 pendências de identificação XML."""
+    """A loja do roteiro da lista de peças (K06): 120 peças e 2 pendências de identificação XML, mais a Bia (caixa)."""
     env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
     subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-                    "--ignored", "--exact", "montar_lista_de_pecas"],
+                    "--ignored", "--exact", "montar_pendencias_com_caixa"],
                    cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
 
 
@@ -634,6 +649,41 @@ def casos_pendencias(modelo, fotos):
         rr.fechar()
 
 
+def caso_senha_por_cima(modelo, fotos):
+    """P7 (T054-R1 da revisão): como caixa, trocar para "Trazer cadastros" abre a
+    senha do gerente por cima da janela de pendências; o Esc fecha só a senha e a
+    janela continua nas pendências."""
+    rr = u.Rustinho(modelo, "TelaPecas", {"abrirPendenciasXml": True}, fotos, "pendencias_caixa")
+    tela = Tela(rr)
+    try:
+        esperar_janela()
+        time.sleep(0.5)
+        rr.redimensionar(1920, 1080)
+        rr.entrar("Bia")
+        time.sleep(4)
+        t = rr.textos()
+        alvo = [(x, y) for x, y, tx in so_textos(t) if tx == "Trazer cadastros"]
+        if alvo:
+            tela.clicar_ponto(*alvo[0])
+            time.sleep(1.5)
+        t = rr.textos()
+        senha = bool(achar(t, "Trazer cadastros: só o gerente pode"))
+        rr.foto("-0-senha")
+        xdo("key", "Escape")
+        time.sleep(1.2)
+        t = rr.textos()
+        rr.foto("-1-esc")
+        pendencias = [x for x in so_textos(t) if x[2].startswith("Pendências de identificação (")]
+        conferir("P7", "como caixa, a senha do gerente abre por cima; o Esc fecha só ela e a janela fica nas pendências",
+                 senha and not achar(t, "Trazer cadastros: só o gerente pode") and pendencias
+                 and igual(t, "Abrir pendência") and not achar(t, "Trazer cadastros pelo XML")
+                 and not (igual(t, "Código interno") or igual(t, "Nome da peça")),
+                 f"senha abriu {senha}, senha ainda aberta {bool(achar(t, 'Trazer cadastros: só o gerente pode'))}, "
+                 f"janela {bool(pendencias)}, lista {bool(igual(t, 'Abrir pendência'))}")
+    finally:
+        rr.fechar()
+
+
 def main():
     for p in ("Xvfb", "xdotool", "import", "cargo"):
         if not shutil.which(p):
@@ -664,6 +714,7 @@ def main():
             modelo_pecas = tempfile.mkdtemp(prefix="rustinho-dados-t058-")
             montar_loja_pecas(modelo_pecas)
             casos_pendencias(modelo_pecas, fotos)
+            caso_senha_por_cima(modelo_pecas, fotos)
         if "F" in casos:
             for secao in ("pagar", "cheques"):
                 casos_financeiro(modelo, fotos, secao, 1920, 1080, True)
@@ -674,8 +725,6 @@ def main():
     errados = [r for r in resultados if not r[1] and r[0] not in ESPERADAS]
     esperadas = [r for r in resultados if not r[1] and r[0] in ESPERADAS]
     passaram = [r for r in resultados if r[1] and r[0] in ESPERADAS]
-    for r in esperadas:
-        print(f"falha esperada {r[0]}: {ESPERADAS[r[0]]}")
     for r in passaram:
         print(f"✘ a falha esperada {r[0]} passou: tirar de ESPERADAS")
     print(f"\ncertos {len(resultados) - len(errados) - len(esperadas)}, errados {len(errados)}, "
