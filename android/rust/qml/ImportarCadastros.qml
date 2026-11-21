@@ -342,7 +342,10 @@ Painel {
 
     contentItem: Item {
         implicitWidth: coluna.implicitWidth
-        implicitHeight: coluna.implicitHeight
+        // T060 (bug 21, BUG-20261121-K7QX): com muitas notas, os avisos da prévia passavam da altura da janelinha
+        // (o Painel a limita à janela) e o Cadastrar ficava fora de alcance. Como no ConflitoCnpj, o miolo rola
+        // e a linha do Cadastrar fica embaixo, sempre à vista.
+        implicitHeight: externa.implicitHeight
 
         DropArea {
             anchors.fill: parent
@@ -354,505 +357,525 @@ Painel {
         }
 
         ColumnLayout {
-            id: coluna
-            width: parent.width
+            id: externa
+            anchors.fill: parent
             spacing: 14
 
-            Pilulas {
-                visible: painel.pendencias.length > 0 || painel.aba === "pendencias"
-                pequenas: true
-                modelo: [
-                    { id: "importar", nome: "Trazer cadastros" },
-                    { id: "pendencias", nome: "Pendências de identificação" + (painel.pendencias.length > 0 ? " (" + painel.pendencias.length + ")" : "") }
-                ]
-                atual: painel.aba
-                onEscolhido: (id) => {
-                    painel.erro = ""
-                    if (id === "pendencias") {
-                        painel.aba = id
-                        painel.carregarPendencias()
-                        return
-                    }
-                    // A aba de importar pede a senha (se precisar) antes.
-                    painel.exigirSenhaDaTela(() => painel.aba = id, () => {})
-                }
-            }
+            Flickable {
+                id: rolagemDoImportar
+                // A geometria do miolo para os roteiros (GEO:rolagemDoImportar).
+                objectName: "rolagemDoImportar"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredHeight: coluna.implicitHeight
+                contentHeight: coluna.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                ScrollBar.vertical: ScrollBar {}
 
-            Titulo {
-                text: painel.aba === "pendencias" ? "Pendências de identificação XML" : "Trazer cadastros pelo XML"
-                font.pixelSize: 32
-                Layout.fillWidth: true
-            }
-            Nota {
-                visible: painel.naImportacao
-                text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
-                      + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
-                      + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
-                font.pixelSize: 14
-                Layout.fillWidth: true
-            }
+                ColumnLayout {
+                    id: coluna
+                    width: rolagemDoImportar.width
+                    spacing: 14
 
-            Linha {
-                visible: painel.naImportacao
-                spacing: 10
-                Layout.fillWidth: true
-                Botao {
-                    text: "Escolher arquivos"
-                    icone: "mais"
-                    tipo: painel.previa ? "secundario" : "principal"
-                    enabled: !painel.trabalhando
-                    onClicked: seletorArquivos.open()
-                }
-                Botao {
-                    text: "Escolher uma pasta"
-                    visible: !Tema.celular
-                    tipo: "secundario"
-                    enabled: !painel.trabalhando
-                    onClicked: seletorPasta.open()
-                }
-                Item { Layout.fillWidth: true }
-            }
-            Nota {
-                visible: painel.naImportacao && !painel.previa && !painel.trabalhando && painel.erro === ""
-                text: "Dá para escolher vários .xml, um .zip ou .rar com os XMLs dentro ou uma pasta inteira (com subpastas). Também dá para arrastar para cá."
-                font.pixelSize: 13
-                Layout.fillWidth: true
-            }
-
-            Text {
-                visible: painel.naImportacao && painel.trabalhando
-                text: "Lendo as notas..."
-                color: Tema.tintaSuave
-                font.family: Tema.serifa
-                font.italic: true
-                font.pixelSize: 16
-            }
-            TextoErro { text: painel.erro; Layout.fillWidth: true }
-            // A07: a peça escolhida está desativada; dá para abrir a ficha e reativá-la.
-            Botao {
-                visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
-                text: "Abrir a peça"
-                tipo: "secundario"
-                // Fecha o painel antes: a ficha abre por baixo dele e precisa ficar à vista
-                // (é lá que a peça é reativada); a pendência continua aberta.
-                onClicked: {
-                    const id = painel.pecaDesativadaId
-                    painel.pecaDesativadaId = ""
-                    painel.close()
-                    painel.janela.abrir("TelaPeca", { produtoId: id })
-                }
-            }
-            // Os arquivos já escolhidos (continuam escolhidos quando a leitura
-            // não deu: dá para tentar de novo sem escolher outra vez).
-            Linha {
-                visible: painel.naImportacao && painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
-                spacing: 10
-                Layout.fillWidth: true
-                Nota {
-                    text: painel.texto(painel.arquivos.length, "arquivo escolhido", "arquivos escolhidos") + ": "
-                          + painel.arquivos.map(a => a.split(/[\\/]/).pop()).join(", ")
-                    font.pixelSize: 13
-                    elide: Text.ElideRight
-                    maximumLineCount: 2
-                    Layout.fillWidth: true
-                }
-                Botao {
-                    text: "Tentar de novo"
-                    tipo: "secundario"
-                    onClicked: painel.lerArquivos()
-                }
-            }
-            Nota {
-                visible: painel.naImportacao && painel.avisoArquivos !== ""
-                text: painel.avisoArquivos
-                color: Tema.vermelho
-                font.pixelSize: 13
-                Layout.fillWidth: true
-            }
-
-            // Prévia
-            ColumnLayout {
-                visible: painel.naImportacao && !!painel.previa && !painel.trabalhando
-                spacing: 8
-                Layout.fillWidth: true
-
-                Rotulo {
-                    text: painel.previa ? painel.texto(painel.previa.notas, "nota lida", "notas lidas")
-                                          + "  ·  " + painel.previa.notasLoja + " da loja  ·  " + painel.previa.notasFornecedor + " de fornecedores"
-                                          + (painel.previa.ignorados > 0 ? "  ·  " + painel.texto(painel.previa.ignorados, "arquivo ignorado", "arquivos ignorados") : "") : ""
-                    Layout.fillWidth: true
-                }
-
-                Repeater {
-                    model: painel.previa ? [
-                        { chave: "qClientes", titulo: "Clientes", novos: painel.previa.clientesNovos, ja: painel.previa.clientesJa,
-                          exemplos: painel.previa.exemplosClientes, cor: Tema.verde },
-                        { chave: "qFornecedores", titulo: "Fornecedores", novos: painel.previa.fornecedoresNovos, ja: painel.previa.fornecedoresJa,
-                          mudam: painel.cat("fornecedor.ja_sem_papel"), exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul,
-                          // FI-2: quem já está cadastrado (como cliente) passa a ser fornecedor.
-                          extra: painel.cat("fornecedor.ja_sem_papel") > 0
-                                 ? painel.texto(painel.cat("fornecedor.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
-                                   + " a ser fornecedor" : "",
-                          // FI-1 (a): travada enquanto "Peças das notas de fornecedores" estiver marcada.
-                          presa: painel.qPecasFornecedor,
-                          porque: "Marcada junto com \"Peças das notas de fornecedores\": as peças ficam ligadas ao fornecedor, que é cadastrado com elas." },
-                        { chave: "qPecasLoja", titulo: "Peças das notas da loja", novos: painel.previa.pecasLojaNovas, ja: -1,
-                          mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
-                        { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
-                          mudam: painel.cat("forn.ja_pelo_gtin_liga") + painel.cat("forn.ja_pelo_vinculo_gtin_novo"),
-                          exemplos: [], cor: Tema.papel }
-                    ] : []
-                    delegate: Rectangle {
-                        id: linha
-                        required property var modelData
-                        visible: modelData.novos > 0 || modelData.ja > 0 || (modelData.mudam || 0) > 0
-                        Layout.fillWidth: true
-                        implicitHeight: coluna.implicitHeight + 20
-                        radius: Tema.raio
-                        color: modelData.novos > 0 ? modelData.cor : Tema.vela(0.35)
-                        palette.window: Tema.superficie(color)
-                        ColumnLayout {
-                            id: coluna
-                            x: 14
-                            y: 10
-                            width: parent.width - 28
-                            spacing: 2
-                            RowLayout {
-                                spacing: 6
-                                Layout.fillWidth: true
-                                Marcar {
-                                    visible: linha.modelData.novos > 0 || (linha.modelData.mudam || 0) > 0 || !!linha.modelData.presa
-                                    enabled: !linha.modelData.presa
-                                    checked: painel[linha.modelData.chave]
-                                    onToggled: {
-                                        painel[linha.modelData.chave] = checked
-                                        // FI-1 (a): as peças do fornecedor levam o fornecedor junto.
-                                        if (linha.modelData.chave === "qPecasFornecedor" && checked)
-                                            painel.qFornecedores = true
-                                        painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
-                                                            qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
-                                        painel.refazerPrevia(false)
-                                    }
-                                    leftPadding: 0
-                                }
-                                Text {
-                                    text: linha.modelData.titulo
-                                    textFormat: Text.PlainText
-                                    color: Tema.tinta
-                                    font.family: Tema.titulo
-                                    font.weight: Font.Bold
-                                    font.pixelSize: 20
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                }
-                                Text {
-                                    text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, "novo", "novos") : "nada novo"
-                                    textFormat: Text.PlainText
-                                    color: linha.modelData.novos > 0 ? Tema.verdeEscuro : Tema.apagado
-                                    font.family: Tema.texto
-                                    font.weight: Font.Bold
-                                    font.pixelSize: 15
-                                }
+                    Pilulas {
+                        visible: painel.pendencias.length > 0 || painel.aba === "pendencias"
+                        pequenas: true
+                        modelo: [
+                            { id: "importar", nome: "Trazer cadastros" },
+                            { id: "pendencias", nome: "Pendências de identificação" + (painel.pendencias.length > 0 ? " (" + painel.pendencias.length + ")" : "") }
+                        ]
+                        atual: painel.aba
+                        onEscolhido: (id) => {
+                            painel.erro = ""
+                            if (id === "pendencias") {
+                                painel.aba = id
+                                painel.carregarPendencias()
+                                return
                             }
-                            Text {
-                                visible: text !== ""
-                                text: [linha.modelData.ja > 0 ? linha.modelData.ja + " já cadastrados" : "",
-                                       linha.modelData.exemplos.length > 0 ? linha.modelData.exemplos.join(", ") + (linha.modelData.novos > linha.modelData.exemplos.length ? "..." : "") : ""]
-                                      .filter(x => !!x).join("  ·  ")
-                                textFormat: Text.PlainText
-                                color: Tema.tintaSuave
-                                font.family: Tema.serifa
-                                font.italic: true
-                                font.pixelSize: 13
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            Text {
-                                visible: text !== ""
-                                text: [linha.modelData.extra || "", linha.modelData.presa ? linha.modelData.porque : ""]
-                                      .filter(x => !!x).join("  ·  ")
-                                textFormat: Text.PlainText
-                                color: Tema.tinta
-                                font.family: Tema.texto
-                                font.pixelSize: 13
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
+                            // A aba de importar pede a senha (se precisar) antes.
+                            painel.exigirSenhaDaTela(() => painel.aba = id, () => {})
                         }
                     }
-                }
 
-                // A03b e O-3 (com as opções marcadas): o que muda no que já existe
-                // e o que fica para identificar depois.
-                Nota {
-                    visible: !!painel.previa && painel.previa.pecasQueMudam > 0
-                    text: painel.previa ? "Peças que já existem e mudam (GTIN ou código do fornecedor): " + painel.previa.pecasQueMudam
-                          + (painel.previa.exemplosPecasQueMudam.length > 0
-                             ? " — " + painel.previa.exemplosPecasQueMudam.join(", ")
-                               + (painel.previa.pecasQueMudam > painel.previa.exemplosPecasQueMudam.length ? "..." : "")
-                             : "") : ""
-                    font.pixelSize: 13
-                    Layout.fillWidth: true
-                }
-                Nota {
-                    visible: !!painel.previa && painel.previa.vaoParaPendencias > 0
-                    text: painel.previa ? "Vão para pendências: " + painel.previa.vaoParaPendencias + " — "
-                          + painel.previa.pendenciasPorMotivo.map(m => m.texto + ": " + m.quantidade).join("; ") : ""
-                    font.pixelSize: 13
-                    Layout.fillWidth: true
-                }
-                Nota {
-                    visible: !!painel.previa && painel.previa.pecasLojaNovas > 0 && painel.previa.pecasFornecedorNovas > 0
-                    text: "Peça sem código de barras pode ficar repetida (uma com o código da loja, outra do fornecedor). Se for migrar de outro sistema, prefira só as notas da loja."
-                    font.pixelSize: 13
-                    Layout.fillWidth: true
-                }
-                Repeater {
-                    model: painel.previa ? painel.previa.avisos : []
-                    delegate: Text {
-                        required property var modelData
-                        text: modelData
-                        textFormat: Text.PlainText
-                        color: Tema.apagado
-                        font.family: Tema.texto
-                        font.pixelSize: 12
-                        elide: Text.ElideMiddle
+                    Titulo {
+                        text: painel.aba === "pendencias" ? "Pendências de identificação XML" : "Trazer cadastros pelo XML"
+                        font.pixelSize: 32
                         Layout.fillWidth: true
                     }
-                }
-            }
+                    Nota {
+                        visible: painel.naImportacao
+                        text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
+                              + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
+                              + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
 
-            // Pendências de identificação XML (Fase 4.D)
-            ColumnLayout {
-                visible: painel.aba === "pendencias"
-                spacing: 10
-                Layout.fillWidth: true
+                    Linha {
+                        visible: painel.naImportacao
+                        spacing: 10
+                        Layout.fillWidth: true
+                        Botao {
+                            text: "Escolher arquivos"
+                            icone: "mais"
+                            tipo: painel.previa ? "secundario" : "principal"
+                            enabled: !painel.trabalhando
+                            onClicked: seletorArquivos.open()
+                        }
+                        Botao {
+                            text: "Escolher uma pasta"
+                            visible: !Tema.celular
+                            tipo: "secundario"
+                            enabled: !painel.trabalhando
+                            onClicked: seletorPasta.open()
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Nota {
+                        visible: painel.naImportacao && !painel.previa && !painel.trabalhando && painel.erro === ""
+                        text: "Dá para escolher vários .xml, um .zip ou .rar com os XMLs dentro ou uma pasta inteira (com subpastas). Também dá para arrastar para cá."
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
 
-                Nota {
-                    visible: painel.pendencias.length === 0
-                    text: "Nenhuma pendência de identificação XML aberta no momento."
-                    font.pixelSize: 15
-                    Layout.fillWidth: true
-                }
-
-                // Lista de pendências abertas
-                ListView {
-                    id: listaPendencias
-                    visible: !painel.pendenciaAberta && painel.pendencias.length > 0
-                    Layout.fillWidth: true
-                    implicitHeight: Math.min(360, contentHeight)
-                    clip: true
-                    spacing: 6
-                    model: painel.pendencias
-                    boundsBehavior: Flickable.StopAtBounds; delegate: Rectangle {
-                        id: cartaoPend
-                        required property var modelData
-                        required property int index
-                        readonly property bool par: (index + 1) % 2 === 0
-                        width: listaPendencias.width
-                        implicitHeight: colPend.implicitHeight + 20
-                        radius: Tema.raio
-                        color: Tema.faixa(par)
-                        palette.window: Tema.superficie(color)
-                        RowLayout {
-                            id: colPend
-                            x: 14
-                            y: 10
-                            width: parent.width - 28
-                            spacing: 12
-                            ColumnLayout {
-                                spacing: 2
-                                Layout.fillWidth: true
-                                Text {
-                                    text: cartaoPend.modelData.descricao || ""
-                                    textFormat: Text.PlainText
-                                    color: Tema.tintaDaFaixa(cartaoPend.par)
-                                    font.family: Tema.texto
-                                    font.weight: Font.Bold
-                                    font.pixelSize: 16
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                Text {
-                                    text: [
-                                        "Cód. forn.: " + (cartaoPend.modelData.codigoFornecedor || "—"),
-                                        cartaoPend.modelData.fornecedorNome || cartaoPend.modelData.fornecedorDocumento,
-                                        cartaoPend.modelData.gtinComercial ? "GTIN: " + cartaoPend.modelData.gtinComercial + " (" + cartaoPend.modelData.origemComercial + ")" : "SEM GTIN"
-                                    ].filter(x => !!x).join("  ·  ")
-                                    textFormat: Text.PlainText
-                                    color: Tema.tintaSuaveDaFaixa(cartaoPend.par)
-                                    font.family: Tema.texto
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                Text {
-                                    text: cartaoPend.modelData.motivoTexto || ""
-                                    textFormat: Text.PlainText
-                                    // H04 (7.2): o vermelho da faixa (claro na faixa escura do roxo).
-                                    color: Tema.vermelhoDaFaixa(cartaoPend.par)
-                                    font.family: Tema.texto
-                                    font.pixelSize: 12
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                }
-                            }
-                            Botao {
-                                text: "Abrir pendência"
-                                tipo: "secundario"
-                                Layout.alignment: Qt.AlignVCenter
-                                onClicked: painel.abrirPendencia(cartaoPend.modelData)
-                            }
+                    Text {
+                        visible: painel.naImportacao && painel.trabalhando
+                        text: "Lendo as notas..."
+                        color: Tema.tintaSuave
+                        font.family: Tema.serifa
+                        font.italic: true
+                        font.pixelSize: 16
+                    }
+                    TextoErro { text: painel.erro; Layout.fillWidth: true }
+                    // A07: a peça escolhida está desativada; dá para abrir a ficha e reativá-la.
+                    Botao {
+                        visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
+                        text: "Abrir a peça"
+                        tipo: "secundario"
+                        // Fecha o painel antes: a ficha abre por baixo dele e precisa ficar à vista
+                        // (é lá que a peça é reativada); a pendência continua aberta.
+                        onClicked: {
+                            const id = painel.pecaDesativadaId
+                            painel.pecaDesativadaId = ""
+                            painel.close()
+                            painel.janela.abrir("TelaPeca", { produtoId: id })
                         }
                     }
-                }
+                    // Os arquivos já escolhidos (continuam escolhidos quando a leitura
+                    // não deu: dá para tentar de novo sem escolher outra vez).
+                    Linha {
+                        visible: painel.naImportacao && painel.arquivos.length > 0 && !painel.previa && !painel.trabalhando
+                        spacing: 10
+                        Layout.fillWidth: true
+                        Nota {
+                            text: painel.texto(painel.arquivos.length, "arquivo escolhido", "arquivos escolhidos") + ": "
+                                  + painel.arquivos.map(a => a.split(/[\\/]/).pop()).join(", ")
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                            maximumLineCount: 2
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            text: "Tentar de novo"
+                            tipo: "secundario"
+                            onClicked: painel.lerArquivos()
+                        }
+                    }
+                    Nota {
+                        visible: painel.naImportacao && painel.avisoArquivos !== ""
+                        text: painel.avisoArquivos
+                        color: Tema.vermelho
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
 
-                // Detalhe da pendência aberta com todos os dados preservados do XML
-                Rectangle {
-                    visible: !!painel.pendenciaAberta
-                    Layout.fillWidth: true
-                    implicitHeight: detCol.implicitHeight + 28
-                    radius: Tema.raio
-                    color: Tema.pergaminho
-                    palette.window: Tema.superficie(color)
+                    // Prévia
                     ColumnLayout {
-                        id: detCol
-                        x: 16
-                        y: 14
-                        width: parent.width - 32
+                        visible: painel.naImportacao && !!painel.previa && !painel.trabalhando
                         spacing: 8
-                        Text {
-                            text: painel.pendenciaAberta ? painel.pendenciaAberta.descricao : ""
-                            textFormat: Text.PlainText
-                            color: Tema.tintaNo(Tema.pergaminho)
-                            font.family: Tema.titulo
-                            font.weight: Font.Bold
-                            font.pixelSize: 20
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            visible: !!painel.pendenciaAberta && !!painel.pendenciaAberta.motivoTexto
-                            text: painel.pendenciaAberta ? painel.pendenciaAberta.motivoTexto : ""
-                            textFormat: Text.PlainText
-                            color: Tema.vermelho
-                            font.family: Tema.texto
-                            font.weight: Font.DemiBold
-                            font.pixelSize: 13
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            text: !painel.pendenciaAberta ? "" : [
-                                "Fornecedor: " + (painel.pendenciaAberta.fornecedorNome || "—") + " · CNPJ " + (painel.pendenciaAberta.fornecedorDocumento || "—"),
-                                "NF-e: " + (painel.pendenciaAberta.numeroNfe || "—")
-                                    + (painel.pendenciaAberta.emissaoNfe ? " · emissão " + painel.pendenciaAberta.emissaoNfe : "")
-                                    + (painel.pendenciaAberta.chaveNfe ? " · chave " + painel.pendenciaAberta.chaveNfe : ""),
-                                "Cód. fornecedor (cProd): " + (painel.pendenciaAberta.codigoFornecedor || "—"),
-                                "GTIN comercial: " + (painel.pendenciaAberta.gtinComercial
-                                    ? painel.pendenciaAberta.gtinComercial + " (" + painel.pendenciaAberta.origemComercial + ")"
-                                    : "SEM GTIN")
-                                    + "  ·  GTIN tributável: " + (painel.pendenciaAberta.gtinTributavel
-                                    ? painel.pendenciaAberta.gtinTributavel + " (" + painel.pendenciaAberta.origemTributavel + ")"
-                                    : "SEM GTIN"),
-                                "NCM: " + (painel.pendenciaAberta.ncm || "—")
-                                    + (painel.pendenciaAberta.cest ? " · CEST: " + painel.pendenciaAberta.cest : "")
-                                    + (painel.pendenciaAberta.cfop ? " · CFOP: " + painel.pendenciaAberta.cfop : ""),
-                                "Quantidade: " + (painel.pendenciaAberta.quantidade || "1") + " " + (painel.pendenciaAberta.unidade || "UN")
-                                    + "  ·  Valor unitário: R$ " + (painel.pendenciaAberta.valorUnitario || "0,00")
-                            ].join("\n")
-                            textFormat: Text.PlainText
-                            color: Tema.tintaNo(Tema.pergaminho)
-                            font.family: Tema.texto
-                            font.pixelSize: 13
-                            lineHeight: 1.25
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
+                        Layout.fillWidth: true
 
                         Rotulo {
-                            visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
-                            text: "Peças candidatas no cadastro"
-                            color: Tema.roxo ? Tema.apagadoNo(Tema.pergaminho) : Tema.apagado
+                            text: painel.previa ? painel.texto(painel.previa.notas, "nota lida", "notas lidas")
+                                                  + "  ·  " + painel.previa.notasLoja + " da loja  ·  " + painel.previa.notasFornecedor + " de fornecedores"
+                                                  + (painel.previa.ignorados > 0 ? "  ·  " + painel.texto(painel.previa.ignorados, "arquivo ignorado", "arquivos ignorados") : "") : ""
+                            Layout.fillWidth: true
                         }
 
-                        ListView {
-                            id: listaCands
-                            visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
+                        Repeater {
+                            model: painel.previa ? [
+                                { chave: "qClientes", titulo: "Clientes", novos: painel.previa.clientesNovos, ja: painel.previa.clientesJa,
+                                  exemplos: painel.previa.exemplosClientes, cor: Tema.verde },
+                                { chave: "qFornecedores", titulo: "Fornecedores", novos: painel.previa.fornecedoresNovos, ja: painel.previa.fornecedoresJa,
+                                  mudam: painel.cat("fornecedor.ja_sem_papel"), exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul,
+                                  // FI-2: quem já está cadastrado (como cliente) passa a ser fornecedor.
+                                  extra: painel.cat("fornecedor.ja_sem_papel") > 0
+                                         ? painel.texto(painel.cat("fornecedor.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
+                                           + " a ser fornecedor" : "",
+                                  // FI-1 (a): travada enquanto "Peças das notas de fornecedores" estiver marcada.
+                                  presa: painel.qPecasFornecedor,
+                                  porque: "Marcada junto com \"Peças das notas de fornecedores\": as peças ficam ligadas ao fornecedor, que é cadastrado com elas." },
+                                { chave: "qPecasLoja", titulo: "Peças das notas da loja", novos: painel.previa.pecasLojaNovas, ja: -1,
+                                  mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
+                                { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
+                                  mudam: painel.cat("forn.ja_pelo_gtin_liga") + painel.cat("forn.ja_pelo_vinculo_gtin_novo"),
+                                  exemplos: [], cor: Tema.papel }
+                            ] : []
+                            delegate: Rectangle {
+                                id: linha
+                                required property var modelData
+                                visible: modelData.novos > 0 || modelData.ja > 0 || (modelData.mudam || 0) > 0
+                                Layout.fillWidth: true
+                                implicitHeight: coluna.implicitHeight + 20
+                                radius: Tema.raio
+                                color: modelData.novos > 0 ? modelData.cor : Tema.vela(0.35)
+                                palette.window: Tema.superficie(color)
+                                ColumnLayout {
+                                    id: coluna
+                                    x: 14
+                                    y: 10
+                                    width: parent.width - 28
+                                    spacing: 2
+                                    RowLayout {
+                                        spacing: 6
+                                        Layout.fillWidth: true
+                                        Marcar {
+                                            visible: linha.modelData.novos > 0 || (linha.modelData.mudam || 0) > 0 || !!linha.modelData.presa
+                                            enabled: !linha.modelData.presa
+                                            checked: painel[linha.modelData.chave]
+                                            onToggled: {
+                                                painel[linha.modelData.chave] = checked
+                                                // FI-1 (a): as peças do fornecedor levam o fornecedor junto.
+                                                if (linha.modelData.chave === "qPecasFornecedor" && checked)
+                                                    painel.qFornecedores = true
+                                                painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
+                                                                    qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
+                                                painel.refazerPrevia(false)
+                                            }
+                                            leftPadding: 0
+                                        }
+                                        Text {
+                                            text: linha.modelData.titulo
+                                            textFormat: Text.PlainText
+                                            color: Tema.tinta
+                                            font.family: Tema.titulo
+                                            font.weight: Font.Bold
+                                            font.pixelSize: 20
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.WordWrap
+                                        }
+                                        Text {
+                                            text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, "novo", "novos") : "nada novo"
+                                            textFormat: Text.PlainText
+                                            color: linha.modelData.novos > 0 ? Tema.verdeEscuro : Tema.apagado
+                                            font.family: Tema.texto
+                                            font.weight: Font.Bold
+                                            font.pixelSize: 15
+                                        }
+                                    }
+                                    Text {
+                                        visible: text !== ""
+                                        text: [linha.modelData.ja > 0 ? linha.modelData.ja + " já cadastrados" : "",
+                                               linha.modelData.exemplos.length > 0 ? linha.modelData.exemplos.join(", ") + (linha.modelData.novos > linha.modelData.exemplos.length ? "..." : "") : ""]
+                                              .filter(x => !!x).join("  ·  ")
+                                        textFormat: Text.PlainText
+                                        color: Tema.tintaSuave
+                                        font.family: Tema.serifa
+                                        font.italic: true
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        visible: text !== ""
+                                        text: [linha.modelData.extra || "", linha.modelData.presa ? linha.modelData.porque : ""]
+                                              .filter(x => !!x).join("  ·  ")
+                                        textFormat: Text.PlainText
+                                        color: Tema.tinta
+                                        font.family: Tema.texto
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
+
+                        // A03b e O-3 (com as opções marcadas): o que muda no que já existe
+                        // e o que fica para identificar depois.
+                        Nota {
+                            visible: !!painel.previa && painel.previa.pecasQueMudam > 0
+                            text: painel.previa ? "Peças que já existem e mudam (GTIN ou código do fornecedor): " + painel.previa.pecasQueMudam
+                                  + (painel.previa.exemplosPecasQueMudam.length > 0
+                                     ? " — " + painel.previa.exemplosPecasQueMudam.join(", ")
+                                       + (painel.previa.pecasQueMudam > painel.previa.exemplosPecasQueMudam.length ? "..." : "")
+                                     : "") : ""
+                            font.pixelSize: 13
                             Layout.fillWidth: true
-                            implicitHeight: Math.min(180, contentHeight)
+                        }
+                        Nota {
+                            visible: !!painel.previa && painel.previa.vaoParaPendencias > 0
+                            text: painel.previa ? "Vão para pendências: " + painel.previa.vaoParaPendencias + " — "
+                                  + painel.previa.pendenciasPorMotivo.map(m => m.texto + ": " + m.quantidade).join("; ") : ""
+                            font.pixelSize: 13
+                            Layout.fillWidth: true
+                        }
+                        Nota {
+                            visible: !!painel.previa && painel.previa.pecasLojaNovas > 0 && painel.previa.pecasFornecedorNovas > 0
+                            text: "Peça sem código de barras pode ficar repetida (uma com o código da loja, outra do fornecedor). Se for migrar de outro sistema, prefira só as notas da loja."
+                            font.pixelSize: 13
+                            Layout.fillWidth: true
+                        }
+                        Repeater {
+                            model: painel.previa ? painel.previa.avisos : []
+                            delegate: Text {
+                                required property var modelData
+                                text: modelData
+                                textFormat: Text.PlainText
+                                color: Tema.apagado
+                                font.family: Tema.texto
+                                font.pixelSize: 12
+                                // T060: o aviso inteiro, em mais linhas (cortado no meio, não dava para ler o motivo).
+                                wrapMode: Text.Wrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+
+                    // Pendências de identificação XML (Fase 4.D)
+                    ColumnLayout {
+                        visible: painel.aba === "pendencias"
+                        spacing: 10
+                        Layout.fillWidth: true
+
+                        Nota {
+                            visible: painel.pendencias.length === 0
+                            text: "Nenhuma pendência de identificação XML aberta no momento."
+                            font.pixelSize: 15
+                            Layout.fillWidth: true
+                        }
+
+                        // Lista de pendências abertas
+                        ListView {
+                            id: listaPendencias
+                            visible: !painel.pendenciaAberta && painel.pendencias.length > 0
+                            Layout.fillWidth: true
+                            implicitHeight: Math.min(360, contentHeight)
                             clip: true
-                            spacing: 4
-                            model: painel.pendenciaAberta ? (painel.pendenciaAberta.candidatos || []) : []
+                            spacing: 6
+                            model: painel.pendencias
                             boundsBehavior: Flickable.StopAtBounds; delegate: Rectangle {
-                                id: candItem
+                                id: cartaoPend
                                 required property var modelData
                                 required property int index
                                 readonly property bool par: (index + 1) % 2 === 0
-                                width: listaCands.width
-                                implicitHeight: candLinha.implicitHeight + 14
-                                radius: Tema.raioCampo
+                                width: listaPendencias.width
+                                implicitHeight: colPend.implicitHeight + 20
+                                radius: Tema.raio
                                 color: Tema.faixa(par)
                                 palette.window: Tema.superficie(color)
                                 RowLayout {
-                                    id: candLinha
-                                    x: 10
-                                    y: 7
-                                    width: parent.width - 20
-                                    spacing: 10
+                                    id: colPend
+                                    x: 14
+                                    y: 10
+                                    width: parent.width - 28
+                                    spacing: 12
                                     ColumnLayout {
-                                        spacing: 1
+                                        spacing: 2
                                         Layout.fillWidth: true
                                         Text {
-                                            text: candItem.modelData.nome || ""
+                                            text: cartaoPend.modelData.descricao || ""
                                             textFormat: Text.PlainText
-                                            color: Tema.tintaDaFaixa(candItem.par)
+                                            color: Tema.tintaDaFaixa(cartaoPend.par)
                                             font.family: Tema.texto
                                             font.weight: Font.Bold
-                                            font.pixelSize: 14
+                                            font.pixelSize: 16
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
                                         }
                                         Text {
                                             text: [
-                                                "Interno: " + (candItem.modelData.codigo || "a definir"),
-                                                candItem.modelData.marca,
-                                                candItem.modelData.codigoBarras ? "GTIN: " + candItem.modelData.codigoBarras : ""
+                                                "Cód. forn.: " + (cartaoPend.modelData.codigoFornecedor || "—"),
+                                                cartaoPend.modelData.fornecedorNome || cartaoPend.modelData.fornecedorDocumento,
+                                                cartaoPend.modelData.gtinComercial ? "GTIN: " + cartaoPend.modelData.gtinComercial + " (" + cartaoPend.modelData.origemComercial + ")" : "SEM GTIN"
                                             ].filter(x => !!x).join("  ·  ")
                                             textFormat: Text.PlainText
-                                            color: Tema.tintaSuaveDaFaixa(candItem.par)
+                                            color: Tema.tintaSuaveDaFaixa(cartaoPend.par)
+                                            font.family: Tema.texto
+                                            font.pixelSize: 13
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                        Text {
+                                            text: cartaoPend.modelData.motivoTexto || ""
+                                            textFormat: Text.PlainText
+                                            // H04 (7.2): o vermelho da faixa (claro na faixa escura do roxo).
+                                            color: Tema.vermelhoDaFaixa(cartaoPend.par)
                                             font.family: Tema.texto
                                             font.pixelSize: 12
-                                            elide: Text.ElideRight
+                                            wrapMode: Text.WordWrap
                                             Layout.fillWidth: true
                                         }
                                     }
                                     Botao {
-                                        text: "Associar a esta peça"
-                                        tipo: "principal"
-                                        onClicked: painel.resolverLigando(candItem.modelData.id)
+                                        text: "Abrir pendência"
+                                        tipo: "secundario"
+                                        Layout.alignment: Qt.AlignVCenter
+                                        onClicked: painel.abrirPendencia(cartaoPend.modelData)
                                     }
                                 }
                             }
                         }
 
-                        RowLayout {
-                            spacing: 10
+                        // Detalhe da pendência aberta com todos os dados preservados do XML
+                        Rectangle {
+                            visible: !!painel.pendenciaAberta
                             Layout.fillWidth: true
-                            Layout.topMargin: 4
-                            // T058: o "Todas as pendências" saiu; a seta e o Esc
-                            // voltam à lista (voltarUmPasso, lá em cima).
-                            Item { Layout.fillWidth: true }
-                            Botao {
-                                text: "Escolher peça existente"
-                                tipo: "secundario"
-                                onClicked: escolherPecaParaPendencia.abrirCom(painel.pendenciaAberta ? painel.pendenciaAberta.descricao : "")
-                            }
-                            Botao {
-                                text: "Cadastrar como peça nova"
-                                icone: "mais"
-                                tipo: "principal"
-                                onClicked: painel.resolverComoNova()
+                            implicitHeight: detCol.implicitHeight + 28
+                            radius: Tema.raio
+                            color: Tema.pergaminho
+                            palette.window: Tema.superficie(color)
+                            ColumnLayout {
+                                id: detCol
+                                x: 16
+                                y: 14
+                                width: parent.width - 32
+                                spacing: 8
+                                Text {
+                                    text: painel.pendenciaAberta ? painel.pendenciaAberta.descricao : ""
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaNo(Tema.pergaminho)
+                                    font.family: Tema.titulo
+                                    font.weight: Font.Bold
+                                    font.pixelSize: 20
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    visible: !!painel.pendenciaAberta && !!painel.pendenciaAberta.motivoTexto
+                                    text: painel.pendenciaAberta ? painel.pendenciaAberta.motivoTexto : ""
+                                    textFormat: Text.PlainText
+                                    color: Tema.vermelho
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 13
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: !painel.pendenciaAberta ? "" : [
+                                        "Fornecedor: " + (painel.pendenciaAberta.fornecedorNome || "—") + " · CNPJ " + (painel.pendenciaAberta.fornecedorDocumento || "—"),
+                                        "NF-e: " + (painel.pendenciaAberta.numeroNfe || "—")
+                                            + (painel.pendenciaAberta.emissaoNfe ? " · emissão " + painel.pendenciaAberta.emissaoNfe : "")
+                                            + (painel.pendenciaAberta.chaveNfe ? " · chave " + painel.pendenciaAberta.chaveNfe : ""),
+                                        "Cód. fornecedor (cProd): " + (painel.pendenciaAberta.codigoFornecedor || "—"),
+                                        "GTIN comercial: " + (painel.pendenciaAberta.gtinComercial
+                                            ? painel.pendenciaAberta.gtinComercial + " (" + painel.pendenciaAberta.origemComercial + ")"
+                                            : "SEM GTIN")
+                                            + "  ·  GTIN tributável: " + (painel.pendenciaAberta.gtinTributavel
+                                            ? painel.pendenciaAberta.gtinTributavel + " (" + painel.pendenciaAberta.origemTributavel + ")"
+                                            : "SEM GTIN"),
+                                        "NCM: " + (painel.pendenciaAberta.ncm || "—")
+                                            + (painel.pendenciaAberta.cest ? " · CEST: " + painel.pendenciaAberta.cest : "")
+                                            + (painel.pendenciaAberta.cfop ? " · CFOP: " + painel.pendenciaAberta.cfop : ""),
+                                        "Quantidade: " + (painel.pendenciaAberta.quantidade || "1") + " " + (painel.pendenciaAberta.unidade || "UN")
+                                            + "  ·  Valor unitário: R$ " + (painel.pendenciaAberta.valorUnitario || "0,00")
+                                    ].join("\n")
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaNo(Tema.pergaminho)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 13
+                                    lineHeight: 1.25
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+
+                                Rotulo {
+                                    visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
+                                    text: "Peças candidatas no cadastro"
+                                    color: Tema.roxo ? Tema.apagadoNo(Tema.pergaminho) : Tema.apagado
+                                }
+
+                                ListView {
+                                    id: listaCands
+                                    visible: !!painel.pendenciaAberta && (painel.pendenciaAberta.candidatos || []).length > 0
+                                    Layout.fillWidth: true
+                                    implicitHeight: Math.min(180, contentHeight)
+                                    clip: true
+                                    spacing: 4
+                                    model: painel.pendenciaAberta ? (painel.pendenciaAberta.candidatos || []) : []
+                                    boundsBehavior: Flickable.StopAtBounds; delegate: Rectangle {
+                                        id: candItem
+                                        required property var modelData
+                                        required property int index
+                                        readonly property bool par: (index + 1) % 2 === 0
+                                        width: listaCands.width
+                                        implicitHeight: candLinha.implicitHeight + 14
+                                        radius: Tema.raioCampo
+                                        color: Tema.faixa(par)
+                                        palette.window: Tema.superficie(color)
+                                        RowLayout {
+                                            id: candLinha
+                                            x: 10
+                                            y: 7
+                                            width: parent.width - 20
+                                            spacing: 10
+                                            ColumnLayout {
+                                                spacing: 1
+                                                Layout.fillWidth: true
+                                                Text {
+                                                    text: candItem.modelData.nome || ""
+                                                    textFormat: Text.PlainText
+                                                    color: Tema.tintaDaFaixa(candItem.par)
+                                                    font.family: Tema.texto
+                                                    font.weight: Font.Bold
+                                                    font.pixelSize: 14
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
+                                                }
+                                                Text {
+                                                    text: [
+                                                        "Interno: " + (candItem.modelData.codigo || "a definir"),
+                                                        candItem.modelData.marca,
+                                                        candItem.modelData.codigoBarras ? "GTIN: " + candItem.modelData.codigoBarras : ""
+                                                    ].filter(x => !!x).join("  ·  ")
+                                                    textFormat: Text.PlainText
+                                                    color: Tema.tintaSuaveDaFaixa(candItem.par)
+                                                    font.family: Tema.texto
+                                                    font.pixelSize: 12
+                                                    elide: Text.ElideRight
+                                                    Layout.fillWidth: true
+                                                }
+                                            }
+                                            Botao {
+                                                text: "Associar a esta peça"
+                                                tipo: "principal"
+                                                onClicked: painel.resolverLigando(candItem.modelData.id)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    spacing: 10
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    // T058: o "Todas as pendências" saiu; a seta e o Esc
+                                    // voltam à lista (voltarUmPasso, lá em cima).
+                                    Item { Layout.fillWidth: true }
+                                    Botao {
+                                        text: "Escolher peça existente"
+                                        tipo: "secundario"
+                                        onClicked: escolherPecaParaPendencia.abrirCom(painel.pendenciaAberta ? painel.pendenciaAberta.descricao : "")
+                                    }
+                                    Botao {
+                                        text: "Cadastrar como peça nova"
+                                        icone: "mais"
+                                        tipo: "principal"
+                                        onClicked: painel.resolverComoNova()
+                                    }
+                                }
                             }
                         }
                     }
