@@ -3026,6 +3026,15 @@ pub(crate) mod testes {
         let outra: [u8; 32] = aleatorio().unwrap();
         config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
         assert!(aviso(&b.conn), "as cópias antigas não estão sendo apagadas, e o Início não avisa");
+        // T105 (N12 da 4ª conferência): se a chave foi trocada em outro caixa, não basta qualquer gerente: o texto
+        // diz o que fazer se o aviso continuar.
+        let texto = crate::avisos::do_dia(&b.conn)
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == "backup_chave_nao_confirmada")
+            .map(|a| a.descricao)
+            .unwrap_or_default();
+        assert!(texto.contains("Se o aviso continuar"), "o aviso não diz o que fazer se continuar: {texto}");
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }

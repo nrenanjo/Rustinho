@@ -3150,6 +3150,27 @@ mod testes {
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
+    /// T104 (N11 da 4ª conferência, sobre a T101): o resumo de NF-e (o resNFe, comum quando se baixa da SEFAZ sem a
+    /// ciência) entra na conta dos eventos e CT-e; o aviso tem de dizer que pode ser um resumo, e que dele se baixa o
+    /// XML completo (antes dizia "era um evento ou CT-e, não é uma nota", falso para o resumo).
+    #[test]
+    fn previa_fala_do_resumo_de_nfe() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t104-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        std::fs::write(pasta.join("resumo.xml"), "<resNFe><chNFe>1</chNFe></resNFe>").unwrap();
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        assert!(
+            p.avisos.iter().any(|a| a.contains("resumo") && a.contains("baixe o XML completo")),
+            "o aviso não fala do resumo: {:?}",
+            p.avisos
+        );
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     /// T080 (OPUS-C-2 = AUD-C-5 da auditoria da 0.9.18-dev.3.3.3): o arquivo que nem chegou a ser lido (um .zip
     /// estragado, pacote grande demais, lote cortado) aparecia como "O arquivo não é um XML válido", e o motivo
     /// verdadeiro sumia. Agora o aviso traz o motivo de quem leu os arquivos.
