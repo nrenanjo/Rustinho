@@ -3227,6 +3227,25 @@ mod testes {
             .unwrap();
     }
 
+    /// T089 (OPUS-A-7 = AUD-A-7 da auditoria da 0.9.18-dev.3.3.3): "Entrar numa loja" grava a troca ligada, a
+    /// senha, os endereços, o nome do caixa e a marca da junção. Sem transação, uma falha no meio deixava a troca
+    /// ligada com a senha da outra loja e sem a marca (o "Voltar" não desfazia, e dava para criar uma loja nova
+    /// por cima: o furo da FALHA-01). Agora é tudo ou nada.
+    #[test]
+    fn t089_entrar_numa_loja_e_tudo_ou_nada() {
+        let mut s = Servico::em_memoria().unwrap();
+        falhar_ao_gravar(&s, "config", "NEW.chave = 'caixa_nome'");
+        let r = chamar(
+            &mut s,
+            "sync_juntar",
+            r#"{"caixa":"Caixa 2","senha":"rede-da-outra-loja","enderecos":"192.168.0.10"}"#,
+        );
+        assert_eq!(r["ok"], false, "{r}");
+        let c = &s.banco.conn;
+        assert_ne!(config::ler(c, "sync_ligado").unwrap().as_deref(), Some("1"), "a troca ficou ligada pela metade");
+        assert!(config::ler(c, "sync_senha").unwrap().unwrap_or_default().is_empty(), "a senha da outra loja ficou");
+    }
+
     /// M-04 (auditoria da 0.9.14, O-8): trocar a senha e o histórico disso
     /// são uma coisa só — se o histórico não grava, a senha não muda.
     #[test]
