@@ -230,6 +230,8 @@ fn gerente_conferido_dentro(
     memoria: Option<[u8; 32]>,
 ) -> Resultado<Option<[u8; 32]>> {
     let publica = publica_da_loja(conn)?;
+    #[cfg(test)]
+    gancho_de_teste::depois_de_ler();
     let atual: Option<String> = conn
         .query_row("SELECT backup_acesso FROM usuario WHERE id = ?1", [usuario_id], |l| l.get(0))
         .optional()?
@@ -1949,6 +1951,23 @@ fn marcar_banco_que_entra(db: &Path, troca: &str) -> Resultado<()> {
 /// Só nos testes: a restauração "cai" na etapa pedida (sai na hora, sem
 /// arrumar nada, como numa falta de luz) ou falha ao terminar; e se a troca
 /// de dados estava parada na hora de trocar o banco.
+/// Só nos testes (T103): o que roda logo depois da primeira leitura de `gerente_conferido` (outra conexão
+/// gravando no meio, como a troca de dados).
+#[cfg(test)]
+pub(crate) mod gancho_de_teste {
+    use std::cell::RefCell;
+    thread_local! {
+        pub static DEPOIS_DE_LER: RefCell<Option<Box<dyn FnMut()>>> = RefCell::new(None);
+    }
+    pub fn depois_de_ler() {
+        DEPOIS_DE_LER.with(|g| {
+            if let Some(f) = g.borrow_mut().as_mut() {
+                f()
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod queda_de_teste {
     use std::cell::Cell;
@@ -2996,6 +3015,42 @@ pub(crate) mod testes {
         let outra: [u8; 32] = aleatorio().unwrap();
         config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
         assert!(aviso(&b.conn), "as cópias antigas não estão sendo apagadas, e o Início não avisa");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// T103 (N10 da 4ª conferência, sobre a T098): no `entrar` e no aperto da senha (sem transação de quem
+    /// chama), outra conexão (a troca de dados) gravando entre a leitura e a primeira gravação fazia o
+    /// SAVEPOINT (transação adiada) falhar na hora (SQLITE_BUSY_SNAPSHOT), e o login do gerente dava erro de banco
+    /// com a senha certa. Agora, fora de uma transação, a chave dos backups pega a vez de gravar logo no começo.
+    #[test]
+    fn a_troca_de_dados_gravando_no_meio_nao_derruba_o_login_do_gerente() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("login-no-meio");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        // Como depois da atualização: a chave ainda não confirmada neste computador (o login vai gravar).
+        b.conn.execute("DELETE FROM config WHERE chave = ?1", [PUBLICA_CONFIRMADA]).unwrap();
+        // A outra conexão, do próprio Rustinho (com as funções dos gatilhos), como a da troca de dados.
+        let outra = Banco::abrir(&caminho).unwrap();
+        outra.conn.busy_timeout(std::time::Duration::from_millis(200)).unwrap();
+        let gravou = std::rc::Rc::new(std::cell::Cell::new(false));
+        let g2 = gravou.clone();
+        gancho_de_teste::DEPOIS_DE_LER.with(|g| {
+            *g.borrow_mut() = Some(Box::new(move || {
+                g2.set(config::gravar(&outra.conn, "teste_t103", "1").is_ok());
+            }));
+        });
+        let r = gerente_conferido(&b.conn, &ana.id, "1111", None);
+        gancho_de_teste::DEPOIS_DE_LER.with(|g| *g.borrow_mut() = None);
+        assert!(r.as_ref().is_ok_and(|m| m.is_some()), "o login do gerente deu erro com a senha certa: {:?}", r.err());
+        // A outra conexão gravou no meio (sem isso o teste não provaria nada) ou esperou a vez (depois da correção,
+        // o login segura a vez de gravar; aí a outra espera e pode desistir no prazo curto do teste).
+        let _ = gravou.get();
+        assert!(chave_confirmada(&b.conn).unwrap(), "a chave não ficou confirmada");
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
