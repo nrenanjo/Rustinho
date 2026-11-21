@@ -341,8 +341,17 @@ pub fn alteracoes_desde(conn: &Connection, desde: i64, limite: i64) -> Resultado
         .prepare_cached(&format!("SELECT {COLUNAS_ALTERACAO} FROM alteracao WHERE seq > ?1 ORDER BY seq LIMIT ?2"))?;
     let mut lista: Vec<Alteracao> =
         c.query_map(params![desde, limite + 1], ler_alteracao)?.collect::<Result<_, _>>()?;
-    let tem_mais = lista.len() as i64 > limite;
+    let mut tem_mais = lista.len() as i64 > limite;
     lista.truncate(limite.max(0) as usize);
+    // T088 (OPUS-D-7): também pelo tamanho; o primeiro registro vai sempre.
+    let mut soma = 0usize;
+    if let Some(corte) = lista.iter().position(|a| {
+        soma += a.dados.as_ref().map_or(0, |d| d.len()) + a.historia.as_ref().map_or(0, |h| h.len());
+        soma > BYTES_DO_LOTE
+    }) {
+        lista.truncate(corte.max(1));
+        tem_mais = true;
+    }
     if tem_mais {
         let ate = sem_operacao_pela_metade(conn, &lista)?;
         lista.truncate(ate);

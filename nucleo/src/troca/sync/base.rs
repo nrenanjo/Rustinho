@@ -16,6 +16,10 @@ pub const PORTA_UDP: u16 = 47811;
 pub(super) const LOTE: i64 = 200;
 /// Resposta com um lote de alterações.
 pub(super) const TAMANHO_MAXIMO: usize = 64 * 1024 * 1024;
+/// T088 (OPUS-D-7): o lote também para neste tamanho de dados (os registros grandes, como o XML de uma compra,
+/// vão em mais respostas; uma resposta nunca chega perto do `TAMANHO_MAXIMO`, que quem recebe recusa). Um
+/// registro sozinho maior vai sozinho.
+pub(super) const BYTES_DO_LOTE: usize = 16 * 1024 * 1024;
 /// Pedido de outro caixa (é sempre pequeno).
 pub(super) const TAMANHO_PEDIDO: usize = 64 * 1024;
 /// Conexões atendidas ao mesmo tempo (as outras esperam a próxima rodada).
