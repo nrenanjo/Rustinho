@@ -500,8 +500,9 @@ FocusScope {
         }
         onClosed: {
             tela.atualizarPendenciasXml()
+            // T083 (OPUS-E-12): como ao voltar da ficha (T067), o texto fica selecionado e a leitura seguinte o troca.
             if (tela.StackView.status === StackView.Active)
-                busca.focarCursor()
+                busca.focar()
         }
     }
 }
