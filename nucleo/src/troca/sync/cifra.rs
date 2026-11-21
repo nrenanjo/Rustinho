@@ -176,7 +176,11 @@ pub(super) fn decifrar(
     if sal == chaves.sal {
         return abrir(&chaves.propria).ok_or(senha_errada);
     }
-    let id: [u8; 32] = Sha256::digest(chaves.senha.as_bytes()).into();
+    // T078 (OPUS-D-6): a chave do outro caixa sai do mesmo jeito que a própria (`derivar`): no portátil, com a
+    // marca dele. Antes, só a própria levava a marca, e dois portáteis nunca se entendiam.
+    let senha = crate::portatil::senha_da_rede(&chaves.senha);
+    let senha = senha.as_ref();
+    let id: [u8; 32] = Sha256::digest(senha.as_bytes()).into();
     let guardada = conhecidos().lock().unwrap_or_else(|e| e.into_inner()).get(&(id, sal)).copied();
     if let Some(k) = guardada {
         return abrir(&k).ok_or(senha_errada);
@@ -186,7 +190,7 @@ pub(super) fn decifrar(
     }
     let mut k = [0u8; 32];
     crate::usuarios::argon2()
-        .hash_password_into(chaves.senha.as_bytes(), &sal, &mut k)
+        .hash_password_into(senha.as_bytes(), &sal, &mut k)
         .map_err(|_| "chave inválida")?;
     let claro = abrir(&k).ok_or(senha_errada)?;
     // Só guarda depois de conferir: sal inventado nunca ocupa lugar.
