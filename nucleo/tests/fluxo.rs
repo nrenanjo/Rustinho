@@ -375,7 +375,8 @@ fn compra_por_zip_avisa_da_nota_estragada() {
     }
     let r = ok(&mut s, "compra_importar", json!({ "caminho": zip_caminho.display().to_string() }));
     assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
-    let erros: Vec<String> = r["erros"].as_array().unwrap().iter().map(|e| e.as_str().unwrap_or("").to_string()).collect();
+    let erros: Vec<String> =
+        r["erros"].as_array().unwrap().iter().map(|e| e.as_str().unwrap_or("").to_string()).collect();
     assert_eq!(erros.len(), 1, "a nota cortada sumiu sem aviso (ou o evento virou erro): {r}");
     assert!(erros[0].contains("cortada.xml"), "{r}");
     std::fs::remove_dir_all(&pasta).ok();

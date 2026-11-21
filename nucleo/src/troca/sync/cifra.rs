@@ -189,9 +189,7 @@ pub(super) fn decifrar(
         return Err("Muitos pedidos de outros aparelhos agora; a troca de dados tenta de novo em instantes.");
     }
     let mut k = [0u8; 32];
-    crate::usuarios::argon2()
-        .hash_password_into(senha.as_bytes(), &sal, &mut k)
-        .map_err(|_| "chave inválida")?;
+    crate::usuarios::argon2().hash_password_into(senha.as_bytes(), &sal, &mut k).map_err(|_| "chave inválida")?;
     let claro = abrir(&k).ok_or(senha_errada)?;
     // Só guarda depois de conferir: sal inventado nunca ocupa lugar.
     let mut c = conhecidos().lock().unwrap_or_else(|e| e.into_inner());
