@@ -1097,7 +1097,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         .secao("backup");
         a.descricao = "Nenhum gerente confirmou ainda, neste computador, a chave que tranca os backups. Para não \
              perder a única cópia que abre, o Rustinho guarda todas as antigas. Basta um gerente digitar a senha \
-             dele aqui (para entrar ou para liberar uma tela)."
+             dele aqui (para entrar ou para liberar uma tela). Se o aviso continuar, a chave foi trocada em outro \
+             caixa: entre aqui com um gerente que entrou lá depois da troca."
             .into();
         avisos.push(a);
     }

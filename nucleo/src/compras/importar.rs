@@ -333,10 +333,17 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         ));
     }
     if lido.eventos_e_cte > 0 {
+        // T104 (N11 da 4ª conferência): o resumo de NF-e (resNFe) também cai aqui.
         lido.avisos.push(if lido.eventos_e_cte == 1 {
-            "1 arquivo era um evento ou CT-e (não é uma nota) e ficou de fora.".to_string()
+            "1 arquivo era um evento, um CT-e ou um resumo de NF-e (não é a nota completa) e ficou de fora; de um \
+             resumo, baixe o XML completo da NF-e."
+                .to_string()
         } else {
-            format!("{} arquivos eram eventos ou CT-e (não são notas) e ficaram de fora.", lido.eventos_e_cte)
+            format!(
+                "{} arquivos eram eventos, CT-e ou resumos de NF-e (não são a nota completa) e ficaram de fora; dos \
+                 resumos, baixe o XML completo da NF-e.",
+                lido.eventos_e_cte
+            )
         });
     }
     let avisos = lido.avisos_repetidos();
@@ -3146,7 +3153,7 @@ mod testes {
         std::fs::write(pasta.join("evento.xml"), "<procEventoNFe><evento/></procEventoNFe>").unwrap();
         let p = previa(c, &[pasta.display().to_string()]).unwrap();
         assert!(!p.avisos.iter().any(|a| a.contains("sem o motivo listado")), "{:?}", p.avisos);
-        assert!(p.avisos.iter().any(|a| a.contains("evento ou CT-e")), "o evento não foi dito: {:?}", p.avisos);
+        assert!(p.avisos.iter().any(|a| a.contains("evento, um CT-e")), "o evento não foi dito: {:?}", p.avisos);
         let _ = std::fs::remove_dir_all(&pasta);
     }
 

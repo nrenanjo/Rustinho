@@ -2916,9 +2916,6 @@ pub(crate) mod testes {
         assert!(apagar_no_drive(&la, &la[..1], "20261015", 30).is_empty());
     }
 
-    /// 0.9.18: dois computadores com o mesmo nome de caixa ("Caixa 1") na
-    /// mesma conta do Google (outra loja, um portátil de teste...). O envio
-    /// de um não apaga as cópias do outro; as próprias antigas saem.
     /// T096 (N3 da 3ª conferência, sobre a T091): sem nenhum cadeado, a recusa vem antes de copiar e comprimir
     /// o banco (o automático tenta de novo a cada 5 minutos, e cada tentativa copiava o banco inteiro à toa).
     #[test]
@@ -3075,6 +3072,9 @@ pub(crate) mod testes {
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
+    /// 0.9.18: dois computadores com o mesmo nome de caixa ("Caixa 1") na
+    /// mesma conta do Google (outra loja, um portátil de teste...). O envio
+    /// de um não apaga as cópias do outro; as próprias antigas saem.
     #[test]
     fn drive_nao_apaga_copias_de_outro_computador() {
         let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
