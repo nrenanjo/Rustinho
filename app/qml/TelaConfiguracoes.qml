@@ -599,7 +599,7 @@ FocusScope {
             "Retirar " + c.nome + " da loja?",
             // T076 (OPUS-D-3): a retirada não tira a senha da rede do computador; a tela não promete o contrário.
             "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas. "
-            + "Atenção: quem souber a senha da rede consegue entrar de novo com outro computador. Se ele saiu da loja "
+            + "Atenção: quem souber a senha da rede consegue entrar de novo, com outro computador ou com este mesmo. Se ele saiu da loja "
             + "(vendido, roubado ou de alguém que saiu), troque a senha da rede em todos os caixas. "
             + "Fica no histórico com o seu nome e o motivo.",
             "Retirar da loja", (m, pronto) => janela.chamarGerente("caixa_retirar", { dispositivo: c.dispositivo, motivo: m }, r => {
