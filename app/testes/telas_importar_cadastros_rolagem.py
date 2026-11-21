@@ -16,6 +16,8 @@ Por tamanho, pelas medidas do programa (--medir-toque):
   R4  quando a janelinha está na altura máxima (o conteúdo não cabe), rolar o miolo leva ao último aviso e o
       Cadastrar continua inteiro à vista; quando cabe, todos os avisos já estão dentro da janelinha;
   R5  no alto (antes de rolar), o título e o Escolher arquivos estão dentro da janelinha.
+  R6  (no código, T077/AUD-X-1) o erro do Cadastrar, o aviso dos arquivos e o "Abrir a peça" ficam FORA do miolo que
+      rola, logo acima do Cadastrar: quem rolou até o fim e apertou o Cadastrar vê a recusa.
 
 Os tamanhos são lógicos. No Qt, a escala de 125% e de 150% desenha a mesma tela numa janela lógica menor (ex.: 1366 ×
 768 a 150% são 911 × 512 lógicos); por isso, os tamanhos de 125% e 150% entram como janelas lógicas desse tamanho. Não
@@ -61,6 +63,24 @@ TAMANHOS = [
     ("o mínimo, 340x480", 340, 480),
     ("de volta a 1366x768", 1366, 768),
 ]
+
+
+QML_DO_IMPORTAR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "qml", "ImportarCadastros.qml")
+
+
+def dentro_da_rolagem(caminho=QML_DO_IMPORTAR):
+    """R6: o que devia ficar fora do Flickable do miolo e está dentro dele (no texto do QML)."""
+    texto = open(caminho, encoding="utf-8").read()
+    marca = texto.index('objectName: "rolagemDoImportar"')
+    inicio = texto.rindex("Flickable {", 0, marca)
+    prof, fim = 0, inicio
+    for i in range(inicio, len(texto)):
+        prof += {"{": 1, "}": -1}.get(texto[i], 0)
+        if prof == 0 and texto[i] == "}":
+            fim = i
+            break
+    miolo = texto[inicio:fim]
+    return [nome for nome in ("TextoErro", "painel.avisoArquivos", '"Abrir a peça"') if nome in miolo]
 
 
 def xdo(*args):
@@ -166,6 +186,9 @@ def main():
         print(("✔ " if condicao else "✘ ") + nome + ("" if condicao else f" ({detalhe})"))
         certo &= bool(condicao)
 
+    dentro = dentro_da_rolagem()
+    ok("R6: o erro, o aviso dos arquivos e o Abrir a peça ficam fora do miolo que rola (acima do Cadastrar)",
+       not dentro, f"dentro da rolagem: {dentro}")
     antes = os.environ.get("RUSTINHO_ARGS_TESTE")
     os.environ["RUSTINHO_ARGS_TESTE"] = ((antes or "") + " --medir-toque").strip()
     try:
