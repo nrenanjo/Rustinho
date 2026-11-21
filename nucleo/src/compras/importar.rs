@@ -3039,6 +3039,25 @@ mod testes {
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
     const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
 
+    /// T080 (OPUS-C-2 = AUD-C-5 da auditoria da 0.9.18-dev.3.3.3): o arquivo que nem chegou a ser lido (um .zip
+    /// estragado, pacote grande demais, lote cortado) aparecia como "O arquivo não é um XML válido", e o motivo
+    /// verdadeiro sumia. Agora o aviso traz o motivo de quem leu os arquivos.
+    #[test]
+    fn previa_mostra_o_motivo_verdadeiro_do_arquivo_nao_lido() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t080-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        std::fs::write(pasta.join("estragado.zip"), b"isto nao e um zip de verdade").unwrap();
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        let aviso = p.avisos.iter().find(|a| a.contains("estragado.zip")).cloned().unwrap_or_default();
+        assert!(aviso.contains("estragado ou não é zip"), "o motivo verdadeiro sumiu: {:?}", p.avisos);
+        assert!(!aviso.contains("não é um XML válido"), "{aviso}");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     /// T074 (OPUS-C-1 da auditoria da 0.9.18-dev.3.3.3): num caixa em que a faixa de códigos recusa o código
     /// numérico da nota (aqui, uma geração nova, como depois de restaurar um backup), a peça nascia sem o código
     /// do sistema antigo (nem como código antigo) e cada reimportação das mesmas notas criava outra peça.
