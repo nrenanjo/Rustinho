@@ -642,12 +642,25 @@ fn codigo_de_peca_que_nao_chegou_recusa_com_texto() {
         )
         .unwrap();
         c.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        // T106 (a CI 44930016320 do C5): a ficha lista os códigos do mais recente para o mais antigo. Os dois
+        // vínculos da peça nascem um logo depois do outro: no mesmo segundo, a Patral vinha primeiro; com a virada do
+        // segundo no meio, a Di Ricartti. O teste supunha a Patral na linha 0 e falhava por acaso. Agora a Di Ricartti
+        // é a mais recente de propósito, e a linha da Patral vem da própria ficha.
+        c.execute("UPDATE produto_fornecedor SET atualizado_em = '2099-01-01T00:00:00Z' WHERE codigo = '25850-0'", [])
+            .unwrap();
     }
     let antes = l.ligacoes();
     let ficha = l.abrir();
+    let linha_patral = ficha["fornecedores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|x| x["fornecedorId"] == patral.as_str() && x["codigo"] == "00008373")
+        .unwrap();
+    assert_eq!(linha_patral, 1, "a Di Ricartti, a mais recente, vem primeiro");
     let r = l.salvar(&ficha, &[(&patral, "00008373", "555")]);
     assert_eq!(r["ok"], false, "{r}");
     assert!(r["erro"].as_str().unwrap().contains("já é de outra peça"), "{r}");
-    assert_eq!(r["campo"], "codigosFornecedor.0", "{r}");
+    assert_eq!(r["campo"], format!("codigosFornecedor.{linha_patral}"), "{r}");
     assert_eq!(l.ligacoes(), antes, "nada gravado");
 }
