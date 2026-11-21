@@ -3016,6 +3016,43 @@ mod testes {
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
     const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
 
+    /// T074 (OPUS-C-1 da auditoria da 0.9.18-dev.3.3.3): num caixa em que a faixa de códigos recusa o código
+    /// numérico da nota (aqui, uma geração nova, como depois de restaurar um backup), a peça nascia sem o código
+    /// do sistema antigo (nem como código antigo) e cada reimportação das mesmas notas criava outra peça.
+    #[test]
+    fn codigo_recusado_pela_faixa_vira_codigo_antigo_e_nao_duplica() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        crate::faixas::nova_geracao(c, "como depois de restaurar um backup").unwrap();
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t074-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        let e = Entrada { arquivos: vec![pasta.display().to_string()], pecas_loja: true, ..Default::default() };
+        importar(c, d, &u, &e).unwrap();
+        importar(c, d, &u, &e).unwrap();
+        let ids: Vec<String> = c
+            .prepare("SELECT id FROM produto WHERE nome = 'FILTRO DE OLEO PSL55'")
+            .unwrap()
+            .query_map([], |l| l.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids.len(), 1, "a reimportação das mesmas notas duplicou a peça");
+        let (codigo, antigo): (String, i64) = c
+            .query_row(
+                "SELECT codigo, (SELECT COUNT(*) FROM produto_codigo_antigo WHERE produto_id = ?1 AND codigo = '4455')
+                   FROM produto WHERE id = ?1",
+                [&ids[0]],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .unwrap();
+        assert!(codigo == "4455" || antigo == 1, "o código 4455 do sistema antigo se perdeu (código {codigo:?})");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     #[test]
     fn importa_clientes_pecas_e_fornecedores() {
         let b = Banco::em_memoria().unwrap();
