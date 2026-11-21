@@ -137,7 +137,20 @@ const ACESSO: usize = 76;
 const PUBLICA_CONFIRMADA: &str = "backup_publica_confirmada";
 
 fn confirmar_publica(conn: &Connection, publica: &[u8; 32]) -> Resultado<()> {
-    config::gravar(conn, PUBLICA_CONFIRMADA, &hex(publica))
+    // T098 (N7): só grava se mudou (entrar de novo não grava nada).
+    if config::ler(conn, PUBLICA_CONFIRMADA)?.as_deref() != Some(hex(publica).as_str()) {
+        config::gravar(conn, PUBLICA_CONFIRMADA, &hex(publica))?;
+    }
+    Ok(())
+}
+
+/// A chave de agora é a confirmada por um gerente neste caixa? Sem chave (antes do primeiro gerente), sim: não
+/// há o que confirmar (T092, T097, T099).
+pub fn chave_confirmada(conn: &Connection) -> Resultado<bool> {
+    Ok(match publica_da_loja(conn)? {
+        Some(p) => config::ler(conn, PUBLICA_CONFIRMADA)?.as_deref() == Some(hex(&p).as_str()),
+        None => true,
+    })
 }
 
 /// Parte pública da chave da loja (vai para os outros caixas).
@@ -192,7 +205,25 @@ fn gravar_acesso(conn: &Connection, usuario_id: &str, acesso: Option<&[u8]>) -> 
 /// usuário). Abre a parte secreta com ela (ou cria a chave da loja, se ainda
 /// não tem; ou tranca para ele a que já está na memória). Devolve a parte
 /// secreta para ficar na memória do programa enquanto ele estiver aberto.
+/// T098 (N7): a chave, o cadeado e a confirmação vão juntos (tudo ou nada),
+/// dentro ou fora de uma transação de quem chama.
 pub fn gerente_conferido(
+    conn: &Connection,
+    usuario_id: &str,
+    senha: &str,
+    memoria: Option<[u8; 32]>,
+) -> Resultado<Option<[u8; 32]>> {
+    conn.execute_batch("SAVEPOINT chave_dos_backups")?;
+    let r = gerente_conferido_dentro(conn, usuario_id, senha, memoria);
+    if r.is_ok() {
+        conn.execute_batch("RELEASE chave_dos_backups")?;
+    } else {
+        let _ = conn.execute_batch("ROLLBACK TO chave_dos_backups; RELEASE chave_dos_backups");
+    }
+    r
+}
+
+fn gerente_conferido_dentro(
     conn: &Connection,
     usuario_id: &str,
     senha: &str,
@@ -213,13 +244,9 @@ pub fn gerente_conferido(
         (None, _) => {
             let s: [u8; 32] = aleatorio()?;
             config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
-            confirmar_publica(conn, &publica_de(&s))?;
             s
         }
-        (Some(p), Some(m)) if publica_de(&m) == p => {
-            confirmar_publica(conn, &p)?;
-            m
-        }
+        (Some(p), Some(m)) if publica_de(&m) == p => m,
         // T073 (OPUS-A-3): nenhum gerente tem cadeado, e a chave não está na memória: ninguém consegue mais
         // abrir os backups trancados com ela. Este gerente ganha uma chave nova (os backups antigos continuam
         // abrindo com os cadeados que levam dentro: as senhas de quando foram feitos).
@@ -228,6 +255,8 @@ pub fn gerente_conferido(
         _ => return Ok(memoria),
     };
     gravar_acesso(conn, usuario_id, Some(&trancar(&segredo, senha)?))?;
+    // T098 (N7): a confirmação depois do cadeado.
+    confirmar_publica(conn, &publica_de(&segredo))?;
     Ok(Some(segredo))
 }
 
@@ -235,8 +264,8 @@ pub fn gerente_conferido(
 fn chave_nova(conn: &Connection, usuario_id: &str, senha: &str) -> Resultado<[u8; 32]> {
     let s: [u8; 32] = aleatorio()?;
     config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
-    confirmar_publica(conn, &publica_de(&s))?;
     gravar_acesso(conn, usuario_id, Some(&trancar(&s, senha)?))?;
+    confirmar_publica(conn, &publica_de(&s))?;
     crate::registro::anotar("chave dos backups trocada por uma nova: nenhum gerente tinha cadeado da anterior");
     Ok(s)
 }
@@ -963,6 +992,16 @@ fn anotar(conn: &Connection, r: &Resultado<Feito>) -> Resultado<()> {
 
 fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Feito> {
     let a = ajustes(conn, Some(caminho_db))?;
+    // T073 (OPUS-A-3), T091 (N3 da 2ª conferência) e T096 (N3 da 3ª): trancado sem nenhum cadeado de gerente,
+    // ninguém abre o backup. Ele nem é feito (nem a cópia do banco, que o automático repetiria a cada 5 minutos):
+    // sai como erro (o aviso do Início), e os antigos ficam. A cópia de antes de restaurar segue como sempre.
+    if a.publica.is_some() && !antes && acessos_da_loja(conn)?.is_empty() {
+        crate::registro::anotar("backup sem nenhum cadeado de gerente: não foi feito; os antigos foram mantidos");
+        return Err(Erro::validacao(
+            "Não deu para fazer o backup: nenhum gerente consegue abrir os backups novos agora. Peça a um gerente \
+             para entrar no Rustinho com a senha dele, e faça o backup de novo. Os backups antigos foram mantidos.",
+        ));
+    }
     std::fs::create_dir_all(&a.pasta).map_err(|e| erro_pasta(&a.pasta, e))?;
     let privada = pasta_privada(Some(caminho_db));
     apagar_sobras(&privada);
@@ -1064,17 +1103,6 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
 
     // 3. Criptografia e gravação (primeiro com outro nome, para não deixar meio arquivo).
     let acessos = acessos_da_loja(conn)?;
-    // T073 (OPUS-A-3) e T091 (N3 da 2ª conferência): trancado sem nenhum cadeado de gerente, ninguém abre o
-    // backup. Ele nem é gravado (gravado, o automático fazia mais um a cada tentativa, ele ia ao Drive como o mais
-    // novo, podia ficar no lugar de um bom do mesmo segundo, e a retenção podia guardá-lo no lugar do bom do mesmo
-    // dia): sai como erro (o aviso do Início), e os antigos ficam. A cópia de antes de restaurar segue como sempre.
-    if a.publica.is_some() && acessos.is_empty() && !antes {
-        crate::registro::anotar("backup sem nenhum cadeado de gerente: não foi feito; os antigos foram mantidos");
-        return Err(Erro::validacao(
-            "Não deu para fazer o backup: nenhum gerente consegue abrir os backups novos agora. Peça a um gerente \
-             para entrar no Rustinho com a senha dele, e faça o backup de novo. Os backups antigos foram mantidos.",
-        ));
-    }
     let nome = montar_nome(conn, antes, defeito_na_origem.is_some())?;
     let destino = a.pasta.join(&nome);
     let parcial = a.pasta.join(format!(".{nome}.parcial"));
@@ -1122,13 +1150,11 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
 
     // 5. Apagar as antigas. T092 (AUD-D-03): só com a chave de agora confirmada por um gerente neste caixa; senão
     // os backups novos podem não abrir com ninguém, e os antigos ficam.
-    if let Some(p) = &a.publica {
-        if config::ler(conn, PUBLICA_CONFIRMADA)?.as_deref() != Some(hex(p).as_str()) {
-            crate::registro::anotar(
-                "backup feito; a chave dos backups ainda não foi confirmada por um gerente neste caixa: os antigos ficam",
-            );
-            return Ok(Feito { arquivo: destino.display().to_string(), tamanho });
-        }
+    if !chave_confirmada(conn)? {
+        crate::registro::anotar(
+            "backup feito; a chave dos backups ainda não foi confirmada por um gerente neste caixa: os antigos ficam",
+        );
+        return Ok(Feito { arquivo: destino.display().to_string(), tamanho });
     }
     let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
     for velho in para_apagar(&nomes_na_pasta(&a.pasta), &hoje, a.dias) {
@@ -1694,7 +1720,10 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         if !nomes.contains(&c.nome) {
             nomes.push(c.nome.clone());
         }
-        for velho in apagar_no_drive(&nomes, &minhas, &hoje, a.dias) {
+        // T097 (N2 da 3ª conferência): o Drive com a mesma trava da pasta (T092): sem a chave confirmada por um
+        // gerente neste caixa, nenhuma cópia antiga sai (podem ser as únicas que abrem).
+        let apagar = if chave_confirmada(conn)? { apagar_no_drive(&nomes, &minhas, &hoje, a.dias) } else { Vec::new() };
+        for velho in apagar {
             // Se não deu para apagar agora, continua na lista: tenta de novo
             // no próximo envio.
             if rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60)).is_ok() {
@@ -2961,9 +2990,8 @@ pub(crate) mod testes {
         crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
         gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
         anotar(&b.conn, &fazer(&caminho, false)).unwrap();
-        let aviso = |c: &Connection| {
-            crate::avisos::do_dia(c).unwrap().iter().any(|a| a.id == "backup_chave_nao_confirmada")
-        };
+        let aviso =
+            |c: &Connection| crate::avisos::do_dia(c).unwrap().iter().any(|a| a.id == "backup_chave_nao_confirmada");
         assert!(!aviso(&b.conn), "com a chave confirmada, avisou");
         let outra: [u8; 32] = aleatorio().unwrap();
         config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();

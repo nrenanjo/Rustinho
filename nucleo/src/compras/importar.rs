@@ -96,6 +96,8 @@ struct Lido {
     ignorados: i64,
     /// Quantos dos ignorados têm o motivo nos avisos (T086).
     ignorados_listados: i64,
+    /// Quantos dos ignorados eram eventos ou CT-e (não são notas; T101).
+    eventos_e_cte: i64,
     avisos: Vec<String>,
     notas_loja: i64,
     notas_fornecedor: i64,
@@ -264,7 +266,9 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
             Ok(n) => n.nota,
             Err(e) => {
                 lido.ignorados += 1;
-                if lido.avisos.len() < 5 && !e.contains("evento") && !e.contains("CT-e") {
+                if e.contains("evento") || e.contains("CT-e") {
+                    lido.eventos_e_cte += 1;
+                } else if lido.avisos.len() < 5 {
                     lido.avisos.push(format!("{nome}: {e}"));
                     lido.ignorados_listados += 1;
                 }
@@ -320,12 +324,20 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         assinatura.finalize().into()
     };
     // T086 (AUD-X-2): os motivos vão só dos 5 primeiros; uma linha diz quantos mais ficaram sem motivo listado.
-    let sem_motivo = lido.ignorados - lido.ignorados_listados;
+    // T101 (N5 da 3ª conferência): os eventos e CT-e, com o motivo, à parte; o "sem o motivo" é só o resto.
+    let sem_motivo = lido.ignorados - lido.ignorados_listados - lido.eventos_e_cte;
     if sem_motivo > 0 {
         lido.avisos.push(format!(
-            "E mais {sem_motivo} {} sem o motivo listado aqui (eventos e CT-e também entram nessa conta).",
+            "E mais {sem_motivo} {} sem o motivo listado aqui.",
             if sem_motivo == 1 { "arquivo ignorado" } else { "arquivos ignorados" }
         ));
+    }
+    if lido.eventos_e_cte > 0 {
+        lido.avisos.push(if lido.eventos_e_cte == 1 {
+            "1 arquivo era um evento ou CT-e (não é uma nota) e ficou de fora.".to_string()
+        } else {
+            format!("{} arquivos eram eventos ou CT-e (não são notas) e ficaram de fora.", lido.eventos_e_cte)
+        });
     }
     let avisos = lido.avisos_repetidos();
     let repetidos = avisos.len();

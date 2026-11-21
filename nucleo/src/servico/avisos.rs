@@ -178,7 +178,9 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
             "encomendas" | "encomendas_numero_repetido" => "Ver encomendas",
             "oficina" => "Ver ordens de serviço",
             // Caso 8 (C8, 0.9.18): o modo seguro leva ao Backup (restaurar).
-            "backup" | "backup_nuvem" | "backup_sem_tranca" | "banco_defeito" => "Ver backup",
+            "backup" | "backup_nuvem" | "backup_sem_tranca" | "backup_chave_nao_confirmada" | "banco_defeito" => {
+                "Ver backup"
+            }
             // NOTIF-01 (0.9.18): o botão abre Simultaneidade › Duplicatas.
             "conflitos" | "codigos" | "codigos_bloqueio" => "Ver duplicatas",
             "referencias" | "referencias_atrasadas" | "outra_loja" => "Ver caixas",
@@ -1076,6 +1078,26 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         a.descricao = "Enquanto nenhum gerente entrou no Rustinho, a loja não tem a chave que tranca os backups: \
              quem tiver o arquivo abre os dados da loja. Entre uma vez como gerente para criar a chave; daí em \
              diante os backups saem trancados."
+            .into();
+        avisos.push(a);
+    }
+    // T099 (N1 da 3ª conferência): a chave dos backups ainda não foi confirmada por um gerente neste computador
+    // (depois da atualização, de entrar numa loja, ou de a chave mudar): as cópias antigas não são apagadas, para
+    // não perder a única que abre. O disco cresce até um gerente digitar a senha aqui.
+    if !b.ultimo.is_empty() && !backup::chave_confirmada(conn)? {
+        let mut a = Aviso::simples(
+            "backup_chave_nao_confirmada",
+            &hoje,
+            "Backup".into(),
+            "As cópias antigas do backup não estão sendo apagadas".into(),
+            String::new(),
+            "configuracoes",
+        )
+        .categoria(ATENCAO)
+        .secao("backup");
+        a.descricao = "Nenhum gerente confirmou ainda, neste computador, a chave que tranca os backups. Para não \
+             perder a única cópia que abre, o Rustinho guarda todas as antigas. Basta um gerente digitar a senha \
+             dele aqui (para entrar ou para liberar uma tela)."
             .into();
         avisos.push(a);
     }
