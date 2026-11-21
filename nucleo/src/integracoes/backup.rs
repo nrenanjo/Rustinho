@@ -2512,6 +2512,83 @@ pub(crate) mod testes {
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
+    /// Cópias falsas, de 60 dias atrás, na pasta dos backups (a retenção de 30 dias as apagaria).
+    fn copias_velhas(pasta: &Path) -> Vec<PathBuf> {
+        std::fs::create_dir_all(pasta).unwrap();
+        (0..4)
+            .map(|i| {
+                let p = pasta.join(format!("rustinho-20260901-18000{i}-caixa1.rbk"));
+                std::fs::write(&p, b"copia velha").unwrap();
+                p
+            })
+            .collect()
+    }
+
+    fn rbk_na_pasta(pasta: &Path) -> usize {
+        std::fs::read_dir(pasta).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".rbk")).count()
+    }
+
+    /// T091 (N3 da 2ª conferência do Sonnet, sobre a T073): o backup trancado sem nenhum cadeado sai como erro e
+    /// não pode ficar na pasta. Ficando, o backup automático (que vê o erro e tenta de novo a cada 5 minutos)
+    /// gravava mais um arquivo cheio a cada vez, ele ia ao Drive como o "mais novo" e, depois, a retenção podia
+    /// guardá-lo no lugar do bom do mesmo dia.
+    #[test]
+    fn backup_sem_nenhum_cadeado_nao_fica_na_pasta() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("sem-cadeado");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        let velhas = copias_velhas(&backups);
+        deixou_de_ser_gerente(&b.conn, &ana.id).unwrap();
+        let antes = rbk_na_pasta(&backups);
+        for _ in 0..3 {
+            assert!(fazer(&caminho, false).is_err());
+        }
+        assert_eq!(rbk_na_pasta(&backups), antes, "o backup que ninguém abre ficou na pasta");
+        assert!(velhas.iter().all(|v| v.exists()), "os backups antigos foram apagados");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// T092 (AUD-D-03, recomendação da 2ª conferência do Sonnet): a chave dos backups viaja pela rede. Se ela
+    /// mudar sem que um gerente deste caixa a tenha confirmado (a senha dele abrindo essa mesma chave), os
+    /// backups novos podem não abrir com ninguém; então os antigos não são apagados. Com a chave confirmada, a
+    /// retenção segue como sempre.
+    #[test]
+    fn com_a_chave_dos_backups_nao_confirmada_nada_antigo_e_apagado() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("chave-nao-confirmada");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        let backups = ajustes(&b.conn, Some(&caminho)).unwrap().pasta;
+        // Controle: com a chave confirmada pelo gerente, a retenção apaga as cópias velhas (fora as 3 mais novas,
+        // que ficam sempre: a de agora e as duas últimas falsas).
+        let velhas = copias_velhas(&backups);
+        fazer(&caminho, false).unwrap();
+        assert!(!velhas[0].exists() && !velhas[1].exists(), "a retenção não rodou com a chave confirmada");
+        // A chave muda pela rede (outra parte pública, que nenhum gerente deste caixa abre).
+        let outra: [u8; 32] = aleatorio().unwrap();
+        config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
+        let velhas = copias_velhas(&backups);
+        fazer(&caminho, false).unwrap();
+        assert!(velhas.iter().all(|v| v.exists()), "com a chave não confirmada, a retenção apagou os antigos");
+        // Ana entra: o cadeado dela abre a chave de antes, não a nova; a nova continua sem confirmação.
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        fazer(&caminho, false).unwrap();
+        assert!(velhas.iter().all(|v| v.exists()), "a senha de Ana não abre a chave nova, e os antigos sumiram");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     #[test]
     fn fazer_conferir_e_restaurar() {
         let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
