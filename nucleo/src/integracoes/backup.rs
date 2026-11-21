@@ -2180,6 +2180,24 @@ pub(crate) mod testes {
         assert_eq!(apagar, vec![n("20260901", "180000", "caixa1"), n("20261014", "100000", "caixa1")]);
     }
 
+    /// T082 (AUD-A-3 = OPUS-A-9 da auditoria da 0.9.18-dev.3.3.3): a cópia de antes de restaurar entrava na regra
+    /// "uma por dia" e ia embora no dia seguinte (o backup do fim do dia, já do banco restaurado, era o mais novo
+    /// do dia); com ela ia o trabalho de antes de uma restauração errada. Agora ela fica os `dias` da retenção.
+    #[test]
+    fn a_copia_de_antes_de_restaurar_fica_os_dias_da_retencao() {
+        let nomes = vec![
+            "rustinho-20261015-100500-caixa1-antes.rbk".to_string(),
+            "rustinho-20261015-180000-caixa1.rbk".to_string(),
+            "rustinho-20261015-193000-caixa1.rbk".to_string(),
+            "rustinho-20261016-180000-caixa1.rbk".to_string(),
+        ];
+        let apagar = para_apagar(&nomes, "20261016", 30);
+        assert!(!apagar.iter().any(|n| n.contains("-antes")), "a cópia de antes de restaurar foi apagada: {apagar:?}");
+        // Passados os dias da retenção, ela sai.
+        let apagar = para_apagar(&nomes, "20261201", 30);
+        assert!(apagar.iter().any(|n| n.contains("-antes")), "{apagar:?}");
+    }
+
     fn embrulhar_bytes(dados: &[u8], publica: Option<&[u8; 32]>, acessos: &[Vec<u8>]) -> (Vec<u8>, Option<[u8; 32]>) {
         let pasta = pasta_teste("embrulho");
         let origem = pasta.join("zip");
