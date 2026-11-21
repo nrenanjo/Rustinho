@@ -205,7 +205,13 @@ FocusScope {
                             icone: "sair"
                             text: "Trocar usuário"
                             Layout.alignment: Qt.AlignVCenter
-                            onClicked: tela.janela.trocarUsuario()
+                            // T084 (texto O do proprietário, 21/11): abre a tela de Usuários pelo mesmo caminho do
+                            // cartão Usuários do menu (a mesma função, a mesma senha do gerente para o caixa).
+                            onClicked: {
+                                const usuarios = tela.funcao("usuarios")
+                                if (usuarios)
+                                    tela.janela.abrirFuncao(usuarios)
+                            }
                         }
                     }
                 }

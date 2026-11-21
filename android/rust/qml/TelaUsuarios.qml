@@ -131,7 +131,10 @@ FocusScope {
                 titulo: "Usuários"
                 subtitulo: "Todos acessam todas as funções. Cada um entra com o próprio nome e senha."
                 Layout.fillWidth: true
+                // T084 (texto O): na tela larga o formulário de criação fica sempre à direita e o botão era
+                // redundante; na estreita, o formulário não fica à vista e o botão é a entrada para ele.
                 Botao {
+                    visible: Tema.estreito
                     text: "Novo usuário"
                     icone: "mais"
                     onClicked: tela.novo()
