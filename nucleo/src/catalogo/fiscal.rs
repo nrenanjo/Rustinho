@@ -741,6 +741,16 @@ mod comandos {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// T079 (OPUS-C-8 da auditoria da 0.9.18-dev.3.3.3): dia ou mês com 3 algarismos passava a conferência pelo
+    /// truncamento (`as u8`: 257 vira 1) e gravava uma data inválida ("2026-12-257"), mostrada como outra.
+    #[test]
+    fn data_com_dia_ou_mes_grande_demais_e_recusada() {
+        assert!(ler_data("257/12/2026").is_err(), "{:?}", ler_data("257/12/2026"));
+        assert!(ler_data("10/257/2026").is_err(), "{:?}", ler_data("10/257/2026"));
+        assert!(ler_data("2026-269-01").is_err(), "{:?}", ler_data("2026-269-01"));
+        assert_eq!(ler_data("25/12/2026"), Ok(Some("2026-12-25".to_string())));
+    }
     use crate::banco::Banco;
 
     #[test]
