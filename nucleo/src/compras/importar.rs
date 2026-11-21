@@ -711,6 +711,20 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                 reais.0.insert(plano.clone(), id.clone());
                 produtos::registrar_gtins_xml(conn, &id, &gtins_ficha)?;
                 let mut detalhes = vec!["Cadastrada pelo XML de uma nota da loja".to_string()];
+                // T074 (OPUS-C-1): o código da nota que a faixa deste caixa recusou fica como código antigo da
+                // peça (a busca, o leitor e a reimportação continuam achando-a por ele).
+                if !codigo_peca.is_empty() {
+                    let atual: String =
+                        conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
+                    if texto::compactar(&atual) != texto::compactar(&codigo_peca) {
+                        crate::catalogo::codigos::guardar_codigo_antigo(conn, &codigo_peca, &id, &tempo::agora())?;
+                        produtos::atualizar_indice_busca(conn, &id)?;
+                        detalhes.push(format!(
+                            "O código {codigo_peca} do sistema antigo não é da faixa de códigos deste caixa: ficou como \
+                             código antigo"
+                        ));
+                    }
+                }
                 if !codigo_antigo.is_empty() {
                     let cod = codigo_antigo;
                     crate::catalogo::codigos::guardar_codigo_antigo(conn, cod, &id, &tempo::agora())?;
@@ -1341,7 +1355,11 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
             let pelo_codigo = if repetido {
                 plano_repetida(conn, &plano, codigo, it)?
             } else {
-                plano_por_codigo(conn, &plano, codigo)?
+                // T074: o código que a faixa recusou ficou como código antigo (com a mesma descrição).
+                match plano_por_codigo(conn, &plano, codigo)? {
+                    Some(id) => Some(id),
+                    None => peca_repetida(conn, codigo, it)?,
+                }
             };
             let pelo_gtin = plano_pelos_gtins(conn, &plano, &it.gtins, &it.gtin)?;
             if pelo_codigo.is_some() || !matches!(pelo_gtin, BuscaId::Nenhum) {
@@ -1795,16 +1813,21 @@ fn salvar_peca(
     usuario_id: &str,
     mut f: produtos::ProdutoFicha,
 ) -> Resultado<String> {
-    match produtos::salvar(conn, dispositivo, usuario_id, &f) {
-        Ok(id) => Ok(id),
-        Err(Erro::Validacao { campo: Some(c), .. }) if c == "codigoBarras" || c == "codigo" => {
-            f.codigo_barras = String::new();
-            f.codigo = String::new();
-            f.gtins.clear();
-            produtos::salvar(conn, dispositivo, usuario_id, &f)
+    // T074 (OPUS-C-1): só o que foi recusado sai (antes, um código recusado levava junto o código de barras e
+    // os GTINs, e a peça não era mais achada na reimportação). Quem chama guarda o código como código antigo.
+    for _ in 0..2 {
+        match produtos::salvar(conn, dispositivo, usuario_id, &f) {
+            Err(Erro::Validacao { campo: Some(c), .. }) if c == "codigo" && !f.codigo.is_empty() => f.codigo.clear(),
+            Err(Erro::Validacao { campo: Some(c), .. })
+                if c == "codigoBarras" && (!f.codigo_barras.is_empty() || !f.gtins.is_empty()) =>
+            {
+                f.codigo_barras.clear();
+                f.gtins.clear();
+            }
+            r => return r,
         }
-        Err(e) => Err(e),
     }
+    produtos::salvar(conn, dispositivo, usuario_id, &f)
 }
 
 // ---------------------------------------------------------------------------
