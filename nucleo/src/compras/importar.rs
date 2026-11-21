@@ -3100,6 +3100,44 @@ mod testes {
         let _ = std::fs::remove_dir_all(&pasta);
     }
 
+    /// T100 (N4 da 3ª conferência, cobertura da T087): no Trazer cadastros, o aviso das subpastas fundas demais
+    /// vem primeiro e não conta como arquivo ignorado.
+    #[test]
+    fn previa_avisa_primeiro_das_subpastas_fundas() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t100-{}", tempo::novo_id()));
+        let fundo = pasta.join("a/b/c/d/e/f/g/h");
+        std::fs::create_dir_all(&fundo).unwrap();
+        std::fs::write(fundo.join("nota.xml"), NOTA_LOJA).unwrap();
+        for i in 0..6 {
+            std::fs::write(pasta.join(format!("nada{i}.xml")), "<nada/>").unwrap();
+        }
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        assert!(p.avisos.first().is_some_and(|a| a.contains("não foram olhados")), "{:?}", p.avisos);
+        assert_eq!(p.ignorados, 6, "o aviso das subpastas contou como arquivo ignorado");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// T101 (N5 da 3ª conferência, sobre a T086): os eventos e CT-e (que não são notas) são contados à parte, com o
+    /// motivo; a linha "sem o motivo listado" fica só para os outros (antes, um evento comum já dizia que havia um
+    /// arquivo ignorado sem motivo).
+    #[test]
+    fn previa_conta_eventos_e_cte_a_parte() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t101-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("venda.xml"), NOTA_LOJA).unwrap();
+        std::fs::write(pasta.join("evento.xml"), "<procEventoNFe><evento/></procEventoNFe>").unwrap();
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        assert!(!p.avisos.iter().any(|a| a.contains("sem o motivo listado")), "{:?}", p.avisos);
+        assert!(p.avisos.iter().any(|a| a.contains("evento ou CT-e")), "o evento não foi dito: {:?}", p.avisos);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     /// T080 (OPUS-C-2 = AUD-C-5 da auditoria da 0.9.18-dev.3.3.3): o arquivo que nem chegou a ser lido (um .zip
     /// estragado, pacote grande demais, lote cortado) aparecia como "O arquivo não é um XML válido", e o motivo
     /// verdadeiro sumia. Agora o aviso traz o motivo de quem leu os arquivos.

@@ -2860,6 +2860,118 @@ pub(crate) mod testes {
     /// 0.9.18: dois computadores com o mesmo nome de caixa ("Caixa 1") na
     /// mesma conta do Google (outra loja, um portátil de teste...). O envio
     /// de um não apaga as cópias do outro; as próprias antigas saem.
+    /// T096 (N3 da 3ª conferência, sobre a T091): sem nenhum cadeado, a recusa vem antes de copiar e comprimir
+    /// o banco (o automático tenta de novo a cada 5 minutos, e cada tentativa copiava o banco inteiro à toa).
+    #[test]
+    fn sem_cadeado_a_recusa_vem_antes_de_copiar_o_banco() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("sem-cadeado-cedo");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        deixou_de_ser_gerente(&b.conn, &ana.id).unwrap();
+        // A queda de teste depois do zip: se a recusa vier depois da cópia, a queda acontece antes dela.
+        queda_de_teste::ETAPA.with(|e| e.set("backup_depois_do_zip"));
+        let r = fazer(&caminho, false).map(|f| f.arquivo);
+        queda_de_teste::ETAPA.with(|e| e.set(""));
+        assert!(
+            r.as_ref().is_err_and(|e| e.to_string().contains("nenhum gerente")),
+            "a recusa veio depois de copiar e comprimir o banco ({r:?})"
+        );
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// T097 (N2 da 3ª conferência, sobre a T092): a retenção do Google Drive também não apaga as cópias antigas
+    /// enquanto a chave dos backups não for a confirmada por um gerente neste caixa (as antigas podem ser as únicas
+    /// que abrem).
+    #[test]
+    fn drive_nao_apaga_as_antigas_com_a_chave_nao_confirmada() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let pasta = pasta_teste("nuvem-chave");
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+        config::gravar(&b.conn, "backup_dias", "7").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        let antigo = |d: u32| format!("rustinho-202601{d:02}-180000-caixa1.{EXTENSAO}");
+        let minhas: Vec<String> = (1..=5).map(antigo).collect();
+        for n in &minhas {
+            std::fs::write(nuvem.join(n), b"x").unwrap();
+        }
+        config::gravar(&b.conn, ENVIADAS_AO_DRIVE, &minhas.join("\n")).unwrap();
+        // A chave muda pela rede: nenhum gerente deste caixa a confirmou.
+        let outra: [u8; 32] = aleatorio().unwrap();
+        config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
+        fazer(&caminho, false).unwrap();
+        let _ = enviar_pendentes(&b.conn, &caminho);
+        let ficaram: Vec<String> = nomes_na_nuvem().unwrap().into_iter().map(|x| x.0).collect();
+        for n in &minhas {
+            assert!(ficaram.contains(n), "com a chave não confirmada, o Drive apagou a cópia antiga {n}");
+        }
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// T098 (N7 da 3ª conferência, sobre a T092): (1) a confirmação da chave não fica sem o cadeado, se gravar o
+    /// cadeado falhar (é tudo ou nada); (2) entrar de novo, sem nada a mudar, não grava nada.
+    #[test]
+    fn a_chave_e_o_cadeado_sao_gravados_juntos() {
+        let b = Banco::em_memoria().unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        b.conn
+            .execute_batch(
+                "CREATE TEMP TRIGGER falha_cadeado BEFORE UPDATE OF backup_acesso ON main.usuario
+                 BEGIN SELECT RAISE(ABORT, 'falha de teste'); END;",
+            )
+            .unwrap();
+        assert!(gerente_conferido(&b.conn, &ana.id, "1111", None).is_err());
+        assert!(publica_da_loja(&b.conn).unwrap().is_none(), "a chave ficou sem o cadeado");
+        assert!(config::ler(&b.conn, PUBLICA_CONFIRMADA).unwrap().is_none(), "a confirmação ficou sem o cadeado");
+        b.conn.execute_batch("DROP TRIGGER falha_cadeado;").unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        let antes = b.conn.total_changes();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        assert_eq!(b.conn.total_changes(), antes, "entrar de novo, sem nada a mudar, gravou algo");
+    }
+
+    /// T099 (N1 da 3ª conferência, sobre a T092): quando as cópias antigas param de ser apagadas (a chave dos
+    /// backups não foi confirmada por um gerente neste caixa), o Início avisa e diz como resolver; com a chave
+    /// confirmada, não avisa.
+    #[test]
+    fn avisa_quando_as_copias_antigas_nao_estao_sendo_apagadas() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("aviso-chave");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+        anotar(&b.conn, &fazer(&caminho, false)).unwrap();
+        let aviso = |c: &Connection| {
+            crate::avisos::do_dia(c).unwrap().iter().any(|a| a.id == "backup_chave_nao_confirmada")
+        };
+        assert!(!aviso(&b.conn), "com a chave confirmada, avisou");
+        let outra: [u8; 32] = aleatorio().unwrap();
+        config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
+        assert!(aviso(&b.conn), "as cópias antigas não estão sendo apagadas, e o Início não avisa");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     #[test]
     fn drive_nao_apaga_copias_de_outro_computador() {
         let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
