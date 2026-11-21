@@ -1116,6 +1116,19 @@ fn abrir(arquivo: &Path, como: &Como, tmp: &Temporaria) -> Resultado<(PathBuf, I
     if estrutura < 1 || tem_config.is_none() {
         return Err(Erro::validacao("O arquivo não tem os dados do Rustinho."));
     }
+    drop(c);
+    // T071 (AUD-A-1): a mesma conferência da abertura (N01), pelo conteúdo, antes de qualquer troca. Um backup
+    // de outra linha de versões (como a 0.9.18-dev.3) passava, trocava o banco e na abertura seguinte o Rustinho
+    // não abria mais. O de uma versão mais nova continua com a recusa própria, em quem restaura.
+    if usize::try_from(estrutura).is_ok_and(|v| v <= banco::versao_da_estrutura())
+        && banco::conferir_linhagem(&db).is_err()
+    {
+        crate::registro::anotar(&format!("backup recusado, sem nada mudado: a estrutura {estrutura} é de outra linha"));
+        return Err(Erro::validacao(
+            "Esse backup é de outra linha de versões do Rustinho (como a 0.9.18-dev.3) e este programa não \
+             consegue usá-lo. Nada foi mudado. Use o Rustinho que fez o backup, ou chame o suporte.",
+        ));
+    }
     info.estrutura = estrutura;
     Ok((db, info))
 }
