@@ -944,14 +944,37 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
 
     // 1. Foto do banco.
     let foto = tmp.0.join("rustinho.db");
+    // T072 (AUD-A-2): com o defeito numa página de dados, nem a cópia lógica sai. Na cópia de antes de restaurar
+    // (restaurar é a saída do banco com defeito), vão os arquivos do banco como estão, para o suporte, e a
+    // restauração segue; antes, ela era recusada e o caixa ficava sem saída pelo programa.
+    let mut wal_bruto = None;
+    let mut copia_bruta = false;
     if let Err(e) = conn.execute("VACUUM INTO ?1", [foto.display().to_string()]) {
-        return Err(match &defeito_na_origem {
-            Some(d) => Erro::validacao(format!(
-                "O banco deste caixa tem um defeito de integridade ({d}) e não deu para fazer o backup dele ({e}). \
-                 Os backups antigos foram mantidos. Chame o suporte antes de restaurar."
-            )),
-            None => e.into(),
-        });
+        match &defeito_na_origem {
+            Some(d) if antes => {
+                crate::registro::anotar(&format!(
+                    "a cópia lógica do banco com defeito ({d}) não saiu ({e}); a cópia de antes de restaurar leva os \
+                     arquivos do banco como estão"
+                ));
+                std::fs::copy(caminho_db, &foto).map_err(|e| erro_pasta(&a.pasta, e))?;
+                copia_bruta = true;
+                let mut wal = caminho_db.as_os_str().to_owned();
+                wal.push("-wal");
+                let wal = PathBuf::from(wal);
+                if wal.exists() {
+                    let destino_wal = tmp.0.join("rustinho.db-wal");
+                    std::fs::copy(&wal, &destino_wal).map_err(|e| erro_pasta(&a.pasta, e))?;
+                    wal_bruto = Some(destino_wal);
+                }
+            }
+            Some(d) => {
+                return Err(Erro::validacao(format!(
+                    "O banco deste caixa tem um defeito de integridade ({d}) e não deu para fazer o backup dele ({e}). \
+                     Os backups antigos foram mantidos. Chame o suporte antes de restaurar."
+                )))
+            }
+            None => return Err(e.into()),
+        }
     }
     let estrutura: i64 = conn.query_row("PRAGMA user_version", [], |l| l.get(0))?;
     let info = Info {
@@ -976,6 +999,13 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
     let mut f = std::fs::File::open(&foto).map_err(|e| erro_pasta(&a.pasta, e))?;
     std::io::copy(&mut f, &mut zip).map_err(|e| erro_pasta(&a.pasta, e))?;
     drop(f);
+    if let Some(w) = &wal_bruto {
+        zip.start_file("rustinho.db-wal", opcoes).map_err(erro_zip)?;
+        let mut f = std::fs::File::open(w).map_err(|e| erro_pasta(&a.pasta, e))?;
+        std::io::copy(&mut f, &mut zip).map_err(|e| erro_pasta(&a.pasta, e))?;
+        drop(f);
+        let _ = std::fs::remove_file(w);
+    }
     let mut fim = zip.finish().map_err(erro_zip)?;
     fim.flush().map_err(|e| erro_pasta(&a.pasta, e))?;
     drop(fim);
@@ -1011,9 +1041,13 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         Some(k) => Como::Chave(k),
         None => Como::Senha { senha: "", acessos: &[] },
     };
-    if let Err(e) = conferir_com(&destino, &como, &privada) {
-        let _ = std::fs::remove_file(&destino);
-        return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
+    // A cópia dos arquivos de um banco com defeito (T072) não passa na conferência do banco, por definição:
+    // ela fica para o suporte, como está.
+    if !copia_bruta {
+        if let Err(e) = conferir_com(&destino, &como, &privada) {
+            let _ = std::fs::remove_file(&destino);
+            return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
+        }
     }
 
     if let Some(d) = &defeito_na_origem {
