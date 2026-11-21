@@ -428,7 +428,8 @@ fn montar_nome(conn: &Connection, antes: bool, defeito: bool) -> Resultado<Strin
 }
 
 /// Quais cópias apagar: de cada caixa, guarda todas de hoje, a mais nova de
-/// cada dia até `dias` atrás e, sempre, as 3 mais novas.
+/// cada dia até `dias` atrás e, sempre, as 3 mais novas. A cópia de antes de
+/// restaurar fica os `dias` inteiros (T082).
 pub fn para_apagar(nomes: &[String], hoje: &str, dias: i64) -> Vec<String> {
     let limite = dia_menos(hoje, dias);
     let mut lista: Vec<NomeBackup> = nomes.iter().filter_map(|n| ler_nome(n)).collect();
@@ -437,6 +438,14 @@ pub fn para_apagar(nomes: &[String], hoje: &str, dias: i64) -> Vec<String> {
     let mut apagar = Vec::new();
     let mut vistos: Vec<(String, usize, Vec<String>)> = Vec::new(); // (caixa, quantas, dias já guardados)
     for b in lista {
+        // T082 (AUD-A-3): a cópia de antes de restaurar fica os `dias` da retenção, fora da regra "uma por dia"
+        // e das 3 mais novas (é o que guarda o trabalho de antes de uma restauração errada).
+        if b.antes {
+            if b.dia.as_str() != hoje && b.dia.as_str() <= limite.as_str() {
+                apagar.push(b.nome);
+            }
+            continue;
+        }
         let pos = match vistos.iter().position(|v| v.0 == b.caixa) {
             Some(p) => p,
             None => {
