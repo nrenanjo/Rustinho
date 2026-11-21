@@ -469,6 +469,23 @@ mod testes {
         z.finish().unwrap().into_inner()
     }
 
+    /// T087 (OPUS-C-10 da auditoria da 0.9.18-dev.3.3.3): os XMLs de subpastas com mais de 6 níveis eram
+    /// deixados de fora sem aviso nenhum (nem o de corte). Agora vem um aviso dizendo que parte não foi olhada.
+    #[test]
+    fn subpastas_fundas_demais_avisam() {
+        let raiz = std::env::temp_dir().join(format!("rustinho-arquivos-t087-{}", crate::tempo::novo_id()));
+        let fundo = raiz.join("a/b/c/d/e/f/g/h");
+        std::fs::create_dir_all(&fundo).unwrap();
+        std::fs::write(fundo.join("nota.xml"), "<nfeProc/>").unwrap();
+        let lista = xmls(&[raiz.display().to_string()]).unwrap();
+        assert!(
+            lista.iter().any(|x| !x.erro.is_empty() && x.erro.contains("não foram olhados")),
+            "a nota da subpasta funda sumiu sem aviso: {:?}",
+            lista.iter().map(|x| (&x.nome, &x.erro)).collect::<Vec<_>>()
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
     #[test]
     fn limite_total_dos_pacotes() {
         let zip = zip_com(&[("a.xml", b"<a>0123456</a>"), ("b.xml", b"<b>0123456</b>"), ("c.xml", b"<c>0123456</c>")]);
