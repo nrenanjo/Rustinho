@@ -597,13 +597,16 @@ FocusScope {
     function retirarCaixa(c) {
         motivoReferencia.perguntar(
             "Retirar " + c.nome + " da loja?",
-            "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas; "
-            + "se voltar à rede, não entra sozinho: o gerente precisa readmiti-lo. Fica no histórico com o seu nome e o motivo.",
+            // T076 (OPUS-D-3): a retirada não tira a senha da rede do computador; a tela não promete o contrário.
+            "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas. "
+            + "Atenção: quem souber a senha da rede consegue entrar de novo com outro computador. Se ele saiu da loja "
+            + "(vendido, roubado ou de alguém que saiu), troque a senha da rede em todos os caixas. "
+            + "Fica no histórico com o seu nome e o motivo.",
             "Retirar da loja", (m, pronto) => janela.chamarGerente("caixa_retirar", { dispositivo: c.dispositivo, motivo: m }, r => {
                 pronto(r)
                 if (r.ok) {
                     carregarCaixas()
-                    janela.avisar(c.nome + " foi retirado da loja.", "ok")
+                    janela.avisar(c.nome + " foi retirado da loja. Se ele saiu da loja, troque a senha da rede em todos os caixas.", "ok")
                     // Caso 6: a guia volta à OS só se o núcleo confirmar que
                     // nenhum caixa bloqueia mais; senão destaca o próximo.
                     if (tela.guia && !janela.concluirGuia(true))
