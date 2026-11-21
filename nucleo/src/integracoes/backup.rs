@@ -207,11 +207,24 @@ pub fn gerente_conferido(
             s
         }
         (Some(p), Some(m)) if publica_de(&m) == p => m,
+        // T073 (OPUS-A-3): nenhum gerente tem cadeado, e a chave não está na memória: ninguém consegue mais
+        // abrir os backups trancados com ela. Este gerente ganha uma chave nova (os backups antigos continuam
+        // abrindo com os cadeados que levam dentro: as senhas de quando foram feitos).
+        _ if acessos_da_loja(conn)?.is_empty() => return chave_nova(conn, usuario_id, senha).map(Some),
         // Sem como abrir agora: fica para quando outro gerente entrar.
         _ => return Ok(memoria),
     };
     gravar_acesso(conn, usuario_id, Some(&trancar(&segredo, senha)?))?;
     Ok(Some(segredo))
+}
+
+/// T073: a chave dos backups é trocada por uma nova, trancada com a senha deste gerente.
+fn chave_nova(conn: &Connection, usuario_id: &str, senha: &str) -> Resultado<[u8; 32]> {
+    let s: [u8; 32] = aleatorio()?;
+    config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
+    gravar_acesso(conn, usuario_id, Some(&trancar(&s, senha)?))?;
+    crate::registro::anotar("chave dos backups trocada por uma nova: nenhum gerente tinha cadeado da anterior");
+    Ok(s)
 }
 
 /// A senha de um usuário mudou. Se ele é gerente, o cadeado passa para a
@@ -226,7 +239,15 @@ pub fn senha_trocada(conn: &Connection, usuario_id: &str, nova: &str, memoria: O
     }
     match (publica_da_loja(conn)?, memoria) {
         (Some(p), Some(m)) if publica_de(&m) == p => gravar_acesso(conn, usuario_id, Some(&trancar(&m, nova)?)),
-        _ => gravar_acesso(conn, usuario_id, None),
+        (publica, _) => {
+            gravar_acesso(conn, usuario_id, None)?;
+            // T073 (OPUS-A-3): era o último cadeado; sem ele, ninguém abriria os backups novos. A senha nova
+            // tranca uma chave nova.
+            if publica.is_some() && acessos_da_loja(conn)?.is_empty() {
+                chave_nova(conn, usuario_id, nova)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -1048,6 +1069,17 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
             let _ = std::fs::remove_file(&destino);
             return Err(Erro::validacao(format!("A cópia foi gravada mas não abriu ({e}). Ela foi apagada.")));
         }
+    }
+
+    // T073 (OPUS-A-3): trancado sem nenhum cadeado de gerente, ninguém abre este backup. Ele fica, mas sai como
+    // erro (o aviso do Início) e os antigos não são apagados. A cópia de antes de restaurar segue como sempre.
+    if a.publica.is_some() && acessos.is_empty() && !antes {
+        crate::registro::anotar("backup gravado sem nenhum cadeado de gerente; os antigos foram mantidos");
+        return Err(Erro::validacao(format!(
+            "O backup foi gravado em {}, mas nenhum gerente consegue abri-lo agora. Peça a um gerente para entrar \
+             no Rustinho com a senha dele e faça o backup de novo. Os backups antigos foram mantidos.",
+            destino.display()
+        )));
     }
 
     if let Some(d) = &defeito_na_origem {

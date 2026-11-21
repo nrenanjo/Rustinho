@@ -1059,7 +1059,11 @@ fn f02_revisao_backups_de_antes_da_chave_continuam_sem_tranca() {
     let db = pasta.join("rustinho.db");
     let u = {
         let b = Banco::abrir(&db).unwrap();
-        usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        // Ana é gerente: só o cadeado de um gerente ativo vai dentro do backup (T073: um backup trancado sem
+        // nenhum cadeado sai como erro, porque ninguém o abre).
+        usuarios::definir_gerente(&b.conn, &u, true).unwrap();
+        u
     };
     crate::backup::fazer(&db, false).unwrap();
     let backups = pasta.join("backups");
