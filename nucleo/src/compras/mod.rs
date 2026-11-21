@@ -1788,10 +1788,12 @@ mod comandos {
                     fichas.push(compras::ficha(p.conn, &id)?);
                 }
                 // Dentro de um pacote, eventos (cancelamento, carta de
-                // correção) e outros XMLs que não são nota são pulados.
+                // correção) e outros XMLs que não são nota são pulados. T081
+                // (OPUS-C-3): o XML que nem abre (a nota cortada ao meio, o
+                // arquivo estragado) não é pulado: vem em `erros`.
                 Err(e)
                     if pacote
-                        && ["não é de uma NF-e", "resumo ou um evento", "CT-e", "não é um XML válido"]
+                        && ["não é de uma NF-e", "resumo ou um evento", "CT-e"]
                             .iter()
                             .any(|t| e.to_string().contains(t)) => {}
                 Err(e) if e.nome_do_campo() == Some(compras::CAMPO_OUTRO_CNPJ) => {
