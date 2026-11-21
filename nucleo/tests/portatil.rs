@@ -160,5 +160,21 @@ fn filho_portatil() {
     // 5. Google Drive: configuração própria.
     assert_eq!(portatil::rclone_conf(), Some(raiz.join("dados").join("rclone.conf")));
     drop(s);
+    // 6. T078 (OPUS-D-6 = AUD-D-04): dois portáteis com a mesma senha trocam dados. A chave de cada um sai com a
+    //    marca do portátil; a do outro caixa saía sem ela, e um recusava o outro ("a senha não confere").
+    let dois = raiz.join("dados").join("dois-portateis");
+    std::fs::create_dir_all(&dois).unwrap();
+    let (db1, db2) = (dois.join("um").join("rustinho.db"), dois.join("outro").join("rustinho.db"));
+    for (db, nome) in [(&db1, "Portátil 1"), (&db2, "Portátil 2")] {
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        let b = rustinho_nucleo::banco::Banco::abrir(db).unwrap();
+        rustinho_nucleo::config::gravar(&b.conn, "caixa_nome", nome).unwrap();
+        rustinho_nucleo::sync::salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+    }
+    let motor = rustinho_nucleo::sync::Motor::iniciar(db1.clone(), 0, 0);
+    let (pt, _) = motor.portas(std::time::Duration::from_secs(10)).expect("as portas do motor abriram");
+    let r = rustinho_nucleo::sync::puxar(&db2, &format!("127.0.0.1:{pt}"), 0);
+    assert!(r.is_ok(), "dois portáteis com a mesma senha não trocam dados: {r:?}");
+    drop(motor);
     println!("PORTATIL-OK");
 }
