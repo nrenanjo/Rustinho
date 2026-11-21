@@ -754,8 +754,8 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
                 if !codigo_peca.is_empty() {
                     let atual: String =
                         conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [&id], |l| l.get(0))?;
-                    if texto::compactar(&atual) != texto::compactar(&codigo_peca) {
-                        crate::catalogo::codigos::guardar_codigo_antigo(conn, &codigo_peca, &id, &tempo::agora())?;
+                    if texto::compactar(&atual) != texto::compactar(codigo_peca) {
+                        crate::catalogo::codigos::guardar_codigo_antigo(conn, codigo_peca, &id, &tempo::agora())?;
                         produtos::atualizar_indice_busca(conn, &id)?;
                         detalhes.push(format!(
                             "O código {codigo_peca} do sistema antigo não é da faixa de códigos deste caixa: ficou como \
