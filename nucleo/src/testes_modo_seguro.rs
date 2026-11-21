@@ -340,6 +340,83 @@ fn a3_restaurar_backup_bom_tira_do_modo_seguro() {
     let _ = std::fs::remove_dir_all(&pasta);
 }
 
+/// T072 (AUD-A-2 = OPUS-A-2 da auditoria da 0.9.18-dev.3.3.3): com o defeito numa página de dados, nem a
+/// cópia lógica (`VACUUM INTO`) do banco sai, e a restauração era recusada ("Não deu para guardar a cópia de
+/// antes"), justamente a saída que o modo seguro anuncia. Agora a cópia de antes para o suporte é a dos
+/// arquivos como estão, e o backup bom é restaurado.
+#[test]
+fn a3_restaurar_com_defeito_numa_pagina_de_dados() {
+    let _vez = backup::testes::um_por_vez();
+    let pasta = pasta_nova("restaurar-pagina");
+    let l = loja_em_arquivo(&pasta);
+    let backups = pasta.join("backups");
+    let bom = backup::listar(&backups).into_iter().next().expect("backup bom").caminho;
+    estragar_pagina_de_dados(&l.db);
+    {
+        let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+        let e = ok(&mut s, "estado", json!({}));
+        assert!(!e["modoSeguro"].is_null(), "o banco devia abrir em modo seguro: {e}");
+        let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
+        ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": bom, "nuvem": false, "senha": "1234" }));
+        assert_eq!(r["ok"], true, "a restauração do backup bom foi recusada: {r}");
+        assert_eq!(r["dados"]["reabrir"], true, "pede para fechar e abrir: {r}");
+    }
+    let suporte: Vec<String> = std::fs::read_dir(&backups)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.contains("defeito") && n.contains("antes"))
+        .collect();
+    assert_eq!(suporte.len(), 1, "a cópia de antes (do banco com defeito) ficou para o suporte: {suporte:?}");
+    let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
+    let e = ok(&mut s, "estado", json!({}));
+    assert!(e["modoSeguro"].is_null(), "banco restaurado e conferido: fora do modo seguro: {e}");
+    let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(
+        &mut s,
+        "venda_concluir",
+        json!({ "itens": [{ "produtoId": l.peca, "quantidade": "1" }], "tabela": 1,
+                "pagamentos": [{ "forma": "dinheiro", "valor": "100" }] }),
+    );
+    let _ = std::fs::remove_dir_all(&pasta);
+}
+
+/// Estraga uma página de dados da `auditoria` (3000 linhas, 16 bytes 0xFF perto do fim do arquivo): a consulta
+/// dessa tabela e a cópia lógica (`VACUUM INTO`) falham.
+fn estragar_pagina_de_dados(db: &Path) {
+    {
+        let c = rusqlite::Connection::open(db).unwrap();
+        crate::banco::registrar_funcoes(&c).unwrap();
+        c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;").unwrap();
+        for i in 0..3000 {
+            c.execute(
+                "INSERT INTO auditoria (id, quando, dispositivo, usuario_id, acao, entidade, entidade_id, detalhes)
+                 VALUES (?1, '2026-10-01', 'd', NULL, 'teste', 'teste', ?1, ?2)",
+                rusqlite::params![format!("a{i}"), "x".repeat(200)],
+            )
+            .unwrap();
+        }
+    }
+    let pagina: u64 = {
+        let c = rusqlite::Connection::open(db).unwrap();
+        c.query_row("PRAGMA page_size", [], |l| l.get::<_, i64>(0)).unwrap() as u64
+    };
+    let tamanho = std::fs::metadata(db).unwrap().len();
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new().write(true).open(db).unwrap();
+        f.seek(SeekFrom::Start(tamanho - 3 * pagina)).unwrap();
+        f.write_all(&[0xFFu8; 16]).unwrap();
+    }
+    let c = rusqlite::Connection::open(db).unwrap();
+    let copia = std::env::temp_dir().join(format!("rustinho-t072-{}.db", crate::tempo::novo_id()));
+    let r = c.execute("VACUUM INTO ?1", [copia.display().to_string()]);
+    let _ = std::fs::remove_file(&copia);
+    assert!(r.is_err(), "o teste precisa de um defeito em que a cópia lógica não sai");
+}
+
 /// Defeito numa página de dados: uma consulta que não consegue ler devolve
 /// um erro com mensagem (sem derrubar o programa); o modo seguro vale.
 #[test]
