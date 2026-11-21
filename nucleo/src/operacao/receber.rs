@@ -587,6 +587,8 @@ pub struct RecebimentoLinha {
     pub usuario: String,
     pub estornado: bool,
     pub motivo_estorno: String,
+    /// A tela mostra o "Estornar": não estornado e não vindo de uma devolução (T070).
+    pub estornavel: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -635,18 +637,21 @@ pub fn cliente(conn: &Connection, cliente_id: &str, todas: bool) -> Resultado<Cl
     )?;
     let recebimentos = c
         .query_map([cliente_id], |l| {
+            let forma: String = l.get(4)?;
+            let estornado: bool = l.get(9)?;
             Ok(RecebimentoLinha {
                 id: l.get(0)?,
                 numero: l.get(1)?,
                 caixa: l.get(2)?,
                 quando: l.get(3)?,
-                forma: caixa::nome_forma(&l.get::<_, String>(4)?).to_string(),
+                forma: caixa::nome_forma(&forma).to_string(),
                 valor: numeros::escrever_dinheiro(l.get(5)?),
                 juros: numeros::escrever_dinheiro(l.get(6)?),
                 desconto: numeros::escrever_dinheiro(l.get(7)?),
                 usuario: l.get(8)?,
-                estornado: l.get(9)?,
+                estornado,
                 motivo_estorno: l.get(10)?,
+                estornavel: !estornado && forma != "devolucao",
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -953,6 +958,13 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         .ok_or_else(|| Erro::NaoEncontrado("Recebimento".into()))?;
     if estornado.is_some() {
         return Err(Erro::validacao("Este recebimento já foi estornado."));
+    }
+    // T070 (OPUS-B-1): o abatimento feito por uma devolução só se desfaz com a devolução; estornar só ele
+    // reabriria a dívida da peça que o cliente já devolveu.
+    if forma == "devolucao" {
+        return Err(Erro::validacao(
+            "Este abatimento veio de uma devolução. Para desfazê-lo, desfaça a devolução em Trocas e devoluções.",
+        ));
     }
     let motivo = texto::limpar(motivo);
     if motivo.is_empty() {

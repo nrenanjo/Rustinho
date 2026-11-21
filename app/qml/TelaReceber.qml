@@ -464,7 +464,8 @@ FocusScope {
                                                 onClicked: tela.imprimir("recibo", modelData.id)
                                             }
                                             Botao {
-                                                visible: !modelData.estornado
+                                                // T070: o abatimento de uma devolução se desfaz em Trocas e devoluções
+                                                visible: modelData.estornavel
                                                 text: "Estornar"
                                                 tipo: "discreto"
                                                 altura: 32
