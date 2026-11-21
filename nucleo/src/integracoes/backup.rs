@@ -2970,4 +2970,54 @@ pub(crate) mod testes {
         drop(b);
         let _ = std::fs::remove_dir_all(&pasta);
     }
+
+    /// T071 (AUD-A-1 = OPUS-A-1 da auditoria da 0.9.18-dev.3.3.3): um backup feito por outra linha de versões
+    /// (a 0.9.18-dev.3, com a estrutura 24 ou 25 dela) é recusado ao conferir e ao restaurar, antes de trocar o
+    /// banco; antes, a restauração trocava o banco e na abertura seguinte o Rustinho não abria mais (N01).
+    #[test]
+    fn backup_de_outra_linha_e_recusado_antes_de_trocar_o_banco() {
+        use std::io::Write as _;
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let amostras = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("amostras_dev3");
+        for amostra in ["dev3_estrutura24.db", "dev3_estrutura25.db"] {
+            let pasta = pasta_teste("outra-linha");
+            let caminho = pasta.join("rustinho.db");
+            let mut b = Banco::abrir(&caminho).unwrap();
+            config::gravar(&b.conn, "loja_nome", "Loja de Agora").unwrap();
+            // o backup sem senha (magia + 0 + zip), com o banco da outra linha dentro
+            let mut zip_bytes = std::io::Cursor::new(Vec::new());
+            {
+                let mut z = zip::ZipWriter::new(&mut zip_bytes);
+                let opcoes = zip::write::SimpleFileOptions::default();
+                z.start_file("info.json", opcoes).unwrap();
+                z.write_all(br#"{"loja":"Loja Teste","caixa":"Caixa 1"}"#).unwrap();
+                z.start_file("rustinho.db", opcoes).unwrap();
+                z.write_all(&std::fs::read(amostras.join(amostra)).unwrap()).unwrap();
+                z.finish().unwrap();
+            }
+            let mut arquivo = MAGICA.to_vec();
+            arquivo.push(0);
+            arquivo.extend(zip_bytes.into_inner());
+            let rbk = pasta.join("rustinho-20261101-120000-Caixa1.rbk");
+            std::fs::write(&rbk, arquivo).unwrap();
+
+            let conferido = conferir(&b.conn, &rbk, "").map(|i| i.loja);
+            assert!(
+                conferido.as_ref().is_err_and(|e| e.to_string().contains("outra linha")),
+                "{amostra}: a conferência aceitou o backup de outra linha ({conferido:?})"
+            );
+            let r = restaurar(&mut b.conn, Some(&caminho), rbk.to_str().unwrap(), false, "").map(|i| i.loja);
+            assert!(
+                r.as_ref().is_err_and(|e| e.to_string().contains("outra linha")),
+                "{amostra}: a restauração não recusou o backup de outra linha ({r:?})"
+            );
+            assert_eq!(config::nome_loja(&b.conn).unwrap(), "Loja de Agora", "{amostra}: o banco foi trocado");
+            drop(b);
+            // o Rustinho continua abrindo o banco de antes
+            let b = Banco::abrir(&caminho).unwrap_or_else(|e| panic!("{amostra}: o banco não abre mais: {e}"));
+            assert_eq!(config::nome_loja(&b.conn).unwrap(), "Loja de Agora");
+            drop(b);
+            let _ = std::fs::remove_dir_all(&pasta);
+        }
+    }
 }
