@@ -2411,6 +2411,48 @@ pub(crate) mod testes {
         assert_eq!(acessos_da_loja(&b.conn).unwrap().len(), 1);
     }
 
+    /// T073 (OPUS-A-3 = AUD-A-4 da auditoria da 0.9.18-dev.3.3.3): o último cadeado da chave dos backups pode
+    /// sair por ações comuns de gerente (desativar, trocar a senha de outro), num programa que não tem a chave
+    /// na memória. Antes, os backups novos saíam trancados sem ninguém que os abrisse, com a tela dizendo que
+    /// estava tudo certo, e os antigos (bons) iam sendo apagados. Agora: (1) a senha trocada vira o cadeado de
+    /// uma chave nova quando não sobra nenhum; (2) sem nenhum cadeado, o backup sai como erro e os antigos ficam;
+    /// (3) o próximo gerente que entra ganha uma chave nova, e os backups seguintes abrem com a senha dele.
+    #[test]
+    fn o_ultimo_cadeado_dos_backups_nao_some_em_silencio() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        let pasta = pasta_teste("cadeado");
+        let caminho = pasta.join("rustinho.db");
+        let b = Banco::abrir(&caminho).unwrap();
+        config::gravar(&b.conn, "caixa_nome", "Caixa 1").unwrap();
+        let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+        let bia = crate::usuarios::criar(&b.conn, &b.dispositivo, "Bia", "2222", true).unwrap();
+        crate::usuarios::definir_gerente(&b.conn, &bia.id, true).unwrap();
+        gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap().expect("a chave da loja");
+        let antigo = PathBuf::from(fazer(&caminho, false).unwrap().arquivo);
+        // Programa aberto de novo (nada na memória): Bia, sem cadeado, troca a senha esquecida de Ana.
+        senha_trocada(&b.conn, &ana.id, "5555", None).unwrap();
+        let feito = fazer(&caminho, false).expect("com o cadeado novo de Ana, o backup sai");
+        let c = conferir(&b.conn, Path::new(&feito.arquivo), "5555").map(|_| ());
+        assert!(c.is_ok(), "a senha nova de Ana não abre o backup novo ({c:?})");
+        // Bia desativa Ana: não sobra nenhum cadeado.
+        deixou_de_ser_gerente(&b.conn, &ana.id).unwrap();
+        assert!(acessos_da_loja(&b.conn).unwrap().is_empty());
+        let r = fazer(&caminho, false).map(|f| f.arquivo);
+        assert!(
+            r.as_ref().is_err_and(|e| e.to_string().contains("nenhum gerente")),
+            "um backup sem nenhum cadeado saiu como se estivesse certo ({r:?})"
+        );
+        assert!(antigo.exists(), "os backups antigos foram mantidos");
+        // Bia entra: ganha uma chave nova, e os backups seguintes abrem com a senha dela.
+        let m = gerente_conferido(&b.conn, &bia.id, "2222", None).unwrap();
+        assert!(m.is_some(), "o gerente que entrou não ganhou a chave nova");
+        let feito = fazer(&caminho, false).expect("o backup com a chave nova");
+        assert!(conferir(&b.conn, Path::new(&feito.arquivo), "2222").is_ok(), "a senha de Bia não abre o backup");
+        drop(b);
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     #[test]
     fn fazer_conferir_e_restaurar() {
         let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
