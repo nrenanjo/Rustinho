@@ -1523,4 +1523,49 @@ mod testes {
         vendas::cancelar(c, d, u, &v, "desistiu").unwrap();
         assert_eq!(comissoes::relatorio(c, "", "").unwrap().vendedores[0].comissao, "0,00");
     }
+
+    /// T069 (OPUS-B-2 = AUD-B-1 da auditoria da 0.9.18-dev.3.3.3): o desconto do item já está no total do item;
+    /// a comissão não pode descontá-lo de novo. Só o desconto da venda inteira é dividido entre os itens.
+    #[test]
+    fn comissao_com_desconto_no_item_nao_desconta_duas_vezes() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        usuarios::definir_comissao(c, u, "10").unwrap();
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "Palheta".into();
+        f.custo = "50".into();
+        f.estoque_inicial = "5".into();
+        let palheta = produtos::salvar(c, d, u, &f).unwrap(); // 100,00
+        caixa::abrir(c, d, u, "Caixa 1", "0").unwrap();
+        // 1) só desconto no item: 300 − 30 = 270; 10% de 270 = 27,00 (antes saía 270 × 270 / 300 × 10% = 24,30)
+        let so_item = VendaEntrada {
+            itens: vec![ItemEntrada {
+                produto_id: l.peca.clone(),
+                quantidade: "1".into(),
+                desconto: "30".into(),
+                ..Default::default()
+            }],
+            tabela: 1,
+            pagamentos: vec![Pg { forma: "pix".into(), valor: "270".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        let v1 = vendas::concluir(c, d, u, &so_item).unwrap();
+        let r = comissoes::relatorio(c, "", "").unwrap();
+        assert_eq!((r.vendedores[0].vendido.as_str(), r.vendedores[0].comissao.as_str()), ("270,00", "27,00"));
+        vendas::cancelar(c, d, u, &v1, "teste").unwrap();
+        // 2) desconto no item e na venda: (270 + 100) − 10% = 333; 10% de 333 = 33,30 (antes saía 30,80)
+        let misto = VendaEntrada {
+            itens: vec![
+                ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), desconto: "30".into(), ..Default::default() },
+                ItemEntrada { produto_id: palheta, quantidade: "1".into(), ..Default::default() },
+            ],
+            tabela: 1,
+            desconto: "10%".into(),
+            pagamentos: vec![Pg { forma: "pix".into(), valor: "333".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        vendas::concluir(c, d, u, &misto).unwrap();
+        let r = comissoes::relatorio(c, "", "").unwrap();
+        assert_eq!((r.vendedores[0].vendido.as_str(), r.vendedores[0].comissao.as_str()), ("333,00", "33,30"));
+    }
 }
