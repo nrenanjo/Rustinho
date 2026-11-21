@@ -26,6 +26,7 @@ Painel {
         motivo.rotulo = rotulo || "Motivo"
         motivo.tipoBotao = tipoBotao || "perigo"
         motivo.erro = ""
+        campo.erro = ""
         campo.texto = ""
         open()
         campo.focar()
@@ -40,6 +41,9 @@ Painel {
     function terminar(r) {
         if (!r.ok) {
             erro = r.erro
+            // T090 (OPUS-E-3): direto no campo. A ligação `erro: motivo.erro` se desfazia na primeira tecla (o
+            // Campo limpa o próprio erro ao editar), e a recusa do núcleo não aparecia mais.
+            campo.erro = r.erro
             // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do
             // gerente). Esta pergunta fecha guardando o motivo digitado e reabre
             // igual na volta: a operação nunca é refeita sozinha.
@@ -58,7 +62,6 @@ Painel {
         Campo {
             id: campo
             rotulo: motivo.rotulo
-            erro: motivo.erro
             maximo: 200
             Layout.fillWidth: true
             onConfirmado: motivo.confirmar()
