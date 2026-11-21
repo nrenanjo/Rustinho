@@ -243,7 +243,10 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         // válido"). O aviso de lote cortado (só parte dos arquivos foi olhada) vem sempre, e primeiro.
         if !erro_de_leitura.is_empty() {
             let aviso = format!("{nome}: {erro_de_leitura}");
-            if erro_de_leitura.contains("arquivos demais") || erro_de_leitura.contains("escolha menos arquivos") {
+            if erro_de_leitura.contains("arquivos demais")
+                || erro_de_leitura.contains("escolha menos arquivos")
+                || erro_de_leitura.contains("não foram olhados")
+            {
                 lido.avisos.insert(0, aviso);
             } else {
                 lido.ignorados += 1;

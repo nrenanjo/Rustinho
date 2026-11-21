@@ -173,14 +173,16 @@ fn nome_curto(p: &Path) -> String {
 
 /// Junta os arquivos aceitos, sem guardar a pasta inteira na memória (R-03):
 /// uma pasta só entra até o limite, e o total de itens olhados (pastas,
-/// fotos, qualquer coisa) também tem teto. Devolve false se cortou.
-fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32, olhar: &mut usize) -> bool {
+/// fotos, qualquer coisa) também tem teto. Devolve false se cortou. `fundo`
+/// fica verdadeiro se alguma subpasta passou de 6 níveis e não foi olhada (T087).
+fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32, olhar: &mut usize, fundo: &mut bool) -> bool {
     if lista.len() >= MAX_ARQUIVOS || *olhar == 0 {
         return false;
     }
     *olhar -= 1;
     if caminho.is_dir() {
         if profundidade > 6 {
+            *fundo = true;
             return true;
         }
         let Ok(dir) = std::fs::read_dir(caminho) else { return true };
@@ -201,7 +203,7 @@ fn juntar(caminho: &Path, lista: &mut Vec<PathBuf>, profundidade: u32, olhar: &m
         }
         filhos.sort();
         for f in filhos {
-            inteiro &= juntar(&f, lista, profundidade + 1, olhar);
+            inteiro &= juntar(&f, lista, profundidade + 1, olhar, fundo);
         }
         inteiro
     } else {
@@ -289,6 +291,7 @@ pub fn xmls(entradas: &[String]) -> Resultado<Vec<Xml>> {
 fn xmls_com(entradas: &[String], mut orc: Orcamento, mut olhar: usize) -> Resultado<Vec<Xml>> {
     let mut lista = Vec::new();
     let mut inteiro = true;
+    let mut fundo = false;
     for e in entradas {
         let p = caminho_local(e);
         if !p.exists() {
@@ -297,9 +300,16 @@ fn xmls_com(entradas: &[String], mut orc: Orcamento, mut olhar: usize) -> Result
         if p.is_file() && !aceito(&nome_curto(&p)) {
             return Err(Erro::validacao(format!("{} não é XML, ZIP nem RAR.", nome_curto(&p))));
         }
-        inteiro &= juntar(&p, &mut lista, 0, &mut olhar);
+        inteiro &= juntar(&p, &mut lista, 0, &mut olhar, &mut fundo);
     }
     let mut saida = Vec::new();
+    // T087 (OPUS-C-10): a subpasta funda demais não some em silêncio.
+    if fundo {
+        saida.push(ruim(
+            "pasta".into(),
+            "há subpastas com mais de 6 níveis, e os arquivos delas não foram olhados. Escolha a pasta de dentro",
+        ));
+    }
     if !inteiro {
         saida.push(ruim(
             "pasta".into(),
