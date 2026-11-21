@@ -447,21 +447,6 @@ Painel {
                         font.italic: true
                         font.pixelSize: 16
                     }
-                    TextoErro { text: painel.erro; Layout.fillWidth: true }
-                    // A07: a peça escolhida está desativada; dá para abrir a ficha e reativá-la.
-                    Botao {
-                        visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
-                        text: "Abrir a peça"
-                        tipo: "secundario"
-                        // Fecha o painel antes: a ficha abre por baixo dele e precisa ficar à vista
-                        // (é lá que a peça é reativada); a pendência continua aberta.
-                        onClicked: {
-                            const id = painel.pecaDesativadaId
-                            painel.pecaDesativadaId = ""
-                            painel.close()
-                            painel.janela.abrir("TelaPeca", { produtoId: id })
-                        }
-                    }
                     // Os arquivos já escolhidos (continuam escolhidos quando a leitura
                     // não deu: dá para tentar de novo sem escolher outra vez).
                     Linha {
@@ -481,13 +466,6 @@ Painel {
                             tipo: "secundario"
                             onClicked: painel.lerArquivos()
                         }
-                    }
-                    Nota {
-                        visible: painel.naImportacao && painel.avisoArquivos !== ""
-                        text: painel.avisoArquivos
-                        color: Tema.vermelho
-                        font.pixelSize: 13
-                        Layout.fillWidth: true
                     }
 
                     // Prévia
@@ -882,6 +860,31 @@ Painel {
                 }
             }
 
+            // T077 (AUD-X-1): o erro, o aviso dos arquivos e o "Abrir a peça" ficam fora da rolagem, logo
+            // acima do Cadastrar (como no Vender e no A pagar): quem rolou até o fim e apertou o Cadastrar vê
+            // a recusa (ex.: a prévia vencida).
+            TextoErro { text: painel.erro; Layout.fillWidth: true }
+            // A07: a peça escolhida está desativada; dá para abrir a ficha e reativá-la.
+            Botao {
+                visible: painel.aba === "pendencias" && painel.pecaDesativadaId !== ""
+                text: "Abrir a peça"
+                tipo: "secundario"
+                // Fecha o painel antes: a ficha abre por baixo dele e precisa ficar à vista
+                // (é lá que a peça é reativada); a pendência continua aberta.
+                onClicked: {
+                    const id = painel.pecaDesativadaId
+                    painel.pecaDesativadaId = ""
+                    painel.close()
+                    painel.janela.abrir("TelaPeca", { produtoId: id })
+                }
+            }
+            Nota {
+                visible: painel.naImportacao && painel.avisoArquivos !== ""
+                text: painel.avisoArquivos
+                color: Tema.vermelho
+                font.pixelSize: 13
+                Layout.fillWidth: true
+            }
             RowLayout {
                 visible: painel.naImportacao
                 spacing: 10
