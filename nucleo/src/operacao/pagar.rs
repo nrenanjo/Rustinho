@@ -740,8 +740,10 @@ pub fn pagar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Pagamen
     if !FORMAS.iter().any(|f| f.0 == e.forma) {
         return Err(Erro::campo("forma", "Escolha como foi pago."));
     }
+    // T085 (AUD-B-4): vazio = tudo o que falta; um 0 digitado é recusado (antes, pagava o saldo inteiro).
     let valor = match ler_valor(&e.valor, "valor", false)? {
-        0 => saldo,
+        0 if e.valor.trim().is_empty() => saldo,
+        0 => return Err(Erro::campo("valor", "Digite quanto pagar, ou deixe em branco para pagar tudo o que falta.")),
         v => v,
     };
     if valor > saldo {
