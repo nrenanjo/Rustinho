@@ -213,12 +213,23 @@ pub fn gerente_conferido(
     senha: &str,
     memoria: Option<[u8; 32]>,
 ) -> Resultado<Option<[u8; 32]>> {
-    conn.execute_batch("SAVEPOINT chave_dos_backups")?;
+    // T103 (N10 da 4ª conferência): fora de uma transação de quem chama (o `entrar`, o aperto da senha), a vez
+    // de gravar é pega logo no começo (IMMEDIATE, como as outras transações, D-05): uma transação adiada falhava na
+    // hora (SQLITE_BUSY_SNAPSHOT) se a troca de dados gravasse entre a leitura e a gravação. Dentro de uma
+    // transação, ou no modo seguro (só leitura), um SAVEPOINT.
+    let somente_leitura = conn.query_row("PRAGMA query_only", [], |l| l.get::<_, i64>(0)).unwrap_or(0) == 1;
+    let propria = conn.is_autocommit() && !somente_leitura;
+    conn.execute_batch(if propria { "BEGIN IMMEDIATE" } else { "SAVEPOINT chave_dos_backups" })?;
     let r = gerente_conferido_dentro(conn, usuario_id, senha, memoria);
-    if r.is_ok() {
-        conn.execute_batch("RELEASE chave_dos_backups")?;
-    } else {
-        let _ = conn.execute_batch("ROLLBACK TO chave_dos_backups; RELEASE chave_dos_backups");
+    match (r.is_ok(), propria) {
+        (true, true) => conn.execute_batch("COMMIT")?,
+        (true, false) => conn.execute_batch("RELEASE chave_dos_backups")?,
+        (false, true) => {
+            let _ = conn.execute_batch("ROLLBACK");
+        }
+        (false, false) => {
+            let _ = conn.execute_batch("ROLLBACK TO chave_dos_backups; RELEASE chave_dos_backups");
+        }
     }
     r
 }
