@@ -90,6 +90,48 @@ fn caixa_novo_em_arquivo(caminho: &Path, caixa: &str) -> Banco {
 // V01a
 // ---------------------------------------------------------------------------
 
+/// T075 (OPUS-D-2 = AUD-D-11 da auditoria da 0.9.18-dev.3.3.3): desistir de entrar numa loja com a troca de
+/// dados no meio (uma puxada segurando a vez da troca e ainda aplicando lotes). Antes, a desistência limpava
+/// e a puxada seguia aplicando o lote seguinte por cima: a outra loja voltava. Agora a desistência pede para a
+/// troca parar, espera a vez dela e só então limpa: nada da outra loja fica.
+#[test]
+fn t075_desistir_com_a_troca_no_meio_nao_traz_a_loja_de_volta() {
+    let caminho = temp("desistir-no-meio");
+    let mut b = Banco::abrir(&caminho).unwrap();
+    crate::loja::comecar_juncao(&b.conn).unwrap();
+    let (outra, u) = para_testes::loja("Caixa da outra loja");
+    para_testes::peca(&outra, &u, "Peça do primeiro lote");
+    let (lista, _) = sync::alteracoes_desde(&outra.conn, 0, 10_000_000).unwrap();
+    let ate = lista.iter().map(|a| a.seq).max().unwrap_or(0);
+    let primeiro: Vec<_> = lista.into_iter().filter(|a| a.tabela != "usuario").collect();
+    sync::aplicar(&mut b.conn, &primeiro).unwrap();
+    para_testes::peca(&outra, &u, "Peça do segundo lote");
+    let (lista, _) = sync::alteracoes_desde(&outra.conn, ate, 10_000_000).unwrap();
+    let segundo: Vec<_> = lista.into_iter().filter(|a| a.tabela != "usuario").collect();
+    assert!(contar(&b.conn, "SELECT COUNT(*) FROM produto") > 0, "a tentativa recebeu o primeiro lote");
+    // A puxada em andamento: segura a vez da troca e aplica o lote seguinte daqui a pouco.
+    let (comecou_tx, comecou) = std::sync::mpsc::channel();
+    let c2 = caminho.clone();
+    let puxada = thread::spawn(move || {
+        let _vez = sync::travar();
+        comecou_tx.send(()).unwrap();
+        thread::sleep(Duration::from_millis(400));
+        let mut conn = Banco::abrir(&c2).unwrap().conn;
+        sync::aplicar(&mut conn, &segundo).unwrap();
+    });
+    comecou.recv().unwrap();
+    crate::loja::desistir_da_juncao(&mut b.conn).unwrap();
+    puxada.join().unwrap();
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto"), 0, "a outra loja voltou depois da desistência");
+    assert_eq!(
+        contar(&b.conn, "SELECT COUNT(*) FROM alteracao WHERE dispositivo <> (SELECT valor FROM config WHERE chave = 'dispositivo_id')"),
+        0,
+        "ficou registro da outra loja"
+    );
+    drop(b);
+    let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
+}
+
 /// Caixa novo começa a entrar numa loja, recebe parte dos dados dela e
 /// desiste: a tentativa sai inteira (troca desligada, sem senha, sem
 /// endereço, sem par, sem dado da outra loja); a loja nova nasce limpa, com
