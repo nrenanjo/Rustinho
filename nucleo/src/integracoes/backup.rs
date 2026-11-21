@@ -132,6 +132,14 @@ fn de_hex(t: &str) -> Option<Vec<u8>> {
 /// secreta da chave trancada (32 + 16 de conferência).
 const ACESSO: usize = 76;
 
+/// T092 (AUD-D-03): a parte pública que a senha de um gerente abriu NESTE caixa (chave local, não viaja). A
+/// `backup_publica` viaja pela rede; enquanto a de agora não for a confirmada, os backups antigos não são apagados.
+const PUBLICA_CONFIRMADA: &str = "backup_publica_confirmada";
+
+fn confirmar_publica(conn: &Connection, publica: &[u8; 32]) -> Resultado<()> {
+    config::gravar(conn, PUBLICA_CONFIRMADA, &hex(publica))
+}
+
 /// Parte pública da chave da loja (vai para os outros caixas).
 pub fn publica_da_loja(conn: &Connection) -> Resultado<Option<[u8; 32]>> {
     Ok(config::ler(conn, "backup_publica")?.and_then(|t| de_hex(&t)).and_then(|v| v.try_into().ok()))
@@ -197,6 +205,7 @@ pub fn gerente_conferido(
         .flatten();
     if let (Some(p), Some(a)) = (publica, atual.as_deref().and_then(de_hex)) {
         if let Some(s) = destrancar(&a, senha).filter(|s| publica_de(s) == p) {
+            confirmar_publica(conn, &p)?;
             return Ok(Some(s));
         }
     }
@@ -204,9 +213,13 @@ pub fn gerente_conferido(
         (None, _) => {
             let s: [u8; 32] = aleatorio()?;
             config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
+            confirmar_publica(conn, &publica_de(&s))?;
             s
         }
-        (Some(p), Some(m)) if publica_de(&m) == p => m,
+        (Some(p), Some(m)) if publica_de(&m) == p => {
+            confirmar_publica(conn, &p)?;
+            m
+        }
         // T073 (OPUS-A-3): nenhum gerente tem cadeado, e a chave não está na memória: ninguém consegue mais
         // abrir os backups trancados com ela. Este gerente ganha uma chave nova (os backups antigos continuam
         // abrindo com os cadeados que levam dentro: as senhas de quando foram feitos).
@@ -222,6 +235,7 @@ pub fn gerente_conferido(
 fn chave_nova(conn: &Connection, usuario_id: &str, senha: &str) -> Resultado<[u8; 32]> {
     let s: [u8; 32] = aleatorio()?;
     config::gravar(conn, "backup_publica", &hex(&publica_de(&s)))?;
+    confirmar_publica(conn, &publica_de(&s))?;
     gravar_acesso(conn, usuario_id, Some(&trancar(&s, senha)?))?;
     crate::registro::anotar("chave dos backups trocada por uma nova: nenhum gerente tinha cadeado da anterior");
     Ok(s)
@@ -1050,6 +1064,17 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
 
     // 3. Criptografia e gravação (primeiro com outro nome, para não deixar meio arquivo).
     let acessos = acessos_da_loja(conn)?;
+    // T073 (OPUS-A-3) e T091 (N3 da 2ª conferência): trancado sem nenhum cadeado de gerente, ninguém abre o
+    // backup. Ele nem é gravado (gravado, o automático fazia mais um a cada tentativa, ele ia ao Drive como o mais
+    // novo, podia ficar no lugar de um bom do mesmo segundo, e a retenção podia guardá-lo no lugar do bom do mesmo
+    // dia): sai como erro (o aviso do Início), e os antigos ficam. A cópia de antes de restaurar segue como sempre.
+    if a.publica.is_some() && acessos.is_empty() && !antes {
+        crate::registro::anotar("backup sem nenhum cadeado de gerente: não foi feito; os antigos foram mantidos");
+        return Err(Erro::validacao(
+            "Não deu para fazer o backup: nenhum gerente consegue abrir os backups novos agora. Peça a um gerente \
+             para entrar no Rustinho com a senha dele, e faça o backup de novo. Os backups antigos foram mantidos.",
+        ));
+    }
     let nome = montar_nome(conn, antes, defeito_na_origem.is_some())?;
     let destino = a.pasta.join(&nome);
     let parcial = a.pasta.join(format!(".{nome}.parcial"));
@@ -1080,17 +1105,6 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         }
     }
 
-    // T073 (OPUS-A-3): trancado sem nenhum cadeado de gerente, ninguém abre este backup. Ele fica, mas sai como
-    // erro (o aviso do Início) e os antigos não são apagados. A cópia de antes de restaurar segue como sempre.
-    if a.publica.is_some() && acessos.is_empty() && !antes {
-        crate::registro::anotar("backup gravado sem nenhum cadeado de gerente; os antigos foram mantidos");
-        return Err(Erro::validacao(format!(
-            "O backup foi gravado em {}, mas nenhum gerente consegue abri-lo agora. Peça a um gerente para entrar \
-             no Rustinho com a senha dele e faça o backup de novo. Os backups antigos foram mantidos.",
-            destino.display()
-        )));
-    }
-
     if let Some(d) = &defeito_na_origem {
         crate::registro::anotar(&format!("backup de um banco com defeito de integridade: {d}"));
         // A cópia de antes de restaurar continua: restaurar é justamente o
@@ -1106,7 +1120,16 @@ fn fazer_com(conn: &Connection, caminho_db: &Path, antes: bool) -> Resultado<Fei
         )));
     }
 
-    // 5. Apagar as antigas.
+    // 5. Apagar as antigas. T092 (AUD-D-03): só com a chave de agora confirmada por um gerente neste caixa; senão
+    // os backups novos podem não abrir com ninguém, e os antigos ficam.
+    if let Some(p) = &a.publica {
+        if config::ler(conn, PUBLICA_CONFIRMADA)?.as_deref() != Some(hex(p).as_str()) {
+            crate::registro::anotar(
+                "backup feito; a chave dos backups ainda não foi confirmada por um gerente neste caixa: os antigos ficam",
+            );
+            return Ok(Feito { arquivo: destino.display().to_string(), tamanho });
+        }
+    }
     let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
     for velho in para_apagar(&nomes_na_pasta(&a.pasta), &hoje, a.dias) {
         let _ = std::fs::remove_file(a.pasta.join(velho));
@@ -2525,7 +2548,11 @@ pub(crate) mod testes {
     }
 
     fn rbk_na_pasta(pasta: &Path) -> usize {
-        std::fs::read_dir(pasta).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".rbk")).count()
+        std::fs::read_dir(pasta)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".rbk"))
+            .count()
     }
 
     /// T091 (N3 da 2ª conferência do Sonnet, sobre a T073): o backup trancado sem nenhum cadeado sai como erro e
