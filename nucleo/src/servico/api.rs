@@ -1083,11 +1083,15 @@ impl Servico {
                 let d: Juntar = ler(dados)?;
                 let caixa = texto::limpar(&d.caixa);
                 config::validar_nome_caixa(&caixa)?;
-                sync::salvar_ajustes(&self.banco.conn, true, &d.senha, &d.enderecos)?;
-                config::gravar(&self.banco.conn, "caixa_nome", &caixa)?;
+                // T089 (OPUS-A-7): tudo numa transação (como o `sync_salvar`): a troca não fica ligada
+                // com a senha da outra loja sem a marca da junção.
+                let tx = self.banco.conn.transaction()?;
+                sync::salvar_ajustes(&tx, true, &d.senha, &d.enderecos)?;
+                config::gravar(&tx, "caixa_nome", &caixa)?;
                 // FALHA-01: a tentativa fica marcada até chegar um usuário
                 // da loja ou até desistir (veja `loja::desistir_da_juncao`).
-                crate::loja::comecar_juncao(&self.banco.conn)?;
+                crate::loja::comecar_juncao(&tx)?;
+                tx.commit()?;
                 self.sync_ler()
             }
             // FALHA-01 (V01a): desistir de entrar numa loja. Sai tudo o que a
