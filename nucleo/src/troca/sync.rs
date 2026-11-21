@@ -475,6 +475,39 @@ mod testes {
         assert_eq!(pessoas, 10);
     }
 
+    /// T095 (N5 da 2ª conferência do Sonnet, sobre a T075): a puxada em andamento sai no fim do lote quando
+    /// pedem a parada da troca daquele banco (o que a desistência de entrar numa loja faz), sem pedir o lote
+    /// seguinte; sem o pedido, ela segue até o fim.
+    #[test]
+    fn a_puxada_para_no_fim_do_lote_quando_pedem() {
+        let c1 = temp("parar1");
+        let b1 = Banco::abrir(&c1).unwrap();
+        let u = usuarios::criar(&b1.conn, &b1.dispositivo, "Maria", "1234", true).unwrap();
+        for i in 0..20 {
+            let mut f = produtos::ficha_nova(&b1.conn).unwrap();
+            f.nome = format!("Peça {i}");
+            f.custo = "10".into();
+            produtos::salvar(&b1.conn, &b1.dispositivo, &u.id, &f).unwrap();
+        }
+        config::gravar(&b1.conn, "sync_lote_teste", "5").unwrap();
+        salvar_ajustes(&b1.conn, true, "senha-da-loja", "").unwrap();
+        drop(b1);
+        let c2 = temp("parar2");
+        let b2 = Banco::abrir(&c2).unwrap();
+        salvar_ajustes(&b2.conn, true, "senha-da-loja", "").unwrap();
+        let m1 = Motor::iniciar(c1.clone(), 0, 0);
+        let (pt1, _) = m1.portas(Duration::from_secs(10)).expect("o motor do caixa 1 abriu as portas");
+        let endereco = format!("127.0.0.1:{pt1}");
+        let pedido = pedir_parada_para_teste(&c2);
+        let (_, primeiro) = puxar(&c2, &endereco, 0).unwrap();
+        assert!(primeiro > 0 && primeiro <= 5, "com o pedido de parar, a puxada aplicou {primeiro} (o lote é de 5)");
+        drop(pedido);
+        let (_, resto) = puxar(&c2, &endereco, 0).unwrap();
+        assert!(resto > 5, "sem o pedido, a puxada segue até o fim ({resto})");
+        let pecas: i64 = b2.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
+        assert_eq!(pecas, 20);
+    }
+
     #[test]
     fn dois_caixas_pela_rede() {
         // Caixa 1: já tinha dados antes da sincronização.

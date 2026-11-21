@@ -200,6 +200,25 @@ pub fn interromper(caminho: Option<&Path>) -> Interrupcao {
     Interrupcao { banco, _pausa: pausar() }
 }
 
+/// Só nos testes (T095): o pedido de parar a troca deste banco, sem a pausa (para provar que a puxada em
+/// andamento sai no fim do lote, sem a desistência inteira).
+#[cfg(test)]
+pub(crate) struct PedidoDeParadaDeTeste(PathBuf);
+
+#[cfg(test)]
+impl Drop for PedidoDeParadaDeTeste {
+    fn drop(&mut self) {
+        PARAR_EM.lock().unwrap_or_else(|e| e.into_inner()).retain(|p| p != &self.0);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn pedir_parada_para_teste(caminho: &Path) -> PedidoDeParadaDeTeste {
+    let b = mesmo_banco(caminho);
+    PARAR_EM.lock().unwrap_or_else(|e| e.into_inner()).push(b.clone());
+    PedidoDeParadaDeTeste(b)
+}
+
 /// Alguém pediu para a troca deste banco parar?
 pub(super) fn interrompida(caminho: &Path) -> bool {
     let lista = PARAR_EM.lock().unwrap_or_else(|e| e.into_inner());
