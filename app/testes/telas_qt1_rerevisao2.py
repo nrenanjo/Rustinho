@@ -117,22 +117,12 @@ def parte_a(placar, fotos, pasta):
             voltou = na_tela(r, S2) or na_tela(r, S2_TITULO)
             print(f"QT1-RR2 A: 24 s depois, no mesmo Início: a linha voltou = {voltou}", flush=True)
             ok("A7: 24 s depois (o Início leu os avisos de novo), a linha continua fora", not voltou, f)
-            # A mesma pessoa sai e entra de novo, no mesmo dia, sem queda nova.
-            r.clicar("Trocar usuário")
-            time.sleep(2)
-            r.entrar("Ana")
-            time.sleep(1)
-            f = r.foto("-5-entrou-de-novo")
-            voltou = na_tela(r, S2) or na_tela(r, S2_TITULO)
-            print(f"QT1-RR2 A: saiu e entrou de novo (mesmo dia, sem queda nova): a linha voltou = {voltou}", flush=True)
-            ok("A8: a linha escondida continua escondida para quem a escondeu (vale como o Entendi dela: T-04)", not voltou, f)
-            if voltou:
-                if not na_tela(r, "Entendi"):
-                    r.clicar(S2_TITULO)
-                    time.sleep(1.2)
-                r.clicar("Entendi")
-                time.sleep(1.5)
-                ok("A9: o Entendi tira a linha", not na_tela(r, S2) and not na_tela(r, S2_TITULO), r.foto("-6"))
+            # A mesma pessoa sai e entra de novo, no mesmo dia, sem queda nova (A8 e A9). Desde a T084 (texto O do
+            # proprietário, 21/11/2026), o "Trocar usuário" abre a tela de Usuários e não sai mais da conta: sair e
+            # entrar de novo pela tela deixou de existir (fechar e abrir é uma abertura nova, outro caso). Não se
+            # aplica, e diz isso (não conta como aprovado); volta com a D-AUD-3 (doc 8).
+            print("– A8 e A9: não se aplicam desde a T084 (texto O): não há mais o sair da conta pela tela "
+                  "(voltam com a D-AUD-3)", flush=True)
     finally:
         morrer(r)
 

@@ -1518,7 +1518,14 @@ def caso7j(placar, fotos):
 def caso7k(placar, fotos):
     """BUG-20261118-SJ7F, achado 1 da revisão do condutor: a mesma faixa por outra troca da pilha inteira. O caixa
     desiste da senha do gerente, volta ao Receber com a faixa "ainda não foi concluída" (9 s), fecha a janelinha, volta
-    ao Início e toca em "Trocar usuário" antes de a faixa sumir: a faixa NÃO vai junto para a tela de entrada."""
+    ao Início e toca em "Trocar usuário" antes de a faixa sumir: a faixa NÃO vai junto para a tela de entrada.
+
+    Desde a T084 (texto O do proprietário, 21/11/2026), o "Trocar usuário" abre a tela de Usuários e não sai mais da
+    conta: este caminho (sair pela tela) deixou de existir. O caso não se aplica, e diz isso (não conta como
+    aprovado). Volta se o proprietário devolver o sair da conta (D-AUD-3, doc 8)."""
+    print("– 7k: não se aplica desde a T084 (texto O): o \"Trocar usuário\" abre Usuários e não sai mais da conta "
+          "(volta com a D-AUD-3)", flush=True)
+    return
     ok = placar.ok
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7k-")
     try:
