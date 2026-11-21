@@ -43,9 +43,6 @@ FocusScope {
     readonly property string canal: "pecas-" + Api.novaChave()
     // Uma busca pedida e ainda sem resposta.
     property bool buscando: false
-    // Enter com a busca a caminho: abre a peça quando ela chegar (antes, a
-    // busca segurava a janela, e o Enter esperava por ela).
-    property bool abrirAoChegar: false
 
     function atualizarPendenciasXml() {
         const p = Api.chamar("xml_pendencias_listar")
@@ -67,21 +64,30 @@ FocusScope {
             buscando = false
             mostrar(r, texto, "", tamanhoParte)
             anotarBusca(comeco, texto)
-            // RC2-4: o Enter dado com a busca a caminho só abre a peça se a
-            // busca deu certo; com erro, a lista na tela ainda é a do texto
-            // anterior, e a peça marcada nela não é a que a pessoa procurou.
-            const abrir = abrirAoChegar && r.ok
-            abrirAoChegar = false
-            if (abrir)
-                abrirPeca(lista.currentIndex)
         })
     }
 
+    // T067 (bug 22, BUG-20261121-QL7R; texto N do proprietário, 21/11/2026): o
+    // Enter só abre a peça marcada quando a lista na tela é a da busca do texto
+    // que está no campo. O leitor de código de barras "digita" o código em
+    // poucos milissegundos e manda o Enter na hora, antes de a espera de 160 ms
+    // (espera) soltar a busca: a lista ainda era a de antes, e o Enter abria a
+    // ficha da peça consultada antes. Agora, nesse caso, a busca do texto atual
+    // sai na hora e a pessoa escolhe na lista (como no EscolherPeca); o texto
+    // fica selecionado, para a próxima leitura trocar o código em vez de se
+    // juntar a ele. Com a lista já certa, o Enter abre a peça marcada, como
+    // sempre. (Sai o RC2-4, que abria sozinho a 1ª peça quando a busca a
+    // caminho chegasse: a pessoa via a ficha sem ter visto a lista.)
     function confirmar() {
-        if (buscando)
-            abrirAoChegar = true
-        else
-            abrirPeca(lista.currentIndex)
+        if (espera.running || buscando || textoDaLista !== busca.texto) {
+            if (espera.running || !buscando) {
+                espera.stop()
+                novaBusca()
+            }
+            busca.focar()
+            return
+        }
+        abrirPeca(lista.currentIndex)
     }
 
     // A lista do começo. Com manterSelecao (ao voltar de uma peça), lê de novo
@@ -92,7 +98,6 @@ FocusScope {
         // esta leitura é a mais nova, e a busca que estava a caminho não vale.
         Api.esquecer(canal)
         buscando = false
-        abrirAoChegar = false
         const anterior = manterSelecao && lista.currentIndex >= 0 && lista.currentIndex < pecas.count
                          ? pecas.get(lista.currentIndex).id : ""
         const ate = manterSelecao ? Math.max(pecas.count, tamanhoParte) : tamanhoParte
@@ -476,7 +481,10 @@ FocusScope {
             abrirPendenciasXml = false
             Qt.callLater(() => importador.abrirPendencias())
         } else {
-            busca.focarCursor()
+            // T067: de volta de uma ficha, o texto da busca fica selecionado:
+            // uma leitura nova (ou o que se digitar) troca o texto de antes, em
+            // vez de se juntar a ele.
+            busca.focar()
         }
     }
     Component.onCompleted: {
