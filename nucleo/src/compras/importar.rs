@@ -3054,6 +3054,29 @@ mod testes {
     /// protocolo (cadastro por XML exige só a assinatura do emitente, D8).
     const NOTA_LOJA: &str = include_str!("../../tests/pki/xml/venda_da_loja_sem_protocolo.xml");
 
+    /// T086 (AUD-X-2 da auditoria da 0.9.18-dev.3.3.3): a prévia conta todos os arquivos ignorados, mas mostra o
+    /// motivo só dos 5 primeiros, sem dizer que há mais (com 16 ignorados, 11 ficavam sem nenhuma menção). Agora
+    /// uma linha diz quantos mais foram ignorados sem o motivo listado.
+    #[test]
+    fn previa_diz_quantos_ignorados_ficaram_sem_motivo_listado() {
+        let b = Banco::em_memoria().unwrap();
+        let c = &b.conn;
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-importar-t086-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        for i in 0..8 {
+            std::fs::write(pasta.join(format!("nada{i}.xml")), "<nada/>").unwrap();
+        }
+        let p = previa(c, &[pasta.display().to_string()]).unwrap();
+        assert_eq!(p.ignorados, 8);
+        assert!(
+            p.avisos.iter().any(|a| a.contains("E mais 3 arquivos ignorados")),
+            "nada diz que há mais ignorados do que os motivos listados: {:?}",
+            p.avisos
+        );
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
     /// T080 (OPUS-C-2 = AUD-C-5 da auditoria da 0.9.18-dev.3.3.3): o arquivo que nem chegou a ser lido (um .zip
     /// estragado, pacote grande demais, lote cortado) aparecia como "O arquivo não é um XML válido", e o motivo
     /// verdadeiro sumia. Agora o aviso traz o motivo de quem leu os arquivos.
