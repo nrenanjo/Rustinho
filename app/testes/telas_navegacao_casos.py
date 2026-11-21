@@ -459,7 +459,14 @@ class Placar:
     def __init__(self):
         self.certos = 0
         self.errados = 0
+        self.nao_se_aplicam = []
         self.logs = []
+
+    def nao_se_aplica(self, rotulo, motivo):
+        """T102 (N6 da 3ª conferência): o caso que não se aplica é dito e contado na linha final (não conta como
+        certo nem como errado, e não some do resultado)."""
+        print(f"– {rotulo}: não se aplica: {motivo}", flush=True)
+        self.nao_se_aplicam.append(rotulo)
 
     def ok(self, nome, condicao, foto=""):
         condicao = bool(condicao)
@@ -1523,8 +1530,9 @@ def caso7k(placar, fotos):
     Desde a T084 (texto O do proprietário, 21/11/2026), o "Trocar usuário" abre a tela de Usuários e não sai mais da
     conta: este caminho (sair pela tela) deixou de existir. O caso não se aplica, e diz isso (não conta como
     aprovado). Volta se o proprietário devolver o sair da conta (D-AUD-3, doc 8)."""
-    print("– 7k: não se aplica desde a T084 (texto O): o \"Trocar usuário\" abre Usuários e não sai mais da conta "
-          "(volta com a D-AUD-3)", flush=True)
+    placar.nao_se_aplica("7k", "desde a T084 (texto O), o \"Trocar usuário\" abre Usuários e não sai mais da conta; "
+                         "a faixa na troca da pilha inteira segue provada pelo 7j (sessão encerrada); volta com a "
+                         "D-AUD-3")
     return
     ok = placar.ok
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7k-")
@@ -1605,7 +1613,9 @@ def main():
             xvfb.wait(10)
         except subprocess.TimeoutExpired:
             xvfb.kill()
-    print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados")
+    pulados = f", não se aplicam: {len(placar.nao_se_aplicam)} ({', '.join(placar.nao_se_aplicam)})" \
+        if placar.nao_se_aplicam else ""
+    print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados{pulados}")
     print("TUDO CERTO" if placar.errados == 0 else "HOUVE FALHAS")
     print("fotos em", fotos)
     sys.exit(0 if placar.errados == 0 else 1)

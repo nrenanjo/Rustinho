@@ -121,8 +121,8 @@ def parte_a(placar, fotos, pasta):
             # proprietário, 21/11/2026), o "Trocar usuário" abre a tela de Usuários e não sai mais da conta: sair e
             # entrar de novo pela tela deixou de existir (fechar e abrir é uma abertura nova, outro caso). Não se
             # aplica, e diz isso (não conta como aprovado); volta com a D-AUD-3 (doc 8).
-            print("– A8 e A9: não se aplicam desde a T084 (texto O): não há mais o sair da conta pela tela "
-                  "(voltam com a D-AUD-3)", flush=True)
+            placar.nao_se_aplica("A8 e A9", "desde a T084 (texto O), não há mais o sair da conta pela tela; "
+                                 "voltam com a D-AUD-3")
     finally:
         morrer(r)
 
@@ -211,7 +211,9 @@ def main():
             xvfb.wait(10)
         except subprocess.TimeoutExpired:
             xvfb.kill()
-    print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados")
+    pulados = f", não se aplicam: {len(placar.nao_se_aplicam)} ({', '.join(placar.nao_se_aplicam)})" \
+        if placar.nao_se_aplicam else ""
+    print(f"RESULTADO: {placar.certos} certos, {placar.errados} errados{pulados}")
     print("fotos em", fotos)
     sys.exit(0 if placar.errados == 0 else 1)
 
