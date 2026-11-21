@@ -73,7 +73,8 @@ fn calcular(
     ate: &str,
 ) -> Resultado<(i64, i64, i64)> {
     let mut c = conn.prepare_cached(
-        "SELECT v.id, v.subtotal, v.total, i.total, i.comissao,
+        "SELECT v.id, (SELECT COALESCE(SUM(i2.total), 0) FROM venda_item i2 WHERE i2.venda_id = v.id),
+                v.total, i.total, i.comissao,
                 COALESCE((SELECT SUM(di.valor_item) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
                            WHERE di.venda_item_id = i.id AND d.cancelado_em IS NULL), 0),
                 COALESCE((SELECT SUM(di.valor) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -90,16 +91,18 @@ fn calcular(
         .collect::<Result<_, _>>()?;
     let mut vendas: Vec<&str> = Vec::new();
     let (mut vendido, mut comissao) = (0_i64, 0_i128);
-    for (venda, subtotal, total, item, pct, devolvido_item, devolvido) in &linhas {
+    for (venda, soma_itens, total, item, pct, devolvido_item, devolvido) in &linhas {
         if !vendas.contains(&venda.as_str()) {
             vendas.push(venda);
             vendido += total;
         }
         // O que o cliente devolveu não conta.
         vendido -= devolvido;
-        // Parte do item no total da venda (já com o desconto da venda).
+        // Parte do item no total da venda (já com o desconto da venda). O total do item já tem o desconto
+        // do item; a proporção é pela soma dos totais dos itens (T069: pelo subtotal, de antes dos descontos
+        // dos itens, o desconto do item era tirado duas vezes), como no rateio do DRE e da devolução.
         let item = item - devolvido_item;
-        let base = if *subtotal > 0 { item as i128 * *total as i128 / *subtotal as i128 } else { 0 };
+        let base = if *soma_itens > 0 { item as i128 * *total as i128 / *soma_itens as i128 } else { 0 };
         let pct = pct.or(padrao).unwrap_or(0) as i128;
         comissao += base * pct;
     }
