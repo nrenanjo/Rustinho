@@ -53,7 +53,7 @@ def estatica(qml=QML):
     faltas = []
     inicio = open(os.path.join(qml, "TelaInicio.qml"), encoding="utf-8").read()
     trocar = bloco_do_botao(inicio, "Trocar usuário")
-    if not re.search(r'abrirFuncao\(\s*tela\.funcao\("usuarios"\)', trocar) or "trocarUsuario" in trocar:
+    if 'tela.funcao("usuarios")' not in trocar or "tela.janela.abrirFuncao(" not in trocar or "trocarUsuario" in trocar:
         faltas.append("o Trocar usuário não usa o abrirFuncao do menu com a função usuarios")
     usuarios = open(os.path.join(qml, "TelaUsuarios.qml"), encoding="utf-8").read()
     novo = bloco_do_botao(usuarios, "Novo usuário")
@@ -87,6 +87,12 @@ def redimensionar(largura, altura):
 
 def textos(r):
     return [t for _, _, t in r.textos()]
+
+
+def botao(tx, nome):
+    """O botão (um lugar de toque, pelo --medir-toque) com esse nome está na tela? O texto sozinho não basta: o
+    painel do formulário tem o título "Novo usuário", com o mesmo texto do botão."""
+    return any(x.startswith("TOQUE:") and x.split("|")[3] == nome and x.split("|")[-1] == "1" for x in tx)
 
 
 def esperar(r, condicao, segundos=6.0):
@@ -123,6 +129,8 @@ def main():
     fotos = sys.argv[1] if len(sys.argv) > 1 else tempfile.mkdtemp(prefix="rustinho-fotos-t084-")
     os.makedirs(fotos, exist_ok=True)
     raiz = tempfile.mkdtemp(prefix="rustinho-t084-")
+    antes = os.environ.get("RUSTINHO_ARGS_TESTE")
+    os.environ["RUSTINHO_ARGS_TESTE"] = ((antes or "") + " --medir-toque").strip()
     pasta = os.path.join(raiz, "loja")
     xvfb = subprocess.Popen(["Xvfb", TELA, "-screen", "0", "1440x1000x24"], stderr=subprocess.DEVNULL)
     time.sleep(1)
@@ -166,7 +174,9 @@ def main():
             if MARCA_USUARIOS not in tx:
                 raise RuntimeError(f"INSTRUMENTAÇÃO: a tela de Usuários não abriu (foto {r.foto('-instr')})")
             f = r.foto("-1-tela")
-            ok("LARGA: na tela larga não há o + Novo usuário", "Novo usuário" not in tx, f"foto {f}")
+            if not any(x.startswith("TOQUE:") for x in tx):
+                raise RuntimeError("INSTRUMENTAÇÃO: sem as medidas de toque (--medir-toque)")
+            ok("LARGA: na tela larga não há o + Novo usuário", not botao(tx, "Novo usuário"), f"foto {f}")
             ok("LARGA: o formulário de criação está à vista (Nome, senhas, Salvar)",
                all(x in tx for x in (MARCA_FORMULARIO, "Pelo menos 4 caracteres", "Repita a senha", "Salvar")),
                f"foto {f}")
@@ -214,16 +224,22 @@ def main():
         try:
             r.entrar("Ana")
             redimensionar(700, 900)
-            tx = esperar(r, lambda t: "Novo usuário" in t)
+            tx = esperar(r, lambda t: botao(t, "Novo usuário"))
             f = r.foto("-1-lista")
-            ok("ESTREITA: o + Novo usuário continua (o formulário não fica à vista)", "Novo usuário" in tx, f"foto {f}")
-            if "Novo usuário" in tx:
+            ok("ESTREITA: o + Novo usuário continua (o formulário não fica à vista)", botao(tx, "Novo usuário"),
+               f"foto {f}")
+            ok("ESTREITA: o formulário não está à vista antes do botão", MARCA_FORMULARIO not in tx, f"foto {f}")
+            if botao(tx, "Novo usuário"):
                 clicar_no_texto(r, "Novo usuário")
                 tx = esperar(r, lambda t: MARCA_FORMULARIO in t)
                 ok("ESTREITA: ele abre o formulário de criação", MARCA_FORMULARIO in tx, f"foto {r.foto('-2-formulario')}")
         finally:
             r.fechar()
     finally:
+        if antes is None:
+            os.environ.pop("RUSTINHO_ARGS_TESTE", None)
+        else:
+            os.environ["RUSTINHO_ARGS_TESTE"] = antes
         shutil.rmtree(raiz, ignore_errors=True)
         xvfb.terminate()
         xvfb.wait()
