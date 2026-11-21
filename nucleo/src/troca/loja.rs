@@ -345,6 +345,11 @@ pub fn desistir_da_juncao(conn: &mut Connection) -> Resultado<usize> {
     if !marcado && !recebeu_de_outro(conn)? {
         return Ok(0);
     }
+    // T075 (OPUS-D-2): a troca de dados para antes de qualquer leitura do que apagar. Uma puxada em andamento
+    // termina o lote que está aplicando e sai; daqui até o fim, nenhum lote entra. Antes, ela seguia por cima
+    // da limpeza e a outra loja voltava. Depois, a troca fica desligada (sem `sync_ligado` nem senha).
+    let caminho = conn.path().map(std::path::PathBuf::from);
+    let _parada = sync::interromper(caminho.as_deref());
     let eu = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
     let incertos: i64 = conn.query_row(
         "SELECT COUNT(*) FROM (SELECT DISTINCT a.tabela, a.chave FROM alteracao a

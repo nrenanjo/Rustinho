@@ -161,6 +161,47 @@ pub(super) fn pausar_nos_testes() -> RwLockWriteGuard<'static, ()> {
     }
 }
 
+/// T075 (OPUS-D-2): os bancos que alguém vai mudar por fora da troca (desistir de entrar numa loja). A puxada
+/// desse banco para no fim do lote que está aplicando, sem pedir o seguinte.
+static PARAR_EM: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn mesmo_banco(caminho: &Path) -> PathBuf {
+    std::fs::canonicalize(caminho).unwrap_or_else(|_| caminho.to_path_buf())
+}
+
+/// A troca deste banco parada enquanto a guarda existir: o pedido de parar (a puxada em andamento termina o lote
+/// e sai) e a pausa (a vez da troca), na ordem. Na saída, o pedido sai antes da vez voltar.
+pub struct Interrupcao {
+    banco: Option<PathBuf>,
+    _pausa: RwLockWriteGuard<'static, ()>,
+}
+
+impl Drop for Interrupcao {
+    fn drop(&mut self) {
+        if let Some(b) = &self.banco {
+            let mut lista = PARAR_EM.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(i) = lista.iter().position(|p| p == b) {
+                lista.remove(i);
+            }
+        }
+    }
+}
+
+/// Para a troca de dados deste banco (`None` ou vazio: banco em memória, só a pausa) e espera a vez dela.
+pub fn interromper(caminho: Option<&Path>) -> Interrupcao {
+    let banco = caminho.filter(|p| !p.as_os_str().is_empty()).map(mesmo_banco);
+    if let Some(b) = &banco {
+        PARAR_EM.lock().unwrap_or_else(|e| e.into_inner()).push(b.clone());
+    }
+    Interrupcao { banco, _pausa: pausar() }
+}
+
+/// Alguém pediu para a troca deste banco parar?
+pub(super) fn interrompida(caminho: &Path) -> bool {
+    let lista = PARAR_EM.lock().unwrap_or_else(|e| e.into_inner());
+    !lista.is_empty() && lista.contains(&mesmo_banco(caminho))
+}
+
 /// Só nos testes: a troca de dados está parada (alguém segura a pausa)?
 #[cfg(test)]
 pub(crate) fn pausada_para_teste() -> bool {

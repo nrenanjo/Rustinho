@@ -295,6 +295,7 @@ pub(crate) fn puxar_por(
         lotes += 1;
         if !resposta["temMais"].as_bool().unwrap_or(false)
             || parar.is_some_and(|p| p.load(Ordering::SeqCst))
+            || interrompida(caminho)
             || lotes_maximos(&conn).is_some_and(|n| lotes >= n)
         {
             break;
@@ -310,6 +311,7 @@ pub(crate) fn puxar_por(
     // faixas (assim este caixa já conhece todos os códigos que ele conhece),
     // pede a faixa se não tem ou se está acabando (veja `faixas`).
     if !parar.is_some_and(|p| p.load(Ordering::SeqCst))
+        && !interrompida(caminho)
         && crate::faixas::distribuidor(&conn)?.as_deref() == Some(dispositivo.as_str())
         && crate::faixas::precisa(&conn)?
     {
