@@ -179,12 +179,13 @@ fn descricao_chave(it: &ItemXml) -> String {
 // Achar e ler os arquivos (soltos, pastas, .zip e .rar): ver `arquivos`.
 // ---------------------------------------------------------------------------
 
-/// Chama `cada` com (nome do arquivo, conteúdo) de todos os XMLs achados.
-fn cada_xml(entradas: &[String], mut cada: impl FnMut(&str, &str)) -> Resultado<i64> {
+/// Chama `cada` com (nome do arquivo, conteúdo, erro de leitura) de todos os XMLs achados. O erro de leitura (não
+/// vazio) é o motivo de quem leu os arquivos: o pacote estragado, grande demais, o lote cortado (T080).
+fn cada_xml(entradas: &[String], mut cada: impl FnMut(&str, &str, &str)) -> Resultado<i64> {
     let lista = arquivos::xmls(entradas)?;
     let lidos = lista.len() as i64;
     for x in lista {
-        cada(&x.nome, &x.texto);
+        cada(&x.nome, &x.texto, &x.erro);
     }
     Ok(lidos)
 }
@@ -228,13 +229,27 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         use sha2::Digest;
         sha2::Sha256::new()
     };
-    let total = cada_xml(arquivos, |nome, xml| {
+    let total = cada_xml(arquivos, |nome, xml, erro_de_leitura| {
         {
             use sha2::Digest;
             assinatura.update(nome.as_bytes());
             assinatura.update([0u8]);
             assinatura.update(xml.as_bytes());
             assinatura.update([0u8]);
+        }
+        // T080 (OPUS-C-2): o arquivo que nem foi lido aparece com o motivo verdadeiro (antes, "não é um XML
+        // válido"). O aviso de lote cortado (só parte dos arquivos foi olhada) vem sempre, e primeiro.
+        if !erro_de_leitura.is_empty() {
+            let aviso = format!("{nome}: {erro_de_leitura}");
+            if erro_de_leitura.contains("arquivos demais") || erro_de_leitura.contains("escolha menos arquivos") {
+                lido.avisos.insert(0, aviso);
+            } else {
+                lido.ignorados += 1;
+                if lido.avisos.len() < 5 {
+                    lido.avisos.push(aviso);
+                }
+            }
+            return;
         }
         // PEND-09 (D2, D8): só cadastra a partir de nota com a assinatura do
         // emitente verificada; a autorização da SEFAZ não é exigida aqui
