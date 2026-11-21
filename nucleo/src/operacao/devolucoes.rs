@@ -1104,7 +1104,11 @@ mod testes {
         let conta = crate::receber::cliente(c, &cliente, true).unwrap();
         let linha = conta.recebimentos.iter().find(|r| r.id == rec).expect("a linha do abatimento");
         let na_tela = serde_json::to_value(linha).unwrap();
-        assert_eq!(na_tela.get("estornavel"), Some(&serde_json::json!(false)), "o Receber oferece estornar o abatimento");
+        assert_eq!(
+            na_tela.get("estornavel"),
+            Some(&serde_json::json!(false)),
+            "o Receber oferece estornar o abatimento"
+        );
         // o caminho certo continua: desfazer a devolução devolve a dívida inteira
         desfazer(c, d, &u, &dev, "engano").unwrap();
         assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "40,00");

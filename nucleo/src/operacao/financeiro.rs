@@ -1556,7 +1556,12 @@ mod testes {
         // 2) desconto no item e na venda: (270 + 100) − 10% = 333; 10% de 333 = 33,30 (antes saía 30,80)
         let misto = VendaEntrada {
             itens: vec![
-                ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), desconto: "30".into(), ..Default::default() },
+                ItemEntrada {
+                    produto_id: l.peca.clone(),
+                    quantidade: "1".into(),
+                    desconto: "30".into(),
+                    ..Default::default()
+                },
                 ItemEntrada { produto_id: palheta, quantidade: "1".into(), ..Default::default() },
             ],
             tabela: 1,
