@@ -1068,4 +1068,45 @@ mod testes {
         assert!(l[0].como.contains("crediário") && l[0].como.contains("vale-troca"));
         assert!(crate::impressao::devolucao(c, &l[0].id).unwrap().contains("Vale-troca nº 1"));
     }
+
+    /// T070 (OPUS-B-1 = AUD-B-3 da auditoria da 0.9.18-dev.3.3.3): o abatimento do crediário por uma devolução
+    /// não se estorna em Receber (as parcelas voltariam a ficar em aberto com a devolução valendo); desfaz-se a
+    /// devolução em Trocas e devoluções.
+    #[test]
+    fn abatimento_da_devolucao_nao_se_estorna_no_receber() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        caixa::abrir(c, d, &u, "Caixa 1", "0").unwrap();
+        let mut f = pessoas::ficha_nova(c, "cliente").unwrap();
+        f.nome = "Maria".into();
+        let cliente = pessoas::salvar(c, d, &u, &f).unwrap();
+        let filtro = peca(&b, &u, "Filtro", "10"); // 20
+        let e = VendaEntrada {
+            itens: vec![item(&filtro, "3")],
+            tabela: 1,
+            cliente_id: cliente.clone(),
+            pagamentos: vec![pg("dinheiro", "20"), pg("crediario", "40")],
+            ..Default::default()
+        };
+        let venda = vendas::concluir(c, d, &u, &e).unwrap();
+        let i = da_venda(c, &venda).unwrap().itens[0].venda_item_id.clone();
+        // devolve 1 filtro (20), abatido do crediário: fica devendo 20
+        let dev = devolver(c, d, &u, &entrada(&venda, vec![(&i, "1", false)], "crediario", "")).unwrap();
+        assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "20,00");
+        let rec: String =
+            c.query_row("SELECT recebimento_id FROM devolucao WHERE id = ?1", [&dev], |l| l.get(0)).unwrap();
+        // o núcleo recusa, sem mudar nada
+        let erro = crate::receber::estornar(c, d, &u, &rec, "errado").unwrap_err().to_string();
+        assert!(erro.contains("Trocas e devoluções"), "{erro}");
+        assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "20,00");
+        // e a tela não oferece o estorno dessa linha
+        let conta = crate::receber::cliente(c, &cliente, true).unwrap();
+        let linha = conta.recebimentos.iter().find(|r| r.id == rec).expect("a linha do abatimento");
+        let na_tela = serde_json::to_value(linha).unwrap();
+        assert_eq!(na_tela.get("estornavel"), Some(&serde_json::json!(false)), "o Receber oferece estornar o abatimento");
+        // o caminho certo continua: desfazer a devolução devolve a dívida inteira
+        desfazer(c, d, &u, &dev, "engano").unwrap();
+        assert_eq!(da_venda(c, &venda).unwrap().crediario_aberto, "40,00");
+    }
 }
