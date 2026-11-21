@@ -94,6 +94,8 @@ pub struct Importado {
 struct Lido {
     arquivos: i64,
     ignorados: i64,
+    /// Quantos dos ignorados têm o motivo nos avisos (T086).
+    ignorados_listados: i64,
     avisos: Vec<String>,
     notas_loja: i64,
     notas_fornecedor: i64,
@@ -247,6 +249,7 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
                 lido.ignorados += 1;
                 if lido.avisos.len() < 5 {
                     lido.avisos.push(aviso);
+                    lido.ignorados_listados += 1;
                 }
             }
             return;
@@ -260,6 +263,7 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
                 lido.ignorados += 1;
                 if lido.avisos.len() < 5 && !e.contains("evento") && !e.contains("CT-e") {
                     lido.avisos.push(format!("{nome}: {e}"));
+                    lido.ignorados_listados += 1;
                 }
                 return;
             }
@@ -312,9 +316,25 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
         use sha2::Digest;
         assinatura.finalize().into()
     };
+    // T086 (AUD-X-2): os motivos vão só dos 5 primeiros; uma linha diz quantos mais ficaram sem motivo listado.
+    let sem_motivo = lido.ignorados - lido.ignorados_listados;
+    if sem_motivo > 0 {
+        lido.avisos.push(format!(
+            "E mais {sem_motivo} {} sem o motivo listado aqui (eventos e CT-e também entram nessa conta).",
+            if sem_motivo == 1 { "arquivo ignorado" } else { "arquivos ignorados" }
+        ));
+    }
     let avisos = lido.avisos_repetidos();
+    let repetidos = avisos.len();
     for a in avisos.into_iter().take(5) {
         lido.avisos.push(a);
+    }
+    if repetidos > 5 {
+        lido.avisos.push(format!(
+            "E mais {} {} em peças diferentes, como os de cima.",
+            repetidos - 5,
+            if repetidos - 5 == 1 { "código repetido" } else { "códigos repetidos" }
+        ));
     }
     Ok(lido)
 }
