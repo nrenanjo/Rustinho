@@ -16,4 +16,6 @@ fn retirar_um_caixa_nao_promete_que_ele_nao_volta() {
         "a pergunta de Retirar da loja promete que o caixa não volta sozinho, e a senha da rede deixa voltar"
     );
     assert!(t.contains("troque a senha da rede"), "a retirada não orienta a trocar a senha da rede");
+    // T094 (informativo da 2ª conferência): o próprio computador retirado também volta, com uma pasta de dados nova.
+    assert!(t.contains("ou com este mesmo"), "a pergunta fala só de outro computador");
 }
