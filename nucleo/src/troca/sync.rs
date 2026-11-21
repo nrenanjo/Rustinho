@@ -442,6 +442,39 @@ mod testes {
         }
     }
 
+    /// T088 (OPUS-D-7 = AUD-D-12 da auditoria da 0.9.18-dev.3.3.3): o lote era cortado só pela quantidade (200);
+    /// com registros grandes (o XML da compra viaja inteiro), a resposta passava dos 64 MiB, quem recebe recusava
+    /// e a mesma resposta voltava a cada ciclo: a troca com aquele caixa parava de vez. Agora o lote também é
+    /// cortado pelo tamanho, e tudo chega em mais respostas.
+    #[test]
+    fn lote_cortado_tambem_pelo_tamanho() {
+        let b = Banco::em_memoria().unwrap();
+        let grande = "x".repeat(3 * 1024 * 1024);
+        for i in 0..10 {
+            b.conn
+                .execute(
+                    "INSERT INTO pessoa (id, codigo, nome, observacoes, criado_em, atualizado_em, dispositivo)
+                     VALUES (?1, ?2, ?3, ?4, '2026-11-21', '2026-11-21', 'd')",
+                    rusqlite::params![format!("p{i}"), format!("T{i}"), format!("Pessoa {i}"), grande],
+                )
+                .unwrap();
+        }
+        let tamanho = |l: &[Alteracao]| l.iter().map(|a| a.dados.as_ref().map_or(0, |d| d.len())).sum::<usize>();
+        let (primeiro, tem_mais) = alteracoes_desde(&b.conn, 0, 200).unwrap();
+        assert!(tem_mais, "um lote de {} MiB saiu inteiro", tamanho(&primeiro) / (1024 * 1024));
+        assert!(tamanho(&primeiro) <= 16 * 1024 * 1024, "{} bytes num lote", tamanho(&primeiro));
+        // Em mais respostas, chega tudo.
+        let (mut desde, mut pessoas, mut mais) = (0, 0, true);
+        while mais {
+            let (lista, m) = alteracoes_desde(&b.conn, desde, 200).unwrap();
+            assert!(!lista.is_empty(), "lote vazio com mais por vir");
+            desde = lista.last().unwrap().seq;
+            pessoas += lista.iter().filter(|a| a.tabela == "pessoa").count();
+            mais = m;
+        }
+        assert_eq!(pessoas, 10);
+    }
+
     #[test]
     fn dois_caixas_pela_rede() {
         // Caixa 1: já tinha dados antes da sincronização.
