@@ -345,6 +345,42 @@ fn compra_por_zip() {
     std::fs::remove_dir_all(&pasta).ok();
 }
 
+/// T081 (OPUS-C-3 = AUD-C-3 da auditoria da 0.9.18-dev.3.3.3): dentro de um pacote, a NF-e cortada ao meio
+/// (download interrompido, ZIP mal feito) era pulada em silêncio, como um evento: a compra dela não entrava e
+/// ninguém sabia. Agora ela vem em `erros`; o evento continua pulado.
+#[test]
+fn compra_por_zip_avisa_da_nota_estragada() {
+    use std::io::Write;
+    let mut s = Servico::em_memoria().unwrap();
+    ok(
+        &mut s,
+        "configurar_inicio",
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Maria", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
+    );
+    apoio_cnpj::salvar(&mut |c, d| ok(&mut s, c, d));
+    let nota = include_str!("nfe_exemplo.xml");
+    let pasta = std::env::temp_dir().join(format!("rustinho-compra-zip-t081-{}", std::process::id()));
+    std::fs::create_dir_all(&pasta).unwrap();
+    let zip_caminho = pasta.join("notas.zip");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_caminho).unwrap());
+        let op = zip::write::SimpleFileOptions::default();
+        z.start_file("nota.xml", op).unwrap();
+        z.write_all(nota.as_bytes()).unwrap();
+        z.start_file("cortada.xml", op).unwrap();
+        z.write_all(&nota.as_bytes()[..nota.len() / 2]).unwrap();
+        z.start_file("evento.xml", op).unwrap();
+        z.write_all(b"<procEventoNFe><evento/></procEventoNFe>").unwrap();
+        z.finish().unwrap();
+    }
+    let r = ok(&mut s, "compra_importar", json!({ "caminho": zip_caminho.display().to_string() }));
+    assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
+    let erros: Vec<String> = r["erros"].as_array().unwrap().iter().map(|e| e.as_str().unwrap_or("").to_string()).collect();
+    assert_eq!(erros.len(), 1, "a nota cortada sumiu sem aviso (ou o evento virou erro): {r}");
+    assert!(erros[0].contains("cortada.xml"), "{r}");
+    std::fs::remove_dir_all(&pasta).ok();
+}
+
 #[test]
 fn gerente_e_caixa() {
     let mut s = Servico::em_memoria().unwrap();
