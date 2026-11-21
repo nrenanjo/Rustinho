@@ -86,14 +86,17 @@ def rotulo_ret(r, rotulo):
 
 
 def campos_da_janelinha(r):
-    """Os campos (TOQUE:campo) da janelinha aberta: os informados depois da linha GEO:Painel (o programa informa
-    primeiro a tela de trás, depois a janelinha e os itens dela). None se não há janelinha nas medidas. Lê as linhas
-    na ordem do programa nos dois desenhos (no celular, alt.medidas junta as GEO: no fim e perde a ordem)."""
+    """Os campos (TOQUE:campo) da janelinha aberta: os informados depois da linha GEO:fundoDaJanelinha (o programa
+    informa primeiro a tela de trás, depois a janelinha e os itens dela). None se não há janelinha nas medidas. Lê as
+    linhas na ordem do programa nos dois desenhos (no celular, alt.medidas junta as GEO: no fim e perde a ordem).
+    O marcador é o nome que o Painel.qml dá ao fundo da janelinha para os testes. Não serve GEO:Painel: nenhum
+    objectName do programa a produz; ela aparece no Qt 6.12 e não no Qt 6.8.3 dos pacotes, e a CI 44835430265
+    reprovou por isso (20/11)."""
     if nav.CELULAR:
         r._ponteiro_dentro()
     out, achou = [], False
     for _x, _y, t in nav.base.Rustinho.textos(r):
-        if t.startswith("GEO:Painel:"):
+        if t.startswith("GEO:fundoDaJanelinha:"):
             out, achou = [], True
         elif achou and t.startswith("TOQUE:campo|"):
             out.append(tuple(float(v) for v in t.split("|")[4].split(",")))
@@ -141,7 +144,7 @@ def preencher(r, rotulo, texto):
     # para um ponto da janelinha sem campo (o texto caía no campo que já tinha o foco).
     campos = campos_da_janelinha(r)
     if campos is None:
-        raise RuntimeError("INSTRUMENTAÇÃO: a janelinha (GEO:Painel) não está nas medidas")
+        raise RuntimeError("INSTRUMENTAÇÃO: a janelinha (GEO:fundoDaJanelinha) não está nas medidas")
     cands = []
     for x, y, w, h in campos:
         cy = y + h / 2
