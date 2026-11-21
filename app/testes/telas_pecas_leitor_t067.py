@@ -128,6 +128,20 @@ def voltar_da_ficha(r):
     return e
 
 
+QML_PECAS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "qml", "TelaPecas.qml")
+
+
+def volta_do_importador_seleciona(caminho=QML_PECAS):
+    """T083 (OPUS-E-12): ao fechar o "Trazer cadastros" em Peças, o texto da busca fica selecionado (focar), como ao
+    voltar da ficha: a leitura seguinte troca o texto, em vez de se juntar a ele."""
+    texto = open(caminho, encoding="utf-8").read()
+    inicio = texto.index("ImportarCadastros {")
+    bloco = texto[inicio:texto.index("onClosed:", inicio) + 400]
+    fechar = bloco[bloco.index("onClosed:"):]
+    fechar = fechar[:fechar.index("}") + 1]
+    return "busca.focar()" in fechar and "focarCursor" not in fechar
+
+
 def main():
     for p in ("Xvfb", "xdotool", "import"):
         if not shutil.which(p):
@@ -147,6 +161,8 @@ def main():
         print(("✔ " if condicao else "✘ ") + nome + ("" if condicao else f" ({detalhe})"))
         certo &= bool(condicao)
 
+    ok("H: ao fechar o Trazer cadastros, a busca fica com o texto selecionado (no código, T083)",
+       volta_do_importador_seleciona(), "o onClosed do importador usa focarCursor()")
     antes = os.environ.get("RUSTINHO_ARGS_TESTE")
     os.environ["RUSTINHO_ARGS_TESTE"] = ((antes or "") + " --medir-toque").strip()
     try:
