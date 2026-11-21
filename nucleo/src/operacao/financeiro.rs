@@ -1102,6 +1102,45 @@ mod testes {
         assert_eq!(antes, c.total_changes(), "nada gravado");
     }
 
+    /// T085 (AUD-B-4 da auditoria da 0.9.18-dev.3.3.3): no A pagar, o valor vazio quer dizer "tudo o que falta",
+    /// mas um 0 digitado ("0", "0,00", "0,004") também pagava o saldo inteiro, com a tela mostrando 0,00. Agora o
+    /// 0 digitado é recusado e nada é gravado; o vazio continua pagando tudo.
+    #[test]
+    fn pagar_com_zero_digitado_nao_paga_o_saldo() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        let conta = pagar::lancar(
+            c,
+            d,
+            u,
+            &LancamentoEntrada {
+                descricao: "Aluguel".into(),
+                categoria_id: "cat-aluguel".into(),
+                valor: "500".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()[0]
+            .clone();
+        let pg = |valor: &str| PagamentoEntrada {
+            conta_id: conta.clone(),
+            valor: valor.into(),
+            forma: "pix".into(),
+            origem: l.banco.clone(),
+            ..Default::default()
+        };
+        for zero in ["0", "0,00", "0,004"] {
+            let antes = c.total_changes();
+            let r = pagar::pagar(c, d, u, &pg(zero));
+            assert!(r.is_err(), "o valor {zero:?} pagou a conta");
+            assert_eq!(antes, c.total_changes(), "o valor {zero:?} gravou algo");
+        }
+        pagar::pagar(c, d, u, &pg("")).unwrap();
+        let pago: i64 =
+            c.query_row("SELECT pago FROM conta_pagar_saldo WHERE id = ?1", [&conta], |l| l.get(0)).unwrap();
+        assert_eq!(pago, 50_000, "o vazio paga tudo o que falta");
+    }
+
     /// R-10: pagar e receber logo abaixo, no limite e acima: acima é erro
     /// de validação e nenhuma tabela muda.
     #[test]
