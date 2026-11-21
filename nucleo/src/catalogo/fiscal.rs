@@ -356,8 +356,11 @@ pub fn ler_data(texto: &str) -> Result<Option<String>, String> {
     if a < 100 {
         a += 2000;
     }
-    let mes = time::Month::try_from(m as u8).map_err(|_| "Mês inválido.".to_string())?;
-    time::Date::from_calendar_date(a, mes, d as u8).map_err(|_| "Data inválida.".to_string())?;
+    // T079 (OPUS-C-8): sem truncar (257 `as u8` virava 1 e passava a conferência).
+    let mes =
+        u8::try_from(m).ok().and_then(|m| time::Month::try_from(m).ok()).ok_or_else(|| "Mês inválido.".to_string())?;
+    let dia = u8::try_from(d).map_err(|_| "Data inválida.".to_string())?;
+    time::Date::from_calendar_date(a, mes, dia).map_err(|_| "Data inválida.".to_string())?;
     Ok(Some(format!("{a:04}-{m:02}-{d:02}")))
 }
 
