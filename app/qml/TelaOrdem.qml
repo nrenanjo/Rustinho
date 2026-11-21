@@ -529,7 +529,22 @@ FocusScope {
                                 tela.mudou()
                                 esperaCli.restart()
                             }
-                            onConfirmado: tela.achados.length > 0 ? tela.escolherCliente(tela.achados[0]) : telefone.focar()
+                            onConfirmado: {
+                                // T068 (AUD-L-2 e AUD-E1-02, o mesmo defeito do bug 22): o Enter dado dentro da
+                                // espera (o leitor ou a digitação rápida) escolhia o 1º cliente da lista de antes.
+                                // Agora a busca do texto atual sai na hora, nada é escolhido e a pessoa escolhe na
+                                // lista; o texto fica selecionado.
+                                if (esperaCli.running) {
+                                    esperaCli.stop()
+                                    tela.buscarCliente()
+                                    cliente.focar()
+                                    return
+                                }
+                                if (tela.achados.length > 0)
+                                    tela.escolherCliente(tela.achados[0])
+                                else
+                                    telefone.focar()
+                            }
                         }
                         Repeater {
                             model: tela.achados

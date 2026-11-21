@@ -102,6 +102,16 @@ FocusScope {
             Layout.fillWidth: true
             onEditado: espera.restart()
             onConfirmado: {
+                // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
+                // de código de barras manda o código e o Enter em poucos ms) agia sobre a lista de
+                // antes. Agora a busca do texto atual sai na hora, nada abre e a pessoa escolhe na
+                // lista; o texto fica selecionado para a próxima leitura trocar, e não juntar.
+                if (espera.running) {
+                    espera.stop()
+                    tela.carregar()
+                    busca.focar()
+                    return
+                }
                 if (tela.secao === "devolver" && tela.vendas.length === 1)
                     tela.janela.abrir("TelaDevolucao", { vendaId: tela.vendas[0].id })
             }

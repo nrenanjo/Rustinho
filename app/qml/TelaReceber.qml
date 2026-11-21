@@ -215,7 +215,19 @@ FocusScope {
                         dica: "Procurar cliente"
                         Layout.fillWidth: true
                         onEditado: espera.restart()
-                        onConfirmado: if (tela.painel && tela.painel.clientes.length > 0) tela.abrirCliente(tela.painel.clientes[Math.max(0, lista.currentIndex)].clienteId)
+                        onConfirmado: {
+                            // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
+                            // ou a digitação rápida) agia sobre a lista de antes. Agora a busca do texto atual sai
+                            // na hora, nada é escolhido e a pessoa escolhe na lista; o texto fica selecionado.
+                            if (espera.running) {
+                                espera.stop()
+                                tela.carregarPainel()
+                                busca.focar()
+                                return
+                            }
+                            if (tela.painel && tela.painel.clientes.length > 0)
+                                tela.abrirCliente(tela.painel.clientes[Math.max(0, lista.currentIndex)].clienteId)
+                        }
                     }
                     ListView {
                         id: lista
@@ -855,7 +867,19 @@ FocusScope {
                         dica: "Nome, CPF ou placa"
                         Layout.fillWidth: true
                         onEditado: esperaCliente.restart()
-                        onConfirmado: if (lancar.achados.length > 0) linhasCliente.itemAt(0).escolher()
+                        onConfirmado: {
+                            // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
+                            // ou a digitação rápida) agia sobre a lista de antes. Agora a busca do texto atual sai
+                            // na hora, nada é escolhido e a pessoa escolhe na lista; o texto fica selecionado.
+                            if (esperaCliente.running) {
+                                esperaCliente.stop()
+                                lancar.buscarCliente()
+                                campoCliente.focar()
+                                return
+                            }
+                            if (lancar.achados.length > 0)
+                                linhasCliente.itemAt(0).escolher()
+                        }
                     }
                     Repeater {
                         id: linhasCliente

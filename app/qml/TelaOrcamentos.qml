@@ -76,7 +76,19 @@ FocusScope {
             dica: "Cliente, número ou peça"
             Layout.fillWidth: true
             onEditado: espera.restart()
-            onConfirmado: tela.abrir(lista.currentIndex)
+            onConfirmado: {
+                // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
+                // de código de barras manda o código e o Enter em poucos ms) agia sobre a lista de
+                // antes. Agora a busca do texto atual sai na hora, nada abre e a pessoa escolhe na
+                // lista; o texto fica selecionado para a próxima leitura trocar, e não juntar.
+                if (espera.running) {
+                    espera.stop()
+                    tela.buscar()
+                    busca.focar()
+                    return
+                }
+                tela.abrir(lista.currentIndex)
+            }
         }
 
         ListView {

@@ -280,7 +280,19 @@ FocusScope {
                         dica: "Nome ou CNPJ"
                         Layout.fillWidth: true
                         onEditado: esperaFornecedor.restart()
-                        onConfirmado: if (lancamento.achados.length > 0) linhasFornecedor.itemAt(0).escolher()
+                        onConfirmado: {
+                            // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
+                            // ou a digitação rápida) agia sobre a lista de antes. Agora a busca do texto atual sai
+                            // na hora, nada é escolhido e a pessoa escolhe na lista; o texto fica selecionado.
+                            if (esperaFornecedor.running) {
+                                esperaFornecedor.stop()
+                                lancamento.buscarFornecedor()
+                                campoFornecedor.focar()
+                                return
+                            }
+                            if (lancamento.achados.length > 0)
+                                linhasFornecedor.itemAt(0).escolher()
+                        }
                     }
                     Repeater {
                         id: linhasFornecedor
