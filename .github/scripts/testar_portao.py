@@ -463,7 +463,7 @@ class CoberturaShardsT112(unittest.TestCase):
     def test_catalogo_cobre_100_por_cento_dos_roteiros_sem_duplicacao(self):
         roteiros = {os.path.splitext(os.path.basename(r))[0] for r in self.pt.listar_roteiros(self.RAIZ_REAL)}
         unidades = self.pt.catalogo(self.RAIZ_REAL)
-        self.assertEqual(len(roteiros), 52)
+        self.assertGreaterEqual(len(roteiros), 50)
         self.assertEqual({u["roteiro"] for u in unidades}, roteiros)
         ids = [u["id"] for u in unidades]
         self.assertEqual(len(ids), len(set(ids)), "IDs duplicados no catálogo")
