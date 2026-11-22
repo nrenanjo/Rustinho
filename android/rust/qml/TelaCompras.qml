@@ -177,6 +177,15 @@ FocusScope {
         onAccepted: tela.importar(selectedFiles)
     }
 
+    // T107 (texto Q do proprietário, 21/11/2026): uma pasta inteira, com as subpastas, como em Peças › Trazer
+    // cadastros pelo XML. A pasta vai à mesma importação dos arquivos (o núcleo lê os XMLs, .zip e .rar de dentro).
+    FolderDialog {
+        id: seletorPasta
+        title: "Escolha a pasta com os XMLs das notas de compra"
+        currentFolder: StandardPaths.standardLocations(StandardPaths.DownloadLocation)[0]
+        onAccepted: tela.importar([selectedFolder])
+    }
+
     ConflitoCnpj {
         id: conflitoCnpj
         onDescartar: (c) => tela.descartarNaoImportada(c)
@@ -199,6 +208,12 @@ FocusScope {
             titulo: "Compras"
             subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
             Layout.fillWidth: true
+            Botao {
+                text: "Escolher uma pasta"
+                visible: !Tema.celular
+                tipo: "secundario"
+                onClicked: seletorPasta.open()
+            }
             Botao {
                 text: "Importar XML"
                 icone: "mais"
