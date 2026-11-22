@@ -60,10 +60,7 @@ def direto(pasta, ligado):
     também (o banco está em WAL e a impressão lê a configuração na hora)."""
     sql = (f"INSERT INTO config (chave, valor) VALUES ('imprimir_direto', '{'1' if ligado else '0'}') "
            "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;")
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_SQL=sql)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-                    "--ignored", "--exact", "executar_por_fora"],
-                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": sql}, raiz=base.RAIZ)
     c = sqlite3.connect(f"file:{os.path.join(pasta, 'rustinho.db')}?mode=ro", uri=True)
     valor = c.execute("SELECT valor FROM config WHERE chave = 'imprimir_direto'").fetchone()
     c.close()

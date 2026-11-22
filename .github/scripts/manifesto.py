@@ -1,22 +1,21 @@
 #!/usr/bin/env python3
 """MANIFESTO.json, SHA256SUMS.txt e NOTAS.md de uma execução do pipeline
-"Validar" (dev.3.3, DP-02a; PLANO_VALIDACAO_E_PUBLICACAO_DEV33.md §3).
+"Validar" (dev.3.3, DP-02a; PLANO_VALIDACAO_E_PUBLICACAO_DEV33.md §3; T112).
 
 Lê os artefatos da execução (baixados em `pasta`, um subdiretório por
 artefato) e o resultado de cada job (`NECESSARIOS`, o `toJSON(needs)` do job
 do manifesto). Registra:
 - de onde veio: commit, ref, tag, branch, run_id, tentativa, evento;
 - conclusão de cada job e de cada camada (L0 a L4; L5 a L7 "não executado");
-- contagem de testes por suíte;
+- contagem de testes por suíte (incl. artefatos sharded `Testes-Linux-*`,
+  `Testes-Windows-*` e `Telas-Linux-shard-*`);
+- verificação estrita de cobertura quando `RUSTINHO_SHARDS_TELAS` > 0 (ou
+  quando `Telas-Linux-shard-*` está presente): comprova que todos os shards,
+  100% dos roteiros/unidades de tela, `testes-programa.txt` e todos os
+  `qml_*.py` rodaram e passaram;
 - ferramentas e imagens das máquinas;
 - SHA-256 de cada pacote (conferido com o que o job que montou anotou);
 - versão da raiz, versão do app de Android e versionCode.
-
-A chave do Android (T050, 19/11/2026): RUSTINHO_ANDROID=sim|nao, vinda do
-`android` do ci.yml. Desligada (o escopo atual, por decisão do proprietário),
-os jobs `apk` e `emulador` têm de vir pulados ("skipped"), nenhum APK entra
-no manifesto e as notas dizem que o Android está fora do escopo. Ausente ou
-com outro valor, o manifesto sai REPROVADO.
 
 Nunca falha por conta própria: quem reprova é o passo seguinte do job, que lê
 `aprovado` (para o manifesto sair mesmo quando algo falhou).
@@ -29,6 +28,9 @@ import json
 import os
 import re
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import particionar_telas  # noqa: E402
 
 # Camadas do PLANO_VALIDACAO §2 e os jobs que as provam.
 CAMADAS = {
@@ -103,9 +105,91 @@ def chave_valor(texto):
     return dict(l.split("=", 1) for l in texto.splitlines() if "=" in l)
 
 
+def _coletar_telas(pasta, raiz_repo, total_shards_esperado, problemas):
+    """Lê artefatos de telas (sharded `Telas-Linux-shard-*` ou legado `Telas-Linux`) e confere cobertura."""
+    shard_dirs = sorted(glob.glob(os.path.join(pasta, "Telas-Linux-shard-*")))
+    legado_dir = os.path.join(pasta, "Telas-Linux")
+    pastas_telas = shard_dirs if shard_dirs else ([legado_dir] if os.path.isdir(legado_dir) else [])
+
+    roteiros = {}
+    pares_executados = []
+    esperadas = []
+    shards_vistos = []
+    qml_resultado = {}
+    programa_suite = None
+
+    for d in pastas_telas:
+        base = os.path.basename(d)
+        m_sh = re.fullmatch(r"Telas-Linux-shard-(\d+)", base)
+        if m_sh:
+            shards_vistos.append(int(m_sh.group(1)))
+
+        prog = os.path.join(d, "testes-programa.txt")
+        if os.path.exists(prog):
+            programa_suite = (f"{base}/testes-programa.txt", contar_testes(ler(prog)))
+
+        for linha in ler(os.path.join(d, "qml-resultado.txt")).splitlines():
+            if "\t" in linha:
+                qnome, qres = linha.split("\t", 1)
+                qml_resultado[qnome.strip()] = qres.strip()
+
+        res_path = os.path.join(d, "telas-resultado.txt")
+        for linha in ler(res_path).splitlines():
+            if "\t" in linha:
+                partes = linha.split("\t")
+                nome, resultado = partes[0].strip(), partes[1].strip()
+                pares_executados.append((nome, resultado))
+                roteiros[nome] = resultado
+
+        for l in ler(os.path.join(d, "telas.txt")).splitlines():
+            if "falha ESPERADA" in l:
+                esperadas.append(l.strip())
+
+    # Verificação rigorosa de cobertura quando a CI usa sharding (`RUSTINHO_SHARDS_TELAS` > 0).
+    cobertura_verificada = None
+    if total_shards_esperado is not None and total_shards_esperado > 0:
+        tem_catalogo = os.path.isdir(os.path.join(raiz_repo, "app", "testes"))
+        if tem_catalogo:
+            erros_cob = particionar_telas.verificar_cobertura(
+                raiz_repo, pares_executados, shards_vistos=shards_vistos, total_shards=total_shards_esperado
+            )
+            problemas.extend(erros_cob)
+            qml_esperados = particionar_telas.listar_qml(raiz_repo)
+            if qml_esperados:
+                faltam_qml = sorted(set(qml_esperados) - set(qml_resultado))
+                falhos_qml = sorted(q for q, st in qml_resultado.items() if st != "ok")
+                if faltam_qml:
+                    problemas.append(f"testes QML omitidos: {faltam_qml}")
+                if falhos_qml:
+                    problemas.append(f"testes QML reprovados: {falhos_qml}")
+            if programa_suite is None or not programa_suite[1]["terminou"] or programa_suite[1]["falharam"] > 0:
+                problemas.append("testes do programa (testes-programa.txt) ausentes, incompletos ou reprovados")
+            cobertura_verificada = not erros_cob and not any(
+                p.startswith(("testes QML", "testes do programa")) for p in problemas
+            )
+        else:
+            esperados_shards = list(range(1, total_shards_esperado + 1))
+            if sorted(shards_vistos) != esperados_shards:
+                problemas.append(f"shards de telas incompletos: vistos {sorted(shards_vistos)}, esperados {esperados_shards}")
+                cobertura_verificada = False
+            else:
+                cobertura_verificada = True
+
+    info_telas = {
+        "resultado": roteiros,
+        "falhas_esperadas": esperadas,
+        "shards_vistos": sorted(shards_vistos),
+        "shards_esperados": total_shards_esperado,
+        "qml": qml_resultado,
+        "cobertura_verificada": cobertura_verificada,
+    }
+    return info_telas, programa_suite
+
+
 def montar(pasta, necessarios):
     env = os.environ
     ref = env.get("GITHUB_REF", "")
+    raiz_repo = os.getcwd()
     m = {
         "formato": 1,
         "origem": {
@@ -140,22 +224,50 @@ def montar(pasta, necessarios):
                                  "assinatura": ler(os.path.join(pasta, nome, "assinatura.txt")).strip(),
                                  "certificado": ler(os.path.join(pasta, nome, "certificado.txt")).strip()}
 
+    problemas = []
+    if android is None:
+        problemas.append(f"chave do Android (RUSTINHO_ANDROID) ausente ou fora de sim/nao: "
+                         f"{env.get('RUSTINHO_ANDROID')!r}")
+
     # Testes por suíte.
     suites = {}
     for arq in sorted(glob.glob(os.path.join(pasta, "Testes-*", "*.txt"))):
-        suites[f"{os.path.basename(os.path.dirname(arq))}/{os.path.basename(arq)}"] = contar_testes(ler(arq))
-    programa = os.path.join(pasta, "Telas-Linux", "testes-programa.txt")
-    if os.path.exists(programa):
-        suites["Telas-Linux/testes-programa.txt"] = contar_testes(ler(programa))
+        chave = f"{os.path.basename(os.path.dirname(arq))}/{os.path.basename(arq)}"
+        cont = contar_testes(ler(arq))
+        suites[chave] = cont
+        if cont["falharam"] > 0:
+            problemas.append(f"suíte {chave} teve {cont['falharam']} falha(s)")
+        elif not cont["terminou"]:
+            problemas.append(f"suíte {chave} sem linha 'test result:' (incompleta ou truncada)")
+
+    shards_raw = env.get("RUSTINHO_SHARDS_TELAS", "").strip()
+    total_shards_esperado = None
+    if shards_raw:
+        try:
+            total_shards_esperado = int(shards_raw)
+        except ValueError:
+            problemas.append(f"RUSTINHO_SHARDS_TELAS inválido: {shards_raw!r}")
+
+    if total_shards_esperado is not None and total_shards_esperado > 0:
+        suites_nucleo_esperadas = (
+            "Testes-Linux-debug/nucleo-debug.txt",
+            "Testes-Linux-debug/nucleo-debug-rede.txt",
+            "Testes-Linux-release/nucleo-release.txt",
+            "Testes-Linux-release/nucleo-release-rede.txt",
+            "Testes-Windows-lib/nucleo-windows-lib.txt",
+            "Testes-Windows-lib/nucleo-windows-lib-rede.txt",
+            "Testes-Windows-integracao/nucleo-windows-integracao.txt",
+            "Testes-Windows-integracao/nucleo-windows-integracao-rede.txt",
+        )
+        faltam_suites = [s for s in suites_nucleo_esperadas if s not in suites]
+        if faltam_suites:
+            problemas.append(f"suítes do núcleo ausentes nos artefatos: {faltam_suites}")
+
+    info_telas, programa_suite = _coletar_telas(pasta, raiz_repo, total_shards_esperado, problemas)
+    if programa_suite is not None:
+        suites[programa_suite[0]] = programa_suite[1]
     m["testes"] = suites
-    roteiros = {}
-    for linha in ler(os.path.join(pasta, "Telas-Linux", "telas-resultado.txt")).splitlines():
-        if "\t" in linha:
-            nome, resultado = linha.split("\t", 1)
-            roteiros[nome] = resultado
-    esperadas = [l.strip() for l in ler(os.path.join(pasta, "Telas-Linux", "telas.txt")).splitlines()
-                 if "falha ESPERADA" in l]
-    m["roteiros_de_tela"] = {"resultado": roteiros, "falhas_esperadas": esperadas}
+    m["roteiros_de_tela"] = info_telas
 
     # Emulador: o resultado de verdade (o de 32 bits não bloqueia: PEND-18).
     m["emulador"] = {}
@@ -165,10 +277,7 @@ def montar(pasta, necessarios):
             m["emulador"][nome] = kv
 
     # Pacotes.
-    pacotes, problemas = [], []
-    if android is None:
-        problemas.append(f"chave do Android (RUSTINHO_ANDROID) ausente ou fora de sim/nao: "
-                         f"{env.get('RUSTINHO_ANDROID')!r}")
+    pacotes = []
     for artefato, padrao in PACOTES_COMPUTADOR + (PACOTES_ANDROID if android else []):
         for arq in sorted(glob.glob(os.path.join(pasta, artefato, padrao))):
             h = sha256(arq)
@@ -221,8 +330,6 @@ def montar(pasta, necessarios):
                       "situacao": "aprovada" if all(x == "success" for x in r) else "reprovada"}
     ressalvas = [f"APK {n} no emulador {kv.get('resultado')} ({kv.get('observacao')})"
                  for n, kv in m["emulador"].items() if kv.get("resultado") != "aprovado"]
-    # S2-R2 da conferência Sonnet: uma conferência inconclusiva do emulador (a árvore de acessibilidade sem nomes) não
-    # pode virar "aprovada" em silêncio.
     ressalvas += [f"APK {n} no emulador: {kv['inconclusivos']} conferência(s) inconclusiva(s) (inconclusivos.txt)"
                   for n, kv in m["emulador"].items() if kv.get("inconclusivos", "0") not in ("", "0")]
     if ressalvas and camadas["L4"]["situacao"] == "aprovada":
@@ -262,14 +369,18 @@ def notas(m):
     for suite, s in m["testes"].items():
         linhas.append(f"- `{suite}`: {s['passaram']} passaram, {s['falharam']} falharam, "
                       f"{s['ignorados']} ignorados ({s['binarios']} binários)")
-    if m["roteiros_de_tela"]["resultado"]:
-        ok = sum(1 for r in m["roteiros_de_tela"]["resultado"].values() if r == "ok")
-        linhas.append(f"- roteiros de tela: {ok} de {len(m['roteiros_de_tela']['resultado'])} sem falha "
-                      f"inesperada; {len(m['roteiros_de_tela']['falhas_esperadas'])} falhas esperadas listadas "
+    rt = m["roteiros_de_tela"]
+    if rt["resultado"]:
+        ok = sum(1 for r in rt["resultado"].values() if r == "ok")
+        sh_info = (f" em {len(rt['shards_vistos'])}/{rt['shards_esperados']} shards"
+                   if rt.get("shards_esperados") else "")
+        linhas.append(f"- roteiros de tela: {ok} de {len(rt['resultado'])} unidades sem falha "
+                      f"inesperada{sh_info}; {len(rt['falhas_esperadas'])} falhas esperadas listadas "
                       "(defeitos já registrados, com passo de correção)")
+    if rt.get("qml"):
+        ok_q = sum(1 for r in rt["qml"].values() if r == "ok")
+        linhas.append(f"- testes QML: {ok_q} de {len(rt['qml'])} aprovados")
     for nome, kv in m["emulador"].items():
-        # N03: a causa de uma reprovação e as instabilidades do emulador
-        # contornadas pelo roteiro (cada uma registrada nas fotos do job).
         extra = ""
         if kv.get("resultado") != "aprovado" and kv.get("causa"):
             extra += f"; causa: {kv['causa']}"

@@ -92,13 +92,14 @@ class Celular(tema.Rustinho):
         self.redimensionar(round(LARGURA_DP * DENSIDADE), round(ALTURA_DP * DENSIDADE))
 
     def esperar_janela(self):
-        for _ in range(150):
+        fim = time.monotonic() + 30.0
+        while time.monotonic() < fim:
             s = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "rustinho"],
                                env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
             if s.stdout.split():
-                time.sleep(0.5)
+                time.sleep(0.25)
                 return
-            time.sleep(0.2)
+            time.sleep(0.08)
         raise RuntimeError(f"a janela do Rustinho não apareceu (veja {self.saida})")
 
     def ponteiro_dentro(self):
@@ -107,7 +108,7 @@ class Celular(tema.Rustinho):
         direita, da janela (fundo da tela, sem nada embaixo)."""
         wx, wy, w, h = tema.janela_do_rustinho()
         xdo("mousemove", str(wx + w - 4), str(wy + h - 4))
-        time.sleep(0.15)
+        time.sleep(0.06)
 
     def textos(self):
         self.ponteiro_dentro()
@@ -128,7 +129,7 @@ class Celular(tema.Rustinho):
     def foto_janela(self, sufixo=""):
         """Foto só da janela (o mouse fora dela)."""
         xdo("mousemove", "1590", "5")
-        time.sleep(0.6)
+        time.sleep(0.2)
         inteira = self.foto(sufixo + "-tela")
         x, y, w, h = tema.janela_do_rustinho()
         from PIL import Image
@@ -143,12 +144,16 @@ class Celular(tema.Rustinho):
             antes = f.read().count("TEXTOS-DA-TELA-FIM")
         self.ponteiro_dentro()
         xdo("key", "ctrl+shift+F12")
-        for _ in range(60):
-            time.sleep(0.2)
+        fim = time.monotonic() + 12.0
+        passo = 0.03
+        while time.monotonic() < fim:
+            time.sleep(passo)
             with open(self.saida) as f:
                 tudo = f.read()
             if tudo.count("TEXTOS-DA-TELA-FIM") > antes:
                 break
+            if passo < 0.15:
+                passo = min(0.15, passo * 1.4)
         else:
             raise RuntimeError(f"o Rustinho não escreveu os textos da tela (veja {self.saida})")
         bloco = tudo.split("TEXTOS-DA-TELA-INICIO")[-1].split("TEXTOS-DA-TELA-FIM")[0]
@@ -421,7 +426,7 @@ def medir_tela(res, fotos, pasta, nome, tela, props, ids, inventario, qual=None)
             time.sleep(0.5)
         else:
             r.entrar("Ana")
-            time.sleep(1.5)
+            time.sleep(0.5)
         if qual:
             acao(r, qual)
         foto = r.foto_janela()

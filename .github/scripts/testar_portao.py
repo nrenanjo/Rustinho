@@ -362,6 +362,168 @@ class FormaDaChave(unittest.TestCase):
                    "        type: boolean\n        required: false\n        default: true\n")
         self.reprova_com("validar.yml: a entrada android tem de ser booleana com padrão false")
 
+    def test_cache_cargo_sem_bloqueio_em_tag_reprova(self):
+        # T112 + INT9-R5: remover o bloqueio de tag v* em qualquer actions/cache reprova.
+        caminho = os.path.join(self.raiz, "validar.yml")
+        with open(caminho, encoding="utf-8") as f:
+            texto = f.read()
+        alvo = "      - name: Cache Cargo (desligado em tag v*, INT9-R5)\n        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}\n"
+        self.assertIn(alvo, texto)
+        with open(caminho, "w", encoding="utf-8") as f:
+            f.write(texto.replace(alvo, "      - name: Cache Cargo (desligado em tag v*, INT9-R5)\n", 1))
+        self.reprova_com("usa actions/cache sem desligar em tag v* (INT9-R5)")
+
+    def test_shards_telas_diferente_no_manifesto_reprova(self):
+        self.mudar("validar.yml", '          RUSTINHO_SHARDS_TELAS: "6"\n', '          RUSTINHO_SHARDS_TELAS: "4"\n')
+        self.reprova_com("RUSTINHO_SHARDS_TELAS='4', diferente dos 6 shards de programa-e-telas")
+
+    def test_validar_windows_com_push_reprova(self):
+        self.mudar("validar-windows.yml", "on:\n  workflow_dispatch:\n", "on:\n  push:\n  workflow_dispatch:\n")
+        self.reprova_com("validar-windows.yml só pode disparar por workflow_dispatch")
+
+
+class CoberturaShardsT112(unittest.TestCase):
+    """T112: particionamento LPT e verificação estrita de cobertura de shards, roteiros e QML no manifesto e Portão."""
+
+    RAIZ_REAL = os.path.abspath(os.path.join(AQUI, "..", ".."))
+
+    def setUp(self):
+        import particionar_telas
+        self.pt = particionar_telas
+        self.c = Caso()
+        for artefato, arquivo in COMPUTADOR:
+            self.c.pacote(artefato, arquivo)
+        # Copia o catálogo real de app/testes/*.py (somente nomes/estrutura) para testar contra o projeto real.
+        dest_testes = os.path.join(self.c.repo, "app", "testes")
+        os.makedirs(dest_testes, exist_ok=True)
+        for arq in os.listdir(os.path.join(self.RAIZ_REAL, "app", "testes")):
+            if arq.endswith(".py"):
+                shutil.copy(os.path.join(self.RAIZ_REAL, "app", "testes", arq), os.path.join(dest_testes, arq))
+
+    def tearDown(self):
+        self.c.limpar()
+
+    def popular_shards_completos(self, total=6):
+        suites_nucleo = (
+            ("Testes-Linux-debug", "nucleo-debug.txt"),
+            ("Testes-Linux-debug", "nucleo-debug-rede.txt"),
+            ("Testes-Linux-release", "nucleo-release.txt"),
+            ("Testes-Linux-release", "nucleo-release-rede.txt"),
+            ("Testes-Windows-lib", "nucleo-windows-lib.txt"),
+            ("Testes-Windows-lib", "nucleo-windows-lib-rede.txt"),
+            ("Testes-Windows-integracao", "nucleo-windows-integracao.txt"),
+            ("Testes-Windows-integracao", "nucleo-windows-integracao-rede.txt"),
+        )
+        for pasta_s, arq_s in suites_nucleo:
+            ds = os.path.join(self.c.artefatos, pasta_s)
+            os.makedirs(ds, exist_ok=True)
+            with open(os.path.join(ds, arq_s), "w", encoding="utf-8") as f:
+                f.write("test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s\n")
+
+        unidades = self.pt.catalogo(self.c.repo)
+        grupos = self.pt.particionar(unidades, total)
+        for sh, lista_u in grupos.items():
+            d = os.path.join(self.c.artefatos, f"Telas-Linux-shard-{sh}")
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "telas-resultado.txt"), "w", encoding="utf-8") as f:
+                for u in lista_u:
+                    f.write(f"{u['id']}\tok\t12.30\n")
+            with open(os.path.join(d, "telas.txt"), "w", encoding="utf-8") as f:
+                f.write(f"commit: {self.c.commit}\n")
+            if sh == 1:
+                with open(os.path.join(d, "testes-programa.txt"), "w", encoding="utf-8") as f:
+                    f.write("test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s\n")
+                with open(os.path.join(d, "qml-resultado.txt"), "w", encoding="utf-8") as f:
+                    for q in self.pt.listar_qml(self.c.repo):
+                        f.write(f"{q}\tok\n")
+        return unidades, grupos
+
+    def rodar_manifesto_com_shards(self, total=6):
+        e = self.c.env("nao", "refs/heads/ensaio/t112", {"RUSTINHO_SHARDS_TELAS": str(total)})
+        e["NECESSARIOS"] = json.dumps({j: {"result": r} for j, r in jobs_sem_android().items()})
+        r = subprocess.run([sys.executable, "-I", os.path.join(AQUI, "manifesto.py"), "artefatos",
+                            os.path.join("artefatos", "Manifesto")], cwd=self.c.repo, env=e,
+                           capture_output=True, text=True)
+        with open(os.path.join(self.c.artefatos, "Manifesto", "MANIFESTO.json"), encoding="utf-8") as f:
+            return r, json.load(f)
+
+    def test_catalogo_cobre_100_por_cento_dos_roteiros_sem_duplicacao(self):
+        roteiros = {os.path.splitext(os.path.basename(r))[0] for r in self.pt.listar_roteiros(self.RAIZ_REAL)}
+        unidades = self.pt.catalogo(self.RAIZ_REAL)
+        self.assertEqual(len(roteiros), 52)
+        self.assertEqual({u["roteiro"] for u in unidades}, roteiros)
+        ids = [u["id"] for u in unidades]
+        self.assertEqual(len(ids), len(set(ids)), "IDs duplicados no catálogo")
+        grupos = self.pt.particionar(unidades, 6)
+        uniao = [u["id"] for g in grupos.values() for u in g]
+        self.assertEqual(sorted(uniao), sorted(ids))
+
+    def test_shards_completos_aprovam_manifesto_e_portao(self):
+        self.popular_shards_completos(6)
+        r, m = self.rodar_manifesto_com_shards(6)
+        self.assertTrue(m["aprovado"], r.stdout + r.stderr + str(m["problemas"]))
+        self.assertIs(m["roteiros_de_tela"]["cobertura_verificada"], True)
+        p = self.c.portao("nao")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("cobertura de telas verificada", p.stdout)
+
+    def test_shard_faltando_reprova(self):
+        self.popular_shards_completos(6)
+        shutil.rmtree(os.path.join(self.c.artefatos, "Telas-Linux-shard-4"))
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("shards de telas ausentes: [4]" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+    def test_um_roteiro_omitido_em_um_shard_reprova(self):
+        self.popular_shards_completos(6)
+        arq = os.path.join(self.c.artefatos, "Telas-Linux-shard-2", "telas-resultado.txt")
+        with open(arq, encoding="utf-8") as f:
+            linhas = f.read().splitlines()
+        with open(arq, "w", encoding="utf-8") as f:
+            f.write("\n".join(linhas[1:]) + "\n")
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("roteiros/unidades de tela omitidos" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+    def test_qml_omitido_reprova(self):
+        self.popular_shards_completos(6)
+        arq = os.path.join(self.c.artefatos, "Telas-Linux-shard-1", "qml-resultado.txt")
+        with open(arq, encoding="utf-8") as f:
+            linhas = f.read().splitlines()
+        with open(arq, "w", encoding="utf-8") as f:
+            f.write("\n".join(linhas[1:]) + "\n")
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("testes QML omitidos" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+    def test_testes_programa_ausente_reprova(self):
+        self.popular_shards_completos(6)
+        os.remove(os.path.join(self.c.artefatos, "Telas-Linux-shard-1", "testes-programa.txt"))
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("testes do programa" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+    def test_suite_windows_ausente_reprova(self):
+        self.popular_shards_completos(6)
+        shutil.rmtree(os.path.join(self.c.artefatos, "Testes-Windows-integracao"))
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("suítes do núcleo ausentes" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
+    def test_suite_truncada_sem_test_result_reprova(self):
+        self.popular_shards_completos(6)
+        with open(os.path.join(self.c.artefatos, "Testes-Linux-release", "nucleo-release.txt"), "w", encoding="utf-8") as f:
+            f.write("compilando...\n")
+        _, m = self.rodar_manifesto_com_shards(6)
+        self.assertFalse(m["aprovado"])
+        self.assertTrue(any("incompleta ou truncada" in p for p in m["problemas"]), m["problemas"])
+        self.assertNotEqual(self.c.portao("nao").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

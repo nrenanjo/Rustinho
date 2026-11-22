@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Confere a forma dos workflows (dev.3.3, DP-02a; AUD33-J01, J02, J03): o
-portão não pode ser afrouxado sem este teste reprovar. Roda no job "formato"
+"""Confere a forma dos workflows (dev.3.3, DP-02a; AUD33-J01, J02, J03; T112):
+o portão não pode ser afrouxado sem este teste reprovar. Roda no job "formato"
 da CI e à mão:
 
     python3 .github/scripts/conferir_portao.py
@@ -21,6 +21,16 @@ Regras:
    do passo do manifesto (tirado da entrada). Só os jobs apk e emulador podem
    ser pulados por ela (if: inputs.android); nenhum outro job do validar.yml
    tem `if`, e o do manifesto é exatamente always() (T050-R3c).
+7. Otimizações seguras (T112 + INT9-R5):
+   - Todo passo `actions/cache` em validar.yml (e workflows auxiliares) tem de
+     ser explicitamente desligado em tags `refs/tags/v*`
+     (`!startsWith(github.ref, 'refs/tags/v')`), garantindo build limpa na
+     publicação.
+   - Se `programa-e-telas` usa matrix `shard`, o passo `manifesto` tem de
+     receber `RUSTINHO_SHARDS_TELAS` igual ao total de shards da matriz
+     (impedindo remover shards sem o manifesto acusar).
+   - O workflow rápido `validar-windows.yml` (se presente) só dispara por
+     `workflow_dispatch`, só lê (`contents: read`) e nunca publica versão.
 
 A pasta dos workflows pode vir como argumento (para os testes).
 """
@@ -35,6 +45,7 @@ PASTA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.pa
                                                              "workflows")
 JOBS_ANDROID = ("apk", "emulador")
 ESCAPES = re.compile(r"always\(\)|failure\(\)|cancelled\(\)")
+CONDICAO_SEM_CACHE_TAG = "!startsWith(github.ref, 'refs/tags/v')"
 
 
 def carregar(nome):
@@ -84,21 +95,42 @@ def main():
     amb = rascunho.get("environment")
     exigir((amb.get("name") if isinstance(amb, dict) else amb) == "publicacao", "ci.yml: rascunho fora do ambiente publicacao")
 
-    # Permissões: só o rascunho grava.
+    # Permissões: só o rascunho grava; todo actions/cache bloqueado em refs/tags/v*.
     for arq in sorted(glob.glob(os.path.join(PASTA, "*.yml"))):
-        w = carregar(os.path.basename(arq))
+        base = os.path.basename(arq)
+        w = carregar(base)
         topo = (w.get("permissions") or {})
-        exigir(topo.get("contents") in (None, "read"), f"{os.path.basename(arq)}: permissions de topo grava")
+        exigir(topo.get("contents") in (None, "read"), f"{base}: permissions de topo grava")
         for nome, job in (w.get("jobs") or {}).items():
             p = job.get("permissions") or {}
             grava = p == "write-all" or (isinstance(p, dict) and p.get("contents") == "write")
             if grava:
-                exigir(os.path.basename(arq) == "ci.yml" and nome == "rascunho",
-                       f"{os.path.basename(arq)}: o job {nome} grava no repositório")
-        texto = open(arq, encoding="utf-8").read()
-        if os.path.basename(arq) != "ci.yml":
+                exigir(base == "ci.yml" and nome == "rascunho",
+                       f"{base}: o job {nome} grava no repositório")
+            for passo in job.get("steps") or []:
+                uses = str(passo.get("uses", ""))
+                if uses.startswith(("actions/cache@", "actions/cache/")):
+                    cond = str(passo.get("if", ""))
+                    exigir(CONDICAO_SEM_CACHE_TAG in cond,
+                           f"{base}: passo '{passo.get('name')}' do job {nome} usa actions/cache sem desligar em tag v* (INT9-R5)")
+                if uses.startswith("jurplel/install-qt-action@"):
+                    cache_qt = (passo.get("with") or {}).get("cache")
+                    if cache_qt not in (None, False, "false"):
+                        exigir(CONDICAO_SEM_CACHE_TAG in str(cache_qt),
+                               f"{base}: passo '{passo.get('name')}' do job {nome} usa cache do Qt sem desligar em tag v* (INT9-R5)")
+                if base == "validar-windows.yml" and "continue-on-error" in passo:
+                    exigir(False, f"validar-windows.yml: passo '{passo.get('name')}' do job {nome} ignora falha")
+            if base == "validar-windows.yml" and "continue-on-error" in job:
+                exigir(False, f"validar-windows.yml: o job {nome} ignora falha (continue-on-error)")
+        with open(arq, encoding="utf-8") as f_txt:
+            texto = f_txt.read()
+        if base != "ci.yml":
             exigir(not re.search(r"action-gh-release|gh release (create|upload|edit)", texto),
-                   f"{os.path.basename(arq)}: publica versão (só o rascunho do ci.yml pode)")
+                   f"{base}: publica versão (só o rascunho do ci.yml pode)")
+        if base == "validar-windows.yml":
+            gw = gatilhos(w)
+            exigir(set(gw) == {"workflow_dispatch"},
+                   f"validar-windows.yml só pode disparar por workflow_dispatch: {set(gw)}")
 
     vjobs = validar.get("jobs", {})
     outros = set(vjobs) - {"manifesto"}
@@ -137,6 +169,17 @@ def main():
         valor = (job.get("env") or {}).get("RUSTINHO_ANDROID")
         exigir(isinstance(ligado, bool) and valor == ("sim" if ligado else "nao"),
                f"ci.yml: o {nome} tem RUSTINHO_ANDROID {valor!r}, diferente do android: {ligado!r} do validar")
+
+    # 7. Consistência de shards de programa-e-telas com o manifesto.
+    shards_telas = (((vjobs.get("programa-e-telas") or {}).get("strategy") or {}).get("matrix") or {}).get("shard")
+    if shards_telas is not None:
+        esperados = list(range(1, len(shards_telas) + 1))
+        exigir(shards_telas == esperados and len(shards_telas) >= 1,
+               f"validar.yml: matrix.shard de programa-e-telas tem de ser 1..N contínuo (tem {shards_telas!r})")
+        env_m = (passos[0].get("env") or {}) if len(passos) == 1 else {}
+        exigir(str(env_m.get("RUSTINHO_SHARDS_TELAS", "")) == str(len(shards_telas)),
+               f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
+               f"diferente dos {len(shards_telas)} shards de programa-e-telas")
 
     if erros:
         for e in erros:

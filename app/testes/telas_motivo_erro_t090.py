@@ -34,9 +34,7 @@ def xdo(*args):
 
 def montar_loja(pasta):
     """A loja de teste com os avisos (tem a dívida manual do Zé, "Caderno", R$ 50, que dá para tirar)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_LOJA_AVISOS="1")
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--", "--ignored", "--exact",
-                    "montar_loja_de_teste"], cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("estavel", "montar_loja_de_teste", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_LOJA_AVISOS": "1"}, raiz=RAIZ)
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
     ze = c.execute("SELECT id FROM pessoa WHERE nome = 'Zé da Oficina'").fetchone()[0]
     c.close()

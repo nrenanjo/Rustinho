@@ -62,12 +62,15 @@ def tema_por_fora(pasta):
     gatilhos da troca de dados precisam das funções do Rustinho)."""
     if not TEMA:
         return
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta,
-               RUSTINHO_SQL=f"INSERT INTO config (chave, valor) VALUES ('tela_tema', '{TEMA}') "
-                            "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;")
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-                    "--ignored", "--exact", "executar_por_fora"],
-                   cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar(
+        "estavel", "executar_por_fora",
+        {
+            "RUSTINHO_LOJA_TESTE": pasta,
+            "RUSTINHO_SQL": f"INSERT INTO config (chave, valor) VALUES ('tela_tema', '{TEMA}') "
+                            "ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor;",
+        },
+        raiz=RAIZ,
+    )
 
 
 def banco(pasta, sql, *p):

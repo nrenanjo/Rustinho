@@ -17,6 +17,38 @@ use crate::comum::*;
 
 const SENHA_REDE: &str = "rede-da-loja";
 const FILHO: &str = "RUSTINHO_T8_FILHO";
+const ISOLADO: &str = "RUSTINHO_T8_ISOLADO";
+
+/// Executa o teste em um processo filho próprio do mesmo binário de teste.
+///
+/// Motivo (T112): a proteção anti-DoS R-09 (`cifra::Porteiro`, 3 sais novos/min
+/// por IP em produção) usa estado global de processo quando `rustinho-nucleo` é
+/// compilado para testes de integração (`#[cfg(not(test))]`). Rodando os 7
+/// testes de rede no mesmo processo em `127.0.0.1`, a partir do 2º teste o
+/// limite de 3 sais/min estoura e cada teste subsequente dorme ~60 s (300 s por
+/// execução em Linux debug, Linux release e Windows). Isolando cada teste em
+/// seu próprio processo, o `Porteiro` de produção permanece 100% ativo e
+/// inalterado, sem qualquer flag ou atalho no código de produção, e cada teste
+/// conclui em ~1–3 s.
+fn rodar_isolado(nome_teste: &str) -> bool {
+    if std::env::var_os(ISOLADO).is_some() {
+        return false;
+    }
+    let saida = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", nome_teste, "--nocapture", "--test-threads=1"])
+        .env(ISOLADO, "1")
+        .env_remove(FILHO)
+        .output()
+        .expect("iniciar processo isolado do teste t8");
+    assert!(
+        saida.status.success(),
+        "teste isolado {nome_teste} falhou ({:?}):\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        saida.status.code(),
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr),
+    );
+    true
+}
 
 /// A troca de dados destes testes usa um servidor (o motor) DESTE processo.
 /// Uma restauração de backup de outro teste do mesmo processo (t1) pausa a
@@ -110,6 +142,9 @@ fn t8_filho_puxa() {
 #[test]
 fn t8_1_rede_com_queda_no_meio_e_retomada() {
     if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    if rodar_isolado("t8_sincronizacao::t8_1_rede_com_queda_no_meio_e_retomada") {
         return;
     }
     let _vez = vez_da_troca();
@@ -229,6 +264,9 @@ fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
+    if rodar_isolado("t8_sincronizacao::t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao") {
+        return;
+    }
     let _vez = vez_da_troca();
     let pa = pasta_nova("t8-3-a");
     let pb = pasta_nova("t8-3-b");
@@ -277,6 +315,9 @@ fn t8_3_uma_resposta_da_troca_cabe_na_espera_do_balcao() {
 #[test]
 fn t8_4_uma_resposta_nao_corta_uma_venda() {
     if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    if rodar_isolado("t8_sincronizacao::t8_4_uma_resposta_nao_corta_uma_venda") {
         return;
     }
     let _vez = vez_da_troca();
@@ -379,6 +420,9 @@ fn conferencias(b: &Banco) -> Vec<sync::Conflito> {
 #[test]
 fn t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao() {
     if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    if rodar_isolado("t8_sincronizacao::t8_5_resumo_por_tabela_acusa_linha_mexida_a_mao") {
         return;
     }
     let _vez = vez_da_troca();
@@ -577,6 +621,9 @@ fn t8_6a_resumo_gtin_nos_dois_com_a_mesma_hora_e_ordem() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
+    if rodar_isolado("t8_sincronizacao::t8_6a_resumo_gtin_nos_dois_com_a_mesma_hora_e_ordem") {
+        return;
+    }
     let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(true, false);
     assert!(ka.is_empty() && kb.is_empty(), "controle: {ka:#?} {kb:#?}");
 }
@@ -591,6 +638,9 @@ fn t8_6b_resumo_gtin_nos_dois_com_a_hora_e_a_ordem_de_cada_um() {
     if std::env::var_os(FILHO).is_some() {
         return;
     }
+    if rodar_isolado("t8_sincronizacao::t8_6b_resumo_gtin_nos_dois_com_a_hora_e_a_ordem_de_cada_um") {
+        return;
+    }
     let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(false, false);
     assert!(ka.is_empty() && kb.is_empty(), "dois caixas em dia, os mesmos GTINs: falso alarme {ka:#?} {kb:#?}");
 }
@@ -601,6 +651,9 @@ fn t8_6b_resumo_gtin_nos_dois_com_a_hora_e_a_ordem_de_cada_um() {
 #[test]
 fn t8_6c_resumo_acusa_gtin_mexido_a_mao() {
     if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    if rodar_isolado("t8_sincronizacao::t8_6c_resumo_acusa_gtin_mexido_a_mao") {
         return;
     }
     let (ka, kb) = resumo_com_o_mesmo_gtin_nos_dois(true, true);
@@ -615,6 +668,9 @@ fn t8_6c_resumo_acusa_gtin_mexido_a_mao() {
 #[test]
 fn t8_2_senha_da_rede_errada_nao_troca() {
     if std::env::var_os(FILHO).is_some() {
+        return;
+    }
+    if rodar_isolado("t8_sincronizacao::t8_2_senha_da_rede_errada_nao_troca") {
         return;
     }
     let _vez = vez_da_troca();

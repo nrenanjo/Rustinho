@@ -82,16 +82,22 @@ def preparar_loja(destino):
     inicio = time.time()
     montou = False
     if not os.path.isfile(os.path.join(guardada, "rustinho.db")):
-        montando = guardada + ".montando"
+        montando = f"{guardada}.montando.{os.getpid()}"
         shutil.rmtree(montando, ignore_errors=True)
-        env = dict(os.environ, RUSTINHO_LOJA_TESTE=montando, RUSTINHO_LOJA_PECAS=str(PECAS))
-        subprocess.run(
-            ["cargo", "test", "--release", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-             "--ignored", "--exact", "montar_lista_continua"],
-            cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
+        os.makedirs(os.path.dirname(guardada), exist_ok=True)
+        base._aux_nucleo.executar(
+            "lojas_de_teste", "montar_lista_continua",
+            {"RUSTINHO_LOJA_TESTE": montando, "RUSTINHO_LOJA_PECAS": str(PECAS)},
+            release=True, raiz=base.RAIZ,
         )
-        shutil.rmtree(guardada, ignore_errors=True)
-        os.rename(montando, guardada)
+        try:
+            os.rename(montando, guardada)
+        except OSError:
+            if not os.path.isfile(os.path.join(guardada, "rustinho.db")):
+                shutil.rmtree(guardada, ignore_errors=True)
+                os.rename(montando, guardada)
+            else:
+                shutil.rmtree(montando, ignore_errors=True)
         montou = True
     shutil.rmtree(destino, ignore_errors=True)
     shutil.copytree(guardada, destino)

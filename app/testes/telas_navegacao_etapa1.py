@@ -59,10 +59,7 @@ def xdo(*args):
 def por_fora(pasta, sql):
     """Muda o banco por fora (como um banco antigo ou restaurado), pelo núcleo
     (os gatilhos da troca de dados precisam das funções do Rustinho)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_SQL=sql)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-                    "--ignored", "--exact", "executar_por_fora"],
-                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": sql}, raiz=base.RAIZ)
 
 
 def config_por_fora(pasta, pares):

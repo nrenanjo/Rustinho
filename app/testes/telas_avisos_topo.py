@@ -375,8 +375,8 @@ def cenario_d(placar, fotos, pasta):
                 time.sleep(0.3)
                 xdo("type", "--delay", "60", texto)
             r.rolar_ate("Trocar minha senha")
-            time.sleep(0.4)
-            botao = [(x, y) for x, y, t in r.textos() if t == "Trocar minha senha"]
+            p_btn = parado(r, "Trocar minha senha")
+            botao = [p_btn] if p_btn else [(x, y) for x, y, t in r.textos() if t == "Trocar minha senha"]
             r.clicar_em(*botao[0])
             return time.time()
 

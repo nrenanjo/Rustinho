@@ -45,12 +45,7 @@ TELA = u.TELA
 
 def montar_loja(pasta):
     """A loja pelo núcleo (os mesmos comandos das telas)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-         "--ignored", "--exact", "montar_chamadas_gerente"],
-        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("lojas_de_teste", "montar_chamadas_gerente", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
     with open(os.path.join(pasta, "ids.json"), encoding="utf-8") as f:
         return json.load(f)
 

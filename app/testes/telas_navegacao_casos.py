@@ -58,6 +58,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _aux_nucleo  # noqa: E402
 import telas_d09 as base  # noqa: E402
 import telas_modo_seguro as seguro  # noqa: E402
 from telas_d09 import PROGRAMA, RAIZ, simples  # noqa: E402
@@ -80,12 +81,7 @@ def tecla_voltar_android():
 
 
 def cargo_teste(env_extra, *filtro):
-    env = dict(os.environ, CARGO_NET_OFFLINE="true", **env_extra)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-         "--ignored", "--exact", *filtro],
-        cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    _aux_nucleo.executar("estavel", list(filtro), env_extra, raiz=RAIZ, offline=True)
 
 
 def montar_loja(pasta, avisos=False):
