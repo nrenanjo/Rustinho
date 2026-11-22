@@ -917,7 +917,9 @@ fn f4_interrupcao_compra_desfaz_so_a_nota_da_falha() {
     l.executar("DROP TRIGGER falha_de_teste");
     let r = l.ok("compra_importar", json!({ "caminho": pasta }));
     assert_eq!(r["compras"].as_array().map(Vec::len), Some(1), "só a 603 entra de novo: {r}");
-    assert_eq!(r["erros"].as_array().map(Vec::len), Some(2), "a 601 e a 604 são recusadas: {r}");
+    // T108 (texto R): num pacote, a nota que já está em Compras é contada à parte, não é erro.
+    assert_eq!(r["erros"].as_array().map(Vec::len), Some(0), "a 601 e a 604 não são erro: {r}");
+    assert_eq!(r["jaEmCompras"], 2, "a 601 e a 604 já estavam em Compras e não entram de novo: {r}");
     assert_eq!(numeros_das_compras(&l).len(), 3, "{:?}", numeros_das_compras(&l));
 }
 

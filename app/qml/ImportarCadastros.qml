@@ -34,6 +34,8 @@ Painel {
     property bool qFornecedores: false
     property bool qPecasLoja: false
     property bool qPecasFornecedor: false
+    // T108 (texto R do proprietário, 21/11/2026): as notas de compra também vão para Compras, em rascunho.
+    property bool qCompras: false
     // DP-52 (b): a chave desta abertura da tela e se a senha já valeu.
     property string chaveTela: ""
     property bool liberada: false
@@ -97,6 +99,7 @@ Painel {
             d.fornecedores = painel.qFornecedores
             d.pecasLoja = painel.qPecasLoja
             d.pecasFornecedor = painel.qPecasFornecedor
+            d.compras = painel.qCompras
         }
         return d
     }
@@ -229,13 +232,14 @@ Painel {
                                        && (!e || e.qFornecedores)
                 painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
                 painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
+                painel.qCompras = r.dados.comprasNovas > 0 && (!e || e.qCompras)
                 // FI-1 (a): "Peças das notas de fornecedores" exige "Fornecedores"
                 // (as peças ficam ligadas ao fornecedor, cadastrado com elas).
                 if (painel.qPecasFornecedor)
                     painel.qFornecedores = true
                 // A primeira leitura supõe todas as opções (P-5); com outras
                 // marcadas, a prévia é refeita para mostrar o que elas fazem.
-                if (!(painel.qClientes && painel.qFornecedores && painel.qPecasLoja && painel.qPecasFornecedor))
+                if (!(painel.qClientes && painel.qFornecedores && painel.qPecasLoja && painel.qPecasFornecedor && painel.qCompras))
                     painel.refazerPrevia(false)
                 return
             }
@@ -310,6 +314,10 @@ Painel {
             let msg = partes.length > 0 ? "Cadastrados: " + partes.join(", ") + "." : "Nada novo para cadastrar."
             if (d.codigosLigados > 0)
                 msg += " " + d.codigosLigados + " códigos de fornecedor ligados às peças."
+            // T108: as notas de compra que foram para Compras.
+            if (d.compras > 0)
+                msg += " " + (d.compras === 1 ? "1 nota de compra foi para Compras" : d.compras + " notas de compra foram para Compras")
+                       + ", em rascunho: abra cada uma em Compras para conferir e lançar."
             painel.carregarPendencias()
             // T-05 da 2ª re-revisão: a resposta é tratada depois (Qt.callLater), quando a marca da repetição (I6) já
             // caiu; aqui ela vem da própria resposta.
@@ -498,6 +506,13 @@ Painel {
                                   mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
                                 { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
                                   mudam: painel.cat("forn.ja_pelo_gtin_liga") + painel.cat("forn.ja_pelo_vinculo_gtin_novo"),
+                                  exemplos: [], cor: Tema.papel },
+                                // T108 (texto R): as notas de compra vão para Compras, em rascunho; as que já estão lá não
+                                // entram de novo.
+                                { chave: "qCompras", titulo: "Notas de compra em Compras", novos: painel.previa.comprasNovas,
+                                  ja: painel.previa.comprasJa, jaTexto: " já estavam em Compras", novoUm: "nova", novoVarios: "novas",
+                                  extra: painel.previa.comprasNovas > 0
+                                         ? "Entram em rascunho: o estoque e o A pagar só mudam quando cada uma for lançada em Compras." : "",
                                   exemplos: [], cor: Tema.papel }
                             ] : []
                             delegate: Rectangle {
@@ -528,7 +543,8 @@ Painel {
                                                 if (linha.modelData.chave === "qPecasFornecedor" && checked)
                                                     painel.qFornecedores = true
                                                 painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
-                                                                    qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor }
+                                                                    qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor,
+                                                                    qCompras: painel.qCompras }
                                                 painel.refazerPrevia(false)
                                             }
                                             leftPadding: 0
@@ -544,7 +560,8 @@ Painel {
                                             wrapMode: Text.WordWrap
                                         }
                                         Text {
-                                            text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, "novo", "novos") : "nada novo"
+                                            text: linha.modelData.novos > 0 ? painel.texto(linha.modelData.novos, linha.modelData.novoUm || "novo",
+                                                                                           linha.modelData.novoVarios || "novos") : "nada novo"
                                             textFormat: Text.PlainText
                                             color: linha.modelData.novos > 0 ? Tema.verdeEscuro : Tema.apagado
                                             font.family: Tema.texto
@@ -554,7 +571,7 @@ Painel {
                                     }
                                     Text {
                                         visible: text !== ""
-                                        text: [linha.modelData.ja > 0 ? linha.modelData.ja + " já cadastrados" : "",
+                                        text: [linha.modelData.ja > 0 ? linha.modelData.ja + (linha.modelData.jaTexto || " já cadastrados") : "",
                                                linha.modelData.exemplos.length > 0 ? linha.modelData.exemplos.join(", ") + (linha.modelData.novos > linha.modelData.exemplos.length ? "..." : "") : ""]
                                               .filter(x => !!x).join("  ·  ")
                                         textFormat: Text.PlainText
@@ -895,7 +912,8 @@ Painel {
                     visible: !!painel.previa
                     text: "Cadastrar"
                     icone: "check"
-                    enabled: !painel.trabalhando && (painel.qClientes || painel.qFornecedores || painel.qPecasLoja || painel.qPecasFornecedor)
+                    enabled: !painel.trabalhando && (painel.qClientes || painel.qFornecedores || painel.qPecasLoja || painel.qPecasFornecedor
+                                                     || painel.qCompras)
                     onClicked: painel.cadastrar()
                 }
             }

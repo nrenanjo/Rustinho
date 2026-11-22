@@ -34,6 +34,8 @@ pub struct Entrada {
     pub fornecedores: bool,
     pub pecas_loja: bool,
     pub pecas_fornecedor: bool,
+    /// T108 (texto R do proprietário, 21/11/2026): as notas de compra também vão para Compras, em rascunho.
+    pub compras: bool,
     /// P-4: o carimbo da prévia que a tela mostrou. Se vier e não for o de
     /// agora (os arquivos ou os cadastros mudaram), nada é gravado.
     pub carimbo: String,
@@ -65,6 +67,9 @@ pub struct Previa {
     /// D-13: códigos que aparecem em peças com descrições diferentes (cada
     /// descrição vira uma peça; o código não é dado a nenhuma delas).
     pub codigos_repetidos: i64,
+    /// T108: as notas de compra que vão para Compras (em rascunho) e as que já estavam lá.
+    pub compras_novas: i64,
+    pub compras_ja: i64,
     /// Lote 2 (O-3, A03b): as opções desta prévia e o que a importação vai
     /// fazer com elas, pelas mesmas decisões (os campos de cima são, como
     /// antes, com todas as opções marcadas).
@@ -82,11 +87,19 @@ pub struct Importado {
     pub fornecedores: i64,
     pub pecas: i64,
     pub codigos_ligados: i64,
+    /// T108: as notas de compra que foram para Compras, em rascunho. Fora da resposta quando 0 (a resposta de quem
+    /// não pede as compras fica como era: a trava T7).
+    #[serde(skip_serializing_if = "nenhuma")]
+    pub compras: i64,
     /// O resumo das decisões que foram aplicadas: o mesmo da prévia. Fica de
     /// fora da resposta (a trava T7 congela o resultado da importação); serve
     /// à trava "prévia = resultado".
     #[serde(skip)]
     pub resumo: Resumo,
+}
+
+fn nenhuma(n: &i64) -> bool {
+    *n == 0
 }
 
 /// O que foi lido das notas, já sem repetição.
@@ -114,6 +127,29 @@ struct Lido {
     notas_fornecedor_meta: BTreeMap<(String, String, String), (String, String)>,
     /// P-4: SHA-256 do conteúdo dos XMLs, na ordem em que foram lidos.
     assinatura: [u8; 32],
+    /// T108: as notas de compra que servem para Compras e ainda não estão lá: (arquivo, XML, nota verificada para a
+    /// compra), na ordem em que foram lidas.
+    compras: Vec<(String, String, nfe_xml::NotaVerificada)>,
+    /// T108: as notas de compra que já estavam em Compras (não entram de novo).
+    compras_ja: i64,
+}
+
+/// T108 (texto R do proprietário, 21/11/2026): o que a nota de fornecedor é para Compras.
+pub enum ParaCompras {
+    /// Serve para a entrada de compra e ainda não está em Compras.
+    Nova(Box<nfe_xml::NotaVerificada>),
+    /// Já está em Compras (em rascunho ou lançada).
+    Ja,
+    /// Não serve para a entrada (sem a autorização da SEFAZ, para outro CNPJ, devolução, NFC-e...): só os cadastros.
+    NaoServe,
+}
+
+/// T108: as regras de Compras que a importação de cadastros usa para levar as notas de compra a Compras. Quem chama
+/// é o módulo de Compras (ele conhece as regras dele; este módulo não depende dele): `classificar` diz o que a nota
+/// é para Compras (sem gravar) e `criar` cria o rascunho da compra. Sem o gancho, nada vai para Compras.
+pub struct GanchoCompras<'a> {
+    pub classificar: &'a dyn Fn(&Connection, &str, &NotaXml) -> Resultado<ParaCompras>,
+    pub criar: &'a dyn Fn(&Connection, &str, &nfe_xml::NotaVerificada) -> Resultado<()>,
 }
 
 impl Lido {
@@ -222,13 +258,62 @@ fn guardar_mais_nova_b<K: Ord, V>(mapa: &mut BTreeMap<K, (V, String)>, chave: K,
     }
 }
 
-fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
+/// Junta a nota ao que foi lido (pessoas e peças, a mais nova de cada). `false` se a mesma nota já veio em outro
+/// arquivo (nada muda).
+fn acumular(lido: &mut Lido, chaves: &mut HashSet<String>, loja: &str, nota: &NotaXml) -> bool {
+    if !nota.chave.is_empty() && !chaves.insert(nota.chave.clone()) {
+        return false;
+    }
+    let emitente = documento::limpar(&nota.emitente.documento);
+    let destinatario = documento::limpar(&nota.destinatario);
+    if emitente == loja {
+        lido.notas_loja += 1;
+        // Devolução para fornecedor: o destinatário não é cliente.
+        if nota.finalidade == "4" {
+            return true;
+        }
+        if !destinatario.is_empty() && destinatario != loja {
+            guardar_mais_nova(&mut lido.clientes, destinatario, nota.destinatario_dados.clone(), &nota.emissao);
+        }
+        for it in &nota.itens {
+            let cod = it.codigo.trim().to_string();
+            if !cod.is_empty() {
+                let chave = (cod, descricao_chave(it));
+                guardar_mais_nova_b(&mut lido.pecas_loja, chave, it.clone(), &nota.emissao);
+            }
+        }
+    } else {
+        lido.notas_fornecedor += 1;
+        if emitente.is_empty() || nota.finalidade == "4" {
+            return true;
+        }
+        guardar_mais_nova(&mut lido.fornecedores, emitente.clone(), nota.emitente.clone(), &nota.emissao);
+        for it in &nota.itens {
+            let cod = it.codigo.trim().to_string();
+            if !cod.is_empty() {
+                let chave = (emitente.clone(), cod, descricao_chave(it));
+                let atualizar_meta = match lido.pecas_fornecedor.get(&chave) {
+                    Some((_, e)) => e.as_str() < nota.emissao.as_str(),
+                    None => true,
+                };
+                guardar_mais_nova_b(&mut lido.pecas_fornecedor, chave.clone(), it.clone(), &nota.emissao);
+                if atualizar_meta {
+                    lido.notas_fornecedor_meta.insert(chave, (nota.chave.clone(), nota.numero.clone()));
+                }
+            }
+        }
+    }
+    true
+}
+
+fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompras>) -> Resultado<Lido> {
     if arquivos.is_empty() {
         return Err(Erro::validacao("Escolha os arquivos XML, um .zip, um .rar ou uma pasta."));
     }
     let loja = cnpj_loja(conn)?;
     let mut lido = Lido::default();
     let mut chaves: HashSet<String> = HashSet::new();
+    let mut falha: Option<Erro> = None;
     let mut assinatura = {
         use sha2::Digest;
         sha2::Sha256::new()
@@ -275,49 +360,24 @@ fn ler_tudo(conn: &Connection, arquivos: &[String]) -> Resultado<Lido> {
                 return;
             }
         };
-        if !nota.chave.is_empty() && !chaves.insert(nota.chave.clone()) {
+        if !acumular(&mut lido, &mut chaves, &loja, &nota) {
             return; // a mesma nota em dois arquivos
         }
-        let emitente = documento::limpar(&nota.emitente.documento);
-        let destinatario = documento::limpar(&nota.destinatario);
-        if emitente == loja {
-            lido.notas_loja += 1;
-            // Devolução para fornecedor: o destinatário não é cliente.
-            if nota.finalidade == "4" {
-                return;
-            }
-            if !destinatario.is_empty() && destinatario != loja {
-                guardar_mais_nova(&mut lido.clientes, destinatario, nota.destinatario_dados.clone(), &nota.emissao);
-            }
-            for it in &nota.itens {
-                let cod = it.codigo.trim().to_string();
-                if !cod.is_empty() {
-                    let chave = (cod, descricao_chave(it));
-                    guardar_mais_nova_b(&mut lido.pecas_loja, chave, it.clone(), &nota.emissao);
-                }
-            }
-        } else {
-            lido.notas_fornecedor += 1;
-            if emitente.is_empty() || nota.finalidade == "4" {
-                return;
-            }
-            guardar_mais_nova(&mut lido.fornecedores, emitente.clone(), nota.emitente.clone(), &nota.emissao);
-            for it in &nota.itens {
-                let cod = it.codigo.trim().to_string();
-                if !cod.is_empty() {
-                    let chave = (emitente.clone(), cod, descricao_chave(it));
-                    let atualizar_meta = match lido.pecas_fornecedor.get(&chave) {
-                        Some((_, e)) => e.as_str() < nota.emissao.as_str(),
-                        None => true,
-                    };
-                    guardar_mais_nova_b(&mut lido.pecas_fornecedor, chave.clone(), it.clone(), &nota.emissao);
-                    if atualizar_meta {
-                        lido.notas_fornecedor_meta.insert(chave, (nota.chave.clone(), nota.numero.clone()));
-                    }
-                }
+        // T108 (texto R): a nota de compra também vai para Compras, em rascunho, se servir para a entrada (as regras
+        // da importação de Compras) e ainda não estiver lá.
+        let gancho = compras.filter(|_| falha.is_none() && documento::limpar(&nota.emitente.documento) != loja);
+        if let Some(g) = gancho {
+            match (g.classificar)(conn, xml, &nota) {
+                Ok(ParaCompras::Nova(v)) => lido.compras.push((nome.to_string(), xml.to_string(), *v)),
+                Ok(ParaCompras::Ja) => lido.compras_ja += 1,
+                Ok(ParaCompras::NaoServe) => {}
+                Err(e) => falha = Some(e),
             }
         }
     })?;
+    if let Some(e) = falha {
+        return Err(e);
+    }
     lido.arquivos = total;
     lido.assinatura = {
         use sha2::Digest;
@@ -474,6 +534,14 @@ fn opcoes_de(e: &Entrada) -> Opcoes {
         fornecedores: e.fornecedores,
         pecas_loja: e.pecas_loja,
         pecas_fornecedor: e.pecas_fornecedor,
+        compras: e.compras,
+    }
+}
+
+impl Entrada {
+    /// Todas as opções marcadas, sem arquivos (P-5: a prévia sem opções supõe todas).
+    pub fn todas() -> Entrada {
+        todas_as_opcoes(&[])
     }
 }
 
@@ -485,6 +553,7 @@ fn todas_as_opcoes(arquivos: &[String]) -> Entrada {
         fornecedores: true,
         pecas_loja: true,
         pecas_fornecedor: true,
+        compras: true,
         carimbo: String::new(),
     }
 }
@@ -498,7 +567,12 @@ pub fn previa(conn: &Connection, arquivos: &[String]) -> Resultado<Previa> {
 /// Os campos de antes saem das decisões com todas as opções marcadas (o que as
 /// notas trazem); o resumo, com as opções desta prévia.
 pub fn previa_com(conn: &Connection, e: &Entrada) -> Resultado<Previa> {
-    let lido = ler_tudo(conn, &e.arquivos)?;
+    previa_com_compras(conn, e, None)
+}
+
+/// T108: a prévia com as notas de compra que vão para Compras (o gancho é do módulo de Compras).
+pub fn previa_com_compras(conn: &Connection, e: &Entrada, compras: Option<&GanchoCompras>) -> Resultado<Previa> {
+    let lido = ler_tudo(conn, &e.arquivos, compras)?;
     previa_do_lido(conn, e, &lido)
 }
 
@@ -547,6 +621,8 @@ fn previa_do_lido(conn: &Connection, e: &Entrada, lido: &Lido) -> Resultado<Prev
     nomes.sort();
     p.exemplos_fornecedores = nomes.into_iter().take(6).collect();
     p.codigos_repetidos = (lido.repetidos_loja().len() + lido.repetidos_fornecedor().len()) as i64;
+    p.compras_novas = lido.compras.len() as i64;
+    p.compras_ja = lido.compras_ja;
     let mut exemplos: Vec<String> = Vec::new();
     for (_, it, _, dec) in &d_todas.loja {
         if matches!(dec, DecisaoLoja::Nova { .. }) {
@@ -649,19 +725,51 @@ struct Gravacao<'a> {
 /// "Trazer cadastros" dos XMLs, em etapas (ARQ-13): clientes, fornecedores,
 /// peças da loja e peças dos fornecedores.
 pub fn importar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada) -> Resultado<Importado> {
-    let lido = ler_tudo(conn, &e.arquivos)?;
-    gravar(conn, dispositivo, usuario_id, e, &lido)
+    importar_com_compras(conn, dispositivo, usuario_id, e, None)
+}
+
+/// T108: a importação que também leva as notas de compra a Compras, em rascunho (o gancho é do módulo de Compras).
+pub fn importar_com_compras(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    e: &Entrada,
+    compras: Option<&GanchoCompras>,
+) -> Resultado<Importado> {
+    let lido = ler_tudo(conn, &e.arquivos, compras)?;
+    gravar_com(conn, dispositivo, usuario_id, e, &lido, compras)
 }
 
 /// Decide tudo (a mesma função da prévia) e aplica, na ordem das etapas.
 /// Separada da leitura para os testes montarem casos sem nota assinada.
+#[cfg(test)]
 fn gravar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrada, lido: &Lido) -> Resultado<Importado> {
+    gravar_com(conn, dispositivo, usuario_id, e, lido, None)
+}
+
+fn gravar_com(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    e: &Entrada,
+    lido: &Lido,
+    compras: Option<&GanchoCompras>,
+) -> Resultado<Importado> {
     let d = decidir(conn, e, lido)?;
     if !e.carimbo.is_empty() && carimbo(conn, &d.opcoes, lido)? != e.carimbo {
         return Err(Erro::validacao(CARIMBO_VENCIDO));
     }
     let resumo = resumir(conn, lido, &d)?;
     let mut r = aplicar(Gravacao { conn, dispositivo, usuario_id }, lido, &d)?;
+    // T108 (texto R): as notas de compra vão para Compras, em rascunho, DEPOIS dos cadastros (os itens já nascem
+    // ligados às peças cadastradas agora). As regras de Compras continuam: o estoque, o custo e o A pagar só mudam
+    // quando a compra for lançada. Na mesma transação: ou tudo, ou nada.
+    if let Some(g) = compras.filter(|_| d.opcoes.compras) {
+        for (_, xml, v) in &lido.compras {
+            (g.criar)(conn, xml, v)?;
+            r.compras += 1;
+        }
+    }
     r.resumo = resumo;
     Ok(r)
 }
@@ -1603,6 +1711,8 @@ pub struct Opcoes {
     pub fornecedores: bool,
     pub pecas_loja: bool,
     pub pecas_fornecedor: bool,
+    /// T108: as notas de compra vão para Compras, em rascunho.
+    pub compras: bool,
 }
 
 /// Uma categoria do que a importação faz (código estável, texto da tela,
@@ -1668,6 +1778,9 @@ const CATEGORIAS: &[(&str, &str)] = &[
     ("forn.ja_pelo_gtin_liga", "Achadas pelo GTIN: o código do fornecedor será ligado"),
     ("forn.pendencia", "Peças de fornecedor que vão para pendências"),
     ("forn.ignorada", "Peças de fornecedor que não entram (opções desmarcadas)"),
+    ("compra.nova", "Notas de compra que vão para Compras, em rascunho"),
+    ("compra.ja", "Notas de compra que já estavam em Compras (não entram de novo)"),
+    ("compra.nao_importada", "Notas de compra que não vão para Compras (opção desmarcada)"),
 ];
 
 /// Uma pendência aberta para o mesmo item (fornecedor, código e descrição)?
@@ -1805,6 +1918,14 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
             DecisaoForn::Nada => conta("forn.ignorada", desc),
         }
     }
+    // T108: as notas de compra.
+    for (_, _, v) in &lido.compras {
+        let exemplo = format!("NF {} de {}", v.nota.numero, nome_pessoa(&v.nota.emitente));
+        conta(if d.opcoes.compras { "compra.nova" } else { "compra.nao_importada" }, exemplo);
+    }
+    for _ in 0..lido.compras_ja {
+        conta("compra.ja", String::new());
+    }
     let nomes = |ids: &[String]| -> Resultado<Vec<String>> {
         let mut v = Vec::new();
         for p in ids.iter().take(6) {
@@ -1852,7 +1973,7 @@ fn carimbo(conn: &Connection, e: &Opcoes, lido: &Lido) -> Resultado<String> {
     use sha2::Digest;
     let seq: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))?;
     let mut h = sha2::Sha256::new();
-    h.update([e.clientes as u8, e.fornecedores as u8, e.pecas_loja as u8, e.pecas_fornecedor as u8]);
+    h.update([e.clientes as u8, e.fornecedores as u8, e.pecas_loja as u8, e.pecas_fornecedor as u8, e.compras as u8]);
     h.update(lido.assinatura);
     h.update(seq.to_le_bytes());
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
@@ -2322,41 +2443,14 @@ mod comandos {
     use crate::erro::Resultado;
     use crate::{importar, requisitos};
 
+    // T108 (texto R): o `importar_previa` e o `importar_cadastros` foram para os comandos de Compras (`compras::
+    // comandos`), com o mesmo nome, entrada, resposta e permissão: eles também levam as notas de compra a Compras,
+    // e só o módulo de Compras conhece as regras dele (este módulo não depende dele).
     pub const COMANDOS: &[Comando] = &[
-        // T-2 (a): a prévia lê os arquivos da importação, que é do gerente;
-        // só com a senha (a da tela, DP-52 (b)) ou quem a loja liberou.
-        Comando {
-            nome: "importar_previa",
-            classe: Classe::ConsultaDoGerente("configuracoes"),
-            funcao: importar_previa,
-        },
-        Comando { nome: "importar_cadastros", classe: Classe::Gerente("configuracoes"), funcao: importar_cadastros },
         Comando { nome: "arquivos_conferir", classe: Classe::Leitura, funcao: arquivos_conferir },
         Comando { nome: "xml_pendencias_listar", classe: Classe::Leitura, funcao: xml_pendencias_listar },
         Comando { nome: "xml_pendencia_resolver", classe: Classe::Caixa, funcao: xml_pendencia_resolver },
     ];
-
-    fn importar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        // P-5: sem nenhuma opção no pedido, a prévia supõe todas marcadas.
-        let com_opcoes =
-            ["clientes", "fornecedores", "pecasLoja", "pecasFornecedor"].iter().any(|k| dados.get(k).is_some());
-        let d: importar::Entrada = ler(dados)?;
-        if com_opcoes {
-            Ok(json!(importar::previa_com(p.conn, &d)?))
-        } else {
-            Ok(json!(importar::previa(p.conn, &d.arquivos)?))
-        }
-    }
-
-    fn importar_cadastros(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        let d: importar::Entrada = ler(dados)?;
-        let tx = p.conn.transaction()?;
-        let r = importar::importar(&tx, p.disp, p.usuario_id, &d)?;
-        let resposta = json!(r);
-        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
-        tx.commit()?;
-        Ok(resposta)
-    }
 
     fn arquivos_conferir(_p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: importar::Entrada = ler(dados)?;

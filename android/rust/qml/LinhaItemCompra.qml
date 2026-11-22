@@ -186,6 +186,8 @@ Rectangle {
                                 case "fornecedor": return "Ligada sozinha: mesmo código deste fornecedor na última compra"
                                 case "barras": return "Ligada sozinha pelo código de barras"
                                 case "codigo": return "Ligada sozinha pelo código original — confira"
+                                // T108 (texto R): a importação já cadastrou a peça em Peças; o lançar usa esta mesma.
+                                case "importacao": return "Peça nova, já cadastrada em Peças pela importação desta nota."
                                 }
                                 if (linha.pendente)
                                     return "Não achei esta peça pelo código nem pelo código de barras."

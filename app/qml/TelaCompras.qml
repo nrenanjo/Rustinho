@@ -44,6 +44,9 @@ FocusScope {
         const novas = []
         const erros = []
         const conflitos = []
+        // T108 (texto R): as notas que já estavam em Compras (num pacote) e as peças novas cadastradas em Peças.
+        let jaEmCompras = 0
+        let pecasCadastradas = 0
         pendentes = []
         avisoPendentes = ""
         function proximo(i) {
@@ -64,6 +67,8 @@ FocusScope {
                         erros.push(e)
                     for (const c of r.dados.conflitos)
                         conflitos.push(c)
+                    jaEmCompras += r.dados.jaEmCompras || 0
+                    pecasCadastradas += r.dados.pecasCadastradas || 0
                 } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
                     // Falta o CNPJ da loja: a navegação guiada leva a
                     // Configurações › Loja; este arquivo e os que faltam ficam
@@ -83,10 +88,21 @@ FocusScope {
             tela.guardarNaoImportadas(conflitos)
             if (erros.length > 0)
                 janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
-            if (novas.length === 1)
+            const extras = []
+            if (pecasCadastradas > 0)
+                extras.push(pecasCadastradas === 1 ? "1 peça nova cadastrada em Peças" : pecasCadastradas + " peças novas cadastradas em Peças")
+            if (jaEmCompras > 0)
+                extras.push(jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo"
+                                              : jaEmCompras + " notas já estavam em Compras e não entraram de novo")
+            const mais = extras.length > 0 ? extras.join("; ") + "." : ""
+            if (novas.length === 1) {
                 janela.abrir("TelaCompra", { compraId: novas[0].id })
-            else if (novas.length > 1)
-                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar.", "ok")
+                if (mais && erros.length === 0)
+                    janela.avisar(mais, "ok")
+            } else if (novas.length > 1)
+                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar." + (mais ? " " + mais : ""), "ok")
+            else if (mais && erros.length === 0)
+                janela.avisar(mais, "ok")
         }
         proximo(0)
     }
