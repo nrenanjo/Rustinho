@@ -963,7 +963,7 @@ Painel {
                                         onClicked: escolherPecaParaPendencia.abrirCom(painel.pendenciaAberta ? painel.pendenciaAberta.descricao : "")
                                     }
                                     Botao {
-                                        text: painel.corrigindoIdentificacao ? "Cancelar correção" : "Corrigir identificação"
+                                        text: painel.corrigindoIdentificacao ? "Usar dados do XML" : "Corrigir identificação"
                                         tipo: "secundario"
                                         onClicked: {
                                             painel.corrigindoIdentificacao = !painel.corrigindoIdentificacao
