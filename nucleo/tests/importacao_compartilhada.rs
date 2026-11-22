@@ -1124,3 +1124,179 @@ fn opcao_c_h9_ficha_motivo_pendencia_provisorias_e_previa_coerente() {
     let preco_lancado = lanc["compra"]["itens"][0]["peca"]["precoAtual"].as_str().unwrap().to_string();
     assert_eq!(preco_previsto, preco_lancado, "H9: prévia precoNovo divergiu do preço gravado no lançar!");
 }
+
+// ---------------------------------------------------------------------------
+// Rodada v3 — Provas das ressalvas da 2ª conferência independente (Hydrogen)
+// ---------------------------------------------------------------------------
+
+/// V2-1 (Médio — Hydrogen 2ª conferência): em peça provisória virgem (`acao == "nova"`,
+/// `achadoPor == "importacao"`), mudar `fator = 2` NÃO deve mostrar `custoBaixou: true`
+/// (falso rádio "fica / baixa" que voltava sozinho) e a prévia `precoNovo` deve bater
+/// exatamente com o preço gravado em `lancar()`. Já em peça editada manualmente antes do
+/// lançamento, `custoBaixou` e `baixarPreco: false` são respeitados tanto na prévia quanto no lançar.
+#[test]
+fn opcao_c_v3_v2_1_peca_virgem_fator_sem_falso_custo_baixou_e_editada_respeita_escolha() {
+    // 1) Peça virgem com fator = 2 e baixarPreco = false.
+    let mut l = loja("t111-v3-v21-virgem", LOJA_CNPJ);
+    let a = arquivo(&l, "compra");
+    let r = l.ok("compra_importar", json!({ "caminho": a }));
+    let id = r["compras"][0]["id"].as_str().unwrap().to_string();
+    let c0 = l.ok("compra_abrir", json!({ "id": id }));
+    let mut escolhas = escolhas_atuais(&c0);
+    escolhas[0]["fator"] = json!("2");
+    escolhas[0]["baixarPreco"] = json!(false);
+    let c1 = l.ok(
+        "compra_atualizar",
+        json!({ "id": id, "freteExtra": "", "atualizarPrecos": false, "observacoes": "", "gerarPagar": false,
+                "itens": escolhas }),
+    );
+    let p0 = &c1["itens"][0]["peca"];
+    assert_eq!(
+        p0["custoBaixou"], false,
+        "V2-1: peça virgem da importação não tem custo anterior consolidado e não pode exibir caixa custoBaixou: {p0}"
+    );
+    assert_eq!(p0["custoAtual"], "", "V2-1: peça virgem não deve exibir falso 'antes R$ ...': {p0}");
+    let preco_previsto = p0["precoNovo"].as_str().unwrap().to_string();
+    assert_eq!(p0["precoAtual"], preco_previsto, "V2-1: peça virgem não deve exibir falso 'era R$ ...': {p0}");
+    conferir_autorizacao(&mut l, &id, "135260000000001");
+    let lanc = l.ok(
+        "compra_lancar",
+        json!({ "id": id, "freteExtra": "", "atualizarPrecos": false, "observacoes": "", "gerarPagar": false,
+                "itens": escolhas_atuais(&c1) }),
+    );
+    assert_eq!(
+        lanc["compra"]["itens"][0]["peca"]["precoAtual"].as_str().unwrap(),
+        preco_previsto,
+        "V2-1: preço gravado no lançar deve bater 100% com a prévia"
+    );
+
+    // 2) Peça já editada manualmente pelo gerente: fator = 2 com baixarPreco = false mantém o preço editado.
+    let mut l2 = loja("t111-v3-v21-editada", LOJA_CNPJ);
+    let a2 = arquivo(&l2, "compra2");
+    let r2 = l2.ok("compra_importar", json!({ "caminho": a2 }));
+    let id2 = r2["compras"][0]["id"].as_str().unwrap().to_string();
+    let pid0 = r2["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mut fp = l2.ok("produto_abrir", json!({ "id": pid0 }));
+    fp["precos"][0]["preco"] = json!("150,00");
+    fp["precos"][0]["lucro"] = json!("");
+    l2.ok("produto_salvar", fp);
+
+    let c2 = l2.ok("compra_abrir", json!({ "id": id2 }));
+    let mut esc2 = escolhas_atuais(&c2);
+    esc2[0]["fator"] = json!("2");
+    esc2[0]["baixarPreco"] = json!(false);
+    let c2_upd = l2.ok(
+        "compra_atualizar",
+        json!({ "id": id2, "freteExtra": "", "atualizarPrecos": true, "observacoes": "", "gerarPagar": false,
+                "itens": esc2 }),
+    );
+    assert_eq!(c2_upd["itens"][0]["peca"]["custoBaixou"], true, "peça já editada mostra redução de custo");
+    assert_eq!(c2_upd["itens"][0]["peca"]["precoNovo"], "150,00", "baixarPreco=false mantém preço na prévia");
+    conferir_autorizacao(&mut l2, &id2, "135260000000001");
+    let lanc2 = l2.ok(
+        "compra_lancar",
+        json!({ "id": id2, "freteExtra": "", "atualizarPrecos": true, "observacoes": "", "gerarPagar": false,
+                "itens": escolhas_atuais(&c2_upd) }),
+    );
+    assert_eq!(lanc2["compra"]["itens"][0]["peca"]["precoAtual"], "150,00");
+}
+
+/// V2-3 e V2-4 (Baixos — Hydrogen 2ª conferência):
+/// - V2-3: no modo `corrigir: true`, manter o GTIN comercial inalterado preserva GTINs
+///   tributáveis/extras do XML; alterar o GTIN grava `origem = "manual"`;
+/// - V2-4: `acao: "nova"` mesmo sem `corrigir: true` não rouba código de fornecedor já ligado a outra peça.
+#[test]
+fn opcao_c_v3_v2_3_preserva_gtin_extra_e_v2_4_bloqueia_roubo_sem_corrigir() {
+    // V2-3a: pendência com GTIN comercial + GTIN tributável (`nf604`):
+    // provoca pendência `possivel_duplicata_descricao` (sem conflito de GTIN), depois corrige só o nome.
+    let mut l = loja("t111-v3-v23a", LOJA_CNPJ);
+    let nf604 = fixture_codigos("nf604_patral_gtin_tributavel.xml");
+    // Cria pendência diretamente para o XML da nf604 com ambos GTINs livres no catálogo:
+    // cadastrando primeiro uma peça sem GTIN com descrição igual → `possivel_duplicata_descricao`?
+    // Como nf604 tem GTIN livre e código forte, o bloqueio por descrição pega na 1ª importação!
+    let mut f_dup = l.ok("produto_novo", json!({}));
+    f_dup["nome"] = json!("LAMPADA H7 TESTE CAIXA COM 10");
+    f_dup["precos"][0]["preco"] = json!("30,00");
+    l.ok("produto_salvar", f_dup);
+    let p604 = pasta_com(&l, "n604", &[("nf604.xml", &nf604)]);
+    l.ok("compra_importar", json!({ "caminho": p604 }));
+    let pends = l.ok("xml_pendencias_listar", json!({}));
+    assert_eq!(pends.as_array().unwrap().len(), 1, "{pends}");
+    let gtin_com = pends[0]["gtinComercial"].as_str().unwrap().to_string();
+    assert!(!gtin_com.is_empty(), "{pends}");
+    let res = l.ok(
+        "xml_pendencia_resolver",
+        json!({
+            "id": pends[0]["id"],
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "LAMPADA H7 PATRAL CAIXA",
+            "codigoFornecedor": pends[0]["codigoFornecedor"],
+            "codigoBarras": gtin_com,
+            "unidade": "CX"
+        }),
+    );
+    let pid = res["produtoId"].as_str().unwrap().to_string();
+    assert!(
+        n(&l, &format!("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = '{pid}'")) >= 2,
+        "V2-3: corrigir apenas o nome apagou o GTIN tributável/extra do XML!"
+    );
+
+    // V2-3b: alterar o GTIN manualmente grava origem = "manual" em produto_gtin e gtins_json.
+    let mut l2 = loja("t111-v3-v23b", LOJA_CNPJ);
+    let nf900 = acervo_compras("nf900.xml");
+    let p900 = pasta_com(&l2, "n900", &[("nf900.xml", &nf900)]);
+    l2.ok("compra_importar", json!({ "caminho": p900 }));
+    let pends2 = l2.ok("xml_pendencias_listar", json!({}));
+    let pid_pend = pends2[0]["id"].as_str().unwrap().to_string();
+    let res2 = l2.ok(
+        "xml_pendencia_resolver",
+        json!({
+            "id": pid_pend,
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "LAMPADA H4 MANUAL",
+            "codigoFornecedor": "F2-H4",
+            "codigoBarras": "7891000000014",
+            "unidade": "UN"
+        }),
+    );
+    let pid2 = res2["produtoId"].as_str().unwrap().to_string();
+    let origem_gtin: String = l2
+        .conexao()
+        .query_row("SELECT origem FROM produto_gtin WHERE produto_id = ?1 LIMIT 1", [&pid2], |x| x.get(0))
+        .unwrap();
+    let gtins_pend: String = l2
+        .conexao()
+        .query_row("SELECT gtins_json FROM xml_pendencia_identificacao WHERE id = ?1", [&pid_pend], |x| x.get(0))
+        .unwrap();
+    assert_eq!(origem_gtin, "manual");
+    assert!(gtins_pend.contains("\"manual\""), "V2-3: gtins_json gravou origem falsa de cEAN: {gtins_pend}");
+
+    // V2-4: `acao: "nova"` SEM `corrigir: true` numa pendência cujo código já pertence a outra peça é recusado!
+    let mut l3 = loja("t111-v3-v24", LOJA_CNPJ);
+    let nf501 = acervo_compras("nf501.xml");
+    let p501 = pasta_com(&l3, "n501", &[("nf501.xml", &nf501)]);
+    l3.ok("compra_importar", json!({ "caminho": p501 }));
+    let dono_antes: String = l3
+        .conexao()
+        .query_row("SELECT produto_id FROM produto_fornecedor WHERE codigo = 'F1-200'", [], |x| x.get(0))
+        .unwrap();
+    // Importa nf503: F1-200 com 2 correias diferentes gera pendência (codigo_repetido) com codigo_fornecedor = 'F1-200'.
+    let nf503 = acervo_compras("nf503.xml");
+    let p503 = pasta_com(&l3, "n503", &[("nf503.xml", &nf503)]);
+    l3.ok("compra_importar", json!({ "caminho": p503 }));
+    let pends3 = l3.ok("xml_pendencias_listar", json!({}));
+    assert!(!pends3.as_array().unwrap().is_empty());
+    let err = l3.chamar("xml_pendencia_resolver", json!({ "id": pends3[0]["id"], "acao": "nova", "produtoId": "" }));
+    assert_eq!(err["ok"], false, "V2-4: acao nova sem corrigir roubou código F1-200 de outra peça: {err}");
+    assert_eq!(err["campo"], "codigoFornecedor", "{err}");
+    let dono_depois: String = l3
+        .conexao()
+        .query_row("SELECT produto_id FROM produto_fornecedor WHERE codigo = 'F1-200'", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(dono_depois, dono_antes, "V2-4: vínculo original preservado");
+}

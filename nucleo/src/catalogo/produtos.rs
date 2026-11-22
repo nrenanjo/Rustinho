@@ -968,10 +968,15 @@ pub(crate) fn remover_provisorio_se_orfao(
         |l| l.get(0),
     )?;
     if multi_caixa {
+        // V2-2: solta codigo_barras e produto_gtin (e refaz o índice) para que
+        // reimportar o mesmo XML depois não caia em `peca_desativada`, mantendo
+        // o registro `produto` intacto para referências offline (vendas/encomendas).
+        crate::catalogo::codigos::limpar_gtins_do_produto(conn, produto_id)?;
         conn.execute(
-            "UPDATE produto SET ativo = 0, atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1",
+            "UPDATE produto SET ativo = 0, codigo_barras = '', atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1",
             params![produto_id, tempo::agora(), usuario_id, dispositivo],
         )?;
+        crate::catalogo::codigos::refazer_indice(conn, produto_id)?;
         auditoria::registrar(
             conn,
             dispositivo,

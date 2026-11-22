@@ -791,10 +791,27 @@ pub(crate) fn pecas_por_descricao_compacta(conn: &Connection, descricao: &str) -
     };
     let inicio = primeiro.to_string();
     let mut achados: Vec<(bool, String)> = Vec::new();
-    let mut avaliar = |id: String, nome: String, ativo: i64| {
+    let mut avaliar = |id: String, nome: String, ativo: i64| -> Resultado<()> {
         if texto::compactar(&nome) == alvo {
+            if ativo == 0 {
+                // V2-2: peça provisória desfeita em ambiente multi-caixa não é cadastro
+                // real e não deve bloquear reimportação futura do mesmo XML.
+                let desfeita: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM auditoria
+                       WHERE entidade = 'produto' AND entidade_id = ?1 AND acao = 'produto.desfazer_provisorio')
+                       AND NOT EXISTS(SELECT 1 FROM auditoria
+                       WHERE entidade = 'produto' AND entidade_id = ?1
+                         AND acao IN ('produto.alterar', 'compra.entrada'))",
+                    [&id],
+                    |l| l.get(0),
+                )?;
+                if desfeita {
+                    return Ok(());
+                }
+            }
             achados.push((ativo != 0, id));
         }
+        Ok(())
     };
     if let Some(proximo) = char::from_u32(primeiro as u32 + 1) {
         let fim = proximo.to_string();
@@ -804,7 +821,7 @@ pub(crate) fn pecas_por_descricao_compacta(conn: &Connection, descricao: &str) -
         })?;
         for linha in linhas {
             let (id, nome, ativo) = linha?;
-            avaliar(id, nome, ativo);
+            avaliar(id, nome, ativo)?;
         }
     } else {
         let mut stmt = conn.prepare_cached("SELECT id, nome, ativo FROM produto WHERE busca >= ?1")?;
@@ -813,7 +830,7 @@ pub(crate) fn pecas_por_descricao_compacta(conn: &Connection, descricao: &str) -
         })?;
         for linha in linhas {
             let (id, nome, ativo) = linha?;
-            avaliar(id, nome, ativo);
+            avaliar(id, nome, ativo)?;
         }
     }
     achados.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
@@ -840,6 +857,15 @@ pub(crate) fn desvincular_fornecedor_se_produto(
         params![fornecedor_id, compacto, produto_id],
     )?;
     Ok(n > 0)
+}
+
+/// T111 (V2-2): remove os GTINs auxiliares (`produto_gtin`) de uma peça
+/// provisória desativada ao desfazer rascunho em ambiente multi-caixa para não
+/// bloquear a reimportação do mesmo XML. Fica em `codigos` (único escritor de
+/// `produto_gtin`).
+pub(crate) fn limpar_gtins_do_produto(conn: &Connection, produto_id: &str) -> Resultado<()> {
+    conn.execute("DELETE FROM produto_gtin WHERE produto_id = ?1", [produto_id])?;
+    Ok(())
 }
 
 #[cfg(test)]

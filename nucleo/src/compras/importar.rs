@@ -2440,7 +2440,8 @@ pub fn resolver_pendencia(
     } else {
         codigo_fornecedor.trim()
     };
-    if acao == "nova" && (d.corrigir || !cod_forn_corrigido.is_empty()) && !cod_para_vincular.is_empty() {
+    // V2-4: nunca transferir vínculo de outra peça em silêncio ao criar nova peça (com ou sem `corrigir`).
+    if acao == "nova" && !cod_para_vincular.is_empty() {
         if let Some(fid_ref) = &fid {
             let comp = texto::compactar(cod_para_vincular);
             if let Some((outra_id, _)) = crate::catalogo::codigos::vinculo_do_fornecedor(conn, fid_ref, &comp)? {
@@ -2459,10 +2460,16 @@ pub fn resolver_pendencia(
         }
     }
 
+    let orig_barras: String = gtin_comercial.trim().chars().filter(|c| !matches!(c, ' ' | '-')).collect();
     let barras_corrigido: String = d.codigo_barras.trim().chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    let barras_alterado = d.corrigir && barras_corrigido != orig_barras;
     if d.corrigir && acao == "nova" {
-        // Achado 3b: no modo corrigir, o GTIN informado vale literalmente (vazio limpa os GTINs antigos).
-        gtins_ficha.clear();
+        // Achado 3b + V2-3: só descarta GTINs adicionais/tributáveis do XML se o usuário
+        // efetivamente alterou ou limpou o código de barras; se manteve o mesmo GTIN
+        // comercial (ex.: editou só o nome), preserva todos os GTINs do XML.
+        if barras_alterado {
+            gtins_ficha.clear();
+        }
         if !barras_corrigido.is_empty() {
             if !gtin::gtin_valido(&barras_corrigido) {
                 return Err(Erro::campo("codigoBarras", "Código de barras (GTIN) inválido. Confira os dígitos."));
@@ -2470,11 +2477,16 @@ pub fn resolver_pendencia(
             if peca_por_barras(conn, &barras_corrigido)?.is_some() {
                 return Err(Erro::campo("codigoBarras", "Este código de barras já está cadastrado em outra peça."));
             }
-            gtins_ficha.push(produtos::GtinFicha {
-                gtin: barras_corrigido.clone(),
-                tipo: "comercial".into(),
-                origem: "manual".into(),
-            });
+            if barras_alterado || !gtins_ficha.iter().any(|g| g.gtin == barras_corrigido) {
+                gtins_ficha.insert(
+                    0,
+                    produtos::GtinFicha {
+                        gtin: barras_corrigido.clone(),
+                        tipo: "comercial".into(),
+                        origem: "manual".into(),
+                    },
+                );
+            }
         }
     } else if !barras_corrigido.is_empty() {
         if !gtin::gtin_valido(&barras_corrigido) {
@@ -2573,7 +2585,7 @@ pub fn resolver_pendencia(
     if let Some(fid) = &fid {
         let compacto = texto::compactar(cod_para_vincular);
         if !compacto.is_empty() {
-            let ja_ligado = if acao == "nova" && (d.corrigir || !cod_forn_corrigido.is_empty()) {
+            let ja_ligado = if acao == "nova" {
                 crate::catalogo::codigos::JaLigado::Manter
             } else {
                 crate::catalogo::codigos::JaLigado::PassarPeca
@@ -2582,17 +2594,21 @@ pub fn resolver_pendencia(
             produtos::atualizar_indice_busca(conn, &produto_id)?;
         }
     }
-    produtos::registrar_gtins_xml(conn, &produto_id, &gtins_ficha)?;
+    if !(d.corrigir && acao == "nova" && barras_alterado) {
+        produtos::registrar_gtins_xml(conn, &produto_id, &gtins_ficha)?;
+    }
 
     let agora = tempo::agora();
     if d.corrigir && acao == "nova" {
-        let gtins_corr_json = if barras_corrigido.is_empty() {
+        let gtins_corr_json = if !barras_alterado {
+            gtins_json.clone()
+        } else if barras_corrigido.is_empty() {
             "[]".to_string()
         } else {
             serde_json::to_string(&vec![nfe_xml::GtinXml {
                 codigo: barras_corrigido.clone(),
                 tipo: "comercial".into(),
-                origem: "cEAN".into(),
+                origem: "manual".into(),
             }])
             .unwrap_or_else(|_| "[]".to_string())
         };

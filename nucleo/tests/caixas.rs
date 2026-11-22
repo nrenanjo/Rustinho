@@ -1701,9 +1701,40 @@ fn t111_h7_multi_caixa_descarte_provisorio_nao_quebra_venda_offline() {
         bb.conn.query_row("SELECT ativo FROM produto WHERE id = ?1", [&pid0], |l| l.get(0)).unwrap_or(-1);
     let _ = (u, ver);
     drop((ba, bb));
+
+    // V2-2 (Médio — Hydrogen 2ª conferência): após descartar em ambiente multi-caixa,
+    // reimportar o mesmo XML ("Você pode importar o XML de novo depois") NÃO pode
+    // travar em `peca_desativada` nem em `possivel_duplicata_descricao` e deve
+    // gravar normalmente os GTINs nas novas peças!
+    let mut sa = rustinho_nucleo::Servico::abrir(&arq_a).unwrap();
+    chamar(&mut sa, "entrar", serde_json::json!({ "id": uid, "senha": "balcao-azul-2026" }));
+    let reimp = chamar(&mut sa, "compra_importar", serde_json::json!({ "caminho": arq_xml.display().to_string() }));
+    let reimp_cad = reimp["pecasCadastradas"].as_i64().unwrap_or(0);
+    let reimp_pend = reimp["pendenciasIdentificacao"].as_i64().unwrap_or(0);
+    let novo_pid0 = reimp["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap_or("").to_string();
+    drop(sa);
+
+    let mut ba = Banco::abrir(&arq_a).unwrap();
+    let mut bb = Banco::abrir(&arq_b).unwrap();
+    trocar(&mut ba, &mut bb);
+    let novo_gtin_a: String = ba
+        .conn
+        .query_row("SELECT codigo_barras FROM produto WHERE id = ?1", [&novo_pid0], |l| l.get(0))
+        .unwrap_or_default();
+    let pend_a2 = contar(&ba, "SELECT COUNT(*) FROM sync_pendencia");
+    let pend_b2 = contar(&bb, "SELECT COUNT(*) FROM sync_pendencia");
+    let ref_b2 = contar(&bb, "SELECT COUNT(*) FROM sync_referencia WHERE estado = 'apagado'");
+    drop((ba, bb));
     let _ = std::fs::remove_dir_all(&raiz);
 
     assert_eq!((pend_a, pend_b), (0, 0), "H7.2: DELETE físico gerou sync_pendencia no multi-caixa!");
     assert_eq!(ref_b, 0, "H7.2: DELETE físico quebrou referência da encomenda no Caixa B!");
     assert_eq!(ativo_b, 0, "H7.2: em multi-caixa a peça provisória descartada deve ser desativada (ativo = 0)");
+    assert_eq!(
+        (reimp_cad, reimp_pend),
+        (3, 0),
+        "V2-2: reimportar o mesmo XML após descarte em multi-caixa bloqueou em pendência: {reimp}"
+    );
+    assert!(!novo_gtin_a.is_empty(), "V2-2: peça reimportada ficou sem GTIN porque a inativa reteve o código!");
+    assert_eq!((pend_a2, pend_b2, ref_b2), (0, 0, 0), "V2-2: reimportação + sync manteve integridade total");
 }

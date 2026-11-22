@@ -1560,7 +1560,18 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
                 if peca_ja_tocada(conn, pid)? {
                     peca_ligada(conn, pid, cu, atualizar_precos, it.baixar_preco)?
                 } else {
-                    peca_ligada(conn, pid, cu, true, true)?
+                    // V2-1: peça provisória virgem ainda não foi consolidada nem editada;
+                    // o preço inicial acompanha sempre o custo real unitário (com fator e frete) +
+                    // lucro padrão, sem exibir um falso "antes R$ ..." / "O custo baixou" / "era R$ ...".
+                    peca_ligada(conn, pid, cu, true, true)?.map(|mut p| {
+                        p.custo_atual.clear();
+                        p.variacao_custo.clear();
+                        p.custo_subiu = false;
+                        p.custo_baixou = false;
+                        p.baixar_preco = false;
+                        p.preco_atual = p.preco_novo.clone();
+                        p
+                    })
                 }
             }
             // D-06: depois de lançada, o item "peça nova" mostra a peça criada.
