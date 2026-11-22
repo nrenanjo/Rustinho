@@ -23,7 +23,7 @@ const ISOLADO: &str = "RUSTINHO_T8_ISOLADO";
 ///
 /// Motivo (T112): a proteção anti-DoS R-09 (`cifra::Porteiro`, 3 sais novos/min
 /// por IP em produção) usa estado global de processo quando `rustinho-nucleo` é
-/// compilado para testes de integração (`#[cfg(not(test))]`). Rodando os 7
+/// compilado para testes de integração (`#[cfg(not(test))]`). Rodando os 8
 /// testes de rede no mesmo processo em `127.0.0.1`, a partir do 2º teste o
 /// limite de 3 sais/min estoura e cada teste subsequente dorme ~60 s (300 s por
 /// execução em Linux debug, Linux release e Windows). Isolando cada teste em

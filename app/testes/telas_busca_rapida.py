@@ -64,12 +64,16 @@ TEXTO_FINAL = TEXTO_B
 
 
 def chave_da_loja():
-    """O conteúdo das migrações e da montagem da loja: muda, monta de novo."""
+    """O conteúdo do núcleo (`nucleo/src`) e da montagem da loja: muda, monta de novo."""
     h = hashlib.sha256()
-    arquivos = sorted(glob.glob(os.path.join(base.RAIZ, "nucleo", "src", "migracoes", "*")))
+    arquivos = []
+    for dirpath, _, filenames in os.walk(os.path.join(base.RAIZ, "nucleo", "src")):
+        for nome in filenames:
+            arquivos.append(os.path.join(dirpath, nome))
     arquivos.append(os.path.join(base.RAIZ, "nucleo", "tests", "lojas_de_teste.rs"))
-    for a in arquivos:
-        h.update(os.path.basename(a).encode())
+    for a in sorted(arquivos):
+        rel = os.path.relpath(a, base.RAIZ).replace(os.sep, "/")
+        h.update(rel.encode())
         with open(a, "rb") as f:
             h.update(f.read())
     h.update(str(PECAS).encode())
@@ -77,8 +81,9 @@ def chave_da_loja():
 
 
 def preparar_loja(destino):
-    """Copia a loja guardada (ou monta, guarda e copia). Devolve (segundos, montou)."""
-    guardada = os.path.join(base.RAIZ, "target", "lojas_de_teste", f"lista_continua_{PECAS}_{chave_da_loja()}")
+    """Copia a loja guardada (fora de `target/`, sob TMPDIR) ou monta, guarda e copia. Devolve (segundos, montou)."""
+    raiz_cache = os.environ.get("RUSTINHO_CACHE_LOJAS") or os.path.join(tempfile.gettempdir(), "rustinho-lojas-de-teste")
+    guardada = os.path.join(raiz_cache, f"lista_continua_{PECAS}_{chave_da_loja()}")
     inicio = time.time()
     montou = False
     if not os.path.isfile(os.path.join(guardada, "rustinho.db")):

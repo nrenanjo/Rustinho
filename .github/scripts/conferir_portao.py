@@ -22,15 +22,19 @@ Regras:
    ser pulados por ela (if: inputs.android); nenhum outro job do validar.yml
    tem `if`, e o do manifesto é exatamente always() (T050-R3c).
 7. Otimizações seguras (T112 + INT9-R5):
-   - Todo passo `actions/cache` em validar.yml (e workflows auxiliares) tem de
-     ser explicitamente desligado em tags `refs/tags/v*`
+   - Todo passo `actions/cache`, `jurplel/install-qt-action` (com cache) e
+     `actions/setup-java` (com cache) em validar.yml (e workflows auxiliares)
+     tem de ser explicitamente desligado em tags `refs/tags/v*`
      (`!startsWith(github.ref, 'refs/tags/v')`), garantindo build limpa na
      publicação.
-   - Se `programa-e-telas` usa matrix `shard`, o passo `manifesto` tem de
-     receber `RUSTINHO_SHARDS_TELAS` igual ao total de shards da matriz
-     (impedindo remover shards sem o manifesto acusar).
+   - O passo `manifesto` em validar.yml tem de definir sempre
+     `RUSTINHO_SHARDS_TELAS` inteiro >= 1 (igual ao total de shards da matriz
+     `programa-e-telas`, ou `"1"` se não houver matriz), garantindo que a
+     conferência estrita de cobertura de roteiros, QML, programa e suítes Rust
+     nunca seja desligada silenciosamente.
    - O workflow rápido `validar-windows.yml` (se presente) só dispara por
-     `workflow_dispatch`, só lê (`contents: read`) e nunca publica versão.
+     `workflow_dispatch`, só lê (`contents: read`), não ignora falhas
+     (`continue-on-error`) e nunca publica versão.
 
 A pasta dos workflows pode vir como argumento (para os testes).
 """
@@ -118,6 +122,11 @@ def main():
                     if cache_qt not in (None, False, "false"):
                         exigir(CONDICAO_SEM_CACHE_TAG in str(cache_qt),
                                f"{base}: passo '{passo.get('name')}' do job {nome} usa cache do Qt sem desligar em tag v* (INT9-R5)")
+                if uses.startswith("actions/setup-java@"):
+                    cache_java = (passo.get("with") or {}).get("cache")
+                    if cache_java not in (None, "", False, "false"):
+                        exigir(CONDICAO_SEM_CACHE_TAG in str(cache_java),
+                               f"{base}: passo '{passo.get('name') or uses}' do job {nome} usa cache do Java/Gradle sem desligar em tag v* (INT9-R5)")
                 if base == "validar-windows.yml" and "continue-on-error" in passo:
                     exigir(False, f"validar-windows.yml: passo '{passo.get('name')}' do job {nome} ignora falha")
             if base == "validar-windows.yml" and "continue-on-error" in job:
@@ -170,16 +179,19 @@ def main():
         exigir(isinstance(ligado, bool) and valor == ("sim" if ligado else "nao"),
                f"ci.yml: o {nome} tem RUSTINHO_ANDROID {valor!r}, diferente do android: {ligado!r} do validar")
 
-    # 7. Consistência de shards de programa-e-telas com o manifesto.
+    # 7. Consistência obrigatória de RUSTINHO_SHARDS_TELAS com programa-e-telas e manifesto.
+    env_m = (passos[0].get("env") or {}) if len(passos) == 1 else {}
     shards_telas = (((vjobs.get("programa-e-telas") or {}).get("strategy") or {}).get("matrix") or {}).get("shard")
     if shards_telas is not None:
         esperados = list(range(1, len(shards_telas) + 1))
         exigir(shards_telas == esperados and len(shards_telas) >= 1,
                f"validar.yml: matrix.shard de programa-e-telas tem de ser 1..N contínuo (tem {shards_telas!r})")
-        env_m = (passos[0].get("env") or {}) if len(passos) == 1 else {}
-        exigir(str(env_m.get("RUSTINHO_SHARDS_TELAS", "")) == str(len(shards_telas)),
-               f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
-               f"diferente dos {len(shards_telas)} shards de programa-e-telas")
+        esperado_env = str(len(shards_telas))
+    else:
+        esperado_env = "1"
+    exigir(str(env_m.get("RUSTINHO_SHARDS_TELAS", "")) == esperado_env,
+           f"validar.yml: o passo do manifesto tem RUSTINHO_SHARDS_TELAS={env_m.get('RUSTINHO_SHARDS_TELAS')!r}, "
+           f"diferente dos {esperado_env} shard(s) esperados de programa-e-telas")
 
     if erros:
         for e in erros:

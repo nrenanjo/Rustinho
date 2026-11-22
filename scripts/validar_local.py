@@ -5,14 +5,18 @@ Executa localmente TUDO o que não depende de Windows, preservando integralmente
 a cobertura, a segurança e o rigor da CI:
   - L0: cargo fmt --all --check, cargo clippy (-D correctness -D suspicious),
         conferir_portao.py, versao_android.py --testar, testar_portao.py
-  - L1/L2: cargo test (debug + release em paralelo) + testes de rede em série
-           (em network namespace isolado quando `unshare -rn` está disponível,
-           protegendo as portas 47810/47811 do Rustinho real da loja)
+  - L1/L2: cargo test (debug + release em paralelo na parte sem rede) + testes
+           de rede serializados entre perfis (`--test-threads=1` sob trava
+           mútua no host; `--isolar-rede-nucleo` opcional para `unshare -rn`)
   - L3: cargo test -p rustinho, todos os `app/testes/qml_*.py` e TODOS os 52
         roteiros de tela (69 unidades LPT, com os 4 gigantes fatiados) em pool
         paralelo de N workers (display Xvfb, HOME, XDG_*, TMPDIR e rede via
         `unshare -rn` exclusivos por worker, evitando disputa das portas
         47810/47811 e protegendo o Rustinho real da loja)
+
+Todas as camadas (L0, L1/L2, L3) executam com `HOME`, `XDG_*` e `TMPDIR`
+isolados em diretório temporário dedicado (preservando `CARGO_HOME` e
+`RUSTUP_HOME` reais), sem tocar na configuração ou nos dados reais do usuário.
 
 Uso:
     python3 scripts/validar_local.py
@@ -28,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -165,6 +170,9 @@ def main():
     import _aux_nucleo  # noqa: E402
 
     env = dict(os.environ)
+    home_orig = env.get("HOME") or os.path.expanduser("~")
+    env.setdefault("CARGO_HOME", os.path.join(home_orig, ".cargo"))
+    env.setdefault("RUSTUP_HOME", os.path.join(home_orig, ".rustup"))
     env["CARGO_TERM_COLOR"] = "never"
     if args.target_dir:
         env["CARGO_TARGET_DIR"] = os.path.abspath(args.target_dir)
@@ -175,6 +183,22 @@ def main():
     qmlrunner = detectar_qmltestrunner(env)
     if qmlrunner:
         env["RUSTINHO_QMLTESTRUNNER"] = qmlrunner
+
+    # Isola HOME / XDG_* / TMPDIR em diretório temporário dedicado para L0, L1/L2,
+    # L3:testes-programa e L3:qml_* (defesa em profundidade contra interferência no
+    # ambiente real do usuário/loja; as 69 unidades de tela ainda ganham um sandbox
+    # individual por worker dentro de particionar_telas.py).
+    sandbox_home = tempfile.mkdtemp(prefix="rustinho-validar-home-")
+    sandbox_run = os.path.join(sandbox_home, "run")
+    sandbox_tmp = os.path.join(sandbox_home, "tmp")
+    os.makedirs(sandbox_run, mode=0o700, exist_ok=True)
+    os.makedirs(sandbox_tmp, exist_ok=True)
+    env["HOME"] = sandbox_home
+    env["XDG_CONFIG_HOME"] = os.path.join(sandbox_home, ".config")
+    env["XDG_DATA_HOME"] = os.path.join(sandbox_home, ".local", "share")
+    env["XDG_CACHE_HOME"] = os.path.join(sandbox_home, ".cache")
+    env["XDG_RUNTIME_DIR"] = sandbox_run
+    env["TMPDIR"] = sandbox_tmp
 
     git = info_git(raiz)
     print(
@@ -191,136 +215,166 @@ def main():
     resumo_telas = None
     cobertura_problemas = []
 
-    # ---- L0: formato, clippy, portão, versionCode, testar_portao ----
-    if "L0" in camadas:
-        print("\n[L0] Formatação, Clippy e integridade do Portão", flush=True)
-        # fmt + scripts Python rodam em paralelo com clippy (sem disputar target/ com clippy).
-        l0_tarefas = [
-            ("L0:cargo-fmt", ["cargo", "fmt", "--all", "--check"], os.path.join(logs, "l0_fmt.txt")),
-            ("L0:conferir-portao", [sys.executable, "-I", ".github/scripts/conferir_portao.py"], os.path.join(logs, "l0_conferir_portao.txt")),
-            ("L0:versao-android", [sys.executable, "-I", ".github/scripts/versao_android.py", "--testar"], os.path.join(logs, "l0_versao_android.txt")),
-            ("L0:testar-portao", [sys.executable, "-I", ".github/scripts/testar_portao.py"], os.path.join(logs, "l0_testar_portao.txt")),
-            ("L0:cargo-clippy", [
-                "cargo", "clippy", "-p", "rustinho-base", "-p", "rustinho-nucleo",
-                "--all-targets", "--message-format=short", "--",
-                "-D", "clippy::correctness", "-D", "clippy::suspicious",
-            ], os.path.join(logs, "l0_clippy.txt")),
-        ]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(l0_tarefas)) as pool:
-            futs = [pool.submit(rodar_cmd, n, c, raiz, env, lp) for n, c, lp in l0_tarefas]
-            for f in futs:
-                etapas.append(f.result())
-
-    # ---- L1/L2: núcleo debug + release (compilação paralela, execução com threads equilibradas) ----
-    if "L1" in camadas or "L2" in camadas:
-        print("\n[L1/L2] Testes do núcleo (debug + release + rede em série)", flush=True)
-        isolar_rede = args.isolar_rede_nucleo
-        perfis = ["debug"] if args.sem_release else ["debug", "release"]
-        # Evita sobre-subscrição de SQLite em `reserva_concorrente` quando debug e release rodam juntos.
-        threads_por_perfil = str(max(2, cpus // (2 * len(perfis))))
-
-        def rodar_nucleo_perfil(perfil):
-            rel_flag = ["--release"] if perfil == "release" else []
-            env_p = dict(env)
-            if not args.sem_release and perfil == "release":
-                base_target = env.get("CARGO_TARGET_DIR") or os.path.join(raiz, "target")
-                env_p["CARGO_TARGET_DIR"] = os.path.join(base_target, "val_release")
-            lp_main = os.path.join(logs, f"l1_nucleo_{perfil}.txt")
-            lp_rede = os.path.join(logs, f"l1_nucleo_{perfil}_rede.txt")
-            r1 = rodar_cmd(
-                f"L1:nucleo-{perfil}",
-                ["cargo", "test", *rel_flag, "-p", "rustinho-base", "-p", "rustinho-nucleo", "--", *PULAR_REDE, f"--test-threads={threads_por_perfil}"],
-                raiz, env_p, lp_main, isolar_rede=isolar_rede,
-            )
-            r2 = rodar_cmd(
-                f"L1:nucleo-{perfil}-rede",
-                ["cargo", "test", *rel_flag, "-p", "rustinho-base", "-p", "rustinho-nucleo", "--", *TESTES_DE_REDE, "--test-threads=1"],
-                raiz, env_p, lp_rede, isolar_rede=isolar_rede,
-            )
-            return [r1, r2], {
-                f"nucleo-{perfil}": contar_cargo_test(lp_main),
-                f"nucleo-{perfil}-rede": contar_cargo_test(lp_rede),
-            }
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(perfis)) as pool:
-            futs = [pool.submit(rodar_nucleo_perfil, p) for p in perfis]
-            for f in futs:
-                rs, st = f.result()
-                etapas.extend(rs)
-                suites.update(st)
-
-    # ---- L3: cargo test -p rustinho, QML e todos os 52 roteiros de tela em paralelo ----
-    if "L3" in camadas:
-        print("\n[L3] Programa Qt, QML e 52 roteiros de tela (paralelos)", flush=True)
-        if not qmake:
-            etapas.append({"nome": "L3:qmake", "ok": False, "codigo": 1, "timeout": False, "segundos": 0.0, "log": ""})
-            print("  [✘] qmake6/qmake não encontrado no PATH", flush=True)
-        else:
-            # 1) Compila rustinho + roda cargo test -p rustinho + descobre binários auxiliares do núcleo.
-            lp_prog = os.path.join(logs, "l3_testes_programa.txt")
-            lp_build = os.path.join(logs, "l3_build_rustinho.txt")
-            r_prog = rodar_cmd("L3:testes-programa", ["cargo", "test", "-p", "rustinho"], raiz, env, lp_prog)
-            etapas.append(r_prog)
-            suites["programa"] = contar_cargo_test(lp_prog)
-
-            r_build = rodar_cmd("L3:build-rustinho", ["cargo", "build", "-p", "rustinho"], raiz, env, lp_build)
-            etapas.append(r_build)
-
-            # 2) Testes QML em paralelo (offscreen, levam ~2s!).
-            qml_scripts = sorted(
-                os.path.join(raiz, "app", "testes", f"{n}.py")
-                for n in particionar_telas.listar_qml(raiz)
-            )
-            env_qml = dict(env, QT_QPA_PLATFORM="offscreen")
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(qml_scripts))) as pool:
-                futs_qml = [
-                    pool.submit(
-                        rodar_cmd,
-                        f"L3:{os.path.splitext(os.path.basename(q))[0]}",
-                        [sys.executable, "-I", q, raiz],
-                        raiz, env_qml, os.path.join(logs, f"l3_{os.path.splitext(os.path.basename(q))[0]}.txt"),
-                        timeout=600,
-                    )
-                    for q in qml_scripts
-                ]
-                for f in futs_qml:
+    try:
+        # ---- L0: formato, clippy, portão, versionCode, testar_portao ----
+        if "L0" in camadas:
+            print("\n[L0] Formatação, Clippy e integridade do Portão", flush=True)
+            # fmt + scripts Python rodam em paralelo com clippy (sem disputar target/ com clippy).
+            l0_tarefas = [
+                ("L0:cargo-fmt", ["cargo", "fmt", "--all", "--check"], os.path.join(logs, "l0_fmt.txt")),
+                ("L0:conferir-portao", [sys.executable, "-I", ".github/scripts/conferir_portao.py"], os.path.join(logs, "l0_conferir_portao.txt")),
+                ("L0:versao-android", [sys.executable, "-I", ".github/scripts/versao_android.py", "--testar"], os.path.join(logs, "l0_versao_android.txt")),
+                ("L0:testar-portao", [sys.executable, "-I", ".github/scripts/testar_portao.py"], os.path.join(logs, "l0_testar_portao.txt")),
+                ("L0:cargo-clippy", [
+                    "cargo", "clippy", "-p", "rustinho-base", "-p", "rustinho-nucleo",
+                    "--all-targets", "--message-format=short", "--",
+                    "-D", "clippy::correctness", "-D", "clippy::suspicious",
+                ], os.path.join(logs, "l0_clippy.txt")),
+            ]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(l0_tarefas)) as pool:
+                futs = [pool.submit(rodar_cmd, n, c, raiz, env, lp) for n, c, lp in l0_tarefas]
+                for f in futs:
                     etapas.append(f.result())
 
-            # 3) Descobre binários auxiliares do núcleo (elimina lock de cargo nos 52 roteiros!).
-            t_aux = time.monotonic()
-            bins = _aux_nucleo.descobrir_binarios(raiz, env=env, incluir_release_lojas=True)
-            dt_aux = round(time.monotonic() - t_aux, 2)
-            print(f"  [✔] L3:binarios-auxiliares ({dt_aux:.1f}s: {', '.join(sorted(bins))})", flush=True)
-            etapas.append({"nome": "L3:binarios-auxiliares", "ok": True, "codigo": 0, "timeout": False, "segundos": dt_aux, "log": ""})
+        # ---- L1/L2: núcleo debug + release (sem rede em paralelo; rede serializada sob trava) ----
+        if "L1" in camadas or "L2" in camadas:
+            print("\n[L1/L2] Testes do núcleo (debug + release; rede em série sem sobreposição)", flush=True)
+            isolar_rede = args.isolar_rede_nucleo
+            perfis = ["debug"] if args.sem_release else ["debug", "release"]
+            # Evita sobre-subscrição de SQLite em `reserva_concorrente` quando debug e release rodam juntos.
+            threads_por_perfil = str(max(2, cpus // (2 * len(perfis))))
+            trava_rede = threading.Lock()
 
-            env_telas = dict(env)
-            env_telas.update(bins)
-            target_dir = env.get("CARGO_TARGET_DIR") or os.path.join(raiz, "target")
-            env_telas["RUSTINHO_PROGRAMA"] = os.path.join(target_dir, "debug", "rustinho")
+            def rodar_nucleo_perfil(perfil):
+                rel_flag = ["--release"] if perfil == "release" else []
+                env_p = dict(env)
+                if not args.sem_release and perfil == "release":
+                    base_target = env.get("CARGO_TARGET_DIR") or os.path.join(raiz, "target")
+                    env_p["CARGO_TARGET_DIR"] = os.path.join(base_target, "val_release")
+                lp_main = os.path.join(logs, f"l1_nucleo_{perfil}.txt")
+                lp_rede = os.path.join(logs, f"l1_nucleo_{perfil}_rede.txt")
+                r1 = rodar_cmd(
+                    f"L1:nucleo-{perfil}",
+                    ["cargo", "test", *rel_flag, "-p", "rustinho-base", "-p", "rustinho-nucleo", "--", *PULAR_REDE, f"--test-threads={threads_por_perfil}"],
+                    raiz, env_p, lp_main, isolar_rede=isolar_rede,
+                )
+                cmd_rede = ["cargo", "test", *rel_flag, "-p", "rustinho-base", "-p", "rustinho-nucleo", "--", *TESTES_DE_REDE, "--test-threads=1"]
+                if isolar_rede:
+                    r2 = rodar_cmd(f"L1:nucleo-{perfil}-rede", cmd_rede, raiz, env_p, lp_rede, isolar_rede=True)
+                else:
+                    # Serializa debug-rede e release-rede no host para não sobrepor sockets/broadcasts UDP.
+                    with trava_rede:
+                        r2 = rodar_cmd(f"L1:nucleo-{perfil}-rede", cmd_rede, raiz, env_p, lp_rede, isolar_rede=False)
+                return [r1, r2], {
+                    f"nucleo-{perfil}": contar_cargo_test(lp_main),
+                    f"nucleo-{perfil}-rede": contar_cargo_test(lp_rede),
+                }
 
-            unidades = particionar_telas.catalogo(raiz)
-            telas_dir = os.path.join(saida, "telas")
-            resumo_telas, falharam_telas = particionar_telas.executar_unidades(
-                raiz=raiz,
-                unidades=unidades,
-                saida_dir=telas_dir,
-                workers=args.workers,
-                isolamento=args.isolamento,
-                python_bin=sys.executable,
-                env_base=env_telas,
-                shard=1,
-                total_shards=1,
-            )
-            pares = [(u["id"], u["status"]) for u in resumo_telas["unidades"]]
-            cobertura_problemas = particionar_telas.verificar_cobertura(raiz, pares, shards_vistos=[1], total_shards=1)
-            etapas.append({
-                "nome": f"L3:telas-52-roteiros ({len(unidades)} unidades)",
-                "ok": not falharam_telas and not cobertura_problemas,
-                "codigo": 0 if (not falharam_telas and not cobertura_problemas) else 1,
-                "timeout": False,
-                "segundos": resumo_telas["segundos_total"],
-                "log": os.path.join(telas_dir, "telas.txt"),
-            })
+            with concurrent.futures.ThreadPoolExecutor(max_workers=len(perfis)) as pool:
+                futs = [pool.submit(rodar_nucleo_perfil, p) for p in perfis]
+                for f in futs:
+                    rs, st = f.result()
+                    etapas.extend(rs)
+                    suites.update(st)
+
+        # ---- L3: cargo test -p rustinho, QML e todos os 52 roteiros de tela em paralelo ----
+        if "L3" in camadas:
+            print("\n[L3] Programa Qt, QML e 52 roteiros de tela (paralelos)", flush=True)
+            if not qmake:
+                etapas.append({"nome": "L3:qmake", "ok": False, "codigo": 1, "timeout": False, "segundos": 0.0, "log": ""})
+                print("  [✘] qmake6/qmake não encontrado no PATH", flush=True)
+            else:
+                # 1) Compila rustinho + roda cargo test -p rustinho.
+                lp_prog = os.path.join(logs, "l3_testes_programa.txt")
+                lp_build = os.path.join(logs, "l3_build_rustinho.txt")
+                r_prog = rodar_cmd("L3:testes-programa", ["cargo", "test", "-p", "rustinho"], raiz, env, lp_prog)
+                etapas.append(r_prog)
+                suites["programa"] = contar_cargo_test(lp_prog)
+
+                r_build = rodar_cmd("L3:build-rustinho", ["cargo", "build", "-p", "rustinho"], raiz, env, lp_build)
+                etapas.append(r_build)
+
+                # 2) Testes QML em paralelo (offscreen, levam ~2s, independem do binário rustinho).
+                qml_scripts = sorted(
+                    os.path.join(raiz, "app", "testes", f"{n}.py")
+                    for n in particionar_telas.listar_qml(raiz)
+                )
+                env_qml = dict(env, QT_QPA_PLATFORM="offscreen")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(qml_scripts))) as pool:
+                    futs_qml = [
+                        pool.submit(
+                            rodar_cmd,
+                            f"L3:{os.path.splitext(os.path.basename(q))[0]}",
+                            [sys.executable, "-I", q, raiz],
+                            raiz, env_qml, os.path.join(logs, f"l3_{os.path.splitext(os.path.basename(q))[0]}.txt"),
+                            timeout=600,
+                        )
+                        for q in qml_scripts
+                    ]
+                    for f in futs_qml:
+                        etapas.append(f.result())
+
+                # 3) Descobre binários auxiliares e executa os 52 roteiros somente se o build passou
+                #    (evita rodar roteiros contra um binário `target/debug/rustinho` obsoleto e garante
+                #    sempre a emissão do RESUMO_LOCAL.json/md mesmo em caso de falha de compilação).
+                if not r_build["ok"]:
+                    msg_pulo = "L3:build-rustinho falhou; binários auxiliares e 52 roteiros não executados para evitar validar binário obsoleto"
+                    print(f"  [✘] {msg_pulo}", flush=True)
+                    cobertura_problemas.append(msg_pulo)
+                    etapas.append({"nome": "L3:binarios-auxiliares", "ok": False, "codigo": 1, "timeout": False, "segundos": 0.0, "log": lp_build})
+                else:
+                    t_aux = time.monotonic()
+                    lp_aux = os.path.join(logs, "l3_binarios_auxiliares.txt")
+                    bins = None
+                    try:
+                        bins = _aux_nucleo.descobrir_binarios(raiz, env=env, incluir_release_lojas=True)
+                        dt_aux = round(time.monotonic() - t_aux, 2)
+                        print(f"  [✔] L3:binarios-auxiliares ({dt_aux:.1f}s: {', '.join(sorted(bins))})", flush=True)
+                        etapas.append({"nome": "L3:binarios-auxiliares", "ok": True, "codigo": 0, "timeout": False, "segundos": dt_aux, "log": ""})
+                    except (subprocess.CalledProcessError, RuntimeError, OSError) as exc:
+                        dt_aux = round(time.monotonic() - t_aux, 2)
+                        with open(lp_aux, "w", encoding="utf-8", errors="replace") as lf:
+                            lf.write(f"Falha ao compilar/descobrir binários auxiliares: {exc}\n")
+                            if isinstance(exc, subprocess.CalledProcessError):
+                                if exc.stdout:
+                                    lf.write(f"\n--- stdout ---\n{exc.stdout}\n")
+                                if exc.stderr:
+                                    lf.write(f"\n--- stderr ---\n{exc.stderr}\n")
+                        print(f"  [✘] L3:binarios-auxiliares ({dt_aux:.1f}s; veja {lp_aux})", flush=True)
+                        cobertura_problemas.append(f"falha em L3:binarios-auxiliares ({exc})")
+                        etapas.append({"nome": "L3:binarios-auxiliares", "ok": False, "codigo": 1, "timeout": False, "segundos": dt_aux, "log": lp_aux})
+
+                    if bins is not None:
+                        env_telas = dict(env)
+                        env_telas.update(bins)
+                        target_dir = env.get("CARGO_TARGET_DIR") or os.path.join(raiz, "target")
+                        env_telas["RUSTINHO_PROGRAMA"] = os.path.join(target_dir, "debug", "rustinho")
+
+                        unidades = particionar_telas.catalogo(raiz)
+                        telas_dir = os.path.join(saida, "telas")
+                        resumo_telas, falharam_telas = particionar_telas.executar_unidades(
+                            raiz=raiz,
+                            unidades=unidades,
+                            saida_dir=telas_dir,
+                            workers=args.workers,
+                            isolamento=args.isolamento,
+                            python_bin=sys.executable,
+                            env_base=env_telas,
+                            shard=1,
+                            total_shards=1,
+                        )
+                        pares = [(u["id"], u["status"]) for u in resumo_telas["unidades"]]
+                        cobertura_problemas = particionar_telas.verificar_cobertura(raiz, pares, shards_vistos=[1], total_shards=1)
+                        etapas.append({
+                            "nome": f"L3:telas-52-roteiros ({len(unidades)} unidades)",
+                            "ok": not falharam_telas and not cobertura_problemas,
+                            "codigo": 0 if (not falharam_telas and not cobertura_problemas) else 1,
+                            "timeout": False,
+                            "segundos": resumo_telas["segundos_total"],
+                            "log": os.path.join(telas_dir, "telas.txt"),
+                        })
+    finally:
+        shutil.rmtree(sandbox_home, ignore_errors=True)
 
     duracao_total = round(time.monotonic() - t_global, 2)
     aprovado = all(e["ok"] for e in etapas) and not cobertura_problemas

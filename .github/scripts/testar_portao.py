@@ -200,7 +200,8 @@ class SemAndroid(unittest.TestCase):
         artefato, arquivo = ANDROID[0]
         self.c.pacote(artefato, arquivo)
         caminho = os.path.join(self.c.artefatos, artefato, arquivo)
-        h = open(caminho + ".sha256", encoding="utf-8").read().split()[0]
+        with open(caminho + ".sha256", encoding="utf-8") as f:
+            h = f.read().split()[0]
         m["pacotes"].append({"artefato": artefato, "arquivo": arquivo, "bytes": 1, "sha256": h, "anotado_no_job": h})
         with open(os.path.join(self.c.artefatos, "Manifesto", "MANIFESTO.json"), "w", encoding="utf-8") as f:
             json.dump(m, f)
@@ -291,7 +292,9 @@ class FormaDaChave(unittest.TestCase):
     def setUp(self):
         self.raiz = tempfile.mkdtemp(prefix="testar_forma_")
         for arq in os.listdir(self.PASTA):
-            shutil.copy(os.path.join(self.PASTA, arq), self.raiz)
+            dst = os.path.join(self.raiz, arq)
+            shutil.copyfile(os.path.join(self.PASTA, arq), dst)
+            os.chmod(dst, 0o644)
 
     def tearDown(self):
         shutil.rmtree(self.raiz, ignore_errors=True)
@@ -375,7 +378,17 @@ class FormaDaChave(unittest.TestCase):
 
     def test_shards_telas_diferente_no_manifesto_reprova(self):
         self.mudar("validar.yml", '          RUSTINHO_SHARDS_TELAS: "6"\n', '          RUSTINHO_SHARDS_TELAS: "4"\n')
-        self.reprova_com("RUSTINHO_SHARDS_TELAS='4', diferente dos 6 shards de programa-e-telas")
+        self.reprova_com("RUSTINHO_SHARDS_TELAS='4', diferente dos 6 shard(s) esperados de programa-e-telas")
+
+    def test_remover_matrix_e_shards_telas_reprova(self):
+        self.mudar("validar.yml", "    strategy:\n      fail-fast: false\n      matrix:\n        shard: [1, 2, 3, 4, 5, 6]\n", "")
+        self.mudar("validar.yml", '          RUSTINHO_SHARDS_TELAS: "6"\n', "")
+        self.reprova_com("RUSTINHO_SHARDS_TELAS=None, diferente dos 1 shard(s) esperados de programa-e-telas")
+
+    def test_setup_java_cache_sem_bloqueio_em_tag_reprova(self):
+        self.mudar("validar.yml", "          cache: ${{ !startsWith(github.ref, 'refs/tags/v') && 'gradle' || '' }}\n",
+                   "          cache: gradle\n")
+        self.reprova_com("usa cache do Java/Gradle sem desligar em tag v* (INT9-R5)")
 
     def test_validar_windows_com_push_reprova(self):
         self.mudar("validar-windows.yml", "on:\n  workflow_dispatch:\n", "on:\n  push:\n  workflow_dispatch:\n")
