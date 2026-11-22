@@ -403,14 +403,25 @@ pub fn ciclo(
     parar: &dyn Fn() -> bool,
     puxar: &mut dyn FnMut(&str, Option<&Saida>) -> Resultado<Puxada>,
 ) -> Resumo {
-    let inicio = Instant::now();
+    ciclo_com_trava(conn, amb, parar, crate::sync::travar, puxar)
+}
+
+fn ciclo_com_trava<G>(
+    conn: &Connection,
+    amb: &Ambiente,
+    parar: &dyn Fn() -> bool,
+    travar: impl Fn() -> G,
+    puxar: &mut dyn FnMut(&str, Option<&Saida>) -> Resultado<Puxada>,
+) -> Resumo {
     let mut resumo = Resumo::default();
-    let travar = crate::sync::travar;
     let preparo = {
         let _t = travar();
         limpar(conn, amb.agora_ms).and_then(|_| todas(conn))
     };
     let Ok(todas) = preparo else { return resumo };
+    // T-109: o orçamento vale para o tempo gasto tentando caixas fora do ar, não para
+    // eventual espera pela trava global no preparo (ex.: restauração de backup em curso).
+    let inicio = Instant::now();
     for g in agrupar(todas, amb.agora_ms) {
         if parar() {
             break;
@@ -911,6 +922,43 @@ mod testes {
         // Diagnóstico (não reprova): com a máquina livre fica bem abaixo de 200 ms.
         println!("T-35: a gravação local mais lenta durante o ciclo levou {piores:?}");
         std::fs::remove_dir_all(pasta).ok();
+    }
+
+    /// T-109: o orçamento de tempo do ciclo vale para as tentativas de rede,
+    /// não para a espera da trava no preparo (ex.: restauração de backup em curso).
+    /// Usa uma `RwLock` local ao teste (sem adquirir a trava global `TRAVA`),
+    /// garantindo isolamento total frente aos testes paralelos de `--lib`.
+    #[test]
+    fn t109_orcamento_conta_depois_do_preparo() {
+        let b = Banco::em_memoria().unwrap();
+        caixas_mortos(&b, 6);
+        let trava = Arc::new(std::sync::RwLock::new(()));
+        let trava_bg = Arc::clone(&trava);
+        let (pronto_tx, pronto_rx) = std::sync::mpsc::channel();
+        let bloqueio = thread::spawn(move || {
+            let _pausa = trava_bg.write().unwrap();
+            pronto_tx.send(()).unwrap();
+            thread::sleep(Duration::from_millis(400));
+        });
+        pronto_rx.recv().unwrap();
+        let mut a = Ambiente::novo("eu", T0);
+        a.orcamento = Duration::from_millis(300);
+        let mut puxar = |_e: &str, _s: Option<&Saida>| -> Resultado<Puxada> {
+            thread::sleep(Duration::from_millis(120));
+            Err(Erro::validacao("Falha na rede: tempo esgotado"))
+        };
+        let r = ciclo_com_trava(&b.conn, &a, &|| false, || trava.read().unwrap(), &mut puxar);
+        bloqueio.join().unwrap();
+        assert!(
+            !r.tentativas.is_empty(),
+            "T-109: espera no preparo (trava pausada) não pode consumir o orçamento das tentativas de rede"
+        );
+        assert!(r.parou_por_tempo, "T-109: o orçamento ainda deve limitar as tentativas após o preparo");
+        assert!(
+            r.tentativas.len() < 6,
+            "T-109: o ciclo deve parar pelo orçamento antes de tentar todos os 6 mortos ({} tentativas)",
+            r.tentativas.len()
+        );
     }
 
     /// T-37 · CA-B5: um dos mortos volta; é sincronizado sozinho assim que a
