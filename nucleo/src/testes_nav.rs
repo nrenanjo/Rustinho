@@ -430,6 +430,13 @@ fn nav10_notificacoes_do_fiscal() {
     assert!(loja.descricao.contains("estado (UF)"), "{}", loja.descricao);
     let notas = todos.iter().find(|a| a.id == "fiscal_notas").expect("a nota aguarda a conferência");
     assert_eq!((notas.funcao.as_str(), notas.acao.as_str()), ("compras", "Ver compras"));
+    assert!(!notas.alvo.is_empty(), "com 1 nota aguardando, o aviso traz o id dela para abrir a conferência");
+    let filtradas =
+        ok(&mut s, "compras_listar", json!({ "texto": "", "filtro": "aguardando_autorizacao", "limite": 300 }));
+    assert_eq!(filtradas.as_array().unwrap().len(), 1);
+    assert_eq!(filtradas[0]["id"].as_str(), Some(notas.alvo.as_str()));
+    assert_eq!(filtradas[0]["autorizacao"].as_str(), Some("aguardando"));
+    assert_eq!(filtradas[0]["podeLancar"].as_bool(), Some(false));
     for a in todos.iter().filter(|a| a.id.starts_with("fiscal_")) {
         let tudo = format!("{} {} {}", a.texto, a.atraso, a.descricao).to_lowercase();
         assert!(!tudo.contains("emitir") && !tudo.contains("emissão"), "não sugere emissão: {tudo}");
@@ -438,6 +445,26 @@ fn nav10_notificacoes_do_fiscal() {
     crate::config::gravar(&s.banco_para_teste().conn, "loja_uf", "SP").unwrap();
     let agora = ids(&mut s);
     assert!(!agora.contains(&"fiscal_loja".to_string()) && agora.contains(&"fiscal_notas".to_string()), "{agora:?}");
+    // Segunda nota aguardando: o alvo volta a vazio para abrir a lista filtrada de Compras.
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "INSERT INTO compra (id, fornecedor_id, chave, numero, serie, emissao, natureza, total_produtos, frete,
+                                 seguro, desconto, outras, ipi, icms_st, total, destinatario, xml, criado_em,
+                                 criado_por, dispositivo, xml_verificacao, xml_prova, autorizacao, situacao)
+             SELECT 'cp-nav10-2', fornecedor_id, '35261011222333000181550010000123461000000022', '12346', serie,
+                    emissao, natureza, total_produtos, frete, seguro, desconto, outras, ipi, icms_st, total,
+                    destinatario, xml, criado_em, criado_por, dispositivo, xml_verificacao, xml_prova, 'aguardando',
+                    'rascunho'
+               FROM compra WHERE id = ?1",
+            [&notas.alvo],
+        )
+        .unwrap();
+    let notas2 = avisos(&mut s).into_iter().find(|a| a.id == "fiscal_notas").unwrap();
+    assert_eq!(notas2.alvo, "", "com 2+ notas aguardando, abre a lista filtrada de Compras");
+    let filtradas2 =
+        ok(&mut s, "compras_listar", json!({ "texto": "", "filtro": "aguardando_autorizacao", "limite": 300 }));
+    assert_eq!(filtradas2.as_array().unwrap().len(), 2);
 }
 
 /// 10b (C8, dev3.3): comissão e conta finalizada. Fechar de novo um período já fechado é recusado com o

@@ -12,6 +12,9 @@ FocusScope {
     readonly property string nomeNaNavegacao: "Compras"
     property var itens: []
     property bool buscou: false
+    property string filtro: ""
+    property int aguardandoAutorizacao: 0
+    property int negadasAutorizacao: 0
     // 0.9.17: arquivos que esperam a importação (faltava o CNPJ da loja). Ficam
     // aqui enquanto a pessoa resolve o requisito; nada é importado sozinho.
     property var pendentes: []
@@ -20,20 +23,34 @@ FocusScope {
     // a pessoa descartar ou sair de Compras.
     property var naoImportadas: []
 
+    function atualizarContagem() {
+        const c = Api.chamar("compras_contagem", {})
+        if (c.ok) {
+            aguardandoAutorizacao = c.dados.aguardandoAutorizacao || 0
+            negadasAutorizacao = c.dados.negadas || 0
+        }
+    }
+
     function buscar() {
-        const r = Api.chamar("compras_listar", { texto: busca.texto, limite: 300 })
+        const r = Api.chamar("compras_listar", { texto: busca.texto, filtro: tela.filtro, limite: 5000 })
         if (r.ok) {
             itens = r.dados
             lista.currentIndex = itens.length > 0 ? 0 : -1
         } else {
             janela.avisar(r.erro, "erro")
         }
+        atualizarContagem()
         buscou = true
     }
 
     function abrirCompra(indice) {
         if (indice >= 0 && indice < itens.length)
             janela.abrir("TelaCompra", { compraId: itens[indice].id })
+    }
+
+    function conferirCompra(indice) {
+        if (indice >= 0 && indice < itens.length)
+            janela.abrir("TelaCompra", { compraId: itens[indice].id, abrirConferenciaAoAbrir: true })
     }
 
     // Cada arquivo pode ser um XML, um .zip/.rar com várias notas ou uma pasta.
@@ -347,6 +364,63 @@ FocusScope {
             }
         }
 
+        Pilulas {
+            visible: tela.naoImportadas.length === 0
+                     && (tela.aguardandoAutorizacao > 0 || tela.negadasAutorizacao > 0 || tela.filtro !== "")
+            modelo: {
+                const m = [
+                    { id: "", nome: "Todas" },
+                    { id: "aguardando_autorizacao", nome: "Aguardando conferência" + (tela.aguardandoAutorizacao > 0 ? " · " + tela.aguardandoAutorizacao : "") }
+                ]
+                if (tela.negadasAutorizacao > 0 || tela.filtro === "negada")
+                    m.push({ id: "negada", nome: "Bloqueadas" + (tela.negadasAutorizacao > 0 ? " · " + tela.negadasAutorizacao : "") })
+                m.push({ id: "rascunho", nome: "Rascunhos" })
+                m.push({ id: "lancada", nome: "Lançadas" })
+                return m
+            }
+            atual: tela.filtro
+            onEscolhido: id => {
+                if (tela.filtro !== id) {
+                    tela.filtro = id
+                    tela.buscar()
+                }
+            }
+        }
+
+        Faixa {
+            id: faixaConferencia
+            z: 1
+            visible: tela.naoImportadas.length === 0 && tela.filtro === "aguardando_autorizacao"
+            titulo: tela.aguardandoAutorizacao === 0
+                    ? "Conferência da autorização"
+                    : tela.aguardandoAutorizacao === 1
+                      ? "1 nota aguardando conferência da autorização"
+                      : tela.aguardandoAutorizacao + " notas aguardando conferência da autorização"
+            corTitulo: Tema.apagado
+            color: Tema.atencao
+            Layout.fillWidth: true
+            GridLayout {
+                columns: Tema.estreito ? 1 : 2
+                columnSpacing: 12
+                rowSpacing: 8
+                Layout.fillWidth: true
+                Nota {
+                    text: tela.aguardandoAutorizacao > 0
+                          ? "Clique em Conferir na nota para copiar a chave, consultar no portal da NF-e e registrar o protocolo antes de lançar."
+                          : "Todas as notas de compra já tiveram a autorização conferida."
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    text: "Mostrar todas"
+                    tipo: "secundario"
+                    onClicked: {
+                        tela.filtro = ""
+                        tela.buscar()
+                    }
+                }
+            }
+        }
+
         Campo {
             id: busca
             icone: "busca"
@@ -379,8 +453,9 @@ FocusScope {
             Layout.topMargin: 4
             Rotulo { text: "Emissão"; Layout.preferredWidth: 96 }
             Rotulo { text: "Fornecedor"; Layout.fillWidth: true }
-            Rotulo { text: "Situação"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 170 }
-            Rotulo { text: "Total da nota"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 140 }
+            Rotulo { text: "Situação"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 190 }
+            Rotulo { text: "Total da nota"; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 130 }
+            Item { visible: tela.aguardandoAutorizacao > 0; Layout.preferredWidth: 108 }
         }
 
         ListView {
@@ -403,17 +478,27 @@ FocusScope {
                 item: modelData
                 indice: index
                 atual: lista.currentIndex === index
+                temAcaoConferir: tela.aguardandoAutorizacao > 0
                 onAbrir: tela.abrirCompra(index)
+                onConferir: tela.conferirCompra(index)
             }
 
             // Sem compras: o meio fica limpo (a orientação está embaixo do
-            // título e o único botão de importar fica em cima). Numa busca
-            // sem resultado, só o aviso curto.
+            // título e o único botão de importar fica em cima). Numa busca ou
+            // filtro sem resultado, só o aviso curto (em aguardando_autorizacao
+            // sem busca, a faixa acima já informa que não resta nenhuma nota).
             Nota {
                 anchors.centerIn: parent
                 width: Math.min(600, parent.width - 40)
-                visible: tela.buscou && tela.itens.length === 0 && busca.texto !== ""
-                text: "Nenhuma compra combina com “" + busca.texto + "”."
+                visible: tela.buscou && tela.itens.length === 0
+                         && (busca.texto !== "" || (tela.filtro !== "" && tela.filtro !== "aguardando_autorizacao"))
+                text: busca.texto !== ""
+                      ? "Nenhuma compra combina com “" + busca.texto + "”."
+                      : tela.filtro === "negada"
+                        ? "Nenhuma nota bloqueada."
+                        : tela.filtro === "rascunho"
+                          ? "Nenhuma compra em rascunho."
+                          : "Nenhuma compra lançada."
                 font.pixelSize: 16
                 horizontalAlignment: Text.AlignHCenter
             }

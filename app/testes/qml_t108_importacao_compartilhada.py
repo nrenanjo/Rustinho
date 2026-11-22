@@ -63,14 +63,32 @@ TestCase {
         id: janelaFalsa
         property var avisos: []
         property var abertas: []
+        property var abertasProps: []
         property var confirmacoes: []
         property bool guiarRetorno: false
         function avisar(texto, tipo) { avisos.push({ texto: texto, tipo: tipo }) }
-        function abrir(nome, propriedades) { abertas.push(nome) }
+        function abrir(nome, propriedades) { abertas.push(nome); abertasProps.push({ nome: nome, props: propriedades || {} }) }
+        function abrirFuncao(f) { abertas.push("funcao:" + f.id) }
         function guiar(campo, erro, depois) { return guiarRetorno }
         function confirmar(titulo, detalhe, acao, depois, tipo) {
             confirmacoes.push({ titulo: titulo, detalhe: detalhe, acao: acao, tipo: tipo })
         }
+    }
+
+    QtObject {
+        id: telaInicioFalsa
+        property var janela: janelaFalsa
+        function funcao(id) { return { id: id, disponivel: true } }
+%ABRIR_AVISO%
+    }
+
+    QtObject {
+        id: linhaCompraFalsa
+        property var item: ({})
+        readonly property bool rascunho: item.situacao === "rascunho"
+        readonly property bool bloqueada: rascunho && item.autorizacao === "negada"
+        readonly property bool aguardandoConferencia: rascunho && item.podeLancar === false && !bloqueada
+        function textoSituacao() { return %TEXTO_SITUACAO_COMPRA% }
     }
 
     QtObject {
@@ -94,11 +112,13 @@ TestCase {
     QtObject {
         id: tela
         property var janela: janelaFalsa
+        property var itens: []
         property var pendentes: []
         property string avisoPendentes: ""
         function buscar() {}
         function guardarNaoImportadas(conflitos) {}
         function nomeArquivo(a) { return a }
+%CONFERIR_COMPRA%
 %IMPORTAR%
     }
 
@@ -157,10 +177,14 @@ TestCase {
     function init() {
         janelaFalsa.avisos = []
         janelaFalsa.abertas = []
+        janelaFalsa.abertasProps = []
         janelaFalsa.confirmacoes = []
         janelaFalsa.guiarRetorno = false
+        Api.respostas = []
         Api.gravacoes = []
         Api.gravacoesDemoradas = []
+        tela.itens = []
+        linhaCompraFalsa.item = ({})
         painel.escolhas = null
         painel.pendenciaAberta = null
         painel.corrigindoIdentificacao = false
@@ -336,6 +360,48 @@ TestCase {
     function test_t111_h9_tela_compra_tem_atalho_conferir_pendencias() {
         verify(%TEM_ATALHO_PENDENCIAS%, "H9a: TelaCompra.qml deve oferecer atalho para conferir pendências")
     }
+
+    function test_t111_fiscal_notas_navega_para_compras_filtrada_ou_nota_unica() {
+        Api.respostas = [{ ok: true }, { ok: true }]
+        telaInicioFalsa.abrirAviso({ id: "fiscal_notas", funcao: "compras", alvo: "" })
+        compare(janelaFalsa.abertasProps.length, 1)
+        compare(janelaFalsa.abertasProps[0].nome, "TelaCompras")
+        compare(janelaFalsa.abertasProps[0].props.filtro, "aguardando_autorizacao")
+
+        telaInicioFalsa.abrirAviso({ id: "fiscal_notas", funcao: "compras", alvo: "cp-unica" })
+        compare(janelaFalsa.abertasProps.length, 2)
+        compare(janelaFalsa.abertasProps[1].nome, "TelaCompra")
+        compare(janelaFalsa.abertasProps[1].props.compraId, "cp-unica")
+        compare(janelaFalsa.abertasProps[1].props.abrirConferenciaAoAbrir, true)
+    }
+
+    function test_t111_linha_compra_chip_honesto_e_acao_conferir() {
+        linhaCompraFalsa.item = { situacao: "rascunho", pendentes: 0, autorizacao: "aguardando", podeLancar: false }
+        compare(linhaCompraFalsa.textoSituacao(), "Aguardando conferência")
+        verify(linhaCompraFalsa.aguardandoConferencia, "deve oferecer botão Conferir")
+
+        linhaCompraFalsa.item = { situacao: "rascunho", pendentes: 0, autorizacao: "negada", podeLancar: false }
+        compare(linhaCompraFalsa.textoSituacao(), "Nota bloqueada")
+        verify(!linhaCompraFalsa.aguardandoConferencia, "nota bloqueada não oferece Conferir")
+
+        linhaCompraFalsa.item = { situacao: "rascunho", pendentes: 0, autorizacao: "confirmada_gerente", podeLancar: true }
+        compare(linhaCompraFalsa.textoSituacao(), "Pronta para lançar")
+
+        linhaCompraFalsa.item = { situacao: "rascunho", pendentes: 3, autorizacao: "confirmada_gerente", podeLancar: true }
+        compare(linhaCompraFalsa.textoSituacao(), "3 itens a decidir")
+
+        tela.itens = [{ id: "cp-42" }]
+        tela.conferirCompra(0)
+        compare(janelaFalsa.abertasProps.length, 1)
+        compare(janelaFalsa.abertasProps[0].nome, "TelaCompra")
+        compare(janelaFalsa.abertasProps[0].props.compraId, "cp-42")
+        compare(janelaFalsa.abertasProps[0].props.abrirConferenciaAoAbrir, true)
+    }
+
+    function test_t111_tela_compra_tem_conferencia_no_cartao_e_copiar_chave() {
+        verify(%TEM_ATALHO_CONFERENCIA%, "TelaCompra.qml deve oferecer conferência no cartão Para lançar")
+        verify(%TEM_COPIAR_CHAVE%, "TelaCompra.qml deve oferecer botão Copiar chave no painel de conferência")
+    }
 }
 """
 
@@ -359,17 +425,25 @@ def achar(padrao, texto, nome, grupo=0):
 
 
 def main():
+    inicio = open(os.path.join(RAIZ, "app", "qml", "TelaInicio.qml"), encoding="utf-8").read()
     compras = open(os.path.join(RAIZ, "app", "qml", "TelaCompras.qml"), encoding="utf-8").read()
+    linha_compra = open(os.path.join(RAIZ, "app", "qml", "LinhaCompra.qml"), encoding="utf-8").read()
     compra = open(os.path.join(RAIZ, "app", "qml", "TelaCompra.qml"), encoding="utf-8").read()
     linha_item = open(os.path.join(RAIZ, "app", "qml", "LinhaItemCompra.qml"), encoding="utf-8").read()
     cad = open(os.path.join(RAIZ, "app", "qml", "ImportarCadastros.qml"), encoding="utf-8").read()
     nota_bloco = achar(r"Nota \{\n\s*visible: text !== \"\"\n\s*text: \{\n(.*?)\n\s*\}\n\s*font\.pixelSize: 13", linha_item, "nota do item", 1)
+    situacao_bloco = achar(r"readonly property string textoSituacao: \{\n(.*?)\n    \}\n", linha_compra, "textoSituacao", 1)
     trocas = {
+        "%ABRIR_AVISO%": achar(r"^    function abrirAviso\(aviso\) \{\n.*?^    \}\n", inicio, "abrirAviso"),
+        "%TEXTO_SITUACAO_COMPRA%": f"(function() {{\n{situacao_bloco}\n}})()",
+        "%CONFERIR_COMPRA%": achar(r"^    function conferirCompra\(indice\) \{\n.*?^    \}\n", compras, "conferirCompra"),
         "%IMPORTAR%": achar(r"^    function importar\(arquivos\) \{\n.*?^    \}\n", compras, "importar"),
         "%DESCARTAR%": achar(r"^    function descartar\(\) \{\n.*?^    \}\n", compra, "descartar"),
         "%NOTA_ITEM%": f"(function() {{\n{nota_bloco.replace('linha.', 'linhaItem.')}\n}})()",
         "%VIS_BAIXOU%": achar(r"// O custo baixou: o preço baixa junto\?\n\s*Rectangle \{\n\s*visible: ([^\n]+)", linha_item, "visivel custoBaixou", 1).replace("linha.", "linhaItem."),
         "%TEM_ATALHO_PENDENCIAS%": "true" if ("abrirPendencias()" in compra and "Conferir pendências" in compra) else "false",
+        "%TEM_ATALHO_CONFERENCIA%": "true" if ("Conferir autorização…" in compra and "abrirConferenciaAoAbrir" in compra) else "false",
+        "%TEM_COPIAR_CHAVE%": "true" if ("Copiar chave" in compra and "chaveSemEspacos.copy()" in compra) else "false",
         "%CAT%": achar(r"^    function cat\(codigo\) \{\n.*?^    \}\n", cad, "cat"),
         "%TEXTO%": achar(r"^    function texto\(n, um, varios\) \{\n.*?^    \}\n", cad, "texto"),
         "%LER%": achar(r"^    function lerArquivos\(\) \{\n.*?^    \}\n", cad, "lerArquivos"),

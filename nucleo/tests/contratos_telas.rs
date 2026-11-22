@@ -82,7 +82,12 @@ fn compra_por_xml() {
     assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
     let id = r["compras"][0]["id"].as_str().unwrap().to_string();
 
-    // Lista (LinhaCompra).
+    // Contagem e lista (TelaCompras / LinhaCompra).
+    let contagem = ok(&mut s, "compras_contagem", json!({}));
+    tem("compras_contagem", &contagem, &[("aguardandoAutorizacao", "numero"), ("negadas", "numero")]);
+    assert_eq!(contagem["aguardandoAutorizacao"], json!(1));
+    assert_eq!(contagem["negadas"], json!(0));
+
     let lista = ok(&mut s, "compras_listar", json!({ "texto": "", "limite": 300 }));
     assert_eq!(lista.as_array().unwrap().len(), 1);
     tem(
@@ -97,6 +102,8 @@ fn compra_por_xml() {
             ("itens", "numero"),
             ("pendentes", "numero"),
             ("situacao", "texto"),
+            ("autorizacao", "texto"),
+            ("podeLancar", "sim/nao"),
         ],
     );
 

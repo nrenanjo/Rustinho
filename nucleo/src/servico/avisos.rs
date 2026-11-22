@@ -739,14 +739,9 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             avisos.push(a);
         }
     }
-    // NF-e de compra cuja autorização na SEFAZ ainda não foi conferida (PEND-09): Opções — a lista de
-    // compras; o gerente confere cada uma no portal da NF-e e registra (nada é lançado por aqui).
-    let aguardando: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM compra WHERE situacao = 'rascunho' AND xml <> ''
-            AND autorizacao NOT IN ('confirmada_gerente', 'comprovada_sefaz', 'anterior', 'negada')",
-        [],
-        |l| l.get(0),
-    )?;
+    // NF-e de compra cuja autorização na SEFAZ ainda não foi conferida (PEND-09):
+    // com 1 nota só, leva direto à conferência dela (`alvo`); com 2+, abre Compras já filtrada.
+    let aguardando = crate::compras::contar_aguardando_autorizacao(conn)?;
     if aguardando > 0 {
         let mut a = Aviso::simples(
             "fiscal_notas",
@@ -760,6 +755,11 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             "compras",
         );
         a.acao = "Ver compras".into();
+        if aguardando == 1 {
+            if let Some(id) = crate::compras::unica_aguardando_autorizacao(conn)? {
+                a.alvo = id;
+            }
+        }
         avisos.push(a);
     }
 

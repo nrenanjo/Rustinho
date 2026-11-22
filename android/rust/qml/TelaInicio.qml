@@ -78,6 +78,12 @@ FocusScope {
         } else if (aviso.id === "xml_pendencias") {
             Api.chamar("menu_usar", { id: f.id })
             janela.abrir("TelaPecas", { abrirPendenciasXml: true })
+        } else if (aviso.id === "fiscal_notas") {
+            Api.chamar("menu_usar", { id: f.id })
+            if (aviso.alvo)
+                janela.abrir("TelaCompra", { compraId: aviso.alvo, abrirConferenciaAoAbrir: true })
+            else
+                janela.abrir("TelaCompras", { filtro: "aguardando_autorizacao" })
         } else if (aviso.secao) {
             // 9a/9c (C8): com um registro só, ele vem destacado (alvo).
             janela.abrir("TelaConfiguracoes", { secao: aviso.secao, alvo: aviso.alvo || "" })

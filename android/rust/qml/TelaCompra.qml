@@ -9,6 +9,8 @@ FocusScope {
     property string parte: "itens"
     readonly property var janela: ApplicationWindow.window
     property string compraId: ""
+    property bool abrirConferenciaAoAbrir: false
+    property bool primeiraAtivacao: true
     property var compra: null
     // Como esta tela aparece na orientação da navegação guiada ("Depois o
     // Rustinho volta para …").
@@ -283,7 +285,7 @@ FocusScope {
                     // PEND-09: assinatura do emitente e autorização da SEFAZ (uma faixa só).
                     Rectangle {
                         id: avisoConferencia
-                        visible: !!tela.compra && tela.compra.assinaturaTexto !== ""
+                        visible: !!tela.compra && (tela.compra.assinaturaTexto !== "" || tela.compra.autorizacaoTexto !== "")
                         y: avisoTopo.visible ? avisoTopo.height + 10 : 0
                         width: parent.width
                         height: faixaNota.implicitHeight + 20
@@ -304,6 +306,7 @@ FocusScope {
                                 spacing: 2
                                 Layout.fillWidth: true
                                 Text {
+                                    visible: text !== ""
                                     text: tela.compra ? tela.compra.assinaturaTexto : ""
                                     textFormat: Text.PlainText
                                     color: Tema.tintaSuave
@@ -420,6 +423,19 @@ FocusScope {
                                       tela.compra.novas + " novas", tela.compra.ignorados + " fora do estoque"].join(" · ")
                             font.pixelSize: 14
                             Layout.fillWidth: true
+                        }
+                        Nota {
+                            visible: tela.rascunho && !!tela.compra && tela.compra.pendentes > 0 && tela.compra.autorizacao === "aguardando"
+                            text: "Também falta conferir a autorização da nota no portal da NF-e."
+                            color: Tema.vermelho
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            visible: tela.rascunho && !!tela.compra && tela.compra.autorizacao === "aguardando"
+                            text: "Conferir autorização…"
+                            tipo: tela.compra && tela.compra.pendentes === 0 ? "principal" : "secundario"
+                            onClicked: tela.abrirConferencia()
                         }
                         Botao {
                             visible: tela.rascunho && !!tela.compra && tela.compra.pendentes > 0
@@ -571,7 +587,7 @@ FocusScope {
                         }
                         Text {
                             visible: !!tela.compra && tela.compra.chave !== ""
-                            text: tela.compra ? tela.compra.chave.replace(/(\d{4})/g, "$1 ").trim() : ""
+                            text: tela.compra ? tela.compra.chave.replace(/([A-Za-z0-9]{4})(?=[A-Za-z0-9])/g, "$1 ") : ""
                             textFormat: Text.PlainText
                             color: Tema.tintaSuave
                             font.family: Tema.texto
@@ -603,6 +619,18 @@ FocusScope {
         }
     }
 
+    // Auxiliar invisível para copiar os 44 dígitos puros (sem espaços) para colar no portal da NF-e.
+    TextEdit {
+        id: chaveSemEspacos
+        x: -1000
+        y: -1000
+        width: 1
+        height: 1
+        opacity: 0
+        readOnly: true
+        text: tela.compra ? tela.compra.chave : ""
+    }
+
     EscolherPeca {
         id: escolher
         onEscolhida: (produtoId) => tela.gravar(tela.itemEscolhendo, { acao: "ligar", produtoId: produtoId })
@@ -630,10 +658,28 @@ FocusScope {
             ColumnLayout {
                 spacing: 4
                 Layout.fillWidth: true
-                Rotulo { text: "Chave de acesso"; color: Tema.apagado; Layout.fillWidth: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Rotulo { text: "Chave de acesso"; color: Tema.apagado; Layout.fillWidth: true }
+                    Botao {
+                        visible: !!tela.compra && tela.compra.chave !== ""
+                        text: "Copiar chave"
+                        tipo: "secundario"
+                        onClicked: {
+                            chaveSemEspacos.selectAll()
+                            chaveSemEspacos.copy()
+                            chaveSemEspacos.deselect()
+                            tela.janela.avisar("Chave de acesso copiada.", "ok")
+                            if (!conferencia.bloqueia)
+                                protocoloConferido.focar()
+                        }
+                    }
+                }
                 // Quebra a linha no celular; dá para selecionar e copiar.
                 TextEdit {
-                    text: tela.compra ? tela.compra.chave.replace(/(\d{4})(?=\d)/g, "$1 ") : ""
+                    id: chaveConferencia
+                    text: tela.compra ? tela.compra.chave.replace(/([A-Za-z0-9]{4})(?=[A-Za-z0-9])/g, "$1 ") : ""
                     readOnly: true
                     selectByMouse: true
                     color: Tema.tinta
@@ -764,8 +810,17 @@ FocusScope {
         Qt.callLater(() => lista.positionViewAtBeginning())
     }
     StackView.onActivated: {
-        if (compra)
+        if (primeiraAtivacao)
+            primeiraAtivacao = false
+        else if (compra)
             carregar()
+        if (abrirConferenciaAoAbrir) {
+            abrirConferenciaAoAbrir = false
+            if (compra && compra.situacao === "rascunho" && compra.autorizacao === "aguardando") {
+                Qt.callLater(() => tela.abrirConferencia())
+                return
+            }
+        }
         lista.forceActiveFocus()
     }
 }

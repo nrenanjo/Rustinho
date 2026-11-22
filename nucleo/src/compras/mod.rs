@@ -807,6 +807,52 @@ fn ligar_sozinho(
 // PEND-09: assinatura verificada e autorização da SEFAZ (D5, D7).
 // ---------------------------------------------------------------------------
 
+/// Predicado SQL para compras em rascunho (de XML) cuja autorização na SEFAZ
+/// ainda não foi comprovada nem negada. Fonte única entre a tela inicial
+/// (`avisos::do_dia`) e a tela de Compras (`compras_listar`).
+const SQL_AGUARDANDO_AUTORIZACAO: &str = "situacao = 'rascunho' AND xml <> '' \
+     AND autorizacao NOT IN ('confirmada_gerente', 'comprovada_sefaz', 'anterior', 'negada')";
+
+/// Diz se a situação de autorização permite lançar a compra no estoque.
+pub(crate) fn autorizacao_permite_lancar(tem_xml: bool, autorizacao: &str) -> bool {
+    !tem_xml || matches!(autorizacao, "confirmada_gerente" | "comprovada_sefaz" | "anterior")
+}
+
+/// Quantas notas de compra em rascunho (de XML) aguardam a conferência da autorização.
+pub fn contar_aguardando_autorizacao(conn: &Connection) -> Resultado<i64> {
+    Ok(conn.query_row(&format!("SELECT COUNT(*) FROM compra WHERE {SQL_AGUARDANDO_AUTORIZACAO}"), [], |l| l.get(0))?)
+}
+
+/// Contagem exata das compras pendentes de conferência ou bloqueadas (O(1) em SQL,
+/// sem limite de listagem).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComprasContagem {
+    pub aguardando_autorizacao: i64,
+    pub negadas: i64,
+}
+
+/// Devolve a contagem exata de notas aguardando conferência da autorização e notas bloqueadas.
+pub fn contagem(conn: &Connection) -> Resultado<ComprasContagem> {
+    let aguardando_autorizacao = contar_aguardando_autorizacao(conn)?;
+    let negadas: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM compra WHERE situacao = 'rascunho' AND xml <> '' AND autorizacao = 'negada'",
+        [],
+        |l| l.get(0),
+    )?;
+    Ok(ComprasContagem { aguardando_autorizacao, negadas })
+}
+
+/// Quando houver exatamente uma nota aguardando conferência da autorização,
+/// devolve o `id` dela (para a notificação levar direto à conferência).
+pub fn unica_aguardando_autorizacao(conn: &Connection) -> Resultado<Option<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id FROM compra WHERE {SQL_AGUARDANDO_AUTORIZACAO} ORDER BY emissao DESC, criado_em DESC LIMIT 2"
+    ))?;
+    let ids: Vec<String> = stmt.query_map([], |l| l.get(0))?.collect::<Result<_, _>>()?;
+    Ok(if ids.len() == 1 { ids.into_iter().next() } else { None })
+}
+
 /// O que se sabe da nota da compra.
 pub struct SituacaoFiscal {
     pub tem_xml: bool,
@@ -819,11 +865,10 @@ pub struct SituacaoFiscal {
 impl SituacaoFiscal {
     /// Por que a compra não pode ser lançada (None = pode).
     pub fn bloqueio(&self) -> Option<String> {
-        if !self.tem_xml {
+        if autorizacao_permite_lancar(self.tem_xml, &self.autorizacao) {
             return None;
         }
         match self.autorizacao.as_str() {
-            "confirmada_gerente" | "comprovada_sefaz" | "anterior" => None,
             "negada" => Some(
                 "Esta nota foi conferida no portal como rejeitada, cancelada ou denegada: ela não pode entrar no estoque nem no financeiro. Descarte a importação."
                     .into(),
@@ -2380,22 +2425,44 @@ pub struct CompraResumo {
     pub pendentes: i64,
     pub total: String,
     pub situacao: String,
+    pub autorizacao: String,
+    pub pode_lancar: bool,
 }
 
 pub fn listar(conn: &Connection, busca: &str, limite: i64) -> Resultado<Vec<CompraResumo>> {
+    listar_filtrada(conn, busca, "", limite)
+}
+
+pub fn listar_filtrada(conn: &Connection, busca: &str, filtro: &str, limite: i64) -> Resultado<Vec<CompraResumo>> {
+    let clausula_filtro = match filtro.trim() {
+        "" | "todas" => "1 = 1",
+        "aguardando_autorizacao" => {
+            "c.situacao = 'rascunho' AND c.xml <> '' \
+             AND c.autorizacao NOT IN ('confirmada_gerente', 'comprovada_sefaz', 'anterior', 'negada')"
+        }
+        "rascunho" => "c.situacao = 'rascunho'",
+        "lancada" => "c.situacao = 'lancada'",
+        "negada" => "c.situacao = 'rascunho' AND c.xml <> '' AND c.autorizacao = 'negada'",
+        _ => return Err(Erro::validacao("Filtro de compras inválido.")),
+    };
     let termo = format!("%{}%", texto::normalizar(busca));
-    let mut c = conn.prepare(
+    let sql = format!(
         "SELECT c.id, COALESCE(p.nome, ''), c.numero, c.emissao,
                 (SELECT COUNT(*) FROM compra_item i WHERE i.compra_id = c.id),
                 (SELECT COUNT(*) FROM compra_item i WHERE i.compra_id = c.id AND i.acao = ''),
-                c.total, c.situacao
+                c.total, c.situacao, c.autorizacao, c.xml <> ''
            FROM compra c LEFT JOIN pessoa p ON p.id = c.fornecedor_id
-          WHERE ?1 = '%%' OR lower(COALESCE(p.busca, '')) LIKE ?1 OR c.numero LIKE ?1 OR c.chave LIKE ?1
-             OR EXISTS (SELECT 1 FROM compra_item i WHERE i.compra_id = c.id AND normalizar(i.descricao) LIKE ?1)
+          WHERE ({clausula_filtro})
+            AND (?1 = '%%' OR lower(COALESCE(p.busca, '')) LIKE ?1 OR c.numero LIKE ?1 OR c.chave LIKE ?1
+                 OR EXISTS (SELECT 1 FROM compra_item i WHERE i.compra_id = c.id AND normalizar(i.descricao) LIKE ?1))
           ORDER BY CASE c.situacao WHEN 'rascunho' THEN 0 ELSE 1 END, c.emissao DESC, c.criado_em DESC
-          LIMIT ?2",
-    )?;
-    let linhas = c.query_map(params![termo, limite.clamp(1, 1000)], |l| {
+          LIMIT ?2"
+    );
+    let mut c = conn.prepare(&sql)?;
+    let linhas = c.query_map(params![termo, limite.clamp(1, 5000)], |l| {
+        let autorizacao: String = l.get(8)?;
+        let tem_xml: bool = l.get(9)?;
+        let pode_lancar = autorizacao_permite_lancar(tem_xml, &autorizacao);
         Ok(CompraResumo {
             id: l.get(0)?,
             fornecedor: l.get(1)?,
@@ -2405,6 +2472,8 @@ pub fn listar(conn: &Connection, busca: &str, limite: i64) -> Resultado<Vec<Comp
             pendentes: l.get(5)?,
             total: numeros::escrever_dinheiro(l.get(6)?),
             situacao: l.get(7)?,
+            autorizacao,
+            pode_lancar,
         })
     })?;
     Ok(linhas.collect::<Result<_, _>>()?)
@@ -2445,10 +2514,18 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, marcar_feita, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, Classe, Comando, Estorno, Id, Pedido};
     use crate::erro::{Erro, Resultado};
     use crate::nfe_xml;
     use crate::{arquivos, compras, importar};
+
+    #[derive(Default, serde::Deserialize)]
+    #[serde(rename_all = "camelCase", default)]
+    struct EntradaComprasListar {
+        texto: String,
+        limite: Option<i64>,
+        filtro: String,
+    }
 
     #[derive(Default, serde::Deserialize)]
     #[serde(rename_all = "camelCase", default)]
@@ -2458,6 +2535,7 @@ mod comandos {
     }
 
     pub const COMANDOS: &[Comando] = &[
+        Comando { nome: "compras_contagem", classe: Classe::Leitura, funcao: compras_contagem },
         Comando { nome: "compras_listar", classe: Classe::Leitura, funcao: compras_listar },
         Comando { nome: "compra_importar", classe: Classe::Caixa, funcao: compra_importar },
         Comando { nome: "compra_abrir", classe: Classe::Leitura, funcao: compra_abrir },
@@ -2475,9 +2553,13 @@ mod comandos {
         Comando { nome: "importar_cadastros", classe: Classe::Gerente("configuracoes"), funcao: importar_cadastros },
     ];
 
+    fn compras_contagem(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!(compras::contagem(p.conn)?))
+    }
+
     fn compras_listar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        let d: BuscaProdutos = ler(dados)?;
-        Ok(json!(compras::listar(p.conn, &d.texto, d.limite.unwrap_or(300))?))
+        let d: EntradaComprasListar = ler(dados)?;
+        Ok(json!(compras::listar_filtrada(p.conn, &d.texto, &d.filtro, d.limite.unwrap_or(300))?))
     }
 
     // Um arquivo escolhido: um XML, um .zip ou .rar com várias notas,
@@ -3001,6 +3083,97 @@ mod testes {
         let f = ficha(c, &id).unwrap();
         assert!(f.pode_lancar);
         assert!(f.assinatura_texto.contains("antes da verificação"), "{}", f.assinatura_texto);
+    }
+
+    /// T111 (divergência Início ↔ Compras): a listagem devolve `autorizacao` e
+    /// `podeLancar` reais e filtra `aguardando_autorizacao` pela mesma regra do aviso.
+    #[test]
+    fn t111_lista_e_filtro_aguardando_autorizacao_coincidem_com_aviso() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let g = usuarios::criar(c, &b.dispositivo, "Gerente Ana", "Gerente-123", true).unwrap().id;
+        usuarios::definir_gerente(c, &g, true).unwrap();
+        let id1 = importar_xml(c, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+        // Resolve todos os itens da nota 1 (pendentes == 0), mantendo autorizacao = 'aguardando':
+        // a lista NÃO pode marcar podeLancar = true.
+        c.execute("UPDATE compra_item SET acao = 'nova' WHERE compra_id = ?1", [&id1]).unwrap();
+        let todas = listar(c, "", 300).unwrap();
+        assert_eq!(todas.len(), 1);
+        assert_eq!(todas[0].pendentes, 0);
+        assert_eq!(todas[0].autorizacao, "aguardando");
+        assert!(!todas[0].pode_lancar, "sem conferência, não pode aparecer pronta para lançar");
+        assert_eq!(contar_aguardando_autorizacao(c).unwrap(), 1);
+        let ct1 = contagem(c).unwrap();
+        assert_eq!((ct1.aguardando_autorizacao, ct1.negadas), (1, 0));
+        assert_eq!(unica_aguardando_autorizacao(c).unwrap().as_deref(), Some(id1.as_str()));
+        let filtradas = listar_filtrada(c, "", "aguardando_autorizacao", 300).unwrap();
+        assert_eq!(filtradas.len(), 1);
+        assert_eq!(filtradas[0].id, id1);
+
+        // Segunda nota em rascunho aguardando conferência: `unica_aguardando_autorizacao` vira None.
+        let id2 = "cp-t111-segunda".to_string();
+        c.execute(
+            "INSERT INTO compra (id, fornecedor_id, chave, numero, serie, emissao, natureza, total_produtos, frete,
+                                 seguro, desconto, outras, ipi, icms_st, total, destinatario, xml, criado_em,
+                                 criado_por, dispositivo, xml_verificacao, xml_prova, autorizacao, situacao)
+             SELECT ?1, fornecedor_id, '35261011222333000181550010000123461000000022', '12346', serie, emissao,
+                    natureza, total_produtos, frete, seguro, desconto, outras, ipi, icms_st, total, destinatario,
+                    xml, criado_em, criado_por, dispositivo, xml_verificacao, xml_prova, 'aguardando', 'rascunho'
+               FROM compra WHERE id = ?2",
+            params![&id2, &id1],
+        )
+        .unwrap();
+        assert_eq!(contar_aguardando_autorizacao(c).unwrap(), 2);
+        assert_eq!(unica_aguardando_autorizacao(c).unwrap(), None);
+        assert_eq!(listar_filtrada(c, "", "aguardando_autorizacao", 300).unwrap().len(), 2);
+
+        // Confirma nota 1 pelo gerente: sai de aguardando_autorizacao e vira pode_lancar = true.
+        let agora: String =
+            c.query_row("SELECT strftime('%d/%m/%Y %H:%M', 'now', 'localtime')", [], |l| l.get(0)).unwrap();
+        registrar_conferencia(
+            c,
+            &b.dispositivo,
+            &g,
+            &Conferencia {
+                id: id1.clone(),
+                situacao: "autorizada".into(),
+                protocolo: "135260000000001".into(),
+                conferido_em: agora.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(contar_aguardando_autorizacao(c).unwrap(), 1);
+        assert_eq!(unica_aguardando_autorizacao(c).unwrap().as_deref(), Some(id2.as_str()));
+        let apos = listar(c, "", 300).unwrap();
+        let n1 = apos.iter().find(|x| x.id == id1).unwrap();
+        assert_eq!(n1.autorizacao, "confirmada_gerente");
+        assert!(n1.pode_lancar);
+
+        // Confere nota 2 como cancelada: sai de aguardando_autorizacao, vai para `negada` e segue bloqueada.
+        registrar_conferencia(
+            c,
+            &b.dispositivo,
+            &g,
+            &Conferencia {
+                id: id2.clone(),
+                situacao: "cancelada".into(),
+                protocolo: String::new(),
+                conferido_em: agora,
+            },
+        )
+        .unwrap();
+        assert_eq!(contar_aguardando_autorizacao(c).unwrap(), 0);
+        let ct_fim = contagem(c).unwrap();
+        assert_eq!((ct_fim.aguardando_autorizacao, ct_fim.negadas), (0, 1));
+        assert!(listar_filtrada(c, "", "aguardando_autorizacao", 300).unwrap().is_empty());
+        let negadas = listar_filtrada(c, "", "negada", 300).unwrap();
+        assert_eq!(negadas.len(), 1);
+        assert_eq!(negadas[0].id, id2);
+        assert_eq!(negadas[0].autorizacao, "negada");
+        assert!(!negadas[0].pode_lancar);
+
+        // Filtro desconhecido é recusado com erro de validação.
+        assert!(listar_filtrada(c, "", "inexistente", 300).is_err());
     }
 
     #[test]

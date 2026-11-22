@@ -104,6 +104,7 @@ PESOS_SEGUNDOS = {
     "telas_modo_seguro": 23,
     "telas_impressao_falha": 20,
     "telas_compras_pasta_t107": 17,
+    "telas_compras_conferencia_t111": 25,
     "telas_d14_portatil": 17,
     "telas_qt1b_fechamento": 15,
     "telas_notif03": 15,

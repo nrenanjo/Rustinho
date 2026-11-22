@@ -83,6 +83,7 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("compra_estornar", "estornar", &["nao_repetir"]),
     ("compra_importar", "caixa", &["do_caixa", "nao_repetir"]),
     ("compra_lancar", "caixa", &["do_caixa", "nao_repetir"]),
+    ("compras_contagem", "leitura", &["leitura"]),
     ("compras_listar", "leitura", &["leitura"]),
     ("computador_salvar", "caixa", &["do_caixa"]),
     ("config_ler", "leitura", &["leitura"]),
