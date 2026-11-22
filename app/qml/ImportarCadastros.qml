@@ -183,6 +183,7 @@ Painel {
         if (!pendenciaAberta)
             return
         erro = ""
+        campoCorrNome.erro = ""
         campoCorrCodigo.erro = ""
         campoCorrBarras.erro = ""
         const payload = {
@@ -191,6 +192,7 @@ Painel {
             produtoId: ""
         }
         if (comCorrecao) {
+            payload.corrigir = true
             payload.nome = campoCorrNome.texto
             payload.codigoFornecedor = campoCorrCodigo.texto
             payload.codigoBarras = campoCorrBarras.texto
@@ -199,7 +201,9 @@ Painel {
         const r = Api.gravar("xml_pendencia_resolver", payload, chavePendencia)
         if (!r.ok) {
             erro = r.erro
-            if (r.campo === "codigoFornecedor")
+            if (r.campo === "nome")
+                campoCorrNome.erro = r.erro
+            else if (r.campo === "codigoFornecedor")
                 campoCorrCodigo.erro = r.erro
             else if (r.campo === "codigoBarras")
                 campoCorrBarras.erro = r.erro
@@ -964,6 +968,7 @@ Painel {
                                         onClicked: {
                                             painel.corrigindoIdentificacao = !painel.corrigindoIdentificacao
                                             painel.erro = ""
+                                            campoCorrNome.erro = ""
                                             campoCorrCodigo.erro = ""
                                             campoCorrBarras.erro = ""
                                         }

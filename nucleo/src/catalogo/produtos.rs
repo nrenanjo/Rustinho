@@ -865,12 +865,13 @@ fn manter_lucros(antes: &Dados, dados: &mut Dados) {
     }
 }
 
-/// T111 (A5 — limpeza anti-órfão): remove uma peça nascida automaticamente na
-/// importação de compra quando ela ficou órfã (o item foi trocado, ignorado ou
-/// o rascunho da compra foi descartado). Só apaga se TODAS as travas de
-/// integridade passarem: nunca editada, nunca movimentada no estoque, sem
-/// referência em nenhuma outra tabela operacional nem outro fornecedor, e
-/// editável na sincronização. Devolve `true` se removeu.
+/// T111 (A5 — limpeza anti-órfão + Achado 7): remove (em caixa único) ou
+/// desativa (em ambiente multi-caixa, preservando referências offline de
+/// vendas/encomendas) uma peça nascida automaticamente na importação de compra
+/// quando ela ficou órfã (item trocado, ignorado ou rascunho descartado).
+/// Também limpa o vínculo `(fornecedor_id, codigo_fornecedor)` se não houver
+/// mais nenhum item de compra desse fornecedor usando aquele código na peça
+/// (evita zumbi quando dois fornecedores compartilham o mesmo GTIN).
 pub(crate) fn remover_provisorio_se_orfao(
     conn: &Connection,
     dispositivo: &str,
@@ -879,15 +880,15 @@ pub(crate) fn remover_provisorio_se_orfao(
     fornecedor_id: &str,
     codigo_fornecedor: &str,
 ) -> Resultado<bool> {
-    let Some((nome, criado_em, atualizado_em)): Option<(String, String, String)> = conn
-        .query_row("SELECT nome, criado_em, atualizado_em FROM produto WHERE id = ?1", [produto_id], |l| {
-            Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+    let Some((nome, criado_em, atualizado_em, ativo)): Option<(String, String, String, i64)> = conn
+        .query_row("SELECT nome, criado_em, atualizado_em, ativo FROM produto WHERE id = ?1", [produto_id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
         })
         .optional()?
     else {
         return Ok(false);
     };
-    if criado_em != atualizado_em {
+    if ativo == 0 || criado_em != atualizado_em {
         return Ok(false);
     }
     let veio_de_compra: bool = conn.query_row(
@@ -911,7 +912,6 @@ pub(crate) fn remover_provisorio_se_orfao(
     }
     for sql in [
         "SELECT EXISTS(SELECT 1 FROM estoque_movimento WHERE produto_id = ?1)",
-        "SELECT EXISTS(SELECT 1 FROM compra_item WHERE produto_id = ?1)",
         "SELECT EXISTS(SELECT 1 FROM venda_item WHERE produto_id = ?1)",
         "SELECT EXISTS(SELECT 1 FROM devolucao_item WHERE produto_id = ?1)",
         "SELECT EXISTS(SELECT 1 FROM ordem_servico_item WHERE produto_id = ?1)",
@@ -924,33 +924,77 @@ pub(crate) fn remover_provisorio_se_orfao(
             return Ok(false);
         }
     }
+    // Achado 7.1: se não resta nenhum item de compra deste fornecedor com o
+    // mesmo código apontando para a peça provisória intocada, solta o vínculo
+    // dele agora para não travar a limpeza ao descartar a última nota.
     let compacto = texto::compactar(codigo_fornecedor);
-    let outro_fornecedor: bool = if !fornecedor_id.is_empty() && !compacto.is_empty() {
-        conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM produto_fornecedor
-              WHERE produto_id = ?1 AND NOT (fornecedor_id = ?2 AND codigo_compacto = ?3))",
-            params![produto_id, fornecedor_id, compacto],
-            |l| l.get(0),
-        )?
-    } else {
+    if !fornecedor_id.is_empty() && !compacto.is_empty() {
+        let mut stmt = conn.prepare_cached(
+            "SELECT i.codigo_fornecedor FROM compra_item i JOIN compra c ON c.id = i.compra_id
+              WHERE i.produto_id = ?1 AND c.fornecedor_id = ?2",
+        )?;
+        let ainda_usado_pelo_fornecedor = stmt
+            .query_map(params![produto_id, fornecedor_id], |l| l.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .any(|cod| texto::compactar(&cod) == compacto);
+        if !ainda_usado_pelo_fornecedor {
+            crate::catalogo::codigos::desvincular_fornecedor_se_produto(
+                conn,
+                fornecedor_id,
+                codigo_fornecedor,
+                produto_id,
+            )?;
+        }
+    }
+    let ainda_em_compra: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM compra_item WHERE produto_id = ?1)", [produto_id], |l| l.get(0))?;
+    if ainda_em_compra {
+        return Ok(false);
+    }
+    let outro_fornecedor: bool =
         conn.query_row("SELECT EXISTS(SELECT 1 FROM produto_fornecedor WHERE produto_id = ?1)", [produto_id], |l| {
             l.get(0)
-        })?
-    };
+        })?;
     if outro_fornecedor {
         return Ok(false);
     }
-    crate::catalogo::codigos::desvincular_fornecedor_se_produto(conn, fornecedor_id, codigo_fornecedor, produto_id)?;
-    conn.execute("DELETE FROM produto WHERE id = ?1", [produto_id])?;
-    auditoria::registrar(
-        conn,
-        dispositivo,
-        (!usuario_id.is_empty()).then_some(usuario_id),
-        "produto.desfazer_provisorio",
-        "produto",
-        produto_id,
-        &[format!("Peça \"{nome}\" removida ao desfazer item/rascunho da compra (nunca movimentada nem editada)")],
+    // Achado 7.2: em ambiente multi-caixa, a peça pode já ter viajado e sido
+    // usada offline noutro caixa (venda/encomenda); desativar em vez de apagar
+    // fisicamente preserva a integridade referencial da sincronização.
+    let multi_caixa: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sync_par) OR EXISTS(SELECT 1 FROM alteracao WHERE dispositivo <> ?1)",
+        [dispositivo],
+        |l| l.get(0),
     )?;
+    if multi_caixa {
+        conn.execute(
+            "UPDATE produto SET ativo = 0, atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1",
+            params![produto_id, tempo::agora(), usuario_id, dispositivo],
+        )?;
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            (!usuario_id.is_empty()).then_some(usuario_id),
+            "produto.desfazer_provisorio",
+            "produto",
+            produto_id,
+            &[format!(
+                "Peça \"{nome}\" desativada ao desfazer item/rascunho da compra em ambiente multi-caixa (nunca movimentada nem editada)"
+            )],
+        )?;
+    } else {
+        conn.execute("DELETE FROM produto WHERE id = ?1", [produto_id])?;
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            (!usuario_id.is_empty()).then_some(usuario_id),
+            "produto.desfazer_provisorio",
+            "produto",
+            produto_id,
+            &[format!("Peça \"{nome}\" removida ao desfazer item/rascunho da compra (nunca movimentada nem editada)")],
+        )?;
+    }
     Ok(true)
 }
 

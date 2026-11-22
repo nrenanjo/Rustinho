@@ -399,6 +399,14 @@ pub(crate) fn criar_compra_com_opcoes(
                         &gtins_ficha,
                         custo_inicial,
                     )?;
+                    // Achado 8: fecha eventual pendência antiga `sem_vinculo` deste item agora cadastrado.
+                    crate::compras::pendencias::resolver_pendencias_do_item(
+                        conn,
+                        &fornecedor_id,
+                        &item.codigo,
+                        &item.descricao,
+                        &pid,
+                    )?;
                     lig = LigacaoAutomatica {
                         acao: "nova".into(),
                         produto_id: Some(pid),
@@ -481,8 +489,10 @@ pub(crate) fn criar_compra_com_opcoes(
     Ok(CompraCriada { id, pecas_cadastradas, pendencias_identificacao })
 }
 
-/// Verifica se já existe registro provisório pendente para o mesmo fornecedor,
-/// código compactado e descrição compactada.
+/// Verifica se já existe registro provisório pendente de ambiguidade/conflito
+/// para o mesmo fornecedor, código compactado e descrição compactada.
+/// Achado 8: ignora pendência antiga `sem_vinculo` (vinda de Peças sem
+/// "Peças do fornecedor"), que na Opção C não trava o cadastro automático.
 fn pendencia_aberta_do_item(
     conn: &Connection,
     fornecedor_doc: &str,
@@ -492,6 +502,7 @@ fn pendencia_aberta_do_item(
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM xml_pendencia_identificacao
           WHERE situacao = 'pendente'
+            AND motivo <> 'sem_vinculo'
             AND fornecedor_documento = ?1
             AND codigo_compacto = ?2
             AND descricao_compacta = ?3)",
@@ -540,11 +551,16 @@ fn cadastrar_peca_da_importacao(
         f.origem = item.origem;
     }
     f.monofasico = item.cst_pis == "04";
-    f.custo = numeros::escrever_dinheiro(custo);
-    if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
-        if p.lucro.is_empty() {
-            p.lucro = "100".into();
+    if custo > 0 {
+        f.custo = numeros::escrever_dinheiro(custo);
+        if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+            if p.lucro.is_empty() {
+                p.lucro = "100".into();
+            }
         }
+    } else {
+        // Achado 1 (Crítico): bonificação/brinde (custo 0) nasce com preço na hora da venda.
+        f.preco_aberto = true;
     }
     let pid = produtos::salvar(conn, dispositivo, usuario_id, &f)?;
     produtos::registrar_gtins_xml(conn, &pid, gtins_ficha)?;
@@ -1047,6 +1063,9 @@ pub struct CompraFicha {
     pub gerar_pagar: bool,
     /// Já lançada: parcelas no A pagar (quantas).
     pub parcelas_pagar: i64,
+    /// T111 (Achado 9c): em rascunho, há pelo menos uma peça provisória criada
+    /// na importação que será removida/desativada ao descartar esta compra?
+    pub tem_provisorias_descartaveis: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -1067,6 +1086,8 @@ pub struct ItemFicha {
     pub despesas: String,
     pub acao: String,
     pub achado_por: String,
+    /// T111 (Achado 9b): motivo legível da pendência de identificação quando `acao == ""`.
+    pub motivo_pendencia: String,
     pub fator: String,
     /// Quantas peças entram no estoque.
     pub quantidade_pecas: String,
@@ -1256,6 +1277,7 @@ fn custo_unitario(custo_total: i64, pecas_milesimos: i64) -> i64 {
 struct Cabecalho {
     situacao: String,
     fornecedor_id: String,
+    chave: String,
     frete_extra: i64,
     atualizar_precos: bool,
     numero: String,
@@ -1263,20 +1285,160 @@ struct Cabecalho {
 
 fn cabecalho(conn: &Connection, id: &str) -> Resultado<Cabecalho> {
     conn.query_row(
-        "SELECT situacao, COALESCE(fornecedor_id, ''), frete_extra, atualizar_precos, numero FROM compra WHERE id = ?1",
+        "SELECT situacao, COALESCE(fornecedor_id, ''), chave, frete_extra, atualizar_precos, numero
+           FROM compra WHERE id = ?1",
         [id],
         |l| {
             Ok(Cabecalho {
                 situacao: l.get(0)?,
                 fornecedor_id: l.get(1)?,
-                frete_extra: l.get(2)?,
-                atualizar_precos: l.get(3)?,
-                numero: l.get(4)?,
+                chave: l.get(2)?,
+                frete_extra: l.get(3)?,
+                atualizar_precos: l.get(4)?,
+                numero: l.get(5)?,
             })
         },
     )
     .optional()?
     .ok_or_else(|| Erro::NaoEncontrado("Compra".into()))
+}
+
+/// Peça já foi editada manualmente ou movimentada desde o cadastro?
+fn peca_ja_tocada(conn: &Connection, produto_id: &str) -> Resultado<bool> {
+    let tempos: Option<(String, String)> = conn
+        .query_row("SELECT criado_em, atualizado_em FROM produto WHERE id = ?1", [produto_id], |l| {
+            Ok((l.get(0)?, l.get(1)?))
+        })
+        .optional()?;
+    let Some((criado_em, atualizado_em)) = tempos else {
+        return Ok(false);
+    };
+    if criado_em != atualizado_em {
+        return Ok(true);
+    }
+    if conn
+        .query_row("SELECT EXISTS(SELECT 1 FROM estoque_movimento WHERE produto_id = ?1)", [produto_id], |l| l.get(0))?
+    {
+        return Ok(true);
+    }
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auditoria
+          WHERE entidade = 'produto' AND entidade_id = ?1
+            AND acao IN ('produto.alterar', 'compra.entrada', 'compra.estornar'))",
+        [produto_id],
+        |l| l.get(0),
+    )?)
+}
+
+/// T111 (Achado 9c): esta peça provisória seria removida/desativada ao descartar `compra_id`?
+fn peca_provisoria_descartavel(conn: &Connection, compra_id: &str, produto_id: &str) -> Resultado<bool> {
+    let ativa: bool = conn
+        .query_row("SELECT ativo FROM produto WHERE id = ?1", [produto_id], |l| Ok(l.get::<_, i64>(0)? != 0))
+        .optional()?
+        .unwrap_or(false);
+    if !ativa || peca_ja_tocada(conn, produto_id)? {
+        return Ok(false);
+    }
+    let veio_de_compra: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auditoria
+          WHERE entidade = 'produto' AND entidade_id = ?1 AND acao = 'produto.importar_compra')",
+        [produto_id],
+        |l| l.get(0),
+    )?;
+    if !veio_de_compra {
+        return Ok(false);
+    }
+    let em_outra_compra: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM compra_item WHERE produto_id = ?1 AND compra_id <> ?2)",
+        params![produto_id, compra_id],
+        |l| l.get(0),
+    )?;
+    if em_outra_compra {
+        return Ok(false);
+    }
+    for sql in [
+        "SELECT EXISTS(SELECT 1 FROM venda_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM devolucao_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM ordem_servico_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM encomenda WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM produto_codigo_antigo WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM xml_pendencia_identificacao WHERE produto_id = ?1)",
+    ] {
+        if conn.query_row(sql, [produto_id], |l| l.get::<_, bool>(0))? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// T111 (Achado 9b): texto legível do motivo da pendência aberta deste item.
+fn motivo_pendencia_do_item(
+    conn: &Connection,
+    fornecedor_id: &str,
+    fornecedor_doc: &str,
+    chave_nfe: &str,
+    codigo_fornecedor: &str,
+    descricao: &str,
+) -> Resultado<String> {
+    let compacto = texto::compactar(codigo_fornecedor);
+    let desc_comp = texto::compactar(descricao);
+    let motivo: Option<String> = conn
+        .query_row(
+            "SELECT motivo FROM xml_pendencia_identificacao
+              WHERE situacao = 'pendente'
+                AND (fornecedor_id = ?1 OR (?2 <> '' AND fornecedor_documento = ?2))
+                AND (chave_nfe = ?3 OR codigo_compacto <> '')
+                AND codigo_compacto = ?4
+                AND descricao_compacta = ?5
+              ORDER BY CASE WHEN chave_nfe = ?3 THEN 0 ELSE 1 END, criado_em DESC
+              LIMIT 1",
+            params![fornecedor_id, fornecedor_doc, chave_nfe, compacto, desc_comp],
+            |l| l.get(0),
+        )
+        .optional()?;
+    Ok(motivo.map(|m| crate::importar::motivo_legivel(&m).to_string()).unwrap_or_default())
+}
+
+/// T111 (Achado 3a/3b): devolve o código de fornecedor corrigido (e se houve
+/// correção de GTIN) quando o item veio de uma pendência resolvida com
+/// `corrigir: true`, para `lancar()` não regravar código/GTIN antigos do XML.
+fn correcao_da_pendencia(
+    conn: &Connection,
+    fornecedor_id: &str,
+    chave_nfe: &str,
+    it: &ItemBanco,
+    produto_id: &str,
+) -> Resultado<Option<(String, bool)>> {
+    if fornecedor_id.is_empty() {
+        return Ok(None);
+    }
+    let cod_comp = texto::compactar(&it.codigo_fornecedor);
+    let desc_comp = texto::compactar(&it.descricao);
+    let achada: Option<(String, String)> = conn
+        .query_row(
+            "SELECT codigo_fornecedor, gtins_json FROM xml_pendencia_identificacao
+              WHERE fornecedor_id = ?1
+                AND (chave_nfe = ?2 OR codigo_compacto <> '')
+                AND codigo_compacto = ?3
+                AND descricao_compacta = ?4
+                AND situacao = 'resolvida'
+                AND produto_id = ?5
+              ORDER BY CASE WHEN chave_nfe = ?2 THEN 0 ELSE 1 END, resolvido_em DESC
+              LIMIT 1",
+            params![fornecedor_id, chave_nfe, cod_comp, desc_comp, produto_id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    let Some((cod_pend, gtins_pend)) = achada else {
+        return Ok(None);
+    };
+    let mudou_codigo = cod_pend.trim() != it.codigo_fornecedor.trim();
+    let mudou_gtin = gtins_pend != it.gtins_json;
+    if mudou_codigo || mudou_gtin {
+        Ok(Some((cod_pend, mudou_gtin)))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Ficha completa da compra.
@@ -1376,6 +1538,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
     let extras = frete_extra_por_item(&itens, frete_extra);
     let mut lista = Vec::new();
     let (mut pendentes, mut novas, mut ignorados, mut custo_total) = (0, 0, 0, 0_i64);
+    let mut tem_provisorias_descartaveis = false;
     for (i, it) in itens.iter().enumerate() {
         let custo_item = numeros::soma([it.custo_nota()?, extras[i]])?;
         if it.acao != "ignorar" {
@@ -1391,9 +1554,30 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
         let cu = custo_unitario(custo_item, pecas);
         let peca = match (&it.acao[..], &it.produto_id) {
             ("ligar", Some(pid)) => peca_ligada(conn, pid, cu, atualizar_precos, it.baixar_preco)?,
+            // Achado 9d: em rascunho, prévia da peça recém-criada na importação acompanha
+            // exatamente `finalizar_peca_importada` (se virgem) ou `atualizar_custo` (se já tocada).
+            ("nova", Some(pid)) if situacao == "rascunho" && it.achado_por == "importacao" => {
+                if peca_ja_tocada(conn, pid)? {
+                    peca_ligada(conn, pid, cu, atualizar_precos, it.baixar_preco)?
+                } else {
+                    peca_ligada(conn, pid, cu, true, true)?
+                }
+            }
             // D-06: depois de lançada, o item "peça nova" mostra a peça criada.
             ("nova", Some(pid)) => peca_ligada(conn, pid, cu, false, false)?,
             _ => None,
+        };
+        if situacao == "rascunho" && !tem_provisorias_descartaveis {
+            if let Some(pid) = &it.produto_id {
+                if peca_provisoria_descartavel(conn, id, pid)? {
+                    tem_provisorias_descartaveis = true;
+                }
+            }
+        }
+        let motivo_pendencia = if it.acao.is_empty() {
+            motivo_pendencia_do_item(conn, &fornecedor_id, &fdoc, &chave, &it.codigo_fornecedor, &it.descricao)?
+        } else {
+            String::new()
         };
         lista.push(ItemFicha {
             id: it.id.clone(),
@@ -1411,6 +1595,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
             despesas: numeros::escrever_dinheiro(custo_item - it.valor_produtos),
             acao: it.acao.clone(),
             achado_por: it.achado_por.clone(),
+            motivo_pendencia,
             fator: numeros::escrever_quantidade(it.fator),
             quantidade_pecas: numeros::escrever_quantidade(pecas),
             custo_unitario: numeros::escrever_dinheiro(cu),
@@ -1477,6 +1662,7 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
             [id],
             |l| l.get(0),
         )?,
+        tem_provisorias_descartaveis,
     })
 }
 
@@ -1732,6 +1918,14 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
 
     for (i, it) in itens.iter().enumerate() {
         if it.acao == "ignorar" {
+            // Achado 8: fecha pendência de identificação exclusiva de item ignorado no lançamento.
+            crate::compras::pendencias::fechar_pendencia_item_ignorado(
+                conn,
+                &cab.fornecedor_id,
+                &cab.chave,
+                &it.codigo_fornecedor,
+                &it.descricao,
+            )?;
             continue;
         }
         let pecas = it.pecas();
@@ -1740,33 +1934,18 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         let produto_id = if it.acao == "nova" {
             if it.achado_por == "importacao" {
                 if let Some(pid) = &it.produto_id {
-                    let estado: Option<(bool, String, String, String)> = conn
-                        .query_row(
-                            "SELECT ativo, nome, criado_em, atualizado_em FROM produto WHERE id = ?1",
-                            [pid],
-                            |l| Ok((l.get::<_, i64>(0)? != 0, l.get(1)?, l.get(2)?, l.get(3)?)),
-                        )
+                    let estado: Option<(bool, String)> = conn
+                        .query_row("SELECT ativo, nome FROM produto WHERE id = ?1", [pid], |l| {
+                            Ok((l.get::<_, i64>(0)? != 0, l.get(1)?))
+                        })
                         .optional()?;
-                    if let Some((ativa, nome, criado_em, atualizado_em)) = estado {
+                    if let Some((ativa, nome)) = estado {
                         if !ativa {
                             return Err(Erro::validacao(format!(
                                 "A peça \"{nome}\" cadastrada na importação está desativada. Reative-a ou troque a peça antes de lançar."
                             )));
                         }
-                        let ja_tocada: bool = criado_em != atualizado_em
-                            || conn.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM estoque_movimento WHERE produto_id = ?1)",
-                                [pid],
-                                |l| l.get(0),
-                            )?
-                            || conn.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM auditoria
-                                  WHERE entidade = 'produto' AND entidade_id = ?1
-                                    AND acao IN ('produto.alterar', 'compra.entrada', 'compra.estornar'))",
-                                [pid],
-                                |l| l.get(0),
-                            )?;
-                        if !ja_tocada {
+                        if !peca_ja_tocada(conn, pid)? {
                             resumo.pecas_novas += 1;
                             detalhes =
                                 finalizar_peca_importada(conn, dispositivo, usuario_id, pid, it, custo, &tabelas)?;
@@ -1826,7 +2005,13 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             detalhes = d;
             pid
         };
-        produtos::registrar_gtins_xml(conn, &produto_id, &it.gtins_ficha())?;
+        // Achado 3a/3b: se o usuário corrigiu identificação na pendência, respeita o
+        // código e os GTINs corrigidos em vez de regravar os valores antigos do XML.
+        let correcao = correcao_da_pendencia(conn, &cab.fornecedor_id, &cab.chave, it, &produto_id)?;
+        let pular_gtin_xml = correcao.as_ref().is_some_and(|(_, mudou_gtin)| *mudou_gtin);
+        if !pular_gtin_xml {
+            produtos::registrar_gtins_xml(conn, &produto_id, &it.gtins_ficha())?;
+        }
         crate::compras::pendencias::resolver_pendencias_do_item(
             conn,
             &cab.fornecedor_id,
@@ -1852,15 +2037,23 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
             Some(e) => e.1 += pecas,
             None => entraram.push((produto_id.clone(), pecas)),
         }
-        let compacto = texto::compactar(&it.codigo_fornecedor);
-        if !cab.fornecedor_id.is_empty() && !compacto.is_empty() && !ambiguos.contains(&compacto) {
+        let (cod_vincular, foi_corrigido) = match &correcao {
+            Some((cod_corr, _)) => (cod_corr.as_str(), true),
+            None => (it.codigo_fornecedor.as_str(), false),
+        };
+        let compacto = texto::compactar(cod_vincular);
+        if !cab.fornecedor_id.is_empty() && !compacto.is_empty() && (foi_corrigido || !ambiguos.contains(&compacto)) {
             crate::catalogo::codigos::vincular_fornecedor(
                 conn,
                 &cab.fornecedor_id,
-                &it.codigo_fornecedor,
+                cod_vincular,
                 &produto_id,
                 it.fator,
-                crate::catalogo::codigos::JaLigado::PassarPecaEFator,
+                if foi_corrigido {
+                    crate::catalogo::codigos::JaLigado::ManterPecaAtualizarFator
+                } else {
+                    crate::catalogo::codigos::JaLigado::PassarPecaEFator
+                },
             )?;
             produtos::atualizar_indice_busca(conn, &produto_id)?;
         }
@@ -2048,11 +2241,16 @@ fn cadastrar_peca(
         f.origem = it.origem;
     }
     f.monofasico = it.cst_pis == "04";
-    f.custo = numeros::escrever_dinheiro(custo);
-    if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
-        if p.lucro.is_empty() {
-            p.lucro = "100".into();
+    if custo > 0 {
+        f.custo = numeros::escrever_dinheiro(custo);
+        if let Some(p) = f.precos.iter_mut().find(|p| p.tabela == 1) {
+            if p.lucro.is_empty() {
+                p.lucro = "100".into();
+            }
         }
+    } else {
+        // Achado 1 (Crítico): bonificação/brinde (custo 0) nasce com preço na hora da venda.
+        f.preco_aberto = true;
     }
     let id = produtos::salvar(conn, dispositivo, usuario_id, &f)?;
     produtos::registrar_gtins_xml(conn, &id, &f.gtins)?;
@@ -2119,6 +2317,9 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
 /// dela fica (quem importou e quando) e ganha uma linha dizendo que o
 /// rascunho foi descartado; o rascunho não vira compra lançada.
 pub fn excluir_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
+    // Achado 8a: bloqueia descarte se a compra ou algum item tiver referência inconsistente no sync.
+    crate::sync::exigir_editavel(conn, "compra", id)?;
+    crate::sync::exigir_filhos_editaveis(conn, "compra_item", "compra_id", id)?;
     let cab = cabecalho(conn, id)?;
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Só dá para descartar uma compra que ainda não foi lançada."));
@@ -2133,6 +2334,8 @@ pub fn excluir_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, 
         .query_map([id], |l| Ok((l.get(0)?, l.get(1)?)))?
         .collect::<Result<_, _>>()?;
     conn.execute("DELETE FROM compra WHERE id = ?1", [id])?;
+    // Achado 8b: remove pendências abertas exclusivas da nota descartada.
+    crate::compras::pendencias::limpar_pendencias_da_nota_descartada(conn, &cab.chave)?;
     let mut vistos = HashSet::new();
     for (pid, cod_forn) in ligadas {
         if vistos.insert(pid.clone()) && crate::sync::exigir_editavel(conn, "produto", &pid).is_ok() {
@@ -2231,10 +2434,17 @@ pub use comandos::COMANDOS;
 mod comandos {
     use serde_json::{json, Value};
 
-    use crate::despacho::{ler, marcar_feita, Arquivo, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
+    use crate::despacho::{ler, marcar_feita, BuscaProdutos, Classe, Comando, Estorno, Id, Pedido};
     use crate::erro::{Erro, Resultado};
     use crate::nfe_xml;
     use crate::{arquivos, compras, importar};
+
+    #[derive(Default, serde::Deserialize)]
+    #[serde(rename_all = "camelCase", default)]
+    struct EntradaCompraImportar {
+        caminho: String,
+        caminhos: Vec<String>,
+    }
 
     pub const COMANDOS: &[Comando] = &[
         Comando { nome: "compras_listar", classe: Classe::Leitura, funcao: compras_listar },
@@ -2266,22 +2476,32 @@ mod comandos {
     // contada à parte ("jaEmCompras"), não é erro; o XML sozinho repetido continua recusado. O que é de Peças (o
     // fornecedor; o item sem peça vai para as pendências que a tela de Peças mostra) segue como antes.
     fn compra_importar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        let d: Arquivo = ler(dados)?;
-        if d.caminho.trim().is_empty() {
+        let d: EntradaCompraImportar = ler(dados)?;
+        // Achado 2: aceita tanto `{ caminho }` quanto `{ caminhos: [...] }` (seleção múltipla/arraste)
+        // para que `analisar_lote` e `pacote` vejam o lote inteiro de uma vez.
+        let entradas: Vec<String> = if !d.caminhos.is_empty() {
+            d.caminhos.into_iter().filter(|c| !c.trim().is_empty()).collect()
+        } else if !d.caminho.trim().is_empty() {
+            vec![d.caminho]
+        } else {
+            Vec::new()
+        };
+        if entradas.is_empty() {
             return Err(Erro::validacao("Escolha o arquivo XML da nota."));
         }
         // 0.9.17: sem o CNPJ da loja (ou com um inválido) não importa:
         // a tela leva a Configurações › Loja e volta com os arquivos.
         let loja_cnpj = crate::requisitos::exigir_cnpj_da_loja(p.conn, crate::requisitos::PARA_COMPRAS)?;
-        let lista = arquivos::xmls(std::slice::from_ref(&d.caminho))?;
+        let lista = arquivos::xmls(&entradas)?;
         // T111 (A4): pré-analisa o pacote inteiro para detectar códigos e GTINs ambíguos entre notas.
         let lote =
             compras::analisar_lote(&loja_cnpj, lista.iter().filter(|x| x.erro.is_empty()).map(|x| x.texto.as_str()));
-        // T108: a pasta é um pacote mesmo com um XML só (o "Escolher uma pasta" da T107).
-        let pacote = lista.len() > 1
+        // T108 / T111: múltiplos arquivos, pasta ou arquivo compactado são tratados como pacote.
+        let pacote = entradas.len() > 1
+            || lista.len() > 1
             || lista.iter().any(|x| x.nome.contains(" › "))
             // N4 da 2ª conferência: o caminho como o `arquivos` o lê (aceita `file://` e `%xx`).
-            || arquivos::caminho_local(&d.caminho).is_dir();
+            || entradas.iter().any(|c| arquivos::caminho_local(c).is_dir());
         let mut fichas = Vec::new();
         let mut erros = Vec::new();
         // Notas emitidas para outro CNPJ: não entram; a tela mostra a
@@ -3245,5 +3465,141 @@ mod testes {
             .unwrap();
         assert_eq!(motivo_dup, "possivel_duplicata_descricao");
         assert!(cands.contains(&existente), "candidata de 120 chars: {cands}");
+    }
+
+    /// Achado 1 (Crítico — Hydrogen) e Achado 7.1 (Dois fornecedores pelo mesmo GTIN):
+    /// - item com custo == 0 (bonificação/brinde) cadastra com `preco_aberto = 1` sem abortar a NF-e;
+    /// - resolver pendência com `valor_unitario == 0` também cadastra com `preco_aberto = 1`;
+    /// - dois fornecedores distintos compartilhando o mesmo GTIN: descartar a 1ª e depois a 2ª nota limpa a peça sem zumbi.
+    #[test]
+    fn t111_h1_custo_zero_e_h7_dois_fornecedores_mesmo_gtin() {
+        let (b, u) = base();
+        let c = &b.conn;
+
+        // H1a: bonificação (custo == 0) + item pago na mesma NF-e não aborta a transação!
+        let mut ver = nfe_xml::ler_verificada(nfe_xml::EXEMPLO, crate::nfe_assinatura::Ancoras::padrao()).unwrap();
+        ver.nota.itens = vec![
+            ItemXml {
+                codigo: "BRINDE-01".into(),
+                descricao: "ADESIVO PROMOCIONAL BONIFICACAO".into(),
+                unidade: "UN".into(),
+                quantidade: 1000,
+                valor_produtos: 0,
+                ..Default::default()
+            },
+            ItemXml {
+                codigo: "ITEM-PAGO-02".into(),
+                descricao: "FILTRO DE COMBUSTIVEL NORMAL".into(),
+                unidade: "UN".into(),
+                quantidade: 1000,
+                valor_produtos: 5000,
+                ..Default::default()
+            },
+        ];
+        let criada =
+            criar_compra_com_opcoes(c, &b.dispositivo, &u, nfe_xml::EXEMPLO, &ver, true, &AmbiguidadesLote::default())
+                .expect("H1: item de custo zero não pode derrubar a NF-e!");
+        assert_eq!(criada.pecas_cadastradas, 2);
+        let preco_aberto: i64 = c
+            .query_row("SELECT preco_aberto FROM produto WHERE nome = 'ADESIVO PROMOCIONAL BONIFICACAO'", [], |l| {
+                l.get(0)
+            })
+            .unwrap();
+        assert_eq!(preco_aberto, 1, "H1: brinde sem custo nasce com preço na hora da venda");
+
+        // H1b: resolver pendência com valor_unitario == 0 como "nova" funciona!
+        let pend_id = crate::compras::pendencias::registrar_pendencia_xml(
+            c,
+            None,
+            "11222333000181",
+            "FORN TESTE",
+            "35261011222333000181550010000123451000000014",
+            "12345",
+            "2026-10-08",
+            &ItemXml {
+                codigo: "X1".into(),
+                descricao: "AMOSTRA GRATIS TESTE".into(),
+                unidade: "UN".into(),
+                quantidade: 1000,
+                valor_produtos: 0,
+                ..Default::default()
+            },
+            0,
+            "codigo_fraco_sem_gtin",
+            &[],
+        )
+        .unwrap();
+        let res = crate::importar::resolver_pendencia(
+            c,
+            &b.dispositivo,
+            &u,
+            &crate::importar::ResolverPendencia {
+                id: pend_id,
+                acao: "nova".into(),
+                produto_id: String::new(),
+                ..Default::default()
+            },
+        )
+        .expect("H1b: resolver pendência com valor_unitario == 0 não pode falhar!");
+        let pa_pend: i64 =
+            c.query_row("SELECT preco_aberto FROM produto WHERE id = ?1", [&res.produto_id], |l| l.get(0)).unwrap();
+        assert_eq!(pa_pend, 1);
+
+        // H7.1: Dois fornecedores distintos pelo mesmo GTIN; descarta 1ª e depois 2ª → limpa sem zumbi!
+        let (b2, u2) = base();
+        let c2 = &b2.conn;
+        let mut ver_a = nfe_xml::ler_verificada(nfe_xml::EXEMPLO, crate::nfe_assinatura::Ancoras::padrao()).unwrap();
+        ver_a.nota.chave = "35261011222333000181550010000000011000000011".into();
+        ver_a.nota.emitente.documento = "11222333000181".into();
+        ver_a.nota.itens = vec![ItemXml {
+            codigo: "A-100".into(),
+            gtin: "7891234567895".into(),
+            gtin_comercial: "7891234567895".into(),
+            descricao: "ROLAMENTO COMPARTILHADO GTIN".into(),
+            unidade: "UN".into(),
+            quantidade: 1000,
+            valor_produtos: 5000,
+            ..Default::default()
+        }];
+        let ca = criar_compra_com_opcoes(
+            c2,
+            &b2.dispositivo,
+            &u2,
+            nfe_xml::EXEMPLO,
+            &ver_a,
+            true,
+            &AmbiguidadesLote::default(),
+        )
+        .unwrap()
+        .id;
+        let mut ver_b = ver_a.clone();
+        ver_b.nota.chave = "35261033444555000181550010000000021000000022".into();
+        ver_b.nota.emitente.documento = "33444555000181".into();
+        ver_b.nota.emitente.nome = "OUTRO FORNECEDOR LTDA".into();
+        ver_b.nota.itens[0].codigo = "B-200".into();
+        let cb = criar_compra_com_opcoes(
+            c2,
+            &b2.dispositivo,
+            &u2,
+            nfe_xml::EXEMPLO,
+            &ver_b,
+            true,
+            &AmbiguidadesLote::default(),
+        )
+        .unwrap()
+        .id;
+        assert_eq!(c2.query_row::<i64, _, _>("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap(), 1);
+        excluir_rascunho(c2, &b2.dispositivo, &u2, &ca).unwrap();
+        assert_eq!(
+            c2.query_row::<i64, _, _>("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap(),
+            1,
+            "peça preservada enquanto compra B está aberta"
+        );
+        excluir_rascunho(c2, &b2.dispositivo, &u2, &cb).unwrap();
+        assert_eq!(
+            c2.query_row::<i64, _, _>("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap(),
+            0,
+            "H7.1: zumbi ficou no banco ao descartar a 2ª compra de outro fornecedor!"
+        );
     }
 }

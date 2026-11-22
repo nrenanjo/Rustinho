@@ -780,3 +780,347 @@ fn compras_pasta_por_endereco_tambem_e_pacote() {
     let r2 = l.ok("compra_importar", json!({ "caminho": endereco }));
     assert_eq!((r2["jaEmCompras"].clone(), r2["erros"].clone()), (json!(1), json!([])), "{r2}");
 }
+
+// ---------------------------------------------------------------------------
+// Rodada v2 — Provas dos achados da 1ª revisão independente (Hydrogen)
+// ---------------------------------------------------------------------------
+
+/// Achado 2 (Hydrogen): seleção múltipla de arquivos avulsos (`caminhos: [...]`)
+/// analisa todo o lote em `analisar_lote` e trata o conjunto como pacote (`jaEmCompras`, sem erro).
+#[test]
+fn opcao_c_h2_selecao_multipla_caminhos_usa_analisar_lote_e_pacote() {
+    let mut l = loja("t111-h2-multi", LOJA_CNPJ);
+    let nf501 = acervo_compras("nf501.xml");
+    let nf503 = acervo_compras("nf503.xml");
+    let dir = l.pasta.join("avulsos");
+    std::fs::create_dir_all(&dir).unwrap();
+    let p501 = dir.join("nf501.xml");
+    let p503 = dir.join("nf503.xml");
+    std::fs::write(&p501, &nf501).unwrap();
+    std::fs::write(&p503, &nf503).unwrap();
+    let caminhos = json!([p501.display().to_string(), p503.display().to_string()]);
+
+    let r = l.ok("compra_importar", json!({ "caminhos": caminhos }));
+    assert_eq!(r["compras"].as_array().unwrap().len(), 2, "{r}");
+    // Só F1-100 tem identidade inequívoca; F1-200 é ambíguo entre nf501 e nf503!
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 1, "F1-200 não pode nascer automático no lote multi-arquivo");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto_fornecedor WHERE codigo = 'F1-200'"), 0);
+    // Reimportar os mesmos 2 arquivos juntos: pacote conta 2 em jaEmCompras e 0 erros.
+    let r2 = l.ok("compra_importar", json!({ "caminhos": caminhos }));
+    assert_eq!((r2["jaEmCompras"].clone(), r2["erros"].clone()), (json!(2), json!([])), "{r2}");
+}
+
+/// Achado 3 (Hydrogen): fluxo "Corrigir identificação":
+/// 3a) lançar a compra após corrigir o código do fornecedor grava o código NOVO e NUNCA regrava o código velho;
+/// 3b) limpar GTIN e código do fornecedor (com `corrigir: true`) respeita o vazio (não restaura XML/gtins_json);
+/// 3c) informar código de fornecedor que já pertence a outra peça é recusado (sem `PassarPeca` silencioso).
+#[test]
+fn opcao_c_h3_corrigir_identificacao_nao_regrava_antigo_limpa_campos_e_nao_rouba_vinculo() {
+    // 3a) Corrigir B-1 -> F2-B100 em nf900 e lançar: produto_fornecedor fica só com F2-B100, nunca B-1.
+    let mut l = loja("t111-h3a", LOJA_CNPJ);
+    let nf900 = acervo_compras("nf900.xml");
+    let p = pasta_com(&l, "n900", &[("nf900.xml", &nf900)]);
+    let r = l.ok("compra_importar", json!({ "caminho": p }));
+    let compra_id = r["compras"][0]["id"].as_str().unwrap().to_string();
+    let pends = l.ok("xml_pendencias_listar", json!({}));
+    let p_b1 = pends.as_array().unwrap().iter().find(|x| x["codigoFornecedor"] == "B-1").unwrap();
+    let p_b2 = pends.as_array().unwrap().iter().find(|x| x["codigoFornecedor"] == "B-2").unwrap();
+
+    l.ok(
+        "xml_pendencia_resolver",
+        json!({
+            "id": p_b1["id"],
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "LAMPADA H4 CORRIGIDA",
+            "codigoFornecedor": "F2-B100",
+            "codigoBarras": "",
+            "unidade": "UN"
+        }),
+    );
+    // 3b) Na 2ª pendência (B-2), usuário limpa o código do fornecedor (""): não pode voltar a gravar B-2!
+    l.ok(
+        "xml_pendencia_resolver",
+        json!({
+            "id": p_b2["id"],
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "FUSIVEL 10A SEM CODIGO",
+            "codigoFornecedor": "",
+            "codigoBarras": "",
+            "unidade": "PC"
+        }),
+    );
+    let c = l.ok("compra_abrir", json!({ "id": compra_id }));
+    conferir_autorizacao(&mut l, &compra_id, "135260000000900");
+    l.ok("compra_lancar", json!({ "id": compra_id, "itens": escolhas_atuais(&c) }));
+
+    assert_eq!(
+        n(&l, "SELECT COUNT(*) FROM produto_fornecedor WHERE codigo = 'B-1'"),
+        0,
+        "H3a: lancar() regravou o código antigo B-1!"
+    );
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto_fornecedor WHERE codigo = 'F2-B100'"), 1);
+    assert_eq!(
+        n(&l, "SELECT COUNT(*) FROM produto_fornecedor WHERE codigo = 'B-2'"),
+        0,
+        "H3b: código apagado pelo usuário voltou a ser gravado!"
+    );
+
+    // 3b-gtin) Pendência cujo XML trouxe GTIN conflitante/indesejado: limpar codigoBarras com corrigir: true
+    // não pode re-injetar o GTIN antigo de gtins_json.
+    let mut l2 = loja("t111-h3b-gtin", LOJA_CNPJ);
+    let nf604 = fixture_codigos("nf604_patral_gtin_tributavel.xml");
+    // Cria peça existente com mesmo GTIN comercial de nf604 para provocar conflito/ambiguidade ou pré-existência.
+    let mut f_dup = l2.ok("produto_novo", json!({}));
+    f_dup["nome"] = json!("PECA JA COM GTIN");
+    f_dup["codigoBarras"] = json!("7891000000113");
+    f_dup["precos"][0]["preco"] = json!("10,00");
+    let pid_dona = l2.ok("produto_salvar", f_dup)["id"].as_str().unwrap().to_string();
+    // Desativa a peça dona para que nf604 vire pendência peca_desativada preservando gtins_json!
+    l2.executar(&format!("UPDATE produto SET ativo = 0 WHERE id = '{pid_dona}'"));
+    let p604 = pasta_com(&l2, "n604", &[("nf604.xml", &nf604)]);
+    l2.ok("compra_importar", json!({ "caminho": p604 }));
+    let pends2 = l2.ok("xml_pendencias_listar", json!({}));
+    assert_eq!(pends2.as_array().unwrap().len(), 1, "{pends2}");
+    // Usuário decide cadastrar nova peça limpando o GTIN (conforme dica da tela) e com código próprio.
+    let res2 = l2.ok(
+        "xml_pendencia_resolver",
+        json!({
+            "id": pends2[0]["id"],
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "LAMPADA H7 SEM GTIN",
+            "codigoFornecedor": "PT-9-ALT",
+            "codigoBarras": "",
+            "unidade": "CX"
+        }),
+    );
+    let nova_id = res2["produtoId"].as_str().unwrap().to_string();
+    assert_eq!(
+        n(&l2, &format!("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = '{nova_id}'")),
+        0,
+        "H3b: GTINs antigos de gtins_json foram re-injetados mesmo após usuário limpar o campo!"
+    );
+
+    // 3c) Corrigir codigoFornecedor para um código que já pertence a outra peça do mesmo fornecedor: recusa!
+    let mut l3 = loja("t111-h3c-roubo", LOJA_CNPJ);
+    let nf501 = acervo_compras("nf501.xml");
+    let nf503 = acervo_compras("nf503.xml");
+    let p3 = pasta_com(&l3, "lote", &[("01_nf501.xml", &nf501), ("02_nf503.xml", &nf503)]);
+    l3.ok("compra_importar", json!({ "caminho": p3 }));
+    // F1-100 já está vinculado à peça criada automaticamente.
+    let dono_antes: String = l3
+        .conexao()
+        .query_row("SELECT produto_id FROM produto_fornecedor WHERE codigo = 'F1-100'", [], |x| x.get(0))
+        .unwrap();
+    let pends3 = l3.ok("xml_pendencias_listar", json!({}));
+    let err_roubo = l3.chamar(
+        "xml_pendencia_resolver",
+        json!({
+            "id": pends3[0]["id"],
+            "acao": "nova",
+            "produtoId": "",
+            "corrigir": true,
+            "nome": "OUTRA PECA",
+            "codigoFornecedor": "F1-100",
+            "codigoBarras": "",
+            "unidade": "UN"
+        }),
+    );
+    assert_eq!(err_roubo["ok"], false, "H3c: permitiu roubar código F1-100 de outra peça: {err_roubo}");
+    assert_eq!(err_roubo["campo"], "codigoFornecedor", "{err_roubo}");
+    let dono_depois: String = l3
+        .conexao()
+        .query_row("SELECT produto_id FROM produto_fornecedor WHERE codigo = 'F1-100'", [], |x| x.get(0))
+        .unwrap();
+    assert_eq!(dono_depois, dono_antes, "vínculo original de F1-100 preservado");
+}
+
+/// Achado 4 (Hydrogen): Peças (`importar_cadastros`) também bloqueia duplicata por descrição compacta idêntica
+/// (ex.: NF601 `00008373` já cadastrada, depois NF602 `8373` sem GTIN com mesma descrição → pendência, sem duplicar).
+#[test]
+fn opcao_c_h4_pecas_trazer_cadastros_bloqueia_duplicata_por_descricao() {
+    let mut l = loja("t111-h4-pecas-dup", LOJA_CNPJ);
+    let nf601 = fixture_codigos("nf601_patral_00008373.xml");
+    let nf602 = fixture_codigos("nf602_patral_8373.xml");
+    let p1 = pasta_com(&l, "n1", &[("nf601.xml", &nf601)]);
+    let p2 = pasta_com(&l, "n2", &[("nf602.xml", &nf602)]);
+    let r1 = cadastrar(&mut l, &p1, true);
+    assert_eq!(r1["pecas"], 1, "{r1}");
+    let prev2 = l.ok("importar_previa", json!({ "arquivos": [p2.clone()] }));
+    assert_eq!(prev2["pecasFornecedorNovas"].as_i64(), Some(0), "prévia não propõe duplicar: {prev2}");
+    assert_eq!(prev2["vaoParaPendencias"].as_i64(), Some(1), "prévia manda para pendência: {prev2}");
+    let r2 = cadastrar(&mut l, &p2, true);
+    assert_eq!(r2["pecas"], 0, "não duplicou peça em Peças: {r2}");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 1);
+    let pends = l.ok("xml_pendencias_listar", json!({}));
+    assert_eq!(pends.as_array().unwrap().len(), 1, "{pends}");
+    assert_eq!(pends[0]["motivo"], "possivel_duplicata_descricao", "{pends}");
+}
+
+/// Achado 5 (Hydrogen): atribuir código interno pendente (`definir_codigo`) não quebra a limpeza anti-órfão (A5)
+/// nem dispara falso-positivo de D-09 (A6) no primeiro lançamento pelo caixa.
+#[test]
+fn opcao_c_h5_definir_codigo_interno_nao_quebra_limpeza_nem_d09() {
+    // 1) Descarte após definir_codigo continua limpando a peça provisória órfã.
+    let mut l = loja("t111-h5-desc", LOJA_CNPJ);
+    let a = arquivo(&l, "compra");
+    let r = l.ok("compra_importar", json!({ "caminho": a }));
+    let compra_id = r["compras"][0]["id"].as_str().unwrap().to_string();
+    let pid0 = r["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
+    // Simula peça que nasceu sem faixa e recebeu código interno via `definir_codigo` depois.
+    l.executar(&format!("UPDATE produto SET codigo = '', atualizado_em = criado_em WHERE id = '{pid0}'"));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    {
+        let c = l.conexao();
+        let disp: String =
+            c.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |x| x.get(0)).unwrap();
+        assert!(rustinho_nucleo::produtos::definir_codigo(&c, &disp, &pid0, "990001").unwrap());
+    }
+    l.ok("compra_descartar", json!({ "id": compra_id }));
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 0, "H5: definir_codigo travou a limpeza anti-órfão!");
+
+    // 2) Primeiro lançamento pelo caixa com frete extra após definir_codigo não dispara falso-positivo D-09.
+    let mut l2 = loja("t111-h5-d09", LOJA_CNPJ);
+    l2.usuario_caixa("Bia", SENHA_BIA);
+    l2.entrar("Bia", SENHA_BIA);
+    let a2 = arquivo(&l2, "compra2");
+    let r2 = l2.ok("compra_importar", json!({ "caminho": a2 }));
+    let compra_id2 = r2["compras"][0]["id"].as_str().unwrap().to_string();
+    let pid2 = r2["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
+    l2.executar(&format!("UPDATE produto SET codigo = '', atualizado_em = criado_em WHERE id = '{pid2}'"));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    {
+        let c = l2.conexao();
+        let disp: String =
+            c.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |x| x.get(0)).unwrap();
+        assert!(rustinho_nucleo::produtos::definir_codigo(&c, &disp, &pid2, "990002").unwrap());
+    }
+    conferir_autorizacao(&mut l2, &compra_id2, "135260000000001");
+    let c2 = l2.ok("compra_abrir", json!({ "id": compra_id2 }));
+    let lanc = l2.ok(
+        "compra_lancar",
+        json!({ "id": compra_id2, "itens": escolhas_atuais(&c2), "freteExtra": "30,00", "atualizarPrecos": true }),
+    );
+    assert_eq!(lanc["resumo"]["precosAtualizados"], 0, "H5: falso-positivo D-09 após definir_codigo: {lanc}");
+}
+
+/// Achado 8 (Hydrogen): descartar rascunho ou lançar com item ignorado fecha pendências exclusivas da nota;
+/// e uma pendência antiga `"sem_vinculo"` não trava o cadastro automático na Opção C.
+#[test]
+fn opcao_c_h8_descartar_ou_ignorar_limpa_pendencia_e_sem_vinculo_antiga_nao_trava() {
+    // 1) Descartar rascunho fecha pendências exclusivas daquela nota.
+    let mut l = loja("t111-h8-desc", LOJA_CNPJ);
+    let nf900 = acervo_compras("nf900.xml");
+    let p = pasta_com(&l, "n900", &[("nf900.xml", &nf900)]);
+    let r = l.ok("compra_importar", json!({ "caminho": p }));
+    let id = r["compras"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"), 2);
+    l.ok("compra_descartar", json!({ "id": id }));
+    assert_eq!(
+        n(&l, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"),
+        0,
+        "H8: pendências do rascunho descartado ficaram órfãs!"
+    );
+
+    // 2) Lançar marcando item pendente como "ignorar" encerra a pendência daquele item.
+    let mut l2 = loja("t111-h8-ign", LOJA_CNPJ);
+    let nf503 = acervo_compras("nf503.xml");
+    let p2 = pasta_com(&l2, "n503", &[("nf503.xml", &nf503)]);
+    let r2 = l2.ok("compra_importar", json!({ "caminho": p2 }));
+    let id2 = r2["compras"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(n(&l2, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"), 2);
+    let c2 = l2.ok("compra_abrir", json!({ "id": id2 }));
+    let its = c2["itens"].as_array().unwrap();
+    conferir_autorizacao(&mut l2, &id2, "135260000000503");
+    l2.ok(
+        "compra_lancar",
+        json!({
+            "id": id2,
+            "itens": [
+                { "id": its[0]["id"], "acao": "nova", "produtoId": "", "fator": "1", "baixarPreco": false },
+                { "id": its[1]["id"], "acao": "ignorar", "produtoId": "", "fator": "1", "baixarPreco": false }
+            ]
+        }),
+    );
+    assert_eq!(
+        n(&l2, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"),
+        0,
+        "H8: pendência do item ignorado no lançar ficou aberta!"
+    );
+
+    // 3) Pendência antiga `sem_vinculo` (vinda de Peças sem "Peças do fornecedor") não trava o cadastro automático
+    //    na Opção C ao importar por Compras, e é resolvida automaticamente!
+    let mut l3 = loja("t111-h8-antiga", LOJA_CNPJ);
+    let a = arquivo(&l3, "compra");
+    l3.ok(
+        "importar_cadastros",
+        json!({ "arquivos": [a.clone()], "clientes": false, "fornecedores": true, "pecasLoja": false,
+                "pecasFornecedor": false, "compras": false }),
+    );
+    assert_eq!(
+        n(
+            &l3,
+            "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente' AND motivo = 'sem_vinculo'"
+        ),
+        3
+    );
+    let r3 = l3.ok("compra_importar", json!({ "caminho": a }));
+    assert_eq!(r3["pecasCadastradas"], 3, "H8: pendência antiga sem_vinculo travou a Opção C: {r3}");
+    assert_eq!(n(&l3, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"), 0);
+}
+
+/// Achado 9 (Hydrogen): `compra_abrir` expõe `motivoPendencia` legível nos itens pendentes,
+/// `temProvisoriasDescartaveis` correto inclusive na 2ª nota após descarte da 1ª, e prévia de `precoNovo`
+/// coerente com o preço gravado no lançamento com `freteExtra`.
+#[test]
+fn opcao_c_h9_ficha_motivo_pendencia_provisorias_e_previa_coerente() {
+    // 1) motivoPendencia no item pendente.
+    let mut l = loja("t111-h9-motivo", LOJA_CNPJ);
+    let nf900 = acervo_compras("nf900.xml");
+    let p = pasta_com(&l, "n900", &[("nf900.xml", &nf900)]);
+    let r = l.ok("compra_importar", json!({ "caminho": p }));
+    let it0 = &r["compras"][0]["itens"][0];
+    assert!(
+        it0["motivoPendencia"].as_str().unwrap_or("").contains("muito curto"),
+        "H9: falta motivoPendencia legível no item: {it0}"
+    );
+
+    // 2) temProvisoriasDescartaveis na 2ª nota após descartar a 1ª.
+    let mut l2 = loja("t111-h9-desc2", LOJA_CNPJ);
+    let nf501 = acervo_compras("nf501.xml");
+    let nf502 = acervo_compras("nf502.xml");
+    let p2 = pasta_com(&l2, "lote", &[("01_nf501.xml", &nf501), ("02_nf502.xml", &nf502)]);
+    let r2 = l2.ok("compra_importar", json!({ "caminho": p2 }));
+    let compras = r2["compras"].as_array().unwrap();
+    let id501 = compras.iter().find(|c| c["numero"] == "501").unwrap()["id"].as_str().unwrap().to_string();
+    let id502 = compras.iter().find(|c| c["numero"] == "502").unwrap()["id"].as_str().unwrap().to_string();
+    l2.ok("compra_descartar", json!({ "id": id501 }));
+    let c502 = l2.ok("compra_abrir", json!({ "id": id502 }));
+    assert_eq!(c502["temProvisoriasDescartaveis"], true, "H9: 2ª nota não sinalizou provisórias descartáveis: {c502}");
+
+    // 3) Prévia `precoNovo` com freteExtra bate exatamente com `precoAtual` após lançar.
+    let mut l3 = loja("t111-h9-previa", LOJA_CNPJ);
+    let a = arquivo(&l3, "compra");
+    let r3 = l3.ok("compra_importar", json!({ "caminho": a }));
+    let id3 = r3["compras"][0]["id"].as_str().unwrap().to_string();
+    let c3 = l3.ok("compra_abrir", json!({ "id": id3 }));
+    let c3_frete = l3.ok(
+        "compra_atualizar",
+        json!({ "id": id3, "freteExtra": "104,00", "atualizarPrecos": true, "observacoes": "", "gerarPagar": false,
+                "itens": escolhas_atuais(&c3) }),
+    );
+    let preco_previsto = c3_frete["itens"][0]["peca"]["precoNovo"].as_str().unwrap().to_string();
+    conferir_autorizacao(&mut l3, &id3, "135260000000001");
+    let lanc = l3.ok(
+        "compra_lancar",
+        json!({ "id": id3, "freteExtra": "104,00", "atualizarPrecos": true, "observacoes": "", "gerarPagar": false,
+                "itens": escolhas_atuais(&c3_frete) }),
+    );
+    let preco_lancado = lanc["compra"]["itens"][0]["peca"]["precoAtual"].as_str().unwrap().to_string();
+    assert_eq!(preco_previsto, preco_lancado, "H9: prévia precoNovo divergiu do preço gravado no lançar!");
+}

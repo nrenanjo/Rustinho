@@ -67,8 +67,8 @@ pub(crate) fn registrar_pendencia_xml(
                     cst_pis = ?18,
                     quantidade = ?19,
                     valor_unitario = ?20,
-                    motivo = ?21,
-                    candidatos_json = ?22
+                    motivo = CASE WHEN ?21 = 'sem_vinculo' AND motivo <> 'sem_vinculo' THEN motivo ELSE ?21 END,
+                    candidatos_json = CASE WHEN ?21 = 'sem_vinculo' AND motivo <> 'sem_vinculo' THEN candidatos_json ELSE ?22 END
               where id = ?1",
             params![
                 id_existente,
@@ -198,5 +198,136 @@ pub(crate) fn marcar_resolvida(conn: &Connection, id: &str, produto_id: &str, ag
           where id = ?1",
         params![id, produto_id, agora],
     )?;
+    Ok(())
+}
+
+/// T111 (Achado 3): marca a pendência como resolvida gravando o código do
+/// fornecedor corrigido pelo usuário (inclusive vazio `""`) e limpando os
+/// GTINs antigos quando o usuário editou a identificação, preservando
+/// `codigo_compacto` original para que os rascunhos de compra em aberto sejam
+/// religados e saibam que não devem regravar o código/GTIN antigos do XML.
+pub(crate) fn marcar_resolvida_com_correcao(
+    conn: &Connection,
+    id: &str,
+    produto_id: &str,
+    agora: &str,
+    codigo_corrigido: &str,
+    gtins_json_corrigido: &str,
+) -> Resultado<()> {
+    conn.execute(
+        "update xml_pendencia_identificacao
+            set situacao = 'resolvida', produto_id = ?2, resolvido_em = ?3,
+                codigo_fornecedor = ?4, gtins_json = ?5
+          where id = ?1",
+        params![id, produto_id, agora, codigo_corrigido, gtins_json_corrigido],
+    )?;
+    Ok(())
+}
+
+/// Verifica se existe algum item pendente (`acao = ''`) em outra compra em
+/// rascunho aguardando a mesma combinação `(fornecedor_id, codigo_compacto,
+/// descricao_compacta)`. Devolve a chave da primeira compra encontrada, se houver.
+fn outro_rascunho_pendente(
+    conn: &Connection,
+    chave_excluir: &str,
+    fornecedor_id: &str,
+    codigo_compacto: &str,
+    descricao_compacta: &str,
+) -> Resultado<Option<String>> {
+    if fornecedor_id.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT c.chave, i.codigo_fornecedor, i.descricao
+           FROM compra_item i JOIN compra c ON c.id = i.compra_id
+          WHERE c.situacao = 'rascunho'
+            AND c.chave <> ?1
+            AND c.fornecedor_id = ?2
+            AND i.acao = ''",
+    )?;
+    let linhas = stmt.query_map(params![chave_excluir, fornecedor_id], |l| {
+        Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?))
+    })?;
+    for linha in linhas {
+        let (chave, cod, desc) = linha?;
+        if texto::compactar(&cod) == codigo_compacto && texto::compactar(&desc) == descricao_compacta {
+            return Ok(Some(chave));
+        }
+    }
+    Ok(None)
+}
+
+/// T111 (Achado 8): após descartar um rascunho de compra, remove as pendências
+/// abertas ligadas exclusivamente àquela NF-e (se outro rascunho ainda depende
+/// do mesmo item, apenas aponta a pendência para a chave do rascunho vivo).
+pub(crate) fn limpar_pendencias_da_nota_descartada(conn: &Connection, chave_nfe: &str) -> Resultado<()> {
+    if chave_nfe.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, COALESCE(fornecedor_id, ''), codigo_compacto, descricao_compacta
+           FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente' AND chave_nfe = ?1",
+    )?;
+    let linhas: Vec<(String, String, String, String)> =
+        stmt.query_map([chave_nfe], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?.collect::<Result<_, _>>()?;
+    for (pid, fid, cod_comp, desc_comp) in linhas {
+        if let Some(outra_chave) = outro_rascunho_pendente(conn, chave_nfe, &fid, &cod_comp, &desc_comp)? {
+            conn.execute(
+                "update xml_pendencia_identificacao set chave_nfe = ?2 where id = ?1",
+                params![pid, outra_chave],
+            )?;
+        } else {
+            conn.execute("delete from xml_pendencia_identificacao where id = ?1", [&pid])?;
+        }
+    }
+    Ok(())
+}
+
+/// T111 (Achado 8): quando um item pendente é marcado como `"ignorar"` e a
+/// compra é lançada, remove a pendência aberta daquele item caso nenhum outro
+/// rascunho de compra esteja esperando por ele.
+pub(crate) fn fechar_pendencia_item_ignorado(
+    conn: &Connection,
+    fornecedor_id: &str,
+    chave_nfe: &str,
+    codigo_fornecedor: &str,
+    descricao: &str,
+) -> Resultado<()> {
+    let compacto = texto::compactar(codigo_fornecedor);
+    let desc_comp = texto::compactar(descricao);
+    let doc: String = if fornecedor_id.is_empty() {
+        String::new()
+    } else {
+        conn.query_row("SELECT documento FROM pessoa WHERE id = ?1", [fornecedor_id], |l| l.get(0))
+            .optional()?
+            .unwrap_or_default()
+    };
+    let mut stmt = conn.prepare_cached(
+        "SELECT id FROM xml_pendencia_identificacao
+          WHERE situacao = 'pendente'
+            AND (fornecedor_id = ?1 OR (?2 <> '' AND fornecedor_documento = ?2))
+            AND (chave_nfe = ?3 OR codigo_compacto <> '')
+            AND codigo_compacto = ?4
+            AND descricao_compacta = ?5",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![fornecedor_id, doc, chave_nfe, compacto, desc_comp], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    if let Some(outra_chave) = outro_rascunho_pendente(conn, chave_nfe, fornecedor_id, &compacto, &desc_comp)? {
+        for pid in ids {
+            conn.execute(
+                "update xml_pendencia_identificacao set chave_nfe = ?2 where id = ?1",
+                params![pid, outra_chave],
+            )?;
+        }
+    } else {
+        for pid in ids {
+            conn.execute("delete from xml_pendencia_identificacao where id = ?1", [&pid])?;
+        }
+    }
     Ok(())
 }

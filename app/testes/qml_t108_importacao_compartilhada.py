@@ -32,12 +32,14 @@ import QtQuick
 QtObject {
     property var respostas: []
     property var gravacoes: []
+    property var gravacoesDemoradas: []
     property bool repetidaAgora: false
     function caminho(a) { return a }
     function novaChave() { return "chave" }
     function gravar(comando, dados, chave) { gravacoes.push({ comando: comando, dados: dados, chave: chave }); return respostas.shift() }
-    function gravarDemorado(comando, dados, texto, depois, chave) { depois(respostas.shift()) }
+    function gravarDemorado(comando, dados, texto, depois, chave) { gravacoesDemoradas.push({ comando: comando, dados: dados, texto: texto, chave: chave }); depois(respostas.shift()) }
     function chamarDemorado(comando, dados, texto, depois) { depois(respostas.shift()) }
+    function chamar(comando, dados) { return respostas.shift() }
 }
 """
 
@@ -61,9 +63,32 @@ TestCase {
         id: janelaFalsa
         property var avisos: []
         property var abertas: []
+        property var confirmacoes: []
+        property bool guiarRetorno: false
         function avisar(texto, tipo) { avisos.push({ texto: texto, tipo: tipo }) }
         function abrir(nome, propriedades) { abertas.push(nome) }
-        function guiar(campo, erro, depois) { return false }
+        function guiar(campo, erro, depois) { return guiarRetorno }
+        function confirmar(titulo, detalhe, acao, depois, tipo) {
+            confirmacoes.push({ titulo: titulo, detalhe: detalhe, acao: acao, tipo: tipo })
+        }
+    }
+
+    QtObject {
+        id: telaCompraFalsa
+        property var janela: janelaFalsa
+        property var compra: null
+%DESCARTAR%
+    }
+
+    QtObject {
+        id: linhaItem
+        property var item: ({})
+        property bool editavel: true
+        property var peca: item.peca || null
+        readonly property bool pendente: item.acao === ""
+        readonly property bool ignorado: item.acao === "ignorar"
+        function notaItem() { return %NOTA_ITEM% }
+        function mostraCustoBaixou() { return %VIS_BAIXOU% }
     }
 
     QtObject {
@@ -132,7 +157,10 @@ TestCase {
     function init() {
         janelaFalsa.avisos = []
         janelaFalsa.abertas = []
+        janelaFalsa.confirmacoes = []
+        janelaFalsa.guiarRetorno = false
         Api.gravacoes = []
+        Api.gravacoesDemoradas = []
         painel.escolhas = null
         painel.pendenciaAberta = null
         painel.corrigindoIdentificacao = false
@@ -142,6 +170,13 @@ TestCase {
         painel.qPecasLoja = false
         painel.qPecasFornecedor = false
         painel.qCompras = false
+        telaCompraFalsa.compra = null
+        linhaItem.item = ({})
+        linhaItem.editavel = true
+        campoCorrNome.erro = ""
+        campoCorrCodigo.erro = ""
+        campoCorrBarras.erro = ""
+        campoCorrUnidade.erro = ""
     }
 
     function test_n1_com_erro_uma_mensagem_so_e_de_erro() {
@@ -250,6 +285,57 @@ TestCase {
         compare(campoCorrBarras.erro, "GTIN inválido")
         verify(painel.pendenciaAberta !== null, "mantém a pendência aberta para ajustar")
     }
+
+    function test_t111_h2_selecao_multipla_envia_caminhos_em_uma_chamada() {
+        Api.respostas = [{ ok: true, dados: { compras: [{ id: "1" }, { id: "2" }], erros: [], conflitos: [],
+                                              pecasCadastradas: 2, pendenciasIdentificacao: 1 } }]
+        tela.importar(["file:///tmp/a.xml", "file:///tmp/b.xml"])
+        compare(Api.gravacoesDemoradas.length, 1, "H2: deve mandar todos os arquivos em uma única chamada")
+        compare(Api.gravacoesDemoradas[0].comando, "compra_importar")
+        compare(Api.gravacoesDemoradas[0].dados.caminhos.length, 2, JSON.stringify(Api.gravacoesDemoradas[0].dados))
+        compare(janelaFalsa.avisos.length, 1)
+        verify(janelaFalsa.avisos[0].texto.indexOf("2 notas importadas") >= 0, janelaFalsa.avisos[0].texto)
+    }
+
+    function test_t111_h3_corrigir_envia_flag_e_erro_nome() {
+        painel.abrirPendencia({ id: "p-3", descricao: "CORREIA", codigoFornecedor: "B-1", gtinComercial: "", unidade: "UN" })
+        campoCorrNome.texto = ""
+        Api.respostas = [{ ok: false, campo: "nome", erro: "Informe o nome da peça." }]
+        painel.resolverComoNova(true)
+        compare(Api.gravacoes.length, 1)
+        compare(Api.gravacoes[0].dados.corrigir, true, "H3: deve enviar corrigir: true")
+        compare(campoCorrNome.erro, "Informe o nome da peça.", "H3: erro de nome deve ir para campoCorrNome")
+        verify(painel.pendenciaAberta !== null)
+    }
+
+    function test_t111_h9_linha_item_editavel_motivo_e_baixou() {
+        linhaItem.item = { acao: "nova", achadoPor: "importacao", unidade: "CX", peca: { custoBaixou: true } }
+        linhaItem.editavel = false
+        verify(linhaItem.notaItem().indexOf("confira antes de lançar") < 0,
+               "H9b: nota já lançada não pode dizer confira antes de lançar: " + linhaItem.notaItem())
+        linhaItem.editavel = true
+        verify(linhaItem.mostraCustoBaixou(), "H9b: faixa custoBaixou deve valer também para acao nova")
+
+        linhaItem.item = { acao: "", achadoPor: "", motivoPendencia: "Código do fornecedor muito curto e sem GTIN válido" }
+        verify(linhaItem.notaItem().indexOf("muito curto") >= 0,
+               "H9b: item pendente deve exibir motivoPendencia real: " + linhaItem.notaItem())
+    }
+
+    function test_t111_h9_descartar_avisa_provisorias_pelo_sinal_do_nucleo() {
+        telaCompraFalsa.compra = {
+            id: "c-2",
+            temProvisoriasDescartaveis: true,
+            itens: [{ achadoPor: "fornecedor" }]
+        }
+        telaCompraFalsa.descartar()
+        compare(janelaFalsa.confirmacoes.length, 1)
+        verify(janelaFalsa.confirmacoes[0].detalhe.indexOf("Peças provisórias") >= 0,
+               "H9c: deve avisar sobre peças provisórias na 2ª nota: " + janelaFalsa.confirmacoes[0].detalhe)
+    }
+
+    function test_t111_h9_tela_compra_tem_atalho_conferir_pendencias() {
+        verify(%TEM_ATALHO_PENDENCIAS%, "H9a: TelaCompra.qml deve oferecer atalho para conferir pendências")
+    }
 }
 """
 
@@ -274,9 +360,16 @@ def achar(padrao, texto, nome, grupo=0):
 
 def main():
     compras = open(os.path.join(RAIZ, "app", "qml", "TelaCompras.qml"), encoding="utf-8").read()
+    compra = open(os.path.join(RAIZ, "app", "qml", "TelaCompra.qml"), encoding="utf-8").read()
+    linha_item = open(os.path.join(RAIZ, "app", "qml", "LinhaItemCompra.qml"), encoding="utf-8").read()
     cad = open(os.path.join(RAIZ, "app", "qml", "ImportarCadastros.qml"), encoding="utf-8").read()
+    nota_bloco = achar(r"Nota \{\n\s*visible: text !== \"\"\n\s*text: \{\n(.*?)\n\s*\}\n\s*font\.pixelSize: 13", linha_item, "nota do item", 1)
     trocas = {
         "%IMPORTAR%": achar(r"^    function importar\(arquivos\) \{\n.*?^    \}\n", compras, "importar"),
+        "%DESCARTAR%": achar(r"^    function descartar\(\) \{\n.*?^    \}\n", compra, "descartar"),
+        "%NOTA_ITEM%": f"(function() {{\n{nota_bloco.replace('linha.', 'linhaItem.')}\n}})()",
+        "%VIS_BAIXOU%": achar(r"// O custo baixou: o preço baixa junto\?\n\s*Rectangle \{\n\s*visible: ([^\n]+)", linha_item, "visivel custoBaixou", 1).replace("linha.", "linhaItem."),
+        "%TEM_ATALHO_PENDENCIAS%": "true" if ("abrirPendencias()" in compra and "Conferir pendências" in compra) else "false",
         "%CAT%": achar(r"^    function cat\(codigo\) \{\n.*?^    \}\n", cad, "cat"),
         "%TEXTO%": achar(r"^    function texto\(n, um, varios\) \{\n.*?^    \}\n", cad, "texto"),
         "%LER%": achar(r"^    function lerArquivos\(\) \{\n.*?^    \}\n", cad, "lerArquivos"),

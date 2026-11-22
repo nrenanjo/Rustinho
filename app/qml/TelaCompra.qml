@@ -174,7 +174,9 @@ FocusScope {
     }
 
     function descartar() {
-        const temProvisorias = !!compra && (compra.itens || []).some(it => it.achadoPor === "importacao")
+        const temProvisorias = !!compra && (compra.temProvisoriasDescartaveis === true
+                || (compra.temProvisoriasDescartaveis === undefined
+                    && (compra.itens || []).some(it => it.achadoPor === "importacao")))
         const detalhe = temProvisorias
                 ? "Nada foi para o estoque ainda. Peças provisórias criadas só por esta importação (sem uso ou edição) também serão removidas. Você pode importar o XML de novo depois."
                 : "Nada foi para o estoque ainda. Você pode importar o XML de novo depois."
@@ -419,6 +421,12 @@ FocusScope {
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
+                        Botao {
+                            visible: tela.rascunho && !!tela.compra && tela.compra.pendentes > 0
+                            text: "Conferir pendências (" + (tela.compra ? tela.compra.pendentes : 0) + ")"
+                            tipo: "secundario"
+                            onClicked: pendenciasXml.abrirPendencias()
+                        }
                     }
 
                     Faixa {
@@ -598,6 +606,11 @@ FocusScope {
     EscolherPeca {
         id: escolher
         onEscolhida: (produtoId) => tela.gravar(tela.itemEscolhendo, { acao: "ligar", produtoId: produtoId })
+    }
+
+    ImportarCadastros {
+        id: pendenciasXml
+        onImportou: tela.carregar()
     }
 
     // D7 (provisória, até o PEND-15): conferência humana do gerente no portal.

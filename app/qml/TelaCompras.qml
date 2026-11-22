@@ -37,10 +37,13 @@ FocusScope {
     }
 
     // Cada arquivo pode ser um XML, um .zip/.rar com várias notas ou uma pasta.
-    // Um de cada vez, à parte, com a tela de espera (0.9.15).
+    // T111 (Achado 2): manda o lote inteiro numa chamada só para o núcleo
+    // analisar ambiguidades entre todas as notas e tratar seleção múltipla como pacote.
     function importar(arquivos) {
         // Caminhos (os arquivos que esperavam o requisito já vêm assim).
         const lista = Array.from(arquivos).map(a => /^(file|content):/.test(a.toString()) ? Api.caminho(a.toString()) : a.toString())
+        if (lista.length === 0)
+            return
         const novas = []
         const erros = []
         const conflitos = []
@@ -50,41 +53,6 @@ FocusScope {
         let pendenciasIdentificacao = 0
         pendentes = []
         avisoPendentes = ""
-        function proximo(i) {
-            if (i >= lista.length) {
-                terminar()
-                return
-            }
-            const arquivo = lista[i]
-            // FALHA-04: uma chave para a importação deste arquivo.
-            const chaveArquivo = Api.novaChave()
-            Api.gravarDemorado("compra_importar", { caminho: arquivo },
-                               lista.length > 1 ? "Importando " + (i + 1) + " de " + lista.length + "…" : "Importando o XML…", r => {
-                if (r.ok) {
-                    // Nota de outro CNPJ não entra: vem em "conflitos" (caso 2b).
-                    for (const c of r.dados.compras)
-                        novas.push(c)
-                    for (const e of r.dados.erros)
-                        erros.push(e)
-                    for (const c of r.dados.conflitos)
-                        conflitos.push(c)
-                    jaEmCompras += r.dados.jaEmCompras || 0
-                    pecasCadastradas += r.dados.pecasCadastradas || 0
-                    pendenciasIdentificacao += r.dados.pendenciasIdentificacao || 0
-                } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
-                    // Falta o CNPJ da loja: a navegação guiada leva a
-                    // Configurações › Loja; este arquivo e os que faltam ficam
-                    // esperando aqui.
-                    tela.pendentes = lista.slice(i)
-                    if (novas.length > 0 || erros.length > 0 || conflitos.length > 0)
-                        terminar()
-                    return
-                } else {
-                    erros.push(nomeArquivo(arquivo) + ": " + r.erro)
-                }
-                proximo(i + 1)
-            }, chaveArquivo)
-        }
         function terminar() {
             buscar()
             tela.guardarNaoImportadas(conflitos)
@@ -111,7 +79,31 @@ FocusScope {
             if (novas.length === 1)
                 janela.abrir("TelaCompra", { compraId: novas[0].id })
         }
-        proximo(0)
+        // FALHA-04: uma chave para a importação deste lote.
+        const chaveLote = Api.novaChave()
+        Api.gravarDemorado("compra_importar", { caminhos: lista },
+                           lista.length > 1 ? "Importando " + lista.length + " arquivos…" : "Importando o XML…", r => {
+            if (r.ok) {
+                // Nota de outro CNPJ não entra: vem em "conflitos" (caso 2b).
+                for (const c of r.dados.compras)
+                    novas.push(c)
+                for (const e of r.dados.erros)
+                    erros.push(e)
+                for (const c of r.dados.conflitos)
+                    conflitos.push(c)
+                jaEmCompras += r.dados.jaEmCompras || 0
+                pecasCadastradas += r.dados.pecasCadastradas || 0
+                pendenciasIdentificacao += r.dados.pendenciasIdentificacao || 0
+                terminar()
+            } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
+                // Falta o CNPJ da loja: a navegação guiada leva a
+                // Configurações › Loja; os arquivos ficam esperando aqui.
+                tela.pendentes = lista
+            } else {
+                erros.push(lista.length === 1 ? nomeArquivo(lista[0]) + ": " + r.erro : r.erro)
+                terminar()
+            }
+        }, chaveLote)
     }
 
     // Volta da navegação guiada: os arquivos continuam esperando. Com o

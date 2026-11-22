@@ -144,6 +144,9 @@ pub enum JaLigado {
     /// Passa para esta peça com o fator novo (lançar a compra: A08, que a 4.2
     /// muda).
     PassarPecaEFator,
+    /// T111 (H3): vincula se livre; se já estiver nesta mesma peça, atualiza
+    /// apenas o fator; nunca rouba o código de outra peça.
+    ManterPecaAtualizarFator,
 }
 
 /// Liga o código que o fornecedor usa a uma peça (`produto_fornecedor`), pela
@@ -181,6 +184,13 @@ pub fn vincular_fornecedor(
              ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
                SET codigo = excluded.codigo, produto_id = excluded.produto_id, fator = excluded.fator,
                    atualizado_em = excluded.atualizado_em"
+        }
+        JaLigado::ManterPecaAtualizarFator => {
+            "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT (fornecedor_id, codigo_compacto) DO UPDATE
+               SET fator = excluded.fator, atualizado_em = excluded.atualizado_em
+               WHERE produto_fornecedor.produto_id = excluded.produto_id"
         }
     };
     let n = conn.execute(sql, params![fornecedor_id, compacto, codigo, produto_id, fator, tempo::agora()])?;
@@ -401,19 +411,22 @@ pub fn trocar_codigo_interno(
 
 /// Dá o código interno a uma peça que estava com código a definir, com o
 /// índice de busca. Devolve se deu (`false` = a peça já tinha código).
+/// T111 (Achado 5): atribuir código automático da faixa não é edição manual da
+/// peça — `atualizado_em` permanece intacto (`codigo` e `codigo_validado` já
+/// disparam o gatilho de sincronização).
 pub fn definir_codigo_interno(
     conn: &Connection,
     id: &str,
     codigo: &str,
     (busca, codigos): &(String, String),
-    agora: &str,
+    _agora: &str,
     dispositivo: &str,
 ) -> Resultado<bool> {
     let n = conn.execute(
-        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, atualizado_em = ?5, dispositivo = ?6,
+        "UPDATE produto SET codigo = ?2, busca = ?3, codigos = ?4, dispositivo = ?5,
                 codigo_validado = 1
           WHERE id = ?1 AND codigo = ''",
-        params![id, codigo, busca, codigos, agora, dispositivo],
+        params![id, codigo, busca, codigos, dispositivo],
     )?;
     Ok(n == 1)
 }
@@ -758,31 +771,54 @@ pub(crate) fn tem_identidade_forte(gtins: &[GtinFicha], gtin_fallback: &str, cod
     texto::compactar(codigo_fornecedor).len() >= 3
 }
 
+/// T111 (Achado 10): consulta sobre o índice de cobertura `produto_texto_de_busca`
+/// (`busca`, `codigos`, `nome`, `id`, `ativo`) pelo 1º caractere alfanumérico de
+/// `busca`, sem varrer a tabela `produto`.
+pub(crate) const SQL_PECAS_POR_PREFIXO_BUSCA: &str =
+    "SELECT id, nome, ativo FROM produto WHERE busca >= ?1 AND busca < ?2";
+
 /// T111 (Regra 4 — antiduplicidade): peças existentes cuja descrição compacta
-/// é idêntica à do item da nota (limitado a `CANDIDATOS_MAXIMOS`). Nunca funde
-/// automaticamente: serve para encaminhar o item a registro provisório com as
-/// peças candidatas quando não há GTIN nem vínculo de fornecedor.
+/// é idêntica à do item da nota (limitado a `CANDIDATOS_MAXIMOS`, priorizando
+/// peças ativas). Nunca funde automaticamente: serve para encaminhar o item a
+/// registro provisório com as peças candidatas quando não há GTIN nem vínculo.
 pub(crate) fn pecas_por_descricao_compacta(conn: &Connection, descricao: &str) -> Resultado<Vec<String>> {
     // O cadastro guarda até 120 caracteres limpos do nome da peça; compara na
     // mesma janela para não deixar escapar duplicatas com descrição comprida.
     let alvo_120: String = texto::limpar(descricao).chars().take(120).collect();
     let alvo = texto::compactar(&alvo_120);
-    if alvo.is_empty() {
+    let Some(primeiro) = alvo.chars().next() else {
         return Ok(Vec::new());
-    }
-    let mut stmt = conn.prepare_cached("SELECT id, nome FROM produto ORDER BY id")?;
-    let linhas = stmt.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?;
-    let mut achados = Vec::new();
-    for linha in linhas {
-        let (id, nome) = linha?;
+    };
+    let inicio = primeiro.to_string();
+    let mut achados: Vec<(bool, String)> = Vec::new();
+    let mut avaliar = |id: String, nome: String, ativo: i64| {
         if texto::compactar(&nome) == alvo {
-            achados.push(id);
-            if achados.len() == CANDIDATOS_MAXIMOS {
-                break;
-            }
+            achados.push((ativo != 0, id));
+        }
+    };
+    if let Some(proximo) = char::from_u32(primeiro as u32 + 1) {
+        let fim = proximo.to_string();
+        let mut stmt = conn.prepare_cached(SQL_PECAS_POR_PREFIXO_BUSCA)?;
+        let linhas = stmt.query_map(params![inicio, fim], |l| {
+            Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, i64>(2)?))
+        })?;
+        for linha in linhas {
+            let (id, nome, ativo) = linha?;
+            avaliar(id, nome, ativo);
+        }
+    } else {
+        let mut stmt = conn.prepare_cached("SELECT id, nome, ativo FROM produto WHERE busca >= ?1")?;
+        let linhas = stmt.query_map(params![inicio], |l| {
+            Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?, l.get::<_, i64>(2)?))
+        })?;
+        for linha in linhas {
+            let (id, nome, ativo) = linha?;
+            avaliar(id, nome, ativo);
         }
     }
-    Ok(achados)
+    achados.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    achados.truncate(CANDIDATOS_MAXIMOS);
+    Ok(achados.into_iter().map(|(_, id)| id).collect())
 }
 
 /// T111 (A5 — limpeza anti-órfão): remove o vínculo `(fornecedor_id, codigo)`
@@ -902,6 +938,7 @@ mod testes_n07 {
         for (sql, n, indices) in [
             (SQL_PECAS_PELO_GTIN, 1, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
             (SQL_GTIN_DE_OUTRA_PECA, 2, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
+            (SQL_PECAS_POR_PREFIXO_BUSCA, 2, &["produto_texto_de_busca"][..]),
             (produtos::SQL_BARRAS_DE_OUTRA_PECA, 2, &["produto_codigo_barras", "produto_gtin_codigo"][..]),
             (crate::pessoas::SQL_PESSOA_PELO_DOCUMENTO, 1, &["pessoa_documento"][..]),
             (crate::pessoas::SQL_DOCUMENTO_DE_OUTRA, 2, &["pessoa_documento"][..]),
@@ -992,5 +1029,29 @@ mod testes_n07 {
         }
         // Código vazio não acha nada (as peças sem código de barras não contam).
         assert!(matches!(pecas_pelos_gtins(c, &[String::new()]).unwrap(), BuscaId::Nenhum));
+    }
+
+    /// T111 (Achado 10): `pecas_por_descricao_compacta` encontra variações de
+    /// pontuação/acento pelo índice de cobertura e prioriza peças ativas.
+    #[test]
+    fn t111_h10_descricao_compacta_prioriza_ativas_e_casa_pontuacao() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+
+        let mut f1 = produtos::ficha_nova(c).unwrap();
+        f1.nome = "Filtro de Óleo PH-5949".into();
+        f1.precos[0].preco = "25,00".into();
+        let id_inativa = produtos::salvar(c, d, &u, &f1).unwrap();
+        c.execute("UPDATE produto SET ativo = 0 WHERE id = ?1", [&id_inativa]).unwrap();
+
+        let mut f2 = produtos::ficha_nova(c).unwrap();
+        f2.nome = "FILTRO-DE-OLEO PH5949".into();
+        f2.precos[0].preco = "25,00".into();
+        let id_ativa = produtos::salvar(c, d, &u, &f2).unwrap();
+
+        let achados = pecas_por_descricao_compacta(c, "FILTRO DE OLEO PH 5949").unwrap();
+        assert_eq!(achados, vec![id_ativa, id_inativa]);
     }
 }

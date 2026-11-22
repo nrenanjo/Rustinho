@@ -187,13 +187,15 @@ Rectangle {
                                 case "barras": return "Ligada sozinha pelo código de barras"
                                 case "codigo": return "Ligada sozinha pelo código original — confira"
                                 case "importacao": {
+                                    if (!linha.editavel)
+                                        return "Cadastrada automaticamente na importação desta nota."
                                     const emb = ["CX", "FD", "PCT", "KIT", "JG", "PAR"].indexOf((linha.item.unidade || "").toUpperCase()) >= 0
                                     return "Cadastrada automaticamente ao importar o XML — confira antes de lançar"
                                            + (emb ? " (confira quantas peças vêm na embalagem)." : ".")
                                 }
                                 }
                                 if (linha.pendente)
-                                    return "Não achei esta peça pelo código nem pelo código de barras."
+                                    return linha.item.motivoPendencia || "Não achei esta peça pelo código nem pelo código de barras."
                                 if (linha.item.acao === "nova")
                                     return linha.peca ? "Cadastrada como peça nova nesta compra."
                                                       : "Com o nome, NCM, CEST e código de barras da nota, e o preço pelo lucro padrão."
@@ -306,7 +308,7 @@ Rectangle {
 
                 // O custo baixou: o preço baixa junto?
                 Rectangle {
-                    visible: linha.editavel && !!linha.peca && linha.peca.custoBaixou && linha.item.acao === "ligar"
+                    visible: linha.editavel && !!linha.peca && linha.peca.custoBaixou && (linha.item.acao === "ligar" || linha.item.acao === "nova")
                     Layout.fillWidth: true
                     Layout.leftMargin: Tema.estreito ? 0 : 30
                     radius: Tema.raioCampo

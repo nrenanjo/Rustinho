@@ -1600,3 +1600,110 @@ fn rc4_4_c06_escolhido_desativado_no_meio_nao_vira_gerente() {
     assert_eq!(gerentes_ativos, vec![bia], "a Bia volta a ser gerente na conferência seguinte");
     assert_eq!(itens, 1, "a loja ficou sem gerente uma vez: um item só");
 }
+
+/// T111 / Achado 7.2 (Hydrogen): em loja multi-caixa, descartar um rascunho cuja peça provisória já foi
+/// sincronizada para outro caixa NÃO executa `DELETE FROM produto` físico (desativa a peça e remove o vínculo),
+/// impedindo erro de FK / `sync_pendencia` / `sync_referencia` caso o outro caixa tenha vendido a peça offline.
+#[test]
+fn t111_h7_multi_caixa_descarte_provisorio_nao_quebra_venda_offline() {
+    let (mut a, mut b, u) = loja();
+    config::gravar(&a.conn, "loja_cnpj", "11444777000161").unwrap();
+    trocar(&mut a, &mut b);
+
+    // Caixa A importa a nota (simulando compra_importar com criação automática via verificar + criar).
+    // Usa `importar_xml` + registro direto ou Servico: aqui criamos a peça e compra em A via API de banco.
+    let xml = NFE_EXEMPLO;
+    let ver =
+        rustinho_nucleo::nfe_xml::ler_verificada(xml, rustinho_nucleo::nfe_assinatura::Ancoras::padrao()).unwrap();
+    // Cria a compra no Caixa A via comando `compra_importar` usando banco temporário ou função pública?
+    // Como `compras::criar_compra_com_opcoes` é pub(crate), usamos `Servico::abrir` sobre arquivos temporários!
+    drop((a, b));
+
+    let raiz = std::env::temp_dir().join(format!("rustinho-t111-h7-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&raiz);
+    std::fs::create_dir_all(&raiz).unwrap();
+    let arq_a = raiz.join("caixa_a.db");
+    let arq_b = raiz.join("caixa_b.db");
+    let arq_xml = raiz.join("nota.xml");
+    std::fs::write(&arq_xml, xml).unwrap();
+
+    let mut sa = rustinho_nucleo::Servico::abrir(&arq_a).unwrap();
+    let chamar = |s: &mut rustinho_nucleo::Servico, cmd: &str, d: serde_json::Value| -> serde_json::Value {
+        let mut obj = d;
+        if rustinho_nucleo::api::NAO_REPETIR.contains(&cmd) {
+            obj["chaveOperacao"] = serde_json::json!(rustinho_nucleo::tempo::novo_id());
+        }
+        let r: serde_json::Value = serde_json::from_str(&s.chamar(cmd, &obj.to_string())).unwrap();
+        assert_eq!(r["ok"], true, "{cmd}: {r}");
+        r["dados"].clone()
+    };
+    chamar(
+        &mut sa,
+        "configurar_inicio",
+        serde_json::json!({ "loja": "Loja", "caixa": "Caixa A", "nome": "Ana", "senha": "balcao-azul-2026", "senha2": "balcao-azul-2026" }),
+    );
+    drop(sa);
+
+    let mut ba = Banco::abrir(&arq_a).unwrap();
+    config::gravar(&ba.conn, "loja_cnpj", "11444777000161").unwrap();
+    let mut bb = Banco::abrir(&arq_b).unwrap();
+    trocar(&mut ba, &mut bb);
+    // Registra o par em `sync_par` como acontece na rede real.
+    let now = rustinho_nucleo::tempo::agora();
+    ba.conn
+        .execute(
+            "INSERT OR REPLACE INTO sync_par (dispositivo, nome, endereco, cursor, visto_em, sincronizado_em)
+             VALUES (?1, 'Caixa B', '127.0.0.1:9999', 1, ?2, ?2)",
+            rusqlite::params![bb.dispositivo, now],
+        )
+        .unwrap();
+    drop((ba, bb));
+
+    // Caixa A importa a compra (cria 3 peças automaticamente).
+    let mut sa = rustinho_nucleo::Servico::abrir(&arq_a).unwrap();
+    let uid: String = chamar(&mut sa, "usuarios_entrada", serde_json::json!({}))[0]["id"].as_str().unwrap().to_string();
+    chamar(&mut sa, "entrar", serde_json::json!({ "id": uid, "senha": "balcao-azul-2026" }));
+    let imp = chamar(&mut sa, "compra_importar", serde_json::json!({ "caminho": arq_xml.display().to_string() }));
+    let compra_id = imp["compras"][0]["id"].as_str().unwrap().to_string();
+    let pid0 = imp["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
+    drop(sa);
+
+    // Sincroniza A -> B (agora B enxerga pid0).
+    let mut ba = Banco::abrir(&arq_a).unwrap();
+    let mut bb = Banco::abrir(&arq_b).unwrap();
+    trocar(&mut ba, &mut bb);
+    drop((ba, bb));
+
+    // Caixa B (offline) faz uma venda ou encomenda usando pid0!
+    let mut sb = rustinho_nucleo::Servico::abrir(&arq_b).unwrap();
+    chamar(&mut sb, "entrar", serde_json::json!({ "id": uid, "senha": "balcao-azul-2026" }));
+    chamar(
+        &mut sb,
+        "encomenda_criar",
+        serde_json::json!({ "clienteNome": "Cliente B", "telefone": "15999990000", "produtoId": pid0, "descricao": "Rolamento", "quantidade": "1" }),
+    );
+    drop(sb);
+
+    // Caixa A (offline) descarta o rascunho da compra!
+    let mut sa = rustinho_nucleo::Servico::abrir(&arq_a).unwrap();
+    chamar(&mut sa, "entrar", serde_json::json!({ "id": uid, "senha": "balcao-azul-2026" }));
+    chamar(&mut sa, "compra_descartar", serde_json::json!({ "id": compra_id }));
+    drop(sa);
+
+    // Sincroniza A <-> B: NÃO pode haver erro de FK, nem sync_pendencia, nem sync_referencia apagada!
+    let mut ba = Banco::abrir(&arq_a).unwrap();
+    let mut bb = Banco::abrir(&arq_b).unwrap();
+    trocar(&mut ba, &mut bb);
+    let pend_a = contar(&ba, "SELECT COUNT(*) FROM sync_pendencia");
+    let pend_b = contar(&bb, "SELECT COUNT(*) FROM sync_pendencia");
+    let ref_b = contar(&bb, "SELECT COUNT(*) FROM sync_referencia WHERE estado = 'apagado'");
+    let ativo_b: i64 =
+        bb.conn.query_row("SELECT ativo FROM produto WHERE id = ?1", [&pid0], |l| l.get(0)).unwrap_or(-1);
+    let _ = (u, ver);
+    drop((ba, bb));
+    let _ = std::fs::remove_dir_all(&raiz);
+
+    assert_eq!((pend_a, pend_b), (0, 0), "H7.2: DELETE físico gerou sync_pendencia no multi-caixa!");
+    assert_eq!(ref_b, 0, "H7.2: DELETE físico quebrou referência da encomenda no Caixa B!");
+    assert_eq!(ativo_b, 0, "H7.2: em multi-caixa a peça provisória descartada deve ser desativada (ativo = 0)");
+}
