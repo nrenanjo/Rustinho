@@ -66,12 +66,7 @@ LARGURA_COLUNA_CODIGO = 84  # a coluna do código do fornecedor (TelaPecas e Lin
 
 def montar_loja(pasta):
     """A loja pelo núcleo (os mesmos comandos das telas)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-         "--ignored", "--exact", "montar_lista_de_pecas"],
-        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("lojas_de_teste", "montar_lista_de_pecas", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
 
 
 def primeira_coluna(textos):

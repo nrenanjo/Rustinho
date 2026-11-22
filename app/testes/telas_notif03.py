@@ -38,12 +38,7 @@ def xdo(*args):
 
 
 def montar_loja(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_LOJA_AVISOS="1")
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-         "--ignored", "--exact", "montar_loja_de_teste"],
-        cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("estavel", "montar_loja_de_teste", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_LOJA_AVISOS": "1"}, raiz=RAIZ)
 
 
 def conferir_ambiente(pid):

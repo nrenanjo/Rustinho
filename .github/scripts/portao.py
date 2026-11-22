@@ -68,6 +68,14 @@ def main():
     fora = {j: r for j, r in m["jobs"].items() if r != resultado_esperado(j, android)}
     conferir(m["aprovado"] and not fora and m["jobs"], f"{len(m['jobs'])} jobs como deviam (pulados só os do "
              f"Android, se desligado)", f"manifesto não aprovado: {fora or m.get('problemas')}")
+    rt = m.get("roteiros_de_tela") or {}
+    if rt.get("shards_esperados"):
+        conferir(
+            rt.get("cobertura_verificada") is True,
+            f"cobertura de telas verificada ({len(rt.get('resultado') or {})} unidades em "
+            f"{len(rt.get('shards_vistos') or [])}/{rt['shards_esperados']} shards)",
+            f"cobertura de telas incompleta ou reprovada: {m.get('problemas')}",
+        )
 
     # Pacotes: os arquivos baixados são os do manifesto.
     somas = {}

@@ -64,12 +64,16 @@ TEXTO_FINAL = TEXTO_B
 
 
 def chave_da_loja():
-    """O conteúdo das migrações e da montagem da loja: muda, monta de novo."""
+    """O conteúdo do núcleo (`nucleo/src`) e da montagem da loja: muda, monta de novo."""
     h = hashlib.sha256()
-    arquivos = sorted(glob.glob(os.path.join(base.RAIZ, "nucleo", "src", "migracoes", "*")))
+    arquivos = []
+    for dirpath, _, filenames in os.walk(os.path.join(base.RAIZ, "nucleo", "src")):
+        for nome in filenames:
+            arquivos.append(os.path.join(dirpath, nome))
     arquivos.append(os.path.join(base.RAIZ, "nucleo", "tests", "lojas_de_teste.rs"))
-    for a in arquivos:
-        h.update(os.path.basename(a).encode())
+    for a in sorted(arquivos):
+        rel = os.path.relpath(a, base.RAIZ).replace(os.sep, "/")
+        h.update(rel.encode())
         with open(a, "rb") as f:
             h.update(f.read())
     h.update(str(PECAS).encode())
@@ -77,21 +81,28 @@ def chave_da_loja():
 
 
 def preparar_loja(destino):
-    """Copia a loja guardada (ou monta, guarda e copia). Devolve (segundos, montou)."""
-    guardada = os.path.join(base.RAIZ, "target", "lojas_de_teste", f"lista_continua_{PECAS}_{chave_da_loja()}")
+    """Copia a loja guardada (fora de `target/`, sob TMPDIR) ou monta, guarda e copia. Devolve (segundos, montou)."""
+    raiz_cache = os.environ.get("RUSTINHO_CACHE_LOJAS") or os.path.join(tempfile.gettempdir(), "rustinho-lojas-de-teste")
+    guardada = os.path.join(raiz_cache, f"lista_continua_{PECAS}_{chave_da_loja()}")
     inicio = time.time()
     montou = False
     if not os.path.isfile(os.path.join(guardada, "rustinho.db")):
-        montando = guardada + ".montando"
+        montando = f"{guardada}.montando.{os.getpid()}"
         shutil.rmtree(montando, ignore_errors=True)
-        env = dict(os.environ, RUSTINHO_LOJA_TESTE=montando, RUSTINHO_LOJA_PECAS=str(PECAS))
-        subprocess.run(
-            ["cargo", "test", "--release", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-             "--ignored", "--exact", "montar_lista_continua"],
-            cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
+        os.makedirs(os.path.dirname(guardada), exist_ok=True)
+        base._aux_nucleo.executar(
+            "lojas_de_teste", "montar_lista_continua",
+            {"RUSTINHO_LOJA_TESTE": montando, "RUSTINHO_LOJA_PECAS": str(PECAS)},
+            release=True, raiz=base.RAIZ,
         )
-        shutil.rmtree(guardada, ignore_errors=True)
-        os.rename(montando, guardada)
+        try:
+            os.rename(montando, guardada)
+        except OSError:
+            if not os.path.isfile(os.path.join(guardada, "rustinho.db")):
+                shutil.rmtree(guardada, ignore_errors=True)
+                os.rename(montando, guardada)
+            else:
+                shutil.rmtree(montando, ignore_errors=True)
         montou = True
     shutil.rmtree(destino, ignore_errors=True)
     shutil.copytree(guardada, destino)

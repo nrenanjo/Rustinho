@@ -39,12 +39,7 @@ ENTRADA = "Quem está usando?"
 
 
 def montar_loja(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-         "--ignored", "--exact", "montar_loja_de_teste"],
-        cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("estavel", "montar_loja_de_teste", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=RAIZ)
 
 
 def ambiente_do_processo(pid):

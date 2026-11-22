@@ -40,6 +40,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _aux_nucleo  # noqa: E402
 import telas_d09 as base  # noqa: E402  (importar já deixa o ambiente neutro)
 
 base.TELA = os.environ.get("RUSTINHO_TELA", ":91")
@@ -56,10 +57,7 @@ def xdo(*args):
 
 def por_fora(pasta, sql):
     """Muda o banco por fora (como um banco antigo), pelo núcleo."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_SQL=sql)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-                    "--ignored", "--exact", "executar_por_fora"],
-                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    _aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": sql}, raiz=base.RAIZ)
 
 
 def config(pasta, chave):
@@ -273,7 +271,7 @@ class Rustinho(base.Rustinho):
     def foto_janela(self, sufixo=""):
         """Foto só da janela (sem o resto da tela virtual)."""
         xdo("mousemove", "5", "995")   # o mouse fora da janela: nada "com o mouse em cima"
-        time.sleep(0.6)
+        time.sleep(0.2)
         inteira = self.foto(sufixo + "-tela")
         x, y, w, h = janela_do_rustinho()
         from PIL import Image
@@ -297,7 +295,15 @@ class Rustinho(base.Rustinho):
                                    env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
                 if "WIDTH=" in g.stdout and int(re.search(r"WIDTH=(\d+)", g.stdout).group(1)) > 200:
                     xdo("windowsize", j, str(largura), str(altura))
-                    time.sleep(1.5)
+                    fim = time.monotonic() + 3.0
+                    while time.monotonic() < fim:
+                        time.sleep(0.08)
+                        g2 = subprocess.run(["xdotool", "getwindowgeometry", "--shell", j],
+                                            env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+                        d2 = dict(x.split("=", 1) for x in g2.stdout.split() if "=" in x)
+                        if int(d2.get("WIDTH", 0)) == largura and int(d2.get("HEIGHT", 0)) == altura:
+                            break
+                    time.sleep(0.35)
                     return
         raise RuntimeError("não achei a janela do Rustinho para mudar o tamanho")
 
@@ -424,7 +430,7 @@ def abrir(res, pasta, tela, props, fotos, nome):
     r = Rustinho(pasta, tela, props, fotos, nome)
     res.logs.append(r.saida)
     r.entrar("Ana")
-    time.sleep(1.5)
+    time.sleep(0.4)
     return r
 
 

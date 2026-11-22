@@ -37,12 +37,7 @@ CODIGO = "7891000000014"
 
 def montar_loja(pasta):
     """A loja pelo núcleo (os mesmos comandos das telas)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-         "--ignored", "--exact", "montar_numeros_das_telas"],
-        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("lojas_de_teste", "montar_numeros_das_telas", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
 
 
 def esperar_janela():

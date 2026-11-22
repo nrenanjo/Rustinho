@@ -54,10 +54,7 @@ def xdo(*args):
 
 def por_fora(pasta, sql):
     """SQL na loja de teste pelo núcleo (os gatilhos da troca usam as funções do Rustinho)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_SQL=sql)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-                    "--ignored", "--exact", "executar_por_fora"],
-                   cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": sql}, raiz=RAIZ)
 
 
 def casa_com_as_notas(raiz):

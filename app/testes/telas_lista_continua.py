@@ -51,12 +51,11 @@ PECAS = int(os.environ.get("RUSTINHO_LOJA_PECAS", "20000"))
 
 def montar_loja(pasta):
     """A loja pelo núcleo (os mesmos comandos das telas), em release."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta, RUSTINHO_LOJA_PECAS=str(PECAS))
     inicio = time.time()
-    subprocess.run(
-        ["cargo", "test", "--release", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-         "--ignored", "--exact", "montar_lista_continua"],
-        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
+    base._aux_nucleo.executar(
+        "lojas_de_teste", "montar_lista_continua",
+        {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_LOJA_PECAS": str(PECAS)},
+        release=True, raiz=base.RAIZ,
     )
     return time.time() - inicio
 

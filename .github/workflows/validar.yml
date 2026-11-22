@@ -1,21 +1,25 @@
 # Pipeline ÚNICO de validação (dev.3.3, DP-02a; AUD33-J01, J02, J03, I06, I07,
-# J07, J08). Todos os caminhos chamam este mesmo pipeline pelo ci.yml: push em
-# main, desenvolvimento-*, stabilization/* e ensaio/*, tags v*, pull_request e
+# J07, J08; otimizado na T112 sem perda de cobertura ou rigor). Todos os
+# caminhos chamam este mesmo pipeline pelo ci.yml: push em main,
+# desenvolvimento-*, stabilization/* e ensaio/*, tags v*, pull_request e
 # workflow_dispatch. Ele NÃO publica nada: monta, confere e registra tudo no
 # MANIFESTO.json. Quem prepara versão é o job "rascunho" do ci.yml, só em tag
 # v*, só se tudo aqui passou e só com a aprovação do dono (ambiente publicacao).
 #
 # Camadas (PLANO_VALIDACAO_E_PUBLICACAO_DEV33.md §2):
-#   L0 formato · L1/L2 nucleo-linux, nucleo-windows · L3 programa-e-telas ·
+#   L0 formato · L1/L2 nucleo-linux (debug/release), nucleo-windows (lib/integracao) ·
+#   L3 programa-e-telas (6 shards LPT × 2 workers Xvfb, mais testes-programa e QML) ·
 #   L4 pacote-linux, pacote-windows, verificar, apk, emulador.
 # O manifesto depende de TODOS os jobs (conferido por
-# .github/scripts/conferir_portao.py, no job formato).
+# .github/scripts/conferir_portao.py, no job formato) e comprova que 100% dos
+# shards, roteiros de tela, QML e suítes Rust rodaram e passaram.
+#
+# Cache Cargo (T112 + INT9-R5): todo passo actions/cache é DESLIGADO em tags
+# `refs/tags/v*` (`!startsWith(github.ref, 'refs/tags/v')`), para que toda
+# versão de publicação seja compilada do zero. Conferido por conferir_portao.py.
 #
 # Android (T050, 19/11/2026): fora do escopo por decisão do proprietário, até
-# ele pedir de volta. A chave é a entrada `android` (o ci.yml passa false):
-# desligada, os jobs apk e emulador são pulados, o manifesto não lista APK e o
-# Portão exige exatamente os 3 pacotes do computador. Para voltar: `android:
-# true` no ci.yml e RUSTINHO_ANDROID "sim" no portão e no rascunho.
+# ele pedir de volta. A chave é a entrada `android` (o ci.yml passa false).
 name: Validar
 
 on:
@@ -45,8 +49,7 @@ env:
   NDK_VERSAO: "26.1.10909125"
   CARGO_TERM_COLOR: always
   # Testes do núcleo que abrem portas: rodam em série, à parte (os outros, em
-  # paralelo). Juntos são exatamente todos os testes (partição conferida no
-  # passo 1.2 da dev.3.3: 64 de rede + 522 = 586).
+  # paralelo). Juntos são exatamente todos os testes.
   TESTES_DE_REDE: "rede_local:: sync:: testes_supervisao::"
   PULAR_REDE: "--skip rede_local:: --skip sync:: --skip testes_supervisao::"
 
@@ -63,6 +66,18 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSAO }}
           components: rustfmt, clippy
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Linux-formato-rust${{ env.RUST_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Linux-formato-rust${{ env.RUST_VERSAO }}-
       - name: Formatação
         run: cargo fmt --all --check
       # Erros prováveis (correctness, suspicious) reprovam; os outros avisos
@@ -82,45 +97,62 @@ jobs:
           python3 .github/scripts/versao_android.py --testar
           python3 .github/scripts/testar_portao.py
 
-  # L1/L2: testes do núcleo no Linux, como o programa de teste (debug) e como
-  # o programa final (release); os de rede em série.
+  # L1/L2: testes do núcleo no Linux, debug e release em paralelo (T112); os de rede em série.
   nucleo-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        perfil: [debug, release]
+    name: nucleo-linux (${{ matrix.perfil }})
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/acoes/ambiente
         with:
-          nome: nucleo-linux
+          nome: nucleo-linux-${{ matrix.perfil }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_VERSAO }}
-      - name: Testes do núcleo (debug)
+      - name: Linker rápido (mold)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mold > /dev/null
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Linux-nucleo-${{ matrix.perfil }}-mold-rust${{ env.RUST_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Linux-nucleo-${{ matrix.perfil }}-mold-rust${{ env.RUST_VERSAO }}-
+      # Contas que passariam do tamanho do número viram erro nos dois modos
+      # (overflow-checks no Cargo.toml).
+      - name: Testes do núcleo (${{ matrix.perfil }})
         shell: bash
         run: |
           set -o pipefail
           mkdir -p testes
-          echo "commit: $GITHUB_SHA" > testes/nucleo-debug.txt
-          cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-debug.txt
-      - name: Testes de rede do núcleo, em série (debug)
+          echo "commit: $GITHUB_SHA" > "testes/nucleo-${{ matrix.perfil }}.txt"
+          if [ "${{ matrix.perfil }}" = "release" ]; then
+            cargo test --release -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a "testes/nucleo-release.txt"
+          else
+            cargo test -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a "testes/nucleo-debug.txt"
+          fi
+      - name: Testes de rede do núcleo, em série (${{ matrix.perfil }})
         shell: bash
         run: |
           set -o pipefail
-          echo "commit: $GITHUB_SHA" > testes/nucleo-debug-rede.txt
-          cargo test -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-debug-rede.txt
-      # Contas que passariam do tamanho do número viram erro nos dois modos
-      # (overflow-checks no Cargo.toml).
-      - name: Testes do núcleo (release)
-        shell: bash
-        run: |
-          set -o pipefail
-          echo "commit: $GITHUB_SHA" > testes/nucleo-release.txt
-          cargo test --release -p rustinho-base -p rustinho-nucleo -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-release.txt
-      - name: Testes de rede do núcleo, em série (release)
-        shell: bash
-        run: |
-          set -o pipefail
-          echo "commit: $GITHUB_SHA" > testes/nucleo-release-rede.txt
-          cargo test --release -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-release-rede.txt
+          echo "commit: $GITHUB_SHA" > "testes/nucleo-${{ matrix.perfil }}-rede.txt"
+          if [ "${{ matrix.perfil }}" = "release" ]; then
+            cargo test --release -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a "testes/nucleo-release-rede.txt"
+          else
+            cargo test -p rustinho-base -p rustinho-nucleo -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a "testes/nucleo-debug-rede.txt"
+          fi
       - name: Resumo dos testes (avisos)
         if: always()
         shell: bash
@@ -129,34 +161,64 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: Testes-Linux
+          name: Testes-Linux-${{ matrix.perfil }}
           path: testes/
           retention-days: 90
 
-  # L1: testes do núcleo no Windows.
+  # L1: testes do núcleo no Windows (lib e integração em paralelo + exclusão Defender + cache Cargo).
   nucleo-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        parte: [lib, integracao]
+    name: nucleo-windows (${{ matrix.parte }})
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/acoes/ambiente
         with:
-          nome: nucleo-windows
+          nome: nucleo-windows-${{ matrix.parte }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_VERSAO }}
-      - name: Testes do núcleo (Windows)
+      - name: Exclusão de pastas de build/teste no Windows Defender
+        shell: pwsh
+        run: |
+          try {
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:CARGO_HOME -ErrorAction SilentlyContinue
+          } catch {}
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Windows-nucleo-${{ matrix.parte }}-rust${{ env.RUST_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Windows-nucleo-${{ matrix.parte }}-rust${{ env.RUST_VERSAO }}-
+      - name: Testes do núcleo (Windows · ${{ matrix.parte }})
         shell: bash
         run: |
           set -o pipefail
           mkdir -p testes
-          echo "commit: $GITHUB_SHA" > testes/nucleo-windows.txt
-          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast -- $PULAR_REDE 2>&1 | tee -a testes/nucleo-windows.txt
-      - name: Testes de rede do núcleo, em série (Windows)
+          ALVO=(--lib)
+          [ "${{ matrix.parte }}" = "integracao" ] && ALVO=(--test '*')
+          echo "commit: $GITHUB_SHA" > "testes/nucleo-windows-${{ matrix.parte }}.txt"
+          cargo test -p rustinho-base -p rustinho-nucleo "${ALVO[@]}" --no-fail-fast -- $PULAR_REDE 2>&1 | tee -a "testes/nucleo-windows-${{ matrix.parte }}.txt"
+          if [ "${{ matrix.parte }}" = "integracao" ]; then
+            cargo test -p rustinho-base -p rustinho-nucleo --doc --no-fail-fast 2>&1 | tee -a "testes/nucleo-windows-${{ matrix.parte }}.txt"
+          fi
+      - name: Testes de rede do núcleo, em série (Windows · ${{ matrix.parte }})
         shell: bash
         run: |
           set -o pipefail
-          echo "commit: $GITHUB_SHA" > testes/nucleo-windows-rede.txt
-          cargo test -p rustinho-base -p rustinho-nucleo --no-fail-fast -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a testes/nucleo-windows-rede.txt
+          ALVO=(--lib)
+          [ "${{ matrix.parte }}" = "integracao" ] && ALVO=(--test '*')
+          echo "commit: $GITHUB_SHA" > "testes/nucleo-windows-${{ matrix.parte }}-rede.txt"
+          cargo test -p rustinho-base -p rustinho-nucleo "${ALVO[@]}" --no-fail-fast -- $TESTES_DE_REDE --test-threads=1 2>&1 | tee -a "testes/nucleo-windows-${{ matrix.parte }}-rede.txt"
       - name: Resumo dos testes (avisos)
         if: always()
         shell: bash
@@ -165,87 +227,106 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: Testes-Windows
+          name: Testes-Windows-${{ matrix.parte }}
           path: testes/
           retention-days: 90
 
-  # L3: os testes do programa (`cargo test -p rustinho`, com o Qt) e os
-  # roteiros das telas numa tela virtual, inclusive a geometria. Os roteiros já
-  # se isolam do desktop (ambiente_neutro em telas_d09.py). O do seletor do
-  # sistema (telas_seletor_nativo.py) precisa do portal do KDE numa sessão
-  # fechada: roda à mão (docs/TESTES-estabilidade.md).
+  # L3: testes do programa (`cargo test -p rustinho`, com Qt), testes de QML
+  # (offscreen) e os 52 roteiros das telas (69 unidades LPT, com geometria)
+  # particionados em 6 shards paralelos × 2 workers Xvfb cada (T112). O
+  # manifesto verifica que todos os 6 shards e 100% das 69 unidades rodaram e
+  # passaram. O seletor nativo (telas_seletor_nativo.py) continua manual.
   programa-e-telas:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    name: programa-e-telas (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/acoes/ambiente
         with:
-          nome: programa-e-telas
+          nome: programa-e-telas-shard-${{ matrix.shard }}
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_VERSAO }}
       # python3-pil: os roteiros do tema e do celular leem os pixels das fotos.
-      - name: Bibliotecas do sistema e da tela virtual
+      - name: Bibliotecas do sistema, mold e tela virtual
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil x11-utils
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mold libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 xvfb xdotool imagemagick python3-pil x11-utils > /dev/null
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=mold" >> $GITHUB_ENV
       - name: Qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VERSAO }}
           arch: linux_gcc_64
-          cache: true
-      - name: Testes do programa
+          cache: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Linux-telas-mold-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Linux-telas-mold-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-
+      - name: Testes do programa (shard 1)
+        if: ${{ matrix.shard == 1 }}
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p saida_telas
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
-          echo "commit: $GITHUB_SHA" > testes-programa.txt
-          cargo test -p rustinho 2>&1 | tee -a testes-programa.txt
-      - name: Compilar o programa e as lojas de teste
+          echo "commit: $GITHUB_SHA" > saida_telas/testes-programa.txt
+          cargo test -p rustinho 2>&1 | tee -a saida_telas/testes-programa.txt
+      - name: Compilar o programa e binários auxiliares das lojas de teste
+        shell: bash
         run: |
+          set -euo pipefail
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           cargo build -p rustinho
-          cargo test -p rustinho-nucleo --test estavel --test lojas_de_teste --no-run
-      - name: Roteiros das telas (com geometria)
+          /usr/bin/python3 - <<'PY' >> "$GITHUB_ENV"
+          import sys
+          sys.path.insert(0, "app/testes")
+          import _aux_nucleo
+          bins = _aux_nucleo.descobrir_binarios(".", incluir_release_lojas=True)
+          for k, v in sorted(bins.items()):
+              print(f"{k}={v}")
+          PY
+      - name: Roteiros das telas (shard ${{ matrix.shard }}/6, 2 workers Xvfb)
         shell: bash
         run: |
           set -o pipefail
-          echo "commit: $GITHUB_SHA" > telas.txt
-          : > telas-resultado.txt
-          falhou=""
-          for t in app/testes/telas_*.py app/testes/geometria_telas.py; do
-            case "$t" in *telas_seletor_nativo.py) continue ;; esac
-            nome=$(basename "$t" .py)
-            echo "=== $nome" | tee -a telas.txt
-            # O Python do sistema (o do Pillow do apt): o passo do Qt põe
-            # outro python3 na frente, sem o Pillow ("No module named PIL").
-            if timeout 2400 /usr/bin/python3 "$t" "fotos/$nome" 2>&1 | tee -a telas.txt; then
-              printf '%s\tok\n' "$nome" >> telas-resultado.txt
-            else
-              printf '%s\tfalhou\n' "$nome" >> telas-resultado.txt
-              falhou="$falhou $nome"
-            fi
-          done
-          if [ -n "$falhou" ]; then
-            echo "::error title=Roteiros das telas::falharam:$falhou"
-            exit 1
-          fi
-      # R4-CI (decisão do proprietário, 16/11/2026; R-4 da re-revisão 3): os testes de QML (T-01, T-05 e I6), que antes
-      # só rodavam à mão. Sem janela (offscreen), com o qmltestrunner do Qt instalado acima. Rodam mesmo que algum
-      # roteiro das telas tenha falhado (uma falha não esconde a outra), e reprovam o job se falharem.
-      - name: Testes de QML
-        if: ${{ !cancelled() }}
+          mkdir -p saida_telas
+          /usr/bin/python3 .github/scripts/particionar_telas.py \
+            --shard "${{ matrix.shard }}" --total 6 \
+            --executar --workers 2 --isolamento auto \
+            --python /usr/bin/python3 --saida saida_telas
+      # R4-CI (decisão do proprietário, 16/11/2026): os testes de QML (offscreen),
+      # rodando mesmo que algum roteiro de tela tenha falhado (uma falha não esconde outra).
+      - name: Testes de QML (shard 1)
+        if: ${{ matrix.shard == 1 && !cancelled() }}
         shell: bash
         run: |
           set -o pipefail
-          echo "commit: $GITHUB_SHA" > qml.txt
+          mkdir -p saida_telas
+          echo "commit: $GITHUB_SHA" > saida_telas/qml.txt
+          : > saida_telas/qml-resultado.txt
           export QT_QPA_PLATFORM=offscreen RUSTINHO_QMLTESTRUNNER="$QT_ROOT_DIR/bin/qmltestrunner"
           falhou=""
           for t in app/testes/qml_*.py; do
             nome=$(basename "$t" .py)
-            echo "=== $nome" | tee -a qml.txt
-            if ! timeout 600 /usr/bin/python3 -I "$t" "$PWD" 2>&1 | tee -a qml.txt; then
+            echo "=== $nome" | tee -a saida_telas/qml.txt
+            if timeout 600 /usr/bin/python3 -I "$t" "$PWD" 2>&1 | tee -a saida_telas/qml.txt; then
+              printf '%s\tok\n' "$nome" >> saida_telas/qml-resultado.txt
+            else
+              printf '%s\tfalhou\n' "$nome" >> saida_telas/qml-resultado.txt
               falhou="$falhou $nome"
             fi
           done
@@ -256,13 +337,15 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: Telas-Linux
+          name: Telas-Linux-shard-${{ matrix.shard }}
           path: |
-            telas.txt
-            telas-resultado.txt
-            testes-programa.txt
-            qml.txt
-            fotos/
+            saida_telas/telas.txt
+            saida_telas/telas-resultado.txt
+            saida_telas/telas-unidades.json
+            saida_telas/testes-programa.txt
+            saida_telas/qml.txt
+            saida_telas/qml-resultado.txt
+            saida_telas/fotos/
           retention-days: 90
 
   # L4: AppImage do Linux, com conferência (bibliotecas e abrir de verdade).
@@ -276,16 +359,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_VERSAO }}
-      - name: Bibliotecas do sistema
+      - name: Bibliotecas do sistema e linker rápido (lld)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libfuse2 file xvfb
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lld libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libfuse2 file xvfb > /dev/null
+          echo "RUSTFLAGS=-C link-arg=-fuse-ld=lld" >> $GITHUB_ENV
       - name: Qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VERSAO }}
           arch: linux_gcc_64
-          cache: true
+          cache: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Linux-pacote-lld-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Linux-pacote-lld-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-
       - name: Versão
         run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
       - name: Compilar
@@ -400,12 +496,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_VERSAO }}
+      - name: Exclusão de pastas de build no Windows Defender
+        shell: pwsh
+        run: |
+          try {
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, $env:CARGO_HOME -ErrorAction SilentlyContinue
+          } catch {}
       - name: Qt
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4
         with:
           version: ${{ env.QT_VERSAO }}
           arch: win64_msvc2022_64
-          cache: true
+          cache: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+      - name: Cache Cargo (desligado em tag v*, INT9-R5)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-Windows-pacote-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-Windows-pacote-rust${{ env.RUST_VERSAO }}-qt${{ env.QT_VERSAO }}-
       - name: Versão
         shell: bash
         run: echo "VERSAO=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> $GITHUB_ENV
@@ -500,7 +614,6 @@ jobs:
           Copy-Item LICENSE "$base\LICENCA.txt"
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          # A versão instalada, pela lista de programas do Windows (o ISCC.exe não traz a versão no arquivo).
           $chaves = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
           $inno = (Get-ItemProperty $chaves -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Inno Setup*" } | Select-Object -First 1).DisplayVersion
           if (-not $inno) { $inno = "versão não encontrada" }
@@ -512,9 +625,6 @@ jobs:
           "$h  $($setup.Name)" | Out-File -Encoding ascii "saida\$($setup.Name).sha256"
           "Inno Setup $inno" | Out-File -Encoding utf8 saida\instalador.txt
           Write-Output "::notice title=Instalador::$($setup.Name)%0ASHA-256: $h%0ACommit: $env:GITHUB_SHA"
-      # O instalador instala de verdade neste Windows da CI (sem tela,
-      # /VERYSILENT) e o Rustinho instalado abre e cria o banco, numa pasta de
-      # dados só do teste (RUSTINHO_DADOS).
       - name: Instalar e abrir (teste do instalador)
         shell: pwsh
         run: |
@@ -535,7 +645,6 @@ jobs:
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           if (-not (Test-Path "$dados\rustinho.db")) { throw "O Rustinho instalado não criou o banco (estava aberto: $vivo)" }
           "Instalado em $dir (com as 4 DLLs do Visual C++); abriu e criou o banco em $dados (estava aberto: $vivo)." | Tee-Object -Append -FilePath saida\instalador.txt
-          # O que o Rustinho instalado deixou na pasta de sempre, mesmo com RUSTINHO_DADOS (registro).
           $sempre = Join-Path $env:LOCALAPPDATA "Rustinho"
           if (Test-Path $sempre) {
             $lista = (Get-ChildItem -Recurse -File $sempre | ForEach-Object { $_.FullName.Substring($sempre.Length + 1) }) -join ", "
@@ -562,21 +671,16 @@ jobs:
             saida/isolamento.txt
           retention-days: 90
 
-  # L4: os pacotes desta execução conferidos como um usuário os usaria
-  # (instalar na pasta padrão, atalhos, firewall, desinstalar; AppImage com o
-  # FUSE). J08: a verificação roda sobre ESTA execução.
+  # L4: os pacotes desta execução conferidos como um usuário os usaria.
   verificar:
     needs: [pacote-windows, pacote-linux]
     uses: ./.github/workflows/verificar-pacotes.yml
 
-  # L4: APKs de 64 e 32 bits, com a versão da raiz (I06) e o versionCode da
-  # DP-36 (J08). Sem a chave da loja, o APK sai assinado só para teste.
+  # L4: APKs de 64 e 32 bits (fora do escopo desde T050, controlado por inputs.android).
   apk:
     if: inputs.android
     strategy:
       fail-fast: false
-      # Um APK de cada vez (D-05, 16/11/2026): num ramo novo o cache do Gradle começa vazio; assim só o primeiro baixa
-      # as bibliotecas do Maven Central (o 429 da CI de ensaio da integ7) e o segundo já as encontra no cache.
       max-parallel: 1
       matrix:
         include:
@@ -603,17 +707,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          # Guarda as bibliotecas do Gradle entre execuções (D-05). Os arquivos do Gradle só nascem na compilação
-          # (androiddeployqt); sem um arquivo que exista no checkout, o setup-java para com erro. A chave é o hash
-          # do android/CMakeLists.txt e DESTE arquivo (INT9-R4, revisão da integ9): a versão do Qt (QT_VERSAO) e o
-          # que mais muda as bibliotecas do Gradle moram aqui. O setup-java só restaura com a chave exata e não grava
-          # quando acerta: com a chave antiga, um Qt novo ficaria com um cache velho e inútil para sempre, e a
-          # proteção contra o 429 sumiria sem aviso. Com a chave nova, a 1ª execução depois de uma mudança baixa e
-          # grava (o APK de 64 bits, que vem primeiro pelo max-parallel), e a 2ª já encontra o cache.
-          # Em etiqueta de versão (a versão de loja, com a chave e a senha), SEM cache (INT9-R5): a versão de loja não
-          # roda código do Gradle (AGP, plugins) que outra execução deixou. No setup-java v6.1.0, o valor vazio não
-          # restaura nem grava nada (src/setup-java.ts: `cache ? startCacheRestore(...)`; o cache do JDK também
-          # depende dele: `isJdkCacheEnabled` = Boolean(cache)). O preço: a versão de loja baixa tudo do Maven.
           cache: ${{ !startsWith(github.ref, 'refs/tags/v') && 'gradle' || '' }}
           cache-dependency-path: |
             android/CMakeLists.txt
@@ -650,9 +743,6 @@ jobs:
           fi
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$NDK_VERSAO" >> $GITHUB_ENV
           sudo apt-get install -y ninja-build > /dev/null 2>&1 || true
-      # Com a chave da loja (segredos do GitHub), o APK pode ir para uma
-      # versão. Sem ela, é assinado com uma chave de uso único, só para testar,
-      # e o portão recusa publicá-lo.
       - name: Assinatura
         env:
           CHAVE: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_CHAVE_BASE64 || '' }}
@@ -678,7 +768,6 @@ jobs:
           echo "QT_ANDROID_KEYSTORE_ALIAS=rustinho" >> $GITHUB_ENV
       - name: Compilar o APK
         env:
-          # 32 bits: o compilador do C++ da ponte precisa saber que é ARMv7.
           CFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
           CXXFLAGS_armv7_linux_androideabi: "-march=armv7-a -mthumb -mfpu=neon -mfloat-abi=softfp"
         run: |
@@ -718,8 +807,6 @@ jobs:
           echo "APK: $APK"
           cp "$APK" "saida/Rustinho-$VERSAO-Android${{ matrix.sufixo }}.apk"
           ls -la saida
-      # Confere no próprio APK quem assinou (C-10): o certificado do APK tem
-      # de ser o da chave usada, e nunca o da chave antiga, que era pública.
       - name: Conferir a assinatura
         run: |
           set -eu
@@ -738,8 +825,6 @@ jobs:
           echo "| APK | versionCode | certificado (SHA-256) | arquivo (SHA-256) |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| $(basename "$APK") ($(cat saida/assinatura.txt)) | $CODIGO | $DO_APK | $(cat saida/arquivo.txt) |" >> "$GITHUB_STEP_SUMMARY"
-      # Páginas de 16 KB (relatório; ainda não reprova): o alinhamento das bibliotecas do APK e das da instalação do Qt
-      # usada aqui (android/verificar_16kb.py). Pronto para 16 KB só quando o app, a libc++ do NDK e o Qt estiverem.
       - name: Páginas de 16 KB (relatório)
         run: |
           APK=$(ls saida/*.apk | head -1)
@@ -758,11 +843,6 @@ jobs:
           path: saida/
           retention-days: 90
 
-  # L4: o APK num Android de mentira (emulador), com fotos. O de 64 bits
-  # reprova o pipeline. O de 32 bits roda e fica REGISTRADO no manifesto, sem
-  # reprovar: a imagem x86 da API 28 deixa a tela cinza (EGL_BAD_CONFIG), como
-  # no PEND-18 do Moto e6i; a API 34 não instala ARMv7 e a 30 cai no tradutor.
-  # O alvo de verdade é o aparelho (L6); o emulador não o substitui.
   emulador:
     needs: apk
     if: inputs.android
@@ -802,14 +882,10 @@ jobs:
       - name: Emulador
         id: emulador
         continue-on-error: ${{ !matrix.bloqueia }}
-        # CI-3 (16/11/2026): o passo tem limite próprio, abaixo do limite do job (60 min). Se o emulador travar, o passo
-        # falha: o de 32 bits continua "não bloqueia" (continue-on-error), em vez de o job inteiro ser cancelado. O de
-        # 64 bits levou 21 min (job inteiro) na 2ª CI de ensaio.
         timeout-minutes: 40
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         env:
           CURTO: ${{ matrix.curto }}
-          # "automatico" não grava nada (android/testar.sh só age com gpu ou software).
           DESENHO: ${{ inputs.desenho }}
         with:
           api-level: ${{ matrix.api }}
@@ -827,13 +903,9 @@ jobs:
           BLOQUEIA: ${{ matrix.bloqueia }}
         run: |
           mkdir -p fotos
-          # N03: o roteiro diz a causa da falha (programa, roteiro de teste ou
-          # ambiente do emulador) e anota cada instabilidade que contornou.
           causa=$(cat fotos/causa.txt 2> /dev/null || echo "não informada")
           inst=0
           [ -f fotos/instabilidade.txt ] && inst=$(wc -l < fotos/instabilidade.txt)
-          # T047 (S1-R1 da revisão Sonnet): telas em que a ausência da seta não pôde ser conferida (árvore de
-          # acessibilidade sem nomes): ficam à vista no resultado, como inconclusivas, e não como conferidas.
           inc=0
           [ -f fotos/inconclusivos.txt ] && inc=$(wc -l < fotos/inconclusivos.txt)
           if [ "$SAIU" = success ]; then r=aprovado; else r="reprovado ($SAIU)"; fi
@@ -859,7 +931,7 @@ jobs:
 
   # O MANIFESTO da execução (MANIFESTO.json, SHA256SUMS.txt, NOTAS.md). Roda
   # sempre (para registrar também as reprovações) e REPROVA se qualquer job
-  # não passou. Não publica nada.
+  # não passou ou se qualquer shard/roteiro/QML foi omitido. Não publica nada.
   manifesto:
     needs: [formato, nucleo-linux, nucleo-windows, programa-e-telas, pacote-linux, pacote-windows, verificar, apk, emulador]
     if: always()
@@ -874,6 +946,7 @@ jobs:
         env:
           NECESSARIOS: ${{ toJSON(needs) }}
           RUSTINHO_ANDROID: ${{ inputs.android && 'sim' || 'nao' }}
+          RUSTINHO_SHARDS_TELAS: "6"
           FERRAMENTA_RUST: ${{ env.RUST_VERSAO }}
           FERRAMENTA_QT: ${{ env.QT_VERSAO }}
           FERRAMENTA_NDK: ${{ env.NDK_VERSAO }}

@@ -46,12 +46,7 @@ CELULAR = (360, 780)
 
 
 def montar_loja(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-         "--ignored", "--exact", "montar_geometria"],
-        cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    base._aux_nucleo.executar("lojas_de_teste", "montar_geometria", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
 
 
 def esperar_janela():

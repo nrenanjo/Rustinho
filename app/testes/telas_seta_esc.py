@@ -168,7 +168,7 @@ def abrir(res, pasta, tela, props, fotos, nome, usuario="Ana"):
     r = Rustinho(pasta, tela, props, fotos, nome)
     res.logs.append(r.saida)
     r.entrar(usuario)
-    time.sleep(1.5)
+    time.sleep(0.4)
     return r
 
 
@@ -776,7 +776,9 @@ def main():
                 ("A6", lambda: a6_seta_no_lugar(res, fotos, modelo, ids, temas)),
                 ("A7", lambda: (a7_seta_e_esc(res, fotos, modelo, ids, tema_a7), a7_com_alteracao(res, fotos, modelo, ids, tema_a7),
                                 a7_dv3_busca(res, fotos, modelo, ids, tema_a7))),
+                ("A7TELAS", lambda: a7_seta_e_esc(res, fotos, modelo, ids, tema_a7)),
                 ("A7ALT", lambda: a7_com_alteracao(res, fotos, modelo, ids, tema_a7)),
+                ("A7DV3", lambda: a7_dv3_busca(res, fotos, modelo, ids, tema_a7)),
                 ("A8", lambda: ([a8_peca(res, fotos, modelo, ids, t, completo=(t == tema_a7)) for t in temas],
                                 a8_outras(res, fotos, modelo, ids, tema_a7))),
                 ("A10", lambda: tema.a10_xadrez(res, fotos, modelo, cores)),

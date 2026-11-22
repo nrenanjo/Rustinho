@@ -165,7 +165,9 @@ def s1_cadeias_seguidas(placar, fotos):
             for ida in (1, 2, 3):
                 r.clicar("Ver o registro")
                 chegou = r.esperar(lambda: r.tem(TITULO_7) and r.pilha() == base + 1, 10)
-                time.sleep(1.5)
+                if chegou:
+                    r.esperar(lambda: any(60 <= y < r.altura() - 30 for _, y in r.onde("Aceitar como está")), 4)
+                time.sleep(0.8)
                 f = r.foto(f"-ida{ida}")
                 ok(f"s1 (ida {ida}): Ver o registro leva a Caixas com a guia", chegou, f)
                 setas = r.setas()
@@ -585,7 +587,7 @@ def s6_i1_tres_caixas(placar, fotos):
             r.clicar("Ver encomendas")
             chegou = r.esperar(lambda: r.tem("Correia dentada") and r.pilha() == inicio + 1)
             xdo("mousemove", "1400", "950")  # o ponteiro fora da janela: nenhuma linha com o mouse em cima
-            time.sleep(0.8)
+            time.sleep(1.2)
             com = r.foto("-2")
             ok("s6 (I1): Ver encomendas leva a Estoque › Encomendas, com a do outro caixa à vista", chegou, com)
             linha = textos_com(r, "Cliente do Caixa 2")

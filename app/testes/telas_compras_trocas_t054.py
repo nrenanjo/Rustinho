@@ -113,10 +113,7 @@ def notas(n):
 
 
 def montar_loja(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-                    "--ignored", "--exact", "montar_geometria"],
-                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("lojas_de_teste", "montar_geometria", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
 
 
 def esperar_janela():
@@ -546,10 +543,7 @@ def casos_ordens(modelo, fotos, w, h, completo):
 
 def montar_loja_pecas(pasta):
     """A loja do roteiro da lista de peças (K06): 120 peças e 2 pendências de identificação XML, mais a Bia (caixa)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "lojas_de_teste", "--",
-                    "--ignored", "--exact", "montar_pendencias_com_caixa"],
-                   cwd=base.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True)
+    base._aux_nucleo.executar("lojas_de_teste", "montar_pendencias_com_caixa", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=base.RAIZ)
 
 
 def casos_pendencias(modelo, fotos):
@@ -702,6 +696,16 @@ def main():
             casos_compras(modelo, fotos, 1280, 760, True)
             for w, h in TAMANHOS_MENORES:
                 casos_compras(modelo, fotos, w, h, False)
+        else:
+            if "1" in casos:
+                casos_compras(modelo, fotos, 1280, 760, True)
+            meio = len(TAMANHOS_MENORES) // 2
+            if "2" in casos:
+                for w, h in TAMANHOS_MENORES[:meio]:
+                    casos_compras(modelo, fotos, w, h, False)
+            if "3" in casos:
+                for w, h in TAMANHOS_MENORES[meio:]:
+                    casos_compras(modelo, fotos, w, h, False)
         if "T" in casos:
             casos_trocas(modelo, fotos, 1920, 1080, True)
             for w, h in ((1280, 760),) + TAMANHOS_MENORES:

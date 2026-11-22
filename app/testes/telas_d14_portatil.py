@@ -34,12 +34,7 @@ import telas_d09 as t  # noqa: E402  (Rustinho, xdo, conferir, simples)
 
 
 def montar_loja_d14(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-         "--ignored", "--exact", "a1_auditoria::montar_loja_d14"],
-        cwd=t.RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    t._aux_nucleo.executar("estavel", "a1_auditoria::montar_loja_d14", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=t.RAIZ)
     with open(os.path.join(pasta, "d14.json")) as f:
         return json.load(f)
 

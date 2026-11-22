@@ -22,6 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from telas_d09 import PROGRAMA, RAIZ, TELA, Rustinho, conferir, montar_loja, xdo  # noqa: E402
+import _aux_nucleo  # noqa: E402
 
 
 def estragar_lista_livre(db):
@@ -56,12 +57,7 @@ def sha(caminho):
 def montar_loja_v22_com_defeito(pasta):
     """RVI-03: loja de versão anterior (estrutura 22), com defeito, e um backup
     bom dela (montada pelo teste do núcleo `montar_loja_v22_com_defeito`)."""
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--lib", "--",
-         "--ignored", "--exact", "testes_rvi03::montar_loja_v22_com_defeito"],
-        cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    _aux_nucleo.executar("lib", "testes_rvi03::montar_loja_v22_com_defeito", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=RAIZ)
 
 
 def versao_do_banco(db):

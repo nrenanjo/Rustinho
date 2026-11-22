@@ -73,6 +73,7 @@ fn main() {
 
     // Ícone do programa no Windows (o .exe e a barra de tarefas).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        println!("cargo::rerun-if-changed=../instalador/rustinho.ico");
         let mut r = winresource::WindowsResource::new();
         r.set_icon("../instalador/rustinho.ico");
         r.set("FileDescription", "Rustinho");

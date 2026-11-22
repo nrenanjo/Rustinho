@@ -28,6 +28,9 @@ import tempfile
 import time
 import unicodedata
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _aux_nucleo  # noqa: E402
+
 RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROGRAMA = os.environ.get("RUSTINHO_PROGRAMA", os.path.join(RAIZ, "target", "debug", "rustinho"))
 # A tela virtual pode ser trocada (RUSTINHO_TELA=:88) quando a de sempre
@@ -68,12 +71,7 @@ def simples(t):
 
 
 def montar_loja(pasta):
-    env = dict(os.environ, RUSTINHO_LOJA_TESTE=pasta)
-    subprocess.run(
-        ["cargo", "test", "-q", "-p", "rustinho-nucleo", "--test", "estavel", "--",
-         "--ignored", "--exact", "montar_loja_de_teste"],
-        cwd=RAIZ, env=env, stdout=subprocess.DEVNULL, check=True,
-    )
+    _aux_nucleo.executar("estavel", "montar_loja_de_teste", {"RUSTINHO_LOJA_TESTE": pasta}, raiz=RAIZ)
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
     filtro = c.execute("SELECT id FROM produto WHERE nome = 'Filtro de óleo'").fetchone()[0]
     compra = c.execute("SELECT id FROM compra ORDER BY rowid LIMIT 1").fetchone()[0]
@@ -114,8 +112,10 @@ class Rustinho:
         with open(self.saida) as f:
             antes = f.read().count("TEXTOS-DA-TELA-FIM")
         xdo("key", "ctrl+shift+F12")
-        for _ in range(50):
-            time.sleep(0.2)
+        fim = time.monotonic() + 10.0
+        passo = 0.06
+        while time.monotonic() < fim:
+            time.sleep(passo)
             with open(self.saida) as f:
                 tudo = f.read()
             if tudo.count("TEXTOS-DA-TELA-FIM") > antes:
@@ -126,6 +126,8 @@ class Rustinho:
                     if len(p) == 3 and p[0].lstrip("-").isdigit() and p[1].lstrip("-").isdigit():
                         lista.append((int(p[0]), int(p[1]), p[2]))
                 return lista
+            if passo < 0.15:
+                passo = min(0.15, passo * 1.4)
         raise RuntimeError(f"o Rustinho não escreveu os textos da tela (veja {self.saida})")
 
     def textos_para_clicar(self, limite=4.0):
@@ -177,8 +179,9 @@ class Rustinho:
         continua na entrada. Antes de clicar, a posição do nome tem de ser a
         mesma em duas leituras seguidas."""
         anterior = None
-        for _ in range(40):
-            time.sleep(1)
+        fim = time.monotonic() + 40.0
+        while time.monotonic() < fim:
+            time.sleep(0.20 if anterior is not None else 0.15)
             try:
                 posicao = self.posicao_do_texto(usuario)
             except RuntimeError:
@@ -189,10 +192,32 @@ class Rustinho:
             anterior = posicao
         else:
             raise RuntimeError(f"a tela de entrada não apareceu (veja {self.saida})")
-        time.sleep(0.8)
-        xdo("type", "--delay", "80", SENHA[usuario])
+        # Espera reativa até o campo de senha aparecer (mantém tolerância em máquinas lentas).
+        alvo_senha = simples(f"Senha de {usuario}")
+        fim_senha = time.monotonic() + 3.0
+        while time.monotonic() < fim_senha:
+            time.sleep(0.08)
+            try:
+                tx = self.textos()
+            except RuntimeError:
+                continue
+            if any(simples(t) == alvo_senha or simples(t) == "entrar" for _, _, t in tx):
+                break
+        time.sleep(0.10)
+        xdo("type", "--delay", "25", SENHA[usuario])
         xdo("key", "Return")
-        time.sleep(4)
+        # Espera reativa até sair da tela de entrada + folga de assentamento da tela destino.
+        fim_saida = time.monotonic() + 12.0
+        while time.monotonic() < fim_saida:
+            time.sleep(0.12)
+            try:
+                tx = self.textos()
+            except RuntimeError:
+                continue
+            if not any(simples(t) == "quem esta usando?" for _, _, t in tx):
+                time.sleep(0.6)
+                return
+        time.sleep(0.6)
 
     def foto(self, sufixo=""):
         caminho = os.path.join(self.fotos, self.nome + sufixo + ".png")
