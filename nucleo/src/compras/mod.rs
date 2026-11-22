@@ -171,7 +171,7 @@ pub fn importar_xml(conn: &Connection, dispositivo: &str, usuario_id: &str, xml:
     if let Some(e) = ja_importada(conn, &verificada.nota)? {
         return Err(e);
     }
-    Ok(criar_compra(conn, dispositivo, usuario_id, xml, &verificada, false)?.0)
+    criar_compra(conn, dispositivo, usuario_id, xml, &verificada)
 }
 
 /// `campo` da recusa de uma nota que já está em Compras (em rascunho ou lançada). T108 (texto R do proprietário,
@@ -226,6 +226,11 @@ pub(crate) fn classificar_para_compras(
     if ja_importada(conn, nota)?.is_some() {
         return Ok(ParaCompras::Ja);
     }
+    // A9 da revisão da T108: as contas do rateio que o `criar_compra` faz; a nota em que elas não fecham não serve
+    // (em vez de derrubar a importação de cadastros inteira).
+    if ratear_do_cabecalho(nota, nota.itens.clone()).is_err() {
+        return Ok(ParaCompras::NaoServe);
+    }
     match verificar_para_compra(conn, xml) {
         Ok(v) => Ok(ParaCompras::Nova(Box::new(v))),
         Err(Erro::Validacao { .. }) => Ok(ParaCompras::NaoServe),
@@ -234,22 +239,15 @@ pub(crate) fn classificar_para_compras(
 }
 
 /// T108: cria o rascunho da compra da nota já verificada e conferida (`verificar_para_compra`) e que ainda não está
-/// em Compras (`ja_importada`). Devolve o id e quantas peças foram cadastradas.
-///
-/// `cadastrar_novas` (a importação pela tela de Compras, texto R: "processar também as informações pertinentes a
-/// Peças"): o item que a ligação automática de Compras não acha de jeito nenhum (`sem_vinculo`: nem candidata, nem
-/// dúvida) ganha a peça cadastrada agora, como o "Cadastrar nova" do lançar faria, com o código do fornecedor
-/// ligado; o item fica "nova", com a peça, e o lançar a usa (não cadastra outra). Os itens que acham peça ou que
-/// ficam em dúvida seguem as regras de antes. A importação de Peças chama com `false` (os cadastros dela já vieram,
-/// pelas opções da prévia).
+/// em Compras (`ja_importada`). A importação de Compras e a de Peças (as notas de compra) chamam esta. Os itens
+/// seguem a ligação automática de sempre; o que não acha peça vai para as pendências (que a tela de Peças mostra).
 pub(crate) fn criar_compra(
     conn: &Connection,
     dispositivo: &str,
     usuario_id: &str,
     xml: &str,
     verificada: &nfe_xml::NotaVerificada,
-    cadastrar_novas: bool,
-) -> Resultado<(String, i64)> {
+) -> Resultado<String> {
     let nota = &verificada.nota;
     let prova = &verificada.prova;
     let (fornecedor_id, _) = pessoas::garantir_fornecedor(conn, dispositivo, usuario_id, &nota.emitente)?;
@@ -277,24 +275,11 @@ pub(crate) fn criar_compra(
     let gtins_amb = gtins_ambiguos(&itens);
     let forn_nome =
         if nota.emitente.fantasia.is_empty() { nota.emitente.nome.as_str() } else { nota.emitente.fantasia.as_str() };
-    let mut cadastradas = 0i64;
     for (ordem, item) in itens.iter().enumerate() {
         let ambiguo = ambiguos.contains(&texto::compactar(&item.codigo));
         let gtin_ambiguo =
             crate::importar::gtins_para_ficha(&item.gtins, &item.gtin).iter().any(|g| gtins_amb.contains(&g.gtin));
-        let mut lig = ligar_sozinho(conn, &fornecedor_id, item, ambiguo, gtin_ambiguo)?;
-        if cadastrar_novas && lig.motivo_pendencia == "sem_vinculo" && !ambiguo && !gtin_ambiguo {
-            let pid = cadastrar_da_nota(conn, dispositivo, usuario_id, &fornecedor_id, item, &nota.numero, forn_nome)?;
-            lig = LigacaoAutomatica {
-                acao: "nova".into(),
-                produto_id: Some(pid),
-                achado_por: CADASTRADA_NA_IMPORTACAO.into(),
-                fator: 1000,
-                motivo_pendencia: String::new(),
-                candidatos: Vec::new(),
-            };
-            cadastradas += 1;
-        }
+        let lig = ligar_sozinho(conn, &fornecedor_id, item, ambiguo, gtin_ambiguo)?;
         let gtins_json = serde_json::to_string(&item.gtins).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, gtin_tributavel, origem_gtin,
@@ -360,67 +345,7 @@ pub(crate) fn criar_compra(
         &id,
         &[format!("NF {} · {} itens · {}", nota.numero, itens.len(), numeros::escrever_dinheiro(nota.total))],
     )?;
-    Ok((id, cadastradas))
-}
-
-/// T108: o `achado_por` do item cuja peça foi cadastrada pela importação desta compra (o item fica "nova", com a
-/// peça; o lançar a usa e não cadastra outra).
-pub const CADASTRADA_NA_IMPORTACAO: &str = "importacao";
-
-/// T108: cadastra a peça do item que a ligação automática não achou, como o "Cadastrar nova" do lançar
-/// (`cadastrar_peca`), com o custo da nota (o frete pago à parte e o fator só vêm no lançar, que acerta a peça), e
-/// liga o código deste fornecedor a ela (a próxima nota, e as outras do mesmo pacote, ligam sozinhas).
-fn cadastrar_da_nota(
-    conn: &Connection,
-    dispositivo: &str,
-    usuario_id: &str,
-    fornecedor_id: &str,
-    item: &ItemXml,
-    numero: &str,
-    fornecedor: &str,
-) -> Resultado<String> {
-    let custo_nota = numeros::soma([
-        item.valor_produtos,
-        -item.desconto,
-        item.frete,
-        item.seguro,
-        item.outras,
-        item.ipi,
-        item.icms_st,
-    ])?;
-    let nova = PecaNova {
-        descricao: &item.descricao,
-        gtin: &item.gtin,
-        gtins: crate::importar::gtins_para_ficha(&item.gtins, &item.gtin),
-        unidade: &item.unidade,
-        fator: 1000,
-        ncm: &item.ncm,
-        cest: &item.cest,
-        origem: item.origem,
-        cst_pis: &item.cst_pis,
-    };
-    let pid = peca_nova(conn, dispositivo, usuario_id, &nova, custo_unitario(custo_nota, item.quantidade))?;
-    if !texto::compactar(&item.codigo).is_empty() {
-        crate::catalogo::codigos::vincular_fornecedor(
-            conn,
-            fornecedor_id,
-            &item.codigo,
-            &pid,
-            1000,
-            crate::catalogo::codigos::JaLigado::Manter,
-        )?;
-        produtos::atualizar_indice_busca(conn, &pid)?;
-    }
-    auditoria::registrar(
-        conn,
-        dispositivo,
-        Some(usuario_id),
-        "produto.importar",
-        "produto",
-        &pid,
-        &[format!("Cadastrada pela importação da compra NF {numero} de {fornecedor}")],
-    )?;
-    Ok(pid)
+    Ok(id)
 }
 
 /// Se a nota trouxe frete/seguro/desconto/outras só no total, divide entre
@@ -1447,21 +1372,12 @@ pub fn atualizar(conn: &Connection, e: &CompraEntrada) -> Resultado<()> {
                 return Err(Erro::NaoEncontrado("Peça".into()));
             }
             Some(it.produto_id.clone())
-        } else if acao == "nova" {
-            // T108: a peça que a importação cadastrou para este item fica com ele (o lançar não cadastra outra).
-            conn.query_row(
-                "SELECT produto_id FROM compra_item WHERE id = ?1 AND compra_id = ?2 AND acao = 'nova' AND achado_por = ?3",
-                params![it.id, e.id, CADASTRADA_NA_IMPORTACAO],
-                |l| l.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten()
         } else {
             None
         };
         let n = conn.execute(
             "UPDATE compra_item SET acao = ?3, produto_id = ?4, fator = ?5, baixar_preco = ?6,
-                    achado_por = CASE WHEN ?3 IN ('ligar', 'nova') AND produto_id IS ?4 THEN achado_por ELSE '' END
+                    achado_por = CASE WHEN ?3 = 'ligar' AND produto_id IS ?4 THEN achado_por ELSE '' END
               WHERE id = ?1 AND compra_id = ?2",
             params![it.id, e.id, acao, produto_id, fator, it.baixar_preco],
         )?;
@@ -1533,28 +1449,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
         let mut detalhes = Vec::new();
         let produto_id = if it.acao == "nova" {
             resumo.pecas_novas += 1;
-            // T108: a peça que a importação desta compra cadastrou para o item, sem movimento de estoque (ninguém a
-            // usou ainda), recebe o que o "Cadastrar nova" daria (o custo com o frete pago à parte e o fator, o preço
-            // pelo lucro, a unidade); não se cadastra outra. É peça nova desta compra: o preço não conta como "preço
-            // atualizado" (D-09), como no "Cadastrar nova".
-            let da_importacao = match it.produto_id.as_ref().filter(|_| it.achado_por == CADASTRADA_NA_IMPORTACAO) {
-                Some(pid) => conn
-                    .query_row("SELECT COUNT(*) FROM estoque_movimento WHERE produto_id = ?1", [pid], |l| {
-                        l.get::<_, i64>(0)
-                    })
-                    .map(|n| (n == 0).then(|| pid.clone()))?,
-                None => None,
-            };
-            let pid = match da_importacao {
-                Some(pid) => {
-                    atualizar_custo(conn, dispositivo, usuario_id, &pid, custo, true, true, &tabelas)?;
-                    if it.fator != 1000 {
-                        conn.execute("UPDATE produto SET unidade = 'UN' WHERE id = ?1", [&pid])?;
-                    }
-                    pid
-                }
-                None => cadastrar_peca(conn, dispositivo, usuario_id, it, custo)?,
-            };
+            let pid = cadastrar_peca(conn, dispositivo, usuario_id, it, custo)?;
             conn.execute("UPDATE compra_item SET produto_id = ?2 WHERE id = ?1", params![it.id, pid])?;
             pid
         } else {
@@ -1716,53 +1611,24 @@ fn cadastrar_peca(
     it: &ItemBanco,
     custo: i64,
 ) -> Resultado<String> {
-    let nova = PecaNova {
-        descricao: &it.descricao,
-        gtin: &it.gtin,
-        gtins: it.gtins_ficha(),
-        unidade: &it.unidade,
-        fator: it.fator,
-        ncm: &it.ncm,
-        cest: &it.cest,
-        origem: it.origem,
-        cst_pis: &it.cst_pis,
-    };
-    peca_nova(conn, dispositivo, usuario_id, &nova, custo)
-}
-
-/// Os dados do item da nota que a peça nova recebe (do item gravado, no lançar, ou do XML, na importação: T108).
-struct PecaNova<'a> {
-    descricao: &'a str,
-    gtin: &'a str,
-    gtins: Vec<produtos::GtinFicha>,
-    unidade: &'a str,
-    fator: i64,
-    ncm: &'a str,
-    cest: &'a str,
-    origem: i64,
-    cst_pis: &'a str,
-}
-
-/// O "Cadastrar nova" (o mesmo no lançar e, T108, na importação pela tela de Compras).
-fn peca_nova(conn: &Connection, dispositivo: &str, usuario_id: &str, it: &PecaNova, custo: i64) -> Resultado<String> {
     let mut f = produtos::ficha_nova(conn)?;
-    f.nome = texto::limpar(it.descricao).chars().take(120).collect();
+    f.nome = texto::limpar(&it.descricao).chars().take(120).collect();
     let barras_livre = !it.gtin.is_empty()
-        && gtin::gtin_valido(it.gtin)
+        && gtin::gtin_valido(&it.gtin)
         && matches!(
-            crate::importar::peca_por_gtins_inequivoco(conn, &[], it.gtin)?,
+            crate::importar::peca_por_gtins_inequivoco(conn, &[], &it.gtin)?,
             crate::catalogo::codigos::BuscaId::Nenhum
         );
     if barras_livre {
-        f.codigo_barras = it.gtin.to_string();
+        f.codigo_barras = it.gtin.clone();
     }
-    f.gtins = it.gtins.clone();
-    f.unidade = if it.fator == 1000 { crate::unidades::de_fora(it.unidade) } else { "UN".into() };
+    f.gtins = it.gtins_ficha();
+    f.unidade = if it.fator == 1000 { crate::unidades::de_fora(&it.unidade) } else { "UN".into() };
     if it.ncm.len() == 8 && it.ncm.chars().all(|c| c.is_ascii_digit()) {
-        f.ncm = it.ncm.to_string();
+        f.ncm = it.ncm.clone();
     }
     if it.cest.len() == 7 && it.cest.chars().all(|c| c.is_ascii_digit()) {
-        f.cest = it.cest.to_string();
+        f.cest = it.cest.clone();
     }
     if (0..produtos::ORIGENS.len() as i64).contains(&it.origem) {
         f.origem = it.origem;
@@ -1967,11 +1833,9 @@ mod comandos {
     // Um arquivo escolhido: um XML, um .zip ou .rar com várias notas,
     // ou uma pasta. Cada nota vira uma compra; o que falhar vem em "erros".
     //
-    // T108 (texto R do proprietário, 21/11/2026): a importação também faz o que é de Peças. O item que a ligação
-    // automática de Compras não acha de jeito nenhum ganha a peça cadastrada (o "Cadastrar nova" de sempre, agora na
-    // importação), com o código do fornecedor ligado; o resto segue as regras de antes (`compras::criar_compra`). O
-    // estoque, o custo das peças que já existiam e o A pagar continuam só no lançar. Num pacote, a nota que já está em
-    // Compras é contada à parte ("jaEmCompras"), não é erro; o XML sozinho repetido continua recusado.
+    // T108 (texto R do proprietário, 21/11/2026): num pacote (pasta, .zip, .rar), a nota que já está em Compras é
+    // contada à parte ("jaEmCompras"), não é erro; o XML sozinho repetido continua recusado. O que é de Peças (o
+    // fornecedor; o item sem peça vai para as pendências que a tela de Peças mostra) segue como antes.
     fn compra_importar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Arquivo = ler(dados)?;
         if d.caminho.trim().is_empty() {
@@ -1991,7 +1855,6 @@ mod comandos {
         // janela de conflito para conferir ou descartar.
         let mut conflitos = Vec::new();
         let mut ja_em_compras = 0i64;
-        let mut pecas_cadastradas = 0i64;
         for x in lista {
             if !x.erro.is_empty() {
                 erros.push(format!("{}: {}", x.nome, x.erro));
@@ -2001,13 +1864,12 @@ mod comandos {
             let criada = compras::verificar_para_compra(&tx, &x.texto).and_then(|v| {
                 match compras::ja_importada(&tx, &v.nota)? {
                     Some(e) => Err(e),
-                    None => compras::criar_compra(&tx, p.disp, p.usuario_id, &x.texto, &v, true),
+                    None => compras::criar_compra(&tx, p.disp, p.usuario_id, &x.texto, &v),
                 }
             });
             match criada {
-                Ok((id, cadastradas)) => {
+                Ok(id) => {
                     tx.commit()?;
-                    pecas_cadastradas += cadastradas;
                     fichas.push(compras::ficha(p.conn, &id)?);
                 }
                 // Dentro de um pacote, eventos (cancelamento, carta de
@@ -2041,9 +1903,6 @@ mod comandos {
         // T108: só quando há (a resposta de antes fica igual).
         if ja_em_compras > 0 {
             resposta["jaEmCompras"] = json!(ja_em_compras);
-        }
-        if pecas_cadastradas > 0 {
-            resposta["pecasCadastradas"] = json!(pecas_cadastradas);
         }
         // R0, EXCEÇÃO documentada: um pacote grava uma transação por nota; a marca vai numa transação
         // própria no fim. Cada nota já é recusada se repetida (a chave de acesso de 44 dígitos, acima).
@@ -2079,7 +1938,7 @@ mod comandos {
         let tx = p.conn.transaction()?;
         let classificar = compras::classificar_para_compras;
         let criar = |c: &rusqlite::Connection, xml: &str, v: &nfe_xml::NotaVerificada| -> Resultado<()> {
-            compras::criar_compra(c, disp, usuario, xml, v, false).map(|_| ())
+            compras::criar_compra(c, disp, usuario, xml, v).map(|_| ())
         };
         let gancho = importar::GanchoCompras { classificar: &classificar, criar: &criar };
         let r = importar::importar_com_compras(&tx, disp, usuario, &d, Some(&gancho))?;
@@ -2486,6 +2345,39 @@ mod testes {
         let b = Banco::em_memoria().unwrap();
         let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
         (b, u.id)
+    }
+
+    /// A11 da revisão da T108: a prévia e a importação de cadastros com as notas de compra dão o MESMO resumo (as
+    /// categorias `compra.*` incluídas), com a opção marcada e desmarcada.
+    #[test]
+    fn t108_previa_igual_ao_resultado_com_as_compras() {
+        for compras in [true, false] {
+            let (b, u) = base();
+            config::gravar(&b.conn, "loja_cnpj", "11444777000161").unwrap();
+            let pasta = std::env::temp_dir().join(format!("rustinho-t108-resumo-{}", tempo::novo_id()));
+            std::fs::create_dir_all(&pasta).unwrap();
+            std::fs::write(pasta.join("nota.xml"), nfe_xml::EXEMPLO).unwrap();
+            let e = crate::importar::Entrada {
+                arquivos: vec![pasta.display().to_string()],
+                fornecedores: true,
+                pecas_fornecedor: true,
+                compras,
+                ..Default::default()
+            };
+            let classificar = classificar_para_compras;
+            let criar = |c: &Connection, xml: &str, v: &nfe_xml::NotaVerificada| -> Resultado<()> {
+                criar_compra(c, &b.dispositivo, &u, xml, v).map(|_| ())
+            };
+            let gancho = crate::importar::GanchoCompras { classificar: &classificar, criar: &criar };
+            let previa = crate::importar::previa_com_compras(&b.conn, &e, Some(&gancho)).unwrap();
+            let feito = crate::importar::importar_com_compras(&b.conn, &b.dispositivo, &u, &e, Some(&gancho)).unwrap();
+            assert_eq!(previa.resumo, feito.resumo, "compras = {compras}");
+            let codigo = if compras { "compra.nova" } else { "compra.nao_importada" };
+            assert!(previa.resumo.categorias.iter().any(|c| c.codigo == codigo && c.quantidade == 1), "{compras}");
+            let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM compra", [], |l| l.get(0)).unwrap();
+            assert_eq!(n, i64::from(compras), "compras = {compras}");
+            std::fs::remove_dir_all(pasta).ok();
+        }
     }
 
     fn peca(b: &Banco, u: &str, nome: &str, barras: &str, original: &str, custo: &str) -> String {

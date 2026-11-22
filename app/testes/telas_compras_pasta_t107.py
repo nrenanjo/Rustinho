@@ -43,7 +43,7 @@ def estatica(caminho=QML):
     """[(o que falta)] no código."""
     t = open(caminho, encoding="utf-8").read()
     faltas = []
-    if 'text: "Escolher uma pasta"' not in t or "seletorPasta.open()" not in t:
+    if '"Escolher uma pasta"' not in t or "seletorPasta.open()" not in t:
         faltas.append("não há o botão Escolher uma pasta")
     if not re.search(r"FolderDialog\s*\{[^}]*onAccepted:\s*tela\.importar\(\[selectedFolder\]\)", t, re.S):
         faltas.append("a pasta não vai à mesma importação")

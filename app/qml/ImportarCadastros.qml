@@ -233,6 +233,10 @@ Painel {
                 painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
                 painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
                 painel.qCompras = r.dados.comprasNovas > 0 && (!e || e.qCompras)
+                // A3 da revisão da T108: "Notas de compra em Compras" também exige "Fornecedores" (cada compra é de um
+                // fornecedor), como as peças do fornecedor (FI-1).
+                if (painel.qCompras)
+                    painel.qFornecedores = true
                 // FI-1 (a): "Peças das notas de fornecedores" exige "Fornecedores"
                 // (as peças ficam ligadas ao fornecedor, cadastrado com elas).
                 if (painel.qPecasFornecedor)
@@ -415,7 +419,7 @@ Painel {
                         visible: painel.naImportacao
                         text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
                               + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
-                              + "Aqui as notas servem só de cadastro: não entram no estoque nem no financeiro (para isso, use Compras)."
+                              + "As notas de compra da loja também podem ir para Compras, em rascunho: o estoque e o financeiro só mudam quando cada uma for lançada lá."
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }
@@ -500,8 +504,10 @@ Painel {
                                          ? painel.texto(painel.cat("fornecedor.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
                                            + " a ser fornecedor" : "",
                                   // FI-1 (a): travada enquanto "Peças das notas de fornecedores" estiver marcada.
-                                  presa: painel.qPecasFornecedor,
-                                  porque: "Marcada junto com \"Peças das notas de fornecedores\": as peças ficam ligadas ao fornecedor, que é cadastrado com elas." },
+                                  presa: painel.qPecasFornecedor || painel.qCompras,
+                                  porque: painel.qPecasFornecedor
+                                          ? "Marcada junto com \"Peças das notas de fornecedores\": as peças ficam ligadas ao fornecedor, que é cadastrado com elas."
+                                          : "Marcada junto com \"Notas de compra em Compras\": cada compra é de um fornecedor." },
                                 { chave: "qPecasLoja", titulo: "Peças das notas da loja", novos: painel.previa.pecasLojaNovas, ja: -1,
                                   mudam: painel.cat("loja.ja_gtin_novo"), exemplos: [], cor: Tema.papel },
                                 { chave: "qPecasFornecedor", titulo: "Peças das notas de fornecedores", novos: painel.previa.pecasFornecedorNovas, ja: -1,
@@ -511,14 +517,21 @@ Painel {
                                 // entram de novo.
                                 { chave: "qCompras", titulo: "Notas de compra em Compras", novos: painel.previa.comprasNovas,
                                   ja: painel.previa.comprasJa, jaTexto: " já estavam em Compras", novoUm: "nova", novoVarios: "novas",
-                                  extra: painel.previa.comprasNovas > 0
-                                         ? "Entram em rascunho: o estoque e o A pagar só mudam quando cada uma for lançada em Compras." : "",
+                                  naoServe: painel.previa.comprasNaoServe,
+                                  extra: [painel.previa.comprasNovas > 0
+                                          ? "Entram em rascunho: o estoque e o A pagar só mudam quando cada uma for lançada em Compras. "
+                                            + "Se estas notas já foram lançadas no sistema antigo, desmarque." : "",
+                                          // A8 da revisão da T108: as que não servem para Compras não somem sem aviso.
+                                          painel.previa.comprasNaoServe > 0
+                                          ? painel.texto(painel.previa.comprasNaoServe, "nota de fornecedor não serve", "notas de fornecedor não servem")
+                                            + " para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução ou NFC-e): só os cadastros." : ""]
+                                         .filter(x => !!x).join(" "),
                                   exemplos: [], cor: Tema.papel }
                             ] : []
                             delegate: Rectangle {
                                 id: linha
                                 required property var modelData
-                                visible: modelData.novos > 0 || modelData.ja > 0 || (modelData.mudam || 0) > 0
+                                visible: modelData.novos > 0 || modelData.ja > 0 || (modelData.mudam || 0) > 0 || (modelData.naoServe || 0) > 0
                                 Layout.fillWidth: true
                                 implicitHeight: coluna.implicitHeight + 20
                                 radius: Tema.raio
@@ -541,6 +554,9 @@ Painel {
                                                 painel[linha.modelData.chave] = checked
                                                 // FI-1 (a): as peças do fornecedor levam o fornecedor junto.
                                                 if (linha.modelData.chave === "qPecasFornecedor" && checked)
+                                                    painel.qFornecedores = true
+                                                // A3 da revisão da T108: as notas de compra também.
+                                                if (linha.modelData.chave === "qCompras" && checked)
                                                     painel.qFornecedores = true
                                                 painel.escolhas = { qClientes: painel.qClientes, qFornecedores: painel.qFornecedores,
                                                                     qPecasLoja: painel.qPecasLoja, qPecasFornecedor: painel.qPecasFornecedor,

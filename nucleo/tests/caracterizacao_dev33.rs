@@ -898,7 +898,8 @@ fn f4_interrupcao_trazer_cadastros_nao_deixa_metade() {
 /// Fase 4 (trava): numa compra de 3 notas, uma queda na 2ª desfaz só ela (uma
 /// transação por nota). O gatilho aborta o primeiro item da nota 603 depois de
 /// ela já ter gravado o cabeçalho; a 601 e a 604 entram, a 603 vai para os
-/// erros sem deixar nada. Repetir o pacote: 601 e 604 recusadas, 603 entra.
+/// erros sem deixar nada. Repetir o pacote: 601 e 604 não entram de novo (T108: contadas como já em Compras, sem
+/// erro), 603 entra.
 #[test]
 fn f4_interrupcao_compra_desfaz_so_a_nota_da_falha() {
     let mut l = loja("f4-interrupcao-compra");

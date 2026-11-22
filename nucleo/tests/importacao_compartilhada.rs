@@ -8,10 +8,10 @@
 //!   autorizada, para o CNPJ da loja, de venda do fornecedor, normal) e ainda não está em Compras vira o rascunho da
 //!   compra, com a opção "Notas de compra em Compras" da prévia. O estoque, o custo e o A pagar não mudam: só no
 //!   lançar, como sempre.
-//! - **Por Compras**: o item que a ligação automática de Compras não acha de jeito nenhum (nem candidata, nem dúvida)
-//!   ganha a peça cadastrada já na importação, como o "Cadastrar nova" faria, com o código do fornecedor ligado; o
-//!   item fica "nova", com a peça, e o lançar a usa (não cadastra outra). Os itens que acham peça ou ficam em dúvida
-//!   seguem as regras de antes (os testes `pend40` e `t7_3` travam isso).
+//! - **Por Compras**: o que é de Peças segue o caminho de antes, sem peça nascendo sem a decisão da pessoa (a revisão
+//!   da T108 reprovou o cadastro automático: peça repetida). O fornecedor é cadastrado e o item sem peça vai para as
+//!   pendências que a tela de Peças mostra ("associar" ou "cadastrar nova"); resolvida a pendência, o item da compra
+//!   se liga sozinho.
 //! - **Sem duplicar**: a compra pela chave de acesso; os cadastros só cadastram o que falta. Num pacote (pasta,
 //!   .zip, .rar), a nota que já estava em Compras é contada, não é erro; o XML sozinho repetido continua recusado.
 //!
@@ -187,6 +187,10 @@ fn pecas_nao_leva_para_compras_a_nota_de_outro_cnpj() {
     let pasta = pasta(&l, "xml", 1);
     let p = l.ok("importar_previa", json!({ "arquivos": [pasta.clone()] }));
     assert_eq!((p["comprasNovas"].as_i64(), p["comprasJa"].as_i64()), (Some(0), Some(0)), "{p}");
+    // A8 da revisão da T108: a que não serve para Compras não some sem aviso.
+    assert_eq!(p["comprasNaoServe"].as_i64(), Some(1), "{p}");
+    let cat = p["categorias"].as_array().unwrap().iter().find(|x| x["codigo"] == "compra.nao_serve").cloned();
+    assert_eq!(cat.map(|c| c["quantidade"].clone()), Some(json!(1)), "{p}");
     let r = cadastrar(&mut l, &pasta, true);
     assert_eq!(r, json!({ "clientes": 0, "fornecedores": 1, "pecas": 3, "codigosLigados": 0 }), "{r}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 0);
@@ -196,44 +200,40 @@ fn pecas_nao_leva_para_compras_a_nota_de_outro_cnpj() {
 // Por Compras
 // ---------------------------------------------------------------------------
 
-/// Importou por Compras: as peças que a Compras não acha vão para Peças já na importação, com o código do
-/// fornecedor ligado; os itens ficam "nova", com a peça. O estoque e o A pagar não mudam.
+/// Importou por Compras: o fornecedor é cadastrado, e os itens sem peça vão para as pendências de Peças (nenhuma
+/// peça nasce sem a decisão da pessoa). Resolvida a pendência em Peças, o item da compra se liga sozinho. O estoque e
+/// o A pagar não mudam.
 #[test]
-fn importou_por_compras_as_pecas_vao_para_pecas() {
+fn importou_por_compras_o_que_e_de_pecas_vai_para_as_pendencias() {
     let mut l = loja("t108-compras", LOJA_CNPJ);
     let a = arquivo(&l, "compra");
     let r = l.ok("compra_importar", json!({ "caminho": a }));
     assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
-    assert_eq!(r["pecasCadastradas"], 3, "{r}");
     assert_eq!(n(&l, &format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{FORNECEDOR}'")), 1);
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
-    assert_eq!(
-        n(&l, &format!(
-            "SELECT COUNT(*) FROM produto_fornecedor pf JOIN pessoa p ON p.id = pf.fornecedor_id WHERE p.documento = '{FORNECEDOR}'"
-        )),
-        3,
-        "os códigos do fornecedor ficam ligados às peças"
-    );
-    assert!(
-        itens(&l).iter().all(|(acao, por, peca)| acao == "nova" && por == "importacao" && *peca),
-        "{:?}",
-        itens(&l)
-    );
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM xml_pendencia_identificacao"), 0, "nada fica para identificar");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 0, "nenhuma peça nasce sem a decisão da pessoa");
+    let pend = l.ok("xml_pendencias_listar", json!({}));
+    assert_eq!(pend.as_array().unwrap().len(), 3, "os 3 itens estão nas pendências de Peças: {pend}");
+    assert!(itens(&l).iter().all(|(acao, _, peca)| acao.is_empty() && !*peca), "{:?}", itens(&l));
     nada_no_estoque_nem_no_financeiro(&l);
+    // Em Peças, a pessoa cadastra a peça nova de uma pendência: o item da compra se liga sozinho.
+    let id_pend = pend[0]["id"].as_str().unwrap().to_string();
+    l.ok("xml_pendencia_resolver", json!({ "id": id_pend, "acao": "nova", "produtoId": "" }));
+    let id: String = l.conexao().query_row("SELECT id FROM compra", [], |x| x.get(0)).unwrap();
+    let c = l.ok("compra_abrir", json!({ "id": id }));
+    let ligados = c["itens"].as_array().unwrap().iter().filter(|it| it["acao"] == "ligar").count();
+    assert_eq!(ligados, 1, "o item da pendência resolvida se ligou: {c}");
 }
 
-/// O caixa (não gerente) importa a compra como antes, e os cadastros vêm junto: cadastrar peça já é do caixa (o
-/// "nova" do lançar e a tela de Peças).
+/// A2 da revisão da T108: o caixa importa a compra como antes, e nenhuma peça nasce na importação.
 #[test]
-fn o_caixa_importa_e_os_cadastros_vem_junto() {
+fn o_caixa_importa_e_nenhuma_peca_nasce_sem_decisao() {
     let mut l = loja("t108-caixa", LOJA_CNPJ);
     l.usuario_caixa("Bia", SENHA_BIA);
     l.entrar("Bia", SENHA_BIA);
-    let a = arquivo(&l, "compra");
-    let r = l.ok("compra_importar", json!({ "caminho": a }));
-    assert_eq!(r["pecasCadastradas"], 3, "{r}");
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1);
+    let pasta = pasta(&l, "xml", 1);
+    let r = l.ok("compra_importar", json!({ "caminho": pasta }));
+    assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 0);
 }
 
 /// A mesma pasta de novo: num pacote, a nota que já estava em Compras é contada, não é erro; nada se repete.
@@ -247,9 +247,8 @@ fn compras_pasta_de_novo_conta_a_nota_que_ja_estava() {
     assert_eq!(r2["erros"], json!([]), "a nota repetida no pacote não é erro: {r2}");
     assert_eq!(r2["jaEmCompras"], 1, "{r2}");
     assert_eq!(r2["compras"], json!([]), "{r2}");
-    assert!(r2.get("pecasCadastradas").is_none(), "nada novo para cadastrar: {r2}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1);
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM xml_pendencia_identificacao"), 3, "as pendências não se repetem");
 }
 
 /// Duas cópias da mesma nota na mesma pasta: uma compra só; a outra é contada como já em Compras.
@@ -261,7 +260,6 @@ fn compras_duas_copias_na_pasta_uma_compra() {
     assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
     assert_eq!((r["jaEmCompras"].clone(), r["erros"].clone()), (json!(1), json!([])), "{r}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1);
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
 }
 
 /// O XML sozinho repetido continua recusado com a data em que entrou (como antes).
@@ -283,7 +281,6 @@ fn compras_nota_de_outro_cnpj_nao_cadastra_nada() {
     let a = arquivo(&l, "compra");
     let r = l.ok("compra_importar", json!({ "caminho": a }));
     assert_eq!(r["conflitos"].as_array().unwrap().len(), 1, "{r}");
-    assert!(r.get("pecasCadastradas").is_none(), "{r}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 0);
     assert_eq!(n(&l, "SELECT COUNT(*) FROM pessoa WHERE documento = '11222333000181'"), 0);
 }
@@ -292,7 +289,8 @@ fn compras_nota_de_outro_cnpj_nao_cadastra_nada() {
 // Uma depois da outra
 // ---------------------------------------------------------------------------
 
-/// Por Compras e depois por Peças (a mesma pasta): nada se repete; a prévia diz que a nota já estava em Compras.
+/// Por Compras e depois por Peças (a mesma pasta): a nota não entra de novo em Compras; os cadastros de Peças
+/// resolvem as pendências, e os itens da compra se ligam às peças.
 #[test]
 fn compras_e_depois_pecas_nao_duplica() {
     let mut l = loja("t108-compras-pecas", LOJA_CNPJ);
@@ -300,11 +298,16 @@ fn compras_e_depois_pecas_nao_duplica() {
     l.ok("compra_importar", json!({ "caminho": pasta.clone() }));
     let p = l.ok("importar_previa", json!({ "arquivos": [pasta.clone()] }));
     assert_eq!((p["comprasNovas"].as_i64(), p["comprasJa"].as_i64()), (Some(0), Some(1)), "{p}");
-    assert_eq!(p["pecasFornecedorNovas"].as_i64(), Some(0), "as peças já vieram por Compras: {p}");
     let r = cadastrar(&mut l, &pasta, true);
-    assert_eq!(r, json!({ "clientes": 0, "fornecedores": 0, "pecas": 0, "codigosLigados": 0 }), "{r}");
+    assert_eq!(r, json!({ "clientes": 0, "fornecedores": 0, "pecas": 3, "codigosLigados": 0 }), "{r}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1);
     assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'"), 0);
+    let id: String = l.conexao().query_row("SELECT id FROM compra", [], |x| x.get(0)).unwrap();
+    let c = l.ok("compra_abrir", json!({ "id": id }));
+    assert!(c["itens"].as_array().unwrap().iter().all(|it| it["acao"] == "ligar"), "os itens se ligaram: {c}");
+    let r2 = cadastrar(&mut l, &pasta, true);
+    assert_eq!(r2, json!({ "clientes": 0, "fornecedores": 0, "pecas": 0, "codigosLigados": 0 }), "{r2}");
 }
 
 /// Por Peças e depois por Compras (a mesma pasta): nada se repete; a nota é contada como já em Compras.
@@ -315,7 +318,6 @@ fn pecas_e_depois_compras_nao_duplica() {
     cadastrar(&mut l, &pasta, true);
     let r = l.ok("compra_importar", json!({ "caminho": pasta }));
     assert_eq!((r["jaEmCompras"].clone(), r["erros"].clone()), (json!(1), json!([])), "{r}");
-    assert!(r.get("pecasCadastradas").is_none(), "{r}");
     assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1);
     assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
 }
@@ -350,54 +352,39 @@ fn a_compra_que_veio_por_pecas_se_lanca_nas_mesmas_pecas() {
     assert!(n(&l, "SELECT COUNT(*) FROM conta_pagar") >= 1, "o A pagar nasce no lançar");
 }
 
-/// O lançar usa a peça que a importação cadastrou, também quando a tela manda "Cadastrar nova" sem a peça (o
-/// "nova" de sempre): nenhuma peça repetida; o custo leva o frete pago à parte.
-fn conferir_e_lancar(l: &mut Loja, id: &str, frete_extra: &str, atualizar_precos: bool) -> Value {
-    let c = l.ok("compra_abrir", json!({ "id": id }));
-    let escolhas: Vec<Value> = c["itens"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|it| json!({ "id": it["id"], "acao": "nova", "produtoId": "", "fator": "1", "baixarPreco": false }))
-        .collect();
-    l.ok(
-        "compra_conferir_autorizacao",
-        json!({ "id": id, "situacao": "autorizada", "protocolo": "135260000000001",
-                "conferidoEm": "08/10/2026 11:00", "senha": SENHA_ANA }),
+/// A3 da revisão da T108 (FI-1): "Notas de compra em Compras" exige "Fornecedores"; sem ela, nada é gravado.
+#[test]
+fn compras_sem_fornecedores_e_recusada() {
+    let mut l = loja("t108-fi1", LOJA_CNPJ);
+    let pasta = pasta(&l, "xml", 1);
+    let e = l.erro(
+        "importar_cadastros",
+        json!({ "arquivos": [pasta], "clientes": false, "fornecedores": false, "pecasLoja": false,
+                "pecasFornecedor": false, "compras": true }),
     );
-    l.ok(
-        "compra_lancar",
-        json!({ "id": id, "itens": escolhas, "freteExtra": frete_extra, "atualizarPrecos": atualizar_precos }),
-    )
+    assert!(e.contains("Fornecedores"), "{e}");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 0);
+    assert_eq!(n(&l, &format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{FORNECEDOR}'")), 0);
 }
 
+/// A11 da revisão da T108: se a compra cair no meio do "Trazer cadastros", nada é gravado (nem os cadastros).
 #[test]
-fn o_lancar_usa_a_peca_que_a_importacao_cadastrou() {
-    let mut l = loja("t108-lancar-nova", LOJA_CNPJ);
-    let a = arquivo(&l, "compra");
-    let r = l.ok("compra_importar", json!({ "caminho": a }));
-    let id = r["compras"][0]["id"].as_str().unwrap().to_string();
-    let custo_antes: i64 = l.numero("SELECT SUM(custo) FROM produto");
-    let lancou = conferir_e_lancar(&mut l, &id, "90,00", true);
-    assert_eq!(lancou["resumo"]["pecasNovas"], 3, "{lancou}");
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3, "nenhuma peça repetida no lançar");
-    assert_eq!(n(&l, "SELECT COUNT(DISTINCT produto_id) FROM estoque_movimento"), 3);
-    assert!(l.numero("SELECT SUM(custo) FROM produto") > custo_antes, "o frete pago à parte entrou no custo");
-    let c = l.ok("compra_abrir", json!({ "id": id }));
-    assert!(c["itens"].as_array().unwrap().iter().all(|it| it["acao"] == "nova" && !it["peca"].is_null()), "{c}");
-}
-
-/// D-09: a peça que a importação desta compra cadastrou é peça nova da compra. O caixa lança com o frete pago à
-/// parte e os preços seguindo o custo sem a senha do gerente, como no "Cadastrar nova" de antes.
-#[test]
-fn o_caixa_lanca_a_peca_que_a_importacao_cadastrou_sem_o_gerente() {
-    let mut l = loja("t108-caixa-lanca", LOJA_CNPJ);
-    l.usuario_caixa("Bia", SENHA_BIA);
-    l.entrar("Bia", SENHA_BIA);
-    let a = arquivo(&l, "compra");
-    let r = l.ok("compra_importar", json!({ "caminho": a }));
-    let id = r["compras"][0]["id"].as_str().unwrap().to_string();
-    let lancou = conferir_e_lancar(&mut l, &id, "90,00", true);
-    assert_eq!(lancou["resumo"]["precosAtualizados"], 0, "{lancou}");
-    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 3);
+fn queda_na_compra_desfaz_o_trazer_cadastros_inteiro() {
+    let mut l = loja("t108-queda", LOJA_CNPJ);
+    let pasta = pasta(&l, "xml", 1);
+    l.executar(
+        "CREATE TRIGGER falha_de_teste BEFORE INSERT ON compra_item
+           BEGIN SELECT RAISE(ABORT, 'falha de teste no meio'); END",
+    );
+    l.erro(
+        "importar_cadastros",
+        json!({ "arquivos": [pasta.clone()], "clientes": true, "fornecedores": true, "pecasLoja": true,
+                "pecasFornecedor": true, "compras": true }),
+    );
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 0);
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM produto"), 0, "os cadastros voltaram junto");
+    assert_eq!(n(&l, &format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{FORNECEDOR}'")), 0);
+    l.executar("DROP TRIGGER falha_de_teste");
+    let r = cadastrar(&mut l, &pasta, true);
+    assert_eq!((r["compras"].clone(), r["pecas"].clone()), (json!(1), json!(3)), "de novo, tudo entra: {r}");
 }

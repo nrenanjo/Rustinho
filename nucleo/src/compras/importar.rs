@@ -70,6 +70,8 @@ pub struct Previa {
     /// T108: as notas de compra que vão para Compras (em rascunho) e as que já estavam lá.
     pub compras_novas: i64,
     pub compras_ja: i64,
+    /// A8 da revisão: as notas de fornecedor que não servem para a entrada de compra (só os cadastros).
+    pub compras_nao_serve: i64,
     /// Lote 2 (O-3, A03b): as opções desta prévia e o que a importação vai
     /// fazer com elas, pelas mesmas decisões (os campos de cima são, como
     /// antes, com todas as opções marcadas).
@@ -132,6 +134,8 @@ struct Lido {
     compras: Vec<(String, String, nfe_xml::NotaVerificada)>,
     /// T108: as notas de compra que já estavam em Compras (não entram de novo).
     compras_ja: i64,
+    /// A8 da revisão da T108: as notas de fornecedor que não servem para a entrada de compra (só os cadastros).
+    compras_nao_serve: i64,
 }
 
 /// T108 (texto R do proprietário, 21/11/2026): o que a nota de fornecedor é para Compras.
@@ -370,7 +374,7 @@ fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompr
             match (g.classificar)(conn, xml, &nota) {
                 Ok(ParaCompras::Nova(v)) => lido.compras.push((nome.to_string(), xml.to_string(), *v)),
                 Ok(ParaCompras::Ja) => lido.compras_ja += 1,
-                Ok(ParaCompras::NaoServe) => {}
+                Ok(ParaCompras::NaoServe) => lido.compras_nao_serve += 1,
                 Err(e) => falha = Some(e),
             }
         }
@@ -623,6 +627,7 @@ fn previa_do_lido(conn: &Connection, e: &Entrada, lido: &Lido) -> Resultado<Prev
     p.codigos_repetidos = (lido.repetidos_loja().len() + lido.repetidos_fornecedor().len()) as i64;
     p.compras_novas = lido.compras.len() as i64;
     p.compras_ja = lido.compras_ja;
+    p.compras_nao_serve = lido.compras_nao_serve;
     let mut exemplos: Vec<String> = Vec::new();
     for (_, it, _, dec) in &d_todas.loja {
         if matches!(dec, DecisaoLoja::Nova { .. }) {
@@ -765,8 +770,15 @@ fn gravar_com(
     // ligados às peças cadastradas agora). As regras de Compras continuam: o estoque, o custo e o A pagar só mudam
     // quando a compra for lançada. Na mesma transação: ou tudo, ou nada.
     if let Some(g) = compras.filter(|_| d.opcoes.compras) {
-        for (_, xml, v) in &lido.compras {
-            (g.criar)(conn, xml, v)?;
+        for (nome, xml, v) in &lido.compras {
+            // A9 da revisão da T108: se uma compra não puder ser criada, nada é gravado (a mesma transação), e o
+            // aviso diz de qual arquivo.
+            (g.criar)(conn, xml, v).map_err(|e| match e {
+                Erro::Validacao { campo, mensagem } => {
+                    Erro::Validacao { campo, mensagem: format!("{nome}: {mensagem}") }
+                }
+                outro => outro,
+            })?;
             r.compras += 1;
         }
     }
@@ -1338,6 +1350,10 @@ fn barras_da_peca_nova(conn: &Connection, plano: &Plano, it: &ItemXml) -> Result
     })
 }
 
+/// A3 da revisão da T108: o texto quando "Notas de compra em Compras" vem sem "Fornecedores".
+const COMPRAS_EXIGEM_FORNECEDORES: &str =
+    "Para levar as notas de compra a Compras, marque também \"Fornecedores\": cada compra é de um fornecedor.";
+
 /// FI-1 (a): o texto quando "Peças do fornecedor" vem sem "Fornecedores".
 const PECAS_EXIGEM_FORNECEDORES: &str = "\"Peças do fornecedor\" precisa de \"Fornecedores\" marcada: as peças ficam \
      ligadas ao fornecedor, e ele só é cadastrado com a opção dele.";
@@ -1455,6 +1471,11 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
     // nenhum fornecedor entra sem a opção dele (nada implícito).
     if e.pecas_fornecedor && !e.fornecedores {
         return Err(Erro::campo("fornecedores", PECAS_EXIGEM_FORNECEDORES));
+    }
+    // A3 da revisão da T108: as notas de compra também exigem "Fornecedores" (a compra é de um fornecedor, que entra
+    // pela opção dele, com a prévia contando; nada implícito).
+    if e.compras && !e.fornecedores {
+        return Err(Erro::campo("fornecedores", COMPRAS_EXIGEM_FORNECEDORES));
     }
     let mut plano = Plano::default();
     let mut d = Decisoes {
@@ -1781,6 +1802,11 @@ const CATEGORIAS: &[(&str, &str)] = &[
     ("compra.nova", "Notas de compra que vão para Compras, em rascunho"),
     ("compra.ja", "Notas de compra que já estavam em Compras (não entram de novo)"),
     ("compra.nao_importada", "Notas de compra que não vão para Compras (opção desmarcada)"),
+    (
+        "compra.nao_serve",
+        "Notas de fornecedor que não servem para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução ou \
+         NFC-e): só os cadastros",
+    ),
 ];
 
 /// Uma pendência aberta para o mesmo item (fornecedor, código e descrição)?
@@ -1925,6 +1951,9 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
     }
     for _ in 0..lido.compras_ja {
         conta("compra.ja", String::new());
+    }
+    for _ in 0..lido.compras_nao_serve {
+        conta("compra.nao_serve", String::new());
     }
     let nomes = |ids: &[String]| -> Resultado<Vec<String>> {
         let mut v = Vec::new();

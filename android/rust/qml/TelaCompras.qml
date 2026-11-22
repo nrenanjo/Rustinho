@@ -44,9 +44,8 @@ FocusScope {
         const novas = []
         const erros = []
         const conflitos = []
-        // T108 (texto R): as notas que já estavam em Compras (num pacote) e as peças novas cadastradas em Peças.
+        // T108 (texto R): as notas que já estavam em Compras (num pacote).
         let jaEmCompras = 0
-        let pecasCadastradas = 0
         pendentes = []
         avisoPendentes = ""
         function proximo(i) {
@@ -68,7 +67,6 @@ FocusScope {
                     for (const c of r.dados.conflitos)
                         conflitos.push(c)
                     jaEmCompras += r.dados.jaEmCompras || 0
-                    pecasCadastradas += r.dados.pecasCadastradas || 0
                 } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
                     // Falta o CNPJ da loja: a navegação guiada leva a
                     // Configurações › Loja; este arquivo e os que faltam ficam
@@ -86,15 +84,13 @@ FocusScope {
         function terminar() {
             buscar()
             tela.guardarNaoImportadas(conflitos)
+            const mais = jaEmCompras === 0 ? ""
+                         : jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo."
+                         : jaEmCompras + " notas já estavam em Compras e não entraram de novo."
+            // A7c da revisão da T108: com erros, o aviso de erro leva também as notas que já estavam em Compras.
             if (erros.length > 0)
-                janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
-            const extras = []
-            if (pecasCadastradas > 0)
-                extras.push(pecasCadastradas === 1 ? "1 peça nova cadastrada em Peças" : pecasCadastradas + " peças novas cadastradas em Peças")
-            if (jaEmCompras > 0)
-                extras.push(jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo"
-                                              : jaEmCompras + " notas já estavam em Compras e não entraram de novo")
-            const mais = extras.length > 0 ? extras.join("; ") + "." : ""
+                janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : "")
+                              + (mais ? "\n" + mais : ""), "erro")
             if (novas.length === 1) {
                 janela.abrir("TelaCompra", { compraId: novas[0].id })
                 if (mais && erros.length === 0)
@@ -225,7 +221,9 @@ FocusScope {
             subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
             Layout.fillWidth: true
             Botao {
-                text: "Escolher uma pasta"
+                // Na janela bem estreita, o rótulo curto deixa os dois botões numa linha só (a busca continua à vista
+                // na janela mínima; t054, C8-340x480-1).
+                text: Tema.largura < 440 ? "Pasta" : "Escolher uma pasta"
                 visible: !Tema.celular
                 tipo: "secundario"
                 onClicked: seletorPasta.open()
