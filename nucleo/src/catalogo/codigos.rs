@@ -743,6 +743,69 @@ pub(crate) fn gtin_de_outra_peca(conn: &Connection, produto_id: &str) -> Resulta
         .optional()?)
 }
 
+/// T111 (Decisão D-T108 Opção C): o item de uma nota de fornecedor tem
+/// identidade forte para cadastro automático? Exige GTIN válido (comercial ou
+/// tributável) OU código do fornecedor com pelo menos 3 caracteres
+/// alfanuméricos compactados. Código vazio, só símbolos ou muito curto sem
+/// GTIN vai para registro provisório (`xml_pendencia_identificacao`).
+pub(crate) fn tem_identidade_forte(gtins: &[GtinFicha], gtin_fallback: &str, codigo_fornecedor: &str) -> bool {
+    if !gtin_fallback.is_empty() && gtin::gtin_valido(gtin_fallback) {
+        return true;
+    }
+    if gtins.iter().any(|g| codigo_do_xml(g).is_some_and(|(cod, _, _)| gtin::gtin_valido(&cod))) {
+        return true;
+    }
+    texto::compactar(codigo_fornecedor).len() >= 3
+}
+
+/// T111 (Regra 4 — antiduplicidade): peças existentes cuja descrição compacta
+/// é idêntica à do item da nota (limitado a `CANDIDATOS_MAXIMOS`). Nunca funde
+/// automaticamente: serve para encaminhar o item a registro provisório com as
+/// peças candidatas quando não há GTIN nem vínculo de fornecedor.
+pub(crate) fn pecas_por_descricao_compacta(conn: &Connection, descricao: &str) -> Resultado<Vec<String>> {
+    // O cadastro guarda até 120 caracteres limpos do nome da peça; compara na
+    // mesma janela para não deixar escapar duplicatas com descrição comprida.
+    let alvo_120: String = texto::limpar(descricao).chars().take(120).collect();
+    let alvo = texto::compactar(&alvo_120);
+    if alvo.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare_cached("SELECT id, nome FROM produto ORDER BY id")?;
+    let linhas = stmt.query_map([], |l| Ok((l.get::<_, String>(0)?, l.get::<_, String>(1)?)))?;
+    let mut achados = Vec::new();
+    for linha in linhas {
+        let (id, nome) = linha?;
+        if texto::compactar(&nome) == alvo {
+            achados.push(id);
+            if achados.len() == CANDIDATOS_MAXIMOS {
+                break;
+            }
+        }
+    }
+    Ok(achados)
+}
+
+/// T111 (A5 — limpeza anti-órfão): remove o vínculo `(fornecedor_id, codigo)`
+/// somente se ainda apontar para `produto_id`. Fica neste módulo porque
+/// `codigos` é o único escritor autorizado de `produto_fornecedor`.
+pub(crate) fn desvincular_fornecedor_se_produto(
+    conn: &Connection,
+    fornecedor_id: &str,
+    codigo: &str,
+    produto_id: &str,
+) -> Resultado<bool> {
+    let compacto = texto::compactar(codigo);
+    if fornecedor_id.is_empty() || compacto.is_empty() {
+        return Ok(false);
+    }
+    let n = conn.execute(
+        "DELETE FROM produto_fornecedor
+          WHERE fornecedor_id = ?1 AND codigo_compacto = ?2 AND produto_id = ?3",
+        params![fornecedor_id, compacto, produto_id],
+    )?;
+    Ok(n > 0)
+}
+
 #[cfg(test)]
 mod testes_indice {
     //! O índice refeito pelo id é o mesmo que a ficha grava ao salvar (passo

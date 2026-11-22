@@ -195,6 +195,8 @@ fn descrever(acao: &str) -> &'static str {
         "produto.codigo" => "deu código novo à peça",
         "produto.defeito" => "registrou peça com defeito",
         "produto.importar" => "importou cadastros",
+        "produto.importar_compra" => "cadastrou peça ao importar compra",
+        "produto.desfazer_provisorio" => "removeu peça provisória ao desfazer compra",
         "produto.gtin_importado" => "gravou GTIN do XML na peça",
         "unidade.criar" => "cadastrou a unidade",
         "referencia.aceitar" => "aceitou um registro incompleto como está",

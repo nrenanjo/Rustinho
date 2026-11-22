@@ -95,8 +95,12 @@ FocusScope {
         const partes = []
         const entram = compra.itens.length - compra.ignorados
         partes.push(entram + (entram === 1 ? " item entra" : " itens entram") + " no estoque")
-        if (compra.novas > 0)
-            partes.push(compra.novas + (compra.novas === 1 ? " peça nova será cadastrada" : " peças novas serão cadastradas"))
+        const novasPorCadastrar = compra.itens.filter(it => it.acao === "nova" && !it.peca).length
+        const novasImportacao = compra.itens.filter(it => it.acao === "nova" && !!it.peca && it.achadoPor === "importacao").length
+        if (novasPorCadastrar > 0)
+            partes.push(novasPorCadastrar + (novasPorCadastrar === 1 ? " peça nova será cadastrada" : " peças novas serão cadastradas"))
+        if (novasImportacao > 0)
+            partes.push(novasImportacao + (novasImportacao === 1 ? " peça nova da importação será confirmada" : " peças novas da importação serão confirmadas"))
         partes.push(atualizar.checked ? "os preços de revenda seguem o % de lucro de cada peça" : "os preços de revenda não mudam")
         janela.confirmar("Lançar a NF " + compra.numero + "?", partes.join("; ") + ".", "Lançar no estoque", () => {
             // 0915-N / D-09: se a compra muda o preço de venda de uma peça
@@ -170,7 +174,11 @@ FocusScope {
     }
 
     function descartar() {
-        janela.confirmar("Descartar esta importação?", "Nada foi para o estoque ainda. Você pode importar o XML de novo depois.",
+        const temProvisorias = !!compra && (compra.itens || []).some(it => it.achadoPor === "importacao")
+        const detalhe = temProvisorias
+                ? "Nada foi para o estoque ainda. Peças provisórias criadas só por esta importação (sem uso ou edição) também serão removidas. Você pode importar o XML de novo depois."
+                : "Nada foi para o estoque ainda. Você pode importar o XML de novo depois."
+        janela.confirmar("Descartar esta importação?", detalhe,
                          "Descartar", () => {
             const r = Api.chamar("compra_descartar", { id: compra.id })
             if (r.ok) {

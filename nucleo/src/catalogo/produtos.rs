@@ -865,6 +865,95 @@ fn manter_lucros(antes: &Dados, dados: &mut Dados) {
     }
 }
 
+/// T111 (A5 — limpeza anti-órfão): remove uma peça nascida automaticamente na
+/// importação de compra quando ela ficou órfã (o item foi trocado, ignorado ou
+/// o rascunho da compra foi descartado). Só apaga se TODAS as travas de
+/// integridade passarem: nunca editada, nunca movimentada no estoque, sem
+/// referência em nenhuma outra tabela operacional nem outro fornecedor, e
+/// editável na sincronização. Devolve `true` se removeu.
+pub(crate) fn remover_provisorio_se_orfao(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    produto_id: &str,
+    fornecedor_id: &str,
+    codigo_fornecedor: &str,
+) -> Resultado<bool> {
+    let Some((nome, criado_em, atualizado_em)): Option<(String, String, String)> = conn
+        .query_row("SELECT nome, criado_em, atualizado_em FROM produto WHERE id = ?1", [produto_id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?))
+        })
+        .optional()?
+    else {
+        return Ok(false);
+    };
+    if criado_em != atualizado_em {
+        return Ok(false);
+    }
+    let veio_de_compra: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auditoria
+              WHERE entidade = 'produto' AND entidade_id = ?1 AND acao = 'produto.importar_compra')",
+        [produto_id],
+        |l| l.get(0),
+    )?;
+    if !veio_de_compra {
+        return Ok(false);
+    }
+    let editada_ou_entrada: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM auditoria
+          WHERE entidade = 'produto' AND entidade_id = ?1
+            AND acao IN ('produto.alterar', 'compra.entrada', 'compra.estornar'))",
+        [produto_id],
+        |l| l.get(0),
+    )?;
+    if editada_ou_entrada {
+        return Ok(false);
+    }
+    for sql in [
+        "SELECT EXISTS(SELECT 1 FROM estoque_movimento WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM compra_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM venda_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM devolucao_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM ordem_servico_item WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM encomenda WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM produto_codigo_antigo WHERE produto_id = ?1)",
+        "SELECT EXISTS(SELECT 1 FROM xml_pendencia_identificacao WHERE produto_id = ?1)",
+    ] {
+        let em_uso: bool = conn.query_row(sql, [produto_id], |l| l.get(0))?;
+        if em_uso {
+            return Ok(false);
+        }
+    }
+    let compacto = texto::compactar(codigo_fornecedor);
+    let outro_fornecedor: bool = if !fornecedor_id.is_empty() && !compacto.is_empty() {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM produto_fornecedor
+              WHERE produto_id = ?1 AND NOT (fornecedor_id = ?2 AND codigo_compacto = ?3))",
+            params![produto_id, fornecedor_id, compacto],
+            |l| l.get(0),
+        )?
+    } else {
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM produto_fornecedor WHERE produto_id = ?1)", [produto_id], |l| {
+            l.get(0)
+        })?
+    };
+    if outro_fornecedor {
+        return Ok(false);
+    }
+    crate::catalogo::codigos::desvincular_fornecedor_se_produto(conn, fornecedor_id, codigo_fornecedor, produto_id)?;
+    conn.execute("DELETE FROM produto WHERE id = ?1", [produto_id])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        (!usuario_id.is_empty()).then_some(usuario_id),
+        "produto.desfazer_provisorio",
+        "produto",
+        produto_id,
+        &[format!("Peça \"{nome}\" removida ao desfazer item/rascunho da compra (nunca movimentada nem editada)")],
+    )?;
+    Ok(true)
+}
+
 /// D-09: a ficha para quem não vê custos (o caixa): sem o custo, sem o %
 /// de lucro e sem as linhas do histórico que mostram o custo.
 pub fn esconder_custos(f: &mut ProdutoFicha) {

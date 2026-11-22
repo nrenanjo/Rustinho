@@ -43,6 +43,8 @@ Painel {
     property bool naGuia: false
     // A07: a peça desativada que o "Associar" recusou (para "Abrir a peça").
     property string pecaDesativadaId: ""
+    // T111 (Regra 3): corrigir identificação do registro provisório sem redigitar o restante do XML.
+    property bool corrigindoIdentificacao: false
     // A aba de importar, já com a senha (ou sem precisar dela).
     readonly property bool naImportacao: aba === "importar" && liberada
     // T058 (pedido do proprietário, 20/11/2026): com uma pendência aberta e
@@ -166,24 +168,48 @@ Painel {
         chavePendencia = Api.novaChave()
         erro = ""
         pecaDesativadaId = ""
+        corrigindoIdentificacao = false
+        campoCorrNome.texto = p ? (p.descricao || "") : ""
+        campoCorrNome.erro = ""
+        campoCorrCodigo.texto = p ? (p.codigoFornecedor || "") : ""
+        campoCorrCodigo.erro = ""
+        campoCorrBarras.texto = p ? (p.gtinComercial || "") : ""
+        campoCorrBarras.erro = ""
+        campoCorrUnidade.texto = p ? (p.unidade || "") : ""
+        campoCorrUnidade.erro = ""
     }
 
-    function resolverComoNova() {
+    function resolverComoNova(comCorrecao) {
         if (!pendenciaAberta)
             return
         erro = ""
-        const r = Api.gravar("xml_pendencia_resolver", {
+        campoCorrCodigo.erro = ""
+        campoCorrBarras.erro = ""
+        const payload = {
             id: pendenciaAberta.id,
             acao: "nova",
             produtoId: ""
-        }, chavePendencia)
+        }
+        if (comCorrecao) {
+            payload.nome = campoCorrNome.texto
+            payload.codigoFornecedor = campoCorrCodigo.texto
+            payload.codigoBarras = campoCorrBarras.texto
+            payload.unidade = campoCorrUnidade.texto
+        }
+        const r = Api.gravar("xml_pendencia_resolver", payload, chavePendencia)
         if (!r.ok) {
             erro = r.erro
+            if (r.campo === "codigoFornecedor")
+                campoCorrCodigo.erro = r.erro
+            else if (r.campo === "codigoBarras")
+                campoCorrBarras.erro = r.erro
             return
         }
+        corrigindoIdentificacao = false
         pendenciaAberta = null
         carregarPendencias()
-        janela.avisar("Peça cadastrada e associada ao fornecedor.", "ok")
+        janela.avisar(comCorrecao ? "Identificação corrigida, peça cadastrada e associada ao fornecedor."
+                                  : "Peça cadastrada e associada ao fornecedor.", "ok")
         painel.importou()
     }
 
@@ -871,23 +897,76 @@ Painel {
                                     }
                                 }
 
-                                RowLayout {
+                                // T111 (Regra 3): corrigir apenas a identificação sem redigitar NCM/CEST/origem/custo.
+                                ColumnLayout {
+                                    visible: painel.corrigindoIdentificacao
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 4
+                                    spacing: 8
+                                    Nota {
+                                        text: "Corrija apenas o que precisa. NCM, CEST, origem e custo do XML continuam preenchidos automaticamente."
+                                        font.pixelSize: 13
+                                        Layout.fillWidth: true
+                                    }
+                                    Campo {
+                                        id: campoCorrNome
+                                        rotulo: "Nome da peça"
+                                        maximo: 120
+                                        Layout.fillWidth: true
+                                    }
+                                    RowLayout {
+                                        spacing: 10
+                                        Layout.fillWidth: true
+                                        Campo {
+                                            id: campoCorrCodigo
+                                            rotulo: "Código no fornecedor"
+                                            maximo: 60
+                                            Layout.fillWidth: true
+                                        }
+                                        Campo {
+                                            id: campoCorrUnidade
+                                            rotulo: "Unidade"
+                                            maximo: 6
+                                            maiusculas: true
+                                            Layout.preferredWidth: 100
+                                        }
+                                    }
+                                    Campo {
+                                        id: campoCorrBarras
+                                        rotulo: "Código de barras (GTIN, opcional)"
+                                        maximo: 14
+                                        dica: "Deixe vazio se o produto não tiver GTIN"
+                                        Layout.fillWidth: true
+                                    }
+                                }
+
+                                Flow {
                                     spacing: 10
                                     Layout.fillWidth: true
                                     Layout.topMargin: 4
+                                    layoutDirection: Qt.RightToLeft
                                     // T058: o "Todas as pendências" saiu; a seta e o Esc
                                     // voltam à lista (voltarUmPasso, lá em cima).
-                                    Item { Layout.fillWidth: true }
+                                    Botao {
+                                        text: painel.corrigindoIdentificacao ? "Salvar e cadastrar peça" : "Cadastrar como peça nova"
+                                        icone: painel.corrigindoIdentificacao ? "check" : "mais"
+                                        tipo: "principal"
+                                        onClicked: painel.resolverComoNova(painel.corrigindoIdentificacao)
+                                    }
                                     Botao {
                                         text: "Escolher peça existente"
                                         tipo: "secundario"
                                         onClicked: escolherPecaParaPendencia.abrirCom(painel.pendenciaAberta ? painel.pendenciaAberta.descricao : "")
                                     }
                                     Botao {
-                                        text: "Cadastrar como peça nova"
-                                        icone: "mais"
-                                        tipo: "principal"
-                                        onClicked: painel.resolverComoNova()
+                                        text: painel.corrigindoIdentificacao ? "Cancelar correção" : "Corrigir identificação"
+                                        tipo: "secundario"
+                                        onClicked: {
+                                            painel.corrigindoIdentificacao = !painel.corrigindoIdentificacao
+                                            painel.erro = ""
+                                            campoCorrCodigo.erro = ""
+                                            campoCorrBarras.erro = ""
+                                        }
                                     }
                                 }
                             }

@@ -31,9 +31,11 @@ API = """pragma Singleton
 import QtQuick
 QtObject {
     property var respostas: []
+    property var gravacoes: []
     property bool repetidaAgora: false
     function caminho(a) { return a }
     function novaChave() { return "chave" }
+    function gravar(comando, dados, chave) { gravacoes.push({ comando: comando, dados: dados, chave: chave }); return respostas.shift() }
     function gravarDemorado(comando, dados, texto, depois, chave) { depois(respostas.shift()) }
     function chamarDemorado(comando, dados, texto, depois) { depois(respostas.shift()) }
 }
@@ -90,16 +92,29 @@ TestCase {
         property bool qPecasFornecedor: false
         property bool qCompras: false
         property int refeitas: 0
+        property var pendenciaAberta: null
+        property string chavePendencia: ""
+        property string pecaDesativadaId: ""
+        property bool corrigindoIdentificacao: false
+        signal importou()
+        function carregarPendencias() {}
         function refazerPrevia(x) { refeitas += 1 }
         function dadosDaPrevia(comOpcoes) { return {} }
 %CAT%
 %TEXTO%
 %LER%
+%ABRIR_PENDENCIA%
+%RESOLVER_NOVA%
         function linhas() { return %MODELO% }
         function alternar(linha, checked) {
 %ALTERNAR%
         }
     }
+
+    QtObject { id: campoCorrNome; property string texto: ""; property string erro: "" }
+    QtObject { id: campoCorrCodigo; property string texto: ""; property string erro: "" }
+    QtObject { id: campoCorrBarras; property string texto: ""; property string erro: "" }
+    QtObject { id: campoCorrUnidade; property string texto: ""; property string erro: "" }
 
     function visivel(modelData) { return %VISIVEL% }
     function textoJa(linha) { return %TEXTOJA% }
@@ -117,7 +132,11 @@ TestCase {
     function init() {
         janelaFalsa.avisos = []
         janelaFalsa.abertas = []
+        Api.gravacoes = []
         painel.escolhas = null
+        painel.pendenciaAberta = null
+        painel.corrigindoIdentificacao = false
+        painel.erro = ""
         painel.qClientes = false
         painel.qFornecedores = false
         painel.qPecasLoja = false
@@ -153,6 +172,28 @@ TestCase {
         verify(janelaFalsa.avisos[0].texto.indexOf("3 notas já estavam em Compras") >= 0, janelaFalsa.avisos[0].texto)
     }
 
+    function test_t111_aviso_pecas_cadastradas_e_pendencias_uma_mensagem_so() {
+        Api.respostas = [{ ok: true, dados: { compras: [{ id: "a" }], erros: [], conflitos: [],
+                                              pecasCadastradas: 3, pendenciasIdentificacao: 1 } }]
+        tela.importar(["pasta"])
+        compare(janelaFalsa.abertas, ["TelaCompra"])
+        compare(janelaFalsa.avisos.length, 1, JSON.stringify(janelaFalsa.avisos))
+        compare(janelaFalsa.avisos[0].tipo, "ok")
+        verify(janelaFalsa.avisos[0].texto.indexOf("3 peças novas cadastradas automaticamente") >= 0, janelaFalsa.avisos[0].texto)
+        verify(janelaFalsa.avisos[0].texto.indexOf("1 item com identificação duvidosa enviado para conferência") >= 0, janelaFalsa.avisos[0].texto)
+    }
+
+    function test_t111_singular_e_plural_com_erro() {
+        Api.respostas = [{ ok: true, dados: { compras: [{ id: "a" }, { id: "b" }], erros: ["z.xml: falha"],
+                                              conflitos: [], pecasCadastradas: 1, pendenciasIdentificacao: 2 } }]
+        tela.importar(["pasta"])
+        compare(janelaFalsa.avisos.length, 1, JSON.stringify(janelaFalsa.avisos))
+        compare(janelaFalsa.avisos[0].tipo, "erro")
+        verify(janelaFalsa.avisos[0].texto.indexOf("1 peça nova cadastrada automaticamente") >= 0, janelaFalsa.avisos[0].texto)
+        verify(janelaFalsa.avisos[0].texto.indexOf("2 itens com identificação duvidosa enviados para conferência") >= 0, janelaFalsa.avisos[0].texto)
+        verify(janelaFalsa.avisos[0].texto.indexOf("z.xml: falha") >= 0, janelaFalsa.avisos[0].texto)
+    }
+
     function test_a3_primeira_leitura_prende_fornecedores() {
         Api.respostas = [{ ok: true, dados: previa({ comprasNovas: 2 }) }]
         painel.lerArquivos()
@@ -182,6 +223,32 @@ TestCase {
         painel.previa = previa({ comprasJa: 1 })
         const t = textoJa({ modelData: linha("qCompras") })
         verify(t.indexOf("1 já estava em Compras") >= 0, t)
+    }
+
+    function test_t111_corrigir_identificacao_envia_campos_no_resolver() {
+        painel.abrirPendencia({ id: "p-1", descricao: "CORREIA X", codigoFornecedor: "B-1", gtinComercial: "", unidade: "UN" })
+        compare(campoCorrNome.texto, "CORREIA X")
+        compare(campoCorrCodigo.texto, "B-1")
+        campoCorrNome.texto = "CORREIA GATES"
+        campoCorrCodigo.texto = "F1-200"
+        campoCorrUnidade.texto = "PC"
+        Api.respostas = [{ ok: true, dados: { produtoId: "prod-1", pendentes: 0 } }]
+        painel.resolverComoNova(true)
+        compare(Api.gravacoes.length, 1)
+        compare(Api.gravacoes[0].comando, "xml_pendencia_resolver")
+        compare(Api.gravacoes[0].dados.nome, "CORREIA GATES")
+        compare(Api.gravacoes[0].dados.codigoFornecedor, "F1-200")
+        compare(Api.gravacoes[0].dados.unidade, "PC")
+        compare(painel.pendenciaAberta, null)
+    }
+
+    function test_t111_corrigir_identificacao_erro_no_campo_gtin() {
+        painel.abrirPendencia({ id: "p-2", descricao: "FILTRO", codigoFornecedor: "B-2", gtinComercial: "", unidade: "UN" })
+        campoCorrBarras.texto = "12345"
+        Api.respostas = [{ ok: false, campo: "codigoBarras", erro: "GTIN inválido" }]
+        painel.resolverComoNova(true)
+        compare(campoCorrBarras.erro, "GTIN inválido")
+        verify(painel.pendenciaAberta !== null, "mantém a pendência aberta para ajustar")
     }
 }
 """
@@ -213,6 +280,8 @@ def main():
         "%CAT%": achar(r"^    function cat\(codigo\) \{\n.*?^    \}\n", cad, "cat"),
         "%TEXTO%": achar(r"^    function texto\(n, um, varios\) \{\n.*?^    \}\n", cad, "texto"),
         "%LER%": achar(r"^    function lerArquivos\(\) \{\n.*?^    \}\n", cad, "lerArquivos"),
+        "%ABRIR_PENDENCIA%": achar(r"^    function abrirPendencia\(p\) \{\n.*?^    \}\n", cad, "abrirPendencia"),
+        "%RESOLVER_NOVA%": achar(r"^    function resolverComoNova\(comCorrecao\) \{\n.*?^    \}\n", cad, "resolverComoNova"),
         "%MODELO%": achar(r"model: (painel\.previa \? \[.*?\] : \[\])\n", cad, "o modelo da prévia", 1),
         "%VISIVEL%": achar(r"delegate: Rectangle \{\n\s*id: linha\n.*?\n\s*visible: ([^\n]*)\n", cad, "visible", 1),
         "%TEXTOJA%": achar(r"text: (\[linha\.modelData\.ja > 0 \?.*?\.join\(\"  ·  \"\))", cad, "o texto do já", 1),

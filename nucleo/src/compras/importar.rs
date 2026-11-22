@@ -2105,6 +2105,12 @@ pub struct ResolverPendencia {
     /// "ligar" (associar a `produto_id` existente) ou "nova" (cadastrar peça nova com os dados do XML).
     pub acao: String,
     pub produto_id: String,
+    /// T111 (Decisão D-T108 Opção C — Regra 3): correções opcionais de identificação ao cadastrar
+    /// a peça a partir do registro provisório, preservando NCM/CEST/origem/custo do XML sem redigitar.
+    pub nome: String,
+    pub codigo_fornecedor: String,
+    pub codigo_barras: String,
+    pub unidade: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2132,6 +2138,10 @@ fn motivo_legivel(motivo: &str) -> &'static str {
     match motivo {
         "gtin_ambiguo" => "GTIN/código de barras corresponde a mais de uma peça cadastrada",
         "codigo_so_de_simbolos" => "O código do fornecedor só tem símbolos e não identifica a peça",
+        "codigo_fraco_sem_gtin" => "Código do fornecedor muito curto e sem GTIN válido: confira antes de cadastrar",
+        "possivel_duplicata_descricao" => {
+            "Já existe peça com a mesma descrição no cadastro (código diferente, sem GTIN): confira para evitar duplicidade"
+        }
         "fornecedor_ambiguo" => "Código do fornecedor está associado a mais de uma peça",
         "conflito_gtin_fornecedor" => "GTIN aponta para uma peça e o código do fornecedor para outra",
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
@@ -2368,7 +2378,43 @@ pub fn resolver_pendencia(
 
     let gtins_xml: Vec<nfe_xml::GtinXml> = serde_json::from_str(&gtins_json).unwrap_or_default();
     let fallback = if !gtin_comercial.is_empty() { &gtin_comercial } else { &gtin_tributavel };
-    let gtins_ficha = gtins_para_ficha(&gtins_xml, fallback);
+    let mut gtins_ficha = gtins_para_ficha(&gtins_xml, fallback);
+
+    // T111 (Regra 3): correções opcionais de identificação preservando os demais dados do XML.
+    let nome_corrigido = texto::limpar(&d.nome);
+    let cod_forn_corrigido = texto::limpar(&d.codigo_fornecedor);
+    if !cod_forn_corrigido.is_empty() {
+        if texto::tamanho(&cod_forn_corrigido) > 60 {
+            return Err(Erro::campo("codigoFornecedor", "Código no fornecedor: use no máximo 60 caracteres."));
+        }
+        if texto::compactar(&cod_forn_corrigido).is_empty() {
+            return Err(Erro::campo("codigoFornecedor", "O código no fornecedor precisa ter letras ou números."));
+        }
+    }
+    let barras_corrigido: String = d.codigo_barras.trim().chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    if !barras_corrigido.is_empty() {
+        if !gtin::gtin_valido(&barras_corrigido) {
+            return Err(Erro::campo("codigoBarras", "Código de barras (GTIN) inválido. Confira os dígitos."));
+        }
+        if peca_por_barras(conn, &barras_corrigido)?.is_some() {
+            return Err(Erro::campo("codigoBarras", "Este código de barras já está cadastrado em outra peça."));
+        }
+        if !gtins_ficha.iter().any(|g| g.gtin == barras_corrigido) {
+            gtins_ficha.insert(
+                0,
+                produtos::GtinFicha {
+                    gtin: barras_corrigido.clone(),
+                    tipo: "comercial".into(),
+                    origem: "manual".into(),
+                },
+            );
+        }
+    }
+    let unidade_corrigida = texto::limpar(&d.unidade);
+    let houve_correcao = !nome_corrigido.is_empty()
+        || !cod_forn_corrigido.is_empty()
+        || !barras_corrigido.is_empty()
+        || !unidade_corrigida.is_empty();
 
     let acao = d.acao.trim();
     let produto_id = match acao {
@@ -2397,15 +2443,20 @@ pub fn resolver_pendencia(
         }
         "nova" => {
             let mut f = produtos::ficha_nova(conn)?;
-            f.nome = texto::limpar(&descricao).chars().take(120).collect();
+            let nome_base = if !nome_corrigido.is_empty() { &nome_corrigido } else { &descricao };
+            f.nome = texto::limpar(nome_base).chars().take(120).collect();
             if f.nome.is_empty() {
                 f.nome = "Peça sem nome".into();
             }
-            if !fallback.is_empty() && gtin::gtin_valido(fallback) && peca_por_barras(conn, fallback)?.is_none() {
+            if !barras_corrigido.is_empty() {
+                f.codigo_barras = barras_corrigido.clone();
+            } else if !fallback.is_empty() && gtin::gtin_valido(fallback) && peca_por_barras(conn, fallback)?.is_none()
+            {
                 f.codigo_barras = fallback.to_string();
             }
             f.gtins = gtins_ficha.clone();
-            f.unidade = crate::unidades::de_fora(&unidade);
+            f.unidade =
+                crate::unidades::de_fora(if !unidade_corrigida.is_empty() { &unidade_corrigida } else { &unidade });
             if ncm.len() == 8 && ncm.chars().all(|c| c.is_ascii_digit()) {
                 f.ncm = ncm;
             }
@@ -2437,13 +2488,15 @@ pub fn resolver_pendencia(
         _ if !fornecedor_doc.is_empty() => pessoa_existe(conn, &fornecedor_doc)?,
         _ => None,
     };
+    let cod_para_vincular =
+        if !cod_forn_corrigido.is_empty() { cod_forn_corrigido.as_str() } else { codigo_fornecedor.trim() };
     if let Some(fid) = &fid {
-        let compacto = texto::compactar(&codigo_fornecedor);
+        let compacto = texto::compactar(cod_para_vincular);
         if !compacto.is_empty() {
             crate::catalogo::codigos::vincular_fornecedor(
                 conn,
                 fid,
-                codigo_fornecedor.trim(),
+                cod_para_vincular,
                 &produto_id,
                 1000,
                 crate::catalogo::codigos::JaLigado::PassarPeca,
@@ -2468,9 +2521,17 @@ pub fn resolver_pendencia(
         &produto_id,
         &[format!(
             "Pendência XML resolvida ({}) · fornecedor {} · código {}",
-            if acao == "nova" { "peça nova" } else { "associada" },
+            if acao == "nova" {
+                if houve_correcao {
+                    "peça nova com identificação corrigida"
+                } else {
+                    "peça nova"
+                }
+            } else {
+                "associada"
+            },
             if fornecedor_nome.is_empty() { &fornecedor_doc } else { &fornecedor_nome },
-            if codigo_fornecedor.is_empty() { "—" } else { &codigo_fornecedor }
+            if cod_para_vincular.is_empty() { "—" } else { cod_para_vincular }
         )],
     )?;
 
@@ -3148,7 +3209,12 @@ mod testes {
                     |l| l.get(0),
                 )
                 .unwrap();
-            let pedido = ResolverPendencia { id: pend.clone(), acao: "ligar".into(), produto_id: pelo_gtin.clone() };
+            let pedido = ResolverPendencia {
+                id: pend.clone(),
+                acao: "ligar".into(),
+                produto_id: pelo_gtin.clone(),
+                ..Default::default()
+            };
             assert!(resolver_pendencia(c, d, &u, &pedido).is_err(), "ligar à desativada é recusado");
             c.execute("UPDATE produto SET ativo = 1 WHERE id = ?1", [&pelo_gtin]).unwrap();
             resolver_pendencia(c, d, &u, &pedido).unwrap();
@@ -3570,7 +3636,12 @@ mod testes {
             c,
             d,
             &u,
-            &ResolverPendencia { id: p0.id.clone(), acao: "nova".into(), produto_id: String::new() },
+            &ResolverPendencia {
+                id: p0.id.clone(),
+                acao: "nova".into(),
+                produto_id: String::new(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(res0.pendentes, 2);
@@ -3601,7 +3672,12 @@ mod testes {
             c,
             d,
             &u,
-            &ResolverPendencia { id: p1.id.clone(), acao: "ligar".into(), produto_id: pas_id.clone() },
+            &ResolverPendencia {
+                id: p1.id.clone(),
+                acao: "ligar".into(),
+                produto_id: pas_id.clone(),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_eq!(res1.pendentes, 1);

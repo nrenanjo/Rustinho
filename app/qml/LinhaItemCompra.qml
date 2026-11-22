@@ -186,6 +186,11 @@ Rectangle {
                                 case "fornecedor": return "Ligada sozinha: mesmo código deste fornecedor na última compra"
                                 case "barras": return "Ligada sozinha pelo código de barras"
                                 case "codigo": return "Ligada sozinha pelo código original — confira"
+                                case "importacao": {
+                                    const emb = ["CX", "FD", "PCT", "KIT", "JG", "PAR"].indexOf((linha.item.unidade || "").toUpperCase()) >= 0
+                                    return "Cadastrada automaticamente ao importar o XML — confira antes de lançar"
+                                           + (emb ? " (confira quantas peças vêm na embalagem)." : ".")
+                                }
                                 }
                                 if (linha.pendente)
                                     return "Não achei esta peça pelo código nem pelo código de barras."

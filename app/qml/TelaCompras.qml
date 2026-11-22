@@ -44,8 +44,10 @@ FocusScope {
         const novas = []
         const erros = []
         const conflitos = []
-        // T108 (texto R): as notas que já estavam em Compras (num pacote).
+        // T108 / T111: notas já em Compras, peças novas cadastradas e itens duvidosos para conferência.
         let jaEmCompras = 0
+        let pecasCadastradas = 0
+        let pendenciasIdentificacao = 0
         pendentes = []
         avisoPendentes = ""
         function proximo(i) {
@@ -67,6 +69,8 @@ FocusScope {
                     for (const c of r.dados.conflitos)
                         conflitos.push(c)
                     jaEmCompras += r.dados.jaEmCompras || 0
+                    pecasCadastradas += r.dados.pecasCadastradas || 0
+                    pendenciasIdentificacao += r.dados.pendenciasIdentificacao || 0
                 } else if (tela.janela.guiar(r.campo, r.erro, ok => tela.voltouDaGuia(ok))) {
                     // Falta o CNPJ da loja: a navegação guiada leva a
                     // Configurações › Loja; este arquivo e os que faltam ficam
@@ -89,6 +93,13 @@ FocusScope {
             const partes = []
             if (novas.length > 1)
                 partes.push(novas.length + " notas importadas. Abra cada uma para conferir e lançar.")
+            if (pecasCadastradas > 0)
+                partes.push(pecasCadastradas === 1 ? "1 peça nova cadastrada automaticamente."
+                                                   : pecasCadastradas + " peças novas cadastradas automaticamente.")
+            if (pendenciasIdentificacao > 0)
+                partes.push(pendenciasIdentificacao === 1
+                            ? "1 item com identificação duvidosa enviado para conferência em Peças."
+                            : pendenciasIdentificacao + " itens com identificação duvidosa enviados para conferência em Peças.")
             if (jaEmCompras > 0)
                 partes.push(jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo."
                                               : jaEmCompras + " notas já estavam em Compras e não entraram de novo.")

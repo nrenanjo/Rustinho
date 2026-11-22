@@ -609,6 +609,7 @@ fn resolver(b: &Banco, u: &str, pendencia: &str, acao: &str, peca: &str) -> Stri
         id: pendencia.into(),
         acao: acao.into(),
         produto_id: peca.into(),
+        ..Default::default()
     };
     rustinho_nucleo::importar::resolver_pendencia(&b.conn, &b.dispositivo, u, &d).unwrap().produto_id
 }
