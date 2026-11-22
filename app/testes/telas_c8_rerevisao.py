@@ -53,6 +53,15 @@ def senha_gerente(r, passo=""):
 
 def aceitar(r, senha=False):
     r.rolar_ate("Aceitar como está")
+    # Espera o fim da rolagem automática do destaque da guia antes de clicar no botão.
+    anterior = None
+    for _ in range(15):
+        pts = [p for p in r.onde("Aceitar como está") if 60 <= p[1] < r.altura() - 10]
+        atual = min(pts, key=lambda p: p[1]) if pts else None
+        if atual is not None and atual == anterior:
+            break
+        anterior = atual
+        time.sleep(0.2)
     topo(r, "Aceitar como está")
     r.esperar(lambda: r.tem("Aceitar como está?"))
     time.sleep(0.5)
