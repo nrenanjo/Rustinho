@@ -318,6 +318,8 @@ fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompr
     let mut lido = Lido::default();
     let mut chaves: HashSet<String> = HashSet::new();
     let mut falha: Option<Erro> = None;
+    // N3: as chaves cuja 1ª cópia não serviu para Compras (a outra cópia ainda pode servir).
+    let mut nao_serviram: HashSet<String> = HashSet::new();
     let mut assinatura = {
         use sha2::Digest;
         sha2::Sha256::new()
@@ -364,17 +366,33 @@ fn ler_tudo(conn: &Connection, arquivos: &[String], compras: Option<&GanchoCompr
                 return;
             }
         };
-        if !acumular(&mut lido, &mut chaves, &loja, &nota) {
+        let primeira_copia = acumular(&mut lido, &mut chaves, &loja, &nota);
+        // N3 da 2ª conferência da T108: a mesma chave em dois arquivos conta uma vez para os cadastros; para Compras
+        // vale a melhor cópia. Se a 1ª não serviu (por exemplo, a NF-e sem o protocolo de autorização), a outra
+        // (a procNFe, com ele) é classificada.
+        let outra_chance = !primeira_copia && nao_serviram.contains(&nota.chave);
+        if !primeira_copia && !outra_chance {
             return; // a mesma nota em dois arquivos
         }
         // T108 (texto R): a nota de compra também vai para Compras, em rascunho, se servir para a entrada (as regras
         // da importação de Compras) e ainda não estiver lá.
         let gancho = compras.filter(|_| falha.is_none() && documento::limpar(&nota.emitente.documento) != loja);
         if let Some(g) = gancho {
-            match (g.classificar)(conn, xml, &nota) {
+            let resultado = (g.classificar)(conn, xml, &nota);
+            if outra_chance && matches!(resultado, Ok(ParaCompras::Nova(_) | ParaCompras::Ja)) {
+                nao_serviram.remove(&nota.chave);
+                lido.compras_nao_serve -= 1;
+            }
+            match resultado {
                 Ok(ParaCompras::Nova(v)) => lido.compras.push((nome.to_string(), xml.to_string(), *v)),
                 Ok(ParaCompras::Ja) => lido.compras_ja += 1,
-                Ok(ParaCompras::NaoServe) => lido.compras_nao_serve += 1,
+                Ok(ParaCompras::NaoServe) if !outra_chance => {
+                    lido.compras_nao_serve += 1;
+                    if !nota.chave.is_empty() {
+                        nao_serviram.insert(nota.chave.clone());
+                    }
+                }
+                Ok(ParaCompras::NaoServe) => {}
                 Err(e) => falha = Some(e),
             }
         }
@@ -1804,8 +1822,8 @@ const CATEGORIAS: &[(&str, &str)] = &[
     ("compra.nao_importada", "Notas de compra que não vão para Compras (opção desmarcada)"),
     (
         "compra.nao_serve",
-        "Notas de fornecedor que não servem para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução ou \
-         NFC-e): só os cadastros",
+        "Notas de fornecedor que não servem para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução, \
+         NFC-e ou outro motivo): só os cadastros",
     ),
 ];
 

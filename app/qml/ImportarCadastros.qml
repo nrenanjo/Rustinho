@@ -315,12 +315,13 @@ Painel {
             if (d.clientes > 0) partes.push(d.clientes + (d.clientes === 1 ? " cliente" : " clientes"))
             if (d.fornecedores > 0) partes.push(d.fornecedores + (d.fornecedores === 1 ? " fornecedor" : " fornecedores"))
             if (d.pecas > 0) partes.push(d.pecas + (d.pecas === 1 ? " peça" : " peças"))
-            let msg = partes.length > 0 ? "Cadastrados: " + partes.join(", ") + "." : "Nada novo para cadastrar."
+            // N5 da 2ª conferência da T108: só com notas para Compras, sem o "Nada novo para cadastrar".
+            let msg = partes.length > 0 ? "Cadastrados: " + partes.join(", ") + "." : d.compras > 0 ? "" : "Nada novo para cadastrar."
             if (d.codigosLigados > 0)
                 msg += " " + d.codigosLigados + " códigos de fornecedor ligados às peças."
             // T108: as notas de compra que foram para Compras.
             if (d.compras > 0)
-                msg += " " + (d.compras === 1 ? "1 nota de compra foi para Compras" : d.compras + " notas de compra foram para Compras")
+                msg = (msg ? msg + " " : "") + (d.compras === 1 ? "1 nota de compra foi para Compras" : d.compras + " notas de compra foram para Compras")
                        + ", em rascunho: abra cada uma em Compras para conferir e lançar."
             painel.carregarPendencias()
             // T-05 da 2ª re-revisão: a resposta é tratada depois (Qt.callLater), quando a marca da repetição (I6) já
@@ -419,7 +420,7 @@ Painel {
                         visible: painel.naImportacao
                         text: "Use os XMLs das notas emitidas pela loja (exportados do sistema antigo) para trazer clientes e peças com o código e o preço da loja, "
                               + "e os das notas de fornecedores para trazer fornecedores e peças com o custo. Nas peças já cadastradas, só entram GTIN e código do fornecedor, e a prévia mostra quais. "
-                              + "As notas de compra da loja também podem ir para Compras, em rascunho: o estoque e o financeiro só mudam quando cada uma for lançada lá."
+                              + "As notas dos fornecedores (as de compra) também podem ir para Compras, em rascunho: o estoque e o financeiro só mudam quando cada uma for lançada lá."
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }
@@ -516,7 +517,8 @@ Painel {
                                 // T108 (texto R): as notas de compra vão para Compras, em rascunho; as que já estão lá não
                                 // entram de novo.
                                 { chave: "qCompras", titulo: "Notas de compra em Compras", novos: painel.previa.comprasNovas,
-                                  ja: painel.previa.comprasJa, jaTexto: " já estavam em Compras", novoUm: "nova", novoVarios: "novas",
+                                  ja: painel.previa.comprasJa, jaUm: " já estava em Compras", jaTexto: " já estavam em Compras",
+                                  novoUm: "nova", novoVarios: "novas",
                                   naoServe: painel.previa.comprasNaoServe,
                                   extra: [painel.previa.comprasNovas > 0
                                           ? "Entram em rascunho: o estoque e o A pagar só mudam quando cada uma for lançada em Compras. "
@@ -524,7 +526,7 @@ Painel {
                                           // A8 da revisão da T108: as que não servem para Compras não somem sem aviso.
                                           painel.previa.comprasNaoServe > 0
                                           ? painel.texto(painel.previa.comprasNaoServe, "nota de fornecedor não serve", "notas de fornecedor não servem")
-                                            + " para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução ou NFC-e): só os cadastros." : ""]
+                                            + " para Compras (sem a autorização da SEFAZ, para outro CNPJ, devolução, NFC-e ou outro motivo): só os cadastros." : ""]
                                          .filter(x => !!x).join(" "),
                                   exemplos: [], cor: Tema.papel }
                             ] : []
@@ -587,7 +589,8 @@ Painel {
                                     }
                                     Text {
                                         visible: text !== ""
-                                        text: [linha.modelData.ja > 0 ? linha.modelData.ja + (linha.modelData.jaTexto || " já cadastrados") : "",
+                                        text: [linha.modelData.ja > 0 ? linha.modelData.ja + (linha.modelData.ja === 1 && linha.modelData.jaUm
+                                                                                              ? linha.modelData.jaUm : (linha.modelData.jaTexto || " já cadastrados")) : "",
                                                linha.modelData.exemplos.length > 0 ? linha.modelData.exemplos.join(", ") + (linha.modelData.novos > linha.modelData.exemplos.length ? "..." : "") : ""]
                                               .filter(x => !!x).join("  ·  ")
                                         textFormat: Text.PlainText

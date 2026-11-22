@@ -388,3 +388,47 @@ fn queda_na_compra_desfaz_o_trazer_cadastros_inteiro() {
     let r = cadastrar(&mut l, &pasta, true);
     assert_eq!((r["compras"].clone(), r["pecas"].clone()), (json!(1), json!(3)), "de novo, tudo entra: {r}");
 }
+
+/// N3 da 2ª conferência da T108: a mesma nota em dois arquivos, um sem o protocolo de autorização (a NF-e sozinha,
+/// que serve para os cadastros e não para Compras) e outro com ele (a procNFe). Para Compras vale a cópia que serve,
+/// venha ela antes ou depois.
+#[test]
+fn a_copia_com_protocolo_vale_para_compras() {
+    let ini = EXEMPLO.find("<NFe xmlns").unwrap();
+    let fim = EXEMPLO.find("</NFe>").unwrap() + "</NFe>".len();
+    let sem_protocolo = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n", &EXEMPLO[ini..fim]);
+    for (nome, primeiro, segundo) in
+        [("sem-antes", &sem_protocolo, EXEMPLO), ("com-antes", &EXEMPLO.to_string(), sem_protocolo.as_str())]
+    {
+        let mut l = loja(&format!("t108-copias-{nome}"), LOJA_CNPJ);
+        let p = l.pasta.join("xml");
+        std::fs::create_dir_all(&p).unwrap();
+        // A pasta é lida na ordem dos nomes.
+        std::fs::write(p.join("a.xml"), primeiro).unwrap();
+        std::fs::write(p.join("b.xml"), segundo).unwrap();
+        let pasta = p.display().to_string();
+        let prev = l.ok("importar_previa", json!({ "arquivos": [pasta.clone()] }));
+        assert_eq!(prev["notas"].as_i64(), Some(1), "a mesma nota: {nome} {prev}");
+        assert_eq!(
+            (prev["comprasNovas"].as_i64(), prev["comprasNaoServe"].as_i64()),
+            (Some(1), Some(0)),
+            "{nome}: {prev}"
+        );
+        let r = cadastrar(&mut l, &pasta, true);
+        assert_eq!(r["compras"], 1, "{nome}: {r}");
+        assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1, "{nome}");
+    }
+}
+
+/// N4 da 2ª conferência da T108: a pasta que chega como endereço (`file://...`) também é um pacote: a nota que já
+/// está em Compras é contada, não é erro.
+#[test]
+fn compras_pasta_por_endereco_tambem_e_pacote() {
+    let mut l = loja("t108-pasta-endereco", LOJA_CNPJ);
+    let pasta = pasta(&l, "xml", 1);
+    let endereco = format!("file://{pasta}");
+    let r = l.ok("compra_importar", json!({ "caminho": endereco.clone() }));
+    assert_eq!(r["compras"].as_array().unwrap().len(), 1, "{r}");
+    let r2 = l.ok("compra_importar", json!({ "caminho": endereco }));
+    assert_eq!((r2["jaEmCompras"].clone(), r2["erros"].clone()), (json!(1), json!([])), "{r2}");
+}

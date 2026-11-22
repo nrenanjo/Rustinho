@@ -84,21 +84,21 @@ FocusScope {
         function terminar() {
             buscar()
             tela.guardarNaoImportadas(conflitos)
-            const mais = jaEmCompras === 0 ? ""
-                         : jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo."
-                         : jaEmCompras + " notas já estavam em Compras e não entraram de novo."
-            // A7c da revisão da T108: com erros, o aviso de erro leva também as notas que já estavam em Compras.
+            // N1 da 2ª conferência da T108: UMA mensagem só (o aviso mostra uma de cada vez e a de depois troca a de
+            // antes). Com erro, ela é de erro e leva também as notas importadas e as que já estavam em Compras.
+            const partes = []
+            if (novas.length > 1)
+                partes.push(novas.length + " notas importadas. Abra cada uma para conferir e lançar.")
+            if (jaEmCompras > 0)
+                partes.push(jaEmCompras === 1 ? "1 nota já estava em Compras e não entrou de novo."
+                                              : jaEmCompras + " notas já estavam em Compras e não entraram de novo.")
             if (erros.length > 0)
-                janela.avisar(erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : "")
-                              + (mais ? "\n" + mais : ""), "erro")
-            if (novas.length === 1) {
+                janela.avisar((partes.length > 0 ? partes.join(" ") + "\n" : "")
+                              + erros.slice(0, 6).join("\n") + (erros.length > 6 ? "\n… e mais " + (erros.length - 6) : ""), "erro")
+            else if (partes.length > 0)
+                janela.avisar(partes.join(" "), "ok")
+            if (novas.length === 1)
                 janela.abrir("TelaCompra", { compraId: novas[0].id })
-                if (mais && erros.length === 0)
-                    janela.avisar(mais, "ok")
-            } else if (novas.length > 1)
-                janela.avisar(novas.length + " notas importadas. Abra cada uma para conferir e lançar." + (mais ? " " + mais : ""), "ok")
-            else if (mais && erros.length === 0)
-                janela.avisar(mais, "ok")
         }
         proximo(0)
     }

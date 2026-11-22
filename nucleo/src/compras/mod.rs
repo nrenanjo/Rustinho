@@ -1848,7 +1848,8 @@ mod comandos {
         // T108: a pasta é um pacote mesmo com um XML só (o "Escolher uma pasta" da T107).
         let pacote = lista.len() > 1
             || lista.iter().any(|x| x.nome.contains(" › "))
-            || std::path::Path::new(&d.caminho).is_dir();
+            // N4 da 2ª conferência: o caminho como o `arquivos` o lê (aceita `file://` e `%xx`).
+            || arquivos::caminho_local(&d.caminho).is_dir();
         let mut fichas = Vec::new();
         let mut erros = Vec::new();
         // Notas emitidas para outro CNPJ: não entram; a tela mostra a
@@ -2378,6 +2379,94 @@ mod testes {
             assert_eq!(n, i64::from(compras), "compras = {compras}");
             std::fs::remove_dir_all(pasta).ok();
         }
+    }
+
+    /// N2 da 2ª conferência da T108: "prévia = resultado" também com a nota que já está em Compras (`compra.ja`) e
+    /// com a que não serve para Compras (`compra.nao_serve`, a nota para outro CNPJ).
+    #[test]
+    fn t108_previa_igual_ao_resultado_com_ja_e_nao_serve() {
+        for caso in ["ja", "nao_serve"] {
+            let (b, u) = base();
+            let cnpj = if caso == "ja" { "11444777000161" } else { "12345678000195" };
+            config::gravar(&b.conn, "loja_cnpj", cnpj).unwrap();
+            if caso == "ja" {
+                importar_xml(&b.conn, &b.dispositivo, &u, nfe_xml::EXEMPLO).unwrap();
+            }
+            let pasta = std::env::temp_dir().join(format!("rustinho-t108-{caso}-{}", tempo::novo_id()));
+            std::fs::create_dir_all(&pasta).unwrap();
+            std::fs::write(pasta.join("nota.xml"), nfe_xml::EXEMPLO).unwrap();
+            let e = crate::importar::Entrada {
+                arquivos: vec![pasta.display().to_string()],
+                fornecedores: true,
+                pecas_fornecedor: true,
+                compras: true,
+                ..Default::default()
+            };
+            let classificar = classificar_para_compras;
+            let criar = |c: &Connection, xml: &str, v: &nfe_xml::NotaVerificada| -> Resultado<()> {
+                criar_compra(c, &b.dispositivo, &u, xml, v).map(|_| ())
+            };
+            let gancho = crate::importar::GanchoCompras { classificar: &classificar, criar: &criar };
+            let previa = crate::importar::previa_com_compras(&b.conn, &e, Some(&gancho)).unwrap();
+            let feito = crate::importar::importar_com_compras(&b.conn, &b.dispositivo, &u, &e, Some(&gancho)).unwrap();
+            assert_eq!(previa.resumo, feito.resumo, "{caso}");
+            let codigo = format!("compra.{caso}");
+            assert!(previa.resumo.categorias.iter().any(|c| c.codigo == codigo && c.quantidade == 1), "{caso}");
+            assert_eq!(feito.compras, 0, "{caso}");
+            std::fs::remove_dir_all(pasta).ok();
+        }
+    }
+
+    /// A9 da revisão da T108 (N2 da 2ª conferência): a nota em que as contas do rateio não fecham não serve para
+    /// Compras (em vez de derrubar a importação de cadastros inteira na hora de criar a compra).
+    #[test]
+    fn t108_nota_que_nao_fecha_a_conta_nao_serve_para_compras() {
+        let (b, _u) = base();
+        config::gravar(&b.conn, "loja_cnpj", "11444777000161").unwrap();
+        let mut nota = nfe_xml::ler(nfe_xml::EXEMPLO).unwrap();
+        assert!(matches!(
+            classificar_para_compras(&b.conn, nfe_xml::EXEMPLO, &nota).unwrap(),
+            crate::importar::ParaCompras::Nova(_)
+        ));
+        nota.frete = 100;
+        for it in nota.itens.iter_mut() {
+            it.frete = numeros::SOMA_MAXIMA;
+        }
+        assert!(ratear_do_cabecalho(&nota, nota.itens.clone()).is_err(), "o caso precisa estourar a conta");
+        assert!(matches!(
+            classificar_para_compras(&b.conn, nfe_xml::EXEMPLO, &nota).unwrap(),
+            crate::importar::ParaCompras::NaoServe
+        ));
+    }
+
+    /// A9 da revisão da T108 (N2 da 2ª conferência): se a compra de uma nota não puder ser criada, nada é gravado e
+    /// o aviso diz de qual arquivo.
+    #[test]
+    fn t108_erro_da_compra_diz_o_arquivo_e_nada_fica() {
+        let (b, u) = base();
+        config::gravar(&b.conn, "loja_cnpj", "11444777000161").unwrap();
+        let pasta = std::env::temp_dir().join(format!("rustinho-t108-erro-{}", tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        std::fs::write(pasta.join("nota-ruim.xml"), nfe_xml::EXEMPLO).unwrap();
+        let e = crate::importar::Entrada {
+            arquivos: vec![pasta.display().to_string()],
+            fornecedores: true,
+            pecas_fornecedor: true,
+            compras: true,
+            ..Default::default()
+        };
+        let classificar = classificar_para_compras;
+        let criar = |_: &Connection, _: &str, _: &nfe_xml::NotaVerificada| -> Resultado<()> {
+            Err(Erro::validacao("a conta não fecha"))
+        };
+        let gancho = crate::importar::GanchoCompras { classificar: &classificar, criar: &criar };
+        b.conn.execute_batch("SAVEPOINT t108").unwrap();
+        let erro = crate::importar::importar_com_compras(&b.conn, &b.dispositivo, &u, &e, Some(&gancho)).unwrap_err();
+        b.conn.execute_batch("ROLLBACK TO t108; RELEASE t108").unwrap();
+        assert!(erro.to_string().starts_with("nota-ruim.xml: "), "{erro}");
+        let pecas: i64 = b.conn.query_row("SELECT COUNT(*) FROM produto", [], |l| l.get(0)).unwrap();
+        assert_eq!(pecas, 0, "a transação de quem chama volta inteira");
+        std::fs::remove_dir_all(pasta).ok();
     }
 
     fn peca(b: &Banco, u: &str, nome: &str, barras: &str, original: &str, custo: &str) -> String {
