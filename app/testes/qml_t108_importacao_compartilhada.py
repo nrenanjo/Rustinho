@@ -452,17 +452,24 @@ TestCase {
     function test_t054_c2_r7_duplo_clique_descartar_nao_remove_segunda_nota() {
         tela.guardarNaoImportadas([
             { arquivo: "a.xml", numero: "101", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "A" },
-            { arquivo: "b.xml", numero: "102", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "B" }
+            { arquivo: "b.xml", numero: "102", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "B" },
+            { arquivo: "c.xml", numero: "103", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "C" }
         ])
+        compare(tela.naoImportadas.length, 3)
+        tela.descartarNaoImportada(tela.naoImportadas[0], false)
         compare(tela.naoImportadas.length, 2)
+        verify(travaDescartar.running)
+        // Segundo clique imediato durante a janela de 400 ms é bloqueado (na lista e na janelinha).
         tela.descartarNaoImportada(tela.naoImportadas[0], false)
-        compare(tela.naoImportadas.length, 1)
-        // Segundo clique imediato durante a janela de 400 ms é bloqueado.
-        tela.descartarNaoImportada(tela.naoImportadas[0], false)
-        compare(tela.naoImportadas.length, 1, "T054-C2-R7: clique duplo rápido não pode descartar a nota seguinte")
-        // Descartar vindo da janelinha (confirmado lá) continua permitido.
         tela.descartarNaoImportada(tela.naoImportadas[0], true)
-        compare(tela.naoImportadas.length, 0)
+        compare(tela.naoImportadas.length, 2, "T054-C2-R7: clique duplo rápido não pode descartar a nota seguinte")
+        // Após a janela de 400 ms, descartar pela janelinha remove a nota e também rearma a trava.
+        travaDescartar.running = false
+        tela.descartarNaoImportada(tela.naoImportadas[0], true)
+        compare(tela.naoImportadas.length, 1)
+        verify(travaDescartar.running, "T054-C2-R7: descarte pela janelinha também rearma trava pós-fechamento")
+        tela.descartarNaoImportada(tela.naoImportadas[0], false)
+        compare(tela.naoImportadas.length, 1, "T054-C2-R7: clique imediato na lista após fechar janelinha fica bloqueado")
     }
 
     function test_t110_p2_p3_depois_de_importar_sem_espaco_e_sem_nada_novo() {
