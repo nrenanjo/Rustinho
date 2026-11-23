@@ -191,10 +191,9 @@ FocusScope {
         interval: 400
     }
     function descartarNaoImportada(c, daJanelinha) {
-        if (!daJanelinha && travaDescartar.running)
+        if (!c || travaDescartar.running)
             return
-        if (!daJanelinha)
-            travaDescartar.restart()
+        travaDescartar.restart()
         // T054: a lista não volta para o começo depois de descartar uma nota.
         const onde = listaNaoImportadas.contentY
         naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))

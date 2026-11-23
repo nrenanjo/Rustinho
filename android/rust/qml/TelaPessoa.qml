@@ -291,7 +291,7 @@ FocusScope {
                                 dica: tela.juridica ? "00.000.000/0000-00" : "000.000.000-00"
                                 maximo: 20
                                 maiusculas: true
-                                Layout.preferredWidth: 220
+                                Layout.preferredWidth: 270
                                 onEditado: {
                                     tela.marcarAlterado()
                                     const limpo = texto.replace(/[^0-9A-Z]/g, "")

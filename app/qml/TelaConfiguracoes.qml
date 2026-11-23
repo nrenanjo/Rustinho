@@ -964,7 +964,7 @@ FocusScope {
                             maximo: 20
                             maiusculas: true
                             sensivel: true
-                            Layout.preferredWidth: 240
+                            Layout.preferredWidth: 270
                             onEditado: tela.alterado = true
                         }
                         Selecao {

@@ -12,19 +12,24 @@ Painel {
     id: janelaConflito
     property var conflito: null
     property bool conferindo: false
+    property bool descartando: false
     width: Math.min(720, Tema.largura - 24)
     // Nunca mais alta que a janela: o conteúdo rola e os botões ficam à vista.
     height: Math.min(implicitHeight, Tema.altura - 24)
+    padding: Tema.estreito ? 16 : 20
+    bottomPadding: Tema.estreito ? 14 : 18
     signal descartar(var conflito)
 
     function mostrar(c) {
         conflito = c
         conferindo = false
+        descartando = false
         open()
     }
+    onClosed: descartando = false
 
     contentItem: ColumnLayout {
-        spacing: 16
+        spacing: 12
 
         Flickable {
             id: rolagem
@@ -34,27 +39,29 @@ Painel {
             contentHeight: corpo.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: ScrollBar {
+                policy: rolagem.contentHeight > rolagem.height + 1 ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+            }
 
             ColumnLayout {
                 id: corpo
                 width: rolagem.width
-                spacing: 16
+                spacing: 8
 
                 RowLayout {
-                    spacing: 16
+                    spacing: 14
                     Layout.fillWidth: true
                     Rectangle {
-                        Layout.preferredWidth: 64
-                        Layout.preferredHeight: 64
+                        Layout.preferredWidth: 52
+                        Layout.preferredHeight: 52
                         Layout.alignment: Qt.AlignTop
                         radius: Tema.raio
                         color: Tema.atencao
                         border.color: Tema.bordaAtencao
                         Image {
                             anchors.centerIn: parent
-                            width: 36
-                            height: 36
+                            width: 30
+                            height: 30
                             source: Tema.escuro ? "qrc:/qt/qml/rustinho/icone/alerta-branco.png" : "qrc:/qt/qml/rustinho/icone/alerta-preto.png"
                             fillMode: Image.PreserveAspectFit
                             smooth: true
@@ -62,11 +69,11 @@ Painel {
                         }
                     }
                     ColumnLayout {
-                        spacing: 6
+                        spacing: 4
                         Layout.fillWidth: true
                         Titulo {
                             text: "CNPJ da nota é diferente"
-                            font.pixelSize: Tema.estreito ? 26 : 32
+                            font.pixelSize: Tema.estreito ? 24 : 28
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -156,7 +163,7 @@ Painel {
                     GridLayout {
                         columns: 2
                         columnSpacing: 18
-                        rowSpacing: 6
+                        rowSpacing: 3
                         Layout.fillWidth: true
                         Repeater {
                             model: {
@@ -267,12 +274,21 @@ Painel {
                     }
                 }
 
-                Faixa {
+                // Aviso compacto (sem título de Faixa) para caber inteiro em 1280x760 sem cortar nem rolar.
+                Rectangle {
                     color: Tema.atencao
+                    palette.window: Tema.superficie(color)
+                    radius: Tema.raio
                     Layout.fillWidth: true
+                    implicitHeight: avisoNadaGravado.implicitHeight + 16
                     Nota {
+                        id: avisoNadaGravado
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 14
                         text: "A nota não foi importada e nada foi gravado. O CNPJ da loja não muda."
-                        Layout.fillWidth: true
                     }
                 }
             }
@@ -290,7 +306,11 @@ Painel {
             Botao {
                 text: "Descartar nota"
                 tipo: "perigo"
+                enabled: !janelaConflito.descartando
                 onClicked: {
+                    if (janelaConflito.descartando || !janelaConflito.conflito)
+                        return
+                    janelaConflito.descartando = true
                     const c = janelaConflito.conflito
                     janelaConflito.close()
                     janelaConflito.descartar(c)

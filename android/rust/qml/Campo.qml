@@ -43,7 +43,8 @@ ColumnLayout {
     property bool podeColar: false
     property bool semAcoesTexto: false
     readonly property bool busca: icone === "busca" || colarCopiar
-    readonly property bool cabeAcoesFormulario: !busca && !semAcoesTexto && !numerico && entrada.width >= 210
+    readonly property bool cabeAcoesFormulario: !busca && !semAcoesTexto && !numerico
+                                                && entrada.width >= (conferir !== "" ? 260 : 220)
     readonly property bool mostrarColar: busca || podeColar || (!senha && !somenteLeitura && cabeAcoesFormulario)
     readonly property bool mostrarCopiar: busca || (!senha && !escondido && cabeAcoesFormulario)
     readonly property real ladoBotaoInterno: busca ? (Tema.celular ? 48 : 40) : (Tema.celular ? 40 : 30)

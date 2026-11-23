@@ -194,7 +194,6 @@ FocusScope {
                 Item { Layout.fillWidth: true }
                 Botao {
                     text: tela.procurando ? "Procurar de novo" : "Procurar os outros caixas"
-                    icone: "busca"
                     onClicked: tela.juntar()
                 }
             }

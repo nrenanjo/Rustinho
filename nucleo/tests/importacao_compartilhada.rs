@@ -1471,4 +1471,7 @@ fn t110_n6_benchmark_3000_xmls() {
         hwm1 as f64 / 1024.0,
         hwm2 as f64 / 1024.0,
     );
+    assert!(dt_prev.as_secs_f64() < 15.0, "prévia lenta: {dt_prev:?}");
+    assert!(dt_imp.as_secs_f64() < 20.0, "importação lenta: {dt_imp:?}");
+    assert!(hwm2.saturating_sub(hwm0) < 64 * 1024, "delta VmHWM alto: {} KiB", hwm2.saturating_sub(hwm0));
 }

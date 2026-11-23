@@ -365,6 +365,21 @@ def main():
                            and all(c[2] >= 40 and c[0] + c[2] <= fundo[-1][0] + fundo[-1][2] + 1 for c in nomes_cat))
             ok("BUG-JJE5: Classificar categorias em 400x700 com nomes legíveis e Salvar dentro da janelinha",
                jje5_ok, f"{f} fundo={fundo[-1:]} salvar={salvar_c} nomes={nomes_cat[:3]}")
+
+            # JJE5 em paisagem baixa (780 x 360): janelinha e Salvar continuam dentro da janela
+            r.redim(780, 360)
+            time.sleep(1.0)
+            t_pais = r.textos()
+            f_pais = r.foto("-classificar-780x360")
+            fundo_p = geos_de(t_pais).get("fundoDaJanelinha", [])
+            salvar_p = achar_ret(t_pais, "Salvar", exato=True)
+            nomes_p = [x for x in rets_de(t_pais) if simples(x[4]) in ("aluguel", "energia", "fornecedores", "agua", "internet", "vendas")]
+            jje5_pais_ok = bool(fundo_p and salvar_p
+                                and fundo_p[-1][1] + fundo_p[-1][3] <= 361
+                                and salvar_p[-1][1] + salvar_p[-1][3] <= fundo_p[-1][1] + fundo_p[-1][3] + 1
+                                and len(nomes_p) >= 1)
+            ok("BUG-JJE5: Classificar categorias em 780x360 exibe lista e Salvar dentro da janela",
+               jje5_pais_ok, f"{f_pais} fundo={fundo_p[-1:]} salvar={salvar_p} nomes={nomes_p[:2]}")
         finally:
             r.fechar()
             shutil.rmtree(pasta, ignore_errors=True)
@@ -449,6 +464,15 @@ def main():
             ok("Doc 12 #9: cartões CNPJ da loja e CNPJ no XML alinhados no mesmo topo",
                bool(c_loja and c_xml and abs(c_loja[0][1] - c_xml[0][1]) <= 2),
                f"{f} loja={c_loja} xml={c_xml}")
+            # Achado Hydrogen #4: em 1280x760, "Valor total" e o aviso "A nota não foi importada" cabem inteiros acima dos botões
+            fundo_c = geos_de(t).get("fundoDaJanelinha", [])
+            v_tot = achar_ret(t, "Valor total")
+            av_nao = achar_ret(t, "A nota nao foi importada e nada foi gravado")
+            btn_desc = achar_ret(t, "Descartar nota", exato=True)
+            limite_y = btn_desc[0][1] if btn_desc else (fundo_c[-1][1] + fundo_c[-1][3] if fundo_c else 760)
+            ok("ConflitoCnpj em 1280x760: 'Valor total' e aviso de nada gravado visíveis sem corte acima dos botões",
+               bool(v_tot and av_nao and v_tot[0][1] + v_tot[0][3] <= limite_y - 18 and av_nao[0][1] + av_nao[0][3] <= limite_y - 18),
+               f"{f} v_tot={v_tot} av_nao={av_nao} limite_y={limite_y}")
 
             # BUG-TJ8X: clicar numa área da janelinha que fica sobre a lista de trás NÃO fecha nem abre nada atrás
             fundo = geos_de(t).get("fundoDaJanelinha", [])
