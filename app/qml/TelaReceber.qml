@@ -21,6 +21,137 @@ FocusScope {
     property bool todas: false        // mostrar pagas e canceladas
     property var formas: []
     property bool buscou: false
+    // R2 (REC-1 / REC-2): retrato único do recebimento / lançamento de dívida em andamento.
+    property var rascunhoRecuperado: null
+    property string trabalhoDesativadoId: ""
+    property string rascunhoId: ""
+    property string rascunhoStatus: ""
+
+    function coletarRetrato() {
+        return {
+            clienteId: clienteId,
+            marcadas: marcadas,
+            todas: todas,
+            busca: busca.texto,
+            pagarAberto: pagar.opened,
+            pagar: pagar.opened ? {
+                valor: valor.texto,
+                juros: juros.texto,
+                desconto: desconto.texto,
+                forma: pagar.forma,
+                chave: pagar.chave
+            } : null,
+            lancarAberto: lancar.opened,
+            lancar: lancar.opened ? {
+                cliente: lancar.cliente,
+                clienteNome: lancar.clienteNome,
+                campoCliente: campoCliente.texto,
+                descricao: descricao.texto,
+                valor: valorDivida.texto,
+                parcelas: parcelas.texto,
+                vencimento: vencimento.texto,
+                chave: lancar.chave
+            } : null
+        }
+    }
+
+    function restaurarRetrato(est) {
+        if (!est || typeof est !== "object")
+            return
+        todas = !!est.todas
+        if (typeof est.busca === "string")
+            busca.texto = est.busca
+        carregarPainel()
+        if (typeof est.clienteId === "string" && est.clienteId !== "") {
+            abrirCliente(est.clienteId)
+        }
+        if (Array.isArray(est.marcadas))
+            marcadas = est.marcadas
+        if (est.pagarAberto && est.pagar && conta) {
+            Qt.callLater(() => {
+                pagar.abrirCom()
+                if (est.pagar.forma)
+                    pagar.forma = est.pagar.forma
+                if (est.pagar.juros !== undefined)
+                    juros.texto = est.pagar.juros
+                if (est.pagar.desconto !== undefined)
+                    desconto.texto = est.pagar.desconto
+                if (est.pagar.valor !== undefined)
+                    valor.texto = est.pagar.valor
+                if (est.pagar.chave)
+                    pagar.chave = est.pagar.chave
+                pagar.atualizar()
+            })
+        } else if (est.lancarAberto && est.lancar) {
+            Qt.callLater(() => {
+                lancar.abrirCom(conta)
+                lancar.cliente = est.lancar.cliente || ""
+                lancar.clienteNome = est.lancar.clienteNome || ""
+                campoCliente.texto = est.lancar.campoCliente || est.lancar.clienteNome || ""
+                descricao.texto = est.lancar.descricao || ""
+                valorDivida.texto = est.lancar.valor || ""
+                parcelas.texto = est.lancar.parcelas || "1"
+                vencimento.texto = est.lancar.vencimento || ""
+                if (est.lancar.chave)
+                    lancar.chave = est.lancar.chave
+                lancar.atualizar()
+            })
+        }
+    }
+
+    function temRascunhoSignificativo() {
+        return (pagar.opened && clienteId !== "")
+               || (lancar.opened && (descricao.texto.trim() !== "" || valorDivida.texto.trim() !== "" || campoCliente.texto.trim() !== ""))
+               || (clienteId !== "" && marcadas.length > 0)
+    }
+
+    function guardarRascunhoAgora() {
+        timerRascunhoReceber.stop()
+        if (!temRascunhoSignificativo() || trabalhoDesativadoId !== "")
+            return
+        const nomeCli = conta && conta.nome ? conta.nome : (campoCliente.texto.trim() || "Cliente")
+        const tituloRec = lancar.opened
+                        ? ("Lançar dívida · " + nomeCli + (valorDivida.texto.trim() !== "" ? " · R$ " + valorDivida.texto.trim() : ""))
+                        : ("Recebimento · " + nomeCli + (marcadas.length > 0 ? " (" + marcadas.length + (marcadas.length === 1 ? " parcela)" : " parcelas)") : ""))
+        const chaveOp = lancar.opened ? lancar.chave : (pagar.opened ? pagar.chave : "")
+        const r = Api.chamar("trabalho_guardar", {
+            id: rascunhoId,
+            tipo: "receber",
+            alvoId: clienteId || lancar.cliente || "",
+            titulo: tituloRec,
+            estado: coletarRetrato(),
+            chaveOperacao: chaveOp
+        })
+        if (r.ok && r.dados) {
+            rascunhoId = r.dados.id || rascunhoId
+            rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+        }
+    }
+
+    function limparRascunho() {
+        timerRascunhoReceber.stop()
+        if (trabalhoDesativadoId !== "") {
+            janela.chamarGerente("trabalho_gerente_concluir", {
+                id: trabalhoDesativadoId,
+                motivo: "Recebimento concluído ou encerrado pelo gerente"
+            }, () => {})
+            trabalhoDesativadoId = ""
+        } else if (rascunhoId !== "" || temRascunhoSignificativo()) {
+            Api.chamar("trabalho_concluir", {
+                id: rascunhoId,
+                tipo: "receber",
+                alvoId: clienteId || lancar.cliente || ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+    }
+
+    Timer {
+        id: timerRascunhoReceber
+        interval: 600
+        onTriggered: tela.guardarRascunhoAgora()
+    }
 
     function carregarPainel() {
         const r = Api.chamar("receber_painel", { texto: busca.texto })
@@ -67,6 +198,7 @@ FocusScope {
         if (sim)
             m.push(id)
         marcadas = m
+        timerRascunhoReceber.restart()
     }
 
     readonly property var abertas: conta ? conta.parcelas.filter(p => p.situacao !== "paga" && p.situacao !== "cancelada") : []
@@ -96,6 +228,7 @@ FocusScope {
             busca.texto = ""
             carregarPainel()
         } else {
+            limparRascunho()
             janela.voltar()
         }
     }
@@ -540,6 +673,7 @@ FocusScope {
             const r = Api.chamar("receber_calcular", entrada())
             if (r.ok)
                 calc = r.dados
+            timerRascunhoReceber.restart()
         }
         function concluir() {
             const r = Api.gravar("receber_baixar", entrada(), chave)
@@ -552,6 +686,7 @@ FocusScope {
                 tela.janela.oferecerReferencia(r, pagar)
                 return
             }
+            tela.limparRascunho()
             close()
             feito.recibo = r.dados
             feito.open()
@@ -807,6 +942,7 @@ FocusScope {
             const r = Api.chamar("receber_previa", entrada())
             previa = r.ok ? r.dados : []
             erro = r.ok ? "" : r.erro
+            timerRascunhoReceber.restart()
         }
         function buscarCliente() {
             cliente = ""
@@ -824,6 +960,7 @@ FocusScope {
                 erro = r.erro
                 return
             }
+            tela.limparRascunho()
             close()
             janela.avisar("Dívida lançada.", "ok")
             tela.carregarPainel()
@@ -1007,6 +1144,12 @@ FocusScope {
             clienteInicial = ""
         } else {
             carregarConta()
+        }
+        if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+            const rec = rascunhoRecuperado
+            rascunhoRecuperado = null
+            rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+            restaurarRetrato(rec.estado)
         }
         busca.focar()
     }

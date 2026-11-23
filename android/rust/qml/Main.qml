@@ -176,10 +176,114 @@ ApplicationWindow {
     }
 
     function trocarUsuario() {
+        guardarRascunhosDaPilha()
         Tema.oculto = true
         Api.chamar("sair")
         atualizarEstado()
         trocarPara("TelaEntrar")
+    }
+
+    // REC-1 (ES-5 7a): antes de encerrar a sessão por troca de usuário ou fechamento
+    // da janela, garante que qualquer tela com edição pendente na pilha persista o seu
+    // retrato mais recente em `trabalho`.
+    function guardarRascunhosDaPilha() {
+        for (let i = 0; i < pilha.depth; i++) {
+            const item = pilha.get(i, StackView.DontLoad)
+            if (item && typeof item.guardarRascunhoAgora === "function") {
+                try {
+                    item.guardarRascunhoAgora()
+                } catch (e) {
+                    console.warn("Rustinho: falha ao guardar rascunho da tela: " + e)
+                }
+            }
+        }
+    }
+
+    // REC-1 / REC-2 (7b): abre a tela correspondente ao trabalho guardado, sempre como
+    // rascunho (nunca conclui operação comercial nem grava cadastro sozinho).
+    function abrirTelaDoTrabalho(aberto, trabalhoDesativadoId) {
+        if (!aberto || !aberto.resumo)
+            return
+        const res = aberto.resumo
+        if (res.jaConcluida) {
+            confirmar(
+                "Operação já concluída",
+                "Esta operação já tinha sido confirmada e gravada antes da interrupção"
+                + (res.resumoConcluida ? " (" + res.resumoConcluida + ")" : "")
+                + ". O Rustinho não repete a gravação. Deseja retirar este item da lista de trabalhos guardados?",
+                "Retirar da lista",
+                () => {
+                    if (trabalhoDesativadoId)
+                        chamarGerente("trabalho_gerente_concluir", { id: res.id, motivo: "Operação já constava como concluída" }, () => {
+                            if (pilha.currentItem && typeof pilha.currentItem.carregar === "function")
+                                pilha.currentItem.carregar()
+                        })
+                    else {
+                        Api.chamar("trabalho_concluir", { id: res.id })
+                        if (pilha.currentItem && typeof pilha.currentItem.carregar === "function")
+                            pilha.currentItem.carregar()
+                    }
+                },
+                "principal"
+            )
+            return
+        }
+        if (res.situacao === "sem_conserto" || res.formatoIncompativel) {
+            avisar(
+                res.formatoIncompativel
+                ? "Este rascunho foi salvo num formato incompatível com esta versão do Rustinho e continua preservado."
+                : "Não foi possível ler os dados deste rascunho (o estado gravado está ilegível).",
+                "erro"
+            )
+            return
+        }
+        const mapaTelas = {
+            peca: ["TelaPeca", { produtoId: res.alvoId || "" }],
+            pessoa: ["TelaPessoa", { pessoaId: res.alvoId || "" }],
+            venda: ["TelaVender", {}],
+            receber: ["TelaReceber", { clienteInicial: res.alvoId || "" }],
+            os: ["TelaOrdem", { osId: res.alvoId || "" }],
+            compra: ["TelaCompra", { compraId: res.alvoId || "" }]
+        }
+        const destino = mapaTelas[res.tipo]
+        if (!destino) {
+            avisar("Tipo de trabalho não suportado nesta tela: " + res.tipo, "erro")
+            return
+        }
+        const props = Object.assign({}, destino[1], {
+            rascunhoRecuperado: aberto,
+            trabalhoDesativadoId: trabalhoDesativadoId || ""
+        })
+        abrir(destino[0], props)
+        if (res.usouVersaoAnterior)
+            avisar("A última gravação estava incompleta; o Rustinho restaurou a versão anterior íntegra do rascunho.", "info")
+        if (res.conflitoBase && res.motivoConflito)
+            avisar(res.motivoConflito, "erro")
+    }
+
+    function retomarTrabalho(item) {
+        const r = Api.chamar("trabalho_abrir", { id: item.id })
+        if (!r.ok) {
+            avisar(r.erro, "erro")
+            return
+        }
+        if (!r.dados) {
+            avisar("Este rascunho já não está mais disponível.", "info")
+            return
+        }
+        abrirTelaDoTrabalho(r.dados, "")
+    }
+
+    function retomarTrabalhoDesativado(item, motivo, depois) {
+        chamarGerente("trabalho_gerente_abrir", { id: item.id, motivo: motivo || "Conferência pelo gerente" }, r => {
+            if (depois)
+                depois(r)
+            if (!r.ok) {
+                avisar(r.erro, "erro")
+                return
+            }
+            abrirTelaDoTrabalho(r.dados, item.id)
+        })
     }
 
     function abrirFuncao(item) {
@@ -1034,13 +1138,51 @@ ApplicationWindow {
     }
 
     // Ao fechar: faz o backup (se o último tem mais de meia hora) e fecha.
+    // REC-6 / ES-1: se houver operação crítica em andamento (venda, recebimento,
+    // importação, backup ou restauração), pede confirmação explicando o que está em
+    // andamento e quando dá para cancelar com segurança, sem jamais prender a janela
+    // indefinidamente.
     property bool podeFechar: false
-    onClosing: (fechar) => {
-        if (podeFechar || estado.primeiraVez)
-            return
-        fechar.accepted = false
+    property string comandoCriticoSimulado: ""
+    property var avaliacaoFechamentoAtual: null
+
+    function fecharComBackup() {
+        guardarRascunhosDaPilha()
         fechando.visible = true
         esperaFechar.start()
+    }
+
+    function tentarFecharJanela(fechar) {
+        if (podeFechar || estado.primeiraVez)
+            return true
+        if (fechar)
+            fechar.accepted = false
+        const cmdAtivo = Api.comandoAtivo() || comandoCriticoSimulado || (espera.visible ? "operacao_em_andamento" : "")
+        const r = Api.chamar("trabalho_fechamento_avaliar", {
+            comandoAtivo: cmdAtivo,
+            telaAtiva: pilha.currentItem && pilha.currentItem.nomeNaNavegacao ? pilha.currentItem.nomeNaNavegacao : "",
+            temRascunhoAberto: false
+        })
+        if (r.ok && r.dados && r.dados.emAndamento) {
+            avaliacaoFechamentoAtual = r.dados
+            confirmar(
+                r.dados.titulo || "Operação em andamento",
+                r.dados.explicacao || "",
+                r.dados.textoSair || "Sair mesmo assim",
+                () => {
+                    janela.comandoCriticoSimulado = ""
+                    janela.fecharComBackup()
+                },
+                "perigo"
+            )
+            return false
+        }
+        fecharComBackup()
+        return false
+    }
+
+    onClosing: (fechar) => {
+        tentarFecharJanela(fechar)
     }
     Timer {
         id: esperaFechar
@@ -1090,6 +1232,12 @@ ApplicationWindow {
         enabled: janela.textosDaTela
         context: Qt.ApplicationShortcut
         onActivated: janela.escreverTextos()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+F11"
+        enabled: janela.textosDaTela
+        context: Qt.ApplicationShortcut
+        onActivated: janela.close()
     }
     function escreverTextos() {
         const linhas = []

@@ -19,6 +19,16 @@ QtObject {
 
     // Pedidos demorados em andamento: número → { comando, depois }.
     property var _pendentes: ({})
+    function temOperacaoEmCurso() {
+        return Object.keys(_pendentes).length > 0
+    }
+    function comandoAtivo() {
+        const chaves = Object.keys(_pendentes)
+        if (chaves.length === 0)
+            return ""
+        const u = _pendentes[chaves[chaves.length - 1]]
+        return u && u.comando ? String(u.comando) : ""
+    }
     // Consultas fora da linha da janela (7.6): o último pedido de cada canal
     // → { pedido, comando, depois }.
     property var _consultas: ({})

@@ -39,6 +39,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0025_indices_e_busca_normalizada.sql"),
     include_str!("../migracoes/0026_caixas_aprovados.sql"),
     include_str!("../migracoes/0027_operacao_feita.sql"),
+    include_str!("../migracoes/0028_recuperacao_trabalho.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -1025,7 +1026,7 @@ mod testes {
         // dev.3.3, a 0025 (passo 7.5: índices e busca), a 0026 (registro de
         // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
         // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
-        assert_eq!(MIGRACOES.len(), 27);
+        assert_eq!(MIGRACOES.len(), 28);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas

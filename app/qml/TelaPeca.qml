@@ -23,6 +23,12 @@ FocusScope {
     property bool alterado: false
     property bool carregando: true
     property bool mostrarOutros: false
+    // R1 (REC-1 / REC-2): retrato único do estado da ficha e indicador honesto de rascunho guardado.
+    property var rascunhoRecuperado: null
+    property string trabalhoDesativadoId: ""
+    property string rascunhoId: ""
+    property string rascunhoStatus: ""
+    property bool rascunhoFalhou: false
     // D-09: custo e % de lucro só para quem vê os resultados (vem da ficha).
     readonly property bool verCustos: !!ficha && !!ficha.verCustos
     readonly property bool nova: !ficha || ficha.id === ""
@@ -60,7 +66,112 @@ FocusScope {
             return
         }
         preencher(r.dados)
+        if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+            const rec = rascunhoRecuperado
+            rascunhoRecuperado = null
+            rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+            restaurarRetrato(rec.estado)
+            rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+        }
         carregando = false
+    }
+
+    function coletarRetrato() {
+        return {
+            ficha: coletar(),
+            blocoFiscal: blocoFiscal,
+            mostrarOutros: mostrarOutros,
+            rolagemY: rolagem.contentY
+        }
+    }
+
+    function restaurarRetrato(est) {
+        if (!est || typeof est !== "object")
+            return
+        const f = est.ficha && typeof est.ficha === "object" ? est.ficha : est
+        const idOriginal = ficha ? ficha.id : (f.id || "")
+        const atualizadoOriginal = ficha ? (ficha.atualizadoEm || "") : ""
+        const criadoOriginal = ficha ? (ficha.criadoEm || "") : ""
+        const verCustosOriginal = ficha ? !!ficha.verCustos : true
+        const mesclada = Object.assign({}, ficha || {}, f, {
+            id: idOriginal,
+            atualizadoEm: atualizadoOriginal,
+            criadoEm: criadoOriginal,
+            verCustos: verCustosOriginal
+        })
+        preencher(mesclada)
+        if (Array.isArray(f.precos)) {
+            Qt.callLater(() => {
+                for (let i = 0; i < repPrecos.count && i < f.precos.length; i++) {
+                    const linha = repPrecos.itemAt(i)
+                    const p = f.precos[i]
+                    if (linha && p) {
+                        if (p.lucro !== undefined)
+                            linha.campoLucro.texto = p.lucro
+                        if (p.preco !== undefined)
+                            linha.campoPreco.texto = p.preco
+                    }
+                }
+            })
+        }
+        if (typeof est.blocoFiscal === "string" && est.blocoFiscal !== "")
+            blocoFiscal = est.blocoFiscal
+        if (typeof est.mostrarOutros === "boolean")
+            mostrarOutros = est.mostrarOutros
+        if (typeof est.rolagemY === "number")
+            Qt.callLater(() => { rolagem.contentY = Math.max(0, Math.min(est.rolagemY, Math.max(0, rolagem.contentHeight - rolagem.height))) })
+        alterado = true
+    }
+
+    function guardarRascunhoAgora() {
+        timerRascunho.stop()
+        if (!alterado || carregando || trabalhoDesativadoId !== "")
+            return
+        const tituloPeca = nome.texto.trim() !== "" ? nome.texto.trim()
+                         : (ficha && ficha.nome ? ficha.nome : (servico ? "Novo serviço" : "Nova peça"))
+        const r = Api.chamar("trabalho_guardar", {
+            id: rascunhoId,
+            tipo: "peca",
+            alvoId: ficha && ficha.id ? ficha.id : "",
+            titulo: tituloPeca,
+            estado: coletarRetrato(),
+            baseAtualizadoEm: ficha && ficha.atualizadoEm ? ficha.atualizadoEm : "",
+            chaveOperacao: chave
+        })
+        if (r.ok && r.dados) {
+            rascunhoId = r.dados.id || rascunhoId
+            rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+            rascunhoFalhou = false
+        } else {
+            rascunhoStatus = "Não foi possível guardar"
+            rascunhoFalhou = true
+        }
+    }
+
+    function limparRascunho() {
+        timerRascunho.stop()
+        if (trabalhoDesativadoId !== "") {
+            janela.chamarGerente("trabalho_gerente_concluir", {
+                id: trabalhoDesativadoId,
+                motivo: "Ficha salva ou encerrada pelo gerente"
+            }, () => {})
+            trabalhoDesativadoId = ""
+        } else if (rascunhoId !== "" || alterado) {
+            Api.chamar("trabalho_concluir", {
+                id: rascunhoId,
+                tipo: "peca",
+                alvoId: ficha && ficha.id ? ficha.id : ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+    }
+
+    Timer {
+        id: timerRascunho
+        interval: 600
+        onTriggered: tela.guardarRascunhoAgora()
     }
 
     function preencher(f) {
@@ -113,7 +224,7 @@ FocusScope {
         const listaPrecos = []
         for (let i = 0; i < repPrecos.count; i++) {
             const linha = repPrecos.itemAt(i)
-            listaPrecos.push({ tabela: linha.tabela, lucro: linha.lucroTexto, preco: linha.precoTexto })
+            listaPrecos.push({ tabela: linha.tabela, nome: linha.nome || "", lucro: linha.lucroTexto, preco: linha.precoTexto })
         }
         const listaAplicacoes = []
         for (let i = 0; i < aplicacoes.count; i++) {
@@ -267,6 +378,7 @@ FocusScope {
         // outra coisa).
         janela.chamarGerente("produto_salvar", coletar(), r => {
             if (r.ok) {
+                tela.limparRascunho()
                 tela.chave = Api.novaChave()
                 const s = Api.chamar("produto_sugestoes")
                 if (s.ok)
@@ -387,14 +499,16 @@ FocusScope {
     }
 
     function marcarAlterado() {
-        if (!carregando)
+        if (!carregando) {
             alterado = true
+            timerRascunho.restart()
+        }
     }
 
     function aoEsc() {
         if (alterado)
             janela.confirmar("Descartar alterações?", "O que você mudou nesta peça ainda não foi salvo.",
-                             "Descartar", () => janela.voltar(), "perigo")
+                             "Descartar", () => { tela.limparRascunho(); janela.voltar() }, "perigo")
         else
             janela.voltar()
     }
@@ -474,6 +588,13 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
+            Rotulo {
+                visible: tela.alterado && tela.rascunhoStatus !== ""
+                text: tela.rascunhoStatus
+                color: tela.rascunhoFalhou ? Tema.vermelhoNo(palette.window) : Tema.tintaSuaveNo(palette.window)
+                Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 6
+            }
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"

@@ -19,16 +19,100 @@ FocusScope {
     property string chaveLancar: Api.novaChave()
     property int itemEscolhendo: -1
     readonly property bool rascunho: !!compra && compra.situacao === "rascunho"
+    // R2 (REC-1 / REC-2): retrato único da conferência de nota de compra em andamento.
+    property var rascunhoRecuperado: null
+    property string trabalhoDesativadoId: ""
+    property string rascunhoId: ""
+    property string rascunhoStatus: ""
 
     function carregar() {
         chaveLancar = Api.novaChave()
         const r = Api.chamar("compra_abrir", { id: compraId })
-        if (r.ok)
+        if (r.ok) {
             compra = r.dados
-        else {
+            if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+                const rec = rascunhoRecuperado
+                rascunhoRecuperado = null
+                rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+                restaurarRetrato(rec.estado)
+            }
+        } else {
             janela.avisar(r.erro, "erro")
             janela.voltar()
         }
+    }
+
+    function coletarRetrato() {
+        return {
+            compraId: compraId,
+            parte: parte,
+            freteExtra: freteExtra.texto,
+            atualizarPrecos: atualizar.checked,
+            observacoes: observacoes.texto,
+            gerarPagar: gerarPagar.checked,
+            rolagemY: lista.contentY
+        }
+    }
+
+    function restaurarRetrato(est) {
+        if (!est || typeof est !== "object")
+            return
+        if (typeof est.parte === "string" && est.parte !== "")
+            parte = est.parte
+        if (typeof est.freteExtra === "string")
+            freteExtra.texto = est.freteExtra
+        if (typeof est.atualizarPrecos === "boolean")
+            atualizar.checked = est.atualizarPrecos
+        if (typeof est.observacoes === "string")
+            observacoes.texto = est.observacoes
+        if (typeof est.gerarPagar === "boolean")
+            gerarPagar.checked = est.gerarPagar
+        if (typeof est.rolagemY === "number")
+            Qt.callLater(() => { lista.contentY = Math.max(0, Math.min(est.rolagemY, Math.max(0, lista.contentHeight - lista.height))) })
+    }
+
+    function guardarRascunhoAgora() {
+        timerRascunhoCompra.stop()
+        if (!rascunho || !compra || trabalhoDesativadoId !== "")
+            return
+        const r = Api.chamar("trabalho_guardar", {
+            id: rascunhoId,
+            tipo: "compra",
+            alvoId: compra.id,
+            titulo: "NF " + compra.numero + " · " + compra.fornecedor,
+            estado: coletarRetrato(),
+            baseAtualizadoEm: compra.conferidaEm || compra.criadoEm || "",
+            chaveOperacao: chaveLancar
+        })
+        if (r.ok && r.dados) {
+            rascunhoId = r.dados.id || rascunhoId
+            rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+        }
+    }
+
+    function limparRascunho() {
+        timerRascunhoCompra.stop()
+        if (trabalhoDesativadoId !== "") {
+            janela.chamarGerente("trabalho_gerente_concluir", {
+                id: trabalhoDesativadoId,
+                motivo: "Compra lançada ou encerrada pelo gerente"
+            }, () => {})
+            trabalhoDesativadoId = ""
+        } else if (rascunhoId !== "" || (compra && compra.id)) {
+            Api.chamar("trabalho_concluir", {
+                id: rascunhoId,
+                tipo: "compra",
+                alvoId: compra ? compra.id : compraId
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+    }
+
+    Timer {
+        id: timerRascunhoCompra
+        interval: 600
+        onTriggered: tela.guardarRascunhoAgora()
     }
 
     // Monta o que a tela decidiu, com uma mudança opcional num item.
@@ -54,6 +138,7 @@ FocusScope {
         const r = Api.chamar("compra_atualizar", entrada(indice, mudanca))
         if (r.ok) {
             compra = r.dados
+            timerRascunhoCompra.restart()
             Qt.callLater(() => lista.contentY = Math.min(y, Math.max(0, lista.contentHeight - lista.height)))
         } else
             mostrarErro(r)
@@ -109,6 +194,7 @@ FocusScope {
             // cadastrada, pede a senha do gerente (com estes dados).
             janela.chamarGerente("compra_lancar", entrada(-1, {}), r => {
                 if (r.ok) {
+                    tela.limparRascunho()
                     compra = r.dados.compra
                     const s = r.dados.resumo
                     janela.avisar("Compra lançada: " + s.itensEstoque + " itens no estoque"
@@ -186,12 +272,18 @@ FocusScope {
                          "Descartar", () => {
             const r = Api.chamar("compra_descartar", { id: compra.id })
             if (r.ok) {
+                tela.limparRascunho()
                 janela.avisar("Importação descartada.", "ok")
                 janela.voltar()
             } else {
                 janela.avisar(r.erro, "erro")
             }
         }, "perigo")
+    }
+
+    function aoEsc() {
+        limparRascunho()
+        janela.voltar()
     }
 
     function primeiraPalavra(texto) {

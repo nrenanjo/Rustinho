@@ -21,6 +21,12 @@ FocusScope {
     property bool alterado: false
     property string erro: ""
     property string campoErro: ""
+    // R2 (REC-1 / REC-2): retrato único da OS em andamento e indicador honesto de rascunho guardado.
+    property var rascunhoRecuperado: null
+    property string trabalhoDesativadoId: ""
+    property string rascunhoId: ""
+    property string rascunhoStatus: ""
+    property bool rascunhoFalhou: false
 
     readonly property bool nova: osId === ""
     readonly property string situacao: ficha ? ficha.situacao : "orcamento"
@@ -44,6 +50,13 @@ FocusScope {
                 const i = mecanicos.findIndex(x => x.id === tela.janela.estado.usuario.id)
                 mecanico.indice = i + 1
             }
+            if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+                const rec = rascunhoRecuperado
+                rascunhoRecuperado = null
+                rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+                restaurarRetrato(rec.estado)
+                rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+            }
             placa.focar()
             return
         }
@@ -54,6 +67,97 @@ FocusScope {
             return
         }
         preencher(r.dados)
+        if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+            const rec = rascunhoRecuperado
+            rascunhoRecuperado = null
+            rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+            restaurarRetrato(rec.estado)
+            rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+        }
+    }
+
+    function coletarRetrato() {
+        return {
+            entrada: entrada(),
+            clienteTexto: cliente.texto,
+            parte: parte
+        }
+    }
+
+    function restaurarRetrato(est) {
+        if (!est || typeof est !== "object")
+            return
+        const e = est.entrada && typeof est.entrada === "object" ? est.entrada : est
+        if (typeof est.parte === "string" && est.parte !== "")
+            parte = est.parte
+        clienteId = e.clienteId || ""
+        cliente.texto = est.clienteTexto !== undefined ? est.clienteTexto : (e.clienteNome || "")
+        telefone.texto = e.telefone || ""
+        placa.texto = e.placa || ""
+        veiculo.texto = e.veiculo || ""
+        km.texto = e.km || ""
+        defeito.texto = e.defeito || ""
+        diagnostico.texto = e.diagnostico || ""
+        observacoes.texto = e.observacoes || ""
+        previsao.texto = e.previsao || ""
+        desconto.texto = e.desconto || ""
+        if (e.mecanicoId)
+            mecanico.indice = Math.max(0, mecanicos.findIndex(x => x.id === e.mecanicoId) + 1)
+        itens = Array.isArray(e.itens) ? e.itens : []
+        recalcular()
+        alterado = true
+    }
+
+    function guardarRascunhoAgora() {
+        timerRascunhoOs.stop()
+        if (!alterado || travada || trabalhoDesativadoId !== "")
+            return
+        const carro = [veiculo.texto.trim(), placa.texto.trim()].filter(x => !!x).join(" · ")
+        const cli = cliente.texto.trim()
+        const tituloOs = [carro, cli].filter(x => !!x).join(" — ") || (nova ? "Nova OS" : "OS em edição")
+        const r = Api.chamar("trabalho_guardar", {
+            id: rascunhoId,
+            tipo: "os",
+            alvoId: osId,
+            titulo: tituloOs,
+            estado: coletarRetrato(),
+            baseAtualizadoEm: ficha && ficha.atualizadoEm ? ficha.atualizadoEm : "",
+            chaveOperacao: chave
+        })
+        if (r.ok && r.dados) {
+            rascunhoId = r.dados.id || rascunhoId
+            rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+            rascunhoFalhou = false
+        } else {
+            rascunhoStatus = "Não foi possível guardar"
+            rascunhoFalhou = true
+        }
+    }
+
+    function limparRascunho() {
+        timerRascunhoOs.stop()
+        if (trabalhoDesativadoId !== "") {
+            janela.chamarGerente("trabalho_gerente_concluir", {
+                id: trabalhoDesativadoId,
+                motivo: "OS salva ou encerrada pelo gerente"
+            }, () => {})
+            trabalhoDesativadoId = ""
+        } else if (rascunhoId !== "" || alterado) {
+            Api.chamar("trabalho_concluir", {
+                id: rascunhoId,
+                tipo: "os",
+                alvoId: osId
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+    }
+
+    Timer {
+        id: timerRascunhoOs
+        interval: 600
+        onTriggered: tela.guardarRascunhoAgora()
     }
 
     function preencher(f) {
@@ -96,6 +200,7 @@ FocusScope {
     function mudou() {
         alterado = true
         espera.restart()
+        timerRascunhoOs.restart()
     }
 
     function mudarItem(i, campo, valor) {
@@ -153,6 +258,7 @@ FocusScope {
                 cliente.focar()
             return false
         }
+        limparRascunho()
         chave = Api.novaChave()
         preencher(r.dados)
         janela.avisar(era ? "OS " + r.dados.numero + (r.dados.caixa ? " (" + r.dados.caixa + ")" : "") + " aberta." : "OS salva.", "ok")
@@ -179,6 +285,7 @@ FocusScope {
             janela.avisar(r.erro, "erro")
             return false
         }
+        limparRascunho()
         chave = Api.novaChave()
         preencher(r.dados)
         janela.avisar("Rascunho guardado. Ele fica em Ordens de serviço › Abertas para continuar depois.", "ok")
@@ -303,7 +410,7 @@ FocusScope {
         if (alterado && (nova || rascunho))
             saida.open()
         else if (alterado && !travada)
-            janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair", () => janela.voltar(), "perigo")
+            janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair", () => { tela.limparRascunho(); janela.voltar() }, "perigo")
         else
             janela.voltar()
     }
@@ -331,6 +438,13 @@ FocusScope {
                        : [tela.ficha.veiculo, tela.ficha.cliente, "aberta " + tela.ficha.criadoEm + (tela.ficha.criadoPor ? " por " + tela.ficha.criadoPor : ""),
                           tela.ficha.vendaNumero ? "venda " + tela.ficha.vendaNumero : ""].filter(x => !!x).join(" · ")
             Layout.fillWidth: true
+            Rotulo {
+                visible: tela.alterado && tela.rascunhoStatus !== ""
+                text: tela.rascunhoStatus
+                color: tela.rascunhoFalhou ? Tema.vermelhoNo(palette.window) : Tema.tintaSuaveNo(palette.window)
+                Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 6
+            }
             Rotulo {
                 visible: tela.alterado
                 text: "Não salvo"
@@ -1017,6 +1131,7 @@ FocusScope {
                     tipo: "perigo"
                     onClicked: {
                         saida.close()
+                        tela.limparRascunho()
                         tela.alterado = false
                         tela.janela.voltar()
                     }

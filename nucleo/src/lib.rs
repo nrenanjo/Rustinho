@@ -50,6 +50,7 @@ pub mod compras;
 pub mod dados;
 pub mod integracoes;
 pub mod operacao;
+pub mod recuperacao;
 pub mod servico;
 pub mod troca;
 

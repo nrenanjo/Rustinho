@@ -106,6 +106,7 @@ PESOS_SEGUNDOS = {
     "telas_compras_pasta_t107": 17,
     "telas_compras_conferencia_t111": 25,
     "telas_dev1a_interface": 70,
+    "telas_dev1c_recuperacao": 45,
     "telas_d14_portatil": 17,
     "telas_qt1b_fechamento": 15,
     "telas_notif03": 15,

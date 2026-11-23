@@ -35,6 +35,11 @@ FocusScope {
     property int encomendasNaVenda: 0
 
     property var carrinho: []        // [{produtoId, quantidade, preco, desconto}]
+    // R2 (REC-1 / REC-2): retrato único da venda em andamento (carrinho, cliente, desconto).
+    property var rascunhoRecuperado: null
+    property string trabalhoDesativadoId: ""
+    property string rascunhoId: ""
+    property string rascunhoStatus: ""
     // FALHA-04: chave da venda (e do orçamento) que está sendo montada; a
     // mesma em cada nova tentativa; nova quando começa outra (limparVenda).
     property string chaveVenda: Api.novaChave()
@@ -86,6 +91,106 @@ FocusScope {
             calculo = r.dados
         else
             janela.avisar(r.erro, "erro")
+        timerRascunhoVenda.restart()
+    }
+
+    function coletarRetrato() {
+        return {
+            carrinho: carrinho,
+            clienteId: clienteId,
+            clienteNome: clienteNome,
+            campoClienteTexto: campoCliente.texto,
+            desconto: descontoTotal.texto,
+            parcelas: campoParcelas.texto,
+            primeiroVencimento: campoVencimento.texto,
+            orcamentoCarregado: orcamentoCarregado,
+            encomendaCarregada: encomendaCarregada,
+            encomendaNumero: encomendaNumero,
+            encomendaCaixa: encomendaCaixa,
+            osCarregada: osCarregada,
+            osNumero: osNumero,
+            osCaixa: osCaixa,
+            itemAtual: itemAtual,
+            busca: busca.texto,
+            chaveVenda: chaveVenda
+        }
+    }
+
+    function restaurarRetrato(est) {
+        if (!est || typeof est !== "object")
+            return
+        carrinho = Array.isArray(est.carrinho) ? est.carrinho : []
+        clienteId = est.clienteId || ""
+        clienteNome = est.clienteNome || ""
+        campoCliente.texto = est.campoClienteTexto !== undefined ? est.campoClienteTexto : (est.clienteNome || "")
+        descontoTotal.texto = est.desconto || ""
+        if (est.parcelas !== undefined)
+            campoParcelas.texto = String(est.parcelas || "1")
+        if (est.primeiroVencimento !== undefined)
+            campoVencimento.texto = est.primeiroVencimento || ""
+        orcamentoCarregado = est.orcamentoCarregado || ""
+        encomendaCarregada = est.encomendaCarregada || ""
+        encomendaNumero = est.encomendaNumero || 0
+        encomendaCaixa = est.encomendaCaixa || ""
+        osCarregada = est.osCarregada || ""
+        osNumero = est.osNumero || 0
+        osCaixa = est.osCaixa || ""
+        itemAtual = typeof est.itemAtual === "number" ? est.itemAtual : (carrinho.length - 1)
+        if (typeof est.chaveVenda === "string" && est.chaveVenda !== "")
+            chaveVenda = est.chaveVenda
+        if (carrinho.length > 0) {
+            const r = Api.chamar("venda_calcular", entrada())
+            if (r.ok)
+                calculo = r.dados
+        }
+    }
+
+    function guardarRascunhoAgora() {
+        timerRascunhoVenda.stop()
+        if (carrinho.length === 0 || trabalhoDesativadoId !== "")
+            return
+        const qtd = carrinho.length + (carrinho.length === 1 ? " item" : " itens")
+        const cli = campoCliente.texto.trim() !== "" ? (" · " + campoCliente.texto.trim()) : ""
+        const tot = calculo && calculo.total ? (" · R$ " + calculo.total) : ""
+        const r = Api.chamar("trabalho_guardar", {
+            id: rascunhoId,
+            tipo: "venda",
+            alvoId: osCarregada || encomendaCarregada || orcamentoCarregado || "",
+            titulo: "Carrinho (" + qtd + cli + tot + ")",
+            estado: coletarRetrato(),
+            chaveOperacao: chaveVenda
+        })
+        if (r.ok && r.dados) {
+            rascunhoId = r.dados.id || rascunhoId
+            rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+        } else {
+            rascunhoStatus = "Não foi possível guardar"
+        }
+    }
+
+    function limparRascunho() {
+        timerRascunhoVenda.stop()
+        if (trabalhoDesativadoId !== "") {
+            janela.chamarGerente("trabalho_gerente_concluir", {
+                id: trabalhoDesativadoId,
+                motivo: "Venda concluída ou encerrada pelo gerente"
+            }, () => {})
+            trabalhoDesativadoId = ""
+        } else if (rascunhoId !== "" || carrinho.length > 0) {
+            Api.chamar("trabalho_concluir", {
+                id: rascunhoId,
+                tipo: "venda",
+                alvoId: osCarregada || encomendaCarregada || orcamentoCarregado || ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+    }
+
+    Timer {
+        id: timerRascunhoVenda
+        interval: 600
+        onTriggered: tela.guardarRascunhoAgora()
     }
 
     function carregarCaixa() {
@@ -216,6 +321,7 @@ FocusScope {
     }
 
     function limparVenda() {
+        limparRascunho()
         chaveVenda = Api.novaChave()
         chaveOrcamento = Api.novaChave()
         carrinho = []
@@ -1440,6 +1546,12 @@ FocusScope {
             }
         }
         recalcular()
+        if (rascunhoRecuperado && rascunhoRecuperado.estado) {
+            const rec = rascunhoRecuperado
+            rascunhoRecuperado = null
+            rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
+            restaurarRetrato(rec.estado)
+        }
         if (clienteId && calculo)
             campoCliente.texto = calculo.cliente
         else if (clienteNome)

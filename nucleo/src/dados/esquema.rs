@@ -122,6 +122,7 @@ pub const TABELAS: &[Tabela] = &[
     t("operacao_feita", Local, &["operacoes"]),
     t("programa_abertura", Local, &["operacoes"]),
     t("senha_situacao", Local, &["usuarios"]),
+    t("sessao_local", Local, &["recuperacao"]),
     // Interna do SQLite (contadores do AUTOINCREMENT).
     t("sqlite_sequence", Local, &["sync"]),
     t("sync_conflito", Local, &["sync"]),
@@ -130,6 +131,7 @@ pub const TABELAS: &[Tabela] = &[
     t("sync_par", Local, &["backup", "caminhos", "sync"]),
     t("sync_pendencia", Local, &["sync"]),
     t("sync_referencia", Local, &["sync"]),
+    t("trabalho", Local, &["recuperacao"]),
     t("xml_pendencia_identificacao", Local, &["pendencias"]),
 
     // Visões (saldos calculados na hora).

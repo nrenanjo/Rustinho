@@ -209,6 +209,12 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "sync_juntar",
     "sync_salvar",
     "sync_tentar_novamente",
+    "trabalho_concluir",
+    "trabalho_descartar",
+    "trabalho_gerente_abrir",
+    "trabalho_gerente_concluir",
+    "trabalho_gerente_descartar",
+    "trabalho_guardar",
 ];
 
 /// A3: no modo seguro só passam consultas, entrar/sair, a senha do gerente,
@@ -324,6 +330,7 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("backup_automatico", Classe::SemSessao),
     ("backup_ao_fechar", Classe::SemSessao),
     ("sair", Classe::SemSessao),
+    ("trabalho_fechamento_avaliar", Classe::LeituraSemSessao),
     ("numero_formatar", Classe::LeituraSemSessao),
     // ARQ-09/H13 (dev.3.3, 2.2): somas e o exemplo de atraso pelo núcleo,
     // para a tela não ler número do jeito dela.
@@ -404,6 +411,7 @@ const TABELAS: &[&[Comando]] = &[
     pessoas::COMANDOS,
     produtos::COMANDOS,
     receber::COMANDOS,
+    crate::recuperacao::COMANDOS,
     reposicao::COMANDOS,
     requisitos::COMANDOS,
     unidades::COMANDOS,
@@ -1151,9 +1159,14 @@ impl Servico {
             "backup_ao_fechar" => {
                 // QT-1b: o fechar da janela é o encerramento limpo (no Android, o Qt sai por System.exit depois). Um
                 // erro aqui só é registrado: o backup acontece de qualquer jeito.
-                if !self.banco.em_modo_seguro() && self.abertura > 0 {
-                    if let Err(e) = crate::operacoes::fechar_sessao(&self.banco.conn, self.abertura) {
-                        crate::registro::anotar(&format!("QT-1b: encerramento limpo: {e}"));
+                if !self.banco.em_modo_seguro() {
+                    if self.abertura > 0 {
+                        if let Err(e) = crate::operacoes::fechar_sessao(&self.banco.conn, self.abertura) {
+                            crate::registro::anotar(&format!("QT-1b: encerramento limpo: {e}"));
+                        }
+                    }
+                    if let Err(e) = crate::recuperacao::encerrar_sessao(&self.banco.conn, &self.banco.dispositivo) {
+                        crate::registro::anotar(&format!("recuperação: encerramento limpo da sessão: {e}"));
                     }
                 }
                 match &self.banco.caminho {
@@ -1166,6 +1179,8 @@ impl Servico {
             "sair" => {
                 self.liberacoes.clear();
                 if let Some(s) = self.sessao.take() {
+                    let _ = self
+                        .gravar_se_der(crate::recuperacao::encerrar_sessao(&self.banco.conn, &self.banco.dispositivo));
                     self.gravar_se_der(auditoria::registrar(
                         &self.banco.conn,
                         &self.banco.dispositivo,
@@ -1177,6 +1192,10 @@ impl Servico {
                     ))?;
                 }
                 Ok(Value::Null)
+            }
+            "trabalho_fechamento_avaliar" => {
+                let d: crate::recuperacao::AvaliarFechamentoEntrada = ler(dados)?;
+                Ok(json!(crate::recuperacao::avaliar_fechamento(&self.banco.conn, &d)?))
             }
             "numero_formatar" => {
                 let d: Formatar = ler(dados)?;
@@ -2355,6 +2374,9 @@ impl Servico {
                     &u.id,
                     &[],
                 ))?;
+                let _ = self.gravar_se_der(
+                    crate::recuperacao::registrar_entrada(&self.banco.conn, &self.banco.dispositivo, &u.id).map(|_| ()),
+                );
                 self.liberacoes.clear();
                 self.sessao = Some(Sessao { usuario_id: u.id, nome: u.nome, gerente: u.gerente });
                 self.estado()
