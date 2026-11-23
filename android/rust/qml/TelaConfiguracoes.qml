@@ -684,7 +684,10 @@ FocusScope {
             if (r.ok) {
                 sync = r.dados
                 syncSenha.texto = ""
-                janela.avisar(syncLigado.checked ? "Sincronização ligada. Os outros caixas aparecem em alguns segundos." : "Sincronização desligada.", "ok")
+                if (syncLigado.checked && sync.tarefasComFalha && sync.tarefasComFalha.length > 0)
+                    janela.avisar("A troca de dados não pôde começar: " + sync.tarefasComFalha[0].motivo, "erro")
+                else
+                    janela.avisar(syncLigado.checked ? "Sincronização ligada. Os outros caixas aparecem em alguns segundos." : "Sincronização desligada.", "ok")
             } else if (r.campo === "enderecos") {
                 syncEnderecos.erro = r.erro
             } else if (r.campo === "interfaces") {
@@ -693,6 +696,19 @@ FocusScope {
                 syncSenha.erro = r.erro
             }
         })
+    }
+
+    function tentarSyncNovamente() {
+        const r = Api.chamar("sync_tentar_novamente")
+        if (r.ok) {
+            sync = r.dados
+            if (sync.tarefasComFalha && sync.tarefasComFalha.length > 0)
+                janela.avisar("A troca de dados ainda não está funcionando: " + sync.tarefasComFalha[0].motivo, "erro")
+            else if (sync.ligado)
+                janela.avisar("Troca de dados funcionando novamente.", "ok")
+        } else {
+            janela.avisar(r.erro, "erro")
+        }
     }
 
     Timer {
@@ -1325,8 +1341,8 @@ FocusScope {
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
-                    // O-3 / RVI-02: não mostra a troca como funcionando com uma
-                    // tarefa parada ou esperando para tentar de novo (com o motivo).
+                    // O-3 / RVI-02 / RD-B: não mostra a troca como funcionando com uma
+                    // tarefa parada ou esperando para tentar de novo (com o motivo, loja e caixa do outro Rustinho e botão "Tentar de novo").
                     Nota {
                         readonly property var falhas: tela.sync && tela.sync.tarefasComFalha ? tela.sync.tarefasComFalha : []
                         visible: falhas.length > 0
@@ -1334,7 +1350,7 @@ FocusScope {
                               + falhas.map(f => f.tarefa + " — " + f.motivo
                                                 + (f.situacao === "parada" ? " (parou)" : " (tentando de novo)")).join("; ")
                               + (falhas.some(f => f.situacao === "parada")
-                                 ? ". Feche e abra o Rustinho; se continuar, chame o suporte." : ".")
+                                 ? ". Quando a porta liberar, toque em “Tentar de novo” (ou feche e abra o Rustinho; se continuar, chame o suporte)." : ".")
                         color: Tema.vermelho
                         font.pixelSize: 13
                         Layout.fillWidth: true
@@ -1345,10 +1361,19 @@ FocusScope {
                         font.pixelSize: 13
                         Layout.fillWidth: true
                     }
-                    Botao {
-                        text: "Salvar sincronização"
-                        tipo: "secundario"
-                        onClicked: tela.salvarSync()
+                    Row {
+                        spacing: 12
+                        Botao {
+                            text: "Salvar sincronização"
+                            tipo: "secundario"
+                            onClicked: tela.salvarSync()
+                        }
+                        Botao {
+                            text: "Tentar de novo"
+                            tipo: "secundario"
+                            visible: (tela.sync && tela.sync.tarefasComFalha ? tela.sync.tarefasComFalha.length : 0) > 0
+                            onClicked: tela.tentarSyncNovamente()
+                        }
                     }
                     Repeater {
                         model: tela.sync ? tela.sync.pares : []

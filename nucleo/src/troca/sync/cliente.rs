@@ -398,8 +398,194 @@ pub(super) fn motivo_da_porta(protocolo: &str, porta: u16, erro: &str) -> String
 }
 
 /// O que vai para o registro quando uma porta da troca de dados não abre.
+#[cfg(test)]
 pub(super) fn texto_da_porta(protocolo: &str, porta: u16, erro: &str) -> String {
     format!("troca de dados: {}", motivo_da_porta(protocolo, porta, erro))
+}
+
+/// RD-B (regra 5): identificação de qual instância do Rustinho neste computador
+/// está ocupando uma porta da troca de dados.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OcupanteDaPorta {
+    pub protocolo: String,
+    pub porta: u16,
+    pub pid: u32,
+    pub banco: String,
+    pub pasta: String,
+    pub loja: String,
+    pub caixa: String,
+}
+
+fn mapa_ocupantes() -> &'static Mutex<HashMap<(String, u16), OcupanteDaPorta>> {
+    static M: std::sync::OnceLock<Mutex<HashMap<(String, u16), OcupanteDaPorta>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn pasta_ocupantes() -> PathBuf {
+    let p = std::env::temp_dir().join("rustinho-portas");
+    let _ = std::fs::create_dir_all(&p);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700));
+    }
+    p
+}
+
+fn arquivo_ocupante(protocolo: &str, porta: u16) -> PathBuf {
+    pasta_ocupantes().join(format!("{}-{porta}.json", protocolo.to_ascii_lowercase()))
+}
+
+fn ler_loja_e_caixa(caminho_banco: &Path) -> (String, String) {
+    let Ok(conn) = rusqlite::Connection::open_with_flags(
+        caminho_banco,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return (String::new(), String::new());
+    };
+    let _ = conn.busy_timeout(Duration::from_millis(150));
+    let loja = config::nome_loja(&conn).unwrap_or_default();
+    let caixa = config::nome_caixa(&conn).unwrap_or_default();
+    (loja, caixa)
+}
+
+fn pid_vivo(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill com sinal 0 só verifica se o processo existe no sistema.
+        let r = unsafe { libc::kill(pid as i32, 0) };
+        r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+pub(super) fn registrar_ocupante_porta(protocolo: &str, porta: u16, caminho_banco: &Path) {
+    if porta == 0 || caminho_banco.as_os_str().is_empty() {
+        return;
+    }
+    let (loja, caixa) = ler_loja_e_caixa(caminho_banco);
+    let banco = caminho_banco.display().to_string();
+    let pasta = caminho_banco.parent().unwrap_or(caminho_banco).display().to_string();
+    let info = OcupanteDaPorta {
+        protocolo: protocolo.to_ascii_uppercase(),
+        porta,
+        pid: std::process::id(),
+        banco,
+        pasta,
+        loja,
+        caixa,
+    };
+    if let Ok(bytes) = serde_json::to_vec(&info) {
+        let arq = arquivo_ocupante(protocolo, porta);
+        let tmp = arq.with_extension(format!("tmp-{}", std::process::id()));
+        if std::fs::write(&tmp, &bytes).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            }
+            let _ = std::fs::rename(&tmp, &arq);
+        }
+    }
+    let mut m = mapa_ocupantes().lock().unwrap_or_else(|e| e.into_inner());
+    m.insert((protocolo.to_ascii_uppercase(), porta), info);
+}
+
+pub(super) fn remover_ocupante_porta(protocolo: &str, porta: u16, caminho_banco: &Path) {
+    if porta == 0 {
+        return;
+    }
+    let chave = (protocolo.to_ascii_uppercase(), porta);
+    let meu = caminho_banco.display().to_string();
+    {
+        let mut m = mapa_ocupantes().lock().unwrap_or_else(|e| e.into_inner());
+        if m.get(&chave).is_some_and(|o| o.banco == meu) {
+            m.remove(&chave);
+        }
+    }
+    let arq = arquivo_ocupante(protocolo, porta);
+    if let Ok(txt) = std::fs::read_to_string(&arq) {
+        if let Ok(o) = serde_json::from_str::<OcupanteDaPorta>(&txt) {
+            if o.banco == meu || !pid_vivo(o.pid) {
+                let _ = std::fs::remove_file(&arq);
+            }
+        }
+    }
+}
+
+/// Descobre se outra instância do Rustinho neste computador registrou que ocupa
+/// a `porta`, atualizando loja e caixa diretamente do banco dela quando acessível.
+pub fn ocupante_da_porta(protocolo: &str, porta: u16, meu_banco: &Path) -> Option<OcupanteDaPorta> {
+    if porta == 0 {
+        return None;
+    }
+    let meu = meu_banco.display().to_string();
+    let chave = (protocolo.to_ascii_uppercase(), porta);
+    let cand = {
+        let m = mapa_ocupantes().lock().unwrap_or_else(|e| e.into_inner());
+        m.get(&chave).filter(|o| o.banco != meu && pid_vivo(o.pid)).cloned()
+    }
+    .or_else(|| {
+        let arq = arquivo_ocupante(protocolo, porta);
+        let txt = std::fs::read_to_string(&arq).ok()?;
+        let o: OcupanteDaPorta = serde_json::from_str(&txt).ok()?;
+        (o.banco != meu && pid_vivo(o.pid)).then_some(o)
+    })?;
+    let mut atualizado = cand;
+    let p_banco = Path::new(&atualizado.banco);
+    if p_banco.is_file() {
+        let (loja, caixa) = ler_loja_e_caixa(p_banco);
+        if !loja.is_empty() {
+            atualizado.loja = loja;
+        }
+        if !caixa.is_empty() {
+            atualizado.caixa = caixa;
+        }
+    }
+    Some(atualizado)
+}
+
+/// Resumo legível do outro Rustinho que ocupa a porta ("loja \"X\", Caixa 1").
+pub fn resumo_ocupante(o: &OcupanteDaPorta) -> String {
+    let loja = if o.loja.trim().is_empty() {
+        "loja ainda não configurada".to_string()
+    } else {
+        format!("loja \"{}\"", o.loja.trim())
+    };
+    let caixa = if o.caixa.trim().is_empty() { "Caixa 1" } else { o.caixa.trim() };
+    format!("{loja}, {caixa}")
+}
+
+/// Ocupante em conflito com este banco (quando há falha ativa de porta na supervisão).
+pub fn ocupante_em_conflito(meu_banco: &Path, porta_tcp: u16, porta_udp: u16) -> Option<OcupanteDaPorta> {
+    let s = crate::supervisao::situacao(meu_banco);
+    if !s.com_falha() {
+        return None;
+    }
+    ocupante_da_porta("TCP", porta_tcp, meu_banco).or_else(|| ocupante_da_porta("UDP", porta_udp, meu_banco))
+}
+
+pub(super) fn motivo_da_porta_com_ocupante(protocolo: &str, porta: u16, erro: &str, meu_banco: &Path) -> String {
+    if let Some(o) = ocupante_da_porta(protocolo, porta, meu_banco) {
+        let quem = resumo_ocupante(&o);
+        format!(
+            "não foi possível abrir a porta {protocolo} {porta} ({erro}): já está em uso por outro Rustinho aberto \
+             neste computador ({quem}, em {})",
+            o.pasta
+        )
+    } else {
+        motivo_da_porta(protocolo, porta, erro)
+    }
 }
 
 /// Guarda o problema do motor uma vez só (as tentativas repetem o mesmo).

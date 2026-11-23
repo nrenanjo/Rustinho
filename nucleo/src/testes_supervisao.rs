@@ -283,9 +283,9 @@ fn rvi02_falha_chega_a_api_das_telas() {
     assert!(parada["resumo"].as_str().unwrap().contains("ocupada"), "{parada}");
 }
 
-/// RVI-02: com a troca de dados desligada, porta ocupada não vira alarme no
-/// Início (o servidor e o anúncio não estão sendo usados), mas a situação
-/// guarda a falha; ligar a troca mostra o aviso.
+/// RVI-02 + DP-31: com a troca de dados desligada, o motor não abre as portas
+/// nem gera falha de porta ocupada; ligar a troca faz o motor tentar abrir a
+/// porta ocupada e mostrar o aviso no Início.
 #[test]
 fn rvi02_troca_desligada_sem_alarme_falso() {
     let ocupada = TcpListener::bind("0.0.0.0:0").unwrap();
@@ -295,11 +295,200 @@ fn rvi02_troca_desligada_sem_alarme_falso() {
     let b = Banco::abrir(&c).unwrap();
     para_testes::configurar(&b, "Caixa", 0);
     let mut m = Motor::iniciar(c.clone(), pt, pu);
-    esperar(Duration::from_secs(30), "o servidor para de vez", || tarefa(&c, "servidor").parada);
+    // DP-31: enquanto a troca está desligada, nenhuma porta é aberta e não há queda.
+    assert!(m.portas(Duration::from_millis(300)).is_none(), "troca desligada não pode abrir portas");
+    assert_eq!(tarefa(&c, "servidor").quedas, 0, "troca desligada não pode tentar abrir porta");
     assert!(aviso_da_troca(&b).is_none(), "{:?}", aviso_da_troca(&b));
+    // Ao ligar a troca, o servidor tenta abrir a porta ocupada, para depois do limite e avisa.
     sync::salvar_ajustes(&b.conn, true, "senha-da-loja", "").unwrap();
+    esperar(Duration::from_secs(30), "o servidor para de vez", || tarefa(&c, "servidor").parada);
     let a = aviso_da_troca(&b).expect("com a troca ligada, avisa");
     assert_eq!(a.id, "troca_parada");
+    assert_eq!(a.resolver, "Tentar de novo");
     assert!(m.encerrar(Duration::from_secs(20)));
     drop(ocupada);
+}
+
+/// DP-31 (0.9.19-dev.1, Pacote 2): as portas TCP e UDP da troca de dados só
+/// abrem quando a sincronização está ligada e com senha, e fecham logo que a
+/// sincronização é desligada (liberando as portas no sistema operacional).
+#[test]
+fn dp31_portas_so_abrem_com_troca_ligada_e_fecham_ao_desligar() {
+    // Escolhe duas portas livres no sistema e solta antes de iniciar o motor desligado.
+    let s_tcp = TcpListener::bind("0.0.0.0:0").unwrap();
+    let s_udp = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let pt = s_tcp.local_addr().unwrap().port();
+    let pu = s_udp.local_addr().unwrap().port();
+    drop(s_tcp);
+    drop(s_udp);
+
+    let c = temp("dp31-ciclo");
+    let b = Banco::abrir(&c).unwrap();
+    para_testes::configurar(&b, "Caixa 1", 0);
+    let mut m = Motor::iniciar(c.clone(), pt, pu);
+
+    // 1. Com a troca desligada: nenhuma porta é ocupada (outro socket vincula sem erro).
+    assert!(m.portas(Duration::from_millis(300)).is_none(), "troca desligada não pode abrir portas");
+    assert!(!m.alguma_porta_aberta(), "nenhuma das duas portas pode estar aberta");
+    let sonda_tcp = TcpListener::bind(("0.0.0.0", pt)).expect("porta TCP deve estar livre com troca desligada");
+    let sonda_udp = UdpSocket::bind(("0.0.0.0", pu)).expect("porta UDP deve estar livre com troca desligada");
+    drop(sonda_tcp);
+    drop(sonda_udp);
+
+    // 2. Ligando a troca: o motor abre as portas TCP e UDP imediatamente.
+    sync::salvar_ajustes(&b.conn, true, "senha-forte-loja", "").unwrap();
+    supervisao::reiniciar(&c);
+    let abertas = m.portas(Duration::from_secs(10)).expect("ao ligar a troca, as portas abrem");
+    assert_eq!(abertas, (pt, pu));
+    assert!(TcpStream::connect(("127.0.0.1", pt)).is_ok(), "porta TCP atende conexões");
+    assert!(TcpListener::bind(("0.0.0.0", pt)).is_err(), "porta TCP está ocupada pelo motor");
+
+    // 3. Desligando a troca: o motor fecha os sockets (TCP e UDP) e libera as portas no sistema.
+    sync::salvar_ajustes(&b.conn, false, "", "").unwrap();
+    supervisao::reiniciar(&c);
+    esperar(Duration::from_secs(10), "o motor fecha ambas as portas ao desligar a troca", || !m.alguma_porta_aberta());
+    let sonda_tcp2 = TcpListener::bind(("0.0.0.0", pt)).expect("porta TCP liberada após desligar a troca");
+    let sonda_udp2 = UdpSocket::bind(("0.0.0.0", pu)).expect("porta UDP liberada após desligar a troca");
+    drop(sonda_tcp2);
+    drop(sonda_udp2);
+
+    assert!(m.encerrar(Duration::from_secs(20)));
+}
+
+/// RD-B (0.9.19-dev.1, Pacote 2 — todas as 6 regras):
+/// 1. Mesma pasta de dados: 2ª abertura impedida pela trava.
+/// 2. Portas só com a troca ligada: uma cópia de treino com troca desligada não rouba portas.
+/// 3. Pastas diferentes convivem (inclusive instalado 47810/47811 e portátil 47820/47821).
+/// 4. No conflito de portas entre duas cópias com troca ligada, a 2ª trabalha localmente (cadastra e vende).
+/// 5. O aviso e o `sync_ler` identificam a loja e o caixa do outro Rustinho e oferecem "Tentar de novo",
+///    que retoma a sincronização sem reiniciar quando a porta libera.
+/// 6. A troca nunca aparece como "funcionando" quando está parada ou tentando de novo.
+#[test]
+fn rdb_duas_instancias_conflito_identifica_loja_caixa_trabalha_local_e_tenta_de_novo() {
+    let db_a = temp("rdb-loja-a");
+    let db_b = temp("rdb-loja-b");
+    let db_treino = temp("rdb-treino");
+
+    // Regra 1: duas instâncias na mesma pasta são impedidas.
+    let mut sa = crate::Servico::abrir_para_teste(&db_a, false).unwrap();
+    let dup = crate::Servico::abrir_para_teste(&db_a, false);
+    assert!(
+        matches!(&dup, Err(e) if e.to_string().contains("já está aberto neste computador")),
+        "Regra 1: mesma pasta tem de ser impedida"
+    );
+    drop(dup);
+
+    // Regra 3 (parte portátil × instalado): portas distintas.
+    assert_eq!((sync::PORTA_TCP, sync::PORTA_UDP), (47810, 47811));
+    assert_eq!((crate::portatil::PORTA_TCP, crate::portatil::PORTA_UDP), (47820, 47821));
+
+    // Configura Loja A ("Auto Peças Central", "Balcão Principal") e Cópia de Treino (troca desligada).
+    chamar_ok(
+        &mut sa,
+        "configurar_inicio",
+        serde_json::json!({
+            "loja": "Auto Peças Central",
+            "caixa": "Balcão Principal",
+            "nome": "Ana",
+            "senha": "1234",
+            "senha2": "1234"
+        }),
+    );
+    let mut s_treino = crate::Servico::abrir_para_teste(&db_treino, false).unwrap();
+    chamar_ok(
+        &mut s_treino,
+        "configurar_inicio",
+        serde_json::json!({
+            "loja": "Loja Treinamento",
+            "caixa": "Caixa Treino",
+            "nome": "Ana",
+            "senha": "1234",
+            "senha2": "1234"
+        }),
+    );
+
+    // Regra 2: a cópia de treino (troca desligada) inicia seu motor na mesma porta sem ocupar nada.
+    let s_tcp = TcpListener::bind("0.0.0.0:0").unwrap();
+    let s_udp = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let pt = s_tcp.local_addr().unwrap().port();
+    let pu = s_udp.local_addr().unwrap().port();
+    drop(s_tcp);
+    drop(s_udp);
+    let mut m_treino = Motor::iniciar(db_treino.clone(), pt, pu);
+    assert!(m_treino.portas(Duration::from_millis(250)).is_none(), "Regra 2: treino desligado não ocupa portas");
+
+    // Loja A liga a troca e assume (pt, pu) sem ser bloqueada pela cópia de treino.
+    chamar_ok(&mut sa, "sync_salvar", serde_json::json!({ "ligado": true, "senha": "rede-central", "enderecos": "" }));
+    let mut ma = Motor::iniciar(db_a.clone(), pt, pu);
+    assert_eq!(ma.portas(Duration::from_secs(10)), Some((pt, pu)), "Loja A assumiu as portas");
+
+    // Configura Loja B ("Filial Sul", "Caixa 2") em outra pasta e liga a troca disputando (pt, pu).
+    let mut sb = crate::Servico::abrir_para_teste(&db_b, false).unwrap();
+    chamar_ok(
+        &mut sb,
+        "configurar_inicio",
+        serde_json::json!({
+            "loja": "Filial Sul",
+            "caixa": "Caixa 2",
+            "nome": "Beto",
+            "senha": "1234",
+            "senha2": "1234"
+        }),
+    );
+    chamar_ok(&mut sb, "sync_salvar", serde_json::json!({ "ligado": true, "senha": "rede-filial", "enderecos": "" }));
+    let mut mb = Motor::iniciar(db_b.clone(), pt, pu);
+
+    // Espera B detectar o conflito de portas e parar.
+    esperar(Duration::from_secs(30), "servidor de B para por conflito de porta com A", || {
+        tarefa(&db_b, "servidor").parada
+    });
+
+    // Regra 4: B continua trabalhando localmente (cadastra peça, abre caixa, faz venda).
+    let mut ficha = chamar_ok(&mut sb, "produto_novo", serde_json::json!({}));
+    ficha["nome"] = serde_json::json!("Vela Ignição Local");
+    ficha["custo"] = serde_json::json!("20,00");
+    ficha["estoqueInicial"] = serde_json::json!("5");
+    ficha["precos"][0]["preco"] = serde_json::json!("45,00");
+    let salvo_p = chamar_ok(&mut sb, "produto_salvar", ficha);
+    assert!(!salvo_p["id"].as_str().unwrap_or("").is_empty(), "Regra 4: cadastro local funciona em B");
+
+    // Regra 5 e Regra 6: `sync_ler` e `avisos_do_dia` nunca dizem que está funcionando,
+    // identificam "Auto Peças Central" e "Balcão Principal" e oferecem "Tentar de novo".
+    let estado_b = chamar_ok(&mut sb, "sync_ler", serde_json::json!({}));
+    assert_eq!(estado_b["ligado"], true);
+    assert_eq!(estado_b["funcionando"], false, "Regra 6: nunca mostra funcionando quando parada: {estado_b}");
+    let falhas_b = estado_b["tarefasComFalha"].as_array().unwrap();
+    assert!(!falhas_b.is_empty(), "{estado_b}");
+    let motivo_b = falhas_b[0]["motivo"].as_str().unwrap();
+    assert!(
+        motivo_b.contains("Auto Peças Central") && motivo_b.contains("Balcão Principal"),
+        "Regra 5: motivo deve identificar loja e caixa do outro Rustinho: {motivo_b}"
+    );
+
+    let avisos_b = chamar_ok(&mut sb, "avisos_do_dia", serde_json::json!({}));
+    let av_parada =
+        avisos_b.as_array().unwrap().iter().find(|a| a["id"] == "troca_parada").expect("aviso crítico no Início de B");
+    assert_eq!(av_parada["resolver"], "Tentar de novo", "Regra 5: aviso oferece Tentar de novo: {av_parada}");
+    assert!(
+        av_parada["descricao"].as_str().unwrap().contains("Auto Peças Central")
+            && av_parada["descricao"].as_str().unwrap().contains("Balcão Principal"),
+        "Regra 5: aviso no Início nomeia loja e caixa do outro Rustinho: {av_parada}"
+    );
+
+    // Agora Loja A fecha (liberando as portas) e o operador em B aciona "Tentar de novo".
+    assert!(ma.encerrar(Duration::from_secs(20)));
+    assert!(mb.encerrar(Duration::from_secs(20)));
+    chamar_ok(&mut sb, "aviso_resolver", serde_json::json!({ "id": "troca_parada" }));
+    let mut mb2 = Motor::iniciar(db_b.clone(), pt, pu);
+    assert_eq!(
+        mb2.portas(Duration::from_secs(10)),
+        Some((pt, pu)),
+        "Regra 5: após Tentar de novo, B assume as portas sem conflito"
+    );
+    let estado_b2 = chamar_ok(&mut sb, "sync_ler", serde_json::json!({}));
+    assert_eq!(estado_b2["funcionando"], true, "B passa a funcionando: {estado_b2}");
+    assert_eq!(estado_b2["tarefasComFalha"], serde_json::json!([]), "{estado_b2}");
+
+    assert!(mb2.encerrar(Duration::from_secs(20)));
+    assert!(m_treino.encerrar(Duration::from_secs(20)));
 }

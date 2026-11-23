@@ -815,51 +815,79 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
                 .join("; ")
         };
         let porta = |v: &[&(&str, String)]| v.iter().any(|(_, m)| m.contains("porta"));
+        let outro_rustinho =
+            |v: &[&(&str, String)]| v.iter().any(|(_, m)| m.contains("outro Rustinho aberto neste computador"));
+        let (pt, pu) = crate::portatil::portas();
+        let ocupante = crate::sync::ocupante_em_conflito(std::path::Path::new(&banco), pt, pu);
+        let detalhes_ocupante = |o: Option<&crate::sync::OcupanteDaPorta>| -> Vec<Detalhe> {
+            let Some(o) = o else { return Vec::new() };
+            let loja = if o.loja.trim().is_empty() { "Ainda sem nome" } else { o.loja.trim() };
+            let caixa = if o.caixa.trim().is_empty() { "Caixa 1" } else { o.caixa.trim() };
+            vec![
+                Detalhe { rotulo: "Outro Rustinho (loja)".into(), valor: loja.into() },
+                Detalhe { rotulo: "Caixa".into(), valor: caixa.into() },
+                Detalhe { rotulo: "Pasta dos dados".into(), valor: o.pasta.clone() },
+            ]
+        };
         if !paradas.is_empty() {
-            let (resumo, acao) = if porta(&paradas) {
+            let (resumo, acao) = if outro_rustinho(&paradas) || ocupante.is_some() {
+                let quem =
+                    ocupante.as_ref().map(|o| format!(" ({})", crate::sync::resumo_ocupante(o))).unwrap_or_default();
                 (
-                    "a porta da troca de dados está ocupada por outro programa",
-                    "feche o outro programa e abra o Rustinho de novo; se continuar, chame o suporte",
+                    format!("a porta da troca de dados está ocupada por outro Rustinho neste computador{quem}"),
+                    "feche o outro Rustinho e toque em \"Tentar de novo\"".to_string(),
+                )
+            } else if porta(&paradas) {
+                (
+                    "a porta da troca de dados está ocupada por outro programa".to_string(),
+                    "feche o outro programa e toque em \"Tentar de novo\" (ou abra o Rustinho de novo); se continuar, chame o suporte".to_string(),
                 )
             } else {
                 (
-                    "um erro interno parou a troca com os outros caixas",
-                    "feche e abra o Rustinho; se continuar, chame o suporte",
+                    "um erro interno parou a troca com os outros caixas".to_string(),
+                    "toque em \"Tentar de novo\" ou feche e abra o Rustinho; se continuar, chame o suporte".to_string(),
                 )
             };
-            let mut a = Aviso::simples(
-                "troca_parada",
-                &hoje,
-                "A troca de dados parou".into(),
-                resumo.into(),
-                acao.into(),
-                "configuracoes",
-            )
-            .categoria(CRITICA)
-            .secao("caixas");
+            let mut a =
+                Aviso::simples("troca_parada", &hoje, "A troca de dados parou".into(), resumo, acao, "configuracoes")
+                    .categoria(CRITICA)
+                    .secao("caixas");
             a.descricao = format!(
-                "Parou: {}. As vendas e o resto deste caixa continuam normalmente, mas as alterações não vão \
-                 nem vêm dos outros caixas até o Rustinho ser aberto de novo. Nada do que já foi recebido se perdeu.",
+                "Parou: {}. As vendas e o resto deste caixa continuam normalmente neste computador, mas as alterações \
+                 não vão nem vêm dos outros caixas enquanto a porta estiver ocupada. Quando liberar, toque em \
+                 \"Tentar de novo\". Nada do que já foi recebido se perdeu.",
                 lista(&paradas)
             );
+            a.detalhes = detalhes_ocupante(ocupante.as_ref());
+            a.resolver = "Tentar de novo".into();
             avisos.push(a);
         } else if !tentando.is_empty() {
             // Não está rodando agora: o Início não pode dizer que está tudo bem.
+            let resumo_tentando = if let Some(ref o) = ocupante {
+                format!(
+                    "a porta está ocupada por outro Rustinho ({}) · tentando de novo",
+                    crate::sync::resumo_ocupante(o)
+                )
+            } else {
+                "o Rustinho está tentando de novo".into()
+            };
             let mut a = Aviso::simples(
                 "troca_tentando",
                 &hoje,
                 "A troca de dados não está funcionando".into(),
-                "o Rustinho está tentando de novo".into(),
+                resumo_tentando,
                 String::new(),
                 "configuracoes",
             )
             .categoria(ATENCAO)
             .secao("caixas");
             a.descricao = format!(
-                "Falhou: {}. O Rustinho tenta de novo sozinho, algumas vezes; até lá as alterações não vão nem vêm \
-                 dos outros caixas. As vendas continuam normalmente.",
+                "Falhou: {}. O Rustinho tenta de novo sozinho, algumas vezes (ou agora mesmo em \"Tentar de novo\"); \
+                 até lá as alterações não vão nem vêm dos outros caixas. As vendas continuam normalmente.",
                 lista(&tentando)
             );
+            a.detalhes = detalhes_ocupante(ocupante.as_ref());
+            a.resolver = "Tentar de novo".into();
             avisos.push(a);
         } else if !voltaram.is_empty() {
             let mut a = Aviso::simples(
@@ -1365,6 +1393,18 @@ mod comandos {
                 let atual = crate::operacoes::abertura_atual(&tx)?;
                 crate::operacoes::fechamento_visto(&tx, p.usuario_id, atual)?;
                 tx.commit()?;
+                Ok(json!(true))
+            }
+            "troca_parada" | "troca_tentando" => {
+                if let Ok(banco) =
+                    p.conn.query_row("SELECT file FROM pragma_database_list WHERE name = 'main'", [], |l| {
+                        l.get::<_, String>(0)
+                    })
+                {
+                    if !banco.is_empty() {
+                        crate::supervisao::reiniciar(std::path::Path::new(&banco));
+                    }
+                }
                 Ok(json!(true))
             }
             _ => Err(crate::erro::Erro::validacao("Esta notificação não tem o que conferir.")),

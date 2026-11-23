@@ -215,6 +215,7 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("sync_juntar", "caixa", &["sem_sessao"]),
     ("sync_ler", "leitura", &["leitura", "sem_sessao"]),
     ("sync_salvar", "configuracoes", &[]),
+    ("sync_tentar_novamente", "caixa", &["do_caixa"]),
     ("transferir", "financeiro", &["nao_repetir"]),
     ("troca_historico", "simultaneidade", &["leitura"]),
     ("unidade_salvar", "caixa", &["do_caixa", "nao_repetir"]),

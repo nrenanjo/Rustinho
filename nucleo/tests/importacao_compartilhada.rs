@@ -974,11 +974,15 @@ fn opcao_c_h5_definir_codigo_interno_nao_quebra_limpeza_nem_d09() {
     let r = l.ok("compra_importar", json!({ "caminho": a }));
     let compra_id = r["compras"][0]["id"].as_str().unwrap().to_string();
     let pid0 = r["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
-    // Simula peça que nasceu sem faixa e recebeu código interno via `definir_codigo` depois.
-    l.executar(&format!("UPDATE produto SET codigo = '', atualizado_em = criado_em WHERE id = '{pid0}'"));
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // Simula peça que nasceu sem faixa (no passado) e recebeu código interno via `definir_codigo` depois,
+    // na mesma conexão sem janela de espera para a tarefa em segundo plano `sync-puxada` correr na frente.
     {
         let c = l.conexao();
+        c.execute(
+            "UPDATE produto SET codigo = '', criado_em = '2026-01-01T00:00:00Z', atualizado_em = '2026-01-01T00:00:00Z' WHERE id = ?1",
+            [&pid0],
+        )
+        .unwrap();
         let disp: String =
             c.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |x| x.get(0)).unwrap();
         assert!(rustinho_nucleo::produtos::definir_codigo(&c, &disp, &pid0, "990001").unwrap());
@@ -994,10 +998,13 @@ fn opcao_c_h5_definir_codigo_interno_nao_quebra_limpeza_nem_d09() {
     let r2 = l2.ok("compra_importar", json!({ "caminho": a2 }));
     let compra_id2 = r2["compras"][0]["id"].as_str().unwrap().to_string();
     let pid2 = r2["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
-    l2.executar(&format!("UPDATE produto SET codigo = '', atualizado_em = criado_em WHERE id = '{pid2}'"));
-    std::thread::sleep(std::time::Duration::from_millis(1100));
     {
         let c = l2.conexao();
+        c.execute(
+            "UPDATE produto SET codigo = '', criado_em = '2026-01-01T00:00:00Z', atualizado_em = '2026-01-01T00:00:00Z' WHERE id = ?1",
+            [&pid2],
+        )
+        .unwrap();
         let disp: String =
             c.query_row("SELECT valor FROM config WHERE chave = 'dispositivo_id'", [], |x| x.get(0)).unwrap();
         assert!(rustinho_nucleo::produtos::definir_codigo(&c, &disp, &pid2, "990002").unwrap());

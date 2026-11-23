@@ -64,6 +64,8 @@ pub struct Tarefa {
     pub motivo: Option<String>,
     /// Falhou e está esperando para tentar de novo (não está rodando).
     pub esperando: bool,
+    /// Pediram para tentar de novo ("Tentar de novo" ou religar a troca): acorda logo e zera quedas.
+    pub rearme: bool,
 }
 
 fn mapa() -> &'static Mutex<HashMap<(PathBuf, &'static str), Tarefa>> {
@@ -174,12 +176,59 @@ impl Drop for Rodando<'_> {
     }
 }
 
-/// Dorme aos pouquinhos, acordando logo se pedirem para parar.
-fn cochilar(parar: &AtomicBool, tempo: Duration) {
+/// Limpa o estado de falha de uma tarefa quando a troca é desligada (DP-31).
+pub fn limpar_tarefa(banco: &Path, nome: &'static str) {
+    mexer(banco, nome, |t| {
+        t.quedas = 0;
+        t.ultima_queda = None;
+        t.parada = false;
+        t.esperando = false;
+        t.motivo = None;
+    });
+}
+
+/// RD-B ("Tentar de novo"): zera as quedas e acorda as tarefas deste banco que
+/// estavam esperando para tentar de novo (as que já tinham parado são
+/// relançadas pelo serviço).
+pub fn reiniciar(banco: &Path) {
+    let mut m = mapa().lock().unwrap_or_else(|e| e.into_inner());
+    for ((b, _), t) in m.iter_mut() {
+        if b == banco {
+            t.quedas = 0;
+            t.ultima_queda = None;
+            t.parada = false;
+            t.esperando = false;
+            t.motivo = None;
+            t.rearme = true;
+        }
+    }
+}
+
+fn consumir_rearme(banco: &Path, nome: &'static str) -> bool {
+    mexer(banco, nome, |t| {
+        let r = t.rearme;
+        if r {
+            t.rearme = false;
+            t.quedas = 0;
+            t.ultima_queda = None;
+            t.parada = false;
+            t.esperando = false;
+            t.motivo = None;
+        }
+        r
+    })
+}
+
+/// Dorme aos pouquinhos, acordando logo se pedirem para parar ou tentar de novo.
+fn cochilar(banco: &Path, nome: &'static str, parar: &AtomicBool, tempo: Duration) -> bool {
     let fim = Instant::now() + tempo;
     while !parar.load(Ordering::SeqCst) && Instant::now() < fim {
+        if consumir_rearme(banco, nome) {
+            return true;
+        }
         thread::sleep(Duration::from_millis(20));
     }
+    consumir_rearme(banco, nome)
 }
 
 /// Roda a tarefa `nome` numa linha de execução própria, de novo depois de
@@ -206,6 +255,10 @@ pub fn supervisionar(
             let mut quedas: VecDeque<Instant> = VecDeque::new();
             let mut espera = PRIMEIRA_ESPERA;
             while !parar.load(Ordering::SeqCst) {
+                if consumir_rearme(&banco, nome) {
+                    quedas.clear();
+                    espera = PRIMEIRA_ESPERA;
+                }
                 mexer(&banco, nome, |t| {
                     t.rodando += 1;
                     t.maximo_rodando = t.maximo_rodando.max(t.rodando);
@@ -252,9 +305,14 @@ pub fn supervisionar(
                     espera.as_secs_f32()
                 ));
                 mexer(&banco, nome, |t| t.esperando = true);
-                cochilar(&parar, espera);
+                let rearmou = cochilar(&banco, nome, &parar, espera);
                 mexer(&banco, nome, |t| t.esperando = false);
-                espera = (espera * 2).min(ESPERA_MAXIMA);
+                if rearmou {
+                    quedas.clear();
+                    espera = PRIMEIRA_ESPERA;
+                } else {
+                    espera = (espera * 2).min(ESPERA_MAXIMA);
+                }
             }
             mexer(&banco, nome, |t| t.esperando = false);
         })

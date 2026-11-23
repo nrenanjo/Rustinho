@@ -208,6 +208,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "sync_desistir_juntar",
     "sync_juntar",
     "sync_salvar",
+    "sync_tentar_novamente",
 ];
 
 /// A3: no modo seguro só passam consultas, entrar/sair, a senha do gerente,
@@ -348,6 +349,7 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     // senha dela não abre a pílula Gerente); gravar continua sendo "gerente". Pendências da troca de dados e
     // retirada de caixa: 0.9.15.
     ("sync_salvar", Classe::Gerente("configuracoes")),
+    ("sync_tentar_novamente", Classe::Caixa),
     ("conflitos_listar", Classe::ConsultaDoGerente("simultaneidade")),
     ("conflito_resolver", Classe::Gerente("gerente")),
     ("referencia_aceitar", Classe::Gerente("gerente")),
@@ -1102,12 +1104,14 @@ impl Servico {
                 // da loja ou até desistir (veja `loja::desistir_da_juncao`).
                 crate::loja::comecar_juncao(&tx)?;
                 tx.commit()?;
+                self.reiniciar_motor_sync();
                 self.sync_ler()
             }
             // FALHA-01 (V01a): desistir de entrar numa loja. Sai tudo o que a
             // tentativa deixou; a rede de uma loja configurada não é tocada.
             "sync_desistir_juntar" => {
                 let n = crate::loja::desistir_da_juncao(&mut self.banco.conn)?;
+                self.aguardar_fechamento_portas_sync();
                 Ok(json!({ "saiu": n }))
             }
             "sync_ler" => self.sync_ler(),
@@ -1374,7 +1378,13 @@ impl Servico {
                 &mut acesso,
             )
             .com_operacao(self.operacao_atual.clone());
-            return (c.funcao)(&mut pedido, dados);
+            let tentar_troca =
+                comando == "aviso_resolver" && matches!(dados["id"].as_str(), Some("troca_parada" | "troca_tentando"));
+            let r = (c.funcao)(&mut pedido, dados);
+            if tentar_troca && r.is_ok() {
+                self.reiniciar_motor_sync();
+            }
+            return r;
         }
         match comando {
             // ---- Gerente ----
@@ -2007,8 +2017,14 @@ impl Servico {
                 }
                 sync::salvar_ajustes(&tx, d.ligado, &senha, &d.enderecos)?;
                 tx.commit()?;
+                if d.ligado {
+                    self.reiniciar_motor_sync();
+                } else {
+                    self.aguardar_fechamento_portas_sync();
+                }
                 self.sync_ler()
             }
+            "sync_tentar_novamente" => self.sync_tentar_novamente(),
 
             // Backup
             "backup_ler" => backup::resumo(&self.banco.conn, self.banco.caminho.as_deref(), true),
@@ -2127,15 +2143,77 @@ impl Servico {
         self.banco.caminho.clone().ok_or_else(|| Erro::validacao("Backup só funciona com o banco num arquivo."))
     }
 
+    fn reiniciar_motor_sync(&mut self) {
+        let Some(caminho) = self.banco.caminho.clone() else { return };
+        crate::supervisao::reiniciar(&caminho);
+        if self._motor.as_ref().is_some_and(|m| m.tem_tarefa_terminada()) {
+            if let Some(mut m) = self._motor.take() {
+                m.encerrar(Duration::from_secs(2));
+            }
+            let (tcp, udp) = crate::portatil::portas();
+            self._motor = Some(sync::Motor::iniciar(caminho.clone(), tcp, udp));
+        }
+        if self._motor.is_some() {
+            let fim = std::time::Instant::now() + Duration::from_millis(260);
+            while std::time::Instant::now() < fim {
+                let s = crate::supervisao::situacao(&caminho);
+                let abriu = self._motor.as_ref().and_then(|m| m.portas(Duration::from_millis(20))).is_some();
+                if abriu || s.com_falha() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn aguardar_fechamento_portas_sync(&self) {
+        let Some(caminho) = &self.banco.caminho else { return };
+        crate::supervisao::reiniciar(caminho);
+        if let Some(m) = &self._motor {
+            let fim = std::time::Instant::now() + Duration::from_millis(450);
+            while std::time::Instant::now() < fim {
+                if !m.alguma_porta_aberta() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+
+    fn sync_tentar_novamente(&mut self) -> Resultado<Value> {
+        self.reiniciar_motor_sync();
+        self.sync_ler()
+    }
+
     fn sync_ler(&self) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let a = sync::ajustes(conn)?;
         let usuarios = usuarios::quantidade(conn)?;
-        // O-3 / RVI-02: tarefas da troca de dados que não estão rodando.
+        // O-3 / RVI-02 / DP-31 / RD-B: tarefas da troca de dados que não estão rodando.
+        // Servidor e anúncio só valem com a troca ligada e com senha; puxada vale sempre.
+        let ativa = a.ligado && !a.senha.is_empty();
+        let vale = |(n, _): &&(&'static str, String)| ativa || *n == "puxada";
         let situacao = self.banco.caminho.as_deref().map(crate::supervisao::situacao).unwrap_or_default();
+        let paradas: Vec<_> = situacao.paradas.iter().filter(vale).collect();
+        let tentando: Vec<_> = situacao.tentando.iter().filter(vale).collect();
+        let (pt, pu) = crate::portatil::portas();
+        let ocupante = self.banco.caminho.as_deref().and_then(|c| sync::ocupante_em_conflito(c, pt, pu));
+        let falhas: Vec<Value> = paradas
+            .iter()
+            .map(|t| (*t, "parada"))
+            .chain(tentando.iter().map(|t| (*t, "tentando")))
+            .map(|((n, motivo), qual)| {
+                json!({
+                    "tarefa": crate::supervisao::nome_para_tela(n),
+                    "situacao": qual,
+                    "motivo": motivo,
+                })
+            })
+            .collect();
         Ok(json!({
             "ligado": a.ligado,
             "temSenha": !a.senha.is_empty(),
+            "funcionando": ativa && falhas.is_empty(),
+            "ocupantePorta": ocupante,
             "senhaFraca": sync::senha_fora_da_politica(conn)?,
             "enderecos": a.enderecos.join(", "),
             "interfaces": a.interfaces.join(", "),
@@ -2143,7 +2221,7 @@ impl Servico {
             "caixa": a.nome,
             "pares": sync::pares(conn)?,
             "meuEndereco": endereco_local(),
-            "porta": crate::portatil::portas().0,
+            "porta": pt,
             "usuarios": usuarios,
             // H24 (DP-28): no meio de uma entrada numa loja (sem usuários),
             // já chegou algum dado de outro caixa. Desistir apagaria o que
@@ -2157,19 +2235,9 @@ impl Servico {
             "referencias": sync::referencias(conn)?,
             // O-3: tarefas da troca de dados que caíram (a tela não diz que
             // está tudo bem com o motor parado).
-            "tarefasParadas": situacao.paradas.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+            "tarefasParadas": paradas.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
             // RVI-02: o que não está rodando agora, com o motivo.
-            "tarefasComFalha": situacao
-                .paradas
-                .iter()
-                .map(|t| (t, "parada"))
-                .chain(situacao.tentando.iter().map(|t| (t, "tentando")))
-                .map(|((n, motivo), qual)| json!({
-                    "tarefa": crate::supervisao::nome_para_tela(n),
-                    "situacao": qual,
-                    "motivo": motivo,
-                }))
-                .collect::<Vec<_>>(),
+            "tarefasComFalha": falhas,
         }))
     }
 

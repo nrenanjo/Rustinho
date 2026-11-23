@@ -59,6 +59,20 @@ def esperar_texto(r, pedaco, prazo):
     return False
 
 
+def focar_janela(proc):
+    """No Xvfb sem gerenciador de janelas, entrega o foco de teclado à 2ª instância pelo PID."""
+    fim = time.time() + 15
+    while time.time() < fim:
+        s = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(proc.pid)],
+                           env=dict(os.environ, DISPLAY=TELA), capture_output=True, text=True)
+        wids = s.stdout.split()
+        if wids:
+            subprocess.run(["xdotool", "windowfocus", "--sync", wids[-1]],
+                           env=dict(os.environ, DISPLAY=TELA), check=False)
+            return
+        time.sleep(0.2)
+
+
 def main():
     for p in ("Xvfb", "xdotool", "import"):
         if not shutil.which(p):
@@ -104,9 +118,49 @@ def main():
             print(("✔ " if ok else "✘ ") + "Configurações › Caixas: a troca aparece como não funcionando")
             tudo_certo &= ok
             tudo_certo &= conferir(
-                "Configurações › Caixas: com o motivo (porta TCP 47810)", r.foto("-1"), r.textos(),
-                tem=[f"porta TCP {PORTA_TCP}"],
+                "Configurações › Caixas: com o motivo (porta TCP 47810) e botão Tentar de novo", r.foto("-1"), r.textos(),
+                tem=[f"porta TCP {PORTA_TCP}", "Tentar de novo"],
             )
+            # RD-B: quando a porta é liberada e a pessoa clica em "Tentar de novo", a troca volta a funcionar na hora.
+            ocupada.close()
+            ocupada = None
+            r.clicar("Tentar de novo")
+            ok_volta = esperar_texto(r, simples("Troca de dados funcionando novamente"), 15)
+            print(("✔ " if ok_volta else "✘ ") + "Configurações › Caixas: Tentar de novo retoma a troca quando a porta libera")
+            r.foto("-2-voltou")
+            tudo_certo &= ok_volta
+
+            # RD-B (2 processos reais do Rustinho no mesmo computador em pastas diferentes):
+            # Com a 1ª instância agora segurando a porta 47810, abre uma 2ª instância em `pasta2`
+            # e verifica que ela identifica a loja e o caixa da 1ª instância na tela e retoma após a 1ª fechar.
+            pasta2 = tempfile.mkdtemp(prefix="rustinho-loja2-rvi02-")
+            try:
+                montar_loja_com_troca(pasta2)
+                r2 = Rustinho(pasta2, "TelaConfiguracoes", {"secao": "caixas"}, fotos, "rvi02-segunda-copia")
+                try:
+                    focar_janela(r2.p)
+                    r2.entrar("Ana")
+                    ok_id = esperar_texto(r2, simples("outro Rustinho aberto neste computador"), 30)
+                    print(("✔ " if ok_id else "✘ ") + "2ª instância real: identifica que outro Rustinho deste computador ocupa a porta")
+                    tudo_certo &= ok_id
+                    tudo_certo &= conferir(
+                        "2ª instância real: mostra loja/caixa do 1º Rustinho e botão Tentar de novo",
+                        r2.foto("-1-conflito-duas-copias"),
+                        r2.textos(),
+                        tem=["outro Rustinho aberto neste computador", "Caixa 1", "Tentar de novo"],
+                    )
+                    # Fecha a 1ª instância e clica em "Tentar de novo" na 2ª instância:
+                    r.fechar()
+                    time.sleep(1)
+                    r2.clicar("Tentar de novo")
+                    ok_r2 = esperar_texto(r2, simples("Troca de dados funcionando novamente"), 15)
+                    print(("✔ " if ok_r2 else "✘ ") + "2ª instância real: assume a porta ao clicar em Tentar de novo após fechar a 1ª")
+                    r2.foto("-2-assumiu")
+                    tudo_certo &= ok_r2
+                finally:
+                    r2.fechar()
+            finally:
+                shutil.rmtree(pasta2, ignore_errors=True)
         finally:
             r.fechar()
     finally:

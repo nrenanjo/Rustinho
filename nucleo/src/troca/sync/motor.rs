@@ -77,10 +77,20 @@ impl Motor {
         }
     }
 
+    /// DP-31: alguma das duas portas (TCP ou UDP) ainda está aberta neste instante?
+    pub fn alguma_porta_aberta(&self) -> bool {
+        self.portas.0.load(Ordering::SeqCst) != 0 || self.portas.1.load(Ordering::SeqCst) != 0
+    }
+
     /// O que está impedindo o motor de funcionar (ex.: porta ocupada). Também
     /// vai para o registro, uma vez.
     pub fn problemas(&self) -> Vec<String> {
         self.problemas.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Alguma das tarefas supervisionadas já parou de vez (encerrou a linha de execução)?
+    pub fn tem_tarefa_terminada(&self) -> bool {
+        self.tarefas.iter().any(|t| t.is_finished())
     }
 
     /// Só nos testes: uma tarefa a mais para o motor esperar ao encerrar
@@ -94,10 +104,12 @@ impl Motor {
         let parar = Arc::new(AtomicBool::new(false));
         let mut tarefas = Vec::new();
         let problemas: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        // Com a porta 0, a de verdade só se sabe depois de abrir; quem anuncia
-        // e quem puxa usam a de verdade. Depois de uma queda, a tarefa abre a
-        // mesma porta de novo (os outros caixas já a conhecem).
+        // `portas` guarda as portas ABERTAS agora (0 = fechada, DP-31).
+        // `escolhidas` lembra a porta atribuída pelo sistema quando pediram 0,
+        // para reabrir a mesma depois de uma queda ou religamento (os outros
+        // caixas já a conhecem).
         let portas: Arc<(AtomicU16, AtomicU16)> = Arc::new((AtomicU16::new(0), AtomicU16::new(0)));
+        let escolhidas: Arc<(AtomicU16, AtomicU16)> = Arc::new((AtomicU16::new(0), AtomicU16::new(0)));
         let porta_tcp_de = move |p: &Arc<(AtomicU16, AtomicU16)>| match p.0.load(Ordering::SeqCst) {
             0 => porta_tcp,
             aberta => aberta,
@@ -110,28 +122,20 @@ impl Motor {
         // 1. Servidor: atende os outros caixas. (O-3: cada tarefa roda
         // supervisionada e volta sozinha depois de um erro interno; veja
         // `supervisao`.)
+        // DP-31 / RD-B (regra 2): só abre a porta TCP quando a troca de dados
+        // está ligada e tem senha; fecha imediatamente ao desligar.
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
             let problemas = problemas.clone();
             let parar_tarefa = parar.clone();
             let portas = portas.clone();
+            let escolhidas = escolhidas.clone();
             tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "servidor", parar_tarefa, move || {
-                // RVI-02: porta ocupada é falha da tarefa (o supervisor tenta de
-                // novo, com limite, e a situação mostra o motivo); o registro
-                // recebe a falha pelo supervisor.
-                let porta_tcp = porta_tcp_de(&portas);
-                let ouvinte = match TcpListener::bind(("0.0.0.0", porta_tcp)) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        guardar_problema(&problemas, texto_da_porta("TCP", porta_tcp, &e.to_string()));
-                        return Err(motivo_da_porta("TCP", porta_tcp, &e.to_string()));
-                    }
-                };
-                if let Ok(a) = ouvinte.local_addr() {
-                    portas.0.store(a.port(), Ordering::SeqCst);
-                }
-                ouvinte.set_nonblocking(true).ok();
+                let mut ouvinte: Option<TcpListener> = None;
+                let mut porta_aberta: u16 = 0;
+                let mut ultima_checagem = Instant::now() - Duration::from_secs(10);
+                let mut troca_ligada = false;
                 let vagas = Arc::new(AtomicUsize::new(0));
                 let mut atendendo: Vec<Atendimento> = Vec::new();
                 // Quem conecta espera na fila até mandar alguma coisa: conexão
@@ -141,9 +145,50 @@ impl Motor {
                 while !parar.load(Ordering::SeqCst) {
                     crate::supervisao::ponto_de_queda(&caminho, "servidor");
                     atendendo.retain(|a| !a.tarefa.is_finished());
+                    if ouvinte.is_none() || ultima_checagem.elapsed() >= Duration::from_millis(200) {
+                        ultima_checagem = Instant::now();
+                        troca_ligada = abrir_conexao(&caminho)
+                            .ok()
+                            .and_then(|c| ajustes(&c).ok())
+                            .is_some_and(|a| a.ligado && !a.senha.is_empty());
+                    }
+                    if !troca_ligada {
+                        if let Some(o) = ouvinte.take() {
+                            drop(o);
+                            remover_ocupante_porta("TCP", porta_aberta, &caminho);
+                            porta_aberta = 0;
+                            portas.0.store(0, Ordering::SeqCst);
+                            fila.clear();
+                        }
+                        crate::supervisao::limpar_tarefa(&caminho, "servidor");
+                        cochilar(&parar, Duration::from_millis(100));
+                        continue;
+                    }
+                    if ouvinte.is_none() {
+                        // RVI-02: porta ocupada é falha da tarefa (o supervisor tenta de
+                        // novo, com limite, e a situação mostra o motivo); o registro
+                        // recebe a falha pelo supervisor.
+                        let p_alvo = porta_tcp_de(&escolhidas);
+                        let o = match TcpListener::bind(("0.0.0.0", p_alvo)) {
+                            Ok(o) => o,
+                            Err(e) => {
+                                let motivo = motivo_da_porta_com_ocupante("TCP", p_alvo, &e.to_string(), &caminho);
+                                guardar_problema(&problemas, format!("troca de dados: {motivo}"));
+                                return Err(motivo);
+                            }
+                        };
+                        let real = o.local_addr().map(|a| a.port()).unwrap_or(p_alvo);
+                        escolhidas.0.store(real, Ordering::SeqCst);
+                        portas.0.store(real, Ordering::SeqCst);
+                        porta_aberta = real;
+                        registrar_ocupante_porta("TCP", real, &caminho);
+                        o.set_nonblocking(true).ok();
+                        ouvinte = Some(o);
+                    }
+                    let Some(ref o) = ouvinte else { continue };
                     let mut mexeu = false;
                     // 1. Aceita quem chegou.
-                    while let Ok((fluxo, origem)) = ouvinte.accept() {
+                    while let Ok((fluxo, origem)) = o.accept() {
                         mexeu = true;
                         let ip = origem.ip();
                         // Um endereço não tem mais que `VAGAS_POR_ORIGEM` na fila.
@@ -220,6 +265,8 @@ impl Motor {
                 // Parou de aceitar; espera quem já estava sendo atendido (cada
                 // conexão tem prazo de leitura e escrita, então termina).
                 drop(ouvinte);
+                portas.0.store(0, Ordering::SeqCst);
+                remover_ocupante_porta("TCP", porta_aberta, &caminho);
                 for a in atendendo {
                     let _ = a.tarefa.join();
                 }
@@ -228,27 +275,17 @@ impl Motor {
         }
 
         // 2. Descoberta: anuncia este caixa e escuta os outros (UDP).
+        // DP-31 / RD-B (regra 2): só abre o socket UDP com a troca ligada e fecha ao desligar.
         {
             let caminho = caminho.clone();
             let parar = parar.clone();
             let problemas = problemas.clone();
             let parar_tarefa = parar.clone();
             let portas = portas.clone();
+            let escolhidas = escolhidas.clone();
             tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "anuncio", parar_tarefa, move || {
-                let porta_udp = porta_udp_de(&portas);
-                let socket = match UdpSocket::bind(("0.0.0.0", porta_udp)) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        guardar_problema(&problemas, texto_da_porta("UDP", porta_udp, &e.to_string()));
-                        return Err(motivo_da_porta("UDP", porta_udp, &e.to_string()));
-                    }
-                };
-                if let Ok(a) = socket.local_addr() {
-                    portas.1.store(a.port(), Ordering::SeqCst);
-                }
-                let porta_udp = porta_udp_de(&portas);
-                socket.set_broadcast(true).ok();
-                socket.set_read_timeout(Some(Duration::from_secs(1))).ok();
+                let mut socket: Option<UdpSocket> = None;
+                let mut porta_aberta: u16 = 0;
                 let mut ultimo_anuncio = Instant::now() - Duration::from_secs(60);
                 let mut ultima_lista = Instant::now() - Duration::from_secs(60);
                 // As interfaces são lidas de novo a cada segundo; uma mudança
@@ -268,9 +305,38 @@ impl Motor {
                         continue;
                     };
                     if !a.ligado || a.senha.is_empty() {
-                        cochilar(&parar, Duration::from_secs(3));
+                        if let Some(s) = socket.take() {
+                            drop(s);
+                            remover_ocupante_porta("UDP", porta_aberta, &caminho);
+                            porta_aberta = 0;
+                            portas.1.store(0, Ordering::SeqCst);
+                        }
+                        crate::supervisao::limpar_tarefa(&caminho, "anuncio");
+                        cochilar(&parar, Duration::from_millis(120));
                         continue;
                     }
+                    if socket.is_none() {
+                        let p_alvo = porta_udp_de(&escolhidas);
+                        let s = match UdpSocket::bind(("0.0.0.0", p_alvo)) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                let motivo = motivo_da_porta_com_ocupante("UDP", p_alvo, &e.to_string(), &caminho);
+                                guardar_problema(&problemas, format!("troca de dados: {motivo}"));
+                                return Err(motivo);
+                            }
+                        };
+                        let real = s.local_addr().map(|a| a.port()).unwrap_or(p_alvo);
+                        escolhidas.1.store(real, Ordering::SeqCst);
+                        portas.1.store(real, Ordering::SeqCst);
+                        porta_aberta = real;
+                        registrar_ocupante_porta("UDP", real, &caminho);
+                        s.set_broadcast(true).ok();
+                        s.set_read_timeout(Some(Duration::from_millis(250))).ok();
+                        ultimo_anuncio = Instant::now() - Duration::from_secs(60);
+                        socket = Some(s);
+                    }
+                    let porta_udp = porta_udp_de(&escolhidas);
+                    let Some(ref s_udp) = socket else { continue };
                     // Gravações deste laço (sal novo, par visto) respeitam a
                     // pausa da restauração de backup, como as outras tarefas.
                     let chaves = {
@@ -292,7 +358,7 @@ impl Motor {
                         false
                     };
                     if mudou || ultimo_anuncio.elapsed() > Duration::from_secs(10) {
-                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp_de(&portas));
+                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp_de(&escolhidas));
                         if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
                             // Um anúncio por interface apropriada (um broadcast só
                             // sai por uma), mais o limitado de sempre. Se o sistema
@@ -304,7 +370,7 @@ impl Motor {
                         }
                         ultimo_anuncio = Instant::now();
                     }
-                    if let Ok((n, origem)) = socket.recv_from(&mut buf) {
+                    if let Ok((n, origem)) = s_udp.recv_from(&mut buf) {
                         // R-09: sal desconhecido só passa pela conta cara
                         // (Argon2) poucas vezes por minuto (veja `decifrar`).
                         if let Ok(claro) = decifrar(&k, &buf[..n], Some(origem.ip())) {
@@ -323,6 +389,9 @@ impl Motor {
                         }
                     }
                 }
+                drop(socket);
+                portas.1.store(0, Ordering::SeqCst);
+                remover_ocupante_porta("UDP", porta_aberta, &caminho);
                 Ok(())
             }));
         }
@@ -332,7 +401,7 @@ impl Motor {
         {
             let parar = parar.clone();
             let parar_tarefa = parar.clone();
-            let portas = portas.clone();
+            let escolhidas = escolhidas.clone();
             tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "puxada", parar_tarefa, move || {
                 let mut ultima_limpeza = Instant::now() - Duration::from_secs(50 * 60);
                 let mut ultima_reaplicacao = Instant::now() - Duration::from_secs(60);
@@ -386,7 +455,7 @@ impl Motor {
                         orcamento: caminhos::ORCAMENTO,
                     };
                     let (caminho_banco, parar_ciclo) = (caminho.clone(), parar.clone());
-                    let porta_tcp = porta_tcp_de(&portas);
+                    let porta_tcp = porta_tcp_de(&escolhidas);
                     let mut puxar = |endereco: &str, saida: Option<&Saida>| {
                         puxar_por(&caminho_banco, endereco, porta_tcp, Some(&parar_ciclo), saida)
                     };
