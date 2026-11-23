@@ -52,32 +52,99 @@ Item {
     visible: !saindo || height > 0.5
     Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
-    readonly property color corFundo: categoria === "critica" ? Tema.critico
-                                      : categoria === "atencao" ? Tema.atencao : Tema.informativo
-    readonly property color corBorda: categoria === "critica" ? Tema.bordaCritico
-                                      : categoria === "atencao" ? Tema.bordaAtencao : Tema.bordaInformativo
+    // P-NOTIF (diretriz do proprietário, 18/11 e 20/11/2026): padrão visual FIXO
+    // extraído de `fofznotifiz.png`, completamente independente dos três temas
+    // (Claro, Escuro e Planeta Roxo), tanto expandido quanto minimizado.
+    // O aviso rápido (`Aviso.qml`) permanece fora desta regra (verde/vermelho).
+    readonly property color fixaFundoInicio: "#F6C2DC"
+    readonly property color fixaFundoMeio: "#F8CDD7"
+    readonly property color fixaFundoFim: "#FCDAC5"
+    readonly property color fixaBorda: "#B43C8A"
+    readonly property color fixaTitulo: "#1F1423"
+    readonly property color fixaTexto: "#2C1E31"
+    readonly property color fixaRotulo: "#5B3858"
+    readonly property color fixaAtraso: "#9E1F46"
+    readonly property color fixaQuadroFundo: Qt.rgba(1, 1, 1, 0.45)
+    readonly property color fixaQuadroBorda: Qt.rgba(0.70, 0.24, 0.54, 0.24)
+    readonly property color fixaBotaoPrincipal: "#D123AB"
+    readonly property color fixaBotaoPrincipalSobre: "#C21E9E"
+    readonly property color fixaBotaoPrincipalBaixo: "#A8198A"
+    readonly property color fixaBotaoSecundario: "#FCE6F3"
+    readonly property color fixaBotaoSecundarioSobre: "#F7D5EA"
+    readonly property color fixaBotaoSecundarioBaixo: "#EFC2DF"
+    readonly property color fixaBotaoSecundarioTexto: "#4A1142"
 
-    // Texto da informativa expandida: o que é e o atraso em vermelho.
+    // Botão próprio de notificação com cores fixas independentes do tema.
+    component BotaoNotificacao: Button {
+        id: btnNotif
+        property bool principal: true
+        implicitWidth: Math.max(implicitContentWidth + 32, Tema.toqueMinimo)
+        implicitHeight: Math.max(40, Tema.toqueMinimo)
+        topInset: (implicitHeight - 40) / 2
+        bottomInset: topInset
+        font.family: Tema.texto
+        font.pixelSize: 15
+        font.weight: Font.DemiBold
+        focusPolicy: Qt.StrongFocus
+        contentItem: Text {
+            text: btnNotif.text
+            textFormat: Text.PlainText
+            font: btnNotif.font
+            color: btnNotif.principal ? "#FFFFFF" : raiz.fixaBotaoSecundarioTexto
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+        background: Item {
+            // Sombra discreta fixa sob o botão magenta (fofznotifiz.png).
+            Rectangle {
+                anchors.fill: fundoBtn
+                anchors.topMargin: 2
+                anchors.bottomMargin: -2
+                radius: 8
+                color: Qt.rgba(0.28, 0.04, 0.22, 0.18)
+                visible: btnNotif.principal
+            }
+            Rectangle {
+                id: fundoBtn
+                anchors.fill: parent
+                radius: 8
+                color: btnNotif.principal
+                       ? (btnNotif.down ? raiz.fixaBotaoPrincipalBaixo : btnNotif.hovered ? raiz.fixaBotaoPrincipalSobre : raiz.fixaBotaoPrincipal)
+                       : (btnNotif.down ? raiz.fixaBotaoSecundarioBaixo : btnNotif.hovered ? raiz.fixaBotaoSecundarioSobre : raiz.fixaBotaoSecundario)
+                border.width: btnNotif.visualFocus ? 2 : (btnNotif.principal ? 0 : 1)
+                border.color: btnNotif.visualFocus ? "#6A0F5C" : raiz.fixaBorda
+            }
+        }
+        Keys.onReturnPressed: btnNotif.clicked()
+        Keys.onEnterPressed: btnNotif.clicked()
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
+    }
+
+    // Texto da informativa expandida: o que é e o atraso em vinho escuro fixo.
     function linha() {
         const partes = []
         // H10 (7.2): os dados vão escapados (o texto é formatado).
         if (aviso.texto)
             partes.push(Tema.escapar(aviso.texto))
         if (aviso.atraso)
-            partes.push("<font color='" + Tema.vermelho + "'>" + Tema.escapar(aviso.atraso) + "</font>")
+            partes.push("<font color='#9E1F46'>" + Tema.escapar(aviso.atraso) + "</font>")
         return partes.join("  ·  ")
     }
 
     Rectangle {
         id: cartao
+        objectName: "cartaoNotificacao"
         width: raiz.width
         height: raiz.minimizado ? raiz.lado : conteudo.implicitHeight + 34
-        radius: Tema.raio
-        // O quadrado tem o fundo das pílulas; a faixa, o da categoria.
-        color: raiz.minimizado ? Tema.cartao : raiz.corFundo
-        palette.window: Tema.superficie(color)
-        border.width: 1
-        border.color: raiz.minimizado ? Tema.bordaCartao : raiz.corBorda
+        radius: 12
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: raiz.fixaFundoInicio }
+            GradientStop { position: 0.52; color: raiz.fixaFundoMeio }
+            GradientStop { position: 1.0; color: raiz.fixaFundoFim }
+        }
+        border.width: 1.5
+        border.color: raiz.fixaBorda
         opacity: 1 - Math.min(Math.abs(x) / (raiz.width * 0.6), 0.75)
         Behavior on height { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
 
@@ -87,6 +154,7 @@ Item {
             anchors.centerIn: parent
             funcao: raiz.funcao
             nome: raiz.icone
+            claroFixo: true
         }
 
         // ---- Expandida ----
@@ -107,7 +175,7 @@ Item {
                     Text {
                         text: raiz.aviso.tituloLongo || raiz.aviso.titulo || ""
                         textFormat: Text.PlainText
-                        color: Tema.tinta
+                        color: raiz.fixaTitulo
                         font.family: Tema.texto
                         font.weight: Font.Bold
                         font.pixelSize: Tema.estreito ? 16 : 18
@@ -118,7 +186,7 @@ Item {
                         visible: text !== ""
                         text: raiz.categoria === "informativa" ? raiz.linha() : (raiz.aviso.descricao || "")
                         textFormat: raiz.categoria === "informativa" ? Text.StyledText : Text.PlainText
-                        color: Tema.tinta
+                        color: raiz.fixaTexto
                         font.family: Tema.texto
                         font.pixelSize: Tema.estreito ? 14 : 15
                         lineHeight: 1.1
@@ -126,19 +194,19 @@ Item {
                         Layout.fillWidth: true
                     }
                 }
-                Botao {
+                BotaoNotificacao {
                     id: acaoLarga
                     visible: raiz.temAcao && !Tema.estreito
                     text: raiz.aviso.acao || ""
-                    tipo: "principal"
+                    principal: true
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: raiz.abrir()
                 }
-                Botao {
+                BotaoNotificacao {
                     id: resolverLarga
                     visible: raiz.temResolver && !Tema.estreito
                     text: raiz.aviso.resolver || ""
-                    tipo: "secundario"
+                    principal: false
                     Layout.alignment: Qt.AlignVCenter
                     onClicked: raiz.resolver()
                 }
@@ -148,9 +216,9 @@ Item {
             Rectangle {
                 visible: (raiz.aviso.detalhes || []).length > 0
                 radius: 7
-                color: Tema.vela(0.45)
+                color: raiz.fixaQuadroFundo
                 border.width: 1
-                border.color: Tema.sombra(0.09)
+                border.color: raiz.fixaQuadroBorda
                 implicitHeight: grade.implicitHeight + 16
                 Layout.fillWidth: true
                 Layout.topMargin: 4
@@ -169,7 +237,7 @@ Item {
                             readonly property var linha: raiz.aviso.detalhes[Math.floor(index / 2)]
                             text: index % 2 === 0 ? linha.rotulo + ":" : linha.valor
                             textFormat: Text.PlainText
-                            color: index % 2 === 0 ? Tema.tintaSuave : Tema.tinta
+                            color: index % 2 === 0 ? raiz.fixaRotulo : raiz.fixaTexto
                             font.family: Tema.texto
                             font.pixelSize: 14
                             wrapMode: Text.WordWrap
@@ -183,27 +251,27 @@ Item {
                 visible: Tema.estreito && (raiz.temAcao || raiz.temResolver)
                 spacing: 8
                 Layout.topMargin: 4
-                Botao {
+                BotaoNotificacao {
                     id: acaoEstreita
                     visible: raiz.temAcao && Tema.estreito
                     text: raiz.aviso.acao || ""
-                    tipo: "principal"
+                    principal: true
                     onClicked: raiz.abrir()
                 }
-                Botao {
+                BotaoNotificacao {
                     id: resolverEstreita
                     visible: raiz.temResolver && Tema.estreito
                     text: raiz.aviso.resolver || ""
-                    tipo: "secundario"
+                    principal: false
                     onClicked: raiz.resolver()
                 }
             }
         }
 
-        // Triângulo de alerta: a arte original, sem fundo; 10% menor que na
-        // referência (20 px → 18 px de largura), na expandida e na minimizada.
+        // Triângulo de alerta: sempre escuro (sobre o fundo fixo rosa/pêssego),
+        // independente do tema ativo (P-NOTIF).
         Image {
-            source: Tema.escuro ? "qrc:/qt/qml/rustinho/icone/alerta-branco.png" : "qrc:/qt/qml/rustinho/icone/alerta-preto.png"
+            source: "qrc:/qt/qml/rustinho/icone/alerta-preto.png"
             width: 18
             height: Math.round(18 * 1222 / 1287)
             sourceSize.width: 36

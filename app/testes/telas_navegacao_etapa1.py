@@ -125,7 +125,7 @@ class Rustinho(nav.Rustinho):
             xdo("mousemove", str(aberto[0]), str(aberto[1]), "click", "1")
             time.sleep(3)
             return
-        titulo = "Escolha o XML da nota de compra"
+        titulo = "Escolha os XMLs das notas de compra"
         janela = janela_de_arquivos(titulo)
         if not janela:
             raise RuntimeError(f"a janela de arquivos não abriu (veja {self.saida})")

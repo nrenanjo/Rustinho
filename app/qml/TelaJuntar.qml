@@ -132,6 +132,7 @@ FocusScope {
                     rotulo: "Senha da rede da loja"
                     dica: "A mesma que está nas Configurações do outro caixa"
                     senha: true
+                    podeColar: true
                     maximo: 256
                     Layout.fillWidth: true
                     onConfirmado: tela.juntar()

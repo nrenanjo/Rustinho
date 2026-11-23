@@ -35,24 +35,26 @@ ColumnLayout {
     readonly property bool comBotao: comCamera || acao !== ""
     property var sugestoes: []
     property var filtradas: []
-    // Busca da Início e barras de pesquisa gerais (0.9.18-dev.3.2): colar à
-    // esquerda e copiar à direita, dentro do campo. Nas buscas com lupa, a lupa
-    // permanece visível ao lado do botão colar.
+    // P-ICO (diretriz do proprietário, 18/11 e 20/11/2026):
+    // - Lupa removida de todas as barras de pesquisa (funcionalidade e cápsula preservadas).
+    // - Botões reais de colar e copiar levados aos campos de preenchimento (sem reduzir área útil em campos curtos).
+    // - Campos sensíveis: `podeColar: true` exclusivamente na chave/senha da rede; em senhas/PIN, nem colar nem copiar.
     property bool colarCopiar: icone === "busca"
-    readonly property real ladoBotaoInterno: Tema.celular ? 48 : 40
+    property bool podeColar: false
+    property bool semAcoesTexto: false
+    readonly property bool busca: icone === "busca" || colarCopiar
+    readonly property bool cabeAcoesFormulario: !busca && !semAcoesTexto && !numerico && entrada.width >= 210
+    readonly property bool mostrarColar: busca || podeColar || (!senha && !somenteLeitura && cabeAcoesFormulario)
+    readonly property bool mostrarCopiar: busca || (!senha && !escondido && cabeAcoesFormulario)
+    readonly property real ladoBotaoInterno: busca ? (Tema.celular ? 48 : 40) : (Tema.celular ? 40 : 30)
     // H01 (7.1): os controles da direita ficam lado a lado, cada um no seu
     // espaço, da borda para dentro: Copiar, a câmera (ou o botão de ação), o
-    // atalho (F11) e o sufixo. Antes, todos se ancoravam no mesmo canto e o
-    // Copiar ficava em cima do F11 (computador) e da câmera (celular).
-    readonly property real larguraCopiar: colarCopiar ? ladoBotaoInterno + 8 : 0
+    // atalho (F11) e o sufixo.
+    readonly property real larguraColar: mostrarColar ? ladoBotaoInterno + (busca ? 8 : 4) : 0
+    readonly property real larguraCopiar: mostrarCopiar ? ladoBotaoInterno + (busca ? 8 : 4) : 0
     readonly property real larguraBotao: comBotao ? 44 : 0
     // 0.9.18: a superfície embaixo (o rótulo e o erro, fora do campo).
     readonly property color superficie: Tema.roxo ? palette.window : Tema.fundo
-    // T042 (17/11/2026): as barras de pesquisa (campo com a lupa e a busca da
-    // Início) são uma cápsula cinza-escura nos três temas, com o texto e os
-    // ícones brancos e o halo magenta amplo (as cores em Tema.busca...). Os
-    // campos de formulário continuam como estão.
-    readonly property bool busca: icone === "busca" || colarCopiar
     readonly property color corDoCampo: busca ? Tema.buscaFundo : somenteLeitura ? Tema.campoFixo : Tema.papel
     // Na barra de pesquisa (escura nos três temas), erro, validado, prefixo e sufixo usam as cores claras (T042);
     // nos campos de formulário, as de sempre.
@@ -147,13 +149,14 @@ ColumnLayout {
         return false
     }
 
-    // Botão redondo dentro do campo (colar e copiar da busca da Início):
-    // área de toque de 40 × 40 px (48 × 48 dp no celular).
+    // Botão redondo dentro do campo (colar e copiar — busca e campos de preenchimento P-ICO).
     component BotaoInterno: Rectangle {
         id: botaoInterno
         property string nome: ""
         property string dica: ""
         property real lado: 40
+        property bool modoBusca: true
+        property color corSuperficie: Tema.papel
         // Para leitores de tela e para os testes das telas (--textos-da-tela).
         readonly property string nomeAcessivel: dica
         signal acionado()
@@ -161,20 +164,24 @@ ColumnLayout {
         height: lado
         radius: height / 2
         anchors.verticalCenter: parent.verticalCenter
-        // Só existe na barra de pesquisa, que é escura nos três temas (T042):
-        // o ícone branco e, com o mouse em cima ou apertado, um véu branco.
-        color: toque.pressed ? Qt.rgba(1, 1, 1, 0.18) : toque.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent"
+        color: modoBusca
+               ? (toque.pressed ? Qt.rgba(1, 1, 1, 0.18) : toque.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent")
+               : (toque.pressed ? Tema.sombraNo(0.14, corSuperficie) : toque.containsMouse ? Tema.sombraNo(0.07, corSuperficie) : "transparent")
         Icone {
             anchors.centerIn: parent
             nome: botaoInterno.nome
-            tamanho: 22
-            cor: Tema.buscaIcone
+            tamanho: botaoInterno.modoBusca ? 22 : 16
+            cor: botaoInterno.modoBusca ? Tema.buscaIcone : Tema.apagadoNo(botaoInterno.corSuperficie)
         }
+        // A15 (0.9.18): no celular, a área de toque de cada botão interno tem pelo menos 48 × 48 dp,
+        // mantendo o desenho visual compacto (mesmo padrão de toqueCamera).
+        readonly property real margemToque: Tema.celular ? -Math.max(0, Math.ceil((Tema.toqueMinimo - lado) / 2)) : 0
         // MouseArea (e não TapHandler): fica com o toque só para si, sem o
         // campo de texto embaixo roubar o toque para abrir o teclado.
         MouseArea {
             id: toque
             anchors.fill: parent
+            anchors.margins: botaoInterno.margemToque
             hoverEnabled: true
             preventStealing: true
             cursorShape: Qt.PointingHandCursor
@@ -215,20 +222,25 @@ ColumnLayout {
             entrada.forceActiveFocus()
     }
 
-    // Os botões da busca da Início. Colar troca o texto da busca pelo que
-    // foi copiado; copiar leva o texto da busca inteiro.
+    // P-ICO: reutiliza a mesma função real de colar e copiar na busca e nos campos editáveis.
     function colar() {
+        if (campo.somenteLeitura || (campo.senha && !campo.podeColar))
+            return
         entrada.forceActiveFocus()
         entrada.selectAll()
         entrada.paste()
+        if (campo.maiusculas && entrada.text !== entrada.text.toUpperCase())
+            entrada.text = entrada.text.toUpperCase()
         campo.erro = ""
         campo.editado()
     }
     function copiar() {
+        if (campo.senha || campo.escondido)
+            return
         const janela = ApplicationWindow.window
         if (entrada.text === "") {
             if (janela)
-                janela.avisar("A busca está vazia: nada para copiar.", "info")
+                janela.avisar(campo.busca ? "A busca está vazia: nada para copiar." : "Nada para copiar.", "info")
             return
         }
         const de = entrada.selectionStart
@@ -237,7 +249,7 @@ ColumnLayout {
         entrada.copy()
         entrada.select(de, ate)
         if (janela)
-            janela.avisar("Copiado: " + entrada.text, "ok")
+            janela.avisar(campo.sensivel ? "Copiado." : "Copiado: " + entrada.text, "ok")
     }
 
     function semAcento(s) {
@@ -323,9 +335,10 @@ ColumnLayout {
         verticalAlignment: TextInput.AlignVCenter
         readOnly: campo.somenteLeitura
         maximumLength: campo.maximo
-        leftPadding: (campo.colarCopiar && campo.icone === "busca" ? campo.ladoBotaoInterno + 38
-                      : campo.colarCopiar ? campo.ladoBotaoInterno + 10
-                      : campo.icone !== "" ? 48 : 12)
+        readonly property bool temIconeVisivel: campo.icone !== "" && campo.icone !== "busca"
+        leftPadding: (campo.mostrarColar && temIconeVisivel ? campo.larguraColar + 32
+                      : campo.mostrarColar ? campo.larguraColar + (campo.busca ? 2 : 6)
+                      : temIconeVisivel ? 48 : 12)
                      + (campo.prefixo !== "" ? textoPrefixo.implicitWidth + 6 : 0)
         rightPadding: 12 + (campo.sufixo !== "" ? textoSufixo.implicitWidth + 6 : 0)
                       + (textoAtalho.visible ? textoAtalho.implicitWidth + 16 : 0)
@@ -420,41 +433,46 @@ ColumnLayout {
             id: marcaValido
             objectName: campo.objectName !== "" ? campo.objectName + "Valido" : ""
             visible: campo.estado === "valido" && !campo.comBotao && campo.sufixo === "" && !textoAtalho.visible
-                     && !campo.colarCopiar
+                     && !campo.busca
             nome: "check"
             tamanho: 18
             cor: campo.corDeValido
             anchors.right: parent.right
-            anchors.rightMargin: 12
+            anchors.rightMargin: 12 + campo.larguraCopiar
             anchors.verticalCenter: parent.verticalCenter
         }
 
+        // P-ICO: a lupa (`icone === "busca"`) não é mais exibida em nenhuma tela ou barra de pesquisa.
         Icone {
-            visible: campo.icone !== ""
+            visible: entrada.temIconeVisivel
             nome: campo.icone
             tamanho: 22
             cor: campo.busca ? Tema.buscaIcone : Tema.apagado
             anchors.left: parent.left
-            anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 8 : 15
+            anchors.leftMargin: campo.mostrarColar ? campo.larguraColar + 4 : 15
             anchors.verticalCenter: parent.verticalCenter
         }
-        // Colar (à esquerda) e copiar (à direita), na busca da Início.
+        // Colar (à esquerda) e copiar (à direita), na busca e nos campos editáveis (P-ICO).
         BotaoInterno {
-            visible: campo.colarCopiar
+            visible: campo.mostrarColar
             nome: "colar"
-            dica: "Colar na busca"
+            dica: campo.busca ? "Colar na busca" : "Colar"
             lado: campo.ladoBotaoInterno
+            modoBusca: campo.busca
+            corSuperficie: campo.corDoCampo
             anchors.left: parent.left
-            anchors.leftMargin: 6
+            anchors.leftMargin: campo.busca ? 6 : 4
             onAcionado: campo.colar()
         }
         BotaoInterno {
-            visible: campo.colarCopiar
+            visible: campo.mostrarCopiar
             nome: "copiar"
-            dica: "Copiar a busca"
+            dica: campo.busca ? "Copiar a busca" : "Copiar"
             lado: campo.ladoBotaoInterno
+            modoBusca: campo.busca
+            corSuperficie: campo.corDoCampo
             anchors.right: parent.right
-            anchors.rightMargin: 6
+            anchors.rightMargin: campo.busca ? 6 : 4
             onAcionado: campo.copiar()
         }
         Rectangle {
@@ -511,7 +529,7 @@ ColumnLayout {
             textFormat: Text.PlainText
             visible: text !== ""
             anchors.left: parent.left
-            anchors.leftMargin: campo.colarCopiar ? campo.ladoBotaoInterno + 10 : campo.icone !== "" ? 48 : 12
+            anchors.leftMargin: campo.mostrarColar ? campo.larguraColar + (campo.busca ? 2 : 6) : entrada.temIconeVisivel ? 48 : 12
             anchors.verticalCenter: parent.verticalCenter
             color: campo.corApagadaDentro
             font.family: Tema.texto
@@ -557,6 +575,19 @@ ColumnLayout {
                 lista.close()
                 campo.saiu()
             }
+        }
+        Keys.onPressed: (evento) => {
+            // P-ICO: em senhas e PINs, bloqueia também atalhos de teclado (copiar/recortar sempre;
+            // colar bloqueado salvo na chave da rede onde `podeColar` é verdadeiro).
+            if (campo.senha && (evento.matches(StandardKey.Copy) || evento.matches(StandardKey.Cut))) {
+                evento.accepted = true
+                return
+            }
+            if (campo.senha && !campo.podeColar && evento.matches(StandardKey.Paste)) {
+                evento.accepted = true
+                return
+            }
+            evento.accepted = false
         }
         Keys.onDownPressed: (evento) => {
             if (lista.visible) {
@@ -610,41 +641,53 @@ ColumnLayout {
             border.width: 1
             border.color: Tema.sombra(0.12)
         }
-        contentItem: ListView {
-            id: vista
-            implicitHeight: contentHeight
-            model: campo.filtradas
-            currentIndex: -1
-            boundsBehavior: Flickable.StopAtBounds
-            delegate: ItemDelegate {
-                id: sugestao
-                required property var modelData
-                required property int index
-                width: vista.width
-                // A15: no celular, cada sugestão com 48 dp de altura.
-                height: Math.max(34, Tema.toqueMinimo)
-                text: modelData
-                font.family: Tema.texto
-                font.pixelSize: 15
-                highlighted: vista.currentIndex === index
-                // H10 (extensão): a sugestão é um dado (uma marca, um local...).
-                // O rótulo padrão do Qt lê como HTML o texto que parece HTML (e,
-                // no Qt 6.12, um "<img …>" nele fecha o programa) e some com o
-                // "&". Aqui é texto puro, com o desenho do padrão: as cores do
-                // estilo, uma linha, reticências no fim.
-                contentItem: Text {
-                    text: sugestao.text
-                    textFormat: Text.PlainText
-                    font: sugestao.font
-                    color: sugestao.highlighted ? sugestao.palette.highlightedText : sugestao.palette.text
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
+        contentItem: Item {
+            implicitHeight: vista.contentHeight
+            ListView {
+                id: vista
+                anchors.fill: parent
+                implicitHeight: contentHeight
+                model: campo.filtradas
+                currentIndex: -1
+                boundsBehavior: Flickable.StopAtBounds
+                delegate: ItemDelegate {
+                    id: sugestao
+                    required property var modelData
+                    required property int index
+                    width: vista.width
+                    // A15: no celular, cada sugestão com 48 dp de altura.
+                    height: Math.max(34, Tema.toqueMinimo)
+                    text: modelData
+                    font.family: Tema.texto
+                    font.pixelSize: 15
+                    highlighted: vista.currentIndex === index
+                    // H10 (extensão): a sugestão é um dado (uma marca, um local...).
+                    // O rótulo padrão do Qt lê como HTML o texto que parece HTML (e,
+                    // no Qt 6.12, um "<img …>" nele fecha o programa) e some com o
+                    // "&". Aqui é texto puro, com o desenho do padrão: as cores do
+                    // estilo, uma linha, reticências no fim.
+                    contentItem: Text {
+                        text: sugestao.text
+                        textFormat: Text.PlainText
+                        font: sugestao.font
+                        color: sugestao.highlighted ? sugestao.palette.highlightedText : sugestao.palette.text
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: 6
+                        color: parent.highlighted ? Tema.azul : (parent.hovered ? Tema.sombra(0.06) : "transparent")
+                    }
+                    onClicked: campo.escolher(modelData)
                 }
-                background: Rectangle {
-                    radius: 6
-                    color: parent.highlighted ? Tema.azul : (parent.hovered ? Tema.sombra(0.06) : "transparent")
-                }
-                onClicked: campo.escolher(modelData)
+            }
+            // BUG-20261118-54N7: descarta cliques nas sugestões enquanto as telas se movem (N6).
+            MouseArea {
+                anchors.fill: parent
+                z: 1000
+                readonly property var janela: ApplicationWindow.window
+                enabled: !!janela && janela.descartandoCliqueNoMovimento === true
+                acceptedButtons: Qt.AllButtons
             }
         }
     }

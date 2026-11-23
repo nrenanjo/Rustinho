@@ -32,57 +32,80 @@ FocusScope {
         janela.voltar()
     }
 
-    ColumnLayout {
+    // BUG-20261120-FN34: em janela baixa (340 x 480 ou celular deitado), a tela
+    // inteira rola verticalmente para que os filtros, Categorias, busca e lista
+    // nunca fiquem inacessíveis abaixo da borda. Em janelas normais, o layout
+    // fixo permanece idêntico.
+    readonly property bool telaRolavel: Tema.baixo
+    readonly property bool telaMinima: Tema.baixo && Tema.largura < 420
+
+    Flickable {
+        id: rolagemDoFinanceiro
+        objectName: "rolagemDoFinanceiro"
         anchors.fill: parent
-        anchors.margins: Tema.margem
-        anchors.topMargin: Tema.margem - 12
-        spacing: 14
+        clip: true
+        interactive: tela.telaRolavel
+        contentWidth: width
+        contentHeight: tela.telaRolavel ? Math.max(height, corpoFinanceiro.implicitHeight + 2 * Tema.margem) : height
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { visible: tela.telaRolavel }
 
-        Cabecalho {
-            sensivel: true
-            titulo: "Financeiro"
-            subtitulo: "O que a loja deve, onde está o dinheiro e o que vem pela frente"
-            Layout.fillWidth: true
-            Botao {
-                visible: tela.secao === "pagar"
-                text: "Lançar conta"
-                icone: "mais"
-                tipo: "secundario"
-                onClicked: conteudo.item.lancar()
+        ColumnLayout {
+            id: corpoFinanceiro
+            x: Tema.margem
+            y: Tema.margem - 12
+            width: rolagemDoFinanceiro.width - 2 * Tema.margem - (tela.telaRolavel ? 10 : 0)
+            height: tela.telaRolavel ? Math.max(rolagemDoFinanceiro.height - (Tema.margem - 12) - Tema.margem, implicitHeight)
+                                     : rolagemDoFinanceiro.height - (Tema.margem - 12) - Tema.margem
+            spacing: tela.telaMinima ? 8 : 14
+
+            Cabecalho {
+                sensivel: true
+                titulo: "Financeiro"
+                subtitulo: tela.telaMinima ? "" : "O que a loja deve, onde está o dinheiro e o que vem pela frente"
+                Layout.fillWidth: true
+                Botao {
+                    visible: tela.secao === "pagar"
+                    text: "Lançar conta"
+                    icone: "mais"
+                    tipo: "secundario"
+                    onClicked: conteudo.item.lancar()
+                }
+                Botao {
+                    visible: tela.secao === "contas"
+                    text: "Nova conta"
+                    icone: "mais"
+                    tipo: "secundario"
+                    onClicked: conteudo.item.novaConta()
+                }
             }
-            Botao {
-                visible: tela.secao === "contas"
-                text: "Nova conta"
-                icone: "mais"
-                tipo: "secundario"
-                onClicked: conteudo.item.novaConta()
+
+            Pilulas {
+                modelo: [
+                    { id: "pagar", nome: "A pagar" },
+                    { id: "contas", nome: "Contas da loja" },
+                    { id: "cheques", nome: "Cheques" },
+                    { id: "fluxo", nome: "Fluxo de caixa" },
+                    { id: "comissoes", nome: "Comissões" }
+                ]
+                atual: tela.secao
+                onEscolhido: id => tela.secao = id
             }
-        }
 
-        Pilulas {
-            modelo: [
-                { id: "pagar", nome: "A pagar" },
-                { id: "contas", nome: "Contas da loja" },
-                { id: "cheques", nome: "Cheques" },
-                { id: "fluxo", nome: "Fluxo de caixa" },
-                { id: "comissoes", nome: "Comissões" }
-            ]
-            atual: tela.secao
-            onEscolhido: id => tela.secao = id
-        }
-
-        Loader {
-            id: conteudo
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            source: ({
-                pagar: "SecaoPagar.qml",
-                contas: "SecaoContas.qml",
-                cheques: "SecaoCheques.qml",
-                fluxo: "SecaoFluxo.qml",
-                comissoes: "SecaoComissoes.qml"
-            })[tela.secao]
-            onLoaded: item.forceActiveFocus()
+            Loader {
+                id: conteudo
+                Layout.fillWidth: true
+                Layout.fillHeight: !tela.telaRolavel
+                Layout.preferredHeight: tela.telaRolavel ? Math.max(360, item ? item.implicitHeight : 360) : -1
+                source: ({
+                    pagar: "SecaoPagar.qml",
+                    contas: "SecaoContas.qml",
+                    cheques: "SecaoCheques.qml",
+                    fluxo: "SecaoFluxo.qml",
+                    comissoes: "SecaoComissoes.qml"
+                })[tela.secao]
+                onLoaded: item.forceActiveFocus()
+            }
         }
     }
 

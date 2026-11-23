@@ -451,7 +451,9 @@ fn opcao_c_identificacao_duvidosa_vira_registro_provisorio_sem_duplicar_nem_fund
     let p601 = pasta_com(&l3, "n1", &[("nf601.xml", &nf601)]);
     let r601 = l3.ok("compra_importar", json!({ "caminho": p601 }));
     assert_eq!(r601["pecasCadastradas"], 1, "{r601}");
-    let peca601 = r601["compras"][0]["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
+    let id601 = r601["compras"][0]["id"].as_str().unwrap().to_string();
+    let f601 = l3.ok("compra_abrir", json!({ "id": id601 }));
+    let peca601 = f601["itens"][0]["peca"]["id"].as_str().unwrap().to_string();
 
     let p602 = pasta_com(&l3, "n2", &[("nf602.xml", &nf602)]);
     let r602 = l3.ok("compra_importar", json!({ "caminho": p602 }));
@@ -1084,7 +1086,9 @@ fn opcao_c_h9_ficha_motivo_pendencia_provisorias_e_previa_coerente() {
     let nf900 = acervo_compras("nf900.xml");
     let p = pasta_com(&l, "n900", &[("nf900.xml", &nf900)]);
     let r = l.ok("compra_importar", json!({ "caminho": p }));
-    let it0 = &r["compras"][0]["itens"][0];
+    let id900 = r["compras"][0]["id"].as_str().unwrap().to_string();
+    let c900 = l.ok("compra_abrir", json!({ "id": id900 }));
+    let it0 = &c900["itens"][0];
     assert!(
         it0["motivoPendencia"].as_str().unwrap_or("").contains("muito curto"),
         "H9: falta motivoPendencia legível no item: {it0}"
@@ -1299,4 +1303,172 @@ fn opcao_c_v3_v2_3_preserva_gtin_extra_e_v2_4_bloqueia_roubo_sem_corrigir() {
         .query_row("SELECT produto_id FROM produto_fornecedor WHERE codigo = 'F1-200'", [], |x| x.get(0))
         .unwrap();
     assert_eq!(dono_depois, dono_antes, "V2-4: vínculo original preservado");
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.19-dev.1 (Pacote 1): T110/P1, T110/N8, T059-R9
+// ---------------------------------------------------------------------------
+
+/// T110/P1: N3 com 3 cópias da mesma chave (sem protocolo + sem protocolo + autorizada,
+/// e sem protocolo + autorizada + autorizada): escolhe exatamente uma vez a cópia autorizada,
+/// sem contar duplicado nem deixar sobrando em `comprasNaoServe`.
+#[test]
+fn t110_p1_tres_copias_mesma_chave_prefere_autorizada() {
+    let ini = EXEMPLO.find("<NFe xmlns").unwrap();
+    let fim = EXEMPLO.find("</NFe>").unwrap() + "</NFe>".len();
+    let sem_protocolo = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n", &EXEMPLO[ini..fim]);
+
+    for (caso, arquivos) in [
+        ("sem-sem-com", [sem_protocolo.as_str(), sem_protocolo.as_str(), EXEMPLO]),
+        ("sem-com-com", [sem_protocolo.as_str(), EXEMPLO, EXEMPLO]),
+        ("sem-com-sem", [sem_protocolo.as_str(), EXEMPLO, sem_protocolo.as_str()]),
+        ("com-sem-sem", [EXEMPLO, sem_protocolo.as_str(), sem_protocolo.as_str()]),
+    ] {
+        let mut l = loja(&format!("t110-p1-{caso}"), LOJA_CNPJ);
+        let p = pasta_com(&l, "tres", &[("01.xml", arquivos[0]), ("02.xml", arquivos[1]), ("03.xml", arquivos[2])]);
+        let prev = l.ok("importar_previa", json!({ "arquivos": [p.clone()] }));
+        assert_eq!(prev["notas"].as_i64(), Some(1), "{caso}: {prev}");
+        assert_eq!(prev["comprasNovas"].as_i64(), Some(1), "{caso}: {prev}");
+        assert_eq!(prev["comprasNaoServe"].as_i64(), Some(0), "{caso}: {prev}");
+        let r = cadastrar(&mut l, &p, true);
+        assert_eq!(r["compras"], 1, "{caso}: {r}");
+        assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 1, "{caso}");
+    }
+}
+
+/// T110/N8: em pacote (pasta, .zip/.rar ou seleção múltipla), `compra_importar` devolve resumo enxuto
+/// (`id` + `numero`, sem `itens` pesados); em arquivo único, continua devolvendo a ficha completa.
+#[test]
+fn t110_n8_pacote_devolve_resumo_enxuto_e_sozinho_ficha_completa() {
+    let mut l = loja("t110-n8-pacote", LOJA_CNPJ);
+    let nf501 = acervo_compras("nf501.xml");
+    let nf502 = acervo_compras("nf502.xml");
+    let p = pasta_com(&l, "lote", &[("01_nf501.xml", &nf501), ("02_nf502.xml", &nf502)]);
+    let r = l.ok("compra_importar", json!({ "caminho": p }));
+    let compras = r["compras"].as_array().unwrap();
+    assert_eq!(compras.len(), 2, "{r}");
+    for c in compras {
+        assert!(!c["id"].as_str().unwrap_or("").is_empty(), "{c}");
+        assert!(!c["numero"].as_str().unwrap_or("").is_empty(), "{c}");
+        assert!(c.get("itens").is_none(), "T110/N8: pacote não deve carregar ficha pesada `itens`: {c}");
+    }
+
+    let mut l2 = loja("t110-n8-sozinho", LOJA_CNPJ);
+    let arq = arquivo(&l2, "unico");
+    let r2 = l2.ok("compra_importar", json!({ "caminho": arq }));
+    assert!(r2["compras"][0].get("itens").is_some(), "arquivo único mantém ficha completa: {r2}");
+}
+
+/// T059-R9: notas recusadas por CNPJ diferente nunca gravam seus dados em `operacao_feita`,
+/// nem quando vêm sozinhas nem em lote misto com notas válidas.
+#[test]
+fn t059_r9_conflito_cnpj_nunca_e_gravado_em_operacao_feita() {
+    // 1) Só conflito: nenhuma linha em `operacao_feita`.
+    let mut l1 = loja("t059-r9-so-conflito", OUTRO_CNPJ);
+    let a = arquivo(&l1, "conflito");
+    let r1 = l1.ok("compra_importar", json!({ "caminho": a, "chaveOperacao": "op-r9-so-conflito" }));
+    assert_eq!(r1["conflitos"].as_array().unwrap().len(), 1, "{r1}");
+    assert!(!r1["conflitos"][0]["chave"].as_str().unwrap_or("").is_empty(), "D-IMG-1: conflito leva chave: {r1}");
+    assert_eq!(
+        n(&l1, "SELECT COUNT(*) FROM operacao_feita WHERE comando = 'compra_importar'"),
+        0,
+        "T059-R9: conflito puro não pode gravar linha em operacao_feita"
+    );
+
+    // 2) Pacote misto (1 nota válida + 1 nota de outro CNPJ): usando `loja_cnpj = 77888999000181`,
+    // `vendas/nf13.xml` envolta no `<nfeProc>` com seu próprio DigestValue (dest=77888999000181) é compra válida
+    // e `compras/nf501.xml` (dest=11444777000161) é conflito real assinado.
+    // A resposta ao vivo devolve ambos, mas `operacao_feita` grava sempre `conflitos: []` (sem vazar CNPJ de terceiro).
+    let mut l2 = loja("t059-r9-misto", "77888999000181");
+    let nf13 = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/pki/xml/acervo/exportacao/vendas/nf13.xml"),
+    )
+    .unwrap();
+    let nfe_ini = nf13.find("<NFe").unwrap();
+    let nf_valida = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <nfeProc xmlns=\"http://www.portalfiscal.inf.br/nfe\" versao=\"4.00\">{}\
+         <protNFe versao=\"4.00\"><infProt><chNFe>35260911444777000161550010000000131000000941</chNFe>\
+         <cStat>100</cStat><dhRecbto>2026-09-25T10:01:00-03:00</dhRecbto><nProt>135260000000013</nProt>\
+         <digVal>HJzpHvrwjWQVVxmlf7ThyPuXoNQ=</digVal></infProt></protNFe></nfeProc>",
+        &nf13[nfe_ini..]
+    );
+    let nf_outro = acervo_compras("nf501.xml");
+    let p_misto = pasta_com(&l2, "misto", &[("01_valida.xml", &nf_valida), ("02_outro_cnpj.xml", &nf_outro)]);
+    let r2 = l2.ok("compra_importar", json!({ "caminho": p_misto, "chaveOperacao": "op-r9-misto" }));
+    assert_eq!(r2["compras"].as_array().unwrap().len(), 1, "{r2}");
+    assert_eq!(r2["conflitos"].as_array().unwrap().len(), 1, "{r2}");
+    let salvo: String = l2
+        .conexao()
+        .query_row(
+            "SELECT resultado FROM operacao_feita WHERE comando = 'compra_importar' ORDER BY feita_ms DESC LIMIT 1",
+            [],
+            |x| x.get(0),
+        )
+        .unwrap();
+    let v: Value = serde_json::from_str(&salvo).unwrap();
+    assert_eq!(v["conflitos"], json!([]), "T059-R9: operacao_feita não deve armazenar conflitos: {salvo}");
+    assert!(!salvo.contains(LOJA_CNPJ), "T059-R9: CNPJ de terceiro não pode aparecer em operacao_feita: {salvo}");
+}
+
+/// T110/N6 (benchmark sob demanda): pasta com 3.000 arquivos XML assinados em 10 subpastas
+/// (simulando exportação real com compras, repetições e outros documentos) medindo tempo,
+/// tamanho da resposta JSON (N8 enxuto) e pico de memória (VmHWM no Linux).
+/// Execute com: `cargo test --release -p rustinho-nucleo --test importacao_compartilhada t110_n6_benchmark_3000_xmls -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn t110_n6_benchmark_3000_xmls() {
+    fn rss_hwm_kib() -> u64 {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("VmHWM:"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|n| n.parse().ok())
+            })
+            .unwrap_or(0)
+    }
+
+    let mut l = loja("t110-n6-bench", LOJA_CNPJ);
+    let raiz = l.pasta.join("lote_3000");
+    let amostras = [
+        acervo_compras("nf501.xml"),
+        acervo_compras("nf502.xml"),
+        acervo_compras("nf503.xml"),
+        acervo_compras("nf900.xml"),
+        fixture_codigos("nf604_patral_gtin_tributavel.xml"),
+        EXEMPLO.to_string(),
+    ];
+    for i in 0..3000usize {
+        let sub = raiz.join(format!("sub_{:02}", i / 300));
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(format!("nota_{i:04}.xml")), &amostras[i % amostras.len()]).unwrap();
+    }
+    let caminho = raiz.display().to_string();
+
+    let hwm0 = rss_hwm_kib();
+    let t0 = std::time::Instant::now();
+    let prev = l.ok("importar_previa", json!({ "arquivos": [caminho.clone()] }));
+    let dt_prev = t0.elapsed();
+    let hwm1 = rss_hwm_kib();
+    assert_eq!(prev["notas"].as_i64(), Some(amostras.len() as i64), "{prev}");
+
+    let t1 = std::time::Instant::now();
+    let imp = l.ok("compra_importar", json!({ "caminho": caminho, "chaveOperacao": "bench-t110-n6" }));
+    let dt_imp = t1.elapsed();
+    let hwm2 = rss_hwm_kib();
+    let compras = imp["compras"].as_array().unwrap();
+    let json_bytes = serde_json::to_vec(&imp).unwrap().len();
+    assert_eq!(compras.len(), amostras.len(), "{imp}");
+    assert!(compras[0].get("itens").is_none(), "T110/N8 enxuto");
+    println!(
+        "T110/N6 (3000 XMLs assinados em 10 subpastas): previa={:.2}s | compra_importar={:.2}s | json_resp={:.1} KiB | VmHWM={:.1}->{:.1}->{:.1} MiB",
+        dt_prev.as_secs_f64(),
+        dt_imp.as_secs_f64(),
+        json_bytes as f64 / 1024.0,
+        hwm0 as f64 / 1024.0,
+        hwm1 as f64 / 1024.0,
+        hwm2 as f64 / 1024.0,
+    );
 }

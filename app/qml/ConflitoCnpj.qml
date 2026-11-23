@@ -78,13 +78,18 @@ Painel {
                 }
 
                 Nota {
-                    text: janelaConflito.conflito ? janelaConflito.conflito.arquivo : ""
+                    text: janelaConflito.conflito
+                          ? (janelaConflito.conflito.arquivos && janelaConflito.conflito.arquivos.length > 1
+                             ? janelaConflito.conflito.arquivos.join(" · ")
+                             : janelaConflito.conflito.arquivo)
+                          : ""
                     font.pixelSize: 14
                     elide: Text.ElideMiddle
                     wrapMode: Text.NoWrap
                     Layout.fillWidth: true
                 }
 
+                // Ponto 9 do doc 12: os dois cartões de CNPJ com mesmo topo e mesma altura.
                 GridLayout {
                     columns: Tema.estreito ? 1 : 2
                     columnSpacing: 14
@@ -95,6 +100,8 @@ Painel {
                         corTitulo: Tema.verdeEscuro
                         color: Tema.verde
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
                         Layout.preferredWidth: 1
                         Text {
                             text: Tema.sigilo(janelaConflito.conflito ? janelaConflito.conflito.lojaDocumento : "")
@@ -109,12 +116,15 @@ Painel {
                             visible: text !== ""
                             Layout.fillWidth: true
                         }
+                        Item { Layout.fillHeight: true }
                     }
                     Faixa {
                         titulo: "CNPJ no XML (destinatário)"
                         corTitulo: Tema.vermelho
                         color: Tema.rosa
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
                         Layout.preferredWidth: 1
                         Text {
                             text: Tema.sigilo(janelaConflito.conflito ? janelaConflito.conflito.destinatarioDocumento : "")
@@ -129,7 +139,15 @@ Painel {
                             visible: text !== ""
                             Layout.fillWidth: true
                         }
+                        Item { Layout.fillHeight: true }
                     }
+                }
+                // D-IMG-3: avisa como revelar os CNPJs sem mudar a regra de sigilo ("Mostrar valores").
+                Nota {
+                    visible: Tema.oculto
+                    text: "Os CNPJs estão escondidos. Use “Mostrar valores” no canto superior para comparar."
+                    font.pixelSize: 13
+                    Layout.fillWidth: true
                 }
 
                 Faixa {

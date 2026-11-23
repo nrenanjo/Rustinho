@@ -559,6 +559,8 @@ pub struct Servico {
 
 /// Trava `<banco>.trava` só para este programa. O sistema solta sozinho se
 /// o Rustinho fechar de qualquer jeito (até travando).
+/// BUG-20261119-1J8B: breve tolerância (~90 ms) para fechamento/reabertura imediata
+/// ou janela transitória `fork→exec` de subprocessos sem atrasar a recusa real.
 fn travar(caminho: &Path) -> Resultado<std::fs::File> {
     let mut nome = caminho.as_os_str().to_owned();
     nome.push(".trava");
@@ -568,7 +570,15 @@ fn travar(caminho: &Path) -> Resultado<std::fs::File> {
         .write(true)
         .open(std::path::PathBuf::from(nome))
         .map_err(|e| Erro::validacao(format!("Não deu para usar a pasta dos dados: {e}")))?;
-    resultado_da_trava(tentar_travar(&f))?;
+    let mut ultimo = tentar_travar(&f);
+    for _ in 0..6 {
+        if !matches!(ultimo, Err(std::fs::TryLockError::WouldBlock)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(15));
+        ultimo = tentar_travar(&f);
+    }
+    resultado_da_trava(ultimo)?;
     Ok(f)
 }
 
@@ -1292,7 +1302,18 @@ impl Servico {
             }
         }
         if let (Some(op), Ok(resposta)) = (&operacao, &r) {
-            if EXCECOES_R0.contains(&comando) {
+            // T059-R9: quando `compra_importar` só devolveu conflitos de outro CNPJ ou erros
+            // (nenhuma compra, peça ou pendência gravada), nada foi gravado no banco; remove a
+            // marca "em curso" e não persiste o payload de conflitos em `operacao_feita`.
+            let compra_sem_gravacao = comando == "compra_importar"
+                && resposta["compras"].as_array().is_some_and(Vec::is_empty)
+                && resposta["pecasCadastradas"].as_i64().unwrap_or(0) == 0
+                && resposta["pendenciasIdentificacao"].as_i64().unwrap_or(0) == 0;
+            if compra_sem_gravacao {
+                if let Err(e) = crate::operacoes::desistir(&self.banco.conn, op) {
+                    crate::registro::anotar(&format!("T059-R9: {comando}: não tirei a operação em curso: {e}"));
+                }
+            } else if EXCECOES_R0.contains(&comando) {
                 self.feitas.push_back(op.chave);
                 while self.feitas.len() > CHAVES_GUARDADAS {
                     self.feitas.pop_front();
@@ -4093,5 +4114,29 @@ mod testes {
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(r["dados"]["senhaFraca"], false);
         assert_eq!(chamar(&mut s, "sync_ler", "{}")["dados"]["senhaFraca"], false);
+    }
+
+    /// BUG-1J8B: trava transitória liberada durante o retry curto permite reabertura;
+    /// trava realmente presa por outra instância continua sendo recusada.
+    #[test]
+    fn t113_trava_resiste_a_liberacao_transitoria_e_recusa_presa() {
+        let pasta = std::env::temp_dir().join(format!("rustinho-trava-1j8b-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let banco = pasta.join("dados.db");
+
+        // 1) Trava realmente presa -> recusa.
+        let t1 = travar(&banco).expect("primeira trava");
+        let err = travar(&banco).unwrap_err();
+        assert!(err.to_string().contains("já está aberto"), "{err}");
+
+        // 2) Trava liberada em 35 ms (simula encerramento/exec imediato) -> retry curto consegue.
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(35));
+            drop(t1);
+        });
+        let t2 = travar(&banco).expect("retry curto deve adquirir trava recém-liberada");
+        h.join().unwrap();
+        drop(t2);
+        std::fs::remove_dir_all(&pasta).ok();
     }
 }

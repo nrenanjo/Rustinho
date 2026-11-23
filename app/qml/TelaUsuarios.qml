@@ -182,15 +182,27 @@ FocusScope {
                         anchors.rightMargin: 20
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 0
-                        Text {
-                            text: linha.modelData.nome + (linha.modelData.voce ? "  (você)" : "") + (linha.modelData.ativo ? "" : "  · desativado")
-                            textFormat: Text.PlainText
-                            color: linha.aberto ? Tema.tintaAtual : Tema.tintaDaFaixa(linha.par)
-                            font.family: Tema.titulo
-                            font.weight: Font.Bold
-                            font.pixelSize: 24
-                            elide: Text.ElideRight
+                        RowLayout {
+                            spacing: 8
                             Layout.fillWidth: true
+                            Text {
+                                text: linha.modelData.nome + (linha.modelData.voce ? "  (você)" : "") + (linha.modelData.ativo ? "" : "  · desativado")
+                                textFormat: Text.PlainText
+                                color: linha.aberto ? Tema.tintaAtual : Tema.tintaDaFaixa(linha.par)
+                                font.family: Tema.titulo
+                                font.weight: Font.Bold
+                                font.pixelSize: 24
+                                elide: Text.ElideRight
+                                Layout.minimumWidth: 0
+                                Layout.fillWidth: true
+                            }
+                            // DP-27 (0.9.19-dev.1): marca clara de gerente na lista de Usuários.
+                            Chip {
+                                visible: linha.modelData.gerente === true
+                                texto: "Gerente"
+                                color: linha.aberto ? Tema.chipAtual : Tema.verde
+                                corTexto: linha.aberto ? Tema.tintaAtual : Tema.verdeEscuro
+                            }
                         }
                         Text {
                             text: tela.quando(linha.modelData.ultimoAcesso) + (linha.modelData.senhaFraca ? "  ·  senha curta" : "")

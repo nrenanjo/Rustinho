@@ -324,12 +324,30 @@ def cenario(placar, fotos):
             # J5. "Marcar todas como pedidas" pede confirmação antes de gravar.
             esperar_textos(r, lambda t: not aviso_em(t), 8)
             time.sleep(0.6)
-            todas = [(x, y) for x, y, tx in r.textos() if tx == "Marcar todas como pedidas" and na_janela(y)]
+
+            def botao_marcar_todas(txs):
+                # No celular, o topo com as pílulas ("Parados") fica acima da área útil da lista:
+                # só conta o botão que está realmente visível abaixo das pílulas (fora do recorte de cima).
+                topo_lista = 60
+                if nav.CELULAR:
+                    pilulas = [y for _, y, t in txs if t in ("Parados", "Mais vendidos")]
+                    if pilulas:
+                        topo_lista = max(pilulas) + 28
+                return [(x, y) for x, y, tx in txs if tx == "Marcar todas como pedidas" and topo_lista <= y < ALTURA[0] - 30]
+
+            todas = botao_marcar_todas(r.textos())
+            for _ in range(6):
+                if todas or not nav.CELULAR:
+                    break
+                xdo("mousemove", "180", "520", "click", "--repeat", "3", "--delay", "80", "4")
+                time.sleep(0.6)
+                todas = botao_marcar_todas(r.textos())
             if not ok("J5: o botão \"Marcar todas como pedidas\" à vista", todas, r.foto("-12")):
                 return
             x, y = todas[0]
             if nav.CELULAR:
-                x = min(x, nav.CELULAR_DP[0] - 20)  # no celular, o botão sai cortado pela direita (bug 3M90)
+                ok("J5 (BUG-3M90): \"Marcar todas como pedidas\" cabe inteiro na largura do celular",
+                   0 <= x <= nav.CELULAR_DP[0], f"x={x}")
             antes = pedidas(pasta)
             r.clicar_em(x, y)
             time.sleep(1.2)

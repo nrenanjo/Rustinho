@@ -50,11 +50,19 @@ FocusScope {
     // toda) e as linhas sumiam da vista. Nas recargas por ação, a lista volta à mesma LINHA (e não ao mesmo pixel: as
     // linhas têm alturas diferentes e são criadas sob demanda, e o mesmo contentY caía sete linhas adiante).
     function recarregarNoLugar() {
-        const i = Tema.celular ? lista.indexAt(lista.width / 2, lista.contentY + 1) : -1
-        // R-2 da re-revisão 3 do Fable: com a lista pouco rolada, o alto da área ainda é o topo da seção (o cabeçalho
-        // da lista: a busca e as pílulas), e ali não há linha (i < 0). Nesse caso a lista volta ao mesmo deslocamento
-        // em pixels, que vale porque o topo não muda de altura com a ação.
-        const deslocamento = Tema.celular && i < 0 ? lista.contentY - lista.originY : -1
+        // BUG-20261118-K2RV: distingue o cabeçalho (topo da seção) do vão de `spacing` entre duas linhas.
+        let i = -1
+        let deslocamento = -1
+        if (Tema.celular) {
+            const fimTopo = lista.headerItem ? lista.headerItem.y + lista.headerItem.height : lista.originY
+            if (lista.contentY < fimTopo - 1) {
+                deslocamento = lista.contentY - lista.originY
+            } else {
+                i = lista.indexAt(lista.width / 2, lista.contentY + 1)
+                if (i < 0)
+                    i = lista.indexAt(lista.width / 2, lista.contentY + lista.spacing + 4)
+            }
+        }
         carregar()
         if (i >= 0)
             Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
@@ -250,21 +258,50 @@ FocusScope {
         id: cTitulo
         Item {
             readonly property var d: parent ? parent.dado : null
-            implicitHeight: 38
+            readonly property bool mostraBotao: !!d && d.acao && secao.dados && secao.dados.encomendas.length > 1
+            // BUG-20261118-3M90: em janela estreita (360 px), título e botão quebram em duas linhas sem cortar pela direita.
+            readonly property bool empilhar: mostraBotao && width < 440
+            implicitHeight: empilhar ? conteudoEmpilhado.implicitHeight + 8 : 38
             RowLayout {
+                visible: !empilhar
                 anchors.fill: parent
                 anchors.leftMargin: 4
                 anchors.rightMargin: 4
                 Rotulo { text: d ? d.texto : ""; Layout.alignment: Qt.AlignBottom; Layout.bottomMargin: 4 }
                 Item { Layout.fillWidth: true }
                 Botao {
-                    visible: !!d && d.acao && secao.dados && secao.dados.encomendas.length > 1
+                    visible: mostraBotao
                     text: "Marcar todas como pedidas"
                     tipo: "discreto"
                     altura: 32
                     font.pixelSize: 14
                     // Decisão 2c do proprietário (18/11/2026, bug YVZ4): pede
                     // confirmação antes de marcar todas.
+                    onClicked: {
+                        const ids = secao.dados.encomendas.map(e => e.id)
+                        secao.janela.confirmar("Marcar as " + ids.length + " encomendas como pedidas?",
+                            "Todas as encomendas desta lista ficam como pedidas ao fornecedor.",
+                            "Marcar todas", () => secao.pedidas(ids))
+                    }
+                }
+            }
+            ColumnLayout {
+                id: conteudoEmpilhado
+                visible: empilhar
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 4
+                anchors.rightMargin: 4
+                spacing: 4
+                Rotulo { text: d ? d.texto : ""; Layout.fillWidth: true }
+                Botao {
+                    visible: mostraBotao
+                    text: "Marcar todas como pedidas"
+                    tipo: "discreto"
+                    altura: 32
+                    font.pixelSize: 14
+                    Layout.alignment: Qt.AlignLeft
                     onClicked: {
                         const ids = secao.dados.encomendas.map(e => e.id)
                         secao.janela.confirmar("Marcar as " + ids.length + " encomendas como pedidas?",

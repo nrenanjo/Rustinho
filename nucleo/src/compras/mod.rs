@@ -108,6 +108,8 @@ pub const CAMPO_OUTRO_CNPJ: &str = "nota.outro_cnpj";
 pub struct ConflitoCnpj {
     /// O nome do arquivo (dentro de um .zip: "pacote.zip › nota.xml").
     pub arquivo: String,
+    /// D-IMG-1: chave de acesso da NF-e (44 dígitos) para deduplicar cópias da mesma nota na tela.
+    pub chave: String,
     pub loja_nome: String,
     pub loja_documento: String,
     pub emitente_nome: String,
@@ -138,6 +140,7 @@ pub fn conflito_cnpj(conn: &Connection, arquivo: &str, xml: &str) -> Resultado<C
     let nota = nfe_xml::ler(xml).map_err(Erro::validacao)?;
     Ok(ConflitoCnpj {
         arquivo: arquivo.to_string(),
+        chave: nota.chave.clone(),
         loja_nome: config::nome_loja(conn)?,
         loja_documento: documento::escrever(&config::ler(conn, "loja_cnpj")?.unwrap_or_default()),
         emitente_nome: nota.emitente.nome.clone(),
@@ -292,6 +295,7 @@ pub(crate) fn analisar_lote<'a>(loja_cnpj: &str, xmls: impl Iterator<Item = &'a 
 /// Resultado da criação de um rascunho de compra (T111 — Opção C).
 pub(crate) struct CompraCriada {
     pub id: String,
+    pub numero: String,
     pub pecas_cadastradas: i64,
     pub pendencias_identificacao: i64,
 }
@@ -486,7 +490,7 @@ pub(crate) fn criar_compra_com_opcoes(
         &id,
         &[format!("NF {} · {} itens · {}", nota.numero, itens.len(), numeros::escrever_dinheiro(nota.total))],
     )?;
-    Ok(CompraCriada { id, pecas_cadastradas, pendencias_identificacao })
+    Ok(CompraCriada { id, numero: nota.numero.clone(), pecas_cadastradas, pendencias_identificacao })
 }
 
 /// Verifica se já existe registro provisório pendente de ambiguidade/conflito
@@ -2620,7 +2624,14 @@ mod comandos {
                     tx.commit()?;
                     pecas_cadastradas += c.pecas_cadastradas;
                     pendencias_identificacao += c.pendencias_identificacao;
-                    fichas.push(compras::ficha(p.conn, &c.id)?);
+                    // T110-N8: em pacote (pasta, .zip/.rar ou seleção múltipla), devolve só o resumo
+                    // enxuto (`id` + `numero`) para evitar carregar centenas/milhares de fichas completas
+                    // na memória de uma só vez.
+                    if pacote {
+                        fichas.push(json!({ "id": c.id, "numero": c.numero }));
+                    } else {
+                        fichas.push(json!(compras::ficha(p.conn, &c.id)?));
+                    }
                 }
                 // Dentro de um pacote, eventos (cancelamento, carta de
                 // correção) e outros XMLs que não são nota são pulados. T081
@@ -2662,9 +2673,16 @@ mod comandos {
         }
         // R0, EXCEÇÃO documentada: um pacote grava uma transação por nota; a marca vai numa transação
         // própria no fim. Cada nota já é recusada se repetida (a chave de acesso de 44 dígitos, acima).
-        let tx = p.conn.transaction()?;
-        marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
-        tx.commit()?;
+        // T059-R9: notas recusadas por outro CNPJ nunca são gravadas no banco, nem por 30 dias em
+        // `operacao_feita` (se só houve conflitos/erros, não cria linha; em lote misto, grava sem o
+        // payload de `conflitos`), honrando literalmente "A nota não foi importada e nada foi gravado".
+        if !fichas.is_empty() || pecas_cadastradas > 0 || pendencias_identificacao > 0 {
+            let mut resposta_registro = resposta.clone();
+            resposta_registro["conflitos"] = json!([]);
+            let tx = p.conn.transaction()?;
+            marcar_feita(&tx, p.operacao.as_ref(), &resposta_registro)?;
+            tx.commit()?;
+        }
         Ok(resposta)
     }
 

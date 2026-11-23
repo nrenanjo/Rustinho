@@ -37,11 +37,19 @@ FocusScope {
     // toda) e as linhas sumiam da vista. Nas recargas por ação, a lista volta à mesma LINHA (e não ao mesmo pixel: as
     // linhas têm alturas diferentes e são criadas sob demanda, e o mesmo contentY caía sete linhas adiante).
     function recarregarNoLugar() {
-        const i = Tema.celular ? lista.indexAt(lista.width / 2, lista.contentY + 1) : -1
-        // R-2 da re-revisão 3 do Fable: com a lista pouco rolada, o alto da área ainda é o topo da seção (o cabeçalho
-        // da lista: a busca e as pílulas), e ali não há linha (i < 0). Nesse caso a lista volta ao mesmo deslocamento
-        // em pixels, que vale porque o topo não muda de altura com a ação.
-        const deslocamento = Tema.celular && i < 0 ? lista.contentY - lista.originY : -1
+        // BUG-20261118-K2RV: distingue o cabeçalho (topo da seção) do vão de `spacing` entre duas linhas.
+        let i = -1
+        let deslocamento = -1
+        if (Tema.celular) {
+            const fimTopo = lista.headerItem ? lista.headerItem.y + lista.headerItem.height : lista.originY
+            if (lista.contentY < fimTopo - 1) {
+                deslocamento = lista.contentY - lista.originY
+            } else {
+                i = lista.indexAt(lista.width / 2, lista.contentY + 1)
+                if (i < 0)
+                    i = lista.indexAt(lista.width / 2, lista.contentY + lista.spacing + 4)
+            }
+        }
         carregar()
         if (i >= 0)
             Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
@@ -516,7 +524,6 @@ FocusScope {
                 }
                 Botao {
                     text: "Procurar"
-                    icone: "busca"
                     tipo: "secundario"
                     Layout.alignment: Qt.AlignBottom
                     onClicked: escolher.abrirCom("", nPeca.texto)

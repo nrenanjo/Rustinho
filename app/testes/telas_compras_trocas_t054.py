@@ -82,13 +82,8 @@ TAMANHOS_MENORES = ((1024, 600), (800, 520), (640, 480), (340, 480))
 
 resultados = []
 
-# Falhas conhecidas que NÃO vêm destas mudanças (já estavam no código publicado,
-# `06520fa`): saem na lista, mas não reprovam o roteiro. Se uma delas passar, o
-# roteiro reprova (é hora de tirá-la daqui).
-ESPERADAS = {
-    "F4-340x480": "BUG-20261120-FN34: na janela mínima (340 x 480), a tela Financeiro inteira não cabe e não rola; "
-                  "os filtros e a busca de A pagar ficam abaixo da borda (já era assim antes da T056)",
-}
+# Falhas conhecidas que NÃO vêm destas mudanças: vazia após correção do BUG-20261120-FN34 (0.9.19-dev.1).
+ESPERADAS = {}
 
 
 def conferir(codigo, nome, certo, detalhe=""):
@@ -179,8 +174,9 @@ def faixa_visivel(t):
     fora da lista)."""
     lista = u.geos(t).get("listaNaoImportadas")
     if lista:
-        # A lista de verdade (T054-R6 da revisão): o meio da linha com 20 de folga dentro dela.
-        return lista[1] + 20, lista[1] + lista[3] - 20
+        # A lista de verdade (T054-R6 + D-IMG-4): em linhas de 2 andares (fornecedor/nota + arquivo embaixo),
+        # o nome do arquivo da última linha fica ~15 px acima da borda inferior, 100% visível.
+        return lista[1] + 10, lista[1] + lista[3] - 8
     # O programa de antes (06520fa) não tem a lista: a conta pelas medidas do layout.
     titulo = achar(t, "Não importad")
     busca = achar(t, "Fornecedor, número da nota ou peça")
@@ -194,7 +190,8 @@ def linha_da_nota(t, numero):
 
 
 def botao_na_linha(t, texto, y):
-    return [(x, by, tx) for x, by, tx in igual(t, texto) if abs(by - y) <= 14]
+    # D-IMG-4: a linha agora mostra fornecedor/nota em destaque acima do arquivo (2 linhas de texto).
+    return [(x, by, tx) for x, by, tx in igual(t, texto) if abs(by - y) <= 26]
 
 
 def ir_ao_fim(tela, rr, ultimo, limite=40):
@@ -471,12 +468,25 @@ def casos_financeiro(modelo, fotos, secao, w, h, completo):
             rr.foto("-2-busca")
             conferir(f"{nome}3", "a busca recebe o texto", achar(t, "energia"), f"{achar(t, 'energia')[:1]}")
         else:
+            # BUG-20261120-FN34: na janela mínima (340 x 480), a tela Financeiro rola verticalmente
+            # até os filtros, Categorias e a busca ficarem inteiros dentro da janela.
+            if secao == "pagar" and h < 560:
+                rc0 = retangulo(t, "Categorias")
+                if not (rc0 and rc0[1] + rc0[3] <= wh and dica and dica[0][1] <= wh):
+                    tela.rolar(ww // 2, wh // 2, 12, para_baixo=True)
+                    t = rr.textos()
+                    rr.foto("-1-rolado")
+                    fs = [igual(t, f) for f in filtros]
+                    rd = [r for r in u.rets(t) if simples(r[6]).startswith(simples(dica_txt[:30]))]
+                    dica = achar(t, dica_txt[:30])
+                    copiar = igual(t, "Copiar a busca")
+                    acima = all(fs) and dica and max(f[0][1] for f in fs) + 20 < dica[0][1]
             larg_busca = rd[0][2] if rd else 0
-            dentro = all(fs) and all(0 <= r[0] and r[0] + r[2] <= ww + 1 for f in filtros
-                                     for r in [retangulo(t, f)] if r) and copiar and copiar[-1][0] < ww
+            dentro = all(fs) and all(0 <= r[0] and r[0] + r[2] <= ww + 1 and 0 <= r[1] and r[1] + r[3] <= wh + 1
+                                     for f in filtros for r in [retangulo(t, f)] if r) and copiar and copiar[-1][0] < ww
             if secao == "pagar":
                 rc = retangulo(t, "Categorias")
-                dentro = dentro and rc and rc[0] + rc[2] <= ww + 1 and rc[1] + rc[3] <= wh
+                dentro = dentro and rc and rc[0] + rc[2] <= ww + 1 and 0 <= rc[1] and rc[1] + rc[3] <= wh + 1
             conferir(f"{nome}4-{w}x{h}", "filtros e busca dentro da janela, a busca embaixo e larga" + sufixo,
                      acima and dentro and copiar and rd and copiar[-1][0] - rd[0][0] > 0.5 * (ww - 64),
                      f"filtros {[f[:1] for f in fs]}, dica {rd[:1]}, copiar {copiar[-1:]}, janela {ww} x {wh}"

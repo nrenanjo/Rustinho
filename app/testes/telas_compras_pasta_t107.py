@@ -35,7 +35,7 @@ imp.TELA = base.TELA
 TELA = base.TELA
 QML = os.path.join(RAIZ, "app", "qml", "TelaCompras.qml")
 TITULO_PASTA = "Escolha a pasta com os XMLs das notas de compra"
-TITULO_ARQUIVOS = "Escolha o XML da nota de compra"
+TITULO_ARQUIVOS = "Escolha os XMLs das notas de compra"
 NOTA = "nota-da-subpasta.xml"
 
 

@@ -243,14 +243,22 @@ def main():
             f = r.foto("-6d")
             ok("arrasto curto não muda nada", marca(pasta, "minimizado", "conflitos") == antes
                and not r.tem(TEXTO_ATENCAO), f)
-            # 12. Tema escuro: o triângulo vira o PNG branco, sem reiniciar.
-            # (0.9.18: três botões — sol, lua, planeta —, achados pelo nome.)
+            # 12. P-NOTIF (0.9.19-dev.1): padrão visual FIXO (rosa/pêssego + triângulo escuro) nos 3 temas!
             lua = r.achar("Tema escuro")
             xdo("mousemove", str(lua[0]), str(lua[1]), "click", "1")
             time.sleep(1.5)
             f = r.foto("-12-escuro")
-            canto = canto_do_triangulo(f, r.achar(PAGAR))
-            ok("12: tema escuro, triângulo branco no quadrado", max(canto) > 190, f"{f} brilho máximo {max(canto)}")
+            canto_escuro = canto_do_triangulo(f, r.achar(PAGAR))
+            ok("12: tema escuro mantém padrão fixo (triângulo escuro sobre fundo rosa/pêssego)",
+               min(canto_escuro) < 70, f"{f} brilho mínimo {min(canto_escuro)}")
+            roxo = r.achar("Planeta Roxo")
+            if roxo:
+                xdo("mousemove", str(roxo[0]), str(roxo[1]), "click", "1")
+                time.sleep(1.5)
+                f_roxo = r.foto("-12-roxo")
+                canto_roxo = canto_do_triangulo(f_roxo, r.achar(PAGAR))
+                ok("12: Planeta Roxo mantém padrão fixo (triângulo escuro sobre fundo rosa/pêssego)",
+                   min(canto_roxo) < 70, f"{f_roxo} brilho mínimo {min(canto_roxo)}")
             sol = r.achar("Tema claro")
             xdo("mousemove", str(sol[0]), str(sol[1]), "click", "1")
             time.sleep(1)

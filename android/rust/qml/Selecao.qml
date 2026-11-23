@@ -100,12 +100,25 @@ ColumnLayout {
             width: combo.width
             padding: 4
             implicitHeight: Math.min(contentItem.implicitHeight + 8, 340)
-            contentItem: ListView {
-                clip: true
-                implicitHeight: contentHeight
-                model: combo.popup.visible ? combo.delegateModel : null
-                currentIndex: combo.highlightedIndex
-                boundsBehavior: Flickable.StopAtBounds
+            contentItem: Item {
+                implicitHeight: listaOpcoes.contentHeight
+                ListView {
+                    id: listaOpcoes
+                    anchors.fill: parent
+                    clip: true
+                    implicitHeight: contentHeight
+                    model: combo.popup.visible ? combo.delegateModel : null
+                    currentIndex: combo.highlightedIndex
+                    boundsBehavior: Flickable.StopAtBounds
+                }
+                // BUG-20261118-54N7: descarta cliques na lista enquanto as telas se movem (N6).
+                MouseArea {
+                    anchors.fill: parent
+                    z: 1000
+                    readonly property var janela: ApplicationWindow.window
+                    enabled: !!janela && janela.descartandoCliqueNoMovimento === true
+                    acceptedButtons: Qt.AllButtons
+                }
             }
             background: Rectangle {
                 color: Tema.papel

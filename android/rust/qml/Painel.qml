@@ -29,8 +29,8 @@ Popup {
                                                        - 2 * (Tema.estreito ? 8 : 16))
     height: Math.min(implicitHeight, alturaMaxima)
     padding: Tema.estreito ? 18 : 30
-    // O conteúdo começa logo abaixo da área de toque da seta.
-    topPadding: mostraSeta ? setaDoPainel.y + setaDoPainel.height : padding
+    // O conteúdo começa logo abaixo da área de toque da seta, com folga visual (doc 12, ponto 10).
+    topPadding: mostraSeta ? setaDoPainel.y + setaDoPainel.height + 8 : padding
     // T058 (pedido do proprietário, 20/11/2026): a janelinha com passos (ex.:
     // a pendência aberta dentro da lista de pendências) dá a função
     // voltarUmPasso, que volta um passo e devolve true; quando não há passo
@@ -85,12 +85,29 @@ Popup {
     }
     // O pop-up herda as cores da janela, não da tela: diz a sua superfície.
     palette.window: Tema.superficie(painel.cor)
-    T.Overlay.modal: Rectangle { color: Tema.veu }
+    T.Overlay.modal: Rectangle {
+        color: Tema.veu
+        // BUG-20261120-TJ8X: bloqueia tanto MouseArea quanto TapHandler da tela atrás do véu modal.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            hoverEnabled: true
+        }
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            grabPermissions: PointerHandler.CanTakeOverFromAnything
+        }
+    }
     background: Rectangle {
         // Os testes das telas sabem por este nome que há uma janelinha aberta.
         objectName: "fundoDaJanelinha"
         color: painel.cor
         radius: Tema.raio + 3
+        // BUG-20261120-TJ8X: absorve toques no fundo da janelinha para não vazarem a TapHandlers abaixo.
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            grabPermissions: PointerHandler.CanTakeOverFromAnything
+        }
         Seta {
             id: setaDoPainel
             visible: painel.mostraSeta

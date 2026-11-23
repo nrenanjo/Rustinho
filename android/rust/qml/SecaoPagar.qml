@@ -54,15 +54,18 @@ FocusScope {
 
     Timer { id: espera; interval: 200; onTriggered: secao.carregar() }
 
+    implicitHeight: corpoPagar.implicitHeight
+
     ColumnLayout {
+        id: corpoPagar
         anchors.fill: parent
-        spacing: 12
+        spacing: Tema.baixo ? 8 : 12
 
         Linha {
             // T042: por cima da linha da barra de pesquisa logo abaixo: o halo da barra passa atrás, não por cima.
             z: 1
             colunasEstreito: 2
-            spacing: 12
+            spacing: Tema.baixo ? 8 : 12
             Layout.fillWidth: true
             CartaoNumero {
                 rotulo: "Total a pagar"
@@ -90,8 +93,8 @@ FocusScope {
         // T056 (pedido do proprietário, 20/11/2026, com Orçamentos como
         // referência): os filtros numa linha própria, com Categorias à direita
         // (fora da busca); embaixo, a busca na largura toda.
-        RowLayout {
-            spacing: 14
+        Flow {
+            spacing: Tema.largura < 420 ? 8 : 14
             Layout.fillWidth: true
             Pilulas {
                 pequenas: true
@@ -122,6 +125,7 @@ FocusScope {
             id: lista
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: Tema.baixo ? 160 : 0
             clip: true
             spacing: 6
             model: secao.painel ? secao.painel.parcelas : []

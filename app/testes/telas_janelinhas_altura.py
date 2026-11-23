@@ -86,20 +86,25 @@ def rotulo_ret(r, rotulo):
 
 
 def campos_da_janelinha(r):
-    """Os campos (TOQUE:campo) da janelinha aberta: os informados depois da linha GEO:fundoDaJanelinha (o programa
-    informa primeiro a tela de trás, depois a janelinha e os itens dela). None se não há janelinha nas medidas. Lê as
-    linhas na ordem do programa nos dois desenhos (no celular, alt.medidas junta as GEO: no fim e perde a ordem).
-    O marcador é o nome que o Painel.qml dá ao fundo da janelinha para os testes. Não serve GEO:Painel: nenhum
-    objectName do programa a produz; ela aparece no Qt 6.12 e não no Qt 6.8.3 dos pacotes, e a CI 44835430265
-    reprovou por isso (20/11)."""
+    """Os campos (TOQUE:campo) da janelinha aberta: os informados depois da linha GEO:fundoDaJanelinha
+    E geograficamente inteiros dentro do retângulo da janelinha (T054-C2-R3: não depende apenas da ordem do percurso).
+    None se não há janelinha nas medidas."""
     if nav.CELULAR:
         r._ponteiro_dentro()
-    out, achou = [], False
+    out, achou, fundo = [], False, None
     for _x, _y, t in nav.base.Rustinho.textos(r):
         if t.startswith("GEO:fundoDaJanelinha:"):
+            partes = [float(v) for v in t[len("GEO:fundoDaJanelinha:"):].split(",")[:4]]
+            fundo = tuple(partes) if len(partes) == 4 else None
             out, achou = [], True
         elif achou and t.startswith("TOQUE:campo|"):
-            out.append(tuple(float(v) for v in t.split("|")[4].split(",")))
+            cx, cy, cw, ch = (float(v) for v in t.split("|")[4].split(","))
+            if fundo is None:
+                out.append((cx, cy, cw, ch))
+            else:
+                fx, fy, fw, fh = fundo
+                if cx >= fx - 1 and cy >= fy - 1 and cx + cw <= fx + fw + 1 and cy + ch <= fy + fh + 1:
+                    out.append((cx, cy, cw, ch))
     return out if achou else None
 
 

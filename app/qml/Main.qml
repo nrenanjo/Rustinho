@@ -945,7 +945,27 @@ ApplicationWindow {
             }
         }
     }
+    readonly property bool descartandoCliqueNoMovimento: cliqueDescartado.running
     readonly property bool descartandoClique: cliqueDescartado.running || cliqueDescartadoNaLista.running
+    readonly property bool temJanelinhaAberta: janelinhasAbertas.length > 0
+    // BUG-20261120-TJ8X: enquanto qualquer janelinha modal estiver aberta, intercepta
+    // ponteiro/TapHandler sobre a pilha (sem desabilitar a pilha, pois as janelinhas são
+    // filhas das telas e renderizam no Overlay).
+    Item {
+        objectName: "escudoDeJanelinha"
+        anchors.fill: pilha
+        z: 900
+        visible: janela.temJanelinhaAberta
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            hoverEnabled: true
+        }
+        TapHandler {
+            acceptedButtons: Qt.AllButtons
+            grabPermissions: PointerHandler.CanTakeOverFromAnything
+        }
+    }
     MouseArea {
         objectName: "cliqueDescartadoNoMovimento"
         anchors.fill: pilha

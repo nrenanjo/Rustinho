@@ -345,14 +345,15 @@ Painel {
             if (d.clientes > 0) partes.push(d.clientes + (d.clientes === 1 ? " cliente" : " clientes"))
             if (d.fornecedores > 0) partes.push(d.fornecedores + (d.fornecedores === 1 ? " fornecedor" : " fornecedores"))
             if (d.pecas > 0) partes.push(d.pecas + (d.pecas === 1 ? " peça" : " peças"))
-            // N5 da 2ª conferência da T108: só com notas para Compras, sem o "Nada novo para cadastrar".
+            // N5 / T110-P3: só com notas para Compras, sem "Nada novo para cadastrar" e sem espaço inicial.
             let msg = partes.length > 0 ? "Cadastrados: " + partes.join(", ") + "." : d.compras > 0 ? "" : "Nada novo para cadastrar."
             if (d.codigosLigados > 0)
-                msg += " " + d.codigosLigados + " códigos de fornecedor ligados às peças."
+                msg = (msg ? msg + " " : "") + d.codigosLigados + (d.codigosLigados === 1 ? " código de fornecedor ligado às peças." : " códigos de fornecedor ligados às peças.")
             // T108: as notas de compra que foram para Compras.
             if (d.compras > 0)
-                msg = (msg ? msg + " " : "") + (d.compras === 1 ? "1 nota de compra foi para Compras" : d.compras + " notas de compra foram para Compras")
-                       + ", em rascunho: abra cada uma em Compras para conferir e lançar."
+                msg = (msg ? msg + " " : "") + (d.compras === 1
+                    ? "1 nota de compra foi para Compras, em rascunho: abra em Compras para conferir e lançar."
+                    : d.compras + " notas de compra foram para Compras, em rascunho: abra cada uma em Compras para conferir e lançar.")
             painel.carregarPendencias()
             // T-05 da 2ª re-revisão: a resposta é tratada depois (Qt.callLater), quando a marca da repetição (I6) já
             // caiu; aqui ela vem da própria resposta.

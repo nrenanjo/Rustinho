@@ -179,7 +179,7 @@ FocusScope {
                                     font.family: Tema.texto
                                     font.pixelSize: 12
                                     horizontalAlignment: Text.AlignRight
-                                    Layout.preferredWidth: 56
+                                    Layout.preferredWidth: Tema.estreito ? 44 : 56
                                 }
                                 Text {
                                     text: "R$ " + Tema.valor(linhaDre.modelData.valor)
@@ -189,7 +189,7 @@ FocusScope {
                                     font.weight: linhaDre.modelData.subtotal ? Font.Bold : Font.Normal
                                     font.pixelSize: linhaDre.modelData.subtotal ? 16 : 14
                                     horizontalAlignment: Text.AlignRight
-                                    Layout.minimumWidth: 120
+                                    Layout.minimumWidth: Tema.estreito ? 86 : 120
                                 }
                                 Icone {
                                     nome: "direita"
@@ -377,24 +377,26 @@ FocusScope {
                             Layout.fillWidth: true
                             visible: modelData.estado !== "antes"
                             required property int index
+                            readonly property bool compacto: width < 480 || Tema.estreito
                             // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
                             readonly property bool par: (index + 1) % 2 === 0
                             color: Tema.faixa(mes.par, Tema.vela(0.4), "transparent")
                             palette.window: Tema.superficie(color)
                             radius: Tema.raioCampo
-                            implicitHeight: conteudoDaFaixa.implicitHeight + 6
-                            implicitWidth: conteudoDaFaixa.implicitWidth + 16
+                            implicitHeight: (compacto ? conteudoCompacto.implicitHeight : conteudoDaFaixa.implicitHeight) + 8
                             RowLayout {
                                 id: conteudoDaFaixa
+                                visible: !mes.compacto
                                 x: 8
-                                y: 3
+                                y: 4
                                 width: mes.width - 16
                                 spacing: 8
                                 Text { text: mes.modelData.rotulo; textFormat: Text.PlainText; color: Tema.apagadoDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.preferredWidth: 56 }
                                 Text {
                                     text: mes.modelData.estado === "sem_dados" ? "sem dados" : "vendas R$ " + Tema.valor(mes.modelData.vendas)
                                     textFormat: Text.PlainText
-                                    color: Tema.tintaDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13; Layout.fillWidth: true
+                                    color: Tema.tintaDaFaixa(mes.par); font.family: Tema.texto; font.pixelSize: 13
+                                    elide: Text.ElideRight; Layout.minimumWidth: 0; Layout.fillWidth: true
                                 }
                                 Text {
                                     visible: mes.modelData.estado !== "sem_dados"
@@ -406,6 +408,52 @@ FocusScope {
                                 Chip {
                                     visible: mes.modelData.estado === "incompleto" || mes.modelData.parcial
                                     texto: mes.modelData.parcial ? "em andamento" : "incompleto"
+                                }
+                            }
+                            // BUG-20261120-OV4C: em janelas estreitas, quebra em duas linhas limpas sem sobreposição nem chip cortado.
+                            ColumnLayout {
+                                id: conteudoCompacto
+                                visible: mes.compacto
+                                x: 8
+                                y: 4
+                                width: mes.width - 16
+                                spacing: 4
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Text {
+                                        text: mes.modelData.rotulo
+                                        textFormat: Text.PlainText
+                                        color: Tema.apagadoDaFaixa(mes.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 13
+                                        Layout.fillWidth: true
+                                    }
+                                    Chip {
+                                        visible: mes.modelData.estado === "incompleto" || mes.modelData.parcial
+                                        texto: mes.modelData.parcial ? "em andamento" : "incompleto"
+                                    }
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+                                    Text {
+                                        text: mes.modelData.estado === "sem_dados" ? "sem dados" : "vendas R$ " + Tema.valor(mes.modelData.vendas)
+                                        textFormat: Text.PlainText
+                                        color: Tema.tintaDaFaixa(mes.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 13
+                                    }
+                                    Text {
+                                        visible: mes.modelData.estado !== "sem_dados"
+                                        text: "resultado R$ " + Tema.valor(mes.modelData.resultado)
+                                        textFormat: Text.PlainText
+                                        color: mes.modelData.vResultado < 0 && !Tema.oculto ? Tema.vermelhoDaFaixa(mes.par) : Tema.tintaDaFaixa(mes.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 13
+                                    }
                                 }
                             }
                         }

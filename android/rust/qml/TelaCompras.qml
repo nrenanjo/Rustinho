@@ -77,7 +77,9 @@ FocusScope {
             // antes). Com erro, ela é de erro e leva também as notas importadas e as que já estavam em Compras.
             const partes = []
             if (novas.length > 1)
-                partes.push(novas.length + " notas importadas. Abra cada uma para conferir e lançar.")
+                partes.push(erros.length > 0
+                            ? novas.length + " notas importadas."
+                            : novas.length + " notas importadas. Abra cada uma para conferir e lançar.")
             if (pecasCadastradas > 0)
                 partes.push(pecasCadastradas === 1 ? "1 peça nova cadastrada automaticamente."
                                                    : pecasCadastradas + " peças novas cadastradas automaticamente.")
@@ -137,22 +139,62 @@ FocusScope {
         }
     }
 
-    // Notas de outro CNPJ desta importação: entram na lista (sem repetir a
-    // mesma) e a janela de conflito abre na primeira nova.
-    // A mesma nota (o Qt copia os objetos entre a lista e a janela: compara
-    // pelo que identifica a nota, não pelo objeto).
+    // D-IMG-1 (21/11/2026): a mesma nota em dois arquivos diferentes conta e aparece
+    // uma única vez, agrupando os nomes dos arquivos em `arquivos`.
     function chaveDaNota(c) {
-        return c.arquivo + "|" + c.numero + "|" + c.serie + "|" + c.emitenteDocumento
+        if (c.chave && String(c.chave).trim() !== "")
+            return "chave|" + String(c.chave).trim()
+        return (c.numero || "") + "|" + (c.serie || "") + "|" + (c.emitenteDocumento || "") + "|" + (c.destinatarioDocumento || "")
+    }
+    function arquivosDaNota(c) {
+        if (c.arquivos && c.arquivos.length > 0)
+            return c.arquivos
+        return c.arquivo ? [c.arquivo] : []
+    }
+    function textoArquivosDaNota(c) {
+        const lista = arquivosDaNota(c)
+        if (lista.length <= 1)
+            return lista[0] || ""
+        return lista[0] + "  (+" + (lista.length - 1) + (lista.length === 2 ? " arquivo)" : " arquivos)")
     }
     function guardarNaoImportadas(conflitos) {
-        const ja = naoImportadas.map(chaveDaNota)
-        const novas = conflitos.filter(c => ja.indexOf(chaveDaNota(c)) < 0)
-        if (novas.length === 0)
-            return
-        naoImportadas = naoImportadas.concat(novas)
-        conflitoCnpj.mostrar(novas[0])
+        const mapa = {}
+        const atual = naoImportadas.map(x => {
+            const copia = Object.assign({}, x, { arquivos: arquivosDaNota(x).slice() })
+            mapa[chaveDaNota(copia)] = copia
+            return copia
+        })
+        let primeiraNova = null
+        for (const c of conflitos) {
+            const k = chaveDaNota(c)
+            if (mapa[k]) {
+                for (const a of arquivosDaNota(c)) {
+                    if (mapa[k].arquivos.indexOf(a) < 0)
+                        mapa[k].arquivos.push(a)
+                }
+                mapa[k].arquivo = mapa[k].arquivos.join(", ")
+            } else {
+                const nova = Object.assign({}, c, { arquivos: arquivosDaNota(c).slice() })
+                mapa[k] = nova
+                atual.push(nova)
+                if (!primeiraNova)
+                    primeiraNova = nova
+            }
+        }
+        naoImportadas = atual
+        if (primeiraNova)
+            conflitoCnpj.mostrar(primeiraNova)
     }
-    function descartarNaoImportada(c) {
+    // T054-C2-R7: protege contra clique duplo rápido em "Descartar" (evita descartar a nota que subiu).
+    Timer {
+        id: travaDescartar
+        interval: 400
+    }
+    function descartarNaoImportada(c, daJanelinha) {
+        if (!daJanelinha && travaDescartar.running)
+            return
+        if (!daJanelinha)
+            travaDescartar.restart()
         // T054: a lista não volta para o começo depois de descartar uma nota.
         const onde = listaNaoImportadas.contentY
         naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))
@@ -201,7 +243,8 @@ FocusScope {
 
     FileDialog {
         id: seletor
-        title: "Escolha o XML da nota de compra (ou um .zip / .rar)"
+        // D-IMG-6: informa explicitamente que dá para selecionar vários arquivos.
+        title: "Escolha os XMLs das notas de compra (ou arquivos .zip / .rar)"
         fileMode: FileDialog.OpenFiles
         // Começa na pasta Downloads, onde costumam ficar os XML baixados do e-mail.
         currentFolder: StandardPaths.standardLocations(StandardPaths.DownloadLocation)[0]
@@ -220,7 +263,7 @@ FocusScope {
 
     ConflitoCnpj {
         id: conflitoCnpj
-        onDescartar: (c) => tela.descartarNaoImportada(c)
+        onDescartar: (c) => tela.descartarNaoImportada(c, true)
         // T054 (pedido do proprietário, 20/11/2026): com a janelinha aberta, o
         // "Mostrar valores" do canto da tela continua à vista e clicável, no
         // mesmo lugar (é o mesmo controle, que passa para cima do véu).
@@ -238,7 +281,11 @@ FocusScope {
             id: cabecalhoDeCompras
             sensivel: true
             titulo: "Compras"
-            subtitulo: "Importe o XML da nota do fornecedor para atualizar o estoque"
+            // D-IMG-6: informa que é possível escolher vários arquivos ou arrastá-los para a tela.
+            // Em janela muito estreita (< 440 px), versão compacta preserva a busca visível em 340 × 480.
+            subtitulo: Tema.largura < 440
+                       ? "Importe ou arraste XMLs de notas"
+                       : "Importe os XMLs das notas dos fornecedores (escolha vários arquivos ou arraste para cá)"
             Layout.fillWidth: true
             Botao {
                 // Na janela bem estreita, o rótulo curto deixa os dois botões numa linha só (a busca continua à vista
@@ -305,6 +352,12 @@ FocusScope {
             corTitulo: Tema.vermelho
             color: Tema.rosa
             Layout.fillWidth: true
+            // D-IMG-5: orientação curta sob o título de "Não importadas".
+            Nota {
+                text: "Nada foi importado. Veja cada nota; descartar só tira da lista."
+                font.pixelSize: Tema.baixo ? 12 : 14
+                Layout.fillWidth: true
+            }
             // T054 (pedido do proprietário, 20/11/2026): com centenas de notas, a
             // lista rola por conta própria numa altura limitada, e a busca e as
             // compras continuam à vista. Antes, um Repeater desenhava todas as
@@ -315,9 +368,8 @@ FocusScope {
                 // Os testes leem onde a lista fica (T054-R6 da revisão).
                 objectName: "listaNaoImportadas"
                 Layout.fillWidth: true
-                // Até 40% da tela (no mínimo umas duas linhas e meia); com
-                // poucas notas, só a altura delas.
-                Layout.preferredHeight: Math.min(contentHeight, Math.max(150, tela.height * 0.4 - 90))
+                // Até 40% da tela (em janela baixa como 340 × 480, mínimo 110 px para a busca continuar à vista).
+                Layout.preferredHeight: Math.min(contentHeight, Math.max(Tema.baixo ? 110 : 150, tela.height * 0.4 - 90))
                 clip: true
                 spacing: notasDeOutroCnpj.espacamento
                 boundsBehavior: Flickable.StopAtBounds
@@ -335,19 +387,36 @@ FocusScope {
                     color: Tema.faixa(faixaDaLista.par, Tema.vela(0.4), "transparent")
                     palette.window: Tema.superficie(color)
                     radius: Tema.raioCampo
-                    implicitHeight: conteudoDaFaixa.implicitHeight + 8
+                    implicitHeight: conteudoDaFaixa.implicitHeight + 10
                     implicitWidth: conteudoDaFaixa.implicitWidth + 16
                     RowLayout {
                         id: conteudoDaFaixa
                         x: 8
-                        y: 4
+                        y: 5
                         width: faixaDaLista.width - 16
                         spacing: 12
-                        Nota {
-                            text: modelData.arquivo + " — nota " + modelData.numero + " de " + modelData.emitenteNome
-                            elide: Text.ElideMiddle
-                            wrapMode: Text.NoWrap
+                        // D-IMG-4: fornecedor e nota em destaque (como na lista de compras) e arquivo embaixo.
+                        ColumnLayout {
+                            spacing: 1
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            Text {
+                                text: (modelData.emitenteNome || "Fornecedor") + " — nota " + (modelData.numero || "—")
+                                textFormat: Text.PlainText
+                                color: Tema.tintaDaFaixa(faixaDaLista.par)
+                                font.family: Tema.texto
+                                font.weight: Font.DemiBold
+                                font.pixelSize: 15
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Nota {
+                                text: tela.textoArquivosDaNota(modelData)
+                                font.pixelSize: 12
+                                elide: Text.ElideMiddle
+                                wrapMode: Text.NoWrap
+                                Layout.fillWidth: true
+                            }
                         }
                         Botao {
                             text: "Ver"
@@ -357,7 +426,7 @@ FocusScope {
                         Botao {
                             text: "Descartar"
                             tipo: "discreto"
-                            onClicked: tela.descartarNaoImportada(modelData)
+                            onClicked: tela.descartarNaoImportada(modelData, false)
                         }
                     }
                 }

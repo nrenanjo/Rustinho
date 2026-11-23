@@ -1296,6 +1296,7 @@ FocusScope {
                             rotulo: "Senha da rede da loja"
                             dica: tela.sync && tela.sync.temSenha ? "•••••••• (deixe vazio para manter)" : "A mesma em todos os caixas"
                             senha: true
+                            podeColar: true
                             maximo: 256
                             Layout.fillWidth: true
                         }

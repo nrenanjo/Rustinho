@@ -1523,12 +1523,10 @@ def caso7k(placar, fotos):
     desiste da senha do gerente, volta ao Receber com a faixa "ainda não foi concluída" (9 s), fecha a janelinha, volta
     ao Início e toca em "Trocar usuário" antes de a faixa sumir: a faixa NÃO vai junto para a tela de entrada.
 
-    Desde a T084 (texto O do proprietário, 21/11/2026), o "Trocar usuário" abre a tela de Usuários e não sai mais da
-    conta: este caminho (sair pela tela) deixou de existir. O caso não se aplica, e diz isso (não conta como
-    aprovado). Volta se o proprietário devolver o sair da conta (D-AUD-3, doc 8)."""
-    placar.nao_se_aplica("7k", "desde a T084 (texto O), o \"Trocar usuário\" abre Usuários e não sai mais da conta; "
-                         "a faixa na troca da pilha inteira segue provada pelo 7j (sessão encerrada); volta com a "
-                         "D-AUD-3")
+    Desde a T084 (texto O) e decisão definitiva D-AUD-3 (texto P, 21/11/2026), o "Trocar usuário" abre a tela de
+    Usuários e não há botão "Sair" na interface: este caminho deixou de existir definitivamente."""
+    placar.nao_se_aplica("7k", "decisão definitiva D-AUD-3 (texto P): \"Trocar usuário\" abre Usuários e não há sair "
+                         "da conta pela tela; a faixa na troca da pilha inteira segue provada pelo 7j")
     return
     ok = placar.ok
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-nav7k-")

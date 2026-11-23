@@ -110,16 +110,41 @@ TestCase {
     }
 
     QtObject {
+        id: conflitoCnpj
+        property var mostrados: []
+        function mostrar(c) { mostrados.push(c) }
+    }
+
+    QtObject {
+        id: listaNaoImportadas
+        property real contentY: 0
+        property real contentHeight: 300
+        property real height: 150
+        function forceLayout() {}
+    }
+
+    QtObject {
+        id: travaDescartar
+        property bool running: false
+        function restart() { running = true }
+    }
+
+    QtObject {
         id: tela
         property var janela: janelaFalsa
         property var itens: []
         property var pendentes: []
         property string avisoPendentes: ""
+        property var naoImportadas: []
         function buscar() {}
-        function guardarNaoImportadas(conflitos) {}
         function nomeArquivo(a) { return a }
 %CONFERIR_COMPRA%
 %IMPORTAR%
+%CHAVE_NOTA%
+%ARQUIVOS_NOTA%
+%TEXTO_ARQUIVOS_NOTA%
+%GUARDAR_NAO_IMPORTADAS%
+%DESCARTAR_NAO_IMPORTADA%
     }
 
     QtObject {
@@ -141,13 +166,19 @@ TestCase {
         property string chavePendencia: ""
         property string pecaDesativadaId: ""
         property bool corrigindoIdentificacao: false
+        property bool liberada: true
+        property bool fechou: false
         signal importou()
+        function close() { fechou = true }
         function carregarPendencias() {}
         function refazerPrevia(x) { refeitas += 1 }
         function dadosDaPrevia(comOpcoes) { return {} }
+        function exigirSenhaDaTela(ok, cancel) {}
+        function cadastrarAgora() {}
 %CAT%
 %TEXTO%
 %LER%
+%DEPOIS_IMPORTAR%
 %ABRIR_PENDENCIA%
 %RESOLVER_NOVA%
         function linhas() { return %MODELO% }
@@ -184,8 +215,12 @@ TestCase {
         Api.gravacoes = []
         Api.gravacoesDemoradas = []
         tela.itens = []
+        tela.naoImportadas = []
+        conflitoCnpj.mostrados = []
+        travaDescartar.running = false
         linhaCompraFalsa.item = ({})
         painel.escolhas = null
+        painel.fechou = false
         painel.pendenciaAberta = null
         painel.corrigindoIdentificacao = false
         painel.erro = ""
@@ -402,6 +437,51 @@ TestCase {
         verify(%TEM_ATALHO_CONFERENCIA%, "TelaCompra.qml deve oferecer conferência no cartão Para lançar")
         verify(%TEM_COPIAR_CHAVE%, "TelaCompra.qml deve oferecer botão Copiar chave no painel de conferência")
     }
+
+    function test_d_img_1_deduplica_nota_repetida_em_dois_arquivos() {
+        tela.guardarNaoImportadas([
+            { arquivo: "498752-nfe.xml", numero: "803058", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "UNIVERSAL" },
+            { arquivo: "498752-nfe (1).xml", numero: "803058", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "UNIVERSAL" }
+        ])
+        compare(tela.naoImportadas.length, 1, "D-IMG-1: mesma nota em dois arquivos conta uma única vez")
+        compare(tela.naoImportadas[0].arquivos.length, 2, "D-IMG-1: preserva os dois arquivos agrupados")
+        verify(tela.textoArquivosDaNota(tela.naoImportadas[0]).indexOf("+1 arquivo") >= 0)
+        compare(conflitoCnpj.mostrados.length, 1)
+    }
+
+    function test_t054_c2_r7_duplo_clique_descartar_nao_remove_segunda_nota() {
+        tela.guardarNaoImportadas([
+            { arquivo: "a.xml", numero: "101", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "A" },
+            { arquivo: "b.xml", numero: "102", serie: "1", emitenteDocumento: "11", destinatarioDocumento: "22", emitenteNome: "B" }
+        ])
+        compare(tela.naoImportadas.length, 2)
+        tela.descartarNaoImportada(tela.naoImportadas[0], false)
+        compare(tela.naoImportadas.length, 1)
+        // Segundo clique imediato durante a janela de 400 ms é bloqueado.
+        tela.descartarNaoImportada(tela.naoImportadas[0], false)
+        compare(tela.naoImportadas.length, 1, "T054-C2-R7: clique duplo rápido não pode descartar a nota seguinte")
+        // Descartar vindo da janelinha (confirmado lá) continua permitido.
+        tela.descartarNaoImportada(tela.naoImportadas[0], true)
+        compare(tela.naoImportadas.length, 0)
+    }
+
+    function test_t110_p2_p3_depois_de_importar_sem_espaco_e_sem_nada_novo() {
+        painel.depoisDeImportar({ ok: true, dados: { clientes: 0, fornecedores: 0, pecas: 0, codigosLigados: 2, compras: 1 } })
+        wait(20)
+        compare(janelaFalsa.avisos.length, 1, JSON.stringify(janelaFalsa.avisos))
+        const txt = janelaFalsa.avisos[0].texto
+        verify(txt.indexOf("Nada novo") < 0, "N5.1: não pode dizer Nada novo quando há compras: " + txt)
+        verify(!txt.startsWith(" "), "T110-P3: não pode começar com espaço: '" + txt + "'")
+        verify(txt.indexOf("abra em Compras") >= 0, "T110-P3: singular correto para 1 nota: " + txt)
+    }
+
+    function test_t110_p4_aviso_erro_curto_sem_abra_cada_uma() {
+        Api.respostas = [{ ok: true, dados: { compras: [{ id: "a" }, { id: "b" }], erros: ["e.xml: ruim"], conflitos: [] } }]
+        tela.importar(["pasta"])
+        compare(janelaFalsa.avisos.length, 1)
+        compare(janelaFalsa.avisos[0].tipo, "erro")
+        verify(janelaFalsa.avisos[0].texto.indexOf("Abra cada uma") < 0, "T110-P4: aviso de erro mais curto: " + janelaFalsa.avisos[0].texto)
+    }
 }
 """
 
@@ -438,6 +518,11 @@ def main():
         "%TEXTO_SITUACAO_COMPRA%": f"(function() {{\n{situacao_bloco}\n}})()",
         "%CONFERIR_COMPRA%": achar(r"^    function conferirCompra\(indice\) \{\n.*?^    \}\n", compras, "conferirCompra"),
         "%IMPORTAR%": achar(r"^    function importar\(arquivos\) \{\n.*?^    \}\n", compras, "importar"),
+        "%CHAVE_NOTA%": achar(r"^    function chaveDaNota\(c\) \{\n.*?^    \}\n", compras, "chaveDaNota"),
+        "%ARQUIVOS_NOTA%": achar(r"^    function arquivosDaNota\(c\) \{\n.*?^    \}\n", compras, "arquivosDaNota"),
+        "%TEXTO_ARQUIVOS_NOTA%": achar(r"^    function textoArquivosDaNota\(c\) \{\n.*?^    \}\n", compras, "textoArquivosDaNota"),
+        "%GUARDAR_NAO_IMPORTADAS%": achar(r"^    function guardarNaoImportadas\(conflitos\) \{\n.*?^    \}\n", compras, "guardarNaoImportadas"),
+        "%DESCARTAR_NAO_IMPORTADA%": achar(r"^    function descartarNaoImportada\(c, daJanelinha\) \{\n.*?^    \}\n", compras, "descartarNaoImportada"),
         "%DESCARTAR%": achar(r"^    function descartar\(\) \{\n.*?^    \}\n", compra, "descartar"),
         "%NOTA_ITEM%": f"(function() {{\n{nota_bloco.replace('linha.', 'linhaItem.')}\n}})()",
         "%VIS_BAIXOU%": achar(r"// O custo baixou: o preço baixa junto\?\n\s*Rectangle \{\n\s*visible: ([^\n]+)", linha_item, "visivel custoBaixou", 1).replace("linha.", "linhaItem."),
@@ -447,6 +532,7 @@ def main():
         "%CAT%": achar(r"^    function cat\(codigo\) \{\n.*?^    \}\n", cad, "cat"),
         "%TEXTO%": achar(r"^    function texto\(n, um, varios\) \{\n.*?^    \}\n", cad, "texto"),
         "%LER%": achar(r"^    function lerArquivos\(\) \{\n.*?^    \}\n", cad, "lerArquivos"),
+        "%DEPOIS_IMPORTAR%": achar(r"^    function depoisDeImportar\(r\) \{\n.*?^    \}\n", cad, "depoisDeImportar"),
         "%ABRIR_PENDENCIA%": achar(r"^    function abrirPendencia\(p\) \{\n.*?^    \}\n", cad, "abrirPendencia"),
         "%RESOLVER_NOVA%": achar(r"^    function resolverComoNova\(comCorrecao\) \{\n.*?^    \}\n", cad, "resolverComoNova"),
         "%MODELO%": achar(r"model: (painel\.previa \? \[.*?\] : \[\])\n", cad, "o modelo da prévia", 1),

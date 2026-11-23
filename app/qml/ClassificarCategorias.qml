@@ -12,7 +12,8 @@ Painel {
     property string erro: ""
     signal salvo()
     width: Math.min(760, Tema.largura - 24)
-    height: Math.min(680, Tema.altura - 40)
+    height: Math.min(680, alturaMaxima)
+    readonly property bool estreita: width < 600
 
     function abrir() {
         const r = Api.chamar("dre_classificacao")
@@ -52,88 +53,117 @@ Painel {
 
     contentItem: ColumnLayout {
         spacing: 12
-        Titulo { text: "Classificar categorias"; font.pixelSize: 30; Layout.fillWidth: true }
-        Nota {
-            text: (janelinha.c ? janelinha.c.nota + " " : "") + "Categoria sem classificação conta como despesa e deixa o resultado incompleto."
-            font.pixelSize: 14
+        Titulo {
+            text: "Classificar categorias"
+            font.pixelSize: janelinha.estreita ? 24 : 30
             Layout.fillWidth: true
         }
-        Nota {
-            visible: !!janelinha.c && janelinha.c.confirmada
-            text: "A classificação já foi confirmada. Mudanças ficam registradas na auditoria."
-            color: Tema.verdeEscuro
-            font.pixelSize: 14
-            Layout.fillWidth: true
-        }
-        ListView {
-            id: lista
-            clip: true
-            spacing: 6
-            model: janelinha.c ? janelinha.c.categorias : []
+        Flickable {
+            id: rolagemClassificar
+            objectName: "rolagemClassificar"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            contentWidth: width
+            contentHeight: mioloClassificar.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
-            delegate: Rectangle {
-                id: linha
-                required property var modelData
-                width: lista.width - 14
-                required property int index
-                // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
-                readonly property bool par: (index + 1) % 2 === 0
-                color: Tema.faixa(linha.par, Tema.vela(0.4), "transparent")
-                palette.window: Tema.superficie(color)
-                radius: Tema.raioCampo
-                implicitHeight: conteudoDaFaixa.implicitHeight + 12
-                implicitWidth: conteudoDaFaixa.implicitWidth + 20
-                RowLayout {
-                    id: conteudoDaFaixa
-                    x: 10
-                    y: 6
-                    width: linha.width - 20
-                    spacing: 12
-                    ColumnLayout {
-                        spacing: 0
-                        Layout.fillWidth: true
-                        Text {
-                            text: linha.modelData.nome
-                            textFormat: Text.PlainText
-                            color: linha.modelData.ativo ? Tema.tintaDaFaixa(linha.par) : Tema.apagadoDaFaixa(linha.par)
-                            font.family: Tema.texto
-                            font.weight: Font.DemiBold
-                            font.pixelSize: 15
-                            elide: Text.ElideRight
+
+            ColumnLayout {
+                id: mioloClassificar
+                width: rolagemClassificar.width - (rolagemClassificar.contentHeight > rolagemClassificar.height ? 14 : 0)
+                spacing: 10
+
+                Nota {
+                    text: (janelinha.c ? janelinha.c.nota + " " : "") + "Categoria sem classificação conta como despesa e deixa o resultado incompleto."
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    visible: !!janelinha.c && janelinha.c.confirmada
+                    text: "A classificação já foi confirmada. Mudanças ficam registradas na auditoria."
+                    color: Tema.verdeEscuro
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+                ColumnLayout {
+                    spacing: 6
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: janelinha.c ? janelinha.c.categorias : []
+                        delegate: Rectangle {
+                            id: linha
+                            required property var modelData
+                            required property int index
                             Layout.fillWidth: true
-                        }
-                        Text {
-                            text: (linha.modelData.tipo === "receita" ? "entrada" : "saída") + (linha.modelData.ativo ? "" : " · desativada")
-                            color: Tema.apagadoDaFaixa(linha.par)
-                            font.family: Tema.serifa
-                            font.italic: true
-                            font.pixelSize: 12
-                        }
-                    }
-                    Selecao {
-                        modelo: janelinha.nomesGrupos()
-                        indice: janelinha.indiceDe(janelinha.escolhas[linha.modelData.id])
-                        Layout.preferredWidth: 300
-                        onEscolhido: {
-                            const e = Object.assign({}, janelinha.escolhas)
-                            e[linha.modelData.id] = indice === 0 ? "" : janelinha.c.grupos[indice - 1].id
-                            janelinha.escolhas = e
+                            // Faixas alternadas (V-6): no roxo, clara e escura com o texto invertido.
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linha.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoDaFaixa.implicitHeight + 14
+                            GridLayout {
+                                id: conteudoDaFaixa
+                                x: 10
+                                y: 7
+                                width: linha.width - 20
+                                columns: janelinha.estreita ? 1 : 2
+                                columnSpacing: 12
+                                rowSpacing: 6
+                                ColumnLayout {
+                                    spacing: 0
+                                    Layout.fillWidth: true
+                                    Layout.minimumWidth: 0
+                                    Text {
+                                        text: linha.modelData.nome
+                                        textFormat: Text.PlainText
+                                        color: linha.modelData.ativo ? Tema.tintaDaFaixa(linha.par) : Tema.apagadoDaFaixa(linha.par)
+                                        font.family: Tema.texto
+                                        font.weight: Font.DemiBold
+                                        font.pixelSize: 15
+                                        wrapMode: janelinha.estreita ? Text.WordWrap : Text.NoWrap
+                                        elide: janelinha.estreita ? Text.ElideNone : Text.ElideRight
+                                        Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
+                                    }
+                                    Text {
+                                        text: (linha.modelData.tipo === "receita" ? "entrada" : "saída") + (linha.modelData.ativo ? "" : " · desativada")
+                                        textFormat: Text.PlainText
+                                        color: Tema.apagadoDaFaixa(linha.par)
+                                        font.family: Tema.serifa
+                                        font.italic: true
+                                        font.pixelSize: 12
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                                Selecao {
+                                    modelo: janelinha.nomesGrupos()
+                                    indice: janelinha.indiceDe(janelinha.escolhas[linha.modelData.id])
+                                    Layout.fillWidth: janelinha.estreita
+                                    Layout.preferredWidth: janelinha.estreita ? -1 : Math.min(300, Math.max(200, Math.round(linha.width * 0.48)))
+                                    onEscolhido: {
+                                        const e = Object.assign({}, janelinha.escolhas)
+                                        e[linha.modelData.id] = indice === 0 ? "" : janelinha.c.grupos[indice - 1].id
+                                        janelinha.escolhas = e
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                Marcar {
+                    id: confirmar
+                    visible: !!janelinha.c && !janelinha.c.confirmada
+                    text: "Conferi com o contador: confirmo a classificação"
+                    Layout.fillWidth: true
+                }
+                TextoErro { text: janelinha.erro; Layout.fillWidth: true }
             }
         }
-        Marcar {
-            id: confirmar
-            visible: !!janelinha.c && !janelinha.c.confirmada
-            text: "Conferi com o contador: confirmo a classificação"
-        }
-        TextoErro { text: janelinha.erro }
         RowLayout {
-            Layout.alignment: Qt.AlignRight
+            Layout.fillWidth: true
             spacing: 10
+            Item { Layout.fillWidth: true }
             Botao { text: "Salvar"; icone: "check"; onClicked: janelinha.salvar() }
         }
     }

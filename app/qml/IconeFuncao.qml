@@ -9,6 +9,8 @@ Rectangle {
     property string funcao: ""
     property string nome: "caixa"
     property real tamanhoIcone: Tema.estreito ? 24 : 27
+    // P-NOTIF: quando sobre superfície fixa clara (cartão de notificação), ignora o modo escuro do tema.
+    property bool claroFixo: false
 
     readonly property var cores: ({
         vender: ["#DCE7F8", "#2A6FD6", "#1D2A3D", "#8DB5F0"],
@@ -31,12 +33,12 @@ Rectangle {
     implicitWidth: Tema.estreito ? 42 : 48
     implicitHeight: implicitWidth
     radius: 8
-    color: Tema.escuro ? cor[2] : cor[0]
+    color: (Tema.escuro && !claroFixo) ? cor[2] : cor[0]
     Icone {
         anchors.centerIn: parent
         nome: icone.nome || "caixa"
         tamanho: icone.tamanhoIcone
         espessura: 2.1
-        cor: Tema.escuro ? icone.cor[3] : icone.cor[1]
+        cor: (Tema.escuro && !icone.claroFixo) ? icone.cor[3] : icone.cor[1]
     }
 }
