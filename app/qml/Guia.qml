@@ -32,6 +32,10 @@ Item {
     // Retângulo de recorte S-3 (área rolável ou área abaixo da orientação).
     property rect recorte: Qt.rect(0, 0, width, height)
     property real opacidadeDestaque: 0
+    property real opacidadeAlvo: 0
+    property real opacidadeInicio: 0
+    property real opacidadeInicioMs: 0
+    property bool animandoOpacidade: false
     property bool aguardandoChegada: false
     property bool recarregandoLista: false
     property bool deslizandoRegistro: false
@@ -57,15 +61,41 @@ Item {
             || (areaRolagem && (areaRolagem.moving || areaRolagem.dragging || areaRolagem.flicking))
         ))
 
-    Behavior on opacidadeDestaque {
-        NumberAnimation {
-            duration: Tema.duracaoEsmaecer(180)
-            easing.type: Easing.OutCubic
+    function _animarOpacidadePara(destino, imediato) {
+        opacidadeAlvo = destino
+        if (imediato === true || Tema.duracaoEsmaecer(180) <= 0) {
+            animandoOpacidade = false
+            opacidadeDestaque = destino
+            if (destino <= 0.005 && alvo === null && !recarregandoLista)
+                area = Qt.rect(0, 0, 0, 0)
+            return
         }
+        opacidadeInicio = opacidadeDestaque
+        opacidadeInicioMs = Date.now()
+        animandoOpacidade = true
     }
-    onOpacidadeDestaqueChanged: {
-        if (opacidadeDestaque <= 0.005 && alvo === null && !recarregandoLista)
-            area = Qt.rect(0, 0, 0, 0)
+
+    Timer {
+        id: pulsoTransicaoGuia
+        interval: 16
+        repeat: true
+        running: guia.animandoOpacidade || guia.deslizandoRegistro
+        onTriggered: {
+            if (guia.animandoOpacidade) {
+                const dur = Math.max(1, Tema.duracaoEsmaecer(180))
+                const t = Math.min(1, (Date.now() - guia.opacidadeInicioMs) / dur)
+                const e = 1 - Math.pow(1 - t, 3)
+                guia.opacidadeDestaque = guia.opacidadeInicio + (guia.opacidadeAlvo - guia.opacidadeInicio) * e
+                if (t >= 1) {
+                    guia.opacidadeDestaque = guia.opacidadeAlvo
+                    guia.animandoOpacidade = false
+                    if (guia.opacidadeDestaque <= 0.005 && guia.alvo === null && !guia.recarregandoLista)
+                        guia.area = Qt.rect(0, 0, 0, 0)
+                }
+            }
+            if (guia.deslizandoRegistro)
+                guia.passoAcompanhamento()
+        }
     }
 
     function _logMov(evento) {
@@ -106,22 +136,29 @@ Item {
                 return
             aguardandoChegada = false
             medir()
-            opacidadeDestaque = 1
+            _animarOpacidadePara(1, false)
             _logMov(interrompido ? "chegada_interrompida" : "destaque_ativo")
             if (typeof aoChegar === "function" && !interrompido)
                 aoChegar()
         }
-        if (rolagem && janela && typeof janela.rolarAteItem === "function") {
+        let precisaRolar = false
+        if (rolagem && rolagem.contentItem && rolagem.height > 0 && janela && typeof janela.rolarAteItem === "function") {
+            const p = item.mapToItem(rolagem.contentItem, 0, 0)
+            const topoV = rolagem.contentY
+            const baseV = topoV + rolagem.height
+            precisaRolar = !(p.y >= topoV + 16 && p.y + item.height <= baseV - 16)
+        }
+        if (precisaRolar) {
             // MG-3 / A6: destaque só entra depois de a rolagem concluir.
             aguardandoChegada = true
-            opacidadeDestaque = 0
+            _animarOpacidadePara(0, true)
             medirRecorte()
             _logMov("aguardando_rolagem")
             janela.rolarAteItem(rolagem, item, 24, finalizarChegada)
         } else {
             aguardandoChegada = false
             medir()
-            opacidadeDestaque = 1
+            _animarOpacidadePara(1, false)
             _logMov("destaque_direto")
             if (typeof aoChegar === "function")
                 Qt.callLater(() => { if (_tokenDestaque === token && alvo === item) aoChegar() })
@@ -136,9 +173,7 @@ Item {
         veuLeve = false
         alvo = null
         areaRolagem = null
-        opacidadeDestaque = 0
-        if (imediato === true || Tema.movimentoReduzido)
-            area = Qt.rect(0, 0, 0, 0)
+        _animarOpacidadePara(0, imediato === true || Tema.movimentoReduzido)
     }
 
     // MG-5 / A7: recarga da lista mantém o destaque atual congelado sem sumir.
@@ -167,11 +202,11 @@ Item {
             areaPara = novoRect
             deslizeInicioMs = Date.now()
             deslizandoRegistro = true
-            opacidadeDestaque = 1
+            _animarOpacidadePara(1, false)
             _logMov("registro_deslizar")
         } else {
             area = novoRect
-            opacidadeDestaque = 1
+            _animarOpacidadePara(1, false)
             _logMov("registro_atualizado")
         }
     }
@@ -278,12 +313,59 @@ Item {
         onTriggered: if (!guia.persistente) guia.esconder()
     }
 
-    // ---- Destaque: véu suave e luz difusa recortados à área rolável (S-3) ----
+    // ---- Destaque: véu na janela toda fora da janela visível do alvo + luz recortada à área rolável (S-3) ----
+    // O recorte S-3 (MG-11 / A10 / s8) garante que nem a abertura do véu nem a luz difusa
+    // invadam cabeçalho ou pílulas fixas quando a página rola, enquanto o véu continua
+    // escurecendo de forma uniforme toda a área externa (incluindo margens laterais e topo).
     property bool veuLeve: false
     readonly property real forcaVeu: veuLeve ? 0.5 : 1
     readonly property color corVeu: Tema.roxo ? Qt.rgba(0.09, 0, 0.09, 0.5 * forcaVeu)
                                     : Tema.escuro ? Qt.rgba(0, 0, 0, 0.55 * forcaVeu)
                                     : Qt.rgba(0.16, 0.15, 0.13, 0.30 * forcaVeu)
+    readonly property real vx1: Math.max(guia.area.x, guia.recorte.x)
+    readonly property real vy1: Math.max(guia.area.y, guia.recorte.y)
+    readonly property real vx2: Math.min(guia.area.x + guia.area.width, guia.recorte.x + guia.recorte.width)
+    readonly property real vy2: Math.min(guia.area.y + guia.area.height, guia.recorte.y + guia.recorte.height)
+    readonly property bool janelaVisivel: vx2 > vx1 && vy2 > vy1
+
+    Item {
+        id: camadaVeu
+        anchors.fill: parent
+        opacity: guia.opacidadeDestaque
+        visible: guia.destacando
+
+        Rectangle {   // quando o alvo rolou inteiramente para fora da área rolável, véu contínuo sem buraco nas pílulas
+            visible: !guia.janelaVisivel
+            anchors.fill: parent
+            color: guia.corVeu
+        }
+        Rectangle {   // em cima
+            visible: guia.janelaVisivel
+            x: 0; y: 0; width: parent.width; height: Math.max(0, guia.vy1)
+            color: guia.corVeu
+        }
+        Rectangle {   // embaixo
+            visible: guia.janelaVisivel
+            x: 0; y: guia.vy2
+            width: parent.width; height: Math.max(0, parent.height - y)
+            color: guia.corVeu
+        }
+        Rectangle {   // à esquerda
+            visible: guia.janelaVisivel
+            x: 0; y: guia.vy1
+            width: Math.max(0, guia.vx1)
+            height: Math.max(0, guia.vy2 - guia.vy1)
+            color: guia.corVeu
+        }
+        Rectangle {   // à direita
+            visible: guia.janelaVisivel
+            x: guia.vx2; y: guia.vy1
+            width: Math.max(0, parent.width - x)
+            height: Math.max(0, guia.vy2 - guia.vy1)
+            color: guia.corVeu
+        }
+    }
+
     Item {
         id: camadaDestaque
         objectName: "camadaDestaqueGuia"
@@ -293,35 +375,13 @@ Item {
         height: guia.recorte.height
         clip: true
         opacity: guia.opacidadeDestaque
-        visible: guia.destacando
+        visible: guia.destacando && guia.janelaVisivel
 
         readonly property real lx: guia.area.x - x
         readonly property real ly: guia.area.y - y
         readonly property real lw: guia.area.width
         readonly property real lh: guia.area.height
 
-        Rectangle {   // em cima
-            x: 0; y: 0; width: camadaDestaque.width; height: Math.max(0, camadaDestaque.ly)
-            color: guia.corVeu
-        }
-        Rectangle {   // embaixo
-            x: 0; y: camadaDestaque.ly + camadaDestaque.lh
-            width: camadaDestaque.width; height: Math.max(0, camadaDestaque.height - y)
-            color: guia.corVeu
-        }
-        Rectangle {   // à esquerda
-            x: 0; y: Math.max(0, camadaDestaque.ly)
-            width: Math.max(0, camadaDestaque.lx)
-            height: Math.max(0, Math.min(camadaDestaque.height, camadaDestaque.ly + camadaDestaque.lh) - y)
-            color: guia.corVeu
-        }
-        Rectangle {   // à direita
-            x: camadaDestaque.lx + camadaDestaque.lw
-            y: Math.max(0, camadaDestaque.ly)
-            width: Math.max(0, camadaDestaque.width - x)
-            height: Math.max(0, Math.min(camadaDestaque.height, camadaDestaque.ly + camadaDestaque.lh) - y)
-            color: guia.corVeu
-        }
         Canvas {
             id: luz
             x: camadaDestaque.lx - guia.alcanceLuz
@@ -341,6 +401,21 @@ Item {
                 const h = camadaDestaque.lh
                 const r = Math.min(Tema.raioCampo + guia.folga, Math.min(w, h) / 2)
 
+                function tracarRetanguloArredondado(rx, ry, rw, rh, rad) {
+                    ctx.beginPath()
+                    ctx.moveTo(rx + rad, ry)
+                    ctx.lineTo(rx + rw - rad, ry)
+                    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rad)
+                    ctx.lineTo(rx + rw, ry + rh - rad)
+                    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rad, ry + rh)
+                    ctx.lineTo(rx + rad, ry + rh)
+                    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rad)
+                    ctx.lineTo(rx, ry + rad)
+                    ctx.quadraticCurveTo(rx, ry, rx + rad, ry)
+                    ctx.closePath()
+                }
+
+                // 1) Aura luminosa difusa ao redor do retângulo destacado.
                 ctx.save()
                 ctx.shadowColor = Tema.roxo ? "rgba(255, 214, 246, 0.92)"
                                 : Tema.escuro ? "rgba(232, 194, 126, 0.62)" : "rgba(255, 248, 230, 0.96)"
@@ -349,19 +424,22 @@ Item {
                 ctx.shadowOffsetY = 0
                 ctx.fillStyle = Tema.roxo ? "rgba(255, 230, 250, 0.14)"
                               : Tema.escuro ? "rgba(232, 194, 126, 0.06)" : "rgba(255, 249, 237, 0.16)"
-                ctx.beginPath()
-                ctx.moveTo(x + r, y)
-                ctx.lineTo(x + w - r, y)
-                ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-                ctx.lineTo(x + w, y + h - r)
-                ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-                ctx.lineTo(x + r, y + h)
-                ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-                ctx.lineTo(x, y + r)
-                ctx.quadraticCurveTo(x, y, x + r, y)
-                ctx.closePath()
+                tracarRetanguloArredondado(x, y, w, h, r)
                 ctx.fill()
                 ctx.restore()
+
+                // 2) Mantém o interior do campo 100% nítido (preserva contraste e bordas de estado/erro).
+                const iw = w - 2 * guia.folga
+                const ih = h - 2 * guia.folga
+                if (iw > 2 && ih > 2) {
+                    const ir = Math.min(Tema.raioCampo, Math.min(iw, ih) / 2)
+                    ctx.save()
+                    ctx.globalCompositeOperation = "destination-out"
+                    ctx.fillStyle = "rgba(0, 0, 0, 1)"
+                    tracarRetanguloArredondado(x + guia.folga, y + guia.folga, iw, ih, ir)
+                    ctx.fill()
+                    ctx.restore()
+                }
             }
         }
     }

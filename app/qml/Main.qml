@@ -641,8 +641,13 @@ ApplicationWindow {
     function destacarAlvo(item, rolagem, aoChegar) {
         if (guiaAtiva || validacaoAtiva || !item)
             return
-        guia.destacar(item, rolagem, true, aoChegar)   // o véu leve (I4)
         fimDoDestaque.restart()
+        guia.destacar(item, rolagem, true, () => {
+            if (!guiaAtiva && !validacaoAtiva)
+                fimDoDestaque.restart()
+            if (typeof aoChegar === "function")
+                aoChegar()
+        })   // o véu leve (I4)
     }
     Timer {
         id: fimDoDestaque
@@ -1875,6 +1880,14 @@ ApplicationWindow {
         if (typeof diagnostico !== "undefined")
             diagnostico.marcar(texto)
     }
+    function _pertenceATela(item, tela) {
+        if (!item || !tela)
+            return false
+        for (let p = item; p; p = p.parent)
+            if (p === tela)
+                return true
+        return false
+    }
     Connections {
         target: pilha
         function onCurrentItemChanged() {
@@ -1883,7 +1896,8 @@ ApplicationWindow {
             if (conferirLinhaDoToque.running)
                 janela.concluirConferenciaDoToque(false)
             janela.toqueNoBotao = null
-            movimento.cancelar(true)
+            if (movimento.ativo && movimento.area && !janela._pertenceATela(movimento.area, pilha.currentItem))
+                movimento.cancelar(true)
             // BUG-20261118-FXVT: a faixa de retorno pertence à tela de origem;
             // quando ela deixa de ser a tela atual (voltar/substituir/início), some.
             if (!janela.guiaAtiva && !janela.validacaoAtiva && guia.temAviso
@@ -1891,9 +1905,12 @@ ApplicationWindow {
                 guia.esconder()
                 janela.origemDaFaixa = null
             }
-            // Destaque solto (notificação sem guia/validação) não vaza para outra tela.
-            if (!janela.guiaAtiva && !janela.validacaoAtiva && guia.destacando)
+            // Destaque solto (notificação sem guia/validação) não vaza para outra tela,
+            // mas não apaga um destaque que a tela recém-aberta já iniciou para si mesma.
+            if (!janela.guiaAtiva && !janela.validacaoAtiva && (guia.destacando || guia.aguardandoChegada)
+                    && (!guia.alvo || !janela._pertenceATela(guia.alvo, pilha.currentItem))) {
                 guia.semDestaque(true)
+            }
             // Validação progressiva (NCG-1) encerra quando a tela dela sai da pilha.
             if (janela.validacaoAtiva && (!janela.validacaoAtiva.tela
                     || pilha.find(item => item === janela.validacaoAtiva.tela) === null)) {

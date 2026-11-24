@@ -4,9 +4,8 @@ import rustinho
 
 // Motor único de movimento e rolagem suave (0.9.19-dev.1, P6: MG-1..MG-8, MG-D2, MG-D4).
 // - Rolagem guiada e automática usa 250–450 ms (InOutCubic; OutCubic se já em movimento).
-// - Relógio de passos acumulado por frame (`decorridoMs`, limitado a 34 ms/quadro) para que
-//   um 1º quadro pesado (ex.: abertura simultânea da faixa de orientação) não "coma" a curva
-//   nem provoque salto seco.
+// - Relógio de passos sob demanda (~60 Hz, desligado em repouso = 0% CPU), independente de
+//   eventos externos ou vsync de renderização por software (Xvfb/llvmpipe).
 // - Grande distância (> 3 alturas da área): esmaece (95 ms) → salta para perto →
 //   entra suavemente (95 ms) com rolagem curta final (260 ms, OutCubic).
 // - Interrupção manual (arrasto, flick ou roda do mouse / tecla): para no mesmo
@@ -14,7 +13,8 @@ import rustinho
 // - Movimento reduzido (`Tema.movimentoReduzido`): posiciona direto em 0 ms.
 Item {
     id: mov
-    visible: false
+    width: 0
+    height: 0
 
     readonly property var janela: ApplicationWindow.window
     readonly property bool ativo: estado !== ""
@@ -26,7 +26,7 @@ Item {
     property real saltoY: 0
     property real ultimoYEscrito: -1
     property real ultimaAlturaArea: -1
-    property real inicioMs: 0
+    property real ultimoTickMs: 0
     property real decorridoMs: 0
     property real faseDecorridoMs: 0
     property bool primeiroQuadro: true
@@ -71,6 +71,7 @@ Item {
         indiceAlvo = -1
         ultimoYEscrito = -1
         ultimaAlturaArea = -1
+        ultimoTickMs = 0
         decorridoMs = 0
         faseDecorridoMs = 0
         primeiroQuadro = true
@@ -125,7 +126,7 @@ Item {
         const dist = Math.abs(destino - inicio)
         const gen = ++_geracao
 
-        inicioMs = Date.now()
+        ultimoTickMs = Date.now()
         decorridoMs = 0
         faseDecorridoMs = 0
         primeiroQuadro = true
@@ -207,6 +208,7 @@ Item {
         }
         cancelar(true)
         const gen = ++_geracao
+        ultimoTickMs = Date.now()
         decorridoMs = 0
         faseDecorridoMs = 0
         primeiroQuadro = true
@@ -231,6 +233,102 @@ Item {
         _log("lista_inicio", lista.contentY, { indice: indice })
     }
 
+    function _passo() {
+        const a = mov.area
+        if (!a) {
+            mov._limpar()
+            return
+        }
+        const mesmaAltura = mov.ultimaAlturaArea < 0 || Math.abs(a.height - mov.ultimaAlturaArea) < 1
+        // MG-6 / A8: detecta qualquer rolagem manual (roda do mouse, barra, PageUp/Down) no mesmo quadro.
+        if (a.dragging || a.flicking
+                || (mesmaAltura && mov.ultimoYEscrito >= 0 && Math.abs(a.contentY - mov.ultimoYEscrito) > 2.5)) {
+            mov.interromperPorUsuario()
+            return
+        }
+        mov.ultimaAlturaArea = a.height
+        const agora = Date.now()
+        const dtReal = mov.ultimoTickMs > 0 ? agora - mov.ultimoTickMs : 16
+        mov.ultimoTickMs = agora
+        // MG-9: acompanha o tempo real de relógio para nunca virar câmera lenta em hardware
+        // mais modesto ou renderização por software (Xvfb/llvmpipe). No 1º quadro dá um passo
+        // inicial de 16 ms; nos seguintes avança pelo tempo real decorrido. Apenas o fadeOut
+        // inicial de grande distância limita o passo a 75 ms para garantir ao menos 1 quadro
+        // esmaecido antes do salto (A3).
+        const dt = mov.primeiroQuadro ? 16 : Math.max(12, dtReal)
+        const dtFase = (mov.estado === "fadeOut" || mov.estado === "listaFadeOut")
+                       ? (mov.primeiroQuadro ? 16 : Math.min(75, Math.max(12, dtReal)))
+                       : dt
+        mov.primeiroQuadro = false
+        mov.decorridoMs += dt
+        mov.faseDecorridoMs += dtFase
+        const [minY, maxY] = mov._limites(a)
+
+        if (mov.estado === "normal") {
+            const t = Math.min(1, mov.decorridoMs / Math.max(1, mov.duracaoMs))
+            const e = mov.jaEmMovimento
+                      ? (1 - Math.pow(1 - t, 3))
+                      : (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+            const y = mov._limitar(mov.inicioY + (mov.destinoY - mov.inicioY) * e, minY, maxY)
+            a.contentY = y
+            mov.ultimoYEscrito = y
+            mov._log("rolar", y)
+            if (mov.aoAtualizar)
+                mov.aoAtualizar()
+            if (t >= 1)
+                mov._concluir(false)
+        } else if (mov.estado === "fadeOut") {
+            const t = Math.min(1, mov.faseDecorridoMs / 95)
+            a.opacity = 1 - 0.85 * (1 - Math.pow(1 - t, 3))
+            mov._log("fadeOut", a.contentY)
+            if (t >= 1) {
+                const s = mov._limitar(mov.saltoY, minY, maxY)
+                a.contentY = s
+                mov.ultimoYEscrito = s
+                mov.inicioY = s
+                mov.faseDecorridoMs = 0
+                mov.estado = "fadeIn"
+                mov._log("salto", s)
+            }
+        } else if (mov.estado === "fadeIn") {
+            const tOp = Math.min(1, mov.faseDecorridoMs / 95)
+            a.opacity = 0.15 + 0.85 * (1 - Math.pow(1 - tOp, 3))
+            const tY = Math.min(1, mov.faseDecorridoMs / Math.max(1, mov.duracaoMs))
+            const e = 1 - Math.pow(1 - tY, 3)
+            const y = mov._limitar(mov.inicioY + (mov.destinoY - mov.inicioY) * e, minY, maxY)
+            a.contentY = y
+            mov.ultimoYEscrito = y
+            mov._log("fadeIn", y)
+            if (mov.aoAtualizar)
+                mov.aoAtualizar()
+            if (tY >= 1) {
+                a.opacity = 1
+                mov._concluir(false)
+            }
+        } else if (mov.estado === "listaFadeOut") {
+            const t = Math.min(1, mov.faseDecorridoMs / 95)
+            a.opacity = 1 - 0.85 * (1 - Math.pow(1 - t, 3))
+            mov._log("listaFadeOut", a.contentY)
+            if (t >= 1) {
+                if (mov.listaAlvo && mov.indiceAlvo >= 0 && mov.indiceAlvo < mov.listaAlvo.count)
+                    mov.listaAlvo.positionViewAtIndex(mov.indiceAlvo, mov.modoLista)
+                mov.ultimoYEscrito = a.contentY
+                mov.destinoY = a.contentY
+                mov.faseDecorridoMs = 0
+                mov.estado = "listaFadeIn"
+                mov._log("listaSalto", a.contentY)
+            }
+        } else if (mov.estado === "listaFadeIn") {
+            const tOp = Math.min(1, mov.faseDecorridoMs / 95)
+            a.opacity = 0.15 + 0.85 * (1 - Math.pow(1 - tOp, 3))
+            mov._log("listaFadeIn", a.contentY)
+            if (tOp >= 1) {
+                a.opacity = 1
+                mov._concluir(false)
+            }
+        }
+    }
+
     Connections {
         target: mov.area
         function onDraggingChanged() {
@@ -243,94 +341,12 @@ Item {
         }
     }
 
-    FrameAnimation {
-        id: anim
+    // Pulso ativo estritamente durante o movimento (250–450 ms); desligado em repouso (0% CPU).
+    Timer {
+        id: pulsoMovimento
+        interval: 16
+        repeat: true
         running: mov.ativo
-        onTriggered: {
-            const a = mov.area
-            if (!a) {
-                mov._limpar()
-                return
-            }
-            const mesmaAltura = mov.ultimaAlturaArea < 0 || Math.abs(a.height - mov.ultimaAlturaArea) < 1
-            // MG-6 / A8: detecta qualquer rolagem manual (roda do mouse, barra, PageUp/Down) no mesmo quadro.
-            if (a.dragging || a.flicking
-                    || (mesmaAltura && mov.ultimoYEscrito >= 0 && Math.abs(a.contentY - mov.ultimoYEscrito) > 2.5)) {
-                mov.interromperPorUsuario()
-                return
-            }
-            mov.ultimaAlturaArea = a.height
-            const dt = mov.primeiroQuadro
-                       ? 16
-                       : (anim.frameTime > 0 ? Math.min(80, Math.max(12, anim.frameTime * 1000)) : 16)
-            mov.primeiroQuadro = false
-            mov.decorridoMs += dt
-            mov.faseDecorridoMs += dt
-            const [minY, maxY] = mov._limites(a)
-
-            if (mov.estado === "normal") {
-                const t = Math.min(1, mov.decorridoMs / Math.max(1, mov.duracaoMs))
-                const e = mov.jaEmMovimento
-                          ? (1 - Math.pow(1 - t, 3))
-                          : (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-                const y = mov._limitar(mov.inicioY + (mov.destinoY - mov.inicioY) * e, minY, maxY)
-                a.contentY = y
-                mov.ultimoYEscrito = y
-                mov._log("rolar", y)
-                if (mov.aoAtualizar)
-                    mov.aoAtualizar()
-                if (t >= 1)
-                    mov._concluir(false)
-            } else if (mov.estado === "fadeOut") {
-                const t = Math.min(1, mov.faseDecorridoMs / 95)
-                a.opacity = 1 - 0.85 * (1 - Math.pow(1 - t, 3))
-                mov._log("fadeOut", a.contentY)
-                if (t >= 1) {
-                    const s = mov._limitar(mov.saltoY, minY, maxY)
-                    a.contentY = s
-                    mov.ultimoYEscrito = s
-                    mov.inicioY = s
-                    mov.faseDecorridoMs = 0
-                    mov.estado = "fadeIn"
-                    mov._log("salto", s)
-                }
-            } else if (mov.estado === "fadeIn") {
-                const tOp = Math.min(1, mov.faseDecorridoMs / 95)
-                a.opacity = 0.15 + 0.85 * (1 - Math.pow(1 - tOp, 3))
-                const tY = Math.min(1, mov.faseDecorridoMs / Math.max(1, mov.duracaoMs))
-                const e = 1 - Math.pow(1 - tY, 3)
-                const y = mov._limitar(mov.inicioY + (mov.destinoY - mov.inicioY) * e, minY, maxY)
-                a.contentY = y
-                mov.ultimoYEscrito = y
-                mov._log("fadeIn", y)
-                if (mov.aoAtualizar)
-                    mov.aoAtualizar()
-                if (tY >= 1) {
-                    a.opacity = 1
-                    mov._concluir(false)
-                }
-            } else if (mov.estado === "listaFadeOut") {
-                const t = Math.min(1, mov.faseDecorridoMs / 95)
-                a.opacity = 1 - 0.85 * (1 - Math.pow(1 - t, 3))
-                mov._log("listaFadeOut", a.contentY)
-                if (t >= 1) {
-                    if (mov.listaAlvo && mov.indiceAlvo >= 0 && mov.indiceAlvo < mov.listaAlvo.count)
-                        mov.listaAlvo.positionViewAtIndex(mov.indiceAlvo, mov.modoLista)
-                    mov.ultimoYEscrito = a.contentY
-                    mov.destinoY = a.contentY
-                    mov.faseDecorridoMs = 0
-                    mov.estado = "listaFadeIn"
-                    mov._log("listaSalto", a.contentY)
-                }
-            } else if (mov.estado === "listaFadeIn") {
-                const tOp = Math.min(1, mov.faseDecorridoMs / 95)
-                a.opacity = 0.15 + 0.85 * (1 - Math.pow(1 - tOp, 3))
-                mov._log("listaFadeIn", a.contentY)
-                if (tOp >= 1) {
-                    a.opacity = 1
-                    mov._concluir(false)
-                }
-            }
-        }
+        onTriggered: mov._passo()
     }
 }

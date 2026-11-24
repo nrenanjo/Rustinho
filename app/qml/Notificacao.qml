@@ -51,7 +51,10 @@ Item {
     implicitHeight: saindo ? 0 : cartao.height
     clip: saindo
     visible: !saindo || height > 0.5
-    Behavior on implicitHeight { NumberAnimation { duration: Tema.duracaoPosicao(160); easing.type: Easing.OutCubic } }
+    Behavior on implicitHeight {
+        enabled: !raiz.persistente
+        NumberAnimation { duration: Tema.duracaoPosicao(160); easing.type: Easing.OutCubic }
+    }
 
     // P-NOTIF (diretriz do proprietário, 18/11 e 20/11/2026): padrão visual FIXO
     // extraído de `fofznotifiz.png`, completamente independente dos três temas
@@ -147,7 +150,10 @@ Item {
         border.width: 1.5
         border.color: raiz.fixaBorda
         opacity: 1 - Math.min(Math.abs(x) / (raiz.width * 0.6), 0.75)
-        Behavior on height { NumberAnimation { duration: Tema.duracaoPosicao(140); easing.type: Easing.OutCubic } }
+        Behavior on height {
+            enabled: !raiz.persistente
+            NumberAnimation { duration: Tema.duracaoPosicao(140); easing.type: Easing.OutCubic }
+        }
 
         // ---- Minimizada: o ícone da função, no centro do quadrado ----
         IconeFuncao {

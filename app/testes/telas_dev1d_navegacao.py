@@ -482,6 +482,37 @@ def main():
         finally:
             r.fechar()
 
+        # 6b: mesmo cenário BUG-20261118-FXVT no modo celular (--celular, janela 412x860).
+        nova_loja()
+        r = App(pasta, "TelaConfiguracoes", {"secao": "fiscal"}, fotos, "5b-bug-fxvt-celular",
+                args_extras=["--celular"])
+        try:
+            janelas = subprocess.check_output(
+                ["xdotool", "search", "--onlyvisible", "--pid", str(r.p.pid)],
+                env=dict(os.environ, DISPLAY=TELA), text=True
+            ).split()
+            if janelas:
+                xdo("windowmove", janelas[0], "0", "0")
+                xdo("windowsize", janelas[0], "412", "860")
+                xdo("windowfocus", "--sync", janelas[0])
+                time.sleep(1.0)
+            r.entrar("Ana")
+            ok("FXVT (celular): abriu Fiscal embutido sem CNPJ", r.esperar("Ir para Loja"), r.foto("-0"))
+            clicou = r.clicar("Ir para Loja")
+            ok("FXVT (celular): iniciou guia UF/CNPJ",
+               clicou and r.esperar("Para continuar, informe a UF"), r.foto("-1-guia"))
+            xdo("key", "Escape")
+            ok("FXVT (celular): desistir mostra faixa transitória no Fiscal",
+               r.esperar("A operação ainda não foi concluída"), r.foto("-2-faixa"))
+            xdo("key", "Escape")
+            ok("FXVT (celular): ao voltar ao Início em < 8 s, a faixa não aparece no Início",
+               r.esperar("Trocar usuário")
+               and not r.tem("A operação ainda não foi concluída"),
+               r.foto("-3-inicio"))
+            logs_erros += r.erros_qml()
+        finally:
+            r.fechar()
+
         ok("Geral: nenhum TypeError ou ReferenceError em nenhum cenário",
            len(logs_erros) == 0, "; ".join(logs_erros[:3]))
 
