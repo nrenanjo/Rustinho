@@ -54,6 +54,26 @@ def executar(alvo, filtro, env_extra=None, release=False, raiz=None, offline=Fal
     subprocess.run(cmd, cwd=raiz, env=env, stdout=subprocess.DEVNULL, check=True)
 
 
+def iniciar(alvo, filtro, env_extra=None, raiz=None, saida=None):
+    """O mesmo teste `--ignored --exact` de `executar`, mas em segundo plano (T014: o
+    outro caixa do roteiro do protocolo 4 fica servindo enquanto a tela trabalha).
+    Devolve o `subprocess.Popen`; `saida` (um arquivo aberto) recebe o que ele escreve."""
+    raiz = raiz or RAIZ_PADRAO
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
+    var = VAR_BINARIO.get((alvo, False))
+    binario = env.get(var, "") if var else ""
+    if binario and os.path.isfile(binario) and os.access(binario, os.X_OK):
+        cmd = [binario, "--ignored", "--exact", filtro, "--nocapture"]
+    else:
+        cmd = ["cargo", "test", "-q", "-p", "rustinho-nucleo"]
+        cmd += ["--lib"] if alvo == "lib" else ["--test", alvo]
+        cmd += ["--", "--ignored", "--exact", filtro, "--nocapture"]
+    destino = saida if saida is not None else subprocess.DEVNULL
+    return subprocess.Popen(cmd, cwd=raiz, env=env, stdout=destino, stderr=subprocess.STDOUT)
+
+
 def descobrir_binarios(raiz=None, env=None, incluir_release_lojas=True):
     """Compila (`--no-run`) e devolve `{VAR_ENV: caminho}` dos binários auxiliares do núcleo."""
     raiz = raiz or RAIZ_PADRAO

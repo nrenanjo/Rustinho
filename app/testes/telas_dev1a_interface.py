@@ -289,11 +289,13 @@ def main():
             r.fechar()
             shutil.rmtree(pasta, ignore_errors=True)
 
-        # ---- 3. P-ICO chave da rede (TelaJuntar: só Colar, sem Copiar) ----
+        # ---- 3. P-ICO chave da rede (só Colar, sem Copiar) ----
+        # 0.9.19 (protocolo 4): a tela de entrada é pelo convite; o campo da senha
+        # da rede ficou só em Configurações › Caixas da loja.
         pasta = tempfile.mkdtemp(prefix="rustinho-dev1a-juntar-")
         shutil.rmtree(pasta)
         shutil.copytree(modelo, pasta)
-        r = App(pasta, "TelaJuntar", {}, fotos, "3-juntar-pico")
+        r = App(pasta, "TelaConfiguracoes", {"secao": "caixas"}, fotos, "3-rede-pico")
         try:
             r.entrar("Ana")
             time.sleep(1.2)

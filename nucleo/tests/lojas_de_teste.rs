@@ -315,3 +315,135 @@ fn montar_juncao_com_dado_chegado() {
     assert_eq!(l.numero("SELECT COUNT(*) FROM produto"), 3, "as 3 peças chegaram");
     l.fechar();
 }
+
+// ---------------------------------------------------------------------------
+// T014 (0.9.19-dev.2, protocolo 4): os dois lados do roteiro
+// `app/testes/telas_dev2_protocolo4.py`. O Rustinho de verdade (na tela) faz um
+// papel; o outro é feito aqui, pelo núcleo e pelos mesmos comandos das telas.
+// Conversam com o roteiro por arquivos na pasta `RUSTINHO_P4_TROCA` (cada um
+// escrito inteiro de uma vez, pelo nome definitivo depois de pronto).
+// ---------------------------------------------------------------------------
+
+/// Escreve `nome` na pasta de troca (num temporário e depois pelo nome final).
+fn p4_escrever(troca: &std::path::Path, nome: &str, texto: &str) {
+    let tmp = troca.join(format!(".{nome}.novo"));
+    std::fs::write(&tmp, texto).unwrap();
+    std::fs::rename(&tmp, troca.join(nome)).unwrap();
+}
+
+/// Espera o roteiro escrever `nome` (até `segundos`); devolve o texto.
+fn p4_esperar(troca: &std::path::Path, nome: &str, segundos: u64) -> Option<String> {
+    let fim = std::time::Instant::now() + std::time::Duration::from_secs(segundos);
+    while std::time::Instant::now() < fim {
+        if let Ok(t) = std::fs::read_to_string(troca.join(nome)) {
+            return Some(t.trim().to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    None
+}
+
+/// T014 — o caixa da loja (a raiz) servindo pelo motor, numa porta sorteada. O
+/// caixa novo é o Rustinho de verdade, na tela de Juntar:
+/// 1. monta a loja (Ana gerente, um cliente, a troca ligada) e liga o motor;
+/// 2. quando a loja já é a raiz, escreve `porta.txt`;
+/// 3. espera `codigo.txt` (o código que o roteiro leu na tela do caixa novo), gera o
+///    convite pela API, com a gerente, e escreve `convite.txt`;
+/// 4. serve até `fim.txt` (ou 5 minutos).
+#[test]
+#[ignore = "só à mão: o caixa da loja do roteiro do protocolo 4 (T014)"]
+fn servir_loja_p4() {
+    let (Some(pasta), Some(troca)) = (std::env::var_os("RUSTINHO_LOJA_TESTE"), std::env::var_os("RUSTINHO_P4_TROCA"))
+    else {
+        return;
+    };
+    let (pasta, troca) = (std::path::PathBuf::from(pasta), std::path::PathBuf::from(troca));
+    std::fs::create_dir_all(&pasta).unwrap();
+    std::fs::create_dir_all(&troca).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja do Convite", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    l.pessoa("cliente", "Cliente Sintetico do Convite");
+    l.ok("sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja-p4", "enderecos": "" }));
+    let motor = rustinho_nucleo::sync::Motor::iniciar(pasta.join("rustinho.db"), 0, 0);
+    let (tcp, _) = motor.portas(std::time::Duration::from_secs(20)).expect("as portas do motor abriram");
+    let fim = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    while l.numero("SELECT COUNT(*) FROM config WHERE chave = 'p4_raiz' AND valor <> ''") == 0 {
+        assert!(std::time::Instant::now() < fim, "a loja não virou a raiz do protocolo 4");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    p4_escrever(&troca, "porta.txt", &tcp.to_string());
+    let codigo = p4_esperar(&troca, "codigo.txt", 300).expect("o roteiro não mandou o código");
+    let r = l.chamar("p4_gerar_convite", json!({ "codigoPedido": codigo, "nome": "Caixa Novo" }));
+    match r["ok"].as_bool() {
+        Some(true) => p4_escrever(&troca, "convite.txt", r["dados"]["convite"].as_str().unwrap()),
+        _ => p4_escrever(&troca, "erro.txt", &r.to_string()),
+    }
+    let _ = p4_esperar(&troca, "fim.txt", 300);
+    let mut motor = motor;
+    let _ = motor.encerrar(std::time::Duration::from_secs(10));
+}
+
+/// T014 — o caixa novo, pelo núcleo; a loja é o Rustinho de verdade (o gerente
+/// aprova na tela de Configurações):
+/// 1. escreve `codigo.txt` (o código deste caixa novo);
+/// 2. espera `convite.txt` (o convite que o roteiro leu na tela do gerente) e entra
+///    pelo convite no endereço `RUSTINHO_P4_ENDERECO`; escreve `entrou.txt` ("ok" ou
+///    o erro);
+/// 3. puxa os dados da loja uma vez (a loja passa a conhecer este caixa) e escreve
+///    `puxou.txt` ("ok" ou o erro);
+/// 4. espera `fim.txt` (ou 5 minutos).
+#[test]
+#[ignore = "só à mão: o caixa novo do roteiro do protocolo 4 (T014)"]
+fn entrar_por_convite_p4() {
+    let (Some(pasta), Some(troca)) = (std::env::var_os("RUSTINHO_LOJA_TESTE"), std::env::var_os("RUSTINHO_P4_TROCA"))
+    else {
+        return;
+    };
+    let (pasta, troca) = (std::path::PathBuf::from(pasta), std::path::PathBuf::from(troca));
+    let endereco = std::env::var("RUSTINHO_P4_ENDERECO").unwrap_or_else(|_| "127.0.0.1:47810".into());
+    std::fs::create_dir_all(&pasta).unwrap();
+    std::fs::create_dir_all(&troca).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    let id = l.ok("p4_identidade", json!({}));
+    p4_escrever(&troca, "codigo.txt", id["codigoPedido"].as_str().unwrap());
+    let convite = p4_esperar(&troca, "convite.txt", 300).expect("o roteiro não mandou o convite");
+    let r = l.chamar("p4_juntar_com_convite", json!({ "convite": convite, "enderecos": endereco }));
+    if r["ok"] != true {
+        p4_escrever(&troca, "entrou.txt", &r.to_string());
+        return;
+    }
+    p4_escrever(&troca, "entrou.txt", "ok");
+    l.fechar();
+    let caminho = pasta.join("rustinho.db");
+    let mut motor = rustinho_nucleo::sync::Motor::iniciar(caminho.clone(), 0, 0);
+    let (tcp, _) = motor.portas(std::time::Duration::from_secs(20)).expect("as portas do motor abriram");
+    let puxou = rustinho_nucleo::sync::puxar(&caminho, &endereco, tcp);
+    p4_escrever(&troca, "puxou.txt", &match puxou {
+        Ok(_) => "ok".to_string(),
+        Err(e) => e.to_string(),
+    });
+    let _ = p4_esperar(&troca, "fim.txt", 300);
+    let _ = motor.encerrar(std::time::Duration::from_secs(10));
+}
+
+/// T014 — a loja (Ana gerente, um cliente, a troca ligada) para o Rustinho de
+/// verdade abrir; o motor dele a torna a raiz do protocolo 4 ao começar.
+#[test]
+#[ignore = "só à mão: a loja do roteiro do protocolo 4 em que o gerente aprova pela tela (T014)"]
+fn montar_loja_p4() {
+    let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&pasta).unwrap();
+    let mut l = Loja::abrir_em(&pasta, false);
+    l.ok(
+        "configurar_inicio",
+        json!({ "loja": "Loja do Gerente", "caixa": "Caixa 1", "nome": "Ana",
+                "senha": SENHA_ANA, "senha2": SENHA_ANA }),
+    );
+    l.pessoa("cliente", "Cliente Sintetico da Loja do Gerente");
+    l.ok("sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja-p4", "enderecos": "" }));
+    l.fechar();
+}

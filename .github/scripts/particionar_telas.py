@@ -37,7 +37,8 @@ EXCLUIDOS = {"telas_seletor_nativo.py"}
 DISPLAYS_SEGUROS = [f":{n}" for n in range(60, 75)] + [":88", ":89", ":91", ":92", ":93"]
 
 # Roteiros que fazem bind em porta TCP fixa (47810) quando executados sem network namespace.
-EXIGEM_REDE_EXCLUSIVA = {"telas_rvi02"}
+# T014 (0.9.19-dev.2): o roteiro do protocolo 4 liga a troca de dados do Rustinho de verdade (47810/47811).
+EXIGEM_REDE_EXCLUSIVA = {"telas_rvi02", "telas_dev2_protocolo4"}
 
 # Pesos estimados (em segundos, calibrados pelos tempos reais medidos no CachyOS + CI 44984217573) para balanceamento LPT.
 PESOS_SEGUNDOS = {
@@ -106,6 +107,7 @@ PESOS_SEGUNDOS = {
     "telas_compras_pasta_t107": 17,
     "telas_compras_conferencia_t111": 25,
     "telas_dev1a_interface": 70,
+    "telas_dev2_protocolo4": 150,
     "telas_dev1c_recuperacao": 45,
     "telas_dev1d_navegacao": 75,
     "telas_d14_portatil": 17,

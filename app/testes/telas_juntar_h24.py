@@ -9,9 +9,10 @@ qualquer clique ou tecla: telas_tema_0918.Rustinho). Cada caso numa abertura
 própria, com o seu banco.
 
 Sem dado chegado (um caixa novo, vazio):
-  J1  boas-vindas → "juntar" → a senha da rede → "Procurar os outros caixas"
-      (a tentativa começa e ninguém responde) → a seta volta às boas-vindas
-      SEM pergunta, e a tentativa sai (a marca da entrada e a troca ligada);
+  J1  boas-vindas → "juntar" → o código deste caixa aparece → um convite e um
+      endereço onde não há loja → "Entrar na loja" (a entrada não acha a loja e
+      não deixa nada: nem a marca da entrada nem a troca ligada) → a seta volta
+      às boas-vindas SEM pergunta (0.9.19: a entrada é pelo convite do gerente);
   J2  o mesmo com o Esc.
 Com dado chegado (o caixa abre no meio de uma entrada, com parte da loja):
   J3  a seta abre a pergunta "Desistir de juntar este caixa?" e, com ela
@@ -24,7 +25,7 @@ Com dado chegado (o caixa abre no meio de uma entrada, com parte da loja):
 
 De onde vem o "dado chegado": a loja montada pelo núcleo
 (nucleo/tests/lojas_de_teste.rs::montar_juncao_com_dado_chegado). O caixa
-novo começou a entrar pelo comando da tela (sync_juntar) e recebeu parte das
+novo começou a entrar (a marca da entrada e a troca ligada) e recebeu parte das
 alterações de outra loja (a configuração dela, 3 peças e um cliente; nenhum
 usuário) pela mesma função que aplica o que chega pela rede (sync::aplicar).
 É o estado de uma entrada interrompida: o programa fechou, ou a rede caiu,
@@ -60,7 +61,10 @@ TELA = u.TELA
 ESPERADAS = {}  # J3–J6 (H24) saíram com a correção do passo 7.2
 PERGUNTA = "Desistir de juntar este caixa?"
 TITULO_JUNTAR = "Juntar este caixa"
-SENHA_DA_REDE = "rede-da-loja-teste"
+# 0.9.19 (protocolo 4): um convite bem formado e um endereço onde não há loja
+# (a porta 9 do próprio computador: a conexão é recusada na hora).
+CONVITE_SEM_LOJA = "ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2-3"
+ENDERECO_SEM_LOJA = "127.0.0.1:9"
 
 
 def montar_com_dado(pasta):
@@ -143,7 +147,8 @@ def abrir(pasta, fotos, nome, logs):
 
 
 def sem_dado(como, fotos, logs, conferir):
-    """J1 (seta) e J2 (Esc): a tentativa começa, nada chega, e volta sem perguntar."""
+    """J1 (seta) e J2 (Esc): a entrada pelo convite não acha a loja, nada chega, e
+    volta sem perguntar."""
     codigo = "J1" if como == "seta" else "J2"
     nome = f"a {como}" if como == "seta" else "o Esc"
     pasta = tempfile.mkdtemp(prefix="rustinho-juntar-vazio-")
@@ -155,20 +160,30 @@ def sem_dado(como, fotos, logs, conferir):
                      f"não medido: as boas-vindas não apareceram (veja {rr.saida})")
             return
         t = esperar(rr, lambda x: na_tela(x, TITULO_JUNTAR))
+        # O código deste caixa aparece (o núcleo prepara a identidade dele) e o
+        # campo do convite fica com o foco.
+        t = esperar(rr, lambda x: any(base.simples(tx).startswith("codigo deste") for tx in sem_textos_especiais(x)), 20)
         time.sleep(0.8)
-        base.xdo("type", "--delay", "60", SENHA_DA_REDE)
-        if not rr.clicar("Procurar os outros caixas"):
+        base.xdo("type", "--delay", "40", CONVITE_SEM_LOJA)
+        if not rr.clicar("Aparece junto do convite. Ex.: 192.168.0.12"):
             conferir(codigo, f"sem dado chegado, {nome} desiste sem perguntar", False,
-                     "não medido: sem o botão \"Procurar os outros caixas\"")
+                     "não medido: sem o campo do endereço do caixa da loja")
             return
-        # Duas voltas do relógio da tela (2 s): o sync_ler já leu a tentativa.
-        t = esperar(rr, lambda x: na_tela(x, "Procurando os outros caixas"), 10)
-        time.sleep(4.5)
-        antes = banco(pasta)
-        rr.foto("-1-procurando")
-        if antes["tentativa"] == 0 or antes["de_outro_caixa"] != 0:
+        time.sleep(0.4)
+        base.xdo("type", "--delay", "40", ENDERECO_SEM_LOJA)
+        if not rr.clicar("Entrar na loja"):
             conferir(codigo, f"sem dado chegado, {nome} desiste sem perguntar", False,
-                     f"não medido: a tentativa não começou ou já tinha dado ({antes})")
+                     "não medido: sem o botão \"Entrar na loja\"")
+            return
+        # A conexão é recusada na hora: a tela mostra o erro no convite e continua.
+        t = esperar(rr, lambda x: any("rede" in base.simples(tx) and "falha" in base.simples(tx)
+                                       for tx in sem_textos_especiais(x)), 15)
+        time.sleep(1.0)
+        antes = banco(pasta)
+        rr.foto("-1-nao-achou")
+        if antes["tentativa"] != 0 or antes["troca_ligada"] != 0 or antes["de_outro_caixa"] != 0:
+            conferir(codigo, f"sem dado chegado, {nome} desiste sem perguntar", False,
+                     f"a entrada que não achou a loja deixou rastro: {antes}")
             return
         acionar(rr, como, rr.textos())
         depois_t = esperar(rr, lambda x: boas_vindas(x) or pergunta(x) is not None, 8)
