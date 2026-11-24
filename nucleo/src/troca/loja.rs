@@ -197,6 +197,20 @@ fn alvo(conn: &Connection) -> Resultado<Option<Alvo>> {
     Ok((!minha.is_empty()).then_some(Alvo { loja: minha, origem: String::new() }))
 }
 
+/// A loja escolhida na entrada (`""` se não há): enquanto a identidade da loja não
+/// chega pela troca, é a loja deste caixa novo (protocolo 4, T009).
+pub fn da_entrada(conn: &Connection) -> Resultado<String> {
+    Ok(alvo(conn)?.map(|a| a.loja).unwrap_or_default())
+}
+
+/// Protocolo 4 (T009): o caixa novo foi aprovado na loja `loja` pelo convite. A
+/// entrada fica marcada e a loja escolhida, como na entrada de antes (FALHA-01):
+/// só essa loja entrega dados para ele.
+pub fn fixar_entrada_aprovada(conn: &Connection, loja: &str) -> Resultado<()> {
+    comecar_juncao(conn)?;
+    fixar_alvo(conn, loja, "")
+}
+
 fn fixar_alvo(conn: &Connection, loja: &str, origem: &str) -> Resultado<()> {
     if loja.is_empty() {
         crate::registro::anotar("entrada na loja: loja escolhida (caixa de antes da identidade da loja)");

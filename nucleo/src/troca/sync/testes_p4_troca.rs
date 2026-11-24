@@ -9,7 +9,7 @@
 use super::testes_seguranca_caixas::{caixa_vazio_em_arquivo, loja_em_arquivo, motor, temp};
 use super::*;
 use crate::banco::Banco;
-use crate::troca::protocolo4::{aprovados, cofre};
+use crate::troca::protocolo4::{aprovados, cofre, hex};
 
 /// A identidade (deste processo) do caixa cujo banco está em `caminho`.
 fn identidade(caminho: &Path) -> Arc<cofre::IdentidadeLocal> {
@@ -245,4 +245,93 @@ fn p4_anuncio_assinado_vira_par_so_de_caixa_aprovado() {
     let contem = |p: &[u8], agulha: &[u8]| p.windows(agulha.len()).any(|j| j == agulha);
     let novo = p4::pacote_de_anuncio(&ctx_a, 4242).unwrap();
     assert!(!contem(&novo, &k.sal) && !contem(&novo, &k.propria), "o anúncio assinado não leva nada da senha");
+}
+
+/// O caixa novo (banco vazio, **sem a senha da rede**) com a troca ainda desligada.
+fn caixa_novo_sem_senha(caminho: &Path, nome: &str) -> Banco {
+    let b = Banco::abrir(caminho).unwrap();
+    config::gravar(&b.conn, "caixa_nome", nome).unwrap();
+    config::gravar(&b.conn, "codigos_espera_teste", "0").unwrap();
+    b
+}
+
+/// O código de pedido que a tela do caixa novo mostra (o gerente confere).
+fn codigo_do_caixa_novo(b: &Banco, caminho: &Path) -> String {
+    let id = identidade(caminho);
+    let disp = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+    aprovados::Pedido::com_dispositivo(&id.identidade, &disp).codigo()
+}
+
+/// T009 (etapa 5, A6, D1) de ponta a ponta: o gerente gera o convite no caixa 1 com o
+/// código do caixa novo; o caixa novo, sem a senha da rede, entra pelo convite (o
+/// endereço vem no QR), fica aprovado (com a auditoria), e recebe a loja pelo fio do
+/// protocolo 4. O mesmo convite não serve de novo; um convite errado é recusado.
+#[test]
+fn p4_caixa_novo_entra_pelo_convite_sem_a_senha_da_rede() {
+    thread::spawn(|| {
+        let (ca, cb, cc) = (temp("conv-a"), temp("conv-b"), temp("conv-c"));
+        let (a, ua) = loja_em_arquivo(&ca, "Caixa 1");
+        crate::troca::sync::testes_seguranca_caixas::cliente(&a, &ua, "Cliente Da Loja Pelo Convite");
+        p4::garantir_raiz(&a.conn, &ca).unwrap();
+        let loja = crate::loja::id(&a.conn).unwrap();
+        let ia = identidade(&ca);
+        let (mut ma, pt_a) = motor(&ca);
+
+        // O caixa novo mostra o código; o gerente gera o convite no caixa 1.
+        let b = caixa_novo_sem_senha(&cb, "Caixa 2");
+        let codigo = codigo_do_caixa_novo(&b, &cb);
+        let conv = cofre::gerar_convite(
+            &a.conn,
+            &ia.identidade,
+            &ia.identidade.publica(),
+            &loja,
+            &codigo,
+            "Caixa 2",
+            "Ana",
+            &format!("127.0.0.1:{pt_a}"),
+        )
+        .unwrap();
+
+        // Convite errado: recusado, e o caixa novo continua sem loja.
+        let errado =
+            format!("RUST4|AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F|{loja}|{}|127.0.0.1:{pt_a}", hex(&ia.identidade.publica()));
+        assert!(juntar_com_convite(&cb, &errado, &[]).is_err(), "convite errado entra");
+        assert!(!p4::tem_raiz_fixada(&b.conn));
+        let id_b = identidade(&cb);
+        assert!(
+            !aprovados::autorizada(&a.conn, &ia.identidade.publica(), &loja, &id_b.identidade.publica()).unwrap(),
+            "com o convite errado, o caixa 1 não pode ter aprovado o caixa novo"
+        );
+
+        // O convite certo (o QR, com o endereço do caixa 1).
+        assert_eq!(juntar_com_convite(&cb, &conv.payload_qr, &[]).unwrap(), loja);
+        assert!(p4::tem_raiz_fixada(&b.conn), "a raiz da loja ficou fixada no caixa novo");
+        assert!(ajustes(&b.conn).unwrap().senha.is_empty(), "sem a senha da rede");
+        let aprovacoes: i64 =
+            a.conn.query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'aprovar_caixa'", [], |l| l.get(0)).unwrap();
+        assert_eq!(aprovacoes, 1, "a entrada foi aprovada e auditada no caixa 1");
+
+        // O caixa novo recebe a loja pelo fio do protocolo 4.
+        let (mut mb, pt_b) = motor(&cb);
+        let antes = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst);
+        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
+        assert!(p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst) > antes, "pelo fio do protocolo 4");
+        assert!(crate::troca::sync::testes_seguranca_caixas::tem_usuarios(&b) >= 1, "os usuários chegaram");
+        assert!(crate::troca::sync::testes_seguranca_caixas::tem_cliente(&b, "Cliente Da Loja Pelo Convite"));
+        let auditada: i64 = b
+            .conn
+            .query_row("SELECT COUNT(*) FROM auditoria WHERE acao LIKE '%aprova%caixa%'", [], |l| l.get(0))
+            .unwrap();
+        assert!(auditada >= 1, "a aprovação está na auditoria do caixa novo (veio com a loja)");
+
+        // O mesmo convite não serve para outro caixa.
+        let c = caixa_novo_sem_senha(&cc, "Caixa 3");
+        let _ = codigo_do_caixa_novo(&c, &cc);
+        assert!(juntar_com_convite(&cc, &conv.payload_qr, &[]).is_err(), "o convite já foi usado");
+        assert!(!p4::tem_raiz_fixada(&c.conn));
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        assert!(mb.encerrar(Duration::from_secs(20)));
+    })
+    .join()
+    .unwrap();
 }

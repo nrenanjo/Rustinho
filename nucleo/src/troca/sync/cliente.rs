@@ -60,7 +60,8 @@ pub(crate) fn puxar_por(
         return Err(Erro::validacao(crate::faixas::texto_do_bloqueio(crate::faixas::BLOQUEIO_COPIA)));
     }
     let a = ajustes(&conn)?;
-    let k = Chaves::de(&conn, &a.senha)?;
+    // A chave da senha da rede (protocolo 3) só existe com a senha (T009).
+    let k = if a.senha.is_empty() { None } else { Some(Chaves::de(&conn, &a.senha)?) };
     // DT-P4-26: o contexto do protocolo 4 deste caixa (None = ainda não fala o P4).
     let ctx = p4::contexto(&conn, caminho);
     let alvo = endereco_completo(endereco)?;
@@ -114,7 +115,7 @@ pub(crate) fn puxar_por(
             let existe: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM sync_par)", [], |l| l.get(0))?;
             existe
         };
-        let (mut fio, conf) = abrir_fio(&conn, &k, &alvo, saida, ctx.as_ref(), &dono, parar)?;
+        let (mut fio, conf) = abrir_fio(&conn, k.as_ref(), &alvo, saida, ctx.as_ref(), &dono, parar)?;
         confirmacao = Some(conf);
         let saiu = agora_ms();
         let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
@@ -324,7 +325,7 @@ pub(crate) fn puxar_por(
         && crate::faixas::distribuidor(&conn)?.as_deref() == Some(dispositivo.as_str())
         && crate::faixas::precisa(&conn)?
     {
-        match pedir_faixa(&mut conn, &k, &alvo, saida, ctx.as_ref(), &dispositivo) {
+        match pedir_faixa(&mut conn, k.as_ref(), &alvo, saida, ctx.as_ref(), &dispositivo) {
             Ok(n) => total += n,
             Err(e) => crate::registro::anotar(&format!("troca de dados: pedido de faixa de códigos: {e}")),
         }
@@ -359,7 +360,7 @@ pub(super) fn completo_antes(conn: &Connection, dispositivo: &str) -> Resultado<
 /// alterações eram novas.
 pub(super) fn pedir_faixa(
     conn: &mut Connection,
-    k: &Chaves,
+    k: Option<&Chaves>,
     alvo: &SocketAddr,
     saida: Option<&Saida>,
     ctx: Option<&p4::ContextoP4>,

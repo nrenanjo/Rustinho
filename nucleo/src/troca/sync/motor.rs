@@ -149,8 +149,7 @@ impl Motor {
                         ultima_checagem = Instant::now();
                         troca_ligada = abrir_conexao(&caminho)
                             .ok()
-                            .and_then(|c| ajustes(&c).ok())
-                            .is_some_and(|a| a.ligado && !a.senha.is_empty());
+                            .is_some_and(|c| ajustes(&c).ok().is_some_and(|a| p4::troca_ativa(&c, &a)));
                     }
                     if !troca_ligada {
                         if let Some(o) = ouvinte.take() {
@@ -309,7 +308,7 @@ impl Motor {
                         cochilar(&parar, Duration::from_secs(1));
                         continue;
                     };
-                    if !a.ligado || a.senha.is_empty() {
+                    if !p4::troca_ativa(&conn, &a) {
                         if let Some(s) = socket.take() {
                             drop(s);
                             remover_ocupante_porta("UDP", porta_aberta, &caminho);
@@ -348,13 +347,20 @@ impl Motor {
                     }
                     // Gravações deste laço (sal novo, par visto) respeitam a
                     // pausa da restauração de backup, como as outras tarefas.
-                    let chaves = {
-                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-                        Chaves::de(&conn, &a.senha)
-                    };
-                    let Ok(k) = chaves else {
-                        cochilar(&parar, Duration::from_secs(1));
-                        continue;
+                    // A chave da senha da rede só existe com a senha (protocolo 3); o caixa
+                    // que entrou por convite (T009) não a tem e só usa o anúncio assinado.
+                    let k: Option<Chaves> = if a.senha.is_empty() {
+                        None
+                    } else {
+                        let chaves = {
+                            let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                            Chaves::de(&conn, &a.senha)
+                        };
+                        let Ok(k) = chaves else {
+                            cochilar(&parar, Duration::from_secs(1));
+                            continue;
+                        };
+                        Some(k)
                     };
                     let mudou = if ultima_lista.elapsed() >= Duration::from_secs(1) {
                         ultima_lista = Instant::now();
@@ -368,7 +374,7 @@ impl Motor {
                     };
                     if mudou || ultimo_anuncio.elapsed() > Duration::from_secs(10) {
                         let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp_de(&escolhidas));
-                        if let Ok(pacote) = cifrar(&k, ola.to_string().as_bytes()) {
+                        if let Some(Ok(pacote)) = k.as_ref().map(|k| cifrar(k, ola.to_string().as_bytes())) {
                             // Um anúncio por interface apropriada (um broadcast só
                             // sai por uma), mais o limitado de sempre. Se o sistema
                             // não soube listar, só o limitado.
@@ -397,6 +403,11 @@ impl Motor {
                         if buf[..n].starts_with(crate::troca::protocolo4::anuncio::MAGICA_ANUNCIO) {
                             let lido =
                                 ctx_p4.as_ref().and_then(|ctx| p4::ler_anuncio(&conn, ctx, &buf[..n], &mut repeticoes));
+                            if ctx_p4.is_none() {
+                                // T009: quem ainda não é da loja guarda o anúncio como
+                                // candidato para a entrada por convite.
+                                p4::guardar_ouvido(&caminho, origem.ip(), &buf[..n]);
+                            }
                             if let Some((d, nome, porta)) = lido {
                                 let endereco = format!("{}:{porta}", origem.ip());
                                 if aceitar_anuncio(&d, &a, interfaces.as_deref(), &endereco) {
@@ -408,7 +419,7 @@ impl Motor {
                         }
                         // R-09: sal desconhecido só passa pela conta cara
                         // (Argon2) poucas vezes por minuto (veja `decifrar`).
-                        if let Ok(claro) = decifrar(&k, &buf[..n], Some(origem.ip())) {
+                        if let Some(Ok(claro)) = k.as_ref().map(|k| decifrar(k, &buf[..n], Some(origem.ip()))) {
                             if let Ok(v) = serde_json::from_slice::<Value>(&claro) {
                                 if let Some((d, nome, porta)) = ler_anuncio(&v) {
                                     let endereco = format!("{}:{porta}", origem.ip());
@@ -474,7 +485,7 @@ impl Motor {
                         ultima_reaplicacao = Instant::now();
                     }
                     let Ok(a) = ajustes(&conn) else { continue };
-                    if !a.ligado || a.senha.is_empty() {
+                    if !p4::troca_ativa(&conn, &a) {
                         continue;
                     }
                     // DT-P4-10 (A4): a raiz do protocolo 4, de minuto em minuto (grava a

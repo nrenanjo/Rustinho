@@ -953,6 +953,22 @@ pub fn garantir_raiz_se_aplicavel(
     Ok(None)
 }
 
+/// T009: o caixa novo fixa a raiz que a loja provou (pela prova do convite) depois
+/// de juntar o registro dela. A1: um pino já fixado nunca é trocado (outra raiz é
+/// recusada); e a raiz tem de ser a única raiz do registro desta loja.
+pub fn fixar_raiz_recebida(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<()> {
+    if let Some(pino) = pino_raiz(conn)? {
+        if &pino == raiz {
+            return Ok(());
+        }
+        return Err(Erro::validacao("Este caixa já pertence a outra loja (outra raiz). A entrada foi recusada."));
+    }
+    if aprovados::raiz_registrada(conn, loja_id)?.as_ref() != Some(raiz) {
+        return Err(Erro::validacao("O registro de caixas que a loja mandou não confere com a raiz dela."));
+    }
+    crate::config::gravar(conn, "p4_raiz", &hex(raiz))
+}
+
 /// Lê a âncora de confiança atual da loja (A1): **sempre** prefere o pino
 /// `p4_raiz` em `config`. Só consulta `caixa_aprovado` quando o pino ainda não
 /// existe (e falha fechado se houver mais de uma raiz distinta).

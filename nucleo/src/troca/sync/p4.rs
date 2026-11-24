@@ -65,7 +65,12 @@ impl ContextoP4 {
 /// técnico; nunca gera identidade nova sozinho) ou a própria chave não autorizada.
 /// A raiz é conferida antes da identidade: um caixa sem raiz não paga o Argon2.
 pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> {
-    let loja = crate::loja::id(conn).ok().filter(|l| !l.is_empty())?;
+    // O caixa que acabou de entrar por convite ainda não recebeu a identidade da
+    // loja pela troca: vale a loja escolhida na entrada (T009).
+    let loja = crate::loja::id(conn)
+        .ok()
+        .filter(|l| !l.is_empty())
+        .or_else(|| crate::loja::da_entrada(conn).ok().filter(|l| !l.is_empty()))?;
     let raiz = cofre::raiz_atual(conn, &loja).ok().flatten()?;
     let pasta = caminho.parent()?;
     let identidade = match cofre::identidade_do_processo(pasta, &modo()) {
@@ -212,6 +217,214 @@ pub(super) fn ler_anuncio(
         return None;
     }
     Some((aprovacao.dispositivo.clone(), aprovacao.nome.clone(), a.porta))
+}
+
+/// A raiz do protocolo 4 está fixada neste caixa (pino `p4_raiz`)?
+pub(super) fn tem_raiz_fixada(conn: &Connection) -> bool {
+    config::ler(conn, "p4_raiz").ok().flatten().is_some_and(|r| !r.trim().is_empty())
+}
+
+/// T009: a troca está ligada e tem como falar — com a senha da rede (protocolo 3)
+/// ou, sem ela, como caixa do protocolo 4 (raiz fixada: o caixa que entrou por
+/// convite não sabe a senha da rede, e não precisa).
+pub(super) fn troca_ativa(conn: &Connection, a: &Ajustes) -> bool {
+    a.ligado && (!a.senha.is_empty() || tem_raiz_fixada(conn))
+}
+
+/// Há convite ativo (não usado, com segredo, dentro da validade) nesta loja? Só
+/// então o servidor aceita o aperto de mão de uma chave desconhecida, e só para o
+/// canal de entrada.
+pub(super) fn tem_convite_ativo(conn: &Connection, loja: &str) -> Resultado<bool> {
+    Ok(cofre::convites_validos_agora(conn, loja, &crate::tempo::agora())?
+        .iter()
+        .any(|c| c.usado_em.is_none() && c.segredo_normalizado.is_some()))
+}
+
+/// Texto para a tela do caixa novo: o convite não confere.
+pub const TEXTO_CONVITE_NAO_CONFERE: &str =
+    "O convite não confere (vencido, já usado, de outra loja ou de outro caixa). Peça ao gerente um convite novo.";
+
+/// T009 (etapa 5, A6): a resposta da loja a um pedido de entrada pelo convite. O
+/// convite tem de casar com a prova amarrada a esta sessão; aí o caixa novo é
+/// aprovado (assinado por este caixa, com o gerente do convite e auditoria) e
+/// recebe a prova do servidor, a raiz, a loja e o registro. Repetir depois de uma
+/// queda devolve a mesma aprovação (idempotente).
+pub(super) fn responder_ingresso(
+    conn: &Connection,
+    ctx: &ContextoP4,
+    chave_cliente: &Chave,
+    exportador: &[u8; 32],
+    pedido: &aprovados::Pedido,
+    prova: &canal::ProvaIngressoCliente,
+) -> canal::MensagemIngresso {
+    let recusa = |motivo: String| {
+        crate::registro::anotar(&format!(
+            "troca de dados (protocolo 4): entrada recusada para a chave {}: {motivo}",
+            hex(chave_cliente)
+        ));
+        canal::MensagemIngresso::Recusado { motivo }
+    };
+    let agora = crate::tempo::agora();
+    let candidatos = match cofre::convites_validos_agora(conn, &ctx.loja, &agora) {
+        Ok(c) => c,
+        Err(e) => return recusa(e.to_string()),
+    };
+    let eu = ctx.eu();
+    let Some(c) = canal::casar_convite_da_prova(&candidatos, exportador, chave_cliente, &eu, pedido, prova) else {
+        return recusa(TEXTO_CONVITE_NAO_CONFERE.into());
+    };
+    if let Err(e) =
+        cofre::consumir_convite_e_aprovar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &c.id, pedido, &agora)
+    {
+        return recusa(e.to_string());
+    }
+    let prova_servidor =
+        match canal::gerar_prova_servidor(&c.segredo_hash, exportador, chave_cliente, &eu, &ctx.raiz, &ctx.loja) {
+            Ok(p) => p,
+            Err(e) => return recusa(e.to_string()),
+        };
+    match aprovados::linhas(conn, &ctx.loja) {
+        Ok(linhas) => {
+            canal::MensagemIngresso::Aprovado { prova_servidor, raiz: ctx.raiz, loja_id: ctx.loja.clone(), linhas }
+        }
+        Err(e) => recusa(e.to_string()),
+    }
+}
+
+/// Um anúncio `RSA4` ouvido por um caixa que ainda não é da loja (assinatura
+/// conferida; a autorização não dá para conferir sem o registro): candidato a
+/// endereço da loja para a entrada por convite.
+#[derive(Clone, Debug)]
+struct Ouvido {
+    endereco: SocketAddr,
+    loja: String,
+    visto: Instant,
+}
+
+fn ouvidos_mapa() -> &'static Mutex<HashMap<PathBuf, Vec<Ouvido>>> {
+    static M: std::sync::OnceLock<Mutex<HashMap<PathBuf, Vec<Ouvido>>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// Guarda um anúncio `RSA4` ouvido (só o endereço e a loja; até 32, por 2 minutos).
+pub(super) fn guardar_ouvido(caminho: &Path, ip: std::net::IpAddr, bytes: &[u8]) {
+    let Ok(a) = crate::troca::protocolo4::anuncio::abrir(bytes, agora_ms()) else { return };
+    let endereco = SocketAddr::new(ip, a.porta);
+    let mut m = ouvidos_mapa().lock().unwrap_or_else(|e| e.into_inner());
+    let lista = m.entry(caminho.to_path_buf()).or_default();
+    lista.retain(|o| o.endereco != endereco && o.visto.elapsed() < Duration::from_secs(120));
+    lista.push(Ouvido { endereco, loja: a.loja_id, visto: Instant::now() });
+    if lista.len() > 32 {
+        lista.remove(0);
+    }
+}
+
+/// Os endereços ouvidos recentemente (da `loja`, se ela é conhecida).
+fn ouvidos(caminho: &Path, loja: &str) -> Vec<SocketAddr> {
+    let m = ouvidos_mapa().lock().unwrap_or_else(|e| e.into_inner());
+    m.get(caminho)
+        .map(|l| {
+            l.iter()
+                .filter(|o| o.visto.elapsed() < Duration::from_secs(120) && (loja.is_empty() || o.loja == loja))
+                .map(|o| o.endereco)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Texto para a tela: não há onde procurar a loja.
+pub const TEXTO_SEM_ENDERECO: &str = "Não foi encontrado nenhum caixa da loja na rede. Use o QR do convite, ou digite \
+     o endereço do caixa onde o gerente gerou o convite.";
+
+/// T009 (etapa 5, A6, D1): o caixa novo (sem usuários) entra na loja pelo convite
+/// que o gerente gerou num caixa da loja. Procura a loja no endereço do QR, nos
+/// `enderecos` digitados e nos anúncios `RSA4` ouvidos; com cada um, abre o canal de
+/// entrada, prova o convite e só aceita a resposta cuja prova do servidor confere
+/// (N-05). Aprovado: junta o registro, confere que a própria chave ficou
+/// autorizada, fixa a raiz e a loja da entrada, liga a troca (sem a senha da rede)
+/// com o endereço de quem aprovou. Devolve a loja.
+pub fn juntar_com_convite(caminho: &Path, convite: &str, enderecos: &[String]) -> Resultado<String> {
+    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+    let conn = abrir_conexao(caminho)?;
+    if crate::usuarios::quantidade(&conn)? > 0 {
+        return Err(Erro::validacao("Este caixa já tem usuários: ele já é de uma loja."));
+    }
+    let qr = canal::interpretar_convite_entrada(convite)?;
+    let pasta = caminho.parent().ok_or_else(|| Erro::Interno("banco sem pasta".into()))?;
+    let id = cofre::identidade_do_processo(pasta, &modo())?;
+    let eu = id.identidade.publica();
+    let disp = config::ler(&conn, "dispositivo_id")?.unwrap_or_default();
+    let pedido = aprovados::Pedido::com_dispositivo(&id.identidade, &disp);
+    let mut alvos: Vec<SocketAddr> = Vec::new();
+    let candidatos = std::iter::once(qr.endereco.clone()).chain(enderecos.iter().cloned());
+    for e in candidatos.filter(|e| !e.trim().is_empty()) {
+        if let Ok(a) = endereco_completo(e.trim()) {
+            if !alvos.contains(&a) {
+                alvos.push(a);
+            }
+        }
+    }
+    for a in ouvidos(caminho, &qr.loja_id) {
+        if !alvos.contains(&a) {
+            alvos.push(a);
+        }
+    }
+    if alvos.is_empty() {
+        return Err(Erro::validacao(TEXTO_SEM_ENDERECO));
+    }
+    let mut ultimo: Option<Erro> = None;
+    for alvo in alvos {
+        let entrada = match tentar_entrar(&id.identidade, &eu, &qr, &pedido, &alvo) {
+            Ok(e) => e,
+            Err(e) => {
+                ultimo = Some(e);
+                continue;
+            }
+        };
+        if !qr.loja_id.is_empty() && entrada.loja_id != qr.loja_id {
+            ultimo = Some(Erro::validacao(TEXTO_CONVITE_NAO_CONFERE));
+            continue;
+        }
+        aprovados::juntar(&conn, &entrada.loja_id, &entrada.linhas)?;
+        if !aprovados::autorizada(&conn, &entrada.raiz, &entrada.loja_id, &eu)? {
+            ultimo = Some(Erro::validacao(TEXTO_CONVITE_NAO_CONFERE));
+            continue;
+        }
+        cofre::fixar_raiz_recebida(&conn, &entrada.raiz, &entrada.loja_id)?;
+        config::gravar(&conn, "p4_chave_publica", &hex(&eu))?;
+        config::gravar(&conn, "p4_cofre_sistema", if id.cofre_sistema { "1" } else { "0" })?;
+        crate::loja::fixar_entrada_aprovada(&conn, &entrada.loja_id)?;
+        let mut digitados: Vec<String> = config::ler(&conn, "sync_enderecos")?
+            .unwrap_or_default()
+            .split([',', ' ', ';', '\n'])
+            .filter(|e| !e.trim().is_empty())
+            .map(str::to_string)
+            .collect();
+        if !digitados.contains(&alvo.to_string()) {
+            digitados.push(alvo.to_string());
+        }
+        config::gravar(&conn, "sync_enderecos", &digitados.join(","))?;
+        config::gravar(&conn, "sync_ligado", "1")?;
+        return Ok(entrada.loja_id);
+    }
+    Err(ultimo.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
+}
+
+/// Uma tentativa de entrada pelo convite no caixa em `alvo`.
+fn tentar_entrar(
+    eu_id: &crate::troca::protocolo4::Identidade,
+    eu: &Chave,
+    qr: &canal::ConviteQr,
+    pedido: &aprovados::Pedido,
+    alvo: &SocketAddr,
+) -> Resultado<canal::EntradaAprovada> {
+    let (fluxo, _) = rede_local::conectar(*alvo, None, Duration::from_secs(3)).map_err(rede)?;
+    let mut c = canal::conectar_para_ingresso(fluxo, eu_id, qr.aprovador_chave, PRAZO_DO_APERTO, None)?;
+    let prova = canal::gerar_prova_cliente(&qr.segredo, c.exportador_convite(), eu, &c.chave_do_par(), pedido)?;
+    c.pedir_entrada(pedido, &prova, Duration::from_secs(10), None)?;
+    let r = c.receber_aprovado(&qr.segredo, eu, TAMANHO_MAXIMO, Duration::from_secs(30), None);
+    c.encerrar();
+    r
 }
 
 /// Texto para a tela: o caixa do outro lado não é o que diz ser (I3).

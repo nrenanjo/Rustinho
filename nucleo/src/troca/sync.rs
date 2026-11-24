@@ -82,6 +82,7 @@ pub use cliente::*;
 pub use conflitos::*;
 use fio::*;
 pub use motor::*;
+pub use p4::juntar_com_convite;
 pub use referencias::*;
 pub use registro::*;
 pub use servidor::*;

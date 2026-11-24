@@ -22,7 +22,7 @@ pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> R
     }
     let mut conn = abrir_conexao(caminho)?;
     let a = ajustes(&conn)?;
-    if !a.ligado || a.senha.is_empty() {
+    if !p4::troca_ativa(&conn, &a) {
         return Ok(());
     }
     // Banco copiado de outro computador: tem o identificador de troca do
@@ -35,6 +35,10 @@ pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> R
     let mut primeiro = [0u8; 1];
     if matches!(fluxo.peek(&mut primeiro), Ok(1)) && primeiro[0] == 0x16 {
         return atender_p4(caminho, &mut conn, &a, fluxo, parar);
+    }
+    // O protocolo 3 precisa da senha da rede (o caixa que entrou por convite não tem).
+    if a.senha.is_empty() {
+        return Ok(());
     }
     let k = Chaves::de(&conn, &a.senha)?;
     let mut fio = FioP3 { fluxo, chaves: &k };
@@ -56,19 +60,42 @@ fn atender_p4(
     let Some(ctx) = p4::contexto(conn, caminho) else {
         return Ok(());
     };
+    use crate::troca::protocolo4::canal;
     let outras = ctx.outras_autorizadas(conn)?;
-    let canal = crate::troca::protocolo4::canal::aceitar_autorizado(
-        fluxo,
-        &ctx.identidade.identidade,
-        &outras,
-        p4::PRAZO_DO_APERTO,
-        Some(parar),
-    )?;
-    let mut fio = p4::FioP4::novo(canal, p4::registro_em_json(conn, &ctx.loja)?);
+    let id = &ctx.identidade.identidade;
+    // T009: com convite ativo, uma chave desconhecida completa o aperto de mão, mas
+    // só ganha o canal de entrada (o pedido do convite; nada da loja).
+    let mut canal = if p4::tem_convite_ativo(conn, &ctx.loja)? {
+        match canal::aceitar_com_ingresso(fluxo, id, &outras, p4::PRAZO_DO_APERTO, Some(parar))? {
+            canal::Aceito::Autenticado(c) => c,
+            canal::Aceito::Ingresso(mut c) => {
+                let (pedido, prova) = c.receber_ingressar(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+                let par = c.chave_do_par();
+                let exportador = *c.exportador_convite();
+                let resposta = p4::responder_ingresso(conn, &ctx, &par, &exportador, &pedido, &prova);
+                c.responder(&resposta, Duration::from_secs(30), Some(parar))?;
+                c.encerrar();
+                return Ok(());
+            }
+        }
+    } else {
+        canal::aceitar_autorizado(fluxo, id, &outras, p4::PRAZO_DO_APERTO, Some(parar))?
+    };
     #[cfg(test)]
     p4::ATENDIDAS_PELO_P4.fetch_add(1, Ordering::SeqCst);
-    let par = fio.chave_do_par().expect("o fio do protocolo 4 tem a chave do par");
-    let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    let par = canal.chave_do_par();
+    let pedido = canal.receber_json(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    // A retomada da entrada (queda logo depois da aprovação): o caixa já aprovado
+    // repete o pedido do convite pelo canal autenticado e recebe a mesma aprovação.
+    if pedido["tipo"] == "ingressar" {
+        let canal::MensagemIngresso::Ingressar { pedido, prova } = canal::MensagemIngresso::de_json(pedido)? else {
+            return Ok(());
+        };
+        let exportador = *canal.exportador_convite();
+        let resposta = p4::responder_ingresso(conn, &ctx, &par, &exportador, &pedido, &prova);
+        return canal.enviar_json(&resposta.para_json()?, Duration::from_secs(30), Some(parar));
+    }
+    let mut fio = p4::FioP4::novo(canal, p4::registro_em_json(conn, &ctx.loja)?);
     p4::juntar_registro(conn, &ctx.loja, &pedido)?;
     let disp = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
     if ctx.chave_de(conn, &disp)? != Some(par) {

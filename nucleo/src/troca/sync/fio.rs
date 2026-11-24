@@ -53,7 +53,7 @@ impl Fio for FioP3<'_> {
 /// - senão, o P3 (até a T010, que põe a convivência na frente).
 pub(super) fn abrir_fio<'a>(
     conn: &Connection,
-    chaves: &'a Chaves,
+    chaves: Option<&'a Chaves>,
     alvo: &SocketAddr,
     saida: Option<&Saida>,
     ctx: Option<&p4::ContextoP4>,
@@ -85,9 +85,17 @@ pub(super) fn abrir_fio<'a>(
             }
         }
     }
+    // O protocolo 3 precisa da senha da rede.
+    let Some(chaves) = chaves else {
+        return Err(Erro::validacao(TEXTO_SEM_SENHA_NEM_P4));
+    };
     let (f, conf) = abrir_fio_p3(chaves, alvo, saida)?;
     Ok((Box::new(f), conf))
 }
+
+/// Texto para a tela: este caixa não tem a senha da rede e o outro não fala o P4.
+pub(super) const TEXTO_SEM_SENHA_NEM_P4: &str =
+    "Este caixa entrou na loja pelo convite e só troca dados com caixas atualizados. Atualize o outro caixa.";
 
 /// Conecta a `alvo` (pela `saida` planejada, quando houver) com os prazos de
 /// sempre da puxada e devolve o fio do protocolo 3 e a confirmação do caminho.
