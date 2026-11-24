@@ -207,3 +207,42 @@ fn p4_par_com_chave_nao_cai_para_o_p3() {
     .join()
     .unwrap();
 }
+
+/// DT-P4-17: o anúncio assinado (`RSA4`) de um caixa aprovado vira par com o
+/// `dispositivo` e o nome da aprovação; repetição, chave não aprovada, outra loja e o
+/// próprio anúncio são recusados; e nada nele vem da senha da rede.
+#[test]
+fn p4_anuncio_assinado_vira_par_so_de_caixa_aprovado() {
+    let (ca, cb, a, b, loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-anuncio");
+    let ctx_a = p4::contexto(&a.conn, &ca).expect("o caixa 1 fala o P4");
+    let ctx_b = p4::contexto(&b.conn, &cb).expect("o caixa 2 fala o P4");
+    let disp_a = config::ler(&a.conn, "dispositivo_id").unwrap().unwrap();
+    let mut rep = crate::troca::protocolo4::anuncio::Repeticoes::nova();
+
+    let pacote = p4::pacote_de_anuncio(&ctx_a, 4242).unwrap();
+    assert_eq!(
+        p4::ler_anuncio(&b.conn, &ctx_b, &pacote, &mut rep),
+        Some((disp_a, "Caixa 1".to_string(), 4242)),
+        "o anúncio do caixa 1 vira par no caixa 2"
+    );
+    assert_eq!(p4::ler_anuncio(&b.conn, &ctx_b, &pacote, &mut rep), None, "o mesmo anúncio de novo é repetição");
+
+    // Chave que não foi aprovada, mesmo dizendo a loja certa.
+    let estranho = crate::troca::protocolo4::Identidade::gerar().unwrap();
+    let falso = crate::troca::protocolo4::anuncio::montar(&estranho, &loja, 4242, agora_ms()).unwrap();
+    assert_eq!(p4::ler_anuncio(&b.conn, &ctx_b, &falso, &mut rep), None, "chave não aprovada");
+    // A chave certa, mas de outra loja.
+    let outra = crate::troca::protocolo4::anuncio::montar(&ctx_a.identidade.identidade, "outra-loja", 4242, agora_ms())
+        .unwrap();
+    assert_eq!(p4::ler_anuncio(&b.conn, &ctx_b, &outra, &mut rep), None, "outra loja");
+    // O próprio anúncio (de volta por outra interface) não vira par.
+    let meu = p4::pacote_de_anuncio(&ctx_b, 4242).unwrap();
+    assert_eq!(p4::ler_anuncio(&b.conn, &ctx_b, &meu, &mut rep), None, "o próprio anúncio");
+
+    // Nada da senha da rede no anúncio: nem o sal nem a chave tirada dela.
+    let ajustes_a = ajustes(&a.conn).unwrap();
+    let k = Chaves::de(&a.conn, &ajustes_a.senha).unwrap();
+    let contem = |p: &[u8], agulha: &[u8]| p.windows(agulha.len()).any(|j| j == agulha);
+    let novo = p4::pacote_de_anuncio(&ctx_a, 4242).unwrap();
+    assert!(!contem(&novo, &k.sal) && !contem(&novo, &k.propria), "o anúncio assinado não leva nada da senha");
+}

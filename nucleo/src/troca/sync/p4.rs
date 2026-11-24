@@ -180,6 +180,40 @@ where
     }
 }
 
+/// DT-P4-17: o anúncio assinado (`RSA4`) deste caixa: chave, loja, porta, momento
+/// e nonce, assinados; nada tirado da senha da rede.
+pub(super) fn pacote_de_anuncio(ctx: &ContextoP4, porta_tcp: u16) -> Resultado<Vec<u8>> {
+    crate::troca::protocolo4::anuncio::montar(&ctx.identidade.identidade, &ctx.loja, porta_tcp, agora_ms())
+}
+
+/// DT-P4-17: um anúncio `RSA4` recebido vira par só se for desta loja, de uma chave
+/// autorizada agora (não a deste caixa), dentro da janela de tempo e sem repetição.
+/// O `dispositivo` e o nome vêm da aprovação assinada da chave (o anúncio não os
+/// traz), e o `dispositivo` tem de apontar de volta para a mesma chave (I3).
+/// Devolve `(dispositivo, nome, porta)`.
+pub(super) fn ler_anuncio(
+    conn: &Connection,
+    ctx: &ContextoP4,
+    bytes: &[u8],
+    repeticoes: &mut crate::troca::protocolo4::anuncio::Repeticoes,
+) -> Option<(String, String, u16)> {
+    let outras = ctx.outras_autorizadas(conn).ok()?;
+    let a = crate::troca::protocolo4::anuncio::verificar_anuncio(bytes, &ctx.loja, agora_ms(), repeticoes, |k| {
+        outras.contains(k)
+    })
+    .ok()?;
+    let linhas = aprovados::linhas(conn, &ctx.loja).ok()?;
+    let aprovacao = linhas
+        .aprovacoes
+        .iter()
+        .filter(|x| x.chave == a.chave && !x.dispositivo.is_empty() && x.assinatura_confere())
+        .max_by(|x, y| x.aprovado_em.cmp(&y.aprovado_em))?;
+    if ctx.chave_de(conn, &aprovacao.dispositivo).ok()? != Some(a.chave) {
+        return None;
+    }
+    Some((aprovacao.dispositivo.clone(), aprovacao.nome.clone(), a.porta))
+}
+
 /// Texto para a tela: o caixa do outro lado não é o que diz ser (I3).
 pub(super) const TEXTO_CAIXA_NAO_CONFERE: &str =
     "O outro computador disse ser um caixa desta loja que não confere com a identidade dele. A troca foi recusada.";

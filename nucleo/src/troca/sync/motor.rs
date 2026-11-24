@@ -294,6 +294,11 @@ impl Motor {
                 let mut conhecidas: Vec<Interface> = Vec::new();
                 let mut erros_de_envio: Vec<(std::net::Ipv4Addr, String)> = Vec::new();
                 let mut buf = vec![0u8; 2048];
+                // DT-P4-17: o contexto do protocolo 4 (refeito a cada 10 s) e os
+                // anúncios `RSA4` já aceitos (contra repetição).
+                let mut ctx_p4: Option<p4::ContextoP4> = None;
+                let mut ultimo_ctx = Instant::now() - Duration::from_secs(60);
+                let mut repeticoes = crate::troca::protocolo4::anuncio::Repeticoes::nova();
                 while !parar.load(Ordering::SeqCst) {
                     crate::supervisao::ponto_de_queda(&caminho, "anuncio");
                     let Ok(conn) = abrir_conexao(&caminho) else {
@@ -337,6 +342,10 @@ impl Motor {
                     }
                     let porta_udp = porta_udp_de(&escolhidas);
                     let Some(ref s_udp) = socket else { continue };
+                    if ultimo_ctx.elapsed() >= Duration::from_secs(10) {
+                        ctx_p4 = p4::contexto(&conn, &caminho);
+                        ultimo_ctx = Instant::now();
+                    }
                     // Gravações deste laço (sal novo, par visto) respeitam a
                     // pausa da restauração de backup, como as outras tarefas.
                     let chaves = {
@@ -368,9 +377,35 @@ impl Motor {
                                 crate::registro::anotar(&format!("troca de dados: anúncio pela interface {ip}: {e}"));
                             }
                         }
+                        // DT-P4-17: o membro do protocolo 4 anuncia também com a chave dele
+                        // (`RSA4`, assinado, sem nada da senha da rede). O anúncio cifrado
+                        // do protocolo 3 continua até a T010 (convivência).
+                        if let Some(ctx) = &ctx_p4 {
+                            if let Ok(pacote) = p4::pacote_de_anuncio(ctx, porta_tcp_de(&escolhidas)) {
+                                let erros = rede_local::anunciar(&conhecidas, &a.interfaces, &pacote, porta_udp);
+                                for (ip, e) in rede_local::erros_novos(&mut erros_de_envio, erros) {
+                                    crate::registro::anotar(&format!(
+                                        "troca de dados: anúncio assinado pela interface {ip}: {e}"
+                                    ));
+                                }
+                            }
+                        }
                         ultimo_anuncio = Instant::now();
                     }
                     if let Ok((n, origem)) = s_udp.recv_from(&mut buf) {
+                        // DT-P4-17: anúncio assinado do protocolo 4.
+                        if buf[..n].starts_with(crate::troca::protocolo4::anuncio::MAGICA_ANUNCIO) {
+                            let lido =
+                                ctx_p4.as_ref().and_then(|ctx| p4::ler_anuncio(&conn, ctx, &buf[..n], &mut repeticoes));
+                            if let Some((d, nome, porta)) = lido {
+                                let endereco = format!("{}:{porta}", origem.ip());
+                                if aceitar_anuncio(&d, &a, interfaces.as_deref(), &endereco) {
+                                    let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                                    let _ = registrar_par(&conn, &d, &nome, &endereco);
+                                }
+                            }
+                            continue;
+                        }
                         // R-09: sal desconhecido só passa pela conta cara
                         // (Argon2) poucas vezes por minuto (veja `decifrar`).
                         if let Ok(claro) = decifrar(&k, &buf[..n], Some(origem.ip())) {
