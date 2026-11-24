@@ -466,25 +466,105 @@ where
         self.0.fluxo.peer_addr()
     }
 
-    /// Envia uma mensagem do ingresso.
-    pub fn enviar(&mut self, msg: &MensagemIngresso, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
+    /// Envia uma mensagem do ingresso (interno: quem chama usa os métodos de cada
+    /// direção, N-05).
+    fn enviar(&mut self, msg: &MensagemIngresso, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
         self.0.enviar_json(&msg.para_json()?, prazo, parar)
     }
 
     /// Recebe uma mensagem do ingresso; qualquer outra coisa (um pedido da troca,
-    /// campos a mais, tipo desconhecido) é recusada.
-    pub fn receber(
-        &mut self,
-        limite: usize,
-        prazo: Duration,
-        parar: Option<&AtomicBool>,
-    ) -> Resultado<MensagemIngresso> {
+    /// campos a mais, tipo desconhecido) é recusada. A primeira leitura com erro num
+    /// canal recém-aberto vale como recusa (N-05).
+    fn receber(&mut self, limite: usize, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<MensagemIngresso> {
         MensagemIngresso::de_json(self.0.receber_json(limite, prazo, parar)?)
     }
 
     /// Fecha graciosamente o canal TLS enviando `close_notify`.
     pub fn encerrar(self) {
         self.0.encerrar()
+    }
+}
+
+/// O que o caixa novo recebe quando a loja aprova a entrada — só sai de
+/// [`CanalIngressoCliente::receber_aprovado`], **depois** de a prova do servidor
+/// conferir com o segredo do convite (N-05).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntradaAprovada {
+    pub raiz: Chave,
+    pub loja_id: String,
+    pub linhas: aprovados::Linhas,
+}
+
+/// Texto para a tela: quem respondeu não provou conhecer o convite.
+pub const TEXTO_PROVA_DO_SERVIDOR: &str =
+    "O computador que respondeu não provou conhecer o convite. Confira com o gerente e tente de novo.";
+
+impl CanalIngresso<ServerConnection> {
+    /// O servidor recebe o pedido de entrada; qualquer outra mensagem é recusada.
+    pub fn receber_ingressar(
+        &mut self,
+        limite: usize,
+        prazo: Duration,
+        parar: Option<&AtomicBool>,
+    ) -> Resultado<(Pedido, ProvaIngressoCliente)> {
+        match self.receber(limite, prazo, parar)? {
+            MensagemIngresso::Ingressar { pedido, prova } => Ok((pedido, prova)),
+            _ => Err(Erro::validacao(TEXTO_MENSAGEM_INVALIDA)),
+        }
+    }
+
+    /// O servidor responde: só `Aprovado` ou `Recusado`.
+    pub fn responder(&mut self, msg: &MensagemIngresso, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
+        if matches!(msg, MensagemIngresso::Ingressar { .. }) {
+            return Err(Erro::Interno("o caixa da loja não pede entrada".into()));
+        }
+        self.enviar(msg, prazo, parar)
+    }
+}
+
+impl CanalIngresso<ClientConnection> {
+    /// O caixa novo pede a entrada.
+    pub fn pedir_entrada(
+        &mut self,
+        pedido: &Pedido,
+        prova: &ProvaIngressoCliente,
+        prazo: Duration,
+        parar: Option<&AtomicBool>,
+    ) -> Resultado<()> {
+        self.enviar(&MensagemIngresso::Ingressar { pedido: pedido.clone(), prova: prova.clone() }, prazo, parar)
+    }
+
+    /// O caixa novo recebe a resposta. A entrada aprovada só é devolvida depois de a
+    /// prova do servidor conferir com o segredo do convite, as chaves desta sessão, a
+    /// raiz e a loja (N-05); `Recusado` vira erro com o motivo; um `Ingressar` vindo
+    /// do servidor é recusado.
+    pub fn receber_aprovado(
+        &mut self,
+        segredo_convite: &str,
+        minha_chave: &Chave,
+        limite: usize,
+        prazo: Duration,
+        parar: Option<&AtomicBool>,
+    ) -> Resultado<EntradaAprovada> {
+        match self.receber(limite, prazo, parar)? {
+            MensagemIngresso::Aprovado { prova_servidor, raiz, loja_id, linhas } => {
+                let chave_servidor = self.chave_do_par();
+                if !verificar_prova_servidor(
+                    segredo_convite,
+                    self.exportador_convite(),
+                    minha_chave,
+                    &chave_servidor,
+                    &raiz,
+                    &loja_id,
+                    &prova_servidor,
+                ) {
+                    return Err(Erro::validacao(TEXTO_PROVA_DO_SERVIDOR));
+                }
+                Ok(EntradaAprovada { raiz, loja_id, linhas })
+            }
+            MensagemIngresso::Recusado { motivo } => Err(Erro::validacao(motivo)),
+            MensagemIngresso::Ingressar { .. } => Err(Erro::validacao(TEXTO_MENSAGEM_INVALIDA)),
+        }
     }
 }
 
@@ -1298,9 +1378,7 @@ mod testes {
             else {
                 panic!("chave desconhecida tem de cair no canal de ingresso");
             };
-            let MensagemIngresso::Ingressar { pedido, prova } = srv.receber(64 * 1024, PRAZO, None).unwrap() else {
-                panic!("esperava o pedido de ingresso");
-            };
+            let (pedido, prova) = srv.receber_ingressar(64 * 1024, PRAZO, None).unwrap();
             let exp = *srv.exportador_convite();
             let cli_k = srv.chave_do_par();
             (srv, pedido, prova, exp, cli_k)
@@ -1309,8 +1387,7 @@ mod testes {
         let mut cli = conectar_para_ingresso(cli_tcp, &novo, qr.aprovador_chave, PRAZO, None).unwrap();
         let prova1 =
             gerar_prova_cliente(&qr.segredo, cli.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
-        cli.enviar(&MensagemIngresso::Ingressar { pedido: pedido_novo.clone(), prova: prova1.clone() }, PRAZO, None)
-            .unwrap();
+        cli.pedir_entrada(&pedido_novo, &prova1, PRAZO, None).unwrap();
 
         let (mut srv, ped_rx, prova_rx, exp_srv, cli_k) = h_srv.join().unwrap();
         assert_eq!(cli_k, novo_pub);
@@ -1341,7 +1418,8 @@ mod testes {
         let p_srv =
             gerar_prova_servidor(&casado.segredo_hash, &exp_srv, &novo_pub, &raiz_pub, &raiz_pub, LOJA).unwrap();
         let linhas = aprovados::linhas(&b.conn, LOJA).unwrap();
-        srv.enviar(
+        let p_srv_copia = p_srv.clone();
+        srv.responder(
             &MensagemIngresso::Aprovado { prova_servidor: p_srv, raiz: raiz_pub, loja_id: LOJA.into(), linhas },
             PRAZO,
             None,
@@ -1349,13 +1427,10 @@ mod testes {
         .unwrap();
         srv.encerrar();
 
-        let MensagemIngresso::Aprovado { prova_servidor, raiz: raiz_rx, loja_id, linhas: linhas_rx } =
-            cli.receber(64 * 1024, PRAZO, None).unwrap()
-        else {
-            panic!("esperava a aprovação");
-        };
-        assert_eq!((raiz_rx, loja_id.as_str()), (raiz_pub, LOJA));
-        assert!(linhas_rx.aprovacoes.iter().any(|a| a.chave == novo_pub), "o registro com a aprovação veio junto");
+        // N-05: a entrada só chega ao caixa novo depois de a prova do servidor conferir.
+        let entrada = cli.receber_aprovado(&qr.segredo, &novo_pub, 64 * 1024, PRAZO, None).unwrap();
+        assert_eq!((entrada.raiz, entrada.loja_id.as_str()), (raiz_pub, LOJA));
+        assert!(entrada.linhas.aprovacoes.iter().any(|a| a.chave == novo_pub), "o registro com a aprovação veio junto");
         let confere = |raiz_alegada: &Chave, loja: &str| {
             verificar_prova_servidor(
                 &qr.segredo,
@@ -1364,7 +1439,7 @@ mod testes {
                 &raiz_pub,
                 raiz_alegada,
                 loja,
-                &prova_servidor,
+                &p_srv_copia,
             )
         };
         assert!(confere(&raiz_pub, LOJA));
@@ -1396,7 +1471,7 @@ mod testes {
         assert_ne!(cli2.exportador_convite(), &exp_srv, "nova sessão TLS gera exporter novo");
         let p_retry =
             gerar_prova_cliente(&conv.segredo, cli2.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
-        cli2.enviar(&MensagemIngresso::Ingressar { pedido: pedido_novo.clone(), prova: p_retry }, PRAZO, None).unwrap();
+        cli2.pedir_entrada(&pedido_novo, &p_retry, PRAZO, None).unwrap();
 
         let (mut srv2, ped_rx2, prova_rx2, exp2) = h_srv2.join().unwrap();
         let cands2 = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
@@ -1417,19 +1492,8 @@ mod testes {
         srv2.enviar_json(&resposta2.para_json().unwrap(), PRAZO, None).unwrap();
         srv2.encerrar();
 
-        let MensagemIngresso::Aprovado { prova_servidor: prova2, .. } = cli2.receber(64 * 1024, PRAZO, None).unwrap()
-        else {
-            panic!("esperava a aprovação da retomada");
-        };
-        assert!(verificar_prova_servidor(
-            &conv.segredo,
-            cli2.exportador_convite(),
-            &novo_pub,
-            &raiz_pub,
-            &raiz_pub,
-            LOJA,
-            &prova2
-        ));
+        let entrada2 = cli2.receber_aprovado(&conv.segredo, &novo_pub, 64 * 1024, PRAZO, None).unwrap();
+        assert_eq!(entrada2.raiz, raiz_pub, "a retomada devolve a mesma loja, com a prova conferida");
         cli2.encerrar();
 
         // Outro caixa (intruso) tentando reusar o convite já consumido é recusado!
@@ -1456,7 +1520,7 @@ mod testes {
         let s1 = srv_id.clone();
         let h_srv = thread::spawn(move || match aceitar_com_ingresso(srv_tcp, &s1, &a, PRAZO, None).unwrap() {
             Aceito::Autenticado(_) => panic!("chave desconhecida virou canal de dados"),
-            Aceito::Ingresso(mut c) => c.receber(64 * 1024, PRAZO, None),
+            Aceito::Ingresso(mut c) => c.receber_ingressar(64 * 1024, PRAZO, None).map(|_| ()),
         });
         let mut cli = conectar_autorizado(cli_tcp, &estranho, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
         cli.enviar_json(&json!({ "tipo": "puxar", "desde": 0 }), PRAZO, None).unwrap();
@@ -1473,6 +1537,61 @@ mod testes {
         let mut cli = conectar_autorizado(cli_tcp, &aprovado, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
         cli.enviar_json(&json!({ "tipo": "puxar", "desde": 0 }), PRAZO, None).unwrap();
         assert_eq!(h_srv.join().unwrap()["tipo"], "puxar");
+    }
+
+    /// N-05: o servidor que não conhece o convite (sem o segredo) não consegue
+    /// entregar uma "aprovação" ao caixa novo: a prova não confere e nada da raiz,
+    /// da loja nem do registro chega a quem chama.
+    #[test]
+    fn n05_aprovacao_forjada_sem_o_convite_e_recusada_pelo_caixa_novo() {
+        let falso = Identidade::gerar().unwrap();
+        let novo = Identidade::gerar().unwrap();
+        let novo_pub = novo.publica();
+        let pedido = Pedido::com_dispositivo(&novo, "disp-n05");
+        let segredo = "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F";
+        let (cli_tcp, srv_tcp) = par_tcp();
+        let h_srv = thread::spawn(move || {
+            let Aceito::Ingresso(mut srv) =
+                aceitar_com_ingresso(srv_tcp, &falso, &HashSet::new(), PRAZO, None).unwrap()
+            else {
+                panic!("chave desconhecida cai no ingresso");
+            };
+            let _ = srv.receber_ingressar(64 * 1024, PRAZO, None).unwrap();
+            // Não sabe o segredo: inventa uma prova e uma raiz.
+            let forjada = MensagemIngresso::Aprovado {
+                prova_servidor: hex(&[7u8; 32]),
+                raiz: falso.publica(),
+                loja_id: LOJA.into(),
+                linhas: aprovados::Linhas::default(),
+            };
+            srv.responder(&forjada, PRAZO, None).unwrap();
+            assert!(
+                srv.responder(
+                    &MensagemIngresso::Ingressar {
+                        pedido: pedido.clone(),
+                        prova: ProvaIngressoCliente { prova_segredo: String::new(), prova_retomada: String::new() }
+                    },
+                    PRAZO,
+                    None
+                )
+                .is_err(),
+                "o servidor não pede entrada"
+            );
+            srv.encerrar();
+        });
+        let mut cli = conectar_para_ingresso(cli_tcp, &novo, None, PRAZO, None).unwrap();
+        let prova = gerar_prova_cliente(
+            segredo,
+            cli.exportador_convite(),
+            &novo_pub,
+            &cli.chave_do_par(),
+            &Pedido::com_dispositivo(&novo, "disp-n05"),
+        )
+        .unwrap();
+        cli.pedir_entrada(&Pedido::com_dispositivo(&novo, "disp-n05"), &prova, PRAZO, None).unwrap();
+        let r = cli.receber_aprovado(segredo, &novo_pub, 64 * 1024, PRAZO, None);
+        assert!(matches!(&r, Err(Erro::Validacao { mensagem, .. }) if mensagem == TEXTO_PROVA_DO_SERVIDOR), "{r:?}");
+        h_srv.join().unwrap();
     }
 
     /// F-04 / observação 10: a leitura das mensagens do ingresso é estrita.
