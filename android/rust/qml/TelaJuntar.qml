@@ -89,6 +89,8 @@ FocusScope {
                 tela.sync = r.dados
                 tela.procurando = true
                 tela.janela.atualizarEstado()
+                // Os campos somem: o foco fica na tela (o Esc continua chegando a ela).
+                tela.forceActiveFocus()
             } else {
                 const alvo = r.campo === "enderecos" ? endereco : convite
                 alvo.erro = r.erro
@@ -285,5 +287,12 @@ FocusScope {
         onClicked: tela.janela.retornar(true)
     }
 
-    StackView.onActivated: if (!tela.procurando && tela.codigo !== "") convite.focarSempre()
+    // O foco: no convite quando ele está à vista; senão, na própria tela — sem foco
+    // nenhum, o Esc não chegaria à pilha de telas (H24: com dado chegado, o Esc pergunta).
+    StackView.onActivated: {
+        if (!tela.procurando && tela.codigo !== "")
+            convite.focarSempre()
+        else
+            tela.forceActiveFocus()
+    }
 }
