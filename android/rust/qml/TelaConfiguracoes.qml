@@ -667,9 +667,31 @@ FocusScope {
         const nome = tela.guia.requisito.campos[0]
         if (nome !== "referencia" && nome !== "caixa_bloqueando")
             return
-        Qt.callLater(() => {
-            if (!janela || !tela.guia)
+        // A mesma espera da chegada da guia (N-2 da re-revisão C8): a lista recarregada e o
+        // resto da seção (a faixa da segurança dos caixas, 0.9.19) ainda estão montando;
+        // a conta de "ficou fora da área visível" só vale com a altura do conteúdo assentada.
+        esperaDaLista.tentativas = 0
+        esperaDaLista.alturaAntes = -1
+        esperaDaLista.nome = nome
+        esperaDaLista.restart()
+    }
+    Timer {
+        id: esperaDaLista
+        interval: 35
+        repeat: true
+        property int tentativas: 0
+        property real alturaAntes: -1
+        property string nome: ""
+        onTriggered: {
+            if (!janela || !tela.guia) {
+                stop()
                 return
+            }
+            const assentou = rolagem.contentHeight > 0 && rolagem.contentHeight === alturaAntes
+            alturaAntes = rolagem.contentHeight
+            if (!assentou && ++tentativas < 25)
+                return
+            stop()
             const c = tela.alvoDaGuia(nome)
             if (c && c[0]) {
                 janela.guiaAtualizarRegistro(c[0])
@@ -684,7 +706,7 @@ FocusScope {
             } else {
                 janela.guiaAtualizarRegistro(null)
             }
-        })
+        }
     }
 
     // T013 (DT-P4-39): o convite que o gerente acabou de gerar (só nesta tela),
