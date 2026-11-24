@@ -282,8 +282,9 @@ def main():
             r.rolar_roda(-25, x=450, y=280)
             time.sleep(0.3)
             # Tenta salvar: validação progressiva deve rolar suavemente até o NCM e só então destacar!
-            # Não tira foto durante a rolagem para não congelar o Xvfb no meio da curva.
+            # Aguarda a curva terminar sem polling ou foto para não travar o Xvfb no meio da rolagem.
             xdo("key", "F2")
+            time.sleep(0.55)
             chegou = r.esperar(lambda a: any(e.get("guia") == "destaque_ativo" for e in a.eventos_mov()), 10)
             ok("P6: validação conduziu ao NCM incompleto e concluiu destaque",
                chegou and r.tem("NCM incompleto"), r.foto("-ncm"))
@@ -355,6 +356,7 @@ def main():
             r.rolar_roda(-45, x=240, y=220)
             time.sleep(0.4)
             xdo("key", "F2")
+            time.sleep(0.55)
             chegou_longa = r.esperar(lambda a: any(e.get("guia") == "destaque_ativo" for e in a.eventos_mov()), 10)
             evs_l = r.eventos_mov()
             fases_l = [e.get("fase") for e in evs_l if "fase" in e]
@@ -402,16 +404,19 @@ def main():
             r.fechar()
 
         # P6 A7 / MG-5: recarga da lista com guia ativa mantém e acompanha o registro sem desaparecer.
+        # `cp-aa-outro` (20/12/2025) vem antes de `cp-zz-alvo` (10/01/2026) tanto por chave quanto por data,
+        # e o teste escolhe explicitamente o botão da linha "20/12/2025" (nunca o alvo "10/01/2026").
+        # Ao aceitar o registro de cima, o alvo da guia sobe na lista e aciona `registro_deslizar` com a guia aberta.
         nova_loja()
         base._aux_nucleo.executar("estavel", "executar_por_fora", {
             "RUSTINHO_LOJA_TESTE": pasta,
             "RUSTINHO_SQL": """
                 INSERT INTO conta_pagar (id, categoria_id, descricao, valor, vencimento, criado_em, dispositivo, competencia)
-                  VALUES ('cp-mg5-alvo', 'cat-aluguel', 'Conta MG5 Alvo', 1500, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+                  VALUES ('cp-zz-alvo', 'cat-aluguel', 'Conta MG5 Alvo', 1500, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'),
                           'caixa-teste', strftime('%Y-%m','now'));
                 INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo) VALUES
-                  ('conta_pagar', '["cp-mg5-outro"]', 'pessoa', '["sumiu-a"]', 'inconsistente', '2025-12-30T00:00:00Z', 'log'),
-                  ('conta_pagar', '["cp-mg5-alvo"]',  'pessoa', '["sumiu-b"]', 'inconsistente', '2026-01-02T00:00:00Z', 'log');
+                  ('conta_pagar', '["cp-aa-outro"]', 'pessoa', '["sumiu-a"]', 'inconsistente', '2025-12-20T12:00:00Z', 'log'),
+                  ('conta_pagar', '["cp-zz-alvo"]',  'pessoa', '["sumiu-b"]', 'inconsistente', '2026-01-10T12:00:00Z', 'log');
             """,
         }, raiz=base.RAIZ)
         r = App(pasta, "TelaFinanceiro", {"secao": "pagar"}, fotos, "2e-movimento-recarga",
@@ -439,31 +444,45 @@ def main():
             ok("P6 A7/MG-5: ofereceu Ver o registro", r.esperar("Ver o registro"))
             r.clicar("Ver o registro")
             ok("P6 A7/MG-5: abriu Caixas com destaque no registro alvo",
-               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 22),
+               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 22)
+               and r.esperar(lambda a: a.valor_teste("TESTE_DESTAQUE_ATIVO") == "1", 8),
                r.foto("-antes-recarga"))
-            # Espera janela de proteção de clique pós-movimento e aceita o OUTRO registro (o de cima, 2025-12-30),
-            # forçando recarga da lista e deslocamento vertical do registro da guia (MG-5 / A7).
+            # Espera janela de proteção de clique pós-movimento e localiza o botão da linha "20/12/2025" (cp-aa-outro).
             time.sleep(0.7)
-            unicos_aceitar = []
-            for x, y, t in r.textos_para_clicar():
-                if simples(t) == simples("Aceitar como está") and 60 <= y < 740:
-                    if not any(abs(y - uy) < 12 for _, uy in unicos_aceitar):
-                        unicos_aceitar.append((x, y))
-            unicos_aceitar.sort(key=lambda p: p[1])
-            if len(unicos_aceitar) >= 2:
-                xdo("mousemove", str(unicos_aceitar[0][0]), str(unicos_aceitar[0][1]), "click", "1")
+            tx_caixas = r.textos_para_clicar()
+            y_outro = next((y for _, y, t in tx_caixas if "20/12/2025" in t), None)
+            botoes_outro = []
+            if y_outro is not None:
+                for x, y, t in tx_caixas:
+                    if simples(t) == simples("Aceitar como está") and y_outro <= y <= y_outro + 90:
+                        botoes_outro.append((y - y_outro, x, y))
+                botoes_outro.sort()
+            n_antes = len(r.eventos_mov())
+            if botoes_outro:
+                xdo("mousemove", str(botoes_outro[0][1]), str(botoes_outro[0][2]), "click", "1")
                 if r.esperar("O que falta não vai aparecer por isso", 6):
                     time.sleep(0.4)
                     xdo("type", "--delay", "25", "Outro registro MG5")
                     time.sleep(0.2)
                     xdo("key", "Return")
-                    r.esperar(lambda a: any(e.get("guia") in ("registro_deslizar", "registro_atualizado") for e in a.eventos_mov()), 10)
-            evs_m5 = r.eventos_mov()
-            guias_m5 = [e.get("guia") for e in evs_m5 if "guia" in e]
+                    r.esperar(lambda a: any(e.get("guia") in ("registro_deslizar", "registro_atualizado")
+                                            for e in a.eventos_mov()[n_antes:]), 12)
+            time.sleep(0.5)
+            evs_pos = r.eventos_mov()[n_antes:]
+            guias_pos = [e.get("guia") for e in evs_pos if "guia" in e]
+            botoes_restantes = []
+            for x, y, t in r.textos():
+                if simples(t) == simples("Aceitar como está") and 60 <= y < 740:
+                    if not any(abs(y - uy) < 12 for _, uy in botoes_restantes):
+                        botoes_restantes.append((x, y))
             ok("P6 A7/MG-5 (real): recarga da lista preserva e desliza/atualiza o destaque no registro da guia",
-               any(g in ("registro_deslizar", "registro_atualizado") for g in guias_m5)
-               and r.tem("Aceitar como está"),
-               f"guias={guias_m5} {r.foto('-apos-recarga')}")
+               any(g in ("registro_deslizar", "registro_atualizado") for g in guias_pos)
+               and r.valor_teste("TESTE_PILHA") == "3"
+               and r.valor_teste("TESTE_GUIA_PERSISTENTE") == "1"
+               and r.valor_teste("TESTE_DESTAQUE_ATIVO") == "1"
+               and len(botoes_restantes) == 1
+               and r.tem("10/01/2026"),
+               f"guias_pos={guias_pos} pilha={r.valor_teste('TESTE_PILHA')} pers={r.valor_teste('TESTE_GUIA_PERSISTENTE')} dest={r.valor_teste('TESTE_DESTAQUE_ATIVO')} botoes={len(botoes_restantes)} {r.foto('-apos-recarga')}")
             logs_erros += r.erros_qml()
         finally:
             r.fechar()

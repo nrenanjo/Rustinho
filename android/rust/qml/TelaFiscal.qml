@@ -190,7 +190,13 @@ FocusScope {
                     Icone { nome: "direita"; tamanho: 16; cor: Tema.apagadoDaFaixa(faixaDaLista.par) }
                 }
                 HoverHandler { id: sobre; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: tela.janela.abrir("TelaPeca", { produtoId: modelData.id }) }
+                TapHandler {
+                    onTapped: {
+                        if (tela.janela)
+                            tela.janela.encerrarValidacaoProgressiva(tela)
+                        tela.janela.abrir("TelaPeca", { produtoId: modelData.id })
+                    }
+                }
             }
         }
         Botao {
@@ -204,7 +210,7 @@ FocusScope {
 
     Shortcut {
         sequence: "F2"
-        enabled: tela.StackView.status === StackView.Active && tela.regrasAlteradas
+        enabled: (tela.embutida ? tela.visible : tela.StackView.status === StackView.Active) && tela.regrasAlteradas
         onActivated: tela.salvarRegras()
     }
 

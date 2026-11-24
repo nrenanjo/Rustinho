@@ -105,7 +105,7 @@ TestCase {
         const durReal = Date.now() - t0
         verify(!interrompido, "não deveria ter sido interrompida")
         verify(passos >= 10, "deveria ter múltiplos passos suaves a ~60 Hz, teve " + passos)
-        // Pico matemático de InOutCubic (derivada máxima 3.0) para 500 px em 375 ms a ~60 Hz: ~64–75 px/quadro.
+        // Pico matemático de InOutCubic (derivada máxima normalizada 1.5): ~32 px em 16 ms (~95 px com jitter offscreen).
         verify(maiorPasso <= 95, "passo por quadro excessivo (A1): " + maiorPasso + " px")
         verify(durReal >= 220 && durReal <= 600, "duração real fora do alvo (A2): " + durReal + " ms")
         verify(Math.abs(area.contentY - 500) <= 1, "destino final incorreto: " + area.contentY)

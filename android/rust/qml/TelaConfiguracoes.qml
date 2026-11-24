@@ -26,6 +26,13 @@ FocusScope {
             avisoHistorico = ""
             historicoVeioDeDuplicatas = false
         }
+        // NCG-1: encerra eventual validação progressiva da aba que saiu de vista.
+        if (janela && janela.validacaoAtiva) {
+            if (secao !== "fiscal" && fiscal.item && janela.validacaoAtiva.tela === fiscal.item)
+                janela.encerrarValidacaoProgressiva(fiscal.item)
+            else if (secao !== "loja" && janela.validacaoAtiva.tela === tela)
+                janela.encerrarValidacaoProgressiva(tela)
+        }
     }
     // 9b (C8, dev3.3): "Ver no histórico" de um conflito em Duplicatas.
     // Auto só quando a ligação é inequívoca (o registro tem um id só e há
@@ -667,12 +674,12 @@ FocusScope {
             if (c && c[0]) {
                 janela.guiaAtualizarRegistro(c[0])
                 // N-7 + MG-5: se o registro recarregado ficou fora da área visível, rola até ele.
-                if (c[1] && c[1].contentItem && c[1].height > 0) {
-                    const p = c[0].mapToItem(c[1].contentItem, 0, 0)
-                    const topoV = c[1].contentY
-                    const baseV = topoV + c[1].height
+                if (rolagem && rolagem.contentItem && rolagem.height > 0) {
+                    const p = c[0].mapToItem(rolagem.contentItem, 0, 0)
+                    const topoV = rolagem.contentY
+                    const baseV = topoV + rolagem.height
                     if (p.y < topoV + 8 || p.y + c[0].height > baseV - 8)
-                        janela.rolarAteItem(c[1], c[0], 24)
+                        janela.rolarAteItem(rolagem, c[0], 24)
                 }
             } else {
                 janela.guiaAtualizarRegistro(null)
