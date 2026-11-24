@@ -11,7 +11,7 @@ pub(super) const TEXTO_MODO_SEGURO: &str =
      está parada até restaurar um backup bom.";
 
 /// Atende um pedido de outro caixa.
-pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) -> Resultado<()> {
+pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> Resultado<()> {
     // Quem não manda o pedido em `PRAZO_DO_PEDIDO` é desligado.
     fluxo.set_read_timeout(Some(PRAZO_DO_PEDIDO)).ok();
     fluxo.set_write_timeout(Some(Duration::from_secs(30))).ok();
@@ -32,7 +32,14 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
         return Ok(());
     }
     let k = Chaves::de(&conn, &a.senha)?;
-    let pedido = receber(&mut fluxo, &k, TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    let mut fio = FioP3 { fluxo, chaves: &k };
+    let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    atender_pedido(&mut conn, &a, &mut fio, pedido)
+}
+
+/// As regras da troca para um pedido já recebido pelo `fio` (DT-P4-12: o mesmo
+/// atendimento para qualquer fio; hoje, o do protocolo 3).
+pub(super) fn atender_pedido(conn: &mut Connection, a: &Ajustes, fio: &mut dyn Fio, pedido: Value) -> Resultado<()> {
     if pedido["tipo"] != "puxar" && pedido["tipo"] != "faixa" {
         return Ok(());
     }
@@ -43,21 +50,17 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
     // conhecê-lo como caixa da loja).
     let quem_pede = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
     if !quem_pede.is_empty() && quem_pede != a.dispositivo {
-        match crate::loja::decidir(&conn, &quem_pede, &pedido, false)? {
+        match crate::loja::decidir(conn, &quem_pede, &pedido, false)? {
             crate::loja::Decisao::Recusa => {
-                let origem = fluxo.peer_addr().map(|e| e.ip().to_string()).unwrap_or_default();
-                crate::loja::anotar_outra_loja(&conn, pedido["nome"].as_str().unwrap_or(""), &origem)?;
-                let (loja, novo) = crate::loja::campos(&conn)?;
-                return enviar(
-                    &mut fluxo,
-                    &k,
-                    &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                let origem = fio.origem().map(|e| e.ip().to_string()).unwrap_or_default();
+                crate::loja::anotar_outra_loja(conn, pedido["nome"].as_str().unwrap_or(""), &origem)?;
+                let (loja, novo) = crate::loja::campos(conn)?;
+                return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
                              "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
                              "loja": loja, "novo": novo, "outraLoja": true,
-                             "recusado": crate::loja::TEXTO_RECUSA_LA }),
-                );
+                             "recusado": crate::loja::TEXTO_RECUSA_LA }));
             }
-            crate::loja::Decisao::Aceita => crate::loja::confirmar(&conn, &quem_pede)?,
+            crate::loja::Decisao::Aceita => crate::loja::confirmar(conn, &quem_pede)?,
             // Este caixa ainda não tem usuários (está entrando numa loja):
             // não confirma ninguém e não entrega nada (logo abaixo).
             crate::loja::Decisao::NadaAReceber => {}
@@ -66,27 +69,23 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
     // Pedido de faixa de códigos das peças: só o distribuidor atende, numa
     // gravação só (veja `faixas::atender_pedido`).
     if pedido["tipo"] == "faixa" {
-        let resposta = responder_faixa(&mut conn, &pedido)?;
-        return enviar(&mut fluxo, &k, &resposta);
+        let resposta = responder_faixa(conn, &pedido)?;
+        return fio.enviar(&resposta);
     }
     // Quem pediu também vira um par conhecido (com o endereço de onde veio).
-    if let (Some(d), Ok(origem)) = (pedido["dispositivo"].as_str(), fluxo.peer_addr()) {
+    if let (Some(d), Some(origem)) = (pedido["dispositivo"].as_str(), fio.origem()) {
         let porta = pedido["porta"].as_u64().unwrap_or(crate::portatil::portas().0 as u64);
         if d != a.dispositivo {
-            registrar_par(&conn, d, pedido["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()))?;
-            registrar_versao(&conn, d, &pedido)?;
+            registrar_par(conn, d, pedido["nome"].as_str().unwrap_or(""), &format!("{}:{porta}", origem.ip()))?;
+            registrar_versao(conn, d, &pedido)?;
         }
     }
     let quem = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
     // Caixa retirado da loja: não recebe nada até o gerente readmitir.
-    if !quem.is_empty() && retirado(&conn, &quem)? {
-        return enviar(
-            &mut fluxo,
-            &k,
-            &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+    if !quem.is_empty() && retirado(conn, &quem)? {
+        return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
                      "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
-                     "recusado": TEXTO_RETIRADO_LA }),
-        );
+                     "recusado": TEXTO_RETIRADO_LA }));
     }
     // Passo 5.2, regra de versão homogênea (veja `RECURSO_CLASSES`): um caixa
     // de versão anterior não recebe nada, e o gerente vê o motivo aqui também.
@@ -94,19 +93,15 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
         if !quem.is_empty() {
             conn.execute("UPDATE sync_par SET erro = ?2 WHERE dispositivo = ?1", params![quem, PROTOCOLO_DIFERENTE])?;
         }
-        let (loja, novo) = crate::loja::campos(&conn)?;
-        return enviar(
-            &mut fluxo,
-            &k,
-            &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+        let (loja, novo) = crate::loja::campos(conn)?;
+        return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
                      "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
-                     "loja": loja, "novo": novo, "recusado": PROTOCOLO_DIFERENTE }),
-        );
+                     "loja": loja, "novo": novo, "recusado": PROTOCOLO_DIFERENTE }));
     }
     let desde = pedido["desde"].as_i64().unwrap_or(0).max(0);
-    let geracao = geracao(&conn)?;
-    let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
-    let seq_maxima = seq_maxima(&conn)?;
+    let geracao = geracao(conn)?;
+    let (minha_loja, sou_novo) = crate::loja::campos(conn)?;
+    let seq_maxima = seq_maxima(conn)?;
     // O contador de quem pediu ainda vale neste banco? A alteração número
     // `desde` aqui tem de ser a mesma que ele recebeu (a "marca"). Se não é
     // (este banco voltou de um backup, é outro computador, foi copiado à
@@ -115,9 +110,7 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
         let aqui: Option<String> =
             conn.query_row("SELECT id FROM alteracao WHERE seq = ?1", [desde], |l| l.get(0)).optional()?;
         if aqui.is_none() || aqui.as_deref() != pedido["marca"].as_str() {
-            return enviar(
-                &mut fluxo,
-                &k,
+            return fio.enviar(
                 &json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": [],
                          "temMais": false, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
                          "recomecar": true, "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
@@ -127,18 +120,18 @@ pub(super) fn atender(caminho: &Path, mut fluxo: TcpStream, parar: &AtomicBool) 
     }
     // Caixa sem usuários (entrando numa loja): não tem dado próprio e não é a
     // fonte de loja nenhuma; o que recebeu de outro caixa não é repassado.
-    let (lista, tem_mais) = if sou_novo { (Vec::new(), false) } else { alteracoes_desde(&conn, desde, lote(&conn))? };
-    let (lista, tem_mais) = preparar_para(&conn, &quem, &pedido, lista, tem_mais)?;
+    let (lista, tem_mais) = if sou_novo { (Vec::new(), false) } else { alteracoes_desde(conn, desde, lote(conn))? };
+    let (lista, tem_mais) = preparar_para(conn, &quem, &pedido, lista, tem_mais)?;
     let mut resposta = json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome, "alteracoes": lista,
                                "temMais": tem_mais, "agoraMs": agora_ms(), "geracao": geracao, "seqMaxima": seq_maxima,
                                "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
                                "loja": minha_loja, "novo": sou_novo });
     // Passo 5.4: quem pediu mandou o resumo das tabelas e está em dia com
     // este caixa (já tem tudo daqui) — este também compara e devolve o seu.
-    if let Some(r) = resumo_do_servidor(&conn, &quem, &pedido, seq_maxima, sou_novo) {
+    if let Some(r) = resumo_do_servidor(conn, &quem, &pedido, seq_maxima, sou_novo) {
         resposta["resumo"] = r;
     }
-    enviar(&mut fluxo, &k, &resposta)
+    fio.enviar(&resposta)
 }
 
 /// O resumo das tabelas deste caixa para a resposta (passo 5.4), comparado

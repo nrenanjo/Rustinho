@@ -112,10 +112,8 @@ pub(crate) fn puxar_por(
             let existe: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM sync_par)", [], |l| l.get(0))?;
             existe
         };
-        let (mut fluxo, conf) = rede_local::conectar(alvo, saida, Duration::from_secs(3)).map_err(rede)?;
+        let (mut fio, conf) = abrir_fio_p3(&k, &alvo, saida)?;
         confirmacao = Some(conf);
-        fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
-        fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
         let saiu = agora_ms();
         let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
         let mut pedido = json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "desde": if sonda { i64::MAX } else { cursor },
@@ -148,8 +146,8 @@ pub(crate) fn puxar_por(
         if let Some(r) = &meu_resumo {
             pedido["resumo"] = r.clone();
         }
-        enviar(&mut fluxo, &k, &pedido)?;
-        let resposta = receber(&mut fluxo, &k, TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
+        fio.enviar(&pedido)?;
+        let resposta = fio.receber(TAMANHO_MAXIMO, Duration::from_secs(30), parar)?;
         // Outro protocolo: recusa antes de ler qualquer alteração.
         if resposta["protocolo"].as_i64() != Some(PROTOCOLO) {
             return Err(Erro::validacao(PROTOCOLO_DIFERENTE));
@@ -360,11 +358,9 @@ pub(super) fn pedir_faixa(
     let (loja, novo) = crate::loja::campos(conn)?;
     pedido["loja"] = json!(loja);
     pedido["novo"] = json!(novo);
-    let (mut fluxo, _) = rede_local::conectar(*alvo, saida, Duration::from_secs(3)).map_err(rede)?;
-    fluxo.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    fluxo.set_write_timeout(Some(Duration::from_secs(10))).ok();
-    enviar(&mut fluxo, k, &pedido)?;
-    let resposta = receber(&mut fluxo, k, TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
+    let (mut fio, _) = abrir_fio_p3(k, alvo, saida)?;
+    fio.enviar(&pedido)?;
+    let resposta = fio.receber(TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
     gravar_faixa_recebida(conn, &resposta)
 }
 
