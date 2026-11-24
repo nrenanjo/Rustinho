@@ -58,9 +58,11 @@ fn main() {
             })
         };
     }
-    // No Windows, imprime direto na impressora padrão (QPrinter).
+    // No Windows, imprime direto na impressora padrão (QPrinter) e consulta
+    // a preferência de animações do sistema (`SystemParametersInfoW` em `user32`).
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         construtor = construtor.qt_module("PrintSupport");
+        println!("cargo::rustc-link-lib=user32");
     }
     if android {
         construtor = construtor.qt_module("Multimedia");

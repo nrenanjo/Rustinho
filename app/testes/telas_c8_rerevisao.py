@@ -408,7 +408,8 @@ def r5_a2_seguranca(placar, fotos):
             r.clicar("Ver o registro")
             senha_gerente(r, "Simultaneidade (destino da guia)")
             ok("r5: a guia aparece em Caixas", r.esperar(lambda: r.tem(TITULO_7)), r.foto("-2"))
-            time.sleep(1.5)
+            r.esperar(lambda: any(60 <= y < r.altura() - 30 for _, y in r.onde("Aceitar como está")), 10)
+            time.sleep(0.3)
             f = r.foto("-2b")
             pos = r.onde("Aceitar como está")
             ok("r5: na chegada (caixa, depois da senha), o botão Aceitar como está do registro destacado fica à vista, sem rolar",

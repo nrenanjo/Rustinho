@@ -386,12 +386,21 @@ def main():
             time.sleep(0.2)
             r.rolar_roda(-45, x=240, y=220)
             time.sleep(0.3)
-            # Dispara rolagem guiada e imediatamente envia roda do mouse dentro da área rolável para interromper em voo.
+            # Dispara rolagem guiada, aguarda o início no log (sem atrasar o loop Qt) e envia roda do mouse em voo.
             xdo("key", "F2")
-            time.sleep(0.05)
+            fim_ini = time.time() + 8
+            while time.time() < fim_ini:
+                if any(e.get("fase") in ("inicio_longa", "inicio", "fadeOut") for e in r.eventos_mov()):
+                    break
+                time.sleep(0.03)
             r.rolar_roda(5, x=240, y=300)
-            time.sleep(0.5)
-            evs_i = r.eventos_mov()
+            fim_int = time.time() + 10
+            evs_i = []
+            while time.time() < fim_int:
+                evs_i = r.eventos_mov()
+                if any(e.get("fase") in ("interrompido", "fim") for e in evs_i):
+                    break
+                time.sleep(0.1)
             interrompeu = any(e.get("interrompido") is True or e.get("fase") == "interrompido" for e in evs_i)
             ev_interr = [e for e in evs_i if e.get("interrompido") is True or e.get("fase") == "interrompido"]
             op_final_i = ev_interr[-1].get("opacidadeArea", 0) if ev_interr else 0
@@ -404,8 +413,8 @@ def main():
             r.fechar()
 
         # P6 A7 / MG-5: recarga da lista com guia ativa mantém e acompanha o registro sem desaparecer.
-        # `cp-aa-outro` (20/12/2025) vem antes de `cp-zz-alvo` (10/01/2026) tanto por chave quanto por data,
-        # e o teste escolhe explicitamente o botão da linha "20/12/2025" (nunca o alvo "10/01/2026").
+        # `cp-aa-outro` (15/02/2026) vem acima de `cp-zz-alvo` (10/01/2026) na ordenação por data recente,
+        # e o teste escolhe explicitamente o botão da linha "15/02/2026" (nunca o alvo "10/01/2026").
         # Ao aceitar o registro de cima, o alvo da guia sobe na lista e aciona `registro_deslizar` com a guia aberta.
         nova_loja()
         base._aux_nucleo.executar("estavel", "executar_por_fora", {
@@ -415,7 +424,7 @@ def main():
                   VALUES ('cp-zz-alvo', 'cat-aluguel', 'Conta MG5 Alvo', 1500, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'),
                           'caixa-teste', strftime('%Y-%m','now'));
                 INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo) VALUES
-                  ('conta_pagar', '["cp-aa-outro"]', 'pessoa', '["sumiu-a"]', 'inconsistente', '2025-12-20T12:00:00Z', 'log'),
+                  ('conta_pagar', '["cp-aa-outro"]', 'pessoa', '["sumiu-a"]', 'inconsistente', '2026-02-15T12:00:00Z', 'log'),
                   ('conta_pagar', '["cp-zz-alvo"]',  'pessoa', '["sumiu-b"]', 'inconsistente', '2026-01-10T12:00:00Z', 'log');
             """,
         }, raiz=base.RAIZ)
@@ -444,13 +453,14 @@ def main():
             ok("P6 A7/MG-5: ofereceu Ver o registro", r.esperar("Ver o registro"))
             r.clicar("Ver o registro")
             ok("P6 A7/MG-5: abriu Caixas com destaque no registro alvo",
-               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 22)
-               and r.esperar(lambda a: a.valor_teste("TESTE_DESTAQUE_ATIVO") == "1", 8),
+               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 35)
+               and r.esperar(lambda a: a.valor_teste("TESTE_MOVIMENTO_ATIVO") == "0"
+                             and a.valor_teste("TESTE_DESTAQUE_ATIVO") == "1", 12),
                r.foto("-antes-recarga"))
-            # Espera janela de proteção de clique pós-movimento e localiza o botão da linha "20/12/2025" (cp-aa-outro).
-            time.sleep(0.7)
+            # Espera janela de proteção de clique pós-movimento e localiza o botão da linha "15/02/2026" (cp-aa-outro).
+            time.sleep(0.8)
             tx_caixas = r.textos_para_clicar()
-            y_outro = next((y for _, y, t in tx_caixas if "20/12/2025" in t), None)
+            y_outro = next((y for _, y, t in tx_caixas if "15/02/2026" in t), None)
             botoes_outro = []
             if y_outro is not None:
                 for x, y, t in tx_caixas:
@@ -460,13 +470,13 @@ def main():
             n_antes = len(r.eventos_mov())
             if botoes_outro:
                 xdo("mousemove", str(botoes_outro[0][1]), str(botoes_outro[0][2]), "click", "1")
-                if r.esperar("O que falta não vai aparecer por isso", 6):
+                if r.esperar("O que falta não vai aparecer por isso", 12):
                     time.sleep(0.4)
                     xdo("type", "--delay", "25", "Outro registro MG5")
                     time.sleep(0.2)
                     xdo("key", "Return")
                     r.esperar(lambda a: any(e.get("guia") in ("registro_deslizar", "registro_atualizado")
-                                            for e in a.eventos_mov()[n_antes:]), 12)
+                                            for e in a.eventos_mov()[n_antes:]), 15)
             time.sleep(0.5)
             evs_pos = r.eventos_mov()[n_antes:]
             guias_pos = [e.get("guia") for e in evs_pos if "guia" in e]

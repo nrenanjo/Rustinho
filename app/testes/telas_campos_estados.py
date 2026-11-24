@@ -133,9 +133,27 @@ def ficha(modelo, fotos, res, nome_tema):
         _, borda_e, _, _, _, g = medir(rr, campo, "-5-digito-errado")
         res.conferir(f"E4 {nome_tema}: dígito errado não fica verde", not perto(borda_e, verde, 20) and campo + "Valido" not in g,
                      tema.hx(borda_e))
-        # Inválido: o núcleo recusa ao salvar.
+        # Inválido: o núcleo recusa ao salvar (e a notificação no topo pode descer o conteúdo;
+        # aguarda a mensagem aparecer e a geometria do campo estabilizar após a descida).
         base.xdo("key", "F2")
-        time.sleep(2)
+        fim_e5 = time.time() + 12
+        ultima_cx = None
+        estavel = 0
+        while time.time() < fim_e5:
+            tx = rr.textos()
+            tem_msg = any("Código de barras inválido" in t for _, _, t in tx)
+            g_tmp = u.geos(tx)
+            cx = g_tmp.get(campo + "Caixa")
+            mov_parado = any(t == "TESTE_MOVIMENTO_ATIVO:0" for _, _, t in tx)
+            if tem_msg and "cartaoNotificacao" in g_tmp and mov_parado and cx is not None:
+                if cx == ultima_cx:
+                    estavel += 1
+                    if (cx[1] > caixa[1] + 50 and estavel >= 2) or estavel >= 5:
+                        break
+                else:
+                    ultima_cx = cx
+                    estavel = 0
+            time.sleep(0.35)
         _, borda_i, fora_i, painel_i, _, _ = medir(rr, campo, "-6-invalido")
         vermelho = cores["vermelho"]
         textos = [t for _, _, t in rr.textos()]
