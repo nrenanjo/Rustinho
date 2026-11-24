@@ -2028,6 +2028,12 @@ pub struct Pendente {
     /// auditoria vai na transação que termina a restauração.
     #[serde(default)]
     auditoria: Option<(String, String)>,
+    /// Protocolo 4 (E5, etapa 6; 0.9.19-dev.2, T009): o registro assinado de caixas
+    /// aprovados e retirados de antes da restauração. Volta por `aprovados::juntar`
+    /// (acrescenta, nunca tira): restaurar um backup de antes de uma retirada não
+    /// traz o caixa retirado de volta.
+    #[serde(default)]
+    registro: Option<crate::troca::protocolo4::aprovados::Linhas>,
 }
 
 impl Pendente {
@@ -2061,7 +2067,9 @@ impl Pendente {
             .optional()?
             .unwrap_or(0);
         let loja = crate::loja::id(conn)?;
-        Ok(Pendente { locais, pares, caminhos, seq, loja, troca: String::new(), auditoria: None })
+        let registro =
+            if loja.is_empty() { None } else { Some(crate::troca::protocolo4::aprovados::linhas(conn, &loja)?) };
+        Ok(Pendente { locais, pares, caminhos, seq, loja, troca: String::new(), auditoria: None, registro })
     }
 
     /// Depois de uma queda: o banco chegou a ser trocado (a marca de dentro
@@ -2119,6 +2127,13 @@ impl Pendente {
                 params![d, n, e],
             )?;
         }
+        // T009 (E5): o registro de caixas de antes volta por cima do do backup (junta,
+        // nunca tira: a retirada feita depois do backup continua valendo), e os
+        // convites que vieram no backup perdem o segredo (não voltam a valer).
+        if let Some(registro) = &self.registro {
+            crate::troca::protocolo4::aprovados::juntar(&tx, &self.loja, registro)?;
+        }
+        tx.execute("UPDATE p4_convite SET segredo_ativo = NULL WHERE segredo_ativo IS NOT NULL", [])?;
         tx.execute("DELETE FROM sync_endereco", [])?;
         for (e, d, digitado, visto) in &self.caminhos {
             tx.execute(

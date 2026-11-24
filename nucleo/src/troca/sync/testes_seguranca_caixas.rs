@@ -303,13 +303,12 @@ fn p4_anuncio_assinado_nao_tem_nada_da_senha_da_rede() {
 
 /// (g) Restaurar um backup de antes de uma retirada não traz o caixa retirado
 /// de volta: a restauração **junta** o registro de caixas (nunca o substitui).
-/// Hoje o banco do backup entra inteiro e a retirada feita depois dele some
-/// (risco registrado pela frente-p4; B.5 da análise unificada de 05/11).
-/// Fica verde quando a restauração (`backup::restaurar`, o `Pendente` que já
-/// guarda "o que é deste computador") passar a guardar as linhas do registro
-/// antes e devolvê-las com `protocolo4::aprovados::juntar` depois.
+/// Até a 0.9.19-dev.1 o banco do backup entrava inteiro e a retirada feita
+/// depois dele sumia (risco registrado pela frente-p4; B.5 da análise unificada
+/// de 05/11). Desde a T009 (0.9.19-dev.2) a restauração (`backup::restaurar`, o
+/// `Pendente` que guarda "o que é deste computador") guarda as linhas do registro
+/// antes e as devolve com `protocolo4::aprovados::juntar` depois.
 #[test]
-#[ignore = "D1/E5: protocolo 4, etapa 6 (revogação) — restaurar backup junta o registro de caixas (aprovados::juntar)"]
 fn seguro_restaurar_backup_nao_desfaz_retirada() {
     use crate::troca::protocolo4::{aprovados, Identidade};
     let _vez = crate::backup::testes::um_por_vez();
