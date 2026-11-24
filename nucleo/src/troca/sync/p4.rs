@@ -125,7 +125,9 @@ pub(super) fn garantir_raiz(conn: &Connection, caminho: &Path) -> Resultado<()> 
         .into_iter()
         .filter(|u| u.gerente)
         .min_by(|a, b| a.criado_em.cmp(&b.criado_em))
-        .map(|u| u.nome)
+        // O identificador do usuário (o "gerente" assinado e da auditoria; a tela
+        // mostra o nome pela tabela de usuários, que vai para todos os caixas).
+        .map(|u| u.id)
         .unwrap_or_default();
     let distribuidor = crate::faixas::sou_distribuidor(conn)?;
     cofre::garantir_raiz_se_aplicavel(
@@ -930,7 +932,12 @@ pub(super) fn converter_retiradas_antigas(conn: &Connection, caminho: &Path) -> 
         }
         let v: Value = serde_json::from_str(&valor).unwrap_or_default();
         let motivo = v["motivo"].as_str().filter(|m| !m.trim().is_empty()).unwrap_or("retirado da loja");
-        let gerente = v["por"].as_str().filter(|g| !g.trim().is_empty()).unwrap_or("gerente (retirada de antes)");
+        // A retirada de antes guardou o NOME de quem retirou: vira o identificador do
+        // usuário quando há um só com esse nome (senão, o nome fica como veio).
+        let por = v["por"].as_str().filter(|g| !g.trim().is_empty()).unwrap_or("gerente (retirada de antes)");
+        let com_o_nome: Vec<String> =
+            crate::usuarios::listar(conn, false)?.into_iter().filter(|u| u.nome == por).map(|u| u.id).collect();
+        let gerente = if com_o_nome.len() == 1 { com_o_nome[0].as_str() } else { por };
         aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, motivo, gerente)?;
         feitas += 1;
     }

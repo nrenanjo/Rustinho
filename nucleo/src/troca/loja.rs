@@ -438,6 +438,13 @@ pub fn desistir_da_juncao(conn: &mut Connection) -> Resultado<usize> {
             OR chave LIKE ?3",
         params![MARCA_JUNCAO, OUTRA_LOJA, format!("{PREFIXO_PAR}%"), MARCA_ALVO],
     )?;
+    // 0.9.19 (protocolo 4): o que a entrada pelo convite deixou da loja também sai —
+    // o pino da raiz e o registro de caixas e convites dela. A identidade deste
+    // computador (o arquivo, fora do banco) fica: ela é deste computador, não da loja.
+    for t in ["caixa_aprovado", "caixa_retirado", "p4_convite"] {
+        tx.execute(&format!("DELETE FROM {t}"), [])?;
+    }
+    tx.execute("DELETE FROM config WHERE chave IN ('p4_raiz', 'p4_convivencia_p3_ate')", [])?;
     tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
     // Faixas de códigos: o que este caixa possa ter recebido não vale mais.
     crate::faixas::nova_geracao(&tx, "desistiu de entrar na loja")?;

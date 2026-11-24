@@ -562,3 +562,77 @@ fn p4_caixa_com_chave_nao_e_atendido_pelo_p3_nem_na_convivencia() {
     .join()
     .unwrap();
 }
+
+/// Achado do autor na 2C (nº 2): o "gerente" da raiz é o identificador do usuário,
+/// como em toda aprovação: a auditoria liga pelo identificador (e mostra o nome).
+#[test]
+fn p4_raiz_registra_o_identificador_do_gerente() {
+    let ca = temp("raiz-gerente-id");
+    let (a, ua) = loja_em_arquivo(&ca, "Caixa 1");
+    p4::garantir_raiz(&a.conn, &ca).unwrap();
+    let quem: Option<String> = a
+        .conn
+        .query_row("SELECT usuario_id FROM auditoria WHERE acao = 'aprovar_caixa_raiz'", [], |l| l.get(0))
+        .unwrap();
+    assert_eq!(quem.as_deref(), Some(ua.as_str()), "a auditoria tem o identificador do gerente");
+    let loja = crate::loja::id(&a.conn).unwrap();
+    assert_eq!(aprovados::linhas(&a.conn, &loja).unwrap().aprovacoes[0].gerente, ua);
+}
+
+/// Achado do autor na 2C (nº 4): desistir da entrada depois do convite tira também
+/// o que a entrada deixou da loja (o pino da raiz e o registro): o caixa pode entrar
+/// em outra loja depois.
+#[test]
+fn p4_desistir_depois_do_convite_libera_o_caixa_para_outra_loja() {
+    thread::spawn(|| {
+        let (ca, cb, cc) = (temp("desistir-a"), temp("desistir-b"), temp("desistir-c"));
+        let (a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
+        p4::garantir_raiz(&a.conn, &ca).unwrap();
+        let loja = crate::loja::id(&a.conn).unwrap();
+        let ia = identidade(&ca);
+        let (mut ma, pt_a) = motor(&ca);
+        let mut b = caixa_novo_sem_senha(&cb, "Caixa 2");
+        let codigo = codigo_do_caixa_novo(&b, &cb);
+        let conv = cofre::gerar_convite(
+            &a.conn,
+            &ia.identidade,
+            &ia.identidade.publica(),
+            &loja,
+            &codigo,
+            "Caixa 2",
+            "Ana",
+            &format!("127.0.0.1:{pt_a}"),
+        )
+        .unwrap();
+        juntar_com_convite(&cb, &conv.payload_qr, &[]).unwrap();
+        assert!(p4::tem_raiz_fixada(&b.conn));
+        assert!(ma.encerrar(Duration::from_secs(20)));
+
+        crate::loja::desistir_da_juncao(&mut b.conn).unwrap();
+        assert!(!p4::tem_raiz_fixada(&b.conn), "o pino da raiz da loja saiu");
+        let n: i64 = b.conn.query_row("SELECT COUNT(*) FROM caixa_aprovado", [], |l| l.get(0)).unwrap();
+        assert_eq!(n, 0, "o registro de caixas da loja saiu");
+
+        let (c, _uc) = loja_em_arquivo(&cc, "Caixa X");
+        p4::garantir_raiz(&c.conn, &cc).unwrap();
+        let loja_c = crate::loja::id(&c.conn).unwrap();
+        assert_ne!(loja_c, loja);
+        let ic = identidade(&cc);
+        let (mut mc, pt_c) = motor(&cc);
+        let conv = cofre::gerar_convite(
+            &c.conn,
+            &ic.identidade,
+            &ic.identidade.publica(),
+            &loja_c,
+            &codigo_do_caixa_novo(&b, &cb),
+            "Caixa 2",
+            "Bia",
+            &format!("127.0.0.1:{pt_c}"),
+        )
+        .unwrap();
+        assert_eq!(juntar_com_convite(&cb, &conv.payload_qr, &[]).unwrap().loja, loja_c, "entra na outra loja");
+        assert!(mc.encerrar(Duration::from_secs(20)));
+    })
+    .join()
+    .unwrap();
+}
