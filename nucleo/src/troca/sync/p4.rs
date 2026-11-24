@@ -427,6 +427,82 @@ fn tentar_entrar(
     r
 }
 
+/// T009 (etapa 6, P4-4): os caixas que ficariam sem cadeia se o caixa `dispositivo`
+/// fosse retirado (a tela lista antes de confirmar). Vazio quando ele não tem chave.
+pub fn dependentes_da_retirada(conn: &Connection, caminho: &Path, dispositivo: &str) -> Resultado<Vec<String>> {
+    let Some(ctx) = contexto(conn, caminho) else { return Ok(Vec::new()) };
+    let Some(chave) = ctx.chave_de(conn, dispositivo)? else { return Ok(Vec::new()) };
+    Ok(aprovados::dependentes_de(conn, &ctx.raiz, &ctx.loja, &chave)?.into_iter().map(|a| a.nome).collect())
+}
+
+/// T009 (etapa 6; E5, P4-3, S-10): retira o caixa `dispositivo` da loja, com o
+/// gerente, numa transação só:
+/// - sempre o bloqueio de antes (`caixa_retirado:<dispositivo>`), que os caixas do
+///   protocolo 3 respeitam (S-10), com as conferências de sempre (motivo, a si
+///   mesmo, pendências recebidas dele);
+/// - e, quando ele tem chave no registro, a retirada **assinada por este caixa**,
+///   que vale por máquina (mesmo que ele troque o identificador declarado) e
+///   viaja pelo canal autenticado. A raiz não é retirada (P4-3): nada é gravado.
+pub fn retirar_caixa_por_chave(
+    conn: &Connection,
+    caminho: &Path,
+    dispositivo: &str,
+    motivo: &str,
+    gerente: &str,
+) -> Resultado<()> {
+    let ctx = contexto(conn, caminho);
+    let chave = match &ctx {
+        Some(ctx) => ctx.chave_de(conn, dispositivo)?,
+        None => None,
+    };
+    conn.execute_batch("SAVEPOINT p4_retirar_caixa")?;
+    let r = (|| -> Resultado<()> {
+        retirar_caixa(conn, dispositivo, motivo, gerente)?;
+        if let (Some(ctx), Some(chave)) = (&ctx, chave) {
+            let motivo = crate::texto::limpar(motivo);
+            aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, &motivo, gerente)?;
+        }
+        Ok(())
+    })();
+    match r {
+        Ok(()) => conn.execute_batch("RELEASE p4_retirar_caixa").map_err(Into::into),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO p4_retirar_caixa; RELEASE p4_retirar_caixa");
+            Err(e)
+        }
+    }
+}
+
+/// S-10: a retirada de antes (`caixa_retirado:<dispositivo>`, que pode ter vindo de
+/// um caixa do protocolo 3) de um caixa que tem chave autorizada vira retirada
+/// assinada por este caixa (com o gerente e o motivo de antes). Roda na puxada, de
+/// minuto em minuto.
+pub(super) fn converter_retiradas_antigas(conn: &Connection, caminho: &Path) -> Resultado<usize> {
+    let Some(ctx) = contexto(conn, caminho) else { return Ok(0) };
+    let antigas: Vec<(String, String)> = {
+        let mut c = conn.prepare("SELECT chave, valor FROM config WHERE chave LIKE ?1")?;
+        let l = c.query_map([format!("{PREFIXO_RETIRADO}%")], |l| Ok((l.get(0)?, l.get(1)?)))?;
+        l.collect::<Result<_, _>>()?
+    };
+    let mut feitas = 0;
+    for (chave_config, valor) in antigas {
+        let dispositivo = chave_config.trim_start_matches(PREFIXO_RETIRADO);
+        if valor.trim().is_empty() {
+            continue;
+        }
+        let Some(chave) = ctx.chave_de(conn, dispositivo)? else { continue };
+        if chave == ctx.raiz || chave == ctx.eu() {
+            continue;
+        }
+        let v: Value = serde_json::from_str(&valor).unwrap_or_default();
+        let motivo = v["motivo"].as_str().filter(|m| !m.trim().is_empty()).unwrap_or("retirado da loja");
+        let gerente = v["por"].as_str().filter(|g| !g.trim().is_empty()).unwrap_or("gerente (retirada de antes)");
+        aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, motivo, gerente)?;
+        feitas += 1;
+    }
+    Ok(feitas)
+}
+
 /// Texto para a tela: o caixa do outro lado não é o que diz ser (I3).
 pub(super) const TEXTO_CAIXA_NAO_CONFERE: &str =
     "O outro computador disse ser um caixa desta loja que não confere com a identidade dele. A troca foi recusada.";

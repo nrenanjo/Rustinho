@@ -495,6 +495,10 @@ impl Motor {
                         if let Err(e) = p4::garantir_raiz(&conn, &caminho) {
                             crate::registro::anotar(&format!("troca de dados (protocolo 4): raiz da loja: {e}"));
                         }
+                        // S-10: retiradas de antes de caixas que têm chave viram assinadas.
+                        if let Err(e) = p4::converter_retiradas_antigas(&conn, &caminho) {
+                            crate::registro::anotar(&format!("troca de dados (protocolo 4): retiradas de antes: {e}"));
+                        }
                         ultima_raiz = Instant::now();
                     }
                     {

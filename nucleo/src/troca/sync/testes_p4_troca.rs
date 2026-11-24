@@ -395,3 +395,67 @@ fn p4_entrada_sem_a_propria_aprovacao_no_registro_e_recusada() {
     .join()
     .unwrap();
 }
+
+/// T009 (etapa 6; E5, P4-3, P4-4, S-10): retirar pela chave lista antes quem fica
+/// sem cadeia; o retirado não troca mais, nem trocando o identificador declarado; a
+/// raiz não é retirada (e nada é gravado); a retirada de antes vira assinada.
+#[test]
+fn p4_retirar_pela_chave_vale_por_maquina() {
+    thread::spawn(|| {
+        let (ca, cb, a, b, loja, ia, ib) = loja_com_dois_caixas_aprovados("p4-retirar");
+        let raiz = ia.identidade.publica();
+        let disp_a = config::ler(&a.conn, "dispositivo_id").unwrap().unwrap();
+        let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+        // O caixa 2 aprovou um caixa 3: retirar o 2 deixaria o 3 sem cadeia (P4-4).
+        let c3 = crate::troca::protocolo4::Identidade::gerar().unwrap();
+        aprovados::aprovar(
+            &a.conn,
+            &ib.identidade,
+            &raiz,
+            &loja,
+            &aprovados::Pedido::com_dispositivo(&c3, "disp-caixa-3-ret"),
+            "Caixa 3",
+            "Ana",
+        )
+        .unwrap();
+        assert_eq!(dependentes_da_retirada(&a.conn, &ca, &disp_b).unwrap(), vec!["Caixa 3".to_string()]);
+
+        // P4-3: a raiz não sai, e nada é gravado (nem o bloqueio de antes).
+        assert!(retirar_caixa_por_chave(&b.conn, &cb, &disp_a, "teste", "Ana").is_err());
+        assert!(!retirado(&b.conn, &disp_a).unwrap(), "o bloqueio de antes não ficou gravado sozinho");
+
+        retirar_caixa_por_chave(&a.conn, &ca, &disp_b, "saiu da loja", "Ana").unwrap();
+        assert!(retirado(&a.conn, &disp_b).unwrap(), "o bloqueio de antes (S-10) também vale");
+        let av = aprovados::avaliar(&a.conn, &raiz, &loja).unwrap();
+        assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Retirada);
+        assert_eq!(av.situacao(&c3.publica()), aprovados::Situacao::SemCadeia);
+
+        // O retirado troca o identificador declarado e tenta de novo: recusado.
+        peca_nova(&a, "Peça depois de retirar pela chave");
+        config::gravar(&b.conn, "dispositivo_id", "outro-id-depois-da-retirada").unwrap();
+        let (mut ma, pt_a) = motor(&ca);
+        let (mut mb, pt_b) = motor(&cb);
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b);
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        assert!(mb.encerrar(Duration::from_secs(20)));
+        assert!(r.is_err(), "o retirado não volta trocando o identificador: {r:?}");
+        assert!(!tem_peca(&b, "Peça depois de retirar pela chave"));
+    })
+    .join()
+    .unwrap();
+}
+
+/// S-10: a retirada de antes (texto na configuração, como a de um caixa do protocolo
+/// 3) de um caixa que tem chave vira retirada assinada.
+#[test]
+fn p4_retirada_de_antes_vira_assinada() {
+    let (ca, _cb, a, b, loja, ia, ib) = loja_com_dois_caixas_aprovados("p4-s10");
+    let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+    retirar_caixa(&a.conn, &disp_b, "saiu na 0.9.18", "Ana").unwrap();
+    let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
+    assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Autorizada, "ainda só o bloqueio de antes");
+    assert_eq!(p4::converter_retiradas_antigas(&a.conn, &ca).unwrap(), 1);
+    let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
+    assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Retirada, "virou retirada assinada");
+    assert_eq!(p4::converter_retiradas_antigas(&a.conn, &ca).unwrap(), 0, "uma vez só");
+}
