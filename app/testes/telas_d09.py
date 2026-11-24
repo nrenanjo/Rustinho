@@ -63,6 +63,36 @@ ambiente_neutro()
 SENHA = {"Ana": "12345678", "Bia": "1111"}
 
 
+def ambiente_do_programa(pid, programa=None, prazo=5.0):
+    """O ambiente do Rustinho do teste (`/proc/<pid>/environ`), lido só depois de o
+    processo já ser o programa (`/proc/<pid>/cmdline` começa por `programa`).
+
+    BUG-20261124-JNAP (variante local, 24/11): logo depois do `Popen`, antes do
+    `exec`, o `/proc/<pid>/environ` ainda é o do Python que criou o processo; com o
+    `DISPLAY=:0` da sessão de quem roda a bateria, a conferência concluía na hora
+    "não está na tela virtual" (mais vezes com a máquina carregada, quando essa
+    janela entre o `fork` e o `exec` cresce). Logo depois do `exec` o arquivo também
+    pode vir vazio (N05): lê de novo. Devolve o dicionário, ou None se o processo
+    terminou ou não virou o programa no prazo."""
+    programa = (programa or PROGRAMA).encode()
+    fim = time.monotonic() + prazo
+    while time.monotonic() < fim:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                eh_o_programa = f.read().split(b"\0")[0] == programa
+            if eh_o_programa:
+                with open(f"/proc/{pid}/environ", "rb") as f:
+                    amb = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
+                if amb:
+                    return amb
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        except OSError:
+            pass
+        time.sleep(0.05)
+    return None
+
+
 def simples(t):
     """Sem acento, minúsculo e com um espaço só."""
     t = unicodedata.normalize("NFKD", t)

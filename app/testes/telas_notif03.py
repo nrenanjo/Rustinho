@@ -41,20 +41,14 @@ def montar_loja(pasta):
     base._aux_nucleo.executar("estavel", "montar_loja_de_teste", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_LOJA_AVISOS": "1"}, raiz=RAIZ)
 
 
-def conferir_ambiente(pid):
-    """O Rustinho do teste tem de estar na tela virtual, sem Wayland. Espera o
-    processo terminar de começar (logo depois de criado, /proc ainda pode
-    estar vazio)."""
-    for _ in range(20):
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(x.split(b"=", 1) for x in f.read().split(b"\0") if b"=" in x)
-        except OSError:
-            env = {}
-        if b"DISPLAY" in env:
-            return env.get(b"DISPLAY") == TELA.encode() and b"WAYLAND_DISPLAY" not in env
-        time.sleep(0.25)
-    return False
+def conferir_ambiente(pid, programa=None):
+    """O Rustinho do teste tem de estar na tela virtual, sem Wayland. O ambiente é
+    lido só depois de o processo já ser o programa (base.ambiente_do_programa:
+    antes do `exec`, o /proc mostra o ambiente de quem o criou; BUG JNAP)."""
+    amb = base.ambiente_do_programa(pid, programa)
+    if amb is None:
+        return False
+    return amb.get(b"DISPLAY") == TELA.encode() and b"WAYLAND_DISPLAY" not in amb
 
 
 # O pedido da senha do gerente (PedirGerente, modo consulta). "Senha do
