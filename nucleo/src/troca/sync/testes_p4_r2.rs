@@ -311,3 +311,87 @@ fn c2r2_12_erro_do_banco_nao_para_o_p4() {
     assert!(p4::contexto(&a.conn, &ca).is_some(), "com o banco de volta, o P4 volta na hora");
     let _ = identidade(&ca);
 }
+
+// ---------------------------------------------------------------------------
+// R2 §6.3 (DT-P4-19, mínimo para a T015): a troca de negócio pelo fio do P4.
+// ---------------------------------------------------------------------------
+
+/// Volta em vários lotes pelo P4 (lote de 5, 20 peças): tudo chega, cada lote por
+/// uma conexão autenticada.
+#[test]
+fn p4_negocio_volta_em_varios_lotes() {
+    thread::spawn(|| {
+        let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-lotes");
+        for i in 0..20 {
+            peca_nova(&a, &format!("Peça em lote {i:02}"));
+        }
+        config::gravar(&a.conn, "sync_lote_teste", "5").unwrap();
+        let (mut ma, pt_a) = motor(&ca);
+        let antes = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst);
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_a}"), 0);
+        let conexoes = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst) - antes;
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        let (_, aplicadas) = r.unwrap();
+        assert!(aplicadas >= 20, "aplicou {aplicadas}");
+        for i in 0..20 {
+            assert!(tem_peca(&b, &format!("Peça em lote {i:02}")), "faltou a peça {i}");
+        }
+        assert!(conexoes >= 4, "os lotes foram pelo fio do P4 ({conexoes} conexões)");
+    })
+    .join()
+    .unwrap();
+}
+
+/// Recomeço depois de restaurar um backup (o resumo do servidor), pelo P4: o caixa
+/// volta ao backup, perde o que recebeu depois, e recebe de novo pelo fio do P4.
+#[test]
+fn p4_negocio_recomeco_depois_de_restaurar_backup() {
+    thread::spawn(|| {
+        let _vez = crate::backup::testes::um_por_vez();
+        let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-recomeco");
+        drop(b);
+        let feito = crate::backup::fazer(&cb, false).unwrap();
+        peca_nova(&a, "Peça depois do backup do caixa 2");
+        let (mut ma, pt_a) = motor(&ca);
+        puxar(&cb, &format!("127.0.0.1:{pt_a}"), 0).unwrap();
+        let mut b = Banco::abrir(&cb).unwrap();
+        assert!(tem_peca(&b, "Peça depois do backup do caixa 2"));
+        crate::backup::restaurar(&mut b.conn, Some(&cb), &feito.arquivo, false, "1234").unwrap();
+        assert!(!tem_peca(&b, "Peça depois do backup do caixa 2"), "o backup é de antes da peça");
+        assert!(p4::tem_raiz_fixada(&b.conn), "o caixa continua do P4 depois de restaurar");
+        let antes = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst);
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_a}"), 0);
+        let pelo_p4 = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst) - antes;
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        r.unwrap();
+        assert!(tem_peca(&b, "Peça depois do backup do caixa 2"), "a peça voltou pelo recomeço");
+        assert!(pelo_p4 >= 1, "pelo fio do P4");
+    })
+    .join()
+    .unwrap();
+}
+
+/// Sonda de endereço desconhecido pelo P4: o caixa da loja muda de porta (endereço
+/// que o outro nunca viu); a puxada tenta o P4 com as chaves autorizadas e acha o
+/// caixa certo — sem cair para o P3.
+#[test]
+fn p4_negocio_endereco_desconhecido() {
+    thread::spawn(|| {
+        let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-sonda");
+        let (mut ma, pt_a) = motor(&ca);
+        puxar(&cb, &format!("127.0.0.1:{pt_a}"), 0).unwrap();
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        peca_nova(&a, "Peça no endereço novo");
+        let (mut ma, pt_novo) = motor(&ca);
+        assert_ne!(pt_novo, pt_a, "outra porta");
+        let antes = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst);
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_novo}"), 0);
+        let pelo_p4 = p4::ATENDIDAS_PELO_P4.load(Ordering::SeqCst) - antes;
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        r.unwrap();
+        assert!(tem_peca(&b, "Peça no endereço novo"));
+        assert!(pelo_p4 >= 1, "pelo fio do P4");
+    })
+    .join()
+    .unwrap();
+}
