@@ -362,7 +362,13 @@ fn gravar(caminho: &Path, bytes: &[u8]) -> Resultado<()> {
         Erro::Interno(format!("não foi possível guardar a identidade deste caixa ({:?})", e.kind()))
     };
     let pasta = caminho.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let pasta_existia = pasta.exists();
     std::fs::create_dir_all(pasta).map_err(falha)?;
+    #[cfg(unix)]
+    if !pasta_existia {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(pasta, std::fs::Permissions::from_mode(0o700));
+    }
     let nome = caminho.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let temporario = pasta.join(format!(".{nome}.novo-{}", crate::tempo::novo_id()));
     let mut opcoes = std::fs::OpenOptions::new();

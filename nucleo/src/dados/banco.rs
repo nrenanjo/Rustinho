@@ -1100,6 +1100,7 @@ mod testes {
                 colunas("p4_convite"),
                 [
                     "id",
+                    "loja_id",
                     "segredo_hash",
                     "segredo_ativo",
                     "codigo_pedido",

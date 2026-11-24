@@ -104,8 +104,12 @@ jobs:
           # Entrada de "Adicionar ou remover programas".
           $u = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -like "Rustinho*" } | Select-Object -First 1
           anota "programas instalados: $($u.DisplayName) | versão $($u.DisplayVersion) | ícone $($u.DisplayIcon)"
-          # Regra do firewall (decisão A9 em aberto).
-          netsh advfirewall firewall show rule name=Rustinho | Out-File -Append $rel
+          # Regra do firewall (DP-45: restrita exclusivamente a 47810/TCP e 47811/UDP).
+          $fw = (netsh advfirewall firewall show rule name=Rustinho) -join "`n"
+          $fw | Out-File -Append $rel
+          if ($fw -notmatch '47810' -or $fw -notmatch '47811') {
+            throw "regras do firewall não restringem às portas 47810/TCP e 47811/UDP:`n$fw"
+          }
 
           # Abre como um usuário: sem RUSTINHO_DADOS (pasta de dados padrão).
           $dados = Join-Path $env:LOCALAPPDATA "Rustinho"

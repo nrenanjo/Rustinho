@@ -1,4 +1,4 @@
-; Instalador do Rustinho para Windows 10 e 11 (64 bits), feito com Inno Setup 6.
+﻿; Instalador do Rustinho para Windows 10 e 11 (64 bits), feito com Inno Setup 6.
 ; A montagem automática (GitHub Actions) passa a versão e a pasta com os
 ; arquivos: ISCC /DVersao=0.8.0 /DOrigem=..\dist rustinho.iss
 

@@ -21,37 +21,62 @@ fn retirar_um_caixa_nao_promete_que_ele_nao_volta() {
 }
 
 /// DP-45 (0.9.19-dev.2): o instalador Windows libera exclusivamente as portas da troca
-/// de dados (47810/TCP e 47811/UDP) e remove as regras na instalação prévia e na desinstalação.
+/// de dados (47810/TCP e 47811/UDP), preserva o BOM UTF-8 do `.iss` e remove as regras
+/// antes de recriar (`[Run]`) e na desinstalação (`[UninstallRun]`).
 #[test]
 fn dp45_firewall_do_instalador_libera_apenas_portas_da_troca() {
     let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("instalador").join("rustinho.iss");
-    let iss = std::fs::read_to_string(&caminho).unwrap_or_else(|e| panic!("{}: {e}", caminho.display()));
-    let regras_add: Vec<&str> = iss
-        .lines()
-        .filter(|l| l.contains("advfirewall firewall add rule") && !l.trim_start().starts_with(';'))
-        .collect();
+    let bytes = std::fs::read(&caminho).unwrap_or_else(|e| panic!("{}: {e}", caminho.display()));
+    assert!(
+        bytes.starts_with(&[0xEF, 0xBB, 0xBF]),
+        "instalador/rustinho.iss deve preservar BOM UTF-8 para acentos no Inno Setup"
+    );
+    let iss = String::from_utf8(bytes[3..].to_vec()).unwrap_or_else(|e| panic!("{}: {e}", caminho.display()));
+
+    let mut secao = String::new();
+    let mut run_linhas = Vec::new();
+    let mut uninstall_linhas = Vec::new();
+    for linha in iss.lines() {
+        let limpa = linha.trim();
+        if limpa.is_empty() || limpa.starts_with(';') {
+            continue;
+        }
+        if limpa.starts_with('[') && limpa.ends_with(']') {
+            secao = limpa.to_ascii_lowercase();
+            continue;
+        }
+        match secao.as_str() {
+            "[run]" => run_linhas.push(limpa),
+            "[uninstallrun]" => uninstall_linhas.push(limpa),
+            _ => {}
+        }
+    }
+
+    let regras_add: Vec<&str> =
+        run_linhas.iter().copied().filter(|l| l.contains("advfirewall firewall add rule")).collect();
     assert_eq!(
         regras_add.len(),
         2,
-        "esperadas exatamente 2 regras de firewall (TCP 47810 e UDP 47811): {regras_add:#?}"
+        "esperadas exatamente 2 regras de firewall em [Run] (TCP 47810 e UDP 47811): {regras_add:#?}"
     );
     assert!(
         regras_add.iter().any(|l| l.contains("protocol=TCP")
             && l.contains("localport=47810")
             && l.contains("profile=private,domain")),
-        "falta regra restrita TCP 47810: {regras_add:#?}"
+        "falta regra restrita TCP 47810 em [Run]: {regras_add:#?}"
     );
     assert!(
         regras_add.iter().any(|l| l.contains("protocol=UDP")
             && l.contains("localport=47811")
             && l.contains("profile=private,domain")),
-        "falta regra restrita UDP 47811: {regras_add:#?}"
+        "falta regra restrita UDP 47811 em [Run]: {regras_add:#?}"
     );
-    let deletes = iss
-        .lines()
-        .filter(|l| {
-            l.contains("advfirewall firewall delete rule name=\"\"Rustinho\"\"") && !l.trim_start().starts_with(';')
-        })
-        .count();
-    assert!(deletes >= 2, "esperada remoção da regra antes de recriar e na desinstalação (achadas: {deletes})");
+    assert!(
+        run_linhas.iter().any(|l| l.contains("advfirewall firewall delete rule name=\"\"Rustinho\"\"")),
+        "falta remoção prévia da regra em [Run]: {run_linhas:#?}"
+    );
+    assert!(
+        uninstall_linhas.iter().any(|l| l.contains("advfirewall firewall delete rule name=\"\"Rustinho\"\"")),
+        "falta remoção da regra em [UninstallRun]: {uninstall_linhas:#?}"
+    );
 }

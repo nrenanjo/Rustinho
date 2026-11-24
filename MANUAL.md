@@ -6,7 +6,7 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
 
 - **Primeira vez:** nome da loja, nome deste computador (ex.: Caixa 1) e o seu usuário.
 - **Entrada:** cada pessoa clica no próprio nome e digita a senha. Depois de 5 senhas erradas, espera 30 segundos.
-- **Senhas:** só se exige o tamanho: pelo menos 4 caracteres (no máximo 128 numa senha nova). Vale qualquer letra, número, espaço ou símbolo, inclusive "1234". Quanto mais longa, mais segura.
+- **Senhas:** só se exige o tamanho (no máximo 128 numa senha nova): pelo menos **4 caracteres** para operador e pelo menos **8 caracteres** para gerente (pois a senha de gerente também protege os backups — quanto mais longa, melhor). Vale qualquer letra, número, espaço ou símbolo. Quem já tinha senha curta continua entrando sem bloqueio, com aviso até trocar.
 - **Início:** as funções mais usadas aparecem primeiro. O alfinete fixa uma função em "Mais usados". Funções das próximas etapas aparecem como "em breve".
 - **Peças:** uma busca só, que acha a peça por código interno, código de barras, código original, equivalente, nome, marca, carro e ano (ex.: `pastilha gol 2015`, `vw gol 1.6`, `32206a`).
 - **Cadastro de peça:** uma tela só, sem abas:
@@ -171,7 +171,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 
 ### Novo na versão 0.9.13
 
-- **Senhas:** só o tamanho é exigido (pelo menos 4 caracteres; no máximo 128 numa senha nova). Vale "1234". Ninguém é obrigado a trocar a senha que já tem.
+- **Senhas:** só o tamanho é exigido (na 0.9.13 o mínimo era 4 para todos; a partir da 0.9.19-dev.2, gerente exige pelo menos 8 caracteres e operador continua com 4; máximo 128 numa senha nova). Ninguém é obrigado a trocar a senha que já tem.
 - **CNPJ com letras** (CNPJ alfanumérico, que a Receita dá desde julho de 2026): aceito nos cadastros, no CNPJ da loja, na busca e nas notas de compra pelo XML (a chave de acesso pode ter letras).
 - **Painel → Resultado (DRE):** a DRE gerencial do período (hoje, 7 dias, mês atual, mês anterior, ano ou datas escolhidas), com comparação, pendências, os últimos 12 meses e as despesas por categoria. Toque numa linha para ver os lançamentos que formam o total. **Imprimir** gera o PDF. É um **resultado gerencial estimado**: não substitui a contabilidade nem a DRE oficial.
   - **Pendências** deixam o resultado incompleto, nunca viram zero: peça vendida sem custo, despesa sem categoria (ou categoria sem classificação), conta sem mês de referência, classificação não confirmada, contas mensais fora de um período menor que um mês, nenhum imposto lançado no mês.

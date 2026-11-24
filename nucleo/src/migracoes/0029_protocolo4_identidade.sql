@@ -10,6 +10,7 @@ ALTER TABLE caixa_aprovado ADD COLUMN dispositivo TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE p4_convite (
     id             TEXT PRIMARY KEY,
+    loja_id        TEXT NOT NULL DEFAULT '',
     segredo_hash   TEXT NOT NULL UNIQUE,
     segredo_ativo  TEXT,
     codigo_pedido  TEXT NOT NULL,

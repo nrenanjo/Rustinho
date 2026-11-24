@@ -42,9 +42,33 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::{de_hex, hex, verificar, Assinatura, Chave, Dominio, Identidade};
 use crate::erro::{Erro, Resultado};
 
-/// Tamanho máximo do nome do caixa e do motivo da retirada (caracteres).
+/// Tamanho máximo do nome do caixa, do motivo da retirada e do `dispositivo` (I3).
 const NOME_MAXIMO: usize = 80;
 const MOTIVO_MAXIMO: usize = 300;
+pub const DISPOSITIVO_MAXIMO: usize = 64;
+
+/// Valida `dispositivo` (decisão I3): obrigatório no ingresso P4, forma canônica
+/// (sem espaços nas pontas), até 64 caracteres ASCII seguros (`A-Z`, `a-z`, `0-9`, `-`, `_`).
+pub fn validar_dispositivo(dispositivo: &str) -> Resultado<()> {
+    if dispositivo.is_empty() {
+        return Err(Erro::validacao("O pedido do caixa novo precisa informar o identificador do dispositivo (I3)."));
+    }
+    if dispositivo != dispositivo.trim() || dispositivo.len() > DISPOSITIVO_MAXIMO {
+        return Err(Erro::validacao("Identificador de dispositivo inválido no pedido do caixa."));
+    }
+    if !dispositivo.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(Erro::validacao("Identificador de dispositivo com caracteres inválidos no pedido do caixa."));
+    }
+    Ok(())
+}
+
+/// Valida forma canônica de `dispositivo` opcional (vazio aceito em linhas legadas 24–28).
+fn dispositivo_canonico(dispositivo: &str) -> bool {
+    dispositivo.is_empty()
+        || (dispositivo == dispositivo.trim()
+            && dispositivo.len() <= DISPOSITIVO_MAXIMO
+            && dispositivo.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+}
 
 /// O pedido de entrada de um caixa novo: as duas chaves públicas dele, o
 /// identificador `dispositivo` (I3) e a prova de que ele tem as partes privadas
@@ -85,14 +109,15 @@ impl Pedido {
     }
 
     /// A assinatura confere (quem pediu tem a chave privada Ed25519 e ligou a
-    /// ela esta chave X25519 e o `dispositivo`)?
+    /// ela esta chave X25519 e o `dispositivo` em forma canônica)?
     pub fn confere(&self) -> bool {
-        verificar(
-            Dominio::Pedido,
-            &self.chave,
-            &Pedido::corpo(&self.chave, &self.chave_troca, &self.dispositivo),
-            &self.assinatura,
-        )
+        dispositivo_canonico(&self.dispositivo)
+            && verificar(
+                Dominio::Pedido,
+                &self.chave,
+                &Pedido::corpo(&self.chave, &self.chave_troca, &self.dispositivo),
+                &self.assinatura,
+            )
     }
 
     /// O código que o gerente confere.
@@ -153,9 +178,10 @@ impl Aprovacao {
         v
     }
 
-    /// A assinatura do aprovador confere?
+    /// A assinatura do aprovador confere (e `dispositivo` está em forma canônica)?
     pub fn assinatura_confere(&self) -> bool {
-        verificar(Dominio::Aprovacao, &self.aprovador, &self.corpo(), &self.assinatura)
+        dispositivo_canonico(&self.dispositivo)
+            && verificar(Dominio::Aprovacao, &self.aprovador, &self.corpo(), &self.assinatura)
     }
 }
 
@@ -473,30 +499,63 @@ pub fn registrar_raiz(
     Ok(a)
 }
 
-/// A chave pública da raiz válida registrada em `caixa_aprovado` para `loja_id`.
+/// A única chave pública de raiz válida registrada em `caixa_aprovado` para `loja_id`.
+///
+/// Falha fechada (A1): se existir mais de uma chave autoassinada distinta para a mesma
+/// loja, devolve erro em vez de escolher uma arbitrariamente. Nunca substitui um pino
+/// `p4_raiz` já fixado em `config` (veja `cofre::raiz_atual`).
 pub fn raiz_registrada(conn: &Connection, loja_id: &str) -> Resultado<Option<Chave>> {
     if loja_id.trim().is_empty() {
         return Ok(None);
     }
+    let mut raizes: std::collections::BTreeSet<Chave> = std::collections::BTreeSet::new();
     for a in ler_aprovacoes(conn, loja_id)? {
         if a.loja_id == loja_id && a.chave == a.aprovador && a.assinatura_confere() {
-            return Ok(Some(a.chave));
+            raizes.insert(a.chave);
         }
     }
-    Ok(None)
+    match raizes.len() {
+        0 => Ok(None),
+        1 => Ok(raizes.into_iter().next()),
+        n => Err(Erro::validacao(format!(
+            "Encontradas {n} raízes distintas no registro de caixas desta loja; recusa segura."
+        ))),
+    }
 }
 
-/// Chave pública mais recente registrada para `dispositivo_alvo` (I3).
-pub fn chave_do_dispositivo(conn: &Connection, loja_id: &str, dispositivo_alvo: &str) -> Resultado<Option<Chave>> {
-    if loja_id.trim().is_empty() || dispositivo_alvo.trim().is_empty() {
+/// Chave pública **autorizada** registrada para `dispositivo_alvo` (I3, A3).
+///
+/// Restringe estritamente a chaves autorizadas na cadeia da `raiz` (excluindo
+/// retiradas, sem cadeia e autoaprovações de estranhos). Se mais de uma chave
+/// autorizada distinta declarar o mesmo `dispositivo`, recusa por ambiguidade.
+pub fn chave_do_dispositivo(
+    conn: &Connection,
+    raiz: &Chave,
+    loja_id: &str,
+    dispositivo_alvo: &str,
+) -> Resultado<Option<Chave>> {
+    let alvo = dispositivo_alvo.trim();
+    if loja_id.trim().is_empty() || alvo.is_empty() {
         return Ok(None);
     }
-    let mut candidatos: Vec<Aprovacao> = ler_aprovacoes(conn, loja_id)?
-        .into_iter()
-        .filter(|a| a.loja_id == loja_id && a.dispositivo == dispositivo_alvo && a.assinatura_confere())
-        .collect();
-    candidatos.sort_by_key(|a| std::cmp::Reverse(fica(&a.aprovado_em, &a.assinatura)));
-    Ok(candidatos.first().map(|a| a.chave))
+    let av = avaliar(conn, raiz, loja_id)?;
+    let mut chaves: std::collections::BTreeSet<Chave> = std::collections::BTreeSet::new();
+    for a in ler_aprovacoes(conn, loja_id)? {
+        if a.loja_id == loja_id
+            && a.dispositivo.trim() == alvo
+            && av.situacao(&a.chave) == Situacao::Autorizada
+            && a.assinatura_confere()
+        {
+            chaves.insert(a.chave);
+        }
+    }
+    match chaves.len() {
+        0 => Ok(None),
+        1 => Ok(chaves.into_iter().next()),
+        n => Err(Erro::validacao(format!(
+            "Conflito de identidade (I3): {n} caixas autorizados compartilham o mesmo dispositivo."
+        ))),
+    }
 }
 
 /// P4-4: caixas hoje autorizados que ficariam `SemCadeia` se `chave` fosse retirada.
@@ -758,11 +817,59 @@ mod testes {
         let p2_ok = Pedido::com_dispositivo(&c2, "disp-caixa-2");
         let a2 = aprovar(&b.conn, &raiz, &r, LOJA, &p2_ok, "Caixa 2", &u).unwrap();
         assert_eq!(a2.dispositivo, "disp-caixa-2");
-        assert_eq!(chave_do_dispositivo(&b.conn, LOJA, "disp-caixa-2").unwrap(), Some(c2.publica()));
+        assert_eq!(chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-2").unwrap(), Some(c2.publica()));
         assert_eq!(raiz_registrada(&b.conn, LOJA).unwrap(), Some(r));
+
+        // A3: estranho não autorizado junta aprovação autoassinada com o mesmo `dispositivo`
+        // e data futura (2999) — `chave_do_dispositivo` continua devolvendo a vítima autorizada!
+        let estranho = Identidade::gerar().unwrap();
+        let mut falsa = assinar_aprovacao(
+            &estranho,
+            estranho.publica(),
+            estranho.publica_troca(),
+            LOJA,
+            "Falso",
+            &u,
+            "disp-caixa-2",
+        );
+        falsa.aprovado_em = "2999-12-31T23:59:59Z".into();
+        falsa.assinatura = estranho.assinar(Dominio::Aprovacao, &falsa.corpo());
+        juntar(&b.conn, LOJA, &Linhas { aprovacoes: vec![falsa], retiradas: Vec::new() }).unwrap();
+        assert_eq!(
+            chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-2").unwrap(),
+            Some(c2.publica()),
+            "A3: aprovação de estranho nunca substitui a chave autorizada"
+        );
+        // A1: com duas raízes autoassinadas no banco, `raiz_registrada` falha fechada.
+        assert!(raiz_registrada(&b.conn, LOJA).is_err(), "A1: >1 raiz distinta deve recusar");
+        // Remove a linha falsa para seguir com o teste de dependentes e conflito de dispositivo.
+        b.conn.execute("DELETE FROM caixa_aprovado WHERE chave = ?1", [hex(&estranho.publica())]).unwrap();
 
         let p3 = Pedido::com_dispositivo(&c3, "disp-caixa-3");
         aprovar(&b.conn, &c2, &r, LOJA, &p3, "Caixa 3", &u).unwrap();
+        // A3: duas chaves autorizadas com o mesmo `dispositivo` devolvem erro de conflito.
+        let c4 = Identidade::gerar().unwrap();
+        aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::com_dispositivo(&c4, "disp-caixa-3"), "Caixa 4", &u).unwrap();
+        assert!(
+            chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-3").is_err(),
+            "A3: >1 chave autorizada com o mesmo dispositivo deve falhar"
+        );
+        b.conn.execute("DELETE FROM caixa_aprovado WHERE chave = ?1", [hex(&c4.publica())]).unwrap();
+
+        // B9 / M4: dispositivo com espaço nas pontas ou grande demais falha em `confere` / `validar_dispositivo`.
+        assert!(validar_dispositivo("").is_err());
+        assert!(validar_dispositivo(" disp ").is_err());
+        assert!(validar_dispositivo(&"a".repeat(DISPOSITIVO_MAXIMO + 1)).is_err());
+        assert!(validar_dispositivo("disp/invalido").is_err());
+        assert!(validar_dispositivo("disp-ok_123").is_ok());
+        let mut p_nao_canon = p2_ok.clone();
+        p_nao_canon.dispositivo = " disp-caixa-2 ".into();
+        p_nao_canon.assinatura = c2.assinar(
+            Dominio::Pedido,
+            &Pedido::corpo(&p_nao_canon.chave, &p_nao_canon.chave_troca, &p_nao_canon.dispositivo),
+        );
+        assert!(!p_nao_canon.confere(), "B9: dispositivo não canônico é recusado");
+
         // P4-4: retirar Caixa 2 derrubaria Caixa 3 em cascata.
         let deps = dependentes_de(&b.conn, &r, LOJA, &c2.publica()).unwrap();
         assert_eq!(deps.len(), 1);
