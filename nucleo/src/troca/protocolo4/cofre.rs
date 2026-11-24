@@ -41,10 +41,11 @@
 //! - **Reserva local (`cofre_sistema = false`):** é **ofuscação**, não proteção
 //!   forte: arquivo `0600` fora do banco, cifrado com chave tirada do caminho e de
 //!   um dado do computador que **não** fica no banco nem no pendrive
-//!   (`/etc/machine-id` no Linux instalado; no portátil, o
-//!   `crate::computador::segredo_local`, N-01). Protege contra quem tem só a cópia
-//!   da pasta ou do pendrive; **não** protege contra quem tem acesso ao próprio
-//!   computador (limite declarado). Por isso o gerente é avisado. Se a identidade ficar ilegível (cofre ou
+//!   (`crate::computador::segredo_local`, N-01 e N-14: no Linux sai do `machine-id`,
+//!   no Windows do MachineGuid). Protege contra quem tem só a cópia da pasta ou do
+//!   pendrive; **não** protege contra quem tem acesso ao próprio computador, nem
+//!   quando o sistema não informa a identidade do computador (limites declarados).
+//!   Por isso o gerente é avisado. Se a identidade ficar ilegível (cofre ou
 //!   computador mudou), [`regerar_identidade_local`] cria identidade limpa (só
 //!   quando a atual não abre) e exige nova aprovação do gerente.
 //! - **Nenhum gancho por variável de ambiente** vale no programa (F-09).
@@ -84,11 +85,39 @@ pub enum Modo {
     /// Instalação normal: identidade na pasta de configuração local do usuário.
     Instalado,
     /// Rustinho portátil: identidade na pasta do portátil, uma por computador.
-    /// `computador`: o [`crate::computador::segredo_local`] — **nunca** a
-    /// `computador::atual` (a impressão), que fica gravada no banco do pendrive e
-    /// deixaria a chave da reserva ao alcance de quem copia o pendrive (N-01);
-    /// `None` quando o sistema não informa.
-    Portatil { computador: Option<String> },
+    /// Só se monta com [`Modo::portatil_deste_computador`] (N-13).
+    Portatil(Portatil),
+}
+
+/// O portátil num computador. O campo é privado (N-13): o valor sai só de
+/// [`Modo::portatil_deste_computador`], que usa o `computador::segredo_local` —
+/// **nunca** a `computador::atual` (a impressão), que fica gravada no banco do
+/// pendrive e deixaria a chave da reserva ao alcance de quem copia o pendrive (N-01).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Portatil {
+    /// `None` quando o sistema não informa a identidade do computador.
+    computador: Option<String>,
+}
+
+/// O `Debug` não mostra o segredo local do computador.
+impl std::fmt::Debug for Portatil {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Portatil").field("computador", &self.computador.as_ref().map(|_| "<oculto>")).finish()
+    }
+}
+
+impl Modo {
+    /// O Rustinho portátil neste computador (chamar depois de `computador::definir`,
+    /// como o resto do programa).
+    pub fn portatil_deste_computador() -> Modo {
+        Modo::Portatil(Portatil { computador: crate::computador::segredo_local() })
+    }
+
+    /// Só nos testes: o portátil num "computador" escolhido.
+    #[cfg(test)]
+    fn portatil_com(computador: Option<&str>) -> Modo {
+        Modo::Portatil(Portatil { computador: computador.map(str::to_string) })
+    }
 }
 
 /// O cofre de senhas do sistema que guarda o segredo de selagem (D4, F-06).
@@ -106,7 +135,7 @@ enum CofreSistema {
 
 /// O cofre do sistema que vale para `modo` neste processo.
 fn cofre_do_sistema(modo: &Modo) -> CofreSistema {
-    if COMPILACAO_DE_TESTE || matches!(modo, Modo::Portatil { .. }) {
+    if COMPILACAO_DE_TESTE || matches!(modo, Modo::Portatil(_)) {
         return CofreSistema::Nenhum;
     }
     #[cfg(target_os = "linux")]
@@ -170,6 +199,10 @@ impl TravaArquivo {
     }
 }
 
+/// N-15: o texto da tela quando outro Rustinho segura a identidade além do prazo.
+pub const TEXTO_IDENTIDADE_OCUPADA: &str =
+    "O Rustinho ainda está guardando a identidade deste caixa em outra janela. Tente de novo em instantes.";
+
 /// Quanto se espera pela trava da identidade (N-02): um processo preso na seção
 /// crítica não congela quem chama (a tela inclusive); depois disso, erro.
 const PRAZO_DA_TRAVA: std::time::Duration = std::time::Duration::from_secs(10);
@@ -185,7 +218,8 @@ fn travar_exclusivo(arquivo: &std::fs::File) -> Resultado<()> {
                 std::thread::sleep(std::time::Duration::from_millis(15));
             }
             Err(std::fs::TryLockError::WouldBlock) => {
-                return Err(Erro::Interno("tempo esgotado esperando a trava da identidade do caixa".into()));
+                crate::registro::anotar("protocolo 4: tempo esgotado esperando a trava da identidade do caixa");
+                return Err(Erro::validacao(TEXTO_IDENTIDADE_OCUPADA));
             }
             Err(std::fs::TryLockError::Error(e)) => {
                 return Err(Erro::Interno(format!(
@@ -304,8 +338,8 @@ fn caminho_identidade_se_existir(pasta_banco: &Path, modo: &Modo) -> Resultado<O
 
 /// O caminho da identidade para a pasta do banco já canônica `canon`.
 fn caminho_identidade_em(canon: &Path, modo: &Modo, base_cfg_override: Option<&Path>) -> Resultado<PathBuf> {
-    if let Modo::Portatil { computador } = modo {
-        return Ok(canon.join(nome_identidade_portatil(computador)?));
+    if let Modo::Portatil(p) = modo {
+        return Ok(canon.join(nome_identidade_portatil(&p.computador)?));
     }
     let pasta_cfg = match base_cfg_override {
         Some(p) => p.to_path_buf(),
@@ -422,6 +456,28 @@ fn criar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resu
     Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
 }
 
+/// As identidades já abertas neste processo, por caminho (DT-P4-08).
+fn cache_identidades() -> &'static Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<IdentidadeLocal>>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<IdentidadeLocal>>>> =
+        OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// DT-P4-08 (N-16): a identidade deste caixa para o motor e os comandos, aberta
+/// **uma vez por processo** (o selo custa um Argon2id e o cofre do sistema pode
+/// levar segundos): as chamadas seguintes devolvem a mesma, da memória. Erro não
+/// fica guardado (quem chama trata como "protocolo 4 indisponível agora" e tenta
+/// depois; nunca chama [`regerar_identidade_local`] sozinho). Não chamar na
+/// linha de execução da tela.
+pub fn identidade_do_processo(pasta_banco: &Path, modo: &Modo) -> Resultado<std::sync::Arc<IdentidadeLocal>> {
+    let caminho = caminho_identidade(pasta_banco, modo)?;
+    if let Some(id) = cache_identidades().lock().unwrap_or_else(|e| e.into_inner()).get(&caminho) {
+        return Ok(id.clone());
+    }
+    let nova = std::sync::Arc::new(carregar_ou_criar_no_caminho(caminho.clone(), modo, &cofre_do_sistema(modo))?);
+    Ok(cache_identidades().lock().unwrap_or_else(|e| e.into_inner()).entry(caminho).or_insert(nova).clone())
+}
+
 /// Recuperação explícita (M3): arquiva uma identidade local **ilegível** (ex.: após
 /// perda do cofre do SO ou troca de `machine-id` em VM) e gera uma identidade
 /// nova limpa, que exigirá nova aprovação pelo gerente da loja.
@@ -430,9 +486,12 @@ fn criar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resu
 /// chave boa e aprovada; o arquivo antigo arquivado ficaria ilegível para sempre,
 /// porque o segredo dele é substituído no cofre). A autorização do gerente para
 /// usar isto fica com a camada de cima.
-pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<IdentidadeLocal> {
+pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<std::sync::Arc<IdentidadeLocal>> {
     let caminho = caminho_identidade(pasta_banco, modo)?;
-    regerar_no_caminho(caminho, modo, &cofre_do_sistema(modo))
+    let nova = std::sync::Arc::new(regerar_no_caminho(caminho.clone(), modo, &cofre_do_sistema(modo))?);
+    // DT-P4-08: o processo passa a usar a identidade nova.
+    cache_identidades().lock().unwrap_or_else(|e| e.into_inner()).insert(caminho, nova.clone());
+    Ok(nova)
 }
 
 fn regerar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
@@ -750,9 +809,9 @@ fn chave_reserva_local(caminho_id: &Path, modo: &Modo) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b"rustinho/p4/reserva-local/v1\0");
     match modo {
-        Modo::Portatil { computador } => {
+        Modo::Portatil(p) => {
             h.update(b"portatil\0");
-            h.update(computador.as_deref().unwrap_or_default().trim().as_bytes());
+            h.update(p.computador.as_deref().unwrap_or_default().trim().as_bytes());
             h.update(b"\0");
             if let Some(nome) = caminho_id.file_name() {
                 h.update(nome.to_string_lossy().as_bytes());
@@ -761,8 +820,12 @@ fn chave_reserva_local(caminho_id: &Path, modo: &Modo) -> [u8; 32] {
         Modo::Instalado => {
             h.update(b"instalado\0");
             h.update(caminho_id.to_string_lossy().as_bytes());
-            if let Ok(mid) = std::fs::read_to_string("/etc/machine-id") {
-                h.update(mid.trim().as_bytes());
+            h.update(b"\0");
+            // N-14: o mesmo dado do computador do portátil (no Linux, o `machine-id`;
+            // no Windows, o MachineGuid), que não fica no banco nem na pasta. Sem a
+            // identidade do sistema, só o caminho: aí a reserva não protege a cópia.
+            if let Some(local) = crate::computador::segredo_local() {
+                h.update(local.as_bytes());
             }
         }
     }
@@ -1430,7 +1493,7 @@ mod testes {
     }
 
     fn portatil_em(computador: &str) -> Modo {
-        Modo::Portatil { computador: Some(computador.to_string()) }
+        Modo::portatil_com(Some(computador))
     }
 
     #[test]
@@ -1465,7 +1528,7 @@ mod testes {
         // reserva amarra o computador).
         assert!(ler_reserva_local(&caminho_reserva(&ca), &ca, &pc_b).is_err());
         // Sem a identidade do computador, o portátil não inventa uma: recusa.
-        let sem = Modo::Portatil { computador: None };
+        let sem = Modo::portatil_com(None);
         assert!(caminho_identidade_com_base(&p.0, &sem, None).is_err());
     }
 
@@ -1775,13 +1838,69 @@ mod testes {
         assert!(carregar_existente_no_caminho(c, &Modo::Instalado, &CofreSistema::Nenhum).unwrap().is_some());
     }
 
+    /// O `flock` do util-linux com `--no-fork` (2.35+): o próprio processo vira o
+    /// comando, sem filho que herde a trava (N-16).
+    #[cfg(target_os = "linux")]
+    fn flock_sem_fork() -> bool {
+        std::process::Command::new("/usr/bin/flock")
+            .arg("--help")
+            .output()
+            .map(|s| String::from_utf8_lossy(&s.stdout).contains("--no-fork"))
+            .unwrap_or(false)
+    }
+
+    /// DT-P4-08: a identidade do processo abre uma vez (a segunda chamada devolve a
+    /// mesma, da memória) e a recuperação explícita troca a do processo.
+    #[test]
+    fn dt_p4_08_identidade_do_processo_abre_uma_vez() {
+        let p = PastaTemp::nova("cache-identidade");
+        let a = identidade_do_processo(&p.0, &Modo::Instalado).unwrap();
+        let b = identidade_do_processo(&p.0, &Modo::Instalado).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &b), "a segunda chamada não pode abrir o selo de novo");
+        // Com a reserva estragada, a do processo continua (está na memória)...
+        let r = caminho_reserva(&a.caminho);
+        let mut bytes = std::fs::read(&r).unwrap();
+        let ult = bytes.len() - 1;
+        bytes[ult] ^= 0xFF;
+        std::fs::write(&r, &bytes).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&a, &identidade_do_processo(&p.0, &Modo::Instalado).unwrap()));
+        // ...e a recuperação explícita troca a do processo pela nova.
+        let nova = regerar_identidade_local(&p.0, &Modo::Instalado).unwrap();
+        assert_ne!(nova.identidade.publica(), a.identidade.publica());
+        let depois = identidade_do_processo(&p.0, &Modo::Instalado).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&nova, &depois));
+    }
+
+    /// N-13: o `Debug` do modo portátil não mostra o segredo local do computador.
+    #[test]
+    fn n13_debug_do_portatil_nao_mostra_o_segredo_local() {
+        let segredo = crate::computador::segredo_local().unwrap();
+        let texto = format!("{:?}", Modo::portatil_deste_computador());
+        assert!(!texto.contains(&segredo), "{texto}");
+    }
+
+    /// N-14: a reserva do modo instalado também se amarra ao computador.
+    #[test]
+    fn n14_reserva_instalada_depende_do_computador() {
+        let raiz = PastaTemp::nova("reserva-instalada");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let com = chave_reserva_local(&c, &Modo::Instalado);
+        let mut h = Sha256::new();
+        h.update(b"rustinho/p4/reserva-local/v1\0");
+        h.update(b"instalado\0");
+        h.update(c.to_string_lossy().as_bytes());
+        h.update(b"\0");
+        let so_caminho: [u8; 32] = h.finalize().into();
+        assert_ne!(com, so_caminho, "a chave da reserva não pode depender só do caminho");
+    }
+
     /// F-01 (no Linux): a trava presa por outro **processo** que morreu é solta pelo
     /// sistema na hora (o processo filho segura a trava e é morto com SIGKILL).
     #[cfg(target_os = "linux")]
     #[test]
     fn f01_trava_de_processo_morto_e_solta_pelo_sistema() {
-        if !Path::new("/usr/bin/flock").is_file() {
-            eprintln!("sem /usr/bin/flock neste sistema: teste não se aplica");
+        if !flock_sem_fork() {
+            eprintln!("sem /usr/bin/flock com --no-fork neste sistema: teste não se aplica");
             return;
         }
         let raiz = PastaTemp::nova("trava-processo-morto");
@@ -2090,10 +2209,10 @@ mod testes {
     #[test]
     fn n01_reserva_do_portatil_nao_abre_com_o_que_esta_no_pendrive() {
         let p = PastaTemp::nova("portatil-n01");
-        let modo = Modo::Portatil { computador: crate::computador::segredo_local() };
+        let modo = Modo::portatil_deste_computador();
         let c = caminho_identidade_com_base(&p.0, &modo, None).unwrap();
         carregar_ou_criar_no_caminho(c.clone(), &modo, &CofreSistema::Nenhum).unwrap();
-        let so_com_o_pendrive = Modo::Portatil { computador: crate::computador::atual() };
+        let so_com_o_pendrive = Modo::portatil_com(crate::computador::atual().as_deref());
         assert!(
             ler_reserva_local(&caminho_reserva(&c), &c, &so_com_o_pendrive).is_err(),
             "quem tem só o pendrive (o computador_id do banco) não pode abrir a reserva"
@@ -2106,8 +2225,8 @@ mod testes {
     #[cfg(target_os = "linux")]
     #[test]
     fn n02_trava_presa_por_outro_processo_da_erro_no_prazo() {
-        if !Path::new("/usr/bin/flock").is_file() {
-            eprintln!("sem /usr/bin/flock neste sistema: teste não se aplica");
+        if !flock_sem_fork() {
+            eprintln!("sem /usr/bin/flock com --no-fork neste sistema: teste não se aplica");
             return;
         }
         let raiz = PastaTemp::nova("trava-presa");
