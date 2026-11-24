@@ -374,7 +374,9 @@ pub(super) fn pedir_faixa(
     pedido["novo"] = json!(novo);
     let (mut fio, _) = abrir_fio(conn, k, alvo, saida, ctx, dono, None)?;
     fio.enviar(&pedido)?;
-    let resposta = fio.receber(TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
+    // C2-3 (R1 da 2C): a resposta do P4 leva o registro de caixas (que só cresce): o
+    // limite é o das respostas, como na puxada.
+    let resposta = fio.receber(TAMANHO_MAXIMO, Duration::from_secs(30), None)?;
     gravar_faixa_recebida(conn, &resposta)
 }
 

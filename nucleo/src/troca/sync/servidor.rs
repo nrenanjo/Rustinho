@@ -45,10 +45,20 @@ pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> R
     let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
     // T010 (A4): o caixa do protocolo 4 só atende o protocolo 3 durante a convivência;
     // e nunca a quem já tem chave no registro (anti-rebaixamento, DT-P4-14).
-    let com_chave = p4::contexto(&conn, caminho)
-        .and_then(|ctx| ctx.chave_de(&conn, pedido["dispositivo"].as_str().unwrap_or_default()).ok().flatten())
-        .is_some();
+    // C2-5 (R1 da 2C): "tem chave" só pelo banco (a identidade deste caixa pode não
+    // abrir agora) e erro conta como "tem" (falha fechada).
+    let disp = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
+    let com_chave = p4::tem_chave_no_registro(&conn, &disp);
     if !p4::p3_permitido(&conn) || com_chave {
+        // C2-11: a recusa fica no registro técnico.
+        crate::registro::anotar(&format!(
+            "troca de dados: protocolo 3 recusado para o caixa {disp:?} ({})",
+            if com_chave {
+                "ele tem chave no registro: tentativa de rebaixamento"
+            } else {
+                "caixas antigos não liberados"
+            }
+        ));
         return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
                                    "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
                                    "recusado": p4::TEXTO_P3_RECUSADO }));
@@ -89,7 +99,10 @@ fn atender_p4(
             }
         }
     } else {
-        canal::aceitar_autorizado(fluxo, id, &outras, p4::PRAZO_DO_APERTO, Some(parar))?
+        canal::aceitar_autorizado(fluxo, id, &outras, p4::PRAZO_DO_APERTO, Some(parar)).inspect_err(|e| {
+            // C2-11: o aperto de mão recusado (chave fora do registro) fica no registro técnico.
+            crate::registro::anotar(&format!("troca de dados (protocolo 4): conexão recusada no aperto de mão: {e}"));
+        })?
     };
     #[cfg(test)]
     p4::ATENDIDAS_PELO_P4.fetch_add(1, Ordering::SeqCst);
@@ -105,7 +118,7 @@ fn atender_p4(
         let resposta = p4::responder_ingresso(conn, &ctx, &par, &exportador, &pedido, &prova);
         return canal.enviar_json(&resposta.para_json()?, Duration::from_secs(30), Some(parar));
     }
-    let mut fio = p4::FioP4::novo(canal, p4::registro_em_json(conn, &ctx.loja)?);
+    let mut fio = p4::FioP4::do_servidor(canal, p4::registro_em_json(conn, &ctx.loja)?);
     p4::juntar_registro(conn, &ctx.loja, &pedido)?;
     let disp = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
     if ctx.chave_de(conn, &disp)? != Some(par) {

@@ -805,7 +805,7 @@ FocusScope {
             diasAntigos.erro = ""
             tela.sync = r.dados
             janela.avisar(dias === null ? "Caixas antigos recusados a partir de agora."
-                                        : "Caixas antigos liberados até " + r.dados.p4.convivenciaAteTexto + ".", "ok")
+                                        : "Caixas antigos liberados neste caixa até " + r.dados.p4.convivenciaAteTexto + ".", "ok")
         })
     }
 
@@ -2001,10 +2001,11 @@ FocusScope {
                         visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.temRaiz
                         text: !faixaSeguranca.p4 ? ""
                               : faixaSeguranca.p4.convivenciaAte
-                                ? "Caixas antigos (antes da versão 0.9.19) liberados até " + faixaSeguranca.p4.convivenciaAteTexto
-                                  + ". Depois, só os caixas atualizados trocam dados com a loja."
-                                : "Caixas antigos (antes da versão 0.9.19) não trocam dados com esta loja. Se precisar de um tempo para "
-                                  + "atualizá-los, libere-os por alguns dias (no máximo " + faixaSeguranca.p4.convivenciaMaximaDias + ")."
+                                ? "Caixas antigos (antes da versão 0.9.19) liberados neste caixa até " + faixaSeguranca.p4.convivenciaAteTexto
+                                  + ": eles trocam dados com este caixa, e os dados chegam aos outros caixas por ele. Depois, só os caixas atualizados."
+                                : "Caixas antigos (antes da versão 0.9.19) não trocam dados com este caixa. Se precisar de um tempo para "
+                                  + "atualizá-los, libere-os aqui por alguns dias (no máximo " + faixaSeguranca.p4.convivenciaMaximaDias
+                                  + "): este caixa serve de ponte entre eles e os caixas atualizados."
                         Layout.fillWidth: true
                     }
                     Row {

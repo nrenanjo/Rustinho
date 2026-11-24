@@ -77,13 +77,18 @@ pub(super) fn abrir_fio<'a>(
                         p4::anotar_recusa_de_identidade(dono, &canal.chave_do_par());
                         return Err(Erro::validacao(p4::TEXTO_CAIXA_NAO_CONFERE));
                     }
-                    let fio = p4::FioP4::novo(canal, p4::registro_em_json(conn, &ctx.loja)?);
+                    let fio = p4::FioP4::do_cliente(canal);
                     return Ok((Box::new(fio), conf));
                 }
                 Err(e) if chave_dono.is_some() => return Err(e),
                 Err(_) => {}
             }
         }
+    }
+    // C2-5 (R1 da 2C): o par com chave no registro nunca cai para o P3 — nem quando a
+    // identidade deste caixa não abre agora (sem contexto). Só pelo banco.
+    if ctx.is_none() && p4::tem_chave_no_registro(conn, dono) {
+        return Err(Erro::validacao(p4::TEXTO_P4_INDISPONIVEL));
     }
     // O protocolo 3 precisa da senha da rede e, num caixa do protocolo 4, da
     // convivência ligada (T010, A4).

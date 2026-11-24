@@ -56,6 +56,14 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
     let mut lista = Vec::new();
     // T012: o que o registro de caixas (protocolo 4) diz de cada um, só pelo banco.
     let chaves = super::p4::chaves_dos_caixas(conn)?;
+    // C2-9 (R1 da 2C): também os caixas que só existem no registro (aprovados e ainda
+    // sem troca: um aparelho perdido antes da primeira troca precisa poder sair).
+    let mut ids = ids;
+    for (disp, c) in &chaves {
+        if (c.tem_chave || c.retirado_pela_chave) && !ids.contains(disp) {
+            ids.push(disp.clone());
+        }
+    }
     for id in ids.into_iter().filter(|d| !d.is_empty() && *d != eu) {
         let chave = chaves.get(&id).cloned().unwrap_or_default();
         #[allow(clippy::type_complexity)]
@@ -81,6 +89,9 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
                     }
                 }
             }
+        }
+        if nome.is_empty() {
+            nome = chaves.get(&id).map(|c| c.nome.clone()).unwrap_or_default();
         }
         if nome.is_empty() {
             nome = format!(

@@ -1144,8 +1144,8 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         );
         a.categoria = ATENCAO.into();
         a.descricao = format!(
-            "Os caixas com versão antiga do Rustinho ainda trocam dados com esta loja até {data}. Atualize esses \
-             caixas antes disso: depois, só os caixas atualizados trocam dados."
+            "Os caixas com versão antiga do Rustinho ainda trocam dados com este caixa até {data} (ele serve de \
+             ponte para os outros). Atualize esses caixas antes disso: depois, só os caixas atualizados trocam dados."
         );
         avisos.push(a);
     }

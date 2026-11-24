@@ -99,6 +99,8 @@ pub use versoes::*;
 #[cfg(test)]
 mod testes_p4_api;
 #[cfg(test)]
+mod testes_p4_r1;
+#[cfg(test)]
 mod testes_p4_troca;
 /// Testes da frente de segurança (R-01 e D1): o comportamento seguro desejado
 /// (`seguro_*`, ignorados até a etapa do protocolo 4 que os deixa verdes).

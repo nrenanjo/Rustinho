@@ -280,12 +280,12 @@ def loja_na_tela(fotos, logs, conferir):
 
         # P5: os caixas antigos.
         rr.clicar("Liberar os caixas antigos")
-        t = esperar(rr, lambda x: tem_texto(x, "liberados até"), 20)
-        liberou = tem_texto(t, "liberados até")
+        t = esperar(rr, lambda x: tem_texto(x, "liberados neste caixa até"), 20)
+        liberou = tem_texto(t, "liberados neste caixa até")
         rr.foto("-3-liberados")
         rr.clicar("Recusar os caixas antigos agora")
-        t = esperar(rr, lambda x: tem_texto(x, "não trocam dados com esta loja"), 20)
-        recusou = tem_texto(t, "não trocam dados com esta loja")
+        t = esperar(rr, lambda x: tem_texto(x, "não trocam dados com este caixa"), 20)
+        recusou = tem_texto(t, "não trocam dados com este caixa")
         conferir("P5", "liberar os caixas antigos por alguns dias e recusar de novo", liberou and recusou,
                  f"liberou {liberou}; recusou {recusou}")
         rr.fechar()

@@ -21,6 +21,12 @@ pub const RECURSO_CHAVES: &str = "chaves-v1";
 #[cfg(test)]
 pub(super) static ATENDIDAS_PELO_P4: AtomicUsize = AtomicUsize::new(0);
 
+#[cfg(test)]
+thread_local! {
+    /// Só nos testes (C2-7): quantas vezes esta linha de execução avaliou o registro.
+    pub(super) static AVALIACOES_DO_REGISTRO: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Prazo do aperto de mão TLS de uma conexão da troca.
 pub(super) const PRAZO_DO_APERTO: Duration = Duration::from_secs(5);
 
@@ -48,6 +54,8 @@ impl ContextoP4 {
 
     /// As chaves autorizadas agora nesta loja, sem a deste caixa (com quem ele fala).
     pub(super) fn outras_autorizadas(&self, conn: &Connection) -> Resultado<std::collections::HashSet<Chave>> {
+        #[cfg(test)]
+        AVALIACOES_DO_REGISTRO.with(|c| c.set(c.get() + 1));
         let av = aprovados::avaliar(conn, &self.raiz, &self.loja)?;
         let mut outras = av.autorizadas().clone();
         outras.remove(&self.eu());
@@ -89,9 +97,37 @@ pub(super) fn contexto_ou_motivo(conn: &Connection, caminho: &Path) -> Resultado
     Ok(ctx)
 }
 
+/// Depois de a identidade não abrir, quanto tempo o motor espera para tentar de novo
+/// (C2-13: cada conexão repetiria o cofre do sistema e o Argon2).
+const ESPERA_DEPOIS_DE_FALHA: Duration = Duration::from_secs(30);
+
+fn falhas_do_contexto() -> &'static Mutex<HashMap<PathBuf, Instant>> {
+    static M: std::sync::OnceLock<Mutex<HashMap<PathBuf, Instant>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// Só nos testes (C2-13): marca uma falha da identidade de `ha` atrás.
+#[cfg(test)]
+pub(super) fn marcar_falha_do_contexto(caminho: &Path, ha: Duration) {
+    let quando = Instant::now().checked_sub(ha).unwrap_or_else(Instant::now);
+    falhas_do_contexto().lock().unwrap_or_else(|e| e.into_inner()).insert(chave_dos_ouvidos(caminho), quando);
+}
+
 /// O contexto P4 deste caixa, ou `None` quando ele ainda não fala o P4 (veja
 /// [`contexto_ou_motivo`]; a identidade indisponível vai para o registro técnico).
+/// Para o motor, o servidor e o cliente da troca: depois de uma falha da identidade,
+/// espera [`ESPERA_DEPOIS_DE_FALHA`] antes de tentar abrir de novo. Os comandos da
+/// tela usam [`contexto_ou_motivo`] (tentam na hora e mostram o motivo).
 pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> {
+    let chave = chave_dos_ouvidos(caminho);
+    if falhas_do_contexto()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&chave)
+        .is_some_and(|quando| quando.elapsed() < ESPERA_DEPOIS_DE_FALHA)
+    {
+        return None;
+    }
     match contexto_ou_motivo(conn, caminho) {
         Ok(ctx) => Some(ctx),
         Err(e) => {
@@ -99,6 +135,7 @@ pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> 
             // o resto (identidade que não abre, banco) vai para o registro técnico.
             if e.to_string() != TEXTO_CAIXA_SEM_APROVACAO {
                 crate::registro::anotar(&format!("troca de dados (protocolo 4): indisponível agora: {e}"));
+                falhas_do_contexto().lock().unwrap_or_else(|e| e.into_inner()).insert(chave, Instant::now());
             }
             None
         }
@@ -129,7 +166,9 @@ pub(super) fn garantir_raiz(conn: &Connection, caminho: &Path) -> Resultado<()> 
         // mostra o nome pela tabela de usuários, que vai para todos os caixas).
         .map(|u| u.id)
         .unwrap_or_default();
-    let distribuidor = crate::faixas::sou_distribuidor(conn)?;
+    // C2-14 (R1 da 2C): quem já ouve caixas atualizados desta loja (anúncio assinado)
+    // não cria raiz nova — a loja já tem uma; este caixa entra pelo convite.
+    let distribuidor = crate::faixas::sou_distribuidor(conn)? && ouvidos(caminho, &loja).is_empty();
     cofre::garantir_raiz_se_aplicavel(
         conn,
         &id.identidade,
@@ -160,19 +199,32 @@ pub(super) fn juntar_registro(conn: &Connection, loja: &str, mensagem: &Value) -
 
 /// O fio do protocolo 4: o canal TLS autenticado. Toda mensagem que sai leva o
 /// registro deste caixa e o recurso [`RECURSO_CHAVES`].
+///
+/// C2-3 (R1 da 2C): o registro vai só nas mensagens do **servidor** (as respostas,
+/// com o limite grande da resposta); o pedido do cliente fica pequeno (o limite do
+/// pedido é de 64 KiB e o registro só cresce). Cada caixa recebe o registro dos
+/// outros quando puxa deles — a puxada acontece nos dois sentidos.
 pub(super) struct FioP4<C> {
     canal: canal::CanalAutenticado<C>,
-    registro: Value,
+    registro: Option<Value>,
 }
 
 impl<C> FioP4<C> {
-    pub(super) fn novo(canal: canal::CanalAutenticado<C>, registro: Value) -> FioP4<C> {
-        FioP4 { canal, registro }
+    /// O fio do servidor (as respostas levam o registro deste caixa).
+    pub(super) fn do_servidor(canal: canal::CanalAutenticado<C>, registro: Value) -> FioP4<C> {
+        FioP4 { canal, registro: Some(registro) }
+    }
+
+    /// O fio do cliente (o pedido não leva o registro).
+    pub(super) fn do_cliente(canal: canal::CanalAutenticado<C>) -> FioP4<C> {
+        FioP4 { canal, registro: None }
     }
 
     /// Troca o registro que vai nas próximas mensagens (depois de juntar o do outro).
     pub(super) fn trocar_registro(&mut self, registro: Value) {
-        self.registro = registro;
+        if self.registro.is_some() {
+            self.registro = Some(registro);
+        }
     }
 }
 
@@ -188,7 +240,9 @@ where
     fn enviar(&mut self, v: &Value) -> Resultado<()> {
         let mut v = v.clone();
         if let Some(obj) = v.as_object_mut() {
-            obj.insert("registro".into(), self.registro.clone());
+            if let Some(registro) = &self.registro {
+                obj.insert("registro".into(), registro.clone());
+            }
             if let Some(Value::Array(rec)) = obj.get_mut("recursos") {
                 if !rec.iter().any(|r| r.as_str() == Some(RECURSO_CHAVES)) {
                     rec.push(Value::String(RECURSO_CHAVES.into()));
@@ -213,6 +267,37 @@ pub(super) fn pacote_de_anuncio(ctx: &ContextoP4, porta_tcp: u16) -> Resultado<V
     crate::troca::protocolo4::anuncio::montar(&ctx.identidade.identidade, &ctx.loja, porta_tcp, agora_ms())
 }
 
+/// T010 (A4) e C2-8 (R1 da 2C, M2): o anúncio cifrado com a senha da rede (`RST3`) só
+/// sai com a senha e com o P3 valendo neste caixa (fora da convivência, nada tirado
+/// da senha vai para a rede: R-01).
+pub(super) fn anuncio_p3_permitido(conn: &Connection, a: &Ajustes) -> bool {
+    !a.senha.is_empty() && p3_permitido(conn)
+}
+
+/// DT-P4-17 e C2-8 (M2, M7): os anúncios que este caixa manda agora — o `RST3`
+/// cifrado (só com `k`, que existe só quando [`anuncio_p3_permitido`]) e o `RSA4`
+/// assinado de quem fala o P4. (Nome para o registro técnico, pacote.)
+pub(super) fn pacotes_de_anuncio(
+    k: Option<&Chaves>,
+    ctx: Option<&ContextoP4>,
+    a: &Ajustes,
+    porta_tcp: u16,
+) -> Vec<(&'static str, Vec<u8>)> {
+    let mut pacotes = Vec::new();
+    if let Some(k) = k {
+        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp);
+        if let Ok(p) = cifrar(k, ola.to_string().as_bytes()) {
+            pacotes.push(("RST3", p));
+        }
+    }
+    if let Some(ctx) = ctx {
+        if let Ok(p) = pacote_de_anuncio(ctx, porta_tcp) {
+            pacotes.push(("RSA4", p));
+        }
+    }
+    pacotes
+}
+
 /// DT-P4-17: um anúncio `RSA4` recebido vira par só se for desta loja, de uma chave
 /// autorizada agora (não a deste caixa), dentro da janela de tempo e sem repetição.
 /// O `dispositivo` e o nome vêm da aprovação assinada da chave (o anúncio não os
@@ -224,6 +309,12 @@ pub(super) fn ler_anuncio(
     bytes: &[u8],
     repeticoes: &mut crate::troca::protocolo4::anuncio::Repeticoes,
 ) -> Option<(String, String, u16)> {
+    // C2-7 (R1 da 2C): a conta barata primeiro — formato, janela de tempo, assinatura
+    // e loja; só um anúncio que passou disso faz avaliar o registro.
+    let previo = crate::troca::protocolo4::anuncio::abrir(bytes, agora_ms()).ok()?;
+    if previo.loja_id != ctx.loja || previo.chave == ctx.eu() {
+        return None;
+    }
     let outras = ctx.outras_autorizadas(conn).ok()?;
     let a = crate::troca::protocolo4::anuncio::verificar_anuncio(bytes, &ctx.loja, agora_ms(), repeticoes, |k| {
         outras.contains(k)
@@ -241,8 +332,11 @@ pub(super) fn ler_anuncio(
     Some((aprovacao.dispositivo.clone(), aprovacao.nome.clone(), a.porta))
 }
 
-/// A4 (T010): a configuração da loja com o prazo da convivência com os caixas do
-/// protocolo 3 (data e hora ISO-8601 UTC; vazia = desligada, o padrão).
+/// A4 (T010): a configuração com o prazo da convivência com os caixas do protocolo 3
+/// (data e hora ISO-8601 UTC; vazia = desligada, o padrão). C2-1 (R1 da 2C): é
+/// **deste caixa** (não vai para os outros): um caixa atualizado com a convivência
+/// ligada já serve de ponte para os antigos, e os dados chegam aos outros pelo P4.
+/// Assim nenhum outro caixa (nem um antigo com a senha da rede) muda o prazo daqui.
 pub const CHAVE_CONVIVENCIA: &str = "p4_convivencia_p3_ate";
 /// A4: o prazo máximo da convivência.
 pub const CONVIVENCIA_MAXIMA_DIAS: i64 = 30;
@@ -253,10 +347,28 @@ pub const TEXTO_P3_RECUSADO: &str = "Este caixa troca dados só com caixas atual
 
 /// Até quando os caixas do protocolo 3 ainda trocam dados (`None` = desligada ou
 /// vencida).
+///
+/// C2-1: lida com desconfiança — só vale um prazo no formato de `tempo::agora`
+/// (`AAAA-MM-DDTHH:MM:SS…Z`, só ASCII) que ainda não venceu e não passa de agora +
+/// [`CONVIVENCIA_MAXIMA_DIAS`] (um valor fora disso conta como desligada).
 pub fn convivencia_p3_ate(conn: &Connection) -> Resultado<Option<String>> {
     let ate = config::ler(conn, CHAVE_CONVIVENCIA)?.unwrap_or_default();
     let ate = ate.trim();
-    Ok((!ate.is_empty() && ate > crate::tempo::agora().as_str()).then(|| ate.to_string()))
+    let agora = crate::tempo::agora();
+    let formato = ate.len() >= 20
+        && ate.is_ascii()
+        && ate.ends_with('Z')
+        && ate.as_bytes().iter().enumerate().take(19).all(|(i, b)| match i {
+            4 | 7 => *b == b'-',
+            10 => *b == b'T',
+            13 | 16 => *b == b':',
+            _ => b.is_ascii_digit(),
+        });
+    if !formato || ate <= agora.as_str() {
+        return Ok(None);
+    }
+    let teto = crate::tempo::somar_segundos(&agora, CONVIVENCIA_MAXIMA_DIAS * 24 * 60 * 60 + 60).unwrap_or_default();
+    Ok((ate <= teto.as_str()).then(|| ate.to_string()))
 }
 
 /// T010: o protocolo 3 vale com este caixa? O caixa que ainda não é do P4 (sem raiz
@@ -666,6 +778,24 @@ fn chave_registrada_de(conn: &Connection, dispositivo: &str) -> Resultado<Option
     Ok(aprovados::chave_do_dispositivo(conn, &raiz, &loja, dispositivo)?.map(|k| (loja, raiz, k)))
 }
 
+/// C2-5 (R1 da 2C): o caixa `dispositivo` tem chave no registro desta loja? Só pelo
+/// banco (sem a identidade deste caixa, que pode não abrir agora). Um erro (registro
+/// ambíguo, banco) conta como "tem": nunca rebaixa para o P3 por causa de um erro.
+pub(super) fn tem_chave_no_registro(conn: &Connection, dispositivo: &str) -> bool {
+    if dispositivo.trim().is_empty() {
+        return false;
+    }
+    match loja_e_raiz(conn) {
+        Ok(None) => false,
+        Ok(Some((loja, raiz))) => !matches!(aprovados::chave_do_dispositivo(conn, &raiz, &loja, dispositivo), Ok(None)),
+        Err(_) => true,
+    }
+}
+
+/// Texto para a tela: o outro caixa tem chave e este não consegue falar o P4 agora.
+pub const TEXTO_P4_INDISPONIVEL: &str = "Este caixa não conseguiu usar a identidade dele agora para falar com o \
+     outro caixa (que só troca dados pela conexão segura). A troca com ele espera; o Rustinho tenta de novo sozinho.";
+
 /// T009 (etapa 6, P4-4): os caixas que ficariam sem cadeia se o caixa `dispositivo`
 /// fosse retirado (a tela lista antes de confirmar). Vazio quando ele não tem chave.
 /// Só lê o banco (T012: pode ser chamado na linha da tela).
@@ -760,13 +890,24 @@ pub struct ChaveDoCaixa {
     pub retirado_pela_chave: bool,
     /// Caixas que ficariam sem cadeia se ele fosse retirado (P4-4).
     pub dependentes: Vec<String>,
+    /// O nome da aprovação assinada mais recente dele (C2-9: o caixa que só existe no
+    /// registro, aprovado e ainda sem troca, também aparece na lista).
+    pub nome: String,
 }
 
 /// T012: a situação no registro de cada `dispositivo` desta loja, só pelo banco.
 pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, ChaveDoCaixa>> {
     let mut m = HashMap::new();
     let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Ok(m) };
+    let mut nomes: HashMap<String, (String, String)> = HashMap::new();
+    for a in aprovados::linhas(conn, &loja)?.aprovacoes {
+        let atual = nomes.entry(a.dispositivo.trim().to_string()).or_default();
+        if a.aprovado_em > atual.0 && a.assinatura_confere() {
+            *atual = (a.aprovado_em.clone(), a.nome.clone());
+        }
+    }
     for (disp, chaves) in aprovados::situacoes_por_dispositivo(conn, &raiz, &loja)? {
+        let nome = nomes.get(&disp).map(|(_, n)| n.clone()).unwrap_or_default();
         let autorizada = chaves.iter().find(|(_, s)| *s == aprovados::Situacao::Autorizada).map(|(k, _)| *k);
         let retirada = chaves.iter().any(|(_, s)| *s == aprovados::Situacao::Retirada);
         let dependentes = match &autorizada {
@@ -780,6 +921,7 @@ pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, 
                 raiz: autorizada == Some(raiz),
                 retirado_pela_chave: retirada && autorizada.is_none(),
                 dependentes,
+                nome,
             },
         );
     }
@@ -984,40 +1126,11 @@ pub fn convites_ativos(conn: &Connection) -> Resultado<Vec<ConviteNaTela>> {
     Ok(lista)
 }
 
-/// S-10: a retirada de antes (`caixa_retirado:<dispositivo>`, que pode ter vindo de
-/// um caixa do protocolo 3) de um caixa que tem chave autorizada vira retirada
-/// assinada por este caixa (com o gerente e o motivo de antes). Roda na puxada, de
-/// minuto em minuto.
-pub(super) fn converter_retiradas_antigas(conn: &Connection, caminho: &Path) -> Resultado<usize> {
-    let Some(ctx) = contexto(conn, caminho) else { return Ok(0) };
-    let antigas: Vec<(String, String)> = {
-        let mut c = conn.prepare("SELECT chave, valor FROM config WHERE chave LIKE ?1")?;
-        let l = c.query_map([format!("{PREFIXO_RETIRADO}%")], |l| Ok((l.get(0)?, l.get(1)?)))?;
-        l.collect::<Result<_, _>>()?
-    };
-    let mut feitas = 0;
-    for (chave_config, valor) in antigas {
-        let dispositivo = chave_config.trim_start_matches(PREFIXO_RETIRADO);
-        if valor.trim().is_empty() {
-            continue;
-        }
-        let Some(chave) = ctx.chave_de(conn, dispositivo)? else { continue };
-        if chave == ctx.raiz || chave == ctx.eu() {
-            continue;
-        }
-        let v: Value = serde_json::from_str(&valor).unwrap_or_default();
-        let motivo = v["motivo"].as_str().filter(|m| !m.trim().is_empty()).unwrap_or("retirado da loja");
-        // A retirada de antes guardou o NOME de quem retirou: vira o identificador do
-        // usuário quando há um só com esse nome (senão, o nome fica como veio).
-        let por = v["por"].as_str().filter(|g| !g.trim().is_empty()).unwrap_or("gerente (retirada de antes)");
-        let com_o_nome: Vec<String> =
-            crate::usuarios::listar(conn, false)?.into_iter().filter(|u| u.nome == por).map(|u| u.id).collect();
-        let gerente = if com_o_nome.len() == 1 { com_o_nome[0].as_str() } else { por };
-        aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, motivo, gerente)?;
-        feitas += 1;
-    }
-    Ok(feitas)
-}
+/// S-10 (C2-2, R1 da 2C): o bloqueio de antes (`caixa_retirado:<dispositivo>`)
+/// continua valendo para o protocolo 3, mas **nunca** vira retirada assinada: ele
+/// pode ter chegado de um caixa antigo, só com a senha da rede (não diz quem o
+/// fez). O caixa com chave é retirado pela chave, num caixa atualizado
+/// ([`retirar_caixa_por_chave`]).
 
 /// Texto para a tela: o caixa do outro lado não é o que diz ser (I3).
 pub(super) const TEXTO_CAIXA_NAO_CONFERE: &str =

@@ -366,7 +366,9 @@ pub fn ler_data(texto: &str) -> Result<Option<String>, String> {
 
 /// "2026-10-01" → "01/10/2026".
 pub fn data_br(iso: &str) -> String {
-    let d = &iso[..10.min(iso.len())];
+    // C2-1 (R1 da 2C): sem pânico com texto que não é data (o byte 10 pode cair no
+    // meio de um caractere).
+    let d = iso.get(..10.min(iso.len())).unwrap_or(iso);
     let p: Vec<&str> = d.split('-').collect();
     if p.len() == 3 {
         format!("{}/{}/{}", p[2], p[1], p[0])

@@ -422,10 +422,14 @@ fn entrar_por_convite_p4() {
     let mut motor = rustinho_nucleo::sync::Motor::iniciar(caminho.clone(), 0, 0);
     let (tcp, _) = motor.portas(std::time::Duration::from_secs(20)).expect("as portas do motor abriram");
     let puxou = rustinho_nucleo::sync::puxar(&caminho, &endereco, tcp);
-    p4_escrever(&troca, "puxou.txt", &match puxou {
-        Ok(_) => "ok".to_string(),
-        Err(e) => e.to_string(),
-    });
+    p4_escrever(
+        &troca,
+        "puxou.txt",
+        &match puxou {
+            Ok(_) => "ok".to_string(),
+            Err(e) => e.to_string(),
+        },
+    );
     let _ = p4_esperar(&troca, "fim.txt", 300);
     let _ = motor.encerrar(std::time::Duration::from_secs(10));
 }

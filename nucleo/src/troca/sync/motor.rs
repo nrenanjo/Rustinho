@@ -349,7 +349,7 @@ impl Motor {
                     // pausa da restauração de backup, como as outras tarefas.
                     // A chave da senha da rede só existe com a senha (protocolo 3); o caixa
                     // que entrou por convite (T009) não a tem e só usa o anúncio assinado.
-                    let k: Option<Chaves> = if a.senha.is_empty() || !p4::p3_permitido(&conn) {
+                    let k: Option<Chaves> = if !p4::anuncio_p3_permitido(&conn, &a) {
                         None
                     } else {
                         let chaves = {
@@ -373,27 +373,18 @@ impl Motor {
                         false
                     };
                     if mudou || ultimo_anuncio.elapsed() > Duration::from_secs(10) {
-                        let ola = anuncio(&a.dispositivo, &a.nome, porta_tcp_de(&escolhidas));
-                        if let Some(Ok(pacote)) = k.as_ref().map(|k| cifrar(k, ola.to_string().as_bytes())) {
-                            // Um anúncio por interface apropriada (um broadcast só
-                            // sai por uma), mais o limitado de sempre. Se o sistema
-                            // não soube listar, só o limitado.
+                        // Um anúncio por interface apropriada (um broadcast só sai por
+                        // uma), mais o limitado de sempre. Se o sistema não soube
+                        // listar, só o limitado. Quais anúncios: `p4::pacotes_de_anuncio`
+                        // (o `RSA4` de quem fala o P4; o `RST3` só quando o P3 vale).
+                        for (qual, pacote) in
+                            p4::pacotes_de_anuncio(k.as_ref(), ctx_p4.as_ref(), &a, porta_tcp_de(&escolhidas))
+                        {
                             let erros = rede_local::anunciar(&conhecidas, &a.interfaces, &pacote, porta_udp);
                             for (ip, e) in rede_local::erros_novos(&mut erros_de_envio, erros) {
-                                crate::registro::anotar(&format!("troca de dados: anúncio pela interface {ip}: {e}"));
-                            }
-                        }
-                        // DT-P4-17: o membro do protocolo 4 anuncia também com a chave dele
-                        // (`RSA4`, assinado, sem nada da senha da rede). O anúncio cifrado
-                        // do protocolo 3 continua até a T010 (convivência).
-                        if let Some(ctx) = &ctx_p4 {
-                            if let Ok(pacote) = p4::pacote_de_anuncio(ctx, porta_tcp_de(&escolhidas)) {
-                                let erros = rede_local::anunciar(&conhecidas, &a.interfaces, &pacote, porta_udp);
-                                for (ip, e) in rede_local::erros_novos(&mut erros_de_envio, erros) {
-                                    crate::registro::anotar(&format!(
-                                        "troca de dados: anúncio assinado pela interface {ip}: {e}"
-                                    ));
-                                }
+                                crate::registro::anotar(&format!(
+                                    "troca de dados: anúncio {qual} pela interface {ip}: {e}"
+                                ));
                             }
                         }
                         ultimo_anuncio = Instant::now();
@@ -494,10 +485,6 @@ impl Motor {
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
                         if let Err(e) = p4::garantir_raiz(&conn, &caminho) {
                             crate::registro::anotar(&format!("troca de dados (protocolo 4): raiz da loja: {e}"));
-                        }
-                        // S-10: retiradas de antes de caixas que têm chave viram assinadas.
-                        if let Err(e) = p4::converter_retiradas_antigas(&conn, &caminho) {
-                            crate::registro::anotar(&format!("troca de dados (protocolo 4): retiradas de antes: {e}"));
                         }
                         ultima_raiz = Instant::now();
                     }

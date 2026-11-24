@@ -12,7 +12,7 @@ use crate::banco::Banco;
 use crate::troca::protocolo4::{aprovados, cofre, hex};
 
 /// A identidade (deste processo) do caixa cujo banco está em `caminho`.
-fn identidade(caminho: &Path) -> Arc<cofre::IdentidadeLocal> {
+pub(super) fn identidade(caminho: &Path) -> Arc<cofre::IdentidadeLocal> {
     cofre::identidade_do_processo(caminho.parent().unwrap(), &cofre::Modo::Instalado).unwrap()
 }
 
@@ -20,7 +20,7 @@ fn identidade(caminho: &Path) -> Arc<cofre::IdentidadeLocal> {
 /// caminho de hoje e é aprovado no caixa 1; os dois juntam o registro. Devolve os
 /// bancos, a loja e as identidades.
 #[allow(clippy::type_complexity)]
-fn loja_com_dois_caixas_aprovados(
+pub(super) fn loja_com_dois_caixas_aprovados(
     nome: &str,
 ) -> (PathBuf, PathBuf, Banco, Banco, String, Arc<cofre::IdentidadeLocal>, Arc<cofre::IdentidadeLocal>) {
     let (ca, cb) = (temp(&format!("{nome}-a")), temp(&format!("{nome}-b")));
@@ -55,7 +55,7 @@ fn loja_com_dois_caixas_aprovados(
 }
 
 /// Uma peça nova no caixa `b` (com o usuário que a loja tem).
-fn peca_nova(b: &Banco, nome: &str) -> String {
+pub(super) fn peca_nova(b: &Banco, nome: &str) -> String {
     let u: String = b.conn.query_row("SELECT id FROM usuario LIMIT 1", [], |l| l.get(0)).unwrap();
     let mut f = crate::produtos::ficha_nova(&b.conn).unwrap();
     f.nome = nome.into();
@@ -63,7 +63,7 @@ fn peca_nova(b: &Banco, nome: &str) -> String {
     crate::produtos::salvar(&b.conn, &b.dispositivo, &u, &f).unwrap()
 }
 
-fn tem_peca(b: &Banco, nome: &str) -> bool {
+pub(super) fn tem_peca(b: &Banco, nome: &str) -> bool {
     b.conn.query_row("SELECT COUNT(*) FROM produto WHERE nome = ?1", [nome], |l| l.get::<_, i64>(0)).unwrap() > 0
 }
 
@@ -253,7 +253,7 @@ fn p4_anuncio_assinado_vira_par_so_de_caixa_aprovado() {
 }
 
 /// O caixa novo (banco vazio, **sem a senha da rede**) com a troca ainda desligada.
-fn caixa_novo_sem_senha(caminho: &Path, nome: &str) -> Banco {
+pub(super) fn caixa_novo_sem_senha(caminho: &Path, nome: &str) -> Banco {
     let b = Banco::abrir(caminho).unwrap();
     config::gravar(&b.conn, "caixa_nome", nome).unwrap();
     config::gravar(&b.conn, "codigos_espera_teste", "0").unwrap();
@@ -261,7 +261,7 @@ fn caixa_novo_sem_senha(caminho: &Path, nome: &str) -> Banco {
 }
 
 /// O código de pedido que a tela do caixa novo mostra (o gerente confere).
-fn codigo_do_caixa_novo(b: &Banco, caminho: &Path) -> String {
+pub(super) fn codigo_do_caixa_novo(b: &Banco, caminho: &Path) -> String {
     let id = identidade(caminho);
     let disp = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
     aprovados::Pedido::com_dispositivo(&id.identidade, &disp).codigo()
@@ -329,10 +329,12 @@ fn p4_caixa_novo_entra_pelo_convite_sem_a_senha_da_rede() {
             .unwrap();
         assert!(auditada >= 1, "a aprovação está na auditoria do caixa novo (veio com a loja)");
 
-        // O mesmo convite não serve para outro caixa.
+        // O mesmo convite não serve para outro caixa: ele foi gerado para o código do
+        // caixa 2 (C2-8: é isso que este trecho prova; "já usado" pelo mesmo caixa é a
+        // retomada, que devolve a mesma aprovação).
         let c = caixa_novo_sem_senha(&cc, "Caixa 3");
         let _ = codigo_do_caixa_novo(&c, &cc);
-        assert!(juntar_com_convite(&cc, &conv.payload_qr, &[]).is_err(), "o convite já foi usado");
+        assert!(juntar_com_convite(&cc, &conv.payload_qr, &[]).is_err(), "o convite é do código de outro caixa");
         assert!(!p4::tem_raiz_fixada(&c.conn));
         assert!(ma.encerrar(Duration::from_secs(20)));
         assert!(mb.encerrar(Duration::from_secs(20)));
@@ -450,19 +452,27 @@ fn p4_retirar_pela_chave_vale_por_maquina() {
     .unwrap();
 }
 
-/// S-10: a retirada de antes (texto na configuração, como a de um caixa do protocolo
-/// 3) de um caixa que tem chave vira retirada assinada.
+/// C2-2 (R1 da 2C): o bloqueio de antes (`caixa_retirado:<dispositivo>`, que pode
+/// chegar de um caixa antigo só com a senha da rede) **não** vira retirada assinada:
+/// o caixa 2, com chave, continua autorizado depois do ciclo da raiz do motor.
 #[test]
-fn p4_retirada_de_antes_vira_assinada() {
-    let (ca, _cb, a, b, loja, ia, ib) = loja_com_dois_caixas_aprovados("p4-s10");
-    let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
-    retirar_caixa(&a.conn, &disp_b, "saiu na 0.9.18", "Ana").unwrap();
-    let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
-    assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Autorizada, "ainda só o bloqueio de antes");
-    assert_eq!(p4::converter_retiradas_antigas(&a.conn, &ca).unwrap(), 1);
-    let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
-    assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Retirada, "virou retirada assinada");
-    assert_eq!(p4::converter_retiradas_antigas(&a.conn, &ca).unwrap(), 0, "uma vez só");
+fn p4_bloqueio_antigo_nao_vira_retirada_assinada() {
+    thread::spawn(|| {
+        let (ca, _cb, a, b, loja, ia, ib) = loja_com_dois_caixas_aprovados("p4-s10");
+        let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+        retirar_caixa(&a.conn, &disp_b, "forjado por um caixa antigo", "alguém").unwrap();
+        let (mut ma, _pt) = motor(&ca);
+        thread::sleep(Duration::from_secs(3));
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
+        assert_eq!(
+            av.situacao(&ib.identidade.publica()),
+            aprovados::Situacao::Autorizada,
+            "o bloqueio de antes não pode virar retirada assinada"
+        );
+    })
+    .join()
+    .unwrap();
 }
 
 /// O caixa 1 com loja; o caixa 2 entra pelo protocolo 3 (como um caixa antigo) antes
