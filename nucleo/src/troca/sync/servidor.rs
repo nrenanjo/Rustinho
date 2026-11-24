@@ -31,10 +31,54 @@ pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> R
     if crate::faixas::copia_detectada(&conn)? {
         return Ok(());
     }
+    // DT-P4-27: o 1º byte (espiado, sem consumir) separa o P4 (TLS: 0x16) do P3 ("RST3").
+    let mut primeiro = [0u8; 1];
+    if matches!(fluxo.peek(&mut primeiro), Ok(1)) && primeiro[0] == 0x16 {
+        return atender_p4(caminho, &mut conn, &a, fluxo, parar);
+    }
     let k = Chaves::de(&conn, &a.senha)?;
     let mut fio = FioP3 { fluxo, chaves: &k };
     let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
     atender_pedido(&mut conn, &a, &mut fio, pedido)
+}
+
+/// Atende pelo protocolo 4 (DT-P4-27): só se este caixa fala o P4; o aperto de mão
+/// só aceita as chaves autorizadas agora; o registro do outro caixa entra antes de
+/// tudo; o `dispositivo` declarado tem de ser o da aprovação da chave do canal; a
+/// resposta leva o registro deste caixa. Depois, as mesmas regras de sempre.
+fn atender_p4(
+    caminho: &Path,
+    conn: &mut Connection,
+    a: &Ajustes,
+    fluxo: TcpStream,
+    parar: &AtomicBool,
+) -> Resultado<()> {
+    let Some(ctx) = p4::contexto(conn, caminho) else {
+        return Ok(());
+    };
+    let outras = ctx.outras_autorizadas(conn)?;
+    let canal = crate::troca::protocolo4::canal::aceitar_autorizado(
+        fluxo,
+        &ctx.identidade.identidade,
+        &outras,
+        p4::PRAZO_DO_APERTO,
+        Some(parar),
+    )?;
+    let mut fio = p4::FioP4::novo(canal, p4::registro_em_json(conn, &ctx.loja)?);
+    #[cfg(test)]
+    p4::ATENDIDAS_PELO_P4.fetch_add(1, Ordering::SeqCst);
+    let par = fio.chave_do_par().expect("o fio do protocolo 4 tem a chave do par");
+    let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    p4::juntar_registro(conn, &ctx.loja, &pedido)?;
+    let disp = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
+    if ctx.chave_de(conn, &disp)? != Some(par) {
+        p4::anotar_recusa_de_identidade(&disp, &par);
+        return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                                   "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                                   "recusado": p4::TEXTO_CAIXA_NAO_CONFERE }));
+    }
+    fio.trocar_registro(p4::registro_em_json(conn, &ctx.loja)?);
+    atender_pedido(conn, a, &mut fio, pedido)
 }
 
 /// As regras da troca para um pedido já recebido pelo `fio` (DT-P4-12: o mesmo

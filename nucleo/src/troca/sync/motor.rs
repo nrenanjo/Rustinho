@@ -405,6 +405,7 @@ impl Motor {
             tarefas.push(crate::supervisao::supervisionar(caminho.clone(), "puxada", parar_tarefa, move || {
                 let mut ultima_limpeza = Instant::now() - Duration::from_secs(50 * 60);
                 let mut ultima_reaplicacao = Instant::now() - Duration::from_secs(60);
+                let mut ultima_raiz = Instant::now() - Duration::from_secs(120);
                 while !parar.load(Ordering::SeqCst) {
                     cochilar(&parar, Duration::from_secs(4));
                     if parar.load(Ordering::SeqCst) {
@@ -440,6 +441,15 @@ impl Motor {
                     let Ok(a) = ajustes(&conn) else { continue };
                     if !a.ligado || a.senha.is_empty() {
                         continue;
+                    }
+                    // DT-P4-10 (A4): a raiz do protocolo 4, de minuto em minuto (grava a
+                    // configuração local; não faz nada quando já está fixada).
+                    if ultima_raiz.elapsed() >= Duration::from_secs(60) {
+                        let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
+                        if let Err(e) = p4::garantir_raiz(&conn, &caminho) {
+                            crate::registro::anotar(&format!("troca de dados (protocolo 4): raiz da loja: {e}"));
+                        }
+                        ultima_raiz = Instant::now();
                     }
                     {
                         let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());

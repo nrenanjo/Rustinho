@@ -67,6 +67,7 @@ mod cliente;
 mod conflitos;
 mod fio;
 mod motor;
+mod p4;
 mod referencias;
 mod registro;
 mod servidor;
@@ -86,6 +87,8 @@ pub use registro::*;
 pub use servidor::*;
 pub use versoes::*;
 
+#[cfg(test)]
+mod testes_p4_troca;
 /// Testes da frente de segurança (R-01 e D1): o comportamento seguro desejado
 /// (`seguro_*`, ignorados até a etapa do protocolo 4 que os deixa verdes).
 /// Submódulo de `sync` para alcançar `cifrar`, `derivar`, `anuncio` e

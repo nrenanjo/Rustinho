@@ -61,6 +61,8 @@ pub(crate) fn puxar_por(
     }
     let a = ajustes(&conn)?;
     let k = Chaves::de(&conn, &a.senha)?;
+    // DT-P4-26: o contexto do protocolo 4 deste caixa (None = ainda não fala o P4).
+    let ctx = p4::contexto(&conn, caminho);
     let alvo = endereco_completo(endereco)?;
     let mut total = 0;
     let mut dispositivo = String::new();
@@ -112,7 +114,7 @@ pub(crate) fn puxar_por(
             let existe: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM sync_par)", [], |l| l.get(0))?;
             existe
         };
-        let (mut fio, conf) = abrir_fio_p3(&k, &alvo, saida)?;
+        let (mut fio, conf) = abrir_fio(&conn, &k, &alvo, saida, ctx.as_ref(), &dono, parar)?;
         confirmacao = Some(conf);
         let saiu = agora_ms();
         let (minha_loja, sou_novo) = crate::loja::campos(&conn)?;
@@ -156,6 +158,15 @@ pub(crate) fn puxar_por(
         dispositivo = resposta["dispositivo"].as_str().unwrap_or_default().to_string();
         if dispositivo.is_empty() || dispositivo == a.dispositivo {
             return Err(Erro::validacao(caminhos::ESTE_MESMO_CAIXA));
+        }
+        // DT-P4-28: pelo P4, o registro do outro caixa entra, e o `dispositivo` que ele
+        // diz ser tem de ser o da chave do canal (I3), antes de aplicar qualquer coisa.
+        if let (Some(par), Some(ctx)) = (fio.chave_do_par(), ctx.as_ref()) {
+            p4::juntar_registro(&conn, &ctx.loja, &resposta)?;
+            if ctx.chave_de(&conn, &dispositivo)? != Some(par) {
+                p4::anotar_recusa_de_identidade(&dispositivo, &par);
+                return Err(Erro::validacao(p4::TEXTO_CAIXA_NAO_CONFERE));
+            }
         }
         // FALHA-01: é da mesma loja? Antes de conhecê-lo como caixa da loja e
         // de aplicar qualquer alteração dele.
@@ -313,7 +324,7 @@ pub(crate) fn puxar_por(
         && crate::faixas::distribuidor(&conn)?.as_deref() == Some(dispositivo.as_str())
         && crate::faixas::precisa(&conn)?
     {
-        match pedir_faixa(&mut conn, &k, &alvo, saida) {
+        match pedir_faixa(&mut conn, &k, &alvo, saida, ctx.as_ref(), &dispositivo) {
             Ok(n) => total += n,
             Err(e) => crate::registro::anotar(&format!("troca de dados: pedido de faixa de códigos: {e}")),
         }
@@ -351,6 +362,8 @@ pub(super) fn pedir_faixa(
     k: &Chaves,
     alvo: &SocketAddr,
     saida: Option<&Saida>,
+    ctx: Option<&p4::ContextoP4>,
+    dono: &str,
 ) -> Resultado<usize> {
     let mut pedido = crate::faixas::pedido(conn)?;
     pedido["tipo"] = json!("faixa");
@@ -358,7 +371,7 @@ pub(super) fn pedir_faixa(
     let (loja, novo) = crate::loja::campos(conn)?;
     pedido["loja"] = json!(loja);
     pedido["novo"] = json!(novo);
-    let (mut fio, _) = abrir_fio_p3(k, alvo, saida)?;
+    let (mut fio, _) = abrir_fio(conn, k, alvo, saida, ctx, dono, None)?;
     fio.enviar(&pedido)?;
     let resposta = fio.receber(TAMANHO_PEDIDO, Duration::from_secs(30), None)?;
     gravar_faixa_recebida(conn, &resposta)
