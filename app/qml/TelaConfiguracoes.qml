@@ -736,7 +736,7 @@ FocusScope {
             if (tela.conviteGerado && tela.conviteGerado.id === id)
                 tela.conviteGerado = null
             tela.recarregarReferencias()
-            janela.avisar("Convite cancelado: ele não serve mais.", "ok")
+            janela.avisar("Convite anulado: ele não serve mais.", "ok")
         })
     }
 
@@ -1916,7 +1916,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                 }
                                 Botao {
-                                    text: "Cancelar este convite"
+                                    text: "Anular este convite"
                                     tipo: "secundario"
                                     onClicked: tela.cancelarConvite(tela.conviteGerado.id)
                                 }
@@ -1965,7 +1965,7 @@ FocusScope {
                                     Layout.fillWidth: true
                                 }
                                 Botao {
-                                    text: "Cancelar"
+                                    text: "Anular"
                                     tipo: "discreto"
                                     onClicked: tela.cancelarConvite(linhaConvite.modelData.id)
                                 }
