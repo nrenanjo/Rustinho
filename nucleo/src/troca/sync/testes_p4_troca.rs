@@ -461,8 +461,10 @@ fn p4_bloqueio_antigo_nao_vira_retirada_assinada() {
         let (ca, _cb, a, b, loja, ia, ib) = loja_com_dois_caixas_aprovados("p4-s10");
         let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
         retirar_caixa(&a.conn, &disp_b, "forjado por um caixa antigo", "alguém").unwrap();
+        // A puxada do motor dorme 4 s antes da primeira volta (a do ciclo da raiz, que
+        // antes convertia o bloqueio): espera passar dela, com folga.
         let (mut ma, _pt) = motor(&ca);
-        thread::sleep(Duration::from_secs(3));
+        thread::sleep(Duration::from_secs(9));
         assert!(ma.encerrar(Duration::from_secs(20)));
         let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
         assert_eq!(
