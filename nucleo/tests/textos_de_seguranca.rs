@@ -19,3 +19,39 @@ fn retirar_um_caixa_nao_promete_que_ele_nao_volta() {
     // T094 (informativo da 2ª conferência): o próprio computador retirado também volta, com uma pasta de dados nova.
     assert!(t.contains("ou com este mesmo"), "a pergunta fala só de outro computador");
 }
+
+/// DP-45 (0.9.19-dev.2): o instalador Windows libera exclusivamente as portas da troca
+/// de dados (47810/TCP e 47811/UDP) e remove as regras na instalação prévia e na desinstalação.
+#[test]
+fn dp45_firewall_do_instalador_libera_apenas_portas_da_troca() {
+    let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("instalador").join("rustinho.iss");
+    let iss = std::fs::read_to_string(&caminho).unwrap_or_else(|e| panic!("{}: {e}", caminho.display()));
+    let regras_add: Vec<&str> = iss
+        .lines()
+        .filter(|l| l.contains("advfirewall firewall add rule") && !l.trim_start().starts_with(';'))
+        .collect();
+    assert_eq!(
+        regras_add.len(),
+        2,
+        "esperadas exatamente 2 regras de firewall (TCP 47810 e UDP 47811): {regras_add:#?}"
+    );
+    assert!(
+        regras_add.iter().any(|l| l.contains("protocol=TCP")
+            && l.contains("localport=47810")
+            && l.contains("profile=private,domain")),
+        "falta regra restrita TCP 47810: {regras_add:#?}"
+    );
+    assert!(
+        regras_add.iter().any(|l| l.contains("protocol=UDP")
+            && l.contains("localport=47811")
+            && l.contains("profile=private,domain")),
+        "falta regra restrita UDP 47811: {regras_add:#?}"
+    );
+    let deletes = iss
+        .lines()
+        .filter(|l| {
+            l.contains("advfirewall firewall delete rule name=\"\"Rustinho\"\"") && !l.trim_start().starts_with(';')
+        })
+        .count();
+    assert!(deletes >= 2, "esperada remoção da regra antes de recriar e na desinstalação (achadas: {deletes})");
+}

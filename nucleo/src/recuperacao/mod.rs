@@ -1426,7 +1426,7 @@ mod testes {
     #[test]
     fn rec1_duas_versoes_sha256_sanitizacao_e_fallback_de_corrupcao() {
         let b = Banco::em_memoria().unwrap();
-        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "12345678", true).unwrap();
 
         // 1ª versão: com campos sensíveis que devem ser sanitizados antes de ir para o disco.
         let g1 = guardar(
@@ -1498,10 +1498,10 @@ mod testes {
     #[test]
     fn rec2_dr3_isolamento_entre_ativos_e_excecao_auditavel_7b_para_desativado() {
         let b = Banco::em_memoria().unwrap();
-        let gerente = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "1234", true).unwrap();
+        let gerente = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "12345678", true).unwrap();
         usuarios::definir_gerente(&b.conn, &gerente.id, true).unwrap();
-        let caixa_ativo = usuarios::criar(&b.conn, &b.dispositivo, "Carlos", "1234", true).unwrap();
-        let caixa_saiu = usuarios::criar(&b.conn, &b.dispositivo, "Bia", "1234", true).unwrap();
+        let caixa_ativo = usuarios::criar(&b.conn, &b.dispositivo, "Carlos", "12345678", true).unwrap();
+        let caixa_saiu = usuarios::criar(&b.conn, &b.dispositivo, "Bia", "12345678", true).unwrap();
 
         let t_carlos = guardar(
             &b.conn,
@@ -1578,7 +1578,7 @@ mod testes {
     #[test]
     fn rec3_dr5_trinta_dias_vira_abandonado_sem_apagar_e_t03_relogio_recuado_protege() {
         let b = Banco::em_memoria().unwrap();
-        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "12345678", true).unwrap();
         let g = guardar(
             &b.conn,
             &b.dispositivo,
@@ -1623,7 +1623,7 @@ mod testes {
     #[test]
     fn rec4_dr6_backup_de_outro_caixa_preserva_e_sinaliza_conflito_origem() {
         let b = Banco::em_memoria().unwrap();
-        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "12345678", true).unwrap();
         let g = guardar(
             &b.conn,
             "caixa-origem-A",
@@ -1691,7 +1691,7 @@ mod testes {
             chamar(
                 &mut s,
                 "configurar_inicio",
-                json!({ "loja": "Loja R1", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" })
+                json!({ "loja": "Loja R1", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" })
             )["ok"],
             true
         );
@@ -1766,7 +1766,7 @@ mod testes {
             chamar(
                 &mut s,
                 "configurar_inicio",
-                json!({ "loja": "Loja Backup R1", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+                json!({ "loja": "Loja Backup R1", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
             );
             disp_a = s.banco_para_teste().dispositivo.clone();
             let g = chamar(
@@ -1791,11 +1791,11 @@ mod testes {
         let db_b = pasta_b.join("rustinho.db");
         {
             let mut b2 = Banco::abrir(&db_b).unwrap();
-            let u = usuarios::criar(&b2.conn, &b2.dispositivo, "Ana", "1234", true).unwrap();
+            let u = usuarios::criar(&b2.conn, &b2.dispositivo, "Ana", "12345678", true).unwrap();
             usuarios::definir_gerente(&b2.conn, &u.id, true).unwrap();
             let disp_b = b2.dispositivo.clone();
             assert_ne!(disp_a, disp_b);
-            crate::backup::restaurar(&mut b2.conn, Some(&db_b), &feito.arquivo, false, "1234").unwrap();
+            crate::backup::restaurar(&mut b2.conn, Some(&db_b), &feito.arquivo, false, "12345678").unwrap();
         }
         {
             let b2 = Banco::abrir(&db_b).unwrap();
@@ -1822,7 +1822,7 @@ mod testes {
             chamar(
                 &mut s,
                 "configurar_inicio",
-                json!({ "loja": "Loja R2", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" })
+                json!({ "loja": "Loja R2", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" })
             )["ok"],
             true
         );
@@ -1927,7 +1927,7 @@ mod testes {
     #[test]
     fn rec1_sanitizacao_chave_rede_e_pin_camel_case_e_sem_conserto_preservado() {
         let b = Banco::em_memoria().unwrap();
-        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "12345678", true).unwrap();
 
         let g1 = guardar(
             &b.conn,
@@ -1986,9 +1986,9 @@ mod testes {
     #[test]
     fn rec2_dr3_outro_caixa_ativo_nao_vaza_e_relogio_e_interrupcao_isolados() {
         let b = Banco::em_memoria().unwrap();
-        let gerente = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "1234", true).unwrap();
+        let gerente = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "12345678", true).unwrap();
         usuarios::definir_gerente(&b.conn, &gerente.id, true).unwrap();
-        let carlos = usuarios::criar(&b.conn, &b.dispositivo, "Carlos", "1234", true).unwrap();
+        let carlos = usuarios::criar(&b.conn, &b.dispositivo, "Carlos", "12345678", true).unwrap();
 
         // Trabalho de Carlos (ATIVO) vindo de outro caixa em backup:
         guardar(

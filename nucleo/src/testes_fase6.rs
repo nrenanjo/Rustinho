@@ -42,7 +42,7 @@ struct Loja {
 fn loja() -> Loja {
     let b = Banco::em_memoria().unwrap();
     let (c, d) = (&b.conn, &b.dispositivo);
-    let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+    let u = usuarios::criar(c, d, "Maria", "12345678", true).unwrap().id;
     let banco = financeiro::salvar_conta(
         c,
         d,
@@ -508,7 +508,7 @@ fn loja_com_bia() -> (crate::Servico, String) {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     for (nome, estoque, minimo) in [("Filtro de óleo", "0", "2"), ("Lâmpada H4", "5", "")] {
         let mut f = ok(&mut s, "produto_novo", json!({}));
@@ -528,9 +528,9 @@ fn loja_com_bia() -> (crate::Servico, String) {
         params![forn, crate::tempo::agora()],
     )
     .unwrap();
-    let bia = usuarios::criar(c, "disp", "Bia", "1234", true).unwrap().id;
+    let bia = usuarios::criar(c, "disp", "Bia", "12345678", true).unwrap().id;
     ok(&mut s, "caixa_abrir", json!({ "valor": "100" }));
-    ok(&mut s, "entrar", json!({ "id": bia, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": bia, "senha": "12345678" }));
     (s, bia)
 }
 
@@ -780,7 +780,7 @@ fn c03_chave_da_operacao_vale_tambem_depois_de_reabrir() {
         let r = bruto(
             &mut s,
             "configurar_inicio",
-            json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+            json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
         );
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(bruto(&mut s, "caixa_abrir", json!({ "valor": "0", "chaveOperacao": "abrir-1" }))["ok"], true);
@@ -790,7 +790,7 @@ fn c03_chave_da_operacao_vale_tambem_depois_de_reabrir() {
     }
     let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
     let ana = texto(&s.banco_para_teste().conn, "SELECT id FROM usuario WHERE nome = 'Ana'", []);
-    assert_eq!(bruto(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }))["ok"], true);
+    assert_eq!(bruto(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }))["ok"], true);
     let r = bruto(&mut s, "caixa_movimentar", sup);
     assert_eq!(
         (r["ok"].clone(), r["repetida"].clone()),
@@ -1059,7 +1059,7 @@ fn f02_revisao_backups_de_antes_da_chave_continuam_sem_tranca() {
     let db = pasta.join("rustinho.db");
     let u = {
         let b = Banco::abrir(&db).unwrap();
-        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap().id;
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "12345678", true).unwrap().id;
         // Ana é gerente: só o cadeado de um gerente ativo vai dentro do backup (T073: um backup trancado sem
         // nenhum cadeado sai como erro, porque ninguém o abre).
         usuarios::definir_gerente(&b.conn, &u, true).unwrap();
@@ -1071,7 +1071,7 @@ fn f02_revisao_backups_de_antes_da_chave_continuam_sem_tranca() {
     {
         let b = Banco::abrir(&db).unwrap();
         assert!(aviso(&b.conn), "sem a chave: avisa");
-        crate::backup::gerente_conferido(&b.conn, &u, "1234", None).unwrap();
+        crate::backup::gerente_conferido(&b.conn, &u, "12345678", None).unwrap();
         assert!(!aviso(&b.conn), "com a chave: o aviso some");
     }
     // Garante um nome diferente para o backup novo (o nome tem a hora em segundos).

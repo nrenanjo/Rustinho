@@ -28,7 +28,7 @@ fn loja(caminho: &std::path::Path) -> (crate::Servico, String) {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let ana: String = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get(0)).unwrap();
     let mut c = ok(&mut s, "pessoa_nova", json!({ "papel": "cliente" }));
@@ -120,7 +120,7 @@ fn n08_so_uma_nao_critica_aberta_mesmo_com_marcas_antigas() {
     assert_eq!(abertas(&mut s), std::slice::from_ref(&primeira), "abrir uma fecha a outra, no núcleo");
     drop(s);
     let mut s = crate::Servico::abrir(&caminho).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     assert_eq!(abertas(&mut s), [primeira], "continua assim depois de fechar e abrir");
     assert_eq!(aviso(&mut s, "outra_loja").unwrap()["minimizado"], false);
     drop(s);
@@ -141,13 +141,13 @@ fn n07_minimizada_continua_depois_de_fechar_e_abrir() {
     ok(&mut s, "aviso_minimizar", json!({ "id": "backup", "minimizado": false }));
     drop(s);
     let mut s = crate::Servico::abrir(&caminho).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let b = aviso(&mut s, "backup").expect("atenção continua depois de abrir de novo");
     assert_eq!(b["minimizado"], false, "expandida continua expandida: {b}");
     ok(&mut s, "aviso_minimizar", json!({ "id": "backup", "minimizado": true }));
     drop(s);
     let mut s = crate::Servico::abrir(&caminho).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     assert_eq!(aviso(&mut s, "backup").unwrap()["minimizado"], true, "minimizada continua minimizada");
     assert_eq!(aviso(&mut s, "outra_loja").unwrap()["minimizado"], false);
     // Só a condição resolve: com o backup feito, a atenção sai.

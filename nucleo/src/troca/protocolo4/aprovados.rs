@@ -46,35 +46,53 @@ use crate::erro::{Erro, Resultado};
 const NOME_MAXIMO: usize = 80;
 const MOTIVO_MAXIMO: usize = 300;
 
-/// O pedido de entrada de um caixa novo: as duas chaves públicas dele e a
-/// prova de que ele tem as partes privadas (assinatura Ed25519 sobre as duas
-/// chaves, contexto [`Dominio::Pedido`]). O gerente confere o
+/// O pedido de entrada de um caixa novo: as duas chaves públicas dele, o
+/// identificador `dispositivo` (I3) e a prova de que ele tem as partes privadas
+/// (assinatura Ed25519 no contexto [`Dominio::Pedido`]). O gerente confere o
 /// [`Pedido::codigo`] na tela do caixa novo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pedido {
     pub chave: Chave,
     pub chave_troca: Chave,
+    /// UUID do dispositivo (`dispositivo_id`, decisão I3). Vazio em pedidos legados.
+    pub dispositivo: String,
     pub assinatura: Assinatura,
 }
 
 impl Pedido {
-    fn corpo(chave: &Chave, chave_troca: &Chave) -> Vec<u8> {
-        let mut v = Vec::with_capacity(64);
+    fn corpo(chave: &Chave, chave_troca: &Chave, dispositivo: &str) -> Vec<u8> {
+        let mut v = Vec::with_capacity(64 + dispositivo.len() + 10);
         v.extend_from_slice(chave);
         v.extend_from_slice(chave_troca);
+        if !dispositivo.is_empty() {
+            v.extend_from_slice(b"\x01disp\0");
+            campo(&mut v, dispositivo);
+        }
         v
     }
 
-    /// O pedido deste caixa.
+    /// O pedido deste caixa (sem `dispositivo` explícito).
     pub fn de(id: &Identidade) -> Pedido {
+        Pedido::com_dispositivo(id, "")
+    }
+
+    /// O pedido deste caixa vinculando criptograficamente `dispositivo` (I3).
+    pub fn com_dispositivo(id: &Identidade, dispositivo: &str) -> Pedido {
         let (chave, chave_troca) = (id.publica(), id.publica_troca());
-        Pedido { chave, chave_troca, assinatura: id.assinar(Dominio::Pedido, &Pedido::corpo(&chave, &chave_troca)) }
+        let disp = dispositivo.trim().to_string();
+        let corpo = Pedido::corpo(&chave, &chave_troca, &disp);
+        Pedido { chave, chave_troca, dispositivo: disp, assinatura: id.assinar(Dominio::Pedido, &corpo) }
     }
 
     /// A assinatura confere (quem pediu tem a chave privada Ed25519 e ligou a
-    /// ela esta chave X25519)?
+    /// ela esta chave X25519 e o `dispositivo`)?
     pub fn confere(&self) -> bool {
-        verificar(Dominio::Pedido, &self.chave, &Pedido::corpo(&self.chave, &self.chave_troca), &self.assinatura)
+        verificar(
+            Dominio::Pedido,
+            &self.chave,
+            &Pedido::corpo(&self.chave, &self.chave_troca, &self.dispositivo),
+            &self.assinatura,
+        )
     }
 
     /// O código que o gerente confere.
@@ -84,7 +102,7 @@ impl Pedido {
 }
 
 /// Uma linha de `caixa_aprovado`: `aprovador` aprovou `chave` na loja
-/// `loja_id`, com o gerente `gerente`, e assinou tudo.
+/// `loja_id`, com o gerente `gerente` e `dispositivo` (I3), e assinou tudo.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Aprovacao {
     pub chave: Chave,
@@ -94,6 +112,8 @@ pub struct Aprovacao {
     pub aprovador: Chave,
     pub gerente: String,
     pub aprovado_em: String,
+    /// UUID do caixa (`dispositivo_id`, decisão I3). Incluído na assinatura quando preenchido.
+    pub dispositivo: String,
     pub assinatura: Assinatura,
 }
 
@@ -126,6 +146,10 @@ impl Aprovacao {
         v.extend_from_slice(&self.aprovador);
         campo(&mut v, &self.gerente);
         campo(&mut v, &self.aprovado_em);
+        if !self.dispositivo.is_empty() {
+            v.extend_from_slice(b"\x01disp\0");
+            campo(&mut v, &self.dispositivo);
+        }
         v
     }
 
@@ -194,6 +218,11 @@ impl Avaliacao {
     pub fn quantas_autorizadas(&self) -> usize {
         self.autorizados.len()
     }
+
+    /// Todas as chaves autorizadas neste momento.
+    pub fn autorizadas(&self) -> &HashSet<Chave> {
+        &self.autorizados
+    }
 }
 
 /// Uma coluna de texto; `None` se o valor não é texto (linha estragada).
@@ -206,7 +235,7 @@ fn texto(l: &rusqlite::Row<'_>, i: usize) -> Option<String> {
 /// texto) não vale e não impede as outras.
 fn ler_aprovacoes(conn: &Connection, loja_id: &str) -> Resultado<Vec<Aprovacao>> {
     let mut c = conn.prepare(
-        "SELECT chave, chave_troca, loja_id, nome, aprovador, gerente, aprovado_em, assinatura
+        "SELECT chave, chave_troca, loja_id, nome, aprovador, gerente, aprovado_em, dispositivo, assinatura
            FROM caixa_aprovado WHERE loja_id = ?1",
     )?;
     let mut linhas = c.query([loja_id])?;
@@ -221,7 +250,8 @@ fn ler_aprovacoes(conn: &Connection, loja_id: &str) -> Resultado<Vec<Aprovacao>>
                 aprovador: de_hex(&texto(l, 4)?)?,
                 gerente: texto(l, 5)?,
                 aprovado_em: texto(l, 6)?,
-                assinatura: de_hex(&texto(l, 7)?)?,
+                dispositivo: texto(l, 7)?,
+                assinatura: de_hex(&texto(l, 8)?)?,
             })
         };
         lista.extend(ler());
@@ -355,11 +385,12 @@ fn em_bloco<T>(conn: &Connection, f: impl FnOnce() -> Resultado<T>) -> Resultado
 
 fn gravar_aprovacao(conn: &Connection, a: &Aprovacao) -> Resultado<()> {
     conn.execute(
-        "INSERT INTO caixa_aprovado (chave, aprovador, chave_troca, loja_id, nome, gerente, aprovado_em, assinatura)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "INSERT INTO caixa_aprovado (chave, aprovador, chave_troca, loja_id, nome, gerente, aprovado_em, dispositivo, assinatura)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT (chave, aprovador) DO UPDATE SET
             chave_troca = excluded.chave_troca, loja_id = excluded.loja_id, nome = excluded.nome,
-            gerente = excluded.gerente, aprovado_em = excluded.aprovado_em, assinatura = excluded.assinatura",
+            gerente = excluded.gerente, aprovado_em = excluded.aprovado_em,
+            dispositivo = excluded.dispositivo, assinatura = excluded.assinatura",
         params![
             hex(&a.chave),
             hex(&a.aprovador),
@@ -368,12 +399,14 @@ fn gravar_aprovacao(conn: &Connection, a: &Aprovacao) -> Resultado<()> {
             a.nome,
             a.gerente,
             a.aprovado_em,
+            a.dispositivo,
             hex(&a.assinatura)
         ],
     )?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assinar_aprovacao(
     aprovador: &Identidade,
     chave: Chave,
@@ -381,6 +414,7 @@ fn assinar_aprovacao(
     loja_id: &str,
     nome: &str,
     gerente: &str,
+    dispositivo_alvo: &str,
 ) -> Aprovacao {
     let mut a = Aprovacao {
         chave,
@@ -390,6 +424,7 @@ fn assinar_aprovacao(
         aprovador: aprovador.publica(),
         gerente: gerente.to_string(),
         aprovado_em: crate::tempo::agora(),
+        dispositivo: dispositivo_alvo.trim().to_string(),
         assinatura: [0u8; 64],
     };
     a.assinatura = aprovador.assinar(Dominio::Aprovacao, &a.corpo());
@@ -397,8 +432,8 @@ fn assinar_aprovacao(
 }
 
 /// Loja nova: este caixa vira a **raiz** da cadeia (registro assinado por ele
-/// mesmo, com o gerente que criou a loja). Uma loja só tem uma raiz: se já
-/// houver outra raiz registrada para esta loja, recusa.
+/// mesmo, com o gerente que criou a loja e o `dispositivo_id` local — I3).
+/// Uma loja só tem uma raiz: se já houver outra raiz registrada para esta loja, recusa.
 pub fn registrar_raiz(
     conn: &Connection,
     eu: &Identidade,
@@ -421,12 +456,13 @@ pub fn registrar_raiz(
     if outra.is_some() {
         return Err(Erro::validacao("Esta loja já tem um caixa raiz."));
     }
-    let a = assinar_aprovacao(eu, eu.publica(), eu.publica_troca(), loja_id, &nome, gerente);
+    let disp = dispositivo(conn)?;
+    let a = assinar_aprovacao(eu, eu.publica(), eu.publica_troca(), loja_id, &nome, gerente, &disp);
     em_bloco(conn, || {
         gravar_aprovacao(conn, &a)?;
         crate::auditoria::registrar(
             conn,
-            &dispositivo(conn)?,
+            &disp,
             Some(gerente),
             "aprovar_caixa_raiz",
             "caixa",
@@ -435,6 +471,70 @@ pub fn registrar_raiz(
         )
     })?;
     Ok(a)
+}
+
+/// A chave pública da raiz válida registrada em `caixa_aprovado` para `loja_id`.
+pub fn raiz_registrada(conn: &Connection, loja_id: &str) -> Resultado<Option<Chave>> {
+    if loja_id.trim().is_empty() {
+        return Ok(None);
+    }
+    for a in ler_aprovacoes(conn, loja_id)? {
+        if a.loja_id == loja_id && a.chave == a.aprovador && a.assinatura_confere() {
+            return Ok(Some(a.chave));
+        }
+    }
+    Ok(None)
+}
+
+/// Chave pública mais recente registrada para `dispositivo_alvo` (I3).
+pub fn chave_do_dispositivo(conn: &Connection, loja_id: &str, dispositivo_alvo: &str) -> Resultado<Option<Chave>> {
+    if loja_id.trim().is_empty() || dispositivo_alvo.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut candidatos: Vec<Aprovacao> = ler_aprovacoes(conn, loja_id)?
+        .into_iter()
+        .filter(|a| a.loja_id == loja_id && a.dispositivo == dispositivo_alvo && a.assinatura_confere())
+        .collect();
+    candidatos.sort_by_key(|a| std::cmp::Reverse(fica(&a.aprovado_em, &a.assinatura)));
+    Ok(candidatos.first().map(|a| a.chave))
+}
+
+/// P4-4: caixas hoje autorizados que ficariam `SemCadeia` se `chave` fosse retirada.
+pub fn dependentes_de(conn: &Connection, raiz: &Chave, loja_id: &str, chave: &Chave) -> Resultado<Vec<Aprovacao>> {
+    let antes = avaliar(conn, raiz, loja_id)?;
+    if antes.situacao(chave) != Situacao::Autorizada {
+        return Ok(Vec::new());
+    }
+    let aprovacoes = ler_aprovacoes(conn, loja_id)?;
+    let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
+    let mut por_chave: HashMap<Chave, Aprovacao> = HashMap::new();
+    for a in aprovacoes {
+        if a.loja_id != loja_id || !a.assinatura_confere() {
+            continue;
+        }
+        if a.aprovador != a.chave {
+            arestas.entry(a.aprovador).or_default().push(a.chave);
+        }
+        por_chave
+            .entry(a.chave)
+            .and_modify(|atual| {
+                if fica(&a.aprovado_em, &a.assinatura) > fica(&atual.aprovado_em, &atual.assinatura) {
+                    *atual = a.clone();
+                }
+            })
+            .or_insert(a);
+    }
+    let mut retirados_simulados = antes.retirados.clone();
+    retirados_simulados.insert(*chave);
+    let depois = alcancados(raiz, &arestas, &retirados_simulados);
+    let mut afetados: Vec<Aprovacao> = antes
+        .autorizados
+        .iter()
+        .filter(|k| **k != *chave && !depois.contains(*k))
+        .filter_map(|k| por_chave.get(k).cloned())
+        .collect();
+    afetados.sort_by(|a, b| a.nome.cmp(&b.nome));
+    Ok(afetados)
 }
 
 /// O caixa `aprovador` (autorizado nesta loja), com o gerente `gerente`,
@@ -467,7 +567,8 @@ pub fn aprovar(
             "Este caixa foi retirado da loja e não volta com a mesma identidade. Gere uma identidade nova nele.",
         ));
     }
-    let a = assinar_aprovacao(aprovador, pedido.chave, pedido.chave_troca, loja_id, &nome, gerente);
+    let a =
+        assinar_aprovacao(aprovador, pedido.chave, pedido.chave_troca, loja_id, &nome, gerente, &pedido.dispositivo);
     em_bloco(conn, || {
         gravar_aprovacao(conn, &a)?;
         crate::auditoria::registrar(
@@ -634,13 +735,45 @@ mod testes {
         // A retirada vence: aprovar o Caixa 2 de novo é recusado...
         assert!(aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::de(&c2), "Caixa 2", &u).is_err());
         // ...e mesmo uma aprovação assinada gravada direto no banco não o traz.
-        let forcada = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2", &u);
+        let forcada = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, "Caixa 2", &u, "");
         gravar_aprovacao(&b.conn, &forcada).unwrap();
         assert_eq!(situacao(&b, &raiz, &c2.publica()), Situacao::Retirada);
         // Trocar o "identificador declarado" (nome, dispositivo) não muda nada:
         // a retirada é da chave.
         b.conn.execute("UPDATE config SET valor = 'outro-id' WHERE chave = 'dispositivo_id'", []).unwrap();
         assert_eq!(situacao(&b, &raiz, &c2.publica()), Situacao::Retirada);
+    }
+
+    /// I3 (0.9.19-dev.2): o `dispositivo` vai assinado no Pedido e na Aprovacao;
+    /// adulterar a coluna `dispositivo` no banco derruba a assinatura; P4-4 lista dependentes.
+    #[test]
+    fn i3_dispositivo_assinado_e_dependentes_p4_4() {
+        let (b, u, raiz) = loja();
+        let r = raiz.publica();
+        let (c2, c3) = (Identidade::gerar().unwrap(), Identidade::gerar().unwrap());
+        let mut p2 = Pedido::com_dispositivo(&c2, "disp-caixa-2");
+        assert!(p2.confere());
+        p2.dispositivo = "disp-adulterado".into();
+        assert!(!p2.confere(), "trocar dispositivo no pedido invalida assinatura");
+        let p2_ok = Pedido::com_dispositivo(&c2, "disp-caixa-2");
+        let a2 = aprovar(&b.conn, &raiz, &r, LOJA, &p2_ok, "Caixa 2", &u).unwrap();
+        assert_eq!(a2.dispositivo, "disp-caixa-2");
+        assert_eq!(chave_do_dispositivo(&b.conn, LOJA, "disp-caixa-2").unwrap(), Some(c2.publica()));
+        assert_eq!(raiz_registrada(&b.conn, LOJA).unwrap(), Some(r));
+
+        let p3 = Pedido::com_dispositivo(&c3, "disp-caixa-3");
+        aprovar(&b.conn, &c2, &r, LOJA, &p3, "Caixa 3", &u).unwrap();
+        // P4-4: retirar Caixa 2 derrubaria Caixa 3 em cascata.
+        let deps = dependentes_de(&b.conn, &r, LOJA, &c2.publica()).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert_eq!(deps[0].chave, c3.publica());
+        assert_eq!(deps[0].nome, "Caixa 3");
+
+        // Adulterar `dispositivo` no banco derruba a assinatura de Caixa 2 (I3).
+        b.conn
+            .execute("UPDATE caixa_aprovado SET dispositivo = 'clonado' WHERE chave = ?1", [hex(&c2.publica())])
+            .unwrap();
+        assert_eq!(situacao(&b, &raiz, &c2.publica()), Situacao::Desconhecida, "dispositivo adulterado não vale");
     }
 
     #[test]
@@ -735,12 +868,12 @@ mod testes {
         assert_eq!(situacao(&b, &raiz, &estranho.publica()), Situacao::Desconhecida);
         assert!(!autorizada(&b.conn, &r, LOJA, &estranho.publica()).unwrap());
         // Aprovar a si mesmo (registro "de raiz" de quem não é a raiz) não vale.
-        let auto = assinar_aprovacao(&estranho, estranho.publica(), estranho.publica_troca(), LOJA, "Eu", &u);
+        let auto = assinar_aprovacao(&estranho, estranho.publica(), estranho.publica_troca(), LOJA, "Eu", &u, "");
         gravar_aprovacao(&b.conn, &auto).unwrap();
         assert_eq!(situacao(&b, &raiz, &estranho.publica()), Situacao::Desconhecida, "autoaprovação");
         // Aprovação assinada por quem não é da loja, também não.
         let outro = Identidade::gerar().unwrap();
-        let a = assinar_aprovacao(&outro, estranho.publica(), estranho.publica_troca(), LOJA, "Eu", &u);
+        let a = assinar_aprovacao(&outro, estranho.publica(), estranho.publica_troca(), LOJA, "Eu", &u, "");
         gravar_aprovacao(&b.conn, &a).unwrap();
         assert_eq!(situacao(&b, &raiz, &estranho.publica()), Situacao::Desconhecida, "aprovador de fora");
         // Quem não é da loja não aprova nem retira.
@@ -1072,7 +1205,7 @@ mod testes_juntar {
         juntar(&la.conn, LOJA, &base).unwrap();
         juntar(&outro.conn, LOJA, &base).unwrap();
         let versao = |nome: &str, quando: &str| {
-            let mut a = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, nome, &u);
+            let mut a = assinar_aprovacao(&raiz, c2.publica(), c2.publica_troca(), LOJA, nome, &u, "");
             a.aprovado_em = quando.into();
             a.assinatura = raiz.assinar(Dominio::Aprovacao, &a.corpo());
             a

@@ -173,9 +173,9 @@ fn t5_6_mudanca_feita_em_outro_caixa_vale_na_hora() {
     let p = povoar(&mut l);
     l.ok(
         "usuario_salvar",
-        json!({ "nome": "Cida", "senha": "4321", "senha2": "4321", "ativo": true, "gerente": true }),
+        json!({ "nome": "Cida", "senha": "43218765", "senha2": "43218765", "ativo": true, "gerente": true }),
     );
-    l.entrar("Cida", "4321");
+    l.entrar("Cida", "43218765");
     l.ok("estoque_ajustar", json!({ "produtoId": p.filtro, "quantidade": "5", "motivo": "contagem" }));
     // Outro caixa tirou o "gerente" da Cida (chega pela troca de dados).
     l.executar("UPDATE usuario SET gerente = 0 WHERE nome = 'Cida'");

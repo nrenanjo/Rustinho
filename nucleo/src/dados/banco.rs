@@ -40,6 +40,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0026_caixas_aprovados.sql"),
     include_str!("../migracoes/0027_operacao_feita.sql"),
     include_str!("../migracoes/0028_recuperacao_trabalho.sql"),
+    include_str!("../migracoes/0029_protocolo4_identidade.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -1026,7 +1027,7 @@ mod testes {
         // dev.3.3, a 0025 (passo 7.5: índices e busca), a 0026 (registro de
         // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
         // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
-        assert_eq!(MIGRACOES.len(), 28);
+        assert_eq!(MIGRACOES.len(), 29);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas
@@ -1079,11 +1080,36 @@ mod testes {
             };
             assert_eq!(
                 colunas("caixa_aprovado"),
-                ["chave", "aprovador", "chave_troca", "loja_id", "nome", "gerente", "aprovado_em", "assinatura"]
+                [
+                    "chave",
+                    "aprovador",
+                    "chave_troca",
+                    "loja_id",
+                    "nome",
+                    "gerente",
+                    "aprovado_em",
+                    "assinatura",
+                    "dispositivo",
+                ]
             );
             assert_eq!(
                 colunas("caixa_retirado"),
                 ["chave", "retirador", "loja_id", "motivo", "gerente", "retirado_em", "assinatura"]
+            );
+            assert_eq!(
+                colunas("p4_convite"),
+                [
+                    "id",
+                    "segredo_hash",
+                    "segredo_ativo",
+                    "codigo_pedido",
+                    "nome_caixa",
+                    "gerente",
+                    "criado_em",
+                    "expira_em",
+                    "usado_em",
+                    "chave_aprovada",
+                ]
             );
             conferir_estrutura(&c).unwrap();
             assert!(MIGRACOES.len() >= 26);

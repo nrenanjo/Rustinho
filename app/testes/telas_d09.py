@@ -60,7 +60,7 @@ def ambiente_neutro():
 
 
 ambiente_neutro()
-SENHA = {"Ana": "1234", "Bia": "1111"}
+SENHA = {"Ana": "12345678", "Bia": "1111"}
 
 
 def simples(t):

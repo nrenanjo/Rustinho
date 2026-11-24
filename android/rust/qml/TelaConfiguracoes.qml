@@ -1157,7 +1157,9 @@ FocusScope {
                         Campo {
                             id: nova
                             rotulo: "Nova senha"
-                            dica: "Pelo menos 4 caracteres"
+                            dica: (janela && janela.estado && janela.estado.usuario && janela.estado.usuario.gerente)
+                                  ? "Pelo menos 8 caracteres"
+                                  : "Pelo menos 4 caracteres"
                             senha: true
                             maximo: 256
                             Layout.fillWidth: true
@@ -1852,7 +1854,7 @@ FocusScope {
                     corTitulo: Tema.verdeEscuro
                     Layout.fillWidth: true
                     Nota {
-                        text: "Cada gerente troca a própria senha em “Minha senha”. A senha de gerente precisa ter pelo menos 4 caracteres; como ela também protege os backups, quanto mais longa, melhor."
+                        text: "Cada gerente troca a própria senha em “Minha senha”. A senha de gerente precisa ter pelo menos 8 caracteres; como ela também protege os backups, quanto mais longa, melhor."
                         font.pixelSize: 14
                         Layout.fillWidth: true
                     }

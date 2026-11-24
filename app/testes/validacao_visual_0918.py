@@ -59,7 +59,7 @@ import time
 import unicodedata
 
 WINDOWS = os.name == "nt"
-USUARIO, SENHA = "Ana", "1234"
+USUARIO, SENHA = "Ana", "12345678"
 CNPJ_BOM = "11.444.777/0001-61"
 # O escuro primeiro: a loja nova já abre no claro, e escolher o tema que já
 # está valendo não grava nada.

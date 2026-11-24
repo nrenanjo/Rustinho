@@ -36,7 +36,7 @@ fn loja() -> (crate::Servico, String) {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     ok(&mut s, "caixa_abrir", json!({ "valor": "100" }));
     let mut c = ok(&mut s, "pessoa_nova", json!({ "papel": "cliente" }));

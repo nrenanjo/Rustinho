@@ -120,6 +120,8 @@ pub const TABELAS: &[Tabela] = &[
     t("fechamento_visto", Local, &["operacoes"]),
     t("operacao_em_curso", Local, &["operacoes"]),
     t("operacao_feita", Local, &["operacoes"]),
+    // Protocolo 4 (0.9.19-dev.2, A6): convites de uso único locais do caixa aprovador.
+    t("p4_convite", Local, &["protocolo4"]),
     t("programa_abertura", Local, &["operacoes"]),
     t("senha_situacao", Local, &["usuarios"]),
     t("sessao_local", Local, &["recuperacao"]),

@@ -14,7 +14,7 @@ use rustinho_nucleo::Servico;
 use serde_json::{json, Value};
 
 /// Senhas das pessoas de teste (só o tamanho conta: mínimo 4).
-pub const SENHA_ANA: &str = "1234";
+pub const SENHA_ANA: &str = "12345678";
 pub const SENHA_BIA: &str = "1111";
 
 pub fn pasta_nova(nome: &str) -> PathBuf {

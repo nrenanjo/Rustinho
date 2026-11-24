@@ -116,7 +116,7 @@ fn filho_portatil() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja Teste", "caixa": "TESTE", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja Teste", "caixa": "TESTE", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     // 2. Troca de dados: outras portas.

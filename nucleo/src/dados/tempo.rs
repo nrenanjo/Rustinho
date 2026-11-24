@@ -24,6 +24,12 @@ pub fn dias_atras(dias: i64) -> String {
         .unwrap_or_default()
 }
 
+/// Soma `segundos` a um instante RFC 3339 UTC ("2026-10-13T17:30:05Z").
+pub fn somar_segundos(iso_rfc3339: &str, segundos: i64) -> Option<String> {
+    let dt = OffsetDateTime::parse(iso_rfc3339, &Rfc3339).ok()?;
+    (dt + time::Duration::seconds(segundos)).replace_nanosecond(0).ok()?.format(&Rfc3339).ok()
+}
+
 /// Ano atual (UTC).
 pub fn ano_atual() -> i32 {
     OffsetDateTime::now_utc().year()

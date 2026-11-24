@@ -91,7 +91,7 @@ fn loja(nome: &str, n: usize) -> (PathBuf, PathBuf, Servico) {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     ok(
         &mut s,
@@ -129,7 +129,7 @@ fn pedidos_de_busca() -> Vec<Value> {
 #[test]
 fn t1_mesma_resposta_que_o_chamar() {
     let (pasta, _db, mut s) = loja("t1", 48);
-    for quem in [("Ana", "1234"), ("Bia", "1111")] {
+    for quem in [("Ana", "12345678"), ("Bia", "1111")] {
         entrar(&mut s, quem.0, quem.1);
         for rodada in 0..2 {
             for cmd in crate::api::CONSULTAS_FORA_DA_JANELA {
@@ -237,7 +237,7 @@ fn t2_senha_do_gerente_digitada_nao_vale_na_consulta() {
     use crate::despacho::Acesso;
     let (pasta, _db, mut s) = loja("t2-senha", 1);
     entrar(&mut s, "Bia", "1111");
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "resultados" }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "acao": "resultados" }));
     // No chamar (linha da janela), a consulta dos resultados está liberada.
     let r = ok(&mut s, "permissao", json!({ "acao": "resultados", "consulta": true }));
     assert_eq!(r["pode"], true, "{r}");
@@ -249,7 +249,7 @@ fn t2_senha_do_gerente_digitada_nao_vale_na_consulta() {
     let e = a.exigir(&conn, "resultados").unwrap_err();
     assert_eq!(e.nome_do_campo(), Some("gerente"), "{e}");
     // O gerente pode, nas duas.
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let mut a = crate::api::acesso_da_consulta_para_teste(&s);
     assert!(a.pode_ler(&conn, "resultados").unwrap());
     assert!(a.exigir(&conn, "precos").is_ok());
@@ -379,7 +379,7 @@ fn t6_t7_restaurar_backup_para_a_leitura_e_reabre_a_conexao() {
         })
     };
     std::thread::sleep(Duration::from_millis(100));
-    let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": feito.arquivo, "nuvem": false, "senha": "1234" }));
+    let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": feito.arquivo, "nuvem": false, "senha": "12345678" }));
     assert!(r.is_object(), "{r}");
     let troca = crate::backup::queda_de_teste::TROCA_EM.with(|t| t.get()).expect("a troca aconteceu");
     std::thread::sleep(Duration::from_millis(100));
@@ -413,7 +413,7 @@ fn t6_t7_restaurar_backup_para_a_leitura_e_reabre_a_conexao() {
     // Depois: entra de novo (os usuários são os do backup) e lê o restaurado,
     // por uma conexão nova.
     let ana = id_de(&mut s, "Ana");
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let r = consultar(&mut s, "t6", "produtos_buscar", json!({ "texto": "depois do backup" }));
     assert_eq!(r["dados"]["itens"].as_array().unwrap().len(), 0, "a peça de depois do backup sumiu: {r}");
     let r = consultar(&mut s, "t6", "produtos_buscar", json!({ "texto": "antes do backup" }));
@@ -464,7 +464,7 @@ fn modo_seguro_a_consulta_responde_como_o_chamar() {
     let e = ok(&mut s, "estado", json!({}));
     assert!(!e["modoSeguro"].is_null(), "o banco abriu em modo seguro: {e}");
     let ana = id_de(&mut s, "Ana");
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     for d in pedidos_de_busca() {
         let normal = s.chamar("produtos_buscar", &d.to_string());
         assert_eq!(consultar_texto(&mut s, "seguro", "produtos_buscar", &d), normal, "{d}");
@@ -482,7 +482,7 @@ fn banco_em_memoria_roda_na_hora() {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let d = json!({ "texto": "" });
     let normal = s.chamar("produtos_buscar", &d.to_string());
@@ -502,7 +502,7 @@ fn t1_loja_grande_mesma_resposta_e_tempos() {
     let Some(pasta) = std::env::var_os("RUSTINHO_LOJA_TESTE").map(PathBuf::from) else { return };
     let mut s = Servico::abrir_para_teste(&pasta.join("rustinho.db"), false).unwrap();
     let ana = id_de(&mut s, "Ana");
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let mut textos: Vec<String> = Vec::new();
     for fim in 1..="pastilha lista 1111".len() {
         textos.push("pastilha lista 1111"[..fim].to_string());
@@ -550,9 +550,9 @@ fn integ_75_76_contagem_depois_de_restaurar_nos_dois_caminhos() {
         assert_eq!(total(&consultar(&mut s, "integ", "produtos_buscar", pedido.clone())), 6);
         assert_eq!(total(&chamar(&mut s, "produtos_buscar", pedido.clone())), 6);
     }
-    ok(&mut s, "backup_restaurar", json!({ "arquivo": feito.arquivo, "nuvem": false, "senha": "1234" }));
+    ok(&mut s, "backup_restaurar", json!({ "arquivo": feito.arquivo, "nuvem": false, "senha": "12345678" }));
     let ana = id_de(&mut s, "Ana");
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let fora = consultar_texto(&mut s, "integ", "produtos_buscar", &pedido);
     let normal = s.chamar("produtos_buscar", &pedido.to_string());
     let v: Value = serde_json::from_str(&fora).unwrap();
@@ -577,9 +577,13 @@ fn fable_a2_gerente_encerrar_com_acoes_fecha_so_as_pedidas() {
         assert!(!pode(&mut s, a), "{a}: o caixa não devia poder sem a senha");
     }
     // O Financeiro aberto com a senha; por cima, Configurações › Simultaneidade (a guia do caso 7) e a pílula Gerente.
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acoes": ["configuracoes", "backup", "simultaneidade"] }));
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "gerente" }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "acao": "financeiro" }));
+    ok(
+        &mut s,
+        "gerente_liberar",
+        json!({ "senha": "12345678", "acoes": ["configuracoes", "backup", "simultaneidade"] }),
+    );
+    ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "acao": "gerente" }));
     for a in todas {
         assert!(pode(&mut s, a), "{a}: liberada");
     }
@@ -591,7 +595,7 @@ fn fable_a2_gerente_encerrar_com_acoes_fecha_so_as_pedidas() {
     }
     // Uma gravação liberada (uma vez) também cai com `acoes`.
     let estorno = json!({ "id": "nao-existe", "motivo": "teste" });
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "movimento_estornar", "dados": estorno }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "movimento_estornar", "dados": estorno }));
     ok(&mut s, "gerente_encerrar", json!({ "acoes": ["configuracoes"] }));
     let r = chamar(&mut s, "movimento_estornar", estorno.clone());
     assert_eq!(r["campo"], "gerente", "a gravação liberada devia ter caído: {r}");
@@ -601,16 +605,20 @@ fn fable_a2_gerente_encerrar_com_acoes_fecha_so_as_pedidas() {
     assert!(!pode(&mut s, "financeiro"));
     // `acoes` vazio ou malformado: fecha tudo (o padrão seguro), não "nada".
     for ruim in [json!({ "acoes": [] }), json!({ "acoes": "configuracoes" }), json!({ "acoes": [1, null] })] {
-        ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
+        ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "acao": "financeiro" }));
         ok(&mut s, "gerente_encerrar", ruim.clone());
         assert!(!pode(&mut s, "financeiro"), "{ruim}: devia fechar tudo");
     }
     // Ação que não existe: não fecha nenhuma consulta (e não dá erro).
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acao": "financeiro" }));
+    ok(&mut s, "gerente_liberar", json!({ "senha": "12345678", "acao": "financeiro" }));
     ok(&mut s, "gerente_encerrar", json!({ "acoes": ["nao_existe"] }));
     assert!(pode(&mut s, "financeiro"));
     // Trocar de pessoa na tela de entrada: nada sobra.
-    ok(&mut s, "gerente_liberar", json!({ "senha": "1234", "acoes": ["configuracoes", "backup", "simultaneidade"] }));
+    ok(
+        &mut s,
+        "gerente_liberar",
+        json!({ "senha": "12345678", "acoes": ["configuracoes", "backup", "simultaneidade"] }),
+    );
     entrar(&mut s, "Bia", "1111");
     for a in todas {
         assert!(!pode(&mut s, a), "{a}: depois de sair e entrar, nada liberado");

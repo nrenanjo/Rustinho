@@ -258,7 +258,7 @@ fn rvi02_falha_chega_a_api_das_telas() {
     chamar_ok(
         &mut s,
         "configurar_inicio",
-        serde_json::json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        serde_json::json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     chamar_ok(&mut s, "sync_salvar", serde_json::json!({ "ligado": true, "senha": "rede-da-loja", "enderecos": "" }));
     let antes = chamar_ok(&mut s, "sync_ler", serde_json::json!({}));
@@ -390,8 +390,8 @@ fn rdb_duas_instancias_conflito_identifica_loja_caixa_trabalha_local_e_tenta_de_
             "loja": "Auto Peças Central",
             "caixa": "Balcão Principal",
             "nome": "Ana",
-            "senha": "1234",
-            "senha2": "1234"
+            "senha": "12345678",
+            "senha2": "12345678"
         }),
     );
     let mut s_treino = crate::Servico::abrir_para_teste(&db_treino, false).unwrap();
@@ -402,8 +402,8 @@ fn rdb_duas_instancias_conflito_identifica_loja_caixa_trabalha_local_e_tenta_de_
             "loja": "Loja Treinamento",
             "caixa": "Caixa Treino",
             "nome": "Ana",
-            "senha": "1234",
-            "senha2": "1234"
+            "senha": "12345678",
+            "senha2": "12345678"
         }),
     );
 
@@ -431,8 +431,8 @@ fn rdb_duas_instancias_conflito_identifica_loja_caixa_trabalha_local_e_tenta_de_
             "loja": "Filial Sul",
             "caixa": "Caixa 2",
             "nome": "Beto",
-            "senha": "1234",
-            "senha2": "1234"
+            "senha": "12345678",
+            "senha2": "12345678"
         }),
     );
     chamar_ok(&mut sb, "sync_salvar", serde_json::json!({ "ligado": true, "senha": "rede-filial", "enderecos": "" }));

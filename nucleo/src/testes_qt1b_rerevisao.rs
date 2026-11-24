@@ -30,7 +30,7 @@ fn configurar(s: &mut crate::Servico) {
     ok(
         s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
 }
 
@@ -93,7 +93,7 @@ fn rr_n01_impressao_nao_conta_como_entrega() {
     let _ = chamar(&mut s, "impressao", json!({ "tipo": "venda", "id": v["id"] }));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = aviso(&mut s).expect("N-01: a venda seguida só da impressão precisa continuar no aviso");
     let l = linhas(&a);
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "N-01: {l:?}");
@@ -112,12 +112,12 @@ fn rr_n02_todas_as_gravadas_sem_confirmacao_aparecem() {
     let mut numeros = Vec::new();
     for i in 0..7 {
         let mut s = abrir(&caminho);
-        entrar(&mut s, "Ana", "1234");
+        entrar(&mut s, "Ana", "12345678");
         numeros.push(ok(&mut s, "venda_concluir", venda(&p, &format!("venda-{i}")))["numero"].clone());
         s.cair_para_teste();
     }
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("o aviso"));
     for n in &numeros {
         assert!(
@@ -139,13 +139,13 @@ fn rr_n03_queda_sem_linha_nao_muda_o_id_nem_reabre() {
     ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
     s.cair_para_teste(); // queda com a venda sem confirmação
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = aviso(&mut s).expect("o aviso da venda");
     ok(&mut s, "aviso_minimizar", json!({ "id": a["id"], "minimizado": true }));
     ok(&mut s, "avisos_do_dia", json!({})); // a tela segue; nada novo é gravado
     s.cair_para_teste(); // queda sem nada a mostrar
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let b = aviso(&mut s).expect("o aviso continua (a venda não foi conferida)");
     assert_eq!(b["id"], a["id"], "N-03: a queda sem linha mudou o id do aviso");
     assert_eq!(b["minimizado"], true, "N-03: o aviso minimizado reabriu sem nada novo");
@@ -171,7 +171,7 @@ fn rr_n04_abertura_de_data_antiga_que_caiu_hoje_avisa() {
         .unwrap();
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("N-04: a queda de hoje de uma abertura com data antiga sumiu do aviso"));
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "N-04: {l:?}");
     fim(s, &caminho);
@@ -199,7 +199,7 @@ fn rr_n05_minimizar_e_por_pessoa() {
     let a = aviso(&mut s).expect("a Bia vê a venda dela");
     ok(&mut s, "aviso_minimizar", json!({ "id": a["id"], "minimizado": true }));
     ok(&mut s, "sair", json!({}));
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let b = aviso(&mut s).expect("o gerente vê a venda da Bia");
     assert_eq!(b["minimizado"], false, "N-05: o gerente recebeu o aviso já minimizado pela Bia");
     fim(s, &caminho);
@@ -217,7 +217,7 @@ fn rr_n01p2_venda_seguida_de_leitura_continua_no_aviso() {
     ok(&mut s, "caixa_estado", json!({})); // a tela recarrega o caixa antes de abrir a confirmação
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("N-01 (parte 2): a venda seguida só de uma leitura precisa avisar"));
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "{l:?}");
     fim(s, &caminho);
@@ -234,7 +234,7 @@ fn rr_n01p2_venda_confirmada_pela_tela_nao_avisa() {
     ok(&mut s, "entrega_confirmar", json!({}));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso(&mut s).is_none(), "a venda que a tela desenhou e confirmou não é motivo de atenção");
     fim(s, &caminho);
 }
@@ -276,7 +276,7 @@ fn s2_queda_sem_pendencia_mostra_a_linha_informativa() {
     ok(&mut s, "entrega_confirmar", json!({}));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso(&mut s).is_none(), "nada pendente: sem o aviso de atenção");
     let a = informativa(&mut s).expect("S2: a linha informativa depois da queda sem nada pendente");
     assert_eq!(a["categoria"], "informativa");
@@ -305,7 +305,7 @@ fn s2_entendi_tira_so_para_quem_conferiu() {
     ok(&mut s, "entrega_confirmar", json!({}));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = informativa(&mut s).expect("a linha informativa");
     let antes =
         s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
@@ -330,7 +330,7 @@ fn s2_com_pendencia_so_o_aviso_de_atencao() {
     ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso(&mut s).is_some());
     assert!(informativa(&mut s).is_none(), "S2: a linha informativa não aparece junto do aviso de atenção");
     fim(s, &caminho);
@@ -376,7 +376,7 @@ fn s2_queda_de_outro_dia_nao_mostra() {
             [],
         )
         .unwrap();
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(informativa(&mut s).is_none(), "S2: só a queda vista hoje");
     fim(s, &caminho);
 }
@@ -398,7 +398,7 @@ fn rr2_t04_s2_arrastada_nao_volta_para_quem_escondeu() {
     ok(&mut s, "entrega_confirmar", json!({}));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = informativa(&mut s).expect("a linha informativa do S2");
     let antes =
         s.banco_para_teste().conn.query_row("SELECT COUNT(*) FROM operacao_feita", [], |l| l.get::<_, i64>(0)).unwrap();
@@ -408,7 +408,7 @@ fn rr2_t04_s2_arrastada_nao_volta_para_quem_escondeu() {
     assert_eq!(antes, depois, "esconder não grava operação");
     assert!(informativa(&mut s).is_none(), "escondida: a linha sai para a Ana");
     ok(&mut s, "sair", json!({}));
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(informativa(&mut s).is_none(), "a Ana saiu e entrou de novo no mesmo dia: a linha continua fora");
     ok(&mut s, "sair", json!({}));
     entrar(&mut s, "Bia", "mesa-verde");
@@ -428,7 +428,7 @@ fn rr3_or8_esconder_o_s2_que_nao_aparece_e_recusado() {
     ok(&mut s, "venda_concluir", venda(&p, "venda-or8"));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let atencao = aviso(&mut s).expect("o aviso de atenção");
     assert!(informativa(&mut s).is_none(), "com pendência, a linha do S2 não aparece");
     let numero = atencao["id"].as_str().unwrap().split_once('.').unwrap().1.to_string();
@@ -438,7 +438,7 @@ fn rr3_or8_esconder_o_s2_que_nao_aparece_e_recusado() {
     assert!(r["erro"].as_str().unwrap_or("").contains("já não está aparecendo"), "{r}");
     assert!(aviso(&mut s).is_some(), "o aviso de atenção continua");
     ok(&mut s, "sair", json!({}));
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso(&mut s).is_some(), "e continua depois de sair e entrar de novo");
     fim(s, &caminho);
 }

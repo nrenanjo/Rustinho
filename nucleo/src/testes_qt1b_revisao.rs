@@ -38,7 +38,7 @@ fn configurar(s: &mut crate::Servico) {
     ok(
         s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
 }
 
@@ -101,7 +101,7 @@ fn rev_f01_duas_quedas_seguidas_mantem_a_venda() {
     let s = abrir(&caminho);
     s.cair_para_teste(); // 2ª queda, antes de alguém entrar
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = aviso(&mut s).expect("F-01: o aviso precisa continuar depois de duas quedas seguidas");
     let l = linhas(&a);
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "{l:?}");
@@ -120,7 +120,7 @@ fn rev_f02_venda_confirmada_na_tela_nao_vira_aviso() {
     ok(&mut s, "entrega_confirmar", json!({})); // a tela desenhou a resposta da venda (N-01, parte 2)
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso(&mut s).is_none(), "F-02: o que a tela já mostrou não é motivo de atenção");
     fim(s, &caminho);
 }
@@ -135,7 +135,7 @@ fn rev_f02_venda_sem_confirmacao_continua_no_aviso() {
     let v = ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("a venda sem confirmação avisa"));
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "{l:?}");
     fim(s, &caminho);
@@ -162,7 +162,7 @@ fn rev_f03_relogio_que_volta_nao_apaga_o_aviso() {
     );
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("F-03: o relógio que volta não pode apagar o aviso"));
     assert!(l.iter().any(|x| x.starts_with(&format!("Gravada: Venda · nº {} · ", v["numero"]))), "{l:?}");
     fim(s, &caminho);
@@ -185,7 +185,7 @@ fn rev_f04_em_curso_de_outra_abertura_nao_entra() {
     sql_tolerante(&mut s, &[orfa.as_str()]);
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     if let Some(a) = aviso(&mut s) {
         let l = linhas(&a);
         assert!(
@@ -207,7 +207,7 @@ fn rev_f05_minimizar_o_aviso_pega() {
     ok(&mut s, "venda_concluir", venda(&p, "venda-1"));
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = aviso(&mut s).expect("o aviso");
     assert_eq!(a["minimizado"], false, "o aviso novo começa aberto");
     assert!(!a["resumo"].as_str().unwrap_or("").is_empty(), "F-05: resumo vazio");
@@ -272,7 +272,7 @@ fn rev_f10_conferi_do_caixa_nao_tira_do_gerente() {
     let a = aviso(&mut s).expect("a Bia vê o recebimento dela");
     ok(&mut s, "aviso_resolver", json!({ "id": a["id"] }));
     ok(&mut s, "sair", json!({}));
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("F-10: o gerente ainda tem de ver o recebimento interrompido da Bia"));
     assert!(l.iter().any(|x| x.starts_with("Não concluída: Recebimento")), "F-10: {l:?}");
     fim(s, &caminho);
@@ -294,7 +294,7 @@ fn rev_f12_sangria_aparece_com_tipo_e_valor() {
     );
     s.cair_para_teste();
     let mut s = abrir(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso(&mut s).expect("o aviso"));
     assert!(l.iter().any(|x| x.contains("angria") && x.contains("5,00")), "F-12: {l:?}");
     fim(s, &caminho);

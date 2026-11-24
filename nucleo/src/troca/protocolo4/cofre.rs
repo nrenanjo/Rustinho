@@ -1,0 +1,1023 @@
+//! Guarda segura da identidade deste caixa (D4, A7, P4-2) e gestão de convites
+//! de uso único (A6) — protocolo 4 (`0.9.19-dev.2`).
+//!
+//! ## Onde fica a identidade (`P4-2`)
+//! - **Nunca no banco SQLite:** copiar `rustinho.db` para outro computador não
+//!   leva a chave privada (D1).
+//! - Em instalação normal: na pasta de configuração local do usuário
+//!   (`$XDG_CONFIG_HOME/rustinho/` ou `$HOME/.config/rustinho/` no Linux;
+//!   `%APPDATA%\Rustinho\` no Windows), diferenciada pelo hash do caminho da
+//!   pasta do banco para que duas pastas no mesmo computador (`RD-B`) tenham
+//!   identidades independentes sem colidir.
+//! - Em modo portátil (`eh_portatil = true`): na própria pasta do portátil
+//!   (`identidade.p4`), protegida contra cópia por `I3` + `copia_detectada`.
+//! - Em testes automatizados: `RUSTINHO_IDENTIDADE` fixa um caminho explícito.
+//!
+//! ## Como o segredo de selagem é guardado (`D4`, `A7`)
+//! A identidade é sempre gravada selada com Argon2id + ChaCha20-Poly1305
+//! ([`Identidade::guardar_em`]) usando uma senha forte aleatória (256 bits)
+//! própria desta máquina — independente da senha do gerente (trocar a senha do
+//! gerente nunca obriga a resselar outros caixas).
+//! - **Linux:** tenta o serviço de senhas do sistema (`secret-tool`); quando
+//!   ausente (ex.: ambiente headless/mínimo), guarda o segredo numa reserva
+//!   selada (`0600`) fora da pasta do banco e marca `cofre_sistema = false`
+//!   para aviso explícito ao gerente (nunca silencioso).
+//! - **Windows:** protege o segredo via DPAPI nativo (`CryptProtectData` /
+//!   `CryptUnprotectData` de `crypt32.dll`, `cofre_sistema = true`).
+//! - **Testes (`#[cfg(test)]` ou `RUSTINHO_COFRE_TESTE=arquivo`):** usa a
+//!   reserva local isolada ao lado da identidade sem tocar no keyring do host.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::ChaCha20Poly1305;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use super::aprovados::{self, Aprovacao, Pedido};
+use super::{aleatorio, apagar, hex, Chave, Identidade, Segredo};
+use crate::erro::{Erro, Resultado};
+
+/// Validade padrão de um convite de entrada de caixa novo: 10 minutos (A6).
+pub const VALIDADE_CONVITE_SEG: i64 = 10 * 60;
+/// Alfabeto Base32 sem letras ambíguas (`I`, `O`, `0`, `1`), idêntico ao código de pedido.
+const ALFABETO_CONVITE: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/// Identidade carregada para este caixa, junto com a origem da proteção do segredo.
+pub struct IdentidadeLocal {
+    pub identidade: Identidade,
+    /// `true` quando o segredo de selagem está protegido pelo cofre do SO
+    /// (`secret-tool` no Linux ou DPAPI no Windows); `false` na reserva local (aviso D4).
+    pub cofre_sistema: bool,
+    pub caminho: PathBuf,
+}
+
+impl std::fmt::Debug for IdentidadeLocal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IdentidadeLocal")
+            .field("codigo", &self.identidade.codigo_de_pedido())
+            .field("cofre_sistema", &self.cofre_sistema)
+            .field("caminho", &self.caminho)
+            .finish()
+    }
+}
+
+/// Calcula o caminho do arquivo `identidade*.p4` para `pasta_banco`.
+///
+/// Sem depender de `crate::portatil` (zero ciclos no grafo de dependências).
+pub fn caminho_identidade(pasta_banco: &Path, eh_portatil: bool) -> PathBuf {
+    if let Ok(explicito) = std::env::var("RUSTINHO_IDENTIDADE") {
+        let limpo = explicito.trim();
+        if !limpo.is_empty() {
+            return PathBuf::from(limpo);
+        }
+    }
+    if eh_portatil {
+        return pasta_banco.join("identidade.p4");
+    }
+    let pasta_cfg = pasta_config_usuario().unwrap_or_else(|| {
+        // Último recurso se não houver HOME/APPDATA: subpasta separada do banco.
+        pasta_banco.join(".identidade_local")
+    });
+    let canon = std::fs::canonicalize(pasta_banco).unwrap_or_else(|_| pasta_banco.to_path_buf());
+    let mut h = Sha256::new();
+    h.update(b"rustinho/p4/pasta-identidade\0");
+    h.update(canon.to_string_lossy().as_bytes());
+    let dig: [u8; 32] = h.finalize().into();
+    let sufixo = hex(&dig[..8]);
+    pasta_cfg.join(format!("identidade-{sufixo}.p4"))
+}
+
+fn pasta_config_usuario() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if let Ok(ap) = std::env::var("APPDATA") {
+            if !ap.trim().is_empty() {
+                return Some(PathBuf::from(ap).join("Rustinho"));
+            }
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            if !xdg.trim().is_empty() {
+                return Some(PathBuf::from(xdg).join("rustinho"));
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.trim().is_empty() {
+                return Some(PathBuf::from(home).join(".config").join("rustinho"));
+            }
+        }
+        None
+    }
+}
+
+fn usar_so_arquivo_reserva() -> bool {
+    cfg!(test) || std::env::var("RUSTINHO_COFRE_TESTE").ok().as_deref() == Some("arquivo")
+}
+
+fn conta_cofre(caminho: &Path) -> String {
+    let mut h = Sha256::new();
+    h.update(b"rustinho/p4/cofre-conta\0");
+    h.update(caminho.to_string_lossy().as_bytes());
+    let d: [u8; 32] = h.finalize().into();
+    format!("caixa-{}", hex(&d[..12]))
+}
+
+fn caminho_reserva(caminho_id: &Path) -> PathBuf {
+    let mut os = caminho_id.as_os_str().to_os_string();
+    os.push(".segredo");
+    PathBuf::from(os)
+}
+
+#[cfg(windows)]
+fn caminho_dpapi(caminho_id: &Path) -> PathBuf {
+    let mut os = caminho_id.as_os_str().to_os_string();
+    os.push(".dpapi");
+    PathBuf::from(os)
+}
+
+/// Carrega a identidade deste caixa ou gera e sela uma nova na primeira abertura.
+/// Nunca substitui uma identidade já gravada.
+pub fn carregar_ou_criar(pasta_banco: &Path, eh_portatil: bool) -> Resultado<IdentidadeLocal> {
+    let caminho = caminho_identidade(pasta_banco, eh_portatil);
+    if caminho.exists() {
+        let (senha, cofre_sistema) = carregar_segredo(&caminho)?;
+        let senha_str = std::str::from_utf8(&senha.0)
+            .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
+        let identidade = Identidade::abrir_de(&caminho, senha_str)?;
+        return Ok(IdentidadeLocal { identidade, cofre_sistema, caminho });
+    }
+    let identidade = Identidade::gerar()?;
+    let mut bruto: [u8; 32] = aleatorio()?;
+    let senha = Segredo(hex(&bruto).into_bytes());
+    apagar(&mut bruto);
+    let senha_str = std::str::from_utf8(&senha.0).map_err(|_| Erro::Interno("segredo aleatório não UTF-8".into()))?;
+    let cofre_sistema = guardar_segredo(&caminho, senha_str)?;
+    identidade.guardar_em(&caminho, senha_str)?;
+    Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
+}
+
+/// Carrega apenas se já existir identidade neste caminho.
+pub fn carregar_existente(pasta_banco: &Path, eh_portatil: bool) -> Resultado<Option<IdentidadeLocal>> {
+    let caminho = caminho_identidade(pasta_banco, eh_portatil);
+    if !caminho.exists() {
+        return Ok(None);
+    }
+    let (senha, cofre_sistema) = carregar_segredo(&caminho)?;
+    let senha_str = std::str::from_utf8(&senha.0)
+        .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
+    let identidade = Identidade::abrir_de(&caminho, senha_str)?;
+    Ok(Some(IdentidadeLocal { identidade, cofre_sistema, caminho }))
+}
+
+fn guardar_segredo(caminho_id: &Path, senha: &str) -> Resultado<bool> {
+    if !usar_so_arquivo_reserva() {
+        #[cfg(target_os = "linux")]
+        if secret_tool_guardar(&conta_cofre(caminho_id), senha) {
+            return Ok(true);
+        }
+        #[cfg(windows)]
+        if dpapi_guardar(&caminho_dpapi(caminho_id), senha).is_ok() {
+            return Ok(true);
+        }
+    }
+    guardar_reserva_local(&caminho_reserva(caminho_id), caminho_id, senha)?;
+    Ok(false)
+}
+
+fn carregar_segredo(caminho_id: &Path) -> Resultado<(Segredo, bool)> {
+    if !usar_so_arquivo_reserva() {
+        #[cfg(target_os = "linux")]
+        if let Some(s) = secret_tool_ler(&conta_cofre(caminho_id)) {
+            return Ok((s, true));
+        }
+        #[cfg(windows)]
+        {
+            let dp = caminho_dpapi(caminho_id);
+            if dp.exists() {
+                if let Ok(s) = dpapi_ler(&dp) {
+                    return Ok((s, true));
+                }
+            }
+        }
+    }
+    let r = caminho_reserva(caminho_id);
+    if r.exists() {
+        let s = ler_reserva_local(&r, caminho_id)?;
+        return Ok((s, false));
+    }
+    Err(Erro::validacao("Não foi possível abrir o cofre de senhas deste computador para ler a identidade do caixa."))
+}
+
+#[cfg(target_os = "linux")]
+fn esperar_com_prazo(filho: &mut std::process::Child, prazo: std::time::Duration) -> Option<std::process::ExitStatus> {
+    let fim = std::time::Instant::now() + prazo;
+    loop {
+        match filho.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if std::time::Instant::now() < fim => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => {
+                let _ = filho.kill();
+                let _ = filho.wait();
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn dbus_sessao_disponivel() -> bool {
+    std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some_and(|v| !v.is_empty())
+}
+
+#[cfg(target_os = "linux")]
+fn secret_tool_guardar(conta: &str, segredo: &str) -> bool {
+    use std::process::{Command, Stdio};
+    if !dbus_sessao_disponivel() {
+        return false;
+    }
+    let Ok(mut filho) = Command::new("secret-tool")
+        .args(["store", "--label", "Rustinho (identidade do caixa)", "service", "rustinho-p4", "account", conta])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = filho.stdin.take() {
+        if stdin.write_all(segredo.as_bytes()).is_err() {
+            let _ = filho.kill();
+            let _ = filho.wait();
+            return false;
+        }
+    }
+    esperar_com_prazo(&mut filho, std::time::Duration::from_secs(3)).is_some_and(|s| s.success())
+}
+
+#[cfg(target_os = "linux")]
+fn secret_tool_ler(conta: &str) -> Option<Segredo> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    if !dbus_sessao_disponivel() {
+        return None;
+    }
+    let mut filho = Command::new("secret-tool")
+        .args(["lookup", "service", "rustinho-p4", "account", conta])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let status = esperar_com_prazo(&mut filho, std::time::Duration::from_secs(3))?;
+    if !status.success() {
+        return None;
+    }
+    let mut saida = Vec::new();
+    if let Some(mut stdout) = filho.stdout.take() {
+        if stdout.read_to_end(&mut saida).is_err() {
+            apagar(&mut saida);
+            return None;
+        }
+    }
+    while saida.last().is_some_and(|b| b.is_ascii_whitespace()) {
+        saida.pop();
+    }
+    let inicio = saida.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(saida.len());
+    let limpo = saida[inicio..].to_vec();
+    apagar(&mut saida);
+    if limpo.is_empty() || std::str::from_utf8(&limpo).is_err() {
+        let mut lixo = limpo;
+        apagar(&mut lixo);
+        None
+    } else {
+        Some(Segredo(limpo))
+    }
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use super::*;
+    use std::ptr;
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        fn CryptProtectData(
+            p_data_in: *const DataBlob,
+            sz_data_descr: *const u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut core::ffi::c_void,
+            p_prompt_struct: *mut core::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut core::ffi::c_void,
+            p_prompt_struct: *mut core::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LocalFree(h_mem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
+
+    pub fn proteger(claro: &[u8]) -> Resultado<Vec<u8>> {
+        let mut copia = claro.to_vec();
+        let cb_data =
+            u32::try_from(copia.len()).map_err(|_| Erro::Interno("segredo grande demais para DPAPI".into()))?;
+        let entrada = DataBlob { cb_data, pb_data: copia.as_mut_ptr() };
+        let mut saida = DataBlob { cb_data: 0, pb_data: ptr::null_mut() };
+        let ok = unsafe {
+            CryptProtectData(
+                &entrada,
+                ptr::null(),
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut saida,
+            )
+        };
+        apagar(&mut copia);
+        if ok == 0 || saida.pb_data.is_null() {
+            return Err(Erro::Interno("DPAPI não conseguiu proteger a identidade do caixa".into()));
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(saida.pb_data, saida.cb_data as usize) }.to_vec();
+        unsafe {
+            LocalFree(saida.pb_data as *mut core::ffi::c_void);
+        }
+        Ok(bytes)
+    }
+
+    pub fn desproteger(cifrado: &[u8]) -> Resultado<Segredo> {
+        let mut copia = cifrado.to_vec();
+        let cb_data = u32::try_from(copia.len())
+            .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
+        let entrada = DataBlob { cb_data, pb_data: copia.as_mut_ptr() };
+        let mut saida = DataBlob { cb_data: 0, pb_data: ptr::null_mut() };
+        let ok = unsafe {
+            CryptUnprotectData(
+                &entrada,
+                ptr::null_mut(),
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut saida,
+            )
+        };
+        if ok == 0 || saida.pb_data.is_null() {
+            return Err(Erro::validacao("DPAPI não conseguiu ler a identidade protegida deste caixa."));
+        }
+        let slice = unsafe { std::slice::from_raw_parts_mut(saida.pb_data, saida.cb_data as usize) };
+        let bytes = slice.to_vec();
+        apagar(slice);
+        unsafe {
+            LocalFree(saida.pb_data as *mut core::ffi::c_void);
+        }
+        Ok(Segredo(bytes))
+    }
+}
+
+#[cfg(windows)]
+fn dpapi_guardar(caminho: &Path, segredo: &str) -> Resultado<()> {
+    let protegido = dpapi::proteger(segredo.as_bytes())?;
+    gravar_restrito(caminho, &protegido)
+}
+
+#[cfg(windows)]
+fn dpapi_ler(caminho: &Path) -> Resultado<Segredo> {
+    let bytes = std::fs::read(caminho)
+        .map_err(|e| Erro::Interno(format!("não foi possível ler o segredo DPAPI ({:?})", e.kind())))?;
+    let claro = dpapi::desproteger(&bytes)?;
+    if std::str::from_utf8(&claro.0).is_err() {
+        return Err(Erro::validacao("O segredo protegido da identidade está danificado."));
+    }
+    Ok(claro)
+}
+
+/// Reserva selada local (D4 fallback explícito quando o SO não tem cofre):
+/// nunca grava o segredo em claro; cifra com ChaCha20-Poly1305 sob chave
+/// vinculada ao caminho do arquivo + contexto local e permissão 0600.
+fn chave_reserva_local(caminho_id: &Path) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"rustinho/p4/reserva-local/v1\0");
+    h.update(caminho_id.to_string_lossy().as_bytes());
+    if let Ok(mid) = std::fs::read_to_string("/etc/machine-id") {
+        h.update(mid.trim().as_bytes());
+    }
+    h.finalize().into()
+}
+
+const MAGICA_RESERVA: &[u8; 4] = b"RSR1";
+
+fn guardar_reserva_local(caminho: &Path, caminho_id: &Path, segredo: &str) -> Resultado<()> {
+    let mut chave = chave_reserva_local(caminho_id);
+    let nonce: [u8; 12] = aleatorio()?;
+    let mut cabecalho = Vec::with_capacity(16);
+    cabecalho.extend_from_slice(MAGICA_RESERVA);
+    cabecalho.extend_from_slice(&nonce);
+    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave reserva inválida".into()))?;
+    apagar(&mut chave);
+    let corpo = cifra
+        .encrypt(&nonce.into(), Payload { msg: segredo.as_bytes(), aad: &cabecalho })
+        .map_err(|_| Erro::Interno("falha ao selar reserva local da identidade".into()))?;
+    let mut tudo = cabecalho;
+    tudo.extend_from_slice(&corpo);
+    gravar_restrito(caminho, &tudo)
+}
+
+fn ler_reserva_local(caminho: &Path, caminho_id: &Path) -> Resultado<Segredo> {
+    let bytes = std::fs::read(caminho)
+        .map_err(|e| Erro::Interno(format!("não foi possível ler reserva da identidade ({:?})", e.kind())))?;
+    if bytes.len() < 16 + 16 || bytes[..4] != MAGICA_RESERVA[..] {
+        return Err(Erro::validacao("Arquivo de reserva da identidade inválido."));
+    }
+    let (cabecalho, corpo) = bytes.split_at(16);
+    let mut nonce = [0u8; 12];
+    nonce.copy_from_slice(&cabecalho[4..16]);
+    let mut chave = chave_reserva_local(caminho_id);
+    let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave reserva inválida".into()))?;
+    apagar(&mut chave);
+    let claro =
+        Segredo(cifra.decrypt(&nonce.into(), Payload { msg: corpo, aad: cabecalho }).map_err(|_| {
+            Erro::validacao("A reserva da identidade não pertence a este computador ou foi danificada.")
+        })?);
+    if std::str::from_utf8(&claro.0).is_err() {
+        return Err(Erro::validacao("A reserva da identidade está danificada."));
+    }
+    Ok(claro)
+}
+
+fn gravar_restrito(caminho: &Path, bytes: &[u8]) -> Resultado<()> {
+    let falha = |e: std::io::Error| {
+        Erro::Interno(format!("não foi possível guardar o cofre local da identidade ({:?})", e.kind()))
+    };
+    let pasta = caminho.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(pasta).map_err(falha)?;
+    let nome = caminho.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let temporario = pasta.join(format!(".{nome}.novo-{}", crate::tempo::novo_id()));
+    let mut opcoes = std::fs::OpenOptions::new();
+    opcoes.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opcoes.mode(0o600);
+    }
+    let gravou = opcoes.open(&temporario).and_then(|mut f| {
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&temporario, caminho)
+    });
+    if let Err(e) = gravou {
+        let _ = std::fs::remove_file(&temporario);
+        return Err(falha(e));
+    }
+    crate::arquivos::so_do_usuario(caminho, "cofre local da identidade");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Inicialização de raiz e persistência de metadados públicos locais.
+// ---------------------------------------------------------------------------
+
+/// Garante que a chave pública local esteja anotada em `config` (nunca a privada)
+/// e, se este caixa for loja nova ou o distribuidor de faixas de uma loja já
+/// existente sem raiz em `caixa_aprovado`, registra-o como raiz da loja.
+pub fn garantir_raiz_se_aplicavel(
+    conn: &Connection,
+    id: &Identidade,
+    cofre_sistema: bool,
+    loja_id: &str,
+    nome_caixa: &str,
+    gerente: &str,
+    eh_distribuidor: bool,
+) -> Resultado<Option<Chave>> {
+    crate::config::gravar(conn, "p4_chave_publica", &hex(&id.publica()))?;
+    crate::config::gravar(conn, "p4_cofre_sistema", if cofre_sistema { "1" } else { "0" })?;
+    if loja_id.trim().is_empty() {
+        return Ok(None);
+    }
+    if let Some(raiz) = aprovados::raiz_registrada(conn, loja_id)? {
+        crate::config::gravar(conn, "p4_raiz", &hex(&raiz))?;
+        return Ok(Some(raiz));
+    }
+    if eh_distribuidor && !gerente.trim().is_empty() {
+        let nome = if nome_caixa.trim().is_empty() { "Caixa 1" } else { nome_caixa.trim() };
+        aprovados::registrar_raiz(conn, id, loja_id, nome, gerente)?;
+        crate::config::gravar(conn, "p4_raiz", &hex(&id.publica()))?;
+        return Ok(Some(id.publica()));
+    }
+    Ok(None)
+}
+
+/// Lê a raiz fixada em `config` (`p4_raiz`) ou diretamente em `caixa_aprovado`.
+pub fn raiz_atual(conn: &Connection, loja_id: &str) -> Resultado<Option<Chave>> {
+    if let Some(raiz_reg) = aprovados::raiz_registrada(conn, loja_id)? {
+        return Ok(Some(raiz_reg));
+    }
+    if let Some(txt) = crate::config::ler(conn, "p4_raiz")? {
+        if let Some(c) = super::de_hex::<32>(&txt) {
+            return Ok(Some(c));
+        }
+    }
+    Ok(None)
+}
+
+// ---------------------------------------------------------------------------
+// Convites de uso único (A6: 128 bits, 26 caracteres Base32, validade 10 min).
+// ---------------------------------------------------------------------------
+
+/// Convite recém-gerado para o gerente repassar ao caixa novo (texto ou QR).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConviteGerado {
+    pub id: String,
+    /// Código formatado em grupos (26 caracteres úteis Base32, 128 bits).
+    pub segredo: String,
+    /// Código de pedido de 12 chars conferido pelo gerente (ex.: `4F2K-9QXA-7MPC`).
+    pub codigo_pedido: String,
+    pub nome_caixa: String,
+    pub expira_em: String,
+    /// Texto compacto para QR code (`RUST4|segredo|loja_id|aprovador_hex|endereco`).
+    pub payload_qr: String,
+}
+
+/// Resumo de convite ativo (nunca expõe o segredo após expirar/consumir).
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConviteAtivo {
+    pub id: String,
+    pub segredo: String,
+    pub codigo_pedido: String,
+    pub nome_caixa: String,
+    pub gerente: String,
+    pub criado_em: String,
+    pub expira_em: String,
+}
+
+/// Codifica 16 bytes (128 bits) em 26 caracteres Base32 sem ambiguidade,
+/// agrupados em blocos de 5 para digitação confortável (`XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X`).
+pub fn formatar_segredo_convite(bytes: &[u8; 16]) -> String {
+    let mut bits: u128 = u128::from_be_bytes(*bytes);
+    let mut chars = ['A'; 26];
+    // 26 × 5 = 130 bits (2 bits extras zero no topo).
+    for i in (0..26).rev() {
+        chars[i] = ALFABETO_CONVITE[(bits & 0x1F) as usize] as char;
+        bits >>= 5;
+    }
+    let mut saida = String::with_capacity(31);
+    for (i, ch) in chars.iter().enumerate() {
+        if i > 0 && i % 5 == 0 {
+            saida.push('-');
+        }
+        saida.push(*ch);
+    }
+    saida
+}
+
+/// Normaliza o convite digitado pelo usuário (maiúsculas, sem traços/espaços).
+pub fn normalizar_segredo(texto: &str) -> String {
+    texto.chars().filter(|c| !c.is_whitespace() && *c != '-').flat_map(|c| c.to_uppercase()).collect()
+}
+
+/// Normaliza o código de pedido (12 chars, maiúsculas, formato `XXXX-XXXX-XXXX`).
+pub fn normalizar_codigo_pedido(texto: &str) -> String {
+    let limpo: String =
+        texto.chars().filter(|c| !c.is_whitespace() && *c != '-').flat_map(|c| c.to_uppercase()).collect();
+    if limpo.len() == 12 {
+        format!("{}-{}-{}", &limpo[0..4], &limpo[4..8], &limpo[8..12])
+    } else {
+        limpo
+    }
+}
+
+pub fn hash_segredo(segredo_normalizado: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(b"rustinho/p4/convite-hash\0");
+    h.update(segredo_normalizado.as_bytes());
+    let d: [u8; 32] = h.finalize().into();
+    hex(&d)
+}
+
+/// Expira convites vencidos apagando `segredo_ativo`.
+pub fn limpar_convites_expirados(conn: &Connection, agora_iso: &str) -> Resultado<()> {
+    conn.execute(
+        "UPDATE p4_convite SET segredo_ativo = NULL
+          WHERE segredo_ativo IS NOT NULL AND expira_em <= ?1",
+        [agora_iso],
+    )?;
+    Ok(())
+}
+
+/// Gera um convite de uso único (128 bits, validade 10 min) para aprovar um caixa novo.
+#[allow(clippy::too_many_arguments)]
+pub fn gerar_convite(
+    conn: &Connection,
+    aprovador: &Identidade,
+    raiz: &Chave,
+    loja_id: &str,
+    codigo_pedido: &str,
+    nome_caixa: &str,
+    gerente: &str,
+    endereco_dica: &str,
+) -> Resultado<ConviteGerado> {
+    if gerente.trim().is_empty() {
+        return Err(Erro::validacao("Só o gerente pode gerar convite para caixa novo."));
+    }
+    let nome = crate::texto::limpar(nome_caixa);
+    if nome.is_empty() {
+        return Err(Erro::campo("nome", "Dê um nome ao caixa novo."));
+    }
+    if nome.chars().count() > 30 {
+        return Err(Erro::campo("nome", "Use no máximo 30 caracteres para o nome do caixa."));
+    }
+    let cod = normalizar_codigo_pedido(codigo_pedido);
+    if cod.len() != 14 || !cod.chars().all(|c| c == '-' || ALFABETO_CONVITE.contains(&(c as u8))) {
+        return Err(Erro::campo(
+            "codigoPedido",
+            "Informe o código de 12 caracteres que aparece na tela do caixa novo (ex.: 4F2K-9QXA-7MPC).",
+        ));
+    }
+    if !aprovados::autorizada(conn, raiz, loja_id, &aprovador.publica())? {
+        return Err(Erro::validacao("Este caixa não está autorizado a aprovar outros caixas nesta loja."));
+    }
+    let agora_iso = crate::tempo::agora();
+    limpar_convites_expirados(conn, &agora_iso)?;
+    let expira_iso = crate::tempo::somar_segundos(&agora_iso, VALIDADE_CONVITE_SEG).unwrap_or_else(crate::tempo::agora);
+
+    let mut bruto: [u8; 16] = aleatorio()?;
+    let segredo = formatar_segredo_convite(&bruto);
+    apagar(&mut bruto);
+    let norm = normalizar_segredo(&segredo);
+    let shash = hash_segredo(&norm);
+    let id = crate::tempo::novo_id();
+    let disp = crate::config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+
+    conn.execute_batch("SAVEPOINT p4_convite_gerar")?;
+    let res = (|| -> Resultado<()> {
+        conn.execute(
+            "INSERT INTO p4_convite (id, segredo_hash, segredo_ativo, codigo_pedido, nome_caixa, gerente, criado_em, expira_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, shash, norm, cod, nome, gerente, agora_iso, expira_iso],
+        )?;
+        crate::auditoria::registrar(
+            conn,
+            &disp,
+            Some(gerente),
+            "p4_convite_gerado",
+            "caixa",
+            &id,
+            &[format!("Caixa: {nome}"), format!("Código do pedido: {cod}"), format!("Expira em: {expira_iso}")],
+        )?;
+        Ok(())
+    })();
+    match res {
+        Ok(()) => conn.execute_batch("RELEASE p4_convite_gerar")?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO p4_convite_gerar; RELEASE p4_convite_gerar");
+            return Err(e);
+        }
+    }
+
+    let payload_qr = format!("RUST4|{}|{}|{}|{}", segredo, loja_id, hex(&aprovador.publica()), endereco_dica.trim());
+    Ok(ConviteGerado { id, segredo, codigo_pedido: cod, nome_caixa: nome, expira_em: expira_iso, payload_qr })
+}
+
+/// Lista convites ainda ativos (não usados e dentro da validade de 10 min).
+pub fn listar_convites_ativos(conn: &Connection) -> Resultado<Vec<ConviteAtivo>> {
+    let agora_iso = crate::tempo::agora();
+    limpar_convites_expirados(conn, &agora_iso)?;
+    let mut c = conn.prepare(
+        "SELECT id, segredo_ativo, codigo_pedido, nome_caixa, gerente, criado_em, expira_em
+           FROM p4_convite
+          WHERE usado_em IS NULL AND segredo_ativo IS NOT NULL AND expira_em > ?1
+          ORDER BY criado_em DESC",
+    )?;
+    let linhas = c
+        .query_map([&agora_iso], |l| {
+            let norm: String = l.get(1)?;
+            let mut formatado = String::with_capacity(31);
+            for (i, ch) in norm.chars().enumerate() {
+                if i > 0 && i % 5 == 0 {
+                    formatado.push('-');
+                }
+                formatado.push(ch);
+            }
+            Ok(ConviteAtivo {
+                id: l.get(0)?,
+                segredo: formatado,
+                codigo_pedido: l.get(2)?,
+                nome_caixa: l.get(3)?,
+                gerente: l.get(4)?,
+                criado_em: l.get(5)?,
+                expira_em: l.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(linhas)
+}
+
+/// Cancela um convite ativo antes de ser usado, zerando `segredo_ativo`.
+pub fn cancelar_convite(conn: &Connection, id: &str, gerente: &str) -> Resultado<()> {
+    if gerente.trim().is_empty() {
+        return Err(Erro::validacao("Só o gerente pode cancelar convite."));
+    }
+    let agora = crate::tempo::agora();
+    let n = conn.execute(
+        "UPDATE p4_convite SET segredo_ativo = NULL, usado_em = ?2
+          WHERE id = ?1 AND usado_em IS NULL",
+        params![id, agora],
+    )?;
+    if n == 0 {
+        return Err(Erro::NaoEncontrado("Convite".into()));
+    }
+    let disp = crate::config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    crate::auditoria::registrar(conn, &disp, Some(gerente), "p4_convite_cancelado", "caixa", id, &[])?;
+    Ok(())
+}
+
+/// Registro interno de um convite candidato (para verificação de *channel binding* no canal TLS).
+#[derive(Clone, Debug)]
+pub struct ConviteCandidato {
+    pub id: String,
+    pub segredo_normalizado: Option<String>,
+    pub segredo_hash: String,
+    pub codigo_pedido: String,
+    pub nome_caixa: String,
+    pub gerente: String,
+    pub expira_em: String,
+    pub usado_em: Option<String>,
+    pub chave_aprovada: Option<String>,
+}
+
+/// Busca convites não expirados (ativos ou recentemente consumidos pela mesma chave para idempotência).
+pub fn convites_validos_agora(conn: &Connection, agora_iso: &str) -> Resultado<Vec<ConviteCandidato>> {
+    limpar_convites_expirados(conn, agora_iso)?;
+    let mut c = conn.prepare(
+        "SELECT id, segredo_ativo, segredo_hash, codigo_pedido, nome_caixa, gerente, expira_em, usado_em, chave_aprovada
+           FROM p4_convite
+          WHERE expira_em > ?1",
+    )?;
+    let linhas = c
+        .query_map([agora_iso], |l| {
+            Ok(ConviteCandidato {
+                id: l.get(0)?,
+                segredo_normalizado: l.get(1)?,
+                segredo_hash: l.get(2)?,
+                codigo_pedido: l.get(3)?,
+                nome_caixa: l.get(4)?,
+                gerente: l.get(5)?,
+                expira_em: l.get(6)?,
+                usado_em: l.get(7)?,
+                chave_aprovada: l.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(linhas)
+}
+
+/// Consome atomicamente o convite `convite_id` e aprova o `pedido` do caixa novo.
+///
+/// Regras de segurança e idempotência (docs/PROPOSTA-D1-R01-protocolo-4.md §3.3):
+/// - Recusa se o convite não existe ou expirou.
+/// - Recusa se o `codigo_pedido` do convite não bate com `pedido.codigo()`.
+/// - Se já foi consumido pela **mesma** chave pública (`pedido.chave`) e ainda
+///   está dentro da validade, devolve a aprovação existente (idempotente em queda).
+/// - Se já foi consumido por **outra** chave (ou cancelado), recusa (uso único!).
+/// - Apaga `segredo_ativo = NULL` na mesma transação em que grava `caixa_aprovado`.
+pub fn consumir_convite_e_aprovar(
+    conn: &Connection,
+    aprovador: &Identidade,
+    raiz: &Chave,
+    loja_id: &str,
+    convite_id: &str,
+    pedido: &Pedido,
+    agora_iso: &str,
+) -> Resultado<Aprovacao> {
+    if !pedido.confere() {
+        return Err(Erro::validacao("O pedido do caixa novo não confere."));
+    }
+    struct LinhaConvite {
+        codigo_esperado: String,
+        nome_caixa: String,
+        gerente: String,
+        expira_em: String,
+        usado_em: Option<String>,
+        chave_aprovada: Option<String>,
+    }
+    let linha: Option<LinhaConvite> = conn
+        .query_row(
+            "SELECT codigo_pedido, nome_caixa, gerente, expira_em, usado_em, chave_aprovada
+               FROM p4_convite WHERE id = ?1",
+            [convite_id],
+            |l| {
+                Ok(LinhaConvite {
+                    codigo_esperado: l.get(0)?,
+                    nome_caixa: l.get(1)?,
+                    gerente: l.get(2)?,
+                    expira_em: l.get(3)?,
+                    usado_em: l.get(4)?,
+                    chave_aprovada: l.get(5)?,
+                })
+            },
+        )
+        .optional()?;
+    let Some(LinhaConvite { codigo_esperado, nome_caixa, gerente, expira_em, usado_em, chave_aprovada }) = linha else {
+        return Err(Erro::validacao("Convite inválido ou não encontrado."));
+    };
+    if expira_em.as_str() <= agora_iso {
+        let _ = conn.execute("UPDATE p4_convite SET segredo_ativo = NULL WHERE id = ?1", [convite_id]);
+        return Err(Erro::validacao("Este convite venceu. Peça ao gerente para gerar um novo convite."));
+    }
+    if pedido.codigo() != codigo_esperado {
+        return Err(Erro::validacao("O código deste caixa não confere com o código que o gerente aprovou no convite."));
+    }
+    let chave_hex = hex(&pedido.chave);
+    if usado_em.is_some() {
+        if chave_aprovada.as_deref() == Some(chave_hex.as_str()) {
+            // Queda de rede logo após aprovar: devolve a aprovação existente sem duplicar.
+            let linhas = aprovados::linhas(conn, loja_id)?;
+            if let Some(a) =
+                linhas.aprovacoes.into_iter().find(|a| a.chave == pedido.chave && a.aprovador == aprovador.publica())
+            {
+                return Ok(a);
+            }
+        }
+        return Err(Erro::validacao("Este convite já foi usado ou cancelado. Peça um novo convite ao gerente."));
+    }
+
+    conn.execute_batch("SAVEPOINT p4_consumir_convite")?;
+    let res = (|| -> Resultado<Aprovacao> {
+        let aprovacao = aprovados::aprovar(conn, aprovador, raiz, loja_id, pedido, &nome_caixa, &gerente)?;
+        let atualizados = conn.execute(
+            "UPDATE p4_convite
+                SET usado_em = ?2, chave_aprovada = ?3, segredo_ativo = NULL
+              WHERE id = ?1 AND usado_em IS NULL",
+            params![convite_id, agora_iso, chave_hex],
+        )?;
+        if atualizados != 1 {
+            return Err(Erro::validacao("Este convite já foi usado."));
+        }
+        Ok(aprovacao)
+    })();
+    match res {
+        Ok(a) => {
+            conn.execute_batch("RELEASE p4_consumir_convite")?;
+            Ok(a)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO p4_consumir_convite; RELEASE p4_consumir_convite");
+            Err(e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::banco::Banco;
+
+    const LOJA: &str = "loja-teste-cofre";
+
+    fn pasta_temp(nome: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("rustinho-p4-cofre-{nome}-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    #[test]
+    fn identidade_cria_reabre_e_copia_do_banco_nao_leva_a_chave() {
+        let p1 = pasta_temp("pc1");
+        let p2 = pasta_temp("pc2");
+        let id1 = carregar_ou_criar(&p1, false).unwrap();
+        assert!(!id1.caminho.starts_with(&p1), "identidade normal fica fora da pasta do banco");
+        let id1_re = carregar_ou_criar(&p1, false).unwrap();
+        assert_eq!(id1.identidade.publica(), id1_re.identidade.publica(), "reabre a mesma identidade");
+        // Outro caminho de banco (simula banco copiado para outra pasta/PC): recebe outra identidade!
+        let id2 = carregar_ou_criar(&p2, false).unwrap();
+        assert_ne!(id1.identidade.publica(), id2.identidade.publica());
+        // Nenhuma chave privada aparece em claro nos arquivos gravados.
+        let (priv_ed, priv_x) = id1.identidade.privadas_para_teste();
+        let bytes_id = std::fs::read(&id1.caminho).unwrap();
+        assert!(!bytes_id.windows(priv_ed.len()).any(|w| w == priv_ed.as_slice()));
+        assert!(!bytes_id.windows(priv_x.len()).any(|w| w == priv_x.as_slice()));
+        let _ = std::fs::remove_file(&id1.caminho);
+        let _ = std::fs::remove_file(caminho_reserva(&id1.caminho));
+        let _ = std::fs::remove_file(&id2.caminho);
+        let _ = std::fs::remove_file(caminho_reserva(&id2.caminho));
+        let _ = std::fs::remove_dir_all(&p1);
+        let _ = std::fs::remove_dir_all(&p2);
+    }
+
+    #[test]
+    fn modo_portatil_guarda_identidade_na_pasta_do_portatil() {
+        let p = pasta_temp("portatil");
+        let id = carregar_ou_criar(&p, true).unwrap();
+        assert_eq!(id.caminho, p.join("identidade.p4"));
+        let id2 = carregar_ou_criar(&p, true).unwrap();
+        assert_eq!(id.identidade.publica(), id2.identidade.publica());
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn convite_128_bits_uso_unico_expiracao_e_idempotencia_em_queda() {
+        let (b, gerente) = crate::faixas::para_testes::loja("Caixa 1");
+        let raiz = Identidade::gerar().unwrap();
+        garantir_raiz_se_aplicavel(&b.conn, &raiz, false, LOJA, "Caixa 1", &gerente, true).unwrap();
+        assert_eq!(raiz_atual(&b.conn, LOJA).unwrap(), Some(raiz.publica()));
+
+        let novo = Identidade::gerar().unwrap();
+        let pedido_novo = Pedido::com_dispositivo(&novo, "disp-caixa-2");
+        let conv = gerar_convite(
+            &b.conn,
+            &raiz,
+            &raiz.publica(),
+            LOJA,
+            &pedido_novo.codigo(),
+            "Caixa 2",
+            &gerente,
+            "192.168.0.10:47810",
+        )
+        .unwrap();
+        assert_eq!(normalizar_segredo(&conv.segredo).len(), 26, "128 bits em 26 chars Base32");
+        assert!(conv.payload_qr.starts_with("RUST4|"));
+        assert_eq!(listar_convites_ativos(&b.conn).unwrap().len(), 1);
+
+        // Outro caixa (código de pedido diferente) é recusado com o mesmo convite.
+        let intruso = Identidade::gerar().unwrap();
+        let pedido_intruso = Pedido::com_dispositivo(&intruso, "disp-intruso");
+        let agora = crate::tempo::agora();
+        assert!(consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido_intruso, &agora)
+            .is_err());
+        // O caixa certo consome o convite com sucesso e apaga segredo_ativo.
+        let a1 =
+            consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido_novo, &agora).unwrap();
+        assert_eq!(a1.chave, novo.publica());
+        assert_eq!(a1.dispositivo, "disp-caixa-2");
+        let seg_ativo: Option<String> =
+            b.conn.query_row("SELECT segredo_ativo FROM p4_convite WHERE id = ?1", [&conv.id], |l| l.get(0)).unwrap();
+        assert!(seg_ativo.is_none(), "segredo em claro limpo após consumo");
+        assert!(listar_convites_ativos(&b.conn).unwrap().is_empty());
+
+        // Queda no meio da confirmação: mesmo caixa repetindo o mesmo convite antes de expirar é idempotente.
+        let a2 =
+            consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido_novo, &agora).unwrap();
+        assert_eq!(a1, a2);
+
+        // Convite expirado é recusado.
+        let novo3 = Identidade::gerar().unwrap();
+        let p3 = Pedido::com_dispositivo(&novo3, "disp-3");
+        let c3 = gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &p3.codigo(), "Caixa 3", &gerente, "").unwrap();
+        let futuro = crate::tempo::somar_segundos(&agora, VALIDADE_CONVITE_SEG + 5).unwrap();
+        assert!(
+            consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &c3.id, &p3, &futuro).is_err(),
+            "convite vencido tem de ser recusado"
+        );
+
+        // Cancelamento limpa segredo_ativo e impede uso.
+        let c4 = gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &p3.codigo(), "Caixa 4", &gerente, "").unwrap();
+        cancelar_convite(&b.conn, &c4.id, &gerente).unwrap();
+        assert!(consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &c4.id, &p3, &agora).is_err());
+
+        // Garante que nenhuma tabela de convite vai para `alteracao` (estritamente local).
+        let alt: i64 =
+            b.conn.query_row("SELECT COUNT(*) FROM alteracao WHERE tabela = 'p4_convite'", [], |l| l.get(0)).unwrap();
+        assert_eq!(alt, 0);
+        // Garante que um banco antigo (migrado até 28) atualiza para 29 sem erro.
+        let _ = Banco::em_memoria().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dpapi_protege_e_desprotege_ida_e_volta() {
+        let segredo = "segredo-dpapi-teste-0919-dev2";
+        let protegido = dpapi::proteger(segredo.as_bytes()).unwrap();
+        assert_ne!(protegido, segredo.as_bytes());
+        let aberto = dpapi::desproteger(&protegido).unwrap();
+        assert_eq!(aberto.0, segredo.as_bytes());
+    }
+}

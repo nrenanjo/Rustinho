@@ -264,7 +264,7 @@ fn entrada_rascunho() -> oficina::Entrada {
 fn rascunho_salva_reabre_e_vira_orcamento_sem_duplicar() {
     let b = Banco::em_memoria().unwrap();
     let (c, d) = (&b.conn, b.dispositivo.as_str());
-    let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+    let u = usuarios::criar(c, d, "Maria", "12345678", true).unwrap().id;
     // Rascunho sem cliente nem carro também vale.
     let vazio = oficina::Entrada::default();
     let r0 = oficina::salvar_rascunho(c, d, &u, &vazio).unwrap();
@@ -319,7 +319,7 @@ fn chave_da_operacao_recusa_o_clique_repetido() {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let mut e = serde_json::to_value(json!({
         "clienteNome": "Carlos", "placa": "ABC1D23",
@@ -371,7 +371,7 @@ fn confirmar(b: &Banco, dispositivo: &str, dias_atras: i64) {
 fn prazo_de_sete_dias_e_caixa_antigo_bloqueiam_rascunho_novo() {
     let b = Banco::em_memoria().unwrap();
     let (c, d) = (&b.conn, b.dispositivo.as_str());
-    let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+    let u = usuarios::criar(c, d, "Maria", "12345678", true).unwrap().id;
     assert!(sync::bloqueios_de_rascunho(c).unwrap().is_empty(), "sozinho, pode");
     com_par(&b, "caixa-2", "Caixa 2");
     // Nunca confirmou: bloqueia.
@@ -415,7 +415,7 @@ fn prazo_de_sete_dias_e_caixa_antigo_bloqueiam_rascunho_novo() {
 fn caixa_que_so_aparece_no_log_bloqueia_ate_ser_retirado() {
     let b = Banco::em_memoria().unwrap();
     let c = &b.conn;
-    let u = usuarios::criar(c, &b.dispositivo, "Maria", "1234", true).unwrap();
+    let u = usuarios::criar(c, &b.dispositivo, "Maria", "12345678", true).unwrap();
     c.execute(
         "INSERT INTO alteracao (id, tabela, chave, operacao, dados, dispositivo, quando) VALUES ('x1', 'pessoa', '[\"p\"]', 'apagar', NULL, 'caixa-velho', '2026-01-01')",
         [],
@@ -452,7 +452,7 @@ fn caixa_que_so_aparece_no_log_bloqueia_ate_ser_retirado() {
 fn log_com_rascunho() -> (Banco, Vec<Alteracao>) {
     let a = Banco::em_memoria().unwrap();
     let (c, d) = (&a.conn, a.dispositivo.as_str());
-    let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+    let u = usuarios::criar(c, d, "Maria", "12345678", true).unwrap().id;
     config::gravar(c, "loja_nome", "Loja").unwrap();
     oficina::salvar_rascunho(c, d, &u, &entrada_rascunho()).unwrap();
     config::gravar(c, "loja_telefone", "1199").unwrap();
@@ -699,7 +699,7 @@ fn erro_de_check_desfaz_o_lote_guarda_tudo_e_a_troca_continua() {
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM pessoa WHERE id IN ('p1', 'p3')"), 0);
     assert!(contar(&b.conn, "SELECT MIN(tentativas) FROM sync_pendencia WHERE estado = 'pendente'") >= 1);
     // O gerente arquiva a que não tem conserto: as outras entram na próxima tentativa.
-    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "12345678", true).unwrap();
     assert!(sync::arquivar_pendencia(&b.conn, "a2", "", &u.id).is_err(), "motivo obrigatório");
     sync::arquivar_pendencia(&b.conn, "a2", "OS estragada no outro caixa", &u.id).unwrap();
     let aplicadas = sync::reaplicar_pendencias(&mut b.conn).unwrap();
@@ -765,7 +765,7 @@ fn dados_estragados_e_tabela_desconhecida_viram_pendencia_e_d16_continua() {
     assert_eq!(config::ler(&b.conn, "sync_senha").unwrap(), None);
     assert_eq!(cursor_de(&b, "caixa-2"), 5);
     conferir_marca_dagua(&b, &lote, 5);
-    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "12345678", true).unwrap();
     assert!(sync::arquivar_pendencia(&b.conn, "b3", "não dá", &u.id).is_err(), "incompatibilidade não se arquiva");
     let lista = sync::pendencias_da_troca(&b.conn).unwrap();
     assert_eq!(lista.len(), 4);
@@ -778,7 +778,7 @@ fn dados_estragados_e_tabela_desconhecida_viram_pendencia_e_d16_continua() {
 #[test]
 fn operacao_comercial_e_a_transacao() {
     let mut b = Banco::em_memoria().unwrap();
-    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "12345678", true).unwrap();
     let tx = b.conn.transaction().unwrap();
     oficina::salvar_rascunho(&tx, "d", &u.id, &entrada_rascunho()).unwrap();
     tx.commit().unwrap();
@@ -834,7 +834,7 @@ fn juntar_a_loja_existente_nao_cria_gerente_local() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let e = chamar(&mut s, "estado", json!({}));
@@ -913,7 +913,7 @@ fn v03_pai_guardado_em_pendencia_nao_vira_inconsistente() {
     sync::registrar_referencias(&b.conn).unwrap();
     assert_eq!(estado_da_referencia(&b, "pessoa_veiculo").unwrap().0, "esperando");
     // O gerente arquiva a OS estragada; o pai entra; a referência some.
-    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+    let u = usuarios::criar(&b.conn, &b.dispositivo, "Maria", "12345678", true).unwrap();
     sync::arquivar_pendencia(&b.conn, "a2", "OS estragada", &u.id).unwrap();
     sync::reaplicar_pendencias(&mut b.conn).unwrap();
     sync::registrar_referencias(&b.conn).unwrap();
@@ -1131,8 +1131,8 @@ fn f06_backup_de_banco_integro_segue_a_retencao() {
 fn f02_os_numero_1_de_dois_caixas_mostra_o_caixa() {
     let mut a = Banco::em_memoria().unwrap();
     let b = Banco::em_memoria().unwrap();
-    let ua = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
-    let ub = usuarios::criar(&b.conn, &b.dispositivo, "Bob", "1234", true).unwrap().id;
+    let ua = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "12345678", true).unwrap().id;
+    let ub = usuarios::criar(&b.conn, &b.dispositivo, "Bob", "12345678", true).unwrap().id;
     config::gravar(&a.conn, "caixa_nome", "Caixa 1").unwrap();
     config::gravar(&b.conn, "caixa_nome", "Caixa 2").unwrap();
     let mut e = entrada_rascunho();

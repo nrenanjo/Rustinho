@@ -4,8 +4,9 @@
 //! com uma senha antiga continua funcionando, e nada aqui apaga, troca ou
 //! tranca nada.
 //!
-//! Decisão do dono da loja (0.9.13): a única exigência é o tamanho.
-//! - Operador, gerente e senha da rede: pelo menos 4 caracteres.
+//! Decisão do dono da loja (0.9.13) + DP-33 (0.9.19-dev.2): a única exigência é o tamanho.
+//! - Operador e senha da rede (convivência P3): pelo menos 4 caracteres.
+//! - Gerente (DP-33): pelo menos 8 caracteres (também protege os backups; frase longa recomendada).
 //! - Senha nova: no máximo 128 caracteres. O login e a conferência de senhas
 //!   antigas continuam aceitando até 256 (`MAXIMO`), para ninguém ficar de fora.
 //!   Conta caracteres, não bytes: acento não pesa dobrado.
@@ -22,7 +23,7 @@ pub const MAXIMO: usize = 256;
 /// Limite para senha nova.
 pub const MAXIMO_NOVA: usize = 128;
 pub const MINIMO_OPERADOR: usize = 4;
-pub const MINIMO_GERENTE: usize = 4;
+pub const MINIMO_GERENTE: usize = 8;
 
 /// Quem vai usar a senha e onde. Hoje só o papel (gerente) muda a mensagem;
 /// os nomes ficam para não mudar quem chama.
@@ -118,13 +119,15 @@ mod testes {
         avaliar(s, &Contexto { usuario, loja, caixa, gerente: false })
     }
 
-    /// S-01: limites de tamanho (operador 4, gerente 4, senha nova até 128; login aceita até 256).
+    /// S-01 / DP-33: limites de tamanho (operador 4, gerente 8, senha nova até 128; login aceita até 256).
     #[test]
     fn s01_tamanhos() {
         assert_eq!(op("caf"), Some(Problema::Curta));
-        assert_eq!(op("café"), None, "4 caracteres");
+        assert_eq!(op("café"), None, "4 caracteres para operador");
         assert_eq!(ger("caf"), Some(Problema::Curta), "3 caracteres");
-        assert_eq!(ger("café"), None, "4 caracteres, gerente igual ao operador");
+        assert_eq!(ger("café"), Some(Problema::Curta), "4 caracteres é curto para gerente (DP-33)");
+        assert_eq!(ger("1234567"), Some(Problema::Curta), "7 caracteres é curto para gerente (DP-33)");
+        assert_eq!(ger("café-ok!"), None, "8 caracteres para gerente");
         assert_eq!(op(""), Some(Problema::Curta));
         let max: String = (0..)
             .map(|i| format!("açúcar{i}-"))
@@ -143,28 +146,23 @@ mod testes {
     fn s02_unicode_e_espacos() {
         assert_eq!(op("áéíó"), None, "4 caracteres, 8 bytes");
         assert_eq!(op("áéí"), Some(Problema::Curta));
+        assert_eq!(ger("áéíóúãõ"), Some(Problema::Curta), "7 caracteres unicode");
+        assert_eq!(ger("áéíóúãõç"), None, "8 caracteres unicode");
         assert_eq!(op("pão de queijo 2026"), None);
         assert_eq!(op("    "), None, "4 espaços: só o tamanho conta");
+        assert_eq!(ger("        "), None, "8 espaços: só o tamanho conta");
         assert_eq!(op("日本語の"), None);
         assert_eq!(op("🙂🔑🙂🔒"), None);
     }
 
-    /// S-03: sem nenhuma outra restrição (decisão do dono da loja, 0.9.13).
+    /// S-03: sem nenhuma outra restrição além do tamanho mínimo de cada papel (0.9.13 + DP-33).
     #[test]
     fn s03_sem_restricoes_alem_do_tamanho() {
-        for s in [
-            "1234",
-            "0000",
-            "1111",
-            "abcd",
-            "senha",
-            "12345678",
-            "password",
-            "qwerty",
-            "abababab",
-            "rustinho",
-            "CAFECOMPAO",
-        ] {
+        for s in ["1234", "0000", "1111", "abcd", "senha", "qwerty"] {
+            assert_eq!(op(s), None, "operador {s}");
+            assert_eq!(ger(s), Some(Problema::Curta), "gerente exige 8: {s}");
+        }
+        for s in ["12345678", "password", "abababab", "rustinho", "CAFECOMPAO"] {
             assert_eq!(op(s), None, "{s}");
             assert_eq!(ger(s), None, "{s}");
         }
@@ -180,7 +178,7 @@ mod testes {
             assert!(!p.mensagem(false).is_empty() && !p.mensagem(true).is_empty() && !p.resumo().is_empty());
             assert_eq!(Problema::do_codigo(p.codigo()), Some(p));
         }
-        assert!(Problema::Curta.mensagem(true).contains('4'));
+        assert!(Problema::Curta.mensagem(true).contains('8'));
         assert!(Problema::Curta.mensagem(true).contains("backups"));
         assert!(Problema::Curta.mensagem(false).contains('4'));
         assert!(Problema::Comprida.mensagem(false).contains("128"));
@@ -188,6 +186,6 @@ mod testes {
             assert_eq!(Problema::do_codigo(antigo), None, "{antigo}");
         }
         assert_eq!(dica(false), "Pelo menos 4 caracteres");
-        assert_eq!(dica(true), "Pelo menos 4 caracteres");
+        assert_eq!(dica(true), "Pelo menos 8 caracteres");
     }
 }

@@ -34,7 +34,7 @@ entrar() {
         sleep 1
     done
     [ -n "$xy" ] && "$C" clique ${xy% *} ${xy#* }
-    "$C" texto "1234"
+    "$C" texto "12345678"
     "$C" tecla Return
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         "$C" textos | grep -q "Bom dia\|Boa tarde\|Boa noite" && return 0

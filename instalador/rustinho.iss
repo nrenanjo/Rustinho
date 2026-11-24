@@ -1,4 +1,4 @@
-﻿; Instalador do Rustinho para Windows 10 e 11 (64 bits), feito com Inno Setup 6.
+; Instalador do Rustinho para Windows 10 e 11 (64 bits), feito com Inno Setup 6.
 ; A montagem automática (GitHub Actions) passa a versão e a pasta com os
 ; arquivos: ISCC /DVersao=0.8.0 /DOrigem=..\dist rustinho.iss
 
@@ -58,10 +58,12 @@ Name: "{group}\Desinstalar o Rustinho"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Rustinho"; Filename: "{app}\rustinho.exe"; IconFilename: "{app}\rustinho.ico"; Tasks: atalho
 
 [Run]
-; Libera o Rustinho no firewall do Windows: os caixas da loja se acham e
-; trocam dados pelo Wi-Fi (portas 47810 e 47811).
+; DP-45 (0.9.19-dev.2): libera o Rustinho no firewall do Windows exclusivamente nas
+; portas da troca entre caixas (47810/TCP e 47811/UDP), removendo antes qualquer
+; regra antiga irrestrita com o mesmo nome.
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Rustinho"""; Flags: runhidden waituntilterminated
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Rustinho"" dir=in action=allow program=""{app}\rustinho.exe"" enable=yes profile=private,domain"; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Rustinho"" dir=in action=allow program=""{app}\rustinho.exe"" protocol=TCP localport=47810 enable=yes profile=private,domain"; Flags: runhidden waituntilterminated
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Rustinho"" dir=in action=allow program=""{app}\rustinho.exe"" protocol=UDP localport=47811 enable=yes profile=private,domain"; Flags: runhidden waituntilterminated
 Filename: "{app}\rustinho.exe"; Description: "Abrir o Rustinho agora"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

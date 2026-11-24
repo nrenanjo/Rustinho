@@ -65,7 +65,7 @@ fn loja_em_arquivo(pasta: &Path) -> Loja {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let mut f = ok(&mut s, "produto_novo", json!({}));
     f["nome"] = json!("Filtro");
@@ -134,7 +134,7 @@ fn a3_banco_com_defeito_entra_em_modo_seguro_e_nao_grava() {
     let e = ok(&mut s, "estado", json!({}));
     assert!(e["modoSeguro"].as_str().is_some_and(|t| !t.is_empty()), "o estado diz que é modo seguro: {e}");
     let bia = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-    ok(&mut s, "entrar", json!({ "id": bia, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": bia, "senha": "12345678" }));
     // Consultas continuam.
     ok(&mut s, "produtos_buscar", json!({ "texto": "filtro" }));
     ok(&mut s, "receber_painel", json!({ "texto": "" }));
@@ -309,13 +309,13 @@ fn a3_restaurar_backup_bom_tira_do_modo_seguro() {
     {
         let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
         let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-        ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
         // Como na tela: o gerente digita a senha dele para abrir o backup.
-        let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": bom, "nuvem": false, "senha": "1234" }));
+        let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": bom, "nuvem": false, "senha": "12345678" }));
         assert_eq!(r["reabrir"], true, "pede para fechar e abrir: {r}");
         // Até fechar e abrir, continua sem gravar.
         let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-        ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
         let r = chamar(&mut s, "caixa_movimentar", json!({ "tipo": "suprimento", "valor": "10", "motivo": "troco" }));
         assert_eq!(r["campo"], "modoSeguro", "{r}");
     }
@@ -330,7 +330,7 @@ fn a3_restaurar_backup_bom_tira_do_modo_seguro() {
     let e = ok(&mut s, "estado", json!({}));
     assert!(e["modoSeguro"].is_null(), "banco restaurado e conferido: fora do modo seguro: {e}");
     let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     ok(
         &mut s,
         "venda_concluir",
@@ -357,8 +357,8 @@ fn a3_restaurar_com_defeito_numa_pagina_de_dados() {
         let e = ok(&mut s, "estado", json!({}));
         assert!(!e["modoSeguro"].is_null(), "o banco devia abrir em modo seguro: {e}");
         let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-        ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
-        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": bom, "nuvem": false, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": bom, "nuvem": false, "senha": "12345678" }));
         assert_eq!(r["ok"], true, "a restauração do backup bom foi recusada: {r}");
         assert_eq!(r["dados"]["reabrir"], true, "pede para fechar e abrir: {r}");
     }
@@ -373,7 +373,7 @@ fn a3_restaurar_com_defeito_numa_pagina_de_dados() {
     let e = ok(&mut s, "estado", json!({}));
     assert!(e["modoSeguro"].is_null(), "banco restaurado e conferido: fora do modo seguro: {e}");
     let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     ok(
         &mut s,
         "venda_concluir",
@@ -449,7 +449,7 @@ fn a3_consulta_que_nao_le_devolve_erro_sem_derrubar() {
     }
     let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
     let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let r = chamar(&mut s, "auditoria_listar", json!({}));
     if r["ok"] == false {
         assert!(r["erro"].as_str().is_some_and(|t| !t.is_empty()), "erro com mensagem: {r}");
@@ -472,14 +472,14 @@ fn c8_backup_da_zip2_restaura_com_a_zip9() {
     let db = pasta.join("rustinho.db");
     let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
     let ana = s.banco_para_teste().conn.query_row("SELECT id FROM usuario", [], |l| l.get::<_, String>(0)).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
-    ok(&mut s, "backup_conferir", json!({ "arquivo": antigo, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
+    ok(&mut s, "backup_conferir", json!({ "arquivo": antigo, "senha": "12345678" }));
     // Uma peça nova depois do backup: restaurar a tira (volta ao backup).
     let mut f = ok(&mut s, "produto_novo", json!({}));
     f["nome"] = json!("Depois do backup");
     f["custo"] = json!("1");
     ok(&mut s, "produto_salvar", f);
-    let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": antigo, "nuvem": false, "senha": "1234" }));
+    let r = ok(&mut s, "backup_restaurar", json!({ "arquivo": antigo, "nuvem": false, "senha": "12345678" }));
     eprintln!("C8 restaurar backup da zip 2.4: {r}");
     drop(s);
     let s = crate::Servico::abrir_para_teste(&db, false).unwrap();

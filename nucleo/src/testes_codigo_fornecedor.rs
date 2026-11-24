@@ -38,7 +38,7 @@ fn loja(original: &str) -> Loja {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let mut f = ok(&mut s, "produto_novo", json!({}));
     f["nome"] = json!("Conector macho 12x08");
@@ -394,7 +394,7 @@ fn o_caixa_e_o_gerente_editam_o_codigo_do_fornecedor() {
     assert_eq!(Loja::na_ficha(&l.abrir(), &ricartti), vec![("25850 0".into(), "6".into())]);
 
     // O gerente também.
-    entrar(&mut l.s, "Ana", "1234");
+    entrar(&mut l.s, "Ana", "12345678");
     let ficha = l.abrir();
     let r = l.salvar(&ficha, &[(&patral, "00008374", "PT-0008375")]);
     assert_eq!(r["ok"], true, "o gerente grava o código do fornecedor: {r}");

@@ -65,7 +65,7 @@ fn loja(nome: &str) -> Loja {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     peca(&mut s, "Antes do backup");
     ok(&mut s, "sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja", "enderecos": "" }));
@@ -80,7 +80,7 @@ fn loja(nome: &str) -> Loja {
     drop(s);
     let feito = backup::fazer(&db, false).expect("backup");
     let mut s = crate::Servico::abrir_para_teste(&db, false).unwrap();
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     peca(&mut s, "Depois do backup");
     crate::config::gravar(&s.banco_para_teste().conn, "caixa_nome", "Caixa Nova").unwrap();
     drop(s);
@@ -128,9 +128,9 @@ fn restaurar_caindo(l: &Loja, etapa: &'static str) -> Value {
     let _vez = backup::testes::um_por_vez();
     let r = {
         let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
-        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
         queda_de_teste::ETAPA.with(|e| e.set(etapa));
-        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "12345678" }));
         queda_de_teste::ETAPA.with(|e| e.set(""));
         r
     };
@@ -146,8 +146,8 @@ fn m04_restaurar_registra_na_auditoria_uma_vez() {
     {
         let _vez = backup::testes::um_por_vez();
         let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
-        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
-        ok(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
+        ok(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "12345678" }));
     }
     assert!(!tem_peca(&l.db, "Depois do backup") && tem_peca(&l.db, "Antes do backup"));
     assert_eq!(restauracoes_na_auditoria(&l.db), 1);
@@ -234,16 +234,16 @@ fn estab_erro_depois_da_troca_nao_deixa_usar_o_banco_pela_metade() {
     {
         let _vez = backup::testes::um_por_vez();
         let mut s = crate::Servico::abrir_para_teste(&l.db, false).unwrap();
-        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        ok(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
         queda_de_teste::ETAPA.with(|e| e.set("falhar_ao_terminar"));
-        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "1234" }));
+        let r = chamar(&mut s, "backup_restaurar", json!({ "arquivo": l.backup, "nuvem": false, "senha": "12345678" }));
         queda_de_teste::ETAPA.with(|e| e.set(""));
         assert_eq!(r["ok"], false, "{r}");
         assert!(marca(&l).exists(), "a marca fica: a restauração termina ao abrir");
         // A troca de dados não abre o banco pela metade.
         assert!(crate::sync::abrir_conexao(&l.db).is_err(), "a troca de dados não pode usar o banco pela metade");
         // Nada é gravado até fechar e abrir (nem entrando de novo).
-        let _ = chamar(&mut s, "entrar", json!({ "id": l.ana, "senha": "1234" }));
+        let _ = chamar(&mut s, "entrar", json!({ "id": l.ana, "senha": "12345678" }));
         let r = chamar(&mut s, "caixa_abrir", json!({ "valor": "10" }));
         assert_eq!(r["ok"], false, "gravou no banco pela metade: {r}");
         // O backup ao fechar não copia o banco pela metade.
@@ -287,7 +287,7 @@ fn estab_baixar_do_drive_nao_para_a_troca_de_dados() {
     let db = l.db.clone();
     let tarefa = std::thread::spawn(move || {
         let mut b = crate::banco::Banco::abrir(&db).unwrap();
-        let r = backup::restaurar(&mut b.conn, Some(&db), &nome, true, "1234");
+        let r = backup::restaurar(&mut b.conn, Some(&db), &nome, true, "12345678");
         (r.map(|_| ()).map_err(|e| e.to_string()), queda_de_teste::PAUSADA_NA_TROCA.with(|p| p.get()))
     });
     let inicio = Instant::now();

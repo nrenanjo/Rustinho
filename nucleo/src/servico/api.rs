@@ -3955,12 +3955,12 @@ mod testes {
             .unwrap()
     }
 
-    /// F17-A1: a primeira configuração aplica a regra do gerente (4),
+    /// F17-A1 / DP-33: a primeira configuração aplica a regra do gerente (8 caracteres),
     /// sem criar nada quando recusa.
     #[test]
     fn f17_a1_primeira_configuracao() {
         let mut s = f17_novo_servico();
-        for (senha, parte) in [("123", "pelo menos 4"), ("caf", "pelo menos 4")] {
+        for (senha, parte) in [("123", "pelo menos 8"), ("1234", "pelo menos 8"), ("1234567", "pelo menos 8")] {
             let r = f17_inicio(&mut s, senha);
             assert_eq!(r["ok"], false, "{senha}: {r}");
             assert_eq!(r["campo"], "senha", "{senha}: {r}");
@@ -3968,11 +3968,11 @@ mod testes {
             assert_eq!(usuarios::quantidade(&s.banco.conn).unwrap(), 0, "recusada: nada foi criado");
             assert!(config::ler(&s.banco.conn, "loja_nome").unwrap().is_none(), "nem a loja");
         }
-        let r = f17_inicio(&mut s, "1234");
+        let r = f17_inicio(&mut s, "12345678");
         assert_eq!(r["ok"], true, "{r}");
     }
 
-    /// F17-A2: usuários — mínimo de 4 caracteres para todos (regra da 0.9.13), Unicode e espaços valem.
+    /// F17-A2 / DP-33: usuários — mínimo de 4 caracteres para operador e 8 para gerente, Unicode e espaços valem.
     #[test]
     fn f17_a2_usuario_salvar() {
         let mut s = conectado();
@@ -3984,26 +3984,29 @@ mod testes {
                     .to_string(),
             )
         };
-        for (senha, ok) in [("cur", false), ("pão de queijo", true)] {
+        for (senha, ok) in [("cur", false), ("café", true)] {
             let r = novo(&mut s, "Bia", senha, None);
             assert_eq!(r["ok"], ok, "{senha}: {r}");
             if !ok {
                 assert_eq!(r["campo"], "senha");
             }
         }
-        // Já criada com a boa; as seguintes testam o gerente.
-        let r = novo(&mut s, "Cida", "abc", Some(true));
-        assert_eq!(r["ok"], false, "gerente também precisa de 4: {r}");
-        assert!(r["erro"].as_str().unwrap().contains("backups"), "{r}");
+        // Já criada com a boa; as seguintes testam o gerente (DP-33: mínimo 8).
+        for curta_ger in ["abc", "1234", "1234567"] {
+            let r = novo(&mut s, "Cida", curta_ger, Some(true));
+            assert_eq!(r["ok"], false, "gerente precisa de 8 ({curta_ger}): {r}");
+            assert!(r["erro"].as_str().unwrap().contains("backups"), "{r}");
+            assert!(r["erro"].as_str().unwrap().contains('8'), "{r}");
+        }
         let r = novo(&mut s, "Cida", "doze-caracteres-ok", Some(true));
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(r["dados"]["gerente"], true);
-        // Promover junto com uma senha curta demais não vale; promover sem trocar a senha não é bloqueado.
+        // Promover junto com uma senha curta demais (< 8) não vale; promover sem trocar a senha não é bloqueado.
         let bia = usuarios::listar(&s.banco.conn, false).unwrap().into_iter().find(|u| u.nome == "Bia").unwrap();
         let r = chamar(
             &mut s,
             "usuario_salvar",
-            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "abc", "senha2": "abc", "gerente": true })
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "1234567", "senha2": "1234567", "gerente": true })
                 .to_string(),
         );
         assert_eq!(r["ok"], false, "{r}");
@@ -4018,34 +4021,37 @@ mod testes {
         let r = chamar(
             &mut s,
             "usuario_salvar",
-            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "mesa-verde", "senha2": "mesa-verde", "gerente": false })
+            &json!({ "id": bia.id, "nome": "Bia", "ativo": true, "senha": "mesa", "senha2": "mesa", "gerente": false })
                 .to_string(),
         );
         assert_eq!(r["ok"], true, "{r}");
     }
 
-    /// F17-A3: troca da própria senha: a regra é a do papel; se recusar, a senha antiga continua valendo.
+    /// F17-A3 / DP-33: troca da própria senha: a regra é a do papel (8 para gerente, 4 para operador);
+    /// se recusar, a senha antiga continua valendo.
     #[test]
     fn f17_a3_senha_trocar() {
         let mut s = conectado(); // Ana, gerente, senha "balcao-azul-2026"
         let trocar = |s: &mut Servico, nova: &str| {
             chamar(s, "senha_trocar", &json!({ "atual": "balcao-azul-2026", "nova": nova, "nova2": nova }).to_string())
         };
-        let r = trocar(&mut s, "caf");
-        assert_eq!(r["ok"], false, "{r}");
-        assert_eq!(r["campo"], "nova");
-        assert!(r["erro"].as_str().unwrap().contains("4"), "{r}");
+        for curta in ["caf", "1234", "1234567"] {
+            let r = trocar(&mut s, curta);
+            assert_eq!(r["ok"], false, "{curta}: {r}");
+            assert_eq!(r["campo"], "nova");
+            assert!(r["erro"].as_str().unwrap().contains('8'), "{r}");
+        }
         let id = s.sessao.as_ref().unwrap().usuario_id.clone();
         assert!(usuarios::conferir_senha(&s.banco.conn, &id, "balcao-azul-2026").is_ok(), "a antiga continua valendo");
         assert_eq!(trocar(&mut s, "x".repeat(129).as_str())["ok"], false, "129 caracteres");
         assert_eq!(trocar(&mut s, "chuva de manhã na oficina")["ok"], true);
-        // Outro usuário: a mesma regra (o que importa é o tamanho).
+        // Operador comum: 4 caracteres continuam válidos na troca.
         let bia = usuarios::criar(&s.banco.conn, &s.banco.dispositivo, "Bia", "balcao-bia-1", true).unwrap();
         assert_eq!(f17_entrar(&mut s, &bia.id, "balcao-bia-1")["ok"], true);
         let r = chamar(
             &mut s,
             "senha_trocar",
-            &json!({ "atual": "balcao-bia-1", "nova": "cafe-pao", "nova2": "cafe-pao" }).to_string(),
+            &json!({ "atual": "balcao-bia-1", "nova": "café", "nova2": "café" }).to_string(),
         );
         assert_eq!(r["ok"], true, "{r}");
     }

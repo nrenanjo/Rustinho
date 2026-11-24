@@ -33,7 +33,7 @@ fn loja() -> (crate::Servico, std::path::PathBuf) {
     ok(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     let pasta = std::env::temp_dir().join(format!("rustinho-nav-{}", crate::tempo::novo_id()));
     std::fs::create_dir_all(&pasta).unwrap();

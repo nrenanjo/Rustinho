@@ -164,7 +164,7 @@ fn v01a_desistir_da_juncao_e_comecar_loja_nova() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let l = chamar(&mut s, "sync_ler", json!({}));
@@ -191,7 +191,7 @@ fn v01a_configurar_inicio_nao_herda_a_juncao() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], false, "não cria a loja em cima da junção: {r}");
     let b = s.banco_para_teste();
@@ -203,7 +203,7 @@ fn v01a_configurar_inicio_nao_herda_a_juncao() {
     let r = chamar(
         &mut t,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut t, "sync_salvar", json!({ "ligado": true, "senha": "rede-boa", "enderecos": "10.0.0.2" }));
@@ -228,7 +228,7 @@ fn primeiro_caixa_liga_a_rede_com_o_gerente_local() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja", "enderecos": "" }));
@@ -255,7 +255,8 @@ fn primeiro_caixa_liga_a_rede_com_o_gerente_local() {
     let r = chamar(&mut s, "sync_salvar", json!({ "ligado": true, "senha": "outra-senha", "enderecos": "" }));
     assert_eq!(r["ok"], false, "nem troca a senha da rede: {r}");
     // Com a senha do gerente presa a esta chamada, liga.
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "sync_salvar", "dados": pedido }));
+    let r =
+        chamar(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "sync_salvar", "dados": pedido }));
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", pedido);
     assert_eq!(r["ok"], true, "com a senha do gerente: {r}");
@@ -499,7 +500,7 @@ fn loja_com_caixa_bia() -> crate::Servico {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja", "enderecos": "" }));
@@ -546,14 +547,14 @@ fn a2_caixa_nao_troca_a_senha_com_a_rede_desligada() {
 fn a2_gerente_troca_a_senha_desligada_com_o_minimo() {
     let mut s = loja_com_caixa_bia();
     let curta = json!({ "ligado": false, "senha": "ab", "enderecos": "" });
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "sync_salvar", "dados": curta }));
+    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "sync_salvar", "dados": curta }));
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", curta);
     assert_eq!(r["ok"], false, "senha da rede de 2 caracteres gravada com a rede desligada: {r}");
     assert_eq!(r["campo"], "senha", "{r}");
     assert_eq!(senha_gravada(&mut s), "rede-da-loja");
     let boa = json!({ "ligado": false, "senha": "nova-da-rede", "enderecos": "" });
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "sync_salvar", "dados": boa }));
+    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "sync_salvar", "dados": boa }));
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", boa);
     assert_eq!(r["ok"], true, "{r}");
@@ -563,7 +564,7 @@ fn a2_gerente_troca_a_senha_desligada_com_o_minimo() {
     let ligar = json!({ "ligado": true, "senha": "", "enderecos": "" });
     let r = chamar(&mut s, "sync_salvar", ligar.clone());
     assert_eq!(r["campo"], "gerente", "caixa ligou a rede: {r}");
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "sync_salvar", "dados": ligar }));
+    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "sync_salvar", "dados": ligar }));
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", ligar);
     assert_eq!(r["ok"], true, "{r}");
@@ -579,7 +580,7 @@ fn a2_senha_curta_ja_gravada_nao_liga_a_rede() {
     let mut s = loja_com_caixa_bia();
     config::gravar(&s.banco_para_teste().conn, "sync_senha", "ab").unwrap();
     let ligar = json!({ "ligado": true, "senha": "", "enderecos": "" });
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "1234", "comando": "sync_salvar", "dados": ligar }));
+    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "12345678", "comando": "sync_salvar", "dados": ligar }));
     assert_eq!(r["ok"], true, "{r}");
     let r = chamar(&mut s, "sync_salvar", ligar);
     assert_eq!(r["ok"], false, "ligou a rede com a senha curta já gravada: {r}");
@@ -846,7 +847,7 @@ fn a4_desistir_atomico_e_sem_efeito_repetido() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], true, "{r}");
     let configurado = retrato(&s.banco_para_teste().conn);
@@ -869,7 +870,7 @@ fn a4_desistir_com_origem_incerta_nao_apaga() {
     let r = chamar(
         &mut s,
         "configurar_inicio",
-        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja nova", "caixa": "Caixa 2", "nome": "Zé", "senha": "12345678", "senha2": "12345678" }),
     );
     assert_eq!(r["ok"], false, "a loja nova não nasce em cima disso: {r}");
 }

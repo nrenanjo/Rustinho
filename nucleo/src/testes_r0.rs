@@ -34,7 +34,7 @@ fn configurar(s: &mut crate::Servico) {
     ok(
         s,
         "configurar_inicio",
-        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" }),
+        json!({ "loja": "Loja", "caixa": "Caixa 1", "nome": "Ana", "senha": "12345678", "senha2": "12345678" }),
     );
 }
 
@@ -69,7 +69,7 @@ fn depois_de_reiniciar_a_mesma_chave_nao_grava_de_novo() {
     };
     let mut s = crate::Servico::abrir(&caminho).unwrap();
     let ana = usuario_ana(&mut s);
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let r = chamar(&mut s, "venda_concluir", venda(&p, "venda-1", "1"));
     assert_eq!((r["ok"].clone(), r["repetida"].clone()), (json!(true), json!(true)), "{r}");
     assert_eq!(r["dados"], primeira, "o resultado da primeira vez, inteiro");
@@ -192,7 +192,7 @@ fn retencao_tira_so_as_antigas() {
 /// de identificação também não.
 #[test]
 fn o_pedido_nao_leva_senha_nem_chaves() {
-    let a = json!({ "valor": "10", "senhaGerente": "1234", "chaveOperacao": "k1", "chaveTela": "t1" });
+    let a = json!({ "valor": "10", "senhaGerente": "12345678", "chaveOperacao": "k1", "chaveTela": "t1" });
     let b = json!({ "valor": "10", "senhaGerente": "9999", "chaveOperacao": "k2", "chaveTela": "t2" });
     assert_eq!(crate::operacoes::pedido(&a), crate::operacoes::pedido(&b));
     assert_ne!(crate::operacoes::pedido(&a), crate::operacoes::pedido(&json!({ "valor": "11" })));
@@ -310,7 +310,7 @@ fn reinicio_antes_de_gravar_a_mesma_chave_grava_normalmente() {
     };
     let mut s = crate::Servico::abrir(&caminho).unwrap();
     let ana = usuario_ana(&mut s);
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let r = chamar(&mut s, "venda_concluir", venda(&p, "venda-1", "1"));
     assert_eq!(r["ok"], true, "{r}");
     assert!(r.get("repetida").is_none(), "não é repetição: {r}");
@@ -351,7 +351,7 @@ fn limite_r0_relancar_com_chave_nova_depois_do_reinicio_grava_outra_venda() {
     };
     let mut s = crate::Servico::abrir(&caminho).unwrap();
     let ana = usuario_ana(&mut s);
-    ok(&mut s, "entrar", json!({ "id": ana, "senha": "1234" }));
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let r = chamar(&mut s, "venda_concluir", venda(&p, "tela-2-venda", "1"));
     assert_eq!(r["ok"], true, "{r}");
     assert!(r.get("repetida").is_none(), "chave nova: não é repetição para o banco: {r}");
@@ -417,7 +417,7 @@ fn qt1b_depois_da_queda_o_aviso_mostra_o_que_foi_gravado() {
     s.cair_para_teste();
 
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let a = aviso_de_fechamento(&mut s).expect("o aviso aparece depois da queda");
     assert_eq!(a["categoria"], "atencao", "{a}");
     assert_eq!((a["acao"].clone(), a["resolver"].clone()), (json!("Ver vendas do caixa"), json!("Conferi")));
@@ -449,13 +449,13 @@ fn qt1b_em_curso_aparece_como_nao_concluida_ou_confira() {
     let mut s = abrir_sem_rede(&caminho);
     configurar(&mut s);
     preparar_venda(&mut s);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     iniciada(&mut s, "receber_baixar", "receber-1");
     iniciada(&mut s, "compra_importar", "compra-1");
     s.cair_para_teste();
 
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso_de_fechamento(&mut s).unwrap());
     let nao = l.iter().find(|x| x.starts_with("Não concluída: Recebimento · ")).expect("o recebimento");
     assert!(nao.ends_with("nada foi gravado"), "{nao}");
@@ -479,13 +479,13 @@ fn qt1b_encerramento_limpo_nao_avisa() {
     ok(&mut s, "venda_concluir", venda(&p, "venda-1", "1"));
     drop(s);
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso_de_fechamento(&mut s).is_none(), "fechou pelo Drop");
     ok(&mut s, "venda_concluir", venda(&p, "venda-2", "1"));
     chamar(&mut s, "backup_ao_fechar", json!({}));
     s.cair_para_teste();
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso_de_fechamento(&mut s).is_none(), "fechou pela janela (backup_ao_fechar) e depois o System.exit");
     drop(s);
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
@@ -526,7 +526,7 @@ fn qt1b_conferi_por_pessoa_e_o_caixa_ve_so_as_dele() {
     assert_eq!(r["ok"], false, "aviso sem o que conferir: {r}");
     ok(&mut s, "sair", json!({}));
 
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso_de_fechamento(&mut s).expect("a Ana (gerente) ainda vê"));
     // A venda da Ana foi seguida de outra chamada (a tela dela a mostrou: F-02); a da Bia, não. O gerente vê a da
     // Bia, mesmo depois do "Conferi" dela.
@@ -551,7 +551,7 @@ fn qt1b_falha_limpa_nao_aparece() {
     assert_eq!(contar(&mut s, "SELECT COUNT(*) FROM operacao_em_curso"), 0, "saiu do em curso");
     s.cair_para_teste();
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     // Depois da revisão (F-02), o que a tela já mostrou não entra: aqui pode nem haver aviso. Se houver, a venda
     // recusada não está nele.
     let l = aviso_de_fechamento(&mut s).map(|a| linhas(&a)).unwrap_or_default();
@@ -574,12 +574,12 @@ fn qt1b_todas_as_gravadas_sem_confirmacao() {
     let mut numeros = Vec::new();
     for i in 0..7 {
         let mut s = abrir_sem_rede(&caminho);
-        entrar(&mut s, "Ana", "1234");
+        entrar(&mut s, "Ana", "12345678");
         numeros.push(ok(&mut s, "venda_concluir", venda(&p, &format!("venda-{i}"), "1"))["numero"].as_i64().unwrap());
         s.cair_para_teste();
     }
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso_de_fechamento(&mut s).unwrap());
     // Também a abertura do caixa: foi gravada e o programa caiu antes de a tela seguir (ela não tinha confirmação).
     assert!(l.iter().any(|x| x.starts_with("Gravada: Abertura do caixa")), "{l:?}");
@@ -640,7 +640,7 @@ fn qt1b_operacao_da_abertura_anterior_nao_entra_no_aviso() {
     let s = abrir_sem_rede(&caminho); // a abertura B começa (talvez no mesmo segundo da venda)
     s.cair_para_teste(); // e cai sem gravar nada
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     assert!(aviso_de_fechamento(&mut s).is_none(), "a venda da abertura A não é da abertura que caiu");
     drop(s);
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
@@ -669,7 +669,7 @@ fn rev_f04_panico_marca_a_abertura_e_a_seguinte_avisa() {
         })
         .unwrap();
     assert_eq!((limpa, com_erro), (0, 1), "a abertura do pânico não vira limpa");
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso_de_fechamento(&mut s).expect("F-04: depois do erro interno, a abertura seguinte avisa"));
     assert!(l.iter().any(|x| x.starts_with("Não concluída: Recebimento")), "{l:?}");
     drop(s);
@@ -689,7 +689,7 @@ fn rev_f12_hora_com_dia_quando_nao_e_hoje() {
         .unwrap();
     s.cair_para_teste();
     let mut s = abrir_sem_rede(&caminho);
-    entrar(&mut s, "Ana", "1234");
+    entrar(&mut s, "Ana", "12345678");
     let l = linhas(&aviso_de_fechamento(&mut s).unwrap());
     let dia: String = s
         .banco_para_teste()

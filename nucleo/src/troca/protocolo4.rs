@@ -37,6 +37,7 @@ use crate::erro::{Erro, Resultado};
 
 pub mod anuncio;
 pub mod aprovados;
+pub mod cofre;
 
 /// Uma chave pública (Ed25519 ou X25519): 32 bytes.
 pub type Chave = [u8; 32];
