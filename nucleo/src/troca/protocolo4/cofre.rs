@@ -63,8 +63,13 @@ fn trava_processo() -> &'static Mutex<()> {
     M.get_or_init(|| Mutex::new(()))
 }
 
-/// Trava exclusiva entre processos via arquivo `.lock` (`create_new`, RAII) (A2).
+/// Trava exclusiva entre processos (A2, B3-R2): no Unix usa `flock(LOCK_EX)`
+/// (atômico no kernel, sem corrida de remoção de trava órfã); fora do Unix usa
+/// arquivo `.lock` exclusivo com `create_new` e RAII `Drop`.
 struct TravaArquivo {
+    #[cfg(unix)]
+    _arquivo: std::fs::File,
+    #[cfg(not(unix))]
     caminho: PathBuf,
 }
 
@@ -76,51 +81,68 @@ impl TravaArquivo {
         let pasta = caminho.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         criar_pasta_restrita(pasta)?;
 
-        let fim = Instant::now() + Duration::from_secs(10);
-        loop {
-            let mut opcoes = std::fs::OpenOptions::new();
-            opcoes.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                opcoes.mode(0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            use std::os::unix::io::AsRawFd;
+            let arquivo = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .mode(0o600)
+                .open(&caminho)
+                .map_err(|e| {
+                    Erro::Interno(format!("não foi possível abrir a trava da identidade do caixa ({:?})", e.kind()))
+                })?;
+            let fd = arquivo.as_raw_fd();
+            loop {
+                // SAFETY: `fd` pertence ao `File` aberto acima e `LOCK_EX` bloqueia até obter a trava exclusiva.
+                let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
+                if rc == 0 {
+                    return Ok(TravaArquivo { _arquivo: arquivo });
+                }
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(Erro::Interno(format!(
+                    "não foi possível travar o arquivo da identidade do caixa ({:?})",
+                    err.kind()
+                )));
             }
-            match opcoes.open(&caminho) {
-                Ok(mut f) => {
-                    let _ = write!(f, "{}", std::process::id());
-                    return Ok(TravaArquivo { caminho });
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    // Remove trava órfã antiga (> 60 s) de processo que caiu no meio.
-                    if let Ok(meta) = std::fs::metadata(&caminho) {
-                        if meta
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.elapsed().ok())
-                            .is_some_and(|d| d > Duration::from_secs(60))
-                        {
-                            let _ = std::fs::remove_file(&caminho);
-                            continue;
+        }
+
+        #[cfg(not(unix))]
+        {
+            let fim = Instant::now() + Duration::from_secs(10);
+            loop {
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(&caminho) {
+                    Ok(mut f) => {
+                        let _ = write!(f, "{}", std::process::id());
+                        return Ok(TravaArquivo { caminho });
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        if Instant::now() >= fim {
+                            return Err(Erro::Interno(
+                                "tempo esgotado aguardando trava exclusiva da identidade do caixa".into(),
+                            ));
                         }
+                        std::thread::sleep(Duration::from_millis(15));
                     }
-                    if Instant::now() >= fim {
-                        return Err(Erro::Interno(
-                            "tempo esgotado aguardando trava exclusiva da identidade do caixa".into(),
-                        ));
+                    Err(e) => {
+                        return Err(Erro::Interno(format!(
+                            "não foi possível travar o arquivo da identidade do caixa ({:?})",
+                            e.kind()
+                        )));
                     }
-                    std::thread::sleep(Duration::from_millis(15));
-                }
-                Err(e) => {
-                    return Err(Erro::Interno(format!(
-                        "não foi possível travar o arquivo da identidade do caixa ({:?})",
-                        e.kind()
-                    )));
                 }
             }
         }
     }
 }
 
+#[cfg(not(unix))]
 impl Drop for TravaArquivo {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.caminho);
@@ -310,7 +332,8 @@ fn regerar_no_caminho(caminho: PathBuf, eh_portatil: bool) -> Resultado<Identida
     if caminho.exists() {
         let mut backup = caminho.as_os_str().to_os_string();
         backup.push(format!(".antiga-{sufixo}"));
-        let _ = std::fs::rename(&caminho, PathBuf::from(backup));
+        std::fs::rename(&caminho, PathBuf::from(backup))
+            .map_err(|e| Erro::Interno(format!("não foi possível arquivar a identidade anterior ({:?})", e.kind())))?;
     }
     let _ = std::fs::remove_file(caminho_reserva(&caminho));
     #[cfg(windows)]
@@ -322,7 +345,10 @@ fn regerar_no_caminho(caminho: PathBuf, eh_portatil: bool) -> Resultado<Identida
     apagar(&mut bruto);
     let senha_str = std::str::from_utf8(&senha.0).map_err(|_| Erro::Interno("segredo aleatório não UTF-8".into()))?;
     let cofre_sistema = guardar_segredo(&caminho, senha_str, eh_portatil)?;
-    identidade.guardar_em(&caminho, senha_str)?;
+    if let Err(e) = identidade.guardar_em(&caminho, senha_str) {
+        let _ = std::fs::remove_file(caminho_reserva(&caminho));
+        return Err(e);
+    }
     Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
 }
 
@@ -330,6 +356,7 @@ fn regerar_no_caminho(caminho: PathBuf, eh_portatil: bool) -> Resultado<Identida
 pub fn carregar_existente(pasta_banco: &Path, eh_portatil: bool) -> Resultado<Option<IdentidadeLocal>> {
     let caminho = caminho_identidade(pasta_banco, eh_portatil)?;
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
+    let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
     if !caminho.exists() {
         return Ok(None);
     }
@@ -1119,6 +1146,11 @@ pub fn consumir_convite_e_aprovar(
             if let Some(a) =
                 linhas.aprovacoes.into_iter().find(|a| a.chave == pedido.chave && a.aprovador == aprovador.publica())
             {
+                if a.dispositivo != pedido.dispositivo {
+                    return Err(Erro::validacao(
+                        "O identificador do dispositivo não confere com a aprovação já gravada para este convite.",
+                    ));
+                }
                 return Ok(a);
             }
         }
@@ -1371,6 +1403,13 @@ mod testes {
         let a2 =
             consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido_novo, &agora).unwrap();
         assert_eq!(a1, a2);
+        // Replay com o mesmo par de chaves mas `dispositivo` divergente é recusado!
+        let pedido_disp_outro = Pedido::com_dispositivo(&novo, "disp-outro");
+        assert!(
+            consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido_disp_outro, &agora)
+                .is_err(),
+            "replay idempotente exige mesmo dispositivo"
+        );
 
         // B5: após retirar o caixa recém-aprovado, replay do mesmo convite é RECUSADO!
         aprovados::retirar(&b.conn, &raiz, &raiz.publica(), LOJA, &novo.publica(), "revogado logo após", &gerente)
@@ -1380,7 +1419,7 @@ mod testes {
             "B5: replay pós-retirada deve ser recusado"
         );
 
-        // Convite expirado é recusado.
+        // Convite expirado é recusado e purgado por `purgar_convites_expirados`.
         let novo3 = Identidade::gerar().unwrap();
         let p3 = Pedido::com_dispositivo(&novo3, "disp-3");
         let c3 = gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &p3.codigo(), "Caixa 3", &gerente, "").unwrap();
@@ -1389,6 +1428,13 @@ mod testes {
             consumir_convite_e_aprovar(&b.conn, &raiz, &raiz.publica(), LOJA, &c3.id, &p3, &futuro).is_err(),
             "convite vencido tem de ser recusado"
         );
+        // Simula convite expirado há mais de 24 h e confere purga automática (B4).
+        let antigo = crate::tempo::somar_segundos(&agora, -(RETENCAO_CONVITE_EXPIRADO_SEG + 60)).unwrap();
+        b.conn.execute("UPDATE p4_convite SET expira_em = ?1 WHERE id = ?2", params![antigo, &c3.id]).unwrap();
+        assert!(purgar_convites_expirados(&b.conn).unwrap() >= 1);
+        let ainda: i64 =
+            b.conn.query_row("SELECT COUNT(*) FROM p4_convite WHERE id = ?1", [&c3.id], |l| l.get(0)).unwrap();
+        assert_eq!(ainda, 0, "convite expirado há >24 h removido na purga");
 
         // Cancelamento limpa segredo_ativo e impede uso.
         let c4 = gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &p3.codigo(), "Caixa 4", &gerente, "").unwrap();

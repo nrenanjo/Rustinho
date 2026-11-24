@@ -544,6 +544,7 @@ pub fn chave_do_dispositivo(
         if a.loja_id == loja_id
             && a.dispositivo.trim() == alvo
             && av.situacao(&a.chave) == Situacao::Autorizada
+            && av.situacao(&a.aprovador) == Situacao::Autorizada
             && a.assinatura_confere()
         {
             chaves.insert(a.chave);
@@ -568,7 +569,7 @@ pub fn dependentes_de(conn: &Connection, raiz: &Chave, loja_id: &str, chave: &Ch
     let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
     let mut por_chave: HashMap<Chave, Aprovacao> = HashMap::new();
     for a in aprovacoes {
-        if a.loja_id != loja_id || !a.assinatura_confere() {
+        if a.loja_id != loja_id || !a.assinatura_confere() || !antes.autorizados.contains(&a.aprovador) {
             continue;
         }
         if a.aprovador != a.chave {
@@ -870,11 +871,29 @@ mod testes {
         );
         assert!(!p_nao_canon.confere(), "B9: dispositivo não canônico é recusado");
 
-        // P4-4: retirar Caixa 2 derrubaria Caixa 3 em cascata.
+        // M1-R2: estranho (não autorizado) assina linha mirando `c2` (autorizado) com
+        // `dispositivo = "disp-caixa-3"` e `c3` com `nome = "Spoof"` em ano 2999.
+        // Nem `chave_do_dispositivo` sofre DoS/conflito, nem `dependentes_de` exibe o nome falso!
+        let mut dos_i3 =
+            assinar_aprovacao(&estranho, c2.publica(), c2.publica_troca(), LOJA, "Spoof C2", &u, "disp-caixa-3");
+        dos_i3.aprovado_em = "2999-12-31T23:59:59Z".into();
+        dos_i3.assinatura = estranho.assinar(Dominio::Aprovacao, &dos_i3.corpo());
+        let mut spoof_c3 =
+            assinar_aprovacao(&estranho, c3.publica(), c3.publica_troca(), LOJA, "Spoof C3", &u, "disp-caixa-3");
+        spoof_c3.aprovado_em = "2999-12-31T23:59:59Z".into();
+        spoof_c3.assinatura = estranho.assinar(Dominio::Aprovacao, &spoof_c3.corpo());
+        juntar(&b.conn, LOJA, &Linhas { aprovacoes: vec![dos_i3, spoof_c3], retiradas: Vec::new() }).unwrap();
+        assert_eq!(
+            chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-3").unwrap(),
+            Some(c3.publica()),
+            "M1-R2: linha de aprovador não autorizado não causa DoS/conflito em chave_do_dispositivo"
+        );
+
+        // P4-4: retirar Caixa 2 derrubaria Caixa 3 em cascata (com nome legítimo, não o spoof).
         let deps = dependentes_de(&b.conn, &r, LOJA, &c2.publica()).unwrap();
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].chave, c3.publica());
-        assert_eq!(deps[0].nome, "Caixa 3");
+        assert_eq!(deps[0].nome, "Caixa 3", "M1-R2: aprovador não autorizado não adultera metadados de dependentes");
 
         // Adulterar `dispositivo` no banco derruba a assinatura de Caixa 2 (I3).
         b.conn
