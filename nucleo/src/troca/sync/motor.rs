@@ -380,6 +380,13 @@ impl Motor {
                         for (qual, pacote) in
                             p4::pacotes_de_anuncio(k.as_ref(), ctx_p4.as_ref(), &a, porta_tcp_de(&escolhidas))
                         {
+                            #[cfg(test)]
+                            p4::anuncios_mandados()
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .entry(caminho.clone())
+                                .or_default()
+                                .push(qual);
                             let erros = rede_local::anunciar(&conhecidas, &a.interfaces, &pacote, porta_udp);
                             for (ip, e) in rede_local::erros_novos(&mut erros_de_envio, erros) {
                                 crate::registro::anotar(&format!(

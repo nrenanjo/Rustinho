@@ -757,14 +757,23 @@ FocusScope {
         })
     }
 
-    function gerarIdentidadeNova() {
-        janela.confirmar("Gerar uma identidade nova para este caixa?",
-                         "Use só se este computador não consegue mais abrir a identidade dele (por exemplo, depois de "
-                         + "reinstalar o sistema). Se for só o cofre de senhas fora do ar agora, espere e tente de novo. "
-                         + "A identidade antiga fica guardada nesta pasta, sem ser apagada. Depois, num caixa aprovado, o gerente "
-                         + "retira este caixa da loja e o aprova de novo com um convite.",
-                         "Gerar identidade nova", () => {
-            janela.chamarGerenteDemorado("p4_gerar_identidade_nova", {}, "Gerando a identidade nova…", r => {
+    function gerarIdentidadeNova(retiradoPorEngano) {
+        const p4 = tela.sync && tela.sync.p4 ? tela.sync.p4 : {}
+        const retirado = !!p4.retirado || retiradoPorEngano === true
+        // C2R2-1: o caixa retirado volta assim; C2R2-2: na raiz, a confirmação reforçada.
+        const texto = retirado
+            ? "Este caixa foi retirado da loja pela chave dele. Com uma identidade nova, ele pode ser aprovado de novo: "
+              + "depois, peça ao gerente um convite com o código novo. A identidade antiga fica guardada nesta pasta."
+            : p4.raiz
+              ? "Este é o primeiro caixa da loja: foi ele que aprovou os outros. Com a identidade nova, ele precisa ser "
+                + "aprovado por outro caixa aprovado da loja (com um convite). Se a loja só tem este caixa, chame o suporte "
+                + "antes: a identidade antiga fica guardada nesta pasta e pode ser recuperada."
+              : "Use só se este computador não consegue mais abrir a identidade dele (por exemplo, depois de "
+                + "reinstalar o sistema). Se for só o cofre de senhas fora do ar agora, espere e tente de novo. "
+                + "A identidade antiga fica guardada nesta pasta, sem ser apagada. Depois, num caixa aprovado, o gerente "
+                + "retira este caixa da loja e o aprova de novo com um convite."
+        janela.confirmar("Gerar uma identidade nova para este caixa?", texto, "Gerar identidade nova", () => {
+            janela.chamarGerenteDemorado("p4_gerar_identidade_nova", { confirmarRaiz: !!p4.raiz, confirmarRetirado: retirado }, "Gerando a identidade nova…", r => {
                 if (r.ok) {
                     tela.codigoDesteCaixa = r.dados.codigoPedido
                     tela.identidadeIlegivel = ""
@@ -837,8 +846,9 @@ FocusScope {
         motivoReferencia.perguntar(
             "Retirar " + c.nome + " da loja?",
             comChave
-            ? "Use só quando este computador deixou de ser da loja. Ele deixa de trocar dados com todos os caixas da loja, "
+            ? "Use só quando este computador deixou de ser da loja. Ele deixa de trocar dados com os caixas atualizados, "
               + "mesmo com a senha da rede, e não conta mais para a versão dos caixas. Para voltar, só com uma aprovação nova do gerente."
+              + " (Se algum caixa estiver com os caixas antigos liberados, troque também a senha da rede: por ele, quem tem a senha ainda troca dados.)"
               + juntos + " Fica no histórico com o seu nome e o motivo."
             // T076 (OPUS-D-3): a retirada não tira a senha da rede do computador; a tela não promete o contrário.
             : "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas. "
@@ -859,6 +869,24 @@ FocusScope {
                 }
             }),
             "Motivo (por que sai da loja?)", "perigo")
+    }
+
+    // C2R2-5: o caixa com duas identidades aprovadas (aprovações ao mesmo tempo em
+    // caixas diferentes): o gerente retira a que não vale mais; o caixa continua.
+    function retirarIdentidade(c, ident) {
+        motivoReferencia.perguntar(
+            "Retirar a identidade " + ident.codigo + " de " + c.nome + "?",
+            "Use para a identidade que não vale mais (a que não aparece no próprio caixa, em Configurações › Caixas da loja). "
+            + "Ela sai da loja para sempre; o caixa continua com a outra. Fica no histórico com o seu nome e o motivo.",
+            "Retirar a identidade", (m, pronto) => janela.chamarGerenteDemorado("caixa_retirar",
+                { dispositivo: c.dispositivo, motivo: m, chave: ident.chave }, "Retirando a identidade…", r => {
+                pronto(r)
+                if (r.ok) {
+                    carregarCaixas()
+                    janela.avisar("A identidade " + ident.codigo + " saiu da loja.", "ok")
+                }
+            }),
+            "Motivo (por que esta identidade sai?)", "perigo")
     }
 
     function readmitirCaixa(c) {
@@ -1790,6 +1818,10 @@ FocusScope {
                     Layout.fillWidth: true
                     Nota {
                         text: !faixaSeguranca.p4 ? ""
+                              : faixaSeguranca.p4.retirado
+                                ? "Este caixa foi retirado da loja pela chave dele: ele não troca dados com os outros caixas. "
+                                  + "Para voltar, gere aqui uma identidade nova (com a senha do gerente) e peça ao gerente um "
+                                  + "convite com o código novo."
                               : faixaSeguranca.p4.aprovado
                                 ? (faixaSeguranca.p4.raiz ? "Este caixa é aprovado na loja (foi o primeiro caixa dela)." : "Este caixa é aprovado na loja.")
                                   + " Para um caixa novo entrar, gere aqui um convite com o código que aparece na tela dele."
@@ -1830,6 +1862,15 @@ FocusScope {
                         Botao {
                             text: "Gerar convite"
                             onClicked: tela.gerarConvite()
+                        }
+                        // C2R2-1: o caixa retirado não fica sabendo (os outros recusam a
+                        // conexão dele: a troca mostra a recusa); o gerente gera a identidade nova.
+                        Botao {
+                            // A raiz não é retirada (P4-3).
+                            visible: !!faixaSeguranca.p4 && !faixaSeguranca.p4.raiz
+                            text: "Este caixa foi retirado da loja?"
+                            tipo: "discreto"
+                            onClicked: tela.gerarIdentidadeNova(true)
                         }
                         Botao {
                             visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.convitesAtivos > 0
@@ -1881,7 +1922,8 @@ FocusScope {
                                 }
                             }
                             Image {
-                                objectName: "qrDoConvite"
+                                // C2R2-8: o nome só quando a imagem carregou (o plugin SVG do Qt existe).
+                                objectName: status === Image.Ready ? "qrDoConvite" : "qrDoConviteSemImagem"
                                 source: tela.conviteGerado ? tela.conviteGerado.qr : ""
                                 sourceSize.width: 180
                                 sourceSize.height: 180
@@ -1947,7 +1989,7 @@ FocusScope {
                             Layout.fillWidth: true
                         }
                         Botao {
-                            visible: tela.codigoDesteCaixa === ""
+                            visible: tela.codigoDesteCaixa === "" && !(faixaSeguranca.p4 && faixaSeguranca.p4.retirado)
                             text: "Mostrar o código deste caixa"
                             tipo: "secundario"
                             onClicked: tela.mostrarCodigoDesteCaixa()
@@ -1961,7 +2003,7 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                     Botao {
-                        visible: tela.identidadeIlegivel !== ""
+                        visible: tela.identidadeIlegivel !== "" || (!!faixaSeguranca.p4 && faixaSeguranca.p4.retirado)
                         text: "Gerar identidade nova"
                         tipo: "secundario"
                         onClicked: tela.gerarIdentidadeNova()
@@ -2100,6 +2142,33 @@ FocusScope {
                                         font.pixelSize: 13
                                         wrapMode: Text.WordWrap
                                         Layout.fillWidth: true
+                                    }
+                                    // C2R2-5: duas identidades aprovadas (o registro ambíguo não troca dados).
+                                    Text {
+                                        visible: (linhaCaixa.modelData.identidades || []).length > 1
+                                        text: "Este caixa tem duas identidades aprovadas (aprovações feitas ao mesmo tempo em caixas "
+                                              + "diferentes) e não troca dados até sobrar uma. Confira no próprio caixa o código dele "
+                                              + "(Configurações › Caixas da loja) e retire a outra."
+                                        textFormat: Text.PlainText
+                                        color: Tema.vermelhoDaFaixa(linhaCaixa.par)
+                                        font.family: Tema.texto
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                    Flow {
+                                        visible: (linhaCaixa.modelData.identidades || []).length > 1
+                                        spacing: 8
+                                        Layout.fillWidth: true
+                                        Repeater {
+                                            model: linhaCaixa.modelData.identidades || []
+                                            delegate: Botao {
+                                                required property var modelData
+                                                text: "Retirar a identidade " + modelData.codigo
+                                                tipo: "discreto"
+                                                onClicked: tela.retirarIdentidade(linhaCaixa.modelData, modelData)
+                                            }
+                                        }
                                     }
                                 }
                                 Botao {

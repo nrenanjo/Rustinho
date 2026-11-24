@@ -119,7 +119,7 @@ fn atender_p4(
         return canal.enviar_json(&resposta.para_json()?, Duration::from_secs(30), Some(parar));
     }
     let mut fio = p4::FioP4::do_servidor(canal, p4::registro_em_json(conn, &ctx.loja)?);
-    p4::juntar_registro(conn, &ctx.loja, &pedido)?;
+    // C2R2-3: o pedido não traz mais o registro (ele vai só nas respostas): nada a juntar.
     let disp = pedido["dispositivo"].as_str().unwrap_or_default().to_string();
     if ctx.chave_de(conn, &disp)? != Some(par) {
         p4::anotar_recusa_de_identidade(&disp, &par);

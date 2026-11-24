@@ -163,7 +163,7 @@ pub(crate) fn puxar_por(
         // DT-P4-28: pelo P4, o registro do outro caixa entra, e o `dispositivo` que ele
         // diz ser tem de ser o da chave do canal (I3), antes de aplicar qualquer coisa.
         if let (Some(par), Some(ctx)) = (fio.chave_do_par(), ctx.as_ref()) {
-            p4::juntar_registro(&conn, &ctx.loja, &resposta)?;
+            p4::juntar_registro(&conn, ctx, &resposta)?;
             if ctx.chave_de(&conn, &dispositivo)? != Some(par) {
                 p4::anotar_recusa_de_identidade(&dispositivo, &par);
                 return Err(Erro::validacao(p4::TEXTO_CAIXA_NAO_CONFERE));

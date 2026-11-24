@@ -1306,6 +1306,63 @@ fn gravar_retirada(conn: &Connection, r: &Retirada) -> Resultado<()> {
     Ok(())
 }
 
+/// C2R2-3 (R2 da 2C): o teto de linhas do registro de uma loja (aprovações mais
+/// retiradas). Uma loja de verdade tem dezenas; o teto só barra o enchimento.
+pub const TETO_DO_REGISTRO: i64 = 10_000;
+
+/// C2R2-3: como [`juntar`], mas só guarda a linha cujo aprovador (ou retirador) já
+/// está na cadeia da `raiz` — aprovado alguma vez, contando as linhas que chegam
+/// junto, até o ponto fixo (a ordem das linhas não importa). Linha bem assinada de
+/// quem não é da loja (lixo) não entra; e o registro não passa de
+/// [`TETO_DO_REGISTRO`] linhas. As que ficam de fora contam em `recusadas`.
+pub fn juntar_na_cadeia(conn: &Connection, raiz: &Chave, loja_id: &str, de_fora: &Linhas) -> Resultado<Juntadas> {
+    let mut pend_a: Vec<Aprovacao> = de_fora.aprovacoes.iter().filter(|a| a.loja_id == loja_id).cloned().collect();
+    let mut pend_r: Vec<Retirada> = de_fora.retiradas.iter().filter(|t| t.loja_id == loja_id).cloned().collect();
+    let mut total = Juntadas {
+        recusadas: de_fora.aprovacoes.len() + de_fora.retiradas.len() - pend_a.len() - pend_r.len(),
+        ..Juntadas::default()
+    };
+    loop {
+        let av = avaliar(conn, raiz, loja_id)?;
+        let na_cadeia = |k: &Chave| k == raiz || av.aprovados.contains(k);
+        let (mut agora_a, resto_a): (Vec<Aprovacao>, Vec<Aprovacao>) =
+            pend_a.into_iter().partition(|a| na_cadeia(&a.aprovador));
+        let (mut agora_r, resto_r): (Vec<Retirada>, Vec<Retirada>) =
+            pend_r.into_iter().partition(|t| na_cadeia(&t.retirador));
+        pend_a = resto_a;
+        pend_r = resto_r;
+        if agora_a.is_empty() && agora_r.is_empty() {
+            break;
+        }
+        let ja: i64 = conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM caixa_aprovado WHERE loja_id = ?1)
+                  + (SELECT COUNT(*) FROM caixa_retirado WHERE loja_id = ?1)",
+            [loja_id],
+            |l| l.get(0),
+        )?;
+        let cabe = usize::try_from((TETO_DO_REGISTRO - ja).max(0)).unwrap_or(0);
+        let fora_a = agora_a.split_off(agora_a.len().min(cabe));
+        let fora_r = agora_r.split_off(agora_r.len().min(cabe - agora_a.len()));
+        if !fora_a.is_empty() || !fora_r.is_empty() {
+            crate::registro::anotar(&format!(
+                "registro de caixas: teto de {TETO_DO_REGISTRO} linhas; {} linhas novas ficaram de fora",
+                fora_a.len() + fora_r.len()
+            ));
+            total.recusadas += fora_a.len() + fora_r.len();
+        }
+        let j = juntar(conn, loja_id, &Linhas { aprovacoes: agora_a, retiradas: agora_r })?;
+        total.novas += j.novas;
+        total.trocadas += j.trocadas;
+        total.ja_tinha += j.ja_tinha;
+        total.recusadas += j.recusadas;
+        if j.novas + j.trocadas == 0 || cabe == 0 {
+            break;
+        }
+    }
+    total.recusadas += pend_a.len() + pend_r.len();
+    Ok(total)
+}
+
 /// Junta ao registro da loja `loja_id` as linhas que vieram de fora (outro
 /// caixa, um backup restaurado): **acrescenta, nunca tira**. Uma linha só é
 /// gravada se a assinatura de quem a fez confere e se é desta loja; quem está

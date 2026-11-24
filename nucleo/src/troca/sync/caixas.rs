@@ -37,6 +37,9 @@ pub struct CaixaConhecido {
     pub retirado_pela_chave: bool,
     /// T012 (P4-4): os caixas que ficariam sem aprovação se ele fosse retirado.
     pub dependentes: Vec<String>,
+    /// C2R2-5: as identidades autorizadas dele quando são mais de uma
+    /// (`[{chave, codigo}]`; vazia no caso normal).
+    pub identidades: Vec<Value>,
 }
 
 /// Todos os caixas que esta loja conhece: os que já conversaram com este
@@ -55,7 +58,11 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
         .collect::<Result<_, _>>()?;
     let mut lista = Vec::new();
     // T012: o que o registro de caixas (protocolo 4) diz de cada um, só pelo banco.
-    let chaves = super::p4::chaves_dos_caixas(conn)?;
+    // C2R2-6: um registro estranho não derruba a lista (o motivo vai para o registro técnico).
+    let chaves = super::p4::chaves_dos_caixas(conn).unwrap_or_else(|e| {
+        crate::registro::anotar(&format!("troca de dados (protocolo 4): lista de caixas sem o registro: {e}"));
+        HashMap::new()
+    });
     // C2-9 (R1 da 2C): também os caixas que só existem no registro (aprovados e ainda
     // sem troca: um aparelho perdido antes da primeira troca precisa poder sair).
     let mut ids = ids;
@@ -155,6 +162,7 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
             raiz: chave.raiz,
             retirado_pela_chave: chave.retirado_pela_chave,
             dependentes: chave.dependentes,
+            identidades: chave.identidades.iter().map(|(k, c)| json!({ "chave": k, "codigo": c })).collect(),
         });
     }
     lista.sort_by(|a, b| a.nome.cmp(&b.nome));

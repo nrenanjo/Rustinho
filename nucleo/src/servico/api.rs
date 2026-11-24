@@ -1906,6 +1906,22 @@ impl Servico {
                 // T012 (DT-P4-35): com chave no registro, a retirada é assinada (pela
                 // identidade deste caixa: caminho demorado) ou recusada inteira.
                 let caminho = self.banco.caminho.clone().unwrap_or_default();
+                // C2R2-5: só uma identidade (registro ambíguo): o caixa continua, com a outra.
+                if !d.chave.trim().is_empty() {
+                    let tx = self.banco.conn.transaction()?;
+                    sync::retirar_identidade_do_caixa(
+                        &tx,
+                        &caminho,
+                        &d.dispositivo,
+                        &d.chave,
+                        &d.motivo,
+                        &sessao.usuario_id,
+                    )?;
+                    let resposta = json!(sync::caixas_conhecidos(&tx)?);
+                    crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
+                    tx.commit()?;
+                    return Ok(resposta);
+                }
                 let tx = self.banco.conn.transaction()?;
                 sync::retirar_caixa_por_chave(
                     &tx,
@@ -1979,8 +1995,15 @@ impl Servico {
             // T013 (DT-P4-42, N-04): identidade nova, só quando a deste computador não
             // abre (o núcleo recusa a que abre). Abre o cofre: caminho demorado.
             "p4_gerar_identidade_nova" => {
+                let d: IdentidadeNova = ler(dados)?;
                 let caminho = self.caminho_p4()?;
-                Ok(json!(sync::gerar_identidade_nova(&self.banco.conn, &caminho, &sessao.usuario_id)?))
+                Ok(json!(sync::gerar_identidade_nova(
+                    &self.banco.conn,
+                    &caminho,
+                    &sessao.usuario_id,
+                    d.confirmar_raiz,
+                    d.confirmar_retirado,
+                )?))
             }
             // T012 (DT-P4-33): o caixa que já é da loja (atualizou para a 0.9.19 e não é a
             // raiz) recebe a aprovação pelo convite. Rede e identidade: caminho demorado.
@@ -3202,6 +3225,19 @@ fn hora_local(conn: &rusqlite::Connection, iso: &str) -> Resultado<String> {
 struct CaixaDaLoja {
     dispositivo: String,
     motivo: String,
+    /// C2R2-5: retirar só esta identidade (chave em hexadecimal) do caixa que tem mais
+    /// de uma aprovada; vazia = o caixa inteiro.
+    chave: String,
+}
+
+/// C2R2-2: a identidade nova na raiz precisa da confirmação reforçada.
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct IdentidadeNova {
+    confirmar_raiz: bool,
+    /// C2R2-1: o gerente diz que este caixa foi retirado da loja (a identidade abre,
+    /// mas não serve mais).
+    confirmar_retirado: bool,
 }
 
 /// Resposta de erro no mesmo formato do `Servico::chamar`.

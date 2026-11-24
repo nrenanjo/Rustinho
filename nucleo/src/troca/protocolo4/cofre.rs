@@ -473,6 +473,15 @@ fn criar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resu
     Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
 }
 
+/// Só nos testes (C2R2-2): esquece a identidade de `pasta_banco` guardada neste
+/// processo (como ao abrir o programa de novo).
+#[cfg(any(test, feature = "ancoras-de-teste"))]
+pub fn esquecer_identidade_do_processo(pasta_banco: &Path, modo: &Modo) {
+    if let Ok(c) = caminho_identidade(pasta_banco, modo) {
+        cache_identidades().lock().unwrap_or_else(|e| e.into_inner()).remove(&c);
+    }
+}
+
 /// As identidades já abertas neste processo, por caminho (DT-P4-08).
 fn cache_identidades() -> &'static Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<IdentidadeLocal>>> {
     static CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<IdentidadeLocal>>>> =
@@ -504,8 +513,23 @@ pub fn identidade_do_processo(pasta_banco: &Path, modo: &Modo) -> Resultado<std:
 /// porque o segredo dele é substituído no cofre). A autorização do gerente para
 /// usar isto fica com a camada de cima.
 pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<std::sync::Arc<IdentidadeLocal>> {
+    regerar_identidade(pasta_banco, modo, false)
+}
+
+/// C2R2-1 (R2 da 2C): a identidade nova também para o caixa cuja chave foi
+/// **retirada** da loja (ela abre, mas não serve mais: a retirada vale para sempre
+/// para aquela chave). A camada de cima confere a retirada e o gerente.
+pub fn regerar_identidade_retirada(pasta_banco: &Path, modo: &Modo) -> Resultado<std::sync::Arc<IdentidadeLocal>> {
+    regerar_identidade(pasta_banco, modo, true)
+}
+
+fn regerar_identidade(
+    pasta_banco: &Path,
+    modo: &Modo,
+    mesmo_abrindo: bool,
+) -> Resultado<std::sync::Arc<IdentidadeLocal>> {
     let caminho = caminho_identidade(pasta_banco, modo)?;
-    let nova = std::sync::Arc::new(regerar_no_caminho(caminho.clone(), modo, &cofre_do_sistema(modo))?);
+    let nova = std::sync::Arc::new(regerar_no_caminho(caminho.clone(), modo, &cofre_do_sistema(modo), mesmo_abrindo)?);
     // DT-P4-08: o processo passa a usar a identidade nova.
     cache_identidades().lock().unwrap_or_else(|e| e.into_inner()).insert(caminho, nova.clone());
     Ok(nova)
@@ -517,7 +541,12 @@ pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<st
 /// segredo ficou (a conta do cofre do sistema, que não é mexida). A identidade nova
 /// ganha uma geração nova: o segredo dela vai para **outra** conta do cofre. Assim,
 /// se era só o cofre fora do ar, a identidade antiga ainda pode ser recuperada.
-fn regerar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
+fn regerar_no_caminho(
+    caminho: PathBuf,
+    modo: &Modo,
+    cofre: &CofreSistema,
+    mesmo_abrindo: bool,
+) -> Resultado<IdentidadeLocal> {
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
     let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
     let arquivar = |de: &Path, para: &Path| -> Resultado<()> {
@@ -529,7 +558,7 @@ fn regerar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Re
         Ok(())
     };
     if caminho.exists() {
-        if abrir_no_caminho(caminho.clone(), modo, cofre).is_ok() {
+        if !mesmo_abrindo && abrir_no_caminho(caminho.clone(), modo, cofre).is_ok() {
             return Err(Erro::validacao("A identidade deste caixa continua funcionando: não é preciso gerar outra."));
         }
         let mut nome = caminho.as_os_str().to_os_string();
@@ -1572,7 +1601,7 @@ mod testes {
             carregar_ou_criar_no_caminho(c1.clone(), &Modo::Instalado, &CofreSistema::Nenhum).is_err(),
             "reserva adulterada deve falhar"
         );
-        let novo = regerar_no_caminho(c1, &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
+        let novo = regerar_no_caminho(c1, &Modo::Instalado, &CofreSistema::Nenhum, false).unwrap();
         assert_ne!(novo.identidade.publica(), id1.identidade.publica(), "recuperação cria nova identidade");
     }
 
@@ -2084,7 +2113,7 @@ mod testes {
         let raiz = PastaTemp::nova("regerar-guarda");
         let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
         let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
-        assert!(regerar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).is_err());
+        assert!(regerar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum, false).is_err());
         let igual = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
         assert_eq!(igual.identidade.publica(), id.identidade.publica(), "a identidade boa continua a mesma");
         let pasta = c.parent().unwrap();
@@ -2210,7 +2239,7 @@ mod testes {
 
         // O cofre não devolve o segredo agora: a identidade não abre; o gerente gera outra.
         assert!(abrir_no_caminho(c.clone(), &Modo::Instalado, &so_guarda).is_err());
-        let nova = regerar_no_caminho(c.clone(), &Modo::Instalado, &so_guarda).unwrap();
+        let nova = regerar_no_caminho(c.clone(), &Modo::Instalado, &so_guarda, false).unwrap();
         assert_ne!(nova.identidade.publica(), antiga.identidade.publica());
         assert_ne!(conta_cofre(&c), conta_antiga, "o segredo novo vai para outra conta do cofre");
         assert_eq!(
