@@ -89,6 +89,24 @@ def escrever(pasta, nome, texto):
     os.replace(tmp, os.path.join(pasta, nome))
 
 
+def trazer_a_vista(rr, texto, comeca=False):
+    """Rola a tela (roda do mouse no meio da janela) até `texto` ficar dentro da janela;
+    devolve True quando está à vista. A tela de verdade é rolável: quem usa rola."""
+    for _ in range(25):
+        _, _, _, altura = tema.janela_do_rustinho()
+        pos = [(x, y) for x, y, t in rr.textos()
+               if base.simples(t) == base.simples(texto) or (comeca and base.simples(t).startswith(base.simples(texto)))]
+        if not pos:
+            return False
+        y = pos[0][1]
+        if 90 < y < altura - 70:
+            return True
+        px, py = rr.ponto(400, altura // 2)
+        base.xdo("mousemove", str(px), str(py), "click", "--repeat", "3", "5" if y >= altura - 70 else "4")
+        time.sleep(0.5)
+    return False
+
+
 def clicar_ultimo(rr, texto):
     """Clica no último texto igual (o de cima de tudo: o botão da janelinha aberta)."""
     achados = [(x, y) for x, y, t in rr.textos() if base.simples(t) == base.simples(texto)]
@@ -177,7 +195,8 @@ def caixa_novo_na_tela(fotos, logs, conferir):
         time.sleep(0.3)
         digitar(f"127.0.0.1:{porta}")
         rr.foto("-2-convite")
-        rr.clicar("Entrar na loja")
+        # Enter no endereço entra na loja (o mesmo que o botão "Entrar na loja").
+        base.xdo("key", "Return")
         t = esperar(rr, lambda x: tem_texto(x, "Quem está usando"), 90)
         rr.foto("-3-entrou")
         entrou = tem_texto(t, "Quem está usando")
@@ -228,6 +247,7 @@ def loja_na_tela(fotos, logs, conferir):
             conferir("P3", "o gerente gera o convite na tela e o caixa novo entra com ele", False,
                      f"não medido: código {codigo}; a loja aprovada na tela: {tem_texto(t, 'Este caixa é aprovado na loja')}")
             return
+        trazer_a_vista(rr, "Gerar convite")
         rr.clicar("Aparece na tela dele. Ex.: 4F2K-9QXA-7MPC")
         time.sleep(0.3)
         digitar(codigo)
@@ -259,6 +279,7 @@ def loja_na_tela(fotos, logs, conferir):
         logs.append(rr.saida)
         rr.entrar("Ana")
         t = esperar(rr, lambda x: tem_texto(x, NOME_NOVO) and tem_texto(x, "Retirar da loja"), 30)
+        trazer_a_vista(rr, "Retirar da loja")
         if not rr.clicar("Retirar da loja"):
             conferir("P4", "a retirada pela chave diz o que vale e não deixa readmitir", False,
                      "não medido: sem o botão Retirar da loja")
@@ -279,10 +300,12 @@ def loja_na_tela(fotos, logs, conferir):
                  f"retiradas assinadas {assinada}")
 
         # P5: os caixas antigos.
+        trazer_a_vista(rr, "Liberar os caixas antigos")
         rr.clicar("Liberar os caixas antigos")
         t = esperar(rr, lambda x: tem_texto(x, "liberados neste caixa até"), 20)
         liberou = tem_texto(t, "liberados neste caixa até")
         rr.foto("-3-liberados")
+        trazer_a_vista(rr, "Recusar os caixas antigos agora")
         rr.clicar("Recusar os caixas antigos agora")
         t = esperar(rr, lambda x: tem_texto(x, "não trocam dados com este caixa"), 20)
         recusou = tem_texto(t, "não trocam dados com este caixa")
@@ -296,6 +319,7 @@ def loja_na_tela(fotos, logs, conferir):
         rr.entrar("Ana")
         t = esperar(rr, lambda x: tem_texto(x, "Pelo menos 8 caracteres"), 20)
         dica = tem_texto(t, "Pelo menos 8 caracteres")
+        trazer_a_vista(rr, "Trocar minha senha")
         clicar_abaixo(rr, "Senha atual")
         time.sleep(0.3)
         digitar(base.SENHA["Ana"])

@@ -208,20 +208,21 @@ FocusScope {
                     Layout.fillWidth: true
                     onConfirmado: tela.entrar()
                 }
-                Campo {
-                    id: endereco
-                    rotulo: "Endereço do caixa da loja (só se não achar sozinho)"
-                    dica: "Aparece junto do convite. Ex.: 192.168.0.12"
-                    maximo: 300
-                    Layout.fillWidth: true
-                    onConfirmado: tela.entrar()
-                }
+                // O botão na linha do endereço: à vista mesmo numa tela baixa.
                 Linha {
                     spacing: 12
                     Layout.fillWidth: true
-                    Item { Layout.fillWidth: true }
+                    Campo {
+                        id: endereco
+                        rotulo: "Endereço do caixa da loja (só se não achar sozinho)"
+                        dica: "Aparece junto do convite. Ex.: 192.168.0.12"
+                        maximo: 300
+                        Layout.fillWidth: true
+                        onConfirmado: tela.entrar()
+                    }
                     Botao {
                         text: "Entrar na loja"
+                        Layout.alignment: Qt.AlignBottom
                         onClicked: tela.entrar()
                     }
                 }

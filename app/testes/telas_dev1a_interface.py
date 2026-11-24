@@ -307,8 +307,13 @@ def main():
             rot_rede = achar_ret(t, "Senha da rede da loja")
             colares = [(x, y) for x, y, tx in t if tx == "Colar"]
             copiares = [(x, y) for x, y, tx in t if tx == "Copiar"]
-            tem_colar_rede = bool(rot_rede and any(0 < cy - rot_rede[0][1] < 80 for _, cy in colares))
-            tem_copiar_rede = bool(rot_rede and any(0 < cy - rot_rede[0][1] < 80 for _, cy in copiares))
+            # Só os ícones dentro da largura do campo da senha (em Configurações ele fica ao
+            # lado do campo dos endereços, que tem Copiar).
+            def no_campo(cx, cy):
+                rx, ry, rw = rot_rede[0][0], rot_rede[0][1], rot_rede[0][2]
+                return 0 < cy - ry < 80 and rx - 4 <= cx <= rx + rw + 4
+            tem_colar_rede = bool(rot_rede and any(no_campo(cx, cy) for cx, cy in colares))
+            tem_copiar_rede = bool(rot_rede and any(no_campo(cx, cy) for cx, cy in copiares))
             ok("P-ICO: senha da rede expõe Colar e NÃO expõe Copiar",
                tem_colar_rede and not tem_copiar_rede,
                f"{f} rot={rot_rede} colares={colares} copiares={copiares}")
