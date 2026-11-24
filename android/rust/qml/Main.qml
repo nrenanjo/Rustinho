@@ -216,6 +216,22 @@ ApplicationWindow {
         return false
     }
 
+    // 7b / G9 / B1: ao sair com Esc/seta de uma tela aberta sobre trabalho de usuário desativado,
+    // permite voltar mantendo o trabalho guardado no Início (para conferência sem obrigar descarte).
+    function confirmarSaidaTrabalhoDesativado(descricao, aoVoltar) {
+        confirmar(
+            "Manter trabalho guardado e voltar?",
+            "O trabalho" + (descricao ? " (“" + descricao + "”)" : "")
+            + " deixado pelo usuário desativado continua na lista do Início para concluir depois ou usar “Descartar como gerente”.",
+            "Manter e voltar",
+            () => {
+                if (aoVoltar)
+                    aoVoltar()
+            },
+            "principal"
+        )
+    }
+
     // 7b / G9: descarte explícito pelo gerente de trabalho deixado por usuário desativado
     // (exige motivo obrigatório >= 3 letras e senha do gerente, auditando `trabalho.gerente_descartar`).
     function descartarTrabalhoDesativado(trabalhoId, descricao, depois) {

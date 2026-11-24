@@ -85,6 +85,8 @@ FocusScope {
     function recalcular() {
         if (carrinho.length === 0) {
             calculo = null
+            if (rascunhoId !== "" && trabalhoDesativadoId === "")
+                timerRascunhoVenda.restart()
             return
         }
         const r = Api.chamar("venda_calcular", entrada())
@@ -148,8 +150,22 @@ FocusScope {
 
     function guardarRascunhoAgora() {
         timerRascunhoVenda.stop()
-        if (carrinho.length === 0 || trabalhoDesativadoId !== "")
+        if (trabalhoDesativadoId !== "")
             return
+        if (carrinho.length === 0) {
+            // N1: quando o usuário esvazia o carrinho, remove o rascunho obsoleto para não reaparecer no Início.
+            if (rascunhoId !== "") {
+                Api.chamar("trabalho_concluir", {
+                    id: rascunhoId,
+                    tipo: "venda",
+                    alvoId: osCarregada || encomendaCarregada || orcamentoCarregado || ""
+                })
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+            }
+            return
+        }
         const qtd = carrinho.length + (carrinho.length === 1 ? " item" : " itens")
         const cli = campoCliente.texto.trim() !== "" ? (" · " + campoCliente.texto.trim()) : ""
         const tot = calculo && calculo.total ? (" · R$ " + calculo.total) : ""
@@ -402,11 +418,13 @@ FocusScope {
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             limparBusca()
         } else if (trabalhoDesativadoId !== "") {
-            descartarRascunho(() => { tela.limparCamposVenda(); janela.voltar() })
+            janela.confirmarSaidaTrabalhoDesativado(campoCliente.texto.trim() || "Venda em andamento", () => janela.voltar())
         } else if (carrinho.length > 0) {
             janela.confirmar("Limpar esta venda?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
                              "Limpar", () => tela.descartarRascunho(() => tela.limparCamposVenda()), "perigo")
         } else {
+            if (rascunhoId !== "")
+                guardarRascunhoAgora()
             janela.voltar()
         }
     }
@@ -648,8 +666,11 @@ FocusScope {
                 else if (tela.carrinho.length > 0)
                     tela.janela.confirmar("Ir para Receber?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
                                           "Ir para Receber", () => tela.descartarRascunho(() => tela.janela.substituir("TelaReceber", {})), "perigo")
-                else
+                else {
+                    if (tela.rascunhoId !== "")
+                        tela.guardarRascunhoAgora()
                     tela.janela.substituir("TelaReceber", {})
+                }
             }
         }
 

@@ -108,8 +108,23 @@ FocusScope {
 
     function guardarRascunhoAgora() {
         timerRascunhoReceber.stop()
-        if (!temRascunhoSignificativo() || trabalhoDesativadoId !== "")
+        if (trabalhoDesativadoId !== "")
             return
+        if (!temRascunhoSignificativo()) {
+            // N1: quando a pessoa limpa as seleções ou fecha a janelinha sem nada preenchido,
+            // remove o rascunho obsoleto para não reaparecer no Início.
+            if (rascunhoId !== "") {
+                Api.chamar("trabalho_concluir", {
+                    id: rascunhoId,
+                    tipo: "receber",
+                    alvoId: clienteId || lancar.cliente || ""
+                })
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+            }
+            return
+        }
         const nomeCli = conta && conta.nome ? conta.nome : (campoCliente.texto.trim() || "Cliente")
         const tituloRec = lancar.opened
                         ? ("Lançar dívida · " + nomeCli + (valorDivida.texto.trim() !== "" ? " · R$ " + valorDivida.texto.trim() : ""))
@@ -265,12 +280,15 @@ FocusScope {
             busca.texto = ""
             carregarPainel()
         } else if (trabalhoDesativadoId !== "") {
-            descartarRascunho(() => janela.voltar())
-        } else if (rascunhoId !== "" || temRascunhoSignificativo()) {
+            const desc = conta && conta.nome ? ("Recebimento · " + conta.nome) : "Recebimento em andamento"
+            janela.confirmarSaidaTrabalhoDesativado(desc, () => janela.voltar())
+        } else if (temRascunhoSignificativo()) {
             janela.confirmar("Descartar recebimento em andamento?",
                              "As parcelas marcadas ou dados ainda não confirmados serão descartados.",
                              "Descartar", () => tela.descartarRascunho(() => janela.voltar()), "perigo")
         } else {
+            if (rascunhoId !== "")
+                guardarRascunhoAgora()
             janela.voltar()
         }
     }
@@ -335,11 +353,14 @@ FocusScope {
                         return
                     if (tela.trabalhoDesativadoId !== "")
                         tela.descartarRascunho(() => tela.janela.substituir("TelaVender", {}))
-                    else if (tela.rascunhoId !== "" || tela.temRascunhoSignificativo())
+                    else if (tela.temRascunhoSignificativo())
                         tela.janela.confirmar("Ir para Vender?", "O preenchimento em andamento nesta tela será descartado.",
                                               "Ir para Vender", () => tela.descartarRascunho(() => tela.janela.substituir("TelaVender", {})), "perigo")
-                    else
+                    else {
+                        if (tela.rascunhoId !== "")
+                            tela.guardarRascunhoAgora()
                         tela.janela.substituir("TelaVender", {})
+                    }
                 }
             }
 
@@ -910,7 +931,11 @@ FocusScope {
                 Botao { text: "Receber"; icone: "check"; atalho: "Enter"; onClicked: pagar.concluir() }
             }
         }
-        onClosed: busca.focar()
+        onClosed: {
+            if (tela.rascunhoId !== "" && !tela.temRascunhoSignificativo())
+                timerRascunhoReceber.restart()
+            busca.focar()
+        }
     }
 
     // ---------- Recebido ----------
@@ -1185,7 +1210,11 @@ FocusScope {
                 Botao { text: "Lançar"; icone: "check"; enabled: lancar.cliente !== ""; onClicked: lancar.salvar() }
             }
         }
-        onClosed: busca.focar()
+        onClosed: {
+            if (tela.rascunhoId !== "" && !tela.temRascunhoSignificativo())
+                timerRascunhoReceber.restart()
+            busca.focar()
+        }
     }
 
     // ---------- Pergunta com motivo (estornar, tirar dívida) ----------

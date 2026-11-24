@@ -285,9 +285,10 @@ FocusScope {
     }
 
     function aoEsc() {
-        if (trabalhoDesativadoId !== "")
-            descartarRascunho(() => janela.voltar())
-        else if (alterado)
+        if (trabalhoDesativadoId !== "") {
+            const desc = nome.texto.trim() || (ficha && ficha.nome ? ficha.nome : "Cadastro")
+            janela.confirmarSaidaTrabalhoDesativado(desc, () => janela.voltar())
+        } else if (alterado)
             janela.confirmar("Descartar alterações?", "O que você mudou neste cadastro ainda não foi salvo.",
                              "Descartar", () => tela.descartarRascunho(() => janela.voltar()), "perigo")
         else

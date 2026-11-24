@@ -316,6 +316,14 @@ def main():
             ok("R2 (TelaReceber): indicador visual 'Guardado às' aparece no cabeçalho ao editar",
                rr.esperar(lambda: rr.tem("Guardado às"), 8),
                rr.foto("-guardado"))
+            # N1: fechar a janelinha Lançar dívida (sem parcelas marcadas) remove o rascunho obsoleto:
+            xdo("key", "Escape")
+            ok("N1 (TelaReceber): fechar janelinha limpa o indicador de rascunho obsoleto",
+               rr.esperar(lambda: not rr.tem("Guardado às"), 6))
+            c = conexao_db(pasta)
+            orfaos_rec = c.execute("SELECT COUNT(*) FROM trabalho WHERE tipo = 'receber' AND usuario_id = ?", (ana_id,)).fetchone()[0]
+            c.close()
+            ok("N1 (TelaReceber): nenhum rascunho obsoleto de receber permaneceu no banco", orfaos_rec == 0)
         finally:
             rr.fechar()
             checar_log(rr.saida)
@@ -335,6 +343,31 @@ def main():
             ok("R2 (TelaVender): indicador visual 'Guardado às' aparece no cabeçalho com item no carrinho",
                rv.esperar(lambda: rv.tem("Guardado às"), 8),
                rv.foto("-guardado"))
+            # N1: remover o último item do carrinho e voltar ao Início NÃO deixa rascunho obsoleto:
+            textos_v = rv.textos()
+            total_linha = [p for p in textos_v if "R$ 100,00" in p[2] and p[1] < 450]
+            ok("N1 (TelaVender): localizou linha do item no carrinho para remover", len(total_linha) > 0)
+            if total_linha:
+                lx, ly, _ = total_linha[0]
+                xdo("mousemove", str(int(lx + 88)), str(int(ly)))
+                xdo("click", "1")
+                ok("N1 (TelaVender): esvaziar o carrinho remove o indicador 'Guardado às'",
+                   rv.esperar(lambda: not rv.tem("Guardado às"), 6))
+                xdo("key", "Escape")
+                ok("N1 (TelaVender): Esc com carrinho vazio volta ao Início sem erro",
+                   rv.esperar(lambda: rv.tem("Vender / Receber"), 6))
+                c = conexao_db(pasta)
+                orfaos_esvaziar = c.execute("SELECT COUNT(*) FROM trabalho WHERE tipo = 'venda' AND usuario_id = ?", (ana_id,)).fetchone()[0]
+                c.close()
+                ok("N1 (TelaVender): nenhum rascunho obsoleto de venda ficou no banco após esvaziar carrinho",
+                   orfaos_esvaziar == 0 and not rv.tem("Carrinho (1 item"))
+                # Reabre Vender e testa também a troca Vender -> Receber sem rascunho órfão:
+                rv.clicar("Vender / Receber")
+                rv.esperar(lambda: rv.tem("Total a pagar"), 6)
+                time.sleep(0.3)
+                xdo("type", "--delay", "30", str(cod_peca))
+                xdo("key", "Return")
+                rv.esperar(lambda: rv.tem("Guardado às"), 8)
             # Trocar para Receber limpa o rascunho de venda sem deixar órfão:
             rv.clicar("Receber")
             if rv.esperar(lambda: rv.tem("Ir para Receber?"), 4):

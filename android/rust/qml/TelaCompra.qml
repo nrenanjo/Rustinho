@@ -318,7 +318,8 @@ FocusScope {
 
     function aoEsc() {
         if (trabalhoDesativadoId !== "") {
-            descartarRascunho(() => janela.voltar())
+            const desc = compra ? ("NF " + compra.numero + " · " + compra.fornecedor) : "Compra em conferência"
+            janela.confirmarSaidaTrabalhoDesativado(desc, () => janela.voltar())
         } else if (rascunho && rascunhoId !== "") {
             janela.confirmar(
                 "Sair da conferência desta nota?",

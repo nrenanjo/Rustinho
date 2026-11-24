@@ -440,10 +440,11 @@ FocusScope {
     function aoEsc() {
         if (saida.opened)
             return
-        if (alterado && (nova || rascunho))
+        if (trabalhoDesativadoId !== "") {
+            const desc = [veiculo.texto.trim(), placa.texto.trim(), cliente.texto.trim()].filter(x => !!x).join(" · ") || "OS"
+            janela.confirmarSaidaTrabalhoDesativado(desc, () => { alterado = false; janela.voltar() })
+        } else if (alterado && (nova || rascunho))
             saida.open()
-        else if (trabalhoDesativadoId !== "")
-            descartarRascunho(() => { alterado = false; janela.voltar() })
         else if (alterado && !travada)
             janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair",
                              () => tela.descartarRascunho(() => { tela.alterado = false; janela.voltar() }), "perigo")

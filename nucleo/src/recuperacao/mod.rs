@@ -482,7 +482,13 @@ pub fn guardar(
             id_atual
         }
         None => {
-            let novo_id = if d.id.trim().is_empty() { tempo::novo_id() } else { d.id.trim().to_string() };
+            let id_pedido = d.id.trim();
+            let id_ocupado: bool = if id_pedido.is_empty() {
+                false
+            } else {
+                conn.query_row("SELECT EXISTS(SELECT 1 FROM trabalho WHERE id = ?1)", [id_pedido], |l| l.get(0))?
+            };
+            let novo_id = if id_pedido.is_empty() || id_ocupado { tempo::novo_id() } else { id_pedido.to_string() };
             conn.execute(
                 "INSERT INTO trabalho (
                     id, usuario_id, dispositivo_origem, tipo, alvo_id, titulo, formato_versao,
@@ -511,7 +517,6 @@ pub fn guardar(
         }
     };
 
-    sincronizar_classificacoes(conn, dispositivo_id, recuado)?;
     let guardado_hora = hora_local_curta(conn, &agora);
     Ok(TrabalhoGuardado {
         id,
@@ -1959,12 +1964,13 @@ mod testes {
             b.conn.query_row("SELECT situacao FROM trabalho WHERE id = ?1", [&g1.id], |l| l.get(0)).unwrap();
         assert_eq!(sit, "sem_conserto", "sem_conserto deve ser persistido no banco");
 
-        // Novo trabalho com mesma chave (usuario, disp, tipo='peca', alvo_id='') NÃO sobrescreve o sem_conserto:
+        // Novo trabalho com mesma chave E mesmo `id` obsoleto (B3) NÃO colide em PK nem sobrescreve o sem_conserto:
         let g2 = guardar(
             &b.conn,
             &b.dispositivo,
             &u.id,
             GuardarEntrada {
+                id: g1.id.clone(),
                 tipo: "peca".into(),
                 titulo: "Nova peça limpa".into(),
                 estado: json!({ "nome": "Nova peça limpa" }),
@@ -1972,7 +1978,7 @@ mod testes {
             },
         )
         .unwrap();
-        assert_ne!(g1.id, g2.id, "novo trabalho deve criar outra linha preservando a corrompida");
+        assert_ne!(g1.id, g2.id, "novo trabalho deve gerar novo id preservando a linha corrompida");
         let total: i64 = b.conn.query_row("SELECT COUNT(*) FROM trabalho", [], |l| l.get(0)).unwrap();
         assert_eq!(total, 2, "linha sem_conserto preservada junto com a nova");
     }
