@@ -283,7 +283,7 @@ impl Identidade {
 
     /// A chave privada Ed25519 em PKCS#8 DER, somente para os submódulos
     /// internos do protocolo 4 (montar `CertifiedKey` do canal TLS 1.3).
-    pub(super) fn pkcs8_der(&self) -> &[u8] {
+    pub(in crate::troca::protocolo4) fn pkcs8_der(&self) -> &[u8] {
         &self.pkcs8.0
     }
 

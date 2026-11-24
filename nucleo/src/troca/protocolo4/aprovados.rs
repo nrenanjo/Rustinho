@@ -74,7 +74,7 @@ pub const DISPOSITIVO_MAXIMO: usize = 64;
 /// (sem espaços nas pontas), até 64 caracteres ASCII seguros (`A-Z`, `a-z`, `0-9`, `-`, `_`).
 pub fn validar_dispositivo(dispositivo: &str) -> Resultado<()> {
     if dispositivo.is_empty() {
-        return Err(Erro::validacao("O pedido do caixa novo precisa informar o identificador do dispositivo (I3)."));
+        return Err(Erro::validacao("O pedido do caixa novo precisa informar o identificador deste caixa."));
     }
     if dispositivo != dispositivo.trim() || dispositivo.len() > DISPOSITIVO_MAXIMO {
         return Err(Erro::validacao("Identificador de dispositivo inválido no pedido do caixa."));
@@ -665,6 +665,17 @@ pub fn aprovar(
             "Este caixa foi retirado da loja e não volta com a mesma identidade. Gere uma identidade nova nele.",
         ));
     }
+    // F-05 (I3): o mesmo caixa (`dispositivo`) não fica com duas chaves autorizadas ao
+    // mesmo tempo (acontece quando ele refaz a identidade e pede entrada de novo, ou
+    // num banco copiado). Recusa já aqui, com o caminho de saída: retirar antes o
+    // registro antigo (a tela da retirada lista quem depende dele, P4-4).
+    if !pedido.dispositivo.is_empty() {
+        match chave_do_dispositivo(conn, raiz, loja_id, &pedido.dispositivo) {
+            Ok(Some(atual)) if atual == pedido.chave => {}
+            Ok(None) => {}
+            Ok(Some(_)) | Err(_) => return Err(Erro::validacao(TEXTO_CAIXA_COM_OUTRA_IDENTIDADE)),
+        }
+    }
     let a =
         assinar_aprovacao(aprovador, pedido.chave, pedido.chave_troca, loja_id, &nome, gerente, &pedido.dispositivo);
     em_bloco(conn, || {
@@ -685,6 +696,11 @@ pub fn aprovar(
     })?;
     Ok(a)
 }
+
+/// F-05: o caixa que pede entrada já está aprovado com outra identidade.
+pub const TEXTO_CAIXA_COM_OUTRA_IDENTIDADE: &str =
+    "Este caixa já está aprovado nesta loja com outra identidade (de antes). Para aprová-lo de novo, retire \
+     primeiro o registro antigo dele em Configurações › Caixas da loja e depois gere um convite novo.";
 
 /// O caixa `retirador` (autorizado nesta loja), com o gerente, retira a
 /// `chave` da loja. Vale por máquina: a chave fica fora para sempre, mesmo
@@ -886,9 +902,19 @@ mod testes {
 
         let p3 = Pedido::com_dispositivo(&c3, "disp-caixa-3");
         aprovar(&b.conn, &c2, &r, LOJA, &p3, "Caixa 3", &u).unwrap();
-        // A3: duas chaves autorizadas com o mesmo `dispositivo` devolvem erro de conflito.
+        // F-05: `aprovar` recusa uma segunda chave para o mesmo caixa (`dispositivo`).
         let c4 = Identidade::gerar().unwrap();
-        aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::com_dispositivo(&c4, "disp-caixa-3"), "Caixa 4", &u).unwrap();
+        let p4 = Pedido::com_dispositivo(&c4, "disp-caixa-3");
+        assert!(matches!(
+            aprovar(&b.conn, &raiz, &r, LOJA, &p4, "Caixa 4", &u),
+            Err(Erro::Validacao { ref mensagem, .. }) if mensagem == TEXTO_CAIXA_COM_OUTRA_IDENTIDADE
+        ));
+        // A3: o conflito ainda pode chegar pela troca (duas aprovações feitas ao mesmo
+        // tempo em dois caixas autorizados): duas chaves autorizadas com o mesmo
+        // `dispositivo` devolvem erro (falha fechada).
+        let concorrente =
+            assinar_aprovacao(&raiz, c4.publica(), c4.publica_troca(), LOJA, "Caixa 4", &u, "disp-caixa-3");
+        juntar(&b.conn, LOJA, &Linhas { aprovacoes: vec![concorrente], retiradas: Vec::new() }).unwrap();
         assert!(
             chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-3").is_err(),
             "A3: >1 chave autorizada com o mesmo dispositivo deve falhar"
@@ -938,6 +964,33 @@ mod testes {
             .execute("UPDATE caixa_aprovado SET dispositivo = 'clonado' WHERE chave = ?1", [hex(&c2.publica())])
             .unwrap();
         assert_eq!(situacao(&b, &raiz, &c2.publica()), Situacao::Desconhecida, "dispositivo adulterado não vale");
+    }
+
+    /// F-05: o caixa que refez a identidade (ou um banco copiado) pede entrada de
+    /// novo com o mesmo `dispositivo`: a aprovação é recusada com o caminho de saída;
+    /// depois de retirar o registro antigo, a aprovação da chave nova passa e o
+    /// caixa volta a ter uma chave só.
+    #[test]
+    fn f05_mesmo_caixa_com_chave_nova_exige_retirar_a_antiga() {
+        let (b, u, raiz) = loja();
+        let r = raiz.publica();
+        let antiga = Identidade::gerar().unwrap();
+        aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::com_dispositivo(&antiga, "disp-caixa-2"), "Caixa 2", &u).unwrap();
+        let nova = Identidade::gerar().unwrap();
+        let pedido_novo = Pedido::com_dispositivo(&nova, "disp-caixa-2");
+        let recusa = aprovar(&b.conn, &raiz, &r, LOJA, &pedido_novo, "Caixa 2", &u);
+        assert!(
+            matches!(&recusa, Err(Erro::Validacao { mensagem, .. }) if mensagem == TEXTO_CAIXA_COM_OUTRA_IDENTIDADE),
+            "{recusa:?}"
+        );
+        assert_eq!(situacao(&b, &raiz, &nova.publica()), Situacao::Desconhecida, "nada foi gravado");
+        assert_eq!(chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-2").unwrap(), Some(antiga.publica()));
+        // Reaprovar a MESMA chave (repetição) continua valendo.
+        aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::com_dispositivo(&antiga, "disp-caixa-2"), "Caixa 2", &u).unwrap();
+        // O caminho de saída: retirar o registro antigo e aprovar a chave nova.
+        retirar(&b.conn, &raiz, &r, LOJA, &antiga.publica(), "refez a identidade", &u).unwrap();
+        aprovar(&b.conn, &raiz, &r, LOJA, &pedido_novo, "Caixa 2", &u).unwrap();
+        assert_eq!(chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-2").unwrap(), Some(nova.publica()));
     }
 
     #[test]

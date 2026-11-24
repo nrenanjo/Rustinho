@@ -4056,6 +4056,33 @@ mod testes {
         assert_eq!(r["ok"], true, "{r}");
     }
 
+    /// F-15 (revisão de entrada da dev.2): o caso real da DP-33 — gerente de antes com
+    /// senha de 4 a 7 caracteres (válida na política antiga) entra normalmente e fica
+    /// marcado "senha curta", com o aviso firme (backups); com 8, não é marcado.
+    #[test]
+    fn f15_gerente_antigo_com_senha_de_4_a_7_entra_e_fica_marcado_curta() {
+        let mut s = conectado();
+        for (nome, senha, curta) in
+            [("Dora", "1234", true), ("Edu", "12345", true), ("Fabi", "1234567", true), ("Gil", "12345678", false)]
+        {
+            let u = usuarios::criar(&s.banco.conn, &s.banco.dispositivo, nome, senha, true).unwrap();
+            usuarios::definir_gerente(&s.banco.conn, &u.id, true).unwrap();
+            assert_eq!(f17_entrar(&mut s, &u.id, senha)["ok"], true, "{nome}: a senha antiga entra");
+            let situacao = usuarios::situacao_senha(&s.banco.conn, &u.id).unwrap();
+            let avisos = chamar(&mut s, "avisos_do_dia", "{}");
+            let aviso =
+                avisos["dados"].as_array().unwrap().iter().find(|a| a["id"] == format!("senha.{}", u.id)).cloned();
+            if curta {
+                assert_eq!(situacao, Some(Some(Problema::Curta)), "{nome}");
+                let a = aviso.expect("aviso da senha curta do gerente");
+                assert!(a["atraso"].as_str().unwrap().contains("backups"), "{nome}: {a}");
+            } else {
+                assert_eq!(situacao, Some(None), "{nome}: 8 caracteres está dentro da política");
+                assert!(aviso.is_none(), "{nome}: sem aviso");
+            }
+        }
+    }
+
     /// F17-A4: quem tem senha antiga entra normalmente; vira aviso e marcador, não bloqueio.
     #[test]
     fn f17_a4_senha_antiga_entra_com_aviso() {

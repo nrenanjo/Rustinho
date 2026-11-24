@@ -7,10 +7,16 @@
 //!   `unsafe` no próprio `rustls`).
 //! - **Somente TLS 1.3** com provedor `ring` e autenticação **mútua** via
 //!   chaves públicas cruas Ed25519 (RFC 7250, sem X.509 nem `rcgen`).
-//! - **Modo autorizado (`PoliticaChaves::SomenteAutorizadas`):** recusa
-//!   qualquer par fora do conjunto de chaves autorizadas *durante o aperto de
-//!   mão TLS*, antes de trocar qualquer byte de dados da loja. Conjunto vazio
-//!   falha fechado (recusa tudo).
+//! - **Dois tipos de canal (F-04):** o transporte TLS é interno ao módulo e só
+//!   chega a quem chama como [`CanalAutenticado`] (o outro lado provou uma chave
+//!   do conjunto autorizado, conferida pelo verificador **e** de novo depois do
+//!   aperto de mão; só ele carrega dados da loja) ou como [`CanalIngresso`] (o
+//!   outro lado provou só ter uma chave Ed25519 qualquer; carrega apenas as
+//!   [`MensagemIngresso`] do convite, lidas de forma estrita). Não existe jeito de
+//!   montar um ouvinte "aceita qualquer chave" que entregue um canal de dados.
+//! - **Modo autorizado:** recusa qualquer par fora do conjunto de chaves
+//!   autorizadas *durante o aperto de mão TLS*, antes de trocar qualquer byte de
+//!   dados da loja. Conjunto vazio falha fechado (recusa tudo).
 //! - **Modo ingresso (`A6`):** quando há convite ativo, o caixa novo prova a
 //!   posse do segredo de 128 bits via `HMAC-SHA256` sobre o material exportado
 //!   da sessão TLS (`export_keying_material`, RFC 5705), vinculando
@@ -58,9 +64,10 @@ const CONTEXTO_EXPORTADOR_CONVITE: &[u8] = b"rustinho/p4/ingresso/v1";
 /// Limite máximo para o texto de entrada do QR code de convite.
 const LIMITE_QR_BYTES: usize = 512;
 
-/// Política de verificação da chave pública Ed25519 do outro lado no handshake TLS 1.3.
+/// Política de verificação da chave pública Ed25519 do outro lado no handshake TLS 1.3
+/// (interna: quem chama escolhe o tipo de canal, F-04).
 #[derive(Clone, Debug)]
-pub enum PoliticaChaves {
+enum PoliticaChaves {
     /// Aceita exclusivamente chaves pertencentes ao conjunto autorizado.
     /// Conjunto vazio falha fechado (recusa todas as conexões).
     SomenteAutorizadas(HashSet<Chave>),
@@ -224,7 +231,7 @@ impl ClientCertVerifier for VerificadorRpk {
 }
 
 /// Constrói a configuração de servidor TLS 1.3 com RPK Ed25519 mútuo.
-pub fn config_servidor(eu: &Identidade, politica: PoliticaChaves) -> Resultado<Arc<ServerConfig>> {
+fn config_servidor(eu: &Identidade, politica: PoliticaChaves) -> Resultado<Arc<ServerConfig>> {
     let mut cfg = ServerConfig::builder_with_provider(Arc::new(provedor::default_provider()))
         .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|e| Erro::Interno(format!("erro ao configurar TLS 1.3 no servidor: {e}")))?
@@ -238,7 +245,7 @@ pub fn config_servidor(eu: &Identidade, politica: PoliticaChaves) -> Resultado<A
 }
 
 /// Constrói a configuração de cliente TLS 1.3 com RPK Ed25519 mútuo.
-pub fn config_cliente(eu: &Identidade, politica: PoliticaChaves) -> Resultado<Arc<ClientConfig>> {
+fn config_cliente(eu: &Identidade, politica: PoliticaChaves) -> Resultado<Arc<ClientConfig>> {
     let mut cfg = ClientConfig::builder_with_provider(Arc::new(provedor::default_provider()))
         .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|e| Erro::Interno(format!("erro ao configurar TLS 1.3 no cliente: {e}")))?
@@ -275,52 +282,322 @@ impl rustls::server::ProducesTickets for SemTickets {
 // Conexão TLS 1.3 sobre `TcpStream` com enquadramento seguro, prazo e parada.
 // ---------------------------------------------------------------------------
 
-/// Canal autenticado TLS 1.3 sobre TCP (cliente ou servidor).
-pub struct CanalTls<C> {
+/// O transporte TLS 1.3 sobre TCP (cliente ou servidor). Interno ao módulo: quem
+/// chama recebe [`CanalAutenticado`] ou [`CanalIngresso`] (F-04).
+struct CanalTls<C> {
     fluxo: TcpStream,
     conn: C,
     chave_par: Chave,
     exportador_convite: [u8; 32],
 }
 
-pub type CanalCliente = CanalTls<ClientConnection>;
-pub type CanalServidor = CanalTls<ServerConnection>;
+fn abrir_cliente(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    politica: PoliticaChaves,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<CanalTls<ClientConnection>> {
+    let cfg = config_cliente(eu, politica)?;
+    let nome = ServerName::try_from("rustinho-caixa").map_err(|_| Erro::Interno("nome TLS inválido".into()))?;
+    let conn = ClientConnection::new(cfg, nome)
+        .map_err(|e| Erro::Interno(format!("falha ao iniciar cliente TLS 1.3: {e}")))?;
+    finalizar_abertura(fluxo, conn, prazo, parar)
+}
 
-impl CanalCliente {
-    /// Abre o canal autenticado TLS 1.3 como cliente sobre `fluxo` já conectado.
-    pub fn conectar(
-        fluxo: TcpStream,
-        eu: &Identidade,
-        politica: PoliticaChaves,
-        prazo: Duration,
-        parar: Option<&AtomicBool>,
-    ) -> Resultado<CanalCliente> {
-        let cfg = config_cliente(eu, politica)?;
-        let nome = ServerName::try_from("rustinho-caixa").map_err(|_| Erro::Interno("nome TLS inválido".into()))?;
-        let conn = ClientConnection::new(cfg, nome)
-            .map_err(|e| Erro::Interno(format!("falha ao iniciar cliente TLS 1.3: {e}")))?;
-        finalizar_abertura(fluxo, conn, prazo, parar)
+fn abrir_servidor(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    politica: PoliticaChaves,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<CanalTls<ServerConnection>> {
+    let cfg = config_servidor(eu, politica)?;
+    let conn =
+        ServerConnection::new(cfg).map_err(|e| Erro::Interno(format!("falha ao iniciar servidor TLS 1.3: {e}")))?;
+    finalizar_abertura(fluxo, conn, prazo, parar)
+}
+
+/// Canal TLS 1.3 em que o outro lado provou, no aperto de mão, a posse de uma chave
+/// do conjunto autorizado (conferida pelo verificador e **de novo** depois do aperto
+/// de mão). É o único canal que carrega dados da loja.
+pub struct CanalAutenticado<C>(CanalTls<C>);
+pub type CanalAutenticadoCliente = CanalAutenticado<ClientConnection>;
+pub type CanalAutenticadoServidor = CanalAutenticado<ServerConnection>;
+
+/// Canal TLS 1.3 de entrada por convite (A6): o outro lado provou só ter a privada de
+/// uma chave Ed25519 qualquer. Carrega apenas as [`MensagemIngresso`] (leitura
+/// estrita): nada da loja passa por ele.
+pub struct CanalIngresso<C>(CanalTls<C>);
+pub type CanalIngressoCliente = CanalIngresso<ClientConnection>;
+pub type CanalIngressoServidor = CanalIngresso<ServerConnection>;
+
+/// O que o servidor aceitou numa conexão em que convites estão ativos.
+pub enum Aceito {
+    /// A chave do outro lado é autorizada nesta loja: canal de dados.
+    Autenticado(CanalAutenticadoServidor),
+    /// Chave desconhecida: só o ingresso por convite.
+    Ingresso(CanalIngressoServidor),
+}
+
+fn exigir_autorizada(chave: &Chave, autorizadas: &HashSet<Chave>) -> Resultado<()> {
+    if autorizadas.contains(chave) {
+        Ok(())
+    } else {
+        Err(Erro::validacao(TEXTO_RECUSA))
     }
 }
 
-impl CanalServidor {
-    /// Aceita o canal autenticado TLS 1.3 como servidor sobre `fluxo` já aceito.
-    pub fn aceitar(
-        fluxo: TcpStream,
-        eu: &Identidade,
-        politica: PoliticaChaves,
-        prazo: Duration,
-        parar: Option<&AtomicBool>,
-    ) -> Resultado<CanalServidor> {
-        let cfg = config_servidor(eu, politica)?;
-        let conn =
-            ServerConnection::new(cfg).map_err(|e| Erro::Interno(format!("falha ao iniciar servidor TLS 1.3: {e}")))?;
-        finalizar_abertura(fluxo, conn, prazo, parar)
+/// Servidor: aceita só caixas autorizados (`autorizadas` vazio recusa todos).
+pub fn aceitar_autorizado(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    autorizadas: &HashSet<Chave>,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<CanalAutenticadoServidor> {
+    let canal = abrir_servidor(fluxo, eu, PoliticaChaves::SomenteAutorizadas(autorizadas.clone()), prazo, parar)?;
+    exigir_autorizada(&canal.chave_par, autorizadas)?;
+    Ok(CanalAutenticado(canal))
+}
+
+/// Servidor com convite ativo: o aperto de mão aceita qualquer chave Ed25519 válida;
+/// depois, chave autorizada → [`Aceito::Autenticado`]; senão → [`Aceito::Ingresso`].
+pub fn aceitar_com_ingresso(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    autorizadas: &HashSet<Chave>,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<Aceito> {
+    let canal = abrir_servidor(fluxo, eu, PoliticaChaves::QualquerChaveValidaParaIngresso, prazo, parar)?;
+    Ok(if autorizadas.contains(&canal.chave_par) {
+        Aceito::Autenticado(CanalAutenticado(canal))
+    } else {
+        Aceito::Ingresso(CanalIngresso(canal))
+    })
+}
+
+/// Cliente: conecta só a um servidor de chave autorizada (`autorizadas` vazio recusa todos).
+pub fn conectar_autorizado(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    autorizadas: &HashSet<Chave>,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<CanalAutenticadoCliente> {
+    let canal = abrir_cliente(fluxo, eu, PoliticaChaves::SomenteAutorizadas(autorizadas.clone()), prazo, parar)?;
+    exigir_autorizada(&canal.chave_par, autorizadas)?;
+    Ok(CanalAutenticado(canal))
+}
+
+/// Cliente (caixa novo) entrando por convite. `servidor_esperado`: a chave do caixa
+/// aprovador quando veio no QR; `None` quando o convite foi digitado — aí a
+/// autenticidade do servidor vem só da prova do convite
+/// ([`verificar_prova_servidor`]), que tem de ser conferida antes de confiar em
+/// qualquer coisa que ele mandar.
+pub fn conectar_para_ingresso(
+    fluxo: TcpStream,
+    eu: &Identidade,
+    servidor_esperado: Option<Chave>,
+    prazo: Duration,
+    parar: Option<&AtomicBool>,
+) -> Resultado<CanalIngressoCliente> {
+    let politica = match servidor_esperado {
+        Some(k) => PoliticaChaves::SomenteAutorizadas(HashSet::from([k])),
+        None => PoliticaChaves::QualquerChaveValidaParaIngresso,
+    };
+    Ok(CanalIngresso(abrir_cliente(fluxo, eu, politica, prazo, parar)?))
+}
+
+impl<C, Data> CanalAutenticado<C>
+where
+    Data: SideData,
+    C: std::ops::DerefMut<Target = ConnectionCommon<Data>>,
+{
+    /// A chave pública Ed25519 autenticada do outro caixa (autorizada nesta loja).
+    pub fn chave_do_par(&self) -> Chave {
+        self.0.chave_par
+    }
+
+    /// Material exportado RFC 5705 desta sessão (para a retomada do ingresso).
+    pub fn exportador_convite(&self) -> &[u8; 32] {
+        &self.0.exportador_convite
+    }
+
+    /// Endereço IP remoto do socket TCP (para auditoria/registro).
+    pub fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        self.0.fluxo.peer_addr()
+    }
+
+    /// Envia um quadro JSON (`u32` big-endian + corpo UTF-8).
+    pub fn enviar_json(&mut self, valor: &Value, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
+        self.0.enviar_json(valor, prazo, parar)
+    }
+
+    /// Recebe um quadro JSON respeitando estritamente `limite` bytes (recusa antes de alocar).
+    pub fn receber_json(&mut self, limite: usize, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<Value> {
+        self.0.receber_json(limite, prazo, parar)
+    }
+
+    /// Fecha graciosamente o canal TLS enviando `close_notify`.
+    pub fn encerrar(self) {
+        self.0.encerrar()
     }
 }
 
+impl<C, Data> CanalIngresso<C>
+where
+    Data: SideData,
+    C: std::ops::DerefMut<Target = ConnectionCommon<Data>>,
+{
+    /// A chave Ed25519 do outro lado (provada no aperto de mão, **não** autorizada).
+    pub fn chave_do_par(&self) -> Chave {
+        self.0.chave_par
+    }
+
+    /// Material exportado RFC 5705 desta sessão (amarra a prova do convite ao canal).
+    pub fn exportador_convite(&self) -> &[u8; 32] {
+        &self.0.exportador_convite
+    }
+
+    /// Endereço IP remoto do socket TCP (para auditoria/registro).
+    pub fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        self.0.fluxo.peer_addr()
+    }
+
+    /// Envia uma mensagem do ingresso.
+    pub fn enviar(&mut self, msg: &MensagemIngresso, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
+        self.0.enviar_json(&msg.para_json()?, prazo, parar)
+    }
+
+    /// Recebe uma mensagem do ingresso; qualquer outra coisa (um pedido da troca,
+    /// campos a mais, tipo desconhecido) é recusada.
+    pub fn receber(
+        &mut self,
+        limite: usize,
+        prazo: Duration,
+        parar: Option<&AtomicBool>,
+    ) -> Resultado<MensagemIngresso> {
+        MensagemIngresso::de_json(self.0.receber_json(limite, prazo, parar)?)
+    }
+
+    /// Fecha graciosamente o canal TLS enviando `close_notify`.
+    pub fn encerrar(self) {
+        self.0.encerrar()
+    }
+}
+
+/// As únicas mensagens que passam pelo [`CanalIngresso`] (formato `{"tipo": ..., ...}`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MensagemIngresso {
+    /// Caixa novo → loja: o pedido (chaves e `dispositivo`, assinado) e a prova do convite.
+    Ingressar { pedido: Pedido, prova: ProvaIngressoCliente },
+    /// Loja → caixa novo: aprovado. A prova de que a loja conhece o convite desta
+    /// sessão, a raiz e a loja (conferidas pela prova) e o registro de caixas.
+    Aprovado { prova_servidor: String, raiz: Chave, loja_id: String, linhas: aprovados::Linhas },
+    /// Loja → caixa novo: recusado (texto para a tela).
+    Recusado { motivo: String },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CorpoIngressar {
+    pedido: Pedido,
+    prova: ProvaIngressoCliente,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CorpoAprovado {
+    prova_servidor: String,
+    raiz: String,
+    loja_id: String,
+    linhas: aprovados::Linhas,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CorpoRecusado {
+    motivo: String,
+}
+
+impl MensagemIngresso {
+    /// A mensagem em JSON (`{"tipo": ..., ...campos}`).
+    pub fn para_json(&self) -> Resultado<Value> {
+        let (tipo, corpo) = match self {
+            MensagemIngresso::Ingressar { pedido, prova } => {
+                ("ingressar", serde_json::to_value(CorpoIngressar { pedido: pedido.clone(), prova: prova.clone() })?)
+            }
+            MensagemIngresso::Aprovado { prova_servidor, raiz, loja_id, linhas } => (
+                "aprovado",
+                serde_json::to_value(CorpoAprovado {
+                    prova_servidor: prova_servidor.clone(),
+                    raiz: hex(raiz),
+                    loja_id: loja_id.clone(),
+                    linhas: linhas.clone(),
+                })?,
+            ),
+            MensagemIngresso::Recusado { motivo } => {
+                ("recusado", serde_json::to_value(CorpoRecusado { motivo: motivo.clone() })?)
+            }
+        };
+        let mut v = corpo;
+        v.as_object_mut()
+            .ok_or_else(|| Erro::Interno("mensagem de ingresso sem campos".into()))?
+            .insert("tipo".into(), Value::String(tipo.into()));
+        Ok(v)
+    }
+
+    /// Lê uma mensagem do ingresso de forma estrita: só os tipos conhecidos, só os
+    /// campos de cada um (o resto é recusado, F-04 e observação 10 da revisão).
+    pub fn de_json(v: Value) -> Resultado<MensagemIngresso> {
+        let recusa = || Erro::validacao(TEXTO_MENSAGEM_INVALIDA);
+        let Value::Object(mut obj) = v else {
+            return Err(recusa());
+        };
+        let tipo = match obj.remove("tipo") {
+            Some(Value::String(t)) => t,
+            _ => return Err(recusa()),
+        };
+        let corpo = Value::Object(obj);
+        match tipo.as_str() {
+            "ingressar" => {
+                let c: CorpoIngressar = serde_json::from_value(corpo).map_err(|_| recusa())?;
+                Ok(MensagemIngresso::Ingressar { pedido: c.pedido, prova: c.prova })
+            }
+            "aprovado" => {
+                let c: CorpoAprovado = serde_json::from_value(corpo).map_err(|_| recusa())?;
+                let raiz = de_hex::<32>(&c.raiz).ok_or_else(recusa)?;
+                Ok(MensagemIngresso::Aprovado {
+                    prova_servidor: c.prova_servidor,
+                    raiz,
+                    loja_id: c.loja_id,
+                    linhas: c.linhas,
+                })
+            }
+            "recusado" => {
+                let c: CorpoRecusado = serde_json::from_value(corpo).map_err(|_| recusa())?;
+                Ok(MensagemIngresso::Recusado { motivo: c.motivo })
+            }
+            _ => Err(recusa()),
+        }
+    }
+}
+
+/// Texto para a tela quando o outro computador não é um caixa autorizado (U1).
+pub const TEXTO_RECUSA: &str = "A conexão com o outro computador foi recusada: ele não é um caixa aprovado desta loja.";
+/// Texto para a tela quando chega algo que não é uma mensagem de entrada na loja.
+pub const TEXTO_MENSAGEM_INVALIDA: &str = "O outro computador mandou uma mensagem que não é de entrada na loja.";
+/// Texto para a tela quando a conexão segura não termina (prazo, queda) (U1).
+pub const TEXTO_CONEXAO_NAO_TERMINOU: &str =
+    "A conexão segura com o outro caixa não terminou. Confira a rede e tente de novo.";
+
+/// F-12: o motivo técnico (em inglês, do `rustls`) vai só para o registro técnico;
+/// a tela recebe um texto simples.
 fn erro_tls(e: TlsError) -> Erro {
-    Erro::validacao(format!("Conexão recusada pelo protocolo de segurança: {e}"))
+    crate::registro::anotar(&format!("troca de dados (protocolo 4): conexão TLS recusada: {e}"));
+    Erro::validacao(TEXTO_RECUSA)
 }
 
 fn erro_rede(e: std::io::Error) -> Erro {
@@ -419,20 +696,24 @@ where
         if conn.wants_read() {
             ler_um_passo_tls(&mut fluxo, &mut conn, fim, parar)?;
         } else if !escreveu {
-            return Err(Erro::validacao("Aperto de mão TLS 1.3 interrompido em estado inconsistente."));
+            crate::registro::anotar(
+                "troca de dados (protocolo 4): aperto de mão TLS interrompido em estado inconsistente",
+            );
+            return Err(Erro::validacao(TEXTO_CONEXAO_NAO_TERMINOU));
         }
     }
     // Envia o último voo do aperto de mão (ex.: Certificate + CertificateVerify + Finished do cliente).
     descarregar_tls(&mut fluxo, &mut conn, fim, parar)?;
 
     if conn.protocol_version() != Some(ProtocolVersion::TLSv1_3) {
-        return Err(Erro::validacao("Conexão recusada: somente TLS 1.3 é permitido."));
+        crate::registro::anotar("troca de dados (protocolo 4): o outro lado não negociou TLS 1.3");
+        return Err(Erro::validacao(TEXTO_RECUSA));
     }
     let chave_par = conn
         .peer_certificates()
         .and_then(|lista| lista.first())
         .and_then(extrair_chave_spki)
-        .ok_or_else(|| Erro::validacao("O outro caixa não apresentou chave pública Ed25519 válida."))?;
+        .ok_or_else(|| Erro::validacao(TEXTO_RECUSA))?;
 
     let mut exportador_convite = [0u8; 32];
     conn.export_keying_material(&mut exportador_convite, ROTULO_EXPORTADOR_CONVITE, Some(CONTEXTO_EXPORTADOR_CONVITE))
@@ -446,21 +727,6 @@ where
     Data: SideData,
     C: std::ops::DerefMut<Target = ConnectionCommon<Data>>,
 {
-    /// A chave pública Ed25519 autenticada do outro caixa (provada no handshake TLS 1.3).
-    pub fn chave_do_par(&self) -> Chave {
-        self.chave_par
-    }
-
-    /// Material exportado RFC 5705 desta sessão TLS 1.3 (único por conexão, igual nos dois lados).
-    pub fn exportador_convite(&self) -> &[u8; 32] {
-        &self.exportador_convite
-    }
-
-    /// Endereço IP remoto do socket TCP (para auditoria/registro).
-    pub fn peer_addr(&self) -> std::io::Result<std::net::SocketAddr> {
-        self.fluxo.peer_addr()
-    }
-
     /// Envia um quadro JSON enquadrado (`u32` big-endian + corpo UTF-8) em um único envio pelo canal TLS 1.3.
     pub fn enviar_json(&mut self, valor: &Value, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
         let bytes = serde_json::to_vec(valor)?;
@@ -530,7 +796,7 @@ where
 
 /// Provas enviadas pelo caixa novo no pedido `"ingressar"` sobre TLS 1.3.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProvaIngressoCliente {
     /// `HMAC-SHA256(segredo_norm, "cliente\0" || exporter || chave_cli || chave_srv || pedido_canonico)`:
     /// obrigatória no primeiro consumo do convite (não pode ser forjada a partir de `segredo_hash`).
@@ -737,13 +1003,25 @@ pub fn casar_convite_da_prova<'a>(
 // ---------------------------------------------------------------------------
 
 /// Dados estruturados extraídos de um payload QR `RUST4|segredo|loja_id|aprovador_hex|endereco`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// O `Debug` não mostra o segredo (F-10).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConviteQr {
     pub segredo: String,
     pub loja_id: String,
     pub aprovador_chave: Option<Chave>,
     pub endereco: String,
+}
+
+impl std::fmt::Debug for ConviteQr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConviteQr")
+            .field("segredo", &"<oculto>")
+            .field("loja_id", &self.loja_id)
+            .field("aprovador_chave", &self.aprovador_chave.as_ref().map(|c| hex(c)))
+            .field("endereco", &self.endereco)
+            .finish()
+    }
 }
 
 /// Interpreta tanto um payload completo de QR (`RUST4|segredo|loja|aprovador|endereco`)
@@ -850,6 +1128,8 @@ mod testes {
         chaves.iter().copied().collect()
     }
 
+    const PRAZO: Duration = Duration::from_secs(5);
+
     // 1. Dois caixas autorizados: aperto de mão mútuo TLS 1.3 RPK, dados nos dois
     // sentidos, chave do par provada e `export_keying_material` idêntico nos dois lados.
     #[test]
@@ -861,35 +1141,21 @@ mod testes {
         let srv_pub = srv_id.publica();
 
         let h_srv = thread::spawn(move || {
-            let mut srv = CanalServidor::aceitar(
-                srv_tcp,
-                &srv_id,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[cli_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-            .unwrap();
+            let mut srv = aceitar_autorizado(srv_tcp, &srv_id, &conjunto(&[cli_pub]), PRAZO, None).unwrap();
             assert_eq!(srv.chave_do_par(), cli_pub);
             let exp_srv = *srv.exportador_convite();
-            let req = srv.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+            let req = srv.receber_json(64 * 1024, PRAZO, None).unwrap();
             assert_eq!(req["tipo"], "puxar");
-            srv.enviar_json(&json!({ "ok": true, "eco": req["seq"] }), Duration::from_secs(5), None).unwrap();
+            srv.enviar_json(&json!({ "ok": true, "eco": req["seq"] }), PRAZO, None).unwrap();
             srv.encerrar();
             exp_srv
         });
 
-        let mut cli = CanalCliente::conectar(
-            cli_tcp,
-            &cli_id,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_pub])),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+        let mut cli = conectar_autorizado(cli_tcp, &cli_id, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
         assert_eq!(cli.chave_do_par(), srv_pub);
         let exp_cli = *cli.exportador_convite();
-        cli.enviar_json(&json!({ "tipo": "puxar", "seq": 42 }), Duration::from_secs(5), None).unwrap();
-        let resp = cli.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+        cli.enviar_json(&json!({ "tipo": "puxar", "seq": 42 }), PRAZO, None).unwrap();
+        let resp = cli.receber_json(64 * 1024, PRAZO, None).unwrap();
         assert_eq!(resp, json!({ "ok": true, "eco": 42 }));
         cli.encerrar();
 
@@ -909,22 +1175,9 @@ mod testes {
         let aprovado_pub = aprovado.publica();
 
         let (cli_tcp, srv_tcp) = par_tcp();
-        let h_srv = thread::spawn(move || {
-            CanalServidor::aceitar(
-                srv_tcp,
-                &srv_id,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[aprovado_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-        });
-        let r_cli = CanalCliente::conectar(
-            cli_tcp,
-            &intruso,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_pub])),
-            Duration::from_secs(5),
-            None,
-        );
+        let h_srv =
+            thread::spawn(move || aceitar_autorizado(srv_tcp, &srv_id, &conjunto(&[aprovado_pub]), PRAZO, None));
+        let r_cli = conectar_autorizado(cli_tcp, &intruso, &conjunto(&[srv_pub]), PRAZO, None);
         let r_srv = h_srv.join().unwrap();
         assert!(r_srv.is_err(), "servidor deve recusar cliente fora da lista autorizada");
         // No cliente, ou falha no handshake ou no primeiro envio/leitura ao receber o alerta do servidor.
@@ -937,22 +1190,8 @@ mod testes {
         let srv_id2 = Identidade::gerar().unwrap();
         let srv_pub2 = srv_id2.publica();
         let (cli_tcp2, srv_tcp2) = par_tcp();
-        let h_srv2 = thread::spawn(move || {
-            CanalServidor::aceitar(
-                srv_tcp2,
-                &srv_id2,
-                PoliticaChaves::SomenteAutorizadas(HashSet::new()),
-                Duration::from_secs(5),
-                None,
-            )
-        });
-        let _ = CanalCliente::conectar(
-            cli_tcp2,
-            &aprovado,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_pub2])),
-            Duration::from_secs(5),
-            None,
-        );
+        let h_srv2 = thread::spawn(move || aceitar_autorizado(srv_tcp2, &srv_id2, &HashSet::new(), PRAZO, None));
+        let _ = conectar_autorizado(cli_tcp2, &aprovado, &conjunto(&[srv_pub2]), PRAZO, None);
         assert!(h_srv2.join().unwrap().is_err(), "conjunto autorizado vazio deve falhar fechado");
     }
 
@@ -966,24 +1205,16 @@ mod testes {
         let srv_leg_pub = srv_legitimo.publica();
 
         let (cli_tcp, srv_tcp) = par_tcp();
-        let h_srv = thread::spawn(move || {
-            CanalServidor::aceitar(
-                srv_tcp,
-                &srv_falso,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[cli_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-        });
-        let r_cli = CanalCliente::conectar(
-            cli_tcp,
-            &cli_id,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_leg_pub])),
-            Duration::from_secs(5),
-            None,
-        );
+        let h_srv = thread::spawn(move || aceitar_autorizado(srv_tcp, &srv_falso, &conjunto(&[cli_pub]), PRAZO, None));
+        let r_cli = conectar_autorizado(cli_tcp, &cli_id, &conjunto(&[srv_leg_pub]), PRAZO, None);
         assert!(r_cli.is_err(), "cliente deve recusar servidor com chave não esperada");
         assert!(h_srv.join().unwrap().is_err());
+        // E o caixa novo que conhece a chave do aprovador pelo QR também recusa o falso.
+        let (cli_tcp2, srv_tcp2) = par_tcp();
+        let falso2 = Identidade::gerar().unwrap();
+        let h_srv2 = thread::spawn(move || aceitar_com_ingresso(srv_tcp2, &falso2, &HashSet::new(), PRAZO, None));
+        assert!(conectar_para_ingresso(cli_tcp2, &cli_id, Some(srv_leg_pub), PRAZO, None).is_err());
+        let _ = h_srv2.join().unwrap();
     }
 
     // 4. Impostor apresenta a chave pública de um caixa aprovado mas assina o TLS
@@ -1015,24 +1246,18 @@ mod testes {
         );
 
         let (cli_tcp, srv_tcp) = par_tcp();
-        let h_srv = thread::spawn(move || {
-            CanalServidor::aceitar(
-                srv_tcp,
-                &srv_id,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[vitima_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-        });
+        let h_srv = thread::spawn(move || aceitar_autorizado(srv_tcp, &srv_id, &conjunto(&[vitima_pub]), PRAZO, None));
         let conn_forjada = ClientConnection::new(cfg_forjado, ServerName::try_from("rustinho-caixa").unwrap()).unwrap();
-        let _ = finalizar_abertura(cli_tcp, conn_forjada, Duration::from_secs(5), None);
+        let _ = finalizar_abertura(cli_tcp, conn_forjada, PRAZO, None);
         assert!(h_srv.join().unwrap().is_err(), "chave pública sem a privada correspondente deve falhar no TLS 1.3");
     }
 
     // 5. Fluxo completo de convite com *channel binding* mútuo (A6) sobre canais TLS 1.3 reais:
-    // - primeiro ingresso com convite válido aprova e devolve prova mútua do servidor por JSON;
+    // - primeiro ingresso com convite válido aprova (com a prova QUE PASSOU PELO FIO, F-08)
+    //   e devolve a prova mútua do servidor;
     // - MITM (exporter diferente), intruso, convite expirado e servidor falso são recusados;
-    // - queda após aprovação e retomada idempotente em 2º canal TLS 1.3 funcionam sem duplicar.
+    // - queda após aprovação e retomada idempotente em 2º canal TLS 1.3 (agora autorizado)
+    //   funcionam sem duplicar, com o convite digitado (sem a chave do aprovador).
     #[test]
     fn convite_channel_binding_mutuo_mitm_e_retomada_idempotente() {
         let (b, gerente) = crate::faixas::para_testes::loja("Caixa 1");
@@ -1058,47 +1283,35 @@ mod testes {
         let qr = interpretar_convite_entrada(&conv.payload_qr).unwrap();
         assert_eq!(qr.aprovador_chave, Some(raiz_pub));
         assert_eq!(qr.loja_id, LOJA);
+        let autorizadas_antes = aprovados::avaliar(&b.conn, &raiz_pub, LOJA).unwrap().autorizadas().clone();
 
-        // --- 1º canal TLS 1.3 real: ingresso completo com troca JSON e prova mútua ---
+        // --- 1º canal TLS 1.3 real: ingresso completo, com a chave do aprovador vinda do QR ---
         let (cli_tcp, srv_tcp) = par_tcp();
         let raiz_srv = raiz.clone();
         let h_srv = thread::spawn(move || {
-            let mut srv = CanalServidor::aceitar(
-                srv_tcp,
-                &raiz_srv,
-                PoliticaChaves::QualquerChaveValidaParaIngresso,
-                Duration::from_secs(5),
-                None,
-            )
-            .unwrap();
-            let req = srv.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
-            let ped: Pedido = serde_json::from_value(req["pedido"].clone()).unwrap();
-            let prova: ProvaIngressoCliente = serde_json::from_value(req["prova"].clone()).unwrap();
+            let Aceito::Ingresso(mut srv) =
+                aceitar_com_ingresso(srv_tcp, &raiz_srv, &autorizadas_antes, PRAZO, None).unwrap()
+            else {
+                panic!("chave desconhecida tem de cair no canal de ingresso");
+            };
+            let MensagemIngresso::Ingressar { pedido, prova } = srv.receber(64 * 1024, PRAZO, None).unwrap() else {
+                panic!("esperava o pedido de ingresso");
+            };
             let exp = *srv.exportador_convite();
             let cli_k = srv.chave_do_par();
-            (srv, ped, prova, exp, cli_k)
+            (srv, pedido, prova, exp, cli_k)
         });
 
-        let mut cli = CanalCliente::conectar(
-            cli_tcp,
-            &novo,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[raiz_pub])),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+        let mut cli = conectar_para_ingresso(cli_tcp, &novo, qr.aprovador_chave, PRAZO, None).unwrap();
         let prova1 =
             gerar_prova_cliente(&qr.segredo, cli.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
-        cli.enviar_json(
-            &json!({ "tipo": "ingressar", "pedido": pedido_novo, "prova": prova1 }),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+        cli.enviar(&MensagemIngresso::Ingressar { pedido: pedido_novo.clone(), prova: prova1.clone() }, PRAZO, None)
+            .unwrap();
 
         let (mut srv, ped_rx, prova_rx, exp_srv, cli_k) = h_srv.join().unwrap();
         assert_eq!(cli_k, novo_pub);
         assert_eq!(exp_srv, *cli.exportador_convite());
+        assert_eq!((&ped_rx, &prova_rx), (&pedido_novo, &prova1), "o que passou pelo fio é o que foi mandado");
 
         let agora = crate::tempo::agora();
         let candidatos = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
@@ -1111,105 +1324,75 @@ mod testes {
         assert!(
             casar_convite_da_prova(&candidatos, &exp_srv, &intruso.publica(), &raiz_pub, &ped_rx, &prova_rx).is_none()
         );
-        // Convite expirado no futuro não entra nos candidatos válidos.
+        // Convite expirado no futuro não entra nos candidatos válidos (e a consulta não apaga nada, F-08).
         let futuro = crate::tempo::somar_segundos(&agora, cofre::VALIDADE_CONVITE_SEG + 10).unwrap();
-        let vencidos = cofre::convites_validos_agora(&b.conn, LOJA, &futuro).unwrap();
-        assert!(vencidos.is_empty(), "convite vencido não pode casar");
-        // Restaura `segredo_ativo` para o consumo real em `agora` (a checagem `vencidos` acima testou limpeza).
-        let conv2 = cofre::gerar_convite(
-            &b.conn,
-            &raiz,
-            &raiz_pub,
-            LOJA,
-            &pedido_novo.codigo(),
-            "Caixa 2",
-            &gerente,
-            "127.0.0.1:47810",
-        )
-        .unwrap();
-        let cands_ok = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
-        let prova_ok = gerar_prova_cliente(&conv2.segredo, &exp_srv, &novo_pub, &raiz_pub, &ped_rx).unwrap();
-        let casado = casar_convite_da_prova(&cands_ok, &exp_srv, &novo_pub, &raiz_pub, &ped_rx, &prova_ok)
-            .expect("prova legítima deve casar");
+        assert!(cofre::convites_validos_agora(&b.conn, LOJA, &futuro).unwrap().is_empty(), "vencido não casa");
+        // F-08: a prova que passou pelo fio casa com o convite certo.
+        let candidatos = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
+        let casado = casar_convite_da_prova(&candidatos, &exp_srv, &novo_pub, &raiz_pub, &ped_rx, &prova_rx)
+            .expect("a prova legítima que veio pelo canal deve casar");
+        assert_eq!(casado.id, conv.id);
         let apr1 =
             cofre::consumir_convite_e_aprovar(&b.conn, &raiz, &raiz_pub, LOJA, &casado.id, &ped_rx, &agora).unwrap();
         let p_srv =
             gerar_prova_servidor(&casado.segredo_hash, &exp_srv, &novo_pub, &raiz_pub, &raiz_pub, LOJA).unwrap();
-        srv.enviar_json(
-            &json!({ "ok": true, "raiz": hex(&raiz_pub), "loja": LOJA, "provaServidor": p_srv }),
-            Duration::from_secs(5),
+        let linhas = aprovados::linhas(&b.conn, LOJA).unwrap();
+        srv.enviar(
+            &MensagemIngresso::Aprovado { prova_servidor: p_srv, raiz: raiz_pub, loja_id: LOJA.into(), linhas },
+            PRAZO,
             None,
         )
         .unwrap();
         srv.encerrar();
 
-        let resp1 = cli.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
-        let p_srv_rx = resp1["provaServidor"].as_str().unwrap();
-        assert!(verificar_prova_servidor(
-            &conv2.segredo,
-            cli.exportador_convite(),
-            &novo_pub,
-            &raiz_pub,
-            &raiz_pub,
-            LOJA,
-            p_srv_rx
-        ));
-        assert!(!verificar_prova_servidor(
-            &conv2.segredo,
-            cli.exportador_convite(),
-            &novo_pub,
-            &intruso.publica(),
-            &raiz_pub,
-            LOJA,
-            p_srv_rx
-        ));
-        assert!(!verificar_prova_servidor(
-            &conv2.segredo,
-            cli.exportador_convite(),
-            &novo_pub,
-            &raiz_pub,
-            &raiz_pub,
-            "outra-loja",
-            p_srv_rx
-        ));
+        let MensagemIngresso::Aprovado { prova_servidor, raiz: raiz_rx, loja_id, linhas: linhas_rx } =
+            cli.receber(64 * 1024, PRAZO, None).unwrap()
+        else {
+            panic!("esperava a aprovação");
+        };
+        assert_eq!((raiz_rx, loja_id.as_str()), (raiz_pub, LOJA));
+        assert!(linhas_rx.aprovacoes.iter().any(|a| a.chave == novo_pub), "o registro com a aprovação veio junto");
+        let confere = |raiz_alegada: &Chave, loja: &str| {
+            verificar_prova_servidor(
+                &qr.segredo,
+                cli.exportador_convite(),
+                &novo_pub,
+                &raiz_pub,
+                raiz_alegada,
+                loja,
+                &prova_servidor,
+            )
+        };
+        assert!(confere(&raiz_pub, LOJA));
+        assert!(!confere(&intruso.publica(), LOJA), "raiz trocada no caminho não confere");
+        assert!(!confere(&raiz_pub, "outra-loja"), "loja trocada no caminho não confere");
         cli.encerrar();
 
-        // --- 2º canal TLS 1.3 real: queda após aprovação e retomada idempotente (nova sessão!) ---
+        // --- 2º canal: queda após aprovação e retomada idempotente (convite digitado, sem QR) ---
+        let autorizadas_depois = aprovados::avaliar(&b.conn, &raiz_pub, LOJA).unwrap().autorizadas().clone();
+        assert!(autorizadas_depois.contains(&novo_pub));
         let (cli_tcp2, srv_tcp2) = par_tcp();
         let raiz_srv2 = raiz.clone();
         let h_srv2 = thread::spawn(move || {
-            let mut srv2 = CanalServidor::aceitar(
-                srv_tcp2,
-                &raiz_srv2,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[novo_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-            .unwrap();
-            let req = srv2.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
-            let ped: Pedido = serde_json::from_value(req["pedido"].clone()).unwrap();
-            let prova: ProvaIngressoCliente = serde_json::from_value(req["prova"].clone()).unwrap();
+            let Aceito::Autenticado(mut srv2) =
+                aceitar_com_ingresso(srv_tcp2, &raiz_srv2, &autorizadas_depois, PRAZO, None).unwrap()
+            else {
+                panic!("o caixa já aprovado entra como autenticado");
+            };
+            let MensagemIngresso::Ingressar { pedido, prova } =
+                MensagemIngresso::de_json(srv2.receber_json(64 * 1024, PRAZO, None).unwrap()).unwrap()
+            else {
+                panic!("esperava a retomada do ingresso");
+            };
             let exp2 = *srv2.exportador_convite();
-            (srv2, ped, prova, exp2)
+            (srv2, pedido, prova, exp2)
         });
 
-        let mut cli2 = CanalCliente::conectar(
-            cli_tcp2,
-            &novo,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[raiz_pub])),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+        let mut cli2 = conectar_para_ingresso(cli_tcp2, &novo, None, PRAZO, None).unwrap();
         assert_ne!(cli2.exportador_convite(), &exp_srv, "nova sessão TLS gera exporter novo");
         let p_retry =
-            gerar_prova_cliente(&conv2.segredo, cli2.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
-        cli2.enviar_json(
-            &json!({ "tipo": "ingressar", "pedido": pedido_novo, "prova": p_retry }),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+            gerar_prova_cliente(&conv.segredo, cli2.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
+        cli2.enviar(&MensagemIngresso::Ingressar { pedido: pedido_novo.clone(), prova: p_retry }, PRAZO, None).unwrap();
 
         let (mut srv2, ped_rx2, prova_rx2, exp2) = h_srv2.join().unwrap();
         let cands2 = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
@@ -1220,25 +1403,114 @@ mod testes {
             cofre::consumir_convite_e_aprovar(&b.conn, &raiz, &raiz_pub, LOJA, &c_retry.id, &ped_rx2, &agora).unwrap();
         assert_eq!(apr1, apr2, "retomada é idempotente e não duplica aprovação");
         let p_srv2 = gerar_prova_servidor(&c_retry.segredo_hash, &exp2, &novo_pub, &raiz_pub, &raiz_pub, LOJA).unwrap();
-        srv2.enviar_json(&json!({ "ok": true, "provaServidor": p_srv2 }), Duration::from_secs(5), None).unwrap();
+        let linhas2 = aprovados::linhas(&b.conn, LOJA).unwrap();
+        let resposta2 = MensagemIngresso::Aprovado {
+            prova_servidor: p_srv2,
+            raiz: raiz_pub,
+            loja_id: LOJA.into(),
+            linhas: linhas2,
+        };
+        srv2.enviar_json(&resposta2.para_json().unwrap(), PRAZO, None).unwrap();
         srv2.encerrar();
 
-        let resp2 = cli2.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+        let MensagemIngresso::Aprovado { prova_servidor: prova2, .. } = cli2.receber(64 * 1024, PRAZO, None).unwrap()
+        else {
+            panic!("esperava a aprovação da retomada");
+        };
         assert!(verificar_prova_servidor(
-            &conv2.segredo,
+            &conv.segredo,
             cli2.exportador_convite(),
             &novo_pub,
             &raiz_pub,
             &raiz_pub,
             LOJA,
-            resp2["provaServidor"].as_str().unwrap()
+            &prova2
         ));
         cli2.encerrar();
 
         // Outro caixa (intruso) tentando reusar o convite já consumido é recusado!
         let ped_int = Pedido::com_dispositivo(&intruso, "disp-int");
-        let p_int = gerar_prova_cliente(&conv2.segredo, &exp2, &intruso.publica(), &raiz_pub, &ped_int).unwrap();
+        let p_int = gerar_prova_cliente(&conv.segredo, &exp2, &intruso.publica(), &raiz_pub, &ped_int).unwrap();
         assert!(casar_convite_da_prova(&cands2, &exp2, &intruso.publica(), &raiz_pub, &ped_int, &p_int).is_none());
+    }
+
+    /// F-04: no servidor com convite ativo, a chave desconhecida só ganha o canal de
+    /// ingresso, que recusa qualquer coisa que não seja uma mensagem do convite (um
+    /// pedido da troca, por exemplo); a chave autorizada ganha o canal de dados.
+    #[test]
+    fn f04_chave_desconhecida_so_ganha_o_canal_de_ingresso() {
+        let srv_id = Identidade::gerar().unwrap();
+        let srv_pub = srv_id.publica();
+        let estranho = Identidade::gerar().unwrap();
+        let aprovado = Identidade::gerar().unwrap();
+        let autorizadas = conjunto(&[aprovado.publica()]);
+
+        // Estranho manda um pedido da troca: o servidor só tem o canal de ingresso, que recusa.
+        let (cli_tcp, srv_tcp) = par_tcp();
+        let a = autorizadas.clone();
+        let srv_id = Arc::new(srv_id);
+        let s1 = srv_id.clone();
+        let h_srv = thread::spawn(move || match aceitar_com_ingresso(srv_tcp, &s1, &a, PRAZO, None).unwrap() {
+            Aceito::Autenticado(_) => panic!("chave desconhecida virou canal de dados"),
+            Aceito::Ingresso(mut c) => c.receber(64 * 1024, PRAZO, None),
+        });
+        let mut cli = conectar_autorizado(cli_tcp, &estranho, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
+        cli.enviar_json(&json!({ "tipo": "puxar", "desde": 0 }), PRAZO, None).unwrap();
+        assert!(h_srv.join().unwrap().is_err(), "o canal de ingresso não aceita um pedido da troca");
+
+        // O caixa autorizado, na mesma situação, recebe o canal de dados.
+        let (cli_tcp, srv_tcp) = par_tcp();
+        let s2 = srv_id.clone();
+        let h_srv =
+            thread::spawn(move || match aceitar_com_ingresso(srv_tcp, &s2, &autorizadas, PRAZO, None).unwrap() {
+                Aceito::Autenticado(mut c) => c.receber_json(64 * 1024, PRAZO, None).unwrap(),
+                Aceito::Ingresso(_) => panic!("caixa autorizado não pode cair no ingresso"),
+            });
+        let mut cli = conectar_autorizado(cli_tcp, &aprovado, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
+        cli.enviar_json(&json!({ "tipo": "puxar", "desde": 0 }), PRAZO, None).unwrap();
+        assert_eq!(h_srv.join().unwrap()["tipo"], "puxar");
+    }
+
+    /// F-04 / observação 10: a leitura das mensagens do ingresso é estrita.
+    #[test]
+    fn f04_mensagem_de_ingresso_lida_de_forma_estrita() {
+        let id = Identidade::gerar().unwrap();
+        let pedido = Pedido::com_dispositivo(&id, "disp-x");
+        let prova = ProvaIngressoCliente { prova_segredo: "aa".into(), prova_retomada: "bb".into() };
+        let ok = MensagemIngresso::Ingressar { pedido: pedido.clone(), prova: prova.clone() };
+        let v = ok.para_json().unwrap();
+        assert_eq!(MensagemIngresso::de_json(v.clone()).unwrap(), ok, "ida e volta");
+        let mut sobrando = v.clone();
+        sobrando["desde"] = json!(0);
+        assert!(MensagemIngresso::de_json(sobrando).is_err(), "campo a mais é recusado");
+        let mut prova_sobrando = v.clone();
+        prova_sobrando["prova"]["extra"] = json!(1);
+        assert!(MensagemIngresso::de_json(prova_sobrando).is_err(), "campo a mais na prova é recusado");
+        assert!(MensagemIngresso::de_json(json!({ "tipo": "puxar" })).is_err(), "tipo desconhecido");
+        assert!(MensagemIngresso::de_json(json!({ "pedido": pedido })).is_err(), "sem tipo");
+        assert!(MensagemIngresso::de_json(json!([1, 2])).is_err(), "não é objeto");
+        let ap = MensagemIngresso::Aprovado {
+            prova_servidor: "cc".into(),
+            raiz: id.publica(),
+            loja_id: LOJA.into(),
+            linhas: aprovados::Linhas::default(),
+        };
+        assert_eq!(MensagemIngresso::de_json(ap.para_json().unwrap()).unwrap(), ap);
+        let mut raiz_ruim = ap.para_json().unwrap();
+        raiz_ruim["raiz"] = json!("nao-e-hex");
+        assert!(MensagemIngresso::de_json(raiz_ruim).is_err());
+    }
+
+    /// F-12: os textos que vão para a tela não trazem jargão nem o inglês da biblioteca.
+    #[test]
+    fn f12_textos_da_tela_sem_jargao() {
+        for t in [TEXTO_RECUSA, TEXTO_MENSAGEM_INVALIDA, TEXTO_CONEXAO_NAO_TERMINOU] {
+            for proibido in ["TLS", "rustls", "handshake", "Aperto de mão", "I3", "Ed25519"] {
+                assert!(!t.contains(proibido), "{t:?} contém {proibido:?}");
+            }
+        }
+        let e = erro_tls(TlsError::General("chave do caixa não autorizada nesta loja".into()));
+        assert!(matches!(e, Erro::Validacao { ref mensagem, .. } if mensagem == TEXTO_RECUSA));
     }
 
     /// 6. Limite de quadro (recusa antes de alocar mensagem gigante) e cancelamento cooperativo.
@@ -1250,26 +1522,12 @@ mod testes {
         let (cli_pub, srv_pub) = (cli_id.publica(), srv_id.publica());
 
         let h_srv = thread::spawn(move || {
-            let mut srv = CanalServidor::aceitar(
-                srv_tcp,
-                &srv_id,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[cli_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-            .unwrap();
-            srv.receber_json(64, Duration::from_secs(5), None)
+            let mut srv = aceitar_autorizado(srv_tcp, &srv_id, &conjunto(&[cli_pub]), PRAZO, None).unwrap();
+            srv.receber_json(64, PRAZO, None)
         });
 
-        let mut cli = CanalCliente::conectar(
-            cli_tcp,
-            &cli_id,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_pub])),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
-        cli.enviar_json(&json!({ "grande": "x".repeat(200) }), Duration::from_secs(5), None).unwrap();
+        let mut cli = conectar_autorizado(cli_tcp, &cli_id, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
+        cli.enviar_json(&json!({ "grande": "x".repeat(200) }), PRAZO, None).unwrap();
         let r = h_srv.join().unwrap();
         assert!(r.is_err(), "quadro acima do limite tem de ser recusado");
     }
@@ -1344,27 +1602,13 @@ mod testes {
         let parar = Arc::new(AtomicBool::new(false));
         let parar_srv = parar.clone();
         let h_srv = thread::spawn(move || {
-            let mut srv = CanalServidor::aceitar(
-                srv_tcp,
-                &srv_id,
-                PoliticaChaves::SomenteAutorizadas(conjunto(&[cli_pub])),
-                Duration::from_secs(5),
-                None,
-            )
-            .unwrap();
+            let mut srv = aceitar_autorizado(srv_tcp, &srv_id, &conjunto(&[cli_pub]), PRAZO, None).unwrap();
             let t0 = Instant::now();
             let res = srv.receber_json(1024, Duration::from_secs(10), Some(&parar_srv));
             (res, t0.elapsed())
         });
 
-        let _cli = CanalCliente::conectar(
-            cli_tcp,
-            &cli_id,
-            PoliticaChaves::SomenteAutorizadas(conjunto(&[srv_pub])),
-            Duration::from_secs(5),
-            None,
-        )
-        .unwrap();
+        let _cli = conectar_autorizado(cli_tcp, &cli_id, &conjunto(&[srv_pub]), PRAZO, None).unwrap();
         thread::sleep(Duration::from_millis(120));
         parar.store(true, Ordering::SeqCst);
         let (res, dt) = h_srv.join().unwrap();

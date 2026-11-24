@@ -54,6 +54,13 @@ def sha(caminho):
     return hashlib.sha256(open(caminho, "rb").read()).hexdigest()
 
 
+# A loja antiga (estrutura 22) tem a gerente Ana com a senha de antes da DP-33
+# (4 caracteres, `testes_rvi03::loja_v22`): a senha antiga continua entrando (só
+# a senha nova de gerente exige 8). Desde a 0.9.19-dev.2 a senha padrão dos
+# roteiros (`telas_d09.SENHA`) é a de uma loja nova, de 8 caracteres.
+SENHA_DA_LOJA_V22 = "1234"
+
+
 def montar_loja_v22_com_defeito(pasta):
     """RVI-03: loja de versão anterior (estrutura 22), com defeito, e um backup
     bom dela (montada pelo teste do núcleo `montar_loja_v22_com_defeito`)."""
@@ -80,7 +87,7 @@ def banco_antigo(fotos):
         arquivos_antes = sorted(os.listdir(pasta))
         r = Rustinho(pasta, "TelaInicio", {}, fotos, "seguro-v22")
         try:
-            r.entrar("Ana")
+            r.entrar("Ana", SENHA_DA_LOJA_V22)
             time.sleep(3)
             textos = r.textos()
             tudo_certo &= conferir(
@@ -96,7 +103,7 @@ def banco_antigo(fotos):
         # com o botão de restaurar.
         r = Rustinho(pasta, "TelaConfiguracoes", {"secao": "backup"}, fotos, "seguro-v22-backup")
         try:
-            r.entrar("Ana")
+            r.entrar("Ana", SENHA_DA_LOJA_V22)
             time.sleep(3)
             textos = r.textos()
             botoes = sum(1 for _, _, t in textos if t.strip() == "Restaurar")

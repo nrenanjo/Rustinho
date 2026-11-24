@@ -651,6 +651,50 @@ pub(crate) fn conferir_estrutura(conn: &Connection) -> Resultado<()> {
             }
         }
     }
+    // 0027 (R0 da recuperação), 0028 (R1/R2 da recuperação, 0.9.19-dev.1) e 0029
+    // (protocolo 4: `dispositivo` na aprovação, I3, e os convites, A6). Checklist §6,
+    // item 5, de `docs/MIGRACOES.md` (F-13 da revisão de entrada da dev.2).
+    let objetos: &[(i64, &str, &str)] = &[
+        (27, "table", "operacao_feita"),
+        (27, "index", "operacao_feita_quando"),
+        (27, "index", "operacao_feita_abertura"),
+        (27, "table", "operacao_em_curso"),
+        (27, "table", "programa_abertura"),
+        (27, "table", "fechamento_visto"),
+        (28, "table", "trabalho"),
+        (28, "index", "trabalho_usuario_situacao"),
+        (28, "index", "trabalho_unico_chave"),
+        (28, "table", "sessao_local"),
+        (28, "index", "sessao_local_disp"),
+        (29, "table", "p4_convite"),
+        (29, "index", "idx_p4_convite_expira"),
+    ];
+    for (desde, tipo, nome) in objetos {
+        if v < *desde {
+            continue;
+        }
+        let tem: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = ?1 AND name = ?2",
+            [tipo, nome],
+            |l| l.get(0),
+        )?;
+        if !tem {
+            return Err(Erro::Interno(format!(
+                "falta {} {nome}",
+                if *tipo == "table" { "a tabela" } else { "o índice" }
+            )));
+        }
+    }
+    if v >= 29 {
+        let tem_coluna: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('caixa_aprovado') WHERE name = 'dispositivo'",
+            [],
+            |l| l.get(0),
+        )?;
+        if !tem_coluna {
+            return Err(Erro::Interno("falta a coluna caixa_aprovado.dispositivo".into()));
+        }
+    }
     Ok(())
 }
 
@@ -1274,6 +1318,27 @@ mod testes {
                 (t.to_string(), cols)
             })
             .collect()
+    }
+
+    /// F-13 (revisão de entrada da dev.2): `conferir_estrutura` acusa a falta do que
+    /// as migrações 0027 a 0029 deixam (checklist §6, item 5, de `docs/MIGRACOES.md`).
+    #[test]
+    fn f13_conferir_estrutura_acusa_o_que_falta_das_migracoes_27_a_29() {
+        let falta = |sql: &str| {
+            let b = Banco::abrir(&pasta_75("f13").join("rustinho.db")).unwrap();
+            conferir_estrutura(&b.conn).expect("banco novo completo passa");
+            b.conn.execute_batch(sql).unwrap();
+            conferir_estrutura(&b.conn).is_err()
+        };
+        assert!(falta("DROP TABLE p4_convite;"), "0029: a tabela dos convites");
+        assert!(falta("DROP INDEX idx_p4_convite_expira;"), "0029: o índice dos convites");
+        assert!(
+            falta("ALTER TABLE caixa_aprovado DROP COLUMN dispositivo;"),
+            "0029: a coluna dispositivo da aprovação (I3)"
+        );
+        assert!(falta("DROP TABLE sessao_local;"), "0028");
+        assert!(falta("DROP INDEX trabalho_unico_chave;"), "0028");
+        assert!(falta("DROP TABLE operacao_em_curso;"), "0027");
     }
 
     fn pasta_75(nome: &str) -> PathBuf {

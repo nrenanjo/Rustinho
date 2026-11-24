@@ -110,6 +110,20 @@ jobs:
           if ($fw -notmatch '47810' -or $fw -notmatch '47811') {
             throw "regras do firewall não restringem às portas 47810/TCP e 47811/UDP:`n$fw"
           }
+          # F-14 (revisão de entrada da dev.2): conferência estrita, independente do idioma do
+          # Windows. As regras com o nome "Rustinho" têm de ser exatamente duas, de entrada,
+          # permitindo só 47810/TCP e 47811/UDP; qualquer regra a mais (por exemplo, uma
+          # residual com porta "Any") reprova.
+          $regras = @(Get-NetFirewallRule -DisplayName "Rustinho" -ErrorAction Stop)
+          $vistas = @($regras | ForEach-Object {
+            $pf = $_ | Get-NetFirewallPortFilter
+            "$($_.Direction)/$($_.Action)/$($pf.Protocol)/$($pf.LocalPort)"
+          } | Sort-Object)
+          anota "regras do firewall (Rustinho): $($vistas -join '; ')"
+          $esperadas = @("Inbound/Allow/TCP/47810", "Inbound/Allow/UDP/47811")
+          if ($vistas.Count -ne 2 -or (Compare-Object $vistas $esperadas)) {
+            throw "regras do firewall diferentes do esperado (DP-45): $($vistas -join '; ')"
+          }
 
           # Abre como um usuário: sem RUSTINHO_DADOS (pasta de dados padrão).
           $dados = Join-Path $env:LOCALAPPDATA "Rustinho"

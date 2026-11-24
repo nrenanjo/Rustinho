@@ -4,40 +4,52 @@
 //! ## Onde fica a identidade (`P4-2`, M5)
 //! - **Nunca no banco SQLite:** copiar `rustinho.db` para outro computador não
 //!   leva a chave privada (D1).
-//! - Em instalação normal (`eh_portatil = false`): na pasta de configuração local
+//! - Em instalação normal ([`Modo::Instalado`]): na pasta de configuração **local**
 //!   do usuário (`$XDG_CONFIG_HOME/rustinho/` ou `$HOME/.config/rustinho/` no Linux;
-//!   `%APPDATA%\Rustinho\` no Windows), diferenciada pelo hash do caminho canônico
-//!   da pasta do banco para que duas pastas no mesmo computador (`RD-B`) tenham
-//!   identidades independentes sem colidir. Se não houver pasta de configuração
-//!   disponível, falha explicitamente (nunca cai silenciosamente na pasta do banco).
-//! - Em modo portátil (`eh_portatil = true`): na própria pasta do portátil
-//!   (`identidade.p4`), protegida contra cópia por `I3` + `copia_detectada`.
-//! - Em testes automatizados: `RUSTINHO_IDENTIDADE` fixa um caminho explícito.
+//!   `%LOCALAPPDATA%\Rustinho\` no Windows — a mesma classe de pasta do banco, que
+//!   não viaja em perfil móvel de domínio, F-03), diferenciada pelo hash do caminho
+//!   canônico da pasta do banco para que duas pastas no mesmo computador (`RD-B`)
+//!   tenham identidades independentes sem colidir. Se não houver pasta de
+//!   configuração disponível, falha explicitamente (nunca cai silenciosamente na
+//!   pasta do banco).
+//! - No Rustinho portátil ([`Modo::Portatil`], F-02): na própria pasta do portátil
+//!   (o portátil não grava nada fora dela), **uma identidade por computador**
+//!   (`identidade-<computador>.p4`). Levar o pendrive a outro computador dá outra
+//!   chave, que precisa de aprovação do gerente como qualquer caixa novo; o
+//!   computador de antes continua com a dele. Uma cópia do pendrive usada **no
+//!   mesmo** computador leva a mesma chave: nem o protocolo nem o `I3` distinguem
+//!   esse clone (limite declarado).
+//! - Nas compilações de teste (`cfg(test)` ou o recurso `ancoras-de-teste` dos
+//!   testes de integração, DT-P4-09): dentro da pasta (temporária) do banco do
+//!   teste, nunca em `~/.config/rustinho/` nem no chaveiro do usuário.
 //!
 //! ## Como o segredo de selagem é guardado (`D4`, `A7`, M3)
 //! A identidade é sempre gravada selada com Argon2id + ChaCha20-Poly1305
 //! ([`Identidade::guardar_em`]) usando uma senha aleatória de 256 bits própria
 //! desta máquina (independente da senha do gerente).
-//! - **Linux:** tenta o serviço de senhas do sistema (`/usr/bin/secret-tool` ou
-//!   caminhos absolutos fixos, com prazo de 3 s e checagem de D-Bus); quando
-//!   ausente (ex.: ambiente headless/mínimo), usa reserva local ofuscada (`0600`)
-//!   fora da pasta do banco e marca `cofre_sistema = false` para aviso explícito
-//!   ao gerente (nunca silencioso).
-//! - **Windows:** protege o segredo via DPAPI nativo (`CryptProtectData` /
-//!   `CryptUnprotectData` de `crypt32.dll`, `cofre_sistema = true`).
-//! - **Reserva local (`cofre_sistema = false`):** ofuscação local com permissão
-//!   `0600` (fora do banco). Em modo instalado vincula-se ao caminho +
-//!   `/etc/machine-id` (quando presente); em modo portátil não depende de
-//!   `/etc/machine-id` para continuar abrindo em outro computador pelo pendrive
-//!   (clonagem é detectada por `I3` + `copia_detectada`). Se a máquina perder o
-//!   cofre/machine-id, [`regerar_identidade_local`] cria identidade limpa e exige
-//!   nova aprovação do gerente.
-//! - **Testes (`#[cfg(test)]` ou `RUSTINHO_COFRE_TESTE=arquivo`):** usa a reserva
-//!   local isolada sem tocar no keyring do host.
+//! - **Linux instalado:** tenta o serviço de senhas do sistema (`secret-tool` por
+//!   caminho absoluto fixo, com prazo de 3 s, só com sessão D-Bus); quando
+//!   ausente (ex.: ambiente headless/mínimo) ou quando ele falha, usa a reserva
+//!   local e marca `cofre_sistema = false` para aviso explícito ao gerente
+//!   (nunca silencioso).
+//! - **Windows instalado:** protege o segredo via DPAPI nativo (`CryptProtectData`
+//!   / `CryptUnprotectData` de `crypt32.dll`, `cofre_sistema = true`).
+//! - **Portátil:** sempre a reserva local na pasta do portátil
+//!   (`cofre_sistema = false`): o cofre do sistema gravaria fora da pasta do
+//!   portátil.
+//! - **Reserva local (`cofre_sistema = false`):** é **ofuscação**, não proteção
+//!   forte: arquivo `0600` fora do banco, cifrado com chave tirada do caminho e da
+//!   identidade do computador (dados que quem tem acesso ao computador consegue
+//!   ler). Por isso o gerente é avisado. Se a identidade ficar ilegível (cofre ou
+//!   computador mudou), [`regerar_identidade_local`] cria identidade limpa (só
+//!   quando a atual não abre) e exige nova aprovação do gerente.
+//! - **Nenhum gancho por variável de ambiente** vale no programa (F-09).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+// Só o `secret-tool` (Linux) usa prazo.
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
@@ -57,96 +69,130 @@ const RETENCAO_CONVITE_EXPIRADO_SEG: i64 = 24 * 60 * 60;
 /// Alfabeto Base32 sem letras ambíguas (`I`, `O`, `0`, `1`), idêntico ao código de pedido.
 const ALFABETO_CONVITE: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
+/// Compilação de teste: os unitários (`cfg(test)`) e os de integração (`nucleo/tests/`,
+/// que ligam o recurso `ancoras-de-teste`, que o programa recusa). DT-P4-09: nelas a
+/// identidade fica na pasta do banco do teste e o cofre do sistema não é usado.
+const COMPILACAO_DE_TESTE: bool = cfg!(any(test, feature = "ancoras-de-teste"));
+
+/// Onde este Rustinho roda (P4-2, F-02).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Modo {
+    /// Instalação normal: identidade na pasta de configuração local do usuário.
+    Instalado,
+    /// Rustinho portátil: identidade na pasta do portátil, uma por computador.
+    /// `computador`: a identidade que o sistema dá ao computador
+    /// (`crate::computador::atual`); `None` quando o sistema não informa.
+    Portatil { computador: Option<String> },
+}
+
+/// O cofre de senhas do sistema que guarda o segredo de selagem (D4, F-06).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CofreSistema {
+    /// Sem cofre do sistema: só a reserva local (portátil, testes, sistema sem serviço de senhas).
+    Nenhum,
+    /// `secret-tool` (Linux), pelo caminho absoluto do executável.
+    #[cfg(target_os = "linux")]
+    SecretTool(PathBuf),
+    /// DPAPI do usuário (Windows), com o segredo protegido num arquivo `.dpapi`.
+    #[cfg(windows)]
+    Dpapi,
+}
+
+/// O cofre do sistema que vale para `modo` neste processo.
+fn cofre_do_sistema(modo: &Modo) -> CofreSistema {
+    if COMPILACAO_DE_TESTE || matches!(modo, Modo::Portatil { .. }) {
+        return CofreSistema::Nenhum;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        match caminho_secret_tool() {
+            Some(bin) if dbus_sessao_disponivel() => CofreSistema::SecretTool(bin.to_path_buf()),
+            _ => CofreSistema::Nenhum,
+        }
+    }
+    #[cfg(windows)]
+    {
+        CofreSistema::Dpapi
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        CofreSistema::Nenhum
+    }
+}
+
 /// Trava intra-processo que serializa criação/leitura inicial da identidade (A2).
 fn trava_processo() -> &'static Mutex<()> {
     static M: OnceLock<Mutex<()>> = OnceLock::new();
     M.get_or_init(|| Mutex::new(()))
 }
 
-/// Trava exclusiva entre processos (A2, B3-R2): no Unix usa `flock(LOCK_EX)`
-/// (atômico no kernel, sem corrida de remoção de trava órfã); fora do Unix usa
-/// arquivo `.lock` exclusivo com `create_new` e RAII `Drop`.
+/// Trava exclusiva entre processos (A2, B3-R2, F-01): a trava do **sistema** sobre um
+/// arquivo `.lock` aberto — `flock(LOCK_EX)` no Unix (inclui o Android) e
+/// `File::lock` no Windows. O sistema solta a trava quando o processo termina, de
+/// qualquer jeito (fim normal, "Finalizar tarefa", queda de energia): um `.lock`
+/// que sobrou no disco não prende ninguém (antes, no Windows, a trava era o próprio
+/// arquivo criado com `create_new` e um processo morto na seção crítica deixava a
+/// identidade inacessível até alguém apagar o arquivo à mão).
 struct TravaArquivo {
-    #[cfg(unix)]
     _arquivo: std::fs::File,
-    #[cfg(not(unix))]
-    caminho: PathBuf,
+}
+
+/// O arquivo da trava da identidade em `caminho_id`.
+fn caminho_da_trava(caminho_id: &Path) -> PathBuf {
+    let mut os = caminho_id.as_os_str().to_os_string();
+    os.push(".lock");
+    PathBuf::from(os)
 }
 
 impl TravaArquivo {
     fn adquirir(caminho_id: &Path) -> Resultado<TravaArquivo> {
-        let mut os = caminho_id.as_os_str().to_os_string();
-        os.push(".lock");
-        let caminho = PathBuf::from(os);
+        let caminho = caminho_da_trava(caminho_id);
         let pasta = caminho.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
         criar_pasta_restrita(pasta)?;
-
+        let mut opcoes = std::fs::OpenOptions::new();
+        opcoes.read(true).write(true).create(true).truncate(false);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            use std::os::unix::io::AsRawFd;
-            let arquivo = std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .mode(0o600)
-                .open(&caminho)
-                .map_err(|e| {
-                    Erro::Interno(format!("não foi possível abrir a trava da identidade do caixa ({:?})", e.kind()))
-                })?;
-            let fd = arquivo.as_raw_fd();
-            loop {
-                // SAFETY: `fd` pertence ao `File` aberto acima e `LOCK_EX` bloqueia até obter a trava exclusiva.
-                let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
-                if rc == 0 {
-                    return Ok(TravaArquivo { _arquivo: arquivo });
-                }
-                let err = std::io::Error::last_os_error();
-                if err.kind() == std::io::ErrorKind::Interrupted {
-                    continue;
-                }
-                return Err(Erro::Interno(format!(
-                    "não foi possível travar o arquivo da identidade do caixa ({:?})",
-                    err.kind()
-                )));
-            }
+            opcoes.mode(0o600);
         }
-
-        #[cfg(not(unix))]
-        {
-            let fim = Instant::now() + Duration::from_secs(10);
-            loop {
-                match std::fs::OpenOptions::new().write(true).create_new(true).open(&caminho) {
-                    Ok(mut f) => {
-                        let _ = write!(f, "{}", std::process::id());
-                        return Ok(TravaArquivo { caminho });
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                        if Instant::now() >= fim {
-                            return Err(Erro::Interno(
-                                "tempo esgotado aguardando trava exclusiva da identidade do caixa".into(),
-                            ));
-                        }
-                        std::thread::sleep(Duration::from_millis(15));
-                    }
-                    Err(e) => {
-                        return Err(Erro::Interno(format!(
-                            "não foi possível travar o arquivo da identidade do caixa ({:?})",
-                            e.kind()
-                        )));
-                    }
-                }
-            }
-        }
+        let arquivo = opcoes.open(&caminho).map_err(|e| {
+            Erro::Interno(format!("não foi possível abrir a trava da identidade do caixa ({:?})", e.kind()))
+        })?;
+        travar_exclusivo(&arquivo)?;
+        Ok(TravaArquivo { _arquivo: arquivo })
     }
 }
 
-#[cfg(not(unix))]
-impl Drop for TravaArquivo {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.caminho);
+/// Espera a trava exclusiva do sistema sobre `arquivo` (solta ao fechar o arquivo).
+#[cfg(unix)]
+fn travar_exclusivo(arquivo: &std::fs::File) -> Resultado<()> {
+    use std::os::unix::io::AsRawFd;
+    let fd = arquivo.as_raw_fd();
+    loop {
+        // SAFETY: `fd` pertence ao `File` aberto pelo chamador, que fica aberto durante a
+        // chamada; `LOCK_EX` bloqueia até obter a trava exclusiva e não mexe em memória do Rust.
+        let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(Erro::Interno(format!(
+            "não foi possível travar o arquivo da identidade do caixa ({:?})",
+            err.kind()
+        )));
     }
+}
+
+/// Espera a trava exclusiva do sistema sobre `arquivo` (solta ao fechar o arquivo).
+#[cfg(not(unix))]
+fn travar_exclusivo(arquivo: &std::fs::File) -> Resultado<()> {
+    arquivo.lock().map_err(|e| {
+        Erro::Interno(format!("não foi possível travar o arquivo da identidade do caixa ({:?})", e.kind()))
+    })
 }
 
 fn criar_pasta_restrita(pasta: &Path) -> Resultado<()> {
@@ -193,35 +239,53 @@ fn caminho_canonico_estavel(pasta_banco: &Path) -> Resultado<PathBuf> {
         .map_err(|e| Erro::Interno(format!("não foi possível resolver o caminho da pasta de dados ({:?})", e.kind())))
 }
 
-/// Calcula o caminho do arquivo `identidade*.p4` para `pasta_banco` (P4-2, M5).
-///
-/// Sem depender de `crate::portatil` (zero ciclos no grafo de dependências).
-/// Em modo instalado, exige pasta de configuração do usuário (nunca cai dentro
-/// da pasta do banco em silêncio).
-pub fn caminho_identidade(pasta_banco: &Path, eh_portatil: bool) -> Resultado<PathBuf> {
-    if let Ok(explicito) = std::env::var("RUSTINHO_IDENTIDADE") {
-        let limpo = explicito.trim();
-        if !limpo.is_empty() {
-            return Ok(PathBuf::from(limpo));
-        }
-    }
-    caminho_identidade_com_base(pasta_banco, eh_portatil, None)
+/// O nome do arquivo da identidade do portátil **neste computador** (F-02).
+fn nome_identidade_portatil(computador: &Option<String>) -> Resultado<String> {
+    let Some(c) = computador.as_deref().map(str::trim).filter(|c| !c.is_empty()) else {
+        return Err(Erro::validacao(
+            "Este computador não informa a própria identidade, então o Rustinho portátil não consegue guardar a \
+             chave deste caixa nele.",
+        ));
+    };
+    let mut h = Sha256::new();
+    h.update(b"rustinho/p4/portatil-computador\0");
+    h.update(c.as_bytes());
+    let d: [u8; 32] = h.finalize().into();
+    Ok(format!("identidade-{}.p4", hex(&d[..8])))
 }
 
-fn caminho_identidade_com_base(
-    pasta_banco: &Path,
-    eh_portatil: bool,
-    base_cfg_override: Option<&Path>,
-) -> Resultado<PathBuf> {
+/// Calcula o caminho do arquivo `identidade*.p4` para `pasta_banco` (P4-2, M5,
+/// F-02, DT-P4-09). Cria a pasta do banco se ela ainda não existe.
+///
+/// Sem depender de `crate::portatil` (zero ciclos no grafo de dependências): quem
+/// chama diz o [`Modo`]. Em modo instalado, exige pasta de configuração do usuário
+/// (nunca cai dentro da pasta do banco em silêncio).
+pub fn caminho_identidade(pasta_banco: &Path, modo: &Modo) -> Resultado<PathBuf> {
     let canon = caminho_canonico_estavel(pasta_banco)?;
-    if eh_portatil {
-        return Ok(canon.join("identidade.p4"));
+    caminho_identidade_em(&canon, modo, None)
+}
+
+/// Como [`caminho_identidade`], mas sem criar nada (F-16): `None` se a pasta do
+/// banco ainda não existe.
+fn caminho_identidade_se_existir(pasta_banco: &Path, modo: &Modo) -> Resultado<Option<PathBuf>> {
+    let Ok(canon) = std::fs::canonicalize(pasta_banco) else {
+        return Ok(None);
+    };
+    caminho_identidade_em(&canon, modo, None).map(Some)
+}
+
+/// O caminho da identidade para a pasta do banco já canônica `canon`.
+fn caminho_identidade_em(canon: &Path, modo: &Modo, base_cfg_override: Option<&Path>) -> Resultado<PathBuf> {
+    if let Modo::Portatil { computador } = modo {
+        return Ok(canon.join(nome_identidade_portatil(computador)?));
     }
     let pasta_cfg = match base_cfg_override {
         Some(p) => p.to_path_buf(),
+        // DT-P4-09: nos testes, nunca a pasta de configuração real do usuário.
+        None if COMPILACAO_DE_TESTE => canon.join(".identidade-teste"),
         None => pasta_config_usuario().ok_or_else(|| {
             Erro::validacao(
-                "Não foi possível localizar a pasta de configuração do usuário (HOME/APPDATA) para guardar a \
+                "Não foi possível localizar a pasta de configuração do usuário (HOME/LOCALAPPDATA) para guardar a \
                  identidade deste caixa fora da pasta do banco.",
             )
         })?,
@@ -234,36 +298,36 @@ fn caminho_identidade_com_base(
     Ok(pasta_cfg.join(format!("identidade-{sufixo}.p4")))
 }
 
+/// Só nos testes: o caminho da identidade com a base de configuração escolhida.
+#[cfg(test)]
+fn caminho_identidade_com_base(pasta_banco: &Path, modo: &Modo, base: Option<&Path>) -> Resultado<PathBuf> {
+    let canon = caminho_canonico_estavel(pasta_banco)?;
+    caminho_identidade_em(&canon, modo, base)
+}
+
 fn pasta_config_usuario() -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        if let Ok(ap) = std::env::var("APPDATA") {
-            if !ap.trim().is_empty() {
-                return Some(PathBuf::from(ap).join("Rustinho"));
-            }
-        }
-        None
-    }
-    #[cfg(not(windows))]
-    {
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            if !xdg.trim().is_empty() {
-                return Some(PathBuf::from(xdg).join("rustinho"));
-            }
-        }
-        if let Ok(home) = std::env::var("HOME") {
-            if !home.trim().is_empty() {
-                return Some(PathBuf::from(home).join(".config").join("rustinho"));
-            }
-        }
-        None
-    }
+    pasta_config_de(&|v| std::env::var_os(v), cfg!(windows))
 }
 
-fn usar_so_arquivo_reserva() -> bool {
-    cfg!(test) || std::env::var("RUSTINHO_COFRE_TESTE").ok().as_deref() == Some("arquivo")
+/// A pasta de configuração **local** do usuário para a identidade (F-03).
+/// - Windows: `%LOCALAPPDATA%\Rustinho-identidade` — local como o banco (que fica em
+///   `%LOCALAPPDATA%\Rustinho`), nunca `%APPDATA%` (*Roaming*: num perfil móvel de
+///   domínio a identidade viajaria e dois computadores teriam a mesma chave), e
+///   fora da pasta do banco (copiar a pasta dos dados não leva a identidade).
+/// - Outros: `$XDG_CONFIG_HOME/rustinho` ou `$HOME/.config/rustinho` (o banco fica em
+///   `~/.local/share/rustinho`).
+fn pasta_config_de(var: &dyn Fn(&str) -> Option<std::ffi::OsString>, windows: bool) -> Option<PathBuf> {
+    let nao_vazia = |n: &str| var(n).filter(|v| !v.to_string_lossy().trim().is_empty()).map(PathBuf::from);
+    if windows {
+        return nao_vazia("LOCALAPPDATA").map(|p| p.join("Rustinho-identidade"));
+    }
+    nao_vazia("XDG_CONFIG_HOME")
+        .map(|p| p.join("rustinho"))
+        .or_else(|| nao_vazia("HOME").map(|p| p.join(".config").join("rustinho")))
 }
 
+/// A conta do segredo no serviço de senhas (só o `secret-tool` usa conta).
+#[cfg(target_os = "linux")]
 fn conta_cofre(caminho: &Path) -> String {
     let mut h = Sha256::new();
     h.update(b"rustinho/p4/cofre-conta\0");
@@ -287,109 +351,140 @@ fn caminho_dpapi(caminho_id: &Path) -> PathBuf {
 
 /// Carrega a identidade deste caixa ou gera e sela uma nova na primeira abertura.
 /// Nunca substitui uma identidade já gravada e é seguro contra corrida entre
-/// threads e processos (A2).
-pub fn carregar_ou_criar(pasta_banco: &Path, eh_portatil: bool) -> Resultado<IdentidadeLocal> {
-    let caminho = caminho_identidade(pasta_banco, eh_portatil)?;
-    carregar_ou_criar_no_caminho(caminho, eh_portatil)
+/// threads e processos (A2). Se a identidade existe e não abre, devolve erro
+/// (falha fechada): quem chama trata como "protocolo 4 indisponível agora".
+pub fn carregar_ou_criar(pasta_banco: &Path, modo: &Modo) -> Resultado<IdentidadeLocal> {
+    let caminho = caminho_identidade(pasta_banco, modo)?;
+    carregar_ou_criar_no_caminho(caminho, modo, &cofre_do_sistema(modo))
 }
 
-fn carregar_ou_criar_no_caminho(caminho: PathBuf, eh_portatil: bool) -> Resultado<IdentidadeLocal> {
+fn carregar_ou_criar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
     let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
     if caminho.exists() {
-        let (senha, cofre_sistema) = carregar_segredo(&caminho, eh_portatil)?;
-        let senha_str = std::str::from_utf8(&senha.0)
-            .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
-        let identidade = Identidade::abrir_de(&caminho, senha_str)?;
-        return Ok(IdentidadeLocal { identidade, cofre_sistema, caminho });
+        return abrir_no_caminho(caminho, modo, cofre);
     }
+    criar_no_caminho(caminho, modo, cofre)
+}
+
+/// Abre a identidade gravada em `caminho` (com as travas já tomadas por quem chama).
+fn abrir_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
+    let (senha, cofre_sistema) = carregar_segredo(&caminho, modo, cofre)?;
+    let senha_str = std::str::from_utf8(&senha.0)
+        .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
+    let identidade = Identidade::abrir_de(&caminho, senha_str)?;
+    Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
+}
+
+/// Gera, sela e grava uma identidade nova em `caminho` (com as travas já tomadas).
+fn criar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
     let identidade = Identidade::gerar()?;
     let mut bruto: [u8; 32] = aleatorio()?;
     let senha = Segredo(hex(&bruto).into_bytes());
     apagar(&mut bruto);
     let senha_str = std::str::from_utf8(&senha.0).map_err(|_| Erro::Interno("segredo aleatório não UTF-8".into()))?;
-    let cofre_sistema = guardar_segredo(&caminho, senha_str, eh_portatil)?;
+    let cofre_sistema = guardar_segredo(&caminho, senha_str, modo, cofre)?;
     if let Err(e) = identidade.guardar_em(&caminho, senha_str) {
-        // Reverte o arquivo de reserva recém-escrito se a identidade falhou ao gravar.
+        // Reverte o segredo recém-guardado fora do cofre se a identidade falhou ao gravar.
         let _ = std::fs::remove_file(caminho_reserva(&caminho));
+        #[cfg(windows)]
+        let _ = std::fs::remove_file(caminho_dpapi(&caminho));
         return Err(e);
     }
     Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
 }
 
-/// Recuperação explícita (M3): arquiva uma identidade local ilegível (ex.: após
+/// Recuperação explícita (M3): arquiva uma identidade local **ilegível** (ex.: após
 /// perda do cofre do SO ou troca de `machine-id` em VM) e gera uma identidade
 /// nova limpa, que exigirá nova aprovação pelo gerente da loja.
-pub fn regerar_identidade_local(pasta_banco: &Path, eh_portatil: bool) -> Resultado<IdentidadeLocal> {
-    let caminho = caminho_identidade(pasta_banco, eh_portatil)?;
-    regerar_no_caminho(caminho, eh_portatil)
+///
+/// F-07: se a identidade atual ainda abre, recusa (gerar outra só jogaria fora uma
+/// chave boa e aprovada; o arquivo antigo arquivado ficaria ilegível para sempre,
+/// porque o segredo dele é substituído no cofre). A autorização do gerente para
+/// usar isto fica com a camada de cima.
+pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<IdentidadeLocal> {
+    let caminho = caminho_identidade(pasta_banco, modo)?;
+    regerar_no_caminho(caminho, modo, &cofre_do_sistema(modo))
 }
 
-fn regerar_no_caminho(caminho: PathBuf, eh_portatil: bool) -> Resultado<IdentidadeLocal> {
+fn regerar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
     let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
-    let sufixo = crate::tempo::novo_id();
     if caminho.exists() {
+        if abrir_no_caminho(caminho.clone(), modo, cofre).is_ok() {
+            return Err(Erro::validacao("A identidade deste caixa continua funcionando: não é preciso gerar outra."));
+        }
         let mut backup = caminho.as_os_str().to_os_string();
-        backup.push(format!(".antiga-{sufixo}"));
+        backup.push(format!(".antiga-{}", crate::tempo::novo_id()));
         std::fs::rename(&caminho, PathBuf::from(backup))
             .map_err(|e| Erro::Interno(format!("não foi possível arquivar a identidade anterior ({:?})", e.kind())))?;
     }
     let _ = std::fs::remove_file(caminho_reserva(&caminho));
     #[cfg(windows)]
     let _ = std::fs::remove_file(caminho_dpapi(&caminho));
-
-    let identidade = Identidade::gerar()?;
-    let mut bruto: [u8; 32] = aleatorio()?;
-    let senha = Segredo(hex(&bruto).into_bytes());
-    apagar(&mut bruto);
-    let senha_str = std::str::from_utf8(&senha.0).map_err(|_| Erro::Interno("segredo aleatório não UTF-8".into()))?;
-    let cofre_sistema = guardar_segredo(&caminho, senha_str, eh_portatil)?;
-    if let Err(e) = identidade.guardar_em(&caminho, senha_str) {
-        let _ = std::fs::remove_file(caminho_reserva(&caminho));
-        return Err(e);
-    }
-    Ok(IdentidadeLocal { identidade, cofre_sistema, caminho })
+    criar_no_caminho(caminho, modo, cofre)
 }
 
-/// Carrega apenas se já existir identidade neste caminho.
-pub fn carregar_existente(pasta_banco: &Path, eh_portatil: bool) -> Resultado<Option<IdentidadeLocal>> {
-    let caminho = caminho_identidade(pasta_banco, eh_portatil)?;
+/// Carrega apenas se já existir identidade. F-16: quando não existe, não cria
+/// nada (nem a pasta do banco, nem a de configuração, nem a trava).
+pub fn carregar_existente(pasta_banco: &Path, modo: &Modo) -> Resultado<Option<IdentidadeLocal>> {
+    let Some(caminho) = caminho_identidade_se_existir(pasta_banco, modo)? else {
+        return Ok(None);
+    };
+    carregar_existente_no_caminho(caminho, modo, &cofre_do_sistema(modo))
+}
+
+fn carregar_existente_no_caminho(
+    caminho: PathBuf,
+    modo: &Modo,
+    cofre: &CofreSistema,
+) -> Resultado<Option<IdentidadeLocal>> {
+    if !caminho.exists() {
+        return Ok(None);
+    }
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
     let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
     if !caminho.exists() {
         return Ok(None);
     }
-    let (senha, cofre_sistema) = carregar_segredo(&caminho, eh_portatil)?;
-    let senha_str = std::str::from_utf8(&senha.0)
-        .map_err(|_| Erro::validacao("O segredo protegido da identidade está danificado."))?;
-    let identidade = Identidade::abrir_de(&caminho, senha_str)?;
-    Ok(Some(IdentidadeLocal { identidade, cofre_sistema, caminho }))
+    abrir_no_caminho(caminho, modo, cofre).map(Some)
 }
 
-fn guardar_segredo(caminho_id: &Path, senha: &str, eh_portatil: bool) -> Resultado<bool> {
-    if !usar_so_arquivo_reserva() {
+/// Guarda o segredo de selagem: no cofre do sistema quando há um e ele aceita;
+/// senão na reserva local. Devolve `true` quando ficou no cofre do sistema.
+fn guardar_segredo(caminho_id: &Path, senha: &str, modo: &Modo, cofre: &CofreSistema) -> Resultado<bool> {
+    match cofre {
+        CofreSistema::Nenhum => {}
         #[cfg(target_os = "linux")]
-        if secret_tool_guardar(&conta_cofre(caminho_id), senha) {
-            return Ok(true);
+        CofreSistema::SecretTool(bin) => {
+            if secret_tool_guardar(bin, &conta_cofre(caminho_id), senha) {
+                return Ok(true);
+            }
         }
         #[cfg(windows)]
-        if dpapi_guardar(&caminho_dpapi(caminho_id), senha).is_ok() {
-            return Ok(true);
+        CofreSistema::Dpapi => {
+            if dpapi_guardar(&caminho_dpapi(caminho_id), senha).is_ok() {
+                return Ok(true);
+            }
         }
     }
-    guardar_reserva_local(&caminho_reserva(caminho_id), caminho_id, senha, eh_portatil)?;
+    guardar_reserva_local(&caminho_reserva(caminho_id), caminho_id, senha, modo)?;
     Ok(false)
 }
 
-fn carregar_segredo(caminho_id: &Path, eh_portatil: bool) -> Resultado<(Segredo, bool)> {
-    if !usar_so_arquivo_reserva() {
+/// Lê o segredo de selagem: primeiro o cofre do sistema, depois a reserva local.
+/// Sem nenhum dos dois, erro (falha fechada: nunca cria identidade por cima).
+fn carregar_segredo(caminho_id: &Path, modo: &Modo, cofre: &CofreSistema) -> Resultado<(Segredo, bool)> {
+    match cofre {
+        CofreSistema::Nenhum => {}
         #[cfg(target_os = "linux")]
-        if let Some(s) = secret_tool_ler(&conta_cofre(caminho_id)) {
-            return Ok((s, true));
+        CofreSistema::SecretTool(bin) => {
+            if let Some(s) = secret_tool_ler(bin, &conta_cofre(caminho_id)) {
+                return Ok((s, true));
+            }
         }
         #[cfg(windows)]
-        {
+        CofreSistema::Dpapi => {
             let dp = caminho_dpapi(caminho_id);
             if dp.exists() {
                 if let Ok(s) = dpapi_ler(&dp) {
@@ -400,7 +495,7 @@ fn carregar_segredo(caminho_id: &Path, eh_portatil: bool) -> Resultado<(Segredo,
     }
     let r = caminho_reserva(caminho_id);
     if r.exists() {
-        let s = ler_reserva_local(&r, caminho_id, eh_portatil)?;
+        let s = ler_reserva_local(&r, caminho_id, modo)?;
         return Ok((s, false));
     }
     Err(Erro::validacao("Não foi possível abrir o cofre de senhas deste computador para ler a identidade do caixa."))
@@ -436,15 +531,11 @@ fn dbus_sessao_disponivel() -> bool {
     std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some_and(|v| !v.is_empty())
 }
 
+/// Guarda `segredo` no serviço de senhas pelo `secret-tool` em `bin` (stdin, prazo de 3 s).
+/// `false` em qualquer falha (quem chama usa a reserva local e avisa o gerente).
 #[cfg(target_os = "linux")]
-fn secret_tool_guardar(conta: &str, segredo: &str) -> bool {
+fn secret_tool_guardar(bin: &Path, conta: &str, segredo: &str) -> bool {
     use std::process::{Command, Stdio};
-    if !dbus_sessao_disponivel() {
-        return false;
-    }
-    let Some(bin) = caminho_secret_tool() else {
-        return false;
-    };
     let Ok(mut filho) = Command::new(bin)
         .args(["store", "--label", "Rustinho (identidade do caixa)", "service", "rustinho-p4", "account", conta])
         .stdin(Stdio::piped())
@@ -464,14 +555,11 @@ fn secret_tool_guardar(conta: &str, segredo: &str) -> bool {
     esperar_com_prazo(&mut filho, Duration::from_secs(3)).is_some_and(|s| s.success())
 }
 
+/// Lê o segredo do serviço de senhas pelo `secret-tool` em `bin` (prazo de 3 s).
 #[cfg(target_os = "linux")]
-fn secret_tool_ler(conta: &str) -> Option<Segredo> {
+fn secret_tool_ler(bin: &Path, conta: &str) -> Option<Segredo> {
     use std::io::Read;
     use std::process::{Command, Stdio};
-    if !dbus_sessao_disponivel() {
-        return None;
-    }
-    let bin = caminho_secret_tool()?;
     let mut filho = Command::new(bin)
         .args(["lookup", "service", "rustinho-p4", "account", conta])
         .stdin(Stdio::null())
@@ -621,24 +709,30 @@ fn dpapi_ler(caminho: &Path) -> Resultado<Segredo> {
     Ok(claro)
 }
 
-/// Chave de ofuscação da reserva local (D4 / M3): usada **somente** quando o SO
-/// não oferece serviço de senhas (`cofre_sistema = false`, aviso explícito ao
-/// gerente). Não substitui um cofre do SO; protege via permissão `0600` e
-/// separação da pasta do banco. Em modo portátil não inclui `/etc/machine-id`
-/// para que o pendrive continue abrindo em outra máquina (`I3` detecta cópia).
-fn chave_reserva_local(caminho_id: &Path, eh_portatil: bool) -> [u8; 32] {
+/// Chave de ofuscação da reserva local (D4 / M3, F-02): usada **somente** quando
+/// não há cofre do sistema (`cofre_sistema = false`, aviso explícito ao gerente).
+/// É ofuscação, não proteção forte: deriva de dados que quem tem acesso ao
+/// computador lê (o caminho e a identidade do computador). Protege contra a cópia
+/// da pasta para outro computador e contra a leitura casual; a permissão `0600` e
+/// a pasta separada do banco fazem o resto.
+fn chave_reserva_local(caminho_id: &Path, modo: &Modo) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b"rustinho/p4/reserva-local/v1\0");
-    if eh_portatil {
-        h.update(b"portatil\0");
-        if let Some(nome) = caminho_id.file_name() {
-            h.update(nome.to_string_lossy().as_bytes());
+    match modo {
+        Modo::Portatil { computador } => {
+            h.update(b"portatil\0");
+            h.update(computador.as_deref().unwrap_or_default().trim().as_bytes());
+            h.update(b"\0");
+            if let Some(nome) = caminho_id.file_name() {
+                h.update(nome.to_string_lossy().as_bytes());
+            }
         }
-    } else {
-        h.update(b"instalado\0");
-        h.update(caminho_id.to_string_lossy().as_bytes());
-        if let Ok(mid) = std::fs::read_to_string("/etc/machine-id") {
-            h.update(mid.trim().as_bytes());
+        Modo::Instalado => {
+            h.update(b"instalado\0");
+            h.update(caminho_id.to_string_lossy().as_bytes());
+            if let Ok(mid) = std::fs::read_to_string("/etc/machine-id") {
+                h.update(mid.trim().as_bytes());
+            }
         }
     }
     h.finalize().into()
@@ -646,8 +740,8 @@ fn chave_reserva_local(caminho_id: &Path, eh_portatil: bool) -> [u8; 32] {
 
 const MAGICA_RESERVA: &[u8; 4] = b"RSR1";
 
-fn guardar_reserva_local(caminho: &Path, caminho_id: &Path, segredo: &str, eh_portatil: bool) -> Resultado<()> {
-    let mut chave = chave_reserva_local(caminho_id, eh_portatil);
+fn guardar_reserva_local(caminho: &Path, caminho_id: &Path, segredo: &str, modo: &Modo) -> Resultado<()> {
+    let mut chave = chave_reserva_local(caminho_id, modo);
     let nonce: [u8; 12] = aleatorio()?;
     let mut cabecalho = Vec::with_capacity(16);
     cabecalho.extend_from_slice(MAGICA_RESERVA);
@@ -662,7 +756,7 @@ fn guardar_reserva_local(caminho: &Path, caminho_id: &Path, segredo: &str, eh_po
     gravar_restrito(caminho, &tudo)
 }
 
-fn ler_reserva_local(caminho: &Path, caminho_id: &Path, eh_portatil: bool) -> Resultado<Segredo> {
+fn ler_reserva_local(caminho: &Path, caminho_id: &Path, modo: &Modo) -> Resultado<Segredo> {
     let bytes = std::fs::read(caminho)
         .map_err(|e| Erro::Interno(format!("não foi possível ler reserva da identidade ({:?})", e.kind())))?;
     if bytes.len() < 16 + 16 || bytes[..4] != MAGICA_RESERVA[..] {
@@ -671,7 +765,7 @@ fn ler_reserva_local(caminho: &Path, caminho_id: &Path, eh_portatil: bool) -> Re
     let (cabecalho, corpo) = bytes.split_at(16);
     let mut nonce = [0u8; 12];
     nonce.copy_from_slice(&cabecalho[4..16]);
-    let mut chave = chave_reserva_local(caminho_id, eh_portatil);
+    let mut chave = chave_reserva_local(caminho_id, modo);
     let cifra = ChaCha20Poly1305::new_from_slice(&chave).map_err(|_| Erro::Interno("chave reserva inválida".into()))?;
     apagar(&mut chave);
     let claro =
@@ -780,7 +874,8 @@ pub fn raiz_atual(conn: &Connection, loja_id: &str) -> Resultado<Option<Chave>> 
 // ---------------------------------------------------------------------------
 
 /// Convite recém-gerado para o gerente repassar ao caixa novo (texto ou QR).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// O `Debug` não mostra o segredo nem o QR (F-10).
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConviteGerado {
     pub id: String,
@@ -795,7 +890,8 @@ pub struct ConviteGerado {
 }
 
 /// Resumo de convite ativo (nunca expõe o segredo após expirar/consumir).
-#[derive(Clone, Debug, Serialize)]
+/// O `Debug` não mostra o segredo (F-10).
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConviteAtivo {
     pub id: String,
@@ -805,6 +901,33 @@ pub struct ConviteAtivo {
     pub gerente: String,
     pub criado_em: String,
     pub expira_em: String,
+}
+
+impl std::fmt::Debug for ConviteGerado {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConviteGerado")
+            .field("id", &self.id)
+            .field("segredo", &"<oculto>")
+            .field("codigo_pedido", &self.codigo_pedido)
+            .field("nome_caixa", &self.nome_caixa)
+            .field("expira_em", &self.expira_em)
+            .field("payload_qr", &"<oculto>")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ConviteAtivo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConviteAtivo")
+            .field("id", &self.id)
+            .field("segredo", &"<oculto>")
+            .field("codigo_pedido", &self.codigo_pedido)
+            .field("nome_caixa", &self.nome_caixa)
+            .field("gerente", &self.gerente)
+            .field("criado_em", &self.criado_em)
+            .field("expira_em", &self.expira_em)
+            .finish()
+    }
 }
 
 /// Codifica 16 bytes (128 bits) em 26 caracteres Base32 sem ambiguidade,
@@ -1024,7 +1147,8 @@ pub fn cancelar_convite(conn: &Connection, id: &str, gerente: &str) -> Resultado
 }
 
 /// Registro interno de um convite candidato (para verificação de *channel binding* no canal TLS).
-#[derive(Clone, Debug)]
+/// O `Debug` não mostra o segredo nem o hash, e o segredo é apagado da memória ao sair de cena (F-10).
+#[derive(Clone)]
 pub struct ConviteCandidato {
     pub id: String,
     pub loja_id: String,
@@ -1038,10 +1162,38 @@ pub struct ConviteCandidato {
     pub chave_aprovada: Option<String>,
 }
 
+impl std::fmt::Debug for ConviteCandidato {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConviteCandidato")
+            .field("id", &self.id)
+            .field("loja_id", &self.loja_id)
+            .field("segredo_normalizado", &self.segredo_normalizado.as_ref().map(|_| "<oculto>"))
+            .field("segredo_hash", &"<oculto>")
+            .field("codigo_pedido", &self.codigo_pedido)
+            .field("nome_caixa", &self.nome_caixa)
+            .field("gerente", &self.gerente)
+            .field("expira_em", &self.expira_em)
+            .field("usado_em", &self.usado_em)
+            .field("chave_aprovada", &self.chave_aprovada)
+            .finish()
+    }
+}
+
+impl Drop for ConviteCandidato {
+    fn drop(&mut self) {
+        if let Some(segredo) = self.segredo_normalizado.take() {
+            let mut bytes = segredo.into_bytes();
+            apagar(&mut bytes);
+        }
+    }
+}
+
 /// Busca convites não expirados da loja `loja_id` (ativos ou recentemente consumidos pela
 /// mesma chave para idempotência em queda).
+///
+/// F-08: é só leitura (não apaga nada com o relógio de quem chama); a limpeza dos
+/// vencidos fica com [`limpar_convites_expirados`] e [`purgar_convites_expirados`].
 pub fn convites_validos_agora(conn: &Connection, loja_id: &str, agora_iso: &str) -> Resultado<Vec<ConviteCandidato>> {
-    limpar_convites_expirados(conn, agora_iso)?;
     let mut c = conn.prepare(
         "SELECT id, loja_id, segredo_ativo, segredo_hash, codigo_pedido, nome_caixa, gerente, expira_em, usado_em, chave_aprovada
            FROM p4_convite
@@ -1213,17 +1365,17 @@ mod testes {
         let p1 = raiz.0.join("pc1");
         let p2 = raiz.0.join("pc2");
 
-        let c1 = caminho_identidade_com_base(&p1, false, Some(&cfg)).unwrap();
-        let id1 = carregar_ou_criar_no_caminho(c1.clone(), false).unwrap();
+        let c1 = caminho_identidade_com_base(&p1, &Modo::Instalado, Some(&cfg)).unwrap();
+        let id1 = carregar_ou_criar_no_caminho(c1.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
         assert!(!id1.caminho.starts_with(&p1), "identidade normal fica fora da pasta do banco");
         assert!(id1.caminho.starts_with(&cfg), "identidade gravada na base isolada");
 
-        let id1_re = carregar_ou_criar_no_caminho(c1.clone(), false).unwrap();
+        let id1_re = carregar_ou_criar_no_caminho(c1.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
         assert_eq!(id1.identidade.publica(), id1_re.identidade.publica(), "reabre a mesma identidade");
 
         // Outro caminho de banco (simula banco copiado para outra pasta/PC): recebe outra identidade!
-        let c2 = caminho_identidade_com_base(&p2, false, Some(&cfg)).unwrap();
-        let id2 = carregar_ou_criar_no_caminho(c2, false).unwrap();
+        let c2 = caminho_identidade_com_base(&p2, &Modo::Instalado, Some(&cfg)).unwrap();
+        let id2 = carregar_ou_criar_no_caminho(c2, &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
         assert_ne!(id1.identidade.publica(), id2.identidade.publica());
 
         // Nenhuma chave privada aparece em claro nos arquivos gravados.
@@ -1238,19 +1390,52 @@ mod testes {
         let ult = corrompido.len() - 1;
         corrompido[ult] ^= 0xFF;
         std::fs::write(&res, &corrompido).unwrap();
-        assert!(carregar_ou_criar_no_caminho(c1.clone(), false).is_err(), "reserva adulterada deve falhar");
-        let novo = regerar_no_caminho(c1, false).unwrap();
+        assert!(
+            carregar_ou_criar_no_caminho(c1.clone(), &Modo::Instalado, &CofreSistema::Nenhum).is_err(),
+            "reserva adulterada deve falhar"
+        );
+        let novo = regerar_no_caminho(c1, &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
         assert_ne!(novo.identidade.publica(), id1.identidade.publica(), "recuperação cria nova identidade");
+    }
+
+    fn portatil_em(computador: &str) -> Modo {
+        Modo::Portatil { computador: Some(computador.to_string()) }
     }
 
     #[test]
     fn modo_portatil_guarda_identidade_na_pasta_do_portatil() {
         let p = PastaTemp::nova("portatil");
-        let c = caminho_identidade_com_base(&p.0, true, None).unwrap();
-        let id = carregar_ou_criar_no_caminho(c.clone(), true).unwrap();
-        assert_eq!(id.caminho, std::fs::canonicalize(&p.0).unwrap().join("identidade.p4"));
-        let id2 = carregar_ou_criar_no_caminho(c, true).unwrap();
+        let modo = portatil_em("pc-da-loja");
+        let c = caminho_identidade_com_base(&p.0, &modo, None).unwrap();
+        let id = carregar_ou_criar_no_caminho(c.clone(), &modo, &CofreSistema::Nenhum).unwrap();
+        let canon = std::fs::canonicalize(&p.0).unwrap();
+        assert_eq!(id.caminho.parent(), Some(canon.as_path()), "a identidade fica na pasta do portátil");
+        assert!(!id.cofre_sistema, "o portátil usa só a reserva na própria pasta (aviso ao gerente)");
+        let id2 = carregar_ou_criar_no_caminho(c, &modo, &CofreSistema::Nenhum).unwrap();
         assert_eq!(id.identidade.publica(), id2.identidade.publica());
+    }
+
+    /// F-02: o pendrive levado a outro computador não fica preso numa identidade que
+    /// não abre ali: o outro computador tem a própria (que precisará de aprovação), e
+    /// a do primeiro computador continua intacta e abrindo nele.
+    #[test]
+    fn f02_portatil_tem_uma_identidade_por_computador() {
+        let p = PastaTemp::nova("portatil-dois-pcs");
+        let (pc_a, pc_b) = (portatil_em("pc-a"), portatil_em("pc-b"));
+        let ca = caminho_identidade_com_base(&p.0, &pc_a, None).unwrap();
+        let cb = caminho_identidade_com_base(&p.0, &pc_b, None).unwrap();
+        assert_ne!(ca, cb, "cada computador tem o próprio arquivo de identidade no pendrive");
+        let ida = carregar_ou_criar_no_caminho(ca.clone(), &pc_a, &CofreSistema::Nenhum).unwrap();
+        let idb = carregar_ou_criar_no_caminho(cb, &pc_b, &CofreSistema::Nenhum).unwrap();
+        assert_ne!(ida.identidade.publica(), idb.identidade.publica(), "outro computador, outra chave");
+        let de_novo_a = carregar_ou_criar_no_caminho(ca.clone(), &pc_a, &CofreSistema::Nenhum).unwrap();
+        assert_eq!(de_novo_a.identidade.publica(), ida.identidade.publica(), "o primeiro computador segue igual");
+        // A reserva de um computador não abre com a identidade de outro (a chave da
+        // reserva amarra o computador).
+        assert!(ler_reserva_local(&caminho_reserva(&ca), &ca, &pc_b).is_err());
+        // Sem a identidade do computador, o portátil não inventa uma: recusa.
+        let sem = Modo::Portatil { computador: None };
+        assert!(caminho_identidade_com_base(&p.0, &sem, None).is_err());
     }
 
     /// A2: 6 threads competindo simultaneamente em `carregar_ou_criar` na mesma pasta
@@ -1261,7 +1446,7 @@ mod testes {
         for rodada in 0..20 {
             let pasta = raiz.0.join(format!("r{rodada}"));
             let cfg = raiz.0.join(format!("cfg{rodada}"));
-            let caminho = caminho_identidade_com_base(&pasta, false, Some(&cfg)).unwrap();
+            let caminho = caminho_identidade_com_base(&pasta, &Modo::Instalado, Some(&cfg)).unwrap();
             let barreira = std::sync::Arc::new(std::sync::Barrier::new(6));
             let handles: Vec<_> = (0..6)
                 .map(|_| {
@@ -1269,7 +1454,10 @@ mod testes {
                     let c = caminho.clone();
                     std::thread::spawn(move || {
                         b.wait();
-                        carregar_ou_criar_no_caminho(c, false).unwrap().identidade.publica()
+                        carregar_ou_criar_no_caminho(c, &Modo::Instalado, &CofreSistema::Nenhum)
+                            .unwrap()
+                            .identidade
+                            .publica()
                     })
                 })
                 .collect();
@@ -1277,7 +1465,10 @@ mod testes {
             for ch in &chaves[1..] {
                 assert_eq!(*ch, chaves[0], "rodada {rodada}: todas as threads têm de obter a mesma chave");
             }
-            let reaberta = carregar_ou_criar_no_caminho(caminho, false).unwrap().identidade.publica();
+            let reaberta = carregar_ou_criar_no_caminho(caminho, &Modo::Instalado, &CofreSistema::Nenhum)
+                .unwrap()
+                .identidade
+                .publica();
             assert_eq!(reaberta, chaves[0], "rodada {rodada}: identidade persistida reabre igual");
         }
     }
@@ -1528,6 +1719,332 @@ mod testes {
             aprovados::autorizada(&b.conn, &raiz.publica(), LOJA, &c2.publica()).unwrap(),
             "B7: aprovação legada da 28 continua válida após migração 0029"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Revisão de entrada (Sonnet, 24/11): F-01, F-03, F-06, F-07, F-10, F-16 e DT-P4-09.
+    // -----------------------------------------------------------------------
+
+    /// F-01: um `.lock` que sobrou no disco (de um processo que morreu na seção
+    /// crítica: "Finalizar tarefa", queda de energia) não prende a identidade. A
+    /// trava é a do sistema, que o sistema solta quando o processo termina.
+    #[test]
+    fn f01_trava_que_sobrou_no_disco_nao_prende_a_identidade() {
+        let raiz = PastaTemp::nova("trava-que-sobrou");
+        let cfg = raiz.0.join("cfg");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&cfg)).unwrap();
+        std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+        std::fs::write(caminho_da_trava(&c), b"4242").unwrap();
+        let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum)
+            .expect("o .lock que sobrou não pode impedir criar a identidade");
+        std::fs::write(caminho_da_trava(&c), b"4242").unwrap();
+        let de_novo = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum)
+            .expect("nem impedir abrir de novo");
+        assert_eq!(id.identidade.publica(), de_novo.identidade.publica());
+        assert!(carregar_existente_no_caminho(c, &Modo::Instalado, &CofreSistema::Nenhum).unwrap().is_some());
+    }
+
+    /// F-01 (no Linux): a trava presa por outro **processo** que morreu é solta pelo
+    /// sistema na hora (o processo filho segura a trava e é morto com SIGKILL).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn f01_trava_de_processo_morto_e_solta_pelo_sistema() {
+        if !Path::new("/usr/bin/flock").is_file() {
+            eprintln!("sem /usr/bin/flock neste sistema: teste não se aplica");
+            return;
+        }
+        let raiz = PastaTemp::nova("trava-processo-morto");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+        let trava = caminho_da_trava(&c);
+        let mut filho =
+            std::process::Command::new("/usr/bin/flock").arg("-x").arg(&trava).args(["sleep", "60"]).spawn().unwrap();
+        // Espera o filho pegar a trava (o arquivo aparece e um `flock -n` falha).
+        let fim = Instant::now() + Duration::from_secs(10);
+        loop {
+            let ocupada = std::process::Command::new("/usr/bin/flock")
+                .args(["-n", "-x"])
+                .arg(&trava)
+                .arg("true")
+                .status()
+                .map(|s| !s.success())
+                .unwrap_or(false);
+            if ocupada {
+                break;
+            }
+            assert!(Instant::now() < fim, "o processo filho não pegou a trava");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        filho.kill().unwrap();
+        filho.wait().unwrap();
+        assert!(trava.exists(), "o arquivo da trava fica no disco depois da morte do processo");
+        carregar_ou_criar_no_caminho(c, &Modo::Instalado, &CofreSistema::Nenhum)
+            .expect("com o dono morto, a trava do sistema já está solta");
+    }
+
+    /// F-03: no Windows a identidade vai para a pasta **local** do usuário (como o
+    /// banco), fora da pasta do banco; nunca para a *Roaming* (`%APPDATA%`).
+    #[test]
+    fn f03_no_windows_a_identidade_fica_na_pasta_local_fora_da_do_banco() {
+        use std::ffi::OsString;
+        let local = "C:\\Users\\caixa\\AppData\\Local";
+        let roaming = "C:\\Users\\caixa\\AppData\\Roaming";
+        let as_duas = |n: &str| match n {
+            "LOCALAPPDATA" => Some(OsString::from(local)),
+            "APPDATA" => Some(OsString::from(roaming)),
+            _ => None,
+        };
+        let p = pasta_config_de(&as_duas, true).unwrap();
+        assert!(p.starts_with(local), "a identidade fica na pasta local: {}", p.display());
+        assert!(!p.to_string_lossy().contains("Roaming"));
+        assert_ne!(p, PathBuf::from(local).join("Rustinho"), "e fora da pasta do banco (%LOCALAPPDATA%\\Rustinho)");
+        let so_roaming = |n: &str| (n == "APPDATA").then(|| OsString::from(roaming));
+        assert_eq!(pasta_config_de(&so_roaming, true), None, "sem pasta local, falha (nunca a Roaming)");
+        let linux = |n: &str| (n == "HOME").then(|| OsString::from("/home/caixa"));
+        assert_eq!(pasta_config_de(&linux, false), Some(PathBuf::from("/home/caixa/.config/rustinho")));
+        let xdg = |n: &str| match n {
+            "XDG_CONFIG_HOME" => Some(OsString::from("/cfg")),
+            "HOME" => Some(OsString::from("/home/caixa")),
+            _ => None,
+        };
+        assert_eq!(pasta_config_de(&xdg, false), Some(PathBuf::from("/cfg/rustinho")));
+    }
+
+    /// DT-P4-09: nas compilações de teste a identidade "instalada" fica dentro da
+    /// pasta do banco do teste — nunca em `~/.config/rustinho/` (área do Rustinho
+    /// real) — e o cofre do sistema nunca é usado (nem o chaveiro do usuário).
+    #[test]
+    fn dt_p4_09_testes_nao_tocam_a_configuracao_nem_o_chaveiro_do_usuario() {
+        let p = PastaTemp::nova("isolamento-testes");
+        let c = caminho_identidade(&p.0, &Modo::Instalado).unwrap();
+        assert!(c.starts_with(std::fs::canonicalize(&p.0).unwrap()), "fora da pasta do teste: {}", c.display());
+        assert_eq!(cofre_do_sistema(&Modo::Instalado), CofreSistema::Nenhum);
+        let id = carregar_ou_criar(&p.0, &Modo::Instalado).unwrap();
+        assert!(!id.cofre_sistema);
+        assert!(id.caminho.starts_with(std::fs::canonicalize(&p.0).unwrap()));
+    }
+
+    /// F-16: ler a identidade que não existe não cria nada (nem a pasta do banco,
+    /// nem a de configuração, nem a trava).
+    #[test]
+    fn f16_carregar_existente_sem_identidade_nao_cria_nada() {
+        let p = PastaTemp::nova("leitura-sem-efeito");
+        let inexistente = p.0.join("nao-existe");
+        assert!(carregar_existente(&inexistente, &Modo::Instalado).unwrap().is_none());
+        assert!(!inexistente.exists(), "a pasta do banco não pode ser criada por uma leitura");
+        assert!(carregar_existente(&p.0, &Modo::Instalado).unwrap().is_none());
+        let entradas: Vec<_> = std::fs::read_dir(&p.0).unwrap().collect();
+        assert!(entradas.is_empty(), "a leitura deixou arquivos ou pastas para trás: {entradas:?}");
+    }
+
+    /// F-07: com a identidade legível, a recuperação recusa (não joga fora uma chave
+    /// boa e aprovada); com ela ilegível, gera outra.
+    #[test]
+    fn f07_regerar_recusa_identidade_que_abre() {
+        let raiz = PastaTemp::nova("regerar-guarda");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
+        assert!(regerar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).is_err());
+        let igual = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Nenhum).unwrap();
+        assert_eq!(igual.identidade.publica(), id.identidade.publica(), "a identidade boa continua a mesma");
+        let pasta = c.parent().unwrap();
+        let antigas = std::fs::read_dir(pasta)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".antiga-"))
+            .count();
+        assert_eq!(antigas, 0, "nada foi arquivado");
+    }
+
+    /// F-10: o `Debug` dos convites não mostra o segredo, o hash nem o QR.
+    #[test]
+    fn f10_debug_dos_convites_nao_mostra_o_segredo() {
+        let (b, gerente) = crate::faixas::para_testes::loja("Caixa 1");
+        let raiz = Identidade::gerar().unwrap();
+        aprovados::registrar_raiz(&b.conn, &raiz, LOJA, "Caixa 1", &gerente).unwrap();
+        let novo = Identidade::gerar().unwrap();
+        let pedido = Pedido::com_dispositivo(&novo, "disp-novo-0001");
+        let conv =
+            gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &pedido.codigo(), "Caixa 2", &gerente, "").unwrap();
+        let norm = normalizar_segredo(&conv.segredo);
+        let textos = [
+            format!("{conv:?}"),
+            format!("{:?}", listar_convites_ativos(&b.conn, LOJA).unwrap()),
+            format!("{:?}", convites_validos_agora(&b.conn, LOJA, &crate::tempo::agora()).unwrap()),
+        ];
+        for t in &textos {
+            assert!(!t.contains(&conv.segredo) && !t.contains(&norm), "o segredo apareceu: {t}");
+            assert!(!t.contains(&hash_segredo(&norm)), "o hash apareceu: {t}");
+            assert!(!t.contains("RUST4|"), "o QR apareceu: {t}");
+        }
+    }
+
+    /// F-08: procurar os convites candidatos não grava nada (antes, a leitura com um
+    /// relógio no futuro apagava o segredo de um convite ainda válido).
+    #[test]
+    fn f08_procurar_candidatos_nao_apaga_o_segredo_de_convite_valido() {
+        let (b, gerente) = crate::faixas::para_testes::loja("Caixa 1");
+        let raiz = Identidade::gerar().unwrap();
+        aprovados::registrar_raiz(&b.conn, &raiz, LOJA, "Caixa 1", &gerente).unwrap();
+        let pedido = Pedido::com_dispositivo(&Identidade::gerar().unwrap(), "disp-novo-0002");
+        gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &pedido.codigo(), "Caixa 2", &gerente, "").unwrap();
+        let futuro = crate::tempo::somar_segundos(&crate::tempo::agora(), VALIDADE_CONVITE_SEG + 60).unwrap();
+        assert!(convites_validos_agora(&b.conn, LOJA, &futuro).unwrap().is_empty());
+        let agora = convites_validos_agora(&b.conn, LOJA, &crate::tempo::agora()).unwrap();
+        assert_eq!(agora.len(), 1);
+        assert!(agora[0].segredo_normalizado.is_some(), "a leitura com outro relógio apagou o segredo");
+    }
+
+    // --- F-06: o cofre do sistema de verdade (o `secret-tool`), com um executável falso. ---
+
+    /// Um `secret-tool` de mentira (o mesmo jeito de chamar do de verdade): `store`
+    /// lê o segredo do stdin e guarda num arquivo por conta; `lookup` devolve com
+    /// quebra de linha. `jeito`: "funciona", "falha" (sai com 1) ou "trava" (dorme 60 s).
+    #[cfg(target_os = "linux")]
+    fn secret_tool_falso(pasta: &Path, jeito: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let chaveiro = pasta.join("chaveiro");
+        std::fs::create_dir_all(&chaveiro).unwrap();
+        let corpo = match jeito {
+            "funciona" => format!(
+                "acao=\"$1\"\nconta=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = account ] && conta=\"$2\"; shift; done\n\
+                 arq=\"{}/$conta\"\ncase \"$acao\" in\n  store) cat > \"$arq\" ;;\n  \
+                 lookup) [ -f \"$arq\" ] || exit 1; cat \"$arq\"; echo ;;\n  *) exit 2 ;;\nesac\n",
+                chaveiro.display()
+            ),
+            "falha" => "cat > /dev/null 2>&1; exit 1\n".to_string(),
+            "trava" => "sleep 60\n".to_string(),
+            outro => panic!("jeito desconhecido: {outro}"),
+        };
+        let bin = pasta.join(format!("secret-tool-{jeito}"));
+        let temporario = pasta.join(format!(".secret-tool-{jeito}.novo"));
+        std::fs::write(&temporario, format!("#!/bin/sh\n{corpo}")).unwrap();
+        std::fs::set_permissions(&temporario, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(&temporario, &bin).unwrap();
+        // Outro teste pode ter herdado o arquivo aberto num `fork` (ETXTBSY): espera ele largar.
+        let fim = Instant::now() + Duration::from_secs(10);
+        loop {
+            match std::process::Command::new(&bin)
+                .arg("--sonda")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut filho) => {
+                    let _ = filho.kill();
+                    let _ = filho.wait();
+                    break;
+                }
+                Err(e) => {
+                    assert!(Instant::now() < fim, "o secret-tool falso não executa: {e}");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+        bin
+    }
+
+    /// F-06: com o cofre do sistema funcionando, o segredo vai para ele (não para a
+    /// reserva), a identidade reabre lendo dele (com a quebra de linha que o
+    /// `secret-tool` devolve) e nem o segredo nem a chave privada vão para o banco.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn f06_cofre_do_sistema_guarda_o_segredo_fora_do_banco_e_da_reserva() {
+        let raiz = PastaTemp::nova("cofre-funciona");
+        let bin = secret_tool_falso(&raiz.0, "funciona");
+        let cofre = CofreSistema::SecretTool(bin);
+        let pasta_banco = raiz.0.join("dados");
+        std::fs::create_dir_all(&pasta_banco).unwrap();
+        let c = caminho_identidade_com_base(&pasta_banco, &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &cofre).unwrap();
+        assert!(id.cofre_sistema, "o segredo tem de ficar no cofre do sistema");
+        assert!(!caminho_reserva(&c).exists(), "com o cofre funcionando, não há reserva local");
+        let guardado = std::fs::read_to_string(raiz.0.join("chaveiro").join(conta_cofre(&c))).unwrap();
+        assert_eq!(guardado.len(), 64, "o segredo de 256 bits (hex) foi para o cofre");
+        let reaberta = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &cofre).unwrap();
+        assert!(reaberta.cofre_sistema);
+        assert_eq!(reaberta.identidade.publica(), id.identidade.publica());
+
+        // O banco da loja guarda só a chave pública (nada do segredo nem da privada).
+        let caminho_db = pasta_banco.join("rustinho.db");
+        let b = Banco::abrir(&caminho_db).unwrap();
+        let gerente = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+        garantir_raiz_se_aplicavel(&b.conn, &id.identidade, id.cofre_sistema, LOJA, "Caixa 1", &gerente, true).unwrap();
+        b.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(b);
+        let (priv_ed, priv_x) = id.identidade.privadas_para_teste();
+        let mut bytes = Vec::new();
+        for e in std::fs::read_dir(&pasta_banco).unwrap().filter_map(|e| e.ok()) {
+            if e.file_name().to_string_lossy().starts_with("rustinho.db") {
+                bytes.extend(std::fs::read(e.path()).unwrap());
+            }
+        }
+        let contem = |agulha: &[u8]| bytes.windows(agulha.len()).any(|w| w == agulha);
+        assert!(contem(hex(&id.identidade.publica()).as_bytes()), "a chave pública fica no banco");
+        assert!(!contem(guardado.as_bytes()), "o segredo de selagem foi parar no banco");
+        assert!(!contem(&priv_ed) && !contem(&priv_x), "a chave privada foi parar no banco");
+        assert!(!contem(hex(&priv_x).as_bytes()), "a chave privada (hex) foi parar no banco");
+    }
+
+    /// F-06: o cofre do sistema que falha (sai com erro) ou trava (passa do prazo de
+    /// 3 s) não impede criar a identidade: vai para a reserva, com o aviso
+    /// (`cofre_sistema = false`), e reabre depois do mesmo jeito.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn f06_cofre_do_sistema_que_falha_ou_trava_cai_na_reserva_com_aviso() {
+        for jeito in ["falha", "trava"] {
+            let raiz = PastaTemp::nova(&format!("cofre-{jeito}"));
+            let cofre = CofreSistema::SecretTool(secret_tool_falso(&raiz.0, jeito));
+            let c =
+                caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+            // O prazo do cofre (3 s) vale para guardar e para ler: o "trava" dorme 60 s.
+            if let CofreSistema::SecretTool(bin) = &cofre {
+                let inicio = Instant::now();
+                assert!(!secret_tool_guardar(bin, "conta-prazo", "segredo"), "{jeito}");
+                assert!(secret_tool_ler(bin, "conta-prazo").is_none(), "{jeito}");
+                assert!(inicio.elapsed() < Duration::from_secs(20), "{jeito}: o prazo do cofre não foi respeitado");
+            }
+            let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &cofre).unwrap();
+            assert!(!id.cofre_sistema, "{jeito}: sem cofre, o aviso tem de aparecer");
+            assert!(caminho_reserva(&c).exists(), "{jeito}: a reserva local guardou o segredo");
+            let de_novo = carregar_ou_criar_no_caminho(c, &Modo::Instalado, &cofre).unwrap();
+            assert_eq!(de_novo.identidade.publica(), id.identidade.publica(), "{jeito}");
+            assert!(!de_novo.cofre_sistema, "{jeito}");
+        }
+    }
+
+    /// F-06: a identidade cujo segredo está só no cofre do sistema, com o cofre fora
+    /// do ar, não abre — e **não** é substituída por outra (falha fechada).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn f06_identidade_no_cofre_fora_do_ar_falha_fechada_sem_criar_outra() {
+        let raiz = PastaTemp::nova("cofre-fora-do-ar");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let funciona = CofreSistema::SecretTool(secret_tool_falso(&raiz.0, "funciona"));
+        let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &funciona).unwrap();
+        let antes = std::fs::read(&c).unwrap();
+        let fora = CofreSistema::SecretTool(secret_tool_falso(&raiz.0, "falha"));
+        assert!(carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &fora).is_err());
+        assert!(carregar_existente_no_caminho(c.clone(), &Modo::Instalado, &fora).is_err());
+        assert_eq!(std::fs::read(&c).unwrap(), antes, "a identidade gravada não pode ser trocada");
+        assert!(!caminho_reserva(&c).exists(), "nem ganhar uma reserva por cima");
+        let volta = carregar_ou_criar_no_caminho(c, &Modo::Instalado, &funciona).unwrap();
+        assert_eq!(volta.identidade.publica(), id.identidade.publica(), "com o cofre de volta, abre a mesma");
+    }
+
+    /// F-06 (Windows): a identidade instalada guarda o segredo no DPAPI (arquivo
+    /// `.dpapi`, sem reserva) e reabre por ele.
+    #[cfg(windows)]
+    #[test]
+    fn f06_dpapi_guarda_o_segredo_da_identidade_e_reabre() {
+        let raiz = PastaTemp::nova("cofre-dpapi");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let id = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &CofreSistema::Dpapi).unwrap();
+        assert!(id.cofre_sistema);
+        assert!(caminho_dpapi(&c).exists());
+        assert!(!caminho_reserva(&c).exists());
+        let de_novo = carregar_ou_criar_no_caminho(c, &Modo::Instalado, &CofreSistema::Dpapi).unwrap();
+        assert_eq!(de_novo.identidade.publica(), id.identidade.publica());
     }
 
     #[cfg(windows)]

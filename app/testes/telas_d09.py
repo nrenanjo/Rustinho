@@ -169,8 +169,9 @@ class Rustinho:
                 return x, y
         return None
 
-    def entrar(self, usuario):
-        """Clica no nome na tela de entrada e digita a senha.
+    def entrar(self, usuario, senha=None):
+        """Clica no nome na tela de entrada e digita a senha (`senha`, ou a de
+        sempre deste usuário em `SENHA`: a de uma loja nova, que segue a DP-33).
 
         H20 × roteiros (integração 2, 13/11): desde a H20 (a entrada rola, com
         os cartões de dois em dois), a primeira leitura da tela de entrada pode
@@ -204,7 +205,7 @@ class Rustinho:
             if any(simples(t) == alvo_senha or simples(t) == "entrar" for _, _, t in tx):
                 break
         time.sleep(0.10)
-        xdo("type", "--delay", "25", SENHA[usuario])
+        xdo("type", "--delay", "25", senha if senha is not None else SENHA[usuario])
         xdo("key", "Return")
         # Espera reativa até sair da tela de entrada + folga de assentamento da tela destino.
         fim_saida = time.monotonic() + 12.0

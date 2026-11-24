@@ -50,8 +50,11 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0022 | `0022_caixa_fechado.sql` | caixa fechado não muda mais (D-14, 0.9.14) | |
 | 0023 | `0023_rascunho_e_pendencias.sql` | rascunho da OS e pendências da troca de dados (0.9.15) | recria tabelas (`sem_chaves_estrangeiras`) |
 | 0024 | `0024_gtins_e_pendencias_xml.sql` | vários GTINs por peça e pendências de identificação do XML (0.9.18-dev.3.1) | **publicada**; a dev.3 paralela tem outra 0024 (§3) |
-| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada da peça e que não viaja, em `dados::esquema::COLUNAS`: quem recebe a peça a refaz; preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | **não publicada**; número provisório até entrar na branch (§5). **Não é a 0025 da dev.3** (`venda_cancelamento`, §3): a linhagem (§4) recusa o banco dev.3/25 |
-| 0026 | `0026_caixas_aprovados.sql` | registro assinado de caixas aprovados e retirados (protocolo 4, etapa 2; era a 0024 da `frente-p4`) | **não publicada**; número provisório até entrar na branch (§5). Era a 0025 da preparação `prod-p4` e da integração, renumerada porque a 7.5 entrou antes (MIG-1 (a): quem entra depois renumera) |
+| 0025 | `0025_indices_e_busca_normalizada.sql` | passo 7.5: o índice composto do estoque com nome novo (B01); a coluna `produto.nome_normalizado` (o nome sem acento, derivada da peça e que não viaja, em `dados::esquema::COLUNAS`: quem recebe a peça a refaz; preenchida na transação da migração sem entrar no log da troca) e o índice da lista de Peças (B04, PEND-39); o índice de cobertura do filtro da busca com texto (PEND-39) | **publicada** (`v0.9.18-dev.3.3`). **Não é a 0025 da dev.3** (`venda_cancelamento`, §3): a linhagem (§4) recusa o banco dev.3/25 |
+| 0026 | `0026_caixas_aprovados.sql` | registro assinado de caixas aprovados e retirados (protocolo 4, etapa 2; era a 0024 da `frente-p4`) | **publicada** (`v0.9.18-dev.3.3`). Era a 0025 da preparação `prod-p4` e da integração, renumerada porque a 7.5 entrou antes (MIG-1 (a)) |
+| 0027 | `0027_operacao_feita.sql` | R0 da recuperação do trabalho (QT-1): a operação já feita, gravada na mesma transação da própria operação, e as tabelas locais de operação em curso, abertura do programa e fechamento visto | **publicada** (`v0.9.18-dev.3.3`). Tabelas locais (não viajam) |
+| 0028 | `0028_recuperacao_trabalho.sql` | R1/R2 da recuperação do trabalho (0.9.19-dev.1, REC-1 a REC-6): `trabalho` (retrato com duas versões e SHA-256) e `sessao_local` | **não publicada** (linha `0.9.19`, `desenvolvimento-0.9.19`). Tabelas locais |
+| 0029 | `0029_protocolo4_identidade.sql` | protocolo 4 (0.9.19-dev.2): a coluna `caixa_aprovado.dispositivo` (I3, dentro da aprovação assinada) e a tabela local `p4_convite` (A6, convites de uso único) | **não publicada** (linha `0.9.19`). Só aditiva; a assinatura das aprovações da 28 continua valendo (teste `b7_migracao_28_para_29_preserva_assinatura_legada`) |
 
 Um número publicado **nunca muda de conteúdo**.
 
@@ -117,9 +120,9 @@ A reserva de 05/11 é substituída: ela previa uma 0024 para os caixas aprovados
 |---|---|---|
 | M-A: pendências: tipo de resolução, motivo, quem resolveu ou descartou, chaves de NF-e | 4.5 | só colunas novas; depois da 2.4 |
 | M-B: decisão de identificação por chave natural | 5.3 | conforme DP-41/42 |
-| M-C: caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | **preparada** como `0026_caixas_aprovados.sql` (no ramo `prod-p4` e na integração era a 0025; renumerada porque a 0025 da 7.5 entrou antes) |
+| M-C: caixas aprovados e retirados (era a 0024 da `frente-p4`) | 5.5 | **publicada** como `0026_caixas_aprovados.sql` (no ramo `prod-p4` e na integração era a 0025; renumerada porque a 0025 da 7.5 entrou antes); a parte da identidade (I3) e dos convites entrou na `0029` (0.9.19-dev.2) |
 | M-D: demais registros do protocolo 4 e da recuperação, se precisarem de banco | 5.5 | conforme DP-44 |
-| M-E: índices de desempenho (inclui o composto da 0006, com nome novo) e o nome sem acento gravado | 7.5 | **preparada** como `0025_indices_e_busca_normalizada.sql` (ramo de preparação `prod-f75`, 13/11) |
+| M-E: índices de desempenho (inclui o composto da 0006, com nome novo) e o nome sem acento gravado | 7.5 | **publicada** como `0025_indices_e_busca_normalizada.sql` |
 | M-F: nome e código gravados no item da OS, se o item não os tiver | 6.5 | só se preciso |
 
 O número sai **no commit**, como o próximo livre (MIG-1 (a), `PLANO_MIGRACOES.md`): a tabela é de
