@@ -345,7 +345,7 @@ def main():
                rv.foto("-guardado"))
             # N1: remover o último item do carrinho e voltar ao Início NÃO deixa rascunho obsoleto:
             textos_v = rv.textos()
-            total_linha = [p for p in textos_v if "R$ 100,00" in p[2] and p[1] < 450]
+            total_linha = [p for p in textos_v if p[2].startswith("R$ ") and "ou %" not in p[2] and 700 <= p[0] <= 860 and p[1] < 450]
             ok("N1 (TelaVender): localizou linha do item no carrinho para remover", len(total_linha) > 0)
             if total_linha:
                 lx, ly, _ = total_linha[0]

@@ -316,8 +316,16 @@ def main():
                    ativo_ev.get("clipY", 0) >= 120, f"ev={ativo_ev}")
             else:
                 ok("P6 A5/A10: evento destaque_ativo emitido", False, f"evs={evs[-5:]}")
-            # P6 A11 (H25): após a descida do topo assentar em repouso, nenhum polling contínuo dispara eventos.
-            time.sleep(1.2)
+            # P6 A11 (H25): aguarda a animação de descida do topo assentar (sem eventos por 0,4 s)
+            # e comprova que em repouso (0,8 s) nenhum polling contínuo dispara eventos.
+            fim_assentar = time.time() + 4.5
+            qtd_prev = len(r.eventos_mov())
+            while time.time() < fim_assentar:
+                time.sleep(0.4)
+                qtd_now = len(r.eventos_mov())
+                if qtd_now == qtd_prev:
+                    break
+                qtd_prev = qtd_now
             qtd_repouso_1 = len(r.eventos_mov())
             time.sleep(0.8)
             qtd_repouso_2 = len(r.eventos_mov())
