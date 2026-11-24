@@ -43,6 +43,16 @@ pub(super) fn atender(caminho: &Path, fluxo: TcpStream, parar: &AtomicBool) -> R
     let k = Chaves::de(&conn, &a.senha)?;
     let mut fio = FioP3 { fluxo, chaves: &k };
     let pedido = fio.receber(TAMANHO_PEDIDO, PRAZO_DO_PEDIDO, Some(parar))?;
+    // T010 (A4): o caixa do protocolo 4 só atende o protocolo 3 durante a convivência;
+    // e nunca a quem já tem chave no registro (anti-rebaixamento, DT-P4-14).
+    let com_chave = p4::contexto(&conn, caminho)
+        .and_then(|ctx| ctx.chave_de(&conn, pedido["dispositivo"].as_str().unwrap_or_default()).ok().flatten())
+        .is_some();
+    if !p4::p3_permitido(&conn) || com_chave {
+        return fio.enviar(&json!({ "protocolo": PROTOCOLO, "dispositivo": a.dispositivo, "nome": a.nome,
+                                   "esquema": banco::versao_da_estrutura() as i64, "recursos": RECURSOS,
+                                   "recusado": p4::TEXTO_P3_RECUSADO }));
+    }
     atender_pedido(&mut conn, &a, &mut fio, pedido)
 }
 

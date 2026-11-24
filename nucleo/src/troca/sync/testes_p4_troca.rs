@@ -25,12 +25,9 @@ fn loja_com_dois_caixas_aprovados(
 ) -> (PathBuf, PathBuf, Banco, Banco, String, Arc<cofre::IdentidadeLocal>, Arc<cofre::IdentidadeLocal>) {
     let (ca, cb) = (temp(&format!("{nome}-a")), temp(&format!("{nome}-b")));
     let (a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
-    p4::garantir_raiz(&a.conn, &ca).unwrap();
-    let loja = crate::loja::id(&a.conn).unwrap();
-    let id_a = identidade(&ca);
-    assert_eq!(cofre::raiz_atual(&a.conn, &loja).unwrap(), Some(id_a.identidade.publica()), "o caixa 1 é a raiz");
 
-    // O caixa 2 entra na loja como hoje (protocolo 3).
+    // O caixa 2 já trocava dados com o 1 (protocolo 3), antes de o 1 virar raiz (A4:
+    // os caixas que já trocavam dados são aprovados uma vez pelo gerente).
     let b = caixa_vazio_em_arquivo(&cb, "Caixa 2");
     {
         let (mut ma, pt_a) = motor(&ca);
@@ -39,6 +36,10 @@ fn loja_com_dois_caixas_aprovados(
         assert!(ma.encerrar(Duration::from_secs(20)));
         assert!(mb.encerrar(Duration::from_secs(20)));
     }
+    p4::garantir_raiz(&a.conn, &ca).unwrap();
+    let loja = crate::loja::id(&a.conn).unwrap();
+    let id_a = identidade(&ca);
+    assert_eq!(cofre::raiz_atual(&a.conn, &loja).unwrap(), Some(id_a.identidade.publica()), "o caixa 1 é a raiz");
     assert_eq!(crate::loja::id(&b.conn).unwrap(), loja, "o caixa 2 recebeu a loja");
 
     // O gerente aprova o caixa 2 no caixa 1; o caixa 2 junta o registro e fixa a raiz.
@@ -177,6 +178,10 @@ fn p4_dispositivo_declarado_diferente_da_chave_e_recusado() {
 fn p4_par_com_chave_nao_cai_para_o_p3() {
     thread::spawn(|| {
         let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-rebaixar");
+        // A convivência ligada nos dois (T010): o P3 em geral é permitido, e o que
+        // barra é só o anti-rebaixamento (o caixa 1 tem chave).
+        definir_convivencia_p3(&a.conn, Some(7), "Ana").unwrap();
+        definir_convivencia_p3(&b.conn, Some(7), "Ana").unwrap();
         // Um terceiro caixa da mesma loja, que entrou pela senha da rede (só fala o P3).
         let cc = temp("p4-rebaixar-c");
         let c = caixa_vazio_em_arquivo(&cc, "Caixa 3");
@@ -458,4 +463,102 @@ fn p4_retirada_de_antes_vira_assinada() {
     let av = aprovados::avaliar(&a.conn, &ia.identidade.publica(), &loja).unwrap();
     assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Retirada, "virou retirada assinada");
     assert_eq!(p4::converter_retiradas_antigas(&a.conn, &ca).unwrap(), 0, "uma vez só");
+}
+
+/// O caixa 1 com loja; o caixa 2 entra pelo protocolo 3 (como um caixa antigo) antes
+/// de o caixa 1 virar raiz. Devolve os dois e as portas dos motores não ficam abertas.
+fn loja_com_caixa_antigo(nome: &str) -> (PathBuf, PathBuf, Banco, Banco) {
+    let (ca, cb) = (temp(&format!("{nome}-a")), temp(&format!("{nome}-b")));
+    let (a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
+    let b = caixa_vazio_em_arquivo(&cb, "Caixa Antigo");
+    {
+        let (mut ma, pt_a) = motor(&ca);
+        let (mut mb, pt_b) = motor(&cb);
+        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        assert!(mb.encerrar(Duration::from_secs(20)));
+    }
+    p4::garantir_raiz(&a.conn, &ca).unwrap();
+    assert!(p4::tem_raiz_fixada(&a.conn) && !p4::tem_raiz_fixada(&b.conn));
+    (ca, cb, a, b)
+}
+
+fn puxa_do_caixa_1(ca: &Path, cb: &Path) -> Resultado<(String, usize)> {
+    let (mut ma, pt_a) = motor(ca);
+    let (mut mb, pt_b) = motor(cb);
+    let r = puxar(cb, &format!("127.0.0.1:{pt_a}"), pt_b);
+    assert!(ma.encerrar(Duration::from_secs(20)));
+    assert!(mb.encerrar(Duration::from_secs(20)));
+    r
+}
+
+/// T010 (A4): por padrão o caixa do protocolo 4 recusa o caixa do protocolo 3 (e não
+/// manda o anúncio cifrado com a senha); o gerente libera por 1 a 30 dias (auditoria e
+/// aviso no Início); desligada ou vencida, a recusa volta.
+#[test]
+fn p4_convivencia_com_caixas_antigos_por_prazo() {
+    thread::spawn(|| {
+        let (ca, cb, a, b) = loja_com_caixa_antigo("conviver");
+        assert!(!p4::p3_permitido(&a.conn), "o padrão é recusar o protocolo 3");
+        assert!(p4::p3_permitido(&b.conn), "o caixa que não é do P4 segue como antes");
+
+        peca_nova(&a, "Peça para o caixa antigo");
+        let r = puxa_do_caixa_1(&ca, &cb);
+        assert!(r.is_err(), "sem a convivência, o caixa antigo é recusado: {r:?}");
+        assert!(!tem_peca(&b, "Peça para o caixa antigo"));
+
+        assert!(definir_convivencia_p3(&a.conn, Some(0), "Ana").is_err());
+        assert!(definir_convivencia_p3(&a.conn, Some(CONVIVENCIA_MAXIMA_DIAS + 1), "Ana").is_err());
+        assert!(definir_convivencia_p3(&a.conn, Some(7), "").is_err(), "só o gerente");
+        let ate = definir_convivencia_p3(&a.conn, Some(7), "Ana").unwrap().expect("ficou ligada");
+        assert_eq!(convivencia_p3_ate(&a.conn).unwrap().as_deref(), Some(ate.as_str()));
+        let auditada: i64 = a
+            .conn
+            .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'p4_convivencia_p3'", [], |l| l.get(0))
+            .unwrap();
+        assert_eq!(auditada, 1);
+        let avisos = crate::avisos::do_dia(&a.conn).unwrap();
+        assert!(avisos.iter().any(|v| v.id == "p4.convivencia"), "o Início avisa enquanto durar");
+
+        puxa_do_caixa_1(&ca, &cb).unwrap();
+        assert!(tem_peca(&b, "Peça para o caixa antigo"), "com a convivência, o caixa antigo troca dados");
+
+        // Desligada: a recusa volta.
+        definir_convivencia_p3(&a.conn, None, "Ana").unwrap();
+        peca_nova(&a, "Peça depois de desligar");
+        assert!(puxa_do_caixa_1(&ca, &cb).is_err());
+        assert!(!tem_peca(&b, "Peça depois de desligar"));
+        // Vencida: também.
+        config::gravar(&a.conn, p4::CHAVE_CONVIVENCIA, "2020-01-01T00:00:00Z").unwrap();
+        assert!(convivencia_p3_ate(&a.conn).unwrap().is_none());
+        assert!(puxa_do_caixa_1(&ca, &cb).is_err());
+        assert!(!crate::avisos::do_dia(&a.conn).unwrap().iter().any(|v| v.id == "p4.convivencia"));
+    })
+    .join()
+    .unwrap();
+}
+
+/// T010 + DT-P4-14: mesmo com a convivência ligada, o caixa que tem chave no registro
+/// não é atendido pelo protocolo 3 (sem rebaixamento pelo lado do servidor).
+#[test]
+fn p4_caixa_com_chave_nao_e_atendido_pelo_p3_nem_na_convivencia() {
+    thread::spawn(|| {
+        let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p3-com-chave");
+        definir_convivencia_p3(&a.conn, Some(7), "Ana").unwrap();
+        peca_nova(&a, "Peça que não vai pelo P3");
+        // O caixa 2 volta a ser um caixa sem nada do protocolo 4 (fala só o P3), mas a
+        // chave dele continua no registro do 1.
+        b.conn
+            .execute_batch(
+                "DELETE FROM config WHERE chave IN ('p4_raiz', 'p4_chave_publica');
+                 DELETE FROM caixa_aprovado; DELETE FROM caixa_retirado;",
+            )
+            .unwrap();
+        assert!(p4::contexto(&b.conn, &cb).is_none(), "o caixa 2 não fala mais o P4");
+        let r = puxa_do_caixa_1(&ca, &cb);
+        assert!(r.is_err(), "quem tem chave só troca pelo P4: {r:?}");
+        assert!(!tem_peca(&b, "Peça que não vai pelo P3"));
+    })
+    .join()
+    .unwrap();
 }

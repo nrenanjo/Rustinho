@@ -40,6 +40,9 @@ pub const CONFIG_DA_LOJA: &[&str] = &[
     "dre_classificacao_confirmada",
     // Identidade da loja (FALHA-01, veja `loja`).
     "loja_id",
+    // Protocolo 4 (A4, T010): até quando os caixas do protocolo 3 ainda trocam dados
+    // (o gerente liga num caixa e vale na loja inteira).
+    "p4_convivencia_p3_ate",
 ];
 
 // ---------------------------------------------------------------------------

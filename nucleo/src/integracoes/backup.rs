@@ -2133,7 +2133,7 @@ impl Pendente {
         if let Some(registro) = &self.registro {
             crate::troca::protocolo4::aprovados::juntar(&tx, &self.loja, registro)?;
         }
-        tx.execute("UPDATE p4_convite SET segredo_ativo = NULL WHERE segredo_ativo IS NOT NULL", [])?;
+        crate::troca::protocolo4::cofre::apagar_segredos_de_convites(&tx)?;
         tx.execute("DELETE FROM sync_endereco", [])?;
         for (e, d, digitado, visto) in &self.caminhos {
             tx.execute(

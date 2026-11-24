@@ -85,10 +85,14 @@ pub(super) fn abrir_fio<'a>(
             }
         }
     }
-    // O protocolo 3 precisa da senha da rede.
+    // O protocolo 3 precisa da senha da rede e, num caixa do protocolo 4, da
+    // convivência ligada (T010, A4).
     let Some(chaves) = chaves else {
         return Err(Erro::validacao(TEXTO_SEM_SENHA_NEM_P4));
     };
+    if !p4::p3_permitido(conn) {
+        return Err(Erro::validacao(p4::TEXTO_P3_RECUSADO));
+    }
     let (f, conf) = abrir_fio_p3(chaves, alvo, saida)?;
     Ok((Box::new(f), conf))
 }

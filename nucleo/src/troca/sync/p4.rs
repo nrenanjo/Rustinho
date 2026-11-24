@@ -219,6 +219,68 @@ pub(super) fn ler_anuncio(
     Some((aprovacao.dispositivo.clone(), aprovacao.nome.clone(), a.porta))
 }
 
+/// A4 (T010): a configuração da loja com o prazo da convivência com os caixas do
+/// protocolo 3 (data e hora ISO-8601 UTC; vazia = desligada, o padrão).
+pub const CHAVE_CONVIVENCIA: &str = "p4_convivencia_p3_ate";
+/// A4: o prazo máximo da convivência.
+pub const CONVIVENCIA_MAXIMA_DIAS: i64 = 30;
+/// Texto para a tela (dos dois lados): o caixa do protocolo 3 foi recusado.
+pub const TEXTO_P3_RECUSADO: &str = "Este caixa troca dados só com caixas atualizados (versão 0.9.19 ou mais nova). \
+     Atualize o outro caixa. Se precisar de um tempo, o gerente pode liberar os caixas antigos por alguns dias em \
+     Configurações › Caixas da loja.";
+
+/// Até quando os caixas do protocolo 3 ainda trocam dados (`None` = desligada ou
+/// vencida).
+pub fn convivencia_p3_ate(conn: &Connection) -> Resultado<Option<String>> {
+    let ate = config::ler(conn, CHAVE_CONVIVENCIA)?.unwrap_or_default();
+    let ate = ate.trim();
+    Ok((!ate.is_empty() && ate > crate::tempo::agora().as_str()).then(|| ate.to_string()))
+}
+
+/// T010: o protocolo 3 vale com este caixa? O caixa que ainda não é do P4 (sem raiz
+/// fixada) continua como antes; o caixa do P4, só durante a convivência (A4).
+pub(super) fn p3_permitido(conn: &Connection) -> bool {
+    !tem_raiz_fixada(conn) || convivencia_p3_ate(conn).ok().flatten().is_some()
+}
+
+/// A4 (T010): o gerente liga (`dias` de 1 a 30) ou desliga (`None`) a convivência
+/// com os caixas do protocolo 3. Vale na loja inteira e vai para a auditoria.
+/// Devolve até quando ficou ligada.
+pub fn definir_convivencia_p3(conn: &Connection, dias: Option<i64>, gerente: &str) -> Resultado<Option<String>> {
+    if gerente.trim().is_empty() {
+        return Err(Erro::validacao("Só o gerente libera os caixas antigos."));
+    }
+    let ate = match dias {
+        None => None,
+        Some(d) if (1..=CONVIVENCIA_MAXIMA_DIAS).contains(&d) => Some(
+            crate::tempo::somar_segundos(&crate::tempo::agora(), d * 24 * 60 * 60)
+                .ok_or_else(|| Erro::Interno("não foi possível calcular o prazo".into()))?,
+        ),
+        Some(_) => {
+            return Err(Erro::campo(
+                "dias",
+                format!("Os caixas antigos podem ser liberados por 1 a {CONVIVENCIA_MAXIMA_DIAS} dias."),
+            ))
+        }
+    };
+    config::gravar(conn, CHAVE_CONVIVENCIA, ate.as_deref().unwrap_or(""))?;
+    let disp = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    let detalhe = match &ate {
+        Some(a) => format!("Caixas antigos liberados até {a}"),
+        None => "Caixas antigos recusados".to_string(),
+    };
+    crate::auditoria::registrar(
+        conn,
+        &disp,
+        Some(gerente),
+        "p4_convivencia_p3",
+        "troca",
+        CHAVE_CONVIVENCIA,
+        &[detalhe],
+    )?;
+    Ok(ate)
+}
+
 /// A raiz do protocolo 4 está fixada neste caixa (pino `p4_raiz`)?
 pub(super) fn tem_raiz_fixada(conn: &Connection) -> bool {
     config::ler(conn, "p4_raiz").ok().flatten().is_some_and(|r| !r.trim().is_empty())

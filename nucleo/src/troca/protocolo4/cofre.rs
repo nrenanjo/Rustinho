@@ -1106,6 +1106,12 @@ pub fn hash_segredo(segredo_normalizado: &str) -> String {
     hex(&d)
 }
 
+/// T009: depois de restaurar um backup, nenhum convite que veio nele volta a valer
+/// (o segredo em claro é apagado). Devolve quantos foram apagados.
+pub fn apagar_segredos_de_convites(conn: &Connection) -> Resultado<usize> {
+    Ok(conn.execute("UPDATE p4_convite SET segredo_ativo = NULL WHERE segredo_ativo IS NOT NULL", [])?)
+}
+
 /// Expira convites vencidos apagando `segredo_ativo`.
 pub fn limpar_convites_expirados(conn: &Connection, agora_iso: &str) -> Resultado<()> {
     conn.execute(

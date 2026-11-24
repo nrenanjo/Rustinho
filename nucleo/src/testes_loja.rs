@@ -68,11 +68,18 @@ fn chamar(s: &mut crate::Servico, cmd: &str, d: Value) -> Value {
 /// Loja configurada num arquivo, como na primeira tela (gerente "Ana", este
 /// caixa distribui as faixas), com a troca de dados ligada. Reabre o banco
 /// (como ao abrir o programa de novo). Devolve o banco e o gerente.
+///
+/// T010 (0.9.19-dev.2): com a troca ligada, este caixa vira a raiz do protocolo 4,
+/// e a entrada pela senha da rede (protocolo 3) só vale com a convivência com os
+/// caixas antigos ligada pelo gerente (A4). Estes testes provam as regras da
+/// FALHA-01 nesse caminho (que existe durante a convivência); a recusa fora dela
+/// está em `troca::sync::testes_p4_troca`.
 fn loja_em_arquivo(caminho: &Path, caixa: &str, loja: &str) -> (Banco, String) {
     let b = Banco::abrir(caminho).unwrap();
     let u = para_testes::configurar(&b, caixa, 0);
     config::gravar(&b.conn, "loja_nome", loja).unwrap();
     sync::salvar_ajustes(&b.conn, true, SENHA_DA_REDE, "").unwrap();
+    sync::definir_convivencia_p3(&b.conn, Some(sync::CONVIVENCIA_MAXIMA_DIAS), &u).unwrap();
     drop(b);
     (Banco::abrir(caminho).unwrap(), u)
 }

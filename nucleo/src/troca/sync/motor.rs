@@ -349,7 +349,7 @@ impl Motor {
                     // pausa da restauração de backup, como as outras tarefas.
                     // A chave da senha da rede só existe com a senha (protocolo 3); o caixa
                     // que entrou por convite (T009) não a tem e só usa o anúncio assinado.
-                    let k: Option<Chaves> = if a.senha.is_empty() {
+                    let k: Option<Chaves> = if a.senha.is_empty() || !p4::p3_permitido(&conn) {
                         None
                     } else {
                         let chaves = {

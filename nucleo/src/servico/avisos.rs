@@ -1130,6 +1130,25 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             .into();
         avisos.push(a);
     }
+    // T010 (A4): enquanto os caixas antigos (protocolo 3) estiverem liberados, o
+    // Início lembra todo dia até quando, para atualizá-los antes do prazo.
+    if let Some(ate) = crate::sync::convivencia_p3_ate(conn)? {
+        let data = crate::fiscal::data_br(&ate);
+        let mut a = Aviso::simples(
+            "p4.convivencia",
+            &hoje,
+            "Caixas antigos liberados".to_string(),
+            format!("Até {data}"),
+            String::new(),
+            "configuracoes",
+        );
+        a.categoria = ATENCAO.into();
+        a.descricao = format!(
+            "Os caixas com versão antiga do Rustinho ainda trocam dados com esta loja até {data}. Atualize esses \
+             caixas antes disso: depois, só os caixas atualizados trocam dados."
+        );
+        avisos.push(a);
+    }
     // Crítica primeiro, depois atenção, depois informativa (ordem estável).
     let peso = |c: &str| match c {
         CRITICA => 0,
