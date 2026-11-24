@@ -55,7 +55,7 @@ fn aprovacao_a_mao(
 
 /// C2R2-1: o caixa retirado pela chave volta: identidade nova (pelo registro que já
 /// mostra a retirada, ou pelo gerente que diz que ele foi retirado), convite novo
-/// pela tela da loja, e o bloqueio antigo sai na aprovação nova.
+/// pela tela da loja, e o gerente readmite (C2R3-4: o bloqueio antigo não sai sozinho).
 #[test]
 fn c2r2_1_caixa_retirado_volta_com_identidade_nova_e_convite() {
     thread::spawn(|| {
@@ -89,10 +89,13 @@ fn c2r2_1_caixa_retirado_volta_com_identidade_nova_e_convite() {
             json!({ "convite": conv["convite"], "enderecos": format!("127.0.0.1:{pt_a}") }),
         );
         assert_eq!(r["p4"]["aprovado"], true, "{r}");
-        assert!(
-            config::ler(&a.conn, &format!("{PREFIXO_RETIRADO}{disp_b}")).unwrap().is_none(),
-            "o bloqueio antigo saiu com a aprovação nova"
-        );
+        // C2R3-4: a aprovação nova não tira o bloqueio antigo sozinha; a lista mostra o caso
+        // e o gerente readmite.
+        assert!(config::ler(&a.conn, &format!("{PREFIXO_RETIRADO}{disp_b}")).unwrap().is_some());
+        let lista = ok(&mut sa, "caixas_conhecidos", json!({}));
+        let c = lista["caixas"].as_array().unwrap().iter().find(|c| c["dispositivo"] == disp_b).cloned().unwrap();
+        assert_eq!((c["situacao"].as_str(), c["temChave"].as_bool()), (Some("retirado"), Some(true)), "{c}");
+        ok(&mut sa, "caixa_readmitir", json!({ "dispositivo": disp_b }));
         let (mut mb, pt_b) = motor(&cb);
         let puxou = puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b);
         assert!(ma.encerrar(Duration::from_secs(20)));

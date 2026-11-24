@@ -27,6 +27,22 @@ thread_local! {
     pub(super) static AVALIACOES_DO_REGISTRO: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// C2R3-7 (R3 da 2C): anota no registro técnico, mas o mesmo texto só uma vez a cada
+/// 10 minutos (as leituras da tela e do motor repetem a cada poucos segundos).
+pub(super) fn anotar_sem_repetir(texto: &str) {
+    static VISTOS: std::sync::OnceLock<Mutex<HashMap<String, Instant>>> = std::sync::OnceLock::new();
+    let mut m = VISTOS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if m.get(texto).is_some_and(|q| q.elapsed() < Duration::from_secs(600)) {
+        return;
+    }
+    if m.len() > 256 {
+        m.clear();
+    }
+    m.insert(texto.to_string(), Instant::now());
+    drop(m);
+    crate::registro::anotar(texto);
+}
+
 /// Prazo do aperto de mão TLS de uma conexão da troca.
 pub(super) const PRAZO_DO_APERTO: Duration = Duration::from_secs(5);
 
@@ -135,7 +151,7 @@ pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> 
         Ok(Some(r)) => r,
         Ok(None) => return None,
         Err(e) => {
-            crate::registro::anotar(&format!("troca de dados (protocolo 4): raiz da loja: {e}"));
+            anotar_sem_repetir(&format!("troca de dados (protocolo 4): raiz da loja: {e}"));
             return None;
         }
     };
@@ -143,7 +159,7 @@ pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> 
     let identidade = match cofre::identidade_do_processo(pasta, &modo()) {
         Ok(i) => i,
         Err(e) => {
-            crate::registro::anotar(&format!("troca de dados (protocolo 4): identidade indisponível agora: {e}"));
+            anotar_sem_repetir(&format!("troca de dados (protocolo 4): identidade indisponível agora: {e}"));
             falhas_do_contexto().lock().unwrap_or_else(|e| e.into_inner()).insert(chave, Instant::now());
             return None;
         }
@@ -153,7 +169,7 @@ pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> 
         Ok(true) => Some(ctx),
         Ok(false) => None,
         Err(e) => {
-            crate::registro::anotar(&format!("troca de dados (protocolo 4): registro de caixas: {e}"));
+            anotar_sem_repetir(&format!("troca de dados (protocolo 4): registro de caixas: {e}"));
             None
         }
     }
@@ -500,24 +516,9 @@ pub(super) fn responder_ingresso(
     {
         return recusa(e.to_string());
     }
-    // C2R2-1 (R2 da 2C): o gerente aprovou de novo este `dispositivo` (identidade
-    // nova, convite novo): o bloqueio antigo dele, se houver, sai (é a readmissão).
-    if retirado(conn, &pedido.dispositivo).unwrap_or(false) {
-        if let Err(e) = readmitir_caixa(conn, &pedido.dispositivo) {
-            crate::registro::anotar(&format!("troca de dados (protocolo 4): readmitir na aprovação: {e}"));
-        } else {
-            let disp = config::ler(conn, "dispositivo_id").ok().flatten().unwrap_or_default();
-            let _ = crate::auditoria::registrar(
-                conn,
-                &disp,
-                Some(&c.gerente),
-                "caixa.readmitir",
-                "sync_par",
-                &pedido.dispositivo,
-                &["Caixa readmitido pela aprovação nova (convite)".into()],
-            );
-        }
-    }
+    // C2R3-4 (R3 da 2C): a aprovação nova NÃO tira o bloqueio antigo do `dispositivo`
+    // (ele é só declarado pelo caixa novo; o código que o gerente conferiu não o cobre).
+    // A lista de caixas mostra o caso e o gerente usa "Readmitir".
     let prova_servidor =
         match canal::gerar_prova_servidor(&c.segredo_hash, exportador, chave_cliente, &eu, &ctx.raiz, &ctx.loja) {
             Ok(p) => p,
@@ -968,8 +969,9 @@ pub struct ChaveDoCaixa {
     pub nome: String,
     /// C2R2-5 (R2 da 2C): quando ele tem **mais de uma** identidade autorizada
     /// (aprovações ao mesmo tempo em caixas diferentes), cada uma, para o gerente
-    /// retirar a que não vale mais: (chave em hexadecimal, código de pedido).
-    pub identidades: Vec<(String, String)>,
+    /// retirar a que não vale mais: (chave em hexadecimal, código de pedido, quem cai
+    /// junto se ela sair — C2R3-8).
+    pub identidades: Vec<(String, String, Vec<String>)>,
 }
 
 /// T012: a situação no registro de cada `dispositivo` desta loja, só pelo banco.
@@ -992,14 +994,14 @@ pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, 
         let autorizadas: Vec<Chave> =
             chaves.iter().filter(|(_, s)| *s == aprovados::Situacao::Autorizada).map(|(k, _)| *k).collect();
         let identidades = if autorizadas.len() > 1 {
-            autorizadas
-                .iter()
-                .map(|k| {
-                    let codigo =
-                        trocas.get(k).map(|t| crate::troca::protocolo4::codigo_de_pedido(k, t)).unwrap_or_default();
-                    (hex(k), codigo)
-                })
-                .collect()
+            let mut v = Vec::new();
+            for k in &autorizadas {
+                let codigo =
+                    trocas.get(k).map(|t| crate::troca::protocolo4::codigo_de_pedido(k, t)).unwrap_or_default();
+                let caem = aprovados::dependentes_de(conn, &raiz, &loja, k)?.into_iter().map(|a| a.nome).collect();
+                v.push((hex(k), codigo, caem));
+            }
+            v
         } else {
             Vec::new()
         };
@@ -1092,7 +1094,7 @@ pub fn situacao(conn: &Connection) -> Resultado<SituacaoP4> {
         Ok(())
     })();
     if let Err(e) = p4 {
-        crate::registro::anotar(&format!("troca de dados (protocolo 4): situação do registro: {e}"));
+        anotar_sem_repetir(&format!("troca de dados (protocolo 4): situação do registro: {e}"));
     }
     Ok(s)
 }

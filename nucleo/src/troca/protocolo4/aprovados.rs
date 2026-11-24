@@ -1310,56 +1310,77 @@ fn gravar_retirada(conn: &Connection, r: &Retirada) -> Resultado<()> {
 /// retiradas). Uma loja de verdade tem dezenas; o teto só barra o enchimento.
 pub const TETO_DO_REGISTRO: i64 = 10_000;
 
-/// C2R2-3: como [`juntar`], mas só guarda a linha cujo aprovador (ou retirador) já
-/// está na cadeia da `raiz` — aprovado alguma vez, contando as linhas que chegam
-/// junto, até o ponto fixo (a ordem das linhas não importa). Linha bem assinada de
-/// quem não é da loja (lixo) não entra; e o registro não passa de
-/// [`TETO_DO_REGISTRO`] linhas. As que ficam de fora contam em `recusadas`.
+/// C2R2-3: como [`juntar`], mas só guarda a linha cujo aprovador (ou retirador) está
+/// na cadeia da `raiz` — aprovado alguma vez, contando as linhas que chegam junto (a
+/// ordem das linhas não importa). Linha bem assinada de quem não é da loja (lixo) não
+/// entra; e o registro não passa de [`TETO_DO_REGISTRO`] linhas.
+///
+/// C2R3-2 (R3 da 2C): numa passada só — o grafo das linhas gravadas e das que chegam
+/// (cada assinatura conferida uma vez) fecha a cadeia na memória; uma mensagem com mais
+/// linhas que o teto é recusada inteira (ela não teria lugar mesmo).
 pub fn juntar_na_cadeia(conn: &Connection, raiz: &Chave, loja_id: &str, de_fora: &Linhas) -> Resultado<Juntadas> {
-    let mut pend_a: Vec<Aprovacao> = de_fora.aprovacoes.iter().filter(|a| a.loja_id == loja_id).cloned().collect();
-    let mut pend_r: Vec<Retirada> = de_fora.retiradas.iter().filter(|t| t.loja_id == loja_id).cloned().collect();
-    let mut total = Juntadas {
-        recusadas: de_fora.aprovacoes.len() + de_fora.retiradas.len() - pend_a.len() - pend_r.len(),
-        ..Juntadas::default()
-    };
-    loop {
-        let av = avaliar(conn, raiz, loja_id)?;
-        let na_cadeia = |k: &Chave| k == raiz || av.aprovados.contains(k);
-        let (mut agora_a, resto_a): (Vec<Aprovacao>, Vec<Aprovacao>) =
-            pend_a.into_iter().partition(|a| na_cadeia(&a.aprovador));
-        let (mut agora_r, resto_r): (Vec<Retirada>, Vec<Retirada>) =
-            pend_r.into_iter().partition(|t| na_cadeia(&t.retirador));
-        pend_a = resto_a;
-        pend_r = resto_r;
-        if agora_a.is_empty() && agora_r.is_empty() {
-            break;
-        }
-        let ja: i64 = conn.query_row(
-            "SELECT (SELECT COUNT(*) FROM caixa_aprovado WHERE loja_id = ?1)
-                  + (SELECT COUNT(*) FROM caixa_retirado WHERE loja_id = ?1)",
-            [loja_id],
-            |l| l.get(0),
-        )?;
-        let cabe = usize::try_from((TETO_DO_REGISTRO - ja).max(0)).unwrap_or(0);
-        let fora_a = agora_a.split_off(agora_a.len().min(cabe));
-        let fora_r = agora_r.split_off(agora_r.len().min(cabe - agora_a.len()));
-        if !fora_a.is_empty() || !fora_r.is_empty() {
-            crate::registro::anotar(&format!(
-                "registro de caixas: teto de {TETO_DO_REGISTRO} linhas; {} linhas novas ficaram de fora",
-                fora_a.len() + fora_r.len()
-            ));
-            total.recusadas += fora_a.len() + fora_r.len();
-        }
-        let j = juntar(conn, loja_id, &Linhas { aprovacoes: agora_a, retiradas: agora_r })?;
-        total.novas += j.novas;
-        total.trocadas += j.trocadas;
-        total.ja_tinha += j.ja_tinha;
-        total.recusadas += j.recusadas;
-        if j.novas + j.trocadas == 0 || cabe == 0 {
-            break;
-        }
+    juntar_na_cadeia_com_teto(conn, raiz, loja_id, de_fora, TETO_DO_REGISTRO)
+}
+
+pub(crate) fn juntar_na_cadeia_com_teto(
+    conn: &Connection,
+    raiz: &Chave,
+    loja_id: &str,
+    de_fora: &Linhas,
+    teto: i64,
+) -> Resultado<Juntadas> {
+    let chegaram = de_fora.aprovacoes.len() + de_fora.retiradas.len();
+    if i64::try_from(chegaram).unwrap_or(i64::MAX) > teto {
+        crate::registro::anotar(&format!(
+            "registro de caixas: {chegaram} linhas numa mensagem passam do teto de {teto}: recusadas"
+        ));
+        return Ok(Juntadas { recusadas: chegaram, ..Juntadas::default() });
     }
-    total.recusadas += pend_a.len() + pend_r.len();
+    // O grafo: aprovador → aprovado, das linhas válidas gravadas e das que chegam.
+    let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
+    let mut liga = |a: &Aprovacao| {
+        if a.aprovador != a.chave {
+            arestas.entry(a.aprovador).or_default().push(a.chave);
+        }
+    };
+    for a in ler_aprovacoes(conn, loja_id)?.iter().filter(|a| a.loja_id == loja_id && a.assinatura_confere()) {
+        liga(a);
+    }
+    let novas: Vec<&Aprovacao> =
+        de_fora.aprovacoes.iter().filter(|a| a.loja_id == loja_id && a.assinatura_confere()).collect();
+    for a in &novas {
+        liga(a);
+    }
+    let na_cadeia = alcancados(raiz, &arestas, &HashSet::new());
+    let mut aceitas: Vec<Aprovacao> = novas.into_iter().filter(|a| na_cadeia.contains(&a.aprovador)).cloned().collect();
+    let mut aceitas_r: Vec<Retirada> = de_fora
+        .retiradas
+        .iter()
+        .filter(|t| t.loja_id == loja_id && na_cadeia.contains(&t.retirador) && t.assinatura_confere())
+        .cloned()
+        .collect();
+    let mut total = Juntadas { recusadas: chegaram - aceitas.len() - aceitas_r.len(), ..Juntadas::default() };
+    let ja: i64 = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM caixa_aprovado WHERE loja_id = ?1)
+              + (SELECT COUNT(*) FROM caixa_retirado WHERE loja_id = ?1)",
+        [loja_id],
+        |l| l.get(0),
+    )?;
+    let cabe = usize::try_from((teto - ja).max(0)).unwrap_or(0);
+    let fora_a = aceitas.split_off(aceitas.len().min(cabe));
+    let fora_r = aceitas_r.split_off(aceitas_r.len().min(cabe - aceitas.len()));
+    if !fora_a.is_empty() || !fora_r.is_empty() {
+        crate::registro::anotar(&format!(
+            "registro de caixas: teto de {teto} linhas; {} linhas novas ficaram de fora",
+            fora_a.len() + fora_r.len()
+        ));
+        total.recusadas += fora_a.len() + fora_r.len();
+    }
+    let j = juntar(conn, loja_id, &Linhas { aprovacoes: aceitas, retiradas: aceitas_r })?;
+    total.novas += j.novas;
+    total.trocadas += j.trocadas;
+    total.ja_tinha += j.ja_tinha;
+    total.recusadas += j.recusadas;
     Ok(total)
 }
 
@@ -1372,23 +1393,36 @@ pub fn juntar_na_cadeia(conn: &Connection, raiz: &Chave, loja_id: &str, de_fora:
 /// chegou. Tudo ou nada (ponto de salvamento).
 pub fn juntar(conn: &Connection, loja_id: &str, de_fora: &Linhas) -> Resultado<Juntadas> {
     em_bloco(conn, || {
+        // C2R3-2: as linhas gravadas desta loja, lidas uma vez (antes, uma leitura da
+        // tabela inteira para cada linha que chegava).
+        let mut gravadas_a: HashMap<(Chave, Chave), Aprovacao> =
+            ler_aprovacoes(conn, loja_id)?.into_iter().map(|a| ((a.chave, a.aprovador), a)).collect();
+        let mut gravadas_r: HashMap<(Chave, Chave), Retirada> =
+            ler_retiradas(conn, loja_id)?.into_iter().map(|t| ((t.chave, t.retirador), t)).collect();
         let mut r = Juntadas::default();
         for a in &de_fora.aprovacoes {
             if a.loja_id != loja_id || !a.assinatura_confere() {
                 r.recusadas += 1;
                 continue;
             }
-            match aprovacao_gravada(conn, &a.chave, &a.aprovador)? {
+            let atual = match gravadas_a.get(&(a.chave, a.aprovador)) {
+                Some(x) => Some(x.clone()),
+                // Linha de outra loja (ou estragada) com a mesma chave primária: a de antes.
+                None => aprovacao_gravada(conn, &a.chave, &a.aprovador)?,
+            };
+            match atual {
                 Some(x) if x == *a => r.ja_tinha += 1,
                 Some(x) if fica(&x.aprovado_em, &x.assinatura) >= fica(&a.aprovado_em, &a.assinatura) => {
                     r.ja_tinha += 1
                 }
                 Some(_) => {
                     gravar_aprovacao(conn, a)?;
+                    gravadas_a.insert((a.chave, a.aprovador), a.clone());
                     r.trocadas += 1;
                 }
                 None => {
                     gravar_aprovacao(conn, a)?;
+                    gravadas_a.insert((a.chave, a.aprovador), a.clone());
                     r.novas += 1;
                 }
             }
@@ -1398,17 +1432,23 @@ pub fn juntar(conn: &Connection, loja_id: &str, de_fora: &Linhas) -> Resultado<J
                 r.recusadas += 1;
                 continue;
             }
-            match retirada_gravada(conn, &t.chave, &t.retirador)? {
+            let atual = match gravadas_r.get(&(t.chave, t.retirador)) {
+                Some(x) => Some(x.clone()),
+                None => retirada_gravada(conn, &t.chave, &t.retirador)?,
+            };
+            match atual {
                 Some(x) if x == *t => r.ja_tinha += 1,
                 Some(x) if fica(&x.retirado_em, &x.assinatura) >= fica(&t.retirado_em, &t.assinatura) => {
                     r.ja_tinha += 1
                 }
                 Some(_) => {
                     gravar_retirada(conn, t)?;
+                    gravadas_r.insert((t.chave, t.retirador), t.clone());
                     r.trocadas += 1;
                 }
                 None => {
                     gravar_retirada(conn, t)?;
+                    gravadas_r.insert((t.chave, t.retirador), t.clone());
                     r.novas += 1;
                 }
             }

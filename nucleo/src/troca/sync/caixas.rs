@@ -60,7 +60,7 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
     // T012: o que o registro de caixas (protocolo 4) diz de cada um, só pelo banco.
     // C2R2-6: um registro estranho não derruba a lista (o motivo vai para o registro técnico).
     let chaves = super::p4::chaves_dos_caixas(conn).unwrap_or_else(|e| {
-        crate::registro::anotar(&format!("troca de dados (protocolo 4): lista de caixas sem o registro: {e}"));
+        super::p4::anotar_sem_repetir(&format!("troca de dados (protocolo 4): lista de caixas sem o registro: {e}"));
         HashMap::new()
     });
     // C2-9 (R1 da 2C): também os caixas que só existem no registro (aprovados e ainda
@@ -162,7 +162,11 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
             raiz: chave.raiz,
             retirado_pela_chave: chave.retirado_pela_chave,
             dependentes: chave.dependentes,
-            identidades: chave.identidades.iter().map(|(k, c)| json!({ "chave": k, "codigo": c })).collect(),
+            identidades: chave
+                .identidades
+                .iter()
+                .map(|(k, c, caem)| json!({ "chave": k, "codigo": c, "dependentes": caem }))
+                .collect(),
         });
     }
     lista.sort_by(|a, b| a.nome.cmp(&b.nome));

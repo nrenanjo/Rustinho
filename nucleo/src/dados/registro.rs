@@ -51,7 +51,24 @@ fn curto(t: &str) -> String {
 }
 
 /// Acrescenta uma linha (com a hora). Falhar aqui nunca atrapalha o caixa.
+/// Só nos testes: quantas vezes cada texto foi anotado neste processo (C2R3-7).
+#[cfg(test)]
+fn contagem_de_teste() -> &'static Mutex<std::collections::HashMap<String, usize>> {
+    static M: std::sync::OnceLock<Mutex<std::collections::HashMap<String, usize>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
+/// Só nos testes: quantas vezes `texto` foi anotado.
+#[cfg(test)]
+pub(crate) fn ler_teste_contagem(texto: &str) -> usize {
+    contagem_de_teste().lock().unwrap_or_else(|e| e.into_inner()).get(texto).copied().unwrap_or(0)
+}
+
 pub fn anotar(texto: &str) {
+    #[cfg(test)]
+    {
+        *contagem_de_teste().lock().unwrap_or_else(|e| e.into_inner()).entry(texto.to_string()).or_default() += 1;
+    }
     let Some(pasta) = PASTA.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
     let arquivo = pasta.join("rustinho.log");
     if std::fs::metadata(&arquivo).map(|m| m.len() > TAMANHO_MAXIMO).unwrap_or(false) {

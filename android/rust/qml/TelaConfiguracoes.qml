@@ -661,19 +661,44 @@ FocusScope {
 
     property var sync: null
 
-    function _atualizarDestaqueDeLista() {
+    // esperarAssentar: só na recarga da lista depois de uma ação (recarregarReferencias). Na
+    // chegada da guia (carregarSync/carregarCaixas), a tela já espera a parte assentar antes
+    // de destacar (esperaDaGuia); esperar de novo aqui congelava o destaque da chegada.
+    function _atualizarDestaqueDeLista(esperarAssentar) {
         if (!janela || !tela.guia)
             return
         const nome = tela.guia.requisito.campos[0]
         if (nome !== "referencia" && nome !== "caixa_bloqueando")
             return
-        // A mesma espera da chegada da guia (N-2 da re-revisão C8): a lista recarregada e o
-        // resto da seção (a faixa da segurança dos caixas, 0.9.19) ainda estão montando;
-        // a conta de "ficou fora da área visível" só vale com a altura do conteúdo assentada.
-        esperaDaLista.tentativas = 0
-        esperaDaLista.alturaAntes = -1
-        esperaDaLista.nome = nome
-        esperaDaLista.restart()
+        if (esperarAssentar === true) {
+            // A mesma espera da chegada da guia (N-2 da re-revisão C8): a lista recarregada e o
+            // resto da seção (a faixa da segurança dos caixas, 0.9.19) ainda estão montando;
+            // a conta de "ficou fora da área visível" só vale com a altura do conteúdo assentada.
+            esperaDaLista.tentativas = 0
+            esperaDaLista.alturaAntes = -1
+            esperaDaLista.nome = nome
+            esperaDaLista.restart()
+        } else {
+            Qt.callLater(() => tela._conferirRegistroDaGuia(nome))
+        }
+    }
+    function _conferirRegistroDaGuia(nome) {
+        if (!janela || !tela.guia)
+            return
+        const c = tela.alvoDaGuia(nome)
+        if (c && c[0]) {
+            janela.guiaAtualizarRegistro(c[0])
+            // N-7 + MG-5: se o registro recarregado ficou fora da área visível, rola até ele.
+            if (rolagem && rolagem.contentItem && rolagem.height > 0) {
+                const p = c[0].mapToItem(rolagem.contentItem, 0, 0)
+                const topoV = rolagem.contentY
+                const baseV = topoV + rolagem.height
+                if (p.y < topoV + 8 || p.y + c[0].height > baseV - 8)
+                    janela.rolarAteItem(rolagem, c[0], 24)
+            }
+        } else {
+            janela.guiaAtualizarRegistro(null)
+        }
     }
     Timer {
         id: esperaDaLista
@@ -692,20 +717,7 @@ FocusScope {
             if (!assentou && ++tentativas < 25)
                 return
             stop()
-            const c = tela.alvoDaGuia(nome)
-            if (c && c[0]) {
-                janela.guiaAtualizarRegistro(c[0])
-                // N-7 + MG-5: se o registro recarregado ficou fora da área visível, rola até ele.
-                if (rolagem && rolagem.contentItem && rolagem.height > 0) {
-                    const p = c[0].mapToItem(rolagem.contentItem, 0, 0)
-                    const topoV = rolagem.contentY
-                    const baseV = topoV + rolagem.height
-                    if (p.y < topoV + 8 || p.y + c[0].height > baseV - 8)
-                        janela.rolarAteItem(rolagem, c[0], 24)
-                }
-            } else {
-                janela.guiaAtualizarRegistro(null)
-            }
+            tela._conferirRegistroDaGuia(nome)
         }
     }
 
@@ -783,9 +795,15 @@ FocusScope {
         const p4 = tela.sync && tela.sync.p4 ? tela.sync.p4 : {}
         const retirado = !!p4.retirado || retiradoPorEngano === true
         // C2R2-1: o caixa retirado volta assim; C2R2-2: na raiz, a confirmação reforçada.
-        const texto = retirado
+        // C2R3-3: quando é o gerente quem diz (o caixa não tem como saber), as duas consequências.
+        const texto = p4.retirado
             ? "Este caixa foi retirado da loja pela chave dele. Com uma identidade nova, ele pode ser aprovado de novo: "
               + "depois, peça ao gerente um convite com o código novo. A identidade antiga fica guardada nesta pasta."
+            : retiradoPorEngano === true
+              ? "Use só se este caixa foi retirado da loja (os outros caixas recusam a conexão dele). Com uma identidade nova, "
+                + "ele pode ser aprovado de novo com um convite. Atenção: se ele ainda estiver aprovado, a identidade nova faz ele "
+                + "parar de trocar dados até a aprovação nova, e a identidade antiga precisa ser retirada num caixa aprovado. "
+                + "A identidade antiga fica guardada nesta pasta."
             : p4.raiz
               ? "Este é o primeiro caixa da loja: foi ele que aprovou os outros. Com a identidade nova, ele precisa ser "
                 + "aprovado por outro caixa aprovado da loja (com um convite). Se a loja só tem este caixa, chame o suporte "
@@ -899,7 +917,13 @@ FocusScope {
         motivoReferencia.perguntar(
             "Retirar a identidade " + ident.codigo + " de " + c.nome + "?",
             "Use para a identidade que não vale mais (a que não aparece no próprio caixa, em Configurações › Caixas da loja). "
-            + "Ela sai da loja para sempre; o caixa continua com a outra. Fica no histórico com o seu nome e o motivo.",
+            + "Ela sai da loja para sempre; o caixa continua com a outra."
+            // C2R3-8: quem cai junto com esta identidade.
+            + (ident.dependentes && ident.dependentes.length > 0
+               ? " Também deixam de ser aprovados, porque foram aprovados por ela: " + ident.dependentes.join(", ")
+                 + ". Depois, aprove-os de novo com um convite."
+               : "")
+            + " Fica no histórico com o seu nome e o motivo.",
             "Retirar a identidade", (m, pronto) => janela.chamarGerenteDemorado("caixa_retirar",
                 { dispositivo: c.dispositivo, motivo: m, chave: ident.chave }, "Retirando a identidade…", r => {
                 pronto(r)
@@ -975,7 +999,7 @@ FocusScope {
         if (r.ok)
             sync = r.dados
         if (acompanhar)
-            _atualizarDestaqueDeLista()
+            _atualizarDestaqueDeLista(true)
     }
 
     function salvarSync() {
@@ -2157,6 +2181,9 @@ FocusScope {
                                               + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
                                                  + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
                                               + (linhaCaixa.modelData.retiradoPelaChave ? " Retirado pela chave: para voltar, só com uma aprovação nova do gerente." : "")
+                                              // C2R3-4: aprovado de novo (chave nova), ainda com o bloqueio antigo.
+                                              + (linhaCaixa.modelData.situacao === "retirado" && linhaCaixa.modelData.temChave
+                                                 ? " Aprovado de novo pelo convite, mas ainda com o bloqueio antigo: toque em Readmitir para ele voltar a trocar dados." : "")
                                               + (linhaCaixa.modelData.raiz ? " É o primeiro caixa da loja: ele aprova os outros e não pode ser retirado." : "")
                                         textFormat: Text.PlainText
                                         color: linhaCaixa.modelData.bloqueia ? Tema.vermelhoDaFaixa(linhaCaixa.par) : Tema.tintaSuaveDaFaixa(linhaCaixa.par)

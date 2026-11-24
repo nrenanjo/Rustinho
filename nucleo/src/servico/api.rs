@@ -1906,9 +1906,10 @@ impl Servico {
                 // T012 (DT-P4-35): com chave no registro, a retirada é assinada (pela
                 // identidade deste caixa: caminho demorado) ou recusada inteira.
                 let caminho = self.banco.caminho.clone().unwrap_or_default();
-                // C2R2-5: só uma identidade (registro ambíguo): o caixa continua, com a outra.
+                // C2R3-1 (R3 da 2C): uma transação só (a marca da operação é atômica com um commit).
+                let tx = self.banco.conn.transaction()?;
                 if !d.chave.trim().is_empty() {
-                    let tx = self.banco.conn.transaction()?;
+                    // C2R2-5: só uma identidade (registro ambíguo): o caixa continua, com a outra.
                     sync::retirar_identidade_do_caixa(
                         &tx,
                         &caminho,
@@ -1917,29 +1918,25 @@ impl Servico {
                         &d.motivo,
                         &sessao.usuario_id,
                     )?;
-                    let resposta = json!(sync::caixas_conhecidos(&tx)?);
-                    crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
-                    tx.commit()?;
-                    return Ok(resposta);
+                } else {
+                    sync::retirar_caixa_por_chave(
+                        &tx,
+                        &caminho,
+                        &d.dispositivo,
+                        &d.motivo,
+                        &sessao.usuario_id,
+                        &sessao.nome,
+                    )?;
+                    auditoria::registrar(
+                        &tx,
+                        &disp,
+                        Some(&sessao.usuario_id),
+                        "caixa.retirar",
+                        "sync_par",
+                        &d.dispositivo,
+                        &[format!("Caixa retirado da loja · {}", texto::limpar(&d.motivo))],
+                    )?;
                 }
-                let tx = self.banco.conn.transaction()?;
-                sync::retirar_caixa_por_chave(
-                    &tx,
-                    &caminho,
-                    &d.dispositivo,
-                    &d.motivo,
-                    &sessao.usuario_id,
-                    &sessao.nome,
-                )?;
-                auditoria::registrar(
-                    &tx,
-                    &disp,
-                    Some(&sessao.usuario_id),
-                    "caixa.retirar",
-                    "sync_par",
-                    &d.dispositivo,
-                    &[format!("Caixa retirado da loja · {}", texto::limpar(&d.motivo))],
-                )?;
                 let resposta = json!(sync::caixas_conhecidos(&tx)?);
                 crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
