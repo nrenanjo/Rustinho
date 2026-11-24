@@ -195,6 +195,8 @@ def main():
     os.makedirs(sandbox_tmp, exist_ok=True)
     env["HOME"] = sandbox_home
     env["XDG_CONFIG_HOME"] = os.path.join(sandbox_home, ".config")
+    # N-10 (0.9.19-dev.2): sem sessão D-Bus, nada chega ao chaveiro do usuário real.
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     env["XDG_DATA_HOME"] = os.path.join(sandbox_home, ".local", "share")
     env["XDG_CACHE_HOME"] = os.path.join(sandbox_home, ".cache")
     env["XDG_RUNTIME_DIR"] = sandbox_run

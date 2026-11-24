@@ -93,6 +93,23 @@ pub fn atual() -> Option<String> {
     DO_PROGRAMA.get().cloned().or_else(do_sistema).map(|i| impressao(&i))
 }
 
+/// Um valor tirado do identificador do sistema, num domínio diferente da
+/// [`impressao`], que **não é guardado em lugar nenhum** (o banco guarda só a
+/// impressão, e uma não se calcula a partir da outra). Amarra ao computador o que
+/// o Rustinho portátil guarda na própria pasta (protocolo 4, N-01): quem tem só a
+/// cópia do pendrive não o obtém; quem tem acesso ao computador, sim (limite
+/// declarado da reserva local). None = o sistema não informa.
+pub fn segredo_local() -> Option<String> {
+    DO_PROGRAMA.get().cloned().or_else(do_sistema).map(|i| derivar_segredo_local(&i))
+}
+
+fn derivar_segredo_local(identificador: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(b"rustinho-p4-segredo-local|");
+    h.update(identificador.trim().to_lowercase().as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -111,6 +128,30 @@ mod testes {
         let saida = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    3f2504e0-4f89-11d3-9a0c-0305e82c3301\r\n\r\n";
         assert_eq!(machine_guid(saida).as_deref(), Some("3f2504e0-4f89-11d3-9a0c-0305e82c3301"));
         assert_eq!(machine_guid("ERRO: não encontrado"), None);
+    }
+
+    /// N-01: o segredo local é de outro domínio que a impressão (que vai para o
+    /// banco): não é igual a ela e não aparece no banco de um caixa conferido.
+    #[test]
+    fn n01_segredo_local_nao_e_a_impressao_nem_fica_no_banco() {
+        let (s, i) = (segredo_local().unwrap(), atual().unwrap());
+        assert_eq!(s.len(), 64);
+        assert_ne!(s, i);
+        assert_eq!(s, derivar_segredo_local("  COMPUTADOR-de-teste\n"), "ignora caixa e espaços como a impressão");
+        let pasta = std::env::temp_dir().join(format!("rustinho-n01-{}", crate::tempo::novo_id()));
+        std::fs::create_dir_all(&pasta).unwrap();
+        let caminho = pasta.join("rustinho.db");
+        let b = crate::banco::Banco::abrir(&caminho).unwrap();
+        crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
+        crate::faixas::conferir_computador(&b.conn, atual().as_deref()).unwrap();
+        assert_eq!(crate::config::ler(&b.conn, "computador_id").unwrap().as_deref(), Some(i.as_str()));
+        b.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(b);
+        for e in std::fs::read_dir(&pasta).unwrap().filter_map(|e| e.ok()) {
+            let bytes = std::fs::read(e.path()).unwrap();
+            assert!(!bytes.windows(s.len()).any(|w| w == s.as_bytes()), "o segredo local foi parar em {:?}", e.path());
+        }
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     #[test]

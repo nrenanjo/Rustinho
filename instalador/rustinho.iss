@@ -165,5 +165,10 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if (CurUninstallStep = usPostUninstall) and ApagarDados then
+  begin
     DelTree(ExpandConstant('{localappdata}\Rustinho'), True, True, True);
+    { N-03 (0.9.19-dev.2): a identidade deste caixa no protocolo 4 fica ao lado,
+      fora da pasta do banco; "apagar os dados" apaga ela também. }
+    DelTree(ExpandConstant('{localappdata}\Rustinho-identidade'), True, True, True);
+  end;
 end;

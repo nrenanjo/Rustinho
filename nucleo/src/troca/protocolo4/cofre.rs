@@ -6,8 +6,8 @@
 //!   leva a chave privada (D1).
 //! - Em instalação normal ([`Modo::Instalado`]): na pasta de configuração **local**
 //!   do usuário (`$XDG_CONFIG_HOME/rustinho/` ou `$HOME/.config/rustinho/` no Linux;
-//!   `%LOCALAPPDATA%\Rustinho\` no Windows — a mesma classe de pasta do banco, que
-//!   não viaja em perfil móvel de domínio, F-03), diferenciada pelo hash do caminho
+//!   `%LOCALAPPDATA%\Rustinho-identidade\` no Windows — local como o banco, que fica em
+//!   `%LOCALAPPDATA%\Rustinho\`, e não viaja em perfil móvel de domínio, F-03), diferenciada pelo hash do caminho
 //!   canônico da pasta do banco para que duas pastas no mesmo computador (`RD-B`)
 //!   tenham identidades independentes sem colidir. Se não houver pasta de
 //!   configuração disponível, falha explicitamente (nunca cai silenciosamente na
@@ -16,9 +16,10 @@
 //!   (o portátil não grava nada fora dela), **uma identidade por computador**
 //!   (`identidade-<computador>.p4`). Levar o pendrive a outro computador dá outra
 //!   chave, que precisa de aprovação do gerente como qualquer caixa novo; o
-//!   computador de antes continua com a dele. Uma cópia do pendrive usada **no
-//!   mesmo** computador leva a mesma chave: nem o protocolo nem o `I3` distinguem
-//!   esse clone (limite declarado).
+//!   computador de antes continua com a dele (os arquivos de cada computador ficam
+//!   no pendrive; não são apagados sozinhos, N-12). Uma cópia do pendrive usada
+//!   **no mesmo** computador leva a mesma chave: nem o protocolo nem o `I3`
+//!   distinguem esse clone (limite declarado).
 //! - Nas compilações de teste (`cfg(test)` ou o recurso `ancoras-de-teste` dos
 //!   testes de integração, DT-P4-09): dentro da pasta (temporária) do banco do
 //!   teste, nunca em `~/.config/rustinho/` nem no chaveiro do usuário.
@@ -38,9 +39,12 @@
 //!   (`cofre_sistema = false`): o cofre do sistema gravaria fora da pasta do
 //!   portátil.
 //! - **Reserva local (`cofre_sistema = false`):** é **ofuscação**, não proteção
-//!   forte: arquivo `0600` fora do banco, cifrado com chave tirada do caminho e da
-//!   identidade do computador (dados que quem tem acesso ao computador consegue
-//!   ler). Por isso o gerente é avisado. Se a identidade ficar ilegível (cofre ou
+//!   forte: arquivo `0600` fora do banco, cifrado com chave tirada do caminho e de
+//!   um dado do computador que **não** fica no banco nem no pendrive
+//!   (`/etc/machine-id` no Linux instalado; no portátil, o
+//!   `crate::computador::segredo_local`, N-01). Protege contra quem tem só a cópia
+//!   da pasta ou do pendrive; **não** protege contra quem tem acesso ao próprio
+//!   computador (limite declarado). Por isso o gerente é avisado. Se a identidade ficar ilegível (cofre ou
 //!   computador mudou), [`regerar_identidade_local`] cria identidade limpa (só
 //!   quando a atual não abre) e exige nova aprovação do gerente.
 //! - **Nenhum gancho por variável de ambiente** vale no programa (F-09).
@@ -80,8 +84,10 @@ pub enum Modo {
     /// Instalação normal: identidade na pasta de configuração local do usuário.
     Instalado,
     /// Rustinho portátil: identidade na pasta do portátil, uma por computador.
-    /// `computador`: a identidade que o sistema dá ao computador
-    /// (`crate::computador::atual`); `None` quando o sistema não informa.
+    /// `computador`: o [`crate::computador::segredo_local`] — **nunca** a
+    /// `computador::atual` (a impressão), que fica gravada no banco do pendrive e
+    /// deixaria a chave da reserva ao alcance de quem copia o pendrive (N-01);
+    /// `None` quando o sistema não informa.
     Portatil { computador: Option<String> },
 }
 
@@ -164,35 +170,57 @@ impl TravaArquivo {
     }
 }
 
-/// Espera a trava exclusiva do sistema sobre `arquivo` (solta ao fechar o arquivo).
-#[cfg(unix)]
+/// Quanto se espera pela trava da identidade (N-02): um processo preso na seção
+/// crítica não congela quem chama (a tela inclusive); depois disso, erro.
+const PRAZO_DA_TRAVA: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Pega a trava exclusiva do sistema sobre `arquivo` (solta ao fechar o arquivo),
+/// tentando sem bloquear até [`PRAZO_DA_TRAVA`].
 fn travar_exclusivo(arquivo: &std::fs::File) -> Resultado<()> {
-    use std::os::unix::io::AsRawFd;
-    let fd = arquivo.as_raw_fd();
+    let fim = std::time::Instant::now() + PRAZO_DA_TRAVA;
     loop {
-        // SAFETY: `fd` pertence ao `File` aberto pelo chamador, que fica aberto durante a
-        // chamada; `LOCK_EX` bloqueia até obter a trava exclusiva e não mexe em memória do Rust.
-        let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
-        if rc == 0 {
-            return Ok(());
+        match tentar_travar(arquivo) {
+            Ok(()) => return Ok(()),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < fim => {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return Err(Erro::Interno("tempo esgotado esperando a trava da identidade do caixa".into()));
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                return Err(Erro::Interno(format!(
+                    "não foi possível travar o arquivo da identidade do caixa ({:?})",
+                    e.kind()
+                )));
+            }
         }
-        let err = std::io::Error::last_os_error();
-        if err.kind() == std::io::ErrorKind::Interrupted {
-            continue;
-        }
-        return Err(Erro::Interno(format!(
-            "não foi possível travar o arquivo da identidade do caixa ({:?})",
-            err.kind()
-        )));
     }
 }
 
-/// Espera a trava exclusiva do sistema sobre `arquivo` (solta ao fechar o arquivo).
+/// Uma tentativa, sem esperar: `flock(LOCK_EX | LOCK_NB)` em todo Unix (o mesmo da
+/// trava do banco, `api::tentar_travar`; a biblioteca do Android não tem `try_lock`).
+#[cfg(unix)]
+fn tentar_travar(arquivo: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    use std::os::unix::io::AsRawFd;
+    loop {
+        // SAFETY: o descritor é de `arquivo`, aberto durante toda a chamada; `flock`
+        // só recebe o número e não mexe em memória do Rust.
+        if unsafe { libc::flock(arquivo.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(());
+        }
+        let e = std::io::Error::last_os_error();
+        match e.kind() {
+            std::io::ErrorKind::Interrupted => continue,
+            std::io::ErrorKind::WouldBlock => return Err(std::fs::TryLockError::WouldBlock),
+            _ => return Err(std::fs::TryLockError::Error(e)),
+        }
+    }
+}
+
+/// Uma tentativa, sem esperar (Windows: a da biblioteca).
 #[cfg(not(unix))]
-fn travar_exclusivo(arquivo: &std::fs::File) -> Resultado<()> {
-    arquivo.lock().map_err(|e| {
-        Erro::Interno(format!("não foi possível travar o arquivo da identidade do caixa ({:?})", e.kind()))
-    })
+fn tentar_travar(arquivo: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    arquivo.try_lock()
 }
 
 fn criar_pasta_restrita(pasta: &Path) -> Resultado<()> {
@@ -653,7 +681,9 @@ mod dpapi {
         };
         apagar(&mut copia);
         if ok == 0 || saida.pb_data.is_null() {
-            return Err(Erro::Interno("DPAPI não conseguiu proteger a identidade do caixa".into()));
+            return Err(Erro::Interno(
+                "o cofre de senhas do Windows não conseguiu proteger a identidade do caixa".into(),
+            ));
         }
         let bytes = unsafe { std::slice::from_raw_parts(saida.pb_data, saida.cb_data as usize) }.to_vec();
         unsafe {
@@ -680,7 +710,7 @@ mod dpapi {
             )
         };
         if ok == 0 || saida.pb_data.is_null() {
-            return Err(Erro::validacao("DPAPI não conseguiu ler a identidade protegida deste caixa."));
+            return Err(Erro::validacao("O cofre de senhas do Windows não conseguiu abrir a identidade deste caixa."));
         }
         let slice = unsafe { std::slice::from_raw_parts_mut(saida.pb_data, saida.cb_data as usize) };
         let bytes = slice.to_vec();
@@ -709,12 +739,13 @@ fn dpapi_ler(caminho: &Path) -> Resultado<Segredo> {
     Ok(claro)
 }
 
-/// Chave de ofuscação da reserva local (D4 / M3, F-02): usada **somente** quando
-/// não há cofre do sistema (`cofre_sistema = false`, aviso explícito ao gerente).
-/// É ofuscação, não proteção forte: deriva de dados que quem tem acesso ao
-/// computador lê (o caminho e a identidade do computador). Protege contra a cópia
-/// da pasta para outro computador e contra a leitura casual; a permissão `0600` e
-/// a pasta separada do banco fazem o resto.
+/// Chave de ofuscação da reserva local (D4 / M3, F-02, N-01): usada **somente**
+/// quando não há cofre do sistema (`cofre_sistema = false`, aviso explícito ao
+/// gerente). É ofuscação, não proteção forte: deriva do caminho e de um dado do
+/// computador que não fica no banco nem no pendrive (`/etc/machine-id`; no
+/// portátil, o `computador::segredo_local`). Protege contra quem tem só a cópia da
+/// pasta ou do pendrive e contra a leitura casual; não contra quem tem acesso ao
+/// próprio computador. A permissão `0600` e a pasta separada do banco fazem o resto.
 fn chave_reserva_local(caminho_id: &Path, modo: &Modo) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(b"rustinho/p4/reserva-local/v1\0");
@@ -1357,7 +1388,7 @@ mod testes {
     }
 
     /// B6: usa base de configuração isolada em pasta temporária (nunca toca no `$HOME`
-    /// real do desenvolvedor nem quebra se `RUSTINHO_IDENTIDADE` estiver definida).
+    /// real do desenvolvedor).
     #[test]
     fn identidade_cria_reabre_e_copia_do_banco_nao_leva_a_chave() {
         let raiz = PastaTemp::nova("isolado");
@@ -1757,8 +1788,14 @@ mod testes {
         let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
         std::fs::create_dir_all(c.parent().unwrap()).unwrap();
         let trava = caminho_da_trava(&c);
-        let mut filho =
-            std::process::Command::new("/usr/bin/flock").arg("-x").arg(&trava).args(["sleep", "60"]).spawn().unwrap();
+        // `--no-fork`: o próprio processo que pega a trava vira o `sleep` (sem filho que
+        // herde a trava e continue vivo depois do SIGKILL).
+        let mut filho = std::process::Command::new("/usr/bin/flock")
+            .args(["--no-fork", "-x"])
+            .arg(&trava)
+            .args(["sleep", "60"])
+            .spawn()
+            .unwrap();
         // Espera o filho pegar a trava (o arquivo aparece e um `flock -n` falha).
         let fim = Instant::now() + Duration::from_secs(10);
         loop {
@@ -1913,7 +1950,7 @@ mod testes {
                 chaveiro.display()
             ),
             "falha" => "cat > /dev/null 2>&1; exit 1\n".to_string(),
-            "trava" => "sleep 60\n".to_string(),
+            "trava" => "exec sleep 60\n".to_string(),
             outro => panic!("jeito desconhecido: {outro}"),
         };
         let bin = pasta.join(format!("secret-tool-{jeito}"));
@@ -2045,6 +2082,63 @@ mod testes {
         assert!(!caminho_reserva(&c).exists());
         let de_novo = carregar_ou_criar_no_caminho(c, &Modo::Instalado, &CofreSistema::Dpapi).unwrap();
         assert_eq!(de_novo.identidade.publica(), id.identidade.publica());
+    }
+
+    /// N-01: no portátil, a reserva se amarra ao `segredo_local` do computador, que
+    /// não fica no pendrive: com a impressão do computador (o que o banco do pendrive
+    /// guarda em `computador_id`), a reserva não abre.
+    #[test]
+    fn n01_reserva_do_portatil_nao_abre_com_o_que_esta_no_pendrive() {
+        let p = PastaTemp::nova("portatil-n01");
+        let modo = Modo::Portatil { computador: crate::computador::segredo_local() };
+        let c = caminho_identidade_com_base(&p.0, &modo, None).unwrap();
+        carregar_ou_criar_no_caminho(c.clone(), &modo, &CofreSistema::Nenhum).unwrap();
+        let so_com_o_pendrive = Modo::Portatil { computador: crate::computador::atual() };
+        assert!(
+            ler_reserva_local(&caminho_reserva(&c), &c, &so_com_o_pendrive).is_err(),
+            "quem tem só o pendrive (o computador_id do banco) não pode abrir a reserva"
+        );
+        assert!(ler_reserva_local(&caminho_reserva(&c), &c, &modo).is_ok(), "no próprio computador, abre");
+    }
+
+    /// N-02: a trava presa por outro processo (que não morreu) não congela quem chama:
+    /// erro claro no prazo.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn n02_trava_presa_por_outro_processo_da_erro_no_prazo() {
+        if !Path::new("/usr/bin/flock").is_file() {
+            eprintln!("sem /usr/bin/flock neste sistema: teste não se aplica");
+            return;
+        }
+        let raiz = PastaTemp::nova("trava-presa");
+        let c = caminho_identidade_com_base(&raiz.0.join("pc"), &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        std::fs::create_dir_all(c.parent().unwrap()).unwrap();
+        let trava = caminho_da_trava(&c);
+        let mut filho = std::process::Command::new("/usr/bin/flock")
+            .args(["--no-fork", "-x"])
+            .arg(&trava)
+            .args(["sleep", "120"])
+            .spawn()
+            .unwrap();
+        let fim = Instant::now() + Duration::from_secs(10);
+        while std::process::Command::new("/usr/bin/flock")
+            .args(["-n", "-x"])
+            .arg(&trava)
+            .arg("true")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(true)
+        {
+            assert!(Instant::now() < fim, "o processo filho não pegou a trava");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let inicio = Instant::now();
+        let r = carregar_ou_criar_no_caminho(c, &Modo::Instalado, &CofreSistema::Nenhum);
+        let levou = inicio.elapsed();
+        let _ = filho.kill();
+        let _ = filho.wait();
+        assert!(r.is_err(), "com a trava presa por outro processo, tem de dar erro");
+        assert!(levou < Duration::from_secs(30), "esperou demais pela trava: {levou:?}");
     }
 
     #[cfg(windows)]

@@ -400,6 +400,10 @@ def executar_unidades(
         env["RUSTINHO_TELA"] = display
         env["HOME"] = home_w
         env["XDG_CONFIG_HOME"] = os.path.join(home_w, ".config")
+        # N-10 (0.9.19-dev.2): sem sessão D-Bus, o `secret-tool` do Rustinho não alcança
+        # o chaveiro de quem roda os roteiros (a identidade do protocolo 4 vai para a
+        # reserva local, dentro do HOME temporário deste worker).
+        env.pop("DBUS_SESSION_BUS_ADDRESS", None)
         env["XDG_DATA_HOME"] = os.path.join(home_w, ".local", "share")
         env["XDG_CACHE_HOME"] = os.path.join(home_w, ".cache")
         env["XDG_RUNTIME_DIR"] = xdg_run

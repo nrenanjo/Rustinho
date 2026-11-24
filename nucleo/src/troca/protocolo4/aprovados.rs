@@ -591,9 +591,7 @@ pub fn chave_do_dispositivo(
     match chaves.len() {
         0 => Ok(None),
         1 => Ok(chaves.into_iter().next()),
-        n => Err(Erro::validacao(format!(
-            "Conflito de identidade (I3): {n} caixas autorizados compartilham o mesmo dispositivo."
-        ))),
+        n => Err(Erro::validacao(format!("{TEXTO_CAIXA_COM_VARIAS_IDENTIDADES} ({n} identidades aprovadas)"))),
     }
 }
 
@@ -673,7 +671,10 @@ pub fn aprovar(
         match chave_do_dispositivo(conn, raiz, loja_id, &pedido.dispositivo) {
             Ok(Some(atual)) if atual == pedido.chave => {}
             Ok(None) => {}
-            Ok(Some(_)) | Err(_) => return Err(Erro::validacao(TEXTO_CAIXA_COM_OUTRA_IDENTIDADE)),
+            Ok(Some(_)) => return Err(Erro::validacao(TEXTO_CAIXA_COM_OUTRA_IDENTIDADE)),
+            // Conflito já existente (duas chaves autorizadas, vindas pela troca) ou erro
+            // do banco: o motivo real sobe (N-06).
+            Err(e) => return Err(e),
         }
     }
     let a =
@@ -696,6 +697,11 @@ pub fn aprovar(
     })?;
     Ok(a)
 }
+
+/// I3: o mesmo caixa ficou aprovado com mais de uma identidade (aprovações feitas ao
+/// mesmo tempo em dois caixas da loja, que se encontraram pela troca).
+pub const TEXTO_CAIXA_COM_VARIAS_IDENTIDADES: &str = "Este caixa está aprovado nesta loja com mais de uma identidade. \
+     Retire em Configurações › Caixas da loja as que não valem mais antes de aprová-lo de novo.";
 
 /// F-05: o caixa que pede entrada já está aprovado com outra identidade.
 pub const TEXTO_CAIXA_COM_OUTRA_IDENTIDADE: &str =
@@ -918,6 +924,13 @@ mod testes {
         assert!(
             chave_do_dispositivo(&b.conn, &r, LOJA, "disp-caixa-3").is_err(),
             "A3: >1 chave autorizada com o mesmo dispositivo deve falhar"
+        );
+        // N-06: com o conflito, `aprovar` mostra o motivo real (não "aprovado com outra identidade").
+        let c5 = Identidade::gerar().unwrap();
+        let recusa = aprovar(&b.conn, &raiz, &r, LOJA, &Pedido::com_dispositivo(&c5, "disp-caixa-3"), "Caixa 5", &u);
+        assert!(
+            matches!(&recusa, Err(Erro::Validacao { mensagem, .. }) if mensagem.starts_with(TEXTO_CAIXA_COM_VARIAS_IDENTIDADES)),
+            "{recusa:?}"
         );
         b.conn.execute("DELETE FROM caixa_aprovado WHERE chave = ?1", [hex(&c4.publica())]).unwrap();
 

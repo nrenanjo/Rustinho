@@ -52,6 +52,15 @@ fn dp45_firewall_do_instalador_libera_apenas_portas_da_troca() {
         }
     }
 
+    // N-03 (0.9.19-dev.2): "apagar os dados" na desinstalação apaga também a pasta da
+    // identidade do caixa (protocolo 4), que fica fora da pasta do banco.
+    for pasta in [r"{localappdata}\Rustinho'", r"{localappdata}\Rustinho-identidade'"] {
+        assert!(
+            iss.lines().any(|l| l.trim_start().starts_with("DelTree(") && l.contains(pasta)),
+            "a desinstalação com \"apagar os dados\" tem de apagar {pasta}"
+        );
+    }
+
     let regras_add: Vec<&str> =
         run_linhas.iter().copied().filter(|l| l.contains("advfirewall firewall add rule")).collect();
     assert_eq!(

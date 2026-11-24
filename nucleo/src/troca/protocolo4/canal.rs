@@ -585,8 +585,10 @@ impl MensagemIngresso {
     }
 }
 
-/// Texto para a tela quando o outro computador não é um caixa autorizado (U1).
-pub const TEXTO_RECUSA: &str = "A conexão com o outro computador foi recusada: ele não é um caixa aprovado desta loja.";
+/// Texto para a tela quando a verificação de segurança recusa a conexão (U1). Vale
+/// para os dois lados (quem recusou e quem foi recusado), sem acusar ninguém (N-11).
+pub const TEXTO_RECUSA: &str = "A conexão com o outro computador foi recusada pela verificação de segurança: \
+     os dois precisam ser caixas aprovados desta loja.";
 /// Texto para a tela quando chega algo que não é uma mensagem de entrada na loja.
 pub const TEXTO_MENSAGEM_INVALIDA: &str = "O outro computador mandou uma mensagem que não é de entrada na loja.";
 /// Texto para a tela quando a conexão segura não termina (prazo, queda) (U1).
@@ -600,8 +602,10 @@ fn erro_tls(e: TlsError) -> Erro {
     Erro::validacao(TEXTO_RECUSA)
 }
 
+/// N-11: o texto do sistema vai só para o registro técnico; a tela recebe um texto simples.
 fn erro_rede(e: std::io::Error) -> Erro {
-    Erro::validacao(format!("Falha na rede: {e}"))
+    crate::registro::anotar(&format!("troca de dados (protocolo 4): falha na rede: {e}"));
+    Erro::validacao(TEXTO_CONEXAO_NAO_TERMINOU)
 }
 
 fn checar_parada_e_prazo(fim: Instant, parar: Option<&AtomicBool>) -> Resultado<()> {
@@ -1504,6 +1508,8 @@ mod testes {
     /// F-12: os textos que vão para a tela não trazem jargão nem o inglês da biblioteca.
     #[test]
     fn f12_textos_da_tela_sem_jargao() {
+        let rede = erro_rede(std::io::ErrorKind::ConnectionReset.into());
+        assert!(matches!(rede, Erro::Validacao { ref mensagem, .. } if mensagem == TEXTO_CONEXAO_NAO_TERMINOU));
         for t in [TEXTO_RECUSA, TEXTO_MENSAGEM_INVALIDA, TEXTO_CONEXAO_NAO_TERMINOU] {
             for proibido in ["TLS", "rustls", "handshake", "Aperto de mão", "I3", "Ed25519"] {
                 assert!(!t.contains(proibido), "{t:?} contém {proibido:?}");
