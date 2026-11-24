@@ -199,6 +199,38 @@ ApplicationWindow {
         }
     }
 
+    function temRascunhoAbertoNaPilha() {
+        for (let i = 0; i < pilha.depth; i++) {
+            const item = pilha.get(i, StackView.DontLoad)
+            if (!item)
+                continue
+            if (item.alterado === true && item.travada !== true)
+                return true
+            if (Array.isArray(item.carrinho) && item.carrinho.length > 0)
+                return true
+            if (typeof item.temRascunhoSignificativo === "function" && item.temRascunhoSignificativo())
+                return true
+            if (typeof item.rascunhoId === "string" && item.rascunhoId !== "" && item.rascunho === true)
+                return true
+        }
+        return false
+    }
+
+    // 7b / G9: descarte explícito pelo gerente de trabalho deixado por usuário desativado
+    // (exige motivo obrigatório >= 3 letras e senha do gerente, auditando `trabalho.gerente_descartar`).
+    function descartarTrabalhoDesativado(trabalhoId, descricao, depois) {
+        perguntaDescartarDesativado.aoTerminar = depois || null
+        perguntaDescartarDesativado.perguntar(
+            "Descartar trabalho de usuário desativado?",
+            "Este trabalho" + (descricao ? " (“" + descricao + "”)" : "")
+            + " foi deixado por um usuário desativado. Informe o motivo do descarte para registro no histórico.",
+            "Descartar trabalho",
+            (m, pronto) => janela.chamarGerente("trabalho_gerente_descartar", { id: trabalhoId, motivo: m }, pronto),
+            "Motivo do descarte",
+            "perigo"
+        )
+    }
+
     // REC-1 / REC-2 (7b): abre a tela correspondente ao trabalho guardado, sempre como
     // rascunho (nunca conclui operação comercial nem grava cadastro sozinho).
     function abrirTelaDoTrabalho(aberto, trabalhoDesativadoId) {
@@ -245,7 +277,12 @@ ApplicationWindow {
             os: ["TelaOrdem", { osId: res.alvoId || "" }],
             compra: ["TelaCompra", { compraId: res.alvoId || "" }]
         }
-        const destino = mapaTelas[res.tipo]
+        let destino = mapaTelas[res.tipo]
+        if (!destino && res.tipo === "guia" && aberto.estado && typeof aberto.estado.tela === "string"
+                && /^Tela[A-Za-z]{1,40}$/.test(aberto.estado.tela)) {
+            const propsGuia = aberto.estado.props && typeof aberto.estado.props === "object" ? aberto.estado.props : {}
+            destino = [aberto.estado.tela, propsGuia]
+        }
         if (!destino) {
             avisar("Tipo de trabalho não suportado nesta tela: " + res.tipo, "erro")
             return
@@ -1158,10 +1195,13 @@ ApplicationWindow {
         if (fechar)
             fechar.accepted = false
         const cmdAtivo = Api.comandoAtivo() || comandoCriticoSimulado || (espera.visible ? "operacao_em_andamento" : "")
+        const temRascunho = temRascunhoAbertoNaPilha()
+        if (temRascunho)
+            guardarRascunhosDaPilha()
         const r = Api.chamar("trabalho_fechamento_avaliar", {
             comandoAtivo: cmdAtivo,
             telaAtiva: pilha.currentItem && pilha.currentItem.nomeNaNavegacao ? pilha.currentItem.nomeNaNavegacao : "",
-            temRascunhoAberto: false
+            temRascunhoAberto: temRascunho
         })
         if (r.ok && r.dados && r.dados.emAndamento) {
             avaliacaoFechamentoAtual = r.dados
@@ -1496,6 +1536,17 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    PerguntaMotivo {
+        id: perguntaDescartarDesativado
+        property var aoTerminar: null
+        onFeito: {
+            const cb = aoTerminar
+            aoTerminar = null
+            if (cb)
+                cb()
         }
     }
 

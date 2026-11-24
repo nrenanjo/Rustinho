@@ -59,13 +59,16 @@ FocusScope {
         return {
             ficha: coletar(),
             papel: papel,
-            rolagemY: rolagem.contentY
+            rolagemY: rolagem.contentY,
+            chave: chave
         }
     }
 
     function restaurarRetrato(est) {
         if (!est || typeof est !== "object")
             return
+        if (typeof est.chave === "string" && est.chave !== "")
+            chave = est.chave
         const f = est.ficha && typeof est.ficha === "object" ? est.ficha : est
         if (typeof est.papel === "string" && est.papel !== "")
             papel = est.papel
@@ -107,12 +110,12 @@ FocusScope {
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunho.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
                 id: trabalhoDesativadoId,
-                motivo: "Cadastro salvo ou encerrado pelo gerente"
+                motivo: "Cadastro salvo pelo gerente"
             }, () => {})
             trabalhoDesativadoId = ""
         } else if (rascunhoId !== "" || alterado) {
@@ -125,6 +128,36 @@ FocusScope {
         rascunhoId = ""
         rascunhoStatus = ""
         rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunho.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = nome.texto.trim() || (ficha && ficha.nome ? ficha.nome : "Cadastro")
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Descartado no cadastro de pessoa" })
+        } else if (alterado) {
+            Api.chamar("trabalho_concluir", {
+                id: "",
+                tipo: "pessoa",
+                alvoId: ficha && ficha.id ? ficha.id : ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -212,7 +245,7 @@ FocusScope {
         const eraNova = nova
         const r = Api.gravar("pessoa_salvar", coletar(), chave)
         if (r.ok) {
-            limparRascunho()
+            concluirRascunho()
             chave = Api.novaChave()
             preencher(r.dados)
             pessoaId = r.dados.id
@@ -252,9 +285,11 @@ FocusScope {
     }
 
     function aoEsc() {
-        if (alterado)
+        if (trabalhoDesativadoId !== "")
+            descartarRascunho(() => janela.voltar())
+        else if (alterado)
             janela.confirmar("Descartar alterações?", "O que você mudou neste cadastro ainda não foi salvo.",
-                             "Descartar", () => { tela.limparRascunho(); janela.voltar() }, "perigo")
+                             "Descartar", () => tela.descartarRascunho(() => janela.voltar()), "perigo")
         else
             janela.voltar()
     }

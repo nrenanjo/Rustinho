@@ -24,6 +24,7 @@ FocusScope {
     property string trabalhoDesativadoId: ""
     property string rascunhoId: ""
     property string rascunhoStatus: ""
+    property bool rascunhoFalhou: false
 
     function carregar() {
         chaveLancar = Api.novaChave()
@@ -35,6 +36,8 @@ FocusScope {
                 rascunhoRecuperado = null
                 rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
                 restaurarRetrato(rec.estado)
+                rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+                rascunhoFalhou = false
             }
         } else {
             janela.avisar(r.erro, "erro")
@@ -50,13 +53,16 @@ FocusScope {
             atualizarPrecos: atualizar.checked,
             observacoes: observacoes.texto,
             gerarPagar: gerarPagar.checked,
-            rolagemY: lista.contentY
+            rolagemY: lista.contentY,
+            chaveLancar: chaveLancar
         }
     }
 
     function restaurarRetrato(est) {
         if (!est || typeof est !== "object")
             return
+        if (typeof est.chaveLancar === "string" && est.chaveLancar !== "")
+            chaveLancar = est.chaveLancar
         if (typeof est.parte === "string" && est.parte !== "")
             parte = est.parte
         if (typeof est.freteExtra === "string")
@@ -81,16 +87,20 @@ FocusScope {
             alvoId: compra.id,
             titulo: "NF " + compra.numero + " · " + compra.fornecedor,
             estado: coletarRetrato(),
-            baseAtualizadoEm: compra.conferidaEm || compra.criadoEm || "",
+            baseAtualizadoEm: compra.revisaoBase || "",
             chaveOperacao: chaveLancar
         })
         if (r.ok && r.dados) {
             rascunhoId = r.dados.id || rascunhoId
             rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+            rascunhoFalhou = false
+        } else {
+            rascunhoStatus = "Não foi possível guardar"
+            rascunhoFalhou = true
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunhoCompra.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
@@ -107,6 +117,31 @@ FocusScope {
         }
         rascunhoId = ""
         rascunhoStatus = ""
+        rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunhoCompra.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = compra ? ("NF " + compra.numero + " · " + compra.fornecedor) : "Compra em conferência"
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Conferência de nota encerrada na tela" })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -194,7 +229,7 @@ FocusScope {
             // cadastrada, pede a senha do gerente (com estes dados).
             janela.chamarGerente("compra_lancar", entrada(-1, {}), r => {
                 if (r.ok) {
-                    tela.limparRascunho()
+                    tela.concluirRascunho()
                     compra = r.dados.compra
                     const s = r.dados.resumo
                     janela.avisar("Compra lançada: " + s.itensEstoque + " itens no estoque"
@@ -272,7 +307,7 @@ FocusScope {
                          "Descartar", () => {
             const r = Api.chamar("compra_descartar", { id: compra.id })
             if (r.ok) {
-                tela.limparRascunho()
+                tela.concluirRascunho()
                 janela.avisar("Importação descartada.", "ok")
                 janela.voltar()
             } else {
@@ -282,8 +317,19 @@ FocusScope {
     }
 
     function aoEsc() {
-        limparRascunho()
-        janela.voltar()
+        if (trabalhoDesativadoId !== "") {
+            descartarRascunho(() => janela.voltar())
+        } else if (rascunho && rascunhoId !== "") {
+            janela.confirmar(
+                "Sair da conferência desta nota?",
+                "As decisões já feitas nos itens continuam salvas como rascunho em Compras. Deseja encerrar o lembrete deste rascunho no Início e voltar?",
+                "Encerrar e voltar",
+                () => tela.descartarRascunho(() => janela.voltar()),
+                "perigo"
+            )
+        } else {
+            janela.voltar()
+        }
     }
 
     function primeiraPalavra(texto) {
@@ -319,6 +365,13 @@ FocusScope {
                 return s
             }
             Layout.fillWidth: true
+            Rotulo {
+                visible: tela.rascunho && tela.rascunhoStatus !== ""
+                text: tela.rascunhoStatus
+                color: tela.rascunhoFalhou ? Tema.vermelhoNo(palette.window) : Tema.tintaSuaveNo(palette.window)
+                Layout.alignment: Qt.AlignVCenter
+                Layout.rightMargin: 6
+            }
             Botao {
                 visible: tela.rascunho
                 text: "Descartar"
@@ -352,7 +405,11 @@ FocusScope {
             visible: Tema.estreito && (true)
             modelo: [{ id: "itens", nome: "Itens" }, { id: "nota", nome: "Nota e custos" }]
             atual: tela.parte
-            onEscolhido: id => tela.parte = id
+            onEscolhido: id => {
+                tela.parte = id
+                if (tela.rascunho)
+                    timerRascunhoCompra.restart()
+            }
         }
 
         RowLayout {
@@ -550,6 +607,7 @@ FocusScope {
                             dica: "Ex.: conhecimento da transportadora"
                             somenteLeitura: !tela.rascunho
                             Layout.fillWidth: true
+                            onEditado: if (tela.rascunho) timerRascunhoCompra.restart()
                             onConfirmado: tela.gravar(-1, {})
                             onSaiu: if (tela.rascunho && texto !== (tela.compra ? tela.compra.freteExtra : "")) tela.gravar(-1, {})
                         }
@@ -698,6 +756,7 @@ FocusScope {
                             id: observacoes
                             dica: "Ex.: faltou 1 jogo de pastilha, fornecedor vai mandar"
                             Layout.fillWidth: true
+                            onEditado: if (tela.rascunho) timerRascunhoCompra.restart()
                         }
                         Botao {
                             visible: tela.rascunho

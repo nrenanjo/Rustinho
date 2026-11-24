@@ -127,14 +127,20 @@ def main():
         # 2. Retomada no Início ("Continuar de onde parou?") + R2 / DR-3 / 7b / DR-5 / DR-6
         # =====================================================================
         # Semeia também no banco:
-        # - Um trabalho de outro caixa vindo em backup (`conflito_origem = 1`, DR-6)
-        # - Um trabalho de usuário ativo (`Bia` antes de desativar, DR-3)
+        # - Um trabalho de outro caixa da PRÓPRIA Ana (`conflito_origem = 1`, DR-6: aparece preservado)
+        # - Um trabalho de outro caixa de Bia ATIVA (`conflito_origem = 1`, DR-3: NÃO vaza título para Ana)
+        # - Um trabalho local de Bia ATIVA com > 30 dias (`DR-3` enquanto ativa; `7b` + `DR-5` abandonado ao desativar)
+        # - Uma compra em rascunho para testar R2 em TelaCompra (`revisaoBase`, indicador visual e confirmação)
         c = conexao_db(pasta)
+        ana_id = c.execute("SELECT id FROM usuario WHERE nome = 'Ana'").fetchone()[0]
         bia_id = c.execute("SELECT id FROM usuario WHERE nome = 'Bia'").fetchone()[0]
         disp_atual = c.execute("SELECT valor FROM config WHERE chave = 'dispositivo_id'").fetchone()[0]
+        forn_id = c.execute("SELECT id FROM pessoa LIMIT 1").fetchone()[0]
         import hashlib
         est_bia = '{"carrinho":[{"desconto":"","preco":"45,00","produtoId":"p1","quantidade":"2"}],"clienteId":"","clienteNome":"Oficina da Bia","desconto":""}'
         sha_bia = hashlib.sha256(est_bia.encode()).hexdigest()
+        est_bia_outro = '{"placa":"SIG-9999"}'
+        sha_bia_outro = hashlib.sha256(est_bia_outro.encode()).hexdigest()
         c.execute("BEGIN IMMEDIATE")
         c.execute(
             """INSERT INTO trabalho (
@@ -152,8 +158,29 @@ def main():
                 criado_em, atualizado_em, atualizado_ms
             ) VALUES (?, ?, 'caixa-antigo-B', 'os', '', 'OS Fusca 1978', 1, ?, ?, '[]', 'aberto', 1,
                       '2026-11-20T10:00:00Z', '2026-11-20T10:00:00Z', 1763632800000)""",
-            ("trab-outro-caixa", bia_id, est_bia, sha_bia),
+            ("trab-outro-caixa", ana_id, est_bia, sha_bia),
         )
+        c.execute(
+            """INSERT INTO trabalho (
+                id, usuario_id, dispositivo_origem, tipo, alvo_id, titulo, formato_versao,
+                estado_json, resumo_sha256, percurso_json, situacao, conflito_origem,
+                criado_em, atualizado_em, atualizado_ms
+            ) VALUES (?, ?, 'caixa-antigo-C', 'os', '', 'Segredo Ativo Bia Outro Caixa', 1, ?, ?, '[]', 'aberto', 1,
+                      '2026-11-20T10:00:00Z', '2026-11-20T10:00:00Z', 1763632800000)""",
+            ("trab-bia-outro-ativo", bia_id, est_bia_outro, sha_bia_outro),
+        )
+        # Semeia também uma compra rascunho real para testar R2 em TelaCompra:
+        c.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1")
+        c.execute(
+            """INSERT INTO compra (id, chave, numero, serie, emissao, fornecedor_id, total_produtos, total, situacao, dispositivo, criado_em)
+               VALUES ('cmp-dev1c', '35261199999999000199550010000008881000000010', '888', '1', '2026-11-20', ?, 5000, 5000, 'rascunho', ?, '2026-11-20T10:00:00Z')""",
+            (forn_id, disp_atual),
+        )
+        c.execute(
+            """INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, descricao, unidade, quantidade, valor_produtos, acao, fator)
+               VALUES ('ci-dev1c-1', 'cmp-dev1c', 0, 'CMP1', 'Vela R2', 'UN', 1000, 5000, 'nova', 1000)"""
+        )
+        c.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1")
         c.execute("COMMIT")
         c.close()
 
@@ -163,16 +190,18 @@ def main():
             ok("Retomada: faixa 'Continuar de onde parou?' visível no Início após SIGKILL",
                r2.esperar(lambda: r2.tem("Continuar de onde parou?") and r2.tem("Amortecedor Turbo R1")),
                r2.foto("-1-inicio-continuar"))
-            ok("DR-3: gerente vê apenas a contagem de trabalho de outro usuário ativo (Bia), sem expor o conteúdo",
-               r2.tem("1 outro usuário ativo") and not r2.tem("Oficina da Bia"),
+            ok("DR-3: gerente vê apenas contagem de outro usuário ativo (Bia), sem vazar nem local nem backup de outro caixa",
+               r2.tem("1 outro usuário ativo") and not r2.tem("Oficina da Bia")
+               and not r2.tem("Segredo Ativo Bia Outro Caixa"),
                r2.foto("-2-dr3-sigilo"))
-            ok("DR-6: rascunho vindo em backup de outro caixa aparece preservado e sinalizado",
+            ok("DR-6: rascunho próprio vindo em backup de outro caixa aparece preservado e sinalizado",
                r2.tem("caixa-antigo-B") and r2.tem("OS Fusca 1978"))
 
             # Clica em "Continuar" para reabrir a ficha da peça do ponto exato em que parou:
             r2.clicar("Continuar")
-            ok("Retomada: TelaPeca reabre como rascunho com o nome 'Amortecedor Turbo R1' preenchido",
-               r2.esperar(lambda: r2.tem("Nova peça") and r2.tem("Amortecedor Turbo R1") and r2.tem("Não salvo")),
+            ok("Retomada: TelaPeca reabre como rascunho com o nome 'Amortecedor Turbo R1' preenchido e status retomado",
+               r2.esperar(lambda: r2.tem("Nova peça") and r2.tem("Amortecedor Turbo R1")
+                          and r2.tem("Não salvo") and r2.tem("Rascunho retomado")),
                r2.foto("-3-peca-retomada"))
 
             # Volta ao Início descartando o rascunho da peça:
@@ -182,7 +211,7 @@ def main():
             r2.clicar("Descartar")
             ok("Retomada: voltou ao Início", r2.esperar(lambda: r2.tem("Vender / Receber")))
 
-            # Agora desativa Bia no banco para testar a exceção auditável 7b (REC-2):
+            # Agora desativa Bia no banco para testar a exceção auditável 7b (REC-2) + selo "abandonado" (DR-5):
             c = conexao_db(pasta)
             c.execute("BEGIN IMMEDIATE")
             c.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1")
@@ -195,12 +224,11 @@ def main():
             r2.clicar("Configurações")
             r2.esperar(lambda: r2.tem("Simultaneidade"))
             xdo("key", "Escape")
-            ok("7b (REC-2): com Bia desativada, o gerente vê o trabalho de Bia (desativado) e os botões de gerente",
+            ok("7b (REC-2) + DR-5: gerente vê trabalho de Bia (desativado) COM selo 'abandonado' e botões de gerente",
                r2.esperar(lambda: r2.tem("Bia (desativado)") and r2.tem("Oficina da Bia")
-                          and r2.tem("Abrir como gerente") and r2.tem("Descartar como gerente")),
+                          and r2.tem("abandonado") and r2.tem("Abrir como gerente")
+                          and r2.tem("Descartar como gerente")),
                r2.foto("-4-gerente-7b-desativado"))
-            ok("DR-5 (REC-3): trabalho com mais de 30 dias continua preservado",
-               r2.tem("Oficina da Bia"))
 
             # Gerente descarta o trabalho de Bia informando motivo (7b):
             r2.clicar("Descartar como gerente")
@@ -225,7 +253,6 @@ def main():
             # =================================================================
             # 3. REC-6 / ES-1: Fechar a janela durante operação crítica
             # =================================================================
-            # testamos via chamada do núcleo os 3 cenários exigidos (venda, importação e backup):
             c = conexao_db(pasta)
             c.execute("BEGIN IMMEDIATE")
             c.execute(
@@ -253,6 +280,74 @@ def main():
         finally:
             r2.fechar()
             checar_log(r2.saida)
+
+        # =====================================================================
+        # 4. Cobertura R2 em TelaCompra, TelaReceber e TelaVender (indicador visual "Guardado às")
+        # =====================================================================
+        rc = Rustinho(pasta, "TelaCompra", {"compraId": "cmp-dev1c"}, fotos, "3-r2-compra")
+        try:
+            rc.entrar("Ana")
+            ok("R2 (TelaCompra): abriu NF 888 sem erro SQLite",
+               rc.esperar(lambda: rc.tem("NF 888") and rc.tem("Vela R2")))
+            rc.clicar("Não lançar")
+            ok("R2 (TelaCompra): indicador visual 'Guardado às' aparece no cabeçalho após confirmação do núcleo",
+               rc.esperar(lambda: rc.tem("Guardado às"), 8),
+               rc.foto("-guardado"))
+            # Esc com rascunho salvo em TelaCompra pede confirmação (não apaga silenciosamente):
+            xdo("key", "Escape")
+            ok("R2 (TelaCompra): Esc com rascunho pede confirmação antes de encerrar",
+               rc.esperar(lambda: rc.tem("Sair da conferência desta nota?")))
+            rc.clicar("Encerrar e voltar")
+            ok("R2 (TelaCompra): voltou após confirmação", rc.esperar(lambda: not rc.tem("Sair da conferência desta nota?")))
+        finally:
+            rc.fechar()
+            checar_log(rc.saida)
+
+        rr = Rustinho(pasta, "TelaReceber", {}, fotos, "4-r2-receber")
+        try:
+            rr.entrar("Ana")
+            ok("R2 (TelaReceber): abriu tela Receber",
+               rr.esperar(lambda: rr.tem("Lançar dívida")))
+            rr.clicar("Lançar dívida")
+            ok("R2 (TelaReceber): abriu janelinha Lançar dívida",
+               rr.esperar(lambda: rr.tem("Do que é")))
+            time.sleep(0.3)
+            xdo("type", "--delay", "30", "Ze")
+            ok("R2 (TelaReceber): indicador visual 'Guardado às' aparece no cabeçalho ao editar",
+               rr.esperar(lambda: rr.tem("Guardado às"), 8),
+               rr.foto("-guardado"))
+        finally:
+            rr.fechar()
+            checar_log(rr.saida)
+
+        rv = Rustinho(pasta, "TelaVender", {}, fotos, "5-r2-vender")
+        try:
+            rv.entrar("Ana")
+            ok("R2 (TelaVender): abriu tela Vender",
+               rv.esperar(lambda: rv.tem("Total a pagar")))
+            time.sleep(0.3)
+            # Busca a primeira peça da loja de teste e adiciona ao carrinho:
+            c = conexao_db(pasta)
+            cod_peca = c.execute("SELECT codigo FROM produto WHERE ativo = 1 LIMIT 1").fetchone()[0]
+            c.close()
+            xdo("type", "--delay", "30", str(cod_peca))
+            xdo("key", "Return")
+            ok("R2 (TelaVender): indicador visual 'Guardado às' aparece no cabeçalho com item no carrinho",
+               rv.esperar(lambda: rv.tem("Guardado às"), 8),
+               rv.foto("-guardado"))
+            # Trocar para Receber limpa o rascunho de venda sem deixar órfão:
+            rv.clicar("Receber")
+            if rv.esperar(lambda: rv.tem("Ir para Receber?"), 4):
+                rv.clicar("Ir para Receber")
+                ok("R2 (TelaVender -> Receber): confirmou saída para Receber",
+                   rv.esperar(lambda: rv.tem("Lançar dívida"), 6))
+                c = conexao_db(pasta)
+                orfaos = c.execute("SELECT COUNT(*) FROM trabalho WHERE tipo = 'venda' AND usuario_id = ?", (ana_id,)).fetchone()[0]
+                c.close()
+                ok("R2 (TelaVender -> Receber): nenhum rascunho de venda órfão ficou no banco", orfaos == 0)
+        finally:
+            rv.fechar()
+            checar_log(rv.saida)
 
         ok("nenhum TypeError/ReferenceError no registro do Qt", not erros_js)
         for linha in erros_js[:10]:

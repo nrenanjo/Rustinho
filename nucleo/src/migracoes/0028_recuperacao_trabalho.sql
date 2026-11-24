@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS trabalho (
 );
 
 CREATE INDEX IF NOT EXISTS trabalho_usuario_situacao ON trabalho(usuario_id, situacao, atualizado_ms);
-CREATE UNIQUE INDEX IF NOT EXISTS trabalho_unico_chave ON trabalho(usuario_id, dispositivo_origem, tipo, alvo_id);
+CREATE UNIQUE INDEX IF NOT EXISTS trabalho_unico_chave
+    ON trabalho(usuario_id, dispositivo_origem, tipo, alvo_id)
+    WHERE situacao IN ('aberto', 'abandonado') AND conflito_origem = 0;
 
 CREATE TABLE IF NOT EXISTS sessao_local (
     id                INTEGER PRIMARY KEY,

@@ -67,19 +67,54 @@ pub fn sha256_hex(texto: &str) -> String {
     Sha256::digest(texto.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Remove recursivamente campos sensíveis (senhas, PIN, tokens, segredos, chaves privadas) antes de persistir.
+/// Remove recursivamente campos sensíveis (senhas, PIN, tokens, segredos, chaves privadas e chave da rede)
+/// antes de persistir.
 pub fn sanitizar_estado(valor: &Value) -> Value {
+    fn tokens_da_chave(chave: &str) -> Vec<String> {
+        let chars: Vec<char> = chave.trim().chars().collect();
+        let mut lista = Vec::new();
+        let mut atual = String::new();
+        for i in 0..chars.len() {
+            let c = chars[i];
+            if !c.is_alphanumeric() {
+                if !atual.is_empty() {
+                    lista.push(std::mem::take(&mut atual));
+                }
+                continue;
+            }
+            let ant = if i > 0 { Some(chars[i - 1]) } else { None };
+            let prox = chars.get(i + 1).copied();
+            let quebra_camel = c.is_uppercase()
+                && !atual.is_empty()
+                && (ant.is_some_and(char::is_lowercase)
+                    || (ant.is_some_and(char::is_uppercase) && prox.is_some_and(char::is_lowercase)));
+            if quebra_camel {
+                lista.push(std::mem::take(&mut atual));
+            }
+            for low in c.to_lowercase() {
+                atual.push(low);
+            }
+        }
+        if !atual.is_empty() {
+            lista.push(atual);
+        }
+        lista
+    }
+
     fn eh_chave_sensivel(chave: &str) -> bool {
         let k = chave.trim().to_ascii_lowercase();
+        let palavras = tokens_da_chave(chave);
         k.contains("senha")
-            || k == "pin"
-            || k.ends_with("_pin")
-            || k.starts_with("pin_")
+            || k.contains("password")
             || k.contains("segredo")
+            || k.contains("secret")
             || k.contains("token")
             || k == "csc"
             || k.contains("chaveprivada")
             || k.contains("chave_privada")
+            || k.contains("chaverede")
+            || k.contains("chave_rede")
+            || palavras.iter().any(|p| p == "pin")
     }
     match valor {
         Value::Object(mapa) => {
@@ -96,12 +131,22 @@ pub fn sanitizar_estado(valor: &Value) -> Value {
     }
 }
 
-/// Detecta se o relógio do computador recuou em relação às sessões ou trabalhos já gravados (`T-03`).
-pub fn relogio_recuado_em(conn: &Connection, agora_epoch_ms: i64) -> Resultado<bool> {
-    let max_sessao: i64 =
-        conn.query_row("SELECT COALESCE(MAX(aberta_ms), 0) FROM sessao_local", [], |l| l.get(0)).unwrap_or(0);
-    let max_trabalho: i64 =
-        conn.query_row("SELECT COALESCE(MAX(atualizado_ms), 0) FROM trabalho", [], |l| l.get(0)).unwrap_or(0);
+/// Detecta se o relógio do computador recuou em relação às sessões ou trabalhos já gravados neste caixa (`T-03`).
+pub fn relogio_recuado_em(conn: &Connection, dispositivo_atual: &str, agora_epoch_ms: i64) -> Resultado<bool> {
+    let max_sessao: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(aberta_ms), 0) FROM sessao_local WHERE dispositivo_id = ?1",
+            [dispositivo_atual],
+            |l| l.get(0),
+        )
+        .unwrap_or(0);
+    let max_trabalho: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(atualizado_ms), 0) FROM trabalho WHERE dispositivo_origem = ?1 AND conflito_origem = 0",
+            [dispositivo_atual],
+            |l| l.get(0),
+        )
+        .unwrap_or(0);
     let maior = max_sessao.max(max_trabalho);
     Ok(maior > 0 && agora_epoch_ms + TOLERANCIA_RELOGIO_MS < maior)
 }
@@ -109,7 +154,7 @@ pub fn relogio_recuado_em(conn: &Connection, agora_epoch_ms: i64) -> Resultado<b
 /// Registra a abertura de uma sessão local de usuário (`REC-1` / `T-03`).
 pub fn registrar_entrada(conn: &Connection, dispositivo_id: &str, usuario_id: &str) -> Resultado<i64> {
     let ms = agora_ms();
-    let recuado = relogio_recuado_em(conn, ms)?;
+    let recuado = relogio_recuado_em(conn, dispositivo_id, ms)?;
     let quando = tempo::agora();
     conn.execute(
         "INSERT INTO sessao_local (id, dispositivo_id, usuario_id, aberta_em, aberta_ms, limpa, relogio_recuado)
@@ -121,26 +166,45 @@ pub fn registrar_entrada(conn: &Connection, dispositivo_id: &str, usuario_id: &s
     Ok(id)
 }
 
-/// Marca a última sessão aberta deste dispositivo como encerrada de forma limpa (`sair` ou fechar janela).
+/// Marca as sessões abertas deste dispositivo como encerradas de forma limpa (`sair` ou fechar janela).
 /// Os trabalhos em andamento continuam guardados para a pessoa retomar quando voltar (`ES-5` 7a).
 pub fn encerrar_sessao(conn: &Connection, dispositivo_id: &str) -> Resultado<()> {
     let quando = tempo::agora();
     conn.execute(
-        "UPDATE sessao_local SET encerrada_em = ?1, limpa = 1
-          WHERE id = (SELECT MAX(id) FROM sessao_local WHERE dispositivo_id = ?2 AND limpa = 0)",
+        "UPDATE sessao_local SET encerrada_em = COALESCE(encerrada_em, ?1), limpa = 1
+          WHERE dispositivo_id = ?2 AND limpa = 0",
         params![quando, dispositivo_id],
     )?;
     Ok(())
 }
 
-/// Atualiza no banco as marcas persistentes de `conflito_origem` (`DR-6`) e `abandonado` (`DR-5`, 30 dias,
-/// suspenso se `relogio_recuado`).
+/// Atualiza no banco as marcas persistentes de `conflito_origem` (`DR-6`), `sem_conserto` (`REC-1`)
+/// e `abandonado` (`DR-5`, 30 dias, suspenso se `relogio_recuado`).
 pub fn sincronizar_classificacoes(conn: &Connection, dispositivo_atual: &str, relogio_recuado: bool) -> Resultado<()> {
     conn.execute(
         "UPDATE trabalho SET conflito_origem = CASE WHEN dispositivo_origem <> ?1 THEN 1 ELSE 0 END
           WHERE conflito_origem <> CASE WHEN dispositivo_origem <> ?1 THEN 1 ELSE 0 END",
         params![dispositivo_atual],
     )?;
+    // Marca em disco linhas cujas duas versões estão corrompidas (`sem_conserto`), preservando-as sem apagar.
+    let todas = carregar_linhas(conn, "t.situacao <> 'sem_conserto'", &[])?;
+    let mut ids_sem_conserto = Vec::new();
+    for l in &todas {
+        let principal_ok =
+            sha256_hex(&l.estado_json) == l.resumo_sha256 && serde_json::from_str::<Value>(&l.estado_json).is_ok();
+        if !principal_ok {
+            let ant_ok = match (&l.estado_anterior_json, &l.resumo_anterior_sha256) {
+                (Some(aj), Some(as_)) => sha256_hex(aj) == *as_ && serde_json::from_str::<Value>(aj).is_ok(),
+                _ => false,
+            };
+            if !ant_ok {
+                ids_sem_conserto.push(l.id.clone());
+            }
+        }
+    }
+    for id_ruim in ids_sem_conserto {
+        conn.execute("UPDATE trabalho SET situacao = 'sem_conserto' WHERE id = ?1", [&id_ruim])?;
+    }
     if !relogio_recuado {
         let corte = tempo::dias_atras(DIAS_ABANDONADO);
         conn.execute(
@@ -207,8 +271,8 @@ fn data_hora_local(conn: &Connection, quando_utc: &str) -> String {
     .unwrap_or_else(|_| quando_utc.to_string())
 }
 
-/// Busca o `atualizado_em` atual do registro alvo no banco (quando `alvo_id` não é vazio).
-/// Devolve `(existe, atualizado_em_atual)`.
+/// Busca a revisão atual do registro alvo no banco (quando `alvo_id` não é vazio).
+/// Devolve `(existe, assinatura_atual)`.
 pub fn estado_base_no_banco(conn: &Connection, tipo: &str, alvo_id: &str) -> Resultado<(bool, String)> {
     let id = alvo_id.trim();
     if id.is_empty() {
@@ -218,8 +282,28 @@ pub fn estado_base_no_banco(conn: &Connection, tipo: &str, alvo_id: &str) -> Res
         "peca" => "SELECT COALESCE(atualizado_em, criado_em, '') FROM produto WHERE id = ?1",
         "pessoa" => "SELECT COALESCE(atualizado_em, criado_em, '') FROM pessoa WHERE id = ?1",
         "os" => "SELECT COALESCE(atualizado_em, criado_em, '') FROM ordem_servico WHERE id = ?1",
-        "compra" => "SELECT COALESCE(conferida_em, criado_em, '') FROM compra WHERE id = ?1",
-        "receber" => "SELECT COALESCE(atualizado_em, criado_em, '') FROM pessoa WHERE id = ?1",
+        "compra" => {
+            "SELECT c.situacao || '|' || COALESCE(c.lancada_em, '') || '|' || COALESCE(c.criado_em, '') || '|' ||
+                    c.frete_extra || '|' || c.atualizar_precos || '|' || c.observacoes || '|' ||
+                    c.autorizacao || '|' || COALESCE(c.autorizacao_dados, '') || '|' ||
+                    COALESCE((SELECT GROUP_CONCAT(
+                        ci.ordem || ':' || ci.acao || ':' || COALESCE(ci.produto_id, '') || ':' || ci.fator || ':' || ci.baixar_preco,
+                        ';'
+                    ) FROM (SELECT ordem, acao, produto_id, fator, baixar_preco FROM compra_item WHERE compra_id = c.id ORDER BY ordem) ci), '')
+               FROM compra c WHERE c.id = ?1"
+        }
+        "receber" => {
+            "SELECT COALESCE(p.atualizado_em, p.criado_em, '') || '|' ||
+                    COALESCE((SELECT COUNT(*) || ':' || COALESCE(MAX(criado_em), '') || ':' ||
+                                     COALESCE(MAX(COALESCE(cancelado_em, '')), '') || ':' ||
+                                     COALESCE(SUM(CASE WHEN cancelado_em IS NULL THEN valor ELSE 0 END), 0)
+                                FROM conta_receber WHERE cliente_id = p.id), '') || '|' ||
+                    COALESCE((SELECT COUNT(*) || ':' || COALESCE(MAX(criado_em), '') || ':' ||
+                                     COALESCE(MAX(COALESCE(estornado_em, '')), '') || ':' ||
+                                     COALESCE(SUM(CASE WHEN estornado_em IS NULL THEN valor ELSE 0 END), 0)
+                                FROM recebimento WHERE cliente_id = p.id), '')
+               FROM pessoa p WHERE p.id = ?1"
+        }
         _ => return Ok((true, String::new())),
     };
     let achado: Option<String> = conn.query_row(sql, [id], |l| l.get(0)).optional()?;
@@ -307,15 +391,20 @@ pub fn guardar(
     };
 
     let ms = agora_ms();
-    let recuado = relogio_recuado_em(conn, ms)?;
+    let recuado = relogio_recuado_em(conn, dispositivo_id, ms)?;
     let agora = tempo::agora();
 
-    // Procura se já existe um trabalho para (usuario_id, dispositivo_id, tipo, alvo_id) ou pelo id informado.
+    // Procura se já existe um trabalho aberto/abandonado para (usuario_id, dispositivo_id, tipo, alvo_id)
+    // ou pelo id informado. Linhas `sem_conserto` ou de outro caixa (`conflito_origem <> 0`) nunca são
+    // sobrescritas silenciosamente (ficam preservadas no banco para conferência/suporte).
     let existente: Option<(String, String, String, String)> = conn
         .query_row(
             "SELECT id, estado_json, resumo_sha256, base_atualizado_em FROM trabalho
-              WHERE (usuario_id = ?1 AND dispositivo_origem = ?2 AND tipo = ?3 AND alvo_id = ?4)
-                 OR (?5 <> '' AND id = ?5 AND usuario_id = ?1 AND dispositivo_origem = ?2)
+              WHERE situacao IN ('aberto', 'abandonado') AND conflito_origem = 0
+                AND (
+                    (usuario_id = ?1 AND dispositivo_origem = ?2 AND tipo = ?3 AND alvo_id = ?4)
+                    OR (?5 <> '' AND id = ?5 AND usuario_id = ?1 AND dispositivo_origem = ?2)
+                )
               LIMIT 1",
             params![usuario_id, dispositivo_id, tipo, alvo_id, d.id.trim()],
             |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
@@ -606,13 +695,16 @@ fn avaliar_linha(
         && !atual_no_banco.is_empty()
         && atual_no_banco != l.base_atualizado_em
     {
-        (
-            true,
+        let detalhe = if atual_no_banco.contains('|') {
+            "Este cadastro foi alterado depois que o rascunho começou. Confira as diferenças na tela antes de confirmar: nada foi gravado por cima."
+                .to_string()
+        } else {
             format!(
                 "Este cadastro foi alterado depois que o rascunho começou (última alteração em {}). Confira as diferenças na tela antes de confirmar: nada foi gravado por cima.",
                 data_hora_local(conn, &atual_no_banco)
-            ),
-        )
+            )
+        };
+        (true, detalhe)
     } else {
         (false, String::new())
     };
@@ -710,7 +802,7 @@ pub fn listar(
     usuario_id: &str,
     gerente: bool,
 ) -> Resultado<PainelTrabalhos> {
-    let recuado = relogio_recuado_em(conn, agora_ms())?;
+    let recuado = relogio_recuado_em(conn, dispositivo_atual, agora_ms())?;
 
     let proprias = carregar_linhas(conn, "t.usuario_id = ?1", &[&usuario_id])?;
     let mut meus = Vec::new();
@@ -728,10 +820,12 @@ pub fn listar(
     let mut outros_ativos = ResumoOutrosAtivos { usuarios_com_trabalho: 0, total_trabalhos: 0 };
 
     if gerente {
-        // Outros trabalhos de outro caixa que vieram em backup (de qualquer usuário, quando quem olha é gerente).
+        // DR-3 + DR-6: trabalhos de outro caixa vindos em backup de terceiros só mostram detalhes
+        // quando pertencem a usuários DESATIVADOS (7b). Trabalhos de outros usuários ATIVOS nunca
+        // expõem título nem conteúdo ao gerente (entram apenas na contagem agregada `outros_ativos`).
         let outros_caixas = carregar_linhas(
             conn,
-            "t.usuario_id <> ?1 AND (t.conflito_origem <> 0 OR t.dispositivo_origem <> ?2)",
+            "t.usuario_id <> ?1 AND COALESCE(u.ativo, 0) = 0 AND (t.conflito_origem <> 0 OR t.dispositivo_origem <> ?2)",
             &[&usuario_id, &dispositivo_atual],
         )?;
         for l in &outros_caixas {
@@ -750,36 +844,43 @@ pub fn listar(
             de_usuarios_desativados.push(resumo);
         }
 
-        // DR-3: para usuários ATIVOS diferentes do gerente atual, só a contagem/existência, sem abrir nem listar.
+        // DR-3: para usuários ATIVOS diferentes do gerente atual (locais ou de backup),
+        // só a contagem/existência, sem abrir nem listar títulos/conteúdo.
         let (usuarios_cnt, total_cnt): (i64, i64) = conn.query_row(
             "SELECT COUNT(DISTINCT t.usuario_id), COUNT(*)
                FROM trabalho t
                JOIN usuario u ON u.id = t.usuario_id
-              WHERE t.usuario_id <> ?1 AND t.dispositivo_origem = ?2 AND u.ativo = 1",
-            params![usuario_id, dispositivo_atual],
+              WHERE t.usuario_id <> ?1 AND u.ativo = 1",
+            params![usuario_id],
             |l| Ok((l.get(0)?, l.get(1)?)),
         )?;
         outros_ativos = ResumoOutrosAtivos { usuarios_com_trabalho: usuarios_cnt, total_trabalhos: total_cnt };
     }
 
-    // Houve interrupção na sessão anterior deste dispositivo?
+    // Houve interrupção na sessão ou abertura IMEDIATAMENTE anterior deste dispositivo?
     let abertura_atual = crate::operacoes::abertura_atual(conn).unwrap_or(0);
     let sessao_interrompida: bool = conn
         .query_row(
-            "SELECT COUNT(*) > 0 FROM sessao_local s
-              WHERE s.dispositivo_id = ?1 AND s.limpa = 0
-                AND s.id < COALESCE((SELECT MAX(id) FROM sessao_local WHERE dispositivo_id = ?1), 0)",
+            "SELECT limpa = 0 FROM sessao_local
+              WHERE dispositivo_id = ?1
+              ORDER BY id DESC
+              LIMIT 1 OFFSET 1",
             params![dispositivo_atual],
             |l| l.get(0),
         )
+        .optional()?
         .unwrap_or(false);
     let programa_caiu: bool = abertura_atual > 1
         && conn
             .query_row(
-                "SELECT COUNT(*) > 0 FROM programa_abertura WHERE numero < ?1 AND (limpa = 0 OR com_erro = 1)",
+                "SELECT (limpa = 0 OR com_erro = 1) FROM programa_abertura
+                  WHERE numero < ?1
+                  ORDER BY numero DESC
+                  LIMIT 1",
                 params![abertura_atual],
                 |l| l.get(0),
             )
+            .optional()?
             .unwrap_or(false);
 
     Ok(PainelTrabalhos {
@@ -809,7 +910,7 @@ pub fn abrir_meu(
         let a = alvo_id.trim();
         carregar_linhas(
             conn,
-            "t.usuario_id = ?1 AND t.dispositivo_origem = ?2 AND t.tipo = ?3 AND t.alvo_id = ?4",
+            "t.usuario_id = ?1 AND t.dispositivo_origem = ?2 AND t.tipo = ?3 AND t.alvo_id = ?4 AND t.situacao IN ('aberto', 'abandonado')",
             &[&usuario_id, &dispositivo_atual, &t, &a],
         )?
     };
@@ -821,7 +922,7 @@ pub fn abrir_meu(
             "Este trabalho pertence a outro usuário. Pelo sigilo do trabalho em andamento, só quem começou pode abrir.",
         ));
     }
-    let recuado = relogio_recuado_em(conn, agora_ms())?;
+    let recuado = relogio_recuado_em(conn, dispositivo_atual, agora_ms())?;
     let (resumo, estado_val, percurso_val) = avaliar_linha(conn, dispositivo_atual, recuado, l)?;
     if resumo.conflito_origem {
         return Err(Erro::validacao(
@@ -976,7 +1077,7 @@ pub fn gerente_abrir_desativado(
     } else {
         motivo_limpo
     };
-    let recuado = relogio_recuado_em(conn, agora_ms())?;
+    let recuado = relogio_recuado_em(conn, dispositivo_atual, agora_ms())?;
     let (resumo, estado_val, percurso_val) = avaliar_linha(conn, dispositivo_atual, recuado, &l)?;
     let detalhes = vec![
         format!("Autor original: {} ({})", l.usuario_nome, l.usuario_id),
@@ -1703,5 +1804,242 @@ mod testes {
         }
 
         let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    #[test]
+    fn rec1_compra_e_receber_revalidam_base_real_sem_coluna_inexistente() {
+        let mut s = crate::Servico::em_memoria().unwrap();
+        let chamar = |s: &mut crate::Servico, cmd: &str, d: Value| -> Value {
+            let txt = crate::apoio_chave::chamar(crate::api::NAO_REPETIR, cmd, &d.to_string(), |x| s.chamar(cmd, x));
+            serde_json::from_str(&txt).unwrap()
+        };
+        assert_eq!(
+            chamar(
+                &mut s,
+                "configurar_inicio",
+                json!({ "loja": "Loja R2", "caixa": "Caixa 1", "nome": "Ana", "senha": "1234", "senha2": "1234" })
+            )["ok"],
+            true
+        );
+
+        // 1) Cria cliente e parcela em conta_receber e valida tipo = "receber":
+        let mut p = chamar(&mut s, "pessoa_nova", json!({ "papel": "cliente" }))["dados"].clone();
+        p["nome"] = json!("Oficina Teste R2");
+        let cli = chamar(&mut s, "pessoa_salvar", p)["dados"].clone();
+        let cli_id = cli["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            chamar(
+                &mut s,
+                "receber_lancar",
+                json!({ "clienteId": cli_id, "descricao": "Caderno", "valor": "100,00", "parcelas": 1, "primeiroVencimento": "" })
+            )["ok"],
+            true
+        );
+        let conta = chamar(&mut s, "receber_cliente", json!({ "id": cli_id, "todas": false }))["dados"].clone();
+        let base_rec = conta["revisaoBase"].as_str().unwrap().to_string();
+        assert!(!base_rec.is_empty(), "ClienteConta deve expor revisaoBase");
+
+        let gr = chamar(
+            &mut s,
+            "trabalho_guardar",
+            json!({
+                "tipo": "receber",
+                "alvoId": cli_id,
+                "titulo": "Recebimento · Oficina Teste R2",
+                "estado": { "clienteId": cli_id, "marcadas": [] },
+                "baseAtualizadoEm": base_rec
+            }),
+        );
+        assert_eq!(gr["ok"], true, "{gr}");
+        let rid = gr["dados"]["id"].as_str().unwrap().to_string();
+        let ab_ok = chamar(&mut s, "trabalho_abrir", json!({ "id": rid }))["dados"].clone();
+        assert_eq!(ab_ok["resumo"]["conflitoBase"], false, "sem mudança na conta não há conflito");
+
+        // Lança nova dívida no crediário (muda conta_receber sem mexer em pessoa.atualizado_em):
+        assert_eq!(
+            chamar(
+                &mut s,
+                "receber_lancar",
+                json!({ "clienteId": cli_id, "descricao": "Peça extra", "valor": "50,00", "parcelas": 1, "primeiroVencimento": "" })
+            )["ok"],
+            true
+        );
+        let ab_conf = chamar(&mut s, "trabalho_abrir", json!({ "id": rid }))["dados"].clone();
+        assert_eq!(
+            ab_conf["resumo"]["conflitoBase"], true,
+            "novo lançamento em conta_receber deve disparar conflitoBase"
+        );
+        assert!(!ab_conf["resumo"]["motivoConflito"].as_str().unwrap().contains('|'));
+
+        // 2) Insere compra + compra_item no banco e valida tipo = "compra" (sem coluna inexistente `conferida_em`):
+        let disp = s.banco_para_teste().dispositivo.clone();
+        {
+            let conn = &s.banco_para_teste().conn;
+            conn.execute(
+                "INSERT INTO compra (id, chave, numero, serie, emissao, fornecedor_id, total_produtos, total, situacao, dispositivo, criado_em)
+                 VALUES ('cmp-r2', '35261112345678000199550010000001231000000010', '123', '1', '2026-11-20', ?1, 10000, 10000, 'rascunho', ?2, '2026-11-20T10:00:00Z')",
+                params![cli_id, disp],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, descricao, unidade, quantidade, valor_produtos, acao, fator)
+                 VALUES ('ci-r2-1', 'cmp-r2', 0, 'F01', 'Filtro teste', 'UN', 1000, 10000, 'nova', 1000)",
+                [],
+            )
+            .unwrap();
+        }
+        let cmp = chamar(&mut s, "compra_abrir", json!({ "id": "cmp-r2" }))["dados"].clone();
+        let base_cmp = cmp["revisaoBase"].as_str().unwrap().to_string();
+        assert!(!base_cmp.is_empty(), "CompraFicha deve expor revisaoBase");
+
+        let gc = chamar(
+            &mut s,
+            "trabalho_guardar",
+            json!({
+                "tipo": "compra",
+                "alvoId": "cmp-r2",
+                "titulo": "NF 123 · Fornecedor",
+                "estado": { "compraId": "cmp-r2", "observacoes": "conferindo" },
+                "baseAtualizadoEm": base_cmp
+            }),
+        );
+        assert_eq!(gc["ok"], true, "guardar tipo compra não pode falhar no SQLite: {gc}");
+        let cid = gc["dados"]["id"].as_str().unwrap().to_string();
+
+        // Listar o painel no Início com trabalho de compra deve funcionar sem erro:
+        let painel = chamar(&mut s, "trabalho_listar", json!({}));
+        assert_eq!(painel["ok"], true, "trabalho_listar com compra deve funcionar: {painel}");
+        let ab_cmp = chamar(&mut s, "trabalho_abrir", json!({ "id": cid }))["dados"].clone();
+        assert_eq!(ab_cmp["resumo"]["conflitoBase"], false);
+
+        // Alteração concorrente no item da compra dispara conflitoBase:
+        s.banco_para_teste().conn.execute("UPDATE compra_item SET acao = 'ignorar' WHERE id = 'ci-r2-1'", []).unwrap();
+        let ab_cmp_conf = chamar(&mut s, "trabalho_abrir", json!({ "id": cid }))["dados"].clone();
+        assert_eq!(ab_cmp_conf["resumo"]["conflitoBase"], true, "alteração em compra_item deve disparar conflitoBase");
+        assert!(!ab_cmp_conf["resumo"]["motivoConflito"].as_str().unwrap().contains('|'));
+    }
+
+    #[test]
+    fn rec1_sanitizacao_chave_rede_e_pin_camel_case_e_sem_conserto_preservado() {
+        let b = Banco::em_memoria().unwrap();
+        let u = usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1234", true).unwrap();
+
+        let g1 = guardar(
+            &b.conn,
+            &b.dispositivo,
+            &u.id,
+            GuardarEntrada {
+                tipo: "peca".into(),
+                titulo: "Teste segredos".into(),
+                estado: json!({
+                    "nome": "Correia",
+                    "chave_rede": "SEGREDO-REDE-1",
+                    "chaveRede": "SEGREDO-REDE-2",
+                    "pinGerente": "4321",
+                    "PINGerente": "8765",
+                    "password": "pw",
+                    "apiSecret": "sec",
+                    "pino": "Pino de pistão 22mm"
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cru: String =
+            b.conn.query_row("SELECT estado_json FROM trabalho WHERE id = ?1", [&g1.id], |l| l.get(0)).unwrap();
+        assert!(!cru.contains("SEGREDO-REDE-1") && !cru.contains("SEGREDO-REDE-2"), "chave_rede vazou: {cru}");
+        assert!(!cru.contains("4321") && !cru.contains("8765"), "pin camelCase vazou: {cru}");
+        assert!(!cru.contains("\"pw\"") && !cru.contains("\"sec\""), "password/secret vazou: {cru}");
+        assert!(cru.contains("Pino de pistão 22mm"), "campo comum 'pino' não pode ser apagado: {cru}");
+
+        // Corrompe o estado e sincroniza classificações -> persiste 'sem_conserto' no SQLite:
+        b.conn.execute("UPDATE trabalho SET estado_json = 'corrompido' WHERE id = ?1", [&g1.id]).unwrap();
+        sincronizar_classificacoes(&b.conn, &b.dispositivo, false).unwrap();
+        let sit: String =
+            b.conn.query_row("SELECT situacao FROM trabalho WHERE id = ?1", [&g1.id], |l| l.get(0)).unwrap();
+        assert_eq!(sit, "sem_conserto", "sem_conserto deve ser persistido no banco");
+
+        // Novo trabalho com mesma chave (usuario, disp, tipo='peca', alvo_id='') NÃO sobrescreve o sem_conserto:
+        let g2 = guardar(
+            &b.conn,
+            &b.dispositivo,
+            &u.id,
+            GuardarEntrada {
+                tipo: "peca".into(),
+                titulo: "Nova peça limpa".into(),
+                estado: json!({ "nome": "Nova peça limpa" }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_ne!(g1.id, g2.id, "novo trabalho deve criar outra linha preservando a corrompida");
+        let total: i64 = b.conn.query_row("SELECT COUNT(*) FROM trabalho", [], |l| l.get(0)).unwrap();
+        assert_eq!(total, 2, "linha sem_conserto preservada junto com a nova");
+    }
+
+    #[test]
+    fn rec2_dr3_outro_caixa_ativo_nao_vaza_e_relogio_e_interrupcao_isolados() {
+        let b = Banco::em_memoria().unwrap();
+        let gerente = usuarios::criar(&b.conn, &b.dispositivo, "Gerente Ana", "1234", true).unwrap();
+        usuarios::definir_gerente(&b.conn, &gerente.id, true).unwrap();
+        let carlos = usuarios::criar(&b.conn, &b.dispositivo, "Carlos", "1234", true).unwrap();
+
+        // Trabalho de Carlos (ATIVO) vindo de outro caixa em backup:
+        guardar(
+            &b.conn,
+            "caixa-backup-antigo",
+            &carlos.id,
+            GuardarEntrada {
+                tipo: "venda".into(),
+                titulo: "Venda secreta do Carlos".into(),
+                estado: json!({ "cliente": "Sigiloso" }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        sincronizar_classificacoes(&b.conn, &b.dispositivo, false).unwrap();
+
+        // Gerente NÃO pode ver título de Carlos (ativo) em de_outro_caixa (DR-3):
+        let p = listar(&b.conn, &b.dispositivo, &gerente.id, true).unwrap();
+        assert!(
+            p.de_outro_caixa.is_empty(),
+            "DR-3: trabalho de outro usuário ativo em backup não pode vazar em de_outro_caixa"
+        );
+        assert_eq!(p.outros_ativos.usuarios_com_trabalho, 1);
+        assert_eq!(p.outros_ativos.total_trabalhos, 1);
+
+        // Após desativar Carlos (7b), o gerente passa a enxergar em de_outro_caixa:
+        usuarios::alterar(&b.conn, &carlos.id, "Carlos", false, None).unwrap();
+        let p2 = listar(&b.conn, &b.dispositivo, &gerente.id, true).unwrap();
+        assert_eq!(p2.de_outro_caixa.len(), 1);
+        assert_eq!(p2.outros_ativos.total_trabalhos, 0);
+
+        // Achado #13: sessão com relógio adiantado de OUTRO caixa não marca relogio_recuado no caixa atual:
+        let futuro_ms = agora_ms() + 7_200_000;
+        b.conn
+            .execute(
+                "INSERT INTO sessao_local (id, dispositivo_id, usuario_id, aberta_em, aberta_ms, limpa)
+                 VALUES (10, 'outro-caixa-adiantado', ?1, ?2, ?3, 1)",
+                params![gerente.id, tempo::agora(), futuro_ms],
+            )
+            .unwrap();
+        assert!(!relogio_recuado_em(&b.conn, &b.dispositivo, agora_ms()).unwrap());
+
+        // Achado #12: queda antiga + encerramento limpo subsequente não mantém houve_interrupcao para sempre:
+        b.conn
+            .execute(
+                "INSERT INTO sessao_local (id, dispositivo_id, usuario_id, aberta_em, aberta_ms, limpa)
+                 VALUES (11, ?1, ?2, ?3, ?4, 0)",
+                params![b.dispositivo, gerente.id, tempo::agora(), agora_ms() - 5000],
+            )
+            .unwrap();
+        registrar_entrada(&b.conn, &b.dispositivo, &gerente.id).unwrap();
+        let p_queda = listar(&b.conn, &b.dispositivo, &gerente.id, true).unwrap();
+        assert!(p_queda.houve_interrupcao, "sessão imediatamente anterior caiu (limpa = 0)");
+
+        encerrar_sessao(&b.conn, &b.dispositivo).unwrap();
+        registrar_entrada(&b.conn, &b.dispositivo, &gerente.id).unwrap();
+        let p_limpo = listar(&b.conn, &b.dispositivo, &gerente.id, true).unwrap();
+        assert!(!p_limpo.houve_interrupcao, "após encerramento limpo, sessão seguinte não acusa interrupção antiga");
     }
 }

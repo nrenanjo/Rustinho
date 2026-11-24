@@ -80,13 +80,16 @@ FocusScope {
         return {
             entrada: entrada(),
             clienteTexto: cliente.texto,
-            parte: parte
+            parte: parte,
+            chave: chave
         }
     }
 
     function restaurarRetrato(est) {
         if (!est || typeof est !== "object")
             return
+        if (typeof est.chave === "string" && est.chave !== "")
+            chave = est.chave
         const e = est.entrada && typeof est.entrada === "object" ? est.entrada : est
         if (typeof est.parte === "string" && est.parte !== "")
             parte = est.parte
@@ -134,12 +137,12 @@ FocusScope {
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunhoOs.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
                 id: trabalhoDesativadoId,
-                motivo: "OS salva ou encerrada pelo gerente"
+                motivo: "OS salva pelo gerente"
             }, () => {})
             trabalhoDesativadoId = ""
         } else if (rascunhoId !== "" || alterado) {
@@ -152,6 +155,36 @@ FocusScope {
         rascunhoId = ""
         rascunhoStatus = ""
         rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunhoOs.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = [veiculo.texto.trim(), placa.texto.trim(), cliente.texto.trim()].filter(x => !!x).join(" · ") || "OS"
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Descartado na ordem de serviço" })
+        } else if (alterado) {
+            Api.chamar("trabalho_concluir", {
+                id: "",
+                tipo: "os",
+                alvoId: osId
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -258,7 +291,7 @@ FocusScope {
                 cliente.focar()
             return false
         }
-        limparRascunho()
+        concluirRascunho()
         chave = Api.novaChave()
         preencher(r.dados)
         janela.avisar(era ? "OS " + r.dados.numero + (r.dados.caixa ? " (" + r.dados.caixa + ")" : "") + " aberta." : "OS salva.", "ok")
@@ -285,7 +318,7 @@ FocusScope {
             janela.avisar(r.erro, "erro")
             return false
         }
-        limparRascunho()
+        concluirRascunho()
         chave = Api.novaChave()
         preencher(r.dados)
         janela.avisar("Rascunho guardado. Ele fica em Ordens de serviço › Abertas para continuar depois.", "ok")
@@ -409,8 +442,11 @@ FocusScope {
             return
         if (alterado && (nova || rascunho))
             saida.open()
+        else if (trabalhoDesativadoId !== "")
+            descartarRascunho(() => { alterado = false; janela.voltar() })
         else if (alterado && !travada)
-            janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair", () => { tela.limparRascunho(); janela.voltar() }, "perigo")
+            janela.confirmar("Sair sem salvar?", "As mudanças nesta OS ainda não foram salvas.", "Sair",
+                             () => tela.descartarRascunho(() => { tela.alterado = false; janela.voltar() }), "perigo")
         else
             janela.voltar()
     }
@@ -1131,9 +1167,10 @@ FocusScope {
                     tipo: "perigo"
                     onClicked: {
                         saida.close()
-                        tela.limparRascunho()
-                        tela.alterado = false
-                        tela.janela.voltar()
+                        tela.descartarRascunho(() => {
+                            tela.alterado = false
+                            tela.janela.voltar()
+                        })
                     }
                 }
             }

@@ -399,11 +399,12 @@ FocusScope {
                                         text: "Guardado em " + modelData.atualizadoTexto
                                               + (modelData.situacao === "abandonado" ? " · Guardado há mais de 30 dias (abandonado)" : "")
                                               + (modelData.situacao === "sem_conserto" ? " · Estado ilegível (sem conserto)" : "")
+                                              + (modelData.formatoIncompativel ? " · Formato incompatível com esta versão" : "")
                                               + (modelData.usouVersaoAnterior ? " · Recuperado da versão anterior íntegra" : "")
                                               + (modelData.conflitoBase ? " · " + modelData.motivoConflito : "")
                                               + (modelData.jaConcluida ? " · Operação já concluída" + (modelData.resumoConcluida ? " (" + modelData.resumoConcluida + ")" : "") : "")
                                         textFormat: Text.PlainText
-                                        color: (modelData.conflitoBase || modelData.situacao === "sem_conserto")
+                                        color: (modelData.conflitoBase || modelData.situacao === "sem_conserto" || modelData.formatoIncompativel)
                                                ? Tema.vermelhoDaFaixa(linhaMeuTrabalho.par)
                                                : Tema.tintaSuaveDaFaixa(linhaMeuTrabalho.par)
                                         font.family: Tema.serifa
@@ -514,8 +515,16 @@ FocusScope {
                                         }
                                         Text {
                                             text: "Guardado em " + modelData.atualizadoTexto
+                                                  + (modelData.situacao === "abandonado" ? " · Guardado há mais de 30 dias (abandonado)" : "")
+                                                  + (modelData.situacao === "sem_conserto" ? " · Estado ilegível (sem conserto)" : "")
+                                                  + (modelData.formatoIncompativel ? " · Formato incompatível com esta versão" : "")
+                                                  + (modelData.usouVersaoAnterior ? " · Recuperado da versão anterior íntegra" : "")
+                                                  + (modelData.conflitoBase ? " · " + modelData.motivoConflito : "")
+                                                  + (modelData.jaConcluida ? " · Operação já concluída" + (modelData.resumoConcluida ? " (" + modelData.resumoConcluida + ")" : "") : "")
                                             textFormat: Text.PlainText
-                                            color: Tema.tintaSuaveDaFaixa(linhaDesativado.par)
+                                            color: (modelData.conflitoBase || modelData.situacao === "sem_conserto" || modelData.formatoIncompativel)
+                                                   ? Tema.vermelhoDaFaixa(linhaDesativado.par)
+                                                   : Tema.tintaSuaveDaFaixa(linhaDesativado.par)
                                             font.family: Tema.serifa
                                             font.italic: true
                                             font.pixelSize: 13
@@ -527,9 +536,10 @@ FocusScope {
                                         spacing: 8
                                         Layout.alignment: Tema.estreito ? Qt.AlignLeft : Qt.AlignRight | Qt.AlignVCenter
                                         Botao {
-                                            text: "Abrir como gerente"
+                                            text: modelData.jaConcluida ? "Ver conclusão" : "Abrir como gerente"
                                             tipo: "principal"
                                             altura: 36
+                                            enabled: modelData.situacao !== "sem_conserto" && !modelData.formatoIncompativel
                                             onClicked: tela.abrirTrabalhoDeDesativado(modelData)
                                         }
                                         Botao {

@@ -81,13 +81,16 @@ FocusScope {
             ficha: coletar(),
             blocoFiscal: blocoFiscal,
             mostrarOutros: mostrarOutros,
-            rolagemY: rolagem.contentY
+            rolagemY: rolagem.contentY,
+            chave: chave
         }
     }
 
     function restaurarRetrato(est) {
         if (!est || typeof est !== "object")
             return
+        if (typeof est.chave === "string" && est.chave !== "")
+            chave = est.chave
         const f = est.ficha && typeof est.ficha === "object" ? est.ficha : est
         const idOriginal = ficha ? ficha.id : (f.id || "")
         const atualizadoOriginal = ficha ? (ficha.atualizadoEm || "") : ""
@@ -148,12 +151,12 @@ FocusScope {
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunho.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
                 id: trabalhoDesativadoId,
-                motivo: "Ficha salva ou encerrada pelo gerente"
+                motivo: "Ficha de peça salva pelo gerente"
             }, () => {})
             trabalhoDesativadoId = ""
         } else if (rascunhoId !== "" || alterado) {
@@ -166,6 +169,36 @@ FocusScope {
         rascunhoId = ""
         rascunhoStatus = ""
         rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunho.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = nome.texto.trim() || (ficha && ficha.nome ? ficha.nome : "Peça")
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Descartado na ficha de peça" })
+        } else if (alterado) {
+            Api.chamar("trabalho_concluir", {
+                id: "",
+                tipo: "peca",
+                alvoId: ficha && ficha.id ? ficha.id : ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -378,7 +411,7 @@ FocusScope {
         // outra coisa).
         janela.chamarGerente("produto_salvar", coletar(), r => {
             if (r.ok) {
-                tela.limparRascunho()
+                tela.concluirRascunho()
                 tela.chave = Api.novaChave()
                 const s = Api.chamar("produto_sugestoes")
                 if (s.ok)
@@ -506,9 +539,11 @@ FocusScope {
     }
 
     function aoEsc() {
-        if (alterado)
+        if (trabalhoDesativadoId !== "")
+            descartarRascunho(() => janela.voltar())
+        else if (alterado)
             janela.confirmar("Descartar alterações?", "O que você mudou nesta peça ainda não foi salvo.",
-                             "Descartar", () => { tela.limparRascunho(); janela.voltar() }, "perigo")
+                             "Descartar", () => tela.descartarRascunho(() => janela.voltar()), "perigo")
         else
             janela.voltar()
     }

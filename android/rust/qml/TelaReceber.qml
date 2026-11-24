@@ -26,6 +26,7 @@ FocusScope {
     property string trabalhoDesativadoId: ""
     property string rascunhoId: ""
     property string rascunhoStatus: ""
+    property bool rascunhoFalhou: false
 
     function coletarRetrato() {
         return {
@@ -120,20 +121,25 @@ FocusScope {
             alvoId: clienteId || lancar.cliente || "",
             titulo: tituloRec,
             estado: coletarRetrato(),
+            baseAtualizadoEm: conta && conta.revisaoBase ? conta.revisaoBase : "",
             chaveOperacao: chaveOp
         })
         if (r.ok && r.dados) {
             rascunhoId = r.dados.id || rascunhoId
             rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+            rascunhoFalhou = false
+        } else {
+            rascunhoStatus = "Não foi possível guardar"
+            rascunhoFalhou = true
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunhoReceber.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
                 id: trabalhoDesativadoId,
-                motivo: "Recebimento concluído ou encerrado pelo gerente"
+                motivo: "Recebimento ou lançamento concluído pelo gerente"
             }, () => {})
             trabalhoDesativadoId = ""
         } else if (rascunhoId !== "" || temRascunhoSignificativo()) {
@@ -145,6 +151,37 @@ FocusScope {
         }
         rascunhoId = ""
         rascunhoStatus = ""
+        rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunhoReceber.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = conta && conta.nome ? ("Recebimento · " + conta.nome) : "Recebimento em andamento"
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Descartado na tela Receber" })
+        } else if (temRascunhoSignificativo()) {
+            Api.chamar("trabalho_concluir", {
+                id: "",
+                tipo: "receber",
+                alvoId: clienteId || lancar.cliente || ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -227,8 +264,13 @@ FocusScope {
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             busca.texto = ""
             carregarPainel()
+        } else if (trabalhoDesativadoId !== "") {
+            descartarRascunho(() => janela.voltar())
+        } else if (rascunhoId !== "" || temRascunhoSignificativo()) {
+            janela.confirmar("Descartar recebimento em andamento?",
+                             "As parcelas marcadas ou dados ainda não confirmados serão descartados.",
+                             "Descartar", () => tela.descartarRascunho(() => janela.voltar()), "perigo")
         } else {
-            limparRascunho()
             janela.voltar()
         }
     }
@@ -269,6 +311,13 @@ FocusScope {
                 titulo: "Vender / Receber"
                 subtitulo: "Crediário e convênio: quem deve, quanto e quando vence"
                 Layout.fillWidth: true
+                Rotulo {
+                    visible: tela.rascunhoStatus !== ""
+                    text: tela.rascunhoStatus
+                    color: tela.rascunhoFalhou ? Tema.vermelhoNo(palette.window) : Tema.tintaSuaveNo(palette.window)
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.rightMargin: 6
+                }
                 Botao {
                     text: "Lançar dívida"
                     icone: "mais"
@@ -281,7 +330,17 @@ FocusScope {
             Pilulas {
                 modelo: [{ id: "vender", nome: "Vender" }, { id: "receber", nome: "Receber" }]
                 atual: "receber"
-                onEscolhido: id => { if (id === "vender") tela.janela.substituir("TelaVender", {}) }
+                onEscolhido: id => {
+                    if (id !== "vender")
+                        return
+                    if (tela.trabalhoDesativadoId !== "")
+                        tela.descartarRascunho(() => tela.janela.substituir("TelaVender", {}))
+                    else if (tela.rascunhoId !== "" || tela.temRascunhoSignificativo())
+                        tela.janela.confirmar("Ir para Vender?", "O preenchimento em andamento nesta tela será descartado.",
+                                              "Ir para Vender", () => tela.descartarRascunho(() => tela.janela.substituir("TelaVender", {})), "perigo")
+                    else
+                        tela.janela.substituir("TelaVender", {})
+                }
             }
 
             // Números do crediário
@@ -686,7 +745,7 @@ FocusScope {
                 tela.janela.oferecerReferencia(r, pagar)
                 return
             }
-            tela.limparRascunho()
+            tela.concluirRascunho()
             close()
             feito.recibo = r.dados
             feito.open()
@@ -960,7 +1019,7 @@ FocusScope {
                 erro = r.erro
                 return
             }
-            tela.limparRascunho()
+            tela.concluirRascunho()
             close()
             janela.avisar("Dívida lançada.", "ok")
             tela.carregarPainel()
@@ -1004,7 +1063,10 @@ FocusScope {
                         rotulo: "Cliente"
                         dica: "Nome, CPF ou placa"
                         Layout.fillWidth: true
-                        onEditado: esperaCliente.restart()
+                        onEditado: {
+                            esperaCliente.restart()
+                            timerRascunhoReceber.restart()
+                        }
                         onConfirmado: {
                             // T068 (AUD-L-2, o mesmo defeito do bug 22): o Enter dado dentro da espera (o leitor
                             // ou a digitação rápida) agia sobre a lista de antes. Agora a busca do texto atual sai
@@ -1029,6 +1091,7 @@ FocusScope {
                                 lancar.clienteNome = modelData.nome
                                 campoCliente.texto = modelData.nome
                                 lancar.achados = []
+                                timerRascunhoReceber.restart()
                                 descricao.focar()
                             }
                             Layout.fillWidth: true
@@ -1054,6 +1117,7 @@ FocusScope {
                         dica: "Ex.: caderno de setembro"
                         maximo: 80
                         Layout.fillWidth: true
+                        onEditado: timerRascunhoReceber.restart()
                         onConfirmado: valorDivida.focar()
                     }
                     Linha {
@@ -1150,6 +1214,8 @@ FocusScope {
             rascunhoRecuperado = null
             rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
             restaurarRetrato(rec.estado)
+            rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+            rascunhoFalhou = false
         }
         busca.focar()
     }

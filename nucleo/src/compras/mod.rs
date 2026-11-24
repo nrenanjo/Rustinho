@@ -1115,6 +1115,9 @@ pub struct CompraFicha {
     /// T111 (Achado 9c): em rascunho, há pelo menos uma peça provisória criada
     /// na importação que será removida/desativada ao descartar esta compra?
     pub tem_provisorias_descartaveis: bool,
+    /// R2 (`REC-1`): assinatura determinística do estado atual da compra e seus itens
+    /// para detectar alterações concorrentes ao retomar um rascunho.
+    pub revisao_base: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1723,6 +1726,20 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<CompraFicha> {
             |l| l.get(0),
         )?,
         tem_provisorias_descartaveis,
+        revisao_base: conn
+            .query_row(
+                "SELECT c.situacao || '|' || COALESCE(c.lancada_em, '') || '|' || COALESCE(c.criado_em, '') || '|' ||
+                        c.frete_extra || '|' || c.atualizar_precos || '|' || c.observacoes || '|' ||
+                        c.autorizacao || '|' || COALESCE(c.autorizacao_dados, '') || '|' ||
+                        COALESCE((SELECT GROUP_CONCAT(
+                            ci.ordem || ':' || ci.acao || ':' || COALESCE(ci.produto_id, '') || ':' || ci.fator || ':' || ci.baixar_preco,
+                            ';'
+                        ) FROM (SELECT ordem, acao, produto_id, fator, baixar_preco FROM compra_item WHERE compra_id = c.id ORDER BY ordem) ci), '')
+                   FROM compra c WHERE c.id = ?1",
+                [id],
+                |l| l.get(0),
+            )
+            .unwrap_or_default(),
     })
 }
 

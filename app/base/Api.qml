@@ -156,7 +156,7 @@ QtObject {
     function chamar(comando, dados) {
         const texto = Sistema.chamar(comando, JSON.stringify(dados === undefined ? {} : dados))
         const r = interpretar(comando, texto)
-        if (dados && dados.chaveOperacao)
+        if (dados && dados.chaveOperacao && comando !== "trabalho_guardar")
             _depoisDeGravar(r)
         return r
     }

@@ -40,6 +40,7 @@ FocusScope {
     property string trabalhoDesativadoId: ""
     property string rascunhoId: ""
     property string rascunhoStatus: ""
+    property bool rascunhoFalhou: false
     // FALHA-04: chave da venda (e do orçamento) que está sendo montada; a
     // mesma em cada nova tentativa; nova quando começa outra (limparVenda).
     property string chaveVenda: Api.novaChave()
@@ -163,17 +164,19 @@ FocusScope {
         if (r.ok && r.dados) {
             rascunhoId = r.dados.id || rascunhoId
             rascunhoStatus = "Guardado às " + (r.dados.guardadoHora || "")
+            rascunhoFalhou = false
         } else {
             rascunhoStatus = "Não foi possível guardar"
+            rascunhoFalhou = true
         }
     }
 
-    function limparRascunho() {
+    function concluirRascunho() {
         timerRascunhoVenda.stop()
         if (trabalhoDesativadoId !== "") {
             janela.chamarGerente("trabalho_gerente_concluir", {
                 id: trabalhoDesativadoId,
-                motivo: "Venda concluída ou encerrada pelo gerente"
+                motivo: "Venda concluída ou orçamento salvo pelo gerente"
             }, () => {})
             trabalhoDesativadoId = ""
         } else if (rascunhoId !== "" || carrinho.length > 0) {
@@ -185,6 +188,37 @@ FocusScope {
         }
         rascunhoId = ""
         rascunhoStatus = ""
+        rascunhoFalhou = false
+    }
+
+    function descartarRascunho(depois) {
+        timerRascunhoVenda.stop()
+        if (trabalhoDesativadoId !== "") {
+            const desc = campoCliente.texto.trim() || "Venda em andamento"
+            janela.descartarTrabalhoDesativado(trabalhoDesativadoId, desc, () => {
+                trabalhoDesativadoId = ""
+                rascunhoId = ""
+                rascunhoStatus = ""
+                rascunhoFalhou = false
+                if (depois)
+                    depois()
+            })
+            return
+        }
+        if (rascunhoId !== "") {
+            Api.chamar("trabalho_descartar", { id: rascunhoId, motivo: "Venda limpa ou descartada na tela" })
+        } else if (carrinho.length > 0) {
+            Api.chamar("trabalho_concluir", {
+                id: "",
+                tipo: "venda",
+                alvoId: osCarregada || encomendaCarregada || orcamentoCarregado || ""
+            })
+        }
+        rascunhoId = ""
+        rascunhoStatus = ""
+        rascunhoFalhou = false
+        if (depois)
+            depois()
     }
 
     Timer {
@@ -320,8 +354,7 @@ FocusScope {
         busca.focar()
     }
 
-    function limparVenda() {
-        limparRascunho()
+    function limparCamposVenda() {
         chaveVenda = Api.novaChave()
         chaveOrcamento = Api.novaChave()
         carrinho = []
@@ -340,6 +373,11 @@ FocusScope {
         valeTroca = null
         itemAtual = -1
         limparBusca()
+    }
+
+    function limparVenda() {
+        concluirRascunho()
+        limparCamposVenda()
     }
 
     // "1.234,56" → centavos, e de volta (sem ponto de milhar).
@@ -363,9 +401,11 @@ FocusScope {
         }
         if (busca.texto !== "" && janela.limparBuscaAntes(daSeta)) {
             limparBusca()
+        } else if (trabalhoDesativadoId !== "") {
+            descartarRascunho(() => { tela.limparCamposVenda(); janela.voltar() })
         } else if (carrinho.length > 0) {
             janela.confirmar("Limpar esta venda?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
-                             "Limpar", () => tela.limparVenda(), "perigo")
+                             "Limpar", () => tela.descartarRascunho(() => tela.limparCamposVenda()), "perigo")
         } else {
             janela.voltar()
         }
@@ -577,12 +617,21 @@ FocusScope {
                         Layout.fillWidth: true
                     }
                 }
-                Botao {
-                    text: "Caixa"
-                    icone: "caixa"
-                    tipo: "secundario"
+                RowLayout {
+                    spacing: 12
                     Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignBottom | Qt.AlignRight
-                    onClicked: tela.janela.abrir("TelaCaixa")
+                    Rotulo {
+                        visible: tela.rascunhoStatus !== ""
+                        text: tela.rascunhoStatus
+                        color: tela.rascunhoFalhou ? Tema.vermelhoNo(palette.window) : Tema.tintaSuaveNo(palette.window)
+                        Layout.alignment: Qt.AlignVCenter
+                    }
+                    Botao {
+                        text: "Caixa"
+                        icone: "caixa"
+                        tipo: "secundario"
+                        onClicked: tela.janela.abrir("TelaCaixa")
+                    }
                 }
             }
         }
@@ -594,9 +643,11 @@ FocusScope {
             onEscolhido: id => {
                 if (id !== "receber")
                     return
-                if (tela.carrinho.length > 0)
+                if (tela.trabalhoDesativadoId !== "")
+                    tela.descartarRascunho(() => tela.janela.substituir("TelaReceber", {}))
+                else if (tela.carrinho.length > 0)
                     tela.janela.confirmar("Ir para Receber?", "Os itens do carrinho serão tirados. Nada foi gravado ainda.",
-                                          "Ir para Receber", () => tela.janela.substituir("TelaReceber", {}), "perigo")
+                                          "Ir para Receber", () => tela.descartarRascunho(() => tela.janela.substituir("TelaReceber", {})), "perigo")
                 else
                     tela.janela.substituir("TelaReceber", {})
             }
@@ -839,7 +890,11 @@ FocusScope {
                         dica: "Nome, CPF, telefone ou placa"
                         icone: "pessoa"
                         Layout.fillWidth: true
-                        onEditado: esperaCliente.restart()
+                        onEditado: {
+                            esperaCliente.restart()
+                            if (tela.carrinho.length > 0)
+                                timerRascunhoVenda.restart()
+                        }
                     }
                     Repeater {
                         model: tela.clientesAchados
@@ -932,6 +987,7 @@ FocusScope {
                         maximo: 10
                         erro: tela.calculo ? tela.calculo.erroDesconto : ""
                         Layout.fillWidth: true
+                        onEditado: if (tela.carrinho.length > 0) timerRascunhoVenda.restart()
                         onConfirmado: tela.recalcular()
                         onSaiu: tela.recalcular()
                     }
@@ -1077,6 +1133,8 @@ FocusScope {
             const r = Api.chamar("venda_calcular", tela.entrada(pagamentos()))
             if (r.ok)
                 calc = r.dados
+            if (tela.carrinho.length > 0)
+                timerRascunhoVenda.restart()
         }
 
         // Clicar no nome da forma põe nela o que falta. Se nada falta (o
@@ -1551,6 +1609,8 @@ FocusScope {
             rascunhoRecuperado = null
             rascunhoId = rec.resumo ? (rec.resumo.id || "") : ""
             restaurarRetrato(rec.estado)
+            rascunhoStatus = rec.resumo && rec.resumo.atualizadoTexto ? ("Rascunho retomado (" + rec.resumo.atualizadoTexto + ")") : "Rascunho retomado"
+            rascunhoFalhou = false
         }
         if (clienteId && calculo)
             campoCliente.texto = calculo.cliente

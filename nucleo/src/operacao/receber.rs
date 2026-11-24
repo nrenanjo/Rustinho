@@ -601,6 +601,9 @@ pub struct ClienteConta {
     pub situacao: Situacao,
     pub parcelas: Vec<Parcela>,
     pub recebimentos: Vec<RecebimentoLinha>,
+    /// R2 (`REC-1`): assinatura determinística da conta do cliente (`pessoa` + `conta_receber` + `recebimento`)
+    /// para detectar lançamentos/baixas/estornos concorrentes ao retomar um rascunho.
+    pub revisao_base: String,
 }
 
 /// A conta de um cliente: parcelas em aberto (ou todas) e recebimentos.
@@ -663,6 +666,22 @@ pub fn cliente(conn: &Connection, cliente_id: &str, todas: bool) -> Resultado<Cl
             })?
             .unwrap_or_default();
     }
+    let revisao_base: String = conn
+        .query_row(
+            "SELECT COALESCE(p.atualizado_em, p.criado_em, '') || '|' ||
+                    COALESCE((SELECT COUNT(*) || ':' || COALESCE(MAX(criado_em), '') || ':' ||
+                                     COALESCE(MAX(COALESCE(cancelado_em, '')), '') || ':' ||
+                                     COALESCE(SUM(CASE WHEN cancelado_em IS NULL THEN valor ELSE 0 END), 0)
+                                FROM conta_receber WHERE cliente_id = p.id), '') || '|' ||
+                    COALESCE((SELECT COUNT(*) || ':' || COALESCE(MAX(criado_em), '') || ':' ||
+                                     COALESCE(MAX(COALESCE(estornado_em, '')), '') || ':' ||
+                                     COALESCE(SUM(CASE WHEN estornado_em IS NULL THEN valor ELSE 0 END), 0)
+                                FROM recebimento WHERE cliente_id = p.id), '')
+               FROM pessoa p WHERE p.id = ?1",
+            [cliente_id],
+            |l| l.get(0),
+        )
+        .unwrap_or_default();
     Ok(ClienteConta {
         cliente_id: cliente_id.to_string(),
         nome,
@@ -671,6 +690,7 @@ pub fn cliente(conn: &Connection, cliente_id: &str, todas: bool) -> Resultado<Cl
         situacao: situacao(conn, cliente_id)?,
         parcelas,
         recebimentos,
+        revisao_base,
     })
 }
 
