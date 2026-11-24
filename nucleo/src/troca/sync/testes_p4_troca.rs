@@ -335,3 +335,63 @@ fn p4_caixa_novo_entra_pelo_convite_sem_a_senha_da_rede() {
     .join()
     .unwrap();
 }
+
+/// T009: um servidor que conhece o convite (a prova dele confere) mas manda um
+/// registro **sem** a aprovação deste caixa não faz o caixa novo "entrar": nada é
+/// fixado (nem a raiz, nem a loja) e a troca não é ligada.
+#[test]
+fn p4_entrada_sem_a_propria_aprovacao_no_registro_e_recusada() {
+    use crate::troca::protocolo4::{canal, Identidade};
+    thread::spawn(|| {
+        let cb = temp("conv-sem-aprovacao");
+        let b = caixa_novo_sem_senha(&cb, "Caixa 2");
+        let _ = codigo_do_caixa_novo(&b, &cb);
+        let falsa_raiz = Arc::new(Identidade::gerar().unwrap());
+        let loja = "loja-do-servidor-que-sabe-o-convite";
+        let segredo = "AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F";
+        // A raiz falsa se registra (linha autoassinada), mas não aprova o caixa novo.
+        let raiz_banco = temp("conv-sem-aprovacao-raiz");
+        let r = Banco::abrir(&raiz_banco).unwrap();
+        let ur = crate::faixas::para_testes::configurar(&r, "Raiz", 0);
+        aprovados::registrar_raiz(&r.conn, &falsa_raiz, loja, "Raiz", &ur).unwrap();
+        let linhas = aprovados::linhas(&r.conn, loja).unwrap();
+        let ouvinte = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endereco = ouvinte.local_addr().unwrap();
+        let fr = falsa_raiz.clone();
+        let servidor = thread::spawn(move || {
+            let (fluxo, _) = ouvinte.accept().unwrap();
+            let canal::Aceito::Ingresso(mut c) =
+                canal::aceitar_com_ingresso(fluxo, &fr, &Default::default(), Duration::from_secs(5), None).unwrap()
+            else {
+                panic!("chave desconhecida cai no ingresso");
+            };
+            let _ = c.receber_ingressar(64 * 1024, Duration::from_secs(5), None).unwrap();
+            let hash = cofre::hash_segredo(&cofre::normalizar_segredo(segredo));
+            let prova = canal::gerar_prova_servidor(
+                &hash,
+                c.exportador_convite(),
+                &c.chave_do_par(),
+                &fr.publica(),
+                &fr.publica(),
+                loja,
+            )
+            .unwrap();
+            let resposta = canal::MensagemIngresso::Aprovado {
+                prova_servidor: prova,
+                raiz: fr.publica(),
+                loja_id: loja.into(),
+                linhas,
+            };
+            c.responder(&resposta, Duration::from_secs(5), None).unwrap();
+            c.encerrar();
+        });
+        let r = juntar_com_convite(&cb, segredo, &[endereco.to_string()]);
+        servidor.join().unwrap();
+        assert!(r.is_err(), "sem a própria aprovação no registro, a entrada não vale: {r:?}");
+        assert!(!p4::tem_raiz_fixada(&b.conn), "nenhuma raiz foi fixada");
+        assert!(crate::loja::da_entrada(&b.conn).unwrap().is_empty(), "nenhuma loja foi escolhida");
+        assert!(!ajustes(&b.conn).unwrap().ligado, "a troca não foi ligada");
+    })
+    .join()
+    .unwrap();
+}
