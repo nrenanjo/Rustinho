@@ -38,9 +38,32 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{de_hex, hex, verificar, Assinatura, Chave, Dominio, Identidade};
 use crate::erro::{Erro, Resultado};
+
+mod serde_hex_32 {
+    use super::*;
+    pub fn serialize<S: Serializer>(v: &[u8; 32], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex(v))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 32], D::Error> {
+        let t = String::deserialize(d)?;
+        de_hex::<32>(&t).ok_or_else(|| serde::de::Error::custom("chave hex inválida (esperados 64 caracteres)"))
+    }
+}
+
+mod serde_hex_64 {
+    use super::*;
+    pub fn serialize<S: Serializer>(v: &[u8; 64], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex(v))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 64], D::Error> {
+        let t = String::deserialize(d)?;
+        de_hex::<64>(&t).ok_or_else(|| serde::de::Error::custom("assinatura hex inválida (esperados 128 caracteres)"))
+    }
+}
 
 /// Tamanho máximo do nome do caixa, do motivo da retirada e do `dispositivo` (I3).
 const NOME_MAXIMO: usize = 80;
@@ -74,12 +97,17 @@ fn dispositivo_canonico(dispositivo: &str) -> bool {
 /// identificador `dispositivo` (I3) e a prova de que ele tem as partes privadas
 /// (assinatura Ed25519 no contexto [`Dominio::Pedido`]). O gerente confere o
 /// [`Pedido::codigo`] na tela do caixa novo.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Pedido {
+    #[serde(with = "serde_hex_32")]
     pub chave: Chave,
+    #[serde(with = "serde_hex_32")]
     pub chave_troca: Chave,
     /// UUID do dispositivo (`dispositivo_id`, decisão I3). Vazio em pedidos legados.
+    #[serde(default)]
     pub dispositivo: String,
+    #[serde(with = "serde_hex_64")]
     pub assinatura: Assinatura,
 }
 
@@ -128,29 +156,39 @@ impl Pedido {
 
 /// Uma linha de `caixa_aprovado`: `aprovador` aprovou `chave` na loja
 /// `loja_id`, com o gerente `gerente` e `dispositivo` (I3), e assinou tudo.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Aprovacao {
+    #[serde(with = "serde_hex_32")]
     pub chave: Chave,
+    #[serde(with = "serde_hex_32")]
     pub chave_troca: Chave,
     pub loja_id: String,
     pub nome: String,
+    #[serde(with = "serde_hex_32")]
     pub aprovador: Chave,
     pub gerente: String,
     pub aprovado_em: String,
     /// UUID do caixa (`dispositivo_id`, decisão I3). Incluído na assinatura quando preenchido.
+    #[serde(default)]
     pub dispositivo: String,
+    #[serde(with = "serde_hex_64")]
     pub assinatura: Assinatura,
 }
 
 /// Uma linha de `caixa_retirado`: `retirador` retirou `chave` da loja.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Retirada {
+    #[serde(with = "serde_hex_32")]
     pub chave: Chave,
     pub loja_id: String,
     pub motivo: String,
+    #[serde(with = "serde_hex_32")]
     pub retirador: Chave,
     pub gerente: String,
     pub retirado_em: String,
+    #[serde(with = "serde_hex_64")]
     pub assinatura: Assinatura,
 }
 
@@ -1106,9 +1144,12 @@ mod testes {
 /// O registro de uma loja como está gravado (linha fora do formato fica de
 /// fora), para mandar a outro caixa ou guardar antes de restaurar um backup.
 /// Nada aqui diz quem está autorizado: isso é sempre [`avaliar`].
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Linhas {
+    #[serde(default)]
     pub aprovacoes: Vec<Aprovacao>,
+    #[serde(default)]
     pub retiradas: Vec<Retirada>,
 }
 

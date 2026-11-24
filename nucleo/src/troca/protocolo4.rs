@@ -37,6 +37,7 @@ use crate::erro::{Erro, Resultado};
 
 pub mod anuncio;
 pub mod aprovados;
+pub mod canal;
 pub mod cofre;
 
 /// Uma chave pública (Ed25519 ou X25519): 32 bytes.
@@ -278,6 +279,12 @@ impl Identidade {
     pub fn trocar_senha_em(caminho: &Path, senha_atual: &str, senha_nova: &str) -> Resultado<()> {
         let id = Identidade::abrir_de(caminho, senha_atual)?;
         gravar(caminho, &id.selar(senha_nova)?)
+    }
+
+    /// A chave privada Ed25519 em PKCS#8 DER, somente para os submódulos
+    /// internos do protocolo 4 (montar `CertifiedKey` do canal TLS 1.3).
+    pub(super) fn pkcs8_der(&self) -> &[u8] {
+        &self.pkcs8.0
     }
 
     /// Só nos testes: as partes privadas (para conferir que não vão em claro
