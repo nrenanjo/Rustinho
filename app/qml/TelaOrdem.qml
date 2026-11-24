@@ -234,6 +234,8 @@ FocusScope {
         alterado = true
         espera.restart()
         timerRascunhoOs.restart()
+        if (janela)
+            janela.reavaliarValidacaoProgressiva(tela)
     }
 
     function mudarItem(i, campo, valor) {
@@ -277,20 +279,48 @@ FocusScope {
         recalcular()
     }
 
+    function pendenciasDeValidacao() {
+        const lista = []
+        if (!clienteId && cliente.texto.trim() === "") {
+            lista.push({
+                chave: "cliente",
+                item: cliente,
+                rolagem: rolagemCarro,
+                preparar: () => { parte = "carro" },
+                titulo: "Falta o cliente da OS",
+                texto: "Diga de quem é o carro (o cliente)."
+            })
+        }
+        if (placa.texto.trim() === "" && veiculo.texto.trim() === "") {
+            lista.push({
+                chave: "placa",
+                item: placa,
+                rolagem: rolagemCarro,
+                preparar: () => { parte = "carro" },
+                titulo: "Falta o veículo da OS",
+                texto: "Digite a placa ou o carro."
+            })
+        }
+        return lista
+    }
+
     function salvar() {
         erro = ""
         campoErro = ""
+        if (janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
+            return false
         const era = nova || rascunho
         const r = Api.gravar("os_salvar", entrada(), chave)
         if (!r.ok) {
             erro = r.erro
             campoErro = r.campo || ""
             if (r.campo === "placa")
-                placa.focar()
+                janela.rolarAteItem(rolagemCarro, placa, 24, () => placa.focar())
             else if (r.campo === "cliente")
-                cliente.focar()
+                janela.rolarAteItem(rolagemCarro, cliente, 24, () => cliente.focar())
             return false
         }
+        janela.encerrarValidacaoProgressiva(tela)
         concluirRascunho()
         chave = Api.novaChave()
         preencher(r.dados)
@@ -615,6 +645,7 @@ FocusScope {
 
             // ---------- Carro, cliente e o problema ----------
             Flickable {
+                id: rolagemCarro
                 visible: !Tema.estreito || tela.parte === "carro"
                 Layout.preferredWidth: Tema.estreito ? -1 : 420
                 Layout.fillWidth: Tema.estreito
@@ -1187,6 +1218,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         if (!tela.nova && !tela.alterado) {
             const r = Api.chamar("os_abrir", { id: osId })
             if (r.ok)

@@ -178,7 +178,7 @@ FocusScope {
     }
     Timer {
         id: esperaDoAlvo
-        interval: 120
+        interval: 35
         repeat: true
         property int tentativas: 0
         property real alturaAntes: -1
@@ -189,7 +189,7 @@ FocusScope {
             if ((linha && linha.height > 0 && assentou) || ++tentativas >= 25) {
                 stop()
                 tela.alvo = ""
-                if (linha)
+                if (linha && janela)
                     janela.destacarAlvo(linha, rolagem)
             }
         }
@@ -231,7 +231,7 @@ FocusScope {
     }
     Timer {
         id: esperaDaGuia
-        interval: 120
+        interval: 35
         repeat: true
         property int tentativas: 0
         property real alturaAntes: -1
@@ -254,13 +254,19 @@ FocusScope {
         // OS-2: a tela pode estar saindo (a janela vale null quando a pilha a tira) ou a guia já ter acabado.
         if (!janela || !tela.guia)
             return
-        janela.guiaDestacar(campo, rolagem)
-        // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
-        const foco = campo === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : campo
-        if (typeof foco.focarSempre === "function")
-            foco.focarSempre()
-        else if (foco.combo)
-            foco.combo.forceActiveFocus()
+        // MG-15: o foco entra somente depois que a rolagem guiada concluir (ou direto em janela simulada de teste).
+        const aplicarFoco = () => {
+            if (!janela || !tela.guia)
+                return
+            // Estado e CNPJ juntos: o cursor vai para o que falta primeiro.
+            const foco = campo === linhaDocumentos ? (ufLoja.indice > 0 ? cnpjLoja : ufLoja) : campo
+            if (typeof foco.focarSempre === "function")
+                foco.focarSempre()
+            else if (foco.combo)
+                foco.combo.forceActiveFocus()
+        }
+        if (janela.guiaDestacar(campo, rolagem, aplicarFoco) !== true)
+            aplicarFoco()
     }
     function iniciarGuiaNaMesmaTela(g) {
         secaoAntesDaGuia = secao
@@ -516,11 +522,73 @@ FocusScope {
         }
     }
 
+    // P6 / MG-D1 (0.9.19-dev.1): preferência local de movimento reduzido deste computador/aparelho.
+    function escolherMovimento(modo) {
+        if (Tema.modoMovimento === modo)
+            return
+        const r = Api.chamar("aparencia_salvar", { movimentoReduzido: modo })
+        if (r.ok && r.dados) {
+            Tema.modoMovimento = r.dados.movimentoReduzido || modo
+            janela.avisar(Tema.movimentoReduzido
+                          ? "Movimento reduzido ativado neste " + Tema.aparelho + "."
+                          : "Movimento normal ativado neste " + Tema.aparelho + ".", "ok")
+        } else {
+            janela.avisar(r.erro || "Não foi possível salvar a preferência de movimento.", "erro")
+        }
+    }
+
+    function marcarAlterado() {
+        alterado = true
+        if (janela)
+            janela.reavaliarValidacaoProgressiva(tela)
+    }
+
+    // NCG-1 / NCG-2: validação progressiva local nas Configurações (quando não guiada por outra tela).
+    function pendenciasDeValidacao() {
+        const lista = []
+        if (caixa.texto.trim() === "") {
+            lista.push({
+                chave: "caixa",
+                item: caixa,
+                rolagem: rolagem,
+                preparar: () => { secao = "loja" },
+                titulo: "Falta o nome deste computador",
+                texto: "Informe o nome deste computador."
+            })
+        } else {
+            caixa.erro = ""
+        }
+        if (completo) {
+            const cnpjLimpo = cnpjLoja.texto.replace(/[^0-9A-Za-z]/g, "").toUpperCase()
+            if (cnpjLimpo !== "") {
+                const cnpjOk = cnpjLimpo.length === 14 ? cnpjLoja.cnpjValido(cnpjLimpo)
+                             : cnpjLimpo.length === 11 ? cnpjLoja.cpfValido(cnpjLimpo) : false
+                if (!cnpjOk) {
+                    lista.push({
+                        chave: "cnpj",
+                        item: cnpjLoja,
+                        rolagem: rolagem,
+                        preparar: () => { secao = "loja" },
+                        titulo: "CNPJ da loja inválido",
+                        texto: "CNPJ inválido. Confira os números e as letras."
+                    })
+                } else {
+                    cnpjLoja.erro = ""
+                }
+            } else {
+                cnpjLoja.erro = ""
+            }
+        }
+        return lista
+    }
+
     function salvar() {
         if (secao === "gerente")
             return salvarGerente()
         if (!completo)
             return salvarComputador()
+        if (!tela.guia && janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
+            return
         const lista = []
         for (let i = 0; i < tabelas.count; i++) {
             const t = tabelas.itemAt(i)
@@ -547,6 +615,7 @@ FocusScope {
                                                 rodapeVenda: rodapeVenda.texto, rodapeOrcamento: rodapeOrcamento.texto, rodapeOs: rodapeOs.texto,
                                                 imprimirLocal: imprimirLocal.checked }, r => {
             if (r.ok) {
+                janela.encerrarValidacaoProgressiva(tela)
                 janela.atualizarEstado()
                 carregar()
                 janela.avisar("Configurações salvas.", "ok")
@@ -562,8 +631,10 @@ FocusScope {
                 const [alvo, onde] = campo
                 secao = onde
                 alvo.erro = r.erro
-                if (typeof alvo.focar === "function")
-                    alvo.focar()
+                janela.rolarAteItem(rolagem, alvo, 24, () => {
+                    if (typeof alvo.focar === "function")
+                        alvo.focar()
+                })
                 return
             }
             const m = r.campo ? r.campo.match(/^tabela(\d)(Nome|Lucro)$/) : null
@@ -582,7 +653,24 @@ FocusScope {
 
     property var sync: null
 
+    function _atualizarDestaqueDeLista() {
+        if (!janela || !tela.guia)
+            return
+        const nome = tela.guia.requisito.campos[0]
+        if (nome !== "referencia" && nome !== "caixa_bloqueando")
+            return
+        Qt.callLater(() => {
+            if (!janela || !tela.guia)
+                return
+            const c = tela.alvoDaGuia(nome)
+            janela.guiaAtualizarRegistro(c ? c[0] : null)
+        })
+    }
+
     function carregarCaixas() {
+        const acompanhar = !!janela && !!tela.guia && tela.guia.requisito.campos[0] === "caixa_bloqueando"
+        if (acompanhar)
+            janela.guiaIniciarRecargaLista()
         const c = Api.chamar("caixas_conhecidos")
         if (c.ok) {
             caixasConhecidos = c.dados.caixas
@@ -592,6 +680,8 @@ FocusScope {
             const p = Api.chamar("pendencias_listar")
             pendencias = p.ok ? p.dados : []
         }
+        if (acompanhar)
+            _atualizarDestaqueDeLista()
     }
 
     function retirarCaixa(c) {
@@ -666,10 +756,16 @@ FocusScope {
     }
 
     // Só a situação e a lista de referências (não mexe no que está sendo digitado).
+    // MG-5: preserva o destaque preso ao registro durante recarga da lista.
     function recarregarReferencias() {
+        const acompanhar = !!janela && !!tela.guia && tela.guia.requisito.campos[0] === "referencia"
+        if (acompanhar)
+            janela.guiaIniciarRecargaLista()
         const r = Api.chamar("sync_ler")
         if (r.ok)
             sync = r.dados
+        if (acompanhar)
+            _atualizarDestaqueDeLista()
     }
 
     function salvarSync() {
@@ -715,11 +811,7 @@ FocusScope {
         interval: 3000
         repeat: true
         running: tela.StackView.status === StackView.Active && !!tela.sync && tela.sync.ligado
-        onTriggered: {
-            const r = Api.chamar("sync_ler")
-            if (r.ok)
-                tela.sync = r.dados
-        }
+        onTriggered: tela.recarregarReferencias()
     }
 
     function quandoFoi(iso) {
@@ -806,6 +898,7 @@ FocusScope {
                 backup: "Cópias dos dados no computador e no Google Drive",
                 caixas: "Os computadores da loja trocando dados pela rede",
                 fiscal: "Emissão fiscal, CSOSN, regras de ST, NCM e PIS/Cofins das peças",
+                aparencia: "Tema visual e preferência de movimento deste " + Tema.aparelho,
                 sobre: "Versão e onde ficam os dados"
             })[tela.secao]
             Layout.fillWidth: true
@@ -860,11 +953,13 @@ FocusScope {
                         { id: "impressao", nome: "Impressão" },
                         { id: "simultaneidade", nome: "Simultaneidade" },
                         { id: "gerente", nome: "Gerente" },
+                        { id: "aparencia", nome: "Aparência" },
                         { id: "sobre", nome: "Sobre" }
                     ] : [
                         { id: "loja", nome: "Este computador" },
                         { id: "impressao", nome: "Impressão" },
                         { id: "simultaneidade", nome: "Simultaneidade" },
+                        { id: "aparencia", nome: "Aparência" },
                         { id: "sobre", nome: "Sobre" }
                     ]
                     atual: tela.grupo
@@ -955,14 +1050,14 @@ FocusScope {
                             rotulo: "Nome da loja"
                             maximo: 80
                             Layout.fillWidth: true
-                            onEditado: tela.alterado = true
+                            onEditado: tela.marcarAlterado()
                         }
                         Campo {
                             id: caixa
                             rotulo: "Nome deste computador"
                             maximo: 30
                             Layout.preferredWidth: 220
-                            onEditado: tela.alterado = true
+                            onEditado: tela.marcarAlterado()
                         }
                     }
                     Linha {
@@ -981,13 +1076,13 @@ FocusScope {
                             maiusculas: true
                             sensivel: true
                             Layout.preferredWidth: 270
-                            onEditado: tela.alterado = true
+                            onEditado: tela.marcarAlterado()
                         }
                         Selecao {
                             id: ufLoja
                             rotulo: "Estado"
                             Layout.preferredWidth: 100
-                            onEscolhido: tela.alterado = true
+                            onEscolhido: tela.marcarAlterado()
                         }
                         Nota {
                             text: "O estado decide as regras de ST. O CNPJ confere se a nota de compra é mesmo para a loja."
@@ -2494,6 +2589,48 @@ FocusScope {
                     sourceComponent: SecaoBackup { width: corpo.width }
                 }
 
+                // ---------------- Aparência (P6 / MG-D1) ----------------
+                Faixa {
+                    visible: tela.secao === "aparencia"
+                    titulo: "Aparência deste " + Tema.aparelho
+                    color: Tema.pergaminho
+                    Layout.fillWidth: true
+                    Rotulo { text: "Tema" }
+                    RowLayout {
+                        spacing: 14
+                        Layout.fillWidth: true
+                        Aparencia {}
+                        Nota {
+                            text: "Escolha Claro, Escuro (AMOLED) ou Planeta Roxo. Vale só para este " + Tema.aparelho + "."
+                            Layout.fillWidth: true
+                        }
+                    }
+                    Rotulo { text: "Movimento reduzido"; Layout.topMargin: 10 }
+                    Nota {
+                        text: "Controla a rolagem guiada e as transições de tela neste " + Tema.aparelho
+                              + ". Em movimento reduzido, a tela vai direto ao campo e usa apenas esmaecimento leve."
+                        Layout.fillWidth: true
+                    }
+                    Pilulas {
+                        id: pilulasMovimento
+                        objectName: "pilulasMovimentoReduzido"
+                        pequenas: true
+                        modelo: [
+                            { id: "sistema", nome: "Seguir o " + Tema.aparelho },
+                            { id: "ligado", nome: "Reduzido" },
+                            { id: "desligado", nome: "Normal" }
+                        ]
+                        atual: Tema.modoMovimento
+                        onEscolhido: id => tela.escolherMovimento(id)
+                    }
+                    Nota {
+                        text: Tema.movimentoReduzido
+                              ? "Ativo agora: movimento reduzido (sem rolagem animada)."
+                              : "Ativo agora: movimento normal (rolagem suave)."
+                        Layout.fillWidth: true
+                    }
+                }
+
                 // ---------------- Sobre ----------------
                 Faixa {
                     visible: tela.secao === "sobre"
@@ -2559,7 +2696,7 @@ FocusScope {
         // Aberta por uma notificação numa parte que só aparece com a senha do
         // gerente: pede a senha ali mesmo, sem trocar de usuário.
         // Desistir da senha aqui volta para a tela de antes (NOTIF-03).
-        const soComGerente = !["loja", "impressao", "sobre"].includes(secao)
+        const soComGerente = !["loja", "impressao", "aparencia", "sobre"].includes(secao)
         if (partesSimultaneidade.includes(secao)) {
             const destino = secao
             secao = "loja"

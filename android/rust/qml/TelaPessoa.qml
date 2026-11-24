@@ -241,10 +241,113 @@ FocusScope {
         }
     }
 
+    function rolarAte(item, aoTerminar) {
+        if (!item)
+            return
+        if (janela && typeof janela.rolarAteItem === "function") {
+            janela.rolarAteItem(rolagem, item, 120, aoTerminar)
+            return
+        }
+        const y = item.mapToItem(rolagem.contentItem, 0, 0).y
+        if (y < rolagem.contentY + 20 || y + item.height > rolagem.contentY + rolagem.height - 20)
+            rolagem.contentY = Math.max(0, Math.min(y - 120, rolagem.contentHeight - rolagem.height))
+        if (typeof aoTerminar === "function")
+            aoTerminar(false)
+    }
+
+    // NCG-1 / NCG-2: validação progressiva alinhada às regras de `pessoas::validar`.
+    function pendenciasDeValidacao() {
+        const lista = []
+        const docLimpo = documento.texto.replace(/[^0-9A-Za-z]/g, "").toUpperCase()
+        if (docLimpo !== "") {
+            const docOk = docLimpo.length === 11 ? documento.cpfValido(docLimpo)
+                        : docLimpo.length === 14 ? documento.cnpjValido(docLimpo) : false
+            if (!docOk) {
+                const ehCnpj = juridica || docLimpo.length > 11
+                lista.push({
+                    chave: "documento",
+                    item: documento,
+                    rolagem: rolagem,
+                    titulo: ehCnpj ? "CNPJ inválido" : "CPF inválido",
+                    texto: ehCnpj ? "CNPJ inválido. Confira os números e as letras." : "CPF inválido. Confira os números."
+                })
+            } else {
+                documento.erro = ""
+            }
+        } else {
+            documento.erro = ""
+        }
+        if (nome.texto.trim() === "") {
+            lista.push({
+                chave: "nome",
+                item: nome,
+                rolagem: rolagem,
+                titulo: juridica ? "Falta a razão social" : "Falta o nome",
+                texto: juridica ? "Digite a razão social." : "Digite o nome."
+            })
+        } else {
+            nome.erro = ""
+        }
+        const em = email.texto.trim().toLowerCase()
+        if (em !== "") {
+            const partes = em.split("@")
+            const emailOk = partes.length === 2 && partes[0] !== "" && partes[1].indexOf(".") >= 0
+                            && em.indexOf(" ") < 0 && em.length <= 80
+            if (!emailOk) {
+                lista.push({
+                    chave: "email",
+                    item: email,
+                    rolagem: rolagem,
+                    titulo: "E-mail inválido",
+                    texto: "E-mail inválido (ex.: nome@empresa.com.br)."
+                })
+            } else {
+                email.erro = ""
+            }
+        } else {
+            email.erro = ""
+        }
+        const digCep = cep.texto.replace(/\D/g, "")
+        if (digCep !== "" && digCep.length !== 8) {
+            lista.push({
+                chave: "cep",
+                item: cep,
+                rolagem: rolagem,
+                titulo: "CEP incompleto",
+                texto: "O CEP tem 8 números (ex.: 18320-095)."
+            })
+        } else {
+            cep.erro = ""
+        }
+        const diaTxt = diaVencimento.texto.trim()
+        if (diaTxt !== "") {
+            const diaNum = Number(diaTxt)
+            if (!/^\d+$/.test(diaTxt) || diaNum < 1 || diaNum > 31) {
+                lista.push({
+                    chave: "diaVencimento",
+                    item: diaVencimento,
+                    rolagem: rolagem,
+                    titulo: "Dia de vencimento inválido",
+                    texto: "Use um dia de 1 a 31 (ou deixe vazio)."
+                })
+            } else {
+                diaVencimento.erro = ""
+            }
+        } else {
+            diaVencimento.erro = ""
+        }
+        return lista
+    }
+
     function salvar() {
+        for (const c of todosCampos())
+            c.erro = ""
+        if (janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
+            return
         const eraNova = nova
         const r = Api.gravar("pessoa_salvar", coletar(), chave)
         if (r.ok) {
+            janela.encerrarValidacaoProgressiva(tela)
             concluirRascunho()
             chave = Api.novaChave()
             preencher(r.dados)
@@ -271,8 +374,10 @@ FocusScope {
         }
         if (alvo) {
             alvo.erro = mensagem
-            if (typeof alvo.focar === "function")
-                alvo.focar()
+            rolarAte(alvo, () => {
+                if (typeof alvo.focar === "function")
+                    alvo.focar()
+            })
         }
         janela.avisar(mensagem, "erro")
     }
@@ -281,6 +386,8 @@ FocusScope {
         if (!carregando) {
             alterado = true
             timerRascunho.restart()
+            if (janela)
+                janela.reavaliarValidacaoProgressiva(tela)
         }
     }
 
@@ -760,6 +867,8 @@ FocusScope {
 
     Component.onCompleted: carregar()
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         if (nova)
             documento.focar()
         else

@@ -798,7 +798,11 @@ FocusScope {
                 // valer quando a pessoa mexe: rola o miolo ou edita um campo.
                 property bool irAoFim: false
                 function mostrarFim() {
-                    contentY = Math.max(0, contentHeight - height)
+                    const dest = Math.max(0, contentHeight - height)
+                    if (tela.janela && typeof tela.janela.rolarSuave === "function")
+                        tela.janela.rolarSuave(rolagemPagar, dest)
+                    else
+                        contentY = dest
                 }
                 onContentHeightChanged: if (irAoFim) mostrarFim()
                 onHeightChanged: if (irAoFim) mostrarFim()
@@ -1228,6 +1232,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         const f = Api.chamar("formas_pagamento")
         if (f.ok)
             formas = f.dados

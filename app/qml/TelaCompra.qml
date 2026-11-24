@@ -210,8 +210,12 @@ FocusScope {
         if (compra.pendentes > 0) {
             janela.avisar("Decida o que fazer com " + (compra.pendentes === 1 ? "o item marcado" : "os " + compra.pendentes + " itens marcados") + " em rosa.", "erro")
             const i = compra.itens.findIndex(it => it.acao === "")
-            if (i >= 0)
-                lista.positionViewAtIndex(i, ListView.Contain)
+            if (i >= 0) {
+                if (janela && typeof janela.rolarAteIndice === "function")
+                    janela.rolarAteIndice(lista, i, ListView.Contain)
+                else
+                    lista.positionViewAtIndex(i, ListView.Contain)
+            }
             return
         }
         const partes = []
@@ -962,6 +966,8 @@ FocusScope {
         Qt.callLater(() => lista.positionViewAtBeginning())
     }
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         if (primeiraAtivacao)
             primeiraAtivacao = false
         else if (compra)

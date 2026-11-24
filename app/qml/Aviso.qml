@@ -40,7 +40,7 @@ Rectangle {
         horizontalAlignment: Text.AlignHCenter
     }
 
-    Behavior on opacity { NumberAnimation { duration: 160 } }
+    Behavior on opacity { NumberAnimation { duration: Tema.duracaoEsmaecer(160) } }
 
     // Só para os testes (INT9-R7, 19/11/2026): como o último aviso fechou, "toque" ou "tempo", dito na leitura dos
     // textos da tela (TESTE_AVISO_FECHADO, Main.escreverTextos). Numa máquina lenta, o teste do toque não consegue

@@ -15,18 +15,23 @@ FocusScope {
     // muda valor: estornar, se for o caso, continua lá, com a senha.
     signal verConta(string contaId, string fechamentoId)
     function mostrarFechamento(id) {
-        lista.positionViewAtEnd()
-        Qt.callLater(() => {
+        const destacarItem = () => {
             // A lista dos fechamentos fica no rodapé da lista (outro escopo): pelo footerItem.
             const rep = lista.footerItem ? lista.footerItem.fechamentos : null
             for (let i = 0; rep && i < rep.count; i++) {
                 const l = rep.itemAt(i)
                 if (l && l.modelData.id === id) {
-                    janela.destacarAlvo(l, null)
+                    janela.destacarAlvo(l, lista)
                     return
                 }
             }
-        })
+        }
+        if (janela && typeof janela.rolarSuave === "function") {
+            janela.rolarSuave(lista, Math.max(0, lista.contentHeight - lista.height), { aoTerminar: () => Qt.callLater(destacarItem) })
+        } else {
+            lista.positionViewAtEnd()
+            Qt.callLater(destacarItem)
+        }
     }
 
     function datas(p) {

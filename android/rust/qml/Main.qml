@@ -6,9 +6,23 @@ import rustinho
 
 // Janela principal: controla qual tela aparece (pilha de telas).
 ApplicationWindow {
-    // QT-1b, N-01 da re-revisão (parte 2): o quadro com o resultado da gravação foi desenhado; a entrega é
-    // confirmada ao núcleo (veja Api.confirmarEntrega).
-    onFrameSwapped: Api.confirmarEntrega()
+    // T-02 (QT-1b / 0.9.19-dev.1): a confirmação de entrega ao núcleo só acontece depois que
+    // o quadro que já sincronizou o estado pós-gravação (`afterSynchronizing`) é efetivamente
+    // exibido (`frameSwapped`). Um `frameSwapped` de um quadro sincronizado antes da gravação
+    // não confirma prematuramente; se uma gravação chegou depois, pede o próximo quadro.
+    property bool _entregaSincronizadaNoQuadro: false
+    onAfterSynchronizing: {
+        if (Api._entregaPendente)
+            _entregaSincronizadaNoQuadro = true
+    }
+    onFrameSwapped: {
+        if (_entregaSincronizadaNoQuadro) {
+            _entregaSincronizadaNoQuadro = false
+            Api.confirmarEntrega()
+        } else if (Api._entregaPendente) {
+            janela.update()
+        }
+    }
     id: janela
     width: 1280
     height: 760
@@ -74,6 +88,10 @@ ApplicationWindow {
             estado = r.dados
             // 0.9.18: "tema" (cinza, amoled, roxo); um núcleo de antes só manda "escuro".
             Tema.tema = r.dados.tema || (r.dados.escuro ? "amoled" : "cinza")
+            // 0.9.19-dev.1 (P6 / MG-8 / MG-D1): preferência de movimento reduzido (aparelho + OS).
+            Tema.modoMovimento = r.dados.movimentoReduzido || "sistema"
+            Tema.movimentoReduzidoSistema = Sistema.movimento_reduzido_sistema()
+                || (textosDaTela && Qt.application.arguments.indexOf("--movimento-reduzido-sistema") >= 0)
             erroGeral = ""
         } else {
             erroGeral = r.erro
@@ -126,18 +144,28 @@ ApplicationWindow {
 
     function inicio() {
         largarGuia()
+        encerrarValidacaoProgressiva()
+        pilhaSuspensaoF11 = []
+        origemDaFaixa = null
+        movimento.cancelar(true)
+        guia.semDestaque(true)
+        guia.esconder()
         pilha.pop(null)
     }
 
     function trocarPara(tela, propriedades) {
         largarGuia()
+        encerrarValidacaoProgressiva()
+        pilhaSuspensaoF11 = []
+        origemDaFaixa = null
+        movimento.cancelar(true)
         // BUG-20261118-SJ7F (casos 7j e 7k): a guia que acabou de terminar
         // deixa a faixa por alguns segundos ("A operação ainda não foi
         // concluída… O que você já tinha feito continua lá"), e o destaque leve
         // de uma notificação dura 6 s. A pilha inteira vai ser trocada (sessão
         // encerrada, trocar de usuário, backup restaurado): a tela de origem
         // sai, e nada disso vai junto para a tela seguinte.
-        guia.semDestaque()
+        guia.semDestaque(true)
         guia.esconder()
         fecharJanelinhas()
         pilha.clear(StackView.Immediate)
@@ -528,6 +556,26 @@ ApplicationWindow {
         }
     })
     property var guiaAtiva: null
+    // BUG-20261118-FXVT: tela dona da faixa de retorno da guia (quando ela sai da pilha, a faixa sai junto).
+    property var origemDaFaixa: null
+    // NCG-1 / NCG-2 (0.9.19-dev.1): validação progressiva guiada no mesmo formulário.
+    // { tela, obterPendencias, satisfeito, ultimoCampo }
+    property var validacaoAtiva: null
+    // NCG-3 (0.9.19-dev.1): pilha de suspensões da navegação livre por F11 (sem banner "Você veio de...").
+    property var pilhaSuspensaoF11: []
+    property bool retornandoDeF11: false
+
+    // Motor único de movimento (P6 / MG-1..MG-8 / MG-D4).
+    readonly property bool movimentoAtivo: movimento.ativo
+    function rolarSuave(area, destinoY, opcoes) { movimento.rolarSuave(area, destinoY, opcoes) }
+    function rolarAteItem(area, item, folga, aoTerminar, aoAtualizar) {
+        movimento.rolarAteItem(area, item, folga, aoTerminar, aoAtualizar)
+    }
+    function rolarAteIndice(lista, indice, modo, aoTerminar) {
+        movimento.rolarAteIndice(lista, indice, modo, aoTerminar)
+    }
+    function cancelarMovimento() { movimento.cancelar(false) }
+
     // Chamada pela tela de origem com a resposta recusada do núcleo. Devolve
     // true se a guia começou (ou já estava em andamento): a tela não precisa
     // fazer mais nada além de guardar o próprio estado.
@@ -545,6 +593,8 @@ ApplicationWindow {
             return false
         if (guiaAtiva)
             return true
+        encerrarValidacaoProgressiva()
+        origemDaFaixa = null
         const origem = pilha.currentItem
         const mesmaTela = req.mesmaTela === true && origem
                           && typeof origem.iniciarGuiaNaMesmaTela === "function"
@@ -558,7 +608,8 @@ ApplicationWindow {
             origemNome: (origem && origem.nomeNaNavegacao) ? origem.nomeNaNavegacao : "a tela de antes"
         }
         guiaAtiva = g
-        guia.mostrar("pendente", req.titulo, req.texto.arg(g.origemNome))
+        // NCG-2: enquanto a pendência existir, a orientação permanece visível (persistente).
+        guia.mostrar("pendente", req.titulo, req.texto.arg(g.origemNome), false, true)
         if (mesmaTela)
             origem.iniciarGuiaNaMesmaTela(g)
         else
@@ -566,48 +617,62 @@ ApplicationWindow {
         return true
     }
     // A tela de destino mostra qual campo destacar (e a rolagem dele).
-    function guiaDestacar(item, rolagem) {
-        if (guiaAtiva)
-            guia.destacar(item, rolagem)
+    // MG-15: `aoChegar` é chamado somente depois que a rolagem concluir e o destaque aparecer.
+    // Retorna true quando a janela assumiu o callback `aoChegar`.
+    function guiaDestacar(item, rolagem, aoChegar) {
+        if (!guiaAtiva)
+            return false
+        guia.destacar(item, rolagem, false, aoChegar)
+        return true
+    }
+    // MG-5: preserva o destaque preso ao registro durante recarga de lista.
+    function guiaIniciarRecargaLista() {
+        if (guiaAtiva || validacaoAtiva || guia.destacando)
+            guia.iniciarRecargaLista()
+    }
+    function guiaAtualizarRegistro(novoItem) {
+        if (guiaAtiva || validacaoAtiva || guia.recarregandoLista)
+            guia.atualizarItemDoRegistro(novoItem)
     }
     // 9a, 9c e 10a (C8, dev3.3): a notificação levou ao registro exato (um
     // só). Só o destaque visual, sem guia e sem orientação; some sozinho em
     // alguns segundos ou quando a tela sai. Nada é escolhido nem resolvido por
     // aqui: a decisão continua com a pessoa (e, no que é dele, com o gerente).
-    function destacarAlvo(item, rolagem) {
-        if (guiaAtiva || !item)
+    function destacarAlvo(item, rolagem, aoChegar) {
+        if (guiaAtiva || validacaoAtiva || !item)
             return
-        guia.destacar(item, rolagem, true)   // o véu leve (I4)
+        guia.destacar(item, rolagem, true, aoChegar)   // o véu leve (I4)
         fimDoDestaque.restart()
     }
     Timer {
         id: fimDoDestaque
         interval: 6000
-        onTriggered: if (!janela.guiaAtiva) guia.semDestaque()
+        onTriggered: if (!janela.guiaAtiva && !janela.validacaoAtiva) guia.semDestaque()
     }
     // O destino muda a orientação (vazio = a de sempre do requisito).
     function guiaOrientar(texto) {
         if (guiaAtiva)
             guia.mostrar("pendente", guiaAtiva.requisito.titulo,
-                         texto || guiaAtiva.requisito.texto.arg(guiaAtiva.origemNome))
+                         texto || guiaAtiva.requisito.texto.arg(guiaAtiva.origemNome), false, true)
     }
     // O destino tentou salvar e não deu: continua lá, com o que foi digitado.
     function guiaFalhou(mensagem) {
         if (guiaAtiva)
-            guia.mostrar("erro", "Não foi salvo", mensagem)
+            guia.mostrar("erro", "Não foi salvo", mensagem, false, true)
     }
     function finalizarRetornoGuia(g, satisfeito) {
-        // BUG-20261118-SJ7F (lacuna 14, caso 7i): a volta termina depois da
-        // troca de tela (depoisDaTroca). Se a sessão caiu nesse meio-tempo, a
-        // tela de origem foi descartada e a entrada está (ou vai estar) na
-        // tela: nada da guia vai junto para a entrada.
-        if (janela.voltandoParaEntrada || !(g.origem && pilha.find(item => item === g.origem) !== null))
+        // BUG-20261118-SJ7F (lacuna 14, caso 7i) e BUG-20261118-FXVT:
+        // a faixa pertence estritamente à tela de origem; se a sessão caiu ou a
+        // tela de origem já saiu (ou deixou de ser a atual), nada vai para outra tela.
+        if (janela.voltandoParaEntrada || !(g.origem && pilha.find(item => item === g.origem) !== null)
+                || pilha.currentItem !== g.origem)
             return
+        origemDaFaixa = g.origem
         if (satisfeito)
-            guia.mostrar("satisfeito", g.textoSatisfeito || "Requisito satisfeito — conclua a operação.", "")
+            guia.mostrar("satisfeito", g.textoSatisfeito || "Requisito satisfeito — conclua a operação.", "", false, false)
         else
             guia.mostrar("pendente", "A operação ainda não foi concluída",
-                         "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true)
+                         "Falta " + g.requisito.nome + ". O que você já tinha feito continua lá.", true, false)
         // No Fiscal embutido, o retorno na mesma tela atualiza os dados sem
         // recarregar a lista de regras de ST que pode ter edições pendentes.
         if (!g.mesmaTela && g.aoVoltar)
@@ -622,7 +687,7 @@ ApplicationWindow {
         if (satisfeito) {
             const r = Api.chamar("requisito_conferir", { id: g.id })
             if (!r.ok || !r.dados.satisfeito) {
-                guia.mostrar("erro", g.requisito.titulo, r.ok ? r.dados.falta : r.erro)
+                guia.mostrar("erro", g.requisito.titulo, r.ok ? r.dados.falta : r.erro, false, true)
                 return false
             }
             requisitoConfirmado = r.dados
@@ -635,6 +700,9 @@ ApplicationWindow {
             return true
         if (g.mesmaTela) {
             depoisDaTroca(() => {
+                // O3 (BUG-20261118-FXVT): reconfere a presença da origem na pilha antes de restaurar.
+                if (janela.voltandoParaEntrada || !(g.origem && pilha.find(item => item === g.origem) !== null))
+                    return
                 g.origem.restaurarGuiaNaMesmaTela(requisitoConfirmado)
                 finalizarRetornoGuia(g, satisfeito)
             })
@@ -645,6 +713,207 @@ ApplicationWindow {
         // ficar ativa; a retomada vem em seguida, sem disputar com isso).
         depoisDaTroca(() => finalizarRetornoGuia(g, satisfeito))
         return true
+    }
+
+    // ---- NCG-1 e NCG-2 (0.9.19-dev.1): validação progressiva guiada no mesmo formulário ----
+    // Conduz o usuário campo a campo pelas pendências detectadas ao tentar salvar;
+    // a notificação é persistente (não some por tempo), avança sozinha quando o
+    // campo é corrigido e muda para "Requisito satisfeito — conclua a operação"
+    // sem nunca gravar automaticamente.
+    function iniciarValidacaoProgressiva(telaOrigem, obterPendencias) {
+        debounceValidacao.stop()
+        if (guiaAtiva || !telaOrigem || typeof obterPendencias !== "function")
+            return false
+        const pendencias = obterPendencias()
+        if (!Array.isArray(pendencias) || pendencias.length === 0) {
+            encerrarValidacaoProgressiva(telaOrigem)
+            return false
+        }
+        origemDaFaixa = null
+        validacaoAtiva = {
+            tela: telaOrigem,
+            obterPendencias: obterPendencias,
+            satisfeito: false,
+            ultimoCampo: ""
+        }
+        _aplicarEtapaValidacao(pendencias)
+        return true
+    }
+
+    function _aplicarEtapaValidacao(pendencias) {
+        if (!validacaoAtiva || !Array.isArray(pendencias) || pendencias.length === 0)
+            return
+        const p = pendencias[0]
+        if (typeof p.preparar === "function")
+            p.preparar()
+        if (p.item && p.item.erro !== undefined)
+            p.item.erro = p.texto || ""
+        const restantes = pendencias.length > 1
+            ? " (1 de " + pendencias.length + " pendências — corrija e avance para a próxima)"
+            : ""
+        guia.mostrar("pendente", p.titulo || "Corrija o campo destacado", (p.texto || "") + restantes, false, true)
+        if (validacaoAtiva.ultimoCampo !== p.chave) {
+            validacaoAtiva.ultimoCampo = p.chave
+            const alvoItem = p.item
+            const areaItem = p.rolagem || null
+            const focarFn = () => {
+                if (!validacaoAtiva || validacaoAtiva.ultimoCampo !== p.chave)
+                    return
+                if (typeof p.focar === "function")
+                    p.focar()
+                else if (alvoItem && typeof alvoItem.focarSempre === "function")
+                    alvoItem.focarSempre()
+                else if (alvoItem && typeof alvoItem.focar === "function")
+                    alvoItem.focar()
+                else if (alvoItem && alvoItem.combo)
+                    alvoItem.combo.forceActiveFocus()
+            }
+            Qt.callLater(() => {
+                if (!validacaoAtiva || validacaoAtiva.ultimoCampo !== p.chave)
+                    return
+                guia.destacar(alvoItem, areaItem, false, focarFn)
+            })
+        }
+    }
+
+    // Debounce gentil: impede que a validação progressiva roube o foco na 1ª letra digitada
+    // de um campo livre (ex.: nome ou preço); avança automaticamente assim que a pessoa termina
+    // de digitar (~600 ms) ou imediatamente ao sair do campo / tentar salvar.
+    Timer {
+        id: debounceValidacao
+        interval: 600
+        onTriggered: janela._executarReavaliacaoValidacao()
+    }
+
+    function _executarReavaliacaoValidacao() {
+        if (!validacaoAtiva)
+            return
+        const pendencias = validacaoAtiva.obterPendencias()
+        if (Array.isArray(pendencias) && pendencias.length > 0) {
+            validacaoAtiva.satisfeito = false
+            _aplicarEtapaValidacao(pendencias)
+            return
+        }
+        // Todos os requisitos foram satisfeitos: remove destaque, muda a notificação
+        // persistente e aguarda a confirmação explícita do usuário em Salvar (NCG-1 / NCG-2).
+        validacaoAtiva.satisfeito = true
+        validacaoAtiva.ultimoCampo = ""
+        guia.semDestaque()
+        guia.mostrar("satisfeito", "Requisito satisfeito — conclua a operação",
+                     "Todos os campos pendentes foram corrigidos. Clique em Salvar (F2) para gravar.", false, true)
+    }
+
+    function reavaliarValidacaoProgressiva(telaOrigem, imediato) {
+        if (!validacaoAtiva || validacaoAtiva.tela !== telaOrigem)
+            return
+        const pendencias = validacaoAtiva.obterPendencias()
+        const continuaNoMesmo = Array.isArray(pendencias) && pendencias.length > 0
+                                && pendencias[0].chave === validacaoAtiva.ultimoCampo
+        if (continuaNoMesmo) {
+            debounceValidacao.stop()
+            _aplicarEtapaValidacao(pendencias)
+            return
+        }
+        if (imediato === true) {
+            debounceValidacao.stop()
+            _executarReavaliacaoValidacao()
+        } else {
+            debounceValidacao.restart()
+        }
+    }
+
+    function encerrarValidacaoProgressiva(telaOrigem) {
+        debounceValidacao.stop()
+        if (!validacaoAtiva)
+            return
+        if (telaOrigem && validacaoAtiva.tela !== telaOrigem)
+            return
+        validacaoAtiva = null
+        if (!guiaAtiva) {
+            guia.semDestaque()
+            guia.esconder()
+        }
+    }
+
+    // ---- NCG-3 (0.9.19-dev.1): navegação livre com F11 e retorno exato sem banner ----
+    function abrirBuscaLivreF11() {
+        const tela = pilha.currentItem
+        if (!tela)
+            return
+        if (typeof tela.guardarRascunhoAgora === "function") {
+            try {
+                tela.guardarRascunhoAgora()
+            } catch (e) {
+                console.warn("Rustinho: falha ao guardar rascunho antes do F11: " + e)
+            }
+        }
+        const foco = janela.activeFocusItem
+        const snap = {
+            tela: tela,
+            foco: foco,
+            cursor: foco && foco.cursorPosition !== undefined ? foco.cursorPosition : -1,
+            selStart: foco && foco.selectionStart !== undefined ? foco.selectionStart : -1,
+            selEnd: foco && foco.selectionEnd !== undefined ? foco.selectionEnd : -1,
+            guiaAtiva: guiaAtiva,
+            validacaoAtiva: validacaoAtiva,
+            origemDaFaixa: origemDaFaixa,
+            avisoGuia: guia.temAviso ? {
+                estado: guia.estado,
+                titulo: guia.titulo,
+                texto: guia.texto,
+                persistente: guia.persistente
+            } : null,
+            alvoDestaque: guia.alvo,
+            rolagemDestaque: guia.areaRolagem,
+            veuLeve: guia.veuLeve
+        }
+        pilhaSuspensaoF11 = pilhaSuspensaoF11.concat([snap])
+        movimento.cancelar(true)
+        // Suspende visualmente a guia/validação sem cancelá-la nem mostrar banner de origem.
+        guiaAtiva = null
+        validacaoAtiva = null
+        origemDaFaixa = null
+        guia.semDestaque(true)
+        guia.esconder()
+        abrir("TelaPecas")
+    }
+
+    function restaurarBuscaLivreF11() {
+        if (pilhaSuspensaoF11.length === 0)
+            return
+        const topo = pilhaSuspensaoF11[pilhaSuspensaoF11.length - 1]
+        if (!topo || pilha.currentItem !== topo.tela)
+            return
+        pilhaSuspensaoF11 = pilhaSuspensaoF11.slice(0, pilhaSuspensaoF11.length - 1)
+        retornandoDeF11 = true
+        depoisDaTroca(() => {
+            Qt.callLater(() => { janela.retornandoDeF11 = false })
+            if (pilha.currentItem !== topo.tela)
+                return
+            guiaAtiva = topo.guiaAtiva
+            validacaoAtiva = topo.validacaoAtiva
+            origemDaFaixa = topo.origemDaFaixa
+            if (topo.avisoGuia)
+                guia.mostrar(topo.avisoGuia.estado, topo.avisoGuia.titulo, topo.avisoGuia.texto,
+                             false, topo.avisoGuia.persistente)
+            if (topo.alvoDestaque && topo.alvoDestaque.visible)
+                guia.destacar(topo.alvoDestaque, topo.rolagemDestaque, topo.veuLeve)
+            if (topo.foco && topo.foco.visible) {
+                try {
+                    topo.foco.forceActiveFocus()
+                    if (topo.selStart >= 0 && topo.selEnd >= 0 && topo.selStart !== topo.selEnd
+                            && typeof topo.foco.select === "function") {
+                        const lim = typeof topo.foco.text === "string" ? topo.foco.text.length : topo.selEnd
+                        topo.foco.select(Math.min(topo.selStart, lim), Math.min(topo.selEnd, lim))
+                    } else if (topo.cursor >= 0 && topo.foco.cursorPosition !== undefined) {
+                        const lim = typeof topo.foco.text === "string" ? topo.foco.text.length : topo.cursor
+                        topo.foco.cursorPosition = Math.min(topo.cursor, lim)
+                    }
+                } catch (e) {
+                    // O controle focado antes pode ter sido recriado; a tela segue funcional.
+                }
+            }
+        })
     }
     // Roda f quando a pilha terminar a troca de telas em andamento.
     function depoisDaTroca(f) {
@@ -834,26 +1103,32 @@ ApplicationWindow {
         // A orientação da navegação guiada fica no alto, no espaço dela.
         // A orientação da guia e o aviso rápido ficam no alto, cada um no seu espaço: as telas descem por eles.
         anchors.topMargin: guia.alturaNoAlto + aviso.alturaNoAlto
-        Behavior on anchors.topMargin { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on anchors.topMargin {
+            NumberAnimation {
+                id: animDescida
+                duration: Tema.duracaoPosicao(140)
+                easing.type: Easing.OutCubic
+            }
+        }
         focus: true
 
         pushEnter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Tema.duracaoEsmaecer(140) }
         }
         pushExit: Transition {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Tema.duracaoEsmaecer(100) }
         }
         popEnter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Tema.duracaoEsmaecer(140) }
         }
         popExit: Transition {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Tema.duracaoEsmaecer(100) }
         }
         replaceEnter: Transition {
-            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140 }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Tema.duracaoEsmaecer(140) }
         }
         replaceExit: Transition {
-            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Tema.duracaoEsmaecer(100) }
         }
 
         // Esc volta, pelo mesmo caminho da seta (cada tela pode decidir
@@ -882,11 +1157,12 @@ ApplicationWindow {
     // Enquanto as telas se movem, e por um instante depois, o clique e o toque nelas são DESCARTADOS (não vão para
     // lugar nenhum). O teclado, a roda do mouse, o próprio aviso, a guia e as janelinhas continuam valendo.
     readonly property real descidaDasTelas: guia.alturaNoAlto + aviso.alturaNoAlto
+    readonly property bool descidaAnimando: animDescida.running
     onDescidaDasTelasChanged: cliqueDescartado.restart()
     Timer {
         id: cliqueDescartado
         // A volta das telas (140 ms) e um instante depois (300 ms), o tempo de quem já ia clicar.
-        interval: 440
+        interval: Tema.movimentoReduzido ? 300 : 440
     }
     // Decisão 2c do proprietário (18/11/2026, bug YVZ4), no escopo que ele
     // aprovou (ajuste depois do S1-R4 da revisão Sonnet): ignorar novos cliques
@@ -997,6 +1273,8 @@ ApplicationWindow {
     Connections {
         target: Api
         function onGravou() {
+            // T-02: garante um ciclo afterSynchronizing -> frameSwapped após toda gravação.
+            janela.update()
             if (janela.toqueNoBotao && Date.now() - janela.toqueNoBotao.quando < 1500) {
                 conferirLinhaDoToque.vezes = 0
                 conferirLinhaDoToque.interval = janela.atrasoConferenciaTeste > 0 ? janela.atrasoConferenciaTeste : 25
@@ -1165,16 +1443,22 @@ ApplicationWindow {
                                                 + " · setas visíveis: " + janela.setasVisiveis())
     }
 
-    // F11: ir para a busca de peças de qualquer lugar.
+    // F11 (NCG-3, 0.9.19-dev.1): ir para a busca de peças de qualquer tela preservando
+    // o estado exato da tela de origem (foco, cursor, guia e validação) para retorno
+    // sem banner "Você veio de...". Em TelaPecas e TelaInicio, apenas foca a busca.
     Shortcut {
         sequence: "F11"
         enabled: !!janela.estado.usuario
         onActivated: {
             const tela = pilha.currentItem
-            if (tela && typeof tela.focarBusca === "function")
-                tela.focarBusca()
-            else
-                janela.abrir("TelaPecas")
+            if (!tela)
+                return
+            if (tela.objectName === "telaPecas" || tela.objectName === "telaInicio") {
+                if (typeof tela.focarBusca === "function")
+                    tela.focarBusca()
+                return
+            }
+            janela.abrirBuscaLivreF11()
         }
     }
 
@@ -1283,6 +1567,8 @@ ApplicationWindow {
     // acrescenta a área de toque de cada controle (linhas TOQUE:) e o
     // retângulo de cada texto (linhas RET:).
     readonly property bool medirToque: textosDaTela && Qt.application.arguments.indexOf("--medir-toque") >= 0
+    // P6 / T021 (0.9.19-dev.1): telemetria de movimento somente nos testes (--medir-movimento).
+    readonly property bool medirMovimento: textosDaTela && Qt.application.arguments.indexOf("--medir-movimento") >= 0
     Shortcut {
         sequence: "Ctrl+Shift+F12"
         enabled: janela.textosDaTela
@@ -1340,6 +1626,12 @@ ApplicationWindow {
         linhas.push("0\t0\tTESTE_TOQUE_DEPOIS_DA_MUDANCA:" + Math.round(janela.toqueDepoisDaMudanca))
         linhas.push("0\t0\tTESTE_AVISO_FECHADO:" + aviso.fechadoPor)
         linhas.push("0\t0\tTESTE_SETAS_VISIVEIS:" + janela.setasVisiveis())
+        linhas.push("0\t0\tTESTE_MOVIMENTO_REDUZIDO:" + (Tema.movimentoReduzido ? 1 : 0))
+        linhas.push("0\t0\tTESTE_MODO_MOVIMENTO:" + Tema.modoMovimento)
+        linhas.push("0\t0\tTESTE_GUIA_PERSISTENTE:" + (guia.temAviso && guia.persistente ? 1 : 0))
+        linhas.push("0\t0\tTESTE_F11_SUSPENSAS:" + janela.pilhaSuspensaoF11.length)
+        linhas.push("0\t0\tTESTE_MOVIMENTO_ATIVO:" + (janela.movimentoAtivo || guia.aguardandoChegada ? 1 : 0))
+        linhas.push("0\t0\tTESTE_DESTAQUE_ATIVO:" + (guia.destacando ? 1 : 0))
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
     // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas
@@ -1407,6 +1699,8 @@ ApplicationWindow {
                         + "|" + item.horizontalAlignment + "|" + componente(item) + "|" + item.text.replace(/[\s|]+/g, " ").trim())
         }
     }
+
+    Movimento { id: movimento }
 
     // O aviso rápido, no alto: abaixo da faixa do modo seguro e da orientação da guia.
     Aviso {
@@ -1589,6 +1883,30 @@ ApplicationWindow {
             if (conferirLinhaDoToque.running)
                 janela.concluirConferenciaDoToque(false)
             janela.toqueNoBotao = null
+            movimento.cancelar(true)
+            // BUG-20261118-FXVT: a faixa de retorno pertence à tela de origem;
+            // quando ela deixa de ser a tela atual (voltar/substituir/início), some.
+            if (!janela.guiaAtiva && !janela.validacaoAtiva && guia.temAviso
+                    && janela.origemDaFaixa && pilha.currentItem !== janela.origemDaFaixa) {
+                guia.esconder()
+                janela.origemDaFaixa = null
+            }
+            // Destaque solto (notificação sem guia/validação) não vaza para outra tela.
+            if (!janela.guiaAtiva && !janela.validacaoAtiva && guia.destacando)
+                guia.semDestaque(true)
+            // Validação progressiva (NCG-1) encerra quando a tela dela sai da pilha.
+            if (janela.validacaoAtiva && (!janela.validacaoAtiva.tela
+                    || pilha.find(item => item === janela.validacaoAtiva.tela) === null)) {
+                janela.encerrarValidacaoProgressiva()
+            }
+            // NCG-3: limpa suspensões de telas já removidas da pilha e restaura ao retornar à origem.
+            if (janela.pilhaSuspensaoF11.length > 0) {
+                const vivas = janela.pilhaSuspensaoF11.filter(s => s.tela && pilha.find(item => item === s.tela) !== null)
+                if (vivas.length !== janela.pilhaSuspensaoF11.length)
+                    janela.pilhaSuspensaoF11 = vivas
+                if (vivas.length > 0 && pilha.currentItem === vivas[vivas.length - 1].tela)
+                    janela.restaurarBuscaLivreF11()
+            }
             if (pilha.currentItem && typeof diagnostico !== "undefined") {
                 diagnostico.telaPronta(String(pilha.currentItem).split("(")[0])
                 contarSetasNoRegistro.restart()

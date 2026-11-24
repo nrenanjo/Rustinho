@@ -74,9 +74,18 @@ FocusScope {
         const i = painel ? painel.encomendas.findIndex(e => e.id === id) : -1
         if (i < 0)
             return
-        lista.positionViewAtIndex(i, ListView.Contain)
         linhaEscolhida = id
-        Qt.callLater(() => janela.destacarAlvo(lista.itemAtIndex(i), null))
+        const destacarLinha = () => {
+            const it = lista.itemAtIndex(i)
+            if (it)
+                janela.destacarAlvo(it, lista)
+        }
+        if (janela && typeof janela.rolarAteIndice === "function") {
+            janela.rolarAteIndice(lista, i, ListView.Contain, destacarLinha)
+        } else {
+            lista.positionViewAtIndex(i, ListView.Contain)
+            Qt.callLater(destacarLinha)
+        }
     }
     function nova() {
         nova_.abrir()

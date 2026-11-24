@@ -403,14 +403,105 @@ FocusScope {
         carregar()
     }
 
+    function _numeroPositivo(texto) {
+        const s = String(texto || "").trim().replace(/\./g, "").replace(",", ".")
+        const v = Number(s)
+        return s !== "" && !isNaN(v) && v > 0
+    }
+
+    function _precoTabela1Linha() {
+        for (let i = 0; i < repPrecos.count; i++) {
+            const linha = repPrecos.itemAt(i)
+            if (linha && linha.tabela === 1)
+                return linha
+        }
+        return null
+    }
+
+    // NCG-1 / NCG-2: lista de pendências de validação do formulário na ordem de preenchimento.
+    function pendenciasDeValidacao() {
+        const lista = []
+        if (nome.texto.trim() === "") {
+            lista.push({
+                chave: "nome",
+                item: nome,
+                rolagem: rolagem,
+                titulo: "Falta o nome da peça",
+                texto: "Digite o nome da peça."
+            })
+        } else {
+            nome.erro = ""
+        }
+        const linha1 = _precoTabela1Linha()
+        if (linha1) {
+            const temPreco = _numeroPositivo(linha1.campoPreco.texto)
+            const temLucroComCusto = _numeroPositivo(campoCusto.texto) && _numeroPositivo(linha1.campoLucro.texto)
+            if (!precoAberto.checked && !temPreco && !temLucroComCusto) {
+                lista.push({
+                    chave: "preco1",
+                    item: linha1.campoPreco,
+                    rolagem: rolagem,
+                    titulo: "Falta o preço de venda",
+                    texto: "Informe o preço de revenda (ou marque \"preço na hora da venda\")."
+                })
+            } else {
+                linha1.campoPreco.erro = ""
+            }
+        }
+        const cb = codigoBarras.texto.replace(/\s+/g, "")
+        if (cb !== "" && (!/^\d+$/.test(cb) || !codigoBarras.gtinValido(cb))) {
+            lista.push({
+                chave: "codigoBarras",
+                item: codigoBarras,
+                rolagem: rolagem,
+                titulo: "Código de barras inválido",
+                texto: "Código de barras inválido. Confira os números (o último dígito não confere)."
+            })
+        } else {
+            codigoBarras.erro = ""
+        }
+        if (!servico) {
+            const digNcm = ncm.texto.replace(/\D/g, "")
+            if (digNcm !== "" && digNcm.length !== 8) {
+                lista.push({
+                    chave: "ncm",
+                    item: ncm,
+                    rolagem: rolagem,
+                    preparar: () => { blocoFiscal = "icms" },
+                    titulo: "NCM incompleto",
+                    texto: "O NCM tem 8 números (ex.: 8482.20.10)."
+                })
+            } else {
+                ncm.erro = ""
+            }
+            const digCest = cest.texto.replace(/\D/g, "")
+            if (digCest !== "" && digCest.length !== 7) {
+                lista.push({
+                    chave: "cest",
+                    item: cest,
+                    rolagem: rolagem,
+                    preparar: () => { blocoFiscal = "icms" },
+                    titulo: "CEST incompleto",
+                    texto: "O CEST tem 7 números (ex.: 01.999.00)."
+                })
+            } else {
+                cest.erro = ""
+            }
+        }
+        return lista
+    }
+
     function salvar() {
         limparErros()
+        if (janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
+            return
         const eraNova = nova
         // D-09: mudar o preço de venda de uma peça cadastrada pede a senha
         // do gerente, para este salvar com estes dados (desconto na venda é
         // outra coisa).
         janela.chamarGerente("produto_salvar", coletar(), r => {
             if (r.ok) {
+                janela.encerrarValidacaoProgressiva(tela)
                 tela.concluirRascunho()
                 tela.chave = Api.novaChave()
                 const s = Api.chamar("produto_sugestoes")
@@ -507,10 +598,18 @@ FocusScope {
         janela.avisar(mensagem, "erro")
     }
 
-    function rolarAte(item) {
+    function rolarAte(item, aoTerminar) {
+        if (!item)
+            return
+        if (janela && typeof janela.rolarAteItem === "function") {
+            janela.rolarAteItem(rolagem, item, 120, aoTerminar)
+            return
+        }
         const y = item.mapToItem(rolagem.contentItem, 0, 0).y
         if (y < rolagem.contentY + 20 || y + item.height > rolagem.contentY + rolagem.height - 20)
             rolagem.contentY = Math.max(0, Math.min(y - 120, rolagem.contentHeight - rolagem.height))
+        if (typeof aoTerminar === "function")
+            aoTerminar(false)
     }
 
     function csosnEscolhido() {
@@ -535,6 +634,8 @@ FocusScope {
         if (!carregando) {
             alterado = true
             timerRascunho.restart()
+            if (janela)
+                janela.reavaliarValidacaoProgressiva(tela)
         }
     }
 
@@ -1631,6 +1732,8 @@ FocusScope {
 
     Component.onCompleted: carregar()
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         if (nova)
             nome.focar()
         else

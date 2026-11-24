@@ -1123,17 +1123,34 @@ impl Servico {
                 Ok(json!({ "saiu": n }))
             }
             "sync_ler" => self.sync_ler(),
-            // Tema da tela (cinza, AMOLED ou Planeta Roxo): vale só para este
-            // aparelho (não vai para os outros caixas nem vem do backup).
-            // Aceita também `{ escuro }`, das telas de antes da 0.9.18.
+            // Tema da tela (cinza, AMOLED ou Planeta Roxo) e preferência de movimento reduzido
+            // (P6 / MG-D1: "sistema" | "ligado" | "desligado"): valem só para este aparelho
+            // (não vão para os outros caixas nem vêm do backup).
             "aparencia_salvar" => {
                 let d: Aparencia = ler(dados)?;
-                let tema = d.tema()?;
-                config::gravar(&self.banco.conn, "tela_tema", tema)?;
-                // A chave antiga continua certa para quem volta a uma versão
-                // anterior (lá o roxo vira o cinza).
-                config::gravar(&self.banco.conn, "tela_escura", if tema == "amoled" { "1" } else { "0" })?;
-                Ok(json!({ "tema": tema, "escuro": tema == "amoled" }))
+                let tem_tema = d.tema.is_some() || d.escuro.is_some();
+                let tem_mov = d.movimento_reduzido.is_some();
+                if !tem_tema && !tem_mov {
+                    return Err(Erro::validacao("Escolha um tema ou a preferência de movimento."));
+                }
+                let tema = if tem_tema {
+                    let t = d.tema()?;
+                    config::gravar(&self.banco.conn, "tela_tema", t)?;
+                    // A chave antiga continua certa para quem volta a uma versão
+                    // anterior (lá o roxo vira o cinza).
+                    config::gravar(&self.banco.conn, "tela_escura", if t == "amoled" { "1" } else { "0" })?;
+                    t
+                } else {
+                    tema_da_tela(&self.banco.conn)?
+                };
+                let movimento = if tem_mov {
+                    let m = d.movimento()?;
+                    config::gravar(&self.banco.conn, "movimento_reduzido", m)?;
+                    m
+                } else {
+                    movimento_reduzido_da_tela(&self.banco.conn)?
+                };
+                Ok(json!({ "tema": tema, "escuro": tema == "amoled", "movimentoReduzido": movimento }))
             }
             // Câmera do celular como leitor de código de barras.
             // F03 (dev.3.3, 2.3): o quadro fica num lugar só, o do núcleo;
@@ -2263,6 +2280,7 @@ impl Servico {
     fn estado(&self) -> Resultado<Value> {
         let conn = &self.banco.conn;
         let tema = tema_da_tela(conn)?;
+        let movimento_reduzido = movimento_reduzido_da_tela(conn)?;
         Ok(json!({
             "primeiraVez": usuarios::quantidade(conn)? == 0,
             // FALHA-01: no meio de uma entrada numa loja (a tela volta para ela).
@@ -2275,6 +2293,7 @@ impl Servico {
             "validadeOrcamento": config::validade_orcamento(conn)?,
             "tema": tema,
             "escuro": tema == "amoled",
+            "movimentoReduzido": movimento_reduzido,
             // A3: banco com defeito de integridade: modo seguro (o defeito; null = normal).
             "modoSeguro": self.banco.defeito,
         }))
@@ -2739,6 +2758,8 @@ fn acoes_livres(conn: &rusqlite::Connection) -> Resultado<Vec<String>> {
 
 /// Os temas da tela (0.9.18): cinza claro, preto AMOLED e Planeta Roxo.
 const TEMAS: [&str; 3] = ["cinza", "amoled", "roxo"];
+/// Preferência de movimento reduzido (0.9.19-dev.1, P6 / MG-D1): padrão "sistema" (seguir o computador/aparelho).
+const MODOS_MOVIMENTO: [&str; 3] = ["sistema", "ligado", "desligado"];
 
 /// O tema deste aparelho: `tela_tema`; num banco de antes da 0.9.18, o
 /// `tela_escura` ("1" = AMOLED; "0" ou nada = cinza).
@@ -2751,13 +2772,27 @@ fn tema_da_tela(conn: &rusqlite::Connection) -> Resultado<&'static str> {
     Ok(if config::ler(conn, "tela_escura")?.as_deref() == Some("1") { "amoled" } else { "cinza" })
 }
 
+/// Preferência local de movimento reduzido deste computador/aparelho (`MG-D1`).
+fn movimento_reduzido_da_tela(conn: &rusqlite::Connection) -> Resultado<&'static str> {
+    if let Some(m) = config::ler(conn, "movimento_reduzido")? {
+        if let Some(modo) = MODOS_MOVIMENTO.iter().find(|x| **x == m) {
+            return Ok(modo);
+        }
+    }
+    Ok("sistema")
+}
+
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Aparencia {
     #[serde(default)]
     tema: Option<String>,
     /// Das telas de antes da 0.9.18: lua (true) ou sol (false).
     #[serde(default)]
     escuro: Option<bool>,
+    /// Preferência de movimento reduzido (P6 / MG-D1): "sistema", "ligado" ou "desligado".
+    #[serde(default)]
+    movimento_reduzido: Option<String>,
 }
 
 impl Aparencia {
@@ -2770,6 +2805,15 @@ impl Aparencia {
                 .ok_or_else(|| Erro::validacao("Tema desconhecido: escolha cinza, AMOLED ou Planeta Roxo.")),
             (None, Some(escuro)) => Ok(if escuro { "amoled" } else { "cinza" }),
             (None, None) => Err(Erro::validacao("Escolha um tema.")),
+        }
+    }
+
+    fn movimento(&self) -> Resultado<&'static str> {
+        match &self.movimento_reduzido {
+            Some(m) => MODOS_MOVIMENTO.iter().find(|x| **x == m.as_str()).copied().ok_or_else(|| {
+                Erro::validacao("Modo de movimento desconhecido: escolha sistema, ligado ou desligado.")
+            }),
+            None => Ok("sistema"),
         }
     }
 }
@@ -4228,5 +4272,43 @@ mod testes {
         h.join().unwrap();
         drop(t2);
         std::fs::remove_dir_all(&pasta).ok();
+    }
+
+    /// T021 / P6 / MG-D1: preferência local de movimento reduzido (sistema/ligado/desligado)
+    /// persiste no banco local sem alterar o tema escolhido e recusa modos inválidos.
+    #[test]
+    fn t021_aparencia_movimento_reduzido() {
+        let mut s = conectado();
+        // Padrão inicial: "sistema" (seguir o computador/aparelho).
+        let est = chamar(&mut s, "estado", "{}");
+        assert_eq!(est["ok"], true, "{est}");
+        assert_eq!(est["dados"]["movimentoReduzido"], "sistema");
+        let tema_inicial = est["dados"]["tema"].as_str().unwrap().to_string();
+
+        // Salvar somente movimentoReduzido preserva o tema.
+        let r = chamar(&mut s, "aparencia_salvar", r#"{"movimentoReduzido":"ligado"}"#);
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["movimentoReduzido"], "ligado");
+        assert_eq!(r["dados"]["tema"], tema_inicial);
+        assert_eq!(chamar(&mut s, "estado", "{}")["dados"]["movimentoReduzido"], "ligado");
+
+        // Salvar somente tema preserva movimentoReduzido.
+        let r = chamar(&mut s, "aparencia_salvar", r#"{"tema":"roxo"}"#);
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["dados"]["tema"], "roxo");
+        assert_eq!(r["dados"]["movimentoReduzido"], "ligado");
+
+        // Voltar para desligado e sistema.
+        for modo in ["desligado", "sistema"] {
+            let r = chamar(&mut s, "aparencia_salvar", &json!({ "movimentoReduzido": modo }).to_string());
+            assert_eq!(r["ok"], true, "{modo}: {r}");
+            assert_eq!(r["dados"]["movimentoReduzido"], modo);
+        }
+
+        // Modo inválido e payload vazio são recusados.
+        let inv = chamar(&mut s, "aparencia_salvar", r#"{"movimentoReduzido":"rapido"}"#);
+        assert_eq!(inv["ok"], false, "{inv}");
+        let vazio = chamar(&mut s, "aparencia_salvar", "{}");
+        assert_eq!(vazio["ok"], false, "{vazio}");
     }
 }

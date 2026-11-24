@@ -30,8 +30,9 @@ Item {
 
     readonly property string categoria: aviso.categoria || "informativa"
     readonly property bool critica: categoria === "critica"
-    // A crítica não minimiza (nem com uma marca antiga de "minimizada").
-    readonly property bool minimizado: aviso.minimizado === true && !critica
+    readonly property bool persistente: aviso.persistente === true
+    // A crítica (e a orientação persistente da navegação guiada, NCG-2) não minimizam.
+    readonly property bool minimizado: aviso.minimizado === true && !critica && !persistente
     // Lado do quadrado (minimizada).
     readonly property real lado: Tema.estreito ? 78 : 92
     // O quadrado não tem texto: nos textos da tela (testes) ele aparece pelo
@@ -50,7 +51,7 @@ Item {
     implicitHeight: saindo ? 0 : cartao.height
     clip: saindo
     visible: !saindo || height > 0.5
-    Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on implicitHeight { NumberAnimation { duration: Tema.duracaoPosicao(160); easing.type: Easing.OutCubic } }
 
     // P-NOTIF (diretriz do proprietário, 18/11 e 20/11/2026): padrão visual FIXO
     // extraído de `fofznotifiz.png`, completamente independente dos três temas
@@ -146,7 +147,7 @@ Item {
         border.width: 1.5
         border.color: raiz.fixaBorda
         opacity: 1 - Math.min(Math.abs(x) / (raiz.width * 0.6), 0.75)
-        Behavior on height { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: Tema.duracaoPosicao(140); easing.type: Easing.OutCubic } }
 
         // ---- Minimizada: o ícone da função, no centro do quadrado ----
         IconeFuncao {
@@ -287,10 +288,15 @@ Item {
         DragHandler {
             id: arrasto
             target: cartao
+            enabled: !raiz.persistente
             yAxis.enabled: false
             onActiveChanged: {
                 if (active)
                     return
+                if (raiz.persistente) {
+                    volta.start()
+                    return
+                }
                 // No quadrado, o limite é pela largura da faixa de notificações
                 // (não pelo próprio quadrado, pequeno demais para isso).
                 const limite = Math.max(raiz.width, 400) * 0.18
@@ -320,25 +326,25 @@ Item {
                     if (b.visible && b.contains(b.mapFromItem(cartao, ponto.position.x, ponto.position.y)))
                         return
                 }
-                // A crítica fica expandida.
-                if (!raiz.critica)
+                // A crítica e a persistente ficam expandidas.
+                if (!raiz.critica && !raiz.persistente)
                     raiz.minimizar(!raiz.minimizado)
             }
         }
-        HoverHandler { cursorShape: arrasto.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
+        HoverHandler { cursorShape: raiz.persistente ? Qt.ArrowCursor : arrasto.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor }
     }
 
     NumberAnimation {
         id: volta
         target: cartao; property: "x"; to: 0
-        duration: 160; easing.type: Easing.OutCubic
+        duration: Tema.duracaoPosicao(160); easing.type: Easing.OutCubic
     }
     SequentialAnimation {
         id: saida
         NumberAnimation {
             target: cartao; property: "x"
             to: -raiz.width
-            duration: 160; easing.type: Easing.InCubic
+            duration: Tema.duracaoPosicao(160); easing.type: Easing.InCubic
         }
         ScriptAction { script: { raiz.saindo = true; raiz.esconder() } }
     }

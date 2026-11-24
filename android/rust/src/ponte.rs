@@ -33,6 +33,7 @@ pub mod qobject {
         fn rustinho_preparar_janela();
         fn rustinho_arquivo_local(endereco: &QString) -> QString;
         fn rustinho_identidade_do_computador() -> QString;
+        fn rustinho_movimento_reduzido_sistema() -> bool;
     }
 
     extern "RustQt" {
@@ -96,6 +97,10 @@ pub mod qobject {
         /// antes já voltou): libera uma nova tentativa ao abrir de novo.
         #[qinvokable]
         fn tentar_atualizacao_de_novo(self: Pin<&mut Self>) -> bool;
+
+        /// Preferência de movimento reduzido do sistema operacional (P6 / MG-8).
+        #[qinvokable]
+        fn movimento_reduzido_sistema(self: &Self) -> bool;
     }
 
     impl cxx_qt::Threading for Sistema {}
@@ -202,6 +207,10 @@ impl qobject::Sistema {
 
     pub fn arquivo_local(&self, endereco: &QString) -> QString {
         qobject::rustinho_arquivo_local(endereco)
+    }
+
+    pub fn movimento_reduzido_sistema(&self) -> bool {
+        qobject::rustinho_movimento_reduzido_sistema()
     }
 
     pub fn ocupado(&self) -> bool {

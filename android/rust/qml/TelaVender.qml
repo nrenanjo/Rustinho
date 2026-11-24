@@ -274,7 +274,12 @@ FocusScope {
         }
         carrinho = lista
         recalcular()
-        Qt.callLater(() => listaCarrinho.positionViewAtIndex(itemAtual, ListView.Contain))
+        Qt.callLater(() => {
+            if (janela && typeof janela.rolarAteIndice === "function")
+                janela.rolarAteIndice(listaCarrinho, itemAtual, ListView.Contain)
+            else
+                listaCarrinho.positionViewAtIndex(itemAtual, ListView.Contain)
+        })
     }
 
     // Texto da lista que está na tela (a pessoa já viu) e o código repetido
@@ -1637,6 +1642,7 @@ FocusScope {
             campoCliente.texto = calculo.cliente
         else if (clienteNome)
             campoCliente.texto = clienteNome
-        busca.focar()
+        if (!janela || !janela.retornandoDeF11)
+            busca.focar()
     }
 }

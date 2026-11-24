@@ -2,12 +2,17 @@
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
+#include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
+#include <QtCore/QTextStream>
 #include <QtCore/QUrl>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 #ifdef Q_OS_ANDROID
 #include <QtCore/QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
@@ -65,5 +70,67 @@ QString rustinho_identidade_do_computador()
     return texto.isEmpty() ? QString() : QStringLiteral("android:") + texto;
 #else
     return QString::fromUtf8(QSysInfo::machineUniqueId());
+#endif
+}
+
+// Preferência de acessibilidade "movimento reduzido" do sistema operacional (P6 / MG-8).
+// Em testes automatizados pode ser controlada por `RUSTINHO_MOVIMENTO_REDUZIDO_SISTEMA=1|0`.
+bool rustinho_movimento_reduzido_sistema()
+{
+    const QByteArray env = qgetenv("RUSTINHO_MOVIMENTO_REDUZIDO_SISTEMA").trimmed();
+    if (env == "1" || env.compare("true", Qt::CaseInsensitive) == 0)
+        return true;
+    if (env == "0" || env.compare("false", Qt::CaseInsensitive) == 0)
+        return false;
+#ifdef Q_OS_ANDROID
+    const QJniObject contexto = QNativeInterface::QAndroidApplication::context();
+    if (!contexto.isValid())
+        return false;
+    const QJniObject resolvedor = contexto.callObjectMethod("getContentResolver", "()Landroid/content/ContentResolver;");
+    if (!resolvedor.isValid())
+        return false;
+    const jfloat escala = QJniObject::callStaticMethod<jfloat>(
+        "android/provider/Settings$Global", "getFloat",
+        "(Landroid/content/ContentResolver;Ljava/lang/String;F)F", resolvedor.object(),
+        QJniObject::fromString(QStringLiteral("animator_duration_scale")).object<jstring>(),
+        1.0f);
+    return escala <= 0.0f;
+#elif defined(Q_OS_WIN)
+    BOOL animacoes = TRUE;
+    if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animacoes, 0))
+        return animacoes == FALSE;
+    return false;
+#else
+    // Linux/BSD: lê arquivos de preferência KDE (`kdeglobals`) ou GTK (`gtk-3.0/settings.ini`) sem bloquear.
+    const QString configDir = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
+    if (!configDir.isEmpty()) {
+        QFile kde(configDir + QStringLiteral("/kdeglobals"));
+        if (kde.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&kde);
+            while (!in.atEnd()) {
+                const QString ln = in.readLine().trimmed();
+                if (ln.startsWith(QStringLiteral("AnimationDurationFactor="))) {
+                    const QString val = ln.mid(24).trimmed();
+                    bool ok = false;
+                    const double fator = val.toDouble(&ok);
+                    if (ok && fator <= 0.0)
+                        return true;
+                }
+            }
+        }
+        QFile gtk(configDir + QStringLiteral("/gtk-3.0/settings.ini"));
+        if (gtk.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream in(&gtk);
+            while (!in.atEnd()) {
+                const QString ln = in.readLine().trimmed();
+                if (ln.startsWith(QStringLiteral("gtk-enable-animations"))) {
+                    const QString val = ln.section(QLatin1Char('='), 1).trimmed().toLower();
+                    if (val == QStringLiteral("0") || val == QStringLiteral("false"))
+                        return true;
+                }
+            }
+        }
+    }
+    return false;
 #endif
 }

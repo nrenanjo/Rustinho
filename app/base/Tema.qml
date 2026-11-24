@@ -16,6 +16,14 @@ QtObject {
     // O "escuro" de antes continua (só leitura): é o AMOLED.
     readonly property bool escuro: tema === "amoled"
     readonly property bool roxo: tema === "roxo"
+    // P6 / MG-8 / MG-D1 (0.9.19-dev.1): preferência global de movimento reduzido.
+    // "sistema" (padrão: seguir o computador/aparelho) | "ligado" | "desligado".
+    property string modoMovimento: "sistema"
+    property bool movimentoReduzidoSistema: false
+    readonly property bool movimentoReduzido: modoMovimento === "ligado"
+                                              || (modoMovimento === "sistema" && movimentoReduzidoSistema)
+    function duracaoEsmaecer(ms) { return movimentoReduzido ? Math.min(ms, 80) : ms }
+    function duracaoPosicao(ms) { return movimentoReduzido ? 0 : ms }
     // Planeta Roxo: as cores exatas das imagens aprovadas dão texto branco
     // sobre magenta com 3,3:1 (botão principal e linha escolhida), abaixo dos
     // 4,5:1 do texto comum. Por padrão o magenta é um pouco mais fechado

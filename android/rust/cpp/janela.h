@@ -12,3 +12,6 @@ QString rustinho_arquivo_local(const QString& endereco);
 
 // Identificador do computador (veja janela.cpp). Vazio se o sistema não informa.
 QString rustinho_identidade_do_computador();
+
+// Preferência de acessibilidade "movimento reduzido" do sistema operacional (P6 / MG-8).
+bool rustinho_movimento_reduzido_sistema();

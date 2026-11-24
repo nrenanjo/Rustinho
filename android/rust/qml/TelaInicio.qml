@@ -7,6 +7,7 @@ import rustinho
 // não cabe, as notificações e as pílulas das funções (as fixadas primeiro).
 FocusScope {
     id: tela
+    objectName: "telaInicio"
     readonly property var janela: ApplicationWindow.window
     // Como esta tela aparece no "voltar" da tela que ela abriu.
     readonly property string nomeNaNavegacao: "Início"

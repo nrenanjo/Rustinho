@@ -33,8 +33,13 @@ FocusScope {
     function mostrarSenha() {
         const p = linhaSenha.mapToItem(coluna, 0, 0)
         const fim = coluna.y + p.y + linhaSenha.height + Tema.margem
-        if (fim > rolagem.contentY + rolagem.height)
-            rolagem.contentY = Math.min(rolagem.contentHeight - rolagem.height, fim - rolagem.height)
+        if (fim > rolagem.contentY + rolagem.height) {
+            const dest = Math.min(rolagem.contentHeight - rolagem.height, fim - rolagem.height)
+            if (janela && typeof janela.rolarSuave === "function")
+                janela.rolarSuave(rolagem, dest)
+            else
+                rolagem.contentY = dest
+        }
     }
 
     function entrar() {
