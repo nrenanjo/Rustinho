@@ -279,8 +279,13 @@ impl qobject::Sistema {
                 com_servico(&guardado, |s| s.chamar(&comando, &dados), rustinho_nucleo::api::resposta_de_erro)
             }))
             .unwrap_or_else(|_| rustinho_nucleo::api::resposta_de_erro("Erro interno inesperado na operação."));
-            let _ = linha.queue(move |obj| obj.terminou(pedido, QString::from(&resposta)));
-            drop(liberacao);
+            // Libera `ocupado` na própria linha do Qt imediatamente antes de emitir `terminou`:
+            // fecha tanto a janela entre o fim da thread e o enfileiramento quanto a corrida
+            // em que `onTerminou` dispara um novo `chamar()` antes de `drop(liberacao)`.
+            let _ = linha.queue(move |obj| {
+                drop(liberacao);
+                obj.terminou(pedido, QString::from(&resposta));
+            });
         });
         pedido
     }
@@ -304,8 +309,11 @@ impl qobject::Sistema {
                 }
             }))
             .unwrap_or_else(|_| "Erro interno inesperado ao abrir o banco.".to_string());
-            let _ = linha.queue(move |obj| obj.aberto(QString::from(&erro)));
-            drop(liberacao);
+            // Libera `ocupado` na própria linha do Qt imediatamente antes de emitir `aberto`.
+            let _ = linha.queue(move |obj| {
+                drop(liberacao);
+                obj.aberto(QString::from(&erro));
+            });
         });
     }
 

@@ -51,10 +51,14 @@ FocusScope {
             }
         }
         carregar()
+        // Preservação silenciosa de posição após recarga do modelo (não é navegação para novo alvo;
+        // evita esmaecimento/animação indesejada e mantém K1-K5 em telas_lista_que_muda).
         if (i >= 0)
-            Qt.callLater(() => janela.rolarAteIndice(lista, Math.min(i, lista.count - 1), ListView.Beginning))
+            Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
         else if (deslocamento > 0)
-            Qt.callLater(() => janela.rolarSuave(lista, lista.originY + deslocamento))
+            Qt.callLater(() => {
+                lista.contentY = lista.originY + Math.min(deslocamento, Math.max(0, lista.contentHeight - lista.height))
+            })
     }
     function carregarDados() {
         const r = Api.chamar("encomendas_painel", { texto: busca.texto, quais: quais })

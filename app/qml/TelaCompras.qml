@@ -198,13 +198,9 @@ FocusScope {
         const onde = listaNaoImportadas.contentY
         naoImportadas = naoImportadas.filter(x => chaveDaNota(x) !== chaveDaNota(c))
         Qt.callLater(() => {
-            // T054-R3 da revisão: refaz a lista antes de ler a altura dela.
+            // T054-R3 da revisão: refaz a lista antes de ler a altura dela (preservação silenciosa de posição).
             listaNaoImportadas.forceLayout()
-            const dest = Math.max(0, Math.min(onde, Math.max(0, listaNaoImportadas.contentHeight - listaNaoImportadas.height)))
-            if (janela && typeof janela.rolarSuave === "function")
-                janela.rolarSuave(listaNaoImportadas, dest)
-            else
-                listaNaoImportadas.contentY = dest
+            listaNaoImportadas.contentY = Math.max(0, Math.min(onde, Math.max(0, listaNaoImportadas.contentHeight - listaNaoImportadas.height)))
         })
     }
 

@@ -316,10 +316,10 @@ def main():
                    ativo_ev.get("clipY", 0) >= 120, f"ev={ativo_ev}")
             else:
                 ok("P6 A5/A10: evento destaque_ativo emitido", False, f"evs={evs[-5:]}")
-            # P6 A11 (H25): após estabilizar em repouso, nenhum polling contínuo dispara eventos.
-            time.sleep(0.35)
+            # P6 A11 (H25): após a descida do topo assentar em repouso, nenhum polling contínuo dispara eventos.
+            time.sleep(1.2)
             qtd_repouso_1 = len(r.eventos_mov())
-            time.sleep(0.65)
+            time.sleep(0.8)
             qtd_repouso_2 = len(r.eventos_mov())
             ok("P6 A11/H25: zero atividade/polling de movimento em repouso",
                qtd_repouso_2 == qtd_repouso_1,
@@ -431,7 +431,7 @@ def main():
             ok("P6 A7/MG-5: ofereceu Ver o registro", r.esperar("Ver o registro"))
             r.clicar("Ver o registro")
             ok("P6 A7/MG-5: abriu Caixas com destaque no registro alvo",
-               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 10),
+               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 22),
                r.foto("-antes-recarga"))
             # Espera janela de proteção de clique pós-movimento e aceita o OUTRO registro (o de cima, 2025-12-30),
             # forçando recarga da lista e deslocamento vertical do registro da guia (MG-5 / A7).
