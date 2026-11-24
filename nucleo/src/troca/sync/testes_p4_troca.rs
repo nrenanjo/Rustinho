@@ -169,3 +169,41 @@ fn p4_dispositivo_declarado_diferente_da_chave_e_recusado() {
     .join()
     .unwrap();
 }
+
+/// DT-P4-14/28 (anti-rebaixamento): para o caixa que o registro diz ter chave, a
+/// troca é só pelo P4 — nem quando quem responde no endereço dele só fala o
+/// protocolo 3 (o que alguém faria para se passar por ele com a senha da rede).
+#[test]
+fn p4_par_com_chave_nao_cai_para_o_p3() {
+    thread::spawn(|| {
+        let (ca, cb, a, b, _loja, _ia, _ib) = loja_com_dois_caixas_aprovados("p4-rebaixar");
+        // Um terceiro caixa da mesma loja, que entrou pela senha da rede (só fala o P3).
+        let cc = temp("p4-rebaixar-c");
+        let c = caixa_vazio_em_arquivo(&cc, "Caixa 3");
+        {
+            let (mut ma, pt_a) = motor(&ca);
+            let (mut mc, pt_c) = motor(&cc);
+            puxar(&cc, &format!("127.0.0.1:{pt_a}"), pt_c).unwrap();
+            assert!(ma.encerrar(Duration::from_secs(20)));
+            assert!(mc.encerrar(Duration::from_secs(20)));
+        }
+        peca_nova(&c, "Peça de quem só fala o P3");
+        let (mut mc, pt_c) = motor(&cc);
+        let (mut mb, pt_b) = motor(&cb);
+        // No caixa 2, o endereço do caixa 1 passa a ser o do caixa 3 (quem responde ali).
+        let disp_a = config::ler(&a.conn, "dispositivo_id").unwrap().unwrap();
+        b.conn
+            .execute(
+                "UPDATE sync_par SET endereco = ?2 WHERE dispositivo = ?1",
+                params![disp_a, format!("127.0.0.1:{pt_c}")],
+            )
+            .unwrap();
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_c}"), pt_b);
+        assert!(mc.encerrar(Duration::from_secs(20)));
+        assert!(mb.encerrar(Duration::from_secs(20)));
+        assert!(r.is_err(), "o caixa com chave não pode ser trocado por quem só fala o P3: {r:?}");
+        assert!(!tem_peca(&b, "Peça de quem só fala o P3"), "nada chegou pelo protocolo 3");
+    })
+    .join()
+    .unwrap();
+}
