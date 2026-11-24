@@ -1170,6 +1170,24 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         a.acao = "Ver caixas".into();
         avisos.push(a);
     }
+    // C2R4-1: o registro de caixas da loja deixou aprovações de fora por falta de lugar
+    // (um caixa aprovou caixas demais: pode ser um computador roubado). Retirar esse
+    // caixa no primeiro caixa da loja devolve o lugar, e o aviso sai sozinho.
+    if crate::sync::registro_de_caixas_cheio(conn)? {
+        let mut a = Aviso::simples(
+            "p4.registro_cheio",
+            &hoje,
+            "Registro de caixas cheio".to_string(),
+            "Confira os caixas da loja".to_string(),
+            String::new(),
+            "configuracoes",
+        )
+        .categoria(ATENCAO)
+        .secao("caixas");
+        a.descricao = crate::troca::protocolo4::aprovados::TEXTO_REGISTRO_CHEIO.to_string();
+        a.acao = "Ver caixas".into();
+        avisos.push(a);
+    }
     // Crítica primeiro, depois atenção, depois informativa (ordem estável).
     let peso = |c: &str| match c {
         CRITICA => 0,

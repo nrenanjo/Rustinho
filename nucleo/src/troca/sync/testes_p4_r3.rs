@@ -7,7 +7,7 @@ use super::*;
 use crate::banco::Banco;
 use crate::troca::protocolo4::{aprovados, cofre, hex, Dominio, Identidade};
 
-fn aprovacao_a_mao(
+pub(super) fn aprovacao_a_mao(
     quem_assina: &Identidade,
     chave: &Identidade,
     loja: &str,
@@ -69,35 +69,33 @@ fn c2r3_2_cadeia_comprida_de_tras_para_frente_entra_numa_passada() {
     );
 }
 
-/// C2R3-5: o teto de linhas do registro vale (aqui, com um teto pequeno), e uma mensagem
-/// com mais linhas que o teto é recusada inteira.
+/// C2R3-5, refeito na R4 (C2R4-1): o teto vale para as aprovações dos membros (as da raiz
+/// não contam), e uma mensagem com mais linhas que o teto **não** é recusada inteira: entra
+/// o que cabe, e o resto fica de fora por falta de lugar.
 #[test]
 fn c2r3_5_teto_do_registro() {
     let (b, raiz, loja) = loja_so_com_raiz("c2r3-5-teto");
     let r = raiz.publica();
-    let linhas: Vec<_> = (0..8)
-        .map(|i| aprovacao_a_mao(&raiz, &Identidade::gerar().unwrap(), &loja, &format!("disp-teto-{i}")))
-        .collect();
-    let j = aprovados::juntar_na_cadeia_com_teto(
+    let membro = Identidade::gerar().unwrap();
+    let mut linhas = vec![aprovacao_a_mao(&raiz, &membro, &loja, "disp-membro")];
+    linhas.extend(
+        (0..8).map(|i| aprovacao_a_mao(&membro, &Identidade::gerar().unwrap(), &loja, &format!("disp-teto-{i}"))),
+    );
+    let lim = aprovados::Limites { teto: 5, por_aprovador: 100, conferencias: 100 };
+    let j = aprovados::juntar_na_cadeia_com_limites(
         &b.conn,
         &r,
         &loja,
-        &aprovados::Linhas { aprovacoes: linhas.clone(), retiradas: vec![] },
-        6,
-    )
-    .unwrap();
-    assert_eq!(j.recusadas, 8, "mensagem maior que o teto: recusada inteira ({j:?})");
-    // 5 linhas cabem na mensagem (teto 5), mas o registro já tem a raiz: entram 4.
-    let j = aprovados::juntar_na_cadeia_com_teto(
-        &b.conn,
-        &r,
-        &loja,
-        &aprovados::Linhas { aprovacoes: linhas[..5].to_vec(), retiradas: vec![] },
-        5,
+        &aprovados::Linhas { aprovacoes: linhas, retiradas: vec![] },
+        lim,
     )
     .unwrap();
     let total: i64 = b.conn.query_row("SELECT COUNT(*) FROM caixa_aprovado", [], |l| l.get(0)).unwrap();
-    assert_eq!((total, j.novas, j.recusadas), (5, 4, 1), "o registro parou no teto (1 da raiz + 4): {j:?}");
+    assert_eq!(
+        (total, j.novas, j.recusadas, j.sem_lugar),
+        (7, 6, 3, 3),
+        "a raiz e o membro entram; do membro, só as 5 que cabem no teto: {j:?}"
+    );
 }
 
 /// C2R3-5: a entrada pelo convite junta só o que entra na cadeia da raiz da loja (o

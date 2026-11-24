@@ -413,6 +413,12 @@ pub fn convivencia_p3_ate(conn: &Connection) -> Resultado<Option<String>> {
     Ok((ate <= teto.as_str()).then(|| ate.to_string()))
 }
 
+/// C2R4-1: o registro de caixas desta loja deixou aprovações de fora por falta de lugar
+/// (um caixa aprovou caixas demais). O Início avisa enquanto for verdade.
+pub fn registro_de_caixas_cheio(conn: &Connection) -> Resultado<bool> {
+    Ok(config::ler(conn, aprovados::CHAVE_REGISTRO_CHEIO)?.is_some_and(|v| !v.trim().is_empty()))
+}
+
 /// T010: o protocolo 3 vale com este caixa? O caixa que ainda não é do P4 (sem raiz
 /// fixada) continua como antes; o caixa do P4, só durante a convivência (A4).
 pub(super) fn p3_permitido(conn: &Connection) -> bool {

@@ -66,19 +66,17 @@ fn c2_1_convivencia_e_deste_caixa_e_lida_com_desconfianca() {
 fn c2_3_registro_grande_nao_para_a_troca() {
     thread::spawn(|| {
         let (ca, cb, a, mut b, loja, ia, _ib) = loja_com_dois_caixas_aprovados("c2-3");
+        // C2R4-1: um caixa aprova no máximo 100 caixas que continuam na loja; as 150
+        // aprovações ficam divididas entre a raiz e um caixa aprovado por ela.
+        let raiz = ia.identidade.publica();
+        let outro = Identidade::gerar().unwrap();
+        let p = aprovados::Pedido::com_dispositivo(&outro, "disp-grande-aprovador");
+        aprovados::aprovar(&a.conn, &ia.identidade, &raiz, &loja, &p, "Caixa aprovador", "Ana").unwrap();
         for i in 0..150 {
             let c = Identidade::gerar().unwrap();
             let p = aprovados::Pedido::com_dispositivo(&c, &format!("disp-grande-{i:03}"));
-            aprovados::aprovar(
-                &a.conn,
-                &ia.identidade,
-                &ia.identidade.publica(),
-                &loja,
-                &p,
-                &format!("Caixa {i}"),
-                "Ana",
-            )
-            .unwrap();
+            let quem = if i % 2 == 0 { &ia.identidade } else { &outro };
+            aprovados::aprovar(&a.conn, quem, &raiz, &loja, &p, &format!("Caixa {i}"), "Ana").unwrap();
         }
         aprovados::juntar(&b.conn, &loja, &aprovados::linhas(&a.conn, &loja).unwrap()).unwrap();
         let tamanho = serde_json::to_vec(&aprovados::linhas(&b.conn, &loja).unwrap()).unwrap().len();
