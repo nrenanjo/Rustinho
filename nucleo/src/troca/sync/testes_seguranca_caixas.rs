@@ -1,10 +1,8 @@
 //! Frente de segurança — R-01 (senha da rede) e D1 (entrada de caixa).
 //!
-//! **Comportamento seguro desejado** (`seguro_*`, `#[ignore]`): descrevem o
-//! que o protocolo 4 tem de garantir. **Falham hoje de propósito** (o
-//! mecanismo não existe na troca de dados); cada um sai do `#[ignore]` na
-//! etapa que o deixa verde (dita no motivo do `#[ignore]`) e passa a ser
-//! exigido. Rode com `--ignored` para vê-los em vermelho.
+//! **Comportamento seguro exigido** (`seguro_*`): o que o protocolo 4 garante.
+//! Escritos antes (em vermelho, com `#[ignore]`) e ligados um a um até a T011 da
+//! 0.9.19-dev.2, quando o último saiu do `#[ignore]`: agora são todos exigidos.
 //!
 //! No fim, testes das peças do protocolo 4 já prontas (etapas 1 a 3) contra a
 //! troca de hoje: passam já, sem mudar o fio (`p4_*`).
@@ -74,23 +72,60 @@ pub(super) fn tem_cliente(b: &Banco, nome: &str) -> bool {
 }
 
 // ===========================================================================
-// 2. Comportamento seguro desejado (protocolo 4) — FALHAM HOJE DE PROPÓSITO
+// 2. Comportamento seguro exigido (protocolo 4) — fora do `#[ignore]` desde a
+//    T011 (0.9.19-dev.2). Os que montavam à mão o que o protocolo 3 fazia (o
+//    pedido em JSON, o anúncio cifrado) miram agora a função real do protocolo 4,
+//    com a mesma propriedade (como o plano 5.5 previa).
 // ===========================================================================
+
+/// A loja do caixa 1 já com a troca ligada há um tempo: ele é a raiz do protocolo
+/// 4 (o motor faz isso na puxada; aqui, na hora).
+fn loja_raiz(caminho: &Path, caixa: &str) -> (Banco, String) {
+    let (b, u) = loja_em_arquivo(caminho, caixa);
+    super::p4::garantir_raiz(&b.conn, caminho).unwrap();
+    assert!(super::p4::tem_raiz_fixada(&b.conn));
+    (b, u)
+}
+
+/// O caixa novo (banco vazio), sem a senha da rede, entra pelo convite que o gerente
+/// gerou no caixa 1 com o código dele. Devolve o banco.
+fn caixa_entra_pelo_convite(ca: &Path, cb: &Path, pt_a: u16, a: &Banco) -> Banco {
+    use crate::troca::protocolo4::{aprovados, cofre};
+    let b = Banco::abrir(cb).unwrap();
+    config::gravar(&b.conn, "caixa_nome", "Caixa 2").unwrap();
+    config::gravar(&b.conn, "codigos_espera_teste", "0").unwrap();
+    let id_b = cofre::identidade_do_processo(cb.parent().unwrap(), &cofre::Modo::Instalado).unwrap();
+    let disp_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
+    let codigo = aprovados::Pedido::com_dispositivo(&id_b.identidade, &disp_b).codigo();
+    let id_a = cofre::identidade_do_processo(ca.parent().unwrap(), &cofre::Modo::Instalado).unwrap();
+    let loja = crate::loja::id(&a.conn).unwrap();
+    let conv = cofre::gerar_convite(
+        &a.conn,
+        &id_a.identidade,
+        &id_a.identidade.publica(),
+        &loja,
+        &codigo,
+        "Caixa 2",
+        "Ana",
+        &format!("127.0.0.1:{pt_a}"),
+    )
+    .unwrap();
+    juntar_com_convite(cb, &conv.payload_qr, &[]).unwrap();
+    b
+}
 
 /// (a) A entrada de um caixa novo só vale com aprovação de um gerente, e a
 /// aprovação fica registrada na auditoria (acceptance 13 de
-/// `SIMULTANEIDADE-requisitos.md`). Hoje a entrada não registra aprovação
-/// nenhuma: a senha da rede basta.
+/// `SIMULTANEIDADE-requisitos.md`) — e chega ao caixa novo com a loja.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapa 5 (entrada aprovada) — aprovação do gerente e auditoria da entrada"]
 fn seguro_entrada_legitima_registrada_na_auditoria() {
     thread::spawn(|| {
         let (ca, cb) = (temp("sa-a"), temp("sa-b"));
-        let (_a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
-        let b = caixa_vazio_em_arquivo(&cb, "Caixa 2");
+        let (a, _ua) = loja_raiz(&ca, "Caixa 1");
         let (mut ma, pt_a) = motor(&ca);
+        let b = caixa_entra_pelo_convite(&ca, &cb, pt_a, &a);
         let (mut mb, pt_b) = motor(&cb);
-        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).ok();
+        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
         assert!(ma.encerrar(Duration::from_secs(20)));
         assert!(mb.encerrar(Duration::from_secs(20)));
         let aprovacoes: i64 = b
@@ -103,14 +138,13 @@ fn seguro_entrada_legitima_registrada_na_auditoria() {
     .unwrap();
 }
 
-/// (b) Um dispositivo não autorizado (caixa vazio só com a senha da rede) deve
-/// ser recusado ao puxar. Hoje a puxada tem sucesso.
+/// (b) Um dispositivo não autorizado (caixa vazio só com a senha da rede) é
+/// recusado ao puxar.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapa 4 (canal autenticado, A5) — rejeição de dispositivo não autorizado"]
 fn seguro_dispositivo_nao_autorizado_e_recusado() {
     thread::spawn(|| {
         let (ca, cb) = (temp("sb-a"), temp("sb-b"));
-        let (_a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
+        let (_a, _ua) = loja_raiz(&ca, "Caixa 1");
         let _b = caixa_vazio_em_arquivo(&cb, "Caixa Intruso");
         let (mut ma, pt_a) = motor(&ca);
         let (mut mb, pt_b) = motor(&cb);
@@ -123,29 +157,28 @@ fn seguro_dispositivo_nao_autorizado_e_recusado() {
     .unwrap();
 }
 
-/// (c) Um caixa retirado deve continuar recusado. Hoje a retirada é por
-/// identificador declarado; o SEGURO é que, retirado o dispositivo, nem
-/// declarando outro identificador ele volte a receber dados.
+/// (c) Um caixa retirado continua recusado: retirado o dispositivo, nem
+/// declarando outro identificador ele volta a receber dados.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapa 6 (revogação por chave) — retirada efetiva (não por identificador declarado)"]
 fn seguro_caixa_retirado_recusado_mesmo_trocando_identificador() {
     thread::spawn(|| {
         let (ca, cb) = (temp("sc-a"), temp("sc-b"));
-        let (a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
-        let b = caixa_vazio_em_arquivo(&cb, "Caixa Intruso");
-        // O intruso entra uma vez (hoje basta a senha).
-        {
+        let (a, ua) = loja_raiz(&ca, "Caixa 1");
+        // O caixa entra de verdade (convite) e troca dados uma vez.
+        let b = {
             let (mut ma, pt_a) = motor(&ca);
+            let b = caixa_entra_pelo_convite(&ca, &cb, pt_a, &a);
             let (mut mb, pt_b) = motor(&cb);
-            puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).ok();
-            puxar(&ca, &format!("127.0.0.1:{pt_b}"), pt_a).ok();
+            puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
             assert!(ma.encerrar(Duration::from_secs(20)));
             assert!(mb.encerrar(Duration::from_secs(20)));
-        }
-        // O gerente retira o intruso.
+            b
+        };
+        // O gerente retira o caixa.
         let id_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
-        retirar_caixa(&a.conn, &id_b, "saiu da loja", "Ana").ok();
-        // O intruso troca o identificador declarado e tenta de novo.
+        retirar_caixa_por_chave(&a.conn, &ca, &id_b, "saiu da loja", "Ana").unwrap();
+        cliente(&a, &ua, "Cliente Depois Da Retirada");
+        // O retirado troca o identificador declarado e tenta de novo.
         config::gravar(&b.conn, "dispositivo_id", "intruso-novo-id-aaaaaaaa").unwrap();
         let (mut ma, pt_a) = motor(&ca);
         let (mut mb, pt_b) = motor(&cb);
@@ -153,55 +186,77 @@ fn seguro_caixa_retirado_recusado_mesmo_trocando_identificador() {
         assert!(ma.encerrar(Duration::from_secs(20)));
         assert!(mb.encerrar(Duration::from_secs(20)));
         assert!(r.is_err(), "um caixa retirado não deve voltar declarando outro identificador");
+        assert!(!tem_cliente(&b, "Cliente Depois Da Retirada"));
     })
     .join()
     .unwrap();
 }
 
-/// (d) Revogação efetiva: uma chave revogada deve ser recusada mesmo que o
-/// dispositivo troque o identificador. Hoje não há chave de dispositivo; a
-/// identidade é um texto declarado, então a revogação não "cola" na máquina.
+/// (d) Revogação efetiva: a chave revogada é recusada mesmo que o dispositivo
+/// troque o identificador. No protocolo 4 a chave não vem declarada no pedido: ela
+/// é provada no aperto de mão do canal (mais forte que um campo do JSON), e a
+/// retirada é feita **só pela chave** (sem o bloqueio de antes por identificador).
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapas 4 e 6 (chave do caixa no pedido, pelo canal) — revogação por chave de dispositivo"]
 fn seguro_revogacao_efetiva_por_chave_de_dispositivo() {
-    // Propriedade desejada: o pedido da troca deve trazer a chave pública do
-    // dispositivo (verificável), não só o identificador declarado, para que a
-    // revogação valha por máquina. Hoje o pedido não tem chave nenhuma.
-    let (b, _u) = crate::faixas::para_testes::loja("Caixa 1");
-    salvar_ajustes(&b.conn, true, SENHA_FRACA, "").unwrap();
-    let a = ajustes(&b.conn).unwrap();
-    let (loja_id, sou_novo) = crate::loja::campos(&b.conn).unwrap();
-    // O pedido montado como em `puxar_por`.
-    let pedido = json!({ "tipo": "puxar", "protocolo": PROTOCOLO, "dispositivo": a.dispositivo,
-                         "nome": a.nome, "loja": loja_id, "novo": sou_novo });
-    assert!(
-        pedido.get("chavePublica").and_then(|v| v.as_str()).is_some(),
-        "o pedido da troca deve trazer a chave pública do dispositivo para a revogação valer por máquina"
-    );
+    use crate::troca::protocolo4::{aprovados, cofre};
+    thread::spawn(|| {
+        let (ca, cb) = (temp("sd-a"), temp("sd-b"));
+        let (a, ua) = loja_raiz(&ca, "Caixa 1");
+        let b = {
+            let (mut ma, pt_a) = motor(&ca);
+            let b = caixa_entra_pelo_convite(&ca, &cb, pt_a, &a);
+            assert!(ma.encerrar(Duration::from_secs(20)));
+            b
+        };
+        let id_a = cofre::identidade_do_processo(ca.parent().unwrap(), &cofre::Modo::Instalado).unwrap();
+        let id_b = cofre::identidade_do_processo(cb.parent().unwrap(), &cofre::Modo::Instalado).unwrap();
+        let loja = crate::loja::id(&a.conn).unwrap();
+        let raiz = id_a.identidade.publica();
+        aprovados::retirar(&a.conn, &id_a.identidade, &raiz, &loja, &id_b.identidade.publica(), "roubado", &ua)
+            .unwrap();
+        assert!(!retirado(&a.conn, &config::ler(&b.conn, "dispositivo_id").unwrap().unwrap()).unwrap());
+        config::gravar(&b.conn, "dispositivo_id", "outra-identificacao-qualquer").unwrap();
+        cliente(&a, &ua, "Cliente Depois Da Revogacao");
+        let (mut ma, pt_a) = motor(&ca);
+        let (mut mb, pt_b) = motor(&cb);
+        let r = puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b);
+        assert!(ma.encerrar(Duration::from_secs(20)));
+        assert!(mb.encerrar(Duration::from_secs(20)));
+        assert!(r.is_err(), "a revogação vale por máquina (pela chave), não pelo identificador declarado");
+        assert!(!tem_cliente(&b, "Cliente Depois Da Revogacao"));
+    })
+    .join()
+    .unwrap();
 }
 
-/// (e) Proteção contra falsificação de identidade: o anúncio deve ser assinado
-/// pela chave do dispositivo, para ninguém anunciar a identidade de outro. Hoje
-/// o anúncio não é assinado (só `{dispositivo, nome, porta}`).
+/// (e) Proteção contra falsificação de identidade: o anúncio que o motor manda é
+/// assinado pela chave do dispositivo, e ninguém anuncia a identidade de outro.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapa 4 (o Motor passa a mandar o anúncio da etapa 3; A4/A5) — anúncio assinado (identidade não falsificável)"]
 fn seguro_anuncio_assinado_contra_falsificacao() {
-    let ola = anuncio("caixa-qualquer", "Caixa 1", PORTA_TCP);
-    assert!(
-        ola.get("assinatura").and_then(|v| v.as_str()).is_some(),
-        "o anúncio deve levar uma assinatura da chave do dispositivo"
-    );
+    use crate::troca::protocolo4::anuncio;
+    let ca = temp("se-a");
+    let (a, _u) = loja_raiz(&ca, "Caixa 1");
+    let ctx = super::p4::contexto(&a.conn, &ca).expect("o caixa raiz fala o P4");
+    let pacote = super::p4::pacote_de_anuncio(&ctx, PORTA_TCP).unwrap();
+    let lido = anuncio::abrir(&pacote, agora_ms()).expect("o anúncio é assinado e confere");
+    assert_eq!(lido.chave, ctx.identidade.identidade.publica(), "a assinatura é da chave deste caixa");
+    // Trocar qualquer coisa (a porta, por exemplo) derruba a assinatura.
+    let mut adulterado = pacote.clone();
+    let ultimo = adulterado.len() - 1;
+    adulterado[ultimo] ^= 0x01;
+    assert!(anuncio::abrir(&adulterado, agora_ms()).is_err(), "anúncio adulterado não confere");
+    // Outra chave não assina pela deste caixa: um anúncio montado por ela traz a chave dela.
+    let outra = crate::troca::protocolo4::Identidade::gerar().unwrap();
+    let falso = anuncio::montar(&outra, &ctx.loja, PORTA_TCP, agora_ms()).unwrap();
+    assert_ne!(anuncio::abrir(&falso, agora_ms()).unwrap().chave, lido.chave);
 }
 
-/// (f) A loja deve ser protegida contra um banco vazio não autorizado: ao
-/// atender um caixa sem aprovação, não entrega `usuario`/`pessoa`. Hoje entrega
-/// a loja inteira a quem tem a senha da rede.
+/// (f) A loja não entrega `usuario`/`pessoa` a um banco vazio sem aprovação.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapas 4 e 5 — loja não entrega dados a banco vazio não autorizado"]
 fn seguro_loja_nao_entrega_a_banco_vazio_nao_autorizado() {
     thread::spawn(|| {
         let (ca, cb) = (temp("sf-a"), temp("sf-b"));
-        let (a, ua) = loja_em_arquivo(&ca, "Caixa 1");
+        let (a, ua) = loja_raiz(&ca, "Caixa 1");
         cliente(&a, &ua, "Cliente Sigiloso LGPDF");
         let b = caixa_vazio_em_arquivo(&cb, "Caixa Intruso");
         let (mut ma, pt_a) = motor(&ca);
@@ -216,21 +271,19 @@ fn seguro_loja_nao_entrega_a_banco_vazio_nao_autorizado() {
     .unwrap();
 }
 
-/// (g) Um anúncio capturado não deve permitir testar a senha offline: ele não
-/// pode conter texto cifrado com uma chave derivada da senha. Hoje o anúncio é
-/// exatamente isso (começa com a magia do protocolo e abre com a chave da
-/// senha), que é a raiz do R-01.
+/// (g) Um anúncio capturado não permite testar a senha offline. Fora da
+/// convivência (o padrão), o caixa do protocolo 4 não manda o anúncio cifrado com a
+/// chave da senha; o que ele manda (o assinado) não abre com a chave da senha.
 #[test]
-#[ignore = "D1/R-01: protocolo 4, etapas 4 e 7 (só quando o anúncio cifrado do protocolo 3 deixar de sair; A4) — anúncio sem material que permita teste offline da senha"]
 fn seguro_anuncio_nao_permite_teste_offline_da_senha() {
-    let (b, _u) = crate::faixas::para_testes::loja("Caixa 1");
-    salvar_ajustes(&b.conn, true, SENHA_FRACA, "").unwrap();
+    let ca = temp("sg-a");
+    let (b, _u) = loja_raiz(&ca, "Caixa 1");
+    assert!(!super::p4::p3_permitido(&b.conn), "fora da convivência, o anúncio cifrado com a senha não sai");
     let a = ajustes(&b.conn).unwrap();
-    let k = Chaves::de(&b.conn, &a.senha).unwrap();
-    let pacote = cifrar(&k, anuncio(&a.dispositivo, &a.nome, PORTA_TCP).to_string().as_bytes()).unwrap();
-
-    // Propriedade desejada: a chave derivada da senha NÃO deve abrir o anúncio
-    // (porque o anúncio não deve ser cifrado com ela). Hoje abre.
+    let ctx = super::p4::contexto(&b.conn, &ca).unwrap();
+    let pacote = super::p4::pacote_de_anuncio(&ctx, PORTA_TCP).unwrap();
+    // O procedimento do atacante, com a senha CERTA: a chave tirada dela não abre
+    // nada do anúncio que sai.
     let mut sal = [0u8; 16];
     sal.copy_from_slice(&pacote[4..20]);
     let mut nonce = [0u8; 12];
