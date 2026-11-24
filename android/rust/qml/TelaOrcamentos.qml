@@ -134,6 +134,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         buscar()
         busca.focarCursor()
     }

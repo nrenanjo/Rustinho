@@ -31,7 +31,7 @@ FocusScope {
             }
             lista.currentIndex = indice
             if (indice <= 0)
-                lista.positionViewAtBeginning()
+                janela.rolarSuave(lista, lista.originY)
         } else {
             janela.avisar(r.erro, "erro")
         }
@@ -172,7 +172,7 @@ FocusScope {
             keyNavigationEnabled: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
-            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: if (currentIndex >= 0) janela.rolarAteIndice(lista, currentIndex, ListView.Contain)
             delegate: LinhaPessoa {
                 required property var modelData
                 required property int index
@@ -215,6 +215,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         buscar(true)
         busca.focarCursor()
     }

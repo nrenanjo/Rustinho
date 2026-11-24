@@ -90,7 +90,7 @@ Rectangle {
                     width: Math.max(linha.item.parte > 0 ? 8 : 0, parent.width * (linha.item.parte || 0))
                     color: Tema.roxo && linha.par ? Qt.lighter(linha.cor, 2.2) : linha.cor
                     opacity: 0.55
-                    Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+                    Behavior on width { NumberAnimation { duration: Tema.duracaoPosicao(260); easing.type: Easing.OutCubic } }
                 }
             }
             Text {

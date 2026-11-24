@@ -947,7 +947,7 @@ FocusScope {
         if (!compra)
             return
         if (compra.situacao !== "rascunho")
-            Qt.callLater(() => lista.positionViewAtBeginning())
+            Qt.callLater(() => janela.rolarSuave(lista, lista.originY))
         if (!freteExtra.entrada.activeFocus)
             freteExtra.texto = compra.freteExtra
         atualizar.checked = compra.atualizarPrecos
@@ -963,7 +963,7 @@ FocusScope {
         // que a tela (no celular, com os botões da decisão embaixo do texto,
         // PEND-17), ela abria rolada, com os avisos escondidos em cima. Na
         // primeira abertura, a lista começa do começo, com os avisos.
-        Qt.callLater(() => lista.positionViewAtBeginning())
+        Qt.callLater(() => janela.rolarSuave(lista, lista.originY))
     }
     StackView.onActivated: {
         if (janela && janela.retornandoDeF11)

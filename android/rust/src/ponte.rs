@@ -279,8 +279,8 @@ impl qobject::Sistema {
                 com_servico(&guardado, |s| s.chamar(&comando, &dados), rustinho_nucleo::api::resposta_de_erro)
             }))
             .unwrap_or_else(|_| rustinho_nucleo::api::resposta_de_erro("Erro interno inesperado na operação."));
-            drop(liberacao);
             let _ = linha.queue(move |obj| obj.terminou(pedido, QString::from(&resposta)));
+            drop(liberacao);
         });
         pedido
     }
@@ -304,8 +304,8 @@ impl qobject::Sistema {
                 }
             }))
             .unwrap_or_else(|_| "Erro interno inesperado ao abrir o banco.".to_string());
-            drop(liberacao);
             let _ = linha.queue(move |obj| obj.aberto(QString::from(&erro)));
+            drop(liberacao);
         });
     }
 

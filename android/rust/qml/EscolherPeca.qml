@@ -105,7 +105,15 @@ Painel {
             keyNavigationEnabled: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
-            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: {
+                if (currentIndex >= 0) {
+                    const w = ApplicationWindow.window
+                    if (w && typeof w.rolarAteIndice === "function")
+                        w.rolarAteIndice(lista, currentIndex, ListView.Contain)
+                    else
+                        positionViewAtIndex(currentIndex, ListView.Contain)
+                }
+            }
             delegate: LinhaPeca {
                 required property var modelData
                 required property int index

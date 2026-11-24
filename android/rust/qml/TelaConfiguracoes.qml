@@ -510,13 +510,14 @@ FocusScope {
         caixa.erro = ""
         const r = Api.chamar("computador_salvar", { caixa: caixa.texto, imprimirDireto: imprimirDireto.checked })
         if (r.ok) {
+            janela.encerrarValidacaoProgressiva(tela)
             janela.atualizarEstado()
             carregar()
             janela.avisar("Configurações salvas.", "ok")
         } else if (r.campo === "caixa") {
             secao = "loja"
             caixa.erro = r.erro
-            caixa.focar()
+            janela.rolarAteItem(rolagem, caixa, 24, () => caixa.focar())
         } else {
             janela.avisar(r.erro, "erro")
         }
@@ -585,10 +586,10 @@ FocusScope {
     function salvar() {
         if (secao === "gerente")
             return salvarGerente()
-        if (!completo)
-            return salvarComputador()
         if (!tela.guia && janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
             return
+        if (!completo)
+            return salvarComputador()
         const lista = []
         for (let i = 0; i < tabelas.count; i++) {
             const t = tabelas.itemAt(i)
@@ -663,7 +664,19 @@ FocusScope {
             if (!janela || !tela.guia)
                 return
             const c = tela.alvoDaGuia(nome)
-            janela.guiaAtualizarRegistro(c ? c[0] : null)
+            if (c && c[0]) {
+                janela.guiaAtualizarRegistro(c[0])
+                // N-7 + MG-5: se o registro recarregado ficou fora da área visível, rola até ele.
+                if (c[1] && c[1].contentItem && c[1].height > 0) {
+                    const p = c[0].mapToItem(c[1].contentItem, 0, 0)
+                    const topoV = c[1].contentY
+                    const baseV = topoV + c[1].height
+                    if (p.y < topoV + 8 || p.y + c[0].height > baseV - 8)
+                        janela.rolarAteItem(c[1], c[0], 24)
+                }
+            } else {
+                janela.guiaAtualizarRegistro(null)
+            }
         })
     }
 
@@ -744,6 +757,9 @@ FocusScope {
     }
 
     function carregarSync() {
+        const acompanhar = !!janela && !!tela.guia && tela.guia.requisito.campos[0] === "referencia"
+        if (acompanhar)
+            janela.guiaIniciarRecargaLista()
         carregarCaixas()
         const r = Api.chamar("sync_ler")
         if (r.ok) {
@@ -753,6 +769,8 @@ FocusScope {
             syncInterfaces.texto = sync.interfaces
             syncSenha.texto = ""
         }
+        if (acompanhar)
+            _atualizarDestaqueDeLista()
     }
 
     // Só a situação e a lista de referências (não mexe no que está sendo digitado).
@@ -1190,7 +1208,7 @@ FocusScope {
                             function mostrarErro(qual, mensagem) {
                                 const alvo = qual === "Nome" ? nomeTabela : lucroTabela
                                 alvo.erro = mensagem
-                                alvo.focar()
+                                janela.rolarAteItem(rolagem, alvo, 24, () => alvo.focar())
                             }
 
                             Text {
@@ -1600,10 +1618,9 @@ FocusScope {
                                             pronto(r)
                                             if (comGuia && !j.concluirGuia(true))
                                                 Qt.callLater(t.mostrarCampoDaGuia)
-                                            else if (r.ok && !daGuia && !!t.guia)
-                                                // N-7 da re-revisão: outro registro aceito com a guia aberta; a lista
-                                                // recarregou e o destaque do registro da guia tinha sumido.
-                                                Qt.callLater(t.mostrarCampoDaGuia)
+                                            // N-7 + MG-5: quando outro registro é aceito com a guia aberta,
+                                            // `motivoReferencia.onFeito` -> `recarregarReferencias()` congela e
+                                            // desliza suavemente o destaque até a nova posição do registro da guia.
                                         })
                                         },
                                         "Motivo (por que aceitar?)", "secundario")

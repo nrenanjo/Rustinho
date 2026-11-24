@@ -900,7 +900,7 @@ ApplicationWindow {
             origemDaFaixa = topo.origemDaFaixa
             if (topo.avisoGuia)
                 guia.mostrar(topo.avisoGuia.estado, topo.avisoGuia.titulo, topo.avisoGuia.texto,
-                             false, topo.avisoGuia.persistente)
+                             !topo.avisoGuia.persistente, topo.avisoGuia.persistente)
             if (topo.alvoDestaque && topo.alvoDestaque.visible)
                 guia.destacar(topo.alvoDestaque, topo.rolagemDestaque, topo.veuLeve)
             if (topo.foco && topo.foco.visible) {
@@ -1454,6 +1454,11 @@ ApplicationWindow {
     Shortcut {
         sequence: "F11"
         enabled: !!janela.estado.usuario
+                 && !espera.visible
+                 && !dialogo.opened
+                 && !pedirGerente.opened
+                 && !perguntaDescartarDesativado.opened
+                 && !janela.temJanelinhaAberta
         onActivated: {
             const tela = pilha.currentItem
             if (!tela)
@@ -1744,7 +1749,7 @@ ApplicationWindow {
         color: Tema.veu
         // Aparece aos poucos: uma operação rápida nem chega a piscar.
         opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.InQuad } }
+        Behavior on opacity { NumberAnimation { duration: Tema.duracaoEsmaecer(220); easing.type: Easing.InQuad } }
         // Segura o teclado enquanto espera e, no fim, devolve o foco a quem
         // tinha (uma janelinha aberta continua respondendo ao Esc).
         property Item focoAntes: null
@@ -1801,12 +1806,13 @@ ApplicationWindow {
                     clip: true
                     Rectangle {
                         id: faixaEspera
-                        width: parent.width * 0.32
+                        width: Tema.movimentoReduzido ? parent.width * 0.45 : parent.width * 0.32
+                        x: Tema.movimentoReduzido ? (parent.width - width) / 2 : 0
                         height: parent.height
                         radius: 4
                         color: Tema.azulEscuro
                         NumberAnimation on x {
-                            running: espera.visible
+                            running: espera.visible && !Tema.movimentoReduzido
                             loops: Animation.Infinite
                             from: -faixaEspera.width
                             to: faixaEspera.parent.width

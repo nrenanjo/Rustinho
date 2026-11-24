@@ -781,7 +781,7 @@ FocusScope {
                             highlightMoveDuration: 0
                             boundsBehavior: Flickable.StopAtBounds
                             ScrollBar.vertical: ScrollBar {}
-                            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+                            onCurrentIndexChanged: if (currentIndex >= 0) janela.rolarAteIndice(listaResultados, currentIndex, ListView.Contain)
                             delegate: Rectangle {
                                 id: faixaDaLista
                                 required property var modelData
@@ -1568,6 +1568,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         carregarCaixa()
         const f = Api.chamar("formas_pagamento")
         if (f.ok)

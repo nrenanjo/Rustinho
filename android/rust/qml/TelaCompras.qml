@@ -200,7 +200,11 @@ FocusScope {
         Qt.callLater(() => {
             // T054-R3 da revisão: refaz a lista antes de ler a altura dela.
             listaNaoImportadas.forceLayout()
-            listaNaoImportadas.contentY = Math.max(0, Math.min(onde, listaNaoImportadas.contentHeight - listaNaoImportadas.height))
+            const dest = Math.max(0, Math.min(onde, Math.max(0, listaNaoImportadas.contentHeight - listaNaoImportadas.height)))
+            if (janela && typeof janela.rolarSuave === "function")
+                janela.rolarSuave(listaNaoImportadas, dest)
+            else
+                listaNaoImportadas.contentY = dest
         })
     }
 
@@ -538,7 +542,7 @@ FocusScope {
             keyNavigationEnabled: false
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
-            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+            onCurrentIndexChanged: if (currentIndex >= 0) janela.rolarAteIndice(lista, currentIndex, ListView.Contain)
             delegate: LinhaCompra {
                 required property var modelData
                 required property int index
@@ -584,6 +588,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         buscar()
         busca.focarCursor()
     }

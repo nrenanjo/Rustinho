@@ -52,11 +52,9 @@ FocusScope {
         }
         carregar()
         if (i >= 0)
-            Qt.callLater(() => lista.positionViewAtIndex(Math.min(i, lista.count - 1), ListView.Beginning))
+            Qt.callLater(() => janela.rolarAteIndice(lista, Math.min(i, lista.count - 1), ListView.Beginning))
         else if (deslocamento > 0)
-            Qt.callLater(() => {
-                lista.contentY = lista.originY + Math.min(deslocamento, Math.max(0, lista.contentHeight - lista.height))
-            })
+            Qt.callLater(() => janela.rolarSuave(lista, lista.originY + deslocamento))
     }
     function carregarDados() {
         const r = Api.chamar("encomendas_painel", { texto: busca.texto, quais: quais })

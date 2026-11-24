@@ -300,5 +300,5 @@ FocusScope {
         novo()
         mostrarFicha = false
     }
-    StackView.onActivated: if (!Tema.estreito) nome.focar()
+    StackView.onActivated: if ((!janela || !janela.retornandoDeF11) && !Tema.estreito) nome.focar()
 }

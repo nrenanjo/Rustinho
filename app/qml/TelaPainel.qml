@@ -155,6 +155,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         if (conteudo.item && typeof conteudo.item.carregar === "function")
             conteudo.item.carregar()
     }

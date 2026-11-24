@@ -670,6 +670,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         // De volta de onde se resolve o código (caso 4): confere de novo.
         reconferirBloqueadas()
         busca.focar()

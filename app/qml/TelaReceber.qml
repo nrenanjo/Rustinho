@@ -731,7 +731,10 @@ FocusScope {
         function abrirCom() {
             chave = Api.novaChave()
             erro = ""
-            rolagemPagar.contentY = 0
+            if (opened)
+                janela.rolarSuave(rolagemPagar, 0)
+            else
+                rolagemPagar.contentY = 0
             forma = "dinheiro"
             chequesReceber.limpar()
             valor.texto = ""
@@ -1015,7 +1018,10 @@ FocusScope {
             parcelas.texto = "1"
             vencimento.texto = ""
             previa = []
-            rolagemLancar.contentY = 0
+            if (opened)
+                janela.rolarSuave(rolagemLancar, 0)
+            else
+                rolagemLancar.contentY = 0
             open()
             if (cliente)
                 descricao.focar()

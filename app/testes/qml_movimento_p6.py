@@ -86,15 +86,28 @@ TestCase {
         let terminou = false
         let interrompido = true
         let passos = 0
+        let anteriorY = 0
+        let maiorPasso = 0
+        const t0 = Date.now()
         mov.rolarSuave(area, 500, {
-            aoAtualizar: () => { passos++ },
+            aoAtualizar: () => {
+                passos++
+                const dy = Math.abs(area.contentY - anteriorY)
+                if (dy > maiorPasso)
+                    maiorPasso = dy
+                anteriorY = area.contentY
+            },
             aoTerminar: (interr) => { terminou = true; interrompido = interr }
         })
         verify(mov.ativo, "movimento deveria estar ativo")
         verify(mov.duracaoMs >= 250 && mov.duracaoMs <= 450, "duração fora de 250..450 ms: " + mov.duracaoMs)
         tryVerify(() => terminou, 4000, "rolagem não concluiu")
+        const durReal = Date.now() - t0
         verify(!interrompido, "não deveria ter sido interrompida")
-        verify(passos >= 3, "deveria ter múltiplos passos suaves, teve " + passos)
+        verify(passos >= 10, "deveria ter múltiplos passos suaves a ~60 Hz, teve " + passos)
+        // Pico matemático de InOutCubic (derivada máxima 3.0) para 500 px em 375 ms a ~60 Hz: ~64–75 px/quadro.
+        verify(maiorPasso <= 95, "passo por quadro excessivo (A1): " + maiorPasso + " px")
+        verify(durReal >= 220 && durReal <= 600, "duração real fora do alvo (A2): " + durReal + " ms")
         verify(Math.abs(area.contentY - 500) <= 1, "destino final incorreto: " + area.contentY)
         compare(area.opacity, 1)
     }
@@ -110,11 +123,11 @@ TestCase {
         tryVerify(() => {
             if (area.opacity < minOpacidade)
                 minOpacidade = area.opacity
-            if (area.opacity < 0.8)
+            if (area.opacity <= 0.2)
                 viuFade = true
             return terminou
         }, 5000, "rolagem longa não concluiu")
-        verify(viuFade && minOpacidade < 0.8, "esmaecimento não ocorreu (minOp=" + minOpacidade + ")")
+        verify(viuFade && minOpacidade <= 0.2, "esmaecimento <= 0.2 não ocorreu (minOp=" + minOpacidade + ")")
         verify(Math.abs(area.contentY - 2400) <= 1, "destino final incorreto: " + area.contentY)
         compare(area.opacity, 1, "opacidade final deve voltar a 1")
     }
@@ -139,6 +152,19 @@ TestCase {
         compare(area.opacity, 1, "opacidade deve voltar a 1 após interrupção")
         wait(120)
         verify(Math.abs(area.contentY - 120) <= 1, "não pode puxar de volta após interrupção (y=" + area.contentY + ")")
+
+        // 2º caminho (A8): interrupção explícita por gesto/tecla durante grande distância (fadeOut).
+        let term2 = false
+        let interr2 = false
+        mov.rolarSuave(area, 2600, {
+            aoTerminar: (interr) => { term2 = true; interr2 = interr }
+        })
+        compare(mov.estado, "fadeOut")
+        wait(40)
+        mov.interromperPorUsuario()
+        verify(term2 && interr2, "interromperPorUsuario deve encerrar no mesmo quadro")
+        verify(!mov.ativo)
+        compare(area.opacity, 1, "opacidade deve voltar imediatamente a 1 após interrupção em fadeOut")
     }
 
     function test_4_a9_movimento_reduzido_imediato() {
@@ -156,6 +182,51 @@ TestCase {
         compare(passos, 1)
     }
 
+    // T-02: prova real em Window do Qt Quick sob QSG_RENDER_LOOP=threaded com animação contínua
+    // (sem mock JS), garantindo 0 confirmações prematuras antes do afterSynchronizing pós-gravação.
+    Window {
+        id: winT02
+        width: 160
+        height: 120
+        visible: false
+        property bool entregaPendente: false
+        property bool sincronizadaNoQuadro: false
+        property int geracaoGravacao: 0
+        property int geracaoSync: 0
+        property int confirmacoes: 0
+        property int prematuras: 0
+        Rectangle {
+            id: animBox
+            width: 30
+            height: 30
+            color: "magenta"
+            NumberAnimation on x {
+                running: winT02.visible
+                loops: Animation.Infinite
+                from: 0
+                to: 120
+                duration: 400
+            }
+        }
+        onAfterSynchronizing: {
+            if (entregaPendente) {
+                sincronizadaNoQuadro = true
+                geracaoSync = geracaoGravacao
+            }
+        }
+        onFrameSwapped: {
+            if (sincronizadaNoQuadro) {
+                sincronizadaNoQuadro = false
+                if (geracaoSync < geracaoGravacao)
+                    prematuras++
+                entregaPendente = false
+                confirmacoes++
+            } else if (entregaPendente) {
+                winT02.update()
+            }
+        }
+    }
+
     function test_5_t02_barreira_afterSynchronizing_frameSwapped() {
         barreiraT02.confirmacoes = 0
         barreiraT02.updates = 0
@@ -170,6 +241,26 @@ TestCase {
         barreiraT02.dispararFrameSwapped()
         compare(barreiraT02.confirmacoes, 1, "deve confirmar entrega após afterSynchronizing + frameSwapped")
         verify(!barreiraT02.apiSim._entregaPendente)
+
+        // Sonda real em Window Qt Quick sob QSG_RENDER_LOOP=threaded com animação ativa:
+        winT02.confirmacoes = 0
+        winT02.prematuras = 0
+        winT02.geracaoGravacao = 0
+        winT02.geracaoSync = 0
+        winT02.sincronizadaNoQuadro = false
+        winT02.entregaPendente = false
+        winT02.visible = true
+        tryVerify(() => winT02.visible, 1000)
+        for (let i = 1; i <= 15; i++) {
+            const antes = winT02.confirmacoes
+            winT02.geracaoGravacao = i
+            winT02.entregaPendente = true
+            winT02.update()
+            tryVerify(() => winT02.confirmacoes === antes + 1, 2000, "quadro real T-02 não confirmou entrega #" + i)
+        }
+        winT02.visible = false
+        compare(winT02.confirmacoes, 15, "todas as 15 entregas reais deveriam confirmar")
+        compare(winT02.prematuras, 0, "zero confirmações prematuras em Window real com animação contínua")
     }
 }
 """
@@ -216,7 +307,7 @@ def main():
                 f.write(TESTE.replace("%COPIA%", copia))
             r = subprocess.run(
                 [qmltestrunner, "-import", pasta, "-input", arquivo],
-                env=dict(os.environ, QT_QPA_PLATFORM="offscreen"),
+                env=dict(os.environ, QT_QPA_PLATFORM="offscreen", QSG_RENDER_LOOP="threaded"),
                 capture_output=True, text=True, errors="replace",
             )
             print(r.stdout + r.stderr)

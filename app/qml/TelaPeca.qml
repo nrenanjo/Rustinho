@@ -591,9 +591,10 @@ FocusScope {
         }
         if (alvo) {
             alvo.erro = mensagem
-            rolarAte(alvo)
-            if (typeof alvo.focar === "function")
-                alvo.focar()
+            rolarAte(alvo, () => {
+                if (typeof alvo.focar === "function")
+                    alvo.focar()
+            })
         }
         janela.avisar(mensagem, "erro")
     }

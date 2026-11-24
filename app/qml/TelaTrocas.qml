@@ -387,6 +387,8 @@ FocusScope {
     }
 
     StackView.onActivated: {
+        if (janela && janela.retornandoDeF11)
+            return
         carregar()
         if (secao !== "vales")
             busca.focar()

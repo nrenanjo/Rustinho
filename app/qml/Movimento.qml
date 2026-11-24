@@ -212,7 +212,7 @@ Item {
         decorridoMs = 0
         faseDecorridoMs = 0
         primeiroQuadro = true
-        if (Tema.movimentoReduzido) {
+        if (Tema.movimentoReduzido || lista.height <= 0) {
             area = lista
             lista.positionViewAtIndex(indice, m)
             destinoY = lista.contentY
@@ -239,10 +239,12 @@ Item {
             mov._limpar()
             return
         }
-        const mesmaAltura = mov.ultimaAlturaArea < 0 || Math.abs(a.height - mov.ultimaAlturaArea) < 1
-        // MG-6 / A8: detecta qualquer rolagem manual (roda do mouse, barra, PageUp/Down) no mesmo quadro.
+        const [minY, maxY] = mov._limites(a)
+        const esperadoY = mov.ultimoYEscrito >= 0 ? mov._limitar(mov.ultimoYEscrito, minY, maxY) : a.contentY
+        // MG-6 / A8: detecta qualquer rolagem manual (roda do mouse, barra, PageUp/Down) no mesmo quadro,
+        // inclusive enquanto o cabeçalho/orientação ainda ajusta a altura da área rolável.
         if (a.dragging || a.flicking
-                || (mesmaAltura && mov.ultimoYEscrito >= 0 && Math.abs(a.contentY - mov.ultimoYEscrito) > 2.5)) {
+                || (mov.ultimoYEscrito >= 0 && Math.abs(a.contentY - esperadoY) > 2.5)) {
             mov.interromperPorUsuario()
             return
         }
@@ -262,7 +264,6 @@ Item {
         mov.primeiroQuadro = false
         mov.decorridoMs += dt
         mov.faseDecorridoMs += dtFase
-        const [minY, maxY] = mov._limites(a)
 
         if (mov.estado === "normal") {
             const t = Math.min(1, mov.decorridoMs / Math.max(1, mov.duracaoMs))

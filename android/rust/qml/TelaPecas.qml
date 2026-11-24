@@ -134,7 +134,7 @@ FocusScope {
             }
             lista.currentIndex = indice
             if (indice <= 0)
-                lista.positionViewAtBeginning()
+                janela.rolarSuave(lista, lista.originY)
         } else {
             janela.avisar(r.erro, "erro")
         }
@@ -401,7 +401,7 @@ FocusScope {
             ScrollBar.vertical: ScrollBar {}
             onCurrentIndexChanged: {
                 if (currentIndex >= 0)
-                    positionViewAtIndex(currentIndex, ListView.Contain)
+                    janela.rolarAteIndice(lista, currentIndex, ListView.Contain)
                 tela.talvezMais()
             }
             onContentYChanged: tela.talvezMais()

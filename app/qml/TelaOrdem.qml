@@ -290,6 +290,8 @@ FocusScope {
                 titulo: "Falta o cliente da OS",
                 texto: "Diga de quem é o carro (o cliente)."
             })
+        } else {
+            cliente.erro = ""
         }
         if (placa.texto.trim() === "" && veiculo.texto.trim() === "") {
             lista.push({
@@ -300,6 +302,8 @@ FocusScope {
                 titulo: "Falta o veículo da OS",
                 texto: "Digite a placa ou o carro."
             })
+        } else {
+            placa.erro = ""
         }
         return lista
     }

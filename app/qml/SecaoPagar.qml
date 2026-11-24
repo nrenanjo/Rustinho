@@ -190,7 +190,10 @@ FocusScope {
             lVencimento.texto = ""
             lCompetencia.texto = ""
             previa = []
-            rolagemLancamento.contentY = 0
+            if (opened)
+                janela.rolarSuave(rolagemLancamento, 0)
+            else
+                rolagemLancamento.contentY = 0
             open()
             lDescricao.focar()
         }

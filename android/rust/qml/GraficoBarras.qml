@@ -84,7 +84,7 @@ Item {
                         radius: width / 2
                         color: col.modelData.destaque ? grafico.corDestaque : grafico.cor
                         opacity: col.modelData.destaque ? 0.9 : sobre.hovered ? 0.75 : 0.5
-                        Behavior on height { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+                        Behavior on height { NumberAnimation { duration: Tema.duracaoPosicao(260); easing.type: Easing.OutCubic } }
                     }
                 }
                 Text {

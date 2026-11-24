@@ -282,20 +282,28 @@ def main():
             r.rolar_roda(-25, x=450, y=280)
             time.sleep(0.3)
             # Tenta salvar: validação progressiva deve rolar suavemente até o NCM e só então destacar!
+            # Não tira foto durante a rolagem para não congelar o Xvfb no meio da curva.
             xdo("key", "F2")
-            ok("P6: validação conduziu ao NCM incompleto",
-               r.esperar("NCM incompleto"), r.foto("-ncm"))
-            r.esperar(lambda a: any(e.get("guia") == "destaque_ativo" for e in a.eventos_mov()), 8)
+            chegou = r.esperar(lambda a: any(e.get("guia") == "destaque_ativo" for e in a.eventos_mov()), 10)
+            ok("P6: validação conduziu ao NCM incompleto e concluiu destaque",
+               chegou and r.tem("NCM incompleto"), r.foto("-ncm"))
             evs = r.eventos_mov()
             rolagens = [e for e in evs if e.get("fase") == "rolar"]
             inicios = [e for e in evs if e.get("fase") == "inicio"]
+            fins = [e for e in evs if e.get("fase") == "fim"]
             idx_aguarda = next((i for i, e in enumerate(evs) if e.get("guia") == "aguardando_rolagem"), -1)
             idx_ativo = next((i for i, e in enumerate(evs) if e.get("guia") == "destaque_ativo"), -1)
             ativo_ev = evs[idx_ativo] if idx_ativo >= 0 else None
-            ok("P6 A1/A2: rolagem guiada ocorreu em múltiplos passos suaves",
+            ys = [e["y"] for e in rolagens]
+            dist_total = inicios[-1].get("distancia", 0) if inicios else 0
+            dur_real = fins[-1].get("t", 0) if fins else 0
+            monotonico = all(ys[i] >= ys[i - 1] - 0.5 for i in range(1, len(ys)))
+            ok("P6 A1/A2/MG-9: rolagem guiada em múltiplos passos monotônicos sem câmera lenta (250–450 ms)",
                len(rolagens) >= 3 and len(inicios) >= 1
-               and 250 <= inicios[-1].get("duracao", 0) <= 450,
-               f"passos={len(rolagens)} inicio={inicios[-1:]}")
+               and 250 <= inicios[-1].get("duracao", 0) <= 450
+               and dist_total > 100 and monotonico
+               and 150 <= dur_real <= 1200,
+               f"passos={len(rolagens)} dur_real={dur_real}ms inicio={inicios[-1:]}")
             ok("P6 A6: destaque só entra depois que a rolagem conclui",
                idx_aguarda >= 0 and idx_ativo > idx_aguarda
                and evs[idx_aguarda].get("opacidade", 1) == 0,
@@ -308,6 +316,146 @@ def main():
                    ativo_ev.get("clipY", 0) >= 120, f"ev={ativo_ev}")
             else:
                 ok("P6 A5/A10: evento destaque_ativo emitido", False, f"evs={evs[-5:]}")
+            # P6 A11 (H25): após estabilizar em repouso, nenhum polling contínuo dispara eventos.
+            time.sleep(0.35)
+            qtd_repouso_1 = len(r.eventos_mov())
+            time.sleep(0.65)
+            qtd_repouso_2 = len(r.eventos_mov())
+            ok("P6 A11/H25: zero atividade/polling de movimento em repouso",
+               qtd_repouso_2 == qtd_repouso_1,
+               f"antes={qtd_repouso_1} depois={qtd_repouso_2}")
+            logs_erros += r.erros_qml()
+        finally:
+            r.fechar()
+
+        # P6 A3 / MG-7 + A13: grande distância (> 3x altura da área rolável) em janela compacta/estreita
+        # no binário real -> esmaece (<= 0.25), salta para perto e desliza suavemente.
+        r = App(pasta, "TelaPeca", {"produtoId": ""}, fotos, "2c-movimento-longa",
+                args_extras=["--medir-movimento"])
+        try:
+            r.entrar("Ana")
+            r.esperar("Nova peça")
+            r.encolher(480, 340)
+            xdo("type", "--delay", "25", "Peca Longa Distancia")
+            time.sleep(0.2)
+            r.clicar("Preço digitado na hora da venda")
+            time.sleep(0.2)
+            ok("P6 A3/A13: alcançou NCM em janela compacta 480x340",
+               r.clicar_campo_por_rotulo("NCM", altura_janela=340, dica="8 números"))
+            xdo("type", "--delay", "25", "123")
+            time.sleep(0.2)
+            r.rolar_roda(-45, x=240, y=220)
+            time.sleep(0.4)
+            xdo("key", "F2")
+            chegou_longa = r.esperar(lambda a: any(e.get("guia") == "destaque_ativo" for e in a.eventos_mov()), 10)
+            evs_l = r.eventos_mov()
+            fases_l = [e.get("fase") for e in evs_l if "fase" in e]
+            min_op_l = min((e.get("opacidadeArea", 1.0) for e in evs_l if e.get("fase") in ("fadeOut", "salto")), default=1.0)
+            fim_l = [e for e in evs_l if e.get("fase") == "fim"]
+            ok("P6 A3/MG-7 (real): grande distância usa fadeOut (<= 0.25) -> salto -> fadeIn e volta a opacity=1",
+               chegou_longa and "inicio_longa" in fases_l and "salto" in fases_l and "fadeIn" in fases_l
+               and min_op_l <= 0.25 and bool(fim_l) and fim_l[-1].get("opacidadeArea", 0) == 1,
+               f"min_op={min_op_l} fases={fases_l[:12]} {r.foto('-longa')}")
+            logs_erros += r.erros_qml()
+        finally:
+            r.fechar()
+
+        # P6 A8 / MG-6: interrupção manual real por roda do mouse no binário real.
+        r = App(pasta, "TelaPeca", {"produtoId": ""}, fotos, "2d-movimento-interrupcao",
+                args_extras=["--medir-movimento"])
+        try:
+            r.entrar("Ana")
+            r.esperar("Nova peça")
+            r.encolher(480, 340)
+            xdo("type", "--delay", "25", "Peca Interrupcao Real")
+            time.sleep(0.2)
+            r.clicar("Preço digitado na hora da venda")
+            time.sleep(0.2)
+            r.clicar_campo_por_rotulo("NCM", altura_janela=340, dica="8 números")
+            xdo("type", "--delay", "25", "123")
+            time.sleep(0.2)
+            r.rolar_roda(-45, x=240, y=220)
+            time.sleep(0.3)
+            # Dispara rolagem guiada e imediatamente envia roda do mouse dentro da área rolável para interromper em voo.
+            xdo("key", "F2")
+            time.sleep(0.05)
+            r.rolar_roda(5, x=240, y=300)
+            time.sleep(0.5)
+            evs_i = r.eventos_mov()
+            interrompeu = any(e.get("interrompido") is True or e.get("fase") == "interrompido" for e in evs_i)
+            ev_interr = [e for e in evs_i if e.get("interrompido") is True or e.get("fase") == "interrompido"]
+            op_final_i = ev_interr[-1].get("opacidadeArea", 0) if ev_interr else 0
+            nao_puxou = bool(ev_interr) and ev_interr[-1].get("y", 9999) < ev_interr[-1].get("destino", 0) - 200
+            ok("P6 A8/MG-6 (real): roda do mouse interrompe a rolagem guiada no binário real sem puxar de volta",
+               interrompeu and op_final_i == 1 and nao_puxou,
+               f"fases={[e.get('fase') for e in evs_i if 'fase' in e]} interr={ev_interr[-1:]} {r.foto('-interr')}")
+            logs_erros += r.erros_qml()
+        finally:
+            r.fechar()
+
+        # P6 A7 / MG-5: recarga da lista com guia ativa mantém e acompanha o registro sem desaparecer.
+        nova_loja()
+        base._aux_nucleo.executar("estavel", "executar_por_fora", {
+            "RUSTINHO_LOJA_TESTE": pasta,
+            "RUSTINHO_SQL": """
+                INSERT INTO conta_pagar (id, categoria_id, descricao, valor, vencimento, criado_em, dispositivo, competencia)
+                  VALUES ('cp-mg5-alvo', 'cat-aluguel', 'Conta MG5 Alvo', 1500, date('now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+                          'caixa-teste', strftime('%Y-%m','now'));
+                INSERT INTO sync_referencia (tabela, chave, pai, falta, estado, desde, motivo) VALUES
+                  ('conta_pagar', '["cp-mg5-outro"]', 'pessoa', '["sumiu-a"]', 'inconsistente', '2025-12-30T00:00:00Z', 'log'),
+                  ('conta_pagar', '["cp-mg5-alvo"]',  'pessoa', '["sumiu-b"]', 'inconsistente', '2026-01-02T00:00:00Z', 'log');
+            """,
+        }, raiz=base.RAIZ)
+        r = App(pasta, "TelaFinanceiro", {"secao": "pagar"}, fotos, "2e-movimento-recarga",
+                args_extras=["--medir-movimento"])
+        try:
+            r.entrar("Ana")
+            ok("P6 A7/MG-5: abriu conta inconsistente no A pagar", r.esperar("Conta MG5 Alvo"))
+            # Clica no botão "Pagar" na mesma linha da conta inconsistente e confirma o pagamento.
+            tx_pagar = r.textos()
+            y_conta = next((y for _, y, t in tx_pagar if "Conta MG5 Alvo" in t), None)
+            if y_conta is not None:
+                cand = [(abs(y - y_conta), x, y) for x, y, t in tx_pagar if simples(t) == "pagar"]
+                cand.sort()
+                if cand:
+                    xdo("mousemove", str(cand[0][1]), str(cand[0][2]))
+                    xdo("click", "1")
+            time.sleep(1.2)
+            xdo("key", "Return")
+            time.sleep(0.8)
+            if not r.tem("Ver o registro"):
+                botoes_p = [(x, y) for x, y, t in r.textos() if simples(t) == "pagar"]
+                if botoes_p:
+                    xdo("mousemove", str(botoes_p[-1][0]), str(botoes_p[-1][1]))
+                    xdo("click", "1")
+            ok("P6 A7/MG-5: ofereceu Ver o registro", r.esperar("Ver o registro"))
+            r.clicar("Ver o registro")
+            ok("P6 A7/MG-5: abriu Caixas com destaque no registro alvo",
+               r.esperar(lambda a: any(e.get("guia") in ("destaque_ativo", "destaque_direto") for e in a.eventos_mov()), 10),
+               r.foto("-antes-recarga"))
+            # Espera janela de proteção de clique pós-movimento e aceita o OUTRO registro (o de cima, 2025-12-30),
+            # forçando recarga da lista e deslocamento vertical do registro da guia (MG-5 / A7).
+            time.sleep(0.7)
+            unicos_aceitar = []
+            for x, y, t in r.textos_para_clicar():
+                if simples(t) == simples("Aceitar como está") and 60 <= y < 740:
+                    if not any(abs(y - uy) < 12 for _, uy in unicos_aceitar):
+                        unicos_aceitar.append((x, y))
+            unicos_aceitar.sort(key=lambda p: p[1])
+            if len(unicos_aceitar) >= 2:
+                xdo("mousemove", str(unicos_aceitar[0][0]), str(unicos_aceitar[0][1]), "click", "1")
+                if r.esperar("O que falta não vai aparecer por isso", 6):
+                    time.sleep(0.4)
+                    xdo("type", "--delay", "25", "Outro registro MG5")
+                    time.sleep(0.2)
+                    xdo("key", "Return")
+                    r.esperar(lambda a: any(e.get("guia") in ("registro_deslizar", "registro_atualizado") for e in a.eventos_mov()), 10)
+            evs_m5 = r.eventos_mov()
+            guias_m5 = [e.get("guia") for e in evs_m5 if "guia" in e]
+            ok("P6 A7/MG-5 (real): recarga da lista preserva e desliza/atualiza o destaque no registro da guia",
+               any(g in ("registro_deslizar", "registro_atualizado") for g in guias_m5)
+               and r.tem("Aceitar como está"),
+               f"guias={guias_m5} {r.foto('-apos-recarga')}")
             logs_erros += r.erros_qml()
         finally:
             r.fechar()
@@ -411,11 +559,21 @@ def main():
             time.sleep(0.8)
             xdo("key", "Return")
             ok("NCG-3 (Vender): item entrou no carrinho", r.esperar("Subtotal"), r.foto("-1-item"))
-            # Preenche o cliente para validar preservação de múltiplos campos.
-            if r.clicar("Cliente"):
-                time.sleep(0.2)
-                xdo("type", "--delay", "30", "Oficina F11")
-                time.sleep(0.3)
+            # Preenche o campo real de cliente (à direita, dica "Nome, CPF, telefone ou placa") e o desconto,
+            # deixando o foco ativo no campo de desconto antes do F11.
+            clicou_cli = r.clicar("Nome, CPF, telefone ou placa")
+            ok("NCG-3 (Vender): clicou no campo real de cliente", clicou_cli)
+            time.sleep(0.2)
+            xdo("type", "--delay", "30", "Oficina F11")
+            time.sleep(0.3)
+            pos_cli_antes = [(x, y) for x, y, t in r.textos() if "Oficina F11" in t]
+            ok("NCG-3 (Vender): 'Oficina F11' foi digitado no campoCliente (x > 650), não na busca",
+               any(x > 650 for x, _ in pos_cli_antes), f"pos={pos_cli_antes}")
+            ok("NCG-3 (Vender): clicou no campo Desconto na venda",
+               r.clicar_campo_por_rotulo("Desconto na venda", altura_janela=760))
+            time.sleep(0.2)
+            xdo("type", "--delay", "30", "5")
+            time.sleep(0.3)
             # Pressiona F11: deve abrir TelaPecas livremente sem banner "Você veio de".
             xdo("key", "F11")
             ok("NCG-3 (Vender): F11 abriu Peças sem banner 'Você veio de'",
@@ -424,12 +582,27 @@ def main():
                and not r.tem("Você veio de")
                and not r.tem("voltar para Vender"),
                r.foto("-2-pecas"))
-            # Esc volta exatamente à TelaVender preservando carrinho e cliente.
+            # Esc volta exatamente à TelaVender preservando carrinho, campoCliente, desconto e foco/cursor.
             xdo("key", "Escape")
-            ok("NCG-3 (Vender): Esc retorna à Vender com carrinho e cliente preservados",
-               r.esperar("Subtotal") and r.tem("Oficina F11")
+            ok("NCG-3 (Vender): Esc retorna à Vender preservando carrinho, cliente e desconto",
+               r.esperar("Subtotal")
+               and any(x > 650 for x, _, t in r.textos() if "Oficina F11" in t)
                and r.valor_teste("TESTE_F11_SUSPENSAS") == "0",
                r.foto("-3-voltou"))
+            # Digita '0' sem clicar: se o foco/cursor voltou ao campo de desconto, vira '50'.
+            time.sleep(0.3)
+            xdo("type", "--delay", "30", "0")
+            ok("NCG-3 (Vender): foco e cursor voltaram exatamente ao campo editado (5 -> 50)",
+               r.esperar(lambda a: any(t.strip() == "50" and x > 650 for x, _, t in a.textos()), 4),
+               r.foto("-4-foco"))
+            # Guarda de modal: abre diálogo de confirmação de saída e garante que F11 não abre Peças por trás.
+            xdo("key", "Escape")
+            ok("NCG-3 (Modal): diálogo de confirmação aberto", r.esperar("Limpar esta venda?"))
+            xdo("key", "F11")
+            time.sleep(0.4)
+            ok("NCG-3 (Modal): F11 ignorado com diálogo modal aberto",
+               r.tem("Limpar esta venda?") and r.valor_teste("TESTE_F11_SUSPENSAS") == "0",
+               r.foto("-5-modal"))
             logs_erros += r.erros_qml()
         finally:
             r.fechar()

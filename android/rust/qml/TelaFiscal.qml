@@ -58,7 +58,42 @@ FocusScope {
         })
     }
 
+    function pendenciasDeValidacao() {
+        const lista = []
+        for (let i = 0; i < regras.count; i++) {
+            const g = regras.get(i)
+            const linha = repRegras.itemAt(i)
+            const cest = String(g.cestInicio || "").trim()
+            if (cest === "" || !/^\d{1,7}$/.test(cest)) {
+                lista.push({
+                    chave: "regra_" + i + "_cest",
+                    item: linha ? linha.campo("cestInicio") : null,
+                    rolagem: rolagem,
+                    titulo: "Começo do CEST inválido na regra " + (i + 1),
+                    texto: "Informe apenas os números iniciais do CEST (ex.: 01 ou 16)."
+                })
+            } else if (linha && linha.campo("cestInicio")) {
+                linha.campo("cestInicio").erro = ""
+            }
+            const vigDe = String(g.vigenteDe || "").trim()
+            if (vigDe === "") {
+                lista.push({
+                    chave: "regra_" + i + "_vigenteDe",
+                    item: linha ? linha.campo("vigenteDe") : null,
+                    rolagem: rolagem,
+                    titulo: "Falta a data inicial na regra " + (i + 1),
+                    texto: "Informe a partir de qual data esta regra de ST vale."
+                })
+            } else if (linha && linha.campo("vigenteDe")) {
+                linha.campo("vigenteDe").erro = ""
+            }
+        }
+        return lista
+    }
+
     function salvarRegras() {
+        if (janela && janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
+            return
         salvarRegrasAgora()
     }
     function salvarRegrasAgora() {
@@ -69,14 +104,20 @@ FocusScope {
         }
         janela.chamarGerente("fiscal_regras_salvar", { regras: lista }, r => {
             if (r.ok) {
+                janela.encerrarValidacaoProgressiva(tela)
                 preencher(r.dados)
                 janela.avisar("Regras de ST salvas.", "ok")
             } else {
                 const m = r.campo ? r.campo.match(/^regras\.(\d+)\.(\w+)$/) : null
                 if (m) {
                     const linha = repRegras.itemAt(parseInt(m[1]))
-                    if (linha)
-                        linha.campo(m[2]).erro = r.erro
+                    if (linha) {
+                        const alvo = linha.campo(m[2])
+                        if (alvo) {
+                            alvo.erro = r.erro
+                            janela.rolarAteItem(rolagem, alvo, 24, () => { if (alvo.focar) alvo.focar() })
+                        }
+                    }
                 }
                 janela.avisar(r.erro, "erro")
             }
@@ -340,10 +381,14 @@ FocusScope {
                                 onMudou: (campo, valor) => {
                                     regras.setProperty(index, campo, valor)
                                     tela.regrasAlteradas = true
+                                    if (tela.janela)
+                                        tela.janela.reavaliarValidacaoProgressiva(tela)
                                 }
                                 onRemover: {
                                     regras.remove(index)
                                     tela.regrasAlteradas = true
+                                    if (tela.janela)
+                                        tela.janela.reavaliarValidacaoProgressiva(tela)
                                 }
                             }
                         }

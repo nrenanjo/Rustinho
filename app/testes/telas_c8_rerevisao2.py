@@ -747,7 +747,9 @@ def s8_destaque_e_pilulas(placar, fotos):
                 return
             r.clicar("Ver o registro")
             ok("s8: a guia aparece em Caixas", r.esperar(lambda: r.tem(TITULO_7) and r.pilha() == base + 1, 10), r.foto("-2"))
-            time.sleep(2.0)
+            r.esperar(lambda: len(unicos(r.onde("Aceitar como está"))) >= 2
+                      and 60 <= unicos(r.onde("Aceitar como está"))[0][1] < r.altura() - 30, 8)
+            time.sleep(0.8)
             f = r.foto("-3")
             pos = unicos(r.onde("Aceitar como está"))
             obs("s8 na chegada, botões Aceitar como está:", pos, "| pílulas:", r.onde("Caixas"), r.onde("Simultaneidade"))
@@ -765,16 +767,25 @@ def s8_destaque_e_pilulas(placar, fotos):
             f = r.foto("-4")
             pos = unicos(r.onde("Aceitar como está"))
             obs("s8 depois de rolar: o botão do registro da guia em", pos[:1], "| a pílula Caixas em y =", pilula, "| foto:", f)
-            # O destaque por cima das pílulas: a luz da pílula "Caixas"/"Duplicatas" com a página rolada / na chegada.
+            # O destaque por cima das pílulas: compara a luz sobre as pílulas depois de rolar (s8-4)
+            # com a chegada com o véu já aceso (s8-3) e com a tela antes do véu (s8-0).
+            # Sem o recorte S-3, rolar o destaque por trás das pílulas clareava a faixa (razão > 1,15).
+            # Com S-3, as pílulas permanecem uniformemente sob o véu (rolada/chegada ~ 1,00 e rolada/sem_veu <= 0,85).
             from PIL import Image
-            a, b = Image.open(r.fotos + "/" + r.nome + "-3.png").convert("L"), Image.open(f).convert("L")
+            im0 = Image.open(r.fotos + "/" + r.nome + "-0.png").convert("L")
+            a = Image.open(r.fotos + "/" + r.nome + "-3.png").convert("L")
+            b = Image.open(f).convert("L")
             faixa = [(x, pilula) for x in (90, 200, 380, 470)]
             def med(im, x, y):
                 px = sorted(im.crop((x - 6, y - 14, x + 6, y - 9)).getdata())
                 return px[len(px) // 2] + 1
             q = [round(med(b, x, y) / med(a, x, y), 2) for x, y in faixa]
-            obs("s8 luz em volta das pílulas, rolada / na chegada:", q)
-            ok("s8: medido (a observação do autor): ver a foto e as razões acima", True, f)
+            q_veu = [round(med(b, x, y) / med(im0, x, y), 2) for x, y in faixa]
+            obs("s8 luz em volta das pílulas, rolada/chegada:", q, "| rolada/sem_veu:", q_veu)
+            ok("s8 (S-3): destaque recortado à área rolável não vaza sobre as pílulas fixas",
+               all(0.90 <= v <= 1.08 for v in q) and (max(q) - min(q) <= 0.08)
+               and all(v <= 0.85 for v in q_veu),
+               f"{f} rolada/chegada={q} rolada/sem_veu={q_veu}")
             xdo("key", "Escape")
             r.esperar(lambda: r.pilha() == base, 10)
             ok("s8: nenhum TypeError/ReferenceError no registro", not erros(r), "; ".join(erros(r)[:2]))
@@ -839,7 +850,7 @@ def s9_aviso_do_filtro_depois(placar, fotos):
 CASOS = {"s1": s1_cadeias_seguidas, "s2": s2_sair_antes_da_espera, "s3": s3_compra, "s4": s4_aceitar_outro,
          "s5": s5_historico_com_filtro, "s6": s6_i1_tres_caixas, "s7": s7_sessao_acaba_no_destino,
          "s9": s9_aviso_do_filtro_depois, "s8": s8_destaque_e_pilulas}
-PADRAO = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s9"]  # o s8 só mede (S-3, à espera da decisão)
+PADRAO = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9"]
 
 
 def main():
