@@ -44,7 +44,7 @@ use serde_json::Value;
 
 use super::aprovados::{self, Pedido};
 use super::cofre;
-use super::{de_hex, hex, Chave, Identidade};
+use super::{apagar, de_hex, hex, Chave, Identidade, Segredo};
 use crate::erro::{Erro, Resultado};
 
 /// Prefixo DER SubjectPublicKeyInfo (RFC 8410) de uma chave pública Ed25519 (12 bytes).
@@ -90,7 +90,8 @@ pub fn extrair_chave_spki(cert: &CertificateDer<'_>) -> Option<Chave> {
 }
 
 fn chave_certificada(id: &Identidade) -> Resultado<Arc<CertifiedKey>> {
-    let chave_der = PrivatePkcs8KeyDer::from(id.pkcs8_der().to_vec());
+    // M1: empresta diretamente do `Segredo` da `Identidade` sem clonar a chave privada no heap.
+    let chave_der = PrivatePkcs8KeyDer::from(id.pkcs8_der());
     let assinador = provedor::sign::any_eddsa_type(&chave_der)
         .map_err(|_| Erro::Interno("não foi possível preparar a chave Ed25519 para o canal TLS".into()))?;
     Ok(Arc::new(CertifiedKey::new(vec![CertificateDer::from(montar_spki(&id.publica()))], assinador)))
@@ -230,6 +231,7 @@ pub fn config_servidor(eu: &Identidade, politica: PoliticaChaves) -> Resultado<A
         .with_client_cert_verifier(VerificadorRpk::novo(politica))
         .with_cert_resolver(Arc::new(rustls::server::AlwaysResolvesServerRawPublicKeys::new(chave_certificada(eu)?)));
     // Sem retomada de sessão por ticket: cada conexão revalida a chave contra o registro atual (revogação imediata!).
+    cfg.send_tls13_tickets = 0;
     cfg.ticketer = Arc::new(SemTickets);
     cfg.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
     Ok(Arc::new(cfg))
@@ -347,7 +349,10 @@ fn descarregar_tls<Data: SideData>(
         match conn.write_tls(fluxo) {
             Ok(0) => return Err(erro_rede(std::io::ErrorKind::WriteZero.into())),
             Ok(_) => {}
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(erro_rede(e)),
         }
@@ -375,7 +380,10 @@ fn ler_um_passo_tls<Data: SideData>(
                 }
                 return Ok(());
             }
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(erro_rede(e)),
         }
@@ -393,16 +401,25 @@ where
     C: std::ops::DerefMut<Target = ConnectionCommon<Data>>,
 {
     let fim = Instant::now() + prazo;
-    fluxo.set_read_timeout(Some(Duration::from_millis(200))).ok();
-    fluxo.set_write_timeout(Some(Duration::from_millis(500))).ok();
+    fluxo.set_nonblocking(false).ok();
+    let passo_leitura = prazo.min(Duration::from_millis(200)).max(Duration::from_millis(1));
+    let passo_escrita = prazo.min(Duration::from_millis(500)).max(Duration::from_millis(1));
+    fluxo.set_read_timeout(Some(passo_leitura)).ok();
+    fluxo.set_write_timeout(Some(passo_escrita)).ok();
 
     while conn.is_handshaking() {
-        descarregar_tls(&mut fluxo, &mut conn, fim, parar)?;
+        checar_parada_e_prazo(fim, parar)?;
+        let escreveu = conn.wants_write();
+        if escreveu {
+            descarregar_tls(&mut fluxo, &mut conn, fim, parar)?;
+        }
         if !conn.is_handshaking() {
             break;
         }
         if conn.wants_read() {
             ler_um_passo_tls(&mut fluxo, &mut conn, fim, parar)?;
+        } else if !escreveu {
+            return Err(Erro::validacao("Aperto de mão TLS 1.3 interrompido em estado inconsistente."));
         }
     }
     // Envia o último voo do aperto de mão (ex.: Certificate + CertificateVerify + Finished do cliente).
@@ -444,14 +461,15 @@ where
         self.fluxo.peer_addr()
     }
 
-    /// Envia um quadro JSON enquadrado (`u32` big-endian + corpo UTF-8) pelo canal TLS 1.3.
+    /// Envia um quadro JSON enquadrado (`u32` big-endian + corpo UTF-8) em um único envio pelo canal TLS 1.3.
     pub fn enviar_json(&mut self, valor: &Value, prazo: Duration, parar: Option<&AtomicBool>) -> Resultado<()> {
         let bytes = serde_json::to_vec(valor)?;
         let tam = u32::try_from(bytes.len()).map_err(|_| Erro::validacao("Mensagem grande demais."))?;
+        let mut quadro = Vec::with_capacity(4 + bytes.len());
+        quadro.extend_from_slice(&tam.to_be_bytes());
+        quadro.extend_from_slice(&bytes);
         let fim = Instant::now() + prazo;
-        self.escrever_tudo(&tam.to_be_bytes(), fim, parar)?;
-        self.escrever_tudo(&bytes, fim, parar)?;
-        descarregar_tls(&mut self.fluxo, &mut self.conn, fim, parar)
+        self.escrever_tudo(&quadro, fim, parar)
     }
 
     /// Recebe um quadro JSON enquadrado respeitando estritamente `limite` bytes (rejeita antes de alocar).
@@ -575,21 +593,23 @@ pub fn gerar_prova_cliente(
     chave_servidor: &Chave,
     pedido: &Pedido,
 ) -> Resultado<ProvaIngressoCliente> {
-    let norm = cofre::normalizar_segredo(segredo_convite);
-    if !segredo_convite_valido(&norm) {
+    let norm = Segredo(cofre::normalizar_segredo(segredo_convite).into_bytes());
+    let norm_str = std::str::from_utf8(&norm.0).unwrap_or_default();
+    if !segredo_convite_valido(norm_str) {
         return Err(Erro::campo(
             "convite",
             "O convite precisa ter 26 caracteres válidos (ex.: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-X).",
         ));
     }
-    let hash_hex = cofre::hash_segredo(&norm);
-    let hash_bytes = de_hex::<32>(&hash_hex).ok_or_else(|| Erro::Interno("hash de convite inválido".into()))?;
+    let hash_hex = cofre::hash_segredo(norm_str);
+    let mut hash_bytes = de_hex::<32>(&hash_hex).ok_or_else(|| Erro::Interno("hash de convite inválido".into()))?;
 
     let corpo_seg = corpo_canonico_pedido_prova(b"cliente\0", exporter, chave_cliente, chave_servidor, pedido);
-    let tag_seg = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, norm.as_bytes()), &corpo_seg);
+    let tag_seg = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, &norm.0), &corpo_seg);
 
     let corpo_ret = corpo_canonico_pedido_prova(b"retomada\0", exporter, chave_cliente, chave_servidor, pedido);
     let tag_ret = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, &hash_bytes), &corpo_ret);
+    apagar(&mut hash_bytes);
 
     Ok(ProvaIngressoCliente { prova_segredo: hex(tag_seg.as_ref()), prova_retomada: hex(tag_ret.as_ref()) })
 }
@@ -666,16 +686,19 @@ pub fn verificar_prova_servidor(
     loja_id: &str,
     prova_servidor_hex: &str,
 ) -> bool {
-    let norm = cofre::normalizar_segredo(segredo_convite);
-    if !segredo_convite_valido(&norm) {
+    let norm = Segredo(cofre::normalizar_segredo(segredo_convite).into_bytes());
+    let norm_str = std::str::from_utf8(&norm.0).unwrap_or_default();
+    if !segredo_convite_valido(norm_str) {
         return false;
     }
-    let hash_hex = cofre::hash_segredo(&norm);
-    let (Some(chave_hash), Some(tag)) = (de_hex::<32>(&hash_hex), de_hex::<32>(prova_servidor_hex)) else {
+    let hash_hex = cofre::hash_segredo(norm_str);
+    let (Some(mut chave_hash), Some(tag)) = (de_hex::<32>(&hash_hex), de_hex::<32>(prova_servidor_hex)) else {
         return false;
     };
     let corpo = corpo_canonico_servidor_prova(exporter, chave_cliente, chave_servidor, raiz, loja_id);
-    hmac::verify(&hmac::Key::new(hmac::HMAC_SHA256, &chave_hash), &corpo, &tag).is_ok()
+    let ok = hmac::verify(&hmac::Key::new(hmac::HMAC_SHA256, &chave_hash), &corpo, &tag).is_ok();
+    apagar(&mut chave_hash);
+    ok
 }
 
 /// Localiza o convite correspondente à prova apresentada no canal TLS 1.3 (primeiro
@@ -730,6 +753,9 @@ pub fn interpretar_convite_entrada(texto: &str) -> Resultado<ConviteQr> {
     if limpo.is_empty() {
         return Err(Erro::campo("convite", "Digite o convite de 26 caracteres ou leia o QR do outro caixa."));
     }
+    if limpo.len() > LIMITE_QR_BYTES {
+        return Err(Erro::campo("convite", "Convite grande demais."));
+    }
     if let Some(resto) = limpo.strip_prefix("RUST4|") {
         let partes: Vec<&str> = resto.split('|').collect();
         if partes.len() < 3 || partes.len() > 4 {
@@ -738,6 +764,10 @@ pub fn interpretar_convite_entrada(texto: &str) -> Resultado<ConviteQr> {
         let norm = cofre::normalizar_segredo(partes[0]);
         if !segredo_convite_valido(&norm) {
             return Err(Erro::campo("convite", "Convite dentro do QR tem formato inválido."));
+        }
+        let loja_id = partes[1].trim();
+        if loja_id.is_empty() {
+            return Err(Erro::campo("convite", "QR de convite sem identidade da loja."));
         }
         let aprovador_chave = if partes[2].trim().is_empty() {
             None
@@ -749,7 +779,7 @@ pub fn interpretar_convite_entrada(texto: &str) -> Resultado<ConviteQr> {
         };
         return Ok(ConviteQr {
             segredo: partes[0].trim().to_string(),
-            loja_id: partes[1].trim().to_string(),
+            loja_id: loja_id.to_string(),
             aprovador_chave,
             endereco: partes.get(3).map(|s| s.trim().to_string()).unwrap_or_default(),
         });
@@ -766,6 +796,7 @@ pub fn interpretar_convite_entrada(texto: &str) -> Resultado<ConviteQr> {
 
 /// Gera uma data URI SVG (`data:image/svg+xml;base64,...`) com o QR code de `texto`
 /// usando `rxing` (`encoders`), sem dependência externa adicional (A6).
+/// O `rxing::QRCodeWriter` já inclui a zona silenciosa padrão de 4 módulos.
 pub fn qr_svg_data_uri(texto: &str) -> Resultado<String> {
     use rxing::{BarcodeFormat, Writer};
     if texto.is_empty() || texto.len() > LIMITE_QR_BYTES {
@@ -776,21 +807,18 @@ pub fn qr_svg_data_uri(texto: &str) -> Resultado<String> {
         .map_err(|e| Erro::Interno(format!("não foi possível gerar o QR code do convite: {e}")))?;
     let w = matriz.getWidth();
     let h = matriz.getHeight();
-    let margem: u32 = 4;
-    let total_w = w + 2 * margem;
-    let total_h = h + 2 * margem;
 
     let mut path = String::with_capacity((w * h) as usize);
     for y in 0..h {
         for x in 0..w {
             if matriz.get(x, y) {
                 use std::fmt::Write as _;
-                let _ = write!(path, "M{},{}h1v1h-1z", x + margem, y + margem);
+                let _ = write!(path, "M{x},{y}h1v1h-1z");
             }
         }
     }
     let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {total_w} {total_h}\" shape-rendering=\"crispEdges\">\
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\" shape-rendering=\"crispEdges\">\
          <rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>\
          <path fill=\"#000000\" d=\"{path}\"/></svg>"
     );
@@ -822,8 +850,8 @@ mod testes {
         chaves.iter().copied().collect()
     }
 
-    /// 1. Dois caixas autorizados: aperto de mão mútuo TLS 1.3 RPK, dados nos dois
-    /// sentidos, chave do par provada e `export_keying_material` idêntico nos dois lados.
+    // 1. Dois caixas autorizados: aperto de mão mútuo TLS 1.3 RPK, dados nos dois
+    // sentidos, chave do par provada e `export_keying_material` idêntico nos dois lados.
     #[test]
     fn canal_mutuo_autorizado_troca_mensagens_e_exporta_mesmo_material() {
         let srv_id = Identidade::gerar().unwrap();
@@ -870,8 +898,8 @@ mod testes {
         assert_ne!(exp_cli, [0u8; 32]);
     }
 
-    /// 2. Intruso não autorizado (cliente fora da lista) é recusado no handshake TLS 1.3
-    /// ANTES de enviar qualquer dado; conjunto vazio também recusa (fail-closed).
+    // 2. Intruso não autorizado (cliente fora da lista) é recusado no handshake TLS 1.3
+    // ANTES de enviar qualquer dado; conjunto vazio também recusa (fail-closed).
     #[test]
     fn intruso_e_conjunto_vazio_recusados_antes_de_qualquer_dado() {
         let srv_id = Identidade::gerar().unwrap();
@@ -958,8 +986,8 @@ mod testes {
         assert!(h_srv.join().unwrap().is_err());
     }
 
-    /// 4. Impostor apresenta a chave pública de um caixa aprovado mas assina o TLS
-    /// com outra chave privada: recusado pela verificação de assinatura Ed25519 (BadSignature).
+    // 4. Impostor apresenta a chave pública de um caixa aprovado mas assina o TLS
+    // com outra chave privada: recusado pela verificação de assinatura Ed25519 (BadSignature).
     #[test]
     fn chave_publica_sem_privada_e_recusada_no_handshake() {
         let srv_id = Identidade::gerar().unwrap();
@@ -1001,24 +1029,25 @@ mod testes {
         assert!(h_srv.join().unwrap().is_err(), "chave pública sem a privada correspondente deve falhar no TLS 1.3");
     }
 
-    /// 5. Fluxo completo de convite com *channel binding* mútuo (A6):
-    /// - primeiro ingresso com convite válido aprova e autentica o servidor;
-    /// - convite errado, MITM em outro canal (exporter diferente), repetição por outro
-    ///   caixa e convite expirado são todos recusados;
-    /// - queda após aprovação e retomada idempotente pelo mesmo caixa funcionam sem duplicar.
+    // 5. Fluxo completo de convite com *channel binding* mútuo (A6) sobre canais TLS 1.3 reais:
+    // - primeiro ingresso com convite válido aprova e devolve prova mútua do servidor por JSON;
+    // - MITM (exporter diferente), intruso, convite expirado e servidor falso são recusados;
+    // - queda após aprovação e retomada idempotente em 2º canal TLS 1.3 funcionam sem duplicar.
     #[test]
     fn convite_channel_binding_mutuo_mitm_e_retomada_idempotente() {
         let (b, gerente) = crate::faixas::para_testes::loja("Caixa 1");
-        let raiz = Identidade::gerar().unwrap();
+        let raiz = Arc::new(Identidade::gerar().unwrap());
         let novo = Identidade::gerar().unwrap();
         let intruso = Identidade::gerar().unwrap();
+        let raiz_pub = raiz.publica();
+        let novo_pub = novo.publica();
         cofre::garantir_raiz_se_aplicavel(&b.conn, &raiz, false, LOJA, "Caixa 1", &gerente, true).unwrap();
 
         let pedido_novo = Pedido::com_dispositivo(&novo, "disp-caixa-2");
         let conv = cofre::gerar_convite(
             &b.conn,
             &raiz,
-            &raiz.publica(),
+            &raiz_pub,
             LOJA,
             &pedido_novo.codigo(),
             "Caixa 2",
@@ -1026,26 +1055,31 @@ mod testes {
             "127.0.0.1:47810",
         )
         .unwrap();
-
-        // Abre canal real de ingresso (servidor aceita ingresso; cliente fixa chave do QR).
         let qr = interpretar_convite_entrada(&conv.payload_qr).unwrap();
-        assert_eq!(qr.aprovador_chave, Some(raiz.publica()));
+        assert_eq!(qr.aprovador_chave, Some(raiz_pub));
         assert_eq!(qr.loja_id, LOJA);
 
+        // --- 1º canal TLS 1.3 real: ingresso completo com troca JSON e prova mútua ---
         let (cli_tcp, srv_tcp) = par_tcp();
-        let raiz_pub = raiz.publica();
-        let novo_pub = novo.publica();
+        let raiz_srv = raiz.clone();
         let h_srv = thread::spawn(move || {
-            CanalServidor::aceitar(
+            let mut srv = CanalServidor::aceitar(
                 srv_tcp,
-                &raiz,
+                &raiz_srv,
                 PoliticaChaves::QualquerChaveValidaParaIngresso,
                 Duration::from_secs(5),
                 None,
             )
-            .unwrap()
+            .unwrap();
+            let req = srv.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+            let ped: Pedido = serde_json::from_value(req["pedido"].clone()).unwrap();
+            let prova: ProvaIngressoCliente = serde_json::from_value(req["prova"].clone()).unwrap();
+            let exp = *srv.exportador_convite();
+            let cli_k = srv.chave_do_par();
+            (srv, ped, prova, exp, cli_k)
         });
-        let cli = CanalCliente::conectar(
+
+        let mut cli = CanalCliente::conectar(
             cli_tcp,
             &novo,
             PoliticaChaves::SomenteAutorizadas(conjunto(&[raiz_pub])),
@@ -1053,90 +1087,158 @@ mod testes {
             None,
         )
         .unwrap();
-        let srv = h_srv.join().unwrap();
-        assert_eq!(cli.exportador_convite(), srv.exportador_convite());
+        let prova1 =
+            gerar_prova_cliente(&qr.segredo, cli.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
+        cli.enviar_json(
+            &json!({ "tipo": "ingressar", "pedido": pedido_novo, "prova": prova1 }),
+            Duration::from_secs(5),
+            None,
+        )
+        .unwrap();
+
+        let (mut srv, ped_rx, prova_rx, exp_srv, cli_k) = h_srv.join().unwrap();
+        assert_eq!(cli_k, novo_pub);
+        assert_eq!(exp_srv, *cli.exportador_convite());
 
         let agora = crate::tempo::agora();
         let candidatos = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
-        let prova =
-            gerar_prova_cliente(&qr.segredo, cli.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
 
-        // MITM com exporter diferente (outro túnel TLS) é RECUSADO!
-        let mut exporter_mitm = *srv.exportador_convite();
+        // MITM (exporter de outro túnel TLS) é recusado.
+        let mut exporter_mitm = exp_srv;
         exporter_mitm[0] ^= 0x80;
+        assert!(casar_convite_da_prova(&candidatos, &exporter_mitm, &novo_pub, &raiz_pub, &ped_rx, &prova_rx).is_none());
+        // Intruso com chave TLS diferente é recusado.
         assert!(
-            casar_convite_da_prova(&candidatos, &exporter_mitm, &novo_pub, &raiz_pub, &pedido_novo, &prova).is_none(),
-            "prova roubada de outro canal TLS (MITM) não pode casar"
+            casar_convite_da_prova(&candidatos, &exp_srv, &intruso.publica(), &raiz_pub, &ped_rx, &prova_rx).is_none()
         );
-
-        // Intruso tentando usar a mesma prova com a própria chave TLS é RECUSADO!
-        assert!(
-            casar_convite_da_prova(
-                &candidatos,
-                srv.exportador_convite(),
-                &intruso.publica(),
-                &raiz_pub,
-                &pedido_novo,
-                &prova
-            )
-            .is_none(),
-            "chave TLS diferente da do pedido é recusada"
-        );
-
-        // Prova legítima casa e consome atomicamente o convite.
-        let casado =
-            casar_convite_da_prova(&candidatos, srv.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo, &prova)
-                .expect("prova legítima deve casar");
-        assert_eq!(casado.id, conv.id);
-
-        // Reconstitui a identidade raiz para aprovar (no servidor real é a mesma instância).
-        let raiz_dir = std::env::temp_dir().join(format!("rustinho-canal-test-{}", crate::tempo::novo_id()));
-        std::fs::create_dir_all(&raiz_dir).unwrap();
-        drop(cli);
-        drop(srv);
-        // Testa prova mútua do servidor + retomada idempotente sobre novo canal TLS (nova sessão!).
-        let mut exp2 = [7u8; 32];
-        let raiz2 = Identidade::gerar().unwrap();
-        let r2 = raiz2.publica();
-        let (b2, g2) = crate::faixas::para_testes::loja("Caixa 1");
-        cofre::garantir_raiz_se_aplicavel(&b2.conn, &raiz2, false, LOJA, "Caixa 1", &g2, true).unwrap();
-        let conv2 =
-            cofre::gerar_convite(&b2.conn, &raiz2, &r2, LOJA, &pedido_novo.codigo(), "Caixa 2", &g2, "").unwrap();
-        let cands1 = cofre::convites_validos_agora(&b2.conn, LOJA, &agora).unwrap();
-        let p1 = gerar_prova_cliente(&conv2.segredo, &exp2, &novo_pub, &r2, &pedido_novo).unwrap();
-        let c1 = casar_convite_da_prova(&cands1, &exp2, &novo_pub, &r2, &pedido_novo, &p1).unwrap();
+        // Convite expirado no futuro não entra nos candidatos válidos.
+        let futuro = crate::tempo::somar_segundos(&agora, cofre::VALIDADE_CONVITE_SEG + 10).unwrap();
+        let vencidos = cofre::convites_validos_agora(&b.conn, LOJA, &futuro).unwrap();
+        assert!(vencidos.is_empty(), "convite vencido não pode casar");
+        // Restaura `segredo_ativo` para o consumo real em `agora` (a checagem `vencidos` acima testou limpeza).
+        let conv2 = cofre::gerar_convite(
+            &b.conn,
+            &raiz,
+            &raiz_pub,
+            LOJA,
+            &pedido_novo.codigo(),
+            "Caixa 2",
+            &gerente,
+            "127.0.0.1:47810",
+        )
+        .unwrap();
+        let cands_ok = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
+        let prova_ok = gerar_prova_cliente(&conv2.segredo, &exp_srv, &novo_pub, &raiz_pub, &ped_rx).unwrap();
+        let casado = casar_convite_da_prova(&cands_ok, &exp_srv, &novo_pub, &raiz_pub, &ped_rx, &prova_ok)
+            .expect("prova legítima deve casar");
         let apr1 =
-            cofre::consumir_convite_e_aprovar(&b2.conn, &raiz2, &r2, LOJA, &c1.id, &pedido_novo, &agora).unwrap();
+            cofre::consumir_convite_e_aprovar(&b.conn, &raiz, &raiz_pub, LOJA, &casado.id, &ped_rx, &agora).unwrap();
+        let p_srv =
+            gerar_prova_servidor(&casado.segredo_hash, &exp_srv, &novo_pub, &raiz_pub, &raiz_pub, LOJA).unwrap();
+        srv.enviar_json(
+            &json!({ "ok": true, "raiz": hex(&raiz_pub), "loja": LOJA, "provaServidor": p_srv }),
+            Duration::from_secs(5),
+            None,
+        )
+        .unwrap();
+        srv.encerrar();
 
-        // Servidor envia prova mútua de volta; cliente confere (e servidor falso falha!).
-        let p_srv = gerar_prova_servidor(&c1.segredo_hash, &exp2, &novo_pub, &r2, &r2, LOJA).unwrap();
-        assert!(verificar_prova_servidor(&conv2.segredo, &exp2, &novo_pub, &r2, &r2, LOJA, &p_srv));
-        assert!(
-            !verificar_prova_servidor(&conv2.segredo, &exp2, &novo_pub, &intruso.publica(), &r2, LOJA, &p_srv),
-            "servidor falso não passa na prova mútua"
-        );
-        assert!(
-            !verificar_prova_servidor(&conv2.segredo, &exp2, &novo_pub, &r2, &r2, "outra-loja", &p_srv),
-            "outra loja não passa na prova mútua"
-        );
+        let resp1 = cli.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+        let p_srv_rx = resp1["provaServidor"].as_str().unwrap();
+        assert!(verificar_prova_servidor(
+            &conv2.segredo,
+            cli.exportador_convite(),
+            &novo_pub,
+            &raiz_pub,
+            &raiz_pub,
+            LOJA,
+            p_srv_rx
+        ));
+        assert!(!verificar_prova_servidor(
+            &conv2.segredo,
+            cli.exportador_convite(),
+            &novo_pub,
+            &intruso.publica(),
+            &raiz_pub,
+            LOJA,
+            p_srv_rx
+        ));
+        assert!(!verificar_prova_servidor(
+            &conv2.segredo,
+            cli.exportador_convite(),
+            &novo_pub,
+            &raiz_pub,
+            &raiz_pub,
+            "outra-loja",
+            p_srv_rx
+        ));
+        cli.encerrar();
 
-        // Simula queda logo após aprovar: `segredo_ativo` já é NULL no banco, nova sessão TLS (`exp2` diferente)!
-        exp2[0] ^= 0x55;
-        let cands2 = cofre::convites_validos_agora(&b2.conn, LOJA, &agora).unwrap();
-        assert!(cands2[0].segredo_normalizado.is_none(), "segredo em claro já apagado");
-        let p_retry = gerar_prova_cliente(&conv2.segredo, &exp2, &novo_pub, &r2, &pedido_novo).unwrap();
-        let c_retry = casar_convite_da_prova(&cands2, &exp2, &novo_pub, &r2, &pedido_novo, &p_retry)
+        // --- 2º canal TLS 1.3 real: queda após aprovação e retomada idempotente (nova sessão!) ---
+        let (cli_tcp2, srv_tcp2) = par_tcp();
+        let raiz_srv2 = raiz.clone();
+        let h_srv2 = thread::spawn(move || {
+            let mut srv2 = CanalServidor::aceitar(
+                srv_tcp2,
+                &raiz_srv2,
+                PoliticaChaves::SomenteAutorizadas(conjunto(&[novo_pub])),
+                Duration::from_secs(5),
+                None,
+            )
+            .unwrap();
+            let req = srv2.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+            let ped: Pedido = serde_json::from_value(req["pedido"].clone()).unwrap();
+            let prova: ProvaIngressoCliente = serde_json::from_value(req["prova"].clone()).unwrap();
+            let exp2 = *srv2.exportador_convite();
+            (srv2, ped, prova, exp2)
+        });
+
+        let mut cli2 = CanalCliente::conectar(
+            cli_tcp2,
+            &novo,
+            PoliticaChaves::SomenteAutorizadas(conjunto(&[raiz_pub])),
+            Duration::from_secs(5),
+            None,
+        )
+        .unwrap();
+        assert_ne!(cli2.exportador_convite(), &exp_srv, "nova sessão TLS gera exporter novo");
+        let p_retry =
+            gerar_prova_cliente(&conv2.segredo, cli2.exportador_convite(), &novo_pub, &raiz_pub, &pedido_novo).unwrap();
+        cli2.enviar_json(
+            &json!({ "tipo": "ingressar", "pedido": pedido_novo, "prova": p_retry }),
+            Duration::from_secs(5),
+            None,
+        )
+        .unwrap();
+
+        let (mut srv2, ped_rx2, prova_rx2, exp2) = h_srv2.join().unwrap();
+        let cands2 = cofre::convites_validos_agora(&b.conn, LOJA, &agora).unwrap();
+        let c_retry = casar_convite_da_prova(&cands2, &exp2, &novo_pub, &raiz_pub, &ped_rx2, &prova_rx2)
             .expect("mesmo caixa retomando após queda casa via prova_retomada");
+        assert!(c_retry.segredo_normalizado.is_none(), "segredo em claro já apagado");
         let apr2 =
-            cofre::consumir_convite_e_aprovar(&b2.conn, &raiz2, &r2, LOJA, &c_retry.id, &pedido_novo, &agora).unwrap();
+            cofre::consumir_convite_e_aprovar(&b.conn, &raiz, &raiz_pub, LOJA, &c_retry.id, &ped_rx2, &agora).unwrap();
         assert_eq!(apr1, apr2, "retomada é idempotente e não duplica aprovação");
+        let p_srv2 = gerar_prova_servidor(&c_retry.segredo_hash, &exp2, &novo_pub, &raiz_pub, &raiz_pub, LOJA).unwrap();
+        srv2.enviar_json(&json!({ "ok": true, "provaServidor": p_srv2 }), Duration::from_secs(5), None).unwrap();
+        srv2.encerrar();
 
-        // Outro caixa (intruso) tentando reusar o convite já consumido é RECUSADO!
+        let resp2 = cli2.receber_json(64 * 1024, Duration::from_secs(5), None).unwrap();
+        assert!(verificar_prova_servidor(
+            &conv2.segredo,
+            cli2.exportador_convite(),
+            &novo_pub,
+            &raiz_pub,
+            &raiz_pub,
+            LOJA,
+            resp2["provaServidor"].as_str().unwrap()
+        ));
+        cli2.encerrar();
+
+        // Outro caixa (intruso) tentando reusar o convite já consumido é recusado!
         let ped_int = Pedido::com_dispositivo(&intruso, "disp-int");
-        let p_int = gerar_prova_cliente(&conv2.segredo, &exp2, &intruso.publica(), &r2, &ped_int).unwrap();
-        assert!(casar_convite_da_prova(&cands2, &exp2, &intruso.publica(), &r2, &ped_int, &p_int).is_none());
-
-        let _ = std::fs::remove_dir_all(raiz_dir);
+        let p_int = gerar_prova_cliente(&conv2.segredo, &exp2, &intruso.publica(), &raiz_pub, &ped_int).unwrap();
+        assert!(casar_convite_da_prova(&cands2, &exp2, &intruso.publica(), &raiz_pub, &ped_int, &p_int).is_none());
     }
 
     /// 6. Limite de quadro (recusa antes de alocar mensagem gigante) e cancelamento cooperativo.
@@ -1172,8 +1274,8 @@ mod testes {
         assert!(r.is_err(), "quadro acima do limite tem de ser recusado");
     }
 
-    /// 7. QR code gerado pelo `rxing` (`encoders`) é SVG válido em base64 e decodifica
-    /// de volta para o payload exato do convite `RUST4|...`.
+    // 7. QR code gerado pelo `rxing` (`encoders`) é SVG válido em base64 e decodifica
+    // de volta para o payload exato do convite `RUST4|...`.
     #[test]
     fn qr_code_do_convite_gera_svg_e_interpreta_ida_e_volta() {
         let raiz = Identidade::gerar().unwrap();
@@ -1219,13 +1321,19 @@ mod testes {
         assert_eq!(manual.aprovador_chave, None);
         assert!(interpretar_convite_entrada("curto").is_err());
         assert!(interpretar_convite_entrada("RUST4|curto|loja|ab").is_err());
-        // Caracteres fora do alfabeto Base32 (I, O, 0, 1 ou não-ASCII) são recusados.
+        // Caracteres fora do alfabeto Base32 (I, O, 0, 1 ou não-ASCII), loja vazia em QR e entrada >512 bytes são recusados (B1).
         assert!(interpretar_convite_entrada("IIIII-OOOOO-00000-11111-AAAAA-A").is_err());
         assert!(interpretar_convite_entrada("ÁÁÁÁÁ-BBBBB-CCCCC-DDDDD-EEEEE-F").is_err());
+        assert!(interpretar_convite_entrada(&format!(
+            "RUST4|AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F||{}",
+            hex(&raiz.publica())
+        ))
+        .is_err());
+        assert!(interpretar_convite_entrada(&"A".repeat(LIMITE_QR_BYTES + 1)).is_err());
     }
 
-    /// 8. Cancelamento cooperativo (`parar = true`) encerra leitura bloqueada sem esperar
-    /// o prazo inteiro, e `Pedido`/`Linhas` serializam e desserializam em JSON com fidelidade.
+    // 8. Cancelamento cooperativo (`parar = true`) encerra leitura bloqueada sem esperar
+    // o prazo inteiro, e `Pedido`/`Linhas` serializam e desserializam em JSON com fidelidade.
     #[test]
     fn cancelamento_cooperativo_e_serde_registro_p4() {
         let srv_id = Identidade::gerar().unwrap();
