@@ -3,8 +3,10 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import rustinho
 
-// Primeira vez num caixa novo: em vez de começar do zero, recebe tudo de
-// outro caixa da loja (usuários, peças, clientes, estoque...).
+// Primeira vez num caixa novo: em vez de começar do zero, entra na loja e
+// recebe tudo de outro caixa (usuários, peças, clientes, estoque...).
+// 0.9.19 (protocolo 4, A6/D1): a entrada é pelo convite que o gerente gera num
+// caixa da loja, conferindo o código deste caixa; a senha da rede não basta.
 FocusScope {
     id: tela
     // Como esta tela aparece na orientação da navegação guiada ("Depois o
@@ -13,9 +15,14 @@ FocusScope {
     readonly property var janela: ApplicationWindow.window
     property var sync: null
     property bool procurando: false
+    // O código deste caixa (o gerente confere ao gerar o convite). Vem do
+    // núcleo pelo caminho demorado: abrir a identidade custa (DT-P4-30).
+    property string codigo: ""
+    property bool cofreSistema: true
+    property string erroDoCodigo: ""
 
     // FALHA-01 (V01a): voltar desfaz a tentativa inteira (troca de dados
-    // desligada, senha e endereços da rede, o que já tinha chegado da loja).
+    // desligada, endereços da rede, o que já tinha chegado da loja).
     function desistir() {
         tela.procurando = false
         const r = Api.chamar("sync_desistir_juntar")
@@ -45,25 +52,49 @@ FocusScope {
                               "Desistir", () => tela.desistir(), "perigo")
     }
 
+    // O código deste caixa (cria a identidade dele na primeira vez).
+    function pedirCodigo() {
+        tela.erroDoCodigo = ""
+        Api.chamarDemorado("p4_identidade", {}, "Preparando o código deste " + Tema.aparelho + "…", r => {
+            if (r.ok) {
+                tela.codigo = r.dados.codigoPedido
+                tela.cofreSistema = r.dados.cofreSistema
+                convite.focarSempre()
+            } else {
+                tela.erroDoCodigo = r.erro
+            }
+        })
+    }
+
     // Aberta de novo no meio de uma tentativa (o programa fechou): continua
-    // esperando os dados da loja.
+    // esperando os dados da loja. Senão, prepara o código deste caixa.
     Component.onCompleted: {
         if (janela && janela.estado && janela.estado.juntando)
             procurando = true
+        else
+            Qt.callLater(tela.pedirCodigo)
     }
 
-    function juntar() {
-        for (const c of [caixa, senha, enderecos])
-            c.erro = ""
-        const r = Api.chamar("sync_juntar", { caixa: caixa.texto, senha: senha.texto, enderecos: enderecos.texto })
-        if (r.ok) {
-            sync = r.dados
-            procurando = true
-        } else {
-            const alvo = { caixa: caixa, senha: senha, enderecos: enderecos }[r.campo] || senha
-            alvo.erro = r.erro
-            alvo.focarSempre()
+    function entrar() {
+        convite.erro = ""
+        endereco.erro = ""
+        if (convite.texto.trim() === "") {
+            convite.erro = "Digite o convite que aparece na tela do gerente."
+            convite.focarSempre()
+            return
         }
+        Api.chamarDemorado("p4_juntar_com_convite", { convite: convite.texto, enderecos: endereco.texto },
+                           "Entrando na loja…", r => {
+            if (r.ok) {
+                tela.sync = r.dados
+                tela.procurando = true
+                tela.janela.atualizarEstado()
+            } else {
+                const alvo = r.campo === "enderecos" ? endereco : convite
+                alvo.erro = r.erro
+                alvo.focarSempre()
+            }
+        })
     }
 
     Timer {
@@ -109,52 +140,101 @@ FocusScope {
                     Layout.fillWidth: true
                 }
                 Nota {
-                    text: "Este " + Tema.aparelho + " vai receber tudo do outro caixa: usuários, peças, clientes e estoque. Os dois precisam estar na mesma rede (Wi-Fi ou cabo), com o Rustinho aberto."
+                    text: "Este " + Tema.aparelho + " vai receber tudo da loja: usuários, peças, clientes e estoque. "
+                          + "O gerente aprova a entrada num caixa da loja que já tem o Rustinho 0.9.19 ou mais novo. "
+                          + "Os dois precisam estar na mesma rede (Wi-Fi ou cabo), com o Rustinho aberto."
                     font.pixelSize: 17
                     Layout.fillWidth: true
                 }
             }
 
             Faixa {
-                titulo: "Este " + Tema.aparelho
+                visible: !tela.procurando
+                titulo: "1. Mostre este código ao gerente"
                 color: Tema.pergaminho
                 Layout.fillWidth: true
                 Campo {
-                    id: caixa
-                    rotulo: "Nome deste " + Tema.aparelho
-                    texto: Tema.celular ? "Celular 1" : "Caixa 2"
-                    maximo: 30
+                    id: campoCodigo
+                    objectName: "codigoDesteCaixa"
+                    visible: tela.codigo !== ""
+                    rotulo: "Código deste " + Tema.aparelho
+                    texto: tela.codigo
+                    somenteLeitura: true
+                    tamanhoFonte: 26
+                    altura: 52
                     Layout.fillWidth: true
-                    onConfirmado: senha.focar()
                 }
+                Nota {
+                    visible: tela.codigo !== ""
+                    text: "No caixa da loja, o gerente abre Configurações › Caixas da loja › Aprovar caixa novo, "
+                          + "digita este código e um nome para este " + Tema.aparelho + ". Lá aparece o convite."
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    visible: tela.codigo !== "" && !tela.cofreSistema
+                    text: "Este computador não tem o cofre de senhas do sistema. A identidade deste caixa fica "
+                          + "protegida dentro da pasta do Rustinho: não copie essa pasta para outro computador."
+                    font.pixelSize: 13
+                    Layout.fillWidth: true
+                }
+                Nota {
+                    visible: tela.erroDoCodigo !== ""
+                    text: "Não deu para preparar o código deste " + Tema.aparelho + ": " + tela.erroDoCodigo
+                    color: Tema.vermelho
+                    Layout.fillWidth: true
+                }
+                Botao {
+                    visible: tela.erroDoCodigo !== ""
+                    text: "Tentar de novo"
+                    tipo: "secundario"
+                    onClicked: tela.pedirCodigo()
+                }
+            }
+
+            Faixa {
+                visible: !tela.procurando
+                titulo: "2. Digite o convite"
+                color: Tema.pergaminho
+                Layout.fillWidth: true
                 Campo {
-                    id: senha
-                    rotulo: "Senha da rede da loja"
-                    dica: "A mesma que está nas Configurações do outro caixa"
-                    senha: true
+                    id: convite
+                    objectName: "conviteDaLoja"
+                    rotulo: "Convite (aparece na tela do gerente; vale 10 minutos)"
+                    dica: "Ex.: ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2-3"
                     podeColar: true
-                    maximo: 256
+                    // No celular, o convite também vem pelo QR da tela do gerente.
+                    camera: true
+                    maximo: 400
                     Layout.fillWidth: true
-                    onConfirmado: tela.juntar()
+                    onConfirmado: tela.entrar()
                 }
                 Campo {
-                    id: enderecos
-                    rotulo: "Endereço do outro caixa (só se não achar sozinho)"
-                    dica: "Ex.: 192.168.0.12 (aparece em Configurações do outro caixa)"
+                    id: endereco
+                    rotulo: "Endereço do caixa da loja (só se não achar sozinho)"
+                    dica: "Aparece junto do convite. Ex.: 192.168.0.12"
                     maximo: 300
                     Layout.fillWidth: true
-                    onConfirmado: tela.juntar()
+                    onConfirmado: tela.entrar()
+                }
+                Linha {
+                    spacing: 12
+                    Layout.fillWidth: true
+                    Item { Layout.fillWidth: true }
+                    Botao {
+                        text: "Entrar na loja"
+                        onClicked: tela.entrar()
+                    }
                 }
             }
 
             Faixa {
                 visible: tela.procurando
-                titulo: "Procurando os outros caixas"
+                titulo: "Recebendo os dados da loja"
                 color: Tema.azul
                 Layout.fillWidth: true
                 Nota {
                     text: !tela.sync || tela.sync.pares.length === 0
-                          ? "Ainda não encontrei nenhum. Confira se o outro caixa está com a sincronização ligada e a mesma senha. Endereço deste " + Tema.aparelho + ": " + (tela.sync ? tela.sync.meuEndereco : "")
+                          ? "A entrada foi aprovada. Esperando o caixa da loja mandar os dados: deixe os dois com o Rustinho aberto. Endereço deste " + Tema.aparelho + ": " + (tela.sync ? tela.sync.meuEndereco : "")
                           : "Recebendo os dados…"
                     Layout.fillWidth: true
                 }
@@ -187,16 +267,6 @@ FocusScope {
                     }
                 }
             }
-
-            Linha {
-                spacing: 12
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                Botao {
-                    text: tela.procurando ? "Procurar de novo" : "Procurar os outros caixas"
-                    onClicked: tela.juntar()
-                }
-            }
         }
     }
 
@@ -214,5 +284,5 @@ FocusScope {
         onClicked: tela.janela.retornar(true)
     }
 
-    StackView.onActivated: senha.focarSempre()
+    StackView.onActivated: if (!tela.procurando && tela.codigo !== "") convite.focarSempre()
 }

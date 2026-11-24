@@ -84,11 +84,12 @@ use fio::*;
 pub use motor::*;
 pub use p4::{
     aprovar_este_caixa_com_convite, convites_ativos, convivencia_p3_ate, definir_convivencia_p3,
-    dependentes_da_retirada, gerar_convite, identidade_para_a_tela, juntar_com_convite, readmitir_caixa_por_chave,
-    retirar_caixa_por_chave, situacao as situacao_p4, tem_raiz_fixada, troca_ativa, ChaveDoCaixa, ConviteNaTela,
-    EntradaPeloConvite, IdentidadeNaTela, SituacaoP4, CONVIVENCIA_MAXIMA_DIAS, TEXTO_CAIXA_SEM_APROVACAO,
-    TEXTO_CONVITE_DE_OUTRA_LOJA, TEXTO_CONVITE_SEM_TROCA, TEXTO_JA_APROVADO, TEXTO_RETIRADA_SEM_IDENTIDADE,
-    TEXTO_RETIRADO_PELA_CHAVE, TEXTO_SEM_IDENTIDADE_DA_LOJA,
+    dependentes_da_retirada, erro_da_identidade, gerar_convite, gerar_identidade_nova, identidade_para_a_tela,
+    juntar_com_convite, precisa_de_aprovacao, readmitir_caixa_por_chave, retirar_caixa_por_chave,
+    situacao as situacao_p4, tem_raiz_fixada, troca_ativa, ChaveDoCaixa, ConviteNaTela, EntradaPeloConvite,
+    IdentidadeNaTela, SituacaoP4, CONVIVENCIA_MAXIMA_DIAS, TEXTO_CAIXA_SEM_APROVACAO, TEXTO_CONVITE_DE_OUTRA_LOJA,
+    TEXTO_CONVITE_SEM_TROCA, TEXTO_JA_APROVADO, TEXTO_RETIRADA_SEM_IDENTIDADE, TEXTO_RETIRADO_PELA_CHAVE,
+    TEXTO_SEM_IDENTIDADE_DA_LOJA,
 };
 pub use referencias::*;
 pub use registro::*;

@@ -175,6 +175,7 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("p4_convites", "gerente", &["leitura"]),
     ("p4_convivencia_p3", "configuracoes", &[]),
     ("p4_gerar_convite", "gerente", &[]),
+    ("p4_gerar_identidade_nova", "configuracoes", &[]),
     ("p4_identidade", "leitura", &["leitura", "sem_sessao"]),
     ("p4_juntar_com_convite", "caixa", &["sem_sessao"]),
     ("pagamento_estornar", "estornar", &["nao_repetir"]),

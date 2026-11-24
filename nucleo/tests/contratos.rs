@@ -216,8 +216,22 @@ fn gerente_backup_e_caixas() {
             ("pares", "lista"),
             ("pendencias", "numero"),
             ("porta", "numero"),
+            ("p4", "objeto"),
         ],
     );
+    // T013 (protocolo 4): o que Configurações › Caixas da loja e Juntar leem.
+    tem(
+        &y["p4"],
+        &[
+            ("temRaiz", "sim/nao"),
+            ("aprovado", "sim/nao"),
+            ("raiz", "sim/nao"),
+            ("convivenciaAteTexto", "texto"),
+            ("convivenciaMaximaDias", "numero"),
+            ("convitesAtivos", "numero"),
+        ],
+    );
+    assert!(y["p4"]["convivenciaAte"].is_null() || y["p4"]["convivenciaAte"].is_string());
     let a = ok(&mut s, "avisos_do_dia", json!({}));
     assert!(a.is_array());
     // Resolver conflito que não existe: erro, não sucesso.

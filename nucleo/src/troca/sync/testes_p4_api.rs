@@ -175,6 +175,15 @@ fn p4_api_caixa_da_loja_recebe_a_aprovacao_pelo_convite() {
         entrar(&mut sb, &ua);
         let id_b = ok(&mut sb, "p4_identidade", json!({}));
         assert_eq!(id_b["aprovado"], false);
+        // DT-P4-41: sem ouvir caixas atualizados, nada no Início; ouvindo o anúncio do
+        // caixa 1 (atualizado), o Início pede a aprovação.
+        let tem_aviso = |s: &mut Servico| {
+            ok(s, "avisos_do_dia", json!({})).as_array().unwrap().iter().any(|a| a["id"] == "p4.aprovar_este_caixa")
+        };
+        assert!(!tem_aviso(&mut sb), "sem caixa atualizado na rede, sem aviso");
+        let pacote = p4::pacote_de_anuncio(&p4::contexto(&a.conn, &ca).unwrap(), pt_a).unwrap();
+        p4::guardar_ouvido(&cb, "127.0.0.1".parse().unwrap(), &pacote);
+        assert!(tem_aviso(&mut sb), "o caixa da loja sem aprovação, com caixas atualizados na rede, vê o aviso");
         // Convite de outra loja (o QR diz a loja): recusado na hora.
         let outro = format!("RUST4|AAAAA-BBBBB-CCCCC-DDDDD-EEEEE-F|outra-loja|{}|127.0.0.1:{pt_a}", "00".repeat(32));
         let r = chamar(&mut sb, "p4_aprovar_este_caixa", json!({ "convite": outro }));
@@ -190,6 +199,7 @@ fn p4_api_caixa_da_loja_recebe_a_aprovacao_pelo_convite() {
         );
         assert_eq!(r["p4"]["aprovado"], true, "{r}");
         assert_eq!(ok(&mut sb, "estado", json!({}))["juntando"], false, "nada muda nos dados do caixa");
+        assert!(!tem_aviso(&mut sb), "aprovado: o aviso sai");
         let r = chamar(&mut sb, "p4_aprovar_este_caixa", json!({ "convite": conv["convite"] }));
         assert_eq!(r["erro"], p4::TEXTO_JA_APROVADO, "{r}");
         assert!(ma.encerrar(Duration::from_secs(20)));
@@ -346,4 +356,37 @@ fn p4_procura_a_loja_pelos_anuncios() {
     let nada = p4::procurar_pelos_anuncios_em("outra-loja", Duration::from_millis(1200), ("127.0.0.1", porta));
     e.join().unwrap();
     assert!(nada.is_empty(), "o anúncio de outra loja não serve: {nada:?}");
+}
+
+/// DT-P4-42 (N-04) pela API: a identidade nova só sai quando a deste computador não
+/// abre, com o gerente; a tela fica sabendo pelo campo "identidade"; a auditoria
+/// guarda quem fez; o código passa a ser o da identidade nova.
+#[test]
+fn p4_api_identidade_nova_so_quando_a_atual_nao_abre() {
+    // A identidade que sobrou num arquivo que não abre (o segredo dela não está aqui).
+    let cb = temp("api-identidade-nova");
+    let (b, ub) = loja_em_arquivo(&cb, "Caixa 1");
+    drop(b);
+    let arquivo = cofre::caminho_identidade(cb.parent().unwrap(), &cofre::Modo::Instalado).unwrap();
+    std::fs::create_dir_all(arquivo.parent().unwrap()).unwrap();
+    std::fs::write(&arquivo, b"identidade de antes, sem o segredo").unwrap();
+    let mut s = Servico::abrir_para_teste(&cb, false).unwrap();
+    let r = chamar(&mut s, "p4_identidade", json!({}));
+    assert_eq!(r["campo"], "identidade", "a tela pode oferecer a identidade nova: {r}");
+
+    entrar(&mut s, &ub);
+    let nova = ok(&mut s, "p4_gerar_identidade_nova", json!({}));
+    let codigo = nova["codigoPedido"].as_str().unwrap().to_string();
+    assert_eq!(ok(&mut s, "p4_identidade", json!({}))["codigoPedido"], codigo.as_str(), "o código é o da nova");
+    let arquivadas = std::fs::read_dir(arquivo.parent().unwrap())
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".antiga-"))
+        .count();
+    assert!(arquivadas >= 1, "a identidade de antes ficou arquivada, não apagada");
+    let r = chamar(&mut s, "p4_gerar_identidade_nova", json!({}));
+    assert_eq!(r["ok"], false, "com a identidade abrindo, não gera outra: {r}");
+    let aud = ok(&mut s, "auditoria_listar", json!({}));
+    let feito = aud.as_array().unwrap().iter().find(|x| x["acao"] == "p4_identidade_nova").expect("auditado");
+    assert_eq!(feito["usuario"], "Ana", "{feito}");
+    assert!(feito["detalhes"].to_string().contains(&codigo));
 }

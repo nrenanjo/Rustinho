@@ -687,6 +687,128 @@ FocusScope {
         })
     }
 
+    // T013 (DT-P4-39): o convite que o gerente acabou de gerar (só nesta tela),
+    // a lista dos convites ativos (pedida com a senha do gerente) e o código
+    // deste caixa (pedido pelo caminho demorado: abre a identidade).
+    property var conviteGerado: null
+    property var convitesAtivos: []
+    property bool convitesVistos: false
+    property string codigoDesteCaixa: ""
+
+    function gerarConvite() {
+        codigoNovo.erro = ""
+        nomeNovo.erro = ""
+        janela.chamarGerenteDemorado("p4_gerar_convite", { codigoPedido: codigoNovo.texto, nome: nomeNovo.texto },
+                                     "Gerando o convite…", r => {
+            if (r.ok) {
+                tela.conviteGerado = r.dados
+                codigoNovo.texto = ""
+                nomeNovo.texto = ""
+                tela.recarregarReferencias()
+            } else if (r.campo === "nome") {
+                nomeNovo.erro = r.erro
+            } else if (r.campo === "codigoPedido") {
+                codigoNovo.erro = r.erro
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
+    }
+
+    function verConvites() {
+        janela.chamarGerente("p4_convites", {}, r => {
+            if (r.ok) {
+                tela.convitesAtivos = r.dados
+                tela.convitesVistos = true
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
+    }
+
+    function cancelarConvite(id) {
+        janela.chamarGerente("p4_cancelar_convite", { id: id }, r => {
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            tela.convitesAtivos = r.dados
+            if (tela.conviteGerado && tela.conviteGerado.id === id)
+                tela.conviteGerado = null
+            tela.recarregarReferencias()
+            janela.avisar("Convite cancelado: ele não serve mais.", "ok")
+        })
+    }
+
+    // DT-P4-42 (N-04): a identidade deste computador não abre (o segredo dela não veio
+    // do cofre de senhas): a tela oferece uma nova, com a senha do gerente.
+    property string identidadeIlegivel: ""
+
+    function mostrarCodigoDesteCaixa() {
+        Api.chamarDemorado("p4_identidade", {}, "Preparando o código deste caixa…", r => {
+            if (r.ok) {
+                tela.codigoDesteCaixa = r.dados.codigoPedido
+                tela.identidadeIlegivel = ""
+            } else if (r.campo === "identidade") {
+                tela.identidadeIlegivel = r.erro
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
+    }
+
+    function gerarIdentidadeNova() {
+        janela.confirmar("Gerar uma identidade nova para este caixa?",
+                         "Use só se este computador não consegue mais abrir a identidade dele (por exemplo, depois de "
+                         + "reinstalar o sistema). Se for só o cofre de senhas fora do ar agora, espere e tente de novo. "
+                         + "A identidade antiga fica guardada nesta pasta, sem ser apagada. Depois, num caixa aprovado, o gerente "
+                         + "retira este caixa da loja e o aprova de novo com um convite.",
+                         "Gerar identidade nova", () => {
+            janela.chamarGerenteDemorado("p4_gerar_identidade_nova", {}, "Gerando a identidade nova…", r => {
+                if (r.ok) {
+                    tela.codigoDesteCaixa = r.dados.codigoPedido
+                    tela.identidadeIlegivel = ""
+                    janela.avisar("Identidade nova pronta. Peça ao gerente a aprovação deste caixa com o código novo.", "ok")
+                } else {
+                    janela.avisar(r.erro, "erro")
+                }
+            })
+        }, "perigo")
+    }
+
+    function usarConvite() {
+        conviteRecebido.erro = ""
+        enderecoDaLoja.erro = ""
+        janela.chamarGerenteDemorado("p4_aprovar_este_caixa", { convite: conviteRecebido.texto, enderecos: enderecoDaLoja.texto },
+                                     "Pedindo a aprovação deste caixa…", r => {
+            if (r.ok) {
+                tela.sync = r.dados
+                conviteRecebido.texto = ""
+                janela.avisar("Pronto: este caixa foi aprovado na loja.", "ok")
+            } else if (r.campo === "enderecos") {
+                enderecoDaLoja.erro = r.erro
+            } else {
+                conviteRecebido.erro = r.erro
+            }
+        })
+    }
+
+    function liberarCaixasAntigos(dias) {
+        janela.chamarGerente("p4_convivencia_p3", { dias: dias }, r => {
+            if (!r.ok) {
+                if (r.campo === "dias")
+                    diasAntigos.erro = r.erro
+                else
+                    janela.avisar(r.erro, "erro")
+                return
+            }
+            diasAntigos.erro = ""
+            tela.sync = r.dados
+            janela.avisar(dias === null ? "Caixas antigos recusados a partir de agora."
+                                        : "Caixas antigos liberados até " + r.dados.p4.convivenciaAteTexto + ".", "ok")
+        })
+    }
+
     function carregarCaixas() {
         const acompanhar = !!janela && !!tela.guia && tela.guia.requisito.campos[0] === "caixa_bloqueando"
         if (acompanhar)
@@ -705,18 +827,31 @@ FocusScope {
     }
 
     function retirarCaixa(c) {
+        // T013 (DT-P4-40): o caixa com chave é retirado de verdade (pela chave, P4); a lista dos que
+        // caem junto (P4-4) aparece antes de confirmar. O caixa sem chave (versão antiga) segue como antes.
+        const comChave = !!c.temChave
+        const juntos = c.dependentes && c.dependentes.length > 0
+                       ? " Também deixam de ser aprovados, porque foram aprovados por ele: " + c.dependentes.join(", ")
+                         + ". Depois, aprove-os de novo com um convite."
+                       : ""
         motivoReferencia.perguntar(
             "Retirar " + c.nome + " da loja?",
+            comChave
+            ? "Use só quando este computador deixou de ser da loja. Ele deixa de trocar dados com todos os caixas da loja, "
+              + "mesmo com a senha da rede, e não conta mais para a versão dos caixas. Para voltar, só com uma aprovação nova do gerente."
+              + juntos + " Fica no histórico com o seu nome e o motivo."
             // T076 (OPUS-D-3): a retirada não tira a senha da rede do computador; a tela não promete o contrário.
-            "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas. "
-            + "Atenção: quem souber a senha da rede consegue entrar de novo, com outro computador ou com este mesmo. Se ele saiu da loja "
-            + "(vendido, roubado ou de alguém que saiu), troque a senha da rede em todos os caixas. "
-            + "Fica no histórico com o seu nome e o motivo.",
-            "Retirar da loja", (m, pronto) => janela.chamarGerente("caixa_retirar", { dispositivo: c.dispositivo, motivo: m }, r => {
+            : "Use só quando este computador deixou de ser da loja. Ele para de trocar dados e não conta mais para a versão dos caixas. "
+              + "Atenção: quem souber a senha da rede consegue entrar de novo, com outro computador ou com este mesmo. Se ele saiu da loja "
+              + "(vendido, roubado ou de alguém que saiu), troque a senha da rede em todos os caixas. "
+              + "Fica no histórico com o seu nome e o motivo.",
+            "Retirar da loja", (m, pronto) => janela.chamarGerenteDemorado("caixa_retirar", { dispositivo: c.dispositivo, motivo: m },
+                                                                         "Retirando o caixa…", r => {
                 pronto(r)
                 if (r.ok) {
                     carregarCaixas()
-                    janela.avisar(c.nome + " foi retirado da loja. Se ele saiu da loja, troque a senha da rede em todos os caixas.", "ok")
+                    janela.avisar(comChave ? c.nome + " foi retirado da loja: não troca mais dados com nenhum caixa."
+                                           : c.nome + " foi retirado da loja. Se ele saiu da loja, troque a senha da rede em todos os caixas.", "ok")
                     // Caso 6: a guia volta à OS só se o núcleo confirmar que
                     // nenhum caixa bloqueia mais; senão destaca o próximo.
                     if (tela.guia && !janela.concluirGuia(true))
@@ -1432,7 +1567,9 @@ FocusScope {
                         Campo {
                             id: syncSenha
                             rotulo: "Senha da rede da loja"
-                            dica: tela.sync && tela.sync.temSenha ? "•••••••• (deixe vazio para manter)" : "A mesma em todos os caixas"
+                            dica: tela.sync && tela.sync.temSenha ? "•••••••• (deixe vazio para manter)"
+                                  : tela.sync && tela.sync.p4 && tela.sync.p4.aprovado ? "Não precisa neste caixa (só para os caixas antigos)"
+                                  : "A mesma em todos os caixas"
                             senha: true
                             podeColar: true
                             maximo: 256
@@ -1639,6 +1776,266 @@ FocusScope {
                     }
                 }
 
+                // ---------------- Caixas da loja: segurança (protocolo 4, 0.9.19) ----------------
+                // T013 (DT-P4-39): a situação deste caixa, a aprovação de caixas novos pelo convite
+                // (com a senha do gerente) e os caixas antigos. O que abre a identidade deste
+                // computador vai pelo caminho demorado (DT-P4-30).
+                Faixa {
+                    id: faixaSeguranca
+                    readonly property var p4: tela.sync && tela.sync.p4 ? tela.sync.p4 : null
+                    visible: tela.secao === "caixas" && !!p4
+                    titulo: "Segurança dos caixas"
+                    subtitulo: p4 && p4.aprovado ? "só os caixas aprovados pelo gerente trocam dados" : "este caixa ainda não foi aprovado"
+                    color: Tema.pergaminho
+                    Layout.fillWidth: true
+                    Nota {
+                        text: !faixaSeguranca.p4 ? ""
+                              : faixaSeguranca.p4.aprovado
+                                ? (faixaSeguranca.p4.raiz ? "Este caixa é aprovado na loja (foi o primeiro caixa dela)." : "Este caixa é aprovado na loja.")
+                                  + " Para um caixa novo entrar, gere aqui um convite com o código que aparece na tela dele."
+                                : "Para trocar dados com os caixas atualizados, este caixa precisa ser aprovado pelo gerente, uma vez só: "
+                                  + "num caixa já aprovado, o gerente gera um convite com o código deste caixa; depois, digite o convite aqui."
+                        Layout.fillWidth: true
+                    }
+
+                    // Caixa aprovado: aprovar caixa novo.
+                    Linha {
+                        visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.aprovado
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            id: codigoNovo
+                            objectName: "codigoDoCaixaNovo"
+                            rotulo: "Código do caixa novo"
+                            dica: "Aparece na tela dele. Ex.: 4F2K-9QXA-7MPC"
+                            podeColar: true
+                            maiusculas: true
+                            maximo: 20
+                            Layout.fillWidth: true
+                            onConfirmado: nomeNovo.focar()
+                        }
+                        Campo {
+                            id: nomeNovo
+                            objectName: "nomeDoCaixaNovo"
+                            rotulo: "Nome do caixa novo"
+                            dica: "Ex.: Caixa 2"
+                            maximo: 30
+                            Layout.fillWidth: true
+                            onConfirmado: tela.gerarConvite()
+                        }
+                    }
+                    Row {
+                        visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.aprovado
+                        spacing: 12
+                        Botao {
+                            text: "Gerar convite"
+                            onClicked: tela.gerarConvite()
+                        }
+                        Botao {
+                            visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.convitesAtivos > 0
+                            text: "Convites ativos (" + (faixaSeguranca.p4 ? faixaSeguranca.p4.convitesAtivos : 0) + ")"
+                            tipo: "secundario"
+                            onClicked: tela.verConvites()
+                        }
+                    }
+                    // O convite que acabou de ser gerado: o texto (com Copiar), o QR e a validade.
+                    Rectangle {
+                        visible: !!tela.conviteGerado
+                        Layout.fillWidth: true
+                        color: Tema.vela(0.5)
+                        palette.window: Tema.superficie(color)
+                        radius: Tema.raioCampo
+                        implicitHeight: conteudoConvite.implicitHeight + 20
+                        RowLayout {
+                            id: conteudoConvite
+                            x: 10
+                            y: 10
+                            width: parent.width - 20
+                            spacing: 16
+                            ColumnLayout {
+                                spacing: 8
+                                Layout.fillWidth: true
+                                Campo {
+                                    objectName: "conviteGerado"
+                                    rotulo: "Convite para " + (tela.conviteGerado ? tela.conviteGerado.nome : "")
+                                    texto: tela.conviteGerado ? tela.conviteGerado.convite : ""
+                                    somenteLeitura: true
+                                    tamanhoFonte: 20
+                                    altura: 46
+                                    Layout.fillWidth: true
+                                }
+                                Nota {
+                                    text: tela.conviteGerado
+                                          ? "Vale até " + tela.conviteGerado.expiraEmTexto + " (10 minutos) e uma vez só. No caixa novo: "
+                                            + "Juntar este caixa › digite o convite (ou leia o QR com o celular)."
+                                            + (tela.conviteGerado.endereco ? " Se ele não achar este caixa sozinho, digite lá o endereço "
+                                                                             + tela.conviteGerado.endereco.split(":")[0] + "." : "")
+                                          : ""
+                                    font.pixelSize: 13
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    text: "Cancelar este convite"
+                                    tipo: "secundario"
+                                    onClicked: tela.cancelarConvite(tela.conviteGerado.id)
+                                }
+                            }
+                            Image {
+                                objectName: "qrDoConvite"
+                                source: tela.conviteGerado ? tela.conviteGerado.qr : ""
+                                sourceSize.width: 180
+                                sourceSize.height: 180
+                                Layout.preferredWidth: 180
+                                Layout.preferredHeight: 180
+                                Layout.alignment: Qt.AlignTop
+                                fillMode: Image.PreserveAspectFit
+                                smooth: false
+                            }
+                        }
+                    }
+                    // Os convites ativos (vistos com a senha do gerente), com Cancelar.
+                    Repeater {
+                        model: tela.convitesVistos ? tela.convitesAtivos : []
+                        delegate: Rectangle {
+                            id: linhaConvite
+                            required property var modelData
+                            required property int index
+                            Layout.fillWidth: true
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(linhaConvite.par, Tema.vela(0.4), "transparent")
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            implicitHeight: conteudoLinhaConvite.implicitHeight + 10
+                            RowLayout {
+                                id: conteudoLinhaConvite
+                                x: 10
+                                y: 5
+                                width: linhaConvite.width - 20
+                                spacing: 10
+                                Text {
+                                    text: linhaConvite.modelData.nome + " · código " + linhaConvite.modelData.codigoPedido
+                                          + " · vale até " + linhaConvite.modelData.expiraEmTexto + " · gerado por " + linhaConvite.modelData.gerente
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaDaFaixa(linhaConvite.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Botao {
+                                    text: "Cancelar"
+                                    tipo: "discreto"
+                                    onClicked: tela.cancelarConvite(linhaConvite.modelData.id)
+                                }
+                            }
+                        }
+                    }
+
+                    // Caixa ainda não aprovado: o código dele e o convite que o gerente gerou.
+                    Linha {
+                        visible: !!faixaSeguranca.p4 && !faixaSeguranca.p4.aprovado
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            objectName: "codigoDesteCaixa"
+                            visible: tela.codigoDesteCaixa !== ""
+                            rotulo: "Código deste caixa (mostre ao gerente)"
+                            texto: tela.codigoDesteCaixa
+                            somenteLeitura: true
+                            tamanhoFonte: 20
+                            altura: 46
+                            Layout.fillWidth: true
+                        }
+                        Botao {
+                            visible: tela.codigoDesteCaixa === ""
+                            text: "Mostrar o código deste caixa"
+                            tipo: "secundario"
+                            onClicked: tela.mostrarCodigoDesteCaixa()
+                        }
+                    }
+                    Nota {
+                        visible: tela.identidadeIlegivel !== ""
+                        text: "A identidade deste computador não abriu: " + tela.identidadeIlegivel
+                              + " Se o cofre de senhas voltar, tente de novo; se não voltar, gere uma identidade nova."
+                        color: Tema.vermelho
+                        Layout.fillWidth: true
+                    }
+                    Botao {
+                        visible: tela.identidadeIlegivel !== ""
+                        text: "Gerar identidade nova"
+                        tipo: "secundario"
+                        onClicked: tela.gerarIdentidadeNova()
+                    }
+                    Linha {
+                        visible: !!faixaSeguranca.p4 && !faixaSeguranca.p4.aprovado
+                        spacing: 12
+                        Layout.fillWidth: true
+                        Campo {
+                            id: conviteRecebido
+                            objectName: "conviteRecebido"
+                            rotulo: "Convite (aparece na tela do gerente)"
+                            dica: "Ex.: ABCDE-FGHJK-LMNPQ-RSTUV-WXYZ2-3"
+                            podeColar: true
+                            camera: true
+                            maximo: 400
+                            Layout.fillWidth: true
+                            onConfirmado: tela.usarConvite()
+                        }
+                        Campo {
+                            id: enderecoDaLoja
+                            rotulo: "Endereço do caixa do gerente (só se não achar sozinho)"
+                            dica: "Ex.: 192.168.0.12"
+                            maximo: 300
+                            Layout.fillWidth: true
+                            onConfirmado: tela.usarConvite()
+                        }
+                    }
+                    Botao {
+                        visible: !!faixaSeguranca.p4 && !faixaSeguranca.p4.aprovado
+                        text: "Usar o convite"
+                        onClicked: tela.usarConvite()
+                    }
+
+                    // Os caixas antigos (antes da 0.9.19): recusados, ou liberados por alguns dias (A4).
+                    Nota {
+                        visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.temRaiz
+                        text: !faixaSeguranca.p4 ? ""
+                              : faixaSeguranca.p4.convivenciaAte
+                                ? "Caixas antigos (antes da versão 0.9.19) liberados até " + faixaSeguranca.p4.convivenciaAteTexto
+                                  + ". Depois, só os caixas atualizados trocam dados com a loja."
+                                : "Caixas antigos (antes da versão 0.9.19) não trocam dados com esta loja. Se precisar de um tempo para "
+                                  + "atualizá-los, libere-os por alguns dias (no máximo " + faixaSeguranca.p4.convivenciaMaximaDias + ")."
+                        Layout.fillWidth: true
+                    }
+                    Row {
+                        visible: !!faixaSeguranca.p4 && faixaSeguranca.p4.temRaiz
+                        spacing: 12
+                        Campo {
+                            id: diasAntigos
+                            objectName: "diasCaixasAntigos"
+                            visible: !faixaSeguranca.p4 || !faixaSeguranca.p4.convivenciaAte
+                            rotulo: "Por quantos dias"
+                            texto: "7"
+                            numerico: true
+                            maximo: 2
+                            width: 160
+                        }
+                        Botao {
+                            visible: !faixaSeguranca.p4 || !faixaSeguranca.p4.convivenciaAte
+                            anchors.bottom: diasAntigos.bottom
+                            text: "Liberar os caixas antigos"
+                            tipo: "secundario"
+                            onClicked: tela.liberarCaixasAntigos(parseInt(diasAntigos.texto, 10) || 0)
+                        }
+                        Botao {
+                            visible: !!faixaSeguranca.p4 && !!faixaSeguranca.p4.convivenciaAte
+                            text: "Recusar os caixas antigos agora"
+                            tipo: "secundario"
+                            onClicked: tela.liberarCaixasAntigos(null)
+                        }
+                    }
+                }
+
                 // ---------------- Caixas da loja: versão de cada um (0.9.15) ----------------
                 Faixa {
                     visible: tela.secao === "caixas" && tela.caixasConhecidos.length > 0
@@ -1694,6 +2091,8 @@ FocusScope {
                                                  + " alteração(ões) esperam a atualização dele." : "")
                                               + (linhaCaixa.modelData.situacao === "retirado" ? " Motivo: " + linhaCaixa.modelData.retiradoMotivo
                                                  + (linhaCaixa.modelData.retiradoPor ? " (" + linhaCaixa.modelData.retiradoPor + ")" : "") + "." : "")
+                                              + (linhaCaixa.modelData.retiradoPelaChave ? " Retirado pela chave: para voltar, só com uma aprovação nova do gerente." : "")
+                                              + (linhaCaixa.modelData.raiz ? " É o primeiro caixa da loja: ele aprova os outros e não pode ser retirado." : "")
                                         textFormat: Text.PlainText
                                         color: linhaCaixa.modelData.bloqueia ? Tema.vermelhoDaFaixa(linhaCaixa.par) : Tema.tintaSuaveDaFaixa(linhaCaixa.par)
                                         font.family: Tema.texto
@@ -1703,13 +2102,13 @@ FocusScope {
                                     }
                                 }
                                 Botao {
-                                    visible: linhaCaixa.modelData.situacao !== "retirado"
+                                    visible: linhaCaixa.modelData.situacao !== "retirado" && !linhaCaixa.modelData.raiz
                                     text: "Retirar da loja"
                                     tipo: "discreto"
                                     onClicked: tela.retirarCaixa(linhaCaixa.modelData)
                                 }
                                 Botao {
-                                    visible: linhaCaixa.modelData.situacao === "retirado"
+                                    visible: linhaCaixa.modelData.situacao === "retirado" && !linhaCaixa.modelData.retiradoPelaChave
                                     text: "Readmitir"
                                     tipo: "secundario"
                                     onClicked: tela.readmitirCaixa(linhaCaixa.modelData)

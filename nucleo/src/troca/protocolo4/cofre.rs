@@ -388,14 +388,31 @@ fn pasta_config_de(var: &dyn Fn(&str) -> Option<std::ffi::OsString>, windows: bo
         .or_else(|| nao_vazia("HOME").map(|p| p.join(".config").join("rustinho")))
 }
 
-/// A conta do segredo no serviço de senhas (só o `secret-tool` usa conta).
+/// A conta do segredo no serviço de senhas (só o `secret-tool` usa conta). N-04:
+/// depois de uma identidade nova (recuperação), a conta leva também a geração
+/// dela ([`caminho_geracao`]): o segredo novo nunca vai por cima do antigo.
 #[cfg(target_os = "linux")]
 fn conta_cofre(caminho: &Path) -> String {
     let mut h = Sha256::new();
     h.update(b"rustinho/p4/cofre-conta\0");
     h.update(caminho.to_string_lossy().as_bytes());
+    if let Ok(g) = std::fs::read_to_string(caminho_geracao(caminho)) {
+        let g = g.trim();
+        if !g.is_empty() {
+            h.update(b"\0geracao\0");
+            h.update(g.as_bytes());
+        }
+    }
     let d: [u8; 32] = h.finalize().into();
     format!("caixa-{}", hex(&d[..12]))
+}
+
+/// N-04: o arquivo com a geração da identidade em `caminho_id` (só existe depois
+/// de uma identidade nova gerada pela recuperação).
+fn caminho_geracao(caminho_id: &Path) -> PathBuf {
+    let mut os = caminho_id.as_os_str().to_os_string();
+    os.push(".conta");
+    PathBuf::from(os)
 }
 
 fn caminho_reserva(caminho_id: &Path) -> PathBuf {
@@ -494,21 +511,66 @@ pub fn regerar_identidade_local(pasta_banco: &Path, modo: &Modo) -> Resultado<st
     Ok(nova)
 }
 
+/// N-04: a identidade antiga sai do lugar **com o segredo dela** (nada é apagado
+/// nem sobrescrito): o arquivo, a reserva local, o arquivo do DPAPI e a geração vão
+/// para `<identidade>.antiga-<id>…`, com um bilhete para o suporte que diz onde o
+/// segredo ficou (a conta do cofre do sistema, que não é mexida). A identidade nova
+/// ganha uma geração nova: o segredo dela vai para **outra** conta do cofre. Assim,
+/// se era só o cofre fora do ar, a identidade antiga ainda pode ser recuperada.
 fn regerar_no_caminho(caminho: PathBuf, modo: &Modo, cofre: &CofreSistema) -> Resultado<IdentidadeLocal> {
     let _guarda_proc = trava_processo().lock().unwrap_or_else(|e| e.into_inner());
     let _guarda_arq = TravaArquivo::adquirir(&caminho)?;
+    let arquivar = |de: &Path, para: &Path| -> Resultado<()> {
+        if de.exists() {
+            std::fs::rename(de, para).map_err(|e| {
+                Erro::Interno(format!("não foi possível arquivar a identidade anterior ({:?})", e.kind()))
+            })?;
+        }
+        Ok(())
+    };
     if caminho.exists() {
         if abrir_no_caminho(caminho.clone(), modo, cofre).is_ok() {
             return Err(Erro::validacao("A identidade deste caixa continua funcionando: não é preciso gerar outra."));
         }
-        let mut backup = caminho.as_os_str().to_os_string();
-        backup.push(format!(".antiga-{}", crate::tempo::novo_id()));
-        std::fs::rename(&caminho, PathBuf::from(backup))
-            .map_err(|e| Erro::Interno(format!("não foi possível arquivar a identidade anterior ({:?})", e.kind())))?;
+        let mut nome = caminho.as_os_str().to_os_string();
+        nome.push(format!(".antiga-{}", crate::tempo::novo_id()));
+        let arquivada = PathBuf::from(nome);
+        #[cfg(target_os = "linux")]
+        let conta = conta_cofre(&caminho);
+        #[cfg(not(target_os = "linux"))]
+        let conta = String::from("(sem conta: DPAPI ou reserva local)");
+        arquivar(&caminho, &arquivada)?;
+        arquivar(&caminho_reserva(&caminho), &caminho_reserva(&arquivada))?;
+        #[cfg(windows)]
+        arquivar(&caminho_dpapi(&caminho), &caminho_dpapi(&arquivada))?;
+        arquivar(&caminho_geracao(&caminho), &caminho_geracao(&arquivada))?;
+        let mut bilhete = arquivada.as_os_str().to_os_string();
+        bilhete.push(".leia-me.txt");
+        let _ = std::fs::write(
+            PathBuf::from(bilhete),
+            format!(
+                "Identidade antiga deste caixa, arquivada em {} porque não abria.\n\
+                 Caminho original: {}\n\
+                 O segredo dela continua onde estava: no cofre de senhas do sistema (serviço rustinho-p4, conta {conta}),\n\
+                 ou no arquivo .segredo / .dpapi arquivado ao lado (cifrado para o caminho original).\n",
+                crate::tempo::agora(),
+                caminho.display()
+            ),
+        );
+    } else {
+        // Sem identidade no lugar: o que sobrou dela (reserva, geração) também não é apagado.
+        let sobra = format!(".sobra-{}", crate::tempo::novo_id());
+        for de in [caminho_reserva(&caminho), caminho_geracao(&caminho)] {
+            let mut para = de.as_os_str().to_os_string();
+            para.push(&sobra);
+            arquivar(&de, &PathBuf::from(para))?;
+        }
     }
-    let _ = std::fs::remove_file(caminho_reserva(&caminho));
-    #[cfg(windows)]
-    let _ = std::fs::remove_file(caminho_dpapi(&caminho));
+    // N-04: a geração nova (o segredo novo vai para outra conta do cofre do sistema).
+    let mut geracao: [u8; 16] = aleatorio()?;
+    std::fs::write(caminho_geracao(&caminho), hex(&geracao))
+        .map_err(|e| Erro::Interno(format!("não foi possível gravar a geração da identidade ({:?})", e.kind())))?;
+    apagar(&mut geracao);
     criar_no_caminho(caminho, modo, cofre)
 }
 
@@ -2090,6 +2152,12 @@ mod testes {
                  lookup) [ -f \"$arq\" ] || exit 1; cat \"$arq\"; echo ;;\n  *) exit 2 ;;\nesac\n",
                 chaveiro.display()
             ),
+            // N-04: o cofre que voltou só para gravar (a leitura do segredo antigo falha).
+            "so_guarda" => format!(
+                "acao=\"$1\"\nconta=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = account ] && conta=\"$2\"; shift; done\n\
+                 arq=\"{}/$conta\"\ncase \"$acao\" in\n  store) cat > \"$arq\" ;;\n  *) exit 1 ;;\nesac\n",
+                chaveiro.display()
+            ),
             "falha" => "cat > /dev/null 2>&1; exit 1\n".to_string(),
             "trava" => "exec sleep 60\n".to_string(),
             outro => panic!("jeito desconhecido: {outro}"),
@@ -2120,6 +2188,54 @@ mod testes {
             }
         }
         bin
+    }
+
+    /// N-04: o cofre do sistema não devolveu o segredo (fora do ar na hora) e o gerente
+    /// gerou uma identidade nova. O segredo novo vai para **outra** conta do cofre: o
+    /// antigo continua lá, e a identidade antiga (arquivada, com o bilhete para o
+    /// suporte) ainda abre com ele.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn n04_identidade_nova_nao_apaga_o_segredo_da_antiga() {
+        let raiz = PastaTemp::nova("cofre-n04");
+        let funciona = CofreSistema::SecretTool(secret_tool_falso(&raiz.0, "funciona"));
+        let so_guarda = CofreSistema::SecretTool(secret_tool_falso(&raiz.0, "so_guarda"));
+        let pasta_banco = raiz.0.join("dados");
+        std::fs::create_dir_all(&pasta_banco).unwrap();
+        let c = caminho_identidade_com_base(&pasta_banco, &Modo::Instalado, Some(&raiz.0.join("cfg"))).unwrap();
+        let antiga = carregar_ou_criar_no_caminho(c.clone(), &Modo::Instalado, &funciona).unwrap();
+        let conta_antiga = conta_cofre(&c);
+        let chaveiro = raiz.0.join("chaveiro");
+        let segredo_antigo = std::fs::read_to_string(chaveiro.join(&conta_antiga)).unwrap();
+
+        // O cofre não devolve o segredo agora: a identidade não abre; o gerente gera outra.
+        assert!(abrir_no_caminho(c.clone(), &Modo::Instalado, &so_guarda).is_err());
+        let nova = regerar_no_caminho(c.clone(), &Modo::Instalado, &so_guarda).unwrap();
+        assert_ne!(nova.identidade.publica(), antiga.identidade.publica());
+        assert_ne!(conta_cofre(&c), conta_antiga, "o segredo novo vai para outra conta do cofre");
+        assert_eq!(
+            std::fs::read_to_string(chaveiro.join(&conta_antiga)).unwrap(),
+            segredo_antigo,
+            "o segredo da identidade antiga continua no cofre, sem mudança"
+        );
+        let arquivadas: Vec<PathBuf> = std::fs::read_dir(c.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.to_string_lossy().ends_with(".leia-me.txt"))
+            .collect();
+        assert_eq!(arquivadas.len(), 1, "um bilhete para o suporte");
+        let bilhete = std::fs::read_to_string(&arquivadas[0]).unwrap();
+        assert!(bilhete.contains(&conta_antiga), "o bilhete diz a conta do segredo antigo: {bilhete}");
+        let arquivada = PathBuf::from(arquivadas[0].to_string_lossy().trim_end_matches(".leia-me.txt").to_string());
+        let reaberta = Identidade::abrir_de(&arquivada, segredo_antigo.trim()).unwrap();
+        assert_eq!(
+            reaberta.publica(),
+            antiga.identidade.publica(),
+            "a identidade antiga ainda abre com o segredo dela"
+        );
+        // A nova reabre (com a geração dela) pelo cofre que funciona.
+        let de_novo = abrir_no_caminho(c.clone(), &Modo::Instalado, &funciona).unwrap();
+        assert_eq!(de_novo.identidade.publica(), nova.identidade.publica());
     }
 
     /// F-06: com o cofre do sistema funcionando, o segredo vai para ele (não para a

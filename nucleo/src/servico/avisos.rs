@@ -1149,6 +1149,27 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
         );
         avisos.push(a);
     }
+    // T013 (DT-P4-41, DT-P4-10): este caixa da loja ainda não foi aprovado no
+    // protocolo 4 e já há caixas atualizados na rede: sem a aprovação (uma vez,
+    // pelo convite do gerente), ele não troca dados com eles.
+    if crate::sync::precisa_de_aprovacao(conn)? {
+        let mut a = Aviso::simples(
+            "p4.aprovar_este_caixa",
+            &hoje,
+            "Este caixa precisa ser aprovado".to_string(),
+            "Peça um convite ao gerente".to_string(),
+            String::new(),
+            "configuracoes",
+        )
+        .categoria(ATENCAO)
+        .secao("caixas");
+        a.descricao = "Os outros caixas da loja já estão atualizados e só trocam dados com caixas aprovados pelo \
+                       gerente. Num caixa aprovado, o gerente gera um convite com o código deste caixa; depois, \
+                       digite o convite em Configurações › Caixas da loja."
+            .to_string();
+        a.acao = "Ver caixas".into();
+        avisos.push(a);
+    }
     // Crítica primeiro, depois atenção, depois informativa (ordem estável).
     let peso = |c: &str| match c {
         CRITICA => 0,

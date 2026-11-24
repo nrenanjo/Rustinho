@@ -163,3 +163,35 @@ fn chamadas_com_senha_do_gerente_na_forma_certa() {
     }
     assert!(erradas.is_empty(), "chamadas com a senha do gerente na forma errada: {erradas:#?}");
 }
+
+/// T012/T013 (DT-P4-30, N-16): os comandos que abrem a identidade deste computador
+/// (um Argon2 e o cofre de senhas do sistema, até alguns segundos) ou que esperam
+/// a rede só são chamados pelas telas pelo caminho demorado (numa tarefa à parte,
+/// com a espera na tela): nunca na linha da janela.
+#[test]
+fn identidade_do_caixa_so_pelo_caminho_demorado() {
+    const ABREM_A_IDENTIDADE: &[&str] = &[
+        "p4_identidade",
+        "p4_gerar_convite",
+        "p4_juntar_com_convite",
+        "p4_aprovar_este_caixa",
+        "p4_gerar_identidade_nova",
+        "caixa_retirar",
+    ];
+    let mut na_linha_da_janela = Vec::new();
+    let mut demoradas = 0;
+    for (arq, texto) in arquivos_qml() {
+        for (forma, nome, linha) in chamadas(&texto) {
+            if !ABREM_A_IDENTIDADE.contains(&nome.as_str()) {
+                continue;
+            }
+            if forma.contains("Demorado") {
+                demoradas += 1;
+            } else {
+                na_linha_da_janela.push(format!("{arq}:{linha} {forma}…{nome}"));
+            }
+        }
+    }
+    assert!(demoradas >= ABREM_A_IDENTIDADE.len(), "as telas chamam esses comandos? ({demoradas})");
+    assert!(na_linha_da_janela.is_empty(), "abrem a identidade na linha da janela: {na_linha_da_janela:#?}");
+}

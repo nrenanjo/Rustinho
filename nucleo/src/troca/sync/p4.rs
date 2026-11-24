@@ -390,12 +390,18 @@ fn ouvidos_mapa() -> &'static Mutex<HashMap<PathBuf, Vec<Ouvido>>> {
     M.get_or_init(Default::default)
 }
 
+/// A chave do mapa dos ouvidos: o banco pelo caminho verdadeiro (o motor e a
+/// conexão do banco podem dizer o mesmo arquivo de jeitos diferentes).
+fn chave_dos_ouvidos(caminho: &Path) -> PathBuf {
+    std::fs::canonicalize(caminho).unwrap_or_else(|_| caminho.to_path_buf())
+}
+
 /// Guarda um anúncio `RSA4` ouvido (só o endereço e a loja; até 32, por 2 minutos).
 pub(super) fn guardar_ouvido(caminho: &Path, ip: std::net::IpAddr, bytes: &[u8]) {
     let Ok(a) = crate::troca::protocolo4::anuncio::abrir(bytes, agora_ms()) else { return };
     let endereco = SocketAddr::new(ip, a.porta);
     let mut m = ouvidos_mapa().lock().unwrap_or_else(|e| e.into_inner());
-    let lista = m.entry(caminho.to_path_buf()).or_default();
+    let lista = m.entry(chave_dos_ouvidos(caminho)).or_default();
     lista.retain(|o| o.endereco != endereco && o.visto.elapsed() < Duration::from_secs(120));
     lista.push(Ouvido { endereco, loja: a.loja_id, visto: Instant::now() });
     if lista.len() > 32 {
@@ -406,7 +412,7 @@ pub(super) fn guardar_ouvido(caminho: &Path, ip: std::net::IpAddr, bytes: &[u8])
 /// Os endereços ouvidos recentemente (da `loja`, se ela é conhecida).
 fn ouvidos(caminho: &Path, loja: &str) -> Vec<SocketAddr> {
     let m = ouvidos_mapa().lock().unwrap_or_else(|e| e.into_inner());
-    m.get(caminho)
+    m.get(&chave_dos_ouvidos(caminho))
         .map(|l| {
             l.iter()
                 .filter(|o| o.visto.elapsed() < Duration::from_secs(120) && (loja.is_empty() || o.loja == loja))
@@ -793,6 +799,8 @@ pub struct SituacaoP4 {
     pub raiz: bool,
     /// Até quando os caixas antigos (protocolo 3) ainda trocam dados; `None` = recusados.
     pub convivencia_ate: Option<String>,
+    /// A mesma data no horário daqui ("01/12/2026 15:42"); vazia quando recusados.
+    pub convivencia_ate_texto: String,
     /// O prazo máximo da convivência (dias).
     pub convivencia_maxima_dias: i64,
     /// Convites ativos (não usados, dentro da validade) nesta loja.
@@ -809,9 +817,17 @@ pub fn situacao(conn: &Connection) -> Resultado<SituacaoP4> {
         "0" => Some(false),
         _ => None,
     });
+    let convivencia_ate = convivencia_p3_ate(conn)?;
+    let convivencia_ate_texto = match &convivencia_ate {
+        Some(iso) => conn
+            .query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [iso], |l| l.get::<_, Option<String>>(0))?
+            .unwrap_or_else(|| iso.clone()),
+        None => String::new(),
+    };
     let mut s = SituacaoP4 {
         tem_raiz: tem_raiz_fixada(conn),
-        convivencia_ate: convivencia_p3_ate(conn)?,
+        convivencia_ate,
+        convivencia_ate_texto,
         convivencia_maxima_dias: CONVIVENCIA_MAXIMA_DIAS,
         cofre_sistema,
         ..SituacaoP4::default()
@@ -827,6 +843,19 @@ pub fn situacao(conn: &Connection) -> Resultado<SituacaoP4> {
             .count();
     }
     Ok(s)
+}
+
+/// T013 (DT-P4-41): este caixa é da loja (tem usuários e a troca ligada), não é
+/// aprovado no protocolo 4 e ouviu há pouco o anúncio assinado de um caixa
+/// atualizado da mesma loja: ele precisa da aprovação do gerente (convite) para
+/// trocar dados com os caixas atualizados. Só lê o banco e a memória do motor.
+pub fn precisa_de_aprovacao(conn: &Connection) -> Resultado<bool> {
+    if !ajustes(conn)?.ligado || crate::usuarios::quantidade(conn)? == 0 || situacao(conn)?.aprovado {
+        return Ok(false);
+    }
+    let loja = crate::loja::id(conn)?;
+    let Some(caminho) = conn.path().filter(|c| !c.is_empty()).map(PathBuf::from) else { return Ok(false) };
+    Ok(!loja.is_empty() && !ouvidos(&caminho, &loja).is_empty())
 }
 
 /// T012 (DT-P4-31): a identidade deste caixa, para a tela.
@@ -853,6 +882,52 @@ pub fn identidade_para_a_tela(conn: &Connection, caminho: &Path) -> Resultado<Id
         None => false,
     };
     Ok(IdentidadeNaTela { codigo_pedido: id.identidade.codigo_de_pedido(), cofre_sistema: id.cofre_sistema, aprovado })
+}
+
+/// T013 (DT-P4-42): o erro ao abrir a identidade, para a tela. Quando o arquivo
+/// dela existe e não abre (o segredo não veio do cofre, ou não confere), o campo
+/// "identidade" deixa a tela oferecer uma identidade nova, com o gerente. A trava
+/// ocupada e os erros internos seguem como estão (não são caso de identidade nova).
+pub fn erro_da_identidade(caminho: &Path, e: Erro) -> Erro {
+    let existe =
+        caminho.parent().and_then(|pasta| cofre::caminho_identidade(pasta, &modo()).ok()).is_some_and(|c| c.exists());
+    match e {
+        Erro::Validacao { campo: None, mensagem } if existe && mensagem != cofre::TEXTO_IDENTIDADE_OCUPADA => {
+            Erro::campo("identidade", mensagem)
+        }
+        outro => outro,
+    }
+}
+
+/// T013 (DT-P4-42, N-04): o gerente gera uma identidade nova para este caixa,
+/// **só** quando a atual não abre (a função recusa a que abre). A antiga fica
+/// arquivada com o segredo dela; a chave anotada passa a ser a nova; a auditoria
+/// guarda quem fez. Depois, este caixa precisa de uma aprovação nova (convite) — e,
+/// se a chave antiga estava aprovada, o gerente a retira num caixa aprovado.
+pub fn gerar_identidade_nova(conn: &Connection, caminho: &Path, gerente_id: &str) -> Resultado<IdentidadeNaTela> {
+    if gerente_id.trim().is_empty() {
+        return Err(Erro::validacao("Só o gerente gera uma identidade nova para o caixa."));
+    }
+    let pasta = caminho.parent().ok_or_else(|| Erro::Interno("banco sem pasta".into()))?;
+    let id = cofre::regerar_identidade_local(pasta, &modo())?;
+    let nova = IdentidadeNaTela {
+        codigo_pedido: id.identidade.codigo_de_pedido(),
+        cofre_sistema: id.cofre_sistema,
+        aprovado: false,
+    };
+    config::gravar(conn, "p4_chave_publica", &hex(&id.identidade.publica()))?;
+    config::gravar(conn, "p4_cofre_sistema", if id.cofre_sistema { "1" } else { "0" })?;
+    let disp = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    crate::auditoria::registrar(
+        conn,
+        &disp,
+        Some(gerente_id),
+        "p4_identidade_nova",
+        "caixa",
+        &disp,
+        &[format!("Código novo deste caixa: {}", nova.codigo_pedido)],
+    )?;
+    Ok(nova)
 }
 
 /// Texto para a tela: o convite precisa da troca ligada.

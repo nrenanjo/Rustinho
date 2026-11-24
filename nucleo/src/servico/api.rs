@@ -206,6 +206,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "p4_cancelar_convite",
     "p4_convivencia_p3",
     "p4_gerar_convite",
+    "p4_gerar_identidade_nova",
     "p4_juntar_com_convite",
     "pendencias_reaplicar",
     "referencia_aceitar",
@@ -380,6 +381,7 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("p4_cancelar_convite", Classe::Gerente("gerente")),
     ("p4_convites", Classe::ConsultaDoGerente("gerente")),
     ("p4_aprovar_este_caixa", Classe::Gerente("configuracoes")),
+    ("p4_gerar_identidade_nova", Classe::Gerente("configuracoes")),
     ("p4_convivencia_p3", Classe::Gerente("configuracoes")),
     ("pendencias_listar", Classe::ConsultaDoGerente("simultaneidade")),
     ("troca_historico", Classe::ConsultaDoGerente("simultaneidade")),
@@ -1146,7 +1148,9 @@ impl Servico {
             // só pelo caminho demorado (DT-P4-30). Cria a identidade do caixa novo.
             "p4_identidade" => {
                 let caminho = self.caminho_p4()?;
-                Ok(json!(sync::identidade_para_a_tela(&self.banco.conn, &caminho)?))
+                let id = sync::identidade_para_a_tela(&self.banco.conn, &caminho)
+                    .map_err(|e| sync::erro_da_identidade(&caminho, e))?;
+                Ok(json!(id))
             }
             // T012 (DT-P4-33, D1, A6): o caixa novo (sem usuários) entra na loja pelo
             // convite, sem a senha da rede. Rede e identidade: caminho demorado. Como a
@@ -1972,6 +1976,12 @@ impl Servico {
                 self.convites_na_tela()
             }
             "p4_convites" => self.convites_na_tela(),
+            // T013 (DT-P4-42, N-04): identidade nova, só quando a deste computador não
+            // abre (o núcleo recusa a que abre). Abre o cofre: caminho demorado.
+            "p4_gerar_identidade_nova" => {
+                let caminho = self.caminho_p4()?;
+                Ok(json!(sync::gerar_identidade_nova(&self.banco.conn, &caminho, &sessao.usuario_id)?))
+            }
             // T012 (DT-P4-33): o caixa que já é da loja (atualizou para a 0.9.19 e não é a
             // raiz) recebe a aprovação pelo convite. Rede e identidade: caminho demorado.
             "p4_aprovar_este_caixa" => {
