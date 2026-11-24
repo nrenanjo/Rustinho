@@ -88,7 +88,11 @@ pub fn salvar_ajustes(conn: &Connection, ligado: bool, senha: &str, enderecos: &
     let estava_ligado = config::ler(conn, "sync_ligado")?.as_deref() == Some("1");
     let troca = !senha.is_empty() && senha != gravada;
     let liga = ligado && !estava_ligado;
-    if troca || liga || (ligado && senha.is_empty()) {
+    // T012 (DT-P4-36): o caixa aprovado no protocolo 4 (raiz fixada) troca sem a
+    // senha da rede; ela só serve à convivência com os caixas antigos. Sem senha,
+    // ligar não exige nada; uma senha digitada segue a política como sempre.
+    let sem_senha_no_p4 = senha.is_empty() && super::p4::tem_raiz_fixada(conn);
+    if troca || ((liga || (ligado && senha.is_empty())) && !sem_senha_no_p4) {
         if senha.chars().count() < 4 {
             return Err(Erro::campo(
                 "senha",

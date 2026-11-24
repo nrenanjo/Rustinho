@@ -202,6 +202,11 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "menu_fixar",
     "menu_usar",
     "pagar_alterar",
+    "p4_aprovar_este_caixa",
+    "p4_cancelar_convite",
+    "p4_convivencia_p3",
+    "p4_gerar_convite",
+    "p4_juntar_com_convite",
     "pendencias_reaplicar",
     "referencia_aceitar",
     "senha_trocar",
@@ -323,6 +328,10 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("sync_juntar", Classe::SemSessao),
     ("sync_desistir_juntar", Classe::SemSessao),
     ("sync_ler", Classe::LeituraSemSessao),
+    // T012 (protocolo 4, DT-P4-31/33): o código deste caixa e a entrada do caixa
+    // novo pelo convite (abrem a identidade: as telas chamam pelo caminho demorado).
+    ("p4_identidade", Classe::LeituraSemSessao),
+    ("p4_juntar_com_convite", Classe::SemSessao),
     ("aparencia_salvar", Classe::SemSessao),
     ("codigo_ler_foto", Classe::LeituraSemSessao),
     // F03 (dev.3.3, 2.3): o lugar do quadro da câmera é do núcleo.
@@ -364,6 +373,14 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("caixas_conhecidos", Classe::Leitura),
     ("caixa_retirar", Classe::Gerente("gerente")),
     ("caixa_readmitir", Classe::Gerente("gerente")),
+    // T012 (protocolo 4): aprovar caixa novo por convite (DT-P4-32), o caixa que já
+    // é da loja recebe a aprovação (DT-P4-33) e a convivência com os caixas antigos
+    // (DT-P4-34). Sempre com a senha do gerente (a classe confere).
+    ("p4_gerar_convite", Classe::Gerente("gerente")),
+    ("p4_cancelar_convite", Classe::Gerente("gerente")),
+    ("p4_convites", Classe::ConsultaDoGerente("gerente")),
+    ("p4_aprovar_este_caixa", Classe::Gerente("configuracoes")),
+    ("p4_convivencia_p3", Classe::Gerente("configuracoes")),
     ("pendencias_listar", Classe::ConsultaDoGerente("simultaneidade")),
     ("troca_historico", Classe::ConsultaDoGerente("simultaneidade")),
     ("auditoria_listar", Classe::ConsultaDoGerente("simultaneidade")),
@@ -458,7 +475,8 @@ pub const CONSULTAS_FORA_DA_JANELA: &[&str] = &["produtos_buscar"];
 /// de dono (entrar numa loja ou desistir dela). Antes deles, a tarefa de
 /// leitura para e fecha a conexão; depois, abre uma nova
 /// (`consulta::Leitor::pausar`).
-pub const TROCAM_O_BANCO: &[&str] = &["backup_restaurar", "sync_juntar", "sync_desistir_juntar"];
+pub const TROCAM_O_BANCO: &[&str] =
+    &["backup_restaurar", "sync_juntar", "sync_desistir_juntar", "p4_juntar_com_convite"];
 
 /// Comandos que funcionam sem ninguém conectado.
 pub fn sem_sessao(comando: &str) -> bool {
@@ -1123,6 +1141,24 @@ impl Servico {
                 Ok(json!({ "saiu": n }))
             }
             "sync_ler" => self.sync_ler(),
+            // T012 (DT-P4-31): o código deste caixa, que o gerente confere ao gerar o
+            // convite. Abre a identidade (Argon2 e o cofre do sistema): as telas chamam
+            // só pelo caminho demorado (DT-P4-30). Cria a identidade do caixa novo.
+            "p4_identidade" => {
+                let caminho = self.caminho_p4()?;
+                Ok(json!(sync::identidade_para_a_tela(&self.banco.conn, &caminho)?))
+            }
+            // T012 (DT-P4-33, D1, A6): o caixa novo (sem usuários) entra na loja pelo
+            // convite, sem a senha da rede. Rede e identidade: caminho demorado. Como a
+            // junção de antes, a loja passa a ser a do convite (troca o banco).
+            "p4_juntar_com_convite" => {
+                let d: EntrarComConvite = ler(dados)?;
+                let enderecos = enderecos_digitados(&d.enderecos)?;
+                let caminho = self.caminho_p4()?;
+                sync::juntar_com_convite(&caminho, &d.convite, &enderecos)?;
+                self.reiniciar_motor_sync();
+                self.sync_ler()
+            }
             // Tema da tela (cinza, AMOLED ou Planeta Roxo) e preferência de movimento reduzido
             // (P6 / MG-D1: "sistema" | "ligado" | "desligado"): valem só para este aparelho
             // (não vão para os outros caixas nem vêm do backup).
@@ -1863,8 +1899,18 @@ impl Servico {
             })),
             "caixa_retirar" => {
                 let d: CaixaDaLoja = ler(dados)?;
+                // T012 (DT-P4-35): com chave no registro, a retirada é assinada (pela
+                // identidade deste caixa: caminho demorado) ou recusada inteira.
+                let caminho = self.banco.caminho.clone().unwrap_or_default();
                 let tx = self.banco.conn.transaction()?;
-                sync::retirar_caixa(&tx, &d.dispositivo, &d.motivo, &sessao.nome)?;
+                sync::retirar_caixa_por_chave(
+                    &tx,
+                    &caminho,
+                    &d.dispositivo,
+                    &d.motivo,
+                    &sessao.usuario_id,
+                    &sessao.nome,
+                )?;
                 auditoria::registrar(
                     &tx,
                     &disp,
@@ -1882,7 +1928,7 @@ impl Servico {
             "caixa_readmitir" => {
                 let d: CaixaDaLoja = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
-                sync::readmitir_caixa(&tx, &d.dispositivo)?;
+                sync::readmitir_caixa_por_chave(&tx, &d.dispositivo)?;
                 auditoria::registrar(
                     &tx,
                     &disp,
@@ -1896,6 +1942,52 @@ impl Servico {
                 crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
                 Ok(resposta)
+            }
+            // T012 (DT-P4-32): o convite de uso único para o caixa novo (10 minutos). O
+            // gerente vai pelo identificador (assinado na aprovação e na auditoria). Sem
+            // a chave da operação de propósito: a resposta guardada levaria o segredo.
+            "p4_gerar_convite" => {
+                let d: ConviteNovo = ler(dados)?;
+                let caminho = self.caminho_p4()?;
+                let ip = endereco_local();
+                let endereco =
+                    if ip.is_empty() { String::new() } else { format!("{ip}:{}", crate::portatil::portas().0) };
+                let conn = &self.banco.conn;
+                let c = sync::gerar_convite(conn, &caminho, &d.codigo_pedido, &d.nome, &sessao.usuario_id, &endereco)?;
+                let qr = crate::troca::protocolo4::canal::qr_svg_data_uri(&c.payload_qr)?;
+                Ok(json!({
+                    "id": c.id,
+                    "convite": c.segredo,
+                    "codigoPedido": c.codigo_pedido,
+                    "nome": c.nome_caixa,
+                    "expiraEm": c.expira_em,
+                    "expiraEmTexto": hora_local(conn, &c.expira_em)?,
+                    "qr": qr,
+                    "endereco": endereco,
+                }))
+            }
+            "p4_cancelar_convite" => {
+                let d: ConviteEscolhido = ler(dados)?;
+                crate::troca::protocolo4::cofre::cancelar_convite(&self.banco.conn, &d.id, &sessao.usuario_id)?;
+                self.convites_na_tela()
+            }
+            "p4_convites" => self.convites_na_tela(),
+            // T012 (DT-P4-33): o caixa que já é da loja (atualizou para a 0.9.19 e não é a
+            // raiz) recebe a aprovação pelo convite. Rede e identidade: caminho demorado.
+            "p4_aprovar_este_caixa" => {
+                let d: EntrarComConvite = ler(dados)?;
+                let enderecos = enderecos_digitados(&d.enderecos)?;
+                let caminho = self.caminho_p4()?;
+                sync::aprovar_este_caixa_com_convite(&caminho, &d.convite, &enderecos)?;
+                self.reiniciar_motor_sync();
+                self.sync_ler()
+            }
+            // T012 (DT-P4-34, A4): liga a convivência com os caixas antigos por `dias`
+            // (1 a 30) ou desliga (`dias` nulo).
+            "p4_convivencia_p3" => {
+                let d: Convivencia = ler(dados)?;
+                sync::definir_convivencia_p3(&self.banco.conn, d.dias, &sessao.usuario_id)?;
+                self.sync_ler()
             }
             "pendencias_listar" => Ok(json!(sync::pendencias_da_troca(&self.banco.conn)?)),
             // Simultaneidade › Histórico (0.9.15): só leitura.
@@ -2179,6 +2271,33 @@ impl Servico {
         self.banco.caminho.clone().ok_or_else(|| Erro::validacao("Backup só funciona com o banco num arquivo."))
     }
 
+    /// T012: o protocolo 4 guarda a identidade ao lado do banco: precisa dele num arquivo.
+    fn caminho_p4(&self) -> Resultado<std::path::PathBuf> {
+        self.banco
+            .caminho
+            .clone()
+            .ok_or_else(|| Erro::validacao("A segurança da troca entre caixas só funciona com o banco num arquivo."))
+    }
+
+    /// T012 (DT-P4-32): os convites ativos para a tela do gerente, sem o segredo, com
+    /// o nome de quem gerou e a hora em que vence.
+    fn convites_na_tela(&self) -> Resultado<Value> {
+        let conn = &self.banco.conn;
+        let mut lista = Vec::new();
+        for c in sync::convites_ativos(conn)? {
+            let gerente = usuarios::buscar(conn, &c.gerente).map(|u| u.nome).unwrap_or_else(|_| c.gerente.clone());
+            lista.push(json!({
+                "id": c.id,
+                "codigoPedido": c.codigo_pedido,
+                "nome": c.nome_caixa,
+                "gerente": gerente,
+                "expiraEm": c.expira_em,
+                "expiraEmTexto": hora_local(conn, &c.expira_em)?,
+            }));
+        }
+        Ok(json!(lista))
+    }
+
     fn reiniciar_motor_sync(&mut self) {
         let Some(caminho) = self.banco.caminho.clone() else { return };
         crate::supervisao::reiniciar(&caminho);
@@ -2226,7 +2345,9 @@ impl Servico {
         let usuarios = usuarios::quantidade(conn)?;
         // O-3 / RVI-02 / DP-31 / RD-B: tarefas da troca de dados que não estão rodando.
         // Servidor e anúncio só valem com a troca ligada e com senha; puxada vale sempre.
-        let ativa = a.ligado && !a.senha.is_empty();
+        // T012 (DT-P4-36): a mesma regra do motor (com a senha da rede ou, sem ela, como
+        // caixa aprovado no protocolo 4).
+        let ativa = sync::troca_ativa(conn, &a);
         let vale = |(n, _): &&(&'static str, String)| ativa || *n == "puxada";
         let situacao = self.banco.caminho.as_deref().map(crate::supervisao::situacao).unwrap_or_default();
         let paradas: Vec<_> = situacao.paradas.iter().filter(vale).collect();
@@ -2274,6 +2395,8 @@ impl Servico {
             "tarefasParadas": paradas.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
             // RVI-02: o que não está rodando agora, com o motivo.
             "tarefasComFalha": falhas,
+            // T012 (DT-P4-36): o protocolo 4 neste caixa (só pelo banco).
+            "p4": sync::situacao_p4(conn)?,
         }))
     }
 
@@ -3014,6 +3137,54 @@ fn endereco_local() -> String {
         .and_then(|s| s.local_addr())
         .map(|a| a.ip().to_string())
         .unwrap_or_default()
+}
+
+/// T012: o convite digitado (26 caracteres) ou lido do QR, e os endereços extras.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct EntrarComConvite {
+    convite: String,
+    enderecos: String,
+}
+
+/// T012: o pedido do caixa novo que o gerente aprova.
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct ConviteNovo {
+    codigo_pedido: String,
+    nome: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ConviteEscolhido {
+    id: String,
+}
+
+/// T012: a convivência com os caixas antigos (`dias` nulo = desligar).
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Convivencia {
+    dias: Option<i64>,
+}
+
+/// T012: os endereços digitados (IP, ou IP:porta), conferidos como no `sync_salvar`.
+fn enderecos_digitados(texto: &str) -> Resultado<Vec<String>> {
+    let mut lista = Vec::new();
+    for e in texto.split([',', ' ', ';', '\n']).map(str::trim).filter(|e| !e.is_empty()) {
+        if e.parse::<std::net::IpAddr>().is_err() && e.parse::<std::net::SocketAddr>().is_err() {
+            return Err(Erro::campo("enderecos", format!("Endereço inválido: {e} (ex.: 192.168.0.12)")));
+        }
+        lista.push(e.to_string());
+    }
+    Ok(lista)
+}
+
+/// Uma data e hora ISO (UTC) no horário daqui ("24/11/2026 15:42").
+fn hora_local(conn: &rusqlite::Connection, iso: &str) -> Resultado<String> {
+    Ok(conn
+        .query_row("SELECT strftime('%d/%m/%Y %H:%M', ?1, 'localtime')", [iso], |l| l.get::<_, Option<String>>(0))?
+        .unwrap_or_else(|| iso.to_string()))
 }
 
 #[derive(Deserialize, Default)]

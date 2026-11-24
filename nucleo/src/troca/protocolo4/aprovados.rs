@@ -595,6 +595,30 @@ pub fn chave_do_dispositivo(
     }
 }
 
+/// T012: a situação de cada chave por `dispositivo` declarado nas aprovações
+/// válidas (assinatura conferida) desta loja, a partir da `raiz`. Para a tela
+/// (quem tem chave, quem foi retirado pela chave); quem decide a troca continua
+/// sendo [`chave_do_dispositivo`] e [`autorizada`].
+pub fn situacoes_por_dispositivo(
+    conn: &Connection,
+    raiz: &Chave,
+    loja_id: &str,
+) -> Resultado<HashMap<String, Vec<(Chave, Situacao)>>> {
+    let av = avaliar(conn, raiz, loja_id)?;
+    let mut m: HashMap<String, Vec<(Chave, Situacao)>> = HashMap::new();
+    for a in ler_aprovacoes(conn, loja_id)? {
+        let disp = a.dispositivo.trim();
+        if a.loja_id != loja_id || disp.is_empty() || !a.assinatura_confere() {
+            continue;
+        }
+        let lista = m.entry(disp.to_string()).or_default();
+        if !lista.iter().any(|(k, _)| *k == a.chave) {
+            lista.push((a.chave, av.situacao(&a.chave)));
+        }
+    }
+    Ok(m)
+}
+
 /// P4-4: caixas hoje autorizados que ficariam `SemCadeia` se `chave` fosse retirada.
 pub fn dependentes_de(conn: &Connection, raiz: &Chave, loja_id: &str, chave: &Chave) -> Resultado<Vec<Aprovacao>> {
     let antes = avaliar(conn, raiz, loja_id)?;

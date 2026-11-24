@@ -29,6 +29,14 @@ pub struct CaixaConhecido {
     pub retirado_em: String,
     pub retirado_motivo: String,
     pub retirado_por: String,
+    /// T012 (protocolo 4): tem chave autorizada no registro da loja (troca pelo canal autenticado).
+    pub tem_chave: bool,
+    /// T012: é a raiz da loja (não pode ser retirado, P4-3).
+    pub raiz: bool,
+    /// T012: foi retirado pela chave (não volta pelo "Readmitir", só por convite novo).
+    pub retirado_pela_chave: bool,
+    /// T012 (P4-4): os caixas que ficariam sem aprovação se ele fosse retirado.
+    pub dependentes: Vec<String>,
 }
 
 /// Todos os caixas que esta loja conhece: os que já conversaram com este
@@ -46,7 +54,10 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
         .query_map([], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
     let mut lista = Vec::new();
+    // T012: o que o registro de caixas (protocolo 4) diz de cada um, só pelo banco.
+    let chaves = super::p4::chaves_dos_caixas(conn)?;
     for id in ids.into_iter().filter(|d| !d.is_empty() && *d != eu) {
+        let chave = chaves.get(&id).cloned().unwrap_or_default();
         #[allow(clippy::type_complexity)]
         let par: Option<(String, Option<i64>, Option<String>, Option<f64>, Option<String>)> = conn
             .query_row(
@@ -96,7 +107,7 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
             [&id],
             |l| l.get(0),
         )?;
-        let (situacao, texto) = if retirada.is_some() {
+        let (situacao, texto) = if retirada.is_some() || chave.retirado_pela_chave {
             ("retirado", "Retirado da loja: não troca dados nem conta para a compatibilidade.".to_string())
         } else if par.is_none() {
             ("desconhecido", "Nunca conversou direto com este caixa: a versão dele não é conhecida.".to_string())
@@ -129,6 +140,10 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
             retirado_em: txt("em"),
             retirado_motivo: txt("motivo"),
             retirado_por: txt("por"),
+            tem_chave: chave.tem_chave,
+            raiz: chave.raiz,
+            retirado_pela_chave: chave.retirado_pela_chave,
+            dependentes: chave.dependentes,
         });
     }
     lista.sort_by(|a, b| a.nome.cmp(&b.nome));

@@ -60,29 +60,49 @@ impl ContextoP4 {
     }
 }
 
-/// O contexto P4 deste caixa, ou `None` quando ele ainda não fala o P4: sem loja,
-/// sem raiz fixada, identidade indisponível agora (o motivo vai para o registro
-/// técnico; nunca gera identidade nova sozinho) ou a própria chave não autorizada.
-/// A raiz é conferida antes da identidade: um caixa sem raiz não paga o Argon2.
-pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> {
-    // O caixa que acabou de entrar por convite ainda não recebeu a identidade da
-    // loja pela troca: vale a loja escolhida na entrada (T009).
-    let loja = crate::loja::id(conn)
+/// A loja deste caixa: a identidade dela ou, no caixa que acabou de entrar por
+/// convite e ainda não a recebeu pela troca, a loja escolhida na entrada (T009).
+fn loja_deste_caixa(conn: &Connection) -> Option<String> {
+    crate::loja::id(conn)
         .ok()
         .filter(|l| !l.is_empty())
-        .or_else(|| crate::loja::da_entrada(conn).ok().filter(|l| !l.is_empty()))?;
-    let raiz = cofre::raiz_atual(conn, &loja).ok().flatten()?;
-    let pasta = caminho.parent()?;
-    let identidade = match cofre::identidade_do_processo(pasta, &modo()) {
-        Ok(i) => i,
-        Err(e) => {
-            crate::registro::anotar(&format!("troca de dados (protocolo 4): identidade indisponível agora: {e}"));
-            return None;
-        }
-    };
+        .or_else(|| crate::loja::da_entrada(conn).ok().filter(|l| !l.is_empty()))
+}
+
+/// Texto para a tela: este caixa ainda não é aprovado na loja (o protocolo 4 não vale nele).
+pub const TEXTO_CAIXA_SEM_APROVACAO: &str = "Este caixa ainda não foi aprovado na loja. O gerente aprova cada caixa \
+     uma vez, com um convite gerado num caixa já aprovado (Configurações › Caixas da loja).";
+
+/// O contexto P4 deste caixa, ou o motivo de ele ainda não falar o P4: sem loja,
+/// sem raiz fixada, identidade indisponível agora (nunca gera identidade nova
+/// sozinho) ou a própria chave não autorizada. A raiz é conferida antes da
+/// identidade: um caixa sem raiz não paga o Argon2.
+pub(super) fn contexto_ou_motivo(conn: &Connection, caminho: &Path) -> Resultado<ContextoP4> {
+    let loja = loja_deste_caixa(conn).ok_or_else(|| Erro::validacao(TEXTO_CAIXA_SEM_APROVACAO))?;
+    let raiz = cofre::raiz_atual(conn, &loja)?.ok_or_else(|| Erro::validacao(TEXTO_CAIXA_SEM_APROVACAO))?;
+    let pasta = caminho.parent().ok_or_else(|| Erro::Interno("banco sem pasta".into()))?;
+    let identidade = cofre::identidade_do_processo(pasta, &modo())?;
     let ctx = ContextoP4 { identidade, raiz, loja };
-    aprovados::autorizada(conn, &ctx.raiz, &ctx.loja, &ctx.eu()).ok().filter(|ok| *ok)?;
-    Some(ctx)
+    if !aprovados::autorizada(conn, &ctx.raiz, &ctx.loja, &ctx.eu())? {
+        return Err(Erro::validacao(TEXTO_CAIXA_SEM_APROVACAO));
+    }
+    Ok(ctx)
+}
+
+/// O contexto P4 deste caixa, ou `None` quando ele ainda não fala o P4 (veja
+/// [`contexto_ou_motivo`]; a identidade indisponível vai para o registro técnico).
+pub(super) fn contexto(conn: &Connection, caminho: &Path) -> Option<ContextoP4> {
+    match contexto_ou_motivo(conn, caminho) {
+        Ok(ctx) => Some(ctx),
+        Err(e) => {
+            // "Ainda não aprovado" é o estado normal de um caixa que não é do P4;
+            // o resto (identidade que não abre, banco) vai para o registro técnico.
+            if e.to_string() != TEXTO_CAIXA_SEM_APROVACAO {
+                crate::registro::anotar(&format!("troca de dados (protocolo 4): indisponível agora: {e}"));
+            }
+            None
+        }
+    }
 }
 
 /// DT-P4-10 (A4): o caixa que distribui as faixas de uma loja com usuários vira a
@@ -282,14 +302,14 @@ pub fn definir_convivencia_p3(conn: &Connection, dias: Option<i64>, gerente: &st
 }
 
 /// A raiz do protocolo 4 está fixada neste caixa (pino `p4_raiz`)?
-pub(super) fn tem_raiz_fixada(conn: &Connection) -> bool {
+pub fn tem_raiz_fixada(conn: &Connection) -> bool {
     config::ler(conn, "p4_raiz").ok().flatten().is_some_and(|r| !r.trim().is_empty())
 }
 
 /// T009: a troca está ligada e tem como falar — com a senha da rede (protocolo 3)
 /// ou, sem ela, como caixa do protocolo 4 (raiz fixada: o caixa que entrou por
 /// convite não sabe a senha da rede, e não precisa).
-pub(super) fn troca_ativa(conn: &Connection, a: &Ajustes) -> bool {
+pub fn troca_ativa(conn: &Connection, a: &Ajustes) -> bool {
     a.ligado && (!a.senha.is_empty() || tem_raiz_fixada(conn))
 }
 
@@ -398,20 +418,99 @@ fn ouvidos(caminho: &Path, loja: &str) -> Vec<SocketAddr> {
 pub const TEXTO_SEM_ENDERECO: &str = "Não foi encontrado nenhum caixa da loja na rede. Use o QR do convite, ou digite \
      o endereço do caixa onde o gerente gerou o convite.";
 
+/// Quem entra pelo convite (DT-P4-33).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QuemEntra {
+    /// O caixa novo, sem usuários (T009): entra na loja e recebe tudo dela.
+    CaixaNovo,
+    /// O caixa que já é da loja (tem usuários) e ainda não foi aprovado no
+    /// protocolo 4 (atualizou para a 0.9.19 e não é a raiz): só a aprovação.
+    JaDaLoja,
+}
+
+/// O que a entrada pelo convite deixou: a loja e o nome que o gerente deu ao
+/// caixa no convite (vem da aprovação assinada).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntradaPeloConvite {
+    pub loja: String,
+    pub nome: String,
+}
+
+/// Texto para a tela: o convite é de outra loja.
+pub const TEXTO_CONVITE_DE_OUTRA_LOJA: &str =
+    "Este convite é de outra loja. Peça ao gerente um convite gerado num caixa desta loja.";
+/// Texto para a tela: o caixa ainda não recebeu a identidade da loja.
+pub const TEXTO_SEM_IDENTIDADE_DA_LOJA: &str = "Este caixa ainda não recebeu a identidade da loja. Ligue a troca \
+     de dados, espere a primeira troca com outro caixa e tente de novo.";
+/// Texto para a tela: este caixa já é aprovado.
+pub const TEXTO_JA_APROVADO: &str = "Este caixa já é aprovado na loja: não precisa de convite.";
+
+/// Por quanto tempo, no máximo, o caixa procura a loja pelos anúncios quando não
+/// tem endereço nenhum (os caixas anunciam a cada 10 segundos).
+const PRAZO_DA_PROCURA: Duration = Duration::from_secs(12);
+
 /// T009 (etapa 5, A6, D1): o caixa novo (sem usuários) entra na loja pelo convite
 /// que o gerente gerou num caixa da loja. Procura a loja no endereço do QR, nos
-/// `enderecos` digitados e nos anúncios `RSA4` ouvidos; com cada um, abre o canal de
-/// entrada, prova o convite e só aceita a resposta cuja prova do servidor confere
-/// (N-05). Aprovado: junta o registro, confere que a própria chave ficou
-/// autorizada, fixa a raiz e a loja da entrada, liga a troca (sem a senha da rede)
-/// com o endereço de quem aprovou. Devolve a loja.
-pub fn juntar_com_convite(caminho: &Path, convite: &str, enderecos: &[String]) -> Resultado<String> {
+/// `enderecos` digitados, nos anúncios `RSA4` ouvidos e, sem nenhum, escutando os
+/// anúncios por alguns segundos; com cada um, abre o canal de entrada, prova o
+/// convite e só aceita a resposta cuja prova do servidor confere (N-05).
+/// Aprovado: junta o registro, confere que a própria chave ficou autorizada, fixa
+/// a raiz e a loja da entrada, dá ao caixa o nome que o gerente escolheu e liga a
+/// troca (sem a senha da rede) com o endereço de quem aprovou.
+pub fn juntar_com_convite(caminho: &Path, convite: &str, enderecos: &[String]) -> Resultado<EntradaPeloConvite> {
+    entrar_com_convite(caminho, convite, enderecos, QuemEntra::CaixaNovo)
+}
+
+/// T012 (DT-P4-33): o caixa que já é da loja e ainda não foi aprovado no
+/// protocolo 4 recebe a aprovação pelo convite (o mesmo canal de entrada). O
+/// convite tem de ser da loja dele; nada muda nos dados nem na troca, só passa a
+/// falar o protocolo 4.
+pub fn aprovar_este_caixa_com_convite(
+    caminho: &Path,
+    convite: &str,
+    enderecos: &[String],
+) -> Resultado<EntradaPeloConvite> {
+    entrar_com_convite(caminho, convite, enderecos, QuemEntra::JaDaLoja)
+}
+
+fn entrar_com_convite(
+    caminho: &Path,
+    convite: &str,
+    enderecos: &[String],
+    quem: QuemEntra,
+) -> Resultado<EntradaPeloConvite> {
     let _trava = TRAVA.read().unwrap_or_else(|e| e.into_inner());
-    let conn = abrir_conexao(caminho)?;
-    if crate::usuarios::quantidade(&conn)? > 0 {
-        return Err(Erro::validacao("Este caixa já tem usuários: ele já é de uma loja."));
-    }
+    let mut conn = abrir_conexao(caminho)?;
+    let usuarios = crate::usuarios::quantidade(&conn)?;
+    let loja_daqui = match quem {
+        QuemEntra::CaixaNovo => {
+            if usuarios > 0 {
+                return Err(Erro::validacao("Este caixa já tem usuários: ele já é de uma loja."));
+            }
+            String::new()
+        }
+        QuemEntra::JaDaLoja => {
+            if usuarios == 0 {
+                return Err(Erro::validacao(
+                    "Este caixa ainda não é de uma loja: use Juntar este caixa, na tela de boas-vindas.",
+                ));
+            }
+            let l = crate::loja::id(&conn)?;
+            if l.is_empty() {
+                return Err(Erro::validacao(TEXTO_SEM_IDENTIDADE_DA_LOJA));
+            }
+            if contexto(&conn, caminho).is_some() {
+                return Err(Erro::validacao(TEXTO_JA_APROVADO));
+            }
+            l
+        }
+    };
     let qr = canal::interpretar_convite_entrada(convite)?;
+    if quem == QuemEntra::JaDaLoja && !qr.loja_id.is_empty() && qr.loja_id != loja_daqui {
+        return Err(Erro::campo("convite", TEXTO_CONVITE_DE_OUTRA_LOJA));
+    }
+    // A loja que a resposta tem de trazer (vazia = o convite em texto, sem a loja).
+    let loja_esperada = if qr.loja_id.is_empty() { loja_daqui.clone() } else { qr.loja_id.clone() };
     let pasta = caminho.parent().ok_or_else(|| Erro::Interno("banco sem pasta".into()))?;
     let id = cofre::identidade_do_processo(pasta, &modo())?;
     let eu = id.identidade.publica();
@@ -426,10 +525,13 @@ pub fn juntar_com_convite(caminho: &Path, convite: &str, enderecos: &[String]) -
             }
         }
     }
-    for a in ouvidos(caminho, &qr.loja_id) {
+    for a in ouvidos(caminho, &loja_esperada) {
         if !alvos.contains(&a) {
             alvos.push(a);
         }
+    }
+    if alvos.is_empty() {
+        alvos = procurar_pelos_anuncios(&loja_esperada, PRAZO_DA_PROCURA);
     }
     if alvos.is_empty() {
         return Err(Erro::validacao(TEXTO_SEM_ENDERECO));
@@ -443,33 +545,87 @@ pub fn juntar_com_convite(caminho: &Path, convite: &str, enderecos: &[String]) -
                 continue;
             }
         };
-        if !qr.loja_id.is_empty() && entrada.loja_id != qr.loja_id {
+        if !loja_esperada.is_empty() && entrada.loja_id != loja_esperada {
             ultimo = Some(Erro::validacao(TEXTO_CONVITE_NAO_CONFERE));
             continue;
         }
-        aprovados::juntar(&conn, &entrada.loja_id, &entrada.linhas)?;
-        if !aprovados::autorizada(&conn, &entrada.raiz, &entrada.loja_id, &eu)? {
+        // Tudo o que a entrada grava, numa transação só: ou o caixa fica aprovado
+        // e ligado à loja, ou nada muda aqui.
+        let tx = conn.transaction()?;
+        aprovados::juntar(&tx, &entrada.loja_id, &entrada.linhas)?;
+        if !aprovados::autorizada(&tx, &entrada.raiz, &entrada.loja_id, &eu)? {
             ultimo = Some(Erro::validacao(TEXTO_CONVITE_NAO_CONFERE));
             continue;
         }
-        cofre::fixar_raiz_recebida(&conn, &entrada.raiz, &entrada.loja_id)?;
-        config::gravar(&conn, "p4_chave_publica", &hex(&eu))?;
-        config::gravar(&conn, "p4_cofre_sistema", if id.cofre_sistema { "1" } else { "0" })?;
-        crate::loja::fixar_entrada_aprovada(&conn, &entrada.loja_id)?;
-        let mut digitados: Vec<String> = config::ler(&conn, "sync_enderecos")?
-            .unwrap_or_default()
-            .split([',', ' ', ';', '\n'])
-            .filter(|e| !e.trim().is_empty())
-            .map(str::to_string)
-            .collect();
-        if !digitados.contains(&alvo.to_string()) {
-            digitados.push(alvo.to_string());
+        cofre::fixar_raiz_recebida(&tx, &entrada.raiz, &entrada.loja_id)?;
+        config::gravar(&tx, "p4_chave_publica", &hex(&eu))?;
+        config::gravar(&tx, "p4_cofre_sistema", if id.cofre_sistema { "1" } else { "0" })?;
+        let nome = aprovados::linhas(&tx, &entrada.loja_id)?
+            .aprovacoes
+            .into_iter()
+            .filter(|a| a.chave == eu && a.assinatura_confere())
+            .max_by(|a, b| a.aprovado_em.cmp(&b.aprovado_em))
+            .map(|a| a.nome)
+            .unwrap_or_default();
+        if quem == QuemEntra::CaixaNovo {
+            crate::loja::fixar_entrada_aprovada(&tx, &entrada.loja_id)?;
+            if !nome.trim().is_empty() {
+                config::gravar(&tx, "caixa_nome", &nome)?;
+            }
+            let mut digitados: Vec<String> = config::ler(&tx, "sync_enderecos")?
+                .unwrap_or_default()
+                .split([',', ' ', ';', '\n'])
+                .filter(|e| !e.trim().is_empty())
+                .map(str::to_string)
+                .collect();
+            if !digitados.contains(&alvo.to_string()) {
+                digitados.push(alvo.to_string());
+            }
+            config::gravar(&tx, "sync_enderecos", &digitados.join(","))?;
+            config::gravar(&tx, "sync_ligado", "1")?;
         }
-        config::gravar(&conn, "sync_enderecos", &digitados.join(","))?;
-        config::gravar(&conn, "sync_ligado", "1")?;
-        return Ok(entrada.loja_id);
+        tx.commit()?;
+        return Ok(EntradaPeloConvite { loja: entrada.loja_id, nome });
     }
     Err(ultimo.unwrap_or_else(|| Erro::validacao(TEXTO_SEM_ENDERECO)))
+}
+
+/// T012: sem endereço nenhum, o caixa escuta os anúncios `RSA4` por até `prazo`
+/// (só durante a entrada que a pessoa pediu; a porta fecha no fim). Assinatura
+/// conferida; a autorização não dá para conferir sem o registro (quem confere é a
+/// prova do servidor, N-05). Para pouco depois do primeiro achado, para juntar os
+/// outros caixas que anunciam na mesma janela.
+fn procurar_pelos_anuncios(loja: &str, prazo: Duration) -> Vec<SocketAddr> {
+    procurar_pelos_anuncios_em(loja, prazo, ("0.0.0.0", crate::portatil::portas().1))
+}
+
+/// O mesmo, escutando em `onde` (os testes usam uma porta sorteada no loopback).
+pub(super) fn procurar_pelos_anuncios_em(
+    loja: &str,
+    prazo: Duration,
+    onde: impl std::net::ToSocketAddrs,
+) -> Vec<SocketAddr> {
+    let Ok(s) = UdpSocket::bind(onde) else { return Vec::new() };
+    if s.set_read_timeout(Some(Duration::from_millis(250))).is_err() {
+        return Vec::new();
+    }
+    let inicio = Instant::now();
+    let mut primeiro: Option<Instant> = None;
+    let mut achados: Vec<SocketAddr> = Vec::new();
+    let mut buf = [0u8; 2048];
+    while inicio.elapsed() < prazo && primeiro.is_none_or(|p| p.elapsed() < Duration::from_secs(3)) {
+        let Ok((n, origem)) = s.recv_from(&mut buf) else { continue };
+        let Ok(a) = crate::troca::protocolo4::anuncio::abrir(&buf[..n], agora_ms()) else { continue };
+        if !loja.is_empty() && a.loja_id != loja {
+            continue;
+        }
+        let e = SocketAddr::new(origem.ip(), a.porta);
+        if !achados.contains(&e) {
+            achados.push(e);
+            primeiro.get_or_insert_with(Instant::now);
+        }
+    }
+    achados
 }
 
 /// Uma tentativa de entrada pelo convite no caixa em `alvo`.
@@ -489,40 +645,68 @@ fn tentar_entrar(
     r
 }
 
-/// T009 (etapa 6, P4-4): os caixas que ficariam sem cadeia se o caixa `dispositivo`
-/// fosse retirado (a tela lista antes de confirmar). Vazio quando ele não tem chave.
-pub fn dependentes_da_retirada(conn: &Connection, caminho: &Path, dispositivo: &str) -> Resultado<Vec<String>> {
-    let Some(ctx) = contexto(conn, caminho) else { return Ok(Vec::new()) };
-    let Some(chave) = ctx.chave_de(conn, dispositivo)? else { return Ok(Vec::new()) };
-    Ok(aprovados::dependentes_de(conn, &ctx.raiz, &ctx.loja, &chave)?.into_iter().map(|a| a.nome).collect())
+/// A loja e a raiz deste caixa, só pelo banco (sem abrir a identidade): `None`
+/// quando ele ainda não fala o protocolo 4.
+fn loja_e_raiz(conn: &Connection) -> Resultado<Option<(String, Chave)>> {
+    let Some(loja) = loja_deste_caixa(conn) else { return Ok(None) };
+    Ok(cofre::raiz_atual(conn, &loja)?.map(|r| (loja, r)))
 }
 
+/// A chave autorizada do caixa `dispositivo` no registro, só pelo banco.
+fn chave_registrada_de(conn: &Connection, dispositivo: &str) -> Resultado<Option<(String, Chave, Chave)>> {
+    let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Ok(None) };
+    Ok(aprovados::chave_do_dispositivo(conn, &raiz, &loja, dispositivo)?.map(|k| (loja, raiz, k)))
+}
+
+/// T009 (etapa 6, P4-4): os caixas que ficariam sem cadeia se o caixa `dispositivo`
+/// fosse retirado (a tela lista antes de confirmar). Vazio quando ele não tem chave.
+/// Só lê o banco (T012: pode ser chamado na linha da tela).
+pub fn dependentes_da_retirada(conn: &Connection, dispositivo: &str) -> Resultado<Vec<String>> {
+    let Some((loja, raiz, chave)) = chave_registrada_de(conn, dispositivo)? else { return Ok(Vec::new()) };
+    Ok(aprovados::dependentes_de(conn, &raiz, &loja, &chave)?.into_iter().map(|a| a.nome).collect())
+}
+
+/// Texto para a tela: a retirada pela chave precisa da identidade deste caixa.
+pub const TEXTO_RETIRADA_SEM_IDENTIDADE: &str = "Este caixa tem a chave de segurança aprovada na loja, mas não \
+     deu para usar a identidade deste computador agora. Nada foi retirado. Tente de novo em instantes; se \
+     continuar, faça a retirada em outro caixa aprovado.";
+
 /// T009 (etapa 6; E5, P4-3, S-10): retira o caixa `dispositivo` da loja, com o
-/// gerente, numa transação só:
+/// gerente (o identificador do usuário vai assinado e na auditoria; o nome, no
+/// bloqueio de antes, que a tela mostra), numa transação só:
 /// - sempre o bloqueio de antes (`caixa_retirado:<dispositivo>`), que os caixas do
 ///   protocolo 3 respeitam (S-10), com as conferências de sempre (motivo, a si
 ///   mesmo, pendências recebidas dele);
 /// - e, quando ele tem chave no registro, a retirada **assinada por este caixa**,
 ///   que vale por máquina (mesmo que ele troque o identificador declarado) e
 ///   viaja pelo canal autenticado. A raiz não é retirada (P4-3): nada é gravado.
+///
+/// T012 (DT-P4-35): a chave do caixa é procurada só pelo banco; se ele tem chave e
+/// este caixa não consegue assinar agora (identidade indisponível, ou este caixa
+/// não aprovado), a retirada é **recusada** inteira: nunca fica só o bloqueio de
+/// antes, que o protocolo 4 não respeita.
 pub fn retirar_caixa_por_chave(
     conn: &Connection,
     caminho: &Path,
     dispositivo: &str,
     motivo: &str,
-    gerente: &str,
+    gerente_id: &str,
+    gerente_nome: &str,
 ) -> Resultado<()> {
-    let ctx = contexto(conn, caminho);
-    let chave = match &ctx {
-        Some(ctx) => ctx.chave_de(conn, dispositivo)?,
+    let chave = chave_registrada_de(conn, dispositivo)?.map(|(_, _, k)| k);
+    let ctx = match chave {
+        Some(_) => Some(contexto_ou_motivo(conn, caminho).map_err(|e| {
+            crate::registro::anotar(&format!("troca de dados (protocolo 4): retirada pela chave recusada: {e}"));
+            Erro::validacao(TEXTO_RETIRADA_SEM_IDENTIDADE)
+        })?),
         None => None,
     };
     conn.execute_batch("SAVEPOINT p4_retirar_caixa")?;
     let r = (|| -> Resultado<()> {
-        retirar_caixa(conn, dispositivo, motivo, gerente)?;
+        retirar_caixa(conn, dispositivo, motivo, gerente_nome)?;
         if let (Some(ctx), Some(chave)) = (&ctx, chave) {
             let motivo = crate::texto::limpar(motivo);
-            aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, &motivo, gerente)?;
+            aprovados::retirar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &chave, &motivo, gerente_id)?;
         }
         Ok(())
     })();
@@ -533,6 +717,194 @@ pub fn retirar_caixa_por_chave(
             Err(e)
         }
     }
+}
+
+/// Texto para a tela: o caixa foi retirado pela chave (não volta pelo "Readmitir").
+pub const TEXTO_RETIRADO_PELA_CHAVE: &str = "Este caixa foi retirado pela chave de segurança dele: a retirada vale \
+     para sempre para aquela chave. Para ele voltar, o gerente aprova de novo com um convite novo, depois que ele \
+     gerar uma identidade nova.";
+
+/// T012 (DT-P4-35): readmitir um caixa retirado. O bloqueio de antes sai como
+/// sempre; um caixa retirado **pela chave** não volta por aqui (a retirada
+/// assinada vence qualquer aprovação, P4: a volta é por convite novo).
+pub fn readmitir_caixa_por_chave(conn: &Connection, dispositivo: &str) -> Resultado<()> {
+    if let Some((loja, raiz)) = loja_e_raiz(conn)? {
+        let situacoes = aprovados::situacoes_por_dispositivo(conn, &raiz, &loja)?;
+        let retirado = situacoes.get(dispositivo.trim()).is_some_and(|l| {
+            l.iter().any(|(_, s)| *s == aprovados::Situacao::Retirada)
+                && !l.iter().any(|(_, s)| *s == aprovados::Situacao::Autorizada)
+        });
+        if retirado {
+            return Err(Erro::validacao(TEXTO_RETIRADO_PELA_CHAVE));
+        }
+    }
+    readmitir_caixa(conn, dispositivo)
+}
+
+/// T012 (DT-P4-35): o que o registro diz de um caixa conhecido, para a tela.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChaveDoCaixa {
+    /// Tem chave autorizada agora (troca pelo protocolo 4).
+    pub tem_chave: bool,
+    /// É a raiz da loja (não pode ser retirado, P4-3).
+    pub raiz: bool,
+    /// Foi retirado pela chave (e não tem outra autorizada).
+    pub retirado_pela_chave: bool,
+    /// Caixas que ficariam sem cadeia se ele fosse retirado (P4-4).
+    pub dependentes: Vec<String>,
+}
+
+/// T012: a situação no registro de cada `dispositivo` desta loja, só pelo banco.
+pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, ChaveDoCaixa>> {
+    let mut m = HashMap::new();
+    let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Ok(m) };
+    for (disp, chaves) in aprovados::situacoes_por_dispositivo(conn, &raiz, &loja)? {
+        let autorizada = chaves.iter().find(|(_, s)| *s == aprovados::Situacao::Autorizada).map(|(k, _)| *k);
+        let retirada = chaves.iter().any(|(_, s)| *s == aprovados::Situacao::Retirada);
+        let dependentes = match &autorizada {
+            Some(k) => aprovados::dependentes_de(conn, &raiz, &loja, k)?.into_iter().map(|a| a.nome).collect(),
+            None => Vec::new(),
+        };
+        m.insert(
+            disp,
+            ChaveDoCaixa {
+                tem_chave: autorizada.is_some(),
+                raiz: autorizada == Some(raiz),
+                retirado_pela_chave: retirada && autorizada.is_none(),
+                dependentes,
+            },
+        );
+    }
+    Ok(m)
+}
+
+/// T012 (DT-P4-31, DT-P4-36): a situação do protocolo 4 neste caixa, só pelo
+/// banco (nunca abre a identidade: pode ser lida na linha da tela).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SituacaoP4 {
+    /// A raiz da loja está fixada aqui: este caixa fala o protocolo 4.
+    pub tem_raiz: bool,
+    /// Este caixa é aprovado na loja (a chave dele está autorizada no registro).
+    pub aprovado: bool,
+    /// Este caixa é a raiz da loja.
+    pub raiz: bool,
+    /// Até quando os caixas antigos (protocolo 3) ainda trocam dados; `None` = recusados.
+    pub convivencia_ate: Option<String>,
+    /// O prazo máximo da convivência (dias).
+    pub convivencia_maxima_dias: i64,
+    /// Convites ativos (não usados, dentro da validade) nesta loja.
+    pub convites_ativos: usize,
+    /// O segredo da identidade fica no cofre do sistema; `None` = ainda não se sabe.
+    pub cofre_sistema: Option<bool>,
+}
+
+/// A situação do protocolo 4 neste caixa (veja [`SituacaoP4`]).
+pub fn situacao(conn: &Connection) -> Resultado<SituacaoP4> {
+    let minha = config::ler(conn, "p4_chave_publica")?.and_then(|h| crate::troca::protocolo4::de_hex::<32>(h.trim()));
+    let cofre_sistema = config::ler(conn, "p4_cofre_sistema")?.and_then(|v| match v.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    });
+    let mut s = SituacaoP4 {
+        tem_raiz: tem_raiz_fixada(conn),
+        convivencia_ate: convivencia_p3_ate(conn)?,
+        convivencia_maxima_dias: CONVIVENCIA_MAXIMA_DIAS,
+        cofre_sistema,
+        ..SituacaoP4::default()
+    };
+    if let Some((loja, raiz)) = loja_e_raiz(conn)? {
+        if let Some(k) = minha {
+            s.aprovado = aprovados::autorizada(conn, &raiz, &loja, &k)?;
+            s.raiz = s.aprovado && k == raiz;
+        }
+        s.convites_ativos = cofre::convites_validos_agora(conn, &loja, &crate::tempo::agora())?
+            .iter()
+            .filter(|c| c.usado_em.is_none() && c.segredo_normalizado.is_some())
+            .count();
+    }
+    Ok(s)
+}
+
+/// T012 (DT-P4-31): a identidade deste caixa, para a tela.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentidadeNaTela {
+    /// O código que o gerente confere (12 caracteres, ex.: `4F2K-9QXA-7MPC`).
+    pub codigo_pedido: String,
+    /// O segredo da identidade fica no cofre do sistema (senão, na reserva local, com aviso).
+    pub cofre_sistema: bool,
+    /// Este caixa já é aprovado na loja.
+    pub aprovado: bool,
+}
+
+/// T012 (DT-P4-31): a identidade deste caixa para a tela. Abre a identidade (custa
+/// um Argon2 e o cofre): nunca na linha da tela, só pelo comando demorado
+/// (DT-P4-30). Cria a identidade se ainda não existe (o caixa novo precisa do
+/// código para pedir a entrada).
+pub fn identidade_para_a_tela(conn: &Connection, caminho: &Path) -> Resultado<IdentidadeNaTela> {
+    let pasta = caminho.parent().ok_or_else(|| Erro::Interno("banco sem pasta".into()))?;
+    let id = cofre::identidade_do_processo(pasta, &modo())?;
+    let aprovado = match loja_e_raiz(conn)? {
+        Some((loja, raiz)) => aprovados::autorizada(conn, &raiz, &loja, &id.identidade.publica())?,
+        None => false,
+    };
+    Ok(IdentidadeNaTela { codigo_pedido: id.identidade.codigo_de_pedido(), cofre_sistema: id.cofre_sistema, aprovado })
+}
+
+/// Texto para a tela: o convite precisa da troca ligada.
+pub const TEXTO_CONVITE_SEM_TROCA: &str = "Ligue a troca de dados deste caixa antes de aprovar um caixa novo: é \
+     por ela que o caixa novo vai entrar.";
+
+/// T012 (DT-P4-32): o gerente gera, neste caixa aprovado, o convite de uso único
+/// para o caixa do `codigo_pedido` (10 minutos). O QR leva o endereço deste caixa
+/// (`endereco`, "IP:porta"). Recusa com a troca desligada e com este caixa ainda
+/// não aprovado. A autenticação do gerente é da camada de cima (classe do comando).
+pub fn gerar_convite(
+    conn: &Connection,
+    caminho: &Path,
+    codigo_pedido: &str,
+    nome: &str,
+    gerente: &str,
+    endereco: &str,
+) -> Resultado<cofre::ConviteGerado> {
+    if !troca_ativa(conn, &ajustes(conn)?) {
+        return Err(Erro::validacao(TEXTO_CONVITE_SEM_TROCA));
+    }
+    let ctx = contexto_ou_motivo(conn, caminho)?;
+    cofre::gerar_convite(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, codigo_pedido, nome, gerente, endereco)
+}
+
+/// T012 (DT-P4-32): um convite ativo, para a tela do gerente. **Sem o segredo**:
+/// quem perdeu o convite cancela e gera outro.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConviteNaTela {
+    pub id: String,
+    pub codigo_pedido: String,
+    pub nome_caixa: String,
+    pub gerente: String,
+    pub expira_em: String,
+}
+
+/// Os convites ativos desta loja (não usados, dentro da validade), do que vence
+/// primeiro ao último. Só lê o banco.
+pub fn convites_ativos(conn: &Connection) -> Resultado<Vec<ConviteNaTela>> {
+    let Some(loja) = loja_deste_caixa(conn) else { return Ok(Vec::new()) };
+    let mut lista: Vec<ConviteNaTela> = cofre::convites_validos_agora(conn, &loja, &crate::tempo::agora())?
+        .into_iter()
+        .filter(|c| c.usado_em.is_none() && c.segredo_normalizado.is_some())
+        .map(|c| ConviteNaTela {
+            id: c.id.clone(),
+            codigo_pedido: c.codigo_pedido.clone(),
+            nome_caixa: c.nome_caixa.clone(),
+            gerente: c.gerente.clone(),
+            expira_em: c.expira_em.clone(),
+        })
+        .collect();
+    lista.sort_by(|a, b| a.expira_em.cmp(&b.expira_em));
+    Ok(lista)
 }
 
 /// S-10: a retirada de antes (`caixa_retirado:<dispositivo>`, que pode ter vindo de

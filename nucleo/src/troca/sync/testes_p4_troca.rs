@@ -309,7 +309,7 @@ fn p4_caixa_novo_entra_pelo_convite_sem_a_senha_da_rede() {
         );
 
         // O convite certo (o QR, com o endereço do caixa 1).
-        assert_eq!(juntar_com_convite(&cb, &conv.payload_qr, &[]).unwrap(), loja);
+        assert_eq!(juntar_com_convite(&cb, &conv.payload_qr, &[]).unwrap().loja, loja);
         assert!(p4::tem_raiz_fixada(&b.conn), "a raiz da loja ficou fixada no caixa novo");
         assert!(ajustes(&b.conn).unwrap().senha.is_empty(), "sem a senha da rede");
         let aprovacoes: i64 =
@@ -423,13 +423,13 @@ fn p4_retirar_pela_chave_vale_por_maquina() {
             "Ana",
         )
         .unwrap();
-        assert_eq!(dependentes_da_retirada(&a.conn, &ca, &disp_b).unwrap(), vec!["Caixa 3".to_string()]);
+        assert_eq!(dependentes_da_retirada(&a.conn, &disp_b).unwrap(), vec!["Caixa 3".to_string()]);
 
         // P4-3: a raiz não sai, e nada é gravado (nem o bloqueio de antes).
-        assert!(retirar_caixa_por_chave(&b.conn, &cb, &disp_a, "teste", "Ana").is_err());
+        assert!(retirar_caixa_por_chave(&b.conn, &cb, &disp_a, "teste", "id-da-ana", "Ana").is_err());
         assert!(!retirado(&b.conn, &disp_a).unwrap(), "o bloqueio de antes não ficou gravado sozinho");
 
-        retirar_caixa_por_chave(&a.conn, &ca, &disp_b, "saiu da loja", "Ana").unwrap();
+        retirar_caixa_por_chave(&a.conn, &ca, &disp_b, "saiu da loja", "id-da-ana", "Ana").unwrap();
         assert!(retirado(&a.conn, &disp_b).unwrap(), "o bloqueio de antes (S-10) também vale");
         let av = aprovados::avaliar(&a.conn, &raiz, &loja).unwrap();
         assert_eq!(av.situacao(&ib.identidade.publica()), aprovados::Situacao::Retirada);

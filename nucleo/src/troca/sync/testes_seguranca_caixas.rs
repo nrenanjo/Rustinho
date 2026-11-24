@@ -176,7 +176,7 @@ fn seguro_caixa_retirado_recusado_mesmo_trocando_identificador() {
         };
         // O gerente retira o caixa.
         let id_b = config::ler(&b.conn, "dispositivo_id").unwrap().unwrap();
-        retirar_caixa_por_chave(&a.conn, &ca, &id_b, "saiu da loja", "Ana").unwrap();
+        retirar_caixa_por_chave(&a.conn, &ca, &id_b, "saiu da loja", "id-da-ana", "Ana").unwrap();
         cliente(&a, &ua, "Cliente Depois Da Retirada");
         // O retirado troca o identificador declarado e tenta de novo.
         config::gravar(&b.conn, "dispositivo_id", "intruso-novo-id-aaaaaaaa").unwrap();
