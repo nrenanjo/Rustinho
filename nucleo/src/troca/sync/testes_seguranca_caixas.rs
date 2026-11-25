@@ -23,9 +23,58 @@ pub(super) const SENHA_FRACA: &str = "2718"; // 4 algarismos: dentro da polític
 // ---------------------------------------------------------------------------
 
 pub(super) fn temp(nome: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("rustinho-seg-{nome}-{}", crate::tempo::novo_id()));
+    let p = pasta_desta_execucao().join(format!("{nome}-{}", crate::tempo::novo_id()));
     std::fs::create_dir_all(&p).unwrap();
     p.join("rustinho.db")
+}
+
+/// C2R5-7 (R5 da 2C): as pastas destes testes ficam numa pasta desta execução
+/// (`rustinho-seg-execucoes/<processo>`); a primeira chamada apaga as das execuções que já
+/// terminaram, para o `/tmp` não encher de rodada em rodada. Fora do Linux não apaga nada.
+fn pasta_desta_execucao() -> PathBuf {
+    static PASTA: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    PASTA
+        .get_or_init(|| {
+            let base = std::env::temp_dir().join("rustinho-seg-execucoes");
+            let eu = std::process::id();
+            apagar_execucoes_terminadas(&base, eu);
+            let p = base.join(eu.to_string());
+            std::fs::create_dir_all(&p).unwrap();
+            p
+        })
+        .clone()
+}
+
+/// C2R5-7: apaga em `base` as pastas de execuções (o nome é o número do processo) que já
+/// terminaram; a desta (`eu`) e as de execuções vivas ficam. Fora do Linux não apaga nada.
+fn apagar_execucoes_terminadas(base: &Path, eu: u32) {
+    let Ok(lista) = std::fs::read_dir(base) else { return };
+    for e in lista.flatten() {
+        let Some(outro) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        let vivo = !cfg!(target_os = "linux") || Path::new(&format!("/proc/{outro}")).exists();
+        if outro != eu && !vivo {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+/// C2R5-7: a pasta de uma execução que terminou sai; a desta e a de outra viva ficam.
+#[test]
+#[cfg(target_os = "linux")]
+fn c2r5_7_pastas_de_execucoes_terminadas_saem() {
+    let base = std::env::temp_dir().join(format!("rustinho-c2r5-7-{}", crate::tempo::novo_id()));
+    let eu = std::process::id();
+    let terminada = u32::MAX - 7; // número de processo que não existe
+    for n in [eu, 1, terminada] {
+        std::fs::create_dir_all(base.join(n.to_string()).join("dentro")).unwrap();
+    }
+    std::fs::create_dir_all(base.join("outra-coisa")).unwrap();
+    apagar_execucoes_terminadas(&base, eu);
+    assert!(base.join(eu.to_string()).exists(), "a desta execução fica");
+    assert!(base.join("1").exists(), "a de um processo vivo fica");
+    assert!(!base.join(terminada.to_string()).exists(), "a de uma execução terminada sai");
+    assert!(base.join("outra-coisa").exists(), "o que não é de execução fica");
+    std::fs::remove_dir_all(&base).unwrap();
 }
 
 /// Um motor com portas escolhidas pelo sistema (C8) e a porta TCP dele.

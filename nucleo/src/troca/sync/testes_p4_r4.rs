@@ -12,10 +12,10 @@ use crate::troca::protocolo4::aprovados::{self, Limites, Linhas, Situacao};
 use crate::troca::protocolo4::{Dominio, Identidade};
 
 /// Limites pequenos: 8 aprovações que contam, 3 caixas por aprovador.
-const PEQUENOS: Limites = Limites { teto: 8, por_aprovador: 3, conferencias: 1000 };
+pub(super) const PEQUENOS: Limites = Limites { teto: 8, por_aprovador: 3, conferencias: 1000 };
 
 /// Uma loja só com a raiz (registrada), num banco novo: (banco, raiz, loja, gerente).
-fn loja_com_raiz(nome: &str) -> (Banco, Identidade, String, String) {
+pub(super) fn loja_com_raiz(nome: &str) -> (Banco, Identidade, String, String) {
     let b = Banco::abrir(&temp(nome)).unwrap();
     let u = crate::faixas::para_testes::configurar(&b, "Caixa 1", 0);
     let loja = crate::loja::criar(&b.conn).unwrap();
@@ -24,9 +24,17 @@ fn loja_com_raiz(nome: &str) -> (Banco, Identidade, String, String) {
     (b, raiz, loja, u)
 }
 
-fn retirada_a_mao(quem_assina: &Identidade, chave: &Identidade, loja: &str) -> aprovados::Retirada {
+pub(super) fn retirada_a_mao(quem_assina: &Identidade, chave: &Identidade, loja: &str) -> aprovados::Retirada {
+    retirada_da_chave(quem_assina, chave.publica(), loja)
+}
+
+pub(super) fn retirada_da_chave(
+    quem_assina: &Identidade,
+    chave: crate::troca::protocolo4::Chave,
+    loja: &str,
+) -> aprovados::Retirada {
     let mut r = aprovados::Retirada {
-        chave: chave.publica(),
+        chave,
         loja_id: loja.into(),
         motivo: "Computador roubado".into(),
         retirador: quem_assina.publica(),
@@ -55,17 +63,17 @@ fn juntar(
     .unwrap()
 }
 
-fn situacao(b: &Banco, raiz: &Identidade, loja: &str, chave: &Identidade) -> Situacao {
+pub(super) fn situacao(b: &Banco, raiz: &Identidade, loja: &str, chave: &Identidade) -> Situacao {
     aprovados::avaliar(&b.conn, &raiz.publica(), loja).unwrap().situacao(&chave.publica())
 }
 
-fn aviso_de_registro_cheio(b: &Banco) -> bool {
+pub(super) fn aviso_de_registro_cheio(b: &Banco) -> bool {
     crate::avisos::do_dia(&b.conn).unwrap().iter().any(|a| a.id == "p4.registro_cheio")
 }
 
 /// O caixa `ladrao` (aprovado pela raiz) aprova 3 caixas falsos, e cada um aprova mais 3:
 /// 12 aprovações, todas na cadeia e bem assinadas.
-fn enchimento(ladrao: &Identidade, loja: &str) -> Vec<aprovados::Aprovacao> {
+pub(super) fn enchimento(ladrao: &Identidade, loja: &str) -> Vec<aprovados::Aprovacao> {
     let mut linhas = Vec::new();
     for i in 0..3 {
         let falso = Identidade::gerar().unwrap();
@@ -84,6 +92,8 @@ fn enchimento(ladrao: &Identidade, loja: &str) -> Vec<aprovados::Aprovacao> {
 /// enquanto o registro está cheio.
 #[test]
 fn c2r4_1_membro_enche_e_a_retirada_entra_mesmo_assim() {
+    // C2R5-4: o aviso vem do estado do registro, com os limites deste teste.
+    aprovados::para_testes::usar_limites(PEQUENOS);
     let (b, raiz, loja, _u) = loja_com_raiz("c2r4-1-poc");
     let (ladrao, membro, legitimo) =
         (Identidade::gerar().unwrap(), Identidade::gerar().unwrap(), Identidade::gerar().unwrap());
@@ -100,7 +110,9 @@ fn c2r4_1_membro_enche_e_a_retirada_entra_mesmo_assim() {
     assert_eq!(j.novas, 2, "{j:?}");
     assert!(!aviso_de_registro_cheio(&b));
     // O ladrão manda 12 aprovações: cabem 8 (as da raiz não contam no teto).
-    let j = juntar(&b, &raiz, &loja, enchimento(&ladrao, &loja), vec![]);
+    let do_ladrao = enchimento(&ladrao, &loja);
+    let um_falso = do_ladrao[0].chave;
+    let j = juntar(&b, &raiz, &loja, do_ladrao, vec![]);
     assert_eq!((j.novas, j.sem_lugar), (8, 4), "{j:?}");
     assert!(aviso_de_registro_cheio(&b), "o Início avisa o gerente");
     // A aprovação legítima de um membro não cabe.
@@ -108,6 +120,12 @@ fn c2r4_1_membro_enche_e_a_retirada_entra_mesmo_assim() {
     let j = juntar(&b, &raiz, &loja, vec![legitima.clone()], vec![]);
     assert_eq!((j.novas, j.sem_lugar), (0, 1), "{j:?}");
     assert_eq!(situacao(&b, &raiz, &loja, &legitimo), Situacao::Desconhecida);
+    // Com o registro cheio, a retirada feita por um membro (não a raiz: não devolve lugar)
+    // entra mesmo assim.
+    let j = juntar(&b, &raiz, &loja, vec![], vec![retirada_da_chave(&membro, um_falso, &loja)]);
+    assert_eq!(j.novas, 1, "a retirada do membro entra com o registro cheio: {j:?}");
+    let av = aprovados::avaliar(&b.conn, &raiz.publica(), &loja).unwrap();
+    assert_eq!(av.situacao(&um_falso), Situacao::Retirada);
     // A retirada do ladrão, assinada pela raiz, entra com o registro cheio.
     let j = juntar(&b, &raiz, &loja, vec![], vec![retirada_a_mao(&raiz, &ladrao, &loja)]);
     assert_eq!(j.novas, 1, "a retirada entra com o registro cheio: {j:?}");
@@ -166,6 +184,8 @@ fn c2r4_1_retirada_por_quem_o_ladrao_aprovou_entra_com_o_apoio() {
 /// registro (só entram como apoio de uma retirada).
 #[test]
 fn c2r4_1_quem_esta_fora_nao_enche_o_registro() {
+    // C2R5-4: o aviso vem do estado do registro, com os limites deste teste.
+    aprovados::para_testes::usar_limites(PEQUENOS);
     let (b, raiz, loja, _u) = loja_com_raiz("c2r4-1-fora");
     let ladrao = Identidade::gerar().unwrap();
     juntar(

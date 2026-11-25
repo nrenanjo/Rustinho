@@ -935,6 +935,28 @@ FocusScope {
             "Motivo (por que esta identidade sai?)", "perigo")
     }
 
+    // C2R5-1: no primeiro caixa, com o registro de caixas cheio, o caixa já retirado por outro
+    // caixa é retirado também aqui: o lugar que ele ocupa no registro volta.
+    function liberarLugar(c) {
+        const chaves = c.liberarLugar || []
+        if (chaves.length === 0)
+            return
+        motivoReferencia.perguntar(
+            "Liberar o lugar de " + c.nome + "?",
+            "Este caixa já foi retirado da loja por outro caixa, mas o lugar que ele ocupa no registro de caixas só volta "
+            + "quando o primeiro caixa da loja (este) também o retira. Depois disso, os outros caixas voltam a aprovar "
+            + "caixas novos. Fica no histórico com o seu nome e o motivo.",
+            "Liberar o lugar", (m, pronto) => janela.chamarGerenteDemorado("caixa_retirar",
+                { dispositivo: c.dispositivo, motivo: m, chave: chaves[0] }, "Liberando o lugar…", r => {
+                pronto(r)
+                if (r.ok) {
+                    carregarCaixas()
+                    janela.avisar("O lugar de " + c.nome + " no registro de caixas voltou.", "ok")
+                }
+            }),
+            "Motivo (por que ele saiu da loja?)", "perigo")
+    }
+
     function readmitirCaixa(c) {
         janela.confirmar("Readmitir " + c.nome + "?", "Ele volta a trocar dados com os caixas da loja.", "Readmitir", () => {
             janela.chamarGerente("caixa_readmitir", { dispositivo: c.dispositivo }, r => {
@@ -2225,6 +2247,13 @@ FocusScope {
                                     text: "Retirar da loja"
                                     tipo: "discreto"
                                     onClicked: tela.retirarCaixa(linhaCaixa.modelData)
+                                }
+                                Botao {
+                                    // C2R5-1: só no primeiro caixa, com o registro de caixas cheio.
+                                    visible: (linhaCaixa.modelData.liberarLugar || []).length > 0
+                                    text: "Liberar o lugar"
+                                    tipo: "secundario"
+                                    onClicked: tela.liberarLugar(linhaCaixa.modelData)
                                 }
                                 Botao {
                                     visible: linhaCaixa.modelData.situacao === "retirado" && !linhaCaixa.modelData.retiradoPelaChave

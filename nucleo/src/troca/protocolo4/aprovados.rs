@@ -385,19 +385,27 @@ fn alcancados(raiz: &Chave, arestas: &HashMap<Chave, Vec<Chave>>, fora: &HashSet
     vistos
 }
 
+/// As aprovações gravadas desta loja com a assinatura conferida (cada uma, uma vez).
+fn aprovacoes_validas(conn: &Connection, loja_id: &str) -> Resultado<Vec<Aprovacao>> {
+    Ok(ler_aprovacoes(conn, loja_id)?.into_iter().filter(|a| a.loja_id == loja_id && a.assinatura_confere()).collect())
+}
+
 /// Confere o registro inteiro da loja `loja_id` a partir da `raiz`.
 pub fn avaliar(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<Avaliacao> {
     if loja_id.is_empty() {
         return Ok(Avaliacao::default());
     }
-    // 1. Só as aprovações com assinatura válida, desta loja. Aprovação de si
-    //    mesmo só vale para a raiz.
+    // 1. Só as aprovações com assinatura válida, desta loja.
+    let validas = aprovacoes_validas(conn, loja_id)?;
+    Ok(avaliar_com(raiz, loja_id, &validas, &ler_retiradas(conn, loja_id)?))
+}
+
+/// [`avaliar`] sobre aprovações já conferidas (`validas`: desta loja, assinatura certa).
+fn avaliar_com(raiz: &Chave, loja_id: &str, validas: &[Aprovacao], retiradas: &[Retirada]) -> Avaliacao {
+    // Aprovação de si mesmo só vale para a raiz.
     let mut raiz_valida = false;
     let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
-    for a in ler_aprovacoes(conn, loja_id)? {
-        if a.loja_id != loja_id || !a.assinatura_confere() {
-            continue;
-        }
+    for a in validas {
         if a.aprovador == a.chave {
             raiz_valida |= a.chave == *raiz;
             continue;
@@ -405,13 +413,13 @@ pub fn avaliar(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<Aval
         arestas.entry(a.aprovador).or_default().push(a.chave);
     }
     if !raiz_valida {
-        return Ok(Avaliacao::default());
+        return Avaliacao::default();
     }
     // 2. Aprovados alguma vez (sem olhar retiradas).
     let aprovados = alcancados(raiz, &arestas, &HashSet::new());
     // 3. Retiradas válidas: assinadas por quem já foi aprovado; a raiz não sai.
-    let retirados: HashSet<Chave> = ler_retiradas(conn, loja_id)?
-        .into_iter()
+    let retirados: HashSet<Chave> = retiradas
+        .iter()
         .filter(|r| {
             r.loja_id == loja_id && r.chave != *raiz && aprovados.contains(&r.retirador) && r.assinatura_confere()
         })
@@ -419,7 +427,260 @@ pub fn avaliar(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<Aval
         .collect();
     // 4. Autorizados: cadeia a partir da raiz sem passar por retirado.
     let autorizados = alcancados(raiz, &arestas, &retirados);
-    Ok(Avaliacao { aprovados, retirados, autorizados })
+    Avaliacao { aprovados, retirados, autorizados }
+}
+
+/// C2R5-2 (R5 da 2C): o registro de uma loja conferido de uma vez (cada assinatura, uma
+/// vez), para as consultas que olham todos os caixas (a lista de caixas, o Início): quem
+/// está autorizado e quem cai junto se cada um sair, sem conferir tudo de novo por caixa.
+pub struct RegistroConferido {
+    raiz: Chave,
+    validas: Vec<Aprovacao>,
+    avaliacao: Avaliacao,
+    /// As chaves retiradas pela própria raiz (o lugar delas volta: C2R4-1).
+    pela_raiz: HashSet<Chave>,
+}
+
+impl RegistroConferido {
+    pub fn carregar(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<RegistroConferido> {
+        if loja_id.trim().is_empty() {
+            return Ok(RegistroConferido {
+                raiz: *raiz,
+                validas: Vec::new(),
+                avaliacao: Avaliacao::default(),
+                pela_raiz: HashSet::new(),
+            });
+        }
+        let validas = aprovacoes_validas(conn, loja_id)?;
+        let retiradas = ler_retiradas(conn, loja_id)?;
+        let avaliacao = avaliar_com(raiz, loja_id, &validas, &retiradas);
+        let pela_raiz = retiradas
+            .iter()
+            .filter(|t| {
+                t.loja_id == loja_id
+                    && t.retirador == *raiz
+                    && avaliacao.retirados.contains(&t.chave)
+                    && t.assinatura_confere()
+            })
+            .map(|t| t.chave)
+            .collect();
+        Ok(RegistroConferido { raiz: *raiz, validas, avaliacao, pela_raiz })
+    }
+
+    /// C2R5-1: a raiz já retirou esta chave.
+    pub fn retirada_pela_raiz(&self, chave: &Chave) -> bool {
+        self.pela_raiz.contains(chave)
+    }
+
+    /// C2R4-1: o lugar ocupado no registro gravado.
+    fn ocupacao(&self) -> Ocupacao {
+        let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
+        for a in &self.validas {
+            if a.aprovador != a.chave {
+                arestas.entry(a.aprovador).or_default().push(a.chave);
+            }
+        }
+        ocupacao(&self.raiz, self.validas.iter(), &arestas, &self.pela_raiz, &self.avaliacao.retirados)
+    }
+
+    /// C2R5-4: o registro está no teto (os caixas, menos a raiz, não aprovam caixas novos).
+    pub fn cheio(&self) -> bool {
+        self.ocupacao().no_teto >= limites_vigentes().teto
+    }
+
+    pub fn avaliacao(&self) -> &Avaliacao {
+        &self.avaliacao
+    }
+
+    /// As aprovações desta loja com a assinatura certa.
+    pub fn aprovacoes(&self) -> &[Aprovacao] {
+        &self.validas
+    }
+
+    /// A situação de cada chave por `dispositivo` declarado nas aprovações válidas.
+    pub fn situacoes_por_dispositivo(&self) -> HashMap<String, Vec<(Chave, Situacao)>> {
+        let mut m: HashMap<String, Vec<(Chave, Situacao)>> = HashMap::new();
+        for a in &self.validas {
+            let disp = a.dispositivo.trim();
+            if disp.is_empty() {
+                continue;
+            }
+            let lista = m.entry(disp.to_string()).or_default();
+            if !lista.iter().any(|(k, _)| *k == a.chave) {
+                lista.push((a.chave, self.avaliacao.situacao(&a.chave)));
+            }
+        }
+        m
+    }
+
+    /// A cadeia viva (aprovador autorizado → aprovado autorizado) e a aprovação mais
+    /// recente de cada chave, feita por um aprovador autorizado (o nome que a tela mostra).
+    fn cadeia_viva(&self) -> (HashMap<Chave, Vec<Chave>>, HashMap<Chave, &Aprovacao>) {
+        let vivos = &self.avaliacao.autorizados;
+        let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
+        let mut por_chave: HashMap<Chave, &Aprovacao> = HashMap::new();
+        for a in &self.validas {
+            if !vivos.contains(&a.aprovador) {
+                continue;
+            }
+            if a.aprovador != a.chave && vivos.contains(&a.chave) {
+                arestas.entry(a.aprovador).or_default().push(a.chave);
+            }
+            por_chave
+                .entry(a.chave)
+                .and_modify(|atual| {
+                    if fica(&a.aprovado_em, &a.assinatura) > fica(&atual.aprovado_em, &atual.assinatura) {
+                        *atual = a;
+                    }
+                })
+                .or_insert(a);
+        }
+        (arestas, por_chave)
+    }
+
+    /// P4-4: as aprovações dos caixas hoje autorizados que ficariam `SemCadeia` se `chave`
+    /// fosse retirada, por nome.
+    pub fn dependentes_de(&self, chave: &Chave) -> Vec<Aprovacao> {
+        if self.avaliacao.situacao(chave) != Situacao::Autorizada {
+            return Vec::new();
+        }
+        let (arestas, por_chave) = self.cadeia_viva();
+        let mut fora = self.avaliacao.retirados.clone();
+        fora.insert(*chave);
+        let depois = alcancados(&self.raiz, &arestas, &fora);
+        let mut afetados: Vec<Aprovacao> = self
+            .avaliacao
+            .autorizados
+            .iter()
+            .filter(|k| **k != *chave && !depois.contains(*k))
+            .filter_map(|k| por_chave.get(k).map(|a| (*a).clone()))
+            .collect();
+        afetados.sort_by(|a, b| a.nome.cmp(&b.nome));
+        afetados
+    }
+
+    /// C2R5-2: para cada chave autorizada (menos a raiz), quem cai junto se ela sair (as
+    /// que ela domina na cadeia viva): até `ate` aprovações, por nome, e quantas são ao
+    /// todo. Uma conta só para todas (os dominadores), sem conferir nada de novo: numa
+    /// cadeia comprida a lista inteira de cada uma cresceria com o quadrado.
+    pub fn quem_cai_junto(&self, ate: usize) -> HashMap<Chave, (Vec<Aprovacao>, usize)> {
+        let mut m = HashMap::new();
+        if !self.avaliacao.autorizados.contains(&self.raiz) {
+            return m;
+        }
+        let (arestas, por_chave) = self.cadeia_viva();
+        let mut filhos: HashMap<Chave, Vec<Chave>> = HashMap::new();
+        for (v, d) in dominadores(&self.raiz, &arestas) {
+            if v != d {
+                filhos.entry(d).or_default().push(v);
+            }
+        }
+        let tamanho = tamanhos_das_subarvores(&self.raiz, &filhos);
+        for k in &self.avaliacao.autorizados {
+            if *k == self.raiz {
+                continue;
+            }
+            let total = tamanho.get(k).copied().unwrap_or(1).saturating_sub(1);
+            let mut lista: Vec<Aprovacao> = Vec::new();
+            let mut pilha: Vec<Chave> = filhos.get(k).cloned().unwrap_or_default();
+            while let Some(v) = pilha.pop() {
+                if lista.len() >= ate {
+                    break;
+                }
+                if let Some(a) = por_chave.get(&v) {
+                    lista.push((*a).clone());
+                }
+                pilha.extend(filhos.get(&v).into_iter().flatten().copied());
+            }
+            lista.sort_by(|a, b| a.nome.cmp(&b.nome));
+            m.insert(*k, (lista, total));
+        }
+        m
+    }
+}
+
+/// C2R5-2: o dominador imediato de cada chave alcançada a partir da `raiz` (quem domina
+/// `v` está em todo caminho da raiz até `v`; a raiz domina a si mesma). Algoritmo
+/// iterativo de Cooper, Harvey e Kennedy, sobre a pós-ordem.
+fn dominadores(raiz: &Chave, arestas: &HashMap<Chave, Vec<Chave>>) -> HashMap<Chave, Chave> {
+    let mut pos: Vec<Chave> = Vec::new();
+    let mut visto: HashSet<Chave> = HashSet::from([*raiz]);
+    let mut pilha: Vec<(Chave, usize)> = vec![(*raiz, 0)];
+    while let Some(topo) = pilha.last_mut() {
+        let (n, i) = *topo;
+        match arestas.get(&n).and_then(|f| f.get(i)) {
+            Some(f) => {
+                topo.1 += 1;
+                if visto.insert(*f) {
+                    pilha.push((*f, 0));
+                }
+            }
+            None => {
+                pos.push(n);
+                pilha.pop();
+            }
+        }
+    }
+    let num: HashMap<Chave, usize> = pos.iter().enumerate().map(|(i, k)| (*k, i)).collect();
+    let mut antecessores: Vec<Vec<usize>> = vec![Vec::new(); pos.len()];
+    for (de, paras) in arestas {
+        let Some(&d) = num.get(de) else { continue };
+        for p in paras {
+            if let Some(&q) = num.get(p) {
+                antecessores[q].push(d);
+            }
+        }
+    }
+    let r = pos.len() - 1;
+    let mut idom: Vec<Option<usize>> = vec![None; pos.len()];
+    idom[r] = Some(r);
+    let cruzar = |idom: &[Option<usize>], mut a: usize, mut b: usize| -> usize {
+        while a != b {
+            while a < b {
+                a = idom[a].unwrap_or(r);
+            }
+            while b < a {
+                b = idom[b].unwrap_or(r);
+            }
+        }
+        a
+    };
+    let mut mudou = true;
+    while mudou {
+        mudou = false;
+        for b in (0..r).rev() {
+            let mut novo: Option<usize> = None;
+            for &p in &antecessores[b] {
+                if idom[p].is_some() {
+                    novo = Some(match novo {
+                        None => p,
+                        Some(n) => cruzar(&idom, p, n),
+                    });
+                }
+            }
+            if novo.is_some() && idom[b] != novo {
+                idom[b] = novo;
+                mudou = true;
+            }
+        }
+    }
+    pos.iter().enumerate().filter_map(|(i, k)| idom[i].map(|d| (*k, pos[d]))).collect()
+}
+
+/// C2R5-2: o tamanho da subárvore de cada nó (ele mesmo incluído).
+fn tamanhos_das_subarvores(raiz: &Chave, filhos: &HashMap<Chave, Vec<Chave>>) -> HashMap<Chave, usize> {
+    let mut ordem = Vec::new();
+    let mut pilha = vec![*raiz];
+    while let Some(v) = pilha.pop() {
+        ordem.push(v);
+        pilha.extend(filhos.get(&v).into_iter().flatten().copied());
+    }
+    let mut t: HashMap<Chave, usize> = HashMap::new();
+    for v in ordem.iter().rev() {
+        let s = 1 + filhos.get(v).into_iter().flatten().map(|f| t.get(f).copied().unwrap_or(0)).sum::<usize>();
+        t.insert(*v, s);
+    }
+    t
 }
 
 /// **Esta chave está autorizada nesta loja agora?** (cadeia válida até a
@@ -623,57 +884,12 @@ pub fn situacoes_por_dispositivo(
     raiz: &Chave,
     loja_id: &str,
 ) -> Resultado<HashMap<String, Vec<(Chave, Situacao)>>> {
-    let av = avaliar(conn, raiz, loja_id)?;
-    let mut m: HashMap<String, Vec<(Chave, Situacao)>> = HashMap::new();
-    for a in ler_aprovacoes(conn, loja_id)? {
-        let disp = a.dispositivo.trim();
-        if a.loja_id != loja_id || disp.is_empty() || !a.assinatura_confere() {
-            continue;
-        }
-        let lista = m.entry(disp.to_string()).or_default();
-        if !lista.iter().any(|(k, _)| *k == a.chave) {
-            lista.push((a.chave, av.situacao(&a.chave)));
-        }
-    }
-    Ok(m)
+    Ok(RegistroConferido::carregar(conn, raiz, loja_id)?.situacoes_por_dispositivo())
 }
 
 /// P4-4: caixas hoje autorizados que ficariam `SemCadeia` se `chave` fosse retirada.
 pub fn dependentes_de(conn: &Connection, raiz: &Chave, loja_id: &str, chave: &Chave) -> Resultado<Vec<Aprovacao>> {
-    let antes = avaliar(conn, raiz, loja_id)?;
-    if antes.situacao(chave) != Situacao::Autorizada {
-        return Ok(Vec::new());
-    }
-    let aprovacoes = ler_aprovacoes(conn, loja_id)?;
-    let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
-    let mut por_chave: HashMap<Chave, Aprovacao> = HashMap::new();
-    for a in aprovacoes {
-        if a.loja_id != loja_id || !a.assinatura_confere() || !antes.autorizados.contains(&a.aprovador) {
-            continue;
-        }
-        if a.aprovador != a.chave {
-            arestas.entry(a.aprovador).or_default().push(a.chave);
-        }
-        por_chave
-            .entry(a.chave)
-            .and_modify(|atual| {
-                if fica(&a.aprovado_em, &a.assinatura) > fica(&atual.aprovado_em, &atual.assinatura) {
-                    *atual = a.clone();
-                }
-            })
-            .or_insert(a);
-    }
-    let mut retirados_simulados = antes.retirados.clone();
-    retirados_simulados.insert(*chave);
-    let depois = alcancados(raiz, &arestas, &retirados_simulados);
-    let mut afetados: Vec<Aprovacao> = antes
-        .autorizados
-        .iter()
-        .filter(|k| **k != *chave && !depois.contains(*k))
-        .filter_map(|k| por_chave.get(k).cloned())
-        .collect();
-    afetados.sort_by(|a, b| a.nome.cmp(&b.nome));
-    Ok(afetados)
+    Ok(RegistroConferido::carregar(conn, raiz, loja_id)?.dependentes_de(chave))
 }
 
 /// O caixa `aprovador` (autorizado nesta loja), com o gerente `gerente`,
@@ -799,6 +1015,9 @@ pub fn retirar(
         return Err(Erro::validacao("Este caixa não está autorizado a retirar caixas nesta loja."));
     }
     match avaliacao.situacao(chave) {
+        // C2R5-1 (R5 da 2C): a raiz retira também a chave que outro caixa já retirou (uma
+        // vez): a retirada dela devolve o lugar que essa chave ocupa no registro.
+        Situacao::Retirada if retirador.publica() == *raiz && retirada_gravada(conn, chave, raiz)?.is_none() => {}
         Situacao::Retirada => return Err(Erro::validacao("Este caixa já foi retirado da loja.")),
         Situacao::Desconhecida => return Err(Erro::NaoEncontrado("Caixa".into())),
         Situacao::Autorizada | Situacao::SemCadeia => {}
@@ -1364,10 +1583,6 @@ pub const LIMITE_POR_APROVADOR: usize = 100;
 /// uma ou duas.
 pub const APOIO_MAXIMO: usize = 4;
 
-/// C2R4-1: a marca (data e hora) de que o registro deixou aprovações de fora por falta
-/// de lugar; o Início avisa enquanto ela existir. Fica só neste caixa.
-pub const CHAVE_REGISTRO_CHEIO: &str = "p4_registro_cheio";
-
 /// Os limites da junção e da aprovação (os testes usam limites pequenos).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limites {
@@ -1440,24 +1655,12 @@ fn falta_de_lugar(
     chave: &Chave,
     lim: Limites,
 ) -> Resultado<Option<String>> {
-    let validas: Vec<Aprovacao> =
-        ler_aprovacoes(conn, loja_id)?.into_iter().filter(|a| a.loja_id == loja_id && a.assinatura_confere()).collect();
+    let reg = RegistroConferido::carregar(conn, raiz, loja_id)?;
     // Aprovar de novo a mesma chave pelo mesmo caixa troca a linha: não ocupa lugar.
-    if validas.iter().any(|a| a.chave == *chave && a.aprovador == *aprovador) {
+    if reg.validas.iter().any(|a| a.chave == *chave && a.aprovador == *aprovador) {
         return Ok(None);
     }
-    let mut arestas: HashMap<Chave, Vec<Chave>> = HashMap::new();
-    for a in &validas {
-        if a.aprovador != a.chave {
-            arestas.entry(a.aprovador).or_default().push(a.chave);
-        }
-    }
-    let cadeia = alcancados(raiz, &arestas, &HashSet::new());
-    let gravadas_r = ler_retiradas(conn, loja_id)?;
-    let validas_r = retiradas_validas(&gravadas_r, raiz, loja_id, &cadeia);
-    let retirados: HashSet<Chave> = validas_r.iter().map(|t| t.chave).collect();
-    let pela_raiz: HashSet<Chave> = validas_r.iter().filter(|t| t.retirador == *raiz).map(|t| t.chave).collect();
-    let o = ocupacao(raiz, validas.iter(), &arestas, &pela_raiz, &retirados);
+    let (o, retirados) = (reg.ocupacao(), &reg.avaliacao.retirados);
     if *aprovador != *raiz && o.no_teto >= lim.teto {
         return Ok(Some(TEXTO_REGISTRO_CHEIO.to_string()));
     }
@@ -1471,12 +1674,43 @@ fn falta_de_lugar(
     Ok(None)
 }
 
+/// C2R5-4 (R5 da 2C): o registro desta loja está no teto (pelo estado gravado, não por um
+/// evento): os caixas, menos a raiz, não aprovam caixas novos até o lugar voltar. O
+/// Início avisa enquanto for verdade.
+pub fn registro_cheio(conn: &Connection, raiz: &Chave, loja_id: &str) -> Resultado<bool> {
+    if loja_id.trim().is_empty() {
+        return Ok(false);
+    }
+    Ok(RegistroConferido::carregar(conn, raiz, loja_id)?.cheio())
+}
+
+/// Os limites em vigor: os de [`Limites::PADRAO`]; nos testes, os que o teste escolher
+/// para esta linha de execução ([`para_testes::usar_limites`]).
+fn limites_vigentes() -> Limites {
+    #[cfg(test)]
+    if let Some(l) = para_testes::LIMITES.with(|c| c.get()) {
+        return l;
+    }
+    Limites::PADRAO
+}
+
+/// Só nos testes: limites pequenos para o aviso do Início.
+#[cfg(test)]
+pub(crate) mod para_testes {
+    use super::Limites;
+    use std::cell::Cell;
+    thread_local!(pub(super) static LIMITES: Cell<Option<Limites>> = const { Cell::new(None) });
+    pub(crate) fn usar_limites(l: Limites) {
+        LIMITES.with(|c| c.set(Some(l)));
+    }
+}
+
 /// C2R4-1: o registro de caixas da loja não tem mais lugar para aprovações (texto para a
 /// tela e para o aviso do Início).
 pub const TEXTO_REGISTRO_CHEIO: &str = "O registro de caixas da loja está cheio: um caixa aprovou caixas demais \
      (pode ser um computador roubado ou com defeito). No primeiro caixa da loja, em Configurações › Caixas da loja, \
-     retire o caixa que não é mais da loja: o lugar volta sozinho. Enquanto isso, o convite gerado no primeiro caixa \
-     continua funcionando.";
+     retire o caixa que não é mais da loja (se ele já aparece como retirado, use \"Liberar o lugar\"): o lugar volta \
+     sozinho. Enquanto isso, o convite gerado no primeiro caixa continua funcionando.";
 
 /// Guarda só o que entra na cadeia da `raiz` (C2R2-3) e nunca deixa o teto barrar uma
 /// retirada (C2R4-1). Veja [`juntar_na_cadeia_com_limites`].
@@ -1505,8 +1739,7 @@ pub fn juntar_na_cadeia(conn: &Connection, raiz: &Chave, loja_id: &str, de_fora:
 ///    devolve o lugar). Primeiro as mais perto da raiz. A aprovação feita por quem já
 ///    está fora não vale para nada e só entra como apoio.
 ///
-/// Quando alguma aprovação fica de fora por falta de lugar, o Início avisa
-/// ([`CHAVE_REGISTRO_CHEIO`]).
+/// Enquanto o registro está no teto, o Início avisa ([`registro_cheio`], pelo estado).
 pub(crate) fn juntar_na_cadeia_com_limites(
     conn: &Connection,
     raiz: &Chave,
@@ -1549,7 +1782,6 @@ pub(crate) fn juntar_na_cadeia_com_limites(
     if novas_a.is_empty() && novas_r.is_empty() && outra_versao_a.is_empty() && outra_versao_r.is_empty() {
         return Ok(total);
     }
-    let avaliou_aprovacoes = !novas_a.is_empty();
 
     // O grafo das gravadas: aprovador → aprovado (cada assinatura conferida uma vez).
     let validas_a: Vec<&Aprovacao> =
@@ -1581,8 +1813,8 @@ pub(crate) fn juntar_na_cadeia_com_limites(
         }
         for a in chegando.remove(&k).unwrap_or_default() {
             if orcamento == 0 {
+                // C2R5-4: orçamento de conferências, não falta de lugar.
                 total.recusadas += 1;
-                total.sem_lugar += 1;
                 continue;
             }
             orcamento -= 1;
@@ -1600,27 +1832,57 @@ pub(crate) fn juntar_na_cadeia_com_limites(
     // Aprovador fora da cadeia: lixo, nem conferido.
     total.recusadas += chegando.values().map(Vec::len).sum::<usize>();
 
-    // 2a. As retiradas que chegam e podem valer (uma por chave retirada).
+    // 2a. As retiradas que chegam e podem valer: chave conhecida, retirador na cadeia, nunca
+    //     a raiz; uma por chave retirada. C2R5-1: a da raiz não disputa a vaga com as outras
+    //     (ela devolve o lugar mesmo quando a chave já foi retirada por outro). C2R5-5: as
+    //     assinaturas conferidas aqui e nas outras versões têm orçamento próprio, e a linha
+    //     repetida na mesma mensagem nem é conferida.
     let mut conhecidas: HashSet<Chave> = validas_a.iter().map(|a| a.chave).collect();
     conhecidas.extend(conferidas.values().flatten().map(|a| a.chave));
     novas_r.sort_by(|x, y| {
         (x.retirado_em.as_str(), x.retirador, x.chave).cmp(&(y.retirado_em.as_str(), y.retirador, y.chave))
     });
-    let mut candidatas: Vec<&Retirada> = Vec::new();
-    let mut alvos: HashSet<Chave> = HashSet::new();
-    for t in novas_r {
-        let pode = t.chave != *raiz
-            && !alvos.contains(&t.chave)
-            && conhecidas.contains(&t.chave)
-            && cadeia.contains(&t.retirador)
-            && t.assinatura_confere();
-        if pode {
-            alvos.insert(t.chave);
-            candidatas.push(t);
-        } else {
+    let mut orcamento_r = lim.conferencias;
+    let mut conferir = |assinatura_confere: &dyn Fn() -> bool, total: &mut Juntadas| -> bool {
+        if orcamento_r == 0 {
+            total.recusadas += 1;
+            return false;
+        }
+        orcamento_r -= 1;
+        let ok = assinatura_confere();
+        if !ok {
             total.recusadas += 1;
         }
+        ok
+    };
+    let mut candidatas: Vec<&Retirada> = Vec::new();
+    let mut alvos: HashSet<(Chave, bool)> = HashSet::new();
+    let mut vistas: HashSet<(Chave, Chave, Assinatura)> = HashSet::new();
+    for t in novas_r {
+        let da_raiz = t.retirador == *raiz;
+        let pode = t.chave != *raiz
+            && vistas.insert((t.chave, t.retirador, t.assinatura))
+            && !alvos.contains(&(t.chave, da_raiz))
+            && conhecidas.contains(&t.chave)
+            && cadeia.contains(&t.retirador);
+        if !pode {
+            total.recusadas += 1;
+            continue;
+        }
+        if conferir(&|| t.assinatura_confere(), &mut total) {
+            alvos.insert((t.chave, da_raiz));
+            candidatas.push(t);
+        }
     }
+    // As outras versões das linhas gravadas (o desempate de `juntar`) também gastam o
+    // orçamento; a assinatura errada fica de fora já aqui.
+    let mut vistas_a: HashSet<(Chave, Chave, Assinatura)> = HashSet::new();
+    outra_versao_a.retain(|a| {
+        vistas_a.insert((a.chave, a.aprovador, a.assinatura)) && conferir(&|| a.assinatura_confere(), &mut total)
+    });
+    outra_versao_r.retain(|t| {
+        vistas.insert((t.chave, t.retirador, t.assinatura)) && conferir(&|| t.assinatura_confere(), &mut total)
+    });
 
     // 3. As aprovações de quem está vivo (sem as retiradas gravadas nem as candidatas),
     //    das mais perto da raiz para as mais longe, enquanto couberem.
@@ -1676,10 +1938,10 @@ pub(crate) fn juntar_na_cadeia_com_limites(
     let quantas_sobras: usize = sobras.values().map(Vec::len).sum();
 
     // 2b. As retiradas: só da chave viva aqui (gravadas e aceitas, com as retiradas
-    //     gravadas); sem teto.
+    //     gravadas), menos a da raiz, que vale sempre (C2R5-1); sem teto.
     let vivos_antes = alcancados(raiz, &arestas_ok, &retirados_gravados);
     let (mut aceitas_r, nao_vivas): (Vec<&Retirada>, Vec<&Retirada>) =
-        candidatas.into_iter().partition(|t| vivos_antes.contains(&t.chave));
+        candidatas.into_iter().partition(|t| t.retirador == *raiz || vivos_antes.contains(&t.chave));
     total.recusadas += nao_vivas.len();
     let na_cadeia = alcancados(raiz, &arestas_ok, &HashSet::new());
     let mut apoio: Vec<&Aprovacao> = Vec::new();
@@ -1735,7 +1997,6 @@ pub(crate) fn juntar_na_cadeia_com_limites(
     total.trocadas += j.trocadas;
     total.ja_tinha += j.ja_tinha;
     total.recusadas += j.recusadas;
-    anotar_falta_de_lugar(conn, total.sem_lugar, avaliou_aprovacoes, lim)?;
     Ok(total)
 }
 
@@ -1780,24 +2041,6 @@ fn subir_pelo_apoio<'a>(
         x = a.aprovador;
     }
     Some(linhas)
-}
-
-/// C2R4-1: marca (ou desmarca) que o registro deixou aprovações de fora por falta de
-/// lugar. Desmarca quando chegam aprovações novas e nenhuma fica de fora por isso.
-fn anotar_falta_de_lugar(conn: &Connection, sem_lugar: usize, avaliou: bool, lim: Limites) -> Resultado<()> {
-    let marcado = crate::config::ler(conn, CHAVE_REGISTRO_CHEIO)?.is_some_and(|v| !v.trim().is_empty());
-    if sem_lugar > 0 && !marcado {
-        crate::config::gravar(conn, CHAVE_REGISTRO_CHEIO, &crate::tempo::agora())?;
-        crate::registro::anotar(&format!(
-            "registro de caixas: {sem_lugar} aprovações ficaram de fora por falta de lugar (teto de {}, {} por \
-             aprovador); o Início avisa o gerente",
-            lim.teto, lim.por_aprovador
-        ));
-    } else if sem_lugar == 0 && avaliou && marcado {
-        conn.execute("DELETE FROM config WHERE chave = ?1", [CHAVE_REGISTRO_CHEIO])?;
-        crate::registro::anotar("registro de caixas: as aprovações voltaram a caber; o aviso saiu");
-    }
-    Ok(())
 }
 
 /// Junta ao registro da loja `loja_id` as linhas que vieram de fora (outro

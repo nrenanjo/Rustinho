@@ -40,6 +40,9 @@ pub struct CaixaConhecido {
     /// C2R2-5: as identidades autorizadas dele quando são mais de uma
     /// (`[{chave, codigo}]`; vazia no caso normal).
     pub identidades: Vec<Value>,
+    /// C2R5-1: só no primeiro caixa e com o registro de caixas cheio, as chaves dele já
+    /// retiradas por outro caixa (botão "Liberar o lugar"); vazia no caso normal.
+    pub liberar_lugar: Vec<String>,
 }
 
 /// Todos os caixas que esta loja conhece: os que já conversaram com este
@@ -167,6 +170,7 @@ pub fn caixas_conhecidos(conn: &Connection) -> Resultado<Vec<CaixaConhecido>> {
                 .iter()
                 .map(|(k, c, caem)| json!({ "chave": k, "codigo": c, "dependentes": caem }))
                 .collect(),
+            liberar_lugar: chave.liberar_lugar,
         });
     }
     lista.sort_by(|a, b| a.nome.cmp(&b.nome));

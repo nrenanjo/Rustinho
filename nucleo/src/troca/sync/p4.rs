@@ -227,7 +227,14 @@ pub(super) fn juntar_registro(conn: &Connection, ctx: &ContextoP4, mensagem: &Va
     let linhas: aprovados::Linhas = serde_json::from_value(r.clone())
         .map_err(|_| Erro::validacao("O registro de caixas que veio do outro caixa está estragado."))?;
     // C2R2-3: só o que entra na cadeia da raiz (lixo bem assinado fica de fora).
-    aprovados::juntar_na_cadeia(conn, &ctx.raiz, &ctx.loja, &linhas)?;
+    let j = aprovados::juntar_na_cadeia(conn, &ctx.raiz, &ctx.loja, &linhas)?;
+    if j.sem_lugar > 0 {
+        // C2R5-4: só no registro técnico (sem repetir); o aviso do Início vem do estado.
+        anotar_sem_repetir(
+            "registro de caixas: aprovações ficaram de fora por falta de lugar (teto do registro ou limite por \
+             aprovador)",
+        );
+    }
     Ok(())
 }
 
@@ -413,10 +420,20 @@ pub fn convivencia_p3_ate(conn: &Connection) -> Resultado<Option<String>> {
     Ok((ate <= teto.as_str()).then(|| ate.to_string()))
 }
 
-/// C2R4-1: o registro de caixas desta loja deixou aprovações de fora por falta de lugar
-/// (um caixa aprovou caixas demais). O Início avisa enquanto for verdade.
+/// C2R4-1: o registro de caixas desta loja está no teto (um caixa aprovou caixas demais).
+/// O Início avisa enquanto for verdade.
 pub fn registro_de_caixas_cheio(conn: &Connection) -> Resultado<bool> {
-    Ok(config::ler(conn, aprovados::CHAVE_REGISTRO_CHEIO)?.is_some_and(|v| !v.trim().is_empty()))
+    // C2R5-4 (R5 da 2C): pelo estado gravado, na hora (uma conferência do registro).
+    // C2R2-6: um registro estranho (duas raízes) não derruba o Início; o motivo vai para
+    // o registro técnico.
+    let cheio = (|| -> Resultado<bool> {
+        let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Ok(false) };
+        aprovados::registro_cheio(conn, &raiz, &loja)
+    })();
+    Ok(cheio.unwrap_or_else(|e| {
+        anotar_sem_repetir(&format!("troca de dados (protocolo 4): aviso do registro cheio sem o registro: {e}"));
+        false
+    }))
 }
 
 /// T010: o protocolo 3 vale com este caixa? O caixa que ainda não é do P4 (sem raiz
@@ -928,7 +945,13 @@ pub fn retirar_identidade_do_caixa(
     let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Err(Erro::validacao(TEXTO_CAIXA_SEM_APROVACAO)) };
     let desta = aprovados::situacoes_por_dispositivo(conn, &raiz, &loja)?
         .get(dispositivo.trim())
-        .is_some_and(|l| l.iter().any(|(k, s)| *k == chave && *s == aprovados::Situacao::Autorizada));
+        // C2R5-1: também a chave já retirada (só a raiz a retira de novo, para o lugar voltar:
+        // `aprovados::retirar` confere).
+        .is_some_and(|l| {
+            l.iter().any(|(k, s)| {
+                *k == chave && matches!(s, aprovados::Situacao::Autorizada | aprovados::Situacao::Retirada)
+            })
+        });
     if !desta {
         return Err(Erro::validacao("Esta identidade não é uma das aprovadas deste caixa."));
     }
@@ -978,44 +1001,71 @@ pub struct ChaveDoCaixa {
     /// retirar a que não vale mais: (chave em hexadecimal, código de pedido, quem cai
     /// junto se ela sair — C2R3-8).
     pub identidades: Vec<(String, String, Vec<String>)>,
+    /// C2R5-1 (R5 da 2C): só no primeiro caixa e com o registro cheio, as chaves dele já
+    /// retiradas por outro caixa e ainda não pela raiz ("Liberar o lugar"), em hexadecimal.
+    pub liberar_lugar: Vec<String>,
 }
+
+/// C2R5-2: quantos nomes a lista de caixas mostra em "quem cai junto" (o resto vira "e
+/// mais N caixas").
+pub const QUEM_CAI_JUNTO_NA_LISTA: usize = 30;
 
 /// T012: a situação no registro de cada `dispositivo` desta loja, só pelo banco.
 pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, ChaveDoCaixa>> {
     let mut m = HashMap::new();
     let Some((loja, raiz)) = loja_e_raiz(conn)? else { return Ok(m) };
+    // C2R5-2 (R5 da 2C): o registro conferido uma vez só; quem cai junto com cada caixa
+    // sai de uma conta só (antes: o registro inteiro conferido de novo para cada caixa).
+    let reg = aprovados::RegistroConferido::carregar(conn, &raiz, &loja)?;
+    let caem = reg.quem_cai_junto(QUEM_CAI_JUNTO_NA_LISTA);
+    let nomes_que_caem = |k: &Chave| -> Vec<String> {
+        let Some((lista, total)) = caem.get(k) else { return Vec::new() };
+        let mut v: Vec<String> = lista.iter().map(|a| a.nome.clone()).collect();
+        if *total > v.len() {
+            v.push(format!("e mais {} caixas", total - v.len()));
+        }
+        v
+    };
     let mut nomes: HashMap<String, (String, String)> = HashMap::new();
-    for a in aprovados::linhas(conn, &loja)?.aprovacoes {
+    let mut trocas: HashMap<Chave, Chave> = HashMap::new();
+    for a in reg.aprovacoes() {
         let atual = nomes.entry(a.dispositivo.trim().to_string()).or_default();
-        if a.aprovado_em > atual.0 && a.assinatura_confere() {
+        if a.aprovado_em > atual.0 {
             *atual = (a.aprovado_em.clone(), a.nome.clone());
         }
-    }
-    let mut trocas: HashMap<Chave, Chave> = HashMap::new();
-    for a in aprovados::linhas(conn, &loja)?.aprovacoes {
         trocas.insert(a.chave, a.chave_troca);
     }
-    for (disp, chaves) in aprovados::situacoes_por_dispositivo(conn, &raiz, &loja)? {
+    // C2R5-1: no primeiro caixa, com o registro cheio, o caixa já retirado por outro caixa
+    // pode ser retirado também pela raiz, para o lugar voltar.
+    let sou_raiz = config::ler(conn, "p4_chave_publica")?.is_some_and(|h| h.trim() == hex(&raiz));
+    let pode_liberar = sou_raiz && reg.cheio();
+    for (disp, chaves) in reg.situacoes_por_dispositivo() {
         let nome = nomes.get(&disp).map(|(_, n)| n.clone()).unwrap_or_default();
         let autorizadas: Vec<Chave> =
             chaves.iter().filter(|(_, s)| *s == aprovados::Situacao::Autorizada).map(|(k, _)| *k).collect();
         let identidades = if autorizadas.len() > 1 {
-            let mut v = Vec::new();
-            for k in &autorizadas {
-                let codigo =
-                    trocas.get(k).map(|t| crate::troca::protocolo4::codigo_de_pedido(k, t)).unwrap_or_default();
-                let caem = aprovados::dependentes_de(conn, &raiz, &loja, k)?.into_iter().map(|a| a.nome).collect();
-                v.push((hex(k), codigo, caem));
-            }
-            v
+            autorizadas
+                .iter()
+                .map(|k| {
+                    let codigo =
+                        trocas.get(k).map(|t| crate::troca::protocolo4::codigo_de_pedido(k, t)).unwrap_or_default();
+                    (hex(k), codigo, nomes_que_caem(k))
+                })
+                .collect()
         } else {
             Vec::new()
         };
-        let autorizada = chaves.iter().find(|(_, s)| *s == aprovados::Situacao::Autorizada).map(|(k, _)| *k);
+        let autorizada = autorizadas.first().copied();
         let retirada = chaves.iter().any(|(_, s)| *s == aprovados::Situacao::Retirada);
-        let dependentes = match &autorizada {
-            Some(k) => aprovados::dependentes_de(conn, &raiz, &loja, k)?.into_iter().map(|a| a.nome).collect(),
-            None => Vec::new(),
+        let dependentes = autorizada.as_ref().map(nomes_que_caem).unwrap_or_default();
+        let liberar_lugar = if pode_liberar {
+            chaves
+                .iter()
+                .filter(|(k, s)| *s == aprovados::Situacao::Retirada && !reg.retirada_pela_raiz(k))
+                .map(|(k, _)| hex(k))
+                .collect()
+        } else {
+            Vec::new()
         };
         m.insert(
             disp,
@@ -1026,6 +1076,7 @@ pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, 
                 dependentes,
                 nome,
                 identidades,
+                liberar_lugar,
             },
         );
     }
