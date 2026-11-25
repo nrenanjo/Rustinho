@@ -222,9 +222,13 @@ def r2_a1_completo(placar, fotos):
             # quando a parte assenta. Na CI (desenho por software) isso passou dos 2,7 s fixos de antes: o botão
             # apareceu em 703, a parte terminou de montar e o empurrou para 813, e só depois a guia rolou e destacou.
             # Agora a medida espera, com limite, DUAS leituras seguidas com a guia parada (destaque ativo e nada se
-            # movendo) e o botão à vista: o sinal do destaque pode acender antes de a guia rolar (prova com mutação em
-            # `evid_006/ESTAB_R2/`), então só ele não basta. Se a guia nunca levar o botão para a área visível (ou ele
-            # sair dela depois), reprova como antes.
+            # movendo) e o botão à vista. Quem separa o certo do errado é a visibilidade: o sinal do destaque sozinho
+            # não prova que a guia chegou ao registro (com a guia sem rolar, `evid_006/ESTAB_R2/mutado`, ele fica em 1
+            # por outro destaque, com o botão em 813; na CI, a leitura em 481 veio com o destaque ainda em 0). B5 da
+            # revisão E1. Se a guia nunca levar o botão para a área visível, reprova como antes.
+            # B1 da revisão E1: confirmado o assentamento, mais uma leitura ~1 s depois (o botão continua à vista com
+            # a guia parada): pega a parte que termina de montar e empurra o botão para fora depois das duas leituras.
+            # B4: limite de 30 s (a rodada verde volta no assentamento; só a que reprova demora).
             chegou = time.time()
             leituras = []
 
@@ -236,9 +240,13 @@ def r2_a1_completo(placar, fotos):
                 leituras[-1] = (pos, bom)
                 return bom and len(leituras) >= 2 and leituras[-2][1]
 
-            assentou = r.esperar(a_vista_e_parada, 15)
+            assentou = r.esperar(a_vista_e_parada, 30)
             print(f"MEDIDA r2: botão à vista com a guia parada {time.time() - chegou:.1f} s depois da chegada "
                   f"(assentou={assentou}, {len(leituras)} leituras)", flush=True)
+            if assentou:
+                time.sleep(1.0)
+                assentou = a_vista_e_parada()
+                print(f"MEDIDA r2: ~1 s depois, ainda à vista com a guia parada: {assentou}", flush=True)
             f = r.foto("-3b")
             ok("r2: na chegada (gerente), o botão Aceitar como está do registro destacado fica à vista, sem rolar",
                assentou, f"{f} últimas leituras (posições, à vista com a guia parada)={leituras[-3:]} "

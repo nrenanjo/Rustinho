@@ -450,6 +450,26 @@ fn r18_desconto_maximo_conta_do_preco_do_orcamento() {
     assert_eq!(vendas::calcular(c, &venda).unwrap().erro_desconto, "");
 }
 
+/// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender
+/// pelo preço de hoje não é desconto: a referência é o menor dos dois. Abaixo
+/// dele, o desconto máximo (5%) continua valendo (R$ 230 = 8% recusa).
+#[test]
+fn r18_preco_de_hoje_menor_vale_o_de_hoje() {
+    let l = loja();
+    let c = &l.b.conn;
+    let o = orcamento_vencido(&l, "5");
+    let mut f = produtos::ficha(c, &l.peca).unwrap();
+    f.precos[0].preco = "250,00".into();
+    f.precos[0].lucro = String::new();
+    produtos::salvar(c, &l.b.dispositivo, &l.u, &f).unwrap();
+    let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    let erro = |v: &VendaEntrada| vendas::calcular(c, v).unwrap().itens[0].erro.clone();
+    venda.itens[0].preco = "250".into();
+    assert_eq!(erro(&venda), "", "o preço de hoje não é desconto");
+    venda.itens[0].preco = "230".into();
+    assert!(erro(&venda).contains("Desconto acima do máximo"), "{:?}", erro(&venda));
+}
+
 /// R18: o preço do orçamento só serve de referência enquanto ele está aberto. Já
 /// vendido, outra venda que aponte para ele volta ao preço de hoje (e a própria
 /// conclusão recusa o orçamento que não está aberto).
