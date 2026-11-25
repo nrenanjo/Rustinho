@@ -390,11 +390,13 @@ fn orcamento_vencido(l: &Loja, desconto_maximo: &str) -> String {
     o
 }
 
-/// DP-17 · retrato: o orçamento vencido vira venda pelos preços dele (R$ 300),
-/// não pelos de hoje (R$ 400). A ficha diz "vencido" e a tela promete
-/// conferir os preços de hoje (H14), o que não acontece.
+/// DP-17 (decidida pelo proprietário em 25/11/2026, regra 18: "manter os preços
+/// originais do orçamento"; R18): o orçamento vencido vira venda pelos preços
+/// dele (R$ 300), não pelos de hoje (R$ 400). A ficha diz "vencido" e a tela diz
+/// que a venda mantém os preços do orçamento (antes prometia conferir os de hoje,
+/// H14). O retrato virou regra definitiva.
 #[test]
-fn dp17_retrato_orcamento_vencido_vira_venda_pelos_precos_dele() {
+fn dp17_orcamento_vencido_vira_venda_pelos_precos_dele() {
     let l = loja();
     let c = &l.b.conn;
     let o = orcamento_vencido(&l, "");
@@ -412,18 +414,54 @@ fn dp17_retrato_orcamento_vencido_vira_venda_pelos_precos_dele() {
     let v = vendas::concluir(c, &l.b.dispositivo, &l.u, &venda).unwrap();
     assert_eq!(vendas::ficha(c, &v).unwrap().total, "300,00");
     let tela = include_str!("../../app/qml/TelaVenda.qml");
-    assert!(tela.contains("Ao vender, os preços de hoje serão conferidos."), "o texto da H14 mudou");
+    assert!(tela.contains("Este orçamento passou da validade. A venda mantém os preços do orçamento."));
+    assert!(!tela.contains("os preços de hoje serão conferidos"), "a promessa antiga (H14) saiu");
 }
 
-/// DP-17 · retrato (efeito lateral de "manter"): com desconto máximo na peça,
-/// o preço antigo do orçamento conta como desconto sobre o preço de hoje, e a
-/// venda do orçamento vencido é recusada.
+/// R18 (consequência técnica da regra 18, `requirements.md` §2 da 007): com
+/// desconto máximo de 5% na peça, o preço do orçamento (R$ 300, hoje R$ 400) não
+/// conta como desconto: a venda do orçamento vencido passa. O desconto dado a
+/// mais sobre o preço do orçamento continua limitado (R$ 20 = 6,7% recusa; R$ 15
+/// = 5% passa). Sem o orçamento (o mesmo carrinho solto), o R$ 300 conta como
+/// desconto sobre os R$ 400 e é recusado. O retrato de antes (a venda do
+/// orçamento vencido era recusada) saiu com a decisão.
 #[test]
-fn dp17_retrato_desconto_maximo_recusa_o_orcamento_vencido() {
+fn r18_desconto_maximo_conta_do_preco_do_orcamento() {
     let l = loja();
     let c = &l.b.conn;
     let o = orcamento_vencido(&l, "5");
-    let venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    let erro = |v: &VendaEntrada| vendas::calcular(c, v).unwrap().itens[0].erro.clone();
+    assert_eq!(erro(&venda), "", "o preço do orçamento não é desconto");
+    venda.itens[0].desconto = "20".into();
+    assert!(erro(&venda).contains("Desconto acima do máximo"), "{:?}", erro(&venda));
+    venda.itens[0].desconto = "15".into();
+    assert_eq!(erro(&venda), "", "5% do preço do orçamento");
+    let mut solto = venda.clone();
+    solto.orcamento_id = String::new();
+    solto.itens[0].desconto = String::new();
+    assert!(erro(&solto).contains("Desconto acima do máximo"), "sem o orçamento, vale o preço de hoje");
+    // Desconto na venda inteira (R4): também a partir do preço do orçamento.
+    venda.itens[0].desconto = String::new();
+    venda.desconto = "20".into();
+    let calc = vendas::calcular(c, &venda).unwrap();
+    assert!(calc.erro_desconto.contains("máximo"), "{:?}", calc.erro_desconto);
+    venda.desconto = "15".into();
+    assert_eq!(vendas::calcular(c, &venda).unwrap().erro_desconto, "");
+}
+
+/// R18: o preço do orçamento só serve de referência enquanto ele está aberto. Já
+/// vendido, outra venda que aponte para ele volta ao preço de hoje (e a própria
+/// conclusão recusa o orçamento que não está aberto).
+#[test]
+fn r18_orcamento_vendido_nao_serve_de_referencia() {
+    let l = loja();
+    let c = &l.b.conn;
+    let o = orcamento_vencido(&l, "5");
+    let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    caixa::abrir(c, &l.b.dispositivo, &l.u, "Caixa 1", "0").unwrap();
+    venda.pagamentos = vec![pg("pix", "300")];
+    vendas::concluir(c, &l.b.dispositivo, &l.u, &venda).unwrap();
     let calc = vendas::calcular(c, &venda).unwrap();
     assert!(calc.itens[0].erro.contains("Desconto acima do máximo"), "{:?}", calc.itens[0].erro);
 }

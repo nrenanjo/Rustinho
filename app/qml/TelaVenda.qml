@@ -91,7 +91,7 @@ FocusScope {
                 width: parent.width - 28
                 wrapMode: Text.WordWrap
                 text: !tela.v ? "" : tela.v.situacao === "vendido" ? "Este orçamento já virou venda."
-                      : tela.v.vencido ? "Este orçamento passou da validade. Ao vender, os preços de hoje serão conferidos."
+                      : tela.v.vencido ? "Este orçamento passou da validade. A venda mantém os preços do orçamento."
                       : (tela.orcamento ? "Orçamento cancelado" : "Venda cancelada: as peças voltaram ao estoque")
                         + (tela.v.motivoCancelamento ? ". Motivo: " + tela.v.motivoCancelamento : ".")
                 textFormat: Text.PlainText

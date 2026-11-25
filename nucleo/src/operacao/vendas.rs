@@ -303,11 +303,30 @@ fn passa_do_maximo(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
 }
 
 /// Calcula o carrinho. Não grava nada.
+/// R18 (DP-17, decisão do proprietário de 25/11/2026, regra 18: o orçamento vencido vira venda pelos preços originais
+/// dele): o preço de cada peça no orçamento, para ser a referência do desconto máximo na venda que sai dele. Assim o
+/// preço antigo não conta como desconto sobre o preço de hoje; o desconto dado a mais sobre ele continua limitado. Só
+/// vale com o orçamento ainda aberto (a venda o fecha), para um orçamento já vendido ou cancelado não servir de
+/// referência a outra venda.
+fn precos_do_orcamento(conn: &Connection, orcamento_id: &str) -> Resultado<std::collections::HashMap<String, i64>> {
+    if orcamento_id.is_empty() {
+        return Ok(Default::default());
+    }
+    let mut st = conn.prepare(
+        "SELECT i.produto_id, MIN(i.preco) FROM venda_item i JOIN venda v ON v.id = i.venda_id
+          WHERE v.id = ?1 AND v.tipo = 'orcamento' AND v.situacao = 'aberto' AND i.produto_id IS NOT NULL
+          GROUP BY i.produto_id",
+    )?;
+    let precos = st.query_map([orcamento_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    Ok(precos)
+}
+
 pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     if e.itens.len() > MAX_ITENS {
         return Err(Erro::validacao(format!("Use no máximo {MAX_ITENS} itens por venda.")));
     }
     let tabela = if (1..=5).contains(&e.tabela) { e.tabela } else { 1 };
+    let do_orcamento = precos_do_orcamento(conn, &e.orcamento_id)?;
     let mut itens = Vec::new();
     // Quanto de cada peça já está no carrinho (a mesma peça pode aparecer 2 vezes).
     let mut usado: Vec<(String, i64)> = Vec::new();
@@ -403,8 +422,10 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
                 0
             }
         };
-        // Desconto máximo da peça: conta também o preço digitado abaixo da tabela.
-        let cheio = multiplicar(quantidade, preco_tabela);
+        // Desconto máximo da peça: conta também o preço digitado abaixo da tabela. R18: na venda de um orçamento, a
+        // referência é o preço do orçamento (ou o de hoje, se for menor); veja `precos_do_orcamento`.
+        let referencia = do_orcamento.get(&it.produto_id).map_or(preco_tabela, |&po| po.min(preco_tabela));
+        let cheio = multiplicar(quantidade, referencia);
         if let Some(max) = p.desconto_maximo {
             let dado = cheio - (bruto - desconto);
             if cheio > 0 && dado > 0 && dado as i128 * 10_000 > cheio as i128 * max as i128 && erro.is_empty() {
