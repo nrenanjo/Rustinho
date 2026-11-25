@@ -572,12 +572,15 @@ FocusScope {
     function compensarConflito(c) {
         // B1 e B2 da revisão R3: num computador só (o outro mostra "Corrigido" depois da troca), e o núcleo confere
         // que a operação é a mesma que o gerente viu.
-        janela.confirmar("Fazer a compensação?", c.compensacao + ". O estorno fica no histórico. Faça num computador só: "
-                         + "depois da troca de dados, os outros mostram esta diferença como corrigida.", "Fazer a compensação",
+        // M2 da revisão R6: no vale não há estorno (a dívida vai para o Receber, ou fica o registro de que a loja assumiu).
+        const vale = c.tipo === "vale_a_mais"
+        janela.confirmar("Fazer a compensação?", c.compensacao + (vale ? ". Fica no histórico." : ". O estorno fica no histórico.")
+                         + " Faça num computador só: depois da troca de dados, os outros mostram esta diferença como corrigida.", "Fazer a compensação",
                          () => janela.chamarGerente("conflito_compensar", { id: c.id, operacao: c.compensacaoOperacao }, r => {
                              if (r.ok) {
                                  conflitos = r.dados
-                                 janela.avisar("Compensação feita. O estorno está no histórico.", "ok")
+                                 janela.avisar(vale ? "Compensação feita. Está no histórico (e a dívida, se houver, no Receber do cliente)."
+                                                    : "Compensação feita. O estorno está no histórico.", "ok")
                              } else {
                                  janela.avisar(r.erro, "erro")
                              }

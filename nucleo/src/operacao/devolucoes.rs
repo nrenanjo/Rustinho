@@ -690,7 +690,10 @@ pub fn acertar_vale(
     }
     let detalhe = if divida {
         let cliente = cliente_id.ok_or_else(|| Erro::validacao("Este vale-troca não tem cliente cadastrado."))?;
-        crate::receber::lancar(
+        // M1 da revisão R6: o id da dívida é o do vale e do quanto já estava acertado: dois gerentes sem rede lançam a
+        // mesma linha (a troca fica com uma só).
+        let acertado: i64 = conn.query_row("SELECT acertado FROM vale WHERE id = ?1", [vale_id], |l| l.get(0))?;
+        crate::receber::lancar_com_id(
             conn,
             dispositivo,
             usuario_id,
@@ -701,6 +704,7 @@ pub fn acertar_vale(
                 parcelas: 1,
                 primeiro_vencimento: String::new(),
             },
+            Some(&format!("vale:{vale_id}:{acertado}")),
         )?;
         format!("R$ {} lançados como dívida do cliente no crediário", dinheiro(sobra))
     } else {

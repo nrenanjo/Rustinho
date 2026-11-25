@@ -296,6 +296,13 @@ fn peca(conn: &Connection, id: &str, tabela: i64) -> Resultado<Option<Peca>> {
 /// a soma dos totais dos itens), o item passa do desconto máximo da peça? A conta é exata (em i128, sem arredondar):
 /// dado = cheio − (total − parte), e passa quando dado × 10000 > cheio × máximo.
 fn passa_do_maximo(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
+    excede_com_a_venda(i, desconto_venda, soma)
+        // R18: com a parte do desconto da venda, o item ainda não fica abaixo do valor líquido do orçamento.
+        && !i.v_orcamento.is_some_and(|o| o.cobre_com_a_venda(i.v_total, i.v_quantidade, desconto_venda, soma))
+}
+
+/// R4: a conta de [`passa_do_maximo`] sem a garantia do orçamento.
+fn excede_com_a_venda(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
     let Some(max) = i.v_desconto_maximo else { return false };
     if desconto_venda <= 0 || soma <= 0 || i.v_cheio <= 0 {
         return false;
@@ -303,8 +310,6 @@ fn passa_do_maximo(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
     let dado_vezes_soma =
         (i.v_cheio as i128 - i.v_total as i128) * soma as i128 + desconto_venda as i128 * i.v_total as i128;
     dado_vezes_soma * 10_000 > i.v_cheio as i128 * max as i128 * soma as i128
-        // R18: com a parte do desconto da venda, o item ainda não fica abaixo do valor líquido do orçamento.
-        && !i.v_orcamento.is_some_and(|o| o.cobre_com_a_venda(i.v_total, i.v_quantidade, desconto_venda, soma))
 }
 
 /// R18 (DP-17, decisão do proprietário de 25/11/2026, regra 18: o orçamento vencido vira venda pelos preços originais
@@ -320,9 +325,8 @@ pub struct NoOrcamento {
     /// A parte que fica depois do desconto da venda inteira do orçamento: `fica_num / fica_den`.
     fica_num: i64,
     fica_den: i64,
-    /// Decisão 7 do proprietário (25/11/2026): o preço unitário da linha do orçamento e a quantidade orçada da peça
-    /// (somadas as linhas dela). A garantia vale só para o cliente do orçamento e até essa quantidade.
-    preco: i64,
+    /// Decisão 7 do proprietário (25/11/2026): a quantidade orçada da peça (somadas as linhas dela). A garantia vale
+    /// só para o cliente do orçamento e até essa quantidade.
     orcada: i64,
 }
 
@@ -335,6 +339,11 @@ struct DoOrcamento {
 }
 
 impl ItemCalculado {
+    /// Uma quantidade escrita como na tela.
+    fn quantidade_de(&self, q: i64) -> String {
+        numeros::escrever_quantidade(q)
+    }
+
     /// A peça tem preço de tabela (não é avulso nem de preço aberto).
     fn v_preco_tabela_conhecido(&self) -> bool {
         self.preco_tabela != "0,00" && !self.preco_tabela.is_empty()
@@ -394,14 +403,14 @@ fn liquidos_do_orcamento(conn: &Connection, orcamento_id: &str) -> Resultado<DoO
     let soma: i64 = totais.iter().sum();
     let desconto_itens: i64 = linhas.iter().map(|l| l.3).sum();
     let desconto_venda = (desconto_total - desconto_itens).clamp(0, soma.max(0));
-    for ((produto_id, quantidade, preco, _), item) in linhas.into_iter().zip(totais) {
+    for ((produto_id, quantidade, _, _), item) in linhas.into_iter().zip(totais) {
         if produto_id.is_empty() || quantidade <= 0 {
             continue;
         }
         // R13: a peça do orçamento pela raiz (o carrinho também está pela raiz).
         let produto_id = estoque::raiz(conn, &produto_id)?;
         let orcada = mapa.get(&produto_id).map_or(0, |v| v.orcada) + quantidade;
-        let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma, preco, orcada };
+        let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma, orcada };
         // Fica a linha de maior valor por unidade: a nova, se ela não fica abaixo da que já estava.
         let fica = match mapa.get(&produto_id) {
             Some(velho) if !velho.cobre_o_item(novo.item, novo.quantidade) => NoOrcamento { orcada, ..*velho },
@@ -434,23 +443,16 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     };
     let tabela = if (1..=5).contains(&e.tabela) { e.tabela } else { 1 };
     let orcamento = liquidos_do_orcamento(conn, &e.orcamento_id)?;
-    // Decisão 7 (25/11/2026): a garantia do orçamento vale para o mesmo cliente e até a quantidade orçada. Conta as
-    // linhas do carrinho que estão com o preço do orçamento (uma linha a mais, pelo preço de hoje, não conta).
-    let mesmo_cliente = orcamento.cliente_id == e.cliente_id;
-    let mut no_preco_do_orcamento: std::collections::HashMap<&str, i64> = Default::default();
-    for it in &e.itens {
-        if let Some(o) = orcamento.pecas.get(&it.produto_id) {
-            let preco = numeros::ler_dinheiro(&it.preco).ok().flatten();
-            let q = numeros::ler_quantidade(&it.quantidade).ok().flatten().unwrap_or(0);
-            if preco == Some(o.preco) {
-                *no_preco_do_orcamento.entry(it.produto_id.as_str()).or_default() += q;
-            }
-        }
-    }
-    let garante = |pid: &str| -> bool {
-        let o = &orcamento.pecas[pid];
-        mesmo_cliente && no_preco_do_orcamento.get(pid).copied().unwrap_or(0) <= o.orcada
+    // Decisão 7 (25/11/2026): a garantia do orçamento vale para o mesmo cliente e até a quantidade orçada. O mesmo
+    // cliente: o mesmo cadastro; sem cadastro dos dois lados, o mesmo nome digitado (B5 da revisão R6). A cota conta
+    // as linhas que só passam do desconto máximo por causa da garantia (A2 da R6), seja qual for o preço digitado.
+    let mesmo_cliente = if orcamento.cliente_id.is_empty() && e.cliente_id.is_empty() {
+        texto::limpar(&orcamento.cliente).to_lowercase() == texto::limpar(&e.cliente_nome).to_lowercase()
+    } else {
+        orcamento.cliente_id == e.cliente_id
     };
+    // A linha que passa do máximo e que a garantia cobre: conta na cota (decidido depois de todas as linhas).
+    let mut depende_da_garantia: Vec<bool> = Vec::new();
     let mut itens = Vec::new();
     // Quanto de cada peça já está no carrinho (a mesma peça pode aparecer 2 vezes).
     let mut usado: Vec<(String, i64)> = Vec::new();
@@ -549,38 +551,35 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         // Desconto máximo da peça: conta também o preço digitado abaixo da tabela. R18: na venda de um orçamento,
         // vender pelo valor líquido dele não esbarra no máximo (veja `NoOrcamento`).
         let cheio = multiplicar(quantidade, preco_tabela);
-        let no_orcamento = orcamento.pecas.get(&it.produto_id).copied().filter(|_| garante(&it.produto_id));
-        // Decisão 7: a linha ainda com o preço do orçamento (abaixo do de hoje), fora da garantia, diz o que fazer.
-        if let Some(o) = orcamento.pecas.get(&it.produto_id) {
-            if no_orcamento.is_none() && preco == o.preco && preco < preco_tabela && erro.is_empty() {
-                erro = if !mesmo_cliente {
-                    format!(
-                        "O preço do orçamento vale só para {}. Use o preço de hoje (R$ {}).",
-                        if orcamento.cliente.is_empty() { "a venda sem cliente" } else { orcamento.cliente.as_str() },
-                        numeros::escrever_dinheiro(preco_tabela)
-                    )
-                } else {
-                    format!(
-                        "O orçamento tem {} pelo preço dele. Deixe essa quantidade aqui e ponha o resto em outra \
-                         linha, pelo preço de hoje (R$ {}).",
-                        numeros::escrever_quantidade(o.orcada),
-                        numeros::escrever_dinheiro(preco_tabela)
-                    )
-                };
-            }
-        }
+        let candidato = orcamento.pecas.get(&it.produto_id).copied();
+        let no_orcamento = candidato.filter(|_| mesmo_cliente);
+        let mut depende = false;
         if let Some(max) = p.desconto_maximo {
             let dado = cheio - (bruto - desconto);
-            let pelo_orcamento = no_orcamento.is_some_and(|o| o.cobre_o_item(bruto - desconto, quantidade));
-            if cheio > 0
-                && dado > 0
-                && dado as i128 * 10_000 > cheio as i128 * max as i128
-                && !pelo_orcamento
-                && erro.is_empty()
-            {
-                erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
+            let excede = cheio > 0 && dado > 0 && dado as i128 * 10_000 > cheio as i128 * max as i128;
+            let cobre = |o: &NoOrcamento| o.cobre_o_item(bruto - desconto, quantidade);
+            if excede && erro.is_empty() {
+                if no_orcamento.as_ref().is_some_and(cobre) {
+                    depende = true;
+                } else if candidato.as_ref().is_some_and(cobre) {
+                    // Decisão 7: o orçamento é de outro cliente (ou sem cliente): a garantia não vale aqui.
+                    erro = format!(
+                        "O preço do orçamento vale só para {}. Use o preço de hoje (R$ {}); o desconto máximo desta \
+                         peça é {}%.",
+                        if orcamento.cliente.is_empty() {
+                            "a venda sem cliente (o orçamento não tem cliente)".to_string()
+                        } else {
+                            orcamento.cliente.clone()
+                        },
+                        numeros::escrever_dinheiro(preco_tabela),
+                        numeros::escrever_percentual(max)
+                    );
+                } else {
+                    erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
+                }
             }
         }
+        depende_da_garantia.push(depende);
         let total = bruto - desconto;
         let ja = if servico { 0 } else { usado.iter().find(|u| u.0 == it.produto_id).map(|u| u.1).unwrap_or(0) };
         let pedido = ja + quantidade;
@@ -636,6 +635,42 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         Ok(d) => (d, String::new()),
         Err(m) => (0, m),
     };
+    // Decisão 7 (A2 da revisão R6): a cota da quantidade orçada. Contam as linhas que só passam do desconto máximo
+    // pela garantia do orçamento (pelo desconto do item ou pela parte do desconto da venda), na ordem do carrinho; a
+    // linha que estoura a cota perde a garantia e diz o que fazer.
+    let mut na_cota: Vec<(String, i64)> = Vec::new();
+    for (i, item) in itens.iter_mut().enumerate() {
+        let Some(o) = item.v_orcamento else { continue };
+        let pela_venda = erro_desconto.is_empty()
+            && excede_com_a_venda(item, desconto, depois_itens)
+            && o.cobre_com_a_venda(item.v_total, item.v_quantidade, desconto, depois_itens);
+        if !item.erro.is_empty() || !(depende_da_garantia[i] || pela_venda) {
+            continue;
+        }
+        let ja = match na_cota.iter_mut().find(|c| c.0 == item.produto_id) {
+            Some(c) => {
+                c.1 += item.v_quantidade;
+                c.1
+            }
+            None => {
+                na_cota.push((item.produto_id.clone(), item.v_quantidade));
+                item.v_quantidade
+            }
+        };
+        if ja > o.orcada {
+            item.v_orcamento = None;
+            if depende_da_garantia[i] {
+                item.erro = format!(
+                    "O orçamento tem {} {} pelo preço dele. Deixe essa quantidade nesta linha e ponha o resto em \
+                     outra, pelo preço de hoje (R$ {}; desconto máximo {}%).",
+                    item.quantidade_de(o.orcada),
+                    item.unidade,
+                    item.preco_tabela,
+                    numeros::escrever_percentual(item.v_desconto_maximo.unwrap_or(0))
+                );
+            }
+        }
+    }
     // R4 (D-AUD-4, decisão do proprietário de 25/11/2026): o desconto da venda inteira respeita o desconto máximo de
     // cada peça. A parte de cada item é proporcional ao total dele (como na comissão, no DRE e na devolução); somada
     // ao desconto do item e ao preço abaixo da tabela, não passa do máximo.

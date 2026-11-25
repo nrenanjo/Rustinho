@@ -95,6 +95,7 @@ pub fn previa(
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn gravar_parcelas(
     conn: &Connection,
     dispositivo: &str,
@@ -103,11 +104,17 @@ fn gravar_parcelas(
     venda_id: Option<&str>,
     descricao: &str,
     lista: &[ParcelaPrevia],
+    id_fixo: Option<&str>,
 ) -> Resultado<Vec<String>> {
     let agora = tempo::agora();
     let mut ids = Vec::new();
     for p in lista {
-        let id = tempo::novo_id();
+        // M1 da revisão R6: com id fixo (pelo conteúdo), dois caixas sem rede gravam a mesma parcela: a troca de dados
+        // fica com uma só (e mostra a diferença), em vez de duas dívidas.
+        let id = match id_fixo {
+            Some(f) => format!("{f}:{}", p.numero),
+            None => tempo::novo_id(),
+        };
         conn.execute(
             "INSERT INTO conta_receber (id, cliente_id, venda_id, parcela, parcelas, descricao, valor, vencimento,
                                         criado_em, criado_por, dispositivo)
@@ -145,7 +152,7 @@ pub fn criar_da_venda(
     primeiro: &str,
 ) -> Resultado<()> {
     let lista = previa(conn, cliente_id, valor, parcelas, primeiro)?;
-    gravar_parcelas(conn, dispositivo, usuario_id, cliente_id, Some(venda_id), descricao, &lista)?;
+    gravar_parcelas(conn, dispositivo, usuario_id, cliente_id, Some(venda_id), descricao, &lista, None)?;
     Ok(())
 }
 
@@ -350,6 +357,18 @@ pub struct LancamentoEntrada {
 }
 
 pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &LancamentoEntrada) -> Resultado<Vec<String>> {
+    lancar_com_id(conn, dispositivo, usuario_id, e, None)
+}
+
+/// [`lancar`] com o id das parcelas fixo (`<id_fixo>:<número>`): a mesma dívida lançada em dois caixas sem rede é a
+/// mesma linha (M1 da revisão R6: o acerto do vale-troca usado além do valor).
+pub fn lancar_com_id(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    e: &LancamentoEntrada,
+    id_fixo: Option<&str>,
+) -> Resultado<Vec<String>> {
     situacao(conn, &e.cliente_id)?;
     let descricao = texto::limpar(&e.descricao);
     if descricao.is_empty() {
@@ -363,7 +382,7 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Lancam
         .filter(|v| *v > 0)
         .ok_or_else(|| Erro::campo("valor", "Digite o valor."))?;
     let lista = previa(conn, &e.cliente_id, valor, e.parcelas, &e.primeiro_vencimento)?;
-    let ids = gravar_parcelas(conn, dispositivo, usuario_id, &e.cliente_id, None, &descricao, &lista)?;
+    let ids = gravar_parcelas(conn, dispositivo, usuario_id, &e.cliente_id, None, &descricao, &lista, id_fixo)?;
     auditoria::registrar(
         conn,
         dispositivo,

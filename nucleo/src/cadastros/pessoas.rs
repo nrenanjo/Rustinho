@@ -1134,6 +1134,9 @@ mod testes {
         f2.email = "maria@exemplo.com.br".into();
         f2.logradouro = "Rua das Flores".into();
         f2.numero = "123".into();
+        // B7 da revisão R6: o CEP e o complemento também.
+        f2.cep = "18010-777".into();
+        f2.complemento = "Fundos 9B".into();
         f2.municipio = "Sorocaba".into();
         salvar(&b.conn, &b.dispositivo, &u, &f2).unwrap();
         let detalhes = ficha(&b.conn, &id).unwrap().historico[0].detalhes.clone();
@@ -1143,10 +1146,10 @@ mod testes {
             assert!(detalhes.iter().all(|d| !d.contains(numero)), "o número {numero} ficou no histórico: {detalhes:?}");
         }
         // Decisão 4: o e-mail e o endereço também, só que mudaram.
-        for rotulo in ["E-mail", "Endereço", "Número", "Bairro"] {
+        for rotulo in ["E-mail", "Endereço", "Número", "Bairro", "CEP", "Complemento"] {
             assert!(detalhes.contains(&format!("{rotulo} alterado")), "{rotulo}: {detalhes:?}");
         }
-        for dado in ["maria@", "Flores", "Centro", "123"] {
+        for dado in ["maria@", "Flores", "Centro", "123", "18010", "Fundos"] {
             assert!(detalhes.iter().all(|d| !d.contains(dado)), "{dado} ficou no histórico: {detalhes:?}");
         }
         assert!(detalhes.iter().any(|d| d == "Cidade: — → Sorocaba"), "os outros campos como antes: {detalhes:?}");

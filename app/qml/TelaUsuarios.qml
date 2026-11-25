@@ -113,7 +113,8 @@ FocusScope {
 
     Shortcut {
         sequence: "F2"
-        enabled: tela.StackView.status === StackView.Active
+        // B3 da revisão R6: no modo "só Sair" não há ficha para gravar.
+        enabled: tela.StackView.status === StackView.Active && !tela.soSair
         onActivated: tela.salvar()
     }
 

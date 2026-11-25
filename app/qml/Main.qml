@@ -1649,6 +1649,10 @@ ApplicationWindow {
         // Decisão 5 (R11, 25/11/2026): o item com o foco do teclado (o nome dele), para os testes do Tab.
         linhas.push("0\t0\tTESTE_FOCO:" + (janela.activeFocusItem && janela.activeFocusItem.objectName
                                                ? janela.activeFocusItem.objectName : ""))
+        // B4 da revisão R6: na linha de lista com foco, o número dela e se é a destacada (setas e Enter).
+        const comFoco = janela.activeFocusItem
+        linhas.push("0\t0\tTESTE_FOCO_LINHA:" + (comFoco && comFoco.indice !== undefined && comFoco.atual !== undefined
+                                                     ? comFoco.indice + (comFoco.atual ? ":atual" : ":outra") : ""))
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
     // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas

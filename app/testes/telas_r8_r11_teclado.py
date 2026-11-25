@@ -215,18 +215,43 @@ def main():
             r.fechar()
 
         # ---- C3. Decisão 5: a lista de Compras pelo teclado. O Tab chega à compra e o Enter abre (como o clique). ----
+        # B4 da revisão R6: uma segunda compra (cópia da primeira, com outro número), para o Tab chegar à segunda linha.
+        base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": (
+            "CREATE TEMP TABLE c2 AS SELECT * FROM compra LIMIT 1;"
+            " UPDATE c2 SET id = 'compra-r11b', numero = numero || '9',"
+            " chave = CASE WHEN chave IS NULL THEN NULL ELSE substr(chave, 1, 40) || '9999' END;"
+            " INSERT INTO compra SELECT * FROM c2;"
+        )}, raiz=base.RAIZ)
         r = Rustinho(pasta, "TelaCompras", {}, fotos, "r11-compras")
         try:
             r.entrar("Ana")
             time.sleep(2)
             xdo("mousemove", "1", "1")
-            na_linha = False
-            for _ in range(40):
+            # O Tab passa pela primeira linha e chega à segunda: ela vira a destacada (o Enter e as setas seguem o foco).
+            linhas_vistas = []
+            for _ in range(60):
                 xdo("key", "Tab")
                 time.sleep(0.25)
-                if any(t == "TESTE_FOCO:linhaCompra" for _, _, t in r.textos()):
+                foco = [t.split(":", 1)[1] for _, _, t in r.textos() if t.startswith("TESTE_FOCO_LINHA:")]
+                foco = foco[0] if foco else ""
+                if foco and (not linhas_vistas or linhas_vistas[-1] != foco):
+                    linhas_vistas.append(foco)
+                if len({f.split(":")[0] for f in linhas_vistas}) >= 2:
+                    break
+            segunda = [f for f in linhas_vistas if not f.startswith("0:")]
+            acompanha = bool(segunda) and segunda[0].endswith(":atual")
+            print(("✔ " if acompanha else "✘ ") + "compras: o Tab chega à segunda linha e ela vira a destacada"
+                  + ("" if acompanha else f" (vistas: {linhas_vistas}; foto: {r.foto('-b4')})"))
+            tudo_certo &= acompanha
+            # Volta para a primeira linha (Shift+Tab até ela) para o Enter abrir a nota, como antes.
+            na_linha = False
+            for _ in range(20):
+                if any(t == "TESTE_FOCO:linhaCompra" for _, _, t in r.textos()) \
+                        and any(t == "TESTE_FOCO_LINHA:0:atual" for _, _, t in r.textos()):
                     na_linha = True
                     break
+                xdo("key", "shift+Tab")
+                time.sleep(0.25)
             print(("✔ " if na_linha else "✘ ") + "compras: o Tab chega à linha da compra"
                   + ("" if na_linha else f" (foto: {r.foto('-0')})"))
             tudo_certo &= na_linha

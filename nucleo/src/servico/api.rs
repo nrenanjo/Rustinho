@@ -1745,11 +1745,19 @@ impl Servico {
                 }
                 let d: Compensar = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
+                // M2 da revisão R6: a mensagem certa para o vale (lá não há estorno).
+                let do_vale: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM sync_conflito WHERE id = ?1 AND tipo = 'vale_a_mais')",
+                    [d.id],
+                    |l| l.get(0),
+                )?;
                 let c = sync::compensacao_do_conflito(&tx, d.id)?.ok_or_else(|| {
-                    Erro::validacao(
+                    Erro::validacao(if do_vale {
+                        "Este vale-troca já foi acertado (ou não passa mais do valor). Nada foi feito."
+                    } else {
                         "Este conflito não tem compensação pronta (ou já foi corrigido). Confira com o cliente ou o \
-                         fornecedor e estorne pela tela do Receber ou do A pagar.",
-                    )
+                         fornecedor e estorne pela tela do Receber ou do A pagar."
+                    })
                 })?;
                 // B2 da revisão R3: a proposta mudou desde que o gerente a viu (chegou outra operação pela troca).
                 if d.operacao != c.id {

@@ -172,7 +172,7 @@ fn completar(conn: &Connection, mut a: Aviso) -> Resultado<Aviso> {
     // só alterna expandida/minimizada, então a ação fica num botão.
     if a.acao.is_empty() {
         a.acao = match a.id.as_str() {
-            "receber" => "Ver crediário",
+            "receber" | "vale_acertado_a_mais" => "Ver crediário",
             "pagar" => "Ver contas a pagar",
             "cheques" => "Ver cheques",
             "encomendas" | "encomendas_numero_repetido" => "Ver encomendas",
@@ -673,6 +673,37 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             .categoria(ATENCAO)
             .secao("duplicatas")
             .alvo(if conflitos == 1 { um_conflito(conn)? } else { String::new() }),
+        );
+    }
+
+    // B1 da revisão R6 (decisão 6): o vale usado além do valor foi acertado e depois uma das vendas foi cancelada: o
+    // acerto ficou sobrando (a dívida no crediário, ou o registro de que a loja assumiu). Nada é apagado sozinho: o
+    // gerente confere com o cliente.
+    let sobrando: Vec<(i64, i64, String)> = conn
+        .prepare(
+            "SELECT numero, MIN(acertado, saldo + acertado), COALESCE(cliente_nome, '') FROM vale_saldo
+              WHERE cancelado_em IS NULL AND acertado > 0 AND saldo + acertado > 0 ORDER BY numero",
+        )?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    if let Some((numero, valor, cliente)) = sobrando.first() {
+        avisos.push(
+            Aviso::simples(
+                "vale_acertado_a_mais",
+                &hoje,
+                "Vale-troca".into(),
+                format!(
+                    "Vale-troca nº {numero}{} acertado a mais: R$ {}{}",
+                    if cliente.is_empty() { String::new() } else { format!(" de {cliente}") },
+                    numeros::escrever_dinheiro(*valor),
+                    if sobrando.len() > 1 { format!(" (e mais {})", sobrando.len() - 1) } else { String::new() }
+                ),
+                "uma venda que usou o vale foi cancelada depois do acerto: confira a dívida no crediário do cliente \
+                 (ou o registro, se a loja assumiu)"
+                    .into(),
+                "vender",
+            )
+            .categoria(ATENCAO),
         );
     }
 

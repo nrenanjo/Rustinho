@@ -18,7 +18,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from telas_d09 import TELA, Rustinho, conferir, montar_loja, simples  # noqa: E402
+from telas_d09 import TELA, Rustinho, conferir, montar_loja, simples, xdo  # noqa: E402
 
 
 def main():
@@ -78,6 +78,11 @@ def main():
                                    igual=["Sair", "Mexer nos usuários (senha do gerente)"],
                                    tem=["Para trocar de pessoa no caixa, toque em Sair."],
                                    sem_igual=["Salvar", "Senha do gerente", "Ana"])
+            # B3 da revisão R6: o F2 (gravar) não faz nada no modo "só Sair": nenhum pedido de senha aparece.
+            xdo("key", "F2")
+            time.sleep(1.5)
+            tudo_certo &= conferir("bia: o F2 não pede a senha do gerente (não há ficha para gravar)", r.foto("-f2"),
+                                   r.textos(), igual=["Sair"], sem_igual=["Senha do gerente"])
             if not r.clicar("Sair"):
                 raise RuntimeError(f"não achei o botão Sair (veja {r.saida})")
             time.sleep(2)

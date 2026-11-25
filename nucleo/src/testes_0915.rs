@@ -1167,3 +1167,33 @@ fn f02_os_numero_1_de_dois_caixas_mostra_o_caixa() {
     let vender = qml("TelaVender.qml");
     assert!(vender.contains("osCaixa"), "a venda da OS mostra o caixa");
 }
+
+/// B2 da revisão R6 e R13: a matriz de compatibilidade segura o que um caixa de estrutura menor não sabe gravar: o
+/// vale acertado (`vale.acertado`, estrutura 30) e as peças juntadas (`produto_juncao`, estrutura 31).
+#[test]
+fn r6_b2_matriz_segura_o_vale_acertado_e_a_juncao() {
+    let alteracao = |tabela: &str, dados: &str| Alteracao {
+        seq: 1,
+        id: "x".into(),
+        tabela: tabela.to_string(),
+        chave: "[\"x\"]".into(),
+        operacao: "gravar".into(),
+        dados: Some(dados.into()),
+        dispositivo: "d".into(),
+        quando: String::new(),
+        base: None,
+        ordem: 1,
+        historia: None,
+        compactada: false,
+        operacao_id: None,
+        incompativel: None,
+    };
+    let acertado = alteracao("vale", r#"{"id":"v","valor":3000,"acertado":3000}"#);
+    let sem_acerto = alteracao("vale", r#"{"id":"v","valor":3000,"acertado":0}"#);
+    assert!(sync::incompatibilidade(29, &acertado).is_some(), "estrutura 29 não tem o acerto: fica guardado");
+    assert!(sync::incompatibilidade(29, &sem_acerto).is_none(), "vale sem acerto passa como antes");
+    assert!(sync::incompatibilidade(30, &acertado).is_none());
+    let juncao = alteracao("produto_juncao", r#"{"produto_id":"d","para_id":"k"}"#);
+    assert!(sync::incompatibilidade(30, &juncao).is_some());
+    assert!(sync::incompatibilidade(31, &juncao).is_none());
+}

@@ -515,3 +515,42 @@ fn d6_vale_a_mais_sem_cliente_a_loja_assume() {
         conn(&mut s).query_row("SELECT detalhes FROM auditoria WHERE acao = 'vale.acertar'", [], |l| l.get(0)).unwrap();
     assert!(detalhes.contains("A loja assumiu R$ 30,00"), "{detalhes}");
 }
+
+/// M1 da revisão R6: a dívida do vale tem id pelo conteúdo (o vale e quanto já estava acertado). Dois gerentes sem rede
+/// que fazem a mesma compensação a partir do mesmo estado gravam a mesma linha: a troca de dados fica com uma dívida
+/// só, e não duas.
+#[test]
+fn m1_divida_do_vale_tem_o_mesmo_id_nos_dois_caixas() {
+    let (mut s, _) = vale_usado_duas_vezes(true);
+    let vale: String = conn(&mut s).query_row("SELECT id FROM vale", [], |l| l.get(0)).unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let b = s.banco_para_teste();
+        let tx = b.conn.transaction().unwrap();
+        crate::devolucoes::acertar_vale(&tx, "disp-qualquer", "u", &vale, true).unwrap();
+        ids.push(tx.query_row("SELECT id FROM conta_receber", [], |l| l.get::<_, String>(0)).unwrap());
+        tx.rollback().unwrap();
+    }
+    assert_eq!(ids[0], format!("vale:{vale}:0:1"));
+    assert_eq!(ids[0], ids[1], "o mesmo estado dá a mesma dívida em qualquer caixa");
+}
+
+/// M2 e B1 da revisão R6: compensar de novo o vale já acertado diz isso (sem falar em estorno); e cancelar depois uma
+/// das vendas que usaram o vale deixa o acerto sobrando: o Início avisa o gerente (nada é apagado sozinho).
+#[test]
+fn m2_b1_vale_acertado_compensar_de_novo_e_cancelar_depois() {
+    let (mut s, _) = vale_usado_duas_vezes(true);
+    let k = abertos_do_tipo(&mut s, "vale_a_mais");
+    let operacao = k[0]["compensacaoOperacao"].as_str().unwrap().to_string();
+    ok(&mut s, "conflito_compensar", json!({ "id": k[0]["id"], "operacao": operacao }));
+    let r = chamar(&mut s, "conflito_compensar", json!({ "id": k[0]["id"], "operacao": operacao }));
+    assert_eq!(r["ok"], false, "{r}");
+    let erro = r["erro"].as_str().unwrap_or_default();
+    assert!(erro.contains("já foi acertado") && !erro.contains("estorne"), "{erro}");
+    let avisos = |s: &mut crate::Servico| -> Vec<String> {
+        crate::avisos::do_dia(conn(s)).unwrap().iter().map(|a| a.id.clone()).collect()
+    };
+    assert!(!avisos(&mut s).contains(&"vale_acertado_a_mais".to_string()));
+    conn(&mut s).execute("UPDATE venda SET situacao = 'cancelada' WHERE id = 'venda-b'", []).unwrap();
+    assert!(avisos(&mut s).contains(&"vale_acertado_a_mais".to_string()), "o acerto ficou sobrando");
+}

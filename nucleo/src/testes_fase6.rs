@@ -790,14 +790,15 @@ fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
     assert!(erro.contains("passa do máximo") && erro.contains("Um orçamento novo usa o preço de hoje"), "{erro}");
 }
 
-/// Decisão 7 do proprietário (25/11/2026, R18 (b)): o preço do orçamento vencido (R$ 300; hoje R$ 400) vale só para
-/// o cliente do orçamento e até a quantidade orçada (1). Outro cliente: a linha pede o preço de hoje. Mais unidades no
-/// preço do orçamento: a linha pede para pôr o resto em outra linha. Uma linha a mais, pelo preço de hoje, passa.
+/// Decisão 7 do proprietário (25/11/2026, R18 (b)): o preço do orçamento vencido (R$ 300; hoje R$ 400; desconto máximo
+/// 5%) vale só para o cliente do orçamento e até a quantidade orçada (1). A1/A2 da revisão R6: a cota conta toda linha
+/// que só passa do máximo pela garantia, seja qual for o preço digitado (300,01, ou o preço de hoje com desconto no
+/// item), e também pelo desconto da venda; só a linha que estoura a cota diz o que fazer (B5).
 #[test]
 fn d7_preco_do_orcamento_so_para_o_cliente_e_a_quantidade() {
     let l = loja();
     let c = &l.b.conn;
-    let o = orcamento_vencido(&l, "");
+    let o = orcamento_vencido(&l, "5");
     let erro =
         |v: &VendaEntrada| vendas::calcular(c, v).unwrap().itens.iter().map(|i| i.erro.clone()).collect::<Vec<_>>();
     let base = vendas::orcamento_para_venda(c, &o).unwrap();
@@ -806,18 +807,54 @@ fn d7_preco_do_orcamento_so_para_o_cliente_e_a_quantidade() {
     outro.cliente_id = String::new();
     let e = erro(&outro);
     assert!(e[0].contains("O preço do orçamento vale só para Oficina do Zé") && e[0].contains("R$ 400,00"), "{e:?}");
-    let mut mais = base.clone();
-    mais.itens[0].quantidade = "10".into();
-    let e = erro(&mais);
-    assert!(e[0].contains("O orçamento tem 1 pelo preço dele"), "{e:?}");
-    let mut dividido = base.clone();
-    dividido.itens.push(ItemEntrada {
+    let linha = |q: &str, preco: &str, desconto: &str| ItemEntrada {
         produto_id: l.peca.clone(),
-        quantidade: "9".into(),
-        preco: "400".into(),
+        quantidade: q.into(),
+        preco: preco.into(),
+        desconto: desconto.into(),
         ..Default::default()
-    });
+    };
+    // Mais do que o orçado, em qualquer forma de chegar ao preço do orçamento: recusa.
+    for (q, preco, desconto) in [("10", "300", ""), ("10", "300,01", ""), ("10", "400", "25%")] {
+        let mut v = base.clone();
+        v.itens = vec![linha(q, preco, desconto)];
+        let e = erro(&v);
+        assert!(e[0].contains("O orçamento tem 1 UN pelo preço dele"), "{q} a {preco} {desconto}: {e:?}");
+    }
+    // O caminho que a mensagem manda: 1 pelo orçamento e o resto pelo preço de hoje (com o desconto máximo).
+    let mut dividido = base.clone();
+    dividido.itens.push(linha("9", "400", "5%"));
     assert_eq!(erro(&dividido), vec![String::new(), String::new()], "o resto pelo preço de hoje, em outra linha");
+    // O resto com desconto além do máximo não entra na garantia (a cota já foi): só a segunda linha recusa.
+    let mut contorno = base.clone();
+    contorno.itens.push(linha("9", "400", "25%"));
+    let e = erro(&contorno);
+    assert!(e[0].is_empty() && e[1].contains("O orçamento tem 1 UN"), "{e:?}");
+    // Pelo desconto da venda inteira: 10 un. a 400 com 25% na venda passa do máximo (a cota é 1).
+    let mut pela_venda = base.clone();
+    pela_venda.itens = vec![linha("10", "400", "")];
+    pela_venda.desconto = "25%".into();
+    let calc = vendas::calcular(c, &pela_venda).unwrap();
+    assert!(calc.erro_desconto.contains("passa do máximo"), "{}", calc.erro_desconto);
+    // Controle: 1 un. com 25% na venda é o orçamento (cabe na cota).
+    let mut uma = base.clone();
+    uma.itens = vec![linha("1", "400", "")];
+    uma.desconto = "25%".into();
+    assert_eq!(vendas::calcular(c, &uma).unwrap().erro_desconto, "", "1 un. com o líquido do orçamento");
+}
+
+/// B5 da revisão R6: peça sem desconto máximo: a garantia não protege nada (qualquer preço já passa), então o preço
+/// do orçamento não é recusado para outro cliente nem acima da quantidade.
+#[test]
+fn d7_sem_desconto_maximo_nada_a_recusar() {
+    let l = loja();
+    let c = &l.b.conn;
+    let o = orcamento_vencido(&l, "");
+    let mut v = vendas::orcamento_para_venda(c, &o).unwrap();
+    v.cliente_id = String::new();
+    v.itens[0].quantidade = "10".into();
+    let e: Vec<String> = vendas::calcular(c, &v).unwrap().itens.iter().map(|i| i.erro.clone()).collect();
+    assert_eq!(e, vec![String::new()]);
 }
 
 /// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender

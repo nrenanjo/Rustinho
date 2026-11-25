@@ -36,8 +36,8 @@ pub(super) const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
 /// R15 (R-03, decisão do proprietário de 25/11/2026, regra 15): a compensação pronta de uma conta paga a mais: o
 /// estorno da operação que sobrou, com o dinheiro acertado pela regra do R14 (a gaveta aberta deste computador ou o
 /// Caixa geral). Só existe quando é exata: a operação mais nova que tem exatamente o valor que passou e que é só desta
-/// conta (o recebimento de várias parcelas reabriria as outras). O vale usado a mais não tem compensação pronta (é
-/// escolha comercial: espera o proprietário).
+/// conta (o recebimento de várias parcelas reabriria as outras). O vale usado a mais (decisão 6 do proprietário):
+/// a diferença vira dívida do cliente cadastrado, ou a loja assume (vale sem cadastro), com o registro.
 pub struct Compensacao {
     /// "recebimento", "pagamento", "vale_divida" ou "vale_loja" (decisão 6).
     pub tabela: &'static str,
@@ -282,8 +282,8 @@ pub(super) fn texto_a_mais(
             )?;
             format!(
                 "O vale-troca Nº {numero}{} ({}) foi usado além do valor em caixas sem rede: vendas {}. Usado no total: \
-                 {}. Confira com o cliente e corrija pela venda que sobrou (o cancelamento fica no histórico). Nada foi \
-                 apagado sozinho.",
+                 {}. Confira com o cliente: a compensação pronta acerta a diferença (dívida no crediário do cliente \
+                 cadastrado, ou a loja assume), ou cancele a venda que sobrou. Nada foi apagado sozinho.",
                 if cliente.is_empty() { String::new() } else { format!(" de {cliente}") },
                 dinheiro(valor),
                 vendas.join(" e "),
