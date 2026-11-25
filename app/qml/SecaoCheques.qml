@@ -240,9 +240,10 @@ FocusScope {
                             // R19 (DP-18): no cheque devolvido, desfaz a devolução; é sempre do gerente (o núcleo confere).
                             readonly property bool devolvido: linha.ch.situacao === "devolvido"
                             onClicked: janela.confirmar(devolvido ? "Desfazer a devolução do cheque?" : "Devolver o cheque à carteira?",
-                                                        devolvido ? "O cheque nº " + linha.ch.numero + " volta a ficar "
-                                                                    + (linha.ch.conta !== "" ? "depositado em " + linha.ch.conta : "em carteira")
-                                                                    + ". A saída da conta e a dívida lançada no Receber são desfeitas. Só o gerente pode."
+                                                        devolvido ? "O cheque nº " + linha.ch.numero
+                                                                    + (linha.ch.conta !== "" ? " volta a ficar depositado em " + linha.ch.conta + ", e a saída da conta é estornada."
+                                                                                             : " volta a ficar em carteira.")
+                                                                    + " Se a devolução lançou uma dívida no Receber, ela é cancelada. Só o gerente pode."
                                                                   : "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
                                                         devolvido ? "Desfazer a devolução" : "Devolver à carteira", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
                                                             // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.

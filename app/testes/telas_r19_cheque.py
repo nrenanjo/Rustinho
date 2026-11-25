@@ -4,8 +4,8 @@ com registro.
 
 Em Financeiro › Cheques › Todos, um cheque devolvido (depositado no "Banco R19", com a dívida lançada no Receber):
 - a linha do cheque devolvido tem o botão "Desfazer";
-- o clique pergunta "Desfazer a devolução do cheque?", diz que o cheque volta a ficar depositado no banco e que a
-  saída da conta e a dívida são desfeitas;
+- o clique pergunta "Desfazer a devolução do cheque?", diz que o cheque volta a ficar depositado no banco, que a
+  saída da conta é estornada e que a dívida lançada no Receber, se houver, é cancelada;
 - confirmado (a Ana é gerente), o cheque volta a "depositado", a saída da conta é estornada, a dívida é cancelada
   e o registro "cheque.desfazer_devolucao" fica no histórico.
 
@@ -87,10 +87,10 @@ def main():
                 raise RuntimeError(f"não achei o botão Desfazer na linha do cheque devolvido (veja {r.saida})")
             time.sleep(1.2)
             tudo_certo &= conferir(
-                "a pergunta diz o que volta: depositado no banco, a saída da conta e a dívida desfeitas",
+                "a pergunta diz o que volta: depositado no banco, a saída estornada e a dívida (se houver) cancelada",
                 r.foto("-2"), r.textos(),
-                tem=[PERGUNTA, "volta a ficar depositado em Banco R19",
-                     "A saída da conta e a dívida lançada no Receber são desfeitas. Só o gerente pode."],
+                tem=[PERGUNTA, "volta a ficar depositado em Banco R19, e a saída da conta é estornada.",
+                     "Se a devolução lançou uma dívida no Receber, ela é cancelada. Só o gerente pode."],
                 igual=["Desfazer a devolução"])
             if not r.clicar("Desfazer a devolução"):
                 raise RuntimeError(f"não achei o botão Desfazer a devolução (veja {r.saida})")
