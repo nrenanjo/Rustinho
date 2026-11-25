@@ -32,6 +32,129 @@ pub(super) const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
+/// R15 (R-03, decisão do proprietário de 25/11/2026, regra 15): a compensação pronta de uma conta paga a mais: o
+/// estorno da operação que sobrou, com o dinheiro acertado pela regra do R14 (a gaveta aberta deste computador ou o
+/// Caixa geral). Só existe quando é exata: a operação mais nova que tem exatamente o valor que passou e que é só desta
+/// conta (o recebimento de várias parcelas reabriria as outras). O vale usado a mais não tem compensação pronta (é
+/// escolha comercial: espera o proprietário).
+pub struct Compensacao {
+    /// "recebimento" ou "pagamento".
+    pub tabela: &'static str,
+    pub id: String,
+    pub texto: String,
+}
+
+pub(super) fn compensacao_de(
+    conn: &Connection,
+    tipo: &str,
+    tabela: &str,
+    chave: &str,
+) -> Resultado<Option<Compensacao>> {
+    if tipo != "pago_a_mais" {
+        return Ok(None);
+    }
+    let dinheiro = |v: i64| format!("R$ {}", crate::numeros::escrever_dinheiro(v));
+    match tabela {
+        "conta_receber" => {
+            let sobra: Option<i64> = conn
+                .query_row(
+                    "SELECT pago - valor FROM conta_receber_saldo WHERE id = ?1 AND cancelado_em IS NULL AND pago > valor",
+                    [chave],
+                    |l| l.get(0),
+                )
+                .optional()?;
+            let Some(sobra) = sobra else { return Ok(None) };
+            let achado: Option<(String, i64, String, String)> = conn
+                .query_row(
+                    "SELECT r.id, r.numero, r.dispositivo, r.forma FROM recebimento r JOIN recebimento_parcela rp ON rp.recebimento_id = r.id
+                      WHERE rp.conta_id = ?1 AND rp.valor = ?2 AND r.estornado_em IS NULL AND r.forma <> 'devolucao'
+                        AND NOT EXISTS (SELECT 1 FROM recebimento_parcela o
+                                         WHERE o.recebimento_id = r.id AND o.conta_id <> ?1 AND o.valor <> 0)
+                      ORDER BY r.criado_em DESC, r.id DESC LIMIT 1",
+                    params![chave, sobra],
+                    |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+                )
+                .optional()?;
+            Ok(achado.map(|(id, numero, disp, forma)| {
+                let caixa = nome_do_caixa(conn, &disp).unwrap_or_default();
+                let onde = if caixa.is_empty() { "outro caixa".to_string() } else { caixa };
+                Compensacao {
+                    tabela: "recebimento",
+                    id,
+                    texto: format!(
+                        "Estornar o recebimento Nº {numero} do {onde} ({}){}",
+                        dinheiro(sobra),
+                        if forma == "dinheiro" {
+                            ": o dinheiro é devolvido ao cliente pela gaveta aberta deste computador (sem caixa \
+                             aberto, pelo Caixa geral)"
+                        } else {
+                            ""
+                        }
+                    ),
+                }
+            }))
+        }
+        "conta_pagar" => {
+            let sobra: Option<i64> = conn
+                .query_row(
+                    "SELECT pago - valor FROM conta_pagar_saldo WHERE id = ?1 AND cancelado_em IS NULL AND pago > valor",
+                    [chave],
+                    |l| l.get(0),
+                )
+                .optional()?;
+            let Some(sobra) = sobra else { return Ok(None) };
+            let achado: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT id, dispositivo FROM pagamento WHERE conta_pagar_id = ?1 AND valor = ?2 AND estornado_em IS NULL
+                      ORDER BY criado_em DESC, id DESC LIMIT 1",
+                    params![chave, sobra],
+                    |l| Ok((l.get(0)?, l.get(1)?)),
+                )
+                .optional()?;
+            Ok(achado.map(|(id, disp)| {
+                let caixa = nome_do_caixa(conn, &disp).unwrap_or_default();
+                let onde = if caixa.is_empty() { "outro caixa".to_string() } else { caixa };
+                Compensacao {
+                    tabela: "pagamento",
+                    id,
+                    texto: format!(
+                        "Estornar o pagamento de {} feito no {onde}: o valor volta como no estorno pela tela do A pagar",
+                        dinheiro(sobra)
+                    ),
+                }
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// R15: faz a compensação pronta do conflito (sempre do gerente; o comando confere). Recusa se o conflito já foi
+/// corrigido ou se não há compensação exata. O estorno fica no histórico como qualquer outro.
+pub fn compensar(conn: &Connection, dispositivo: &str, usuario_id: &str, conflito_id: i64) -> Resultado<String> {
+    let k: Option<(String, String, String, Option<String>)> = conn
+        .query_row("SELECT tipo, tabela, chave, resolvido_em FROM sync_conflito WHERE id = ?1", [conflito_id], |l| {
+            Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
+        })
+        .optional()?;
+    let Some((tipo, tabela, chave, resolvido)) = k else { return Err(Erro::NaoEncontrado("Conflito".into())) };
+    let sem = || {
+        Erro::validacao(
+            "Este conflito não tem compensação pronta (ou já foi corrigido). Confira com o cliente ou o fornecedor e \
+             estorne pela tela do Receber ou do A pagar.",
+        )
+    };
+    if resolvido.is_some() || !ainda_a_mais(conn, &tipo, &tabela, &chave)? {
+        return Err(sem());
+    }
+    let c = compensacao_de(conn, &tipo, &tabela, &chave)?.ok_or_else(sem)?;
+    let motivo = "Pago mais de uma vez em caixas sem rede (compensação do conflito entre caixas)";
+    match c.tabela {
+        "recebimento" => crate::receber::estornar(conn, dispositivo, usuario_id, &c.id, motivo)?,
+        _ => crate::pagar::estornar(conn, dispositivo, usuario_id, &c.id, motivo)?,
+    }
+    Ok(c.texto)
+}
+
 /// R-03: a conta (ou o vale) continua passando do valor? (Só lê.)
 pub(super) fn ainda_a_mais(conn: &Connection, tipo: &str, tabela: &str, chave: &str) -> Resultado<bool> {
     let sql = match (tipo, tabela) {
@@ -270,6 +393,8 @@ pub struct Conflito {
     /// Histórico filtra por eles quando a ligação é inequívoca.
     pub tabela: String,
     pub registro_id: String,
+    /// R15 (R-03): a compensação pronta (o texto do botão), ou vazio quando não há uma exata.
+    pub compensacao: String,
 }
 
 /// Nome do campo para a tela.
@@ -386,6 +511,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 Some([Value::String(id)]) => id.clone(),
                 _ => String::new(),
             },
+            compensacao: String::new(),
         };
         match tipo.as_str() {
             "orcamento" => {
@@ -459,6 +585,9 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 // de abertos na hora, sem esperar a próxima troca de dados.
                 if k.resolvido.is_empty() && !ainda_a_mais(conn, &tipo, &tabela, &chave)? {
                     k.resolvido = TEXTO_CORRIGIDO.into();
+                }
+                if k.resolvido.is_empty() {
+                    k.compensacao = compensacao_de(conn, &tipo, &tabela, &chave)?.map(|c| c.texto).unwrap_or_default();
                 }
             }
             "gerente" => {

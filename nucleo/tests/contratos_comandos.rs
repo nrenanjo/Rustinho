@@ -91,6 +91,7 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("config_ler", "leitura", &["leitura"]),
     ("config_salvar", "configuracoes", &[]),
     ("configurar_inicio", "caixa", &["sem_sessao"]),
+    ("conflito_compensar", "gerente", &["nao_repetir"]),
     ("conflito_resolver", "gerente", &[]),
     ("conflitos_listar", "simultaneidade", &["leitura"]),
     ("conflitos_manter_todos", "gerente", &[]),

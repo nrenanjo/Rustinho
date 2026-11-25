@@ -416,6 +416,7 @@ pub const NOMES_DAS_OPERACOES: &[(&str, &str)] = &[
     ("compra_estornar", "Estorno de compra"),
     ("compra_importar", "Importação de compras"),
     ("compra_lancar", "Compra lançada"),
+    ("conflito_compensar", "Compensação de conflito entre caixas"),
     ("conta_cancelar", "Dívida tirada do crediário"),
     ("conta_loja_salvar", "Conta da loja"),
     ("devolucao_desfazer", "Devolução desfeita"),

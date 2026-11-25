@@ -246,6 +246,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "config_salvar",
     "configurar_inicio",
     "conflito_resolver",
+    "conflito_compensar",
     "conflitos_manter_todos",
     "conta_loja_conferir",
     "dre_classificacao_salvar",
@@ -342,6 +343,8 @@ pub const NAO_REPETIR: &[&str] = &[
     "pagar_pagar",
     "pagar_cancelar",
     "pagamento_estornar",
+    // R15: a compensação pronta estorna um recebimento ou um pagamento (dinheiro: a mesma chave não repete).
+    "conflito_compensar",
     "movimento_lancar",
     "movimento_estornar",
     "transferir",
@@ -425,6 +428,7 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("sync_tentar_novamente", Classe::Caixa),
     ("conflitos_listar", Classe::ConsultaDoGerente("simultaneidade")),
     ("conflito_resolver", Classe::Gerente("gerente")),
+    ("conflito_compensar", Classe::Gerente("gerente")),
     ("referencia_aceitar", Classe::Gerente("gerente")),
     ("conflitos_manter_todos", Classe::Gerente("gerente")),
     ("caixas_conhecidos", Classe::Leitura),
@@ -1698,6 +1702,24 @@ impl Servico {
                     "sync_conflito",
                     &d.id.to_string(),
                     &[if d.usar { "Voltou a versão que tinha perdido".into() } else { "Ficou como está".into() }],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::conflitos(&self.banco.conn)?))
+            }
+            // R15 (R-03, decisão do proprietário de 25/11/2026): a compensação pronta de uma conta paga a mais, sempre
+            // pelo gerente; o estorno fica no histórico como qualquer outro, e o conflito sai da lista.
+            "conflito_compensar" => {
+                let d: Resolver = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let feito = sync::compensar(&tx, &disp, &sessao.usuario_id, d.id)?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "conflito.compensar",
+                    "sync_conflito",
+                    &d.id.to_string(),
+                    &[feito],
                 )?;
                 tx.commit()?;
                 Ok(json!(sync::conflitos(&self.banco.conn)?))

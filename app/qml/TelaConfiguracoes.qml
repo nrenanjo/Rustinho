@@ -492,6 +492,20 @@ FocusScope {
         })
     }
 
+    // R15 (R-03, decisão do proprietário de 25/11/2026): a compensação pronta de uma conta paga a mais. A pergunta
+    // mostra o que vai ser feito; só o gerente confirma (o núcleo confere).
+    function compensarConflito(c) {
+        janela.confirmar("Fazer a compensação?", c.compensacao + ". O estorno fica no histórico.", "Fazer a compensação",
+                         () => janela.chamarGerente("conflito_compensar", { id: c.id }, r => {
+                             if (r.ok) {
+                                 conflitos = r.dados
+                                 janela.avisar("Compensação feita. O estorno está no histórico.", "ok")
+                             } else {
+                                 janela.avisar(r.erro, "erro")
+                             }
+                         }))
+    }
+
     function salvarGerente() {
         const acoes = {}
         for (const a of gerente.acoes)
@@ -2512,6 +2526,17 @@ FocusScope {
                                     font.pixelSize: 14
                                     Layout.fillWidth: true
                                 }
+                                Text {
+                                    // R15: a compensação pronta, à vista antes do clique.
+                                    visible: !modelData.resolvido && !!modelData.compensacao
+                                    text: "Compensação pronta: " + modelData.compensacao + "."
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaDaFaixa(faixaDaLista5.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
                                 Linha {
                                     visible: !modelData.resolvido
                                     spacing: 12
@@ -2521,6 +2546,13 @@ FocusScope {
                                         text: "Usar a do outro caixa"
                                         tipo: "secundario"
                                         onClicked: tela.resolverConflito(modelData, true)
+                                    }
+                                    // R15: a compensação pronta (a conta paga a mais), quando há uma exata.
+                                    Botao {
+                                        visible: !!modelData.compensacao
+                                        text: "Fazer a compensação"
+                                        tipo: "principal"
+                                        onClicked: tela.compensarConflito(modelData)
                                     }
                                     Botao {
                                         text: modelData.podeUsar ? "Deixar como está" : "Entendi"
