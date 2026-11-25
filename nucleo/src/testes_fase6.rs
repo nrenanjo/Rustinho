@@ -1130,11 +1130,12 @@ fn e01_r25_venda_cancelada_depois_do_fechamento_fica_no_dia_dela() {
     assert_eq!(fluxo(), (30_000, 30_000), "a entrada fica no dia da venda e o cancelamento entra hoje");
 }
 
-/// E14 · revisão (achado novo, pede decisão): o recibo do crediário
-/// reimpresso mostra o nome e o documento do cadastro de HOJE (o recebimento
-/// não guarda o nome); a venda reimpressa mostra o nome gravado nela.
+/// E14 · DA-F6-3, decidida pelo proprietário em 25/11/2026 (regra 26: "manter; aviso
+/// no manual"): o recibo do crediário reimpresso mostra o nome e o documento do
+/// cadastro de HOJE (o recebimento não guarda o nome); a venda reimpressa mostra o
+/// nome gravado nela. O manual avisa (R26).
 #[test]
-fn e14_revisao_recibo_reimpresso_com_o_cadastro_de_hoje() {
+fn e14_r26_recibo_reimpresso_com_o_cadastro_de_hoje_e_aviso_no_manual() {
     let l = loja();
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
@@ -1158,6 +1159,11 @@ fn e14_revisao_recibo_reimpresso_com_o_cadastro_de_hoje() {
     assert_eq!(receber::recibo(c, &rec).unwrap().cliente, "Auto Center Zé Ltda", "o recibo antigo com o nome de hoje");
     assert!(crate::impressao::recibo(c, &rec).unwrap().contains("Auto Center Zé Ltda"));
     assert_eq!(vendas::ficha(c, &v).unwrap().cliente, "Oficina do Zé", "a venda guarda o nome dela");
+    let manual = include_str!("../../MANUAL.md");
+    assert!(
+        manual.contains("**Segunda via do recibo do crediário:** sai com o cadastro **de hoje** do cliente."),
+        "o manual avisa a regra 26"
+    );
 }
 
 /// F02 · revisão (observação): depois que um gerente entra e a loja ganha a

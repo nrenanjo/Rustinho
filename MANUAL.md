@@ -97,6 +97,42 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
 
 ### Novo na versão 0.9.19
 
+- **Regras do dia a dia (decisões do dono, 24 e 25/11/2026):**
+  - **Olho de Hórus:** com o olho fechado, somem o custo, o % de lucro (com os títulos deles), os valores das telas de
+    resultados e os saldos e totais do Caixa. O preço de venda continua à vista e, na ficha da peça, sobe para o lugar
+    do custo. O olho só muda o que aparece na tela e nunca atrapalha o fechamento do caixa.
+  - **Sair:** o "Trocar usuário" saiu do Início. Para outra pessoa assumir o caixa, use **Sair** na tela de
+    **Usuários**: o Rustinho continua aberto e cada venda fica no nome de quem fez.
+  - **Fechar o caixa:** o valor esperado na gaveta aparece antes da contagem, também com o olho fechado.
+  - **Só o gerente**, com o registro no histórico:
+    - ligar ou desligar a troca de dados;
+    - mudar o limite de crédito do cliente;
+    - criar uma unidade fracionada;
+    - mudar o CSOSN da peça;
+    - mudar o desconto máximo ou a comissão da peça;
+    - descartar uma pendência do XML.
+
+    Quem não é gerente recebe o pedido da senha do gerente, como no preço de venda.
+  - **Custo só para quem vê os resultados:** também na lista do que comprar (na tela e impressa) e em "Comprado por
+    fornecedor".
+  - **Crediário:** se o cliente paga uma parcela atrasada em duas vezes, a multa e os juros não são cobrados de novo
+    no segundo pagamento. Daí em diante, só os juros dos dias seguintes, sobre o que falta.
+  - **Desconto da venda:** o desconto dado na venda inteira respeita o desconto máximo de cada peça.
+  - **Bonificação:** uma compra com custo zero não muda o custo da peça.
+  - **Comissão:** fecha só até ontem. As vendas de hoje ainda podem entrar; na tela, **Ver até ontem** mostra o
+    período que dá para fechar. A devolução feita depois de fechada a comissão desconta no período em que foi feita,
+    e o período fechado não muda.
+  - **Venda cancelada depois do fechamento do caixa:** continua no dia em que foi feita, e o fluxo de caixa mostra o
+    cancelamento à parte, no dia dele.
+  - **Pendências do XML:** dá para descartar uma pendência, com o motivo, que fica no histórico. Descartar um
+    rascunho de compra fecha as pendências dele.
+  - **Trazer cadastros pelo XML:** a prévia só precisa ser refeita se mudarem peças, pessoas ou códigos. Uma venda no
+    meio do caminho não atrapalha mais.
+  - **Histórico do cadastro:** quando o telefone ou o celular mudam, o histórico guarda só "Telefone alterado" ou
+    "Celular alterado", sem os números. O que já estava no histórico fica como estava.
+  - **Segunda via do recibo do crediário:** sai com o cadastro **de hoje** do cliente. Se o endereço ou o nome mudaram
+    depois do pagamento, a segunda via mostra o novo.
+
 - **Recuperação automática do trabalho em andamento (R1 / R2 — REC-1 a REC-6):**
   - Enquanto você preenche uma ficha de peça, um cadastro de cliente ou fornecedor, uma venda no carrinho, um recebimento de crediário, uma ordem de serviço ou a conferência de uma compra, o Rustinho guarda automaticamente o rascunho no banco de dados deste caixa (com duas versões conferidas por resumo SHA-256 e sem jamais gravar senhas ou PINs), exibindo **Guardado às HH:MM** somente após a confirmação no disco.
   - Se a sessão terminar (trocar usuário, usuário desativado, sessão perdida, fechar a janela ou queda de energia/travamento), ao entrar de novo o Início apresenta **Continuar de onde parou?**. O trabalho volta sempre como **rascunho** para conferência — nenhuma venda, pagamento, lançamento de estoque ou cadastro é concluído sozinho. Se a operação já tinha sido concluída antes da queda, o Rustinho informa o resultado gravado sem repetir.

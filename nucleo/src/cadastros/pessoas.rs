@@ -916,10 +916,17 @@ fn corta(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
+/// R10 (D-AUD-9, LGPD, decisão do proprietário de 25/11/2026): a partir da 0.9.19, do telefone e do celular o
+/// histórico guarda só que mudaram, sem o número antigo (nem o novo, que está no cadastro). O que já estava no
+/// histórico fica como está.
+const SO_QUE_MUDOU: [&str; 2] = ["Telefone", "Celular"];
+
 fn diferencas(a: &Dados, b: &Dados) -> Vec<String> {
     let mut v = Vec::new();
     let mut campo = |rotulo: &str, x: &str, y: &str| {
-        if x != y {
+        if x != y && SO_QUE_MUDOU.contains(&rotulo) {
+            v.push(format!("{rotulo} alterado"));
+        } else if x != y {
             let t = |s: &str| if s.is_empty() { "—".to_string() } else { s.to_string() };
             v.push(format!("{rotulo}: {} → {}", t(x), t(y)));
         }
@@ -1081,6 +1088,31 @@ mod testes {
         salvar(&b.conn, &b.dispositivo, &u, &f2).unwrap();
         let h = ficha(&b.conn, &id).unwrap().historico;
         assert!(h[0].detalhes.iter().any(|d| d.starts_with("Telefone")));
+    }
+
+    /// R10 (D-AUD-9, LGPD, decisão do proprietário de 25/11/2026): mudar o telefone ou o celular deixa no histórico
+    /// só "Telefone alterado" / "Celular alterado", sem os números. Antes ficava "Telefone: antigo → novo". Os
+    /// outros campos continuam como antes.
+    #[test]
+    fn r10_historico_sem_o_telefone_antigo() {
+        let (b, u) = base();
+        let mut f = ficha_nova(&b.conn, "cliente").unwrap();
+        f.nome = "Maria da Silva".into();
+        f.telefone = "(15) 3551-1111".into();
+        f.celular = "(15) 99111-2222".into();
+        let id = salvar(&b.conn, &b.dispositivo, &u, &f).unwrap();
+        let mut f2 = ficha(&b.conn, &id).unwrap();
+        f2.telefone = "(15) 3552-3333".into();
+        f2.celular = "(15) 99444-5555".into();
+        f2.bairro = "Centro".into();
+        salvar(&b.conn, &b.dispositivo, &u, &f2).unwrap();
+        let detalhes = ficha(&b.conn, &id).unwrap().historico[0].detalhes.clone();
+        assert!(detalhes.contains(&"Telefone alterado".to_string()), "{detalhes:?}");
+        assert!(detalhes.contains(&"Celular alterado".to_string()), "{detalhes:?}");
+        for numero in ["3551", "1111", "99111", "2222", "3552", "3333", "99444", "5555"] {
+            assert!(detalhes.iter().all(|d| !d.contains(numero)), "o número {numero} ficou no histórico: {detalhes:?}");
+        }
+        assert!(detalhes.iter().any(|d| d == "Bairro: — → Centro"), "os outros campos como antes: {detalhes:?}");
     }
 
     #[test]
