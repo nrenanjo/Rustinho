@@ -22,6 +22,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import telas_d09 as base  # noqa: E402
 from telas_d09 import TELA, Rustinho, conferir, montar_loja  # noqa: E402
 
 NOTA = "A comissão fecha só até ontem: as vendas de hoje ainda podem entrar."
@@ -38,16 +39,19 @@ def main():
         montar_loja(pasta)
         c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
         ana = c.execute("SELECT id FROM usuario WHERE nome = 'Ana'").fetchone()[0]
-        c.execute("UPDATE usuario SET comissao = 1000 WHERE id = ?", (ana,))
-        n = c.execute(
-            "UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day') "
-            "WHERE rowid = (SELECT rowid FROM venda WHERE vendedor_id = ? AND cancelado_em IS NULL ORDER BY rowid LIMIT 1)",
+        venda = c.execute(
+            "SELECT id FROM venda WHERE vendedor_id = ? AND tipo = 'venda' AND situacao = 'concluida' "
+            "ORDER BY rowid LIMIT 1",
             (ana,),
-        ).rowcount
-        c.commit()
+        ).fetchone()
         c.close()
-        if n != 1:
+        if not venda:
             raise RuntimeError("a loja de teste não tem venda da Ana para passar para ontem")
+        # Pelo núcleo: os gatilhos da troca de dados usam as funções do Rustinho.
+        base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": (
+            f"UPDATE usuario SET comissao = 1000 WHERE id = '{ana}';"
+            f"UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day') WHERE id = '{venda[0]}';"
+        )}, raiz=base.RAIZ)
         r = Rustinho(pasta, "TelaFinanceiro", {"secao": "comissoes"}, fotos, "r3-comissao")
         try:
             r.entrar("Ana")
