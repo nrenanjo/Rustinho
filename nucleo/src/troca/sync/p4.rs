@@ -1021,8 +1021,11 @@ pub(super) fn chaves_dos_caixas(conn: &Connection) -> Resultado<HashMap<String, 
     let nomes_que_caem = |k: &Chave| -> Vec<String> {
         let Some((lista, total)) = caem.get(k) else { return Vec::new() };
         let mut v: Vec<String> = lista.iter().map(|a| a.nome.clone()).collect();
-        if *total > v.len() {
-            v.push(format!("e mais {} caixas", total - v.len()));
+        // C2R6-1: "e mais 1 caixa", no singular.
+        match total.saturating_sub(v.len()) {
+            0 => {}
+            1 => v.push("e mais 1 caixa".to_string()),
+            n => v.push(format!("e mais {n} caixas")),
         }
         v
     };

@@ -581,16 +581,24 @@ impl RegistroConferido {
                 continue;
             }
             let total = tamanho.get(k).copied().unwrap_or(1).saturating_sub(1);
+            // C2R6-1 (R6 da 2C): os mais perto primeiro e, no mesmo nível, por nome: a lista é a
+            // mesma a cada consulta (antes dependia da ordem de um `HashMap`).
+            let nome = |v: &Chave| por_chave.get(v).map(|a| a.nome.as_str()).unwrap_or("");
             let mut lista: Vec<Aprovacao> = Vec::new();
-            let mut pilha: Vec<Chave> = filhos.get(k).cloned().unwrap_or_default();
-            while let Some(v) = pilha.pop() {
-                if lista.len() >= ate {
-                    break;
+            let mut nivel: Vec<Chave> = filhos.get(k).cloned().unwrap_or_default();
+            while !nivel.is_empty() && lista.len() < ate {
+                nivel.sort_by(|a, b| nome(a).cmp(nome(b)).then(a.cmp(b)));
+                let mut proximo = Vec::new();
+                for v in &nivel {
+                    if lista.len() >= ate {
+                        break;
+                    }
+                    if let Some(a) = por_chave.get(v) {
+                        lista.push((*a).clone());
+                    }
+                    proximo.extend(filhos.get(v).into_iter().flatten().copied());
                 }
-                if let Some(a) = por_chave.get(&v) {
-                    lista.push((*a).clone());
-                }
-                pilha.extend(filhos.get(&v).into_iter().flatten().copied());
+                nivel = proximo;
             }
             lista.sort_by(|a, b| a.nome.cmp(&b.nome));
             m.insert(*k, (lista, total));
