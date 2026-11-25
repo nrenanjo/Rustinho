@@ -666,6 +666,59 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     Ok(())
 }
 
+/// Decisão 6 do proprietário (25/11/2026, R15): o vale-troca usado além do valor em caixas sem rede. O que passou
+/// fica acertado no vale (`acertado`): ou virou dívida do cliente no crediário (`divida`), ou a loja assumiu.
+/// Devolve a diferença acertada. Recusa se o vale não passa mais do valor.
+pub fn acertar_vale(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    vale_id: &str,
+    divida: bool,
+) -> Resultado<i64> {
+    crate::sync::exigir_editavel(conn, "vale", vale_id)?;
+    let (numero, sobra, cliente_id): (i64, i64, Option<String>) = conn
+        .query_row(
+            "SELECT numero, -(saldo + acertado), cliente_id FROM vale_saldo WHERE id = ?1 AND cancelado_em IS NULL",
+            [vale_id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+        )
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Vale-troca".into()))?;
+    if sobra <= 0 {
+        return Err(Erro::validacao("Este vale-troca não passa mais do valor: nada a acertar."));
+    }
+    let detalhe = if divida {
+        let cliente = cliente_id.ok_or_else(|| Erro::validacao("Este vale-troca não tem cliente cadastrado."))?;
+        crate::receber::lancar(
+            conn,
+            dispositivo,
+            usuario_id,
+            &crate::receber::LancamentoEntrada {
+                cliente_id: cliente,
+                descricao: format!("Vale-troca nº {numero} usado além do valor"),
+                valor: dinheiro(sobra),
+                parcelas: 1,
+                primeiro_vencimento: String::new(),
+            },
+        )?;
+        format!("R$ {} lançados como dívida do cliente no crediário", dinheiro(sobra))
+    } else {
+        format!("A loja assumiu R$ {}", dinheiro(sobra))
+    };
+    conn.execute("UPDATE vale SET acertado = acertado + ?2 WHERE id = ?1", params![vale_id, sobra])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "vale.acertar",
+        "vale",
+        vale_id,
+        &[format!("Vale-troca nº {numero} usado além do valor (caixas sem rede)"), detalhe],
+    )?;
+    Ok(sobra)
+}
+
 // ---------------------------------------------------------------------------
 // Listas
 // ---------------------------------------------------------------------------

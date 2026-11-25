@@ -26,7 +26,8 @@ pub(super) const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
     (
         "vale",
         "vale_a_mais",
-        "SELECT id FROM vale_saldo WHERE cancelado_em IS NULL AND saldo < 0",
+        // Decisão 6 (25/11/2026): o que o gerente já acertou (`acertado`) não conta mais como usado a mais.
+        "SELECT id FROM vale_saldo WHERE cancelado_em IS NULL AND saldo + acertado < 0",
         "SELECT group_concat(id, ',') FROM (SELECT DISTINCT x.id FROM venda_pagamento p JOIN venda x ON x.id = p.venda_id
           WHERE p.vale_id = ?1 AND x.situacao = 'concluida' ORDER BY x.criado_em, x.id)",
     ),
@@ -38,7 +39,7 @@ pub(super) const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
 /// conta (o recebimento de várias parcelas reabriria as outras). O vale usado a mais não tem compensação pronta (é
 /// escolha comercial: espera o proprietário).
 pub struct Compensacao {
-    /// "recebimento" ou "pagamento".
+    /// "recebimento", "pagamento", "vale_divida" ou "vale_loja" (decisão 6).
     pub tabela: &'static str,
     pub id: String,
     pub texto: String,
@@ -50,10 +51,45 @@ pub(super) fn compensacao_de(
     tabela: &str,
     chave: &str,
 ) -> Resultado<Option<Compensacao>> {
+    let dinheiro = |v: i64| format!("R$ {}", crate::numeros::escrever_dinheiro(v));
+    if tipo == "vale_a_mais" {
+        // Decisão 6 do proprietário (25/11/2026): cliente cadastrado, a diferença vira dívida dele no crediário;
+        // sem cadastro, a loja assume. Os dois com o registro, e o vale fica com a diferença acertada.
+        let achado: Option<(i64, i64, String, String)> = conn
+            .query_row(
+                "SELECT numero, -(saldo + acertado), COALESCE(cliente_id, ''), cliente_nome FROM vale_saldo
+                  WHERE id = ?1 AND cancelado_em IS NULL AND saldo + acertado < 0",
+                [chave],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)),
+            )
+            .optional()?;
+        return Ok(achado.map(|(numero, sobra, cliente_id, cliente)| {
+            if cliente_id.is_empty() {
+                Compensacao {
+                    tabela: "vale_loja",
+                    id: chave.to_string(),
+                    texto: format!(
+                        "A loja assume os {} que o vale-troca nº {numero} passou do valor (sem cliente cadastrado); \
+                         fica o registro",
+                        dinheiro(sobra)
+                    ),
+                }
+            } else {
+                Compensacao {
+                    tabela: "vale_divida",
+                    id: chave.to_string(),
+                    texto: format!(
+                        "Lançar os {} que o vale-troca nº {numero} passou do valor como dívida de {cliente} no \
+                         crediário",
+                        dinheiro(sobra)
+                    ),
+                }
+            }
+        }));
+    }
     if tipo != "pago_a_mais" {
         return Ok(None);
     }
-    let dinheiro = |v: i64| format!("R$ {}", crate::numeros::escrever_dinheiro(v));
     match tabela {
         "conta_receber" => {
             let sobra: Option<i64> = conn
@@ -154,7 +190,7 @@ pub(super) fn ainda_a_mais(conn: &Connection, tipo: &str, tabela: &str, chave: &
             "SELECT EXISTS (SELECT 1 FROM conta_pagar_saldo WHERE id = ?1 AND cancelado_em IS NULL AND pago > valor)"
         }
         ("vale_a_mais", _) => {
-            "SELECT EXISTS (SELECT 1 FROM vale_saldo WHERE id = ?1 AND cancelado_em IS NULL AND saldo < 0)"
+            "SELECT EXISTS (SELECT 1 FROM vale_saldo WHERE id = ?1 AND cancelado_em IS NULL AND saldo + acertado < 0)"
         }
         _ => return Ok(true),
     };

@@ -1727,7 +1727,17 @@ impl Servico {
                 let motivo = "Pago mais de uma vez em caixas sem rede (compensação do conflito entre caixas)";
                 match c.tabela {
                     "recebimento" => crate::receber::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
-                    _ => crate::pagar::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
+                    "pagamento" => crate::pagar::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
+                    // Decisão 6: o vale usado além do valor.
+                    "vale_divida" | "vale_loja" => crate::devolucoes::acertar_vale(
+                        &tx,
+                        &disp,
+                        &sessao.usuario_id,
+                        &c.id,
+                        c.tabela == "vale_divida",
+                    )
+                    .map(|_| ())?,
+                    outra => return Err(Erro::Interno(format!("compensação desconhecida: {outra}"))),
                 }
                 auditoria::registrar(
                     &tx,

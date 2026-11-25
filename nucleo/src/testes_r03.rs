@@ -447,3 +447,70 @@ fn r15_recebimento_de_duas_parcelas_nao_tem_compensacao_pronta() {
     assert_eq!(k.len(), 2, "{k:?}");
     assert!(k.iter().all(|x| x["compensacao"] == ""), "{k:?}");
 }
+
+/// O vale de R$ 30 usado duas vezes (R$ 30 em cada caixa), como no `r03_vale_usado_em_dois_caixas_vira_conflito`,
+/// com ou sem cliente cadastrado. Devolve o serviço e o id do cliente (vazio sem cadastro).
+fn vale_usado_duas_vezes(com_cliente: bool) -> (crate::Servico, String) {
+    let (mut s, cliente) = loja();
+    outro_caixa(&mut s);
+    let cliente = if com_cliente { cliente } else { String::new() };
+    let c = conn(&mut s);
+    c.execute(
+        "INSERT INTO vale (id, numero, dispositivo, caixa_nome, cliente_id, cliente_nome, valor, criado_em)
+         VALUES ('vale-1', 7, 'disp-caixa-2', 'Caixa 2', NULLIF(?1, ''), ?2, 3000, '2026-10-27')",
+        rusqlite::params![cliente, if com_cliente { "Zé da Silva" } else { "" }],
+    )
+    .unwrap();
+    for (id, disp, caixa) in [("venda-a", "disp-a", "Caixa 1"), ("venda-b", "disp-caixa-2", "Caixa 2")] {
+        c.execute(
+            "INSERT INTO venda (id, numero, dispositivo, caixa_nome, tipo, situacao, subtotal, total, criado_em)
+             VALUES (?1, 1, ?2, ?3, 'venda', 'concluida', 3000, 3000, '2026-10-28')",
+            rusqlite::params![id, disp, caixa],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO venda_pagamento (id, venda_id, forma, valor, vale_id) VALUES (?1, ?2, 'vale', 3000, 'vale-1')",
+            rusqlite::params![format!("pg-{id}"), id],
+        )
+        .unwrap();
+    }
+    sync::verificar_depois(c).unwrap();
+    (s, cliente)
+}
+
+/// Decisão 6 do proprietário (25/11/2026): vale usado além do valor, com cliente cadastrado. A compensação pronta
+/// lança os R$ 30 como dívida dele no crediário (com o gerente), o conflito sai e não volta na próxima conferência.
+#[test]
+fn d6_vale_a_mais_com_cliente_vira_divida() {
+    let (mut s, cliente) = vale_usado_duas_vezes(true);
+    let k = abertos_do_tipo(&mut s, "vale_a_mais");
+    let proposta = k[0]["compensacao"].as_str().unwrap().to_string();
+    assert!(proposta.contains("Lançar os R$ 30,00") && proposta.contains("dívida de Zé da Silva"), "{proposta}");
+    let operacao = k[0]["compensacaoOperacao"].as_str().unwrap().to_string();
+    ok(&mut s, "conflito_compensar", json!({ "id": k[0]["id"], "operacao": operacao }));
+    assert!(abertos_do_tipo(&mut s, "vale_a_mais").is_empty(), "o conflito saiu");
+    let aberto = crate::receber::situacao(conn(&mut s), &cliente).unwrap().em_aberto;
+    assert_eq!(aberto, "30,00", "a diferença virou dívida do cliente");
+    sync::verificar_depois(conn(&mut s)).unwrap();
+    assert!(abertos_do_tipo(&mut s, "vale_a_mais").is_empty(), "não volta na próxima conferência");
+    let registro: i64 =
+        conn(&mut s).query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'vale.acertar'", [], |l| l.get(0)).unwrap();
+    assert_eq!(registro, 1);
+}
+
+/// Decisão 6: sem cliente cadastrado, a loja assume a diferença; fica o registro, e nenhuma dívida é lançada.
+#[test]
+fn d6_vale_a_mais_sem_cliente_a_loja_assume() {
+    let (mut s, _) = vale_usado_duas_vezes(false);
+    let k = abertos_do_tipo(&mut s, "vale_a_mais");
+    let proposta = k[0]["compensacao"].as_str().unwrap().to_string();
+    assert!(proposta.contains("A loja assume os R$ 30,00") && proposta.contains("fica o registro"), "{proposta}");
+    let operacao = k[0]["compensacaoOperacao"].as_str().unwrap().to_string();
+    ok(&mut s, "conflito_compensar", json!({ "id": k[0]["id"], "operacao": operacao }));
+    assert!(abertos_do_tipo(&mut s, "vale_a_mais").is_empty());
+    let dividas: i64 = conn(&mut s).query_row("SELECT COUNT(*) FROM conta_receber", [], |l| l.get(0)).unwrap();
+    assert_eq!(dividas, 0, "nenhuma dívida");
+    let detalhes: String =
+        conn(&mut s).query_row("SELECT detalhes FROM auditoria WHERE acao = 'vale.acertar'", [], |l| l.get(0)).unwrap();
+    assert!(detalhes.contains("A loja assumiu R$ 30,00"), "{detalhes}");
+}
