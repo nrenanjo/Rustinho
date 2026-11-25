@@ -975,15 +975,20 @@ fn r8_n4_estorno_de_compra_depois_da_juncao_registra_na_que_ficou() {
 fn r9_b4_escolher_normaliza_a_juncao_antiga_com_data_e_autor() {
     let (mut a, _b, u, d, k) = dois();
     juntar(&mut a, &u, &d, &k, false);
-    a.conn
-        .execute("UPDATE produto_juncao SET em = '2026-11-20T10:00:00Z', por = ?2 WHERE produto_id = ?1", [&d, &u])
-        .unwrap();
-    assert!(produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "a linha antiga muda");
-    assert_eq!(
-        texto(&a.conn, "SELECT em || '|' || COALESCE(por, '-') FROM produto_juncao WHERE produto_id = ?1", &d),
-        "|-"
-    );
-    assert!(!produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "de novo, nada muda");
+    // R10-B3: com data e autor, só com a data e só com o autor (cada cláusula tem o seu caso).
+    for (em, por) in
+        [("2026-11-20T10:00:00Z", Some(u.as_str())), ("2026-11-20T10:00:00Z", None), ("", Some(u.as_str()))]
+    {
+        a.conn
+            .execute("UPDATE produto_juncao SET em = ?2, por = ?3 WHERE produto_id = ?1", rusqlite::params![d, em, por])
+            .unwrap();
+        assert!(produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "a linha antiga muda ({em:?}, {por:?})");
+        assert_eq!(
+            texto(&a.conn, "SELECT em || '|' || COALESCE(por, '-') FROM produto_juncao WHERE produto_id = ?1", &d),
+            "|-"
+        );
+        assert!(!produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "de novo, nada muda");
+    }
 }
 
 /// R9 (parte `enc` da sugestão): a encomenda de D feita numa venda desconta, em K, a venda que a gerou (sem a raiz, K
@@ -1004,4 +1009,52 @@ fn r9_encomenda_da_juntada_desconta_na_sugestao_da_que_ficou() {
     a.conn.execute("UPDATE encomenda SET produto_id = ?1 WHERE id = 'e1'", [&d]).unwrap();
     let sug = crate::reposicao::sugestao(&a.conn, "").unwrap();
     assert!(!sug.itens.iter().any(|i| i.produto_id == k), "a venda de D já está encomendada: K não pede compra");
+}
+
+/// R10-B1 (teste do revisor R10): a peça juntada que volta a ficar ativa (a ficha editada em outro caixa traz
+/// `ativo = 1`) não conta duas vezes: as vendas dela contam só em K, e nas "Peças paradas" ela não herda a última venda
+/// nem a última entrada que já contam em K (guardas `NOT IN` de `vend`, `uv` e `ue`).
+#[test]
+fn r10_juntada_ativa_nao_conta_duas_vezes() {
+    let (mut a, _b, u, d, k) = dois();
+    let velho = "2025-01-01T00:00:00Z";
+    for p in [&d, &k] {
+        a.conn.execute("UPDATE produto SET criado_em = ?2 WHERE id = ?1", [p, velho]).unwrap();
+        a.conn.execute("UPDATE estoque_movimento SET criado_em = ?2 WHERE produto_id = ?1", [p, velho]).unwrap();
+    }
+    venda_de(&a.conn, 1, &d, 100_000, Some(&crate::tempo::dias_atras(1)));
+    juntar(&mut a, &u, &d, &k, false);
+    a.conn.execute("UPDATE produto SET ativo = 1 WHERE id = ?1", [&d]).unwrap();
+    a.conn
+        .execute(
+            "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
+             VALUES ('x1', ?1, 2000, 'compra', '', NULL, 'd', '2025-03-01T00:00:00Z')",
+            [&d],
+        )
+        .unwrap();
+    let sug = crate::reposicao::sugestao(&a.conn, "").unwrap();
+    assert!(sug.itens.iter().any(|i| i.produto_id == k));
+    assert!(!sug.itens.iter().any(|i| i.produto_id == d), "D juntada não pede compra com as vendas que contam em K");
+    let par = crate::reposicao::parados(&a.conn, "").unwrap();
+    let linha_d = par.itens.iter().find(|i| i.produto_id == d).expect("D tem saldo e está velha");
+    assert_eq!(linha_d.ultima_venda, "Nunca vendeu");
+    assert_eq!(linha_d.ultima_compra, "");
+}
+
+/// R10 (robustez): uma junção malformada com a peça vazia (NULL; só chega por um par estragado) não esconde as vendas
+/// das outras peças (antes: o `NOT IN` com um NULL descartava todas as linhas).
+#[test]
+fn r10_juncao_malformada_nao_esconde_vendas() {
+    let (a, _b, _u, d, k) = dois();
+    venda_de(&a.conn, 1, &d, 100_000, Some(&crate::tempo::dias_atras(1)));
+    a.conn
+        .execute(
+            "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (NULL, ?1, '', NULL, 'x')",
+            [&k],
+        )
+        .unwrap();
+    let sug = crate::reposicao::sugestao(&a.conn, "").unwrap();
+    assert!(sug.itens.iter().any(|i| i.produto_id == d), "a venda de D continua pedindo compra");
+    let par = crate::reposicao::parados(&a.conn, "").unwrap();
+    assert!(!par.itens.iter().any(|i| i.produto_id == d), "D vendeu ontem: não está parada");
 }

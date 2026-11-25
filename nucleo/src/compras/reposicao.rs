@@ -182,7 +182,7 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let forn = fornecedores(conn)?;
     let filtro = texto::normalizar(busca);
     let mut c = conn.prepare(
-        "WITH rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz),
+        "WITH rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz WHERE produto_id IS NOT NULL),
               vend_peca AS (
               SELECT vi.produto_id AS produto_id,
                      SUM(vi.quantidade - COALESCE((SELECT SUM(di.quantidade) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -625,7 +625,7 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
     let hoje = fiscal::hoje(conn)?;
     let mut c = conn.prepare(
         "WITH est AS (SELECT produto_id, SUM(quantidade) AS q FROM estoque_movimento GROUP BY produto_id),
-              rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz),
+              rz AS MATERIALIZED (SELECT produto_id, raiz FROM produto_raiz WHERE produto_id IS NOT NULL),
               uv_peca AS (SELECT vi.produto_id AS produto_id, MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                       WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND vi.produto_id IS NOT NULL
                       GROUP BY vi.produto_id),

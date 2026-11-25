@@ -1,5 +1,5 @@
-//! R9-A1 (revisão R9 da 007, 25/11/2026): "O que comprar", "Peças paradas" e "Mais vendidos" ficam lineares no tamanho
-//! do catálogo. A soma pela peça que ficou (R13, `produto_raiz`) não pode estar no `GROUP BY` das partes que a lista
+//! R9-A1 (revisão R9 da 007, 25/11/2026): "O que comprar" e "Peças paradas" ficam lineares no tamanho do catálogo
+//! ("Mais vendidos" não junta partes por peça: medido linear na R10, sem trava aqui). A soma pela peça que ficou (R13, `produto_raiz`) não pode estar no `GROUP BY` das partes que a lista
 //! junta por peça: com ela o SQLite perde o índice automático do `LEFT JOIN` e varre a parte inteira para cada peça
 //! (8000 peças: 197 ms → 19 s). O texto das consultas é o de `nucleo/src/compras/reposicao.rs`.
 
@@ -30,6 +30,11 @@ fn sem_varredura(funcao: &str, partes: &[&str], n: usize) {
         assert!(
             !p.iter().any(|l| l.trim() == format!("SCAN {parte}") || l.starts_with(&format!("SCAN {parte} "))),
             "{funcao}: a parte `{parte}` é varrida para cada peça (perdeu o índice): {p:#?}"
+        );
+        // R10-B2: e precisa aparecer buscada pelo índice automático (senão o teste passaria vazio com outro nome).
+        assert!(
+            p.iter().any(|l| l.starts_with(&format!("SEARCH {parte} USING AUTOMATIC COVERING INDEX"))),
+            "{funcao}: a parte `{parte}` não é buscada pelo índice automático: {p:#?}"
         );
     }
 }
