@@ -194,14 +194,21 @@ fn trocar(a: &mut Banco, b: &mut Banco) {
 
 /// Dois caixas que já trocaram: D com 3 e K com 2.
 fn dois() -> (Banco, Banco, String, String, String) {
+    dois_com(&[("", ""), ("", "")])
+}
+
+/// Como `dois`, com código interno e código de barras de D e K (R8-N1: as peças reais têm).
+fn dois_com(codigos: &[(&str, &str); 2]) -> (Banco, Banco, String, String, String) {
     let mut a = Banco::em_memoria().unwrap();
     let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "1234", true).unwrap().id;
     usuarios::definir_gerente(&a.conn, &u, true).unwrap();
     config::gravar(&a.conn, "caixa_nome", "Caixa 1").unwrap();
     let mut ids = Vec::new();
-    for (nome, q) in [("Amortecedor D", "3"), ("Amortecedor K", "2")] {
+    for ((nome, q), (codigo, barras)) in [("Amortecedor D", "3"), ("Amortecedor K", "2")].into_iter().zip(codigos) {
         let mut f = produtos::ficha_nova(&a.conn).unwrap();
         f.nome = nome.into();
+        f.codigo = (*codigo).into();
+        f.codigo_barras = (*barras).into();
         f.custo = "10".into();
         f.estoque_inicial = q.into();
         ids.push(produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap());
@@ -569,6 +576,58 @@ fn r13_rascunho_que_chega_depois_da_juncao_lanca_na_que_ficou() {
 
 // ---------------------------------------------------------------- revisão R7
 
+/// R8-N9: dois gerentes, sem rede, escolhem a mesma peça para a junção em disputa: a escolha fica igual nos dois
+/// caixas e a troca não recria a "Junção em disputa" (antes: cada escolha levava a hora e o gerente de cada caixa).
+#[test]
+fn r8_n9_dois_gerentes_escolhem_a_mesma_peca_sem_nova_disputa() {
+    let (mut a, mut b, u, d, k) = dois();
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &bia, true).unwrap();
+    let k2 = {
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = "Amortecedor K2".into();
+        f.custo = "10".into();
+        produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap()
+    };
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &d, &k, false);
+    juntar(&mut b, &u, &d, &k2, false);
+    trocar(&mut a, &mut b);
+    // Os dois gerentes entram antes (com rede: a chave dos backups da loja chega ao caixa 2); as escolhas, sem rede.
+    let mut sa = crate::Servico::com_banco_para_teste(a);
+    ok(&mut sa, "entrar", json!({ "id": u, "senha": "1234" }));
+    trocar(sa.banco_para_teste(), &mut b);
+    let mut sb = crate::Servico::com_banco_para_teste(b);
+    ok(&mut sb, "entrar", json!({ "id": bia, "senha": "1234" }));
+    trocar(sa.banco_para_teste(), sb.banco_para_teste());
+    // Escolhem a peça que hoje não vale (a que vale não muda nada): os dois caixas gravam a escolha.
+    let vale = estoque::raiz(&sa.banco_para_teste().conn, &d).unwrap();
+    let outra = if vale == k { k2.clone() } else { k.clone() };
+    ok(&mut sa, "produto_juncao_escolher", json!({ "produtoId": d, "paraId": outra }));
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    ok(&mut sb, "produto_juncao_escolher", json!({ "produtoId": d, "paraId": outra }));
+    let (a, b) = (sa.banco_para_teste(), sb.banco_para_teste());
+    trocar(a, b);
+    trocar(a, b);
+    for x in [&*a, &*b] {
+        assert_eq!(
+            contar(&x.conn, "SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL", []),
+            0,
+            "{:?}",
+            x.conn
+                .prepare("SELECT tabela || ' | ' || chave FROM sync_conflito WHERE resolvido_em IS NULL")
+                .unwrap()
+                .query_map([], |l| l.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(estoque::raiz(&x.conn, &d).unwrap(), outra);
+        let esperado = if outra == k2 { (0, 2000, 3000) } else { (0, 5000, 0) };
+        assert_eq!((saldo(&x.conn, &d), saldo(&x.conn, &k), saldo(&x.conn, &k2)), esperado);
+    }
+}
+
 /// M-1 da R7: escolher a junção em disputa só desfaz a passagem da própria D; a entrada de outra peça X já juntada
 /// na peça que perdeu fica (antes: a volta levava também as 4 de X para D e o Completar as mandava para a escolhida).
 #[test]
@@ -619,6 +678,45 @@ fn r7_m2_dois_gerentes_juntam_o_mesmo_par_sem_conflito() {
             sync::conflitos(&x.conn).unwrap().iter().map(|c| &c.texto).collect::<Vec<_>>()
         );
         assert_eq!((saldo(&x.conn, &k), saldo(&x.conn, &d)), (5000, 0));
+    }
+}
+
+/// R8-N1: o M-2 com peças reais (código interno e código de barras diferentes): o código antigo e o GTIN que a
+/// junção cria em K ficam iguais nos dois caixas (antes: levavam a hora de cada caixa e davam conflito "Peça").
+#[test]
+fn r8_n1_dois_gerentes_juntam_pecas_com_codigos_sem_conflito() {
+    let (mut a, mut b, u, d, k) = dois_com(&[("DD-1", "7891000100103"), ("KK-1", "7894900011517")]);
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &bia, true).unwrap();
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &d, &k, false);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    juntar(&mut b, &bia, &d, &k, false);
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        assert_eq!(
+            conflitos(x),
+            0,
+            "{:?}",
+            sync::conflitos(&x.conn).unwrap().iter().map(|c| &c.texto).collect::<Vec<_>>()
+        );
+        let antigo: i64 = x
+            .conn
+            .query_row(
+                "SELECT count(*) FROM produto_codigo_antigo WHERE produto_id = ?1 AND codigo = 'DD-1'",
+                [&k],
+                |l| l.get(0),
+            )
+            .unwrap();
+        let gtin: i64 = x
+            .conn
+            .query_row(
+                "SELECT count(*) FROM produto_gtin WHERE produto_id = ?1 AND gtin = '7891000100103'",
+                [&k],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!((antigo, gtin), (1, 1), "os códigos de D passaram para K");
     }
 }
 
@@ -697,5 +795,143 @@ fn r7_b5_os_aberta_e_vendas_de_d_contam_para_k() {
         mais.iter().any(|l| l.nome.starts_with("Amortecedor K") && l.detalhe.starts_with("2 ")),
         "{:?}",
         mais.iter().map(|l| (&l.nome, &l.detalhe)).collect::<Vec<_>>()
+    );
+}
+
+/// Uma venda concluída de agora (ou da data dada), direto no banco.
+fn venda_de(c: &rusqlite::Connection, n: i64, produto: &str, milesimos: i64, quando: Option<&str>) {
+    let quando = quando.map(str::to_string).unwrap_or_else(crate::tempo::agora);
+    c.execute(
+        "INSERT INTO venda (id, numero, dispositivo, caixa_nome, tipo, situacao, subtotal, total, criado_em)
+         VALUES (?1, ?2, 'disp', 'Caixa 1', 'venda', 'concluida', 1000, 1000, ?3)",
+        rusqlite::params![format!("v{n}"), n, quando],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO venda_item (id, venda_id, ordem, produto_id, codigo, descricao, unidade, quantidade, preco, desconto, total)
+         VALUES (?1, ?2, 1, ?3, '', 'Item', 'UN', ?4, 500, 0, 1000)",
+        rusqlite::params![format!("vi{n}"), format!("v{n}"), produto, milesimos],
+    )
+    .unwrap();
+}
+
+/// R8-N2: no "Mais vendidos" (curva ABC) as vendas de D contam na peça que ficou (antes: D e K em linhas separadas).
+#[test]
+fn r8_n2_mais_vendidos_soma_a_juntada_na_que_ficou() {
+    let (mut a, _b, u, d, k) = dois();
+    venda_de(&a.conn, 1, &d, 2000, None);
+    venda_de(&a.conn, 2, &k, 1000, None);
+    juntar(&mut a, &u, &d, &k, false);
+    let r = crate::reposicao::mais_vendidos(&a.conn, 30, "valor", "").unwrap();
+    let ids: Vec<(&str, i64)> = r.itens.iter().map(|i| (i.produto_id.as_str(), i.vendas)).collect();
+    assert_eq!(ids, vec![(k.as_str(), 2)], "uma linha só, a de K, com as duas vendas");
+}
+
+/// R8-N3: nas "Peças paradas" a última entrada de D conta para K (antes: K aparecia parada com o estoque que acabou
+/// de entrar em D).
+#[test]
+fn r8_n3_parados_conta_a_entrada_da_juntada() {
+    let (mut a, _b, u, d, k) = dois();
+    let velho = "2025-01-01T00:00:00Z";
+    a.conn.execute("UPDATE produto SET criado_em = ?2 WHERE id = ?1", [&k, velho]).unwrap();
+    a.conn.execute("UPDATE estoque_movimento SET criado_em = ?2 WHERE produto_id = ?1", [&k, velho]).unwrap();
+    let parada = |a: &Banco| crate::reposicao::parados(&a.conn, "").unwrap().itens.iter().any(|i| i.produto_id == k);
+    assert!(parada(&a), "antes da junção K está parada");
+    juntar(&mut a, &u, &d, &k, false);
+    assert!(!parada(&a), "D entrou hoje: K não está parada");
+}
+
+/// R8-N4: as vendas de D contam para K no "O que comprar" e na última venda das "Peças paradas" (a correção da R7 não
+/// tinha teste que reprovasse).
+#[test]
+fn r8_n4_vendas_da_juntada_contam_na_sugestao_e_nos_parados() {
+    let (mut a, _b, u, d, k) = dois();
+    let velho = "2025-01-01T00:00:00Z";
+    for p in [&d, &k] {
+        a.conn.execute("UPDATE produto SET criado_em = ?2 WHERE id = ?1", [p, velho]).unwrap();
+        a.conn.execute("UPDATE estoque_movimento SET criado_em = ?2 WHERE produto_id = ?1", [p, velho]).unwrap();
+    }
+    venda_de(&a.conn, 1, &d, 100_000, Some(&crate::tempo::dias_atras(1)));
+    juntar(&mut a, &u, &d, &k, false);
+    let sug = crate::reposicao::sugestao(&a.conn, "").unwrap();
+    assert!(sug.itens.iter().any(|i| i.produto_id == k), "as 100 vendidas de D pedem compra de K");
+    let parados = crate::reposicao::parados(&a.conn, "").unwrap();
+    assert!(!parados.itens.iter().any(|i| i.produto_id == k), "D vendeu ontem: K não está parada");
+}
+
+/// R8-N4: a guarda contra juntar uma peça nela mesma.
+#[test]
+fn r8_n4_juntar_cadastro_recusa_a_mesma_peca() {
+    let (a, _b, u, d, _k) = dois();
+    let e = produtos::juntar_cadastro(&a.conn, &a.dispositivo, &u, &d, &d).unwrap_err();
+    assert!(e.to_string().contains("nela mesma"), "{e}");
+    assert_eq!(contar(&a.conn, "SELECT ativo FROM produto WHERE id = ?1", [&d]), 1);
+}
+
+/// R8-N4 (B7): uma cadeia de 12 junções chega à raiz (o limite é de 64 passos).
+#[test]
+fn r8_n4_cadeia_longa_chega_a_raiz() {
+    let (mut a, _b, u, _d, _k) = dois();
+    let mut pecas = Vec::new();
+    for i in 0..13 {
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = format!("Elo {i}");
+        f.custo = "10".into();
+        f.estoque_inicial = "1".into();
+        pecas.push(produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap());
+    }
+    for w in pecas.windows(2) {
+        juntar(&mut a, &u, &w[0], &w[1], false);
+    }
+    let ultima = pecas.last().unwrap();
+    assert_eq!(&estoque::raiz(&a.conn, &pecas[0]).unwrap(), ultima);
+    assert_eq!(texto(&a.conn, "SELECT raiz FROM produto_raiz WHERE produto_id = ?1", &pecas[0]), *ultima);
+    assert_eq!(saldo(&a.conn, ultima), 13_000);
+}
+
+/// R8-N4 (B3 da R7): o estorno de uma compra lançada em D, feito depois da junção, sai de K e fica registrado no
+/// histórico de K com o saldo dela (antes: o registro ia para D, com "0 → negativo").
+#[test]
+fn r8_n4_estorno_de_compra_depois_da_juncao_registra_na_que_ficou() {
+    use crate::{compras, nfe_xml};
+    let (mut a, _b, u, d, k) = dois();
+    let disp = a.dispositivo.clone();
+    let compra = {
+        let c = &a.conn;
+        let compra = compras::importar_xml(c, &disp, &u, nfe_xml::EXEMPLO).unwrap();
+        let f = compras::ficha(c, &compra).unwrap();
+        let itens = f
+            .itens
+            .iter()
+            .enumerate()
+            .map(|(i, it)| compras::ItemEntrada {
+                id: it.id.clone(),
+                acao: if i == 0 { "ligar".into() } else { "ignorar".into() },
+                produto_id: if i == 0 { d.clone() } else { String::new() },
+                fator: "1".into(),
+                baixar_preco: false,
+            })
+            .collect();
+        compras::atualizar(c, &compras::CompraEntrada { id: compra.clone(), itens, ..Default::default() }).unwrap();
+        compras::liberar_para_teste(c, &disp, &compra);
+        compras::lancar(c, &disp, &u, &compra).unwrap();
+        compra
+    };
+    let total = saldo(&a.conn, &d) + saldo(&a.conn, &k);
+    let entrou = saldo(&a.conn, &d) - 3000;
+    assert!(entrou > 0);
+    juntar(&mut a, &u, &d, &k, false);
+    let c = &a.conn;
+    compras::estornar(c, &disp, &u, &compra, "Nota errada").unwrap();
+    assert_eq!((saldo(c, &d), saldo(c, &k)), (0, total - entrou));
+    let registro = contar(
+        c,
+        "SELECT COUNT(*) FROM auditoria WHERE acao = 'compra.estornar' AND entidade = 'produto' AND entidade_id = ?1",
+        [&k],
+    );
+    assert_eq!(registro, 1, "o estorno fica no histórico da peça que ficou");
+    assert_eq!(
+        contar(c, "SELECT COUNT(*) FROM auditoria WHERE acao = 'compra.estornar' AND entidade_id = ?1", [&d]),
+        0
     );
 }

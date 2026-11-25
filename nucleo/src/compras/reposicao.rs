@@ -459,7 +459,7 @@ pub fn mais_vendidos(conn: &Connection, dias: i64, ordem: &str, busca: &str) -> 
                 SUM((vi.custo * (vi.quantidade - COALESCE(dv.q, 0)) + 500) / 1000), COALESCE(MAX(est.q), 0), p.estoque_minimo
            FROM venda_item vi
            JOIN venda v ON v.id = vi.venda_id
-           JOIN produto p ON p.id = vi.produto_id
+           JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
            LEFT JOIN est ON est.produto_id = p.id
            LEFT JOIN (SELECT di.venda_item_id, SUM(di.quantidade) AS q, SUM(di.valor_item) AS v
                         FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
@@ -623,8 +623,9 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
                             MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                       WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND vi.produto_id IS NOT NULL
                       GROUP BY 1),
-              ue AS (SELECT produto_id, MAX(criado_em) AS u FROM estoque_movimento
-                      WHERE tipo IN ('compra', 'inicial') GROUP BY produto_id)
+              ue AS (SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = m.produto_id), m.produto_id) AS produto_id,
+                            MAX(m.criado_em) AS u FROM estoque_movimento m
+                      WHERE m.tipo IN ('compra', 'inicial') GROUP BY 1)
          SELECT p.id, p.codigo, p.nome, p.marca, p.unidade, p.local, est.q, p.custo,
                 COALESCE(date(uv.u, 'localtime'), ''), COALESCE(date(ue.u, 'localtime'), ''),
                 date(MAX(COALESCE(uv.u, ''), COALESCE(ue.u, ''), p.criado_em), 'localtime')

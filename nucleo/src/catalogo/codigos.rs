@@ -1013,6 +1013,9 @@ pub(crate) fn desvincular_fornecedor_se_produto(
 /// código de barras. Refaz o índice de busca das duas.
 pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<()> {
     let agora = tempo::agora();
+    // R8-N1: o que a junção cria em K (GTIN e código antigo) leva a hora do cadastro de D, igual em qualquer caixa
+    // que junte o mesmo par (com a hora de cada caixa, dois gerentes sem rede davam conflito falso).
+    let quando: String = conn.query_row("SELECT criado_em FROM produto WHERE id = ?1", [d], |l| l.get(0))?;
     conn.execute(
         "UPDATE produto_fornecedor SET produto_id = ?2, atualizado_em = ?3 WHERE produto_id = ?1",
         params![d, k, agora],
@@ -1036,7 +1039,7 @@ pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<()> 
             conn.execute(
                 "INSERT OR IGNORE INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
                  VALUES (?1, ?2, ?3, 'comercial', 'manual', 99, ?4)",
-                params![format!("juntar:{d}:{barras_d}"), k, barras_d, agora],
+                params![format!("juntar:{d}:{barras_d}"), k, barras_d, quando],
             )?;
         }
         conn.execute("UPDATE produto SET codigo_barras = '' WHERE id = ?1", [d])?;
@@ -1050,7 +1053,7 @@ pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<()> 
     conn.execute("UPDATE produto_codigo_antigo SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
     let codigo_k: String = conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [k], |l| l.get(0))?;
     if !codigo_d.is_empty() && codigo_d != codigo_k {
-        guardar_codigo_antigo(conn, &codigo_d, k, &agora)?;
+        guardar_codigo_antigo(conn, &codigo_d, k, &quando)?;
     }
     refazer_indice(conn, k)?;
     refazer_indice(conn, d)?;

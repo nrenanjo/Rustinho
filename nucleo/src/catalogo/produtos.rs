@@ -1749,13 +1749,17 @@ pub fn juntar_cadastro(conn: &Connection, dispositivo: &str, usuario_id: &str, d
 
 /// R13 (definição final 4): o gerente escolhe em qual peça D fica (a junção estava em disputa). `para` precisa ser
 /// uma das peças oferecidas (quem chama confere) e não pode levar de volta a D. Devolve se mudou.
+///
+/// R8-N9: a linha fica igual em qualquer caixa que escolha a mesma peça (sem data nem autor, como em
+/// `juntar_cadastro`: quem e quando estão no histórico), para dois gerentes sem rede não recriarem a disputa.
 pub fn escolher_juncao(conn: &Connection, usuario_id: &str, d: &str, para: &str) -> Resultado<bool> {
+    let _ = usuario_id;
     if estoque::raiz(conn, para)? == d {
         return Err(Erro::validacao("Essa escolha faria a peça voltar para ela mesma. Escolha a outra."));
     }
     let n = conn.execute(
-        "UPDATE produto_juncao SET para_id = ?2, em = ?3, por = ?4 WHERE produto_id = ?1 AND para_id <> ?2",
-        params![d, para, tempo::agora(), usuario_id],
+        "UPDATE produto_juncao SET para_id = ?2, em = '', por = NULL WHERE produto_id = ?1 AND (para_id <> ?2 OR em <> '' OR por IS NOT NULL)",
+        params![d, para],
     )?;
     Ok(n > 0)
 }

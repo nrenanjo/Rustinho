@@ -789,7 +789,7 @@ FocusScope {
                             text: !tela.ficha ? ""
                                   : tela.ficha.juntadaCom
                                     ? "Esta peça foi juntada com " + tela.ficha.juntadaCom + " (era a mesma peça cadastrada duas vezes). "
-                                      + "A venda, a compra e o estoque vão para a peça que ficou."
+                                      + "A venda, a compra e o estoque vão para a peça que ficou: para ajustar o estoque, conte na peça que ficou."
                                     : "Juntada com " + (tela.ficha.juntadas || []).join(", ") + ". O histórico abaixo inclui o delas."
                             font.pixelSize: 14
                             wrapMode: Text.WordWrap
@@ -1270,6 +1270,8 @@ FocusScope {
                                 text: "Ajustar"
                                 icone: "ajuste"
                                 tipo: "secundario"
+                                // R8-N5: na peça juntada o estoque está na que ficou (a nota diz onde contar).
+                                visible: !!tela.ficha && !tela.ficha.juntadaCom
                                 onClicked: {
                                     if (tela.alterado) {
                                         janela.avisar("Salve as alterações antes de ajustar o estoque.", "info")
