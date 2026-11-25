@@ -96,6 +96,29 @@ FocusScope {
             }
         }
         TextoErro { text: secao.erro }
+        // R3 (D-AUD-4, decisão do proprietário de 25/11/2026): a comissão fecha
+        // só até ontem (as vendas de hoje ainda podem entrar). Com o período
+        // terminando hoje, "Fechar" não aparece; um toque mostra até ontem.
+        Linha {
+            visible: secao.dados !== null && secao.dados.podeFechar === false
+            spacing: 10
+            Layout.fillWidth: true
+            Nota {
+                text: "A comissão fecha só até ontem: as vendas de hoje ainda podem entrar."
+                Layout.fillWidth: true
+            }
+            Botao {
+                objectName: "verAteOntem"
+                text: "Ver até ontem"
+                tipo: "secundario"
+                onClicked: {
+                    de.texto = secao.dados.deAteOntem
+                    ate.texto = secao.dados.ontem
+                    secao.periodo = ""
+                    secao.carregar()
+                }
+            }
+        }
 
         ListView {
             id: lista
@@ -190,7 +213,8 @@ FocusScope {
                         Botao {
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: !linha.modelData.jaFechado && linha.modelData.comissao !== "0,00"
+                            visible: secao.dados !== null && secao.dados.podeFechar === true
+                                     && !linha.modelData.jaFechado && linha.modelData.comissao !== "0,00"
                             text: "Fechar"
                             tipo: "secundario"
                             onClicked: fechamento.abrirCom(linha.modelData)

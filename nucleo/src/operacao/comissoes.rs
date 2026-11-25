@@ -52,6 +52,42 @@ pub struct Relatorio {
     pub vendedores: Vec<Vendedor>,
     pub total: String,
     pub fechamentos: Vec<Fechamento>,
+    /// R3: o período mostrado termina até ontem (só assim dá para fechar).
+    pub pode_fechar: bool,
+    /// R3: o período "até ontem" que a tela oferece quando este não pode ser fechado.
+    pub de_ate_ontem: String,
+    pub ontem: String,
+}
+
+/// Ontem no fuso do computador, "AAAA-MM-DD".
+fn ontem(conn: &Connection) -> Resultado<String> {
+    Ok(conn.query_row("SELECT date('now', 'localtime', '-1 day')", [], |l| l.get(0))?)
+}
+
+/// R3 (D-AUD-4, decisão do proprietário de 25/11/2026): a comissão fecha só
+/// até ontem. Fechando até hoje, uma venda feita depois do fechamento, no
+/// mesmo dia, ficava sem comissão para sempre (o dia já estava fechado). Sem
+/// data final, vai até ontem; sem data inicial, começa no dia 1º do mês da
+/// data final.
+fn periodo_para_fechar(conn: &Connection, de: &str, ate: &str) -> Resultado<(String, String)> {
+    let ontem = ontem(conn)?;
+    let de = fiscal::ler_data(de).map_err(|m| Erro::campo("de", m))?;
+    let ate = fiscal::ler_data(ate).map_err(|m| Erro::campo("ate", m))?.unwrap_or_else(|| ontem.clone());
+    if ate > ontem {
+        return Err(Erro::campo(
+            "ate",
+            format!(
+                "A comissão fecha só até ontem ({}): as vendas de hoje ainda podem entrar. Termine o período ontem \
+                 ou antes.",
+                fiscal::data_br(&ontem)
+            ),
+        ));
+    }
+    let de = de.unwrap_or_else(|| format!("{}-01", &ate[..7]));
+    if ate < de {
+        return Err(Erro::campo("ate", "A data final é antes da inicial."));
+    }
+    Ok((de, ate))
 }
 
 fn periodo(conn: &Connection, de: &str, ate: &str) -> Resultado<(String, String)> {
@@ -187,12 +223,17 @@ pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio>
     for f in &mut fechamentos {
         f.criado_em = fiscal::data_local_br(conn, &f.criado_em)?;
     }
+    let ontem = ontem(conn)?;
+    let de_ate_ontem = if de <= ontem { de.clone() } else { format!("{}-01", &ontem[..7]) };
     Ok(Relatorio {
         de: fiscal::data_br(&de),
         ate: fiscal::data_br(&ate),
         vendedores,
         total: numeros::escrever_dinheiro(total),
         fechamentos,
+        pode_fechar: ate <= ontem,
+        de_ate_ontem: fiscal::data_br(&de_ate_ontem),
+        ontem: fiscal::data_br(&ontem),
     })
 }
 
@@ -207,7 +248,7 @@ pub fn fechar(
     ate: &str,
     vencimento: &str,
 ) -> Resultado<String> {
-    let (de, ate) = periodo(conn, de, ate)?;
+    let (de, ate) = periodo_para_fechar(conn, de, ate)?;
     let (nome, padrao): (String, Option<i64>) = conn
         .query_row("SELECT nome, comissao FROM usuario WHERE id = ?1", [vendedor_id], |l| Ok((l.get(0)?, l.get(1)?)))
         .optional()?

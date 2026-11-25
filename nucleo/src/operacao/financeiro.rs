@@ -1510,6 +1510,55 @@ mod testes {
         assert!(cheques::painel(c, "555", "carteira").unwrap().cheques.is_empty());
     }
 
+    /// R3 (D-AUD-4, decisão do proprietário de 25/11/2026): a comissão fecha só até ontem. Fechando até hoje (ou
+    /// sem data final, que era hoje), a venda feita depois do fechamento, no mesmo dia, ficava sem comissão para
+    /// sempre. Agora terminar hoje ou depois é recusado, sem data final vai até ontem, e a venda de hoje entra no
+    /// período seguinte.
+    #[test]
+    fn r3_comissao_fecha_so_ate_ontem() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        usuarios::definir_comissao(c, u, "5").unwrap();
+        caixa::abrir(c, d, u, "Caixa 1", "0").unwrap();
+        let vender = || {
+            let e = VendaEntrada {
+                itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+                tabela: 1,
+                pagamentos: vec![Pg { forma: "pix".into(), valor: "300".into(), ..Default::default() }],
+                ..Default::default()
+            };
+            vendas::concluir(c, d, u, &e).unwrap();
+        };
+        vender();
+        c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day')", []).unwrap();
+        let data = |dias: &str| -> String {
+            c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', ?1)", [dias], |l| l.get(0)).unwrap()
+        };
+        let (ontem, hoje, amanha) = (data("-1 day"), data("+0 day"), data("+1 day"));
+        for ate in [&hoje, &amanha] {
+            let e = comissoes::fechar(c, d, u, u, "", ate, "").unwrap_err();
+            assert_eq!(e.nome_do_campo(), Some("ate"), "{e}");
+            assert!(e.to_string().contains(&format!("só até ontem ({ontem})")), "{e}");
+        }
+        assert!(pagar::painel(c, "comissao", "abertas").unwrap().parcelas.is_empty(), "nada lançado");
+        // Sem data final: até ontem (a venda de ontem, 5% de 300,00).
+        comissoes::fechar(c, d, u, u, "", "", "").unwrap();
+        let p = pagar::painel(c, "comissao", "abertas").unwrap();
+        assert_eq!(p.parcelas.iter().map(|x| x.valor.as_str()).collect::<Vec<_>>(), ["15,00"]);
+        // A venda de hoje, feita depois do fechamento, fica no período seguinte: hoje não está fechado.
+        vender();
+        let r = comissoes::relatorio(c, &hoje, &hoje).unwrap();
+        let v = &r.vendedores[0];
+        assert_eq!((v.vendas, v.comissao.as_str(), v.ja_fechado.as_str()), (1, "15,00", ""));
+        // A tela: o período que termina hoje não fecha; ela oferece "até ontem".
+        assert!(!r.pode_fechar);
+        // (o período começava hoje, depois de ontem: o "até ontem" começa no dia 1º do mês de ontem)
+        let primeiro: String =
+            c.query_row("SELECT strftime('01/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
+        assert_eq!((r.ontem.as_str(), r.de_ate_ontem.as_str()), (ontem.as_str(), primeiro.as_str()));
+        assert!(comissoes::relatorio(c, &ontem, &ontem).unwrap().pode_fechar);
+    }
+
     #[test]
     fn comissao_do_periodo() {
         let l = loja();
@@ -1535,15 +1584,19 @@ mod testes {
             ..Default::default()
         };
         let v = vendas::concluir(c, d, u, &e).unwrap();
-        let r = comissoes::relatorio(c, "", "").unwrap();
+        // R3 (decisão de 25/11/2026): a comissão fecha só até ontem; a venda do teste passa para ontem.
+        c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day')", []).unwrap();
+        let ontem: String =
+            c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
+        let r = comissoes::relatorio(c, &ontem, &ontem).unwrap();
         let maria = &r.vendedores[0];
         // 270 × 5% + 90 × 10% = 13,50 + 9,00
         assert_eq!((maria.vendas, maria.vendido.as_str(), maria.comissao.as_str()), (1, "360,00", "22,50"));
-        comissoes::fechar(c, d, u, u, "", "", "").unwrap();
-        assert!(comissoes::fechar(c, d, u, u, "", "", "").unwrap_err().to_string().contains("já foi fechada"));
+        comissoes::fechar(c, d, u, u, &ontem, &ontem, "").unwrap();
+        assert!(comissoes::fechar(c, d, u, u, &ontem, &ontem, "").unwrap_err().to_string().contains("já foi fechada"));
         let p = pagar::painel(c, "comissao", "abertas").unwrap();
         assert_eq!((p.parcelas[0].valor.as_str(), p.parcelas[0].categoria.as_str()), ("22,50", "Comissões"));
-        let r = comissoes::relatorio(c, "", "").unwrap();
+        let r = comissoes::relatorio(c, &ontem, &ontem).unwrap();
         assert!(!r.vendedores[0].ja_fechado.is_empty());
         comissoes::reabrir(c, d, u, &r.fechamentos[0].id).unwrap();
         assert!(pagar::painel(c, "comissao", "abertas").unwrap().parcelas.is_empty());

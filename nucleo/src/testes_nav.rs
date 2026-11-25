@@ -467,6 +467,14 @@ fn nav10_notificacoes_do_fiscal() {
     assert_eq!(filtradas2.as_array().unwrap().len(), 2);
 }
 
+/// R3 (decisão do proprietário de 25/11/2026): a comissão fecha só até ontem. Passa as vendas do teste para ontem
+/// e devolve ontem ("dd/mm/aaaa").
+fn venda_para_ontem(s: &mut crate::Servico) -> String {
+    let c = &s.banco_para_teste().conn;
+    c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day')", []).unwrap();
+    c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap()
+}
+
 /// 10b (C8, dev3.3): comissão e conta finalizada. Fechar de novo um período já fechado é recusado com o
 /// fechamento exato (a tela o destaca); desfazer o fechamento de uma comissão já paga é recusado com a conta
 /// exata (a tela oferece "Ver no A pagar"). Nenhuma das duas mexe em valor.
@@ -488,7 +496,9 @@ fn nav11_comissao_fechada_e_conta_paga_dizem_o_registro() {
     );
     let ana: String =
         s.banco_para_teste().conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0)).unwrap();
-    let periodo = json!({ "usuarioId": ana, "de": "", "ate": "", "vencimento": "" });
+    // R3 (decisão de 25/11/2026): a comissão fecha só até ontem; a venda do teste passa para ontem.
+    let ontem = venda_para_ontem(&mut s);
+    let periodo = json!({ "usuarioId": ana, "de": ontem, "ate": ontem, "vencimento": "" });
     let r = ok(&mut s, "comissao_fechar", periodo.clone());
     let fech = r["fechamentos"][0].clone();
     let (fid, conta) = (fech["id"].as_str().unwrap().to_string(), fech["contaPagarId"].as_str().unwrap().to_string());
@@ -574,7 +584,8 @@ fn rev_m1_comissao_com_conta_inconsistente_recusa_pelo_caso_7() {
     );
     let ana: String =
         s.banco_para_teste().conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0)).unwrap();
-    let r = ok(&mut s, "comissao_fechar", json!({ "usuarioId": ana, "de": "", "ate": "", "vencimento": "" }));
+    let ontem = venda_para_ontem(&mut s);
+    let r = ok(&mut s, "comissao_fechar", json!({ "usuarioId": ana, "de": ontem, "ate": ontem, "vencimento": "" }));
     let (fid, conta) = (
         r["fechamentos"][0]["id"].as_str().unwrap().to_string(),
         r["fechamentos"][0]["contaPagarId"].as_str().unwrap().to_string(),
