@@ -400,6 +400,8 @@ FocusScope {
         width: Math.min(520, Tema.largura - 24)
         property string chave: ""
         function abrirCom() {
+            // R21: o esperado do momento (outra tela pode ter vendido desde a última leitura).
+            tela.carregar()
             chave = Api.novaChave()
             contado.texto = ""
             contado.erro = ""
@@ -412,6 +414,20 @@ FocusScope {
             Titulo { text: "Fechar o caixa"; font.pixelSize: 32 }
             Nota {
                 text: "Conte o dinheiro da gaveta e digite o total. O Rustinho mostra a diferença e imprime o fechamento."
+                Layout.fillWidth: true
+            }
+            // R21 (DP-20, decisão do proprietário de 25/11/2026): conferência tradicional. O esperado na
+            // gaveta aparece já, antes da contagem, e o olho do sigilo nunca o esconde (OLHO-1: o olho não
+            // interfere no fechamento).
+            Text {
+                objectName: "esperadoNoFechamento"
+                text: tela.r ? "Esperado na gaveta: R$ " + tela.r.esperado : ""
+                visible: text !== ""
+                color: Tema.roxo ? Tema.tintaNo(palette.window) : Tema.tinta
+                textFormat: Text.PlainText
+                font.family: Tema.serifa
+                font.pixelSize: 20
+                wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
             Campo { id: contado; rotulo: "Dinheiro contado"; prefixo: "R$"; numerico: true; Layout.fillWidth: true; onConfirmado: botaoFechar.clicked() }

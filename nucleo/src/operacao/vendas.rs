@@ -119,6 +119,11 @@ pub struct ItemCalculado {
     pub v_comissao: Option<i64>,
     #[serde(skip)]
     pub v_falta: i64,
+    /// R4: o desconto máximo da peça e o valor cheio do item (quantidade × preço da tabela).
+    #[serde(skip)]
+    pub v_desconto_maximo: Option<i64>,
+    #[serde(skip)]
+    pub v_cheio: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -284,6 +289,19 @@ fn peca(conn: &Connection, id: &str, tabela: i64) -> Resultado<Option<Peca>> {
     })
 }
 
+/// R4: com a parte dele no desconto da venda (`desconto_venda`, repartido pela proporção do total do item em `soma`,
+/// a soma dos totais dos itens), o item passa do desconto máximo da peça? A conta é exata (em i128, sem arredondar):
+/// dado = cheio − (total − parte), e passa quando dado × 10000 > cheio × máximo.
+fn passa_do_maximo(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
+    let Some(max) = i.v_desconto_maximo else { return false };
+    if desconto_venda <= 0 || soma <= 0 || i.v_cheio <= 0 {
+        return false;
+    }
+    let dado_vezes_soma =
+        (i.v_cheio as i128 - i.v_total as i128) * soma as i128 + desconto_venda as i128 * i.v_total as i128;
+    dado_vezes_soma * 10_000 > i.v_cheio as i128 * max as i128 * soma as i128
+}
+
 /// Calcula o carrinho. Não grava nada.
 pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     if e.itens.len() > MAX_ITENS {
@@ -386,8 +404,8 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             }
         };
         // Desconto máximo da peça: conta também o preço digitado abaixo da tabela.
+        let cheio = multiplicar(quantidade, preco_tabela);
         if let Some(max) = p.desconto_maximo {
-            let cheio = multiplicar(quantidade, preco_tabela);
             let dado = cheio - (bruto - desconto);
             if cheio > 0 && dado > 0 && dado as i128 * 10_000 > cheio as i128 * max as i128 && erro.is_empty() {
                 erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
@@ -429,6 +447,8 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             v_custo: p.custo,
             v_comissao: p.comissao,
             v_falta: falta,
+            v_desconto_maximo: p.desconto_maximo,
+            v_cheio: cheio,
         });
     }
     if e.pagamentos.len() > PAGAMENTOS_MAXIMOS {
@@ -444,6 +464,17 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         Ok(d) if d > depois_itens => (0, "O desconto é maior que o total.".to_string()),
         Ok(d) => (d, String::new()),
         Err(m) => (0, m),
+    };
+    // R4 (D-AUD-4, decisão do proprietário de 25/11/2026): o desconto da venda inteira respeita o desconto máximo de
+    // cada peça. A parte de cada item é proporcional ao total dele (como na comissão, no DRE e na devolução); somada
+    // ao desconto do item e ao preço abaixo da tabela, não passa do máximo.
+    let erro_desconto = match itens.iter().find(|i| erro_desconto.is_empty() && passa_do_maximo(i, desconto, depois_itens)) {
+        Some(i) => format!(
+            "O desconto da venda passa do máximo de {} ({}%). Diminua o desconto.",
+            i.descricao,
+            numeros::escrever_percentual(i.v_desconto_maximo.unwrap_or(0))
+        ),
+        None => erro_desconto,
     };
     let total = depois_itens - desconto;
     let pago = numeros::somar(e.pagamentos.iter().map(valor_para_conta))
@@ -1340,6 +1371,41 @@ mod testes {
 
     fn item(id: &str, q: &str) -> ItemEntrada {
         ItemEntrada { produto_id: id.into(), quantidade: q.into(), ..Default::default() }
+    }
+
+    /// R4 (D-AUD-4, decisão do proprietário de 25/11/2026): o desconto da venda inteira respeita o desconto máximo
+    /// de cada peça. A Pastilha (80,00, máximo 10%) e o Óleo (43,00, sem máximo): 123,00. Antes, qualquer desconto
+    /// da venda passava.
+    #[test]
+    fn r4_desconto_da_venda_respeita_o_maximo_de_cada_peca() {
+        let (b, u, p1, p2) = base();
+        let venda = |desconto: &str, itens: Vec<ItemEntrada>| VendaEntrada {
+            itens,
+            tabela: 1,
+            desconto: desconto.into(),
+            ..Default::default()
+        };
+        // 10% da venda: a Pastilha fica com 10% (o máximo): passa.
+        let c = calcular(&b.conn, &venda("10%", vec![item(&p1, "1"), item(&p2, "1")])).unwrap();
+        assert_eq!((c.erro_desconto.as_str(), c.total.as_str()), ("", "110,70"));
+        // 12,31 = um centavo acima de 10% de 123,00 na parte da Pastilha: recusado, com o nome da peça.
+        let c = calcular(&b.conn, &venda("12,31", vec![item(&p1, "1"), item(&p2, "1")])).unwrap();
+        assert_eq!(c.erro_desconto, "O desconto da venda passa do máximo de Pastilha (10%). Diminua o desconto.");
+        // 12,30: no limite, passa.
+        assert_eq!(calcular(&b.conn, &venda("12,30", vec![item(&p1, "1"), item(&p2, "1")])).unwrap().erro_desconto, "");
+        // O desconto do item conta junto: 5% no item e 6% na venda passam de 10%.
+        let mut it = item(&p1, "1");
+        it.desconto = "5%".into();
+        let c = calcular(&b.conn, &venda("6%", vec![it])).unwrap();
+        assert!(c.erro_desconto.contains("máximo de Pastilha"), "{}", c.erro_desconto);
+        // A peça sem máximo aceita qualquer desconto da venda.
+        assert_eq!(calcular(&b.conn, &venda("50%", vec![item(&p2, "1")])).unwrap().erro_desconto, "");
+        // E concluir recusa pelo campo do desconto.
+        let mut e = venda("20%", vec![item(&p1, "1")]);
+        e.pagamentos = vec![PagamentoEntrada { forma: "pix".into(), valor: "64".into(), ..Default::default() }];
+        crate::caixa::abrir(&b.conn, &b.dispositivo, &u, "Caixa 1", "0").unwrap();
+        let erro = concluir(&b.conn, &b.dispositivo, &u, &e).unwrap_err();
+        assert_eq!(erro.nome_do_campo(), Some("desconto"), "{erro}");
     }
 
     /// M-03: a prévia da venda soma os pagamentos (pago), os cheques e o

@@ -5,7 +5,8 @@ comercial na tela, durante o atendimento.
 Com o olho fechado:
 - na ficha da peça, o custo e o % de lucro somem **com os títulos** ("Custo", "% sobre o
   custo"); o preço de venda continua visível e **sobe** para o lugar deles;
-- no Caixa, o saldo ("Dinheiro na gaveta") fica discreto (sem o valor em reais).
+- no Caixa, o saldo ("Dinheiro na gaveta") fica discreto (sem o valor em reais);
+- R21: o diálogo "Fechar o caixa" mostra o esperado na gaveta mesmo com o olho fechado.
 
 Com o olho aberto, tudo volta. O olho só muda o que aparece: nada é gravado.
 
@@ -24,7 +25,7 @@ import time
 import re
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from telas_d09 import TELA, Rustinho, conferir, montar_loja, simples  # noqa: E402
+from telas_d09 import TELA, Rustinho, conferir, montar_loja, simples, xdo  # noqa: E402
 
 DINHEIRO = re.compile(r"R\$ ?-?[\d.]+,\d\d")
 
@@ -121,6 +122,18 @@ def main():
             print(("✔ " if ok else "✘ ") + "caixa, olho fechado: o saldo e os totais ficam discretos"
                   + ("" if ok else f": apareceu {com_valor[:4]} (foto: {foto})"))
             tudo_certo &= ok
+            # R21 (DP-20): conferência tradicional. Com o olho fechado, o diálogo "Fechar o caixa" mostra o
+            # esperado na gaveta antes da contagem (o olho não interfere no fechamento). Esc fecha sem fechar o caixa.
+            if not r.clicar("Fechar caixa"):
+                raise RuntimeError(f"não achei o botão Fechar caixa (veja {r.saida})")
+            time.sleep(1.5)
+            esperado = [t for _, _, t in r.textos() if t.startswith("Esperado na gaveta: R$ ") and DINHEIRO.search(t)]
+            foto = r.foto("-1b-fechar")
+            print(("✔ " if esperado else "✘ ") + "caixa, olho fechado: o diálogo de fechar mostra o esperado na gaveta"
+                  + (f" ({esperado[0]})" if esperado else f" (foto: {foto})"))
+            tudo_certo &= bool(esperado)
+            xdo("key", "Escape")
+            time.sleep(1)
             if not r.clicar("Mostrar valores"):
                 raise RuntimeError(f"não achei o botão Mostrar valores no Caixa (veja {r.saida})")
             time.sleep(1)

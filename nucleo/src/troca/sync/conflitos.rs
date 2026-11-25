@@ -14,7 +14,7 @@ pub(super) const CONTAS_A_MAIS: &[(&str, &str, &str, &str)] = &[
         "pago_a_mais",
         "SELECT id FROM conta_receber_saldo WHERE cancelado_em IS NULL AND pago > valor",
         "SELECT group_concat(id, ',') FROM (SELECT r.id FROM recebimento_parcela rp JOIN recebimento r ON r.id = rp.recebimento_id
-          WHERE rp.conta_id = ?1 AND r.estornado_em IS NULL ORDER BY r.criado_em, r.id)",
+          WHERE rp.conta_id = ?1 AND r.estornado_em IS NULL AND rp.valor <> 0 ORDER BY r.criado_em, r.id)",
     ),
     (
         "conta_pagar",
@@ -88,7 +88,8 @@ pub(super) fn texto_a_mais(
                 )?;
             let recebimentos = lista(
                 "SELECT r.numero, rp.valor, r.dispositivo, r.estornado_em IS NOT NULL
-                   FROM recebimento r JOIN recebimento_parcela rp ON rp.recebimento_id = r.id WHERE r.id = ?1",
+                   FROM recebimento r JOIN recebimento_parcela rp ON rp.recebimento_id = r.id
+                  WHERE r.id = ?1 AND rp.valor <> 0",
             )?;
             format!(
                 "A parcela {parcela}/{parcelas} de {cliente} ({}, vencimento {}) foi recebida mais de uma vez em caixas \

@@ -563,6 +563,8 @@ fn dp20_dp24_esperado_a_vista_e_caixa_sob_o_olho() {
     assert!(tela.contains("titulo: \"Dinheiro na gaveta\""));
     assert!(tela.contains("\"R$ \" + Tema.valor(tela.r.esperado)"), "o esperado no resumo, sob o olho");
     assert!(tela.contains("sensivel: true"), "o Caixa tem o botão do olho");
+    // R21: no diálogo de fechar, o esperado aparece antes da contagem e sem o olho.
+    assert!(tela.contains("\"Esperado na gaveta: R$ \" + tela.r.esperado"), "o esperado no fechamento, fora do olho");
     assert!(tela.contains("Conte o dinheiro da gaveta e digite o total. O Rustinho mostra a diferença"));
 }
 
@@ -747,12 +749,14 @@ fn dp21_retrato_venda_sem_estoque_conclui_e_o_estoque_fica_negativo() {
     assert_eq!(crate::estoque::saldo(c, &l.peca).unwrap(), -2_000);
 }
 
-/// DP-22 · retrato (E16): a comissão de outubro foi fechada (R$ 15,00 = 5% de
-/// R$ 300). Em novembro o cliente devolve a peça. O relatório de outubro passa
-/// a mostrar R$ 0,00 (o fechamento continua de R$ 15,00) e o de novembro não
-/// desconta nada: a devolução não chega a período nenhum.
+/// DP-22 (decidida pelo proprietário em 25/11/2026, regra 23: "descontar no período seguinte"; E16): a comissão de
+/// outubro foi fechada em 01/11 (R$ 15,00 = 5% de R$ 300). Depois o cliente devolve a peça. Outubro não muda (o
+/// fechamento e o relatório continuam R$ 15,00); a devolução desconta no período em que foi feita. Sem comissão ali
+/// para descontar, fechar recusa e explica; com uma venda no período, desconta dela. Desfeito o fechamento de
+/// outubro, a devolução volta para outubro. O retrato de antes (a devolução não descontava em lugar nenhum) saiu
+/// com a decisão.
 #[test]
-fn dp22_retrato_devolucao_depois_do_fechamento_nao_desconta_em_lugar_nenhum() {
+fn dp22_devolucao_depois_do_fechamento_desconta_no_periodo_seguinte() {
     let l = loja();
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
@@ -763,6 +767,7 @@ fn dp22_retrato_devolucao_depois_do_fechamento_nao_desconta_em_lugar_nenhum() {
     let outubro = || comissoes::relatorio(c, "01/10/2026", "31/10/2026").unwrap();
     assert_eq!(outubro().vendedores[0].comissao, "15,00");
     comissoes::fechar(c, d, &l.u, &l.u, "01/10/2026", "31/10/2026", "").unwrap();
+    c.execute("UPDATE comissao_fechamento SET criado_em = '2026-11-01T12:00:00Z'", []).unwrap();
     let item = devolucoes::da_venda(c, &v).unwrap().itens[0].venda_item_id.clone();
     devolucoes::devolver(
         c,
@@ -777,11 +782,28 @@ fn dp22_retrato_devolucao_depois_do_fechamento_nao_desconta_em_lugar_nenhum() {
         },
     )
     .unwrap();
+    // A devolução foi ontem (depois do fechamento de 01/11).
+    c.execute("UPDATE devolucao SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day')", []).unwrap();
+    let ontem: String = c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
     let r = outubro();
-    assert_eq!(r.vendedores[0].comissao, "0,00", "o período fechado recalcula");
+    assert_eq!(r.vendedores[0].comissao, "15,00", "o período fechado não muda");
     assert_eq!(r.fechamentos[0].valor, "15,00", "o fechamento fica");
-    let novembro = comissoes::relatorio(c, "01/11/2026", "30/11/2026").unwrap();
-    assert_eq!(novembro.vendedores[0].comissao, "0,00", "e o período seguinte não desconta");
+    let dia = || {
+        let v = comissoes::relatorio(c, &ontem, &ontem).unwrap().vendedores.remove(0);
+        (v.comissao, v.vendido)
+    };
+    assert_eq!(dia(), ("-15,00".to_string(), "-300,00".to_string()), "desconta no dia da devolução");
+    let e = comissoes::fechar(c, d, &l.u, &l.u, &ontem, &ontem, "").unwrap_err().to_string();
+    assert!(e.contains("negativa (R$ -15,00)") && e.contains("período maior"), "{e}");
+    // Com uma venda no mesmo dia (R$ 15,00 de comissão), o desconto sai dela.
+    let v2 = vender(&l, d, "1", vec![pg("pix", "300")], None);
+    c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day') WHERE id = ?1", [&v2]).unwrap();
+    assert_eq!(dia().0, "0,00");
+    // Desfeito o fechamento de outubro, a devolução volta para outubro (e sai do dia dela).
+    let f = outubro().fechamentos[0].id.clone();
+    comissoes::reabrir(c, d, &l.u, &f).unwrap();
+    assert_eq!(outubro().vendedores[0].comissao, "0,00");
+    assert_eq!(dia().0, "15,00");
 }
 
 // ---------------------------------------------------------------------------

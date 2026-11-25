@@ -108,17 +108,24 @@ fn calcular(
     de: &str,
     ate: &str,
 ) -> Resultado<(i64, i64, i64)> {
-    let mut c = conn.prepare_cached(
+    // R23 (DP-22, decisão do proprietário de 25/11/2026): a devolução feita depois de fechada a comissão da venda
+    // (um fechamento ativo que cobre o dia da venda, feito antes da devolução) não muda o período fechado: ela
+    // desconta no período em que foi feita (a segunda consulta, abaixo). As outras devoluções descontam no
+    // período da venda, como sempre. Desfeito o fechamento, a devolução volta ao período da venda.
+    const DEPOIS_DO_FECHAMENTO: &str = "EXISTS (SELECT 1 FROM comissao_fechamento f
+              WHERE f.usuario_id = v.vendedor_id AND f.cancelado_em IS NULL
+                AND date(v.criado_em, 'localtime') BETWEEN f.de AND f.ate AND f.criado_em <= d.criado_em)";
+    let mut c = conn.prepare_cached(&format!(
         "SELECT v.id, (SELECT COALESCE(SUM(i2.total), 0) FROM venda_item i2 WHERE i2.venda_id = v.id),
                 v.total, i.total, i.comissao,
                 COALESCE((SELECT SUM(di.valor_item) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
-                           WHERE di.venda_item_id = i.id AND d.cancelado_em IS NULL), 0),
+                           WHERE di.venda_item_id = i.id AND d.cancelado_em IS NULL AND NOT {DEPOIS_DO_FECHAMENTO}), 0),
                 COALESCE((SELECT SUM(di.valor) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
-                           WHERE di.venda_item_id = i.id AND d.cancelado_em IS NULL), 0)
+                           WHERE di.venda_item_id = i.id AND d.cancelado_em IS NULL AND NOT {DEPOIS_DO_FECHAMENTO}), 0)
            FROM venda v JOIN venda_item i ON i.venda_id = v.id
           WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND v.vendedor_id = ?1
-            AND date(v.criado_em, 'localtime') BETWEEN ?2 AND ?3",
-    )?;
+            AND date(v.criado_em, 'localtime') BETWEEN ?2 AND ?3"
+    ))?;
     #[allow(clippy::type_complexity)]
     let linhas: Vec<(String, i64, i64, i64, Option<i64>, i64, i64)> = c
         .query_map(params![usuario_id, de, ate], |l| {
@@ -142,8 +149,29 @@ fn calcular(
         let pct = pct.or(padrao).unwrap_or(0) as i128;
         comissao += base * pct;
     }
-    // pct em centésimos de ponto: base * pct / 10000, arredondado
-    let comissao = crate::numeros::saturar((comissao + 5000) / 10000);
+    // R23: as devoluções feitas neste período de vendas cuja comissão já estava fechada: descontam aqui.
+    let mut d = conn.prepare_cached(&format!(
+        "SELECT (SELECT COALESCE(SUM(i2.total), 0) FROM venda_item i2 WHERE i2.venda_id = v.id), v.total, i.comissao,
+                SUM(di.valor_item), SUM(di.valor)
+           FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
+           JOIN venda_item i ON i.id = di.venda_item_id JOIN venda v ON v.id = i.venda_id
+          WHERE d.cancelado_em IS NULL AND v.tipo = 'venda' AND v.situacao = 'concluida' AND v.vendedor_id = ?1
+            AND date(d.criado_em, 'localtime') BETWEEN ?2 AND ?3 AND {DEPOIS_DO_FECHAMENTO}
+          GROUP BY i.id"
+    ))?;
+    #[allow(clippy::type_complexity)]
+    let devolvidas: Vec<(i64, i64, Option<i64>, i64, i64)> = d
+        .query_map(params![usuario_id, de, ate], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?
+        .collect::<Result<_, _>>()?;
+    for (soma_itens, total, pct, devolvido_item, devolvido) in &devolvidas {
+        vendido -= devolvido;
+        let base = if *soma_itens > 0 { *devolvido_item as i128 * *total as i128 / *soma_itens as i128 } else { 0 };
+        comissao -= base * pct.or(padrao).unwrap_or(0) as i128;
+    }
+    // pct em centésimos de ponto: base * pct / 10000, arredondado (o desconto do R23 pode deixar negativo:
+    // arredonda do mesmo jeito, longe do zero no meio centavo).
+    let arredondado = if comissao < 0 { -((-comissao + 5000) / 10000) } else { (comissao + 5000) / 10000 };
+    let comissao = crate::numeros::saturar(arredondado);
     Ok((vendas.len() as i64, vendido, comissao))
 }
 
@@ -265,7 +293,15 @@ pub fn fechar(
         ));
     }
     let (vendas, vendido, comissao) = calcular(conn, vendedor_id, padrao, &de, &ate)?;
-    if comissao <= 0 {
+    if comissao < 0 {
+        // R23: as devoluções deste período (de vendas com a comissão já fechada) passam da comissão dele.
+        return Err(Erro::validacao(format!(
+            "As devoluções deste período deixam a comissão de {nome} negativa (R$ -{}). Feche um período maior, que \
+             inclua vendas.",
+            numeros::escrever_dinheiro(-comissao)
+        )));
+    }
+    if comissao == 0 {
         return Err(Erro::validacao(format!("{nome} não tem comissão neste período.")));
     }
     let ids = pagar::lancar(

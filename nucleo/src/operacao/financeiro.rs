@@ -685,10 +685,29 @@ pub fn fluxo(conn: &Connection, de: &str, ate: &str, dias: i64) -> Resultado<Flu
     let mut real: Somas = BTreeMap::new();
     for (data, valor, d) in consultar(
         conn,
+        // R25 (DA-F6-2, decisão do proprietário de 25/11/2026): a venda cancelada depois do fechamento do caixa
+        // continua no dia em que foi feita (o dia fechado não muda de valor; a mesma marca do D-14)...
         "SELECT date(v.criado_em, 'localtime'), SUM(p.valor) - MAX(CASE WHEN p.forma = 'dinheiro' THEN v.troco ELSE 0 END), 'Vendas'
            FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
-          WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND p.forma NOT IN ('crediario', 'cheque', 'vale')
+          WHERE v.tipo = 'venda' AND (v.situacao = 'concluida' OR (v.situacao = 'cancelada' AND v.cancelado_apos_fechar = 1))
+            AND p.forma NOT IN ('crediario', 'cheque', 'vale')
             AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2
+          GROUP BY v.id",
+        &de,
+        &ate,
+    )? {
+        somar(&mut real, data, valor, d);
+    }
+    for (data, valor, d) in consultar(
+        conn,
+        // ... e o cancelamento entra à parte, no dia em que foi feito, com o mesmo valor (negativo).
+        "SELECT date(v.cancelado_em, 'localtime'),
+                -(SUM(p.valor) - MAX(CASE WHEN p.forma = 'dinheiro' THEN v.troco ELSE 0 END)),
+                'Venda cancelada depois do fechamento'
+           FROM venda_pagamento p JOIN venda v ON v.id = p.venda_id
+          WHERE v.tipo = 'venda' AND v.situacao = 'cancelada' AND v.cancelado_apos_fechar = 1
+            AND p.forma NOT IN ('crediario', 'cheque', 'vale')
+            AND date(v.cancelado_em, 'localtime') BETWEEN ?1 AND ?2
           GROUP BY v.id",
         &de,
         &ate,
@@ -1508,6 +1527,50 @@ mod testes {
         assert_eq!(cheques::painel(c, "555", "carteira").unwrap().cheques.len(), 1);
         receber::estornar(c, d, u, &rec, "errado").unwrap();
         assert!(cheques::painel(c, "555", "carteira").unwrap().cheques.is_empty());
+    }
+
+    /// R25 (DA-F6-2, decisão do proprietário de 25/11/2026): a venda cancelada depois do fechamento do caixa não
+    /// some do dia em que foi feita (o dia fechado não muda de valor); o cancelamento entra à parte, no dia dele.
+    /// Antes, a venda sumia do fluxo e o dia fechado mudava. O cancelamento antes do fechamento continua tirando a
+    /// venda do dia.
+    #[test]
+    fn r25_cancelamento_depois_do_fechamento_fica_no_dia_dele() {
+        let l = loja();
+        let (c, d, u) = (&l.b.conn, &l.b.dispositivo, &l.u);
+        caixa::abrir(c, d, u, "Caixa 1", "0").unwrap();
+        let e = VendaEntrada {
+            itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+            tabela: 1,
+            pagamentos: vec![Pg { forma: "pix".into(), valor: "300".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        let depois = vendas::concluir(c, d, u, &e).unwrap();
+        let antes = vendas::concluir(c, d, u, &e).unwrap();
+        // Cancelada antes do fechamento: sai do dia, como sempre.
+        vendas::cancelar(c, d, u, &antes, "desistiu na hora").unwrap();
+        caixa::fechar(c, d, u, "0", "").unwrap();
+        c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, '-1 day')", []).unwrap();
+        let data = |dias: &str| -> String {
+            c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', ?1)", [dias], |l| l.get(0)).unwrap()
+        };
+        let (ontem, hoje) = (data("-1 day"), data("+0 day"));
+        let dia = |f: &Fluxo, quando: &str| -> (String, String, Vec<String>) {
+            f.realizado
+                .iter()
+                .find(|x| x.data == quando)
+                .map(|x| (x.entradas.clone(), x.saidas.clone(), x.detalhes.clone()))
+                .unwrap_or_default()
+        };
+        let f = fluxo(c, &ontem, &hoje, 0).unwrap();
+        assert_eq!(dia(&f, &ontem).0, "300,00", "só a venda que ficou");
+        // Cancelada hoje, com o caixa dela já fechado.
+        vendas::cancelar(c, d, u, &depois, "devolveu a peça").unwrap();
+        let f = fluxo(c, &ontem, &hoje, 0).unwrap();
+        assert_eq!(dia(&f, &ontem).0, "300,00", "o dia fechado não muda");
+        let (_, saidas, detalhes) = dia(&f, &hoje);
+        assert_eq!(saidas, "300,00");
+        assert!(detalhes.iter().any(|x| x.contains("Venda cancelada depois do fechamento")), "{detalhes:?}");
+        assert_eq!((f.entradas.as_str(), f.saidas.as_str()), ("300,00", "300,00"));
     }
 
     /// R3 (D-AUD-4, decisão do proprietário de 25/11/2026): a comissão fecha só até ontem. Fechando até hoje (ou

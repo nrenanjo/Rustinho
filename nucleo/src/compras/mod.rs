@@ -2171,6 +2171,18 @@ fn atualizar_custo(
     tabelas: &[config::TabelaPreco],
 ) -> Resultado<(Vec<String>, bool)> {
     let antes: i64 = conn.query_row("SELECT custo FROM produto WHERE id = ?1", [produto_id], |l| l.get(0))?;
+    // R5 (D-AUD-4, decisão do proprietário de 25/11/2026): a compra com custo zero (bonificação do fornecedor) não
+    // troca o custo da peça, nem o preço, nem o % de lucro. Antes o custo ia a zero e o lucro no DRE ficava maior
+    // do que é. A entrada no estoque continua; o registro da compra diz que foi bonificação.
+    if custo == 0 && antes > 0 {
+        return Ok((
+            vec![format!(
+                "Bonificação (custo zero): o custo da peça continua R$ {}",
+                numeros::escrever_dinheiro(antes)
+            )],
+            false,
+        ));
+    }
     let baixou = antes > 0 && custo < antes;
     let atualizar_precos = atualizar_precos && (!baixou || baixar_preco);
     let mut detalhes = Vec::new();
@@ -3361,6 +3373,40 @@ mod testes {
         f.codigo_original = original.into();
         f.custo = custo.into();
         produtos::salvar(&b.conn, &b.dispositivo, u, &f).unwrap()
+    }
+
+    /// R5 (D-AUD-4, decisão do proprietário de 25/11/2026): a compra com custo zero (bonificação) não troca o custo
+    /// da peça, nem o preço, nem o % de lucro, com ou sem "atualizar os preços"; o registro diz que foi bonificação.
+    /// Antes o custo ia a zero (e o lucro no DRE ficava maior do que é).
+    #[test]
+    fn r5_bonificacao_com_custo_zero_nao_troca_o_custo() {
+        let (b, u) = base();
+        let c = &b.conn;
+        let pid = peca(&b, &u, "Palheta", "", "", "50");
+        let tabelas = config::tabelas_preco(c).unwrap();
+        let ler = || -> (i64, Vec<(i64, Option<i64>)>) {
+            let custo = c.query_row("SELECT custo FROM produto WHERE id = ?1", [&pid], |l| l.get(0)).unwrap();
+            let precos = c
+                .prepare("SELECT preco, lucro FROM produto_preco WHERE produto_id = ?1 ORDER BY tabela")
+                .unwrap()
+                .query_map([&pid], |l| Ok((l.get(0)?, l.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            (custo, precos)
+        };
+        let antes = ler();
+        assert_eq!(antes.0, 5_000);
+        for atualizar_precos in [false, true] {
+            let (detalhes, mudou_preco) =
+                atualizar_custo(c, &b.dispositivo, &u, &pid, 0, atualizar_precos, true, &tabelas).unwrap();
+            assert!(!mudou_preco);
+            assert_eq!(detalhes, ["Bonificação (custo zero): o custo da peça continua R$ 50,00"]);
+            assert_eq!(ler(), antes, "atualizar os preços: {atualizar_precos}");
+        }
+        // Um custo de verdade continua trocando o custo.
+        atualizar_custo(c, &b.dispositivo, &u, &pid, 6_000, false, false, &tabelas).unwrap();
+        assert_eq!(ler().0, 6_000);
     }
 
     /// D-15: o % de lucro refeito quando a compra muda o custo e o preço

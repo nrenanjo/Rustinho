@@ -272,6 +272,18 @@ fn juros_de(saldo: i64, dias: i64, t: Taxas) -> i64 {
     crate::numeros::saturar((m + j + 5_000) / 10_000)
 }
 
+/// R2 (D-AUD-4, decisão do proprietário de 25/11/2026): só os juros de `dias`
+/// sobre o saldo, sem multa nem tolerância. Para a parcela cuja multa e juros
+/// já foram acertados num pagamento feito em atraso: daí em diante, só os
+/// juros dos dias seguintes, sobre o que falta.
+fn juros_desde(saldo: i64, dias: i64, t: Taxas) -> i64 {
+    if dias <= 0 || saldo <= 0 {
+        return 0;
+    }
+    let j = saldo as i128 * t.juros_mes as i128 * dias as i128 / 30;
+    crate::numeros::saturar((j + 5_000) / 10_000)
+}
+
 /// Taxas para a tela de configurações ("2,00" = 2%; tolerância em dias).
 pub fn taxas_texto(conn: &Connection) -> Resultado<(String, String, String)> {
     let t = taxas(conn)?;
@@ -509,9 +521,17 @@ pub struct Parcela {
 fn ler_parcelas(conn: &Connection, filtro: &str, valor: &str) -> Resultado<Vec<Parcela>> {
     let hoje = fiscal::hoje(conn)?;
     let taxas = taxas(conn)?;
+    // R2: o último dia em que a parcela recebeu um pagamento já em atraso (passada a tolerância). Nesse dia a multa
+    // e os juros foram acertados (cobrados ou dispensados no campo dos juros). O abatimento de uma devolução não
+    // conta: não foi pagamento.
+    let carencia = taxas.carencia.max(0);
     let sql = format!(
         "SELECT c.id, COALESCE(c.venda_id, ''), c.descricao, c.parcela, c.parcelas, c.vencimento, c.valor, c.pago,
-                c.cancelado_em IS NOT NULL
+                c.cancelado_em IS NOT NULL,
+                (SELECT MAX(date(r.criado_em, 'localtime'))
+                   FROM recebimento_parcela rp JOIN recebimento r ON r.id = rp.recebimento_id
+                  WHERE rp.conta_id = c.id AND r.estornado_em IS NULL AND r.forma <> 'devolucao'
+                    AND date(r.criado_em, 'localtime') > date(c.vencimento, '+{carencia} days'))
            FROM conta_receber_saldo c WHERE {filtro}
           ORDER BY c.vencimento, c.criado_em, c.parcela"
     );
@@ -527,14 +547,20 @@ fn ler_parcelas(conn: &Connection, filtro: &str, valor: &str) -> Resultado<Vec<P
             l.get::<_, i64>(6)?,
             l.get::<_, i64>(7)?,
             l.get::<_, bool>(8)?,
+            l.get::<_, Option<String>>(9)?,
         ))
     })?;
     let mut lista = Vec::new();
     for linha in linhas {
-        let (id, venda_id, descricao, parcela, parcelas, vencimento, valor, pago, cancelada) = linha?;
+        let (id, venda_id, descricao, parcela, parcelas, vencimento, valor, pago, cancelada, acertada_em) = linha?;
         let saldo = (valor - pago).max(0);
         let atraso = dias_entre(&vencimento, &hoje).max(0);
-        let juros = if saldo > 0 && !cancelada { juros_de(saldo, atraso, taxas) } else { 0 };
+        let juros = match (&acertada_em, saldo > 0 && !cancelada) {
+            (_, false) => 0,
+            // R2: multa e juros já acertados naquele dia; agora só os juros dos dias seguintes.
+            (Some(dia), true) => juros_desde(saldo, dias_entre(dia, &hoje).max(0), taxas),
+            (None, true) => juros_de(saldo, atraso, taxas),
+        };
         let situacao = if cancelada {
             "cancelada"
         } else if saldo == 0 {
@@ -754,6 +780,10 @@ pub struct ReceberCalculo {
     pub v_desconto: i64,
     #[serde(skip)]
     pub v_troco: i64,
+    /// R2: as parcelas escolhidas com multa ou juros: este recebimento os acerta (cobrados ou dispensados no
+    /// campo dos juros), também nas que o valor não chega a abater.
+    #[serde(skip)]
+    pub acertadas: Vec<String>,
 }
 
 pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalculo> {
@@ -866,6 +896,7 @@ pub fn calcular(conn: &Connection, e: &ReceberEntrada) -> Resultado<ReceberCalcu
         v_juros: juros,
         v_desconto: desconto,
         v_troco: troco,
+        acertadas: escolhidas.iter().filter(|p| p.v_juros > 0).map(|p| p.id.clone()).collect(),
     })
 }
 
@@ -925,6 +956,14 @@ pub fn receber(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Receb
         conn.execute(
             "INSERT INTO recebimento_parcela (id, recebimento_id, conta_id, valor) VALUES (?1, ?2, ?3, ?4)",
             params![tempo::novo_id(), id, a.conta_id, a.v_valor],
+        )?;
+    }
+    // R2: a parcela atrasada que o valor não chegou a abater também teve a multa e os juros acertados hoje (o
+    // recebimento os cobrou): fica ligada a ele com abatimento zero, para não cobrar de novo.
+    for conta in c.acertadas.iter().filter(|k| !c.abates.iter().any(|a| &a.conta_id == *k)) {
+        conn.execute(
+            "INSERT INTO recebimento_parcela (id, recebimento_id, conta_id, valor) VALUES (?1, ?2, ?3, 0)",
+            params![tempo::novo_id(), id, conta],
         )?;
     }
     if e.forma == "cheque" {
@@ -1080,7 +1119,7 @@ pub fn recibo(conn: &Connection, id: &str) -> Resultado<Recibo> {
     let mut c = conn.prepare(
         "SELECT rp.conta_id, c.descricao, c.parcela, c.parcelas, c.vencimento, rp.valor, c.valor - c.pago
            FROM recebimento_parcela rp JOIN conta_receber_saldo c ON c.id = rp.conta_id
-          WHERE rp.recebimento_id = ?1 ORDER BY c.vencimento, c.parcela",
+          WHERE rp.recebimento_id = ?1 AND rp.valor <> 0 ORDER BY c.vencimento, c.parcela",
     )?;
     r.partes = c
         .query_map([id], |l| {
@@ -1208,6 +1247,122 @@ mod testes {
     use crate::banco::Banco;
     use crate::vendas::{self, ItemEntrada, PagamentoEntrada, VendaEntrada};
     use crate::{pessoas, produtos, usuarios};
+
+    /// Uma loja com a cliente Zé, o caixa aberto e as taxas dadas (multa, juros ao mês, tolerância).
+    fn loja_com_taxas(multa: &str, juros: &str, carencia: &str) -> (Banco, String, String) {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, &b.dispositivo);
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        let mut cli = pessoas::ficha_nova(c, "cliente").unwrap();
+        cli.nome = "Oficina do Zé".into();
+        let zé = pessoas::salvar(c, d, &u, &cli).unwrap();
+        caixa::abrir(c, d, &u, "Caixa 1", "50").unwrap();
+        salvar_taxas(c, multa, juros, carencia).unwrap();
+        (b, u, zé)
+    }
+
+    /// Uma dívida de `valor` lançada à mão, vencida há `dias` dias. Devolve o id da parcela.
+    fn divida_vencida(b: &Banco, u: &str, cliente: &str, valor: &str, dias: i64) -> String {
+        let e = LancamentoEntrada {
+            cliente_id: cliente.into(),
+            descricao: "Caderno".into(),
+            valor: valor.into(),
+            parcelas: 1,
+            primeiro_vencimento: String::new(),
+        };
+        let id = lancar(&b.conn, &b.dispositivo, u, &e).unwrap().remove(0);
+        vencida_ha(b, &id, dias);
+        id
+    }
+
+    fn vencida_ha(b: &Banco, conta: &str, dias: i64) {
+        b.conn
+            .execute(
+                "UPDATE conta_receber SET vencimento = date('now', 'localtime', ?2) WHERE id = ?1",
+                params![conta, format!("-{dias} days")],
+            )
+            .unwrap();
+    }
+
+    fn recebido_ha(b: &Banco, recebimento: &str, dias: i64) {
+        b.conn
+            .execute(
+                "UPDATE recebimento SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', criado_em, ?2) WHERE id = ?1",
+                params![recebimento, format!("-{dias} days")],
+            )
+            .unwrap();
+    }
+
+    /// Os juros sugeridos (multa + juros) de uma parcela.
+    fn juros_da(b: &Banco, cliente: &str, conta: &str) -> String {
+        cliente_conta(&b.conn, cliente).into_iter().find(|p| p.id == conta).unwrap().juros
+    }
+
+    fn cliente_conta(c: &Connection, cliente_id: &str) -> Vec<Parcela> {
+        cliente(c, cliente_id, false).unwrap().parcelas
+    }
+
+    /// R2 (D-AUD-4, decisão do proprietário de 25/11/2026): a parcela atrasada paga em duas vezes cobra a multa e
+    /// os juros uma vez. Antes, o segundo pagamento sugeria de novo a multa sobre o que faltava e os juros desde o
+    /// vencimento (aqui: 4,00 + 2,00 no mesmo dia).
+    #[test]
+    fn r2_multa_e_juros_uma_vez_no_pagamento_parcial() {
+        let (b, u, zé) = loja_com_taxas("2", "1", "");
+        let (c, d) = (&b.conn, &b.dispositivo);
+        let conta = divida_vencida(&b, &u, &zé, "300", 30);
+        // 300,00 vencida há 30 dias: multa 6,00 + juros 3,00.
+        assert_eq!(juros_da(&b, &zé, &conta), "9,00");
+        let pagar = ReceberEntrada { cliente_id: zé.clone(), valor: "109".into(), forma: "dinheiro".into(), ..Default::default() };
+        let calc = calcular(c, &pagar).unwrap();
+        assert_eq!((calc.juros.as_str(), calc.continua_devendo.as_str()), ("9,00", "200,00"));
+        let rec = receber(c, d, &u, &pagar).unwrap();
+        // No mesmo dia, nada de multa nem juros de novo sobre os 200,00 que faltam.
+        assert_eq!(juros_da(&b, &zé, &conta), "");
+        // Dez dias depois do pagamento: só os juros desses dez dias sobre 200,00 (0,67), sem multa.
+        recebido_ha(&b, &rec, 10);
+        vencida_ha(&b, &conta, 40);
+        assert_eq!(juros_da(&b, &zé, &conta), "0,67");
+        // Estornado o pagamento, volta tudo desde o vencimento: 300,00 com 40 dias = 6,00 + 4,00.
+        estornar(c, d, &u, &rec, "Lançado errado").unwrap();
+        assert_eq!(juros_da(&b, &zé, &conta), "10,00");
+    }
+
+    /// R2: o pagamento que cobre só os juros (sem abater a parcela) também acerta a multa e os juros daquele dia (e o
+    /// recibo não mostra abatimento de R$ 0,00); o pagamento feito dentro da tolerância não acerta nada.
+    #[test]
+    fn r2_pagamento_so_dos_juros_e_dentro_da_tolerancia() {
+        let (b, u, zé) = loja_com_taxas("2", "1", "5");
+        let (c, d) = (&b.conn, &b.dispositivo);
+        let conta = divida_vencida(&b, &u, &zé, "300", 30);
+        assert_eq!(juros_da(&b, &zé, &conta), "9,00");
+        let so_juros = ReceberEntrada {
+            cliente_id: zé.clone(),
+            contas: vec![conta.clone()],
+            valor: "9".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        };
+        let rec = receber(c, d, &u, &so_juros).unwrap();
+        assert_eq!(juros_da(&b, &zé, &conta), "", "os juros foram pagos hoje");
+        assert!(recibo(c, &rec).unwrap().partes.is_empty(), "o recibo não mostra abatimento de R$ 0,00");
+        assert_eq!(situacao(c, &zé).unwrap().em_aberto, "300,00", "a parcela continua inteira");
+
+        // Dentro da tolerância (3 dias), o pagamento de 100,00 não tem encargos e não acerta nada: passada a
+        // tolerância, a multa e os juros contam desde o vencimento, sobre o que falta (200,00 com 10 dias = 4,67).
+        let outra = divida_vencida(&b, &u, &zé, "300", 3);
+        assert_eq!(juros_da(&b, &zé, &outra), "");
+        let cem = ReceberEntrada {
+            cliente_id: zé.clone(),
+            contas: vec![outra.clone()],
+            valor: "100".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        };
+        let rec2 = receber(c, d, &u, &cem).unwrap();
+        recebido_ha(&b, &rec2, 7);
+        vencida_ha(&b, &outra, 10);
+        assert_eq!(juros_da(&b, &zé, &outra), "4,67");
+    }
 
     #[test]
     fn crediario_do_comeco_ao_fim() {
