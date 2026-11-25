@@ -534,3 +534,35 @@ fn r13_circulo_entre_dois_caixas_e_reativar() {
     assert_eq!((saldo(c, &d), saldo(c, &k)), (0, 5000));
     assert!(crate::faixas::juntadas_para_ver(c).unwrap().is_empty());
 }
+
+/// Mutação R13-compra-raiz (sobreviveu ao teste das entradas): o item de compra em rascunho ligado a D que chega de
+/// outro caixa DEPOIS da junção (a passagem da junção não o viu) entra em K ao lançar.
+#[test]
+fn r13_rascunho_que_chega_depois_da_juncao_lanca_na_que_ficou() {
+    use crate::{compras, nfe_xml};
+    let (mut a, _b, u, d, k) = dois();
+    let disp = a.dispositivo.clone();
+    juntar(&mut a, &u, &d, &k, false);
+    let c = &a.conn;
+    let compra = compras::importar_xml(c, &disp, &u, nfe_xml::EXEMPLO).unwrap();
+    let f = compras::ficha(c, &compra).unwrap();
+    let itens = f
+        .itens
+        .iter()
+        .enumerate()
+        .map(|(i, it)| compras::ItemEntrada {
+            id: it.id.clone(),
+            acao: if i == 0 { "ligar".into() } else { "ignorar".into() },
+            produto_id: if i == 0 { k.clone() } else { String::new() },
+            fator: "1".into(),
+            baixar_preco: false,
+        })
+        .collect();
+    compras::atualizar(c, &compras::CompraEntrada { id: compra.clone(), itens, ..Default::default() }).unwrap();
+    // Como se o item tivesse sido ligado a D em outro caixa, antes de saber da junção, e chegado agora pela troca.
+    c.execute("UPDATE compra_item SET produto_id = ?2 WHERE compra_id = ?1 AND acao = 'ligar'", [&compra, &d]).unwrap();
+    compras::liberar_para_teste(c, &disp, &compra);
+    compras::lancar(c, &disp, &u, &compra).unwrap();
+    assert_eq!(texto(c, "SELECT produto_id FROM compra_item WHERE compra_id = ?1 AND acao = 'ligar'", &compra), k);
+    assert_eq!(saldo(c, &d), 0);
+}

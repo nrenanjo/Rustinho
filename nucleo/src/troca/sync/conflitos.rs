@@ -726,12 +726,13 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 k.pode_usar = PODE_USAR.contains(&tabela.as_str());
                 // R12 (DP-41): o código do fornecedor ligado a peças diferentes por dois caixas sem rede.
                 if tabela == "produto_fornecedor" && k.resolvido.is_empty() {
-                    let disputa = match chave_do_fornecedor(&chave) {
-                        Some((f, c)) => crate::catalogo::codigos::fornecedor_em_disputa(conn, &f, &c)?,
-                        None => None,
+                    use crate::catalogo::codigos::{situacao_do_fornecedor, SituacaoFornecedor};
+                    let situacao = match chave_do_fornecedor(&chave) {
+                        Some((f, c)) => situacao_do_fornecedor(conn, &f, &c)?,
+                        None => SituacaoFornecedor::Comum,
                     };
-                    match disputa {
-                        Some(pecas) => {
+                    match situacao {
+                        SituacaoFornecedor::Disputa(pecas) => {
                             let nome = |id: &str| -> Resultado<String> {
                                 Ok(conn
                                     .query_row(
@@ -757,11 +758,13 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                                 k.mesma_peca = json!(lista);
                             }
                         }
-                        // Deixou de ser disputa (juntaram as peças, ou a ligação ficou igual).
-                        None => {
+                        // Deixou de ser disputa: juntaram as peças (a mesma raiz e o mesmo fator).
+                        SituacaoFornecedor::Corrigida => {
                             k.resolvido =
                                 "Corrigido: as duas ligações levam agora à mesma peça (ou ao mesmo fator)".into()
                         }
+                        // O conflito comum da ligação (como antes do R12): o gerente decide.
+                        SituacaoFornecedor::Comum | SituacaoFornecedor::SemConflito => {}
                     }
                 }
                 // Depois de resolvido, o que vale agora de fato (pelos dados,
@@ -795,7 +798,7 @@ pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
         .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
         .collect::<Result<_, _>>()?;
     let mut abertos = outros;
-    // R12: o código do fornecedor conta só enquanto a disputa é efetiva.
+    // R12: o código do fornecedor conta, salvo quando juntaram as peças (corrigido).
     let fornecedor: Vec<String> = conn
         .prepare(
             "SELECT chave FROM sync_conflito WHERE resolvido_em IS NULL AND tabela = 'produto_fornecedor'
@@ -804,10 +807,16 @@ pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
         .query_map([], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
     for chave in fornecedor {
-        if let Some((f, c)) = chave_do_fornecedor(&chave) {
-            if crate::catalogo::codigos::fornecedor_em_disputa(conn, &f, &c)?.is_some() {
-                abertos += 1;
+        // Só o corrigido (juntaram as peças) deixa de contar; a disputa e o conflito comum contam.
+        let corrigida = match chave_do_fornecedor(&chave) {
+            Some((f, c)) => {
+                crate::catalogo::codigos::situacao_do_fornecedor(conn, &f, &c)?
+                    == crate::catalogo::codigos::SituacaoFornecedor::Corrigida
             }
+            None => false,
+        };
+        if !corrigida {
+            abertos += 1;
         }
     }
     for (tipo, tabela, chave) in a_mais {

@@ -273,3 +273,24 @@ fn regex_simples() -> impl Fn(&str) -> usize {
             .count()
     }
 }
+
+/// Mutação R12-raiz (sobreviveu): a junção chega pela troca e a ligação que perdeu ainda aponta para a peça juntada
+/// (nada regravou a ligação). Pela raiz, as duas versões são a mesma peça: a disputa acaba e aparece "Corrigido".
+#[test]
+fn r12_juncao_que_chega_pela_troca_acaba_com_a_disputa_pela_raiz() {
+    let d = em_disputa();
+    let x = &d.a;
+    let atual = ligada(x, &d.f);
+    let outra = if atual == d.p { d.q.clone() } else { d.p.clone() };
+    // A junção (outra → atual) chega como a troca de dados a grava: só a linha da junção.
+    x.conn
+        .execute(
+            "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, '2026-11-25T10:00:00Z', NULL, 'Peça cadastrada em dobro')",
+            [&outra, &atual],
+        )
+        .unwrap();
+    assert_eq!(fornecedor_em_disputa(&x.conn, &d.f, &compacto()).unwrap(), None);
+    assert_eq!(sync::conflitos_abertos(&x.conn).unwrap(), 0);
+    let k = sync::conflitos(&x.conn).unwrap().into_iter().find(|k| k.tabela == "produto_fornecedor").unwrap();
+    assert!(k.resolvido.starts_with("Corrigido"), "{}", k.resolvido);
+}

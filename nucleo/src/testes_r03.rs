@@ -554,3 +554,30 @@ fn m2_b1_vale_acertado_compensar_de_novo_e_cancelar_depois() {
     conn(&mut s).execute("UPDATE venda SET situacao = 'cancelada' WHERE id = 'venda-b'", []).unwrap();
     assert!(avisos(&mut s).contains(&"vale_acertado_a_mais".to_string()), "o acerto ficou sobrando");
 }
+
+/// B7 da revisão R6: o vale de R$ 30 usado três vezes (sobra R$ 60): a compensação pronta lança os R$ 60.
+#[test]
+fn b7_vale_usado_tres_vezes_lanca_a_sobra_inteira() {
+    let (mut s, cliente) = vale_usado_duas_vezes(true);
+    let c = conn(&mut s);
+    c.execute(
+        "INSERT INTO venda (id, numero, dispositivo, caixa_nome, tipo, situacao, subtotal, total, criado_em)
+         VALUES ('venda-c', 2, 'disp-caixa-2', 'Caixa 2', 'venda', 'concluida', 3000, 3000, '2026-10-29')",
+        [],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO venda_pagamento (id, venda_id, forma, valor, vale_id) VALUES ('pg-venda-c', 'venda-c', 'vale', 3000, 'vale-1')",
+        [],
+    )
+    .unwrap();
+    sync::verificar_depois(c).unwrap();
+    let k = abertos_do_tipo(&mut s, "vale_a_mais");
+    assert_eq!(k.len(), 1);
+    let proposta = k[0]["compensacao"].as_str().unwrap().to_string();
+    assert!(proposta.contains("R$ 60,00"), "{proposta}");
+    let operacao = k[0]["compensacaoOperacao"].as_str().unwrap().to_string();
+    ok(&mut s, "conflito_compensar", json!({ "id": k[0]["id"], "operacao": operacao }));
+    assert_eq!(crate::receber::situacao(conn(&mut s), &cliente).unwrap().em_aberto, "60,00");
+    assert!(abertos_do_tipo(&mut s, "vale_a_mais").is_empty());
+}

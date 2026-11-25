@@ -159,6 +159,31 @@ pub(crate) fn fornecedor_em_disputa(
     fornecedor_id: &str,
     compacto: &str,
 ) -> Resultado<Option<Vec<String>>> {
+    Ok(match situacao_do_fornecedor(conn, fornecedor_id, compacto)? {
+        SituacaoFornecedor::Disputa(c) => Some(c),
+        _ => None,
+    })
+}
+
+/// R12: a situação de um conflito aberto na chave `(fornecedor, código)`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum SituacaoFornecedor {
+    /// Sem conflito aberto na chave.
+    SemConflito,
+    /// As versões levam a peças diferentes (pelas raízes) ou a fatores diferentes: a disputa efetiva.
+    Disputa(Vec<String>),
+    /// Eram peças diferentes e agora têm a mesma raiz (juntaram as peças), com o mesmo fator: a disputa acabou.
+    Corrigida,
+    /// Outro conflito da ligação (apagar contra editar, só o texto do código): o conflito comum, como antes do R12.
+    Comum,
+}
+
+/// R12: classifica o conflito aberto da chave (veja [`SituacaoFornecedor`]).
+pub(crate) fn situacao_do_fornecedor(
+    conn: &Connection,
+    fornecedor_id: &str,
+    compacto: &str,
+) -> Resultado<SituacaoFornecedor> {
     let perdeu: Vec<Option<String>> = conn
         .prepare_cached(
             "SELECT dados_perdeu FROM sync_conflito WHERE tabela = 'produto_fornecedor' AND resolvido_em IS NULL
@@ -167,7 +192,7 @@ pub(crate) fn fornecedor_em_disputa(
         .query_map(params![fornecedor_id, compacto], |l| l.get(0))?
         .collect::<Result<_, _>>()?;
     if perdeu.is_empty() {
-        return Ok(None);
+        return Ok(SituacaoFornecedor::SemConflito);
     }
     let atual: Option<(String, i64)> = conn
         .query_row(
@@ -176,27 +201,45 @@ pub(crate) fn fornecedor_em_disputa(
             |l| Ok((l.get(0)?, l.get(1)?)),
         )
         .optional()?;
+    // A ligação que vale foi apagada: é o conflito comum (apagar contra editar), o gerente decide como antes.
     let Some((peca, fator)) = atual else {
-        return Ok(None);
+        return Ok(SituacaoFornecedor::Comum);
     };
     let raiz = crate::estoque::raiz(conn, &peca)?;
     let mut candidatas = vec![raiz.clone()];
     let mut efetiva = false;
-    for dados in perdeu.into_iter().flatten() {
-        let v: serde_json::Value = serde_json::from_str(&dados).unwrap_or_default();
-        let Some(outra) = v.get("produto_id").and_then(|x| x.as_str()).filter(|x| !x.is_empty()) else {
+    let mut juntadas = false;
+    let mut comum = false;
+    for dados in perdeu {
+        let Some(dados) = dados else {
+            comum = true; // a versão que perdeu apagava a ligação
             continue;
         };
-        let outra = crate::estoque::raiz(conn, outra)?;
+        let v: serde_json::Value = serde_json::from_str(&dados).unwrap_or_default();
+        let Some(original) = v.get("produto_id").and_then(|x| x.as_str()).filter(|x| !x.is_empty()) else {
+            comum = true;
+            continue;
+        };
+        let outra = crate::estoque::raiz(conn, original)?;
         let outro_fator = v.get("fator").and_then(|x| x.as_i64()).unwrap_or(1000);
         if outra != raiz || outro_fator != fator {
             efetiva = true;
             if !candidatas.contains(&outra) {
                 candidatas.push(outra);
             }
+        } else if original != peca {
+            juntadas = true; // peças diferentes que agora têm a mesma raiz
+        } else {
+            comum = true; // a mesma peça e o mesmo fator: a diferença é outra (o texto do código)
         }
     }
-    Ok(efetiva.then_some(candidatas))
+    Ok(if efetiva {
+        SituacaoFornecedor::Disputa(candidatas)
+    } else if juntadas && !comum {
+        SituacaoFornecedor::Corrigida
+    } else {
+        SituacaoFornecedor::Comum
+    })
 }
 
 /// R12: o texto da chave em disputa (ficha, troca de código).
