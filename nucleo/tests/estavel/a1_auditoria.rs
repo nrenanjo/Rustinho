@@ -122,7 +122,11 @@ fn d14_cancelar_venda_de_caixa_fechado_sem_caixa_aberto_vai_para_o_caixa_geral()
     // Fluxo de caixa (R25 / DA-F6-2, decisão do proprietário de 25/11/2026): a venda fica no dia dela e o
     // cancelamento entra à parte, uma vez só; o acerto no Caixa geral não conta de novo.
     let f = l.ok("fluxo_caixa", json!({ "de": "", "ate": "" }));
-    assert_eq!((centavos(f["entradas"].as_str().unwrap()), centavos(f["saidas"].as_str().unwrap())), (10000, 10000), "{f}");
+    assert_eq!(
+        (centavos(f["entradas"].as_str().unwrap()), centavos(f["saidas"].as_str().unwrap())),
+        (10000, 10000),
+        "{f}"
+    );
     let detalhes: Vec<&str> = f["realizado"]
         .as_array()
         .unwrap()

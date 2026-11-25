@@ -190,7 +190,8 @@ fn pend36_resolver_pendencia_nao_transfere_vinculo_em_silencio() {
 fn pend37_r6_gerente_descarta_pendencia_com_motivo() {
     let mut l = loja("pend37");
     importar_so_fornecedor(&mut l);
-    let abertas = |l: &mut Loja| l.numero("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'");
+    let abertas =
+        |l: &mut Loja| l.numero("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'");
     let antes = abertas(&mut l);
     let pend = pendencia(&mut l, "OL5W30");
     // Sem motivo, não.

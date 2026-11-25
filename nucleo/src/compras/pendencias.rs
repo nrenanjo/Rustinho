@@ -15,7 +15,13 @@ use crate::{auditoria, documento, tempo, texto};
 /// motivo. A pendência sai da lista (importar um ano de notas não deixa milhares dela para sempre), e o que ela
 /// dizia (fornecedor, código, descrição, nota) fica no registro, com o motivo e quem descartou. Quem pode: o
 /// gerente (DP-13, alternativa recomendada; a permissão é conferida no comando).
-pub(crate) fn descartar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+pub(crate) fn descartar(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    motivo: &str,
+) -> Resultado<()> {
     let motivo = texto::limpar(motivo);
     if motivo.is_empty() {
         return Err(Erro::campo("motivo", "Diga por que descartar esta pendência."));

@@ -309,6 +309,9 @@ fn r9_desligar_a_troca_de_dados_e_do_gerente() {
     // rede nunca vai para o registro.
     assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.ligar'"), 1);
     assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.desligar'"), 1);
-    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao LIKE 'troca.%' AND detalhes LIKE '%rede-da-loja%'"), 0);
+    assert_eq!(
+        l.numero("SELECT COUNT(*) FROM auditoria WHERE acao LIKE 'troca.%' AND detalhes LIKE '%rede-da-loja%'"),
+        0
+    );
     assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.senha'"), 1, "a senha nova (só o fato)");
 }

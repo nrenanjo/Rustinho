@@ -747,7 +747,8 @@ pub fn lista_compra_html_com(conn: &Connection, ve_custos: bool) -> Resultado<St
         );
     }
     let mut h = String::new();
-    let custo = if ve_custos { format!(" · custo estimado R$ {} (sem as encomendas)", s.custo_total) } else { String::new() };
+    let custo =
+        if ve_custos { format!(" · custo estimado R$ {} (sem as encomendas)", s.custo_total) } else { String::new() };
     h.push_str(&format!(
         "<h1>Lista de compra</h1><p class=\"nota\">Para {} dias de venda · {} itens{}</p>",
         s.dias_compra,

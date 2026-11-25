@@ -468,14 +468,15 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     // R4 (D-AUD-4, decisão do proprietário de 25/11/2026): o desconto da venda inteira respeita o desconto máximo de
     // cada peça. A parte de cada item é proporcional ao total dele (como na comissão, no DRE e na devolução); somada
     // ao desconto do item e ao preço abaixo da tabela, não passa do máximo.
-    let erro_desconto = match itens.iter().find(|i| erro_desconto.is_empty() && passa_do_maximo(i, desconto, depois_itens)) {
-        Some(i) => format!(
-            "O desconto da venda passa do máximo de {} ({}%). Diminua o desconto.",
-            i.descricao,
-            numeros::escrever_percentual(i.v_desconto_maximo.unwrap_or(0))
-        ),
-        None => erro_desconto,
-    };
+    let erro_desconto =
+        match itens.iter().find(|i| erro_desconto.is_empty() && passa_do_maximo(i, desconto, depois_itens)) {
+            Some(i) => format!(
+                "O desconto da venda passa do máximo de {} ({}%). Diminua o desconto.",
+                i.descricao,
+                numeros::escrever_percentual(i.v_desconto_maximo.unwrap_or(0))
+            ),
+            None => erro_desconto,
+        };
     let total = depois_itens - desconto;
     let pago = numeros::somar(e.pagamentos.iter().map(valor_para_conta))
         .ok_or_else(|| Erro::validacao("Os pagamentos somam mais do que uma venda pode ter."))?;

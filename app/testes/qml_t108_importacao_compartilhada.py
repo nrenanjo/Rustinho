@@ -166,6 +166,8 @@ TestCase {
         property string chavePendencia: ""
         property string pecaDesativadaId: ""
         property bool corrigindoIdentificacao: false
+        // R6 (D-AUD-5, 25/11/2026): o painel também guarda se a pendência aberta está sendo descartada.
+        property bool descartando: false
         property bool liberada: true
         property bool fechou: false
         signal importou()
@@ -191,6 +193,7 @@ TestCase {
     QtObject { id: campoCorrCodigo; property string texto: ""; property string erro: "" }
     QtObject { id: campoCorrBarras; property string texto: ""; property string erro: "" }
     QtObject { id: campoCorrUnidade; property string texto: ""; property string erro: "" }
+    QtObject { id: motivoDescarte; property string texto: ""; property string erro: "" }
 
     function visivel(modelData) { return %VISIVEL% }
     function textoJa(linha) { return %TEXTOJA% }

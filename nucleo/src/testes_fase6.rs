@@ -551,11 +551,8 @@ fn dp19_alvo_d09_tambem_na_lista_de_compra_e_no_painel() {
     assert_eq!((&painel["total"], &painel["resultados"]), (&json!(""), &json!(false)), "{painel}");
     assert!(painel["itens"].as_array().unwrap().iter().all(|i| i["total"] == ""), "B1 da revisão: {painel}");
     // Controle (B1 da revisão): o gerente continua vendo o custo nas três.
-    let ana: String = s
-        .banco_para_teste()
-        .conn
-        .query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0))
-        .unwrap();
+    let ana: String =
+        s.banco_para_teste().conn.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0)).unwrap();
     ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
     let sug = ok(&mut s, "estoque_sugestao", json!({ "texto": "" }));
     assert_eq!((sug["custoTotal"].as_str(), sug["resultados"].as_bool()), (Some("300,00"), Some(true)), "{sug}");
@@ -577,7 +574,10 @@ fn dp19_alvo_d09_tambem_na_lista_de_compra_e_no_painel() {
 fn dp20_dp24_esperado_a_vista_e_caixa_sob_o_olho() {
     let (mut s, _bia) = loja_com_bia();
     let e = ok(&mut s, "caixa_estado", json!({}));
-    assert_eq!(e["resumo"]["esperado"], "100,00", "o esperado vai para a tela antes de contar, com o olho fechado ou aberto");
+    assert_eq!(
+        e["resumo"]["esperado"], "100,00",
+        "o esperado vai para a tela antes de contar, com o olho fechado ou aberto"
+    );
     let tela = include_str!("../../app/qml/TelaCaixa.qml");
     assert!(tela.contains("titulo: \"Dinheiro na gaveta\""));
     assert!(tela.contains("\"R$ \" + Tema.valor(tela.r.esperado)"), "o esperado no resumo, sob o olho");
@@ -608,7 +608,10 @@ fn r8_previa_do_fechamento_e_o_enter_que_nao_conclui() {
     // As telas: o Enter passa ao campo seguinte; fechar pede a prévia; a pergunta de perigo não confirma com o Enter.
     let vender = include_str!("../../app/qml/TelaVender.qml");
     assert!(!vender.contains("onConfirmado: botaoConcluir.clicked()"), "o Enter num valor ainda conclui a venda");
-    assert!(vender.contains("onConfirmado: receber.seguinte(valor)") && vender.contains("onConfirmado: receber.seguinte(campoVale)"));
+    assert!(
+        vender.contains("onConfirmado: receber.seguinte(valor)")
+            && vender.contains("onConfirmado: receber.seguinte(campoVale)")
+    );
     let caixa = include_str!("../../app/qml/TelaCaixa.qml");
     assert!(caixa.contains("onConfirmado: obs.focar()") && caixa.contains("Api.chamar(\"caixa_fechar_previa\""));
     let dialogo = include_str!("../../app/qml/Dialogo.qml");
@@ -730,7 +733,10 @@ fn dp23_sensiveis_so_com_o_gerente_e_com_registro() {
         (include_str!("../../app/qml/TelaFiscal.qml"), "fiscal_automatico"),
     ] {
         assert!(tela.contains(&format!("janela.chamarGerente(\"{comando}\"")), "{comando}");
-        assert!(!tela.contains(&format!("Api.gravar(\"{comando}\"")) && !tela.contains(&format!("Api.chamar(\"{comando}\"")));
+        assert!(
+            !tela.contains(&format!("Api.gravar(\"{comando}\""))
+                && !tela.contains(&format!("Api.chamar(\"{comando}\""))
+        );
     }
 }
 
@@ -743,7 +749,8 @@ fn b2_senha_errada_registra_o_que_se_pedia() {
     let mut f = ok(&mut s, "pessoa_nova", json!({ "papel": "cliente" }));
     f["nome"] = json!("Oficina do Zé");
     f["limiteCredito"] = json!("300");
-    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "senha-errada", "comando": "pessoa_salvar", "dados": f }));
+    let r =
+        chamar(&mut s, "gerente_liberar", json!({ "senha": "senha-errada", "comando": "pessoa_salvar", "dados": f }));
     assert_eq!(r["campo"], "senha", "{r}");
     let c = &s.banco_para_teste().conn;
     let det = texto(c, "SELECT COALESCE(MAX(detalhes), '') FROM auditoria WHERE acao = 'gerente.senha_errada'", []);
@@ -848,7 +855,8 @@ fn dp22_devolucao_depois_do_fechamento_desconta_no_periodo_seguinte() {
     .unwrap();
     // A devolução foi ontem (depois do fechamento de 01/11).
     c.execute("UPDATE devolucao SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day')", []).unwrap();
-    let ontem: String = c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
+    let ontem: String =
+        c.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
     let r = outubro();
     assert_eq!(r.vendedores[0].comissao, "15,00", "o período fechado não muda");
     assert_eq!(r.fechamentos[0].valor, "15,00", "o fechamento fica");
@@ -861,7 +869,8 @@ fn dp22_devolucao_depois_do_fechamento_desconta_no_periodo_seguinte() {
     assert!(e.contains("negativa (R$ -15,00)") && e.contains("período maior"), "{e}");
     // Com uma venda no mesmo dia (R$ 15,00 de comissão), o desconto sai dela.
     let v2 = vender(&l, d, "1", vec![pg("pix", "300")], None);
-    c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day') WHERE id = ?1", [&v2]).unwrap();
+    c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day') WHERE id = ?1", [&v2])
+        .unwrap();
     assert_eq!(dia().0, "0,00");
     // Desfeito o fechamento de outubro, a devolução volta para outubro (e sai do dia dela).
     let f = outubro().fechamentos[0].id.clone();

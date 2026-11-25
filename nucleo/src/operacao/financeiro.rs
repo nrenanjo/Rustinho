@@ -1609,7 +1609,10 @@ mod testes {
         // E sem data inicial, do dia 1º do mês de ontem (B6 da revisão R1 da 006).
         let primeiro: String =
             c.query_row("SELECT strftime('01/%m/%Y', 'now', 'localtime', '-1 day')", [], |l| l.get(0)).unwrap();
-        assert_eq!(comissoes::relatorio(c, &ontem, &ontem).unwrap().fechamentos[0].periodo, format!("{primeiro} a {ontem}"));
+        assert_eq!(
+            comissoes::relatorio(c, &ontem, &ontem).unwrap().fechamentos[0].periodo,
+            format!("{primeiro} a {ontem}")
+        );
         let p = pagar::painel(c, "comissao", "abertas").unwrap();
         assert_eq!(p.parcelas.iter().map(|x| x.valor.as_str()).collect::<Vec<_>>(), ["15,00"]);
         // A venda de hoje, feita depois do fechamento, fica no período seguinte: hoje não está fechado.

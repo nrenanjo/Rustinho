@@ -1312,7 +1312,12 @@ mod testes {
         let conta = divida_vencida(&b, &u, &zé, "300", 30);
         // 300,00 vencida há 30 dias: multa 6,00 + juros 3,00.
         assert_eq!(juros_da(&b, &zé, &conta), "9,00");
-        let pagar = ReceberEntrada { cliente_id: zé.clone(), valor: "109".into(), forma: "dinheiro".into(), ..Default::default() };
+        let pagar = ReceberEntrada {
+            cliente_id: zé.clone(),
+            valor: "109".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        };
         let calc = calcular(c, &pagar).unwrap();
         assert_eq!((calc.juros.as_str(), calc.continua_devendo.as_str()), ("9,00", "200,00"));
         let rec = receber(c, d, &u, &pagar).unwrap();
