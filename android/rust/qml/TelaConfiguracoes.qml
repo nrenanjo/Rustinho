@@ -495,8 +495,11 @@ FocusScope {
     // R15 (R-03, decisão do proprietário de 25/11/2026): a compensação pronta de uma conta paga a mais. A pergunta
     // mostra o que vai ser feito; só o gerente confirma (o núcleo confere).
     function compensarConflito(c) {
-        janela.confirmar("Fazer a compensação?", c.compensacao + ". O estorno fica no histórico.", "Fazer a compensação",
-                         () => janela.chamarGerente("conflito_compensar", { id: c.id }, r => {
+        // B1 e B2 da revisão R3: num computador só (o outro mostra "Corrigido" depois da troca), e o núcleo confere
+        // que a operação é a mesma que o gerente viu.
+        janela.confirmar("Fazer a compensação?", c.compensacao + ". O estorno fica no histórico. Faça num computador só: "
+                         + "depois da troca de dados, os outros mostram esta diferença como corrigida.", "Fazer a compensação",
+                         () => janela.chamarGerente("conflito_compensar", { id: c.id, operacao: c.compensacaoOperacao }, r => {
                              if (r.ok) {
                                  conflitos = r.dados
                                  janela.avisar("Compensação feita. O estorno está no histórico.", "ok")

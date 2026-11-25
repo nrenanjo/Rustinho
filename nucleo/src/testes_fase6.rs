@@ -745,6 +745,29 @@ fn r18_orcamento_novo_nao_renova_o_preco_de_outro() {
     assert!(e.contains("Um orçamento novo usa o preço de hoje"), "a mensagem explica (B2 da revisão R2): {e}");
 }
 
+/// R18 · B4 da revisão R3: o orçamento novo recusado pelo desconto da venda inteira também traz a explicação.
+#[test]
+fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    let mut f = produtos::ficha(c, &l.peca).unwrap();
+    f.desconto_maximo = "5".into();
+    produtos::salvar(c, d, &l.u, &f).unwrap();
+    let e = VendaEntrada {
+        itens: vec![ItemEntrada { produto_id: l.peca.clone(), quantidade: "1".into(), ..Default::default() }],
+        tabela: 1,
+        cliente_id: l.cliente.clone(),
+        validade_dias: 10,
+        ..Default::default()
+    };
+    let o = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &e).unwrap();
+    let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    venda.desconto = "20".into();
+    let erro = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
+    assert!(erro.contains("passa do máximo") && erro.contains("Um orçamento novo usa o preço de hoje"), "{erro}");
+}
+
 /// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender
 /// pelo preço de hoje não é desconto: a referência é o menor dos dois. Abaixo
 /// dele, o desconto máximo (5%) continua valendo (R$ 230 = 8% recusa).

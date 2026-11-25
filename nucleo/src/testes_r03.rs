@@ -303,7 +303,12 @@ fn r15_compensacao_pronta_da_parcela_recebida_duas_vezes() {
     let r = chamar(&mut s, "conflito_compensar", json!({ "id": id }));
     assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("gerente")), "{r}");
     ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
-    ok(&mut s, "conflito_compensar", json!({ "id": id }));
+    // B2 da revisão R3: a operação mostrada mudou → recusa sem mudar nada; a certa passa.
+    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id, "operacao": "outra-operacao" }));
+    assert!(r["erro"].as_str().unwrap_or("").contains("A compensação mudou"), "{r}");
+    let operacao = k[0]["compensacaoOperacao"].as_str().unwrap().to_string();
+    assert_eq!(operacao, "rec-caixa-2");
+    ok(&mut s, "conflito_compensar", json!({ "id": id, "operacao": operacao }));
     assert!(abertos_do_tipo(&mut s, "pago_a_mais").is_empty(), "o conflito saiu");
     let estornado: Option<String> = conn(&mut s)
         .query_row("SELECT estornado_em FROM recebimento WHERE id = 'rec-caixa-2'", [], |l| l.get(0))

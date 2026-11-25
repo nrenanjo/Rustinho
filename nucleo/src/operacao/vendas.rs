@@ -852,8 +852,10 @@ pub fn salvar_orcamento(
     let c = calcular(conn, &VendaEntrada { orcamento_id: String::new(), ..e.clone() })?;
     conferir_itens(&c).map_err(|erro| match erro {
         // B2 da revisão R2: quem não deu desconto precisa saber por que o orçamento novo esbarra no máximo.
+        // B4 da revisão R3: também o desconto da venda inteira ("O desconto da venda passa do máximo …").
         Erro::Validacao { campo, mensagem }
-            if !e.orcamento_id.is_empty() && mensagem.contains("Desconto acima do máximo") =>
+            if !e.orcamento_id.is_empty()
+                && (mensagem.contains("Desconto acima do máximo") || mensagem.contains("passa do máximo")) =>
         {
             Erro::Validacao {
                 campo,

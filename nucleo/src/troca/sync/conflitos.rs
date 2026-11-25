@@ -77,12 +77,12 @@ pub(super) fn compensacao_de(
                 .optional()?;
             Ok(achado.map(|(id, numero, disp, forma)| {
                 let caixa = nome_do_caixa(conn, &disp).unwrap_or_default();
-                let onde = if caixa.is_empty() { "outro caixa".to_string() } else { caixa };
+                let onde = if caixa.is_empty() { "de outro caixa".to_string() } else { format!("do {caixa}") };
                 Compensacao {
                     tabela: "recebimento",
                     id,
                     texto: format!(
-                        "Estornar o recebimento Nº {numero} do {onde} ({}){}",
+                        "Estornar o recebimento Nº {numero} {onde}, de {}{}",
                         dinheiro(sobra),
                         if forma == "dinheiro" {
                             ": o dinheiro é devolvido ao cliente pela gaveta aberta deste computador (sem caixa \
@@ -113,12 +113,12 @@ pub(super) fn compensacao_de(
                 .optional()?;
             Ok(achado.map(|(id, disp)| {
                 let caixa = nome_do_caixa(conn, &disp).unwrap_or_default();
-                let onde = if caixa.is_empty() { "outro caixa".to_string() } else { caixa };
+                let onde = if caixa.is_empty() { "em outro caixa".to_string() } else { format!("no {caixa}") };
                 Compensacao {
                     tabela: "pagamento",
                     id,
                     texto: format!(
-                        "Estornar o pagamento de {} feito no {onde}: o valor volta como no estorno pela tela do A pagar",
+                        "Estornar o pagamento de {} feito {onde}: o valor volta como no estorno pela tela do A pagar",
                         dinheiro(sobra)
                     ),
                 }
@@ -384,6 +384,8 @@ pub struct Conflito {
     pub registro_id: String,
     /// R15 (R-03): a compensação pronta (o texto do botão), ou vazio quando não há uma exata.
     pub compensacao: String,
+    /// B2 da revisão R3: a operação que a proposta estorna (o comando confere que é a mesma que o gerente viu).
+    pub compensacao_operacao: String,
 }
 
 /// Nome do campo para a tela.
@@ -501,6 +503,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 _ => String::new(),
             },
             compensacao: String::new(),
+            compensacao_operacao: String::new(),
         };
         match tipo.as_str() {
             "orcamento" => {
@@ -576,7 +579,10 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     k.resolvido = TEXTO_CORRIGIDO.into();
                 }
                 if k.resolvido.is_empty() {
-                    k.compensacao = compensacao_de(conn, &tipo, &tabela, &chave)?.map(|c| c.texto).unwrap_or_default();
+                    if let Some(c) = compensacao_de(conn, &tipo, &tabela, &chave)? {
+                        k.compensacao = c.texto;
+                        k.compensacao_operacao = c.id;
+                    }
                 }
             }
             "gerente" => {

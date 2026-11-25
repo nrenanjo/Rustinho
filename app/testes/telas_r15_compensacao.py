@@ -3,7 +3,7 @@
 
 Em Configurações › Simultaneidade › Duplicatas › Diferenças entre caixas, uma parcela de R$ 50 do Zé recebida duas
 vezes (aqui e no "Caixa R15", sem rede):
-- a diferença mostra "Compensação pronta: Estornar o recebimento Nº 902 do Caixa R15 (R$ 50,00)…" e o botão
+- a diferença mostra "Compensação pronta: Estornar o recebimento Nº 902 do Caixa R15, de R$ 50,00…" e o botão
   "Fazer a compensação";
 - o clique pergunta "Fazer a compensação?" com a mesma proposta;
 - confirmado (a Ana é gerente), o recebimento que sobrou (o do Caixa R15) é estornado, o outro fica, e o registro
@@ -82,14 +82,14 @@ def main():
             time.sleep(3.0)
             tx = r.textos()
             tudo_certo &= conferir("a diferença mostra a compensação pronta e o botão", r.foto("-1"), tx,
-                                   tem=["Compensação pronta: Estornar o recebimento Nº 902 do Caixa R15 (R$ 50,00)"],
+                                   tem=["Compensação pronta: Estornar o recebimento Nº 902 do Caixa R15, de R$ 50,00"],
                                    igual=["Fazer a compensação"])
             if not r.clicar("Fazer a compensação"):
                 raise RuntimeError(f"não achei o botão Fazer a compensação (veja {r.saida})")
             time.sleep(1.2)
             tudo_certo &= conferir("a pergunta repete a proposta", r.foto("-2"), r.textos(),
                                    tem=["Fazer a compensação?", "Estornar o recebimento Nº 902 do Caixa R15",
-                                        "O estorno fica no histórico."])
+                                        "O estorno fica no histórico. Faça num computador só"])
             # O botão da pergunta tem o mesmo texto do da lista: o último na tela é o da pergunta (por cima).
             if not clicar_ultimo(r, "Fazer a compensação"):
                 raise RuntimeError(f"não achei o botão da pergunta (veja {r.saida})")

@@ -1709,7 +1709,7 @@ impl Servico {
             // R15 (R-03, decisão do proprietário de 25/11/2026): a compensação pronta de uma conta paga a mais, sempre
             // pelo gerente; o estorno fica no histórico como qualquer outro, e o conflito sai da lista.
             "conflito_compensar" => {
-                let d: Resolver = ler(dados)?;
+                let d: Compensar = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
                 let c = sync::compensacao_do_conflito(&tx, d.id)?.ok_or_else(|| {
                     Erro::validacao(
@@ -1717,6 +1717,13 @@ impl Servico {
                          fornecedor e estorne pela tela do Receber ou do A pagar.",
                     )
                 })?;
+                // B2 da revisão R3: a proposta mudou desde que o gerente a viu (chegou outra operação pela troca).
+                if !d.operacao.is_empty() && d.operacao != c.id {
+                    return Err(Erro::validacao(
+                        "A compensação mudou desde que a lista foi aberta (chegou outra operação pela troca de \
+                         dados). Nada foi feito. Confira a nova proposta e confirme de novo.",
+                    ));
+                }
                 let motivo = "Pago mais de uma vez em caixas sem rede (compensação do conflito entre caixas)";
                 match c.tabela {
                     "recebimento" => crate::receber::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
@@ -2861,6 +2868,15 @@ struct Resolver {
     id: i64,
     #[serde(default)]
     usar: bool,
+}
+
+/// R15: o conflito e a operação que a proposta mostrada estorna (B2 da revisão R3).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Compensar {
+    id: i64,
+    #[serde(default)]
+    operacao: String,
 }
 
 #[derive(Deserialize)]
