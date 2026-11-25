@@ -1197,3 +1197,31 @@ fn r6_b2_matriz_segura_o_vale_acertado_e_a_juncao() {
     assert!(sync::incompatibilidade(30, &juncao).is_some());
     assert!(sync::incompatibilidade(31, &juncao).is_none());
 }
+
+/// T028 (R11-B1 da 007): um registro que chega com a chave vazia (NULL) é dado estragado: vira pendência e não entra
+/// (antes: o SQLite aceitava NULL na chave de texto, e uma junção assim quebrava as Duplicatas e a ficha da peça).
+#[test]
+fn t028_chave_vazia_vira_pendencia_e_nao_entra() {
+    let mut b = Banco::em_memoria().unwrap();
+    com_par(&b, "caixa-2", "Caixa 2");
+    let juncao = alteracao(
+        "j1",
+        1,
+        "produto_juncao",
+        json!([null]),
+        Some(json!({ "produto_id": "d", "para_id": "k", "em": "", "por": null, "motivo": "x" })),
+        None,
+    );
+    let so_nos_dados = alteracao(
+        "j2",
+        2,
+        "produto_juncao",
+        json!(["d"]),
+        Some(json!({ "produto_id": null, "para_id": "k", "em": "", "por": null, "motivo": "x" })),
+        None,
+    );
+    let r = aplicar_lote(&mut b, &[juncao, so_nos_dados], 0);
+    assert_eq!(r.pendentes, 2);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM sync_pendencia WHERE motivo = 'invalida'"), 2);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_juncao"), 0);
+}

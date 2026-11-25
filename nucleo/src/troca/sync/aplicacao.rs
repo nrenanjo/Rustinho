@@ -148,6 +148,11 @@ pub(super) fn invalida(a: &Alteracao, chave_cols: &[String]) -> Option<String> {
     if valores.len() != chave_cols.len() {
         return Some(format!("a chave tem {} partes e a tabela {} pede {}", valores.len(), a.tabela, chave_cols.len()));
     }
+    // T028 (R11-B1 da 007): nenhuma chave das tabelas que viajam pode ser vazia (o SQLite aceita NULL numa chave de
+    // texto, e o registro ficaria sem dono).
+    if valores.iter().any(Value::is_null) {
+        return Some("a chave do registro está vazia".into());
+    }
     if a.operacao != "gravar" && a.operacao != "apagar" {
         return Some(format!("operação desconhecida: {}", a.operacao));
     }
@@ -156,6 +161,9 @@ pub(super) fn invalida(a: &Alteracao, chave_cols: &[String]) -> Option<String> {
             Some(Ok(Value::Object(m))) => {
                 if let Some(k) = chave_cols.iter().find(|k| !m.contains_key(k.as_str())) {
                     return Some(format!("os dados não têm a coluna {k} da chave"));
+                }
+                if let Some(k) = chave_cols.iter().find(|k| m.get(k.as_str()).is_some_and(Value::is_null)) {
+                    return Some(format!("a coluna {k} da chave está vazia nos dados"));
                 }
             }
             _ => return Some("os dados não são um registro (objeto JSON)".into()),
