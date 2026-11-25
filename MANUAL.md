@@ -135,8 +135,9 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
     rascunho de compra fecha as pendências dele.
   - **Trazer cadastros pelo XML:** a prévia só precisa ser refeita se mudarem peças, pessoas ou códigos. Uma venda no
     meio do caminho não atrapalha mais.
-  - **Histórico do cadastro:** quando o telefone ou o celular mudam, o histórico guarda só "Telefone alterado" ou
-    "Celular alterado", sem os números. O que já estava no histórico fica como estava.
+  - **Histórico do cadastro:** quando o telefone, o celular, o e-mail ou o endereço (CEP, rua, número, complemento,
+    bairro) mudam, o histórico guarda só que mudou ("Telefone alterado", "E-mail alterado"...), sem o dado antigo nem
+    o novo. A cidade e a UF continuam com o antes e o depois. O que já estava no histórico fica como estava.
   - **Segunda via do recibo do crediário:** sai com o cadastro **de hoje** do cliente. Se o endereço ou o nome mudaram
     depois do pagamento, a segunda via mostra o novo.
 

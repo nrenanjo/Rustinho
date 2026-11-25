@@ -943,8 +943,9 @@ fn corta(s: &str, n: usize) -> String {
 
 /// R10 (D-AUD-9, LGPD, decisão do proprietário de 25/11/2026): a partir da 0.9.19, do telefone e do celular o
 /// histórico guarda só que mudaram, sem o número antigo (nem o novo, que está no cadastro). O que já estava no
-/// histórico fica como está.
-const SO_QUE_MUDOU: [&str; 2] = ["Telefone", "Celular"];
+/// histórico fica como está. Decisão 4 do proprietário (25/11/2026): o mesmo para o e-mail e o endereço (CEP, rua,
+/// número, complemento e bairro); a cidade e a UF continuam com o antes e o depois.
+const SO_QUE_MUDOU: [&str; 8] = ["Telefone", "Celular", "E-mail", "CEP", "Endereço", "Número", "Complemento", "Bairro"];
 
 fn diferencas(a: &Dados, b: &Dados) -> Vec<String> {
     let mut v = Vec::new();
@@ -1130,6 +1131,10 @@ mod testes {
         f2.telefone = "(15) 3552-3333".into();
         f2.celular = "(15) 99444-5555".into();
         f2.bairro = "Centro".into();
+        f2.email = "maria@exemplo.com.br".into();
+        f2.logradouro = "Rua das Flores".into();
+        f2.numero = "123".into();
+        f2.municipio = "Sorocaba".into();
         salvar(&b.conn, &b.dispositivo, &u, &f2).unwrap();
         let detalhes = ficha(&b.conn, &id).unwrap().historico[0].detalhes.clone();
         assert!(detalhes.contains(&"Telefone alterado".to_string()), "{detalhes:?}");
@@ -1137,7 +1142,14 @@ mod testes {
         for numero in ["3551", "1111", "99111", "2222", "3552", "3333", "99444", "5555"] {
             assert!(detalhes.iter().all(|d| !d.contains(numero)), "o número {numero} ficou no histórico: {detalhes:?}");
         }
-        assert!(detalhes.iter().any(|d| d == "Bairro: — → Centro"), "os outros campos como antes: {detalhes:?}");
+        // Decisão 4: o e-mail e o endereço também, só que mudaram.
+        for rotulo in ["E-mail", "Endereço", "Número", "Bairro"] {
+            assert!(detalhes.contains(&format!("{rotulo} alterado")), "{rotulo}: {detalhes:?}");
+        }
+        for dado in ["maria@", "Flores", "Centro", "123"] {
+            assert!(detalhes.iter().all(|d| !d.contains(dado)), "{dado} ficou no histórico: {detalhes:?}");
+        }
+        assert!(detalhes.iter().any(|d| d == "Cidade: — → Sorocaba"), "os outros campos como antes: {detalhes:?}");
     }
 
     #[test]
