@@ -75,7 +75,7 @@ def d14(fotos):
             raise RuntimeError(f"não achei o botão Cancelar venda (veja {r.saida})")
         time.sleep(1.5)
         certo &= t.conferir("d14: a caixa de cancelar explica o caixa fechado", r.foto("-2"), r.textos(),
-                            tem=["Cancelar a venda?", "caixa já fechado", "o fechamento dele não muda"])
+                            tem=["Cancelar a venda?", "caixa já fechado ou aberto em outro computador", "aquela gaveta não muda"])
         t.xdo("type", "--delay", "60", "cliente voltou")
         t.xdo("key", "Return")
         time.sleep(3)
