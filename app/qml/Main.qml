@@ -1646,6 +1646,9 @@ ApplicationWindow {
         linhas.push("0\t0\tTESTE_F11_SUSPENSAS:" + janela.pilhaSuspensaoF11.length)
         linhas.push("0\t0\tTESTE_MOVIMENTO_ATIVO:" + (janela.movimentoAtivo || guia.aguardandoChegada ? 1 : 0))
         linhas.push("0\t0\tTESTE_DESTAQUE_ATIVO:" + (guia.destacando ? 1 : 0))
+        // Decisão 5 (R11, 25/11/2026): o item com o foco do teclado (o nome dele), para os testes do Tab.
+        linhas.push("0\t0\tTESTE_FOCO:" + (janela.activeFocusItem && janela.activeFocusItem.objectName
+                                               ? janela.activeFocusItem.objectName : ""))
         console.info("TEXTOS-DA-TELA-INICIO\n" + linhas.join("\n") + "\nTEXTOS-DA-TELA-FIM")
     }
     // A15 (--medir-toque): onde o dedo aciona cada controle. Botões, caixas

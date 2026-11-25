@@ -5,6 +5,7 @@ import rustinho
 // Uma compra na lista.
 Rectangle {
     id: linha
+    objectName: "linhaCompra"
     property var item: ({})
     property int indice: 0
     property bool atual: false
@@ -207,4 +208,13 @@ Rectangle {
         cursorShape: Qt.PointingHandCursor
     }
     TapHandler { onTapped: linha.abrir() }
+    // R11 (D-AUD-9) e decisão 5 do proprietário (25/11/2026): a compra é alcançável pelo teclado. O Tab chega na
+    // linha (o contorno mostra o foco) e segue para o botão dela; o Enter (ou o espaço) abre a compra, como o clique.
+    activeFocusOnTab: true
+    onActiveFocusChanged: if (activeFocus && ListView.view) ListView.view.positionViewAtIndex(linha.indice, ListView.Contain)
+    Keys.onReturnPressed: linha.abrir()
+    Keys.onEnterPressed: linha.abrir()
+    Keys.onSpacePressed: linha.abrir()
+    border.width: activeFocus ? 2 : 0
+    border.color: Tema.foco
 }

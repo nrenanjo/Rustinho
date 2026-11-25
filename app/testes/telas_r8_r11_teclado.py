@@ -182,6 +182,65 @@ def main():
         finally:
             r.fechar()
 
+        # ---- C2. Decisão 5 do proprietário (25/11/2026): as linhas de Cheques pelo teclado. Um cheque em carteira,
+        # pelo núcleo; sem o mouse, o "Devolvido" da linha está escondido; o Tab chega à linha e ele aparece. ----
+        import telas_d09 as base
+        ana = sqlite3.connect(os.path.join(pasta, "rustinho.db")).execute("SELECT id FROM usuario WHERE nome = 'Ana'").fetchone()[0]
+        base._aux_nucleo.executar("estavel", "executar_por_fora", {"RUSTINHO_LOJA_TESTE": pasta, "RUSTINHO_SQL": (
+            "INSERT INTO cheque (id, emitente, banco, numero, valor, bom_para, situacao, criado_em, criado_por, dispositivo)"
+            f" VALUES ('ch-r11', 'Emitente R11', 'Itaú', '000111', 15000, date('now'), 'carteira',"
+            f" strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), '{ana}', 'disp-r11');"
+        )}, raiz=base.RAIZ)
+        r = Rustinho(pasta, "TelaFinanceiro", {"secao": "cheques"}, fotos, "r11-cheques")
+        try:
+            r.entrar("Ana")
+            time.sleep(2)
+            xdo("mousemove", "1", "1")
+            time.sleep(0.5)
+            escondido = not any(simples(t) == simples("Devolvido") for _, _, t in r.textos())
+            print(("✔ " if escondido else "✘ ") + "cheques: sem o mouse em cima, o Devolvido da linha está escondido"
+                  + ("" if escondido else f" (foto: {r.foto('-1')})"))
+            tudo_certo &= escondido
+            apareceu = False
+            for _ in range(40):
+                xdo("key", "Tab")
+                time.sleep(0.25)
+                if any(simples(t) == simples("Devolvido") for _, _, t in r.textos()):
+                    apareceu = True
+                    break
+            print(("✔ " if apareceu else "✘ ") + "cheques: o Tab chega à linha e o Devolvido aparece, sem o mouse"
+                  + ("" if apareceu else f" (foto: {r.foto('-2')})"))
+            tudo_certo &= apareceu
+        finally:
+            r.fechar()
+
+        # ---- C3. Decisão 5: a lista de Compras pelo teclado. O Tab chega à compra e o Enter abre (como o clique). ----
+        r = Rustinho(pasta, "TelaCompras", {}, fotos, "r11-compras")
+        try:
+            r.entrar("Ana")
+            time.sleep(2)
+            xdo("mousemove", "1", "1")
+            na_linha = False
+            for _ in range(40):
+                xdo("key", "Tab")
+                time.sleep(0.25)
+                if any(t == "TESTE_FOCO:linhaCompra" for _, _, t in r.textos()):
+                    na_linha = True
+                    break
+            print(("✔ " if na_linha else "✘ ") + "compras: o Tab chega à linha da compra"
+                  + ("" if na_linha else f" (foto: {r.foto('-0')})"))
+            tudo_certo &= na_linha
+            xdo("key", "Return")
+            time.sleep(1.5)
+            tx = r.textos()
+            abriu = na_linha and any(t.startswith("TESTE_PILHA:") and t != "TESTE_PILHA:1" for _, _, t in tx) \
+                and any(t.startswith("NF ") and "·" in t and y < 200 for _, y, t in tx)
+            print(("✔ " if abriu else "✘ ") + "compras: o Tab chega à compra e o Enter abre a nota, sem o mouse"
+                  + ("" if abriu else f" (foto: {r.foto('-1')})"))
+            tudo_certo &= abriu
+        finally:
+            r.fechar()
+
         # ---- A3. Fechar o caixa de verdade pelo teclado (B-N3 da revisão R2): na pergunta, o Tab chega ao botão
         # (o primeiro Tab para na seta de desistir) e o Enter ali confirma; o caixa fecha. Por último, porque fecha. ----
         r = Rustinho(pasta, "TelaCaixa", {}, fotos, "r8-fechar-de-verdade")

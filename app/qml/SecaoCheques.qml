@@ -122,6 +122,17 @@ FocusScope {
                                                  : ch.podeDepositar || ch.situacao === "depositado" ? Tema.verde : Tema.papel
                 HoverHandler { id: sobreLinha }
                 TapHandler { onTapped: secao.linhaEscolhida = linha.ch.id }
+                // R11 (D-AUD-9) e decisão 5 do proprietário (25/11/2026): a linha é alcançável pelo teclado. Com o Tab,
+                // ela fica escolhida e os botões dela aparecem (e seguem no Tab); o contorno mostra onde está o foco.
+                activeFocusOnTab: true
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        secao.linhaEscolhida = linha.ch.id
+                        ListView.view.positionViewAtIndex(linha.index, ListView.Contain)
+                    }
+                }
+                border.width: activeFocus ? 2 : 0
+                border.color: Tema.foco
                 RowLayout {
                     id: conteudoCh
                     anchors.left: parent.left
