@@ -623,9 +623,10 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
                             MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                       WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND vi.produto_id IS NOT NULL
                       GROUP BY 1),
-              ue AS (SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = m.produto_id), m.produto_id) AS produto_id,
-                            MAX(m.criado_em) AS u FROM estoque_movimento m
-                      WHERE m.tipo IN ('compra', 'inicial') GROUP BY 1)
+              ue_peca AS (SELECT produto_id, MAX(criado_em) AS u FROM estoque_movimento
+                      WHERE tipo IN ('compra', 'inicial') GROUP BY produto_id),
+              ue AS (SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = e.produto_id), e.produto_id) AS produto_id,
+                            MAX(e.u) AS u FROM ue_peca e GROUP BY 1)
          SELECT p.id, p.codigo, p.nome, p.marca, p.unidade, p.local, est.q, p.custo,
                 COALESCE(date(uv.u, 'localtime'), ''), COALESCE(date(ue.u, 'localtime'), ''),
                 date(MAX(COALESCE(uv.u, ''), COALESCE(ue.u, ''), p.criado_em), 'localtime')

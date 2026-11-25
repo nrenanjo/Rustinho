@@ -720,6 +720,39 @@ fn r8_n1_dois_gerentes_juntam_pecas_com_codigos_sem_conflito() {
     }
 }
 
+/// R8-N1, código de barras só na peça (sem a linha em `produto_gtin`, como nos cadastros antigos): o GTIN que a
+/// junção cria em K é igual nos dois caixas.
+#[test]
+fn r8_n1_codigo_de_barras_so_na_peca_sem_conflito() {
+    let (mut a, mut b, u, d, k) = dois();
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &bia, true).unwrap();
+    a.conn.execute("UPDATE produto SET codigo_barras = '7891000100103' WHERE id = ?1", [&d]).unwrap();
+    a.conn.execute("UPDATE produto SET codigo_barras = '7894900011517' WHERE id = ?1", [&k]).unwrap();
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &d, &k, false);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    juntar(&mut b, &bia, &d, &k, false);
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        assert_eq!(
+            conflitos(x),
+            0,
+            "{:?}",
+            sync::conflitos(&x.conn).unwrap().iter().map(|c| &c.texto).collect::<Vec<_>>()
+        );
+        let gtin: i64 = x
+            .conn
+            .query_row(
+                "SELECT count(*) FROM produto_gtin WHERE produto_id = ?1 AND gtin = '7891000100103'",
+                [&k],
+                |l| l.get(0),
+            )
+            .unwrap();
+        assert_eq!(gtin, 1, "o código de barras de D virou GTIN de K");
+    }
+}
+
 /// B1 da R7: completar a junção na raiz de um círculo é recusado (antes: juntava a peça nela mesma, apagando
 /// aplicações e códigos de barras e desativando a peça).
 #[test]
