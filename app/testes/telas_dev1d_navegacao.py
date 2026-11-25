@@ -685,7 +685,7 @@ def main():
             # Em < 3 s, dá Esc para voltar ao Início: a faixa NÃO pode vazar ao Início!
             xdo("key", "Escape")
             ok("FXVT: ao voltar ao Início em < 8 s, a faixa não aparece no Início",
-               r.esperar("Trocar usuário")
+               r.esperar("Buscar peça:")
                and not r.tem("A operação ainda não foi concluída"),
                r.foto("-3-inicio"))
             logs_erros += r.erros_qml()
@@ -716,7 +716,7 @@ def main():
                r.esperar("A operação ainda não foi concluída"), r.foto("-2-faixa"))
             xdo("key", "Escape")
             ok("FXVT (celular): ao voltar ao Início em < 8 s, a faixa não aparece no Início",
-               r.esperar("Trocar usuário")
+               r.esperar("Buscar peça:")
                and not r.tem("A operação ainda não foi concluída"),
                r.foto("-3-inicio"))
             logs_erros += r.erros_qml()

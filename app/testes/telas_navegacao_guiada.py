@@ -379,7 +379,7 @@ def main():
             time.sleep(1)
             xdo("key", "Escape")
             time.sleep(1.5)
-            ok("A: pilha sem telas repetidas (Esc vai ao Início)", r.tem("Trocar usuário") and not r.tem("CNPJ da loja"),
+            ok("A: pilha sem telas repetidas (Esc vai ao Início)", r.tem("Buscar peça:") and not r.tem("CNPJ da loja"),
                r.foto("-4-inicio"))
         finally:
             r.fechar()

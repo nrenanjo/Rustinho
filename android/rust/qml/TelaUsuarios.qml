@@ -139,6 +139,16 @@ FocusScope {
                     icone: "mais"
                     onClicked: tela.novo()
                 }
+                // R1 / D-AUD-3 (decisão do proprietário, 25/11/2026): "Sair" encerra a sessão de
+                // quem está usando e volta à entrada, sem fechar o Rustinho: outra pessoa assume
+                // o caixa com o próprio usuário (cada venda fica no nome de quem fez).
+                Botao {
+                    objectName: "botaoSairDaConta"
+                    text: "Sair"
+                    icone: "sair"
+                    tipo: "discreto"
+                    onClicked: janela.trocarUsuario()
+                }
             }
 
             ListView {

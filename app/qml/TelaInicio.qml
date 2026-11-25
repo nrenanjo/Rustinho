@@ -277,20 +277,9 @@ FocusScope {
                         spacing: 10
                         Layout.alignment: Tema.fino ? Qt.AlignLeft : Qt.AlignRight
                         Layout.topMargin: 4
+                        // R1 / D-AUD-3 (decisão do proprietário, 25/11/2026): o "Trocar usuário" saiu do
+                        // Início; quem sai da conta usa o "Sair" da tela de Usuários.
                         Aparencia { Layout.alignment: Qt.AlignVCenter }
-                        Botao {
-                            tipo: "discreto"
-                            icone: "sair"
-                            text: "Trocar usuário"
-                            Layout.alignment: Qt.AlignVCenter
-                            // T084 (texto O do proprietário, 21/11): abre a tela de Usuários pelo mesmo caminho do
-                            // cartão Usuários do menu (a mesma função, a mesma senha do gerente para o caixa).
-                            onClicked: {
-                                const usuarios = tela.funcao("usuarios")
-                                if (usuarios)
-                                    tela.janela.abrirFuncao(usuarios)
-                            }
-                        }
                     }
                 }
             }

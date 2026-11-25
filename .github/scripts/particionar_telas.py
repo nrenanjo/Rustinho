@@ -101,6 +101,7 @@ PESOS_SEGUNDOS = {
     "telas_importar_cadastros": 31,
     "telas_falha07": 28,
     "telas_olho1": 30,
+    "telas_r1_sair": 25,
     "telas_estab_sessao": 28,
     "telas_numeros": 27,
     "telas_modo_seguro": 23,

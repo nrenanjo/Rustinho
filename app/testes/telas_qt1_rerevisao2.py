@@ -117,9 +117,10 @@ def parte_a(placar, fotos, pasta):
             voltou = na_tela(r, S2) or na_tela(r, S2_TITULO)
             print(f"QT1-RR2 A: 24 s depois, no mesmo Início: a linha voltou = {voltou}", flush=True)
             ok("A7: 24 s depois (o Início leu os avisos de novo), a linha continua fora", not voltou, f)
-            # A mesma pessoa sai e entra de novo, no mesmo dia, sem queda nova (A8 e A9). Decisão definitiva D-AUD-3
-            # (texto P, 21/11/2026): "Trocar usuário" abre Usuários e não há sair da conta pela tela.
-            placar.nao_se_aplica("A8 e A9", "decisão definitiva D-AUD-3 (texto P): não há sair da conta pela tela")
+            # A mesma pessoa sai e entra de novo, no mesmo dia, sem queda nova (A8 e A9). D-AUD-3 mudou em
+            # 25/11/2026 (regra 1): o "Sair" fica na tela de Usuários. Este roteiro não passa por lá; A8 e A9
+            # continuam fora dele.
+            placar.nao_se_aplica("A8 e A9", "o sair da conta fica na tela de Usuários (D-AUD-3, 25/11/2026); fora deste roteiro")
     finally:
         morrer(r)
 
