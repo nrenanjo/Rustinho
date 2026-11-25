@@ -119,9 +119,17 @@ fn d14_cancelar_venda_de_caixa_fechado_sem_caixa_aberto_vai_para_o_caixa_geral()
     assert!(movimentos_da_gaveta(&l, &v).is_empty());
     assert_eq!(geral(&mut l), geral_antes - 10000);
     assert!(auditoria_tem(&l, "caixa.caixa_fechado", "Caixa geral"));
-    // Fluxo de caixa: a venda já sai do dia dela; o acerto não conta de novo.
+    // Fluxo de caixa (R25 / DA-F6-2, decisão do proprietário de 25/11/2026): a venda fica no dia dela e o
+    // cancelamento entra à parte, uma vez só; o acerto no Caixa geral não conta de novo.
     let f = l.ok("fluxo_caixa", json!({ "de": "", "ate": "" }));
-    assert_eq!(centavos(f["saidas"].as_str().unwrap()), 0, "{f}");
+    assert_eq!((centavos(f["entradas"].as_str().unwrap()), centavos(f["saidas"].as_str().unwrap())), (10000, 10000), "{f}");
+    let detalhes: Vec<&str> = f["realizado"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|d| d["detalhes"].as_array().unwrap().iter().filter_map(|x| x.as_str()))
+        .collect();
+    assert_eq!(detalhes.iter().filter(|x| x.contains("Venda cancelada depois do fechamento")).count(), 1, "{f}");
 }
 
 #[test]

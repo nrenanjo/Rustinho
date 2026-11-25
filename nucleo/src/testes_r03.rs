@@ -156,6 +156,42 @@ fn r03_parcela_recebida_em_dois_caixas_vira_conflito() {
     assert_eq!(abertos, 0, "anotado como corrigido");
 }
 
+/// R2 (D-AUD-4, decisão do proprietário de 25/11/2026): a ligação de abatimento zero (o recebimento que acertou só
+/// os juros da parcela) não é recebimento da parcela: fica fora das operações do conflito "recebida mais de uma vez".
+#[test]
+fn r2_ligacao_de_abatimento_zero_fica_fora_do_conflito_de_pago_a_mais() {
+    let (mut s, cliente) = loja();
+    outro_caixa(&mut s);
+    ok(
+        &mut s,
+        "receber_lancar",
+        json!({ "clienteId": cliente, "descricao": "caderno", "valor": "50", "parcelas": 1, "primeiroVencimento": "" }),
+    );
+    let parcela: String = conn(&mut s).query_row("SELECT id FROM conta_receber", [], |l| l.get(0)).unwrap();
+    let r = ok(&mut s, "receber_baixar", json!({ "clienteId": cliente, "contas": [parcela], "forma": "dinheiro" }));
+    let meu = r["id"].as_str().unwrap().to_string();
+    let rp_meu: String = conn(&mut s)
+        .query_row("SELECT id FROM recebimento_parcela WHERE recebimento_id = ?1", [&meu], |l| l.get(0))
+        .unwrap();
+    copiar_do_outro_caixa(&mut s, "recebimento", &meu, "rec-caixa-2", &[]);
+    copiar_do_outro_caixa(&mut s, "recebimento_parcela", &rp_meu, "rp-caixa-2", &[("recebimento_id", "'rec-caixa-2'")]);
+    // Um terceiro recebimento, que só acertou os juros desta parcela (abatimento zero).
+    copiar_do_outro_caixa(&mut s, "recebimento", &meu, "rec-so-juros", &[]);
+    copiar_do_outro_caixa(
+        &mut s,
+        "recebimento_parcela",
+        &rp_meu,
+        "rp-so-juros",
+        &[("recebimento_id", "'rec-so-juros'"), ("valor", "0")],
+    );
+    sync::verificar_depois(conn(&mut s)).unwrap();
+    let ops: String = conn(&mut s)
+        .query_row("SELECT perdeu FROM sync_conflito WHERE tipo = 'pago_a_mais'", [], |l| l.get(0))
+        .unwrap();
+    assert!(ops.contains(&meu) && ops.contains("rec-caixa-2"), "{ops}");
+    assert!(!ops.contains("rec-so-juros"), "a ligação de abatimento zero entrou no conflito: {ops}");
+}
+
 /// A mesma conta a pagar paga nos dois caixas: o mesmo tratamento.
 #[test]
 fn r03_conta_paga_em_dois_caixas_vira_conflito() {

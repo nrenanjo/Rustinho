@@ -1069,6 +1069,35 @@ mod testes {
         assert!(crate::impressao::devolucao(c, &l[0].id).unwrap().contains("Vale-troca nº 1"));
     }
 
+    /// R2 (D-AUD-4, decisão do proprietário de 25/11/2026): o abatimento de uma devolução não é pagamento, então não
+    /// acerta a multa e os juros da parcela atrasada: eles continuam contando desde o vencimento, sobre o que falta.
+    #[test]
+    fn r2_abatimento_da_devolucao_nao_acerta_multa_e_juros() {
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        caixa::abrir(c, d, &u, "Caixa 1", "0").unwrap();
+        let mut f = pessoas::ficha_nova(c, "cliente").unwrap();
+        f.nome = "Maria".into();
+        let cliente = pessoas::salvar(c, d, &u, &f).unwrap();
+        let filtro = peca(&b, &u, "Filtro", "10"); // 20
+        let e = VendaEntrada {
+            itens: vec![item(&filtro, "3")],
+            tabela: 1,
+            cliente_id: cliente.clone(),
+            pagamentos: vec![pg("dinheiro", "20"), pg("crediario", "40")],
+            ..Default::default()
+        };
+        let venda = vendas::concluir(c, d, &u, &e).unwrap();
+        crate::receber::salvar_taxas(c, "2", "1", "").unwrap();
+        c.execute("UPDATE conta_receber SET vencimento = date('now', 'localtime', '-30 days')", []).unwrap();
+        let i = da_venda(c, &venda).unwrap().itens[0].venda_item_id.clone();
+        devolver(c, d, &u, &entrada(&venda, vec![(&i, "1", false)], "crediario", "")).unwrap();
+        let parcelas = crate::receber::cliente(c, &cliente, false).unwrap().parcelas;
+        // 20,00 com 30 dias de atraso: multa 0,40 + juros 0,20, desde o vencimento.
+        assert_eq!((parcelas[0].saldo.as_str(), parcelas[0].juros.as_str()), ("20,00", "0,60"));
+    }
+
     /// T070 (OPUS-B-1 = AUD-B-3 da auditoria da 0.9.18-dev.3.3.3): o abatimento do crediário por uma devolução
     /// não se estorna em Receber (as parcelas voltariam a ficar em aberto com a devolução valendo); desfaz-se a
     /// devolução em Trocas e devoluções.

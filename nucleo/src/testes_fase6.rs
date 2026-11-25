@@ -1100,14 +1100,14 @@ fn e13_revisao_lista_de_compra_separa_fornecedores_de_mesmo_nome() {
     assert_eq!(html.matches(">Distribuidora Sul</p>").count(), 2, "um grupo para cada fornecedor: {html}");
 }
 
-/// E01 · revisão (achado novo, pede decisão): o fluxo de caixa ainda conta a
-/// venda pela situação ATUAL. Venda em dinheiro de 3 dias atrás, caixa
-/// fechado, cancelada hoje sem gaveta aberta (D-14: os R$ 300 saem do Caixa
-/// geral): a entrada some do dia da venda e a saída de hoje não aparece (o
-/// movimento `caixa_fechado` não entra no fluxo). O mesmo vale para o
-/// recebimento estornado e a devolução desfeita. O saldo da conta muda.
+/// E01 · DA-F6-2, decidida pelo proprietário em 25/11/2026 (regra 25): venda em
+/// dinheiro de 3 dias atrás, caixa fechado, cancelada hoje sem gaveta aberta (D-14:
+/// os R$ 300 saem do Caixa geral). A entrada fica no dia da venda (o dia fechado
+/// não muda) e o cancelamento aparece hoje, à parte, com o mesmo valor. O retrato
+/// de antes (a entrada sumia e a saída não aparecia) saiu com a decisão. O
+/// recebimento estornado e a devolução desfeita não fazem parte desta decisão.
 #[test]
-fn e01_revisao_venda_cancelada_depois_do_fechamento_some_do_fluxo() {
+fn e01_r25_venda_cancelada_depois_do_fechamento_fica_no_dia_dela() {
     let l = loja();
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
@@ -1127,7 +1127,7 @@ fn e01_revisao_venda_cancelada_depois_do_fechamento_some_do_fluxo() {
     let antes = geral();
     vendas::cancelar(c, d, &l.u, &v, "devolveu o dinheiro").unwrap();
     assert_eq!(geral() - antes, -30_000, "os R$ 300 saíram do Caixa geral hoje (D-14)");
-    assert_eq!(fluxo(), (0, 0), "hoje: a entrada sumiu do dia da venda e a saída de hoje não aparece");
+    assert_eq!(fluxo(), (30_000, 30_000), "a entrada fica no dia da venda e o cancelamento entra hoje");
 }
 
 /// E14 · revisão (achado novo, pede decisão): o recibo do crediário
