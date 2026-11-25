@@ -202,6 +202,10 @@ fn pend37_r6_gerente_descarta_pendencia_com_motivo() {
     // B-N1 da revisão R2: sem motivo, a caixa recebe o pedido do motivo, e não o da senha do gerente.
     let r = l.chamar("xml_pendencia_resolver", json!({ "id": pend, "acao": "descartar", "motivo": "" }));
     assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("motivo")), "{r}");
+    // B-R3-3 da revisão R3: o motivo comprido também, antes da senha.
+    let comprido = "x".repeat(201);
+    let r = l.chamar("xml_pendencia_resolver", json!({ "id": pend, "acao": "descartar", "motivo": comprido }));
+    assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("motivo")), "{r}");
     let pedido = json!({ "id": pend, "acao": "descartar", "motivo": "Uso e consumo" });
     let r = l.chamar("xml_pendencia_resolver", pedido.clone());
     assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("gerente")), "{r}");

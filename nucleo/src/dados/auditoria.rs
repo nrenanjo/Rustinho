@@ -231,7 +231,9 @@ mod testes {
     use super::descrever;
 
     /// As ações que o código grava a partir de uma variável (não dá para ler do texto).
-    const PELA_VARIAVEL: &[&str] = &["caixa.sangria", "caixa.suprimento"];
+    // B-R3-1 da revisão R3 da 006: as ações da troca de dados (R9, B-N4) também vão por uma variável.
+    const PELA_VARIAVEL: &[&str] =
+        &["caixa.sangria", "caixa.suprimento", "troca.ligar", "troca.desligar", "troca.senha"];
 
     /// O 4º argumento de cada `auditoria::registrar(` no código do núcleo: os
     /// textos "dominio.acao" que aparecem nele.

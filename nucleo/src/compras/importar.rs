@@ -2707,8 +2707,13 @@ mod comandos {
         // R6 (D-AUD-5) e DP-13 (alternativa recomendada): descartar a pendência é do gerente, com motivo. O motivo
         // vazio é recusado antes de pedir a senha (B-N1 da revisão R2: o gerente não digita a senha à toa).
         if d.acao == "descartar" {
-            if crate::texto::limpar(&d.motivo).is_empty() {
+            let motivo = crate::texto::limpar(&d.motivo);
+            if motivo.is_empty() {
                 return Err(crate::erro::Erro::campo("motivo", "Diga por que descartar esta pendência."));
+            }
+            // B-R3-3 da revisão R3: o motivo comprido também é recusado antes da senha.
+            if crate::texto::tamanho(&motivo) > 200 {
+                return Err(crate::erro::Erro::campo("motivo", "Use no máximo 200 letras."));
             }
             p.exigir("pendencia_xml")?;
         }
