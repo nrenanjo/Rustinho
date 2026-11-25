@@ -745,7 +745,10 @@ fn r18_orcamento_novo_nao_renova_o_preco_de_outro() {
     assert!(e.contains("Um orçamento novo usa o preço de hoje"), "a mensagem explica (B2 da revisão R2): {e}");
 }
 
-/// R18 · B4 da revisão R3: o orçamento novo recusado pelo desconto da venda inteira também traz a explicação.
+/// R18 · B4 da revisão R3 e B2 da R4: o orçamento novo recusado pelo desconto da venda inteira traz a explicação
+/// quando o preço do carrinho (o do orçamento, R$ 300) difere do de hoje (R$ 310, máximo 5%): o item passa (3,2%),
+/// a venda inteira com R$ 10 de desconto não (6,5%). Com o preço igual ao de hoje, a explicação não entra (só o
+/// desconto alto demais).
 #[test]
 fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
     let l = loja();
@@ -764,6 +767,14 @@ fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
     let o = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &e).unwrap();
     let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
     venda.desconto = "20".into();
+    let erro = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
+    assert!(erro.contains("passa do máximo") && !erro.contains("Um orçamento novo"), "preço igual ao de hoje: {erro}");
+    let mut f = produtos::ficha(c, &l.peca).unwrap();
+    f.precos[0].preco = "310,00".into();
+    f.precos[0].lucro = String::new();
+    produtos::salvar(c, d, &l.u, &f).unwrap();
+    let mut venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    venda.desconto = "10".into();
     let erro = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
     assert!(erro.contains("passa do máximo") && erro.contains("Um orçamento novo usa o preço de hoje"), "{erro}");
 }

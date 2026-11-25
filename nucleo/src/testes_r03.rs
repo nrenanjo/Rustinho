@@ -322,7 +322,7 @@ fn r15_compensacao_pronta_da_parcela_recebida_duas_vezes() {
         .query_row("SELECT COUNT(*) FROM auditoria WHERE acao = 'conflito.compensar'", [], |l| l.get(0))
         .unwrap();
     assert_eq!(registro, 1);
-    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id }));
+    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id, "operacao": "rec-caixa-2" }));
     assert!(!r["ok"].as_bool().unwrap() && r["erro"].as_str().unwrap().contains("não tem compensação pronta"), "{r}");
 }
 
@@ -354,7 +354,9 @@ fn r15_compensacao_pronta_da_conta_paga_duas_vezes() {
     let proposta = k[0]["compensacao"].as_str().unwrap().to_string();
     assert!(proposta.contains("Estornar o pagamento de R$ 80,00 feito no Caixa 2"), "{proposta}");
     let id = id_do_conflito(&mut s, "pago_a_mais");
-    ok(&mut s, "conflito_compensar", json!({ "id": id }));
+    // B1 da revisão R4: sem a operação mostrada, recusa.
+    assert_eq!(chamar(&mut s, "conflito_compensar", json!({ "id": id }))["ok"], false);
+    ok(&mut s, "conflito_compensar", json!({ "id": id, "operacao": k[0]["compensacaoOperacao"] }));
     assert!(abertos_do_tipo(&mut s, "pago_a_mais").is_empty());
     let estornado: Option<String> = conn(&mut s)
         .query_row("SELECT estornado_em FROM pagamento WHERE id = 'pag-caixa-2'", [], |l| l.get(0))
@@ -394,7 +396,7 @@ fn r15_sem_compensacao_exata_recusa() {
     let k = abertos_do_tipo(&mut s, "pago_a_mais");
     assert_eq!(k[0]["compensacao"], "", "{k:?}");
     let id = id_do_conflito(&mut s, "pago_a_mais");
-    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id }));
+    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id, "operacao": "rec-caixa-2" }));
     assert!(!r["ok"].as_bool().unwrap(), "{r}");
     let ativos: i64 = conn(&mut s)
         .query_row("SELECT COUNT(*) FROM recebimento WHERE estornado_em IS NULL", [], |l| l.get(0))

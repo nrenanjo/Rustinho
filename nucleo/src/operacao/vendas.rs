@@ -853,8 +853,10 @@ pub fn salvar_orcamento(
     conferir_itens(&c).map_err(|erro| match erro {
         // B2 da revisão R2: quem não deu desconto precisa saber por que o orçamento novo esbarra no máximo.
         // B4 da revisão R3: também o desconto da venda inteira ("O desconto da venda passa do máximo …").
+        // B2 da revisão R4: a explicação só quando algum preço do carrinho difere do de hoje.
         Erro::Validacao { campo, mensagem }
             if !e.orcamento_id.is_empty()
+                && c.itens.iter().any(|i| i.preco != i.preco_tabela)
                 && (mensagem.contains("Desconto acima do máximo") || mensagem.contains("passa do máximo")) =>
         {
             Erro::Validacao {

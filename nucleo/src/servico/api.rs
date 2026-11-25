@@ -1718,7 +1718,7 @@ impl Servico {
                     )
                 })?;
                 // B2 da revisão R3: a proposta mudou desde que o gerente a viu (chegou outra operação pela troca).
-                if !d.operacao.is_empty() && d.operacao != c.id {
+                if d.operacao != c.id {
                     return Err(Erro::validacao(
                         "A compensação mudou desde que a lista foi aberta (chegou outra operação pela troca de \
                          dados). Nada foi feito. Confira a nova proposta e confirme de novo.",
@@ -2875,7 +2875,7 @@ struct Resolver {
 #[serde(rename_all = "camelCase")]
 struct Compensar {
     id: i64,
-    #[serde(default)]
+    /// B1 da revisão R4: obrigatória (sem ela, a conferência da proposta seria pulada).
     operacao: String,
 }
 
