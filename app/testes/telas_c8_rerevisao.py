@@ -175,6 +175,12 @@ def r1_10b_depois_caso7(placar, fotos):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
+def guia_assentada(textos):
+    """O programa diz que a guia destacou o registro e que nada está se movendo (rolagem ou destaque deslizando)."""
+    tx = {t for _, _, t in textos}
+    return "TESTE_DESTAQUE_ATIVO:1" in tx and "TESTE_MOVIMENTO_ATIVO:0" in tx
+
+
 def r2_a1_completo(placar, fotos):
     """A-1 até o fim: aceitar o registro; na volta, a ficha e a pergunta; o clique conclui; a ficha fecha para Comissões."""
     ok = placar.ok
@@ -212,11 +218,31 @@ def r2_a1_completo(placar, fotos):
             f = r.foto("-3")
             ok("r2: no destino, nem a ficha nem a pergunta por cima",
                not r.tem("Comissão de Ana · teste") and not r.tem("Estornar o pagamento?"), f)
-            time.sleep(1.5)  # a parte assenta
+            # Estabilização de 25/11/2026 (JNAP, CI 45574350469, duas tentativas): a guia destaca e rola até o registro
+            # quando a parte assenta. Na CI (desenho por software) isso passou dos 2,7 s fixos de antes: o botão
+            # apareceu em 703, a parte terminou de montar e o empurrou para 813, e só depois a guia rolou e destacou.
+            # Agora a medida espera, com limite, DUAS leituras seguidas com a guia parada (destaque ativo e nada se
+            # movendo) e o botão à vista: o sinal do destaque pode acender antes de a guia rolar (prova com mutação em
+            # `evid_006/ESTAB_R2/`), então só ele não basta. Se a guia nunca levar o botão para a área visível (ou ele
+            # sair dela depois), reprova como antes.
+            chegou = time.time()
+            leituras = []
+
+            def a_vista_e_parada():
+                tx = r.textos()
+                pos = [(x, y) for x, y, t in tx if t == "Aceitar como está"]
+                leituras.append(pos)
+                bom = guia_assentada(tx) and any(60 <= y < r.altura() - 30 for _, y in pos)
+                leituras[-1] = (pos, bom)
+                return bom and len(leituras) >= 2 and leituras[-2][1]
+
+            assentou = r.esperar(a_vista_e_parada, 15)
+            print(f"MEDIDA r2: botão à vista com a guia parada {time.time() - chegou:.1f} s depois da chegada "
+                  f"(assentou={assentou}, {len(leituras)} leituras)", flush=True)
             f = r.foto("-3b")
-            pos = r.onde("Aceitar como está")
             ok("r2: na chegada (gerente), o botão Aceitar como está do registro destacado fica à vista, sem rolar",
-               any(60 <= y < r.altura() - 30 for _, y in pos), f"{f} posições={pos} altura da janela={r.altura()}")
+               assentou, f"{f} últimas leituras (posições, à vista com a guia parada)={leituras[-3:]} "
+                         f"altura da janela={r.altura()}")
             aceitar(r)
             f = r.foto("-4")
             ok("r2: aceito, volta ao Financeiro com a ficha e a pergunta",

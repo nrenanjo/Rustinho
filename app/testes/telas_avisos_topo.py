@@ -66,6 +66,18 @@ def onde(r, pedaco, textos=None):
 TOPO = "cabecalhoDaTela" if nav.CELULAR else "setaDeRetorno"
 
 
+def controle_valido(natural, como_controle):
+    """O controle do D (sem toque) vale? `natural`: segundos com o aviso na tela, pela leitura (None: não sumiu);
+    `como_controle`: o que o programa diz (None: programa de antes da linha TESTE_AVISO_FECHADO).
+    - Programa que diz: vale só "tempo" (fechou sozinho pelo prazo dele). "toque", "" ou outra coisa reprovam.
+    - Programa de antes: o critério antigo, pelo tempo medido (pelo menos 1,5 s na tela)."""
+    if natural is None:
+        return False
+    if como_controle is None:
+        return natural >= 1.5
+    return como_controle == "tempo"
+
+
 def fechado_por(textos):
     """Como o último aviso fechou, pelo programa ("toque" ou "tempo"; "" se ainda não fechou); None se o programa não diz
     (um programa de antes da linha TESTE_AVISO_FECHADO)."""
@@ -489,14 +501,18 @@ def cenario_d(placar, fotos, pasta):
                f"{f} guia y={g[1]} aviso y={a2[1]} seta y={seta[1]} ({modo})")
         sumiu, depois = ate_sumir(visto)
         natural = None if sumiu is None else sumiu - visto
-        ok("D (controle): sem toque, o aviso some sozinho e a orientação da guia continua",
-           natural is not None and natural >= 1.5 and bool(onde(r, GUIA, depois)),
-           f"{r.foto('-controle')} na tela por {natural if natural is None else round(natural, 2)} s")
-        if natural is None:
-            return
         # INT9-R7 (19/11/2026): o programa diz como o aviso fechou (TESTE_AVISO_FECHADO). No controle, "tempo": prova que a
         # linha separa os dois casos. Um programa de antes não diz nada (None): vale o critério antigo, pelo tempo.
         como_controle = fechado_por(depois)
+        # Estabilização de 25/11/2026 (JNAP, CI 45574350469): o controle mediu 1,49 s contra o mínimo de 1,5 s, com o
+        # programa dizendo "fechou pelo tempo": a primeira leitura que viu o aviso chegou tarde (leituras lentas). Com a
+        # linha do programa, vale o que ele diz (veja `controle_valido`); o tempo fica na mensagem, para informação.
+        ok("D (controle): sem toque, o aviso some sozinho e a orientação da guia continua",
+           controle_valido(natural, como_controle) and bool(onde(r, GUIA, depois)),
+           f"{r.foto('-controle')} na tela por {natural if natural is None else round(natural, 2)} s; "
+           f"o programa diz: {como_controle}")
+        if natural is None:
+            return
         if como_controle is not None:
             ok("D (controle): o programa diz que o aviso fechou pelo tempo", como_controle == "tempo",
                f"{r.foto('-controle-como')} TESTE_AVISO_FECHADO:{como_controle}")
