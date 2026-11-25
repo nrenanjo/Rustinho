@@ -248,6 +248,9 @@ pub struct Resumo {
     pub valor_inicial: String,
     pub vendas: i64,
     pub canceladas: i64,
+    /// R14 (R-02): vendas, recebimentos e devoluções desta gaveta desfeitos em outro computador (ou depois do
+    /// fechamento). Continuam contando aqui, porque o dinheiro foi acertado na gaveta de quem desfez.
+    pub desfeitas_fora: i64,
     pub total_vendido: String,
     pub por_forma: Vec<PorForma>,
     /// Pagamentos de crediário recebidos neste caixa.
@@ -298,6 +301,16 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
     let canceladas: i64 = conn.query_row(
         "SELECT COUNT(*) FROM venda
           WHERE sessao_id = ?1 AND tipo = 'venda' AND situacao = 'cancelada' AND cancelado_apos_fechar = 0",
+        [sessao_id],
+        |l| l.get(0),
+    )?;
+    let desfeitas_fora: i64 = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM venda WHERE sessao_id = ?1 AND tipo = 'venda' AND situacao = 'cancelada'
+                   AND cancelado_apos_fechar = 1)
+              + (SELECT COUNT(*) FROM recebimento WHERE sessao_id = ?1 AND estornado_em IS NOT NULL
+                   AND estornado_apos_fechar = 1)
+              + (SELECT COUNT(*) FROM devolucao WHERE sessao_id = ?1 AND cancelado_em IS NOT NULL
+                   AND desfeita_apos_fechar = 1)",
         [sessao_id],
         |l| l.get(0),
     )?;
@@ -361,6 +374,7 @@ pub fn resumo(conn: &Connection, sessao_id: &str) -> Resultado<Resumo> {
         sessao,
         vendas,
         canceladas,
+        desfeitas_fora,
         total_vendido: numeros::escrever_dinheiro(total_vendido),
         por_forma,
         recebimentos,
@@ -493,6 +507,56 @@ pub fn sessao_fechada(conn: &Connection, sessao_id: Option<&str>) -> Resultado<b
         .query_row("SELECT fechado_em IS NOT NULL FROM caixa_sessao WHERE id = ?1", [id], |l| l.get(0))
         .optional()?
         .unwrap_or(false))
+}
+
+/// D-14 e R14 (R-02, DP-16, decisão do proprietário de 25/11/2026): a gaveta (sessão) de uma operação, vista deste
+/// computador, é "de fora" quando já foi fechada ou quando está aberta em OUTRO computador. Uma operação feita aqui
+/// (cancelar a venda, estornar o recebimento, desfazer a devolução) nunca muda essa sessão: ela continua contando a
+/// operação como estava, e o dinheiro fica na gaveta aberta deste computador ou no Caixa geral
+/// (`compensar_caixa_fechado`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeFora {
+    Fechada,
+    /// Aberta em outro computador (o nome do caixa de lá).
+    OutroComputador(String),
+}
+
+impl DeFora {
+    /// Para a descrição do movimento: "caixa já fechado" ou "caixa aberto em outro computador: Caixa 2".
+    pub fn na_descricao(&self) -> String {
+        match self {
+            DeFora::Fechada => "caixa já fechado".into(),
+            DeFora::OutroComputador(nome) => format!("caixa aberto em outro computador: {nome}"),
+        }
+    }
+
+    /// Para o histórico: "O caixa da venda já estava fechado (o fechamento não muda)" ou "O caixa da venda está
+    /// aberto em outro computador (Caixa 2); a gaveta de lá não muda".
+    pub fn no_registro(&self, de_que: &str) -> String {
+        match self {
+            DeFora::Fechada => format!("O caixa {de_que} já estava fechado (o fechamento não muda)"),
+            DeFora::OutroComputador(nome) => {
+                format!("O caixa {de_que} está aberto em outro computador ({nome}); a gaveta de lá não muda")
+            }
+        }
+    }
+}
+
+/// Veja `DeFora`. Nada: sem sessão, ou a sessão aberta deste computador (como sempre).
+pub fn sessao_de_fora(conn: &Connection, dispositivo: &str, sessao_id: Option<&str>) -> Resultado<Option<DeFora>> {
+    let Some(id) = sessao_id else { return Ok(None) };
+    let s: Option<(String, String, bool)> = conn
+        .query_row(
+            "SELECT dispositivo, caixa_nome, fechado_em IS NOT NULL FROM caixa_sessao WHERE id = ?1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+        )
+        .optional()?;
+    Ok(match s {
+        Some((_, _, true)) => Some(DeFora::Fechada),
+        Some((d, nome, false)) if d != dispositivo => Some(DeFora::OutroComputador(nome)),
+        _ => None,
+    })
 }
 
 /// D-14: dinheiro que sai (`valor` negativo) ou volta (positivo) por causa de

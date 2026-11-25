@@ -200,6 +200,7 @@ TestCase {
 
     function previa(campos) {
         const p = { clientesNovos: 0, clientesJa: 0, fornecedoresNovos: 0, fornecedoresJa: 0, pecasLojaNovas: 0,
+                    clientesViram: 0, fornecedoresViram: 0,
                     pecasFornecedorNovas: 0, comprasNovas: 0, comprasJa: 0, comprasNaoServe: 0, categorias: [],
                     exemplosClientes: [], exemplosFornecedores: [] }
         for (const k in campos)
@@ -314,6 +315,25 @@ TestCase {
         const l = linha("qCompras")
         verify(visivel(l), "a linha aparece")
         verify(l.extra.indexOf("2 notas de fornecedor não servem para Compras") >= 0, l.extra)
+    }
+
+    // R17 (FI-3) e M1 da revisão: só um fornecedor que aparece como cliente. A primeira leitura marca "Clientes" e
+    // diz que ele passa a ser cliente; desmarcada (a prévia refeita não conta mais), a linha continua com a caixa
+    // (o `mudam` vem contado com todas as opções) e sem o texto; marcada de novo, o texto volta.
+    function test_r17_m1_clientes_que_viram_nao_somem_ao_desmarcar() {
+        Api.respostas = [{ ok: true, dados: previa({ clientesViram: 1 }) }]
+        painel.lerArquivos()
+        verify(painel.qClientes, "Clientes marcada na primeira leitura")
+        let l = linha("qClientes")
+        verify(l.extra.indexOf("1 cadastro já existente passa a ser cliente") >= 0, l.extra)
+        painel.qClientes = false
+        painel.previa = previa({ clientesViram: 1 })
+        l = linha("qClientes")
+        verify((l.mudam || 0) > 0, "a caixa de marcar continua: " + l.mudam)
+        compare(l.extra, "", "desmarcada, sem o texto")
+        painel.qClientes = true
+        l = linha("qClientes")
+        verify(l.extra.indexOf("passa a ser cliente") >= 0, l.extra)
     }
 
     function test_n5_singular_do_ja() {

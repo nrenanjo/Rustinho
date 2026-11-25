@@ -1029,17 +1029,19 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     if motivo.is_empty() {
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
+    // 0915-L (R14): o cheque do recebimento conferido antes de mudar qualquer coisa.
+    crate::sync::exigir_filhos_prontos(conn, "cheque", "recebimento_id", id)?;
     crate::cheques::cancelar_de(conn, usuario_id, "recebimento_id", id)?;
-    // D-14: recebimento de um caixa já fechado. O fechamento dele não muda; o
-    // dinheiro sai da gaveta aberta (ou do Caixa geral).
-    let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
+    // D-14 e R14 (R-02): recebimento de um caixa já fechado ou aberto em outro computador. Aquela gaveta não muda;
+    // o dinheiro sai da gaveta aberta deste computador (ou do Caixa geral).
+    let de_fora = caixa::sessao_de_fora(conn, dispositivo, sessao_id.as_deref())?;
     conn.execute(
         "UPDATE recebimento SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = ?4, estornado_apos_fechar = ?5
           WHERE id = ?1",
-        params![id, tempo::agora(), usuario_id, motivo, fechado],
+        params![id, tempo::agora(), usuario_id, motivo, de_fora.is_some()],
     )?;
     let mut detalhes = vec![format!("Estorno do recebimento {numero} · {caixa_nome} · {motivo}")];
-    if fechado {
+    if let Some(fora) = &de_fora {
         let onde = caixa::compensar_caixa_fechado(
             conn,
             dispositivo,
@@ -1047,11 +1049,11 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             if forma == "dinheiro" { -valor.max(0) } else { 0 },
             "recebimento_estornado",
             id,
-            &format!("Estorno do recebimento {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
+            &format!("Estorno do recebimento {numero} · {caixa_nome} ({}) · {motivo}", fora.na_descricao()),
         )?;
         detalhes.push(match onde {
-            Some(o) => format!("O caixa do recebimento já estava fechado (o fechamento não muda): {o}"),
-            None => "O caixa do recebimento já estava fechado (o fechamento não muda); não era dinheiro".into(),
+            Some(o) => format!("{}: {o}", fora.no_registro("do recebimento")),
+            None => format!("{}; não era dinheiro", fora.no_registro("do recebimento")),
         });
     }
     auditoria::registrar(conn, dispositivo, Some(usuario_id), "receber.estornar", "pessoa", &cliente_id, &detalhes)?;

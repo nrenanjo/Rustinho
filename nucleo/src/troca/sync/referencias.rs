@@ -371,6 +371,35 @@ pub fn exigir_filhos_editaveis(conn: &Connection, filha: &str, coluna: &str, id:
     )
 }
 
+/// 0915-L (R14, DP-16, decisão do proprietário de 25/11/2026): nas cascatas (cancelar a venda cancela os cheques e
+/// as parcelas dela; estornar o recebimento cancela o cheque dele; a devolução abate parcelas; o estorno da compra
+/// cancela as contas dela), os filhos são conferidos ANTES de mudar qualquer coisa. Inconsistente: a mesma recusa
+/// do caminho direto (`exigir_filhos_editaveis`, que leva a tela até o registro). Esperando a troca de dados (o pai
+/// ainda vai chegar de outro caixa): também recusa, dizendo qual registro espera.
+pub fn exigir_filhos_prontos(conn: &Connection, filha: &str, coluna: &str, id: &str) -> Resultado<()> {
+    exigir_filhos_editaveis(conn, filha, coluna, id)?;
+    let achada: Option<(String, String)> = conn
+        .query_row(
+            &format!(
+                "SELECT r.tabela, r.pai FROM sync_referencia r
+                  WHERE r.estado = 'esperando' AND r.tabela = ?1
+                    AND r.chave IN (SELECT json_array(f.id) FROM \"{filha}\" f WHERE f.\"{coluna}\" = ?2) LIMIT 1"
+            ),
+            params![filha, id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    match achada {
+        None => Ok(()),
+        Some((tabela, pai)) => Err(Erro::validacao(format!(
+            "Um registro ligado a esta operação ({}) ainda espera a troca de dados: falta chegar {} de outro caixa. \
+             Nada foi feito. Faça de novo quando a troca de dados terminar.",
+            nome_da_tabela(&tabela).to_lowercase(),
+            nome_da_tabela(&pai).to_lowercase(),
+        ))),
+    }
+}
+
 pub(super) fn exigir_sem_inconsistencia(
     conn: &Connection,
     onde: &str,

@@ -4112,14 +4112,10 @@ mod testes {
     #[test]
     fn r5_t9_varredura_toda_operacao_de_dinheiro_chama_o_bloqueio() {
         use crate::despacho::COMANDOS_DE_DINHEIRO;
-        const LACUNAS: &[&str] = &[
-            "vendas::cancelar",
-            "devolucoes::devolver",
-            "caixa::movimentar_com_conta",
-            "caixa::fechar",
-            "comissoes::fechar",
-            "comissoes::reabrir",
-        ];
+        // R14 (0915-L, 25/11/2026): `vendas::cancelar` e `devolucoes::devolver` passaram a conferir os filhos da
+        // cascata (`exigir_filhos_prontos`) e saíram das lacunas.
+        const LACUNAS: &[&str] =
+            &["caixa::movimentar_com_conta", "caixa::fechar", "comissoes::fechar", "comissoes::reabrir"];
         const CONFERIDAS_ATE_A_3_5: &[&str] = &[
             "receber::receber",
             "receber::estornar",
@@ -4180,7 +4176,9 @@ mod testes {
                 "o atendente de {comando} não chama {funcao}"
             );
             let c = corpo(codigo, &format!("pub fn {nome}("));
-            let chama = c.contains("exigir_editavel") || c.contains("exigir_filhos_editaveis");
+            let chama = c.contains("exigir_editavel")
+                || c.contains("exigir_filhos_editaveis")
+                || c.contains("exigir_filhos_prontos");
             if LACUNAS.contains(funcao) {
                 assert!(!chama, "{funcao} já chama o bloqueio: tire-a das LACUNAS (E04)");
             } else {

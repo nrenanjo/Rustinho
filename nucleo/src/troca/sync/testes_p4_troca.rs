@@ -501,14 +501,21 @@ fn primeira_troca_pelo_p3(ca: &Path, cb: &Path, a: &Banco) {
 /// recusa dele, o programa tenta de novo no ciclo seguinte, e aqui também (senão essa recusa
 /// passaria por outra coisa, nos dois sentidos: a troca que devia dar certo falha, e a que
 /// devia ser recusada "passa" pelo motivo errado).
+/// Estabilização de 25/11/2026 (JNAP, CI 45587904059): na CI carregada, as 40 tentativas de 250 ms (10 s) não
+/// bastaram; o orçamento passa a ser de tempo (até 60 s), com a espera crescendo até 2 s. Só a recusa do limitador é
+/// repetida; qualquer outro resultado volta na hora.
 fn puxa_do_caixa_1(ca: &Path, cb: &Path) -> Resultado<(String, usize)> {
-    let mut tentativas = 0;
+    let inicio = std::time::Instant::now();
+    let mut espera = Duration::from_millis(250);
     loop {
         let r = puxa_do_caixa_1_uma_vez(ca, cb);
         match &r {
-            Err(e) if e.to_string().contains("Muitos pedidos de outros aparelhos") && tentativas < 40 => {
-                tentativas += 1;
-                thread::sleep(Duration::from_millis(250));
+            Err(e)
+                if e.to_string().contains("Muitos pedidos de outros aparelhos")
+                    && inicio.elapsed() < Duration::from_secs(60) =>
+            {
+                thread::sleep(espera);
+                espera = (espera * 2).min(Duration::from_secs(2));
             }
             _ => return r,
         }

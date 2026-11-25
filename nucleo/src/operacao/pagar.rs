@@ -867,6 +867,7 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
     let total = numeros::soma([valor, juros, -desconto])?;
+    let mut onde = None;
     if let Some(sessao_id) = sessao {
         let aberta = caixa::sessao_aberta(conn, dispositivo)?.filter(|s| s.id == sessao_id);
         if aberta.is_some() {
@@ -880,19 +881,21 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 None,
             )?;
         } else {
-            conn.execute(
-                "INSERT INTO movimento_conta (id, conta_id, data, valor, tipo, descricao, origem_id, usuario_id, criado_em, dispositivo)
-                 VALUES (?1, 'caixa-geral', ?2, ?3, 'ajuste', ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    tempo::novo_id(),
-                    fiscal::hoje(conn)?,
-                    total,
-                    format!("Estorno do pagamento (saiu da gaveta): {descricao}"),
-                    id,
-                    usuario_id,
-                    tempo::agora(),
-                    dispositivo
-                ],
+            // R14 (R-02, proposta §6 item 2, decisão do proprietário de 25/11/2026): o pagamento saiu de uma gaveta
+            // que não é a aberta deste computador (já fechada, ou aberta em outro computador). Aquela gaveta não muda;
+            // o dinheiro volta na gaveta aberta deste computador (suprimento ligado ao pagamento) ou, sem ela, no
+            // Caixa geral, como a D-14.
+            let fora = caixa::sessao_de_fora(conn, dispositivo, Some(&sessao_id))?
+                .map(|f| f.na_descricao())
+                .unwrap_or_else(|| "caixa de outro computador".into());
+            onde = caixa::compensar_caixa_fechado(
+                conn,
+                dispositivo,
+                usuario_id,
+                total,
+                "pagamento_estornado",
+                id,
+                &format!("Estorno do pagamento (saiu da gaveta: {fora}): {descricao}"),
             )?;
         }
     }
@@ -907,7 +910,11 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         "pagar.estornar",
         "conta_pagar",
         &conta_id,
-        &[format!("{descricao}: estorno de R$ {} · {motivo}", numeros::escrever_dinheiro(total))],
+        &[format!(
+            "{descricao}: estorno de R$ {} · {motivo}{}",
+            numeros::escrever_dinheiro(total),
+            onde.map(|o| format!(" · {o}")).unwrap_or_default()
+        )],
     )?;
     Ok(())
 }

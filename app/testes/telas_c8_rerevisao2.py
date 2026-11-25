@@ -412,11 +412,14 @@ def s4_aceitar_outro(placar, fotos):
             # da N6 (44361340632), a foto de 2 s depois da chegada ainda saiu sem o destaque (razões 1.0; em todas as
             # outras, 0,74), sem causa explicada. CI-1/CI-2: só o roteiro espera mais. Fotos a cada ~0,5 s, por até 6 s,
             # com o tempo anotado (uma demora de verdade continua à vista na MEDIDA).
+            # Estabilização de 25/11/2026 (JNAP, CI 45587904059): na CI, com o desenho por software, a guia destacou
+            # depois dos 6 s (no r2 do telas_c8_rerevisao, mais de 10 s). O limite vai a 30 s, como o do r2: a rodada
+            # verde volta no destaque; sem destaque nenhum, reprova como antes.
             time.sleep(1.0)
             while True:
                 f1 = r.foto("-3")
                 q1 = razoes(f1, f0)
-                if all(0.66 <= v <= 0.82 for v in q1) or time.time() - chegou > 6.0:
+                if all(0.66 <= v <= 0.82 for v in q1) or time.time() - chegou > 30.0:
                     break
                 time.sleep(0.5)
             print(f"MEDIDA s4: o destaque visto {time.time() - chegou:.1f} s depois da chegada (razões {q1})", flush=True)

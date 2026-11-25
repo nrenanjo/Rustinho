@@ -285,8 +285,8 @@ Painel {
                 painel.previa = r.dados
                 const e = painel.escolhas
                 // FI-3 (R17): quem já está cadastrado (como fornecedor) passa a ser cliente.
-                painel.qClientes = (r.dados.clientesNovos > 0 || painel.cat("cliente.ja_sem_papel") > 0) && (!e || e.qClientes)
-                painel.qFornecedores = (r.dados.fornecedoresNovos > 0 || painel.cat("fornecedor.ja_sem_papel") > 0)
+                painel.qClientes = (r.dados.clientesNovos > 0 || r.dados.clientesViram > 0) && (!e || e.qClientes)
+                painel.qFornecedores = (r.dados.fornecedoresNovos > 0 || r.dados.fornecedoresViram > 0)
                                        && (!e || e.qFornecedores)
                 painel.qPecasLoja = r.dados.pecasLojaNovas > 0 && (!e || e.qPecasLoja)
                 painel.qPecasFornecedor = r.dados.pecasFornecedorNovas > 0 && (!e || e.qPecasFornecedor)
@@ -556,16 +556,17 @@ Painel {
                         Repeater {
                             model: painel.previa ? [
                                 { chave: "qClientes", titulo: "Clientes", novos: painel.previa.clientesNovos, ja: painel.previa.clientesJa,
-                                  mudam: painel.cat("cliente.ja_sem_papel"), exemplos: painel.previa.exemplosClientes, cor: Tema.verde,
+                                  // M1 da revisão: `mudam` contado com todas as opções (a caixa não some ao desmarcar).
+                                  mudam: painel.previa.clientesViram, exemplos: painel.previa.exemplosClientes, cor: Tema.verde,
                                   // FI-3 (R17): quem já está cadastrado (como fornecedor) passa a ser cliente.
-                                  extra: painel.cat("cliente.ja_sem_papel") > 0
-                                         ? painel.texto(painel.cat("cliente.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
+                                  extra: painel.qClientes && painel.previa.clientesViram > 0
+                                         ? painel.texto(painel.previa.clientesViram, "cadastro já existente passa", "cadastros já existentes passam")
                                            + " a ser cliente" : "" },
                                 { chave: "qFornecedores", titulo: "Fornecedores", novos: painel.previa.fornecedoresNovos, ja: painel.previa.fornecedoresJa,
-                                  mudam: painel.cat("fornecedor.ja_sem_papel"), exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul,
+                                  mudam: painel.previa.fornecedoresViram, exemplos: painel.previa.exemplosFornecedores, cor: Tema.azul,
                                   // FI-2: quem já está cadastrado (como cliente) passa a ser fornecedor.
-                                  extra: painel.cat("fornecedor.ja_sem_papel") > 0
-                                         ? painel.texto(painel.cat("fornecedor.ja_sem_papel"), "cadastro já existente passa", "cadastros já existentes passam")
+                                  extra: painel.qFornecedores && painel.previa.fornecedoresViram > 0
+                                         ? painel.texto(painel.previa.fornecedoresViram, "cadastro já existente passa", "cadastros já existentes passam")
                                            + " a ser fornecedor" : "",
                                   // FI-1 (a): travada enquanto "Peças das notas de fornecedores" estiver marcada.
                                   presa: painel.qPecasFornecedor || painel.qCompras,

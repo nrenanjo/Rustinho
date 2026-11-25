@@ -2359,6 +2359,8 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
     if motivo.is_empty() {
         return Err(Erro::campo("motivo", "Diga o motivo do estorno."));
     }
+    // 0915-L (R14): as contas a pagar da compra conferidas antes de mudar qualquer coisa.
+    crate::sync::exigir_filhos_prontos(conn, "conta_pagar", "compra_id", id)?;
     crate::pagar::cancelar_da_compra(conn, usuario_id, id)?;
     crate::encomendas::desfazer_da_compra(conn, dispositivo, usuario_id, id)?;
     let itens = itens_banco(conn, id)?;

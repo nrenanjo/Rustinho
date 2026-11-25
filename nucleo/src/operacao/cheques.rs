@@ -544,8 +544,10 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
 /// permissão é conferida no comando). Desfaz o que a devolução fez:
 /// - a saída da conta (`cheque_devolvido`), se o cheque estava depositado: o movimento é estornado;
 /// - a dívida lançada no Receber, se houve: é cancelada. A dívida não guarda o cheque: é a parcela sem venda, do
-///   cliente do cheque, com a descrição e o valor da devolução, lançada na mesma operação (até 1 minuto da devolução).
-///   Se ela já tem pagamento, nada é desfeito: o recebimento é estornado antes;
+///   cliente do cheque, com a descrição e o valor da devolução, lançada na mesma operação (até 2 segundos da
+///   devolução, pelo relógio do mesmo computador). Outro cheque igual (mesmo cliente, número e valor) devolvido nesses
+///   mesmos segundos deixaria a dívida sem dono certo: aí nada é desfeito (B1 da revisão). Se a dívida já tem
+///   pagamento, nada é desfeito: o recebimento é estornado antes;
 /// - a situação: volta a "depositado" (na mesma conta) ou a "carteira".
 fn desfazer_devolucao(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, d: &Dados) -> Resultado<()> {
     let descricao = format!("Cheque nº {} devolvido", d.numero);
@@ -556,13 +558,30 @@ fn desfazer_devolucao(conn: &Connection, dispositivo: &str, usuario_id: &str, id
                 "SELECT s.id, s.pago FROM conta_receber_saldo s, cheque ch
                   WHERE ch.id = ?1 AND s.cliente_id = ?2 AND s.venda_id IS NULL AND s.cancelado_em IS NULL
                     AND s.descricao = ?3 AND s.valor = ?4
-                    AND ABS(julianday(s.criado_em) - julianday(ch.situacao_em)) * 86400 <= 60
+                    AND ABS(julianday(s.criado_em) - julianday(ch.situacao_em)) * 86400 <= 2
                   ORDER BY ABS(julianday(s.criado_em) - julianday(ch.situacao_em)) LIMIT 1",
                 params![id, cliente, descricao, d.valor],
                 |l| Ok((l.get(0)?, l.get(1)?)),
             )
             .optional()?,
     };
+    let gemeos: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM cheque o, cheque ch
+          WHERE ch.id = ?1 AND o.id <> ch.id AND o.situacao = 'devolvido' AND o.cliente_id IS ch.cliente_id
+            AND o.numero = ch.numero AND o.valor = ch.valor
+            AND ABS(julianday(o.situacao_em) - julianday(ch.situacao_em)) * 86400 <= 2",
+        [id],
+        |l| l.get(0),
+    )?;
+    if gemeos > 0 {
+        return Err(Erro::validacao(format!(
+            "Há outro cheque nº {} de R$ {} do mesmo cliente devolvido no mesmo instante: o Rustinho não sabe qual \
+             dívida do Receber é deste. Nada foi feito. Peça ajuda para acertar à mão (cancelar a dívida certa no \
+             Receber).",
+            d.numero,
+            numeros::escrever_dinheiro(d.valor)
+        )));
+    }
     if let Some((_, pago)) = &divida {
         if *pago > 0 {
             return Err(Erro::validacao(format!(

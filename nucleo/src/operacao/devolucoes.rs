@@ -425,6 +425,10 @@ pub fn devolver(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entr
             ));
         }
     }
+    // 0915-L (R14) e E04 (R-05 §4): as parcelas que o abatimento paga conferidas antes de gravar qualquer coisa.
+    if cred > 0 {
+        crate::sync::exigir_filhos_prontos(conn, "conta_receber", "venda_id", &e.venda_id)?;
+    }
     let (venda_numero, venda_caixa, cliente_id, cliente_nome): (i64, String, Option<String>, String) = conn.query_row(
         "SELECT numero, caixa_nome, cliente_id, cliente_nome FROM venda WHERE id = ?1",
         [&e.venda_id],
@@ -631,21 +635,20 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             &format!("Devolução nº {} desfeita · venda {venda_numero} · {venda_caixa} · {motivo}", d.4),
         )?;
     }
-    // D-14: devolução em dinheiro de um caixa já fechado. O fechamento dele
-    // não muda; o dinheiro que o cliente devolve entra na gaveta aberta (ou
-    // no Caixa geral).
-    let fechado = caixa::sessao_fechada(conn, d.6.as_deref())?;
+    // D-14 e R14 (R-02): devolução em dinheiro de um caixa já fechado ou aberto em outro computador. Aquela gaveta
+    // não muda; o dinheiro que o cliente devolve entra na gaveta aberta deste computador (ou no Caixa geral).
+    let de_fora = caixa::sessao_de_fora(conn, dispositivo, d.6.as_deref())?;
     conn.execute(
         "UPDATE devolucao SET cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4, desfeita_apos_fechar = ?5
           WHERE id = ?1",
-        params![id, agora, usuario_id, motivo, fechado],
+        params![id, agora, usuario_id, motivo, de_fora.is_some()],
     )?;
     let mut detalhes = vec![format!(
         "Devolução nº {} desfeita · {motivo}{}",
         d.4,
-        if d.5 > 0 && !fechado { " (o dinheiro volta a contar na gaveta)" } else { "" }
+        if d.5 > 0 && de_fora.is_none() { " (o dinheiro volta a contar na gaveta)" } else { "" }
     )];
-    if fechado {
+    if let Some(fora) = &de_fora {
         let onde = caixa::compensar_caixa_fechado(
             conn,
             dispositivo,
@@ -653,10 +656,10 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             d.5.max(0),
             "devolucao_desfeita",
             id,
-            &format!("Devolução nº {} · {} desfeita (caixa já fechado) · {motivo}", d.4, d.7),
+            &format!("Devolução nº {} · {} desfeita ({}) · {motivo}", d.4, d.7, fora.na_descricao()),
         )?;
         if let Some(o) = onde {
-            detalhes.push(format!("O caixa da devolução já estava fechado (o fechamento não muda): {o}"));
+            detalhes.push(format!("{}: {o}", fora.no_registro("da devolução")));
         }
     }
     auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.devolucao_desfeita", "venda", &d.3, &detalhes)?;

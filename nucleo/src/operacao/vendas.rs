@@ -124,6 +124,9 @@ pub struct ItemCalculado {
     pub v_desconto_maximo: Option<i64>,
     #[serde(skip)]
     pub v_cheio: i64,
+    /// R18: o valor líquido desta peça no orçamento de onde a venda saiu.
+    #[serde(skip)]
+    pub v_orcamento: Option<NoOrcamento>,
 }
 
 #[derive(Debug, Serialize)]
@@ -300,33 +303,99 @@ fn passa_do_maximo(i: &ItemCalculado, desconto_venda: i64, soma: i64) -> bool {
     let dado_vezes_soma =
         (i.v_cheio as i128 - i.v_total as i128) * soma as i128 + desconto_venda as i128 * i.v_total as i128;
     dado_vezes_soma * 10_000 > i.v_cheio as i128 * max as i128 * soma as i128
+        // R18: com a parte do desconto da venda, o item ainda não fica abaixo do valor líquido do orçamento.
+        && !i.v_orcamento.is_some_and(|o| o.cobre_com_a_venda(i.v_total, i.v_quantidade, desconto_venda, soma))
+}
+
+/// R18 (DP-17, decisão do proprietário de 25/11/2026, regra 18: o orçamento vencido vira venda pelos preços originais
+/// dele): o valor líquido de uma peça no orçamento. Na venda que sai dele, vender por esse valor (ou acima) não esbarra
+/// no desconto máximo, mesmo que o preço de hoje tenha subido; abaixo dele, vale o desconto máximo de sempre, medido
+/// do preço de hoje (A1 da revisão: o desconto não se empilha sobre o do orçamento). As contas são exatas (frações em
+/// i128); se passarem do limite do i128, a peça fica sem a garantia do orçamento (vale a regra de sempre).
+#[derive(Debug, Clone, Copy)]
+pub struct NoOrcamento {
+    /// Total do item no orçamento, depois do desconto do item.
+    item: i64,
+    quantidade: i64,
+    /// A parte que fica depois do desconto da venda inteira do orçamento: `fica_num / fica_den`.
+    fica_num: i64,
+    fica_den: i64,
+}
+
+impl NoOrcamento {
+    /// `total` de `quantidade` (depois do desconto do item) não fica abaixo do valor líquido do orçamento, por unidade?
+    fn cobre_o_item(&self, total: i64, quantidade: i64) -> bool {
+        let (a, b) =
+            ((total as i128).checked_mul(self.quantidade as i128), (self.item as i128).checked_mul(quantidade as i128));
+        quantidade > 0 && matches!((a, b), (Some(a), Some(b)) if a >= b)
+    }
+
+    /// O mesmo depois da parte do desconto da venda: `total × (soma − desconto_venda) / soma` contra o líquido final
+    /// do orçamento (`item × fica_num / fica_den`), por unidade.
+    fn cobre_com_a_venda(&self, total: i64, quantidade: i64, desconto_venda: i64, soma: i64) -> bool {
+        if quantidade <= 0 || soma <= 0 || self.fica_den <= 0 {
+            return false;
+        }
+        let agora = (total as i128)
+            .checked_mul((soma - desconto_venda) as i128)
+            .and_then(|x| x.checked_mul(self.fica_den as i128))
+            .and_then(|x| x.checked_mul(self.quantidade as i128));
+        let orcamento = (self.item as i128)
+            .checked_mul(self.fica_num as i128)
+            .and_then(|x| x.checked_mul(soma as i128))
+            .and_then(|x| x.checked_mul(quantidade as i128));
+        matches!((agora, orcamento), (Some(a), Some(o)) if a >= o)
+    }
+}
+
+/// R18: o valor líquido de cada peça no orçamento ainda aberto (a venda o fecha; vendido ou cancelado não serve de
+/// referência). Peça repetida no orçamento: vale a linha de maior valor por unidade (a mais exigente).
+fn liquidos_do_orcamento(
+    conn: &Connection,
+    orcamento_id: &str,
+) -> Resultado<std::collections::HashMap<String, NoOrcamento>> {
+    let mut mapa: std::collections::HashMap<String, NoOrcamento> = Default::default();
+    if orcamento_id.is_empty() {
+        return Ok(mapa);
+    }
+    let desconto_total: Option<i64> = conn
+        .query_row(
+            "SELECT desconto FROM venda WHERE id = ?1 AND tipo = 'orcamento' AND situacao = 'aberto'",
+            [orcamento_id],
+            |l| l.get(0),
+        )
+        .optional()?;
+    let Some(desconto_total) = desconto_total else { return Ok(mapa) };
+    let linhas: Vec<(String, i64, i64, i64)> = conn
+        .prepare("SELECT COALESCE(produto_id, ''), quantidade, preco, desconto FROM venda_item WHERE venda_id = ?1")?
+        .query_map([orcamento_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
+        .collect::<Result<_, _>>()?;
+    let totais: Vec<i64> = linhas.iter().map(|(_, q, p, d)| multiplicar(*q, *p) - d).collect();
+    let soma: i64 = totais.iter().sum();
+    let desconto_itens: i64 = linhas.iter().map(|l| l.3).sum();
+    let desconto_venda = (desconto_total - desconto_itens).clamp(0, soma.max(0));
+    for ((produto_id, quantidade, _, _), item) in linhas.into_iter().zip(totais) {
+        if produto_id.is_empty() || quantidade <= 0 {
+            continue;
+        }
+        let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma };
+        // Fica a linha de maior valor por unidade: a nova, se ela não fica abaixo da que já estava.
+        let fica = match mapa.get(&produto_id) {
+            Some(velho) if !velho.cobre_o_item(novo.item, novo.quantidade) => *velho,
+            _ => novo,
+        };
+        mapa.insert(produto_id, fica);
+    }
+    Ok(mapa)
 }
 
 /// Calcula o carrinho. Não grava nada.
-/// R18 (DP-17, decisão do proprietário de 25/11/2026, regra 18: o orçamento vencido vira venda pelos preços originais
-/// dele): o preço de cada peça no orçamento, para ser a referência do desconto máximo na venda que sai dele. Assim o
-/// preço antigo não conta como desconto sobre o preço de hoje; o desconto dado a mais sobre ele continua limitado. Só
-/// vale com o orçamento ainda aberto (a venda o fecha), para um orçamento já vendido ou cancelado não servir de
-/// referência a outra venda.
-fn precos_do_orcamento(conn: &Connection, orcamento_id: &str) -> Resultado<std::collections::HashMap<String, i64>> {
-    if orcamento_id.is_empty() {
-        return Ok(Default::default());
-    }
-    let mut st = conn.prepare(
-        "SELECT i.produto_id, MIN(i.preco) FROM venda_item i JOIN venda v ON v.id = i.venda_id
-          WHERE v.id = ?1 AND v.tipo = 'orcamento' AND v.situacao = 'aberto' AND i.produto_id IS NOT NULL
-          GROUP BY i.produto_id",
-    )?;
-    let precos = st.query_map([orcamento_id], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
-    Ok(precos)
-}
-
 pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     if e.itens.len() > MAX_ITENS {
         return Err(Erro::validacao(format!("Use no máximo {MAX_ITENS} itens por venda.")));
     }
     let tabela = if (1..=5).contains(&e.tabela) { e.tabela } else { 1 };
-    let do_orcamento = precos_do_orcamento(conn, &e.orcamento_id)?;
+    let do_orcamento = liquidos_do_orcamento(conn, &e.orcamento_id)?;
     let mut itens = Vec::new();
     // Quanto de cada peça já está no carrinho (a mesma peça pode aparecer 2 vezes).
     let mut usado: Vec<(String, i64)> = Vec::new();
@@ -422,13 +491,19 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
                 0
             }
         };
-        // Desconto máximo da peça: conta também o preço digitado abaixo da tabela. R18: na venda de um orçamento, a
-        // referência é o preço do orçamento (ou o de hoje, se for menor); veja `precos_do_orcamento`.
-        let referencia = do_orcamento.get(&it.produto_id).map_or(preco_tabela, |&po| po.min(preco_tabela));
-        let cheio = multiplicar(quantidade, referencia);
+        // Desconto máximo da peça: conta também o preço digitado abaixo da tabela. R18: na venda de um orçamento,
+        // vender pelo valor líquido dele não esbarra no máximo (veja `NoOrcamento`).
+        let cheio = multiplicar(quantidade, preco_tabela);
+        let no_orcamento = do_orcamento.get(&it.produto_id).copied();
         if let Some(max) = p.desconto_maximo {
             let dado = cheio - (bruto - desconto);
-            if cheio > 0 && dado > 0 && dado as i128 * 10_000 > cheio as i128 * max as i128 && erro.is_empty() {
+            let pelo_orcamento = no_orcamento.is_some_and(|o| o.cobre_o_item(bruto - desconto, quantidade));
+            if cheio > 0
+                && dado > 0
+                && dado as i128 * 10_000 > cheio as i128 * max as i128
+                && !pelo_orcamento
+                && erro.is_empty()
+            {
                 erro = format!("Desconto acima do máximo desta peça ({}%).", numeros::escrever_percentual(max));
             }
         }
@@ -470,6 +545,7 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
             v_falta: falta,
             v_desconto_maximo: p.desconto_maximo,
             v_cheio: cheio,
+            v_orcamento: no_orcamento,
         });
     }
     if e.pagamentos.len() > PAGAMENTOS_MAXIMOS {
@@ -771,7 +847,9 @@ pub fn salvar_orcamento(
     caixa_nome: &str,
     e: &VendaEntrada,
 ) -> Resultado<String> {
-    let c = calcular(conn, e)?;
+    // A1 da revisão do R18: um orçamento novo nunca parte do valor de outro (a garantia do orçamento só vale na venda
+    // que sai dele); sem isso, orçamentos encadeados baixariam o preço sem limite.
+    let c = calcular(conn, &VendaEntrada { orcamento_id: String::new(), ..e.clone() })?;
     conferir_itens(&c)?;
     let dias = if e.validade_dias <= 0 { config::validade_orcamento(conn)? } else { e.validade_dias.min(365) };
     let validade: String =
@@ -826,6 +904,9 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 "Esta venda tem devolução. Desfaça a devolução (em Trocas e devoluções) antes de cancelar a venda.",
             ));
         }
+        // 0915-L (R14): os cheques e as parcelas da venda conferidos antes de mudar qualquer coisa.
+        crate::sync::exigir_filhos_prontos(conn, "cheque", "venda_id", id)?;
+        crate::sync::exigir_filhos_prontos(conn, "conta_receber", "venda_id", id)?;
         cheques::cancelar_de(conn, usuario_id, "venda_id", id)?;
         encomendas::cancelar_da_venda(conn, dispositivo, usuario_id, id)?;
         crate::oficina::cancelar_da_venda(conn, dispositivo, usuario_id, id)?;
@@ -845,16 +926,17 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 &format!("Cancelamento da venda {numero} · {caixa_nome} · {motivo}"),
             )?;
         }
-        // D-14: venda de um caixa já fechado. O fechamento dele não muda; o
-        // dinheiro devolvido sai da gaveta aberta (ou do Caixa geral).
-        let fechado = caixa::sessao_fechada(conn, sessao_id.as_deref())?;
+        // D-14 e R14 (R-02): venda de um caixa já fechado ou aberto em outro computador. Aquela gaveta não muda (a
+        // marca a mantém no resumo de lá, também quando a linha chega pela troca de dados); o dinheiro devolvido sai
+        // da gaveta aberta deste computador (ou do Caixa geral).
+        let de_fora = caixa::sessao_de_fora(conn, dispositivo, sessao_id.as_deref())?;
         conn.execute(
             "UPDATE venda SET situacao = 'cancelada', cancelado_em = ?2, cancelado_por = ?3, motivo_cancelamento = ?4,
                               cancelado_apos_fechar = ?5 WHERE id = ?1",
-            params![id, tempo::agora(), usuario_id, motivo, fechado],
+            params![id, tempo::agora(), usuario_id, motivo, de_fora.is_some()],
         )?;
         let mut detalhes = vec![format!("Motivo: {motivo}")];
-        if fechado {
+        if let Some(fora) = &de_fora {
             let dinheiro: i64 = conn.query_row(
                 "SELECT COALESCE((SELECT SUM(valor) FROM venda_pagamento WHERE venda_id = ?1 AND forma = 'dinheiro'), 0)
                         - troco FROM venda WHERE id = ?1",
@@ -868,13 +950,11 @@ pub fn cancelar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
                 -dinheiro.max(0),
                 "venda_cancelada",
                 id,
-                &format!("Cancelamento da venda {numero} · {caixa_nome} (caixa já fechado) · {motivo}"),
+                &format!("Cancelamento da venda {numero} · {caixa_nome} ({}) · {motivo}", fora.na_descricao()),
             )?;
             detalhes.push(match onde {
-                Some(o) => format!("O caixa da venda já estava fechado (o fechamento não muda): {o}"),
-                None => {
-                    "O caixa da venda já estava fechado (o fechamento não muda); não havia dinheiro a devolver".into()
-                }
+                Some(o) => format!("{}: {o}", fora.no_registro("da venda")),
+                None => format!("{}; não havia dinheiro a devolver", fora.no_registro("da venda")),
             });
         }
         auditoria::registrar(conn, dispositivo, Some(usuario_id), "venda.cancelar", "venda", id, &detalhes)?;

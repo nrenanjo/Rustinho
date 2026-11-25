@@ -58,6 +58,10 @@ pub struct Previa {
     pub clientes_ja: i64,
     pub fornecedores_novos: i64,
     pub fornecedores_ja: i64,
+    /// M1 da revisão do R17: quantos já cadastrados passam a ser cliente (FI-3) ou fornecedor (FI-2) com a opção
+    /// marcada, contados com todas as opções ligadas (como os novos): a caixa de marcar não some ao desmarcar.
+    pub clientes_viram: i64,
+    pub fornecedores_viram: i64,
     pub pecas_loja_novas: i64,
     pub pecas_fornecedor_novas: i64,
     pub pecas_ja: i64,
@@ -642,6 +646,8 @@ fn previa_do_lido(conn: &Connection, e: &Entrada, lido: &Lido) -> Resultado<Prev
     }
     nomes.sort();
     p.exemplos_fornecedores = nomes.into_iter().take(6).collect();
+    p.clientes_viram = d_todas.clientes.iter().filter(|x| x.vira_cliente).count() as i64;
+    p.fornecedores_viram = d_todas.fornecedores.iter().filter(|x| x.vira_fornecedor).count() as i64;
     p.codigos_repetidos = (lido.repetidos_loja().len() + lido.repetidos_fornecedor().len()) as i64;
     p.compras_novas = lido.compras.len() as i64;
     p.compras_ja = lido.compras_ja;
@@ -1418,9 +1424,7 @@ fn desativada(conn: &Connection, pid: &str) -> Resultado<bool> {
     Ok(matches!(nome_e_ativo(conn, pid)?, Some((_, false))))
 }
 
-/// FI-2: a pessoa já é fornecedora? A do plano foi cadastrada como cliente
-/// nesta importação (etapa 1), então ainda não é.
-/// A pessoa já cadastrada é cliente? (Uma pessoa do plano é nova: ainda não.)
+/// FI-3 (R17): a pessoa já cadastrada é cliente? (Uma pessoa do plano é nova: ainda não.)
 fn plano_e_cliente(conn: &Connection, id: &str) -> Resultado<bool> {
     if id.starts_with(PLANEJADO) {
         return Ok(false);
@@ -1431,6 +1435,8 @@ fn plano_e_cliente(conn: &Connection, id: &str) -> Resultado<bool> {
         .is_some_and(|c| c != 0))
 }
 
+/// FI-2: a pessoa já é fornecedora? A do plano foi cadastrada como cliente
+/// nesta importação (etapa 1), então ainda não é.
 fn plano_e_fornecedor(conn: &Connection, id: &str) -> Resultado<bool> {
     if id.starts_with(PLANEJADO) {
         return Ok(false);

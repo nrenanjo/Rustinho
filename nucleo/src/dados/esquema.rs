@@ -90,7 +90,8 @@ pub const TABELAS: &[Tabela] = &[
     t("categoria", Viaja, &["dre", "financeiro"]),
     t("conta_pagar", Viaja, &["pagar"]),
     t("pagamento", Viaja, &["pagar"]),
-    t("movimento_conta", Viaja, &["caixa", "cheques", "financeiro", "pagar"]),
+    // R14 (25/11/2026): o estorno do pagamento que saiu de outra gaveta grava pelo `caixa` (`compensar_caixa_fechado`).
+    t("movimento_conta", Viaja, &["caixa", "cheques", "financeiro"]),
     t("cheque", Viaja, &["cheques"]),
     t("comissao_fechamento", Viaja, &["comissoes"]),
     // Metas da DRE gerencial (veja `dre`).
