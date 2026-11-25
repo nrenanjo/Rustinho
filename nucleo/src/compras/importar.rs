@@ -821,8 +821,20 @@ fn aplicar(gr: Gravacao, lido: &Lido, d: &Decisoes) -> Resultado<Importado> {
     let mut reais = Reais::default();
     let mut gtin_novo = GtinsEmPecasExistentes::default();
 
-    // Etapa 1: os clientes das notas da loja que ainda não estão cadastrados.
+    // Etapa 1: os clientes das notas da loja que ainda não estão cadastrados; FI-3 (R17): quem já existe só como
+    // fornecedor passa a ser também cliente, com o motivo no registro.
     for p in &d.clientes {
+        if p.vira_cliente {
+            if let Some(id) = pessoa_existe(conn, &p.doc)? {
+                pessoas::passar_a_cliente(
+                    conn,
+                    dispositivo,
+                    usuario_id,
+                    &id,
+                    "Apareceu como cliente numa nota da loja (Trazer cadastros)",
+                )?;
+            }
+        }
         if let Some(plano) = &p.nova {
             let (pessoa, _) = &lido.clientes[&p.doc];
             let (id, _) = pessoas::garantir_pela_nota(
@@ -1408,6 +1420,17 @@ fn desativada(conn: &Connection, pid: &str) -> Resultado<bool> {
 
 /// FI-2: a pessoa já é fornecedora? A do plano foi cadastrada como cliente
 /// nesta importação (etapa 1), então ainda não é.
+/// A pessoa já cadastrada é cliente? (Uma pessoa do plano é nova: ainda não.)
+fn plano_e_cliente(conn: &Connection, id: &str) -> Resultado<bool> {
+    if id.starts_with(PLANEJADO) {
+        return Ok(false);
+    }
+    Ok(conn
+        .query_row("SELECT cliente FROM pessoa WHERE id = ?1", [id], |l| l.get::<_, i64>(0))
+        .optional()?
+        .is_some_and(|c| c != 0))
+}
+
 fn plano_e_fornecedor(conn: &Connection, id: &str) -> Resultado<bool> {
     if id.starts_with(PLANEJADO) {
         return Ok(false);
@@ -1427,6 +1450,11 @@ struct DecisaoPessoa {
     /// cliente) que ainda não é fornecedora e passa a ser, com "Fornecedores"
     /// marcada, como a entrada de compra pelo XML faz.
     vira_fornecedor: bool,
+    /// FI-3 (a), R17 (decisão do proprietário de 25/11/2026, regra 17): a pessoa
+    /// já cadastrada só como fornecedora que aparece como cliente numa nota da
+    /// loja passa a ser também cliente, com "Clientes" marcada, com registro de
+    /// quando e por quê.
+    vira_cliente: bool,
 }
 
 /// O que acontece com uma peça das notas da loja.
@@ -1531,9 +1559,15 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
     let mut lista: Vec<_> = lido.clientes.keys().collect();
     lista.sort();
     for doc in lista {
-        let nova =
-            if e.clientes && plano_pessoa(conn, &plano, doc)?.is_none() { Some(plano.nova_pessoa(doc)) } else { None };
-        d.clientes.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor: false });
+        let (nova, vira_cliente) = if !e.clientes {
+            (None, false)
+        } else {
+            match plano_pessoa(conn, &plano, doc)? {
+                Some(id) => (None, !plano_e_cliente(conn, &id)?),
+                None => (Some(plano.nova_pessoa(doc)), false),
+            }
+        };
+        d.clientes.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor: false, vira_cliente });
     }
 
     // Etapa 2: fornecedores (só com "Fornecedores"; FI-1). FI-2: a pessoa que
@@ -1555,7 +1589,7 @@ fn decidir<'a>(conn: &Connection, e: &Entrada, lido: &'a Lido) -> Resultado<Deci
             }
             None => (None, false),
         };
-        d.fornecedores.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor });
+        d.fornecedores.push(DecisaoPessoa { doc: doc.clone(), nova, vira_fornecedor, vira_cliente: false });
     }
 
     // Etapa 3: peças das notas da loja.
@@ -1828,6 +1862,7 @@ pub struct Resumo {
 const CATEGORIAS: &[(&str, &str)] = &[
     ("cliente.novo", "Clientes novos"),
     ("cliente.ja", "Clientes já cadastrados"),
+    ("cliente.ja_sem_papel", "Já cadastrados (como fornecedor) que passam a ser clientes"),
     ("cliente.nao_cadastrado", "Clientes que não entram (opção desmarcada)"),
     ("fornecedor.novo", "Fornecedores novos"),
     ("fornecedor.ja", "Fornecedores já cadastrados"),
@@ -1893,6 +1928,8 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
         let (em, _) = &lido.clientes[&p.doc];
         if p.nova.is_some() {
             conta("cliente.novo", nome_pessoa(em));
+        } else if p.vira_cliente {
+            conta("cliente.ja_sem_papel", nome_pessoa(em));
         } else if pessoa_existe(conn, &p.doc)?.is_some() {
             conta("cliente.ja", String::new());
         } else {
@@ -2975,6 +3012,8 @@ mod testes {
         // nas notas da loja (cliente) e nas de compra (fornecedor), sem cadastro.
         let f3 = cnpj("554443330001");
         let f4 = cnpj("776665550001");
+        // FI-3 (R17): f5 já é fornecedor (só fornecedor) e aparece como cliente nas notas da loja.
+        let f5 = cnpj("334445550001");
         let cliente = "52998224725";
         let (g1, g2, g2b, g3, g4, g5, g6) = (
             ean13(789_100_000_001),
@@ -2996,7 +3035,11 @@ mod testes {
             ..Default::default()
         };
         let mut lido = Lido::default();
-        for (doc, nome) in [(cliente.to_string(), "CLIENTE NOVO"), (f4.clone(), "CLIENTE QUE TAMBEM VENDE")] {
+        for (doc, nome) in [
+            (cliente.to_string(), "CLIENTE NOVO"),
+            (f4.clone(), "CLIENTE QUE TAMBEM VENDE"),
+            (f5.clone(), "FORNECEDOR QUE COMPRA"),
+        ] {
             lido.clientes.insert(
                 doc.clone(),
                 (Emitente { documento: doc, nome: nome.into(), ..Default::default() }, "2026-11-01".into()),
@@ -3059,6 +3102,8 @@ mod testes {
             let (fid, _) = crate::pessoas::garantir_pela_nota(c, d, &u, &em, false, "teste").unwrap();
             let em3 = Emitente { documento: f3.clone(), nome: "CLIENTE ANTIGO QUE VENDE".into(), ..Default::default() };
             crate::pessoas::garantir_pela_nota(c, d, &u, &em3, true, "teste").unwrap();
+            let em5 = Emitente { documento: f5.clone(), nome: "FORNECEDOR QUE COMPRA".into(), ..Default::default() };
+            crate::pessoas::garantir_pela_nota(c, d, &u, &em5, false, "teste").unwrap();
             let peca = |nome: &str, barras: &str, codigo: &str| {
                 let mut f = produtos::ficha_nova(c).unwrap();
                 f.nome = nome.into();
@@ -3158,7 +3203,7 @@ mod testes {
             let anunciado = (
                 cat("loja.nova") + cat("forn.nova") + cat("forn.nova_codigo_repetido"),
                 cat("forn.nova") + cat("forn.ja_pelo_gtin_liga"),
-                cat("cliente.novo"),
+                cat("cliente.novo") + cat("cliente.ja_sem_papel"),
                 cat("fornecedor.novo") + cat("fornecedor.ja_sem_papel"),
                 p.resumo.vao_para_pendencias - abertas,
             );
@@ -3237,6 +3282,22 @@ mod testes {
             if passou != esperado_passou {
                 erros.push(format!(
                     "{n:04b}: FI-2: {passou} \"Passou a ser fornecedor\" na auditoria, esperado {esperado_passou}"
+                ));
+            }
+            // FI-3 (a), R17: com "Clientes", quem já era só fornecedor (f5) passa a cliente, anunciado na prévia, com o
+            // registro de quando e por quê; sem "Clientes", nada muda.
+            let e_cli =
+                |doc: &str| conta(&format!("SELECT COUNT(*) FROM pessoa WHERE documento = '{doc}' AND cliente = 1"));
+            let virou = conta(
+                "SELECT COUNT(*) FROM auditoria WHERE acao = 'pessoa.alterar' AND detalhes LIKE '%Passou a ser cliente%' \
+                 AND detalhes LIKE '%Apareceu como cliente numa nota da loja (Trazer cadastros)%'",
+            );
+            let esperado = e.clientes as i64;
+            if (e_cli(&f5), virou, cat("cliente.ja_sem_papel")) != (esperado, esperado, esperado) {
+                erros.push(format!(
+                    "{n:04b}: FI-3: f5 cliente {}, registro {virou}, anunciado {}, esperado {esperado}",
+                    e_cli(&f5),
+                    cat("cliente.ja_sem_papel")
                 ));
             }
         }
@@ -3366,6 +3427,54 @@ mod testes {
             resolver_pendencia(c, d, &u, &pedido).unwrap();
             assert_eq!(vinculos_de(&pelo_gtin), 1, "reativada, liga");
         }
+    }
+
+    /// N06-c (c), R16 (decisão do proprietário de 25/11/2026, regra 16: "deixar
+    /// como está"): nas notas da **própria loja**, "Trazer cadastros" continua
+    /// gravando o GTIN da nota na peça desativada achada pelo código (é o código
+    /// da própria venda). Não liga nada, não mexe no estoque, não reativa a peça e
+    /// não abre pendência; a prévia anuncia a peça que ganha GTIN.
+    #[test]
+    fn r16_n06c_nota_da_loja_grava_o_gtin_na_peca_desativada() {
+        let g = ean13(789_300_000_001);
+        let b = Banco::em_memoria().unwrap();
+        let (c, d) = (&b.conn, b.dispositivo.as_str());
+        let u = usuarios::criar(c, d, "Maria", "1234", true).unwrap().id;
+        crate::faixas::comecar_loja(c).unwrap();
+        config::gravar(c, "loja_cnpj", "11444777000161").unwrap();
+        let mut f = produtos::ficha_nova(c).unwrap();
+        f.nome = "PECA DA LOJA DESATIVADA".into();
+        f.codigo = "LJ9".into();
+        f.estoque_inicial = "3".into();
+        f.precos[0].preco = "10,00".into();
+        let pid = produtos::salvar(c, d, &u, &f).unwrap();
+        c.execute("UPDATE produto SET ativo = 0 WHERE id = ?1", [&pid]).unwrap();
+        let item = ItemXml {
+            codigo: "LJ9".into(),
+            descricao: "PECA DA LOJA DESATIVADA".into(),
+            gtins: vec![nfe_xml::GtinXml { codigo: g.clone(), tipo: "comercial".into(), origem: "cEAN".into() }],
+            quantidade: 1000,
+            valor_produtos: 5000,
+            ..Default::default()
+        };
+        let mut lido = Lido::default();
+        lido.pecas_loja.insert((item.codigo.clone(), descricao_chave(&item)), (item, "2026-11-01".into()));
+        let conta = |sql: &str| -> i64 { c.query_row(sql, [], |l| l.get(0)).unwrap() };
+        let estoque_antes = crate::estoque::saldo(c, &pid).unwrap();
+        let e = Entrada { pecas_loja: true, ..Default::default() };
+        let p = previa_do_lido(c, &e, &lido).unwrap();
+        let cat = |codigo: &str| p.resumo.categorias.iter().find(|x| x.codigo == codigo).map_or(0, |x| x.quantidade);
+        assert_eq!(cat("loja.ja_gtin_novo"), 1, "a prévia anuncia o GTIN novo: {:?}", p.resumo.categorias);
+        gravar(c, d, &u, &e, &lido).unwrap();
+        assert_eq!(
+            conta(&format!("SELECT COUNT(*) FROM produto_gtin WHERE produto_id = '{pid}' AND gtin = '{g}'")),
+            1,
+            "o GTIN da nota da loja fica gravado na peça desativada"
+        );
+        assert_eq!(conta(&format!("SELECT ativo FROM produto WHERE id = '{pid}'")), 0, "a peça continua desativada");
+        assert_eq!(crate::estoque::saldo(c, &pid).unwrap(), estoque_antes, "o estoque não muda");
+        assert_eq!(conta("SELECT COUNT(*) FROM produto_fornecedor"), 0, "nada é ligado");
+        assert_eq!(conta("SELECT COUNT(*) FROM xml_pendencia_identificacao"), 0, "nenhuma pendência");
     }
 
     /// FI-1 (a), decisão do proprietário de 12/11: as 16 combinações das opções,

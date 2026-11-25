@@ -77,7 +77,7 @@ def main():
             if not r.clicar("Todos"):
                 raise RuntimeError(f"não achei o filtro Todos (veja {r.saida})")
             time.sleep(1.5)
-            if not r.clicar("Emitente R19", comeca=True):
+            if not r.clicar("Nº 000777", comeca=True):
                 raise RuntimeError(f"não achei a linha do cheque devolvido (veja {r.saida})")
             time.sleep(1.0)
             tx = r.textos()

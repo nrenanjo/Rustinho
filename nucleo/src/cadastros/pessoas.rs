@@ -819,6 +819,31 @@ pub fn garantir_fornecedor(
     garantir_pela_nota(conn, dispositivo, usuario_id, e, false, "Cadastrado pela nota de compra")
 }
 
+/// FI-3 (a), R17 (decisão do proprietário de 25/11/2026): a pessoa passa a ser
+/// também cliente, com registro de quando (o do histórico) e por quê. Quem já é
+/// cliente não muda.
+pub fn passar_a_cliente(
+    conn: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    id: &str,
+    motivo: &str,
+) -> Resultado<()> {
+    let mudou = conn.execute("UPDATE pessoa SET cliente = 1 WHERE id = ?1 AND cliente = 0", [id])?;
+    if mudou > 0 {
+        auditoria::registrar(
+            conn,
+            dispositivo,
+            Some(usuario_id),
+            "pessoa.alterar",
+            "pessoa",
+            id,
+            &["Passou a ser cliente".into(), motivo.into()],
+        )?;
+    }
+    Ok(())
+}
+
 /// Acha a pessoa pelo CPF/CNPJ ou cadastra com os dados da nota, como
 /// cliente (`cliente` = true) ou fornecedor. Se já existe com o outro papel,
 /// passa a ter os dois. Devolve (id, foi_criado).

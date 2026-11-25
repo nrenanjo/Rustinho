@@ -937,10 +937,13 @@ fn r4_desconto_maximo_e_comissao_so_com_o_gerente() {
 // DP-21 (E06): estoque negativo. DP-22 (E16): comissão e devolução tardia.
 // ---------------------------------------------------------------------------
 
-/// DP-21 · retrato: vender mais do que tem não para a venda; o item é marcado
-/// como falta e o estoque fica negativo.
+/// DP-21 (decidida pelo proprietário em 25/11/2026, regra 22: "manter como
+/// hoje"; R22): vender mais do que tem não para a venda; o item é marcado como
+/// falta e o estoque fica negativo. A diferença aparece para correção: a peça
+/// fica com o estoque baixo na busca (o "−2") e entra na lista do que comprar
+/// como "Acabou". O retrato virou regra definitiva.
 #[test]
-fn dp21_retrato_venda_sem_estoque_conclui_e_o_estoque_fica_negativo() {
+fn dp21_venda_sem_estoque_conclui_e_a_diferenca_aparece() {
     let l = loja();
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
@@ -955,6 +958,12 @@ fn dp21_retrato_venda_sem_estoque_conclui_e_o_estoque_fica_negativo() {
     assert!(calc.itens[0].falta_estoque && calc.itens[0].erro.is_empty());
     vendas::concluir(c, d, &l.u, &e).unwrap();
     assert_eq!(crate::estoque::saldo(c, &l.peca).unwrap(), -2_000);
+    let achada = crate::catalogo::busca::buscar(c, "Bateria 60Ah", false, 10).unwrap();
+    let p = achada.iter().find(|p| p.id == l.peca).expect("a peça na busca");
+    assert!(p.estoque_baixo && p.estoque.contains("-2"), "estoque {:?} baixo {}", p.estoque, p.estoque_baixo);
+    let sug = crate::compras::reposicao::sugestao(c, "").unwrap();
+    let item = sug.itens.iter().find(|i| i.produto_id == l.peca).expect("a peça na lista do que comprar");
+    assert_eq!((item.prioridade.as_str(), item.nome_prioridade.as_str()), ("acabou", "Acabou"));
 }
 
 /// DP-22 (decidida pelo proprietário em 25/11/2026, regra 23: "descontar no período seguinte"; E16): a comissão de

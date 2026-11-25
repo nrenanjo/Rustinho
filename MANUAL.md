@@ -355,6 +355,7 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
   - **XMLs das notas da loja** (exportados do sistema antigo): trazem os **clientes** e as **peças com o código e o último preço da loja**.
   - **XMLs de fornecedores:** trazem os **fornecedores** e as peças com o custo (o código do fornecedor fica ligado à peça).
   - Aceita vários .xml, um **.zip** ou uma **pasta inteira**. Antes de cadastrar, mostra quantos são novos. Nada que já existe é mudado. Precisa do **CNPJ da loja** em Configurações.
+  - Quem já está cadastrado só como **cliente** e aparece numa nota de fornecedor passa a ser também **fornecedor**; quem está só como **fornecedor** e aparece como cliente numa nota da loja passa a ser também **cliente** (0.9.19). A prévia mostra quantos passam, e o histórico da pessoa guarda quando e por quê.
   - Só aproveita notas com a **assinatura digital do emitente** conferida (a autorização da SEFAZ não é exigida aqui, porque cadastrar não mexe em estoque, custo nem financeiro). Nota adulterada ou sem assinatura é pulada e aparece nos avisos.
 - **Configurações** em pílulas: **Loja**, **Vendas**, **Crediário**, **Impressão**, **Caixas da loja** e **Sobre**.
   - **Crediário:** multa, juros ao mês e **tolerância** (dias de atraso sem cobrar nada), com um exemplo calculado na hora.
