@@ -320,6 +320,18 @@ pub struct NoOrcamento {
     /// A parte que fica depois do desconto da venda inteira do orçamento: `fica_num / fica_den`.
     fica_num: i64,
     fica_den: i64,
+    /// Decisão 7 do proprietário (25/11/2026): o preço unitário da linha do orçamento e a quantidade orçada da peça
+    /// (somadas as linhas dela). A garantia vale só para o cliente do orçamento e até essa quantidade.
+    preco: i64,
+    orcada: i64,
+}
+
+/// O orçamento de onde a venda sai: o cliente dele e as peças (R18 e decisão 7).
+#[derive(Debug, Default)]
+struct DoOrcamento {
+    cliente_id: String,
+    cliente: String,
+    pecas: std::collections::HashMap<String, NoOrcamento>,
 }
 
 impl NoOrcamento {
@@ -350,22 +362,23 @@ impl NoOrcamento {
 
 /// R18: o valor líquido de cada peça no orçamento ainda aberto (a venda o fecha; vendido ou cancelado não serve de
 /// referência). Peça repetida no orçamento: vale a linha de maior valor por unidade (a mais exigente).
-fn liquidos_do_orcamento(
-    conn: &Connection,
-    orcamento_id: &str,
-) -> Resultado<std::collections::HashMap<String, NoOrcamento>> {
-    let mut mapa: std::collections::HashMap<String, NoOrcamento> = Default::default();
+fn liquidos_do_orcamento(conn: &Connection, orcamento_id: &str) -> Resultado<DoOrcamento> {
+    let mut o = DoOrcamento::default();
     if orcamento_id.is_empty() {
-        return Ok(mapa);
+        return Ok(o);
     }
-    let desconto_total: Option<i64> = conn
+    let cabeca: Option<(i64, String, String)> = conn
         .query_row(
-            "SELECT desconto FROM venda WHERE id = ?1 AND tipo = 'orcamento' AND situacao = 'aberto'",
+            "SELECT desconto, COALESCE(cliente_id, ''), cliente_nome FROM venda
+              WHERE id = ?1 AND tipo = 'orcamento' AND situacao = 'aberto'",
             [orcamento_id],
-            |l| l.get(0),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
         )
         .optional()?;
-    let Some(desconto_total) = desconto_total else { return Ok(mapa) };
+    let Some((desconto_total, cliente_id, cliente)) = cabeca else { return Ok(o) };
+    o.cliente_id = cliente_id;
+    o.cliente = cliente;
+    let mapa = &mut o.pecas;
     let linhas: Vec<(String, i64, i64, i64)> = conn
         .prepare("SELECT COALESCE(produto_id, ''), quantidade, preco, desconto FROM venda_item WHERE venda_id = ?1")?
         .query_map([orcamento_id], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?)))?
@@ -374,19 +387,20 @@ fn liquidos_do_orcamento(
     let soma: i64 = totais.iter().sum();
     let desconto_itens: i64 = linhas.iter().map(|l| l.3).sum();
     let desconto_venda = (desconto_total - desconto_itens).clamp(0, soma.max(0));
-    for ((produto_id, quantidade, _, _), item) in linhas.into_iter().zip(totais) {
+    for ((produto_id, quantidade, preco, _), item) in linhas.into_iter().zip(totais) {
         if produto_id.is_empty() || quantidade <= 0 {
             continue;
         }
-        let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma };
+        let orcada = mapa.get(&produto_id).map_or(0, |v| v.orcada) + quantidade;
+        let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma, preco, orcada };
         // Fica a linha de maior valor por unidade: a nova, se ela não fica abaixo da que já estava.
         let fica = match mapa.get(&produto_id) {
-            Some(velho) if !velho.cobre_o_item(novo.item, novo.quantidade) => *velho,
+            Some(velho) if !velho.cobre_o_item(novo.item, novo.quantidade) => NoOrcamento { orcada, ..*velho },
             _ => novo,
         };
         mapa.insert(produto_id, fica);
     }
-    Ok(mapa)
+    Ok(o)
 }
 
 /// Calcula o carrinho. Não grava nada.
@@ -395,7 +409,24 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         return Err(Erro::validacao(format!("Use no máximo {MAX_ITENS} itens por venda.")));
     }
     let tabela = if (1..=5).contains(&e.tabela) { e.tabela } else { 1 };
-    let do_orcamento = liquidos_do_orcamento(conn, &e.orcamento_id)?;
+    let orcamento = liquidos_do_orcamento(conn, &e.orcamento_id)?;
+    // Decisão 7 (25/11/2026): a garantia do orçamento vale para o mesmo cliente e até a quantidade orçada. Conta as
+    // linhas do carrinho que estão com o preço do orçamento (uma linha a mais, pelo preço de hoje, não conta).
+    let mesmo_cliente = orcamento.cliente_id == e.cliente_id;
+    let mut no_preco_do_orcamento: std::collections::HashMap<&str, i64> = Default::default();
+    for it in &e.itens {
+        if let Some(o) = orcamento.pecas.get(&it.produto_id) {
+            let preco = numeros::ler_dinheiro(&it.preco).ok().flatten();
+            let q = numeros::ler_quantidade(&it.quantidade).ok().flatten().unwrap_or(0);
+            if preco == Some(o.preco) {
+                *no_preco_do_orcamento.entry(it.produto_id.as_str()).or_default() += q;
+            }
+        }
+    }
+    let garante = |pid: &str| -> bool {
+        let o = &orcamento.pecas[pid];
+        mesmo_cliente && no_preco_do_orcamento.get(pid).copied().unwrap_or(0) <= o.orcada
+    };
     let mut itens = Vec::new();
     // Quanto de cada peça já está no carrinho (a mesma peça pode aparecer 2 vezes).
     let mut usado: Vec<(String, i64)> = Vec::new();
@@ -494,7 +525,26 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
         // Desconto máximo da peça: conta também o preço digitado abaixo da tabela. R18: na venda de um orçamento,
         // vender pelo valor líquido dele não esbarra no máximo (veja `NoOrcamento`).
         let cheio = multiplicar(quantidade, preco_tabela);
-        let no_orcamento = do_orcamento.get(&it.produto_id).copied();
+        let no_orcamento = orcamento.pecas.get(&it.produto_id).copied().filter(|_| garante(&it.produto_id));
+        // Decisão 7: a linha ainda com o preço do orçamento (abaixo do de hoje), fora da garantia, diz o que fazer.
+        if let Some(o) = orcamento.pecas.get(&it.produto_id) {
+            if no_orcamento.is_none() && preco == o.preco && preco < preco_tabela && erro.is_empty() {
+                erro = if !mesmo_cliente {
+                    format!(
+                        "O preço do orçamento vale só para {}. Use o preço de hoje (R$ {}).",
+                        if orcamento.cliente.is_empty() { "a venda sem cliente" } else { orcamento.cliente.as_str() },
+                        numeros::escrever_dinheiro(preco_tabela)
+                    )
+                } else {
+                    format!(
+                        "O orçamento tem {} pelo preço dele. Deixe essa quantidade aqui e ponha o resto em outra \
+                         linha, pelo preço de hoje (R$ {}).",
+                        numeros::escrever_quantidade(o.orcada),
+                        numeros::escrever_dinheiro(preco_tabela)
+                    )
+                };
+            }
+        }
         if let Some(max) = p.desconto_maximo {
             let dado = cheio - (bruto - desconto);
             let pelo_orcamento = no_orcamento.is_some_and(|o| o.cobre_o_item(bruto - desconto, quantidade));

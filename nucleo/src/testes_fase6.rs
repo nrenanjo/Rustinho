@@ -779,6 +779,36 @@ fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
     assert!(erro.contains("passa do máximo") && erro.contains("Um orçamento novo usa o preço de hoje"), "{erro}");
 }
 
+/// Decisão 7 do proprietário (25/11/2026, R18 (b)): o preço do orçamento vencido (R$ 300; hoje R$ 400) vale só para
+/// o cliente do orçamento e até a quantidade orçada (1). Outro cliente: a linha pede o preço de hoje. Mais unidades no
+/// preço do orçamento: a linha pede para pôr o resto em outra linha. Uma linha a mais, pelo preço de hoje, passa.
+#[test]
+fn d7_preco_do_orcamento_so_para_o_cliente_e_a_quantidade() {
+    let l = loja();
+    let c = &l.b.conn;
+    let o = orcamento_vencido(&l, "");
+    let erro =
+        |v: &VendaEntrada| vendas::calcular(c, v).unwrap().itens.iter().map(|i| i.erro.clone()).collect::<Vec<_>>();
+    let base = vendas::orcamento_para_venda(c, &o).unwrap();
+    assert_eq!(erro(&base), vec![String::new()], "o mesmo cliente, a mesma quantidade");
+    let mut outro = base.clone();
+    outro.cliente_id = String::new();
+    let e = erro(&outro);
+    assert!(e[0].contains("O preço do orçamento vale só para Oficina do Zé") && e[0].contains("R$ 400,00"), "{e:?}");
+    let mut mais = base.clone();
+    mais.itens[0].quantidade = "10".into();
+    let e = erro(&mais);
+    assert!(e[0].contains("O orçamento tem 1 pelo preço dele"), "{e:?}");
+    let mut dividido = base.clone();
+    dividido.itens.push(ItemEntrada {
+        produto_id: l.peca.clone(),
+        quantidade: "9".into(),
+        preco: "400".into(),
+        ..Default::default()
+    });
+    assert_eq!(erro(&dividido), vec![String::new(), String::new()], "o resto pelo preço de hoje, em outra linha");
+}
+
 /// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender
 /// pelo preço de hoje não é desconto: a referência é o menor dos dois. Abaixo
 /// dele, o desconto máximo (5%) continua valendo (R$ 230 = 8% recusa).

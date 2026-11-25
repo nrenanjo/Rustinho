@@ -53,7 +53,7 @@ O que cada parte faz, versão por versão. Para baixar e instalar, veja o [READM
   - Cliente opcional: busque por nome, CPF, telefone ou **placa**, ou só digite um nome.
   - **Receber** (F2): dinheiro, Pix, débito, crédito ou outro, e dá para dividir entre várias formas. Clicar no nome da forma põe nela o que falta. O troco aparece grande. Crediário a partir da etapa 4 (veja abaixo).
   - Depois de receber: **Imprimir comprovante** (A4). O comprovante não é documento fiscal e diz isso.
-- **Orçamentos:** no Vender, **Salvar como orçamento** (F6), com validade e observações. Sai impresso em A4. Na lista de orçamentos, **Vender** põe tudo no carrinho de novo. Orçamento vencido também vira venda **pelos preços do orçamento** (0.9.19); o desconto máximo da peça conta a partir do preço do orçamento.
+- **Orçamentos:** no Vender, **Salvar como orçamento** (F6), com validade e observações. Sai impresso em A4. Na lista de orçamentos, **Vender** põe tudo no carrinho de novo. Orçamento vencido também vira venda **pelos preços do orçamento** (0.9.19), **só para o cliente do orçamento e até a quantidade orçada**; a mais vai em outra linha, pelo preço de hoje. Abaixo do preço do orçamento, vale o desconto máximo de sempre.
 - **Caixa:** abertura com o troco da gaveta, **sangria** e **suprimento**, "dinheiro na gaveta" sempre à vista, vendas por forma de pagamento e **fechamento** com o dinheiro contado (mostra se sobrou ou faltou e imprime). Cada venda pode ser aberta, reimpressa ou **cancelada** (as peças voltam ao estoque).
 - **Compras:** quando o custo de uma peça **baixa**, a compra pergunta se o preço de revenda fica ou baixa junto. Quando sobe, o preço segue o % de lucro.
 - **Vários caixas juntos (Wi-Fi):**
