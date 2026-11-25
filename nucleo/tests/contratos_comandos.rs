@@ -50,6 +50,8 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("caixa_abrir", "caixa", &["do_caixa", "nao_repetir"]),
     ("caixa_estado", "leitura", &["leitura"]),
     ("caixa_fechar", "caixa", &["do_caixa", "nao_repetir"]),
+    // R8 (D-AUD-8, 25/11/2026): a prévia do fechamento para a pergunta de confirmação (só lê).
+    ("caixa_fechar_previa", "leitura", &["leitura"]),
     ("caixa_movimentar", "caixa", &["do_caixa", "nao_repetir"]),
     ("caixa_readmitir", "gerente", &["nao_repetir"]),
     ("caixa_resumo", "leitura", &["leitura"]),

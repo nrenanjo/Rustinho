@@ -197,7 +197,12 @@ FICAM = [
     ("TelaOrdem.qml", "Voltar etapa", "tela.passar(", "volta a OS uma etapa (negócio)"),
     ("TelaOrdem.qml", "Sair sem salvar", "tela.alterado = false", "descarta a OS não salva (Descartar)"),
     ("TelaCaixa.qml", "Fechar caixa", "fechar.abrirCom()", "fecha o caixa (negócio)"),
-    ("TelaCaixa.qml", "Fechar e imprimir", "\"caixa_fechar\"", "fecha o caixa e imprime (negócio)"),
+    # R8 (D-AUD-8, decisão do proprietário de 25/11/2026): o botão pede a confirmação (com o contado e a diferença,
+    # pela prévia do núcleo) e só então fecha o caixa e imprime.
+    ("TelaCaixa.qml", "Fechar e imprimir", "\"caixa_fechar_previa\"", "confirma, fecha o caixa e imprime (negócio)"),
+    # R1 (D-AUD-3, decisão do proprietário de 25/11/2026): "Sair" na tela de Usuários encerra a sessão para outra
+    # pessoa entrar, sem fechar o Rustinho.
+    ("TelaUsuarios.qml", "Sair", "janela.trocarUsuario()", "encerra a sessão para outra pessoa entrar (negócio)"),
     ("TelaReceber.qml", "Pronto", "feito.close()", "conclusão (Enter) do recibo; não é voltar nem cancelar"),
     ("TelaVender.qml", "Nova venda", "concluida.close()", "conclusão (Enter) da venda; não é voltar nem cancelar"),
     ("SecaoPagar.qml", "Pronto", "categorias.close()", "conclusão da edição das categorias (cada mudança já foi gravada)"),

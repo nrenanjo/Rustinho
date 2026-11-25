@@ -568,6 +568,34 @@ fn dp20_dp24_esperado_a_vista_e_caixa_sob_o_olho() {
     assert!(tela.contains("Conte o dinheiro da gaveta e digite o total. O Rustinho mostra a diferença"));
 }
 
+/// R8 (D-AUD-8, decidida pelo proprietário em 25/11/2026, regra 8): o Enter não conclui sem querer.
+/// (1) Fechar o caixa pede confirmação: a prévia mostra o contado, o esperado e a diferença, os mesmos que o
+/// fechamento grava, e não fecha nada. (2) Nos campos de valor do Receber da venda e no "Dinheiro contado", o Enter
+/// passa ao campo seguinte. (3) A pergunta de perigo não abre com o foco no botão de confirmar.
+#[test]
+fn r8_previa_do_fechamento_e_o_enter_que_nao_conclui() {
+    let (mut s, _bia) = loja_com_bia();
+    let p = ok(&mut s, "caixa_fechar_previa", json!({ "valor": "130" }));
+    assert_eq!(
+        (p["contado"].as_str(), p["esperado"].as_str(), p["diferenca"].as_str(), p["diferencaCentavos"].as_i64()),
+        (Some("130,00"), Some("100,00"), Some("30,00"), Some(3000)),
+        "{p}"
+    );
+    assert_eq!(ok(&mut s, "caixa_estado", json!({}))["aberto"], true, "a prévia não fecha o caixa");
+    let r = chamar(&mut s, "caixa_fechar_previa", json!({ "valor": "" }));
+    assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("contado")), "{r}");
+    let f = ok(&mut s, "caixa_fechar", json!({ "valor": "130", "motivo": "" }));
+    assert_eq!((&f["diferenca"], &f["diferencaCentavos"]), (&p["diferenca"], &p["diferencaCentavos"]), "{f}");
+    // As telas: o Enter passa ao campo seguinte; fechar pede a prévia; a pergunta de perigo não confirma com o Enter.
+    let vender = include_str!("../../app/qml/TelaVender.qml");
+    assert!(!vender.contains("onConfirmado: botaoConcluir.clicked()"), "o Enter num valor ainda conclui a venda");
+    assert!(vender.contains("onConfirmado: receber.seguinte(valor)") && vender.contains("onConfirmado: receber.seguinte(campoVale)"));
+    let caixa = include_str!("../../app/qml/TelaCaixa.qml");
+    assert!(caixa.contains("onConfirmado: obs.focar()") && caixa.contains("Api.chamar(\"caixa_fechar_previa\""));
+    let dialogo = include_str!("../../app/qml/Dialogo.qml");
+    assert!(dialogo.contains("dialogo.tipoConfirmar !== \"perigo\""), "a pergunta de perigo confirma com o Enter");
+}
+
 /// A recusa que pede a senha do gerente, com o nome do que é dele na mensagem.
 fn so_o_gerente(r: &Value, o_que: &str) {
     assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("gerente")), "{r}");

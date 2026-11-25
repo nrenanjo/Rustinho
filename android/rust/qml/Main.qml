@@ -503,8 +503,9 @@ ApplicationWindow {
         source: Tema.celular ? Qt.resolvedUrl("../qml_android/LeitorCamera.qml") : ""
     }
 
-    function confirmar(titulo, mensagem, textoBotao, funcao, tipo) {
-        dialogo.perguntar(titulo, mensagem, textoBotao, funcao, tipo)
+    // `enterConfirma` (R8): opcional; sem ele, a pergunta de perigo não confirma com o Enter.
+    function confirmar(titulo, mensagem, textoBotao, funcao, tipo, enterConfirma) {
+        dialogo.perguntar(titulo, mensagem, textoBotao, funcao, tipo, enterConfirma)
     }
 
     // ---------------------------------------------------------------------

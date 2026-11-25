@@ -419,6 +419,41 @@ fn dinheiro_na_sessao(conn: &Connection, sessao_id: &str) -> Resultado<i64> {
 }
 
 /// Fecha o caixa com o dinheiro contado na gaveta. Devolve o id da sessão.
+/// O dinheiro contado na gaveta, como o fechamento lê.
+fn ler_contado(contado: &str) -> Resultado<i64> {
+    let contado = numeros::ler_dinheiro(contado)
+        .map_err(|m| Erro::campo("contado", m))?
+        .ok_or_else(|| Erro::campo("contado", "Conte o dinheiro da gaveta e digite o total."))?;
+    if contado < 0 {
+        return Err(Erro::campo("contado", "O valor não pode ser negativo."));
+    }
+    Ok(contado)
+}
+
+/// R8 (D-AUD-8, decisão do proprietário de 25/11/2026): o que o fechamento vai gravar, para a pergunta de
+/// confirmação mostrar antes (contado, esperado e diferença), pela mesma leitura e o mesmo esperado do `fechar`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviaFechamento {
+    pub contado: String,
+    pub esperado: String,
+    pub diferenca: String,
+    pub diferenca_centavos: i64,
+}
+
+pub fn previa_fechar(conn: &Connection, dispositivo: &str, contado: &str) -> Resultado<PreviaFechamento> {
+    let sessao = sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("O caixa já está fechado."))?;
+    let contado = ler_contado(contado)?;
+    let r = resumo(conn, &sessao.id)?;
+    let diferenca = contado - r.esperado_dinheiro;
+    Ok(PreviaFechamento {
+        contado: numeros::escrever_dinheiro(contado),
+        esperado: r.esperado,
+        diferenca: numeros::escrever_dinheiro(diferenca),
+        diferenca_centavos: diferenca,
+    })
+}
+
 pub fn fechar(
     conn: &Connection,
     dispositivo: &str,
@@ -427,12 +462,7 @@ pub fn fechar(
     observacoes: &str,
 ) -> Resultado<String> {
     let sessao = sessao_aberta(conn, dispositivo)?.ok_or_else(|| Erro::validacao("O caixa já está fechado."))?;
-    let contado = numeros::ler_dinheiro(contado)
-        .map_err(|m| Erro::campo("contado", m))?
-        .ok_or_else(|| Erro::campo("contado", "Conte o dinheiro da gaveta e digite o total."))?;
-    if contado < 0 {
-        return Err(Erro::campo("contado", "O valor não pode ser negativo."));
-    }
+    let contado = ler_contado(contado)?;
     let r = resumo(conn, &sessao.id)?;
     let observacoes = observacoes.trim().chars().take(500).collect::<String>();
     conn.execute(
@@ -570,6 +600,7 @@ mod comandos {
         Comando { nome: "caixa_abrir", classe: Classe::Caixa, funcao: caixa_abrir },
         Comando { nome: "caixa_movimentar", classe: Classe::Caixa, funcao: caixa_movimentar },
         Comando { nome: "caixa_fechar", classe: Classe::Caixa, funcao: caixa_fechar },
+        Comando { nome: "caixa_fechar_previa", classe: Classe::Leitura, funcao: caixa_fechar_previa },
         Comando { nome: "caixa_resumo", classe: Classe::Leitura, funcao: caixa_resumo },
         Comando { nome: "formas_pagamento", classe: Classe::Leitura, funcao: formas_pagamento },
     ];
@@ -617,6 +648,12 @@ mod comandos {
         marcar_feita(&tx, p.operacao.as_ref(), &resposta)?;
         tx.commit()?;
         Ok(resposta)
+    }
+
+    // R8: a prévia do fechamento (só lê), para a pergunta de confirmação.
+    fn caixa_fechar_previa(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Valor = ler(dados)?;
+        Ok(json!(caixa::previa_fechar(p.conn, p.disp, &d.valor)?))
     }
 
     fn caixa_resumo(p: &mut Pedido, dados: Value) -> Resultado<Value> {

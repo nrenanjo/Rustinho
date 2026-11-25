@@ -430,7 +430,8 @@ FocusScope {
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            Campo { id: contado; rotulo: "Dinheiro contado"; prefixo: "R$"; numerico: true; Layout.fillWidth: true; onConfirmado: botaoFechar.clicked() }
+            // R8 (D-AUD-8): o Enter no valor passa para as observações; não fecha o caixa.
+            Campo { id: contado; rotulo: "Dinheiro contado"; prefixo: "R$"; numerico: true; Layout.fillWidth: true; onConfirmado: obs.focar() }
             AreaTexto { id: obs; rotulo: "Observações"; Layout.fillWidth: true }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
@@ -438,23 +439,42 @@ FocusScope {
                     id: botaoFechar
                     text: "Fechar e imprimir"
                     icone: "check"
+                    // R8 (D-AUD-8, decisão do proprietário de 25/11/2026): fechar o caixa pede confirmação, com o
+                    // contado e a diferença (a conta é a do núcleo, a mesma que o fechamento grava). O Enter não
+                    // confirma a pergunta.
                     onClicked: {
-                        const x = Api.gravar("caixa_fechar", { valor: contado.texto, motivo: obs.texto }, fechar.chave)
-                        if (!x.ok) {
-                            contado.erro = x.erro
+                        contado.erro = ""
+                        const p = Api.chamar("caixa_fechar_previa", { valor: contado.texto })
+                        if (!p.ok) {
+                            contado.erro = p.erro
                             return
                         }
-                        fechar.close()
-                        const d = x.dados.diferencaCentavos
-                        const valor = x.dados.diferenca.replace("-", "")
-                        tela.janela.avisar(d === 0 ? "Caixa fechado. O dinheiro bateu." :
-                                           "Caixa fechado. " + (d > 0 ? "Sobraram R$ " : "Faltaram R$ ") + valor + " na gaveta.",
-                                           d === 0 ? "ok" : "info")
-                        tela.imprimir(x.dados.sessao.id)
-                        tela.carregar()
+                        const d = p.dados
+                        const dif = d.diferencaCentavos === 0 ? "O dinheiro bate."
+                                  : (d.diferencaCentavos > 0 ? "Sobram R$ " : "Faltam R$ ") + d.diferenca.replace("-", "") + "."
+                        tela.janela.confirmar("Fechar o caixa?",
+                                              "Contado: R$ " + d.contado + ". Esperado na gaveta: R$ " + d.esperado + ". " + dif
+                                              + " Depois de fechado, o caixa não reabre.",
+                                              "Fechar o caixa", () => fechar.efetivar(), "principal", false)
                     }
                 }
             }
+        }
+        // O fechamento de fato, depois da confirmação (R8).
+        function efetivar() {
+            const x = Api.gravar("caixa_fechar", { valor: contado.texto, motivo: obs.texto }, fechar.chave)
+            if (!x.ok) {
+                contado.erro = x.erro
+                return
+            }
+            fechar.close()
+            const d = x.dados.diferencaCentavos
+            const valor = x.dados.diferenca.replace("-", "")
+            tela.janela.avisar(d === 0 ? "Caixa fechado. O dinheiro bateu." :
+                               "Caixa fechado. " + (d > 0 ? "Sobraram R$ " : "Faltaram R$ ") + valor + " na gaveta.",
+                               d === 0 ? "ok" : "info")
+            tela.imprimir(x.dados.sessao.id)
+            tela.carregar()
         }
     }
 

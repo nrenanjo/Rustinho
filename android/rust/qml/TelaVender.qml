@@ -1175,6 +1175,24 @@ FocusScope {
             campoVale.focar()
         }
 
+        // R8 (D-AUD-8, decisão do proprietário de 25/11/2026): nos campos de valor, o Enter (às vezes o do leitor
+        // de código de barras) passa para o campo seguinte e nunca conclui a venda. Depois do último, o foco vai para
+        // o "Concluir", que só conclui com outro Enter ali (ou o clique).
+        function seguinte(atual) {
+            const campos = []
+            if (campoVale.visible)
+                campos.push(campoVale)
+            for (let i = 0; i < repFormas.count; i++) {
+                const c = repFormas.itemAt(i).campo
+                if (c && c.visible && !c.somenteLeitura)
+                    campos.push(c)
+            }
+            const k = campos.indexOf(atual)
+            if (k >= 0 && k + 1 < campos.length)
+                campos[k + 1].focar()
+            else
+                botaoConcluir.forceActiveFocus()
+        }
         function completar(linha) {
             linha.campo.texto = ""
             atualizar()
@@ -1281,7 +1299,7 @@ FocusScope {
                         maximo: 14
                         Layout.preferredWidth: 150
                         onEditado: receber.atualizar()
-                        onConfirmado: botaoConcluir.clicked()
+                        onConfirmado: receber.seguinte(campoVale)
                     }
                 }
                 Repeater {
@@ -1308,7 +1326,7 @@ FocusScope {
                             somenteLeitura: !modelData.disponivel
                             Layout.fillWidth: true
                             onEditado: receber.atualizar()
-                            onConfirmado: botaoConcluir.clicked()
+                            onConfirmado: receber.seguinte(valor)
                         }
                     }
                 }

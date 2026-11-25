@@ -104,6 +104,7 @@ PESOS_SEGUNDOS = {
     "telas_r1_sair": 25,
     "telas_r24_gerente": 25,
     "telas_r3_comissao": 25,
+    "telas_r8_r11_teclado": 40,
     "telas_estab_sessao": 28,
     "telas_numeros": 27,
     "telas_modo_seguro": 23,

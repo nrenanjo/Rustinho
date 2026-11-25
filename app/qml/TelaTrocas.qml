@@ -179,6 +179,17 @@ FocusScope {
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreVale }
                 TapHandler { onTapped: tela.linhaEscolhida = "vale:" + lv.modelData.id }
+                // R11 (D-AUD-9, decisão do proprietário de 25/11/2026): a linha é alcançável pelo teclado. Com o Tab,
+                // ela fica escolhida e os botões dela aparecem (e seguem no Tab); o contorno mostra onde está o foco.
+                activeFocusOnTab: true
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        tela.linhaEscolhida = "vale:" + lv.modelData.id
+                        ListView.view.positionViewAtIndex(lv.index, ListView.Contain)
+                    }
+                }
+                border.width: activeFocus ? 2 : 0
+                border.color: Tema.foco
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 18
@@ -288,6 +299,17 @@ FocusScope {
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobreFeita }
                 TapHandler { onTapped: tela.linhaEscolhida = "troca:" + lf.modelData.id }
+                // R11 (D-AUD-9, decisão do proprietário de 25/11/2026): a linha é alcançável pelo teclado. Com o Tab,
+                // ela fica escolhida e os botões dela aparecem (e seguem no Tab); o contorno mostra onde está o foco.
+                activeFocusOnTab: true
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        tela.linhaEscolhida = "troca:" + lf.modelData.id
+                        ListView.view.positionViewAtIndex(lf.index, ListView.Contain)
+                    }
+                }
+                border.width: activeFocus ? 2 : 0
+                border.color: Tema.foco
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: 18

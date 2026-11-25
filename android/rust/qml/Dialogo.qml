@@ -12,6 +12,10 @@ Painel {
     property string textoConfirmar: "Confirmar"
     property string tipoConfirmar: "principal"
     property var aoConfirmar: null
+    // R8 (D-AUD-8, decisão do proprietário de 25/11/2026): nas perguntas de perigo (e onde a tela pedir), o botão
+    // de confirmar não abre com o foco, então o Enter (às vezes o do leitor de código de barras) não confirma. O Tab
+    // chega até ele, e o clique continua valendo.
+    property bool enterConfirma: true
 
     width: Math.min(480, Tema.largura - 24)
 
@@ -52,14 +56,20 @@ Painel {
         }
     }
 
-    onOpened: confirmar.forceActiveFocus()
+    onOpened: {
+        if (dialogo.enterConfirma)
+            confirmar.forceActiveFocus()
+        else
+            dialogo.contentItem.forceActiveFocus()
+    }
 
-    function perguntar(titulo, mensagem, textoBotao, funcao, tipo) {
+    function perguntar(titulo, mensagem, textoBotao, funcao, tipo, enterConfirma) {
         dialogo.titulo = titulo
         dialogo.mensagem = mensagem
         dialogo.textoConfirmar = textoBotao
         dialogo.aoConfirmar = funcao
         dialogo.tipoConfirmar = tipo || "principal"
+        dialogo.enterConfirma = enterConfirma !== undefined ? !!enterConfirma : dialogo.tipoConfirmar !== "perigo"
         dialogo.open()
     }
 }

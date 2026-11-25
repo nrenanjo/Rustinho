@@ -225,6 +225,17 @@ FocusScope {
                 palette.window: Tema.superficie(color)
                 HoverHandler { id: sobre }
                 TapHandler { onTapped: secao.linhaEscolhida = linha.e.id }
+                // R11 (D-AUD-9, decisão do proprietário de 25/11/2026): a linha é alcançável pelo teclado. Com o Tab,
+                // ela fica escolhida e os botões dela aparecem (e seguem no Tab); o contorno mostra onde está o foco.
+                activeFocusOnTab: true
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        secao.linhaEscolhida = linha.e.id
+                        ListView.view.positionViewAtIndex(linha.index, ListView.Contain)
+                    }
+                }
+                border.width: activeFocus ? 2 : 0
+                border.color: Tema.foco
                 RowLayout {
                     id: conteudoEnc
                     anchors.left: parent.left
