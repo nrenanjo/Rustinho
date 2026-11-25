@@ -157,3 +157,23 @@ fn n07_minimizada_continua_depois_de_fechar_e_abrir() {
     drop(s);
     let _ = std::fs::remove_dir_all(caminho.parent().unwrap());
 }
+
+/// Decisão 3 do proprietário (25/11/2026): o aviso das pendências de identificação do XML é de atenção (pode ser
+/// minimizado), e não mais crítico.
+#[test]
+fn d3_aviso_das_pendencias_do_xml_e_de_atencao_e_minimiza() {
+    let caminho = pasta();
+    std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+    let (mut s, _) = loja(&caminho);
+    s.banco_para_teste()
+        .conn
+        .execute(
+            "INSERT INTO xml_pendencia_identificacao (id, descricao, situacao, criado_em) VALUES ('p-d3', 'FILTRO', 'pendente', '2026-11-25T10:00:00Z')",
+            [],
+        )
+        .unwrap();
+    let a = aviso(&mut s, "xml_pendencias").expect("o aviso aparece");
+    assert_eq!(a["categoria"], "atencao", "{a}");
+    ok(&mut s, "aviso_minimizar", json!({ "id": "xml_pendencias", "minimizado": true }));
+    assert_eq!(aviso(&mut s, "xml_pendencias").unwrap()["minimizado"], true);
+}

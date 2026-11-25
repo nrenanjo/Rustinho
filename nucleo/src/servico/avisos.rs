@@ -772,10 +772,14 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
     if let Err(e) = &xml_pendentes {
         crate::registro::anotar(&format!("contagem das pendências de identificação XML: {e}"));
     }
-    let texto_xml = match xml_pendentes {
-        Ok(0) => None,
-        Ok(n) => Some(format!("{} aguardando associação com peças", plural(n, "item de XML", "itens de XML"))),
-        Err(_) => Some("não foi possível conferir as pendências agora".to_string()),
+    // Decisão 3 do proprietário (25/11/2026): com o descarte possível (R6), as pendências deixam de ser para sempre;
+    // o aviso é de atenção, que pode ser minimizado. A falha ao contar continua crítica (é defeito, não pendência).
+    let (texto_xml, categoria_xml) = match xml_pendentes {
+        Ok(0) => (None, ATENCAO),
+        Ok(n) => {
+            (Some(format!("{} aguardando associação com peças", plural(n, "item de XML", "itens de XML"))), ATENCAO)
+        }
+        Err(_) => (Some("não foi possível conferir as pendências agora".to_string()), CRITICA),
     };
     if let Some(texto) = texto_xml {
         let mut a = Aviso::simples(
@@ -786,7 +790,7 @@ pub fn do_dia(conn: &Connection) -> Resultado<Vec<Aviso>> {
             "associe a uma peça existente ou cadastre como peça nova".into(),
             "pecas",
         )
-        .categoria(CRITICA);
+        .categoria(categoria_xml);
         a.acao = "Resolver pendências".into();
         avisos.push(a);
     }
