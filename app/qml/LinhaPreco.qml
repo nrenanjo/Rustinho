@@ -64,7 +64,9 @@ RowLayout {
 
     Campo {
         id: preco
-        rotulo: linha.destaque ? "Preço de " + linha.nome.toLowerCase() : (linha.verLucro ? "Preço" : linha.nome)
+        // M1 da revisão (OLHO-1): com o olho fechado, o % de lucro (que leva o nome da tabela) some; o preço
+        // passa a levar o nome da tabela, para não ficarem quatro campos só "Preço".
+        rotulo: linha.destaque ? "Preço de " + linha.nome.toLowerCase() : (linha.verLucro && !Tema.oculto ? "Preço" : linha.nome)
         prefixo: "R$"
         numerico: true
         maximo: 18

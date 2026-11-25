@@ -1627,10 +1627,9 @@ impl Servico {
                         self.gravar_se_der(usuarios::anotar_falha(&self.banco.conn, "gerente", ESPERA_APOS_ERROS))?;
                         let para = match (&tela, &pedido) {
                             (Some((t, _)), _) => format!("{} (tela {t})", nome_da_tela(t)),
-                            (None, Err((comando, _))) => format!(
-                                "{} (comando {comando})",
-                                nome_da_acao(acao_do_comando(comando).unwrap_or("precos"))
-                            ),
+                            // B2 da revisão: o mesmo nome da liberação (antes, pessoa_salvar, unidade_salvar e
+                            // fiscal_automatico apareciam como "mudar o preço de venda").
+                            (None, Err((comando, _))) => format!("{} (comando {comando})", nome_da_liberacao(comando)),
                             (None, Ok(acoes)) => format!(
                                 "consultar {} ({})",
                                 acoes.iter().map(|a| nome_da_acao(a)).collect::<Vec<_>>().join("; "),

@@ -148,12 +148,15 @@ FocusScope {
                     corValor: Tema.verdeEscuro
                 }
                 CartaoNumero {
-                    // OLHO-1: o custo some com o título com o olho fechado.
+                    // OLHO-1: o custo some com o título com o olho fechado. R20 (DP-19) e M3 da revisão: para quem não
+                    // vê os resultados, "—" e "só o gerente" (o padrão D-09).
+                    readonly property bool pode: !!secao.dados && secao.dados.resultados === true
                     visible: !Tema.oculto
                     rotulo: "Custo estimado"
-                    sensivel: true
-                    valor: secao.dados ? secao.dados.custoTotal : ""
-                    nota: "sem as encomendas"
+                    sensivel: pode
+                    prefixo: pode ? "R$ " : ""
+                    valor: secao.dados ? (pode ? secao.dados.custoTotal : "—") : ""
+                    nota: secao.dados && !pode ? "só o gerente" : "sem as encomendas"
                     cor: Tema.azul
                 }
             }
@@ -489,7 +492,7 @@ FocusScope {
                     }
                     Text {
                         // OLHO-1: com o olho fechado, o custo some da linha.
-                        text: [lp.p.tem, lp.p.ritmo, lp.p.custoTotal !== "0,00" && !Tema.oculto ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : ""]
+                        text: [lp.p.tem, lp.p.ritmo, !!lp.p.custoTotal && lp.p.custoTotal !== "0,00" && !Tema.oculto ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : ""]
                               .filter(x => !!x).join(" · ")
                         textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)
@@ -585,8 +588,9 @@ FocusScope {
                         Layout.alignment: Qt.AlignRight
                     }
                     Text {
-                        // OLHO-1: com o olho fechado, o custo some com o rótulo.
-                        visible: !Tema.oculto
+                        // OLHO-1: com o olho fechado, o custo some com o rótulo. R20: sem o custo (quem não vê os
+                        // resultados), nada de "R$" solto.
+                        visible: !Tema.oculto && !!lp.p.custoTotal
                         text: lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : "sem custo"
                         textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)

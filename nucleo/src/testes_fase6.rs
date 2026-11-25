@@ -542,10 +542,29 @@ fn dp19_alvo_d09_tambem_na_lista_de_compra_e_no_painel() {
     let (mut s, _bia) = loja_com_bia();
     let sug = ok(&mut s, "estoque_sugestao", json!({ "texto": "" }));
     assert_eq!((sug["itens"][0]["custo"].as_str(), sug["custoTotal"].as_str()), (Some(""), Some("")));
+    assert_eq!(sug["itens"][0]["custoTotal"], "", "{sug}");
+    assert_eq!(sug["resultados"], false, "a tela mostra \"só o gerente\" (M3 da revisão)");
     let html =
         ok(&mut s, "impressao", json!({ "tipo": "lista_compra", "id": "" }))["html"].as_str().unwrap().to_string();
     assert!(!html.contains("150,00") && !html.contains("300,00"), "{html}");
-    assert_eq!(ok(&mut s, "painel_fornecedores", json!({ "dias": 30 }))["total"], "");
+    let painel = ok(&mut s, "painel_fornecedores", json!({ "dias": 30 }));
+    assert_eq!((&painel["total"], &painel["resultados"]), (&json!(""), &json!(false)), "{painel}");
+    assert!(painel["itens"].as_array().unwrap().iter().all(|i| i["total"] == ""), "B1 da revisão: {painel}");
+    // Controle (B1 da revisão): o gerente continua vendo o custo nas três.
+    let ana: String = s
+        .banco_para_teste()
+        .conn
+        .query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0))
+        .unwrap();
+    ok(&mut s, "entrar", json!({ "id": ana, "senha": "12345678" }));
+    let sug = ok(&mut s, "estoque_sugestao", json!({ "texto": "" }));
+    assert_eq!((sug["custoTotal"].as_str(), sug["resultados"].as_bool()), (Some("300,00"), Some(true)), "{sug}");
+    let html =
+        ok(&mut s, "impressao", json!({ "tipo": "lista_compra", "id": "" }))["html"].as_str().unwrap().to_string();
+    assert!(html.contains("300,00"), "{html}");
+    let painel = ok(&mut s, "painel_fornecedores", json!({ "dias": 30 }));
+    assert_eq!((&painel["total"], &painel["resultados"]), (&json!("1.234,00"), &json!(true)), "{painel}");
+    assert!(painel["itens"].as_array().unwrap().iter().all(|i| i["total"] != ""), "{painel}");
 }
 
 /// DP-20 e DP-24 (decididas pelo proprietário em 25/11/2026). DP-20 → regra 21,
@@ -715,6 +734,23 @@ fn dp23_sensiveis_so_com_o_gerente_e_com_registro() {
     }
 }
 
+/// B2 da revisão R1 da 006: a senha do gerente digitada errada para uma gravação que só às vezes é dele fica no
+/// registro com o nome certo do que se pedia (antes, "mudar o preço de venda" para o limite de crédito, a unidade
+/// fracionada e o CSOSN).
+#[test]
+fn b2_senha_errada_registra_o_que_se_pedia() {
+    let (mut s, _bia) = loja_com_bia();
+    let mut f = ok(&mut s, "pessoa_nova", json!({ "papel": "cliente" }));
+    f["nome"] = json!("Oficina do Zé");
+    f["limiteCredito"] = json!("300");
+    let r = chamar(&mut s, "gerente_liberar", json!({ "senha": "senha-errada", "comando": "pessoa_salvar", "dados": f }));
+    assert_eq!(r["campo"], "senha", "{r}");
+    let c = &s.banco_para_teste().conn;
+    let det = texto(c, "SELECT COALESCE(MAX(detalhes), '') FROM auditoria WHERE acao = 'gerente.senha_errada'", []);
+    assert!(det.contains("Para: mudar o limite de crédito do cliente (comando pessoa_salvar)"), "{det}");
+    assert!(!det.contains("preço de venda"), "{det}");
+}
+
 /// R4 (D-AUD-4, decidida pelo proprietário em 25/11/2026, regra 4): mudar o desconto
 /// máximo ou a comissão da peça pede a senha do gerente (na peça nova, preencher um
 /// dos dois também); salvar a ficha sem mexer neles continua livre.
@@ -832,6 +868,73 @@ fn dp22_devolucao_depois_do_fechamento_desconta_no_periodo_seguinte() {
     comissoes::reabrir(c, d, &l.u, &f).unwrap();
     assert_eq!(outubro().vendedores[0].comissao, "0,00");
     assert_eq!(dia().0, "15,00");
+}
+
+/// B3 da revisão R1 da 006 (R23), o cenário da DP-22: venda de R$ 300 em 15/10 (5% = R$ 15,00), outubro fechado em
+/// 01/11 e a peça devolvida ontem. Devolve a loja e ontem ("dd/mm/aaaa").
+fn cenario_devolucao_depois_do_fechamento() -> (Loja, String) {
+    let l = loja();
+    {
+        let c = &l.b.conn;
+        let d = &l.b.dispositivo;
+        usuarios::definir_comissao(c, &l.u, "5").unwrap();
+        caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
+        let v = vender(&l, d, "1", vec![pg("pix", "300")], None);
+        c.execute("UPDATE venda SET criado_em = '2026-10-15T15:00:00Z' WHERE id = ?1", [&v]).unwrap();
+        comissoes::fechar(c, d, &l.u, &l.u, "01/10/2026", "31/10/2026", "").unwrap();
+        c.execute("UPDATE comissao_fechamento SET criado_em = '2026-11-01T12:00:00Z'", []).unwrap();
+        let item = devolucoes::da_venda(c, &v).unwrap().itens[0].venda_item_id.clone();
+        devolucoes::devolver(
+            c,
+            d,
+            &l.u,
+            &devolucoes::Entrada {
+                venda_id: v.clone(),
+                itens: vec![devolucoes::ItemEntrada { venda_item_id: item, quantidade: "1".into(), defeito: false }],
+                destino: "vale".into(),
+                motivo: "Não serviu".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        c.execute("UPDATE devolucao SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day')", []).unwrap();
+    }
+    let ontem: String =
+        l.b.conn.query_row("SELECT strftime('%d/%m/%Y', 'now', 'localtime', '-1 day')", [], |x| x.get(0)).unwrap();
+    (l, ontem)
+}
+
+/// B3 da revisão R1 da 006 (R23).
+/// (a) O vendedor desativado que só tem, no período, a devolução a descontar aparece no relatório. Antes sumia, e o
+/// desconto junto.
+/// (b) Desfazer o fechamento de outubro depois de um fechamento mais novo já ter descontado a devolução é recusado,
+/// dizendo qual desfazer antes. Antes, a devolução voltava para outubro e descontava duas vezes.
+#[test]
+fn b3_r23_vendedor_desativado_e_fechamento_mais_novo() {
+    let (l, ontem) = cenario_devolucao_depois_do_fechamento();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    // (a)
+    c.execute("UPDATE usuario SET ativo = 0 WHERE id = ?1", [&l.u]).unwrap();
+    let r = comissoes::relatorio(c, &ontem, &ontem).unwrap();
+    assert_eq!(r.vendedores.iter().map(|v| v.comissao.as_str()).collect::<Vec<_>>(), ["-15,00"], "o desconto sumiu");
+    c.execute("UPDATE usuario SET ativo = 1 WHERE id = ?1", [&l.u]).unwrap();
+    // (b) Uma venda de R$ 600 ontem (R$ 30,00) e o fechamento de ontem: R$ 15,00, já com a devolução descontada.
+    let v2 = vender(&l, d, "2", vec![pg("pix", "600")], None);
+    c.execute("UPDATE venda SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 day') WHERE id = ?1", [&v2])
+        .unwrap();
+    comissoes::fechar(c, d, &l.u, &l.u, &ontem, &ontem, "").unwrap();
+    let fechamentos = comissoes::relatorio(c, "01/10/2026", "31/10/2026").unwrap().fechamentos;
+    let id_de = |periodo: &str| fechamentos.iter().find(|f| f.periodo == periodo).unwrap().id.clone();
+    let (outubro, novo) = (id_de("01/10/2026 a 31/10/2026"), id_de(&format!("{ontem} a {ontem}")));
+    assert_eq!(fechamentos.iter().find(|f| f.id == novo).unwrap().valor, "15,00");
+    let e = comissoes::reabrir(c, d, &l.u, &outubro).unwrap_err().to_string();
+    assert!(e.contains(&format!("Desfaça antes o fechamento de {ontem} a {ontem}")), "{e}");
+    // Desfeito o mais novo antes, outubro desfaz, e a devolução volta para outubro (uma vez só).
+    comissoes::reabrir(c, d, &l.u, &novo).unwrap();
+    comissoes::reabrir(c, d, &l.u, &outubro).unwrap();
+    assert_eq!(comissoes::relatorio(c, "01/10/2026", "31/10/2026").unwrap().vendedores[0].comissao, "0,00");
+    assert_eq!(comissoes::relatorio(c, &ontem, &ontem).unwrap().vendedores[0].comissao, "30,00");
 }
 
 // ---------------------------------------------------------------------------

@@ -298,7 +298,7 @@ def cenario_k7(placar, fotos):
     """K7 (S2-R1 da conferência Sonnet): a lista é destruída enquanto a conferência ainda espera. Com a conferência
     atrasada (1,5 s), "Já pedi" e, 0,3 s depois, o Esc (a tela do Estoque sai da pilha, e a lista com ela). Quando a
     conferência roda, a lista já não existe: os botões do resto do programa têm de continuar respondendo (aqui, o
-    "Trocar usuário" do Início, que desde a T084, texto O, abre a tela de Usuários), sem erro de script."""
+    cartão Usuários do Início, que abre a tela de Usuários; o "Trocar usuário" saiu com o R1), sem erro de script."""
     ok = placar.ok
     rot = "K7"
     pasta = tempfile.mkdtemp(prefix="rustinho-loja-k7-")
@@ -316,16 +316,16 @@ def cenario_k7(placar, fotos):
             xdo("mousemove", str(bx), str(by), "mousedown", "1", "mouseup", "1", "sleep", "0.3", "key", "Escape")
             time.sleep(2.5)
             f = r.foto("-2")
-            no_inicio = r.esperar(lambda: r.tem("Trocar usuário"), 5)
+            no_inicio = r.esperar(lambda: r.tem("Buscar peça:"), 5)
             ok(f"{rot}: \"Já pedi\" vale (A pedida) e o Esc volta ao Início", situacao(pasta, "A") == "pedida" and no_inicio,
                f"{f} A={situacao(pasta, 'A')}")
             if not no_inicio:
                 return
-            r.clicar("Trocar usuário")
+            r.clicar("Usuários")
             saiu = r.esperar(lambda: r.tem("Todos acessam todas as funções. Cada um entra com o próprio nome e senha.")
                              or r.tem("Senha do gerente"), 5)
-            ok(f"{rot}: depois de a lista sumir com a conferência esperando, os botões continuam respondendo (o \"Trocar "
-               "usuário\" do Início abre Usuários, T084)", saiu, r.foto("-3"))
+            ok(f"{rot}: depois de a lista sumir com a conferência esperando, os botões continuam respondendo (o cartão "
+               "Usuários do Início abre Usuários)", saiu, r.foto("-3"))
         finally:
             r.fechar()
     finally:

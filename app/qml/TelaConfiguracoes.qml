@@ -1471,8 +1471,9 @@ FocusScope {
                                 Layout.fillWidth: true
                                 onEditado: tela.alterado = true
                             }
-                            // D-09: só quem vê os custos vê e muda o lucro sugerido
-                            // (o campo fica, sem esconder: veja D-10).
+                            // D-09: só quem vê os custos vê e muda o lucro sugerido. OLHO-1 (25/11/2026): com o
+                            // olho fechado, o campo some com o título (o D-10 falava do Qt 6.4; a CI e os pacotes usam
+                            // o 6.8.3, onde trocar "visible" dentro da linha não embaralha; B5 da revisão).
                             Campo {
                                 id: lucroTabela
                                 objectName: "campoLucroTabela"

@@ -70,11 +70,22 @@ def main():
                 "peça, olho fechado: sem custo, sem % de lucro e sem os títulos; o preço fica",
                 r.foto("-1-fechado"),
                 fechado,
-                tem=["Preço de revenda", "Mostrar valores"],
+                tem=["Preço de revenda", "Mostrar valores",
+                     "O custo e o % de lucro estão escondidos pelo olho"],  # B4 da revisão: a pista
                 sem_igual=["Custo", "% sobre o custo"],
                 sem_percentual=True,
             )
             y_fechado = y_de(fechado, "Preço de revenda")
+            # M1 da revisão: com o olho fechado, os preços das outras tabelas levam o nome da tabela (e não quatro
+            # campos só "Preço").
+            if not r.clicar("Outros preços"):
+                raise RuntimeError(f"não achei o botão Outros preços (veja {r.saida})")
+            time.sleep(1)
+            tudo_certo &= conferir("peça, olho fechado: os outros preços levam o nome da tabela", r.foto("-1b-outros"),
+                                   r.textos(), igual=["Tabela 2", "Tabela 3", "Tabela 4", "Tabela 5"])
+            if not r.clicar("Esconder outros preços"):
+                raise RuntimeError(f"não achei o botão Esconder outros preços (veja {r.saida})")
+            time.sleep(1)
             if not r.clicar("Mostrar valores"):
                 raise RuntimeError(f"não achei o botão Mostrar valores (veja {r.saida})")
             time.sleep(1)
@@ -85,6 +96,7 @@ def main():
                 aberto,
                 tem=["Preço de revenda", "Esconder"],
                 igual=["Custo", "% sobre o custo"],
+                nao_tem=["O custo e o % de lucro estão escondidos pelo olho"],
             )
             y_aberto = y_de(aberto, "Preço de revenda")
             sobe = y_fechado is not None and y_aberto is not None and y_fechado < y_aberto
@@ -142,6 +154,30 @@ def main():
             ok = len(com_valor) >= 3
             foto = r.foto("-2-aberto")
             print(("✔ " if ok else "✘ ") + "caixa, olho aberto: o saldo e os totais aparecem"
+                  + ("" if ok else f": só {com_valor} (foto: {foto})"))
+            tudo_certo &= ok
+        finally:
+            r.fechar()
+
+        # ---- 2b. Mais vendidos (M4 da revisão): os valores vendidos somem com o olho fechado ----
+        r = Rustinho(pasta, "TelaEstoque", {"secao": "vendidos"}, fotos, "olho1-vendidos")
+        try:
+            r.entrar("Ana")
+            time.sleep(2.5)
+            fechado = r.textos()
+            com_valor = [t for _, _, t in fechado if DINHEIRO.search(t)]
+            ok = any(simples(t) == simples("Vendido") for _, _, t in fechado) and not com_valor
+            foto = r.foto("-1-fechado")
+            print(("✔ " if ok else "✘ ") + "mais vendidos, olho fechado: o vendido e os totais das linhas ficam discretos"
+                  + ("" if ok else f": apareceu {com_valor[:4]} (foto: {foto})"))
+            tudo_certo &= ok
+            if not r.clicar("Mostrar valores"):
+                raise RuntimeError(f"não achei o botão Mostrar valores em Mais vendidos (veja {r.saida})")
+            time.sleep(1)
+            com_valor = [t for _, _, t in r.textos() if DINHEIRO.search(t)]
+            ok = len(com_valor) >= 2
+            foto = r.foto("-2-aberto")
+            print(("✔ " if ok else "✘ ") + "mais vendidos, olho aberto: os valores aparecem"
                   + ("" if ok else f": só {com_valor} (foto: {foto})"))
             tudo_certo &= ok
         finally:

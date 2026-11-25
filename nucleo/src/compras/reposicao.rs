@@ -809,7 +809,10 @@ mod comandos {
                 i.custo_total.clear();
             }
         }
-        Ok(json!(s))
+        // M3 da revisão: a tela mostra "—" e "só o gerente" (o padrão D-09), não um "R$" vazio.
+        let mut v = json!(s);
+        v["resultados"] = json!(ve);
+        Ok(v)
     }
 
     fn estoque_dias(p: &mut Pedido, dados: Value) -> Resultado<Value> {

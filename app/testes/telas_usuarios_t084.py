@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Roteiro da T084 (texto O do proprietário, 21/11/2026): o "Trocar usuário" da página inicial abre a tela de Usuários,
-pelo mesmo caminho do cartão Usuários do menu; a tela de Usuários não tem mais o "+ Novo usuário" (o formulário de
-criação já fica à direita), e o cadastro continua funcionando.
+"""Roteiro da T084 (texto O do proprietário, 21/11/2026), atualizado pelo R1 (D-AUD-3, decisão de 25/11/2026): o
+"Trocar usuário" saiu da página inicial; a tela de Usuários (pelo cartão do menu) tem o "Sair"; a tela de Usuários não
+tem mais o "+ Novo usuário" (o formulário de criação já fica à direita), e o cadastro continua funcionando.
 
-  ESTÁTICA  no código: o "Trocar usuário" chama o mesmo `abrirFuncao` do menu, com a função "usuarios" (sem caminho
-            próprio), e o "+ Novo usuário" só aparece na tela estreita (onde o formulário não fica à vista e o botão é a
-            única entrada para ele).
-  GERENTE   (Ana) o "Trocar usuário" abre Usuários, a mesma tela do cartão Usuários do menu.
+  ESTÁTICA  no código: o Início sem o "Trocar usuário" (R1); o "Sair" de Usuários chama `janela.trocarUsuario()`; e o
+            "+ Novo usuário" só aparece na tela estreita (onde o formulário não fica à vista e o botão é a única entrada
+            para ele).
+  GERENTE   (Ana) o Início sem o "Trocar usuário"; o cartão Usuários do menu abre Usuários, com o "Sair".
   LARGA     (a tela de Usuários aberta direto, 1280 px) sem o "+ Novo usuário", com o formulário (Nome, as senhas,
             Salvar F2); um usuário novo é criado pelo formulário, com o F2, e entra na lista e no banco; clicar num
             usuário da lista abre a edição dele (o gerenciamento de antes continua).
-  CAIXA     (Bia) o "Trocar usuário" pede a senha do gerente, como o cartão Usuários (o mesmo fluxo).
+  CAIXA     (Bia) o cartão Usuários pede a senha do gerente (o "Sair" fica do outro lado dela; R1).
   ESTREITA  (700 px) o "+ Novo usuário" continua e abre o formulário: o cadastro não fica sem entrada.
 
     python3 app/testes/telas_usuarios_t084.py [pasta para as fotos]
@@ -52,10 +52,11 @@ def estatica(qml=QML):
     """[(o que falta)] no código."""
     faltas = []
     inicio = open(os.path.join(qml, "TelaInicio.qml"), encoding="utf-8").read()
-    trocar = bloco_do_botao(inicio, "Trocar usuário")
-    if 'tela.funcao("usuarios")' not in trocar or "tela.janela.abrirFuncao(" not in trocar or "trocarUsuario" in trocar:
-        faltas.append("o Trocar usuário não usa o abrirFuncao do menu com a função usuarios")
+    if 'text: "Trocar usuário"' in inicio:
+        faltas.append("o Início ainda tem o Trocar usuário (R1 tirou)")
     usuarios = open(os.path.join(qml, "TelaUsuarios.qml"), encoding="utf-8").read()
+    if "janela.trocarUsuario()" not in bloco_do_botao(usuarios, "Sair"):
+        faltas.append("o Sair de Usuários não chama janela.trocarUsuario()")
     novo = bloco_do_botao(usuarios, "Novo usuário")
     if not re.search(r"visible:\s*Tema\.estreito\b", novo):
         faltas.append("o + Novo usuário aparece na tela larga")
@@ -119,7 +120,8 @@ def main():
         certo &= bool(condicao)
 
     faltas = estatica()
-    ok("ESTÁTICA: o Trocar usuário pelo caminho do menu; o + Novo usuário só na tela estreita", not faltas, str(faltas))
+    ok("ESTÁTICA: o Início sem o Trocar usuário e o Sair em Usuários (R1); o + Novo usuário só na tela estreita", not faltas,
+       str(faltas))
 
     for p in ("Xvfb", "xdotool", "import"):
         if not shutil.which(p):
@@ -144,21 +146,14 @@ def main():
         try:
             r.entrar("Ana")
             redimensionar(1280, 900)
-            tx = esperar(r, lambda t: "Trocar usuário" in t)
-            if "Trocar usuário" not in tx:
+            tx = esperar(r, lambda t: "Usuários" in t)
+            if "Usuários" not in tx:
                 raise RuntimeError(f"INSTRUMENTAÇÃO: a página inicial não apareceu (foto {r.foto('-instr')})")
-            clicar_no_texto(r, "Trocar usuário")
+            ok("GERENTE: o Início não tem o Trocar usuário (R1)", "Trocar usuário" not in tx, f"foto {r.foto('-1-inicio')}")
+            clicar_no_texto(r, "Usuários")
             tx = esperar(r, lambda t: MARCA_USUARIOS in t)
-            f = r.foto("-1-trocar")
-            ok("GERENTE: o Trocar usuário abre a tela de Usuários", MARCA_USUARIOS in tx, f"foto {f}")
-            if MARCA_USUARIOS in tx:
-                # O cartão Usuários do menu leva à mesma tela.
-                xdo("key", "Escape")
-                time.sleep(1.5)
-                tx = esperar(r, lambda t: "Trocar usuário" in t)
-                clicar_no_texto(r, "Usuários")
-                tx = esperar(r, lambda t: MARCA_USUARIOS in t)
-                ok("GERENTE: o cartão Usuários abre a mesma tela", MARCA_USUARIOS in tx, f"foto {r.foto('-3-cartao')}")
+            ok("GERENTE: o cartão Usuários abre a tela de Usuários, com o Sair (R1)",
+               MARCA_USUARIOS in tx and "Sair" in tx, f"foto {r.foto('-3-cartao')}")
             with open(r.saida, encoding="utf-8", errors="replace") as reg:
                 erros = [linha.strip() for linha in reg if "TypeError" in linha or "ReferenceError" in linha]
             ok("GERENTE: nenhum TypeError/ReferenceError no registro", not erros, str(erros[:3]))
@@ -210,11 +205,11 @@ def main():
         try:
             r.entrar("Bia")
             redimensionar(1280, 900)
-            esperar(r, lambda t: "Trocar usuário" in t)
-            clicar_no_texto(r, "Trocar usuário")
+            esperar(r, lambda t: "Usuários" in t)
+            clicar_no_texto(r, "Usuários")
             tx = esperar(r, lambda t: "Senha do gerente" in t)
-            f = r.foto("-1-trocar")
-            ok("CAIXA: o Trocar usuário pede a senha do gerente, como o cartão Usuários", "Senha do gerente" in tx,
+            f = r.foto("-1-usuarios")
+            ok("CAIXA: o cartão Usuários pede a senha do gerente (o Sair fica em Usuários; R1)", "Senha do gerente" in tx,
                f"foto {f}")
         finally:
             r.fechar()

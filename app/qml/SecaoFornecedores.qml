@@ -27,7 +27,16 @@ FocusScope {
             colunasEstreito: 2
             spacing: 12
             Layout.fillWidth: true
-            CartaoNumero { rotulo: "Comprado"; sensivel: true; valor: secao.dados ? secao.dados.total : ""; nota: "notas lançadas"; cor: Tema.rosa }
+            // R20 (DP-19) e M3 da revisão: para quem não vê os resultados, "—" e "só o gerente" (o padrão D-09).
+            CartaoNumero {
+                readonly property bool pode: !!secao.dados && secao.dados.resultados === true
+                rotulo: "Comprado"
+                sensivel: pode
+                prefixo: pode ? "R$ " : ""
+                valor: secao.dados ? (pode ? secao.dados.total : "—") : ""
+                nota: secao.dados && !pode ? "só o gerente" : "notas lançadas"
+                cor: Tema.rosa
+            }
             CartaoNumero { rotulo: "Notas"; prefixo: ""; valor: secao.dados ? String(secao.dados.notas) : "" }
             CartaoNumero { rotulo: "Fornecedores"; prefixo: ""; valor: secao.dados ? String(secao.dados.fornecedores) : ""; cor: Tema.azul }
         }
@@ -136,7 +145,7 @@ FocusScope {
                         spacing: 0
                         Layout.preferredWidth: Tema.estreito ? -1 : 150
                         Text {
-                            text: "R$ " + Tema.valor(linha.f.total)
+                            text: secao.dados && secao.dados.resultados === true ? "R$ " + Tema.valor(linha.f.total) : "—"
                             textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto

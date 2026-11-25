@@ -1159,6 +1159,15 @@ FocusScope {
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
+                        // B4 da revisão (OLHO-1): com o olho fechado, a pista de onde estão o custo e o % de lucro
+                        // (embaixo dos preços, para o preço continuar subindo para o lugar do custo).
+                        Nota {
+                            objectName: "notaCustoEscondido"
+                            visible: tela.verCustos && Tema.oculto
+                            text: "O custo e o % de lucro estão escondidos pelo olho: toque em Mostrar valores para ver e mudar."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
                         Botao {
                             text: tela.mostrarOutros ? "Esconder outros preços" : "Outros preços"
                             icone: tela.mostrarOutros ? "cima" : "baixo"

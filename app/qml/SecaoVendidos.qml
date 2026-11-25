@@ -62,7 +62,9 @@ FocusScope {
                 colunasEstreito: 2
                 spacing: 12
                 Layout.fillWidth: true
-                CartaoNumero { rotulo: "Vendido"; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
+                // OLHO-1 e M4 da revisão: o valor vendido também some com o olho fechado ("mais vendidos" está na
+                // decisão); a quantidade e a curva ABC ficam.
+                CartaoNumero { rotulo: "Vendido"; sensivel: true; valor: secao.dados ? secao.dados.total : ""; cor: Tema.verde; corValor: Tema.verdeEscuro }
                 // D-01: o lucro só para quem pode ver os resultados. O cartão fica
                 // sempre (trocar "visible" dentro da linha embaralha no Qt 6.4, D-10).
                 CartaoNumero {
@@ -235,7 +237,7 @@ FocusScope {
                         spacing: 0
                         Layout.preferredWidth: Tema.estreito ? -1 : 140
                         Text {
-                            text: "R$ " + linha.v.total
+                            text: "R$ " + Tema.valor(linha.v.total)
                             textFormat: Text.PlainText
                             color: Tema.tintaDaFaixa(linha.par)
                             font.family: Tema.texto

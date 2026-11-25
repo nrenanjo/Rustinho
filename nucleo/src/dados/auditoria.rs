@@ -125,6 +125,8 @@ fn descrever(acao: &str) -> &'static str {
         "compra.lancar" => "lançou no estoque",
         "compra.estornar" => "estornou",
         "compra.descartar" => "descartou o rascunho da compra",
+        // R6 (D-AUD-5, 25/11/2026): o descarte da pendência de identificação do XML, com o motivo.
+        "xml_pendencia.descartar" => "descartou a pendência do XML",
         "fiscal.regras" => "mudou as regras de ST",
         "usuario.alterar" => "alterou o usuário",
         "usuario.senha_fora_da_politica" => "entrou com senha fora da política",

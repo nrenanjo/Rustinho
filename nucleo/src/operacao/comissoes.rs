@@ -195,9 +195,14 @@ fn curto(d: &str) -> String {
 pub fn relatorio(conn: &Connection, de: &str, ate: &str) -> Resultado<Relatorio> {
     let (de, ate) = periodo(conn, de, ate)?;
     let mut c = conn.prepare(
+        // B3 da revisão (R23): também quem só tem, no período, devolução a descontar (de venda de outro período).
         "SELECT u.id, u.nome, u.comissao FROM usuario u
           WHERE u.ativo = 1 OR EXISTS (SELECT 1 FROM venda v WHERE v.vendedor_id = u.id
                                         AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2)
+             OR EXISTS (SELECT 1 FROM devolucao d JOIN devolucao_item di ON di.devolucao_id = d.id
+                          JOIN venda_item i ON i.id = di.venda_item_id JOIN venda v ON v.id = i.venda_id
+                         WHERE v.vendedor_id = u.id AND d.cancelado_em IS NULL
+                           AND date(d.criado_em, 'localtime') BETWEEN ?1 AND ?2)
           ORDER BY u.nome COLLATE NOCASE",
     )?;
     let usuarios: Vec<(String, String, Option<i64>)> =
@@ -362,6 +367,35 @@ pub fn reabrir(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str)
         .ok_or_else(|| Erro::NaoEncontrado("Fechamento".into()))?;
     if cancelado.is_some() {
         return Err(Erro::validacao("Este fechamento já foi desfeito."));
+    }
+    // B3 da revisão (R23): uma devolução de venda deste período, feita depois deste fechamento, já foi descontada
+    // por um fechamento mais novo, ainda ativo. Desfazer este a faria voltar para cá e descontar duas vezes: primeiro
+    // desfaz-se o mais novo.
+    let mais_novo: Option<(String, String)> = conn
+        .query_row(
+            "SELECT f2.de, f2.ate FROM comissao_fechamento f
+               JOIN venda v ON v.vendedor_id = f.usuario_id AND v.tipo = 'venda'
+                AND date(v.criado_em, 'localtime') BETWEEN f.de AND f.ate
+               JOIN venda_item i ON i.venda_id = v.id
+               JOIN devolucao_item di ON di.venda_item_id = i.id
+               JOIN devolucao d ON d.id = di.devolucao_id AND d.cancelado_em IS NULL AND f.criado_em <= d.criado_em
+               JOIN comissao_fechamento f2 ON f2.usuario_id = f.usuario_id AND f2.id <> f.id AND f2.cancelado_em IS NULL
+                AND date(d.criado_em, 'localtime') BETWEEN f2.de AND f2.ate AND d.criado_em <= f2.criado_em
+              WHERE f.id = ?1
+              ORDER BY f2.ate LIMIT 1",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    if let Some((a, b)) = mais_novo {
+        return Err(Erro::validacao(format!(
+            "O fechamento de {} a {} já descontou uma devolução de venda deste período. Desfaça antes o fechamento de \
+             {} a {}.",
+            fiscal::data_br(&a),
+            fiscal::data_br(&b),
+            fiscal::data_br(&a),
+            fiscal::data_br(&b)
+        )));
     }
     if let Some(c) = conta {
         let cancelada: Option<String> =

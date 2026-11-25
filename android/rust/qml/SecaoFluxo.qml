@@ -172,7 +172,8 @@ FocusScope {
                     }
                     Text {
                         visible: !!secao.fluxo && (secao.fluxo.atrasadoReceber !== "0,00" || secao.fluxo.atrasadoPagar !== "0,00")
-                        text: secao.fluxo ? "Atrasado (fora da conta): a receber R$ " + secao.fluxo.atrasadoReceber + "  ·  a pagar R$ " + secao.fluxo.atrasadoPagar : ""
+                        // B7 da revisão: sob o olho, como o resto do fluxo.
+                        text: secao.fluxo ? "Atrasado (fora da conta): a receber R$ " + Tema.valor(secao.fluxo.atrasadoReceber) + "  ·  a pagar R$ " + Tema.valor(secao.fluxo.atrasadoPagar) : ""
                         textFormat: Text.PlainText
                         color: Tema.vermelho
                         font.family: Tema.texto

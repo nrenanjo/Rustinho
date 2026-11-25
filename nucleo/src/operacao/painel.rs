@@ -757,7 +757,10 @@ mod comandos {
                 i.total.clear();
             }
         }
-        Ok(json!(f))
+        // M3 da revisão: a tela mostra "—" e "só o gerente" (o padrão D-09), não um "R$" vazio.
+        let mut v = json!(f);
+        v["resultados"] = json!(ve);
+        Ok(v)
     }
 
     fn painel_pagamentos(p: &mut Pedido, dados: Value) -> Resultado<Value> {
