@@ -1148,6 +1148,15 @@ mod comandos {
     }
 }
 
+/// R13 (B5 da R7): os itens das OS ainda abertas (nem entregues nem canceladas) com a peça juntada D passam para K.
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    Ok(conn.execute(
+        "UPDATE ordem_servico_item SET produto_id = ?2 WHERE produto_id = ?1
+           AND ordem_id IN (SELECT id FROM ordem_servico WHERE situacao NOT IN ('entregue', 'cancelada'))",
+        rusqlite::params![d, k],
+    )?)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;

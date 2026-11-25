@@ -218,3 +218,26 @@ fn empate_entre_fornecedores_mesmo_resultado_em_todos_os_caixas() {
     assert!(balao(&d.a).is_some(), "a busca acha a peça pelo código");
     assert_eq!(balao(&d.a), balao(&d.b), "o mesmo fornecedor no balão nos dois caixas");
 }
+
+/// B2 da revisão R7: os dois caixas corrigem só a forma do mesmo código (a mesma peça, o mesmo fator), cada um de um
+/// jeito. É o conflito comum da ligação: continua aberto para o gerente decidir (não é "Corrigido", que é só quando
+/// juntaram as peças).
+#[test]
+fn r7_b2_so_o_texto_do_codigo_e_conflito_comum() {
+    let mut d = dois();
+    editar(&d.a, &d.u, &d.p, &[(&d.f, "00008373", "0000-8373")]);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    editar(&d.b, &d.u, &d.p, &[(&d.f, "00008373", "000.083.73")]);
+    trocar(&mut d.a, &mut d.b);
+    for x in [&d.a, &d.b] {
+        let k = abertos(x);
+        assert_eq!(
+            k.len(),
+            1,
+            "o conflito comum continua aberto: {:?}",
+            k.iter().map(|c| &c.texto).collect::<Vec<_>>()
+        );
+        assert_ne!(k[0].o_que, "Código do fornecedor em disputa");
+        assert_eq!(sync::conflitos_abertos(&x.conn).unwrap(), 1);
+    }
+}

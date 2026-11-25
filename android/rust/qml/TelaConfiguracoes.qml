@@ -2534,7 +2534,12 @@ FocusScope {
                         onClicked: janela.chamarGerente("conflitos_manter_todos", {}, r => {
                             if (r.ok) {
                                 tela.conflitos = r.dados
-                                janela.avisar("Ficaram como estão. As versões que perderam continuam guardadas na lista.", "ok")
+                                // B4 da R7: as disputas (junção e código do fornecedor) não fecham assim: o aviso diz.
+                                const ficaram = tela.conflitos.filter(c => !c.resolvido).length
+                                janela.avisar(ficaram > 0
+                                              ? "Ficaram como estão. " + ficaram + (ficaram === 1 ? " disputa continua" : " disputas continuam")
+                                                + " na lista: nelas, escolha qual vale (junção ou código do fornecedor)."
+                                              : "Ficaram como estão. As versões que perderam continuam guardadas na lista.", "ok")
                             } else {
                                 janela.avisar(r.erro, "erro")
                             }

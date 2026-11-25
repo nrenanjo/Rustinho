@@ -20,11 +20,11 @@ pub fn saldo(conn: &Connection, produto_id: &str) -> Resultado<i64> {
 }
 
 /// R13 (DP-42): a raiz de uma peça: segue as junções (`produto_juncao`, peça juntada em outra) até a peça que não
-/// foi juntada. No máximo 8 passos; num ciclo (duas peças juntadas uma na outra em caixas sem rede), a raiz é o
+/// foi juntada. No máximo 64 passos (B7 da R7); num ciclo (duas peças juntadas uma na outra em caixas sem rede), a raiz é o
 /// menor id do ciclo (a Duplicatas mostra o ciclo para o gerente reativar uma). Só lê.
 pub fn raiz(conn: &Connection, produto_id: &str) -> Resultado<String> {
     let mut vistos = vec![produto_id.to_string()];
-    for _ in 0..8 {
+    for _ in 0..64 {
         let atual = vistos.last().cloned().unwrap_or_default();
         let para: Option<String> = conn
             .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [&atual], |l| l.get(0))
@@ -99,14 +99,19 @@ pub fn passar_por_juncao(conn: &Connection, dispositivo: &str, d: &str, k: &str)
 /// R13 (definição final 4): o gerente escolheu outra peça para D; as passagens de D para `perdeu` voltam para D (um
 /// par de volta para cada entrada, com id pelo id dela: idempotente e igual em qualquer caixa). Devolve quantas.
 pub fn desfazer_passagem(conn: &Connection, dispositivo: &str, d: &str, perdeu: &str) -> Resultado<usize> {
+    // M-1 da R7: só as passagens da própria D: a entrada `juntar:<h>:entrada:<perdeu>` cuja saída gêmea
+    // `juntar:<h>:saida:<perdeu>` é de D (outra peça já juntada na que perdeu fica como está).
     let sufixo = format!(":entrada:{perdeu}");
     let entradas: Vec<(String, i64, String)> = conn
         .prepare(
-            "SELECT id, quantidade, criado_em FROM estoque_movimento
-              WHERE produto_id = ?1 AND tipo = 'juncao' AND substr(id, 1, 7) = 'juntar:'
-                AND substr(id, -length(?2)) = ?2",
+            "SELECT e.id, e.quantidade, e.criado_em FROM estoque_movimento e
+              WHERE e.produto_id = ?1 AND e.tipo = 'juncao' AND substr(e.id, 1, 7) = 'juntar:'
+                AND substr(e.id, -length(?2)) = ?2
+                AND EXISTS (SELECT 1 FROM estoque_movimento s
+                             WHERE s.id = substr(e.id, 1, length(e.id) - length(?2)) || ':saida:' || ?1
+                               AND s.produto_id = ?3 AND s.tipo = 'juncao')",
         )?
-        .query_map(params![perdeu, sufixo], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .query_map(params![perdeu, sufixo, d], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
         .collect::<Result<_, _>>()?;
     for (id, quantidade, em) in &entradas {
         for (lado, peca, q) in [("saida", perdeu, -quantidade), ("entrada", d, *quantidade)] {
@@ -148,6 +153,9 @@ pub fn ajustar(
     if texto::tamanho(&motivo) > 120 {
         return Err(Erro::campo("motivo", "Use no máximo 120 letras."));
     }
+    // B5 da R7: a contagem feita na ficha de uma peça juntada é a da peça que ficou.
+    let raiz_da_peca = raiz(conn, produto_id)?;
+    let produto_id = raiz_da_peca.as_str();
     let (servico, unidade, fracionada): (bool, String, bool) = conn
         .query_row(
             "SELECT p.tipo = 'servico', p.unidade, COALESCE((SELECT fracionada FROM unidade WHERE sigla = p.unidade), 0)

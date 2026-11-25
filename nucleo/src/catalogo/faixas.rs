@@ -1691,6 +1691,11 @@ pub fn juntadas_para_ver(conn: &Connection) -> Resultado<Vec<JuntadaParaVer>> {
                 "item(ns) de orçamento aberto",
             ),
             (
+                "SELECT COUNT(*) FROM ordem_servico_item WHERE produto_id = ?1
+                   AND ordem_id IN (SELECT id FROM ordem_servico WHERE situacao NOT IN ('entregue', 'cancelada'))",
+                "item(ns) de OS aberta",
+            ),
+            (
                 "SELECT COUNT(*) FROM xml_pendencia_identificacao
                   WHERE produto_id = ?1 OR instr(candidatos_json, '\"' || ?1 || '\"') > 0",
                 "pendência(s) do XML",

@@ -613,7 +613,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
                     "ativo",
                     format!(
                         "Esta peça foi juntada com {nome} e não volta a ser usada. A peça que ficou já tem o estoque e \
-                         os códigos dela. Se precisar, fale com o gerente."
+                         os códigos dela. A junção não se desfaz."
                     ),
                 ));
             }
@@ -1712,15 +1712,21 @@ pub fn conferir_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<(String
     Ok((k, dv))
 }
 
-/// R13: a parte do cadastro de juntar D em K (K já é a raiz, conferida por `conferir_juncao`): grava a junção,
-/// aponta para K as peças que estavam juntadas em D (achata a cadeia), passa as aplicações e os equivalentes de D
-/// que K ainda não tem (pela chave natural) e desativa D. Idempotente para o mesmo par.
+/// R13: a parte do cadastro de juntar D em K (K já é a raiz, conferida por `conferir_juncao`): grava a junção (sem
+/// reescrever nenhuma outra: a cadeia não é achatada, a raiz a segue), passa as aplicações e os equivalentes de D que
+/// K ainda não tem (pela chave natural) e desativa D. Idempotente para o mesmo par.
+///
+/// M-2 da R7: as linhas que viajam ficam iguais em qualquer caixa que junte o mesmo par (sem data nem autor: quem e
+/// quando estão no histórico), para dois gerentes sem rede não criarem conflito falso.
 pub fn juntar_cadastro(conn: &Connection, dispositivo: &str, usuario_id: &str, d: &str, k: &str) -> Resultado<()> {
-    let agora = tempo::agora();
+    let _ = (dispositivo, usuario_id);
+    if d == k {
+        return Err(Erro::validacao("Uma peça não se junta nela mesma."));
+    }
     conn.execute(
-        "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, ?3, ?4, 'Peça cadastrada em dobro')
+        "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, '', NULL, 'Peça cadastrada em dobro')
          ON CONFLICT (produto_id) DO NOTHING",
-        params![d, k, agora, usuario_id],
+        params![d, k],
     )?;
     conn.execute(
         "DELETE FROM produto_aplicacao WHERE produto_id = ?1 AND EXISTS (SELECT 1 FROM produto_aplicacao x
@@ -1737,10 +1743,7 @@ pub fn juntar_cadastro(conn: &Connection, dispositivo: &str, usuario_id: &str, d
         params![d, k],
     )?;
     conn.execute("UPDATE produto_equivalente SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
-    conn.execute(
-        "UPDATE produto SET ativo = 0, atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1 AND ativo = 1",
-        params![d, agora, usuario_id, dispositivo],
-    )?;
+    conn.execute("UPDATE produto SET ativo = 0 WHERE id = ?1 AND ativo = 1", params![d])?;
     Ok(())
 }
 
@@ -1763,7 +1766,7 @@ pub fn escolher_juncao(conn: &Connection, usuario_id: &str, d: &str, para: &str)
 pub fn tirar_do_circulo(conn: &Connection, dispositivo: &str, usuario_id: &str, d: &str) -> Resultado<()> {
     let mut atual = d.to_string();
     let mut circulo = false;
-    for _ in 0..8 {
+    for _ in 0..64 {
         let para: Option<String> = conn
             .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [&atual], |l| l.get(0))
             .optional()?;

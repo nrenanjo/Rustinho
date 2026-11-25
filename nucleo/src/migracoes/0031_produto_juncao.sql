@@ -15,3 +15,15 @@ CREATE TABLE produto_juncao (
 );
 
 CREATE INDEX produto_juncao_para ON produto_juncao (para_id);
+
+-- B5 da R7: a raiz de cada peça juntada (segue a cadeia; no círculo, sem raiz: cada uma fica como ela mesma). As
+-- consultas de vendas por peça (o que comprar, peças paradas, mais vendidos) somam a peça juntada na que ficou.
+CREATE VIEW produto_raiz AS
+WITH RECURSIVE cadeia (produto_id, para_id, n) AS (
+    SELECT produto_id, para_id, 1 FROM produto_juncao
+    UNION ALL
+    SELECT c.produto_id, j.para_id, c.n + 1 FROM cadeia c JOIN produto_juncao j ON j.produto_id = c.para_id
+     WHERE c.n < 64
+)
+SELECT produto_id, para_id AS raiz FROM cadeia c
+ WHERE NOT EXISTS (SELECT 1 FROM produto_juncao x WHERE x.produto_id = c.para_id);

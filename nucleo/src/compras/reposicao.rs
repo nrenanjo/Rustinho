@@ -183,16 +183,17 @@ pub fn sugestao(conn: &Connection, busca: &str) -> Resultado<Sugestao> {
     let filtro = texto::normalizar(busca);
     let mut c = conn.prepare(
         "WITH vend AS (
-              SELECT vi.produto_id,
+              SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id) AS produto_id,
                      SUM(vi.quantidade - COALESCE((SELECT SUM(di.quantidade) FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
                                                     WHERE di.venda_item_id = vi.id AND d.cancelado_em IS NULL), 0)) AS q
                 FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND v.criado_em >= ?1 AND vi.produto_id IS NOT NULL
-               GROUP BY vi.produto_id),
+               GROUP BY 1),
               enc AS (
-              SELECT produto_id, SUM(quantidade) AS q FROM encomenda
+              SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = encomenda.produto_id), produto_id) AS produto_id,
+                     SUM(quantidade) AS q FROM encomenda
                WHERE venda_id IS NOT NULL AND situacao <> 'cancelada' AND criado_em >= ?1 AND produto_id IS NOT NULL
-               GROUP BY produto_id),
+               GROUP BY 1),
               est AS (SELECT produto_id, SUM(quantidade) AS q FROM estoque_movimento GROUP BY produto_id)
          SELECT p.id, p.codigo, p.nome, p.marca, p.unidade, p.local, p.custo, p.estoque_minimo, COALESCE(est.q, 0),
                 MAX(COALESCE(vend.q, 0) - COALESCE(enc.q, 0), 0),
@@ -618,9 +619,10 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
     let hoje = fiscal::hoje(conn)?;
     let mut c = conn.prepare(
         "WITH est AS (SELECT produto_id, SUM(quantidade) AS q FROM estoque_movimento GROUP BY produto_id),
-              uv AS (SELECT vi.produto_id, MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
+              uv AS (SELECT COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id) AS produto_id,
+                            MAX(v.criado_em) AS u FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
                       WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND vi.produto_id IS NOT NULL
-                      GROUP BY vi.produto_id),
+                      GROUP BY 1),
               ue AS (SELECT produto_id, MAX(criado_em) AS u FROM estoque_movimento
                       WHERE tipo IN ('compra', 'inicial') GROUP BY produto_id)
          SELECT p.id, p.codigo, p.nome, p.marca, p.unidade, p.local, est.q, p.custo,

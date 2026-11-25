@@ -112,9 +112,9 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
     let (col_op, val_op) = if com_operacao { (", operacao_id", ", rustinho_operacao()") } else { ("", "") };
     for tabela in TABELAS {
         let (todas, chave) = colunas(conn, tabela)?;
-        // Banco de estrutura antiga (migrado só até uma estrutura velha, nos testes de atualização): a tabela que
-        // ainda não existe não tem gatilho; os dela são criados quando a migração a criar e o banco abrir.
-        if todas.is_empty() {
+        // Banco de estrutura antiga, só nos testes de atualização (migrado até uma estrutura velha): a tabela que
+        // ainda não existe não tem gatilho. Fora dos testes, tabela sem coluna continua sendo erro (B8 da R7).
+        if todas.is_empty() && cfg!(test) {
             continue;
         }
         if chave.is_empty() {

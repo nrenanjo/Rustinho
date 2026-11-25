@@ -2417,6 +2417,9 @@ pub fn estornar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             continue;
         }
         if let Some(pid) = &it.produto_id {
+            // B3 da R7 (item 9 do desenho v3): o saldo e o registro são os da peça que ficou, se a peça foi juntada.
+            let raiz = estoque::raiz(conn, pid)?;
+            let pid = &raiz;
             let texto_motivo = format!("Estorno da compra NF {} · {motivo}", cab.numero);
             let antes = estoque::saldo(conn, pid)?;
             estoque::lancar(conn, dispositivo, Some(usuario_id), pid, -it.pecas(), "estorno_compra", &texto_motivo)?;

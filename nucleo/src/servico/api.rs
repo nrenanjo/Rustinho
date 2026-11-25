@@ -3070,7 +3070,15 @@ pub(crate) fn juncao_para_completar(conn: &rusqlite::Connection, d: &str) -> Res
              Diferenças: o estoque vai sozinho para a peça escolhida.",
         ));
     }
-    crate::estoque::raiz(conn, d)
+    // B1 da R7: na raiz de um círculo (duas peças juntadas uma na outra), completar juntaria a peça nela mesma.
+    let raiz = crate::estoque::raiz(conn, d)?;
+    if raiz == d {
+        return Err(Erro::validacao(
+            "Esta peça está num círculo de junções (duas peças juntadas uma na outra em caixas sem rede). Reative a que \
+             deve ficar e complete a junção na outra.",
+        ));
+    }
+    Ok(raiz)
 }
 
 /// R13: junta D em K (K já é a raiz). Cada parte pelo módulo dono da tabela; tudo idempotente para o mesmo par.
@@ -3089,6 +3097,7 @@ pub(crate) fn juntar_pecas(
     let compras = crate::compras::passar_para_juncao(conn, d, k)?;
     let orcamentos = crate::vendas::passar_para_juncao(conn, d, k)?;
     let pendencias = crate::compras::pendencias::passar_para_juncao(conn, d, k)?;
+    let ordens = crate::oficina::passar_para_juncao(conn, d, k)?;
     let estoque = crate::estoque::passar_por_juncao(conn, disp, d, k)?;
     let nome = |id: &str| -> Resultado<String> {
         Ok(conn.query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [id], |l| l.get(0))?)
@@ -3102,6 +3111,7 @@ pub(crate) fn juntar_pecas(
         (compras, "item(ns) de compra em rascunho"),
         (orcamentos, "item(ns) de orçamento aberto"),
         (pendencias, "pendência(s) do XML"),
+        (ordens, "item(ns) de OS aberta"),
     ] {
         if n > 0 {
             feito.push(format!("{n} {o_que} passaram para a peça que fica"));

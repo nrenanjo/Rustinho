@@ -403,18 +403,24 @@ fn linhas_das_formas(somas: Vec<SomaDaForma>, total: i64) -> Vec<Linha> {
         .collect()
 }
 
+/// Só nos testes: os mais vendidos de todo o período.
+#[cfg(test)]
+pub(crate) fn mais_vendidos_para_teste(conn: &Connection) -> Resultado<Vec<Linha>> {
+    pecas_periodo(conn, "2000-01-01", "2999-12-31", 10)
+}
+
 fn pecas_periodo(conn: &Connection, de: &str, ate: &str, limite: i64) -> Resultado<Vec<Linha>> {
     let mut c = conn.prepare(
         "SELECT COALESCE(p.nome, vi.descricao), COALESCE(p.marca, ''), COALESCE(p.unidade, vi.unidade),
                 SUM(vi.quantidade - COALESCE(dv.q, 0)), SUM(vi.total - COALESCE(dv.v, 0))
            FROM venda_item vi JOIN venda v ON v.id = vi.venda_id
-           LEFT JOIN produto p ON p.id = vi.produto_id
+           LEFT JOIN produto p ON p.id = COALESCE((SELECT r.raiz FROM produto_raiz r WHERE r.produto_id = vi.produto_id), vi.produto_id)
            LEFT JOIN (SELECT di.venda_item_id, SUM(di.quantidade) AS q, SUM(di.valor_item) AS v
                         FROM devolucao_item di JOIN devolucao d ON d.id = di.devolucao_id
                        WHERE d.cancelado_em IS NULL GROUP BY di.venda_item_id) dv ON dv.venda_item_id = vi.id
           WHERE v.tipo = 'venda' AND v.situacao = 'concluida' AND v.criado_em >= ?3
             AND date(v.criado_em, 'localtime') BETWEEN ?1 AND ?2
-          GROUP BY COALESCE(vi.produto_id, vi.descricao)
+          GROUP BY COALESCE(p.id, vi.descricao)
          HAVING SUM(vi.quantidade - COALESCE(dv.q, 0)) > 0
           ORDER BY SUM(vi.total - COALESCE(dv.v, 0)) DESC
           LIMIT ?4",

@@ -999,6 +999,14 @@ mod comandos {
     }
 }
 
+/// R13 (DP-42): as encomendas ainda não entregues (nem canceladas) da peça juntada (D) passam para a raiz (K).
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    Ok(conn.execute(
+        "UPDATE encomenda SET produto_id = ?2 WHERE produto_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
+        rusqlite::params![d, k],
+    )?)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -1220,12 +1228,4 @@ mod testes {
         assert_eq!(codificar("Olá, Ana!"), "Ol%C3%A1%2C%20Ana%21");
         assert_eq!(primeiro_nome("JOÃO DA SILVA"), "João");
     }
-}
-
-/// R13 (DP-42): as encomendas ainda não entregues (nem canceladas) da peça juntada (D) passam para a raiz (K).
-pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
-    Ok(conn.execute(
-        "UPDATE encomenda SET produto_id = ?2 WHERE produto_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
-        rusqlite::params![d, k],
-    )?)
 }

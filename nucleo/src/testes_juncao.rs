@@ -566,3 +566,136 @@ fn r13_rascunho_que_chega_depois_da_juncao_lanca_na_que_ficou() {
     assert_eq!(texto(c, "SELECT produto_id FROM compra_item WHERE compra_id = ?1 AND acao = 'ligar'", &compra), k);
     assert_eq!(saldo(c, &d), 0);
 }
+
+// ---------------------------------------------------------------- revisão R7
+
+/// M-1 da R7: escolher a junção em disputa só desfaz a passagem da própria D; a entrada de outra peça X já juntada
+/// na peça que perdeu fica (antes: a volta levava também as 4 de X para D e o Completar as mandava para a escolhida).
+#[test]
+fn r7_m1_escolher_nao_desfaz_a_juncao_de_outra_peca() {
+    let (mut a, mut b, u, d, k) = dois();
+    let nova = |a: &Banco, nome: &str, q: &str| {
+        let mut f = produtos::ficha_nova(&a.conn).unwrap();
+        f.nome = nome.into();
+        f.custo = "10".into();
+        f.estoque_inicial = q.into();
+        produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap()
+    };
+    let k2 = nova(&a, "Amortecedor K2", "0");
+    let x = nova(&a, "Amortecedor X", "4");
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &x, &k, false);
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &d, &k, false);
+    juntar(&mut b, &u, &d, &k2, false);
+    trocar(&mut a, &mut b);
+    let mut s = crate::Servico::com_banco_para_teste(a);
+    ok(&mut s, "entrar", json!({ "id": u, "senha": "1234" }));
+    ok(&mut s, "produto_juncao_escolher", json!({ "produtoId": d, "paraId": k2 }));
+    let a = s.banco_para_teste();
+    trocar(a, &mut b);
+    for c in [&a.conn, &b.conn] {
+        assert_eq!((saldo(c, &d), saldo(c, &x), saldo(c, &k), saldo(c, &k2)), (0, 0, 6000, 3000));
+    }
+}
+
+/// M-2 da R7: dois gerentes diferentes juntam o mesmo par sem rede, em segundos diferentes: a troca não cria
+/// "Junção em disputa" falsa nem conflito na peça; o estoque passa uma vez só.
+#[test]
+fn r7_m2_dois_gerentes_juntam_o_mesmo_par_sem_conflito() {
+    let (mut a, mut b, u, d, k) = dois();
+    let bia = usuarios::criar(&a.conn, &a.dispositivo, "Bia", "1234", true).unwrap().id;
+    usuarios::definir_gerente(&a.conn, &bia, true).unwrap();
+    trocar(&mut a, &mut b);
+    juntar(&mut a, &u, &d, &k, false);
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    juntar(&mut b, &bia, &d, &k, false);
+    trocar(&mut a, &mut b);
+    for x in [&a, &b] {
+        assert_eq!(
+            conflitos(x),
+            0,
+            "{:?}",
+            sync::conflitos(&x.conn).unwrap().iter().map(|c| &c.texto).collect::<Vec<_>>()
+        );
+        assert_eq!((saldo(&x.conn, &k), saldo(&x.conn, &d)), (5000, 0));
+    }
+}
+
+/// B1 da R7: completar a junção na raiz de um círculo é recusado (antes: juntava a peça nela mesma, apagando
+/// aplicações e códigos de barras e desativando a peça).
+#[test]
+fn r7_b1_completar_na_raiz_de_um_circulo_recusa() {
+    let (mut a, mut b, u, d, k) = dois();
+    juntar(&mut a, &u, &d, &k, false);
+    juntar(&mut b, &u, &k, &d, false);
+    trocar(&mut a, &mut b);
+    let raiz = estoque::raiz(&a.conn, &d).unwrap();
+    assert_eq!(raiz, std::cmp::min(d.clone(), k.clone()), "no círculo, a raiz é o menor id");
+    let e = crate::api::juncao_para_completar(&a.conn, &raiz).unwrap_err();
+    assert!(e.to_string().contains("círculo"), "{e}");
+}
+
+/// B5 da R7: o ajuste de estoque feito na ficha da peça juntada conta o estoque da peça que ficou (antes: calculava
+/// contra o saldo 0 de D e lançava a contagem inteira a mais em K).
+#[test]
+fn r7_b5_ajuste_na_ficha_da_juntada_vale_para_a_que_ficou() {
+    let (mut a, _b, u, d, k) = dois();
+    juntar(&mut a, &u, &d, &k, false);
+    estoque::ajustar(&a.conn, &a.dispositivo.clone(), &u, &d, "4", "Contagem").unwrap();
+    assert_eq!((saldo(&a.conn, &k), saldo(&a.conn, &d)), (4000, 0));
+}
+
+/// B5 da R7: a OS aberta com a peça juntada passa para a que ficou; e as vendas de D contam para K no "O que
+/// comprar" e no "Mais vendidos".
+#[test]
+fn r7_b5_os_aberta_e_vendas_de_d_contam_para_k() {
+    use crate::oficina;
+    let (mut a, _b, u, d, k) = dois();
+    let disp = a.dispositivo.clone();
+    let os = oficina::salvar_rascunho(
+        &a.conn,
+        &disp,
+        &u,
+        &oficina::Entrada {
+            cliente_nome: "Carlos".into(),
+            itens: vec![oficina::ItemEntradaOs {
+                tipo: "peca".into(),
+                produto_id: d.clone(),
+                quantidade: "1".into(),
+                preco: "10".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // Uma venda antiga de D (antes da junção).
+    a.conn
+        .execute(
+            "INSERT INTO venda (id, numero, dispositivo, caixa_nome, tipo, situacao, subtotal, total, criado_em)
+             VALUES ('v-d', 1, 'disp', 'Caixa 1', 'venda', 'concluida', 1000, 1000, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+            [],
+        )
+        .unwrap();
+    a.conn
+        .execute(
+            "INSERT INTO venda_item (id, venda_id, ordem, produto_id, codigo, descricao, unidade, quantidade, preco, desconto, total)
+             VALUES ('vi-d', 'v-d', 1, ?1, '', 'Amortecedor D', 'UN', 2000, 500, 0, 1000)",
+            [&d],
+        )
+        .unwrap();
+    juntar(&mut a, &u, &d, &k, false);
+    let c = &a.conn;
+    assert_eq!(texto(c, "SELECT produto_id FROM ordem_servico_item WHERE ordem_id = ?1", &os), k);
+    let vendidas: i64 = c
+        .query_row("SELECT COUNT(*) FROM produto_raiz WHERE produto_id = ?1 AND raiz = ?2", [&d, &k], |l| l.get(0))
+        .unwrap();
+    assert_eq!(vendidas, 1, "a visão produto_raiz leva D a K");
+    let mais = crate::painel::mais_vendidos_para_teste(c).unwrap();
+    assert!(
+        mais.iter().any(|l| l.nome.starts_with("Amortecedor K") && l.detalhe.starts_with("2 ")),
+        "{:?}",
+        mais.iter().map(|l| (&l.nome, &l.detalhe)).collect::<Vec<_>>()
+    );
+}
