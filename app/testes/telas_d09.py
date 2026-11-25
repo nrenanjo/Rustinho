@@ -324,6 +324,10 @@ def main():
             r = Rustinho(pasta, tela, props, fotos, nome)
             try:
                 r.entrar(usuario)
+                # OLHO-1 (25/11/2026): com o olho fechado (o padrão ao entrar), custo e margem
+                # somem para todos. A D-09 é sobre quem pode ver: confere com o olho aberto.
+                if r.clicar("Mostrar valores"):
+                    time.sleep(1)
                 tudo_certo &= conferir(nome, r.foto(), r.textos(), **c)
             finally:
                 r.fechar()

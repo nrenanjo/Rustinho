@@ -180,6 +180,11 @@ def desabilitado(modelo, fotos, res, nome_tema):
             base.xdo("key", "Return")
             time.sleep(1.5)
         rr.clicar("Vendas")
+        # OLHO-1 (25/11/2026): com o olho fechado, o lucro sugerido some com o título;
+        # o estado "desabilitado" se confere com o olho aberto.
+        time.sleep(1)
+        if rr.clicar("Mostrar valores"):
+            time.sleep(1)
         time.sleep(1.5)
         g = u.geos(rr.textos())
         lucro, nome = g.get("campoLucroTabelaCaixa"), g.get("campoNomeTabelaCaixa")

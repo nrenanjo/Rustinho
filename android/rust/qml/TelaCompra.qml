@@ -629,6 +629,8 @@ FocusScope {
                             onToggled: tela.gravar(-1, {})
                         }
                         RowLayout {
+                            // OLHO-1: o custo some com o título com o olho fechado.
+                            visible: !Tema.oculto
                             Layout.fillWidth: true
                             Layout.topMargin: 4
                             Rotulo { text: "Custo das peças"; Layout.fillWidth: true }

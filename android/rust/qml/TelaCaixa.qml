@@ -55,6 +55,8 @@ FocusScope {
         spacing: 12
 
         Cabecalho {
+            // OLHO-1: o botão do olho no Caixa (o saldo e os totais ficam discretos no atendimento).
+            sensivel: true
             titulo: "Caixa"
             subtitulo: !tela.estado ? "" : tela.aberto
                        ? tela.estado.caixa + " · aberto " + tela.hora(tela.r.sessao.abertoEm) + " por " + tela.r.sessao.abertoPor
@@ -156,7 +158,9 @@ FocusScope {
                         corTitulo: Tema.verdeEscuro
                         Layout.fillWidth: true
                         Text {
-                            text: tela.r ? "R$ " + tela.r.esperado : ""
+                            // OLHO-1: o saldo fica discreto com o olho fechado. O fechamento do caixa
+                            // (a janela "Fechar o caixa") não usa o olho.
+                            text: tela.r ? "R$ " + Tema.valor(tela.r.esperado) : ""
                             textFormat: Text.PlainText
                             color: Tema.tinta
                             font.family: Tema.texto
@@ -197,7 +201,8 @@ FocusScope {
                                     Layout.fillWidth: true
                                 }
                                 Text {
-                                    text: modelData[1]
+                                    // OLHO-1: os totais ficam discretos com o olho fechado.
+                                    text: Tema.sigiloTexto(modelData[1])
                                     textFormat: Text.PlainText
                                     color: Tema.tinta
                                     font.family: Tema.texto
@@ -234,7 +239,7 @@ FocusScope {
                                     y: 4
                                     width: faixaDaLista.width - 16
                                     text: Qt.formatTime(new Date(modelData.quando), "HH:mm") + " · " + (modelData.tipo === "sangria" ? "Sangria" : "Suprimento")
-                                          + " R$ " + modelData.valor + " · " + modelData.motivo + " · " + modelData.usuario
+                                          + " R$ " + Tema.valor(modelData.valor) + " · " + modelData.motivo + " · " + modelData.usuario
                                     font.pixelSize: 14
                                 }
                             }
@@ -305,6 +310,7 @@ FocusScope {
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
                     delegate: LinhaVenda {
+                        discreto: true
                         required property var modelData
                         required property int index
                         width: lista.width

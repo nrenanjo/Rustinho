@@ -1427,7 +1427,8 @@ FocusScope {
                         Layout.fillWidth: true
                         Rotulo { text: "Nº"; Layout.preferredWidth: 30 }
                         Rotulo { text: "Nome da tabela"; Layout.fillWidth: true }
-                        Rotulo { text: "Lucro sugerido"; Layout.preferredWidth: 150 }
+                        // OLHO-1: o lucro sugerido some com o título com o olho fechado.
+                        Rotulo { visible: !Tema.oculto; text: "Lucro sugerido"; Layout.preferredWidth: 150 }
                     }
                     Repeater {
                         id: tabelas
@@ -1475,6 +1476,7 @@ FocusScope {
                             Campo {
                                 id: lucroTabela
                                 objectName: "campoLucroTabela"
+                                visible: !Tema.oculto
                                 texto: linhaTabela.modelData.lucroPadrao
                                 enabled: !!tela.config && tela.config.verLucro
                                 sufixo: "%"

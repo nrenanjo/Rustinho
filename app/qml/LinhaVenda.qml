@@ -8,6 +8,9 @@ Rectangle {
     property var item: ({})
     property int indice: 0
     property bool atual: false
+    // OLHO-1: no Caixa, o valor da venda fica discreto com o olho fechado (em Trocas e
+    // Orçamentos, não).
+    property bool discreto: false
 
     signal abrir()
 
@@ -95,7 +98,7 @@ Rectangle {
             }
         }
         Text {
-            text: "R$ " + linha.item.total
+            text: "R$ " + (linha.discreto ? Tema.valor(linha.item.total) : linha.item.total)
             textFormat: Text.PlainText
             color: linha.corTexto
             font.family: Tema.texto

@@ -44,7 +44,8 @@ RowLayout {
 
     Campo {
         id: lucro
-        visible: linha.verLucro
+        // OLHO-1: com o olho fechado, o % de lucro some com o título; o preço fica.
+        visible: linha.verLucro && !Tema.oculto
         sensivel: true
         rotulo: linha.destaque ? "% sobre o custo" : linha.nome
         sufixo: "%"

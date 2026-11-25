@@ -263,6 +263,8 @@ Rectangle {
                     ColumnLayout {
                         spacing: 0
                         Text {
+                            // OLHO-1: o custo some com o título com o olho fechado.
+                            visible: !Tema.oculto
                             text: "Custo R$ " + Tema.valor(linha.item.custoUnitario) + " cada"
                             textFormat: Text.PlainText
                             color: Tema.tinta
@@ -272,7 +274,7 @@ Rectangle {
                             Layout.alignment: Qt.AlignRight
                         }
                         Text {
-                            visible: linha.editavel && !!linha.peca && linha.peca.custoAtual !== ""
+                            visible: !Tema.oculto && linha.editavel && !!linha.peca && linha.peca.custoAtual !== ""
                             text: linha.peca ? "antes R$ " + Tema.valor(linha.peca.custoAtual) + (linha.peca.variacaoCusto && !Tema.oculto ? "  (" + linha.peca.variacaoCusto + "%)" : "") : ""
                             textFormat: Text.PlainText
                             color: linha.peca && linha.peca.custoSubiu ? Tema.vermelho : Tema.tintaSuave

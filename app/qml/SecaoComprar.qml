@@ -148,6 +148,8 @@ FocusScope {
                     corValor: Tema.verdeEscuro
                 }
                 CartaoNumero {
+                    // OLHO-1: o custo some com o título com o olho fechado.
+                    visible: !Tema.oculto
                     rotulo: "Custo estimado"
                     sensivel: true
                     valor: secao.dados ? secao.dados.custoTotal : ""
@@ -486,7 +488,8 @@ FocusScope {
                         corTexto: lp.p.prioridade === "minimo" ? Tema.tintaSuave : Tema.vermelho
                     }
                     Text {
-                        text: [lp.p.tem, lp.p.ritmo, lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : ""]
+                        // OLHO-1: com o olho fechado, o custo some da linha.
+                        text: [lp.p.tem, lp.p.ritmo, lp.p.custoTotal !== "0,00" && !Tema.oculto ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : ""]
                               .filter(x => !!x).join(" · ")
                         textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)
@@ -582,6 +585,8 @@ FocusScope {
                         Layout.alignment: Qt.AlignRight
                     }
                     Text {
+                        // OLHO-1: com o olho fechado, o custo some com o rótulo.
+                        visible: !Tema.oculto
                         text: lp.p.custoTotal !== "0,00" ? "≈ R$ " + Tema.valor(lp.p.custoTotal) : "sem custo"
                         textFormat: Text.PlainText
                         color: Tema.tintaSuaveDaFaixa(lp.par)

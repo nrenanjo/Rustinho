@@ -1120,7 +1120,9 @@ FocusScope {
 
                         Campo {
                             id: campoCusto
-                            visible: tela.verCustos
+                            // OLHO-1 (decisão do proprietário, 25/11/2026): com o olho fechado, o custo
+                            // some com o título, e o preço sobe para o lugar dele.
+                            visible: tela.verCustos && !Tema.oculto
                             sensivel: true
                             rotulo: "Custo"
                             prefixo: "R$"
