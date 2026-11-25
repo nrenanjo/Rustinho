@@ -28,7 +28,9 @@ fn r8_n5_ajustar_nao_aparece_na_ficha_da_peca_juntada() {
         .lines()
         .find(|l| l.trim_start().starts_with("visible:"))
         .unwrap_or_else(|| panic!("o Ajustar não tem visible:\n{bloco}"));
-    assert!(visivel.contains("!tela.ficha.juntadaCom"), "o Ajustar some na peça juntada: {visivel}");
+    // R9-B3: a linha inteira (a inversão `!!tela.ficha.juntadaCom` contém o mesmo trecho e sumiria com o Ajustar das
+    // peças comuns).
+    assert_eq!(visivel.trim(), "visible: !!tela.ficha && !tela.ficha.juntadaCom", "o Ajustar some só na peça juntada");
 }
 
 #[test]

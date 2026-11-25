@@ -968,3 +968,20 @@ fn r8_n4_estorno_de_compra_depois_da_juncao_registra_na_que_ficou() {
         0
     );
 }
+
+/// R9-B4: a junção gravada com data e autor (bancos de antes do M-2) é normalizada ao escolher a mesma peça, para
+/// ficar igual à dos outros caixas.
+#[test]
+fn r9_b4_escolher_normaliza_a_juncao_antiga_com_data_e_autor() {
+    let (mut a, _b, u, d, k) = dois();
+    juntar(&mut a, &u, &d, &k, false);
+    a.conn
+        .execute("UPDATE produto_juncao SET em = '2026-11-20T10:00:00Z', por = ?2 WHERE produto_id = ?1", [&d, &u])
+        .unwrap();
+    assert!(produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "a linha antiga muda");
+    assert_eq!(
+        texto(&a.conn, "SELECT em || '|' || COALESCE(por, '-') FROM produto_juncao WHERE produto_id = ?1", &d),
+        "|-"
+    );
+    assert!(!produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "de novo, nada muda");
+}
