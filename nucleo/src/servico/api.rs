@@ -55,8 +55,18 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
 /// registro (auditoria) do cadastro.
 /// "desconto_e_comissao" (R4 / D-AUD-4, decisão de 25/11/2026): mudar o
 /// desconto máximo ou a comissão da peça.
-const SEMPRE_DO_GERENTE: &[&str] =
-    &["gerente", "precos", "simultaneidade", "limite_credito", "unidade_fracionada", "csosn", "desconto_e_comissao"];
+/// "pendencia_xml" (R6 / D-AUD-5, com a DP-13 na alternativa recomendada):
+/// descartar uma pendência de identificação do XML, com motivo.
+const SEMPRE_DO_GERENTE: &[&str] = &[
+    "gerente",
+    "precos",
+    "simultaneidade",
+    "limite_credito",
+    "unidade_fracionada",
+    "csosn",
+    "desconto_e_comissao",
+    "pendencia_xml",
+];
 
 /// Nome da ação para as mensagens.
 fn nome_da_acao(acao: &str) -> String {
@@ -68,6 +78,7 @@ fn nome_da_acao(acao: &str) -> String {
         "unidade_fracionada" => "criar uma unidade fracionada".into(),
         "csosn" => "mudar o CSOSN da peça".into(),
         "desconto_e_comissao" => "mudar o desconto máximo ou a comissão da peça".into(),
+        "pendencia_xml" => "descartar uma pendência de identificação do XML".into(),
         _ => ACOES_DO_GERENTE
             .iter()
             .find(|(id, _)| *id == acao)
@@ -121,10 +132,17 @@ fn acao_de_consulta(acao: &str) -> Resultado<&'static str> {
 /// algo que é: produto_salvar e compra_lancar, quando mudam o preço de venda
 /// de uma peça cadastrada (D-09; 0915-N na compra); produto_salvar também no
 /// desconto máximo, na comissão (R4) e no CSOSN (R24); pessoa_salvar, no
-/// limite de crédito; unidade_salvar, na unidade fracionada; e
-/// fiscal_automatico, que troca o CSOSN das peças pelo automático (R24).
-const AS_VEZES_DO_GERENTE: &[&str] =
-    &["produto_salvar", "compra_lancar", "pessoa_salvar", "unidade_salvar", "fiscal_automatico"];
+/// limite de crédito; unidade_salvar, na unidade fracionada;
+/// fiscal_automatico, que troca o CSOSN das peças pelo automático (R24); e
+/// xml_pendencia_resolver, ao descartar a pendência (R6).
+const AS_VEZES_DO_GERENTE: &[&str] = &[
+    "produto_salvar",
+    "compra_lancar",
+    "pessoa_salvar",
+    "unidade_salvar",
+    "fiscal_automatico",
+    "xml_pendencia_resolver",
+];
 
 /// O comando pode pedir a senha do gerente? (os do gerente e os que só às
 /// vezes pedem, veja `AS_VEZES_DO_GERENTE`.)
@@ -142,6 +160,7 @@ fn nome_da_liberacao(comando: &str) -> String {
         "pessoa_salvar" => nome_da_acao("limite_credito"),
         "unidade_salvar" => nome_da_acao("unidade_fracionada"),
         "fiscal_automatico" => "passar o CSOSN das peças para automático".into(),
+        "xml_pendencia_resolver" => nome_da_acao("pendencia_xml"),
         _ => nome_da_acao(acao_do_comando(comando).unwrap_or("precos")),
     }
 }

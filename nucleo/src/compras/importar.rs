@@ -2043,12 +2043,23 @@ fn resumir(conn: &Connection, lido: &Lido, d: &Decisoes) -> Resultado<Resumo> {
     })
 }
 
+/// R7 (D-AUD-6, decisão do proprietário de 25/11/2026): as tabelas cujas mudanças vencem a prévia: peças (com
+/// preços, aplicações, equivalentes e unidades), pessoas e códigos (GTIN, códigos de fornecedor, códigos antigos e
+/// faixas de códigos). Uma venda, um recebimento ou qualquer outra gravação não vence mais.
+const TABELAS_DA_PREVIA: &str = "'produto', 'produto_preco', 'produto_aplicacao', 'produto_equivalente', \
+     'produto_fornecedor', 'produto_codigo_antigo', 'produto_gtin', 'faixa_codigo', 'unidade', 'pessoa', \
+     'pessoa_veiculo'";
+
 /// P-4: o carimbo de uma prévia. Muda se mudam as opções, o conteúdo dos
-/// arquivos lidos ou os cadastros (a fila de alterações da troca anda a cada
-/// gravação de peça, pessoa, GTIN ou vínculo).
+/// arquivos lidos ou os cadastros (R7: só as peças, as pessoas e os códigos; a
+/// fila de alterações da troca anda a cada gravação delas).
 fn carimbo(conn: &Connection, e: &Opcoes, lido: &Lido) -> Resultado<String> {
     use sha2::Digest;
-    let seq: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM alteracao", [], |l| l.get(0))?;
+    let seq: i64 = conn.query_row(
+        &format!("SELECT COALESCE(MAX(seq), 0) FROM alteracao WHERE tabela IN ({TABELAS_DA_PREVIA})"),
+        [],
+        |l| l.get(0),
+    )?;
     let mut h = sha2::Sha256::new();
     h.update([e.clientes as u8, e.fornecedores as u8, e.pecas_loja as u8, e.pecas_fornecedor as u8, e.compras as u8]);
     h.update(lido.assinatura);
@@ -2144,6 +2155,8 @@ pub struct ResolverPendencia {
     pub codigo_fornecedor: String,
     pub codigo_barras: String,
     pub unidade: String,
+    /// R6: o motivo de "descartar".
+    pub motivo: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2334,6 +2347,11 @@ pub fn resolver_pendencia(
 ) -> Resultado<PendenciaResolvida> {
     if d.id.trim().is_empty() {
         return Err(Erro::validacao("Escolha a pendência de identificação."));
+    }
+    // R6 (D-AUD-5): descartar, com o motivo (a permissão do gerente é conferida no comando).
+    if d.acao == "descartar" {
+        crate::compras::pendencias::descartar(conn, dispositivo, usuario_id, &d.id, &d.motivo)?;
+        return Ok(PendenciaResolvida { produto_id: String::new(), pendentes: contar_pendencias_ou_erro(conn)? });
     }
     /// A pendência como a resolução lê (A16: no lugar da tupla de 16 campos).
     struct PendenciaGravada {
@@ -2686,6 +2704,10 @@ mod comandos {
 
     fn xml_pendencia_resolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: importar::ResolverPendencia = ler(dados)?;
+        // R6 (D-AUD-5) e DP-13 (alternativa recomendada): descartar a pendência é do gerente, com motivo.
+        if d.acao == "descartar" {
+            p.exigir("pendencia_xml")?;
+        }
         let tx = p.conn.transaction()?;
         let r = importar::resolver_pendencia(&tx, p.disp, p.usuario_id, &d)?;
         let resposta = json!(r);

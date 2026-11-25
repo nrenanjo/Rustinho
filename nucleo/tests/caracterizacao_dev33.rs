@@ -183,20 +183,42 @@ fn pend36_resolver_pendencia_nao_transfere_vinculo_em_silencio() {
     );
 }
 
-/// PEND-37 — a pendência não tem encerramento por descarte (só "resolvida").
-/// Quem descarta e a categoria do aviso são da DP-13; aqui é o gerente, com
-/// motivo, o que vale em qualquer alternativa da DP-13.
+/// PEND-37 → R6 (D-AUD-5, decisão do proprietário de 25/11/2026), com a DP-13 na alternativa recomendada (o
+/// gerente, com motivo e registro): a pendência de identificação pode ser descartada. Sem motivo, não; a caixa
+/// precisa da senha do gerente; descartada, sai da lista, e o registro guarda o que ela dizia e o motivo.
 #[test]
-#[ignore = "caracterização PEND-37: não há descarte em 4b253c6; passa no passo 4.5 (DP-13, DP-48)"]
-fn pend37_gerente_descarta_pendencia_com_motivo() {
+fn pend37_r6_gerente_descarta_pendencia_com_motivo() {
     let mut l = loja("pend37");
     importar_so_fornecedor(&mut l);
-    let antes = l.numero("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'");
+    let abertas = |l: &mut Loja| l.numero("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'");
+    let antes = abertas(&mut l);
     let pend = pendencia(&mut l, "OL5W30");
-    let r = l.chamar("xml_pendencia_resolver", json!({ "id": pend, "acao": "descartar", "motivo": "Uso e consumo" }));
-    assert_eq!(r["ok"], true, "o gerente não consegue descartar a pendência com motivo: {r}");
-    let depois = l.numero("SELECT COUNT(*) FROM xml_pendencia_identificacao WHERE situacao = 'pendente'");
-    assert_eq!(depois, antes - 1, "a pendência descartada continua aberta");
+    // Sem motivo, não.
+    let r = l.chamar("xml_pendencia_resolver", json!({ "id": pend, "acao": "descartar", "motivo": "  " }));
+    assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("motivo")), "{r}");
+    // A caixa precisa da senha do gerente.
+    l.usuario_caixa("Bia", SENHA_BIA);
+    l.entrar("Bia", SENHA_BIA);
+    let pedido = json!({ "id": pend, "acao": "descartar", "motivo": "Uso e consumo" });
+    let r = l.chamar("xml_pendencia_resolver", pedido.clone());
+    assert_eq!((r["ok"].clone(), r["campo"].clone()), (json!(false), json!("gerente")), "{r}");
+    assert_eq!(abertas(&mut l), antes, "nada descartado sem a senha");
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "comando": "xml_pendencia_resolver", "dados": pedido }));
+    l.ok("xml_pendencia_resolver", pedido);
+    assert_eq!(abertas(&mut l), antes - 1, "a pendência descartada continua aberta");
+    // O registro guarda o que ela dizia e o motivo.
+    let det: String = l
+        .conexao()
+        .query_row(
+            "SELECT detalhes FROM auditoria WHERE acao = 'xml_pendencia.descartar' AND entidade_id = ?1",
+            [&pend],
+            |x| x.get(0),
+        )
+        .unwrap();
+    assert!(det.contains("OL5W30") && det.contains("Motivo: Uso e consumo"), "{det}");
+    // Descartar de novo: já foi.
+    let m = l.erro("xml_pendencia_resolver", json!({ "id": pend, "acao": "descartar", "motivo": "de novo" }));
+    assert!(m.contains("já foi resolvida ou descartada") || m.contains("Só o gerente"), "{m}");
 }
 
 /// PEND-40 — a busca por código original pega as 5 primeiras peças do índice

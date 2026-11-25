@@ -45,6 +45,8 @@ Painel {
     property string pecaDesativadaId: ""
     // T111 (Regra 3): corrigir identificação do registro provisório sem redigitar o restante do XML.
     property bool corrigindoIdentificacao: false
+    // R6 (D-AUD-5, decisão do proprietário de 25/11/2026): descartando a pendência aberta (pede o motivo).
+    property bool descartando: false
     // A aba de importar, já com a senha (ou sem precisar dela).
     readonly property bool naImportacao: aba === "importar" && liberada
     // T058 (pedido do proprietário, 20/11/2026): com uma pendência aberta e
@@ -169,6 +171,9 @@ Painel {
         erro = ""
         pecaDesativadaId = ""
         corrigindoIdentificacao = false
+        descartando = false
+        motivoDescarte.texto = ""
+        motivoDescarte.erro = ""
         campoCorrNome.texto = p ? (p.descricao || "") : ""
         campoCorrNome.erro = ""
         campoCorrCodigo.texto = p ? (p.codigoFornecedor || "") : ""
@@ -215,6 +220,28 @@ Painel {
         janela.avisar(comCorrecao ? "Identificação corrigida, peça cadastrada e associada ao fornecedor."
                                   : "Peça cadastrada e associada ao fornecedor.", "ok")
         painel.importou()
+    }
+
+    // R6: descarta a pendência aberta com o motivo; é do gerente (a caixa recebe o pedido da senha).
+    function descartarPendencia() {
+        if (!pendenciaAberta)
+            return
+        erro = ""
+        motivoDescarte.erro = ""
+        janela.chamarGerente("xml_pendencia_resolver",
+                             { id: pendenciaAberta.id, acao: "descartar", motivo: motivoDescarte.texto }, r => {
+            if (!r.ok) {
+                if (r.campo === "motivo")
+                    motivoDescarte.erro = r.erro
+                else
+                    erro = r.erro
+                return
+            }
+            descartando = false
+            pendenciaAberta = null
+            carregarPendencias()
+            janela.avisar("Pendência descartada. O motivo ficou no histórico.", "ok")
+        }, chavePendencia)
     }
 
     function resolverLigando(produtoId) {
@@ -972,6 +999,49 @@ Painel {
                                             campoCorrNome.erro = ""
                                             campoCorrCodigo.erro = ""
                                             campoCorrBarras.erro = ""
+                                        }
+                                    }
+                                    // R6: descartar, com o motivo (o mesmo botão desiste).
+                                    Botao {
+                                        objectName: "descartarPendencia"
+                                        text: painel.descartando ? "Não descartar" : "Descartar"
+                                        tipo: "discreto"
+                                        onClicked: {
+                                            painel.descartando = !painel.descartando
+                                            painel.erro = ""
+                                            motivoDescarte.erro = ""
+                                            if (painel.descartando)
+                                                motivoDescarte.focar()
+                                        }
+                                    }
+                                }
+
+                                // R6 (D-AUD-5): o motivo do descarte.
+                                ColumnLayout {
+                                    visible: painel.descartando && !!painel.pendenciaAberta
+                                    spacing: 8
+                                    Layout.fillWidth: true
+                                    Nota {
+                                        text: "A pendência sai da lista. O que ela dizia e o motivo ficam no histórico."
+                                        Layout.fillWidth: true
+                                    }
+                                    Campo {
+                                        id: motivoDescarte
+                                        rotulo: "Motivo do descarte"
+                                        maximo: 200
+                                        dica: "Ex.: uso e consumo, brinde do fornecedor"
+                                        Layout.fillWidth: true
+                                        onConfirmado: painel.descartarPendencia()
+                                    }
+                                    Flow {
+                                        spacing: 10
+                                        Layout.fillWidth: true
+                                        layoutDirection: Qt.RightToLeft
+                                        Botao {
+                                            objectName: "confirmarDescarte"
+                                            text: "Descartar a pendência"
+                                            tipo: "principal"
+                                            onClicked: painel.descartarPendencia()
                                         }
                                     }
                                 }

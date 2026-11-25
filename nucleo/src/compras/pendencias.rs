@@ -7,9 +7,49 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::erro::Resultado;
+use crate::erro::{Erro, Resultado};
 use crate::nfe_xml::ItemXml;
-use crate::{documento, tempo, texto};
+use crate::{auditoria, documento, tempo, texto};
+
+/// R6 (D-AUD-5, decisão do proprietário de 25/11/2026): descarta uma pendência de identificação aberta, com o
+/// motivo. A pendência sai da lista (importar um ano de notas não deixa milhares dela para sempre), e o que ela
+/// dizia (fornecedor, código, descrição, nota) fica no registro, com o motivo e quem descartou. Quem pode: o
+/// gerente (DP-13, alternativa recomendada; a permissão é conferida no comando).
+pub(crate) fn descartar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, motivo: &str) -> Resultado<()> {
+    let motivo = texto::limpar(motivo);
+    if motivo.is_empty() {
+        return Err(Erro::campo("motivo", "Diga por que descartar esta pendência."));
+    }
+    if texto::tamanho(&motivo) > 200 {
+        return Err(Erro::campo("motivo", "Use no máximo 200 letras."));
+    }
+    let linha: Option<(String, String, String, String, String)> = conn
+        .query_row(
+            "SELECT fornecedor_nome, codigo_fornecedor, descricao, numero_nfe, chave_nfe
+               FROM xml_pendencia_identificacao WHERE id = ?1 AND situacao = 'pendente'",
+            [id],
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)),
+        )
+        .optional()?;
+    let Some((fornecedor, codigo, descricao, numero, chave)) = linha else {
+        return Err(Erro::validacao("Esta pendência já foi resolvida ou descartada."));
+    };
+    conn.execute("DELETE FROM xml_pendencia_identificacao WHERE id = ?1", [id])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "xml_pendencia.descartar",
+        "xml_pendencia",
+        id,
+        &[
+            format!("{fornecedor} · código {codigo} · {descricao}"),
+            format!("NF-e {numero} ({chave})"),
+            format!("Motivo: {motivo}"),
+        ],
+    )?;
+    Ok(())
+}
 
 /// Abre a pendência de identificação de um item da nota (ou atualiza a que
 /// já está aberta para o mesmo fornecedor, código e descrição: não duplica).

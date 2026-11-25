@@ -141,6 +141,41 @@ fn escolhas_atuais(compra: &Value) -> Vec<Value> {
 // Por Peças
 // ---------------------------------------------------------------------------
 
+/// R7 (D-AUD-6, decisão do proprietário de 25/11/2026): a prévia do "Trazer cadastros" só vence quando mudam
+/// peças, pessoas ou códigos. Antes, qualquer venda entre a prévia e o "Cadastrar" vencia a prévia ("os cadastros
+/// mudaram") e era preciso refazer.
+#[test]
+fn r7_previa_so_vence_com_mudanca_de_pecas_pessoas_ou_codigos() {
+    let mut l = loja("r7-previa", LOJA_CNPJ);
+    let peca = l.peca("Filtro R7", "10", "20", "5");
+    l.ok("caixa_abrir", json!({ "valor": "0" }));
+    let pasta = pasta(&l, "xml", 1);
+    let previa = |l: &mut Loja| l.ok("importar_previa", json!({ "arquivos": [pasta.clone()] }))["carimbo"].clone();
+    let cadastrar_com = |l: &mut Loja, carimbo: &Value| {
+        l.chamar(
+            "importar_cadastros",
+            json!({ "arquivos": [pasta.clone()], "clientes": true, "fornecedores": true, "pecasLoja": true,
+                    "pecasFornecedor": true, "compras": true, "carimbo": carimbo }),
+        )
+    };
+    let antes = previa(&mut l);
+    // Uma venda entre a prévia e o "Cadastrar": a prévia continua valendo.
+    l.vender(&[(&peca, "1")], &[("dinheiro", "20")]);
+    assert_eq!(previa(&mut l), antes, "a venda venceu a prévia");
+    // Uma pessoa nova: a prévia vence (o "Cadastrar" com ela é recusado, sem gravar nada).
+    let mut f = l.ok("pessoa_nova", json!({ "papel": "cliente" }));
+    f["nome"] = json!("Oficina R7");
+    l.ok("pessoa_salvar", f);
+    let depois = previa(&mut l);
+    assert_ne!(depois, antes, "a pessoa nova não venceu a prévia");
+    let r = cadastrar_com(&mut l, &antes);
+    assert!(r["ok"] == false && r["erro"].as_str().unwrap_or_default().contains("mudaram desde a prévia"), "{r}");
+    assert_eq!(n(&l, "SELECT COUNT(*) FROM compra"), 0, "nada gravado");
+    // Com a prévia nova, cadastra.
+    let r = cadastrar_com(&mut l, &depois);
+    assert_eq!(r["ok"], true, "{r}");
+}
+
 /// A prévia conta a nota de compra que vai para Compras (e a que já está lá), com a categoria do resumo.
 #[test]
 fn a_previa_de_pecas_conta_as_notas_de_compra() {
