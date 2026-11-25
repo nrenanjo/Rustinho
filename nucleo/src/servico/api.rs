@@ -2227,6 +2227,26 @@ impl Servico {
                     sync::salvar_interfaces(&tx, nomes)?;
                 }
                 sync::salvar_ajustes(&tx, d.ligado, &senha, &d.enderecos)?;
+                // B-N4 da revisão R2 (R9): ligar, desligar e trocar a senha da rede ficam no histórico, também quando
+                // é o próprio gerente (a senha nunca é gravada).
+                let mut mudancas: Vec<&str> = Vec::new();
+                if d.ligado != atual.ligado {
+                    mudancas.push(if d.ligado { "troca.ligar" } else { "troca.desligar" });
+                }
+                if senha_nova {
+                    mudancas.push("troca.senha");
+                }
+                for acao in mudancas {
+                    auditoria::registrar(
+                        &tx,
+                        &self.banco.dispositivo,
+                        Some(&sessao.usuario_id),
+                        acao,
+                        "config",
+                        "sync",
+                        &[format!("Por {}", sessao.nome)],
+                    )?;
+                }
                 tx.commit()?;
                 if d.ligado {
                     self.reiniciar_motor_sync();

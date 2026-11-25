@@ -125,6 +125,10 @@ fn descrever(acao: &str) -> &'static str {
         "compra.lancar" => "lançou no estoque",
         "compra.estornar" => "estornou",
         "compra.descartar" => "descartou o rascunho da compra",
+        // R9 e B-N4 da revisão R2 da 006 (25/11/2026): a troca de dados ligada, desligada e a senha da rede trocada.
+        "troca.ligar" => "ligou a troca de dados",
+        "troca.desligar" => "desligou a troca de dados",
+        "troca.senha" => "trocou a senha da rede",
         // R6 (D-AUD-5, 25/11/2026): o descarte da pendência de identificação do XML, com o motivo.
         "xml_pendencia.descartar" => "descartou a pendência do XML",
         "fiscal.regras" => "mudou as regras de ST",

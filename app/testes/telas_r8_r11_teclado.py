@@ -8,8 +8,11 @@ A. Fechar o caixa:
    O caixa da loja de teste continua aberto: o roteiro desiste com o Esc. Fechar de verdade imprime, e a conta do
    fechamento é conferida pelos testes do núcleo.
 B. Pergunta de perigo ("Descartar alterações?" na ficha da peça): o Enter não confirma; a pergunta continua aberta.
+A2. Receber da venda: o Enter no valor não conclui; o foco vai ao "Concluir" (as outras formas estão vazias), e o
+    Enter seguinte conclui: um Enter a mais por venda (M-N1 e M-N2 da revisão R2).
 C. Botões das linhas pelo teclado (Trocas › feitas): sem o mouse em cima, o Tab chega à linha e os botões dela
    ("Desfazer") aparecem.
+A3. Por último: fechar o caixa de verdade pelo teclado (Tab até o botão da pergunta e Enter).
 
 Usa a loja de teste e o jeito de ler a tela de `telas_d09.py`.
 
@@ -31,6 +34,13 @@ from telas_d09 import TELA, Rustinho, conferir, montar_loja, simples, xdo  # noq
 def caixas_abertos(pasta):
     c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
     n = c.execute("SELECT COUNT(*) FROM caixa_sessao WHERE fechado_em IS NULL").fetchone()[0]
+    c.close()
+    return n
+
+
+def vendas_concluidas(pasta):
+    c = sqlite3.connect(os.path.join(pasta, "rustinho.db"))
+    n = c.execute("SELECT COUNT(*) FROM venda WHERE tipo = 'venda' AND situacao = 'concluida'").fetchone()[0]
     c.close()
     return n
 
@@ -81,6 +91,39 @@ def main():
             time.sleep(1)
             ok = caixas_abertos(pasta) == 1
             print(("✔ " if ok else "✘ ") + "caixa: o Esc desiste e o caixa continua aberto")
+            tudo_certo &= ok
+        finally:
+            r.fechar()
+
+        # ---- A2. O Receber da venda (M-N1 e M-N2 da revisão R2): o Enter no valor não conclui; vai ao "Concluir"
+        # (as outras formas estão vazias); o Enter seguinte conclui: um Enter a mais por venda. ----
+        r = Rustinho(pasta, "TelaVender", {}, fotos, "r8-receber")
+        try:
+            r.entrar("Ana")
+            time.sleep(2)
+            xdo("type", "--delay", "30", "Filtro")
+            time.sleep(0.8)
+            xdo("key", "Return")
+            time.sleep(1.2)
+            if not tem(r.textos(), "Subtotal"):
+                raise RuntimeError(f"a peça não entrou no carrinho (veja {r.saida})")
+            xdo("key", "F2")
+            time.sleep(1.5)
+            if not tem(r.textos(), "Concluir venda"):
+                raise RuntimeError(f"o Receber da venda não abriu (veja {r.saida})")
+            antes = vendas_concluidas(pasta)
+            xdo("type", "--delay", "60", "500")
+            xdo("key", "Return")
+            time.sleep(1.5)
+            ok = vendas_concluidas(pasta) == antes and tem(r.textos(), "Concluir venda")
+            print(("✔ " if ok else "✘ ") + "receber: o Enter no valor não conclui a venda"
+                  + ("" if ok else f" (foto: {r.foto('-1')})"))
+            tudo_certo &= ok
+            xdo("key", "Return")
+            time.sleep(2.5)
+            ok = vendas_concluidas(pasta) == antes + 1
+            print(("✔ " if ok else "✘ ") + "receber: o Enter seguinte (no Concluir) conclui: um Enter a mais"
+                  + ("" if ok else f" (foto: {r.foto('-2')})"))
             tudo_certo &= ok
         finally:
             r.fechar()
@@ -136,6 +179,32 @@ def main():
             print(("✔ " if apareceu else "✘ ") + "linhas: o Tab chega à linha e o Desfazer aparece, sem o mouse"
                   + ("" if apareceu else f" (foto: {foto})"))
             tudo_certo &= apareceu
+        finally:
+            r.fechar()
+
+        # ---- A3. Fechar o caixa de verdade pelo teclado (B-N3 da revisão R2): na pergunta, o Tab chega ao botão
+        # (o primeiro Tab para na seta de desistir) e o Enter ali confirma; o caixa fecha. Por último, porque fecha. ----
+        r = Rustinho(pasta, "TelaCaixa", {}, fotos, "r8-fechar-de-verdade")
+        try:
+            r.entrar("Ana")
+            time.sleep(2)
+            if not r.clicar("Fechar caixa"):
+                raise RuntimeError(f"não achei o botão Fechar caixa (veja {r.saida})")
+            time.sleep(1.5)
+            xdo("type", "--delay", "60", "150")
+            if not r.clicar("Fechar e imprimir"):
+                raise RuntimeError(f"não achei o botão Fechar e imprimir (veja {r.saida})")
+            time.sleep(1.5)
+            xdo("key", "Tab")
+            time.sleep(0.3)
+            xdo("key", "Tab")
+            time.sleep(0.3)
+            xdo("key", "Return")
+            time.sleep(3)
+            ok = caixas_abertos(pasta) == 0
+            print(("✔ " if ok else "✘ ") + "caixa: pelo teclado (Tab até o botão e Enter), a confirmação fecha o caixa"
+                  + ("" if ok else f" (foto: {r.foto('-1')})"))
+            tudo_certo &= ok
         finally:
             r.fechar()
     finally:

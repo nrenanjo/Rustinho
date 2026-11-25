@@ -102,10 +102,16 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
     resultados e os saldos e totais do Caixa. O preço de venda continua à vista e, na ficha da peça, sobe para o lugar
     do custo. O olho só muda o que aparece na tela e nunca atrapalha o fechamento do caixa.
   - **Sair:** o "Trocar usuário" saiu do Início. Para outra pessoa assumir o caixa, use **Sair** na tela de
-    **Usuários**: o Rustinho continua aberto e cada venda fica no nome de quem fez.
+    **Usuários**: o Rustinho continua aberto e cada venda fica no nome de quem fez. A tela de Usuários pede a senha
+    do gerente a quem não é gerente; então, para a caixa sair, o gerente digita a senha.
+  - **Enter sem susto:** no Receber da venda, o Enter num valor não conclui a venda; ele vai para o botão
+    **Concluir venda**, e outro Enter conclui (um Enter a mais). No fechamento do caixa, o Enter no dinheiro contado
+    não fecha: **Fechar e imprimir** mostra o contado, o esperado e a diferença e pede a confirmação. Nas perguntas
+    de perigo ("Limpar esta venda?", "Descartar alterações?"), o Enter não confirma: use o botão (ou o Tab até ele).
+  - **Pelo teclado:** em Trocas e em Encomendas, o Tab chega a cada linha e mostra os botões dela (sem o mouse).
   - **Fechar o caixa:** o valor esperado na gaveta aparece antes da contagem, também com o olho fechado.
   - **Só o gerente**, com o registro no histórico:
-    - ligar ou desligar a troca de dados;
+    - ligar ou desligar a troca de dados (e trocar a senha da rede, sem gravar a senha);
     - mudar o limite de crédito do cliente;
     - criar uma unidade fracionada;
     - mudar o CSOSN da peça;

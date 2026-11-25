@@ -71,7 +71,7 @@ def main():
                 r.foto("-1-fechado"),
                 fechado,
                 tem=["Preço de revenda", "Mostrar valores",
-                     "O custo e o % de lucro estão escondidos pelo olho"],  # B4 da revisão: a pista
+                     "Há valores escondidos pelo olho"],  # B4 da revisão: a pista
                 sem_igual=["Custo", "% sobre o custo"],
                 sem_percentual=True,
             )
@@ -96,7 +96,7 @@ def main():
                 aberto,
                 tem=["Preço de revenda", "Esconder"],
                 igual=["Custo", "% sobre o custo"],
-                nao_tem=["O custo e o % de lucro estão escondidos pelo olho"],
+                nao_tem=["Há valores escondidos pelo olho"],
             )
             y_aberto = y_de(aberto, "Preço de revenda")
             sobe = y_fechado is not None and y_aberto is not None and y_fechado < y_aberto

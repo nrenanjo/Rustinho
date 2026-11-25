@@ -2704,8 +2704,12 @@ mod comandos {
 
     fn xml_pendencia_resolver(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: importar::ResolverPendencia = ler(dados)?;
-        // R6 (D-AUD-5) e DP-13 (alternativa recomendada): descartar a pendência é do gerente, com motivo.
+        // R6 (D-AUD-5) e DP-13 (alternativa recomendada): descartar a pendência é do gerente, com motivo. O motivo
+        // vazio é recusado antes de pedir a senha (B-N1 da revisão R2: o gerente não digita a senha à toa).
         if d.acao == "descartar" {
+            if crate::texto::limpar(&d.motivo).is_empty() {
+                return Err(crate::erro::Erro::campo("motivo", "Diga por que descartar esta pendência."));
+            }
             p.exigir("pendencia_xml")?;
         }
         let tx = p.conn.transaction()?;

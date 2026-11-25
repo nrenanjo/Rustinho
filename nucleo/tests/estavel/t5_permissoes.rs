@@ -305,4 +305,10 @@ fn r9_desligar_a_troca_de_dados_e_do_gerente() {
     l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "comando": "sync_salvar", "dados": desligar }));
     l.ok("sync_salvar", desligar);
     assert_eq!(l.ok("sync_ler", json!({}))["ligado"], false);
+    // B-N4 da revisão R2: ligar (pela Ana, gerente) e desligar (pela Bia, com a senha) ficam no histórico; a senha da
+    // rede nunca vai para o registro.
+    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.ligar'"), 1);
+    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.desligar'"), 1);
+    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao LIKE 'troca.%' AND detalhes LIKE '%rede-da-loja%'"), 0);
+    assert_eq!(l.numero("SELECT COUNT(*) FROM auditoria WHERE acao = 'troca.senha'"), 1, "a senha nova (só o fato)");
 }

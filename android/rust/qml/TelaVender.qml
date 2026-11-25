@@ -1175,9 +1175,10 @@ FocusScope {
             campoVale.focar()
         }
 
-        // R8 (D-AUD-8, decisão do proprietário de 25/11/2026): nos campos de valor, o Enter (às vezes o do leitor
-        // de código de barras) passa para o campo seguinte e nunca conclui a venda. Depois do último, o foco vai para
-        // o "Concluir", que só conclui com outro Enter ali (ou o clique).
+        // R8 (D-AUD-8, decisão do proprietário de 25/11/2026: "aceito o clique adicional"): nos campos de valor, o
+        // Enter (às vezes o do leitor de código de barras) nunca conclui a venda. Ele passa para o campo seguinte que
+        // já tem valor (o pagamento dividido) e, sem outro, para o "Concluir", que só conclui com outro Enter ali (ou
+        // o clique): um Enter a mais por venda (M-N1 da revisão R2: antes, um Enter por forma de pagamento).
         function seguinte(atual) {
             const campos = []
             if (campoVale.visible)
@@ -1188,10 +1189,13 @@ FocusScope {
                     campos.push(c)
             }
             const k = campos.indexOf(atual)
-            if (k >= 0 && k + 1 < campos.length)
-                campos[k + 1].focar()
-            else
-                botaoConcluir.forceActiveFocus()
+            for (let i = k + 1; k >= 0 && i < campos.length; i++) {
+                if (campos[i].texto.trim() !== "") {
+                    campos[i].focar()
+                    return
+                }
+            }
+            botaoConcluir.forceActiveFocus()
         }
         function completar(linha) {
             linha.campo.texto = ""

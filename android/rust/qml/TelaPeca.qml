@@ -1164,7 +1164,8 @@ FocusScope {
                         Nota {
                             objectName: "notaCustoEscondido"
                             visible: tela.verCustos && Tema.oculto
-                            text: "O custo e o % de lucro estão escondidos pelo olho: toque em Mostrar valores para ver e mudar."
+                            // B-N5 da revisão R2: a pista não nomeia o custo nem o lucro (o olho esconde também os títulos).
+                            text: "Há valores escondidos pelo olho: toque em Mostrar valores para ver e mudar."
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
