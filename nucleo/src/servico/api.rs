@@ -1709,6 +1709,12 @@ impl Servico {
             // R15 (R-03, decisão do proprietário de 25/11/2026): a compensação pronta de uma conta paga a mais, sempre
             // pelo gerente; o estorno fica no histórico como qualquer outro, e o conflito sai da lista.
             "conflito_compensar" => {
+                // B2 da revisão R5: sem a operação mostrada, a mensagem em português simples.
+                if dados.get("operacao").and_then(|o| o.as_str()).is_none() {
+                    return Err(Erro::validacao(
+                        "A tela não mandou qual operação a compensação estorna. Feche e abra a lista de novo.",
+                    ));
+                }
                 let d: Compensar = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
                 let c = sync::compensacao_do_conflito(&tx, d.id)?.ok_or_else(|| {

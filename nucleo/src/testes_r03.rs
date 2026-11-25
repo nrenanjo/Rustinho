@@ -354,8 +354,9 @@ fn r15_compensacao_pronta_da_conta_paga_duas_vezes() {
     let proposta = k[0]["compensacao"].as_str().unwrap().to_string();
     assert!(proposta.contains("Estornar o pagamento de R$ 80,00 feito no Caixa 2"), "{proposta}");
     let id = id_do_conflito(&mut s, "pago_a_mais");
-    // B1 da revisão R4: sem a operação mostrada, recusa.
-    assert_eq!(chamar(&mut s, "conflito_compensar", json!({ "id": id }))["ok"], false);
+    // B1 da revisão R4: sem a operação mostrada, recusa (B2 da R5: com a mensagem em português simples).
+    let r = chamar(&mut s, "conflito_compensar", json!({ "id": id }));
+    assert!(r["erro"].as_str().unwrap_or("").contains("A tela não mandou qual operação"), "{r}");
     ok(&mut s, "conflito_compensar", json!({ "id": id, "operacao": k[0]["compensacaoOperacao"] }));
     assert!(abertos_do_tipo(&mut s, "pago_a_mais").is_empty());
     let estornado: Option<String> = conn(&mut s)

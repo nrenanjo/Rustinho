@@ -769,6 +769,17 @@ fn r18_orcamento_novo_explica_tambem_o_desconto_da_venda() {
     venda.desconto = "20".into();
     let erro = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
     assert!(erro.contains("passa do máximo") && !erro.contains("Um orçamento novo"), "preço igual ao de hoje: {erro}");
+    // B1 da revisão R5: um serviço avulso no carrinho (preço de tabela zero) não traz a explicação.
+    let mut com_avulso = venda.clone();
+    com_avulso.itens.push(ItemEntrada {
+        descricao: "Mão de obra".into(),
+        quantidade: "1".into(),
+        preco: "100".into(),
+        ..Default::default()
+    });
+    com_avulso.desconto = "40".into();
+    let erro = vendas::salvar_orcamento(c, d, &l.u, "Caixa 1", &com_avulso).unwrap_err().to_string();
+    assert!(erro.contains("passa do máximo") && !erro.contains("Um orçamento novo"), "com avulso: {erro}");
     let mut f = produtos::ficha(c, &l.peca).unwrap();
     f.precos[0].preco = "310,00".into();
     f.precos[0].lucro = String::new();

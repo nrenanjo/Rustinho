@@ -334,6 +334,13 @@ struct DoOrcamento {
     pecas: std::collections::HashMap<String, NoOrcamento>,
 }
 
+impl ItemCalculado {
+    /// A peça tem preço de tabela (não é avulso nem de preço aberto).
+    fn v_preco_tabela_conhecido(&self) -> bool {
+        self.preco_tabela != "0,00" && !self.preco_tabela.is_empty()
+    }
+}
+
 impl NoOrcamento {
     /// `total` de `quantidade` (depois do desconto do item) não fica abaixo do valor líquido do orçamento, por unidade?
     fn cobre_o_item(&self, total: i64, quantidade: i64) -> bool {
@@ -906,7 +913,8 @@ pub fn salvar_orcamento(
         // B2 da revisão R4: a explicação só quando algum preço do carrinho difere do de hoje.
         Erro::Validacao { campo, mensagem }
             if !e.orcamento_id.is_empty()
-                && c.itens.iter().any(|i| i.preco != i.preco_tabela)
+                // B1 da revisão R5: só as peças com preço de tabela (o avulso e o preço aberto têm tabela zero).
+                && c.itens.iter().any(|i| !i.produto_id.is_empty() && i.v_preco_tabela_conhecido() && i.preco != i.preco_tabela)
                 && (mensagem.contains("Desconto acima do máximo") || mensagem.contains("passa do máximo")) =>
         {
             Erro::Validacao {
