@@ -985,3 +985,23 @@ fn r9_b4_escolher_normaliza_a_juncao_antiga_com_data_e_autor() {
     );
     assert!(!produtos::escolher_juncao(&a.conn, &u, &d, &k).unwrap(), "de novo, nada muda");
 }
+
+/// R9 (parte `enc` da sugestão): a encomenda de D feita numa venda desconta, em K, a venda que a gerou (sem a raiz, K
+/// ficava com as 100 vendidas e pedia compra do que já está encomendado).
+#[test]
+fn r9_encomenda_da_juntada_desconta_na_sugestao_da_que_ficou() {
+    let (mut a, _b, u, d, k) = dois();
+    venda_de(&a.conn, 1, &d, 100_000, Some(&crate::tempo::dias_atras(1)));
+    let agora = crate::tempo::agora();
+    a.conn
+        .execute(
+            "INSERT INTO encomenda (id, numero, produto_id, descricao, quantidade, venda_id, situacao, criado_em, atualizado_em, dispositivo)
+             VALUES ('e1', 1, ?1, 'Amortecedor D', 100000, 'v1', 'aberta', ?2, ?2, 'disp')",
+            rusqlite::params![d, agora],
+        )
+        .unwrap();
+    juntar(&mut a, &u, &d, &k, false);
+    a.conn.execute("UPDATE encomenda SET produto_id = ?1 WHERE id = 'e1'", [&d]).unwrap();
+    let sug = crate::reposicao::sugestao(&a.conn, "").unwrap();
+    assert!(!sug.itens.iter().any(|i| i.produto_id == k), "a venda de D já está encomendada: K não pede compra");
+}
