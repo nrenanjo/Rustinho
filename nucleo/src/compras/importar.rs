@@ -3195,6 +3195,14 @@ mod testes {
                 continue;
             }
             let p = p.unwrap_or_else(|x| panic!("a prévia falhou (gravou?) com {n:04b}: {x}"));
+            // M1 da revisão R1 (B1 da R2): quem passa de papel é contado com todas as opções ligadas, em toda
+            // combinação: f5 vira cliente; f3 e f4 viram fornecedores. A caixa de marcar da tela depende disso.
+            if (p.clientes_viram, p.fornecedores_viram) != (1, 2) {
+                erros.push(format!(
+                    "{n:04b}: viram cliente {}, viram fornecedor {} (esperado 1 e 2, com qualquer opção)",
+                    p.clientes_viram, p.fornecedores_viram
+                ));
+            }
             let r = gravar(c, d, &u, &e, &lido).unwrap();
             let cat =
                 |codigo: &str| p.resumo.categorias.iter().find(|x| x.codigo == codigo).map_or(0, |x| x.quantidade);

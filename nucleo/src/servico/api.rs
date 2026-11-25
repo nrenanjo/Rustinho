@@ -1711,7 +1711,17 @@ impl Servico {
             "conflito_compensar" => {
                 let d: Resolver = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
-                let feito = sync::compensar(&tx, &disp, &sessao.usuario_id, d.id)?;
+                let c = sync::compensacao_do_conflito(&tx, d.id)?.ok_or_else(|| {
+                    Erro::validacao(
+                        "Este conflito não tem compensação pronta (ou já foi corrigido). Confira com o cliente ou o \
+                         fornecedor e estorne pela tela do Receber ou do A pagar.",
+                    )
+                })?;
+                let motivo = "Pago mais de uma vez em caixas sem rede (compensação do conflito entre caixas)";
+                match c.tabela {
+                    "recebimento" => crate::receber::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
+                    _ => crate::pagar::estornar(&tx, &disp, &sessao.usuario_id, &c.id, motivo)?,
+                }
                 auditoria::registrar(
                     &tx,
                     &disp,
@@ -1719,10 +1729,12 @@ impl Servico {
                     "conflito.compensar",
                     "sync_conflito",
                     &d.id.to_string(),
-                    &[feito],
+                    &[c.texto],
                 )?;
+                let resposta = json!(sync::conflitos(&tx)?);
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
-                Ok(json!(sync::conflitos(&self.banco.conn)?))
+                Ok(resposta)
             }
             // R-05: o gerente aceita como está um registro comprovadamente inconsistente.
             "referencia_aceitar" => {

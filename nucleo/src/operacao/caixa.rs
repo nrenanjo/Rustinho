@@ -543,6 +543,8 @@ impl DeFora {
 }
 
 /// Veja `DeFora`. Nada: sem sessão, ou a sessão aberta deste computador (como sempre).
+/// M1 da revisão R2: a sessão que ainda não chegou pela troca de dados (a operação chegou antes dela) só pode ser de
+/// outro computador (a deste sempre existe aqui): vale como aberta em outro computador.
 pub fn sessao_de_fora(conn: &Connection, dispositivo: &str, sessao_id: Option<&str>) -> Resultado<Option<DeFora>> {
     let Some(id) = sessao_id else { return Ok(None) };
     let s: Option<(String, String, bool)> = conn
@@ -553,9 +555,10 @@ pub fn sessao_de_fora(conn: &Connection, dispositivo: &str, sessao_id: Option<&s
         )
         .optional()?;
     Ok(match s {
+        None => Some(DeFora::OutroComputador("outro caixa".into())),
         Some((_, _, true)) => Some(DeFora::Fechada),
         Some((d, nome, false)) if d != dispositivo => Some(DeFora::OutroComputador(nome)),
-        _ => None,
+        Some(_) => None,
     })
 }
 

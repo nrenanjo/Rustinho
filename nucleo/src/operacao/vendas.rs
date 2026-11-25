@@ -850,7 +850,21 @@ pub fn salvar_orcamento(
     // A1 da revisão do R18: um orçamento novo nunca parte do valor de outro (a garantia do orçamento só vale na venda
     // que sai dele); sem isso, orçamentos encadeados baixariam o preço sem limite.
     let c = calcular(conn, &VendaEntrada { orcamento_id: String::new(), ..e.clone() })?;
-    conferir_itens(&c)?;
+    conferir_itens(&c).map_err(|erro| match erro {
+        // B2 da revisão R2: quem não deu desconto precisa saber por que o orçamento novo esbarra no máximo.
+        Erro::Validacao { campo, mensagem }
+            if !e.orcamento_id.is_empty() && mensagem.contains("Desconto acima do máximo") =>
+        {
+            Erro::Validacao {
+                campo,
+                mensagem: format!(
+                    "{mensagem} Um orçamento novo usa o preço de hoje; o preço do orçamento antigo só vale na venda \
+                     que sai dele."
+                ),
+            }
+        }
+        outro => outro,
+    })?;
     let dias = if e.validade_dias <= 0 { config::validade_orcamento(conn)? } else { e.validade_dias.min(365) };
     let validade: String =
         conn.query_row("SELECT date('now', 'localtime', ?1)", [format!("+{dias} days")], |l| l.get(0))?;

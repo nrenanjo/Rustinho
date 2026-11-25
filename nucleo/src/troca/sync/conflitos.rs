@@ -128,31 +128,20 @@ pub(super) fn compensacao_de(
     }
 }
 
-/// R15: faz a compensação pronta do conflito (sempre do gerente; o comando confere). Recusa se o conflito já foi
-/// corrigido ou se não há compensação exata. O estorno fica no histórico como qualquer outro.
-pub fn compensar(conn: &Connection, dispositivo: &str, usuario_id: &str, conflito_id: i64) -> Resultado<String> {
+/// R15: a compensação pronta do conflito `conflito_id`, se ainda há uma (o conflito aberto e a conta ainda passando
+/// do valor). Só lê: quem faz o estorno é o comando `conflito_compensar` (no serviço, para o `sync` não depender do
+/// Receber nem do Pagar).
+pub fn compensacao_do_conflito(conn: &Connection, conflito_id: i64) -> Resultado<Option<Compensacao>> {
     let k: Option<(String, String, String, Option<String>)> = conn
         .query_row("SELECT tipo, tabela, chave, resolvido_em FROM sync_conflito WHERE id = ?1", [conflito_id], |l| {
             Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?))
         })
         .optional()?;
     let Some((tipo, tabela, chave, resolvido)) = k else { return Err(Erro::NaoEncontrado("Conflito".into())) };
-    let sem = || {
-        Erro::validacao(
-            "Este conflito não tem compensação pronta (ou já foi corrigido). Confira com o cliente ou o fornecedor e \
-             estorne pela tela do Receber ou do A pagar.",
-        )
-    };
     if resolvido.is_some() || !ainda_a_mais(conn, &tipo, &tabela, &chave)? {
-        return Err(sem());
+        return Ok(None);
     }
-    let c = compensacao_de(conn, &tipo, &tabela, &chave)?.ok_or_else(sem)?;
-    let motivo = "Pago mais de uma vez em caixas sem rede (compensação do conflito entre caixas)";
-    match c.tabela {
-        "recebimento" => crate::receber::estornar(conn, dispositivo, usuario_id, &c.id, motivo)?,
-        _ => crate::pagar::estornar(conn, dispositivo, usuario_id, &c.id, motivo)?,
-    }
-    Ok(c.texto)
+    compensacao_de(conn, &tipo, &tabela, &chave)
 }
 
 /// R-03: a conta (ou o vale) continua passando do valor? (Só lê.)

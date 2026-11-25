@@ -378,26 +378,49 @@ pub fn exigir_filhos_editaveis(conn: &Connection, filha: &str, coluna: &str, id:
 /// ainda vai chegar de outro caixa): também recusa, dizendo qual registro espera.
 pub fn exigir_filhos_prontos(conn: &Connection, filha: &str, coluna: &str, id: &str) -> Resultado<()> {
     exigir_filhos_editaveis(conn, filha, coluna, id)?;
-    let achada: Option<(String, String)> = conn
+    let achada: Option<(String, String, String)> = conn
         .query_row(
             &format!(
-                "SELECT r.tabela, r.pai FROM sync_referencia r
+                "SELECT r.tabela, r.pai, COALESCE(json_extract(r.chave, '$[0]'), '') FROM sync_referencia r
                   WHERE r.estado = 'esperando' AND r.tabela = ?1
                     AND r.chave IN (SELECT json_array(f.id) FROM \"{filha}\" f WHERE f.\"{coluna}\" = ?2) LIMIT 1"
             ),
             params![filha, id],
-            |l| Ok((l.get(0)?, l.get(1)?)),
+            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
         )
         .optional()?;
     match achada {
         None => Ok(()),
-        Some((tabela, pai)) => Err(Erro::validacao(format!(
-            "Um registro ligado a esta operação ({}) ainda espera a troca de dados: falta chegar {} de outro caixa. \
-             Nada foi feito. Faça de novo quando a troca de dados terminar.",
-            nome_da_tabela(&tabela).to_lowercase(),
+        Some((tabela, pai, filho)) => Err(Erro::validacao(format!(
+            "{} ainda espera a troca de dados: falta chegar {} de outro caixa. Nada foi feito. Faça de novo quando \
+             a troca de dados terminar.",
+            qual_registro(conn, &tabela, &filho)?,
             nome_da_tabela(&pai).to_lowercase(),
         ))),
     }
+}
+
+/// B6 da revisão R2: o registro da cascata dito do jeito que a pessoa reconhece ("O cheque nº 000301", "A parcela 1/3
+/// de caderno", "A conta Frete").
+fn qual_registro(conn: &Connection, tabela: &str, id: &str) -> Resultado<String> {
+    let achado: Option<String> = match tabela {
+        "cheque" => conn
+            .query_row("SELECT 'O cheque nº ' || numero FROM cheque WHERE id = ?1", [id], |l| l.get(0))
+            .optional()?,
+        "conta_receber" => conn
+            .query_row(
+                "SELECT 'A parcela ' || parcela || '/' || parcelas || ' de ' || descricao FROM conta_receber WHERE id = ?1",
+                [id],
+                |l| l.get(0),
+            )
+            .optional()?,
+        "conta_pagar" => conn
+            .query_row("SELECT 'A conta a pagar ' || descricao FROM conta_pagar WHERE id = ?1", [id], |l| l.get(0))
+            .optional()?,
+        _ => None,
+    };
+    Ok(achado
+        .unwrap_or_else(|| format!("Um registro ligado a esta operação ({})", nome_da_tabela(tabela).to_lowercase())))
 }
 
 pub(super) fn exigir_sem_inconsistencia(

@@ -546,7 +546,8 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
 /// - a dívida lançada no Receber, se houve: é cancelada. A dívida não guarda o cheque: é a parcela sem venda, do
 ///   cliente do cheque, com a descrição e o valor da devolução, lançada na mesma operação (até 2 segundos da
 ///   devolução, pelo relógio do mesmo computador). Outro cheque igual (mesmo cliente, número e valor) devolvido nesses
-///   mesmos segundos deixaria a dívida sem dono certo: aí nada é desfeito (B1 da revisão). Se a dívida já tem
+///   mesmos segundos, com dívida em aberto, deixaria a dívida sem dono certo: aí nada é desfeito, e a mensagem manda
+///   cancelar a dívida à mão no Receber e desfazer de novo (B1 da revisão R1; B3 da R2). Se a dívida já tem
 ///   pagamento, nada é desfeito: o recebimento é estornado antes;
 /// - a situação: volta a "depositado" (na mesma conta) ou a "carteira".
 fn desfazer_devolucao(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, d: &Dados) -> Resultado<()> {
@@ -573,13 +574,15 @@ fn desfazer_devolucao(conn: &Connection, dispositivo: &str, usuario_id: &str, id
         [id],
         |l| l.get(0),
     )?;
-    if gemeos > 0 {
+    // B3 da revisão R2: só é ambíguo enquanto houver dívida em aberto que pode ser de qualquer um dos dois.
+    if gemeos > 0 && divida.is_some() {
         return Err(Erro::validacao(format!(
             "Há outro cheque nº {} de R$ {} do mesmo cliente devolvido no mesmo instante: o Rustinho não sabe qual \
-             dívida do Receber é deste. Nada foi feito. Peça ajuda para acertar à mão (cancelar a dívida certa no \
-             Receber).",
+             dívida do Receber é deste. Nada foi feito. Cancele no Receber a dívida destes cheques (\"Cheque nº {} \
+             devolvido\") e desfaça de novo.",
             d.numero,
-            numeros::escrever_dinheiro(d.valor)
+            numeros::escrever_dinheiro(d.valor),
+            d.numero
         )));
     }
     if let Some((_, pago)) = &divida {

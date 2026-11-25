@@ -189,8 +189,8 @@ FocusScope {
                                                   .concat([["Suprimentos", "R$ " + tela.r.suprimentos], ["Sangrias", "− R$ " + tela.r.sangrias]])
                                                   .concat(tela.r.devolvido !== "0,00" ? [["Devolvido a clientes", "− R$ " + tela.r.devolvido]] : [])
                                                   .concat([["Vendas canceladas", String(tela.r.canceladas)]])
-                                                  // R14 (R-02): desfeitas em outro computador; o dinheiro foi acertado na gaveta de lá.
-                                                  .concat(tela.r.desfeitasFora > 0 ? [["Desfeitas em outro computador (esta gaveta não muda)", String(tela.r.desfeitasFora)]] : [])
+                                                  // R14 (R-02): desfeitas depois do fechamento ou em outro computador; o dinheiro foi acertado na gaveta de quem desfez.
+                                                  .concat(tela.r.desfeitasFora > 0 ? [["Desfeitas depois do fechamento ou em outro computador (esta gaveta não muda)", String(tela.r.desfeitasFora)]] : [])
                             delegate: RowLayout {
                                 required property var modelData
                                 Layout.fillWidth: true

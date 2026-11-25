@@ -147,7 +147,7 @@ fn dp16_r02_a_sessao_do_outro_caixa_nunca_muda() {
     let r = caixa::resumo(c, &sa).unwrap();
     assert_eq!((r.vendas, r.canceladas, r.desfeitas_fora), (1, 0, 1));
     let tela = include_str!("../../app/qml/TelaCaixa.qml");
-    assert!(tela.contains("\"Desfeitas em outro computador (esta gaveta não muda)\", String(tela.r.desfeitasFora)"));
+    assert!(tela.contains("\"Desfeitas depois do fechamento ou em outro computador (esta gaveta não muda)\", String(tela.r.desfeitasFora)"));
     // O mesmo cancelamento feito no próprio A: como sempre (a venda sai do A).
     let v2 = vender(&l, A, "1", vec![pg("dinheiro", "300")], None);
     vendas::cancelar(c, A, &l.u, &v2, "desistiu").unwrap();
@@ -275,6 +275,113 @@ fn r14_estorno_e_devolucao_desfeita_no_outro_computador() {
     devolucoes::desfazer(c, B, &l.u, &dev, "devolvido por engano").unwrap();
     assert_eq!(esperado(c, &sa), "200,00", "a sessão do A não muda");
     assert_eq!(esperado(c, &sb), "700,00", "os R$ 300 do cliente entram na gaveta do B");
+    // B6 da revisão R2: o resumo do A conta as duas como desfeitas fora (recebimento e devolução).
+    assert_eq!(caixa::resumo(c, &sa).unwrap().desfeitas_fora, 2);
+}
+
+/// R14 · M1 da revisão R2: a operação chegou pela troca antes da sessão (gaveta) dela. A sessão que não existe aqui só
+/// pode ser de outro computador: nas 4 operações, a marca fica e o dinheiro é acertado na gaveta aberta deste
+/// computador (antes, o dinheiro devolvido não ficava em gaveta nenhuma).
+#[test]
+fn r14_m1_gaveta_que_ainda_nao_chegou() {
+    let l = loja();
+    let c = &l.b.conn;
+    caixa::abrir(c, A, &l.u, "Caixa A", "100").unwrap();
+    caixa::abrir(c, B, &l.u, "Caixa B", "1000").unwrap();
+    let sb = sessao(c, B);
+    let falta = "sessao-que-nao-chegou";
+    // Venda.
+    let v = vender(&l, A, "1", vec![pg("dinheiro", "300")], None);
+    c.execute("UPDATE venda SET sessao_id = ?2 WHERE id = ?1", params![v, falta]).unwrap();
+    vendas::cancelar(c, B, &l.u, &v, "desistiu").unwrap();
+    assert_eq!(contar(c, "SELECT cancelado_apos_fechar FROM venda WHERE id = ?1", [&v]), 1);
+    assert_eq!(esperado(c, &sb), "700,00", "os R$ 300 saem da gaveta do B");
+    // Recebimento.
+    vender(&l, A, "1", vec![pg("crediario", "300")], None);
+    let rec = receber::receber(
+        c,
+        A,
+        &l.u,
+        &receber::ReceberEntrada {
+            cliente_id: l.cliente.clone(),
+            valor: "100".into(),
+            forma: "dinheiro".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    c.execute("UPDATE recebimento SET sessao_id = ?2 WHERE id = ?1", params![rec, falta]).unwrap();
+    receber::estornar(c, B, &l.u, &rec, "recebido errado").unwrap();
+    assert_eq!(contar(c, "SELECT estornado_apos_fechar FROM recebimento WHERE id = ?1", [&rec]), 1);
+    assert_eq!(esperado(c, &sb), "600,00");
+    // Devolução em dinheiro.
+    let v2 = vender(&l, A, "1", vec![pg("dinheiro", "300")], None);
+    let item = devolucoes::da_venda(c, &v2).unwrap().itens[0].venda_item_id.clone();
+    let dev = devolucoes::devolver(
+        c,
+        A,
+        &l.u,
+        &devolucoes::Entrada {
+            venda_id: v2.clone(),
+            itens: vec![devolucoes::ItemEntrada { venda_item_id: item, quantidade: "1".into(), defeito: false }],
+            destino: "dinheiro".into(),
+            motivo: "Não serviu".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    c.execute("UPDATE devolucao SET sessao_id = ?2 WHERE id = ?1", params![dev, falta]).unwrap();
+    devolucoes::desfazer(c, B, &l.u, &dev, "devolvido por engano").unwrap();
+    assert_eq!(contar(c, "SELECT desfeita_apos_fechar FROM devolucao WHERE id = ?1", [&dev]), 1);
+    assert_eq!(esperado(c, &sb), "900,00", "os R$ 300 do cliente entram na gaveta do B");
+    // Pagamento que saiu da gaveta.
+    let conta = pagar::lancar(
+        c,
+        A,
+        &l.u,
+        &pagar::LancamentoEntrada {
+            descricao: "Frete".into(),
+            categoria_id: "cat-aluguel".into(),
+            valor: "60".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap()[0]
+        .clone();
+    let pago = pagar::pagar(
+        c,
+        A,
+        &l.u,
+        &pagar::PagamentoEntrada {
+            conta_id: conta,
+            valor: "60".into(),
+            forma: "dinheiro".into(),
+            origem: "gaveta".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    c.execute("UPDATE pagamento SET sessao_id = ?2 WHERE id = ?1", params![pago, falta]).unwrap();
+    pagar::estornar(c, B, &l.u, &pago, "lançado errado").unwrap();
+    assert_eq!(esperado(c, &sb), "960,00", "o pagamento estornado volta na gaveta do B");
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM caixa_movimento WHERE origem_id = ?1", [&pago]), 1);
+}
+
+/// R14 · B6 da revisão R2: venda de um caixa aberto em outro computador, cancelada num computador sem caixa aberto: o
+/// dinheiro sai do Caixa geral, ligado à venda; a sessão do outro não muda.
+#[test]
+fn r14_sem_gaveta_aqui_o_caixa_geral() {
+    let l = loja();
+    let c = &l.b.conn;
+    caixa::abrir(c, A, &l.u, "Caixa A", "100").unwrap();
+    let sa = sessao(c, A);
+    let v = vender(&l, A, "1", vec![pg("dinheiro", "300")], None);
+    let geral = |c: &Connection| financeiro::saldo(c, "caixa-geral", "9999-12-31").unwrap();
+    let antes = geral(c);
+    vendas::cancelar(c, B, &l.u, &v, "desistiu").unwrap();
+    assert_eq!(esperado(c, &sa), "400,00");
+    assert_eq!(geral(c) - antes, -30_000);
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM movimento_conta WHERE origem_id = ?1", [&v]), 1);
 }
 
 /// R14: a gaveta do B não tem dinheiro bastante para devolver ao cliente: o cancelamento é recusado e nada muda
@@ -306,7 +413,7 @@ fn dp16_0915l_cascata_recusa_filho_esperando() {
     let ch = texto(c, "SELECT id FROM cheque WHERE venda_id = ?1", [&v]);
     plantar(c, "cheque", &ch, "esperando");
     let e = vendas::cancelar(c, A, &l.u, &v, "desistiu").unwrap_err().to_string();
-    assert!(e.contains("espera a troca de dados") && e.contains("cheque"), "{e}");
+    assert!(e.contains("O cheque nº 000302 ainda espera a troca de dados"), "{e}");
     assert_eq!(texto(c, "SELECT situacao FROM venda WHERE id = ?1", [&v]), "concluida");
     assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "carteira");
 }
@@ -324,7 +431,7 @@ fn r14_0915l_outros_caminhos_com_filho_esperando() {
     let estoque_antes = crate::estoque::saldo(c, &l.peca).unwrap();
     plantar(c, "conta_receber", &parcela, "esperando");
     let e = vendas::cancelar(c, A, &l.u, &v, "desistiu").unwrap_err().to_string();
-    assert!(e.contains("espera a troca de dados"), "{e}");
+    assert!(e.contains("A parcela 1/") && e.contains("ainda espera a troca de dados"), "{e}");
     venda_intacta(c, &v);
     assert_eq!(crate::estoque::saldo(c, &l.peca).unwrap(), estoque_antes, "o estoque não voltou");
     let item = devolucoes::da_venda(c, &v).unwrap().itens[0].venda_item_id.clone();
@@ -398,7 +505,7 @@ fn r14_0915l_estorno_de_compra_com_conta_esperando() {
     let estoque = || contar(c, "SELECT COALESCE(SUM(quantidade), 0) FROM estoque_movimento", []);
     let antes = estoque();
     let e = crate::compras::estornar(c, d, &l.u, &compra, "nota errada").unwrap_err().to_string();
-    assert!(e.contains("espera a troca de dados") && e.contains("contas a pagar"), "{e}");
+    assert!(e.contains("A conta a pagar") && e.contains("ainda espera a troca de dados"), "{e}");
     assert_eq!(texto(c, "SELECT situacao FROM compra WHERE id = ?1", [&compra]), "lancada");
     assert_eq!(
         contar(c, "SELECT COUNT(*) FROM conta_pagar WHERE compra_id = ?1 AND cancelado_em IS NULL", [&compra]),
@@ -635,6 +742,7 @@ fn r18_orcamento_novo_nao_renova_o_preco_de_outro() {
     assert_eq!(vendas::calcular(c, &venda).unwrap().itens[0].erro, "", "a venda sai pelo preço do orçamento");
     let e = vendas::salvar_orcamento(c, &l.b.dispositivo, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
     assert!(e.contains("Desconto acima do máximo"), "o orçamento novo conta do preço de hoje: {e}");
+    assert!(e.contains("Um orçamento novo usa o preço de hoje"), "a mensagem explica (B2 da revisão R2): {e}");
 }
 
 /// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender
@@ -823,10 +931,41 @@ fn r19_cheques_gemeos_devolvidos_juntos_recusa() {
     .unwrap();
     for ch in [&ch2, &ch1] {
         let e = cheques::desfazer(c, d, &l.u, ch).unwrap_err().to_string();
-        assert!(e.contains("não sabe qual") && e.contains("Nada foi feito"), "{e}");
+        assert!(e.contains("não sabe qual") && e.contains("Cancele no Receber"), "{e}");
         assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [ch]), "devolvido");
     }
     assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "300,00", "a dívida do primeiro fica");
+    // B3 da revisão R2: cancelada a dívida à mão, como a mensagem manda, os dois desfazem (não fica preso).
+    let divida = texto(c, "SELECT id FROM conta_receber WHERE descricao = 'Cheque nº 000999 devolvido'", []);
+    receber::cancelar_conta(c, d, &l.u, &divida, "dívida do cheque gêmeo").unwrap();
+    for ch in [&ch2, &ch1] {
+        cheques::desfazer(c, d, &l.u, ch).unwrap();
+        assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [ch]), "carteira");
+    }
+}
+
+/// R19 · B3 da revisão R2: dois cheques iguais devolvidos juntos, nenhum com dívida: não há o que confundir, e os
+/// dois desfazem.
+#[test]
+fn r19_cheques_gemeos_sem_divida_desfazem() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
+    let v1 = vender(&l, d, "1", vec![pg("cheque", "300")], Some("000998"));
+    let v2 = vender(&l, d, "1", vec![pg("cheque", "300")], Some("000998"));
+    let ch1 = texto(c, "SELECT id FROM cheque WHERE venda_id = ?1", [&v1]);
+    let ch2 = texto(c, "SELECT id FROM cheque WHERE venda_id = ?1", [&v2]);
+    cheques::devolver(c, d, &l.u, &ch1, "Sem fundos", false).unwrap();
+    cheques::devolver(c, d, &l.u, &ch2, "Sem fundos", false).unwrap();
+    c.execute(
+        "UPDATE cheque SET situacao_em = (SELECT situacao_em FROM cheque WHERE id = ?1) WHERE id = ?2",
+        [&ch1, &ch2],
+    )
+    .unwrap();
+    for ch in [&ch1, &ch2] {
+        cheques::desfazer(c, d, &l.u, ch).unwrap();
+    }
 }
 
 /// R19: a dívida da devolução já tem pagamento: nada é desfeito, e a mensagem diz
@@ -1780,4 +1919,74 @@ fn f02_revisao_backups_de_antes_da_chave_continuam_sem_tranca() {
     assert_eq!(lista.iter().filter(|c| !c.tem_senha).count(), 1, "o de antes da chave continua sem tranca");
     assert_eq!(lista.iter().filter(|c| c.tem_senha).count(), 1, "o novo sai trancado");
     let _ = std::fs::remove_dir_all(&pasta);
+}
+
+// ---------------------------------------------------------------------------
+// R14 com dois bancos de verdade e a troca de dados (proposta R-02 §5; B6 da revisão R2).
+// ---------------------------------------------------------------------------
+
+fn levar(de: &Banco, para: &mut Banco) -> usize {
+    let (mut desde, mut total) = (0, 0);
+    loop {
+        let (lista, mais) = crate::sync::alteracoes_desde(&de.conn, desde, 40).unwrap();
+        if let Some(u) = lista.last() {
+            desde = u.seq;
+        }
+        total += crate::sync::aplicar(&mut para.conn, &lista).unwrap();
+        if !mais {
+            return total;
+        }
+    }
+}
+
+fn trocar(a: &mut Banco, b: &mut Banco) {
+    for _ in 0..6 {
+        if levar(a, b) + levar(b, a) == 0 {
+            return;
+        }
+    }
+    panic!("os caixas não pararam de trocar");
+}
+
+/// R14: a venda em dinheiro feita no Caixa 1 (aberto) é cancelada no Caixa 2, depois de a rede trocar os dados. O
+/// dinheiro devolvido sai da gaveta do Caixa 2. Quando o cancelamento volta ao Caixa 1 pela troca, a gaveta de lá não
+/// muda: o Caixa 1 fecha com o dinheiro que tem (sem sobra nem falta), e o resumo diz que a venda foi desfeita fora.
+#[test]
+fn r14_dois_caixas_de_verdade_a_gaveta_do_outro_nao_muda() {
+    let mut a = Banco::em_memoria().unwrap();
+    let u = usuarios::criar(&a.conn, &a.dispositivo, "Ana", "12345678", true).unwrap().id;
+    crate::config::gravar(&a.conn, "caixa_nome", "Caixa 1").unwrap();
+    let mut f = produtos::ficha_nova(&a.conn).unwrap();
+    f.nome = "Bateria 60Ah".into();
+    f.custo = "150".into();
+    f.estoque_inicial = "10".into();
+    let peca = produtos::salvar(&a.conn, &a.dispositivo, &u, &f).unwrap();
+    let mut b = Banco::em_memoria().unwrap();
+    crate::config::gravar(&b.conn, "caixa_nome", "Caixa 2").unwrap();
+    trocar(&mut a, &mut b);
+    let (da, db) = (a.dispositivo.clone(), b.dispositivo.clone());
+    caixa::abrir(&a.conn, &da, &u, "Caixa 1", "100").unwrap();
+    caixa::abrir(&b.conn, &db, &u, "Caixa 2", "500").unwrap();
+    let sa = sessao(&a.conn, &da);
+    let sb = sessao(&b.conn, &db);
+    let venda = VendaEntrada {
+        itens: vec![ItemEntrada { produto_id: peca.clone(), quantidade: "1".into(), ..Default::default() }],
+        tabela: 1,
+        pagamentos: vec![pg("dinheiro", "300")],
+        ..Default::default()
+    };
+    let v = vendas::concluir(&a.conn, &da, &u, &venda).unwrap();
+    trocar(&mut a, &mut b);
+    vendas::cancelar(&b.conn, &db, &u, &v, "desistiu").unwrap();
+    assert_eq!(esperado(&b.conn, &sb), "200,00", "os R$ 300 saem da gaveta do Caixa 2");
+    trocar(&mut a, &mut b);
+    assert_eq!(texto(&a.conn, "SELECT situacao FROM venda WHERE id = ?1", [&v]), "cancelada", "o cancelamento chegou");
+    let r = caixa::resumo(&a.conn, &sa).unwrap();
+    assert_eq!((r.esperado.as_str(), r.desfeitas_fora), ("400,00", 1), "a gaveta do Caixa 1 não mudou");
+    caixa::fechar(&a.conn, &da, &u, "400", "").unwrap();
+    assert_eq!(caixa::resumo(&a.conn, &sa).unwrap().diferenca, "0,00", "o Caixa 1 fecha certo");
+    // Depois do fechamento, a troca de novo não muda nada nos dois.
+    trocar(&mut a, &mut b);
+    assert_eq!(caixa::resumo(&a.conn, &sa).unwrap().diferenca, "0,00");
+    assert_eq!(esperado(&b.conn, &sb), "200,00");
 }
