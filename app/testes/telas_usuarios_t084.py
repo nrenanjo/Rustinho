@@ -200,17 +200,23 @@ def main():
         finally:
             r.fechar()
 
-        # CAIXA: o mesmo fluxo do cartão (a senha do gerente)
+        # CAIXA: decisão 1 do proprietário (25/11/2026): o cartão Usuários abre sem a senha do gerente e mostra só o
+        # "Sair"; mexer nos usuários pede a senha.
         r = base.Rustinho(pasta, "TelaInicio", {}, fotos, "caixa")
         try:
             r.entrar("Bia")
             redimensionar(1280, 900)
             esperar(r, lambda t: "Usuários" in t)
             clicar_no_texto(r, "Usuários")
-            tx = esperar(r, lambda t: "Senha do gerente" in t)
+            tx = esperar(r, lambda t: "Mexer nos usuários (senha do gerente)" in t)
             f = r.foto("-1-usuarios")
-            ok("CAIXA: o cartão Usuários pede a senha do gerente (o Sair fica em Usuários; R1)", "Senha do gerente" in tx,
-               f"foto {f}")
+            ok("CAIXA: o cartão Usuários abre sem a senha e mostra só o Sair (decisão 1)",
+               "Sair" in tx and "Mexer nos usuários (senha do gerente)" in tx and "Senha do gerente" not in tx
+               and "Salvar" not in tx, f"foto {f}")
+            clicar_no_texto(r, "Mexer nos usuários (senha do gerente)")
+            tx = esperar(r, lambda t: "Senha do gerente" in t)
+            ok("CAIXA: mexer nos usuários pede a senha do gerente", "Senha do gerente" in tx,
+               f"foto {r.foto('-2-senha')}")
         finally:
             r.fechar()
 

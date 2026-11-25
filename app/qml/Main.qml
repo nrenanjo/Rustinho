@@ -103,7 +103,10 @@ ApplicationWindow {
         // Telas do gerente: pede a senha dele se quem está usando é caixa.
         const acao = ({ TelaFinanceiro: "financeiro", TelaUsuarios: "usuarios" })[tela]
         const empurrar = () => pilha.push(Qt.resolvedUrl(tela + ".qml"), propriedades || {})
-        if (acao)
+        // Decisão 1 do proprietário (25/11/2026): Usuários abre sem a senha para quem não é gerente, só com o "Sair".
+        if (tela === "TelaUsuarios" && !podeGerente(acao, true))
+            pilha.push(Qt.resolvedUrl(tela + ".qml"), Object.assign({ soSair: true }, propriedades || {}))
+        else if (acao)
             comGerente(acao, empurrar)
         else
             empurrar()

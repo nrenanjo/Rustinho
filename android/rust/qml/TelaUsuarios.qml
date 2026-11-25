@@ -13,6 +13,9 @@ FocusScope {
     Component.onDestruction: Api.chamar("gerente_encerrar")
     readonly property var janela: ApplicationWindow.window
     property var usuarios: []
+    // Decisão 1 do proprietário (25/11/2026): quem não é gerente abre esta tela sem a senha, mas só vê o "Sair"
+    // (trocar de pessoa no caixa não depende do gerente). O resto continua pedindo a senha.
+    property bool soSair: false
     property var editando: null      // usuário aberto à direita (null = novo)
     // Celular: a lista e a ficha aparecem uma de cada vez.
     property bool mostrarFicha: false
@@ -129,12 +132,13 @@ FocusScope {
             Cabecalho {
                 sensivel: true
                 titulo: "Usuários"
-                subtitulo: "Todos acessam todas as funções. Cada um entra com o próprio nome e senha."
+                subtitulo: tela.soSair ? "Para trocar de pessoa no caixa, toque em Sair."
+                                       : "Todos acessam todas as funções. Cada um entra com o próprio nome e senha."
                 Layout.fillWidth: true
                 // T084 (texto O): na tela larga o formulário de criação fica sempre à direita e o botão era
                 // redundante; na estreita, o formulário não fica à vista e o botão é a entrada para ele.
                 Botao {
-                    visible: Tema.estreito
+                    visible: Tema.estreito && !tela.soSair
                     text: "Novo usuário"
                     icone: "mais"
                     onClicked: tela.novo()
@@ -151,8 +155,30 @@ FocusScope {
                 }
             }
 
+            // Decisão 1: só o "Sair"; mexer nos usuários continua com a senha do gerente.
+            Nota {
+                visible: tela.soSair
+                text: "Para mexer nos usuários (criar, mudar senha, desativar), é preciso a senha do gerente."
+                Layout.fillWidth: true
+            }
+            Botao {
+                visible: tela.soSair
+                objectName: "botaoUsuariosComGerente"
+                text: "Mexer nos usuários (senha do gerente)"
+                tipo: "secundario"
+                onClicked: tela.janela.comGerente("usuarios", () => {
+                    tela.soSair = false
+                    tela.carregar()
+                })
+            }
+            // No modo "só Sair", o resto da coluna fica vazio (o conteúdo fica no alto, não no meio).
+            Item {
+                visible: tela.soSair
+                Layout.fillHeight: true
+            }
             ListView {
                 id: lista
+                visible: !tela.soSair
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -231,7 +257,7 @@ FocusScope {
         }
 
         Faixa {
-            visible: !Tema.estreito || tela.mostrarFicha
+            visible: !tela.soSair && (!Tema.estreito || tela.mostrarFicha)
             titulo: tela.editando ? "Alterar usuário" : "Novo usuário"
             color: Tema.pergaminho
             Layout.preferredWidth: 400
@@ -308,7 +334,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        carregar()
+        if (!soSair)
+            carregar()
         novo()
         mostrarFicha = false
     }

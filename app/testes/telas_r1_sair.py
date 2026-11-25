@@ -51,15 +51,43 @@ def main():
             r.entrar("Bia")
             time.sleep(2)
             textos = r.textos()
-            cumprimenta_bia = any(simples(t).endswith(", bia") for _, _, t in textos)
+            # O roteiro abre Usuários a cada entrada (--abrir): a Bia, caixa, vê Usuários só com o Sair (decisão 1);
+            # o cumprimento pelo nome no Início está no caso da Bia, mais abaixo (a Ana volta e é cumprimentada).
+            entrou_bia = any(t == "Para trocar de pessoa no caixa, toque em Sair." for _, _, t in textos)
             foto = r.foto("-2-bia")
-            print(("✔ " if cumprimenta_bia else "✘ ")
-                  + "sair: a Bia entra no mesmo Rustinho, e o Início a cumprimenta pelo nome"
-                  + ("" if cumprimenta_bia else f" (foto: {foto})"))
-            tudo_certo &= cumprimenta_bia
+            print(("✔ " if entrou_bia else "✘ ")
+                  + "sair: a Bia entra no mesmo Rustinho (Usuários só com o Sair, sem a senha do gerente)"
+                  + ("" if entrou_bia else f" (foto: {foto})"))
+            tudo_certo &= entrou_bia
             vivo = r.p.poll() is None
             print(("✔ " if vivo else "✘ ") + "sair: o Rustinho não fechou")
             tudo_certo &= vivo
+        finally:
+            r.fechar()
+        # Decisão 1 do proprietário (25/11/2026): a Bia (caixa) abre Usuários pelo Início sem a senha do gerente e vê
+        # só o "Sair" (sem a lista nem a ficha); mexer nos usuários continua pedindo a senha.
+        r = Rustinho(pasta, "TelaInicio", {}, fotos, "r1-bia")
+        try:
+            r.entrar("Bia")
+            time.sleep(2)
+            if not r.clicar("Usuários"):
+                raise RuntimeError(f"não achei o ladrilho Usuários no Início (veja {r.saida})")
+            time.sleep(2)
+            textos = r.textos()
+            tudo_certo &= conferir("bia: Usuários abre sem a senha e mostra só o Sair", r.foto("-1"), textos,
+                                   igual=["Sair", "Mexer nos usuários (senha do gerente)"],
+                                   tem=["Para trocar de pessoa no caixa, toque em Sair."],
+                                   sem_igual=["Salvar", "Senha do gerente", "Ana"])
+            if not r.clicar("Sair"):
+                raise RuntimeError(f"não achei o botão Sair (veja {r.saida})")
+            time.sleep(2)
+            r.entrar("Ana")
+            time.sleep(2)
+            textos = r.textos()
+            ok = any(simples(t).endswith(", ana") for _, _, t in textos)
+            print(("✔ " if ok else "✘ ") + "bia: o Sair volta à entrada, e a Ana entra"
+                  + ("" if ok else f" (foto: {r.foto('-2-ana')})"))
+            tudo_certo &= ok
         finally:
             r.fechar()
     finally:
