@@ -396,3 +396,47 @@ fn r15_sem_compensacao_exata_recusa() {
         .unwrap();
     assert_eq!(ativos, 3, "nada mudou");
 }
+
+/// R15: um recebimento que pagou duas parcelas, repetido no outro caixa, deixa as duas pagas a mais. Estornar um
+/// recebimento inteiro reabriria a outra parcela, então nenhuma das duas tem compensação pronta (o gerente estorna
+/// pela tela do Receber, como antes).
+#[test]
+fn r15_recebimento_de_duas_parcelas_nao_tem_compensacao_pronta() {
+    let (mut s, cliente) = loja();
+    outro_caixa(&mut s);
+    ok(
+        &mut s,
+        "receber_lancar",
+        json!({ "clienteId": cliente, "descricao": "caderno", "valor": "100", "parcelas": 2, "primeiroVencimento": "" }),
+    );
+    let parcelas: Vec<String> = conn(&mut s)
+        .prepare("SELECT id FROM conta_receber ORDER BY parcela")
+        .unwrap()
+        .query_map([], |l| l.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let r = ok(&mut s, "receber_baixar", json!({ "clienteId": cliente, "contas": parcelas, "forma": "dinheiro" }));
+    let meu = r["id"].as_str().unwrap().to_string();
+    copiar_do_outro_caixa(&mut s, "recebimento", &meu, "rec-caixa-2", &[]);
+    let rps: Vec<String> = conn(&mut s)
+        .prepare("SELECT id FROM recebimento_parcela WHERE recebimento_id = ?1")
+        .unwrap()
+        .query_map([&meu], |l| l.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    for (i, rp) in rps.iter().enumerate() {
+        copiar_do_outro_caixa(
+            &mut s,
+            "recebimento_parcela",
+            rp,
+            &format!("rp-caixa-2-{i}"),
+            &[("recebimento_id", "'rec-caixa-2'")],
+        );
+    }
+    sync::verificar_depois(conn(&mut s)).unwrap();
+    let k = abertos_do_tipo(&mut s, "pago_a_mais");
+    assert_eq!(k.len(), 2, "{k:?}");
+    assert!(k.iter().all(|x| x["compensacao"] == ""), "{k:?}");
+}

@@ -623,6 +623,20 @@ fn r18_orcamento_no_limite_nao_empilha_nem_encadeia() {
     assert!(e.contains("Desconto acima do máximo"), "o orçamento encadeado é recusado: {e}");
 }
 
+/// R18 · A1 da revisão: um orçamento novo nunca parte de outro. O orçamento vencido (R$ 300; hoje R$ 400, máximo 5%)
+/// vira venda pelo preço dele, mas salvar o mesmo carrinho como orçamento novo é recusado: sem isso, o preço antigo
+/// ganharia validade nova a cada orçamento (o preço do orçamento só vale na venda que sai dele).
+#[test]
+fn r18_orcamento_novo_nao_renova_o_preco_de_outro() {
+    let l = loja();
+    let c = &l.b.conn;
+    let o = orcamento_vencido(&l, "5");
+    let venda = vendas::orcamento_para_venda(c, &o).unwrap();
+    assert_eq!(vendas::calcular(c, &venda).unwrap().itens[0].erro, "", "a venda sai pelo preço do orçamento");
+    let e = vendas::salvar_orcamento(c, &l.b.dispositivo, &l.u, "Caixa 1", &venda).unwrap_err().to_string();
+    assert!(e.contains("Desconto acima do máximo"), "o orçamento novo conta do preço de hoje: {e}");
+}
+
 /// R18: o preço de hoje (R$ 250) ficou menor que o do orçamento (R$ 300). Vender
 /// pelo preço de hoje não é desconto: a referência é o menor dos dois. Abaixo
 /// dele, o desconto máximo (5%) continua valendo (R$ 230 = 8% recusa).
