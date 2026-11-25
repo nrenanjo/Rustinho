@@ -502,11 +502,17 @@ pub fn devolver(
     Ok(())
 }
 
-/// Volta para a carteira (depositou ou repassou por engano).
+/// O cheque está devolvido? (R19: desfazer a devolução é sempre do gerente; o comando confere antes.)
+pub fn devolvido(conn: &Connection, id: &str) -> Resultado<bool> {
+    Ok(dados(conn, id)?.situacao == "devolvido")
+}
+
+/// Volta para a carteira (depositou ou repassou por engano). Num cheque devolvido, desfaz a devolução (R19).
 pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
     crate::sync::exigir_editavel(conn, "cheque", id)?;
     let d = dados(conn, id)?;
     match d.situacao.as_str() {
+        "devolvido" => return desfazer_devolucao(conn, dispositivo, usuario_id, id, &d),
         "depositado" => {
             conn.execute(
                 "UPDATE movimento_conta SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = 'Depósito desfeito'
@@ -515,7 +521,7 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
             )?;
         }
         "repassado" => {}
-        _ => return Err(Erro::validacao("Só dá para desfazer depósito ou repasse.")),
+        _ => return Err(Erro::validacao("Só dá para desfazer depósito, repasse ou devolução.")),
     }
     conn.execute(
         "UPDATE cheque SET situacao = 'carteira', situacao_em = ?2, situacao_por = ?3, conta_loja_id = NULL, observacoes = ''
@@ -531,6 +537,62 @@ pub fn desfazer(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str
         id,
         &[format!("Cheque nº {} voltou para a carteira", d.numero)],
     )?;
+    Ok(())
+}
+
+/// R19 (DP-18, decisão do proprietário de 25/11/2026: só o gerente desfaz a devolução de um cheque, com registro; a
+/// permissão é conferida no comando). Desfaz o que a devolução fez:
+/// - a saída da conta (`cheque_devolvido`), se o cheque estava depositado: o movimento é estornado;
+/// - a dívida lançada no Receber, se houve: é cancelada. A dívida não guarda o cheque: é a parcela sem venda, do
+///   cliente do cheque, com a descrição e o valor da devolução, lançada na mesma operação (até 1 minuto da devolução).
+///   Se ela já tem pagamento, nada é desfeito: o recebimento é estornado antes;
+/// - a situação: volta a "depositado" (na mesma conta) ou a "carteira".
+fn desfazer_devolucao(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str, d: &Dados) -> Resultado<()> {
+    let descricao = format!("Cheque nº {} devolvido", d.numero);
+    let divida: Option<(String, i64)> = match &d.cliente_id {
+        None => None,
+        Some(cliente) => conn
+            .query_row(
+                "SELECT s.id, s.pago FROM conta_receber_saldo s, cheque ch
+                  WHERE ch.id = ?1 AND s.cliente_id = ?2 AND s.venda_id IS NULL AND s.cancelado_em IS NULL
+                    AND s.descricao = ?3 AND s.valor = ?4
+                    AND ABS(julianday(s.criado_em) - julianday(ch.situacao_em)) * 86400 <= 60
+                  ORDER BY ABS(julianday(s.criado_em) - julianday(ch.situacao_em)) LIMIT 1",
+                params![id, cliente, descricao, d.valor],
+                |l| Ok((l.get(0)?, l.get(1)?)),
+            )
+            .optional()?,
+    };
+    if let Some((_, pago)) = &divida {
+        if *pago > 0 {
+            return Err(Erro::validacao(format!(
+                "A dívida do cheque nº {} no Receber já tem pagamento. Estorne o recebimento antes de desfazer a devolução.",
+                d.numero
+            )));
+        }
+    }
+    let estornados = conn.execute(
+        "UPDATE movimento_conta SET estornado_em = ?2, estornado_por = ?3, motivo_estorno = 'Devolução desfeita'
+          WHERE origem_id = ?1 AND tipo = 'cheque_devolvido' AND estornado_em IS NULL",
+        params![id, tempo::agora(), usuario_id],
+    )?;
+    let mut detalhes = vec![format!("Devolução do cheque nº {} desfeita", d.numero)];
+    if let Some((conta, _)) = &divida {
+        receber::cancelar_conta(
+            conn,
+            dispositivo,
+            usuario_id,
+            conta,
+            &format!("Devolução do cheque nº {} desfeita", d.numero),
+        )?;
+        detalhes.push(format!("A dívida de R$ {} no Receber foi cancelada", numeros::escrever_dinheiro(d.valor)));
+    }
+    if estornados > 0 {
+        detalhes.push(format!("Os R$ {} voltaram para a conta", numeros::escrever_dinheiro(d.valor)));
+    }
+    let volta = if d.conta_loja_id.is_some() { "depositado" } else { "carteira" };
+    mudar(conn, usuario_id, id, volta, d.conta_loja_id.as_deref(), Some(""))?;
+    auditoria::registrar(conn, dispositivo, Some(usuario_id), "cheque.desfazer_devolucao", "cheque", id, &detalhes)?;
     Ok(())
 }
 
@@ -644,6 +706,10 @@ mod comandos {
 
     fn cheque_desfazer(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: ChequeAcao = ler(dados)?;
+        // R19 (DP-18): desfazer a devolução é sempre do gerente, mesmo com "estornar" liberado na pílula Gerente.
+        if cheques::devolvido(p.conn, &d.id)? {
+            p.exigir("cheque_devolucao")?;
+        }
         let tx = p.conn.transaction()?;
         cheques::desfazer(&tx, p.disp, p.usuario_id, &d.id)?;
         let resposta = Value::Null;

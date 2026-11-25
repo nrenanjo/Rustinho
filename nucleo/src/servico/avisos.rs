@@ -408,7 +408,7 @@ pub const NOMES_DAS_OPERACOES: &[(&str, &str)] = &[
     ("caixa_retirar", "Caixa retirado da loja"),
     ("categoria_salvar", "Categoria do financeiro"),
     ("cheque_depositar", "Depósito de cheque"),
-    ("cheque_desfazer", "Cheque de volta à carteira"),
+    ("cheque_desfazer", "Cheque desfeito (depósito, repasse ou devolução)"),
     ("cheque_devolver", "Cheque devolvido"),
     ("cheque_repassar", "Cheque repassado"),
     ("comissao_fechar", "Fechamento de comissão"),

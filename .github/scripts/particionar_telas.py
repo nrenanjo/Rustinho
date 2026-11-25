@@ -104,6 +104,7 @@ PESOS_SEGUNDOS = {
     "telas_r1_sair": 25,
     "telas_r24_gerente": 25,
     "telas_r3_comissao": 25,
+    "telas_r19_cheque": 25,
     "telas_r8_r11_teclado": 40,
     "telas_r20_custos": 30,
     "telas_estab_sessao": 28,

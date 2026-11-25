@@ -445,41 +445,117 @@ fn cheque_devolvido(l: &Loja) -> String {
     ch
 }
 
-/// DP-18 · retrato: devolução de cheque não tem volta. "Desfazer" recusa, e o
-/// estorno do movimento manda "desfazer na lista de cheques", que recusa
-/// (um círculo). A dívida e a saída da conta ficam.
+/// DP-18 (decidida pelo proprietário em 25/11/2026, regra 19: "só o gerente
+/// desfaz, com registro"). O cheque volta a depositado, a saída da conta é
+/// estornada, a dívida lançada sai (sem pagamento) e o fluxo (E01) fica só com
+/// o depósito. O estorno do movimento continua mandando "desfazer na lista de
+/// cheques", que agora desfaz. O retrato de antes ("a devolução não tem volta")
+/// saiu com a decisão. A permissão está em `r19_so_o_gerente_desfaz_a_devolucao`.
 #[test]
-fn dp18_retrato_devolucao_de_cheque_nao_tem_volta() {
+fn dp18_gerente_desfaz_a_devolucao_do_cheque() {
     let l = loja();
     let c = &l.b.conn;
     let d = &l.b.dispositivo;
     let ch = cheque_devolvido(&l);
-    let e = cheques::desfazer(c, d, &l.u, &ch).unwrap_err().to_string();
-    assert!(e.contains("Só dá para desfazer depósito ou repasse"), "{e}");
     let mov = texto(c, "SELECT id FROM movimento_conta WHERE origem_id = ?1 AND tipo = 'cheque_devolvido'", [&ch]);
     let e = financeiro::estornar_movimento(c, d, &l.u, &mov, "devolvido por engano").unwrap_err().to_string();
     assert!(e.contains("desfaça na lista de cheques"), "{e}");
-    assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "300,00");
-    assert_eq!(financeiro::saldo(c, &l.banco, "9999-12-31").unwrap(), 100_000, "1.000 + 300 − 300");
-}
-
-/// DP-18 · alvo (alternativa "o gerente desfaz, com auditoria"): o cheque
-/// volta a depositado, a saída da conta é estornada, a dívida lançada sai
-/// (sem pagamento) e o fluxo (E01) fica só com o depósito.
-#[test]
-#[ignore = "depende da DP-18: hoje a devolução de cheque não tem volta"]
-fn dp18_alvo_gerente_desfaz_a_devolucao_do_cheque() {
-    let l = loja();
-    let c = &l.b.conn;
-    let d = &l.b.dispositivo;
-    let ch = cheque_devolvido(&l);
     cheques::desfazer(c, d, &l.u, &ch).unwrap();
     assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "depositado");
+    assert_eq!(texto(c, "SELECT conta_loja_id FROM cheque WHERE id = ?1", [&ch]), l.banco);
     assert_eq!(financeiro::saldo(c, &l.banco, "9999-12-31").unwrap(), 130_000);
     assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "0,00");
     let f = financeiro::fluxo(c, "", "", 30).unwrap();
     assert_eq!((f.entradas.as_str(), f.saidas.as_str()), ("300,00", "0,00"));
-    assert_eq!(contar(c, "SELECT COUNT(*) FROM auditoria WHERE entidade_id = ?1 AND acao LIKE 'cheque.%'", [&ch]), 4);
+    // O registro: o depósito, a devolução e a devolução desfeita (um registro com o que foi desfeito; o alvo de
+    // antes contava 4). A dívida cancelada tem o registro dela no Receber, com o motivo.
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM auditoria WHERE entidade_id = ?1 AND acao LIKE 'cheque.%'", [&ch]), 3);
+    assert_eq!(
+        contar(
+            c,
+            "SELECT COUNT(*) FROM conta_receber WHERE motivo_cancelamento = 'Devolução do cheque nº 000401 desfeita'",
+            []
+        ),
+        1
+    );
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM auditoria WHERE acao = 'receber.cancelar'", []), 1);
+    let reg =
+        texto(c, "SELECT detalhes FROM auditoria WHERE entidade_id = ?1 AND acao = 'cheque.desfazer_devolucao'", [&ch]);
+    assert!(
+        reg.contains("Devolução do cheque nº 000401 desfeita")
+            && reg.contains("A dívida de R$ 300,00 no Receber foi cancelada")
+            && reg.contains("Os R$ 300,00 voltaram para a conta"),
+        "{reg}"
+    );
+    // Desfeita a devolução, o cheque segue o caminho normal: desfazer de novo tira o depósito.
+    cheques::desfazer(c, d, &l.u, &ch).unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "carteira");
+    assert_eq!(financeiro::saldo(c, &l.banco, "9999-12-31").unwrap(), 100_000);
+}
+
+/// R19: o cheque devolvido em carteira (sem depósito) volta para a carteira, e a
+/// dívida lançada na devolução sai. Sem dívida lançada na devolução, nenhuma
+/// outra dívida do cliente é tocada, nem a de mesma descrição lançada à mão antes.
+#[test]
+fn r19_devolvido_em_carteira_e_so_a_divida_da_devolucao() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    caixa::abrir(c, d, &l.u, "Caixa 1", "0").unwrap();
+    let v = vender(&l, d, "1", vec![pg("cheque", "300")], Some("000402"));
+    let ch = texto(c, "SELECT id FROM cheque WHERE venda_id = ?1", [&v]);
+    cheques::devolver(c, d, &l.u, &ch, "Sem fundos", true).unwrap();
+    assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "300,00");
+    cheques::desfazer(c, d, &l.u, &ch).unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "carteira");
+    assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "0,00");
+    assert_eq!(financeiro::saldo(c, &l.banco, "9999-12-31").unwrap(), 100_000, "nenhum movimento na conta");
+    // A dívida "igual", lançada à mão uma hora antes, e a devolução sem dívida.
+    receber::lancar(
+        c,
+        d,
+        &l.u,
+        &receber::LancamentoEntrada {
+            cliente_id: l.cliente.clone(),
+            descricao: "Cheque nº 000402 devolvido".into(),
+            valor: "300".into(),
+            parcelas: 1,
+            primeiro_vencimento: String::new(),
+        },
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE conta_receber SET criado_em = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hour') WHERE cancelado_em IS NULL",
+        [],
+    )
+    .unwrap();
+    cheques::devolver(c, d, &l.u, &ch, "Sem fundos", false).unwrap();
+    cheques::desfazer(c, d, &l.u, &ch).unwrap();
+    assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "carteira");
+    assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "300,00", "a dívida lançada à mão fica");
+}
+
+/// R19: a dívida da devolução já tem pagamento: nada é desfeito, e a mensagem diz
+/// o que fazer antes (estornar o recebimento).
+#[test]
+fn r19_divida_paga_recusa_desfazer_a_devolucao() {
+    let l = loja();
+    let c = &l.b.conn;
+    let d = &l.b.dispositivo;
+    let ch = cheque_devolvido(&l);
+    let pagar = receber::ReceberEntrada {
+        cliente_id: l.cliente.clone(),
+        valor: "100".into(),
+        forma: "dinheiro".into(),
+        ..Default::default()
+    };
+    receber::receber(c, d, &l.u, &pagar).unwrap();
+    let e = cheques::desfazer(c, d, &l.u, &ch).unwrap_err().to_string();
+    assert!(e.contains("já tem pagamento") && e.contains("Estorne o recebimento antes"), "{e}");
+    assert_eq!(texto(c, "SELECT situacao FROM cheque WHERE id = ?1", [&ch]), "devolvido");
+    assert_eq!(financeiro::saldo(c, &l.banco, "9999-12-31").unwrap(), 100_000, "1.000 + 300 − 300");
+    assert_eq!(receber::situacao(c, &l.cliente).unwrap().em_aberto, "200,00");
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM auditoria WHERE acao = 'cheque.desfazer_devolucao'", []), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +702,67 @@ fn so_o_gerente(r: &Value, o_que: &str) {
 
 fn liberar(s: &mut crate::Servico, comando: &str, dados: &Value) {
     ok(s, "gerente_liberar", json!({ "senha": "12345678", "comando": comando, "dados": dados }));
+}
+
+/// R19 (DP-18): desfazer a devolução de um cheque é sempre do gerente, mesmo com
+/// "estornar" liberado para todos na pílula Gerente; com a senha dele, desfaz. O
+/// controle: com "estornar" livre, a caixa ainda desfaz um depósito sem senha.
+#[test]
+fn r19_so_o_gerente_desfaz_a_devolucao() {
+    let (mut s, _bia) = loja_com_bia();
+    let (devolvido, depositado) = {
+        let b = s.banco_para_teste();
+        let (c, disp) = (&b.conn, b.dispositivo.clone());
+        let ana: String = c.query_row("SELECT id FROM usuario WHERE nome = 'Ana'", [], |l| l.get(0)).unwrap();
+        // "cheque_devolucao" na lista dos livres (uma configuração adulterada ou vinda de fora): nem assim.
+        crate::config::gravar(c, "gerente_livres", "estornar,financeiro,cheque_devolucao").unwrap();
+        let conta = financeiro::salvar_conta(
+            c,
+            &disp,
+            &ana,
+            &financeiro::ContaEntrada {
+                nome: "Sicoob".into(),
+                tipo: "banco".into(),
+                ativo: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut cli = pessoas::ficha_nova(c, "cliente").unwrap();
+        cli.nome = "Oficina do Zé".into();
+        let cliente = pessoas::salvar(c, &disp, &ana, &cli).unwrap();
+        let mut ids = vec![];
+        for (id, numero) in [("ch-r19-a", "000501"), ("ch-r19-b", "000502")] {
+            c.execute(
+                "INSERT INTO cheque (id, cliente_id, numero, valor, bom_para, criado_em, dispositivo)
+                 VALUES (?1, ?2, ?3, 30000, date('now'), ?4, ?5)",
+                params![id, cliente, numero, crate::tempo::agora(), disp],
+            )
+            .unwrap();
+            cheques::depositar(c, &disp, &ana, id, &conta).unwrap();
+            ids.push(id.to_string());
+        }
+        cheques::devolver(c, &disp, &ana, &ids[0], "Sem fundos", true).unwrap();
+        (ids[0].clone(), ids[1].clone())
+    };
+    let situacao = |s: &mut crate::Servico, id: &str| -> String {
+        s.banco_para_teste().conn.query_row("SELECT situacao FROM cheque WHERE id = ?1", [id], |l| l.get(0)).unwrap()
+    };
+    let r = chamar(&mut s, "cheque_desfazer", json!({ "id": devolvido }));
+    assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("gerente")), "{r}");
+    assert!(r["erro"].as_str().unwrap().contains("desfazer a devolução de um cheque"), "{r}");
+    assert_eq!(situacao(&mut s, &devolvido), "devolvido", "nada mudou");
+    // Controle: "estornar" está livre, e desfazer o depósito não pede a senha.
+    ok(&mut s, "cheque_desfazer", json!({ "id": depositado }));
+    assert_eq!(situacao(&mut s, &depositado), "carteira");
+    // Com a senha do gerente, desfaz, e a liberação fica no registro.
+    liberar(&mut s, "cheque_desfazer", &json!({ "id": devolvido }));
+    ok(&mut s, "cheque_desfazer", json!({ "id": devolvido }));
+    assert_eq!(situacao(&mut s, &devolvido), "depositado");
+    let c = &s.banco_para_teste().conn;
+    let lib = texto(c, "SELECT detalhes FROM auditoria WHERE acao = 'gerente.liberar' ORDER BY rowid DESC LIMIT 1", []);
+    assert!(lib.contains("desfazer o depósito, o repasse ou a devolução de um cheque"), "{lib}");
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM auditoria WHERE acao = 'cheque.desfazer_devolucao'", []), 1);
 }
 
 /// DP-23 (decidida pelo proprietário em 25/11/2026, regra 24: "só o gerente, com

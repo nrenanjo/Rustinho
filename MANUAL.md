@@ -380,6 +380,10 @@ Para começar do zero, feche o Rustinho e apague essa pasta (os backups vão jun
   - **A pagar:** as contas da loja. As **duplicatas da nota de compra** entram sozinhas ao lançar a compra (dá para desmarcar na tela da compra). Aluguel, energia e o resto: **Lançar conta**, em uma ou mais parcelas. **Pagar** inteiro ou em parte, com juros ou desconto, saindo de uma conta da loja ou da **gaveta do caixa** (vira sangria). Pagamento em **cheque** da loja sai no "bom para". **Corrigir**, **Tirar** e **Estornar** pedem motivo. **Categorias** simples (aluguel, energia, impostos...), que dá para renomear ou criar.
   - **Contas da loja:** o **Caixa geral** (cofre) e os bancos, com saldo e extrato. **Entrada**, **Saída**, **Transferir** (ex.: do cofre para o banco) e **Conferir saldo** (o Rustinho lança a diferença como ajuste).
   - **Cheques:** os cheques recebidos, por "bom para". **Depositar** numa conta, **Repassar** (para um fornecedor) ou **Devolvido** (sai da conta e pode virar dívida do cliente no Receber). Os botões menores aparecem ao passar o mouse.
+    **Desfazer** volta atrás num depósito ou repasse feito por engano (o cheque volta para a carteira). No cheque
+    devolvido, desfaz a devolução: o cheque volta a ficar depositado (ou em carteira), a saída da conta é estornada e a
+    dívida lançada no Receber é cancelada. Desfazer a devolução é **sempre do gerente** e fica no histórico; se a
+    dívida já recebeu algum pagamento, estorne o recebimento antes.
   - **Fluxo de caixa:** o que entrou e saiu, dia a dia, e os **próximos 30 dias** (crediário e cheques a receber, contas a pagar) começando do saldo das contas.
   - **Comissões:** quanto cada vendedor ganhou no período. Vale a comissão da peça (cadastro da peça) ou a do vendedor (**Usuários → Comissão**). **Fechar** lança a comissão no A pagar.
 - **Cheque na venda e no Receber:** forma **Cheque**, com número do 1º cheque, banco e "bom para". Botões **À vista, 30, 30/60, 30/60/90**: os cheques seguintes vêm um mês depois do outro, com o número em sequência.

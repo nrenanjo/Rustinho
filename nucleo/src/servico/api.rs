@@ -57,6 +57,8 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
 /// desconto máximo ou a comissão da peça.
 /// "pendencia_xml" (R6 / D-AUD-5, com a DP-13 na alternativa recomendada):
 /// descartar uma pendência de identificação do XML, com motivo.
+/// "cheque_devolucao" (R19 / DP-18, decisão de 25/11/2026): desfazer a
+/// devolução de um cheque, com registro.
 const SEMPRE_DO_GERENTE: &[&str] = &[
     "gerente",
     "precos",
@@ -66,6 +68,7 @@ const SEMPRE_DO_GERENTE: &[&str] = &[
     "csosn",
     "desconto_e_comissao",
     "pendencia_xml",
+    "cheque_devolucao",
 ];
 
 /// Nome da ação para as mensagens.
@@ -79,6 +82,7 @@ fn nome_da_acao(acao: &str) -> String {
         "csosn" => "mudar o CSOSN da peça".into(),
         "desconto_e_comissao" => "mudar o desconto máximo ou a comissão da peça".into(),
         "pendencia_xml" => "descartar uma pendência de identificação do XML".into(),
+        "cheque_devolucao" => "desfazer a devolução de um cheque".into(),
         _ => ACOES_DO_GERENTE
             .iter()
             .find(|(id, _)| *id == acao)
@@ -161,6 +165,7 @@ fn nome_da_liberacao(comando: &str) -> String {
         "unidade_salvar" => nome_da_acao("unidade_fracionada"),
         "fiscal_automatico" => "passar o CSOSN das peças para automático".into(),
         "xml_pendencia_resolver" => nome_da_acao("pendencia_xml"),
+        "cheque_desfazer" => "desfazer o depósito, o repasse ou a devolução de um cheque".into(),
         _ => nome_da_acao(acao_do_comando(comando).unwrap_or("precos")),
     }
 }

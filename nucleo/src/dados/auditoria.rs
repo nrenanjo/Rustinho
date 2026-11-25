@@ -154,6 +154,7 @@ fn descrever(acao: &str) -> &'static str {
         "cheque.repassar" => "repassou o cheque",
         "cheque.devolver" => "registrou cheque devolvido",
         "cheque.desfazer" => "voltou o cheque para a carteira",
+        "cheque.desfazer_devolucao" => "desfez a devolução do cheque",
         "comissao.fechar" => "fechou a comissão",
         "comissao.reabrir" => "desfez o fechamento da comissão",
         "encomenda.criar" => "anotou a encomenda",

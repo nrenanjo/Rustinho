@@ -232,13 +232,19 @@ FocusScope {
                                                         (m, pronto) => secao.janela.chamarGerente("cheque_repassar", { id: linha.ch.id, motivo: m }, pronto), "Para quem", "principal")
                         }
                         Botao {
-                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado") && (sobreLinha.hovered || Tema.celular || secao.linhaEscolhida === linha.ch.id)
+                            visible: (linha.ch.situacao === "depositado" || linha.ch.situacao === "repassado" || linha.ch.situacao === "devolvido") && (sobreLinha.hovered || Tema.celular || secao.linhaEscolhida === linha.ch.id)
                             text: "Desfazer"
                             tipo: "discreto"
                             altura: 36
                             // D-09: a senha da consulta do Financeiro não vale para desfazer.
-                            onClicked: janela.confirmar("Devolver o cheque à carteira?", "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
-                                                        "Devolver à carteira", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
+                            // R19 (DP-18): no cheque devolvido, desfaz a devolução; é sempre do gerente (o núcleo confere).
+                            readonly property bool devolvido: linha.ch.situacao === "devolvido"
+                            onClicked: janela.confirmar(devolvido ? "Desfazer a devolução do cheque?" : "Devolver o cheque à carteira?",
+                                                        devolvido ? "O cheque nº " + linha.ch.numero + " volta a ficar "
+                                                                    + (linha.ch.conta !== "" ? "depositado em " + linha.ch.conta : "em carteira")
+                                                                    + ". A saída da conta e a dívida lançada no Receber são desfeitas. Só o gerente pode."
+                                                                  : "O cheque nº " + linha.ch.numero + " volta a ficar em carteira.",
+                                                        devolvido ? "Desfazer a devolução" : "Devolver à carteira", () => janela.chamarGerente("cheque_desfazer", { id: linha.ch.id }, r => {
                                                             // Caso 7 (C8): registro inconsistente → "Ver o registro" (decisão do gerente); na volta, nada é refeito.
                                                             if (!r.ok && !janela.oferecerReferencia(r, null))
                                                                 janela.avisar(r.erro, "erro")
