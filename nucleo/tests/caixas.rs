@@ -652,8 +652,10 @@ fn mesma_pendencia_nos_dois(nome: &str, codigo: &str) -> (Banco, Banco, String, 
 /// formas diferentes, sem rede. A liga o FAG-32206 à peça X que já existia; B
 /// cadastra uma peça nova Y. HOJE, depois de trocar:
 /// - vale o vínculo do último a gravar (B: Y), igual nos dois caixas; o de A
-///   aparece só como conflito "Peça" em Simultaneidade › Diferenças, com o
-///   campo "produto id" (dois ids, sem o nome das peças) e "usar a que perdeu";
+///   aparece como conflito em Simultaneidade › Diferenças, com o campo
+///   "produto id" e "usar a que perdeu"; desde o R12 da 0.9.19 (DP-41, decisão
+///   do proprietário), com o rótulo "Código do fornecedor em disputa" e o botão
+///   "São a mesma peça: juntar" com as duas peças (antes: o rótulo genérico "Peça");
 /// - cada caixa continua com a SUA pendência resolvida, cada uma numa peça (a
 ///   fila é local; ninguém compara as duas decisões);
 /// - as duas peças ficam nos dois caixas, e o GTIN da nota foi gravado nas
@@ -671,11 +673,17 @@ fn d03_hoje_dois_caixas_resolvem_o_mesmo_item_de_formas_diferentes() {
     // Hoje: vence o último a gravar, igual nos dois caixas.
     assert_eq!(dono_do_codigo(&a, "FAG-32206"), y, "hoje vale o vínculo do último a gravar");
     assert_eq!(dono_do_codigo(&b, "FAG-32206"), y);
-    // Hoje: o de A vira um conflito genérico de "Peça" (só o id da peça).
+    // O de A vira o conflito da disputa do código do fornecedor (R12), com as duas peças.
     for k in [sync::conflitos(&a.conn).unwrap(), sync::conflitos(&b.conn).unwrap()] {
         let vinculo: Vec<_> = k.iter().filter(|c| c.campos.iter().any(|f| f["campo"] == "produto_id")).collect();
         assert_eq!(vinculo.len(), 1, "{k:?}");
-        assert_eq!((vinculo[0].o_que.as_str(), vinculo[0].pode_usar), ("Peça", true));
+        assert_eq!((vinculo[0].o_que.as_str(), vinculo[0].pode_usar), ("Código do fornecedor em disputa", true));
+        let mut duas: Vec<&str> =
+            vinculo[0].mesma_peca.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+        duas.sort();
+        let mut esperado = vec![x.as_str(), y.as_str()];
+        esperado.sort();
+        assert_eq!(duas, esperado, "São a mesma peça: as duas");
         let campo = vinculo[0].campos.iter().find(|f| f["campo"] == "produto_id").unwrap();
         assert_eq!((campo["ficou"].as_str(), campo["perdeu"].as_str()), (Some(y.as_str()), Some(x.as_str())));
     }
@@ -999,14 +1007,17 @@ fn g05_a_mesma_nota_em_dois_caixas() {
             .query_row("SELECT SUM(quantidade) FROM estoque_movimento WHERE tipo = 'compra'", [], |l| l.get(0))
             .unwrap();
         assert_eq!(entrou, 2 * 26_000, "o estoque da nota (10 + 4 + 12) entra duas vezes até o gerente estornar");
-        // Os conflitos genéricos do vínculo de cada item (cada caixa cadastrou
-        // as suas peças novas) e o item que diz que é a mesma nota (5.4).
+        // Os conflitos do vínculo de cada item (cada caixa cadastrou as suas
+        // peças novas: desde o R12, "Código do fornecedor em disputa") e o item
+        // que diz que é a mesma nota (5.4).
         let k = sync::conflitos(&x.conn).unwrap();
         assert_eq!(k.len(), 4, "{k:#?}");
         let pecas: Vec<_> = k.iter().filter(|c| c.tipo != "nota").collect();
         assert_eq!(pecas.len(), 3, "{k:#?}");
         assert!(
-            pecas.iter().all(|c| c.o_que == "Peça" && c.campos.iter().any(|f| f["campo"] == "produto_id")),
+            pecas.iter().all(|c| c.o_que == "Código do fornecedor em disputa"
+                && c.campos.iter().any(|f| f["campo"] == "produto_id")
+                && c.mesma_peca.as_array().is_some_and(|v| v.len() == 2)),
             "{k:#?}"
         );
         let nota: Vec<_> = k.iter().filter(|c| c.tipo == "nota").collect();
