@@ -1220,8 +1220,23 @@ fn t028_chave_vazia_vira_pendencia_e_nao_entra() {
         Some(json!({ "produto_id": null, "para_id": "k", "em": "", "por": null, "motivo": "x" })),
         None,
     );
-    let r = aplicar_lote(&mut b, &[juncao, so_nos_dados], 0);
-    assert_eq!(r.pendentes, 2);
-    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM sync_pendencia WHERE motivo = 'invalida'"), 2);
+    // R12-B1: também ao apagar, na alteração compactada, no segundo pedaço de uma chave de duas colunas e nos dados
+    // dela (cada forma reduzida da regra deixaria um destes entrar).
+    let apagar = alteracao("j3", 3, "produto_juncao", json!([null]), None, None);
+    let mut compactada = alteracao("j4", 4, "produto_juncao", json!([null]), None, None);
+    compactada.operacao = "gravar".into();
+    compactada.compactada = true;
+    let composta = alteracao("j5", 5, "produto_preco", json!(["p1", null]), None, None);
+    let composta_dados = alteracao(
+        "j6",
+        6,
+        "produto_preco",
+        json!(["p1", 1]),
+        Some(json!({ "produto_id": "p1", "tabela": null, "preco": 1000 })),
+        None,
+    );
+    let r = aplicar_lote(&mut b, &[juncao, so_nos_dados, apagar, compactada, composta, composta_dados], 0);
+    assert_eq!(r.pendentes, 6);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM sync_pendencia WHERE motivo = 'invalida'"), 6);
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_juncao"), 0);
 }
