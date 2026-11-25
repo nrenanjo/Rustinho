@@ -29,13 +29,7 @@ pub(super) fn loja_com_dois_caixas_aprovados(
     // O caixa 2 já trocava dados com o 1 (protocolo 3), antes de o 1 virar raiz (A4:
     // os caixas que já trocavam dados são aprovados uma vez pelo gerente).
     let b = caixa_vazio_em_arquivo(&cb, "Caixa 2");
-    {
-        let (mut ma, pt_a) = motor(&ca);
-        let (mut mb, pt_b) = motor(&cb);
-        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
-        assert!(ma.encerrar(Duration::from_secs(20)));
-        assert!(mb.encerrar(Duration::from_secs(20)));
-    }
+    primeira_troca_pelo_p3(&ca, &cb, &a);
     p4::garantir_raiz(&a.conn, &ca).unwrap();
     let loja = crate::loja::id(&a.conn).unwrap();
     let id_a = identidade(&ca);
@@ -483,19 +477,45 @@ fn loja_com_caixa_antigo(nome: &str) -> (PathBuf, PathBuf, Banco, Banco) {
     let (ca, cb) = (temp(&format!("{nome}-a")), temp(&format!("{nome}-b")));
     let (a, _ua) = loja_em_arquivo(&ca, "Caixa 1");
     let b = caixa_vazio_em_arquivo(&cb, "Caixa Antigo");
-    {
-        let (mut ma, pt_a) = motor(&ca);
-        let (mut mb, pt_b) = motor(&cb);
-        puxar(&cb, &format!("127.0.0.1:{pt_a}"), pt_b).unwrap();
-        assert!(ma.encerrar(Duration::from_secs(20)));
-        assert!(mb.encerrar(Duration::from_secs(20)));
-    }
+    primeira_troca_pelo_p3(&ca, &cb, &a);
     p4::garantir_raiz(&a.conn, &ca).unwrap();
     assert!(p4::tem_raiz_fixada(&a.conn) && !p4::tem_raiz_fixada(&b.conn));
     (ca, cb, a, b)
 }
 
+/// O caixa 2 puxa do caixa 1 pelo protocolo 3 antes de o caixa 1 virar raiz. O motor do
+/// caixa 1 fixa a raiz sozinho no primeiro ciclo (`garantir_raiz`, de minuto em minuto) e,
+/// com a máquina carregada (testes em paralelo), chega antes da puxada: aí o caixa 1 já
+/// recusa o protocolo 3 (`TEXTO_P3_RECUSADO`). Durante esta primeira troca, o caixa 1
+/// libera os caixas antigos (a convivência, A4) e depois volta ao padrão; a raiz fixada
+/// pelo motor é a mesma que o teste fixa em seguida.
+fn primeira_troca_pelo_p3(ca: &Path, cb: &Path, a: &Banco) {
+    let ate = crate::tempo::somar_segundos(&crate::tempo::agora(), 3600).unwrap_or_default();
+    config::gravar(&a.conn, p4::CHAVE_CONVIVENCIA, &ate).unwrap();
+    puxa_do_caixa_1(ca, cb).unwrap();
+    config::gravar(&a.conn, p4::CHAVE_CONVIVENCIA, "").unwrap();
+}
+
+/// O caixa 2 puxa do caixa 1. O limitador de derivações do protocolo 3 (`cifra.rs`, "Muitos
+/// pedidos…") é do processo inteiro e é dividido entre os testes que rodam juntos: com a
+/// recusa dele, o programa tenta de novo no ciclo seguinte, e aqui também (senão essa recusa
+/// passaria por outra coisa, nos dois sentidos: a troca que devia dar certo falha, e a que
+/// devia ser recusada "passa" pelo motivo errado).
 fn puxa_do_caixa_1(ca: &Path, cb: &Path) -> Resultado<(String, usize)> {
+    let mut tentativas = 0;
+    loop {
+        let r = puxa_do_caixa_1_uma_vez(ca, cb);
+        match &r {
+            Err(e) if e.to_string().contains("Muitos pedidos de outros aparelhos") && tentativas < 40 => {
+                tentativas += 1;
+                thread::sleep(Duration::from_millis(250));
+            }
+            _ => return r,
+        }
+    }
+}
+
+fn puxa_do_caixa_1_uma_vez(ca: &Path, cb: &Path) -> Resultado<(String, usize)> {
     let (mut ma, pt_a) = motor(ca);
     let (mut mb, pt_b) = motor(cb);
     let r = puxar(cb, &format!("127.0.0.1:{pt_a}"), pt_b);

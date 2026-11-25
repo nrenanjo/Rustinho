@@ -309,7 +309,14 @@ fn loja_com_membros(nome: &str) -> (Banco, Identidade, String, Identidade, Ident
 #[test]
 fn c2r5_6_retirada_de_quem_nao_esta_na_cadeia_nao_entra() {
     let (b, raiz, loja, m1, _m2) = loja_com_membros("c2r5-6-1");
+    let gravadas = contar(&b, "caixa_aprovado") as usize;
+    aprovados::conferencias_de_teste::tirar();
     let j = juntar(&b, &raiz, &loja, vec![], vec![retirada_a_mao(&nova(), &m1, &loja)]);
+    assert_eq!(
+        aprovados::conferencias_de_teste::tirar(),
+        gravadas,
+        "a de quem está fora da cadeia nem é conferida (só as gravadas)"
+    );
     assert_eq!((j.novas, j.recusadas), (0, 1), "{j:?}");
     assert_eq!(situacao(&b, &raiz, &loja, &m1), Situacao::Autorizada);
     assert_eq!(contar(&b, "caixa_retirado"), 0);
