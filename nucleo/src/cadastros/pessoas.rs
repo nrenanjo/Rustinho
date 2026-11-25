@@ -344,6 +344,16 @@ fn antes_codigo(conn: &Connection, id: &str, novo: bool) -> Resultado<String> {
 }
 
 /// Salva a pessoa. Devolve o id.
+/// R24 (DP-23, decisão do proprietário de 25/11/2026): esta gravação muda o
+/// limite de crédito? No cadastro novo, conta como mudança dar um limite (de
+/// fábrica, fica sem). Com dados inválidos responde "não": a gravação recusa
+/// pelo campo, como sempre.
+pub fn muda_limite(conn: &Connection, ficha: &PessoaFicha) -> Resultado<bool> {
+    let Ok(dados) = validar(ficha) else { return Ok(false) };
+    let antes = if ficha.id.trim().is_empty() { None } else { carregar(conn, &ficha.id)?.1.limite_credito };
+    Ok(antes != dados.limite_credito)
+}
+
 pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &PessoaFicha) -> Resultado<String> {
     let novo = ficha.id.trim().is_empty();
     let antes = if novo { None } else { Some(carregar(conn, &ficha.id)?.1) };
@@ -993,6 +1003,11 @@ mod comandos {
 
     fn pessoa_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let ficha: pessoas::PessoaFicha = ler(dados)?;
+        // R24 (DP-23): o limite de crédito é do gerente; a mudança fica no
+        // registro do cadastro ("pessoa.alterar").
+        if pessoas::muda_limite(p.conn, &ficha)? {
+            p.exigir("limite_credito")?;
+        }
         let tx = p.conn.transaction()?;
         let id = pessoas::salvar(&tx, p.disp, p.usuario_id, &ficha)?;
         let resposta = json!(pessoas::ficha(&tx, &id)?);

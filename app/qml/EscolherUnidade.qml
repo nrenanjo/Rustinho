@@ -46,14 +46,20 @@ Painel {
     function criar() {
         sigla_.erro = ""
         descricao.erro = ""
-        const r = Api.gravar("unidade_salvar", { sigla: sigla_.texto, descricao: descricao.texto, fracionada: fracionada.checked }, chave)
-        if (!r.ok) {
-            (r.campo === "descricao" ? descricao : sigla_).erro = r.erro
-            return
-        }
-        lista = r.dados.lista
-        escolher.escolhida(r.dados.sigla)
-        close()
+        // R24 (DP-23, decisão do proprietário de 25/11/2026): criar uma
+        // unidade fracionada pede a senha do gerente (a inteira, não).
+        janela.chamarGerente("unidade_salvar", { sigla: sigla_.texto, descricao: descricao.texto, fracionada: fracionada.checked }, r => {
+            if (!r.ok) {
+                if (r.campo === "gerente")
+                    janela.avisar(r.erro, "erro")
+                else
+                    (r.campo === "descricao" ? descricao : sigla_).erro = r.erro
+                return
+            }
+            lista = r.dados.lista
+            escolher.escolhida(r.dados.sigla)
+            close()
+        }, chave)
     }
 
     contentItem: ColumnLayout {

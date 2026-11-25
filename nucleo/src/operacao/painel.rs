@@ -747,7 +747,17 @@ mod comandos {
 
     fn painel_fornecedores(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Dias90 = ler(dados)?;
-        Ok(json!(painel::fornecedores(p.conn, d.dias.max(1))?))
+        let ve = p.ve_custos()?;
+        let mut f = painel::fornecedores(p.conn, d.dias.max(1))?;
+        // R20 / DP-19 (decisão do proprietário, 25/11/2026): o comprado (custo) só para quem
+        // vê os custos (D-09).
+        if !ve {
+            f.total.clear();
+            for i in &mut f.itens {
+                i.total.clear();
+            }
+        }
+        Ok(json!(f))
     }
 
     fn painel_pagamentos(p: &mut Pedido, dados: Value) -> Resultado<Value> {

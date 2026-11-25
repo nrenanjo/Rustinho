@@ -283,3 +283,26 @@ fn t5_10_simultaneidade_nao_abre_a_pilula_gerente() {
     let g = l.ok("gerente_ler", json!({}));
     assert!(g["acoes"].as_array().unwrap().iter().all(|a| a["id"] != "simultaneidade"), "{g}");
 }
+
+/// R9 / D-AUD-9 (decisão do proprietário, 25/11/2026): desligar a troca de dados é do
+/// gerente, mesmo quando a loja liberou as Configurações para todos. Com a senha do
+/// gerente digitada para esta gravação, desliga.
+#[test]
+fn r9_desligar_a_troca_de_dados_e_do_gerente() {
+    let (mut l, _p) = loja_com_bia();
+    l.entrar("Ana", SENHA_ANA);
+    l.ok("sync_salvar", json!({ "ligado": true, "senha": "rede-da-loja", "enderecos": "" }));
+    l.ok("gerente_salvar", json!({ "acoes": { "configuracoes": false } }));
+    l.entrar("Bia", SENHA_BIA);
+    let desligar = json!({ "ligado": false, "senha": "", "enderecos": "" });
+    let r = l.chamar("sync_salvar", desligar.clone());
+    assert_eq!(r["ok"], false, "a Bia desligou a troca sem o gerente: {r}");
+    assert_eq!(r["campo"], "gerente", "{r}");
+    assert_eq!(l.ok("sync_ler", json!({}))["ligado"], true, "a recusa não pode desligar");
+    // Os endereços (o resto das Configurações liberadas) continuam com a Bia.
+    l.ok("sync_salvar", json!({ "ligado": true, "senha": "", "enderecos": "" }));
+    // Com a senha do gerente para esta gravação, desliga.
+    l.ok("gerente_liberar", json!({ "senha": SENHA_ANA, "comando": "sync_salvar", "dados": desligar }));
+    l.ok("sync_salvar", desligar);
+    assert_eq!(l.ok("sync_ler", json!({}))["ligado"], false);
+}

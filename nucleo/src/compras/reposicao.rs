@@ -692,6 +692,12 @@ pub fn parados(conn: &Connection, busca: &str) -> Resultado<Parados> {
 
 /// Lista de compra para imprimir, por fornecedor.
 pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
+    lista_compra_html_com(conn, true)
+}
+
+/// A lista de compra para imprimir. R20 / DP-19 (decisão do proprietário, 25/11/2026): sem
+/// `ve_custos`, sai sem o custo estimado e sem o custo de cada linha (D-09).
+pub fn lista_compra_html_com(conn: &Connection, ve_custos: bool) -> Resultado<String> {
     use crate::impressao::escapar;
     let s = sugestao(conn, "")?;
     // E13 (revisão da fase 6): um grupo por fornecedor (pelo identificador,
@@ -736,16 +742,17 @@ pub fn lista_compra_html(conn: &Connection) -> Resultado<String> {
                 escapar(&i.ritmo),
                 i.sugerido,
                 escapar(&i.unidade),
-                i.custo_total
+                if ve_custos { i.custo_total.as_str() } else { "" }
             ),
         );
     }
     let mut h = String::new();
+    let custo = if ve_custos { format!(" · custo estimado R$ {} (sem as encomendas)", s.custo_total) } else { String::new() };
     h.push_str(&format!(
-        "<h1>Lista de compra</h1><p class=\"nota\">Para {} dias de venda · {} itens · custo estimado R$ {} (sem as encomendas)</p>",
+        "<h1>Lista de compra</h1><p class=\"nota\">Para {} dias de venda · {} itens{}</p>",
         s.dias_compra,
         s.itens.len() + s.encomendas.len(),
-        s.custo_total
+        custo
     ));
     if grupos.is_empty() {
         h.push_str("<p>Nada a comprar agora.</p>");
@@ -791,7 +798,18 @@ mod comandos {
 
     fn estoque_sugestao(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Filtro = ler(dados)?;
-        Ok(json!(reposicao::sugestao(p.conn, &d.texto)?))
+        let ve = p.ve_custos()?;
+        let mut s = reposicao::sugestao(p.conn, &d.texto)?;
+        // R20 / DP-19 (decisão do proprietário, 25/11/2026): o custo só para quem vê os
+        // custos (D-09), também na lista do que comprar.
+        if !ve {
+            s.custo_total.clear();
+            for i in &mut s.itens {
+                i.custo.clear();
+                i.custo_total.clear();
+            }
+        }
+        Ok(json!(s))
     }
 
     fn estoque_dias(p: &mut Pedido, dados: Value) -> Resultado<Value> {

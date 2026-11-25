@@ -345,17 +345,20 @@ FocusScope {
         if (janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
             return
         const eraNova = nova
-        const r = Api.gravar("pessoa_salvar", coletar(), chave)
-        if (r.ok) {
-            janela.encerrarValidacaoProgressiva(tela)
-            concluirRascunho()
-            chave = Api.novaChave()
-            preencher(r.dados)
-            pessoaId = r.dados.id
-            janela.avisar(eraNova ? "Cadastro feito." : "Alterações salvas.", "ok")
-        } else {
-            mostrarErro(r.campo, r.erro)
-        }
+        // R24 (DP-23, decisão do proprietário de 25/11/2026): mudar o limite
+        // de crédito pede a senha do gerente, para esta gravação.
+        janela.chamarGerente("pessoa_salvar", coletar(), r => {
+            if (r.ok) {
+                janela.encerrarValidacaoProgressiva(tela)
+                concluirRascunho()
+                chave = Api.novaChave()
+                preencher(r.dados)
+                pessoaId = r.dados.id
+                janela.avisar(eraNova ? "Cadastro feito." : "Alterações salvas.", "ok")
+            } else {
+                mostrarErro(r.campo, r.erro)
+            }
+        }, chave)
     }
 
     function mostrarErro(campo, mensagem) {
@@ -363,7 +366,9 @@ FocusScope {
             codigo: codigo, documento: documento, nome: nome, fantasia: fantasia, ie: ie, telefone: telefone,
             celular: celular, email: email, cep: cep, logradouro: logradouro, numero: numero,
             complemento: complemento, bairro: bairro, municipio: municipio, uf: uf, limiteCredito: limite, diaVencimento: diaVencimento,
-            observacoes: observacoes
+            observacoes: observacoes,
+            // A recusa por falta do gerente: aqui, só o limite de crédito é dele (R24).
+            gerente: limite
         }
         let alvo = campo ? campos[campo] : null
         const v = campo ? campo.match(/^veiculos\.(\d+)\.(\w+)$/) : null

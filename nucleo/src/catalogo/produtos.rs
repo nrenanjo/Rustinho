@@ -1054,6 +1054,30 @@ pub fn muda_preco(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
         || antes.preco_aberto != dados.preco_aberto)
 }
 
+/// R4 (D-AUD-4, decisão do proprietário de 25/11/2026): esta gravação muda o
+/// desconto máximo ou a comissão da peça? Na peça nova, conta como mudança
+/// preencher qualquer um dos dois (de fábrica, ficam vazios). Com dados
+/// inválidos responde "não": a gravação recusa pelo campo, como sempre.
+pub fn muda_desconto_ou_comissao(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
+    let Ok((dados, _)) = validar(f) else { return Ok(false) };
+    let (desconto, comissao) = if f.id.trim().is_empty() {
+        (None, None)
+    } else {
+        let antes = carregar(conn, &f.id)?;
+        (antes.desconto_maximo, antes.comissao)
+    };
+    Ok(desconto != dados.desconto_maximo || comissao != dados.comissao)
+}
+
+/// R24 (DP-23, decisão do proprietário de 25/11/2026): esta gravação muda o
+/// CSOSN da peça? Na peça nova, conta como mudança escolher um CSOSN em vez
+/// do automático (o de fábrica).
+pub fn muda_csosn(conn: &Connection, f: &ProdutoFicha) -> Resultado<bool> {
+    let Ok((dados, _)) = validar(f) else { return Ok(false) };
+    let antes = if f.id.trim().is_empty() { String::new() } else { carregar(conn, &f.id)?.csosn };
+    Ok(antes != dados.csosn)
+}
+
 /// Lê os dados gravados de uma peça.
 fn carregar(conn: &Connection, id: &str) -> Resultado<Dados> {
     let mut d = conn
@@ -1645,6 +1669,14 @@ mod comandos {
         // gravação com estes dados (D-09).
         if produtos::muda_preco(p.conn, &ficha)? {
             p.exigir("precos")?;
+        }
+        // R4 e R24 (decisões do proprietário de 25/11/2026): o desconto
+        // máximo, a comissão e o CSOSN da peça também são do gerente.
+        if produtos::muda_desconto_ou_comissao(p.conn, &ficha)? {
+            p.exigir("desconto_e_comissao")?;
+        }
+        if produtos::muda_csosn(p.conn, &ficha)? {
+            p.exigir("csosn")?;
         }
         let ve = p.ve_custos()?;
         let tx = p.conn.transaction()?;

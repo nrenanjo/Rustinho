@@ -275,6 +275,11 @@ mod comandos {
 
     fn unidade_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: UnidadeEntrada = ler(dados)?;
+        // R24 (DP-23): criar uma unidade fracionada é do gerente (a inteira,
+        // não). A unidade que já existe nunca muda (veja `unidades::salvar`).
+        if d.fracionada {
+            p.exigir("unidade_fracionada")?;
+        }
         // E10 (6.5): a unidade nova entra na auditoria, na mesma transação.
         let tx = p.conn.transaction()?;
         let sigla = unidades::salvar(&tx, &d.sigla, &d.descricao, d.fracionada)?;

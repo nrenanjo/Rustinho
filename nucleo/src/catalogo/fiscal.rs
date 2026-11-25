@@ -703,6 +703,9 @@ mod comandos {
 
     fn fiscal_automatico(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let d: Ids = ler(dados)?;
+        // R24 (DP-23): trocar o CSOSN das peças (aqui, pelo automático) é do
+        // gerente; cada troca fica no registro da peça.
+        p.exigir("csosn")?;
         let tx = p.conn.transaction()?;
         let n = fiscal::usar_automatico(&tx, p.disp, p.usuario_id, &d.ids)?;
         tx.commit()?;

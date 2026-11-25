@@ -534,29 +534,10 @@ fn loja_com_bia() -> (crate::Servico, String) {
     (s, bia)
 }
 
-/// DP-19 · retrato (E09): para quem não vê os resultados, o "dinheiro parado"
-/// esconde o custo (D-09), mas a lista do que comprar, a lista de compra
-/// impressa e o "Comprado por fornecedor" do Painel mostram.
+/// DP-19 (decidida pelo proprietário em 25/11/2026: "aplicar a D-09"; regra 20): quem
+/// não vê os resultados não recebe custo na lista do que comprar nem na impressa, nem o
+/// total comprado. O retrato do comportamento de antes saiu com a decisão.
 #[test]
-fn dp19_retrato_custo_escondido_numa_tela_e_mostrado_em_outras() {
-    let (mut s, _bia) = loja_com_bia();
-    let parados = ok(&mut s, "estoque_parados", json!({ "texto": "" }));
-    assert_eq!(parados["resultados"], false);
-    assert_eq!(parados["valor"], "", "D-09: o valor parado (custo) escondido");
-    let sug = ok(&mut s, "estoque_sugestao", json!({ "texto": "" }));
-    assert_eq!(sug["itens"][0]["custo"], "150,00", "a lista do que comprar mostra o custo");
-    assert_eq!(sug["custoTotal"], "300,00");
-    let html =
-        ok(&mut s, "impressao", json!({ "tipo": "lista_compra", "id": "" }))["html"].as_str().unwrap().to_string();
-    assert!(html.contains("custo estimado R$ 300,00"), "a lista impressa mostra o custo");
-    let forn = ok(&mut s, "painel_fornecedores", json!({ "dias": 30 }));
-    assert_eq!(forn["total"], "1.234,00", "o comprado por fornecedor aparece");
-}
-
-/// DP-19 · alvo (alternativa "aplicar a D-09"): quem não vê os resultados não
-/// recebe custo na lista do que comprar nem na impressa, nem o total comprado.
-#[test]
-#[ignore = "depende da DP-19: hoje a lista de compra e o Painel mandam o custo a qualquer usuário"]
 fn dp19_alvo_d09_tambem_na_lista_de_compra_e_no_painel() {
     let (mut s, _bia) = loja_com_bia();
     let sug = ok(&mut s, "estoque_sugestao", json!({ "texto": "" }));
@@ -567,39 +548,57 @@ fn dp19_alvo_d09_tambem_na_lista_de_compra_e_no_painel() {
     assert_eq!(ok(&mut s, "painel_fornecedores", json!({ "dias": 30 }))["total"], "");
 }
 
-/// DP-20 e DP-24 · retrato (H15, H18): quem não é gerente vê o dinheiro
-/// esperado na gaveta antes de contar (a conferência não é cega), e o olho
-/// do sigilo não chega à tela do Caixa (nenhum valor dela é "sensível").
+/// DP-20 e DP-24 (decididas pelo proprietário em 25/11/2026). DP-20 → regra 21,
+/// conferência tradicional: quem não é gerente vê o dinheiro esperado na gaveta
+/// antes de contar. DP-24 → OLHO-1: o olho do sigilo chega à tela do Caixa (o saldo
+/// e os totais ficam discretos com o olho fechado), só na tela, sem mudar o que o
+/// núcleo manda. O retrato de antes ("o Caixa fica fora do sigilo") saiu com a
+/// decisão.
 #[test]
-fn dp20_dp24_retrato_esperado_a_vista_e_caixa_fora_do_sigilo() {
+fn dp20_dp24_esperado_a_vista_e_caixa_sob_o_olho() {
     let (mut s, _bia) = loja_com_bia();
     let e = ok(&mut s, "caixa_estado", json!({}));
-    assert_eq!(e["resumo"]["esperado"], "100,00", "o esperado vai para a tela antes de contar");
+    assert_eq!(e["resumo"]["esperado"], "100,00", "o esperado vai para a tela antes de contar, com o olho fechado ou aberto");
     let tela = include_str!("../../app/qml/TelaCaixa.qml");
     assert!(tela.contains("titulo: \"Dinheiro na gaveta\""));
-    assert!(tela.contains("\"R$ \" + tela.r.esperado"), "o esperado à vista, grande, no resumo");
+    assert!(tela.contains("\"R$ \" + Tema.valor(tela.r.esperado)"), "o esperado no resumo, sob o olho");
+    assert!(tela.contains("sensivel: true"), "o Caixa tem o botão do olho");
     assert!(tela.contains("Conte o dinheiro da gaveta e digite o total. O Rustinho mostra a diferença"));
-    for marca in ["sensivel", "Tema.valor(", "Tema.sigilo", "Tema.oculto", "Olho"] {
-        assert!(!tela.contains(marca), "a tela do Caixa já usa o sigilo ({marca})");
-    }
-    // Controle: o olho existe e já esconde outras telas de dinheiro.
-    assert!(include_str!("../../app/qml/SecaoFluxo.qml").contains("sensivel: true"));
 }
 
-/// DP-23 · retrato (E15, G5, PEND-31): sem senha do gerente, a Bia muda o
-/// limite de crédito do cliente e tira o CSOSN próprio de uma peça; as duas
-/// mudanças já ficam na auditoria. A unidade que já existe não muda de
-/// "vende quebrado" (a PEND-31 descreve um caminho que não existe mais: a
-/// sigla repetida é recusada); a unidade nova entra na auditoria (E10).
+/// A recusa que pede a senha do gerente, com o nome do que é dele na mensagem.
+fn so_o_gerente(r: &Value, o_que: &str) {
+    assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("gerente")), "{r}");
+    assert!(r["erro"].as_str().unwrap_or_default().contains(o_que), "{o_que}: {r}");
+}
+
+fn liberar(s: &mut crate::Servico, comando: &str, dados: &Value) {
+    ok(s, "gerente_liberar", json!({ "senha": "12345678", "comando": comando, "dados": dados }));
+}
+
+/// DP-23 (decidida pelo proprietário em 25/11/2026, regra 24: "só o gerente, com
+/// registro"; E15, G5, PEND-31): mudar o limite de crédito do cliente, criar uma
+/// unidade fracionada e mudar o CSOSN da peça pedem a senha do gerente; com ela, a
+/// mudança passa e fica no registro do cadastro. Salvar o cadastro sem mexer nisso
+/// continua livre. O retrato de antes (a Bia mudava tudo sem o gerente) saiu com a
+/// decisão.
 #[test]
-fn dp23_retrato_sensiveis_mudam_sem_gerente_e_com_auditoria() {
+fn dp23_sensiveis_so_com_o_gerente_e_com_registro() {
     let (mut s, _bia) = loja_com_bia();
-    // Limite de crédito.
+
+    // Limite de crédito. O cliente novo sem limite é livre; com limite, é do gerente.
     let mut f = ok(&mut s, "pessoa_nova", json!({ "papel": "cliente" }));
     f["nome"] = json!("Oficina do Zé");
+    let mut com_limite = f.clone();
+    com_limite["limiteCredito"] = json!("300");
+    so_o_gerente(&chamar(&mut s, "pessoa_salvar", com_limite), "limite de crédito");
     let cli = ok(&mut s, "pessoa_salvar", f)["id"].as_str().unwrap().to_string();
     let mut f = ok(&mut s, "pessoa_abrir", json!({ "id": cli }));
     f["limiteCredito"] = json!("500");
+    so_o_gerente(&chamar(&mut s, "pessoa_salvar", f.clone()), "limite de crédito");
+    let c = &s.banco_para_teste().conn;
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM pessoa WHERE id = ?1 AND limite_credito IS NOT NULL", [&cli]), 0);
+    liberar(&mut s, "pessoa_salvar", &f);
     ok(&mut s, "pessoa_salvar", f);
     let c = &s.banco_para_teste().conn;
     let det = texto(
@@ -608,11 +607,25 @@ fn dp23_retrato_sensiveis_mudam_sem_gerente_e_com_auditoria() {
         [&cli],
     );
     assert!(det.contains("Limite de crédito"), "{det}");
-    // CSOSN automático.
+    let lib = texto(c, "SELECT COALESCE(MAX(detalhes), '') FROM auditoria WHERE acao = 'gerente.liberar'", []);
+    assert!(lib.contains("mudar o limite de crédito do cliente (uma vez, com estes dados)"), "{lib}");
+    // A senha valeu para aquela gravação; salvar de novo sem mexer no limite é livre.
+    let mut f = ok(&mut s, "pessoa_abrir", json!({ "id": cli }));
+    f["observacoes"] = json!("paga em dia");
+    ok(&mut s, "pessoa_salvar", f.clone());
+    f["limiteCredito"] = json!("");
+    so_o_gerente(&chamar(&mut s, "pessoa_salvar", f), "limite de crédito");
+
+    // CSOSN pela conferência fiscal ("passar para automático").
+    let c = &s.banco_para_teste().conn;
     let peca = texto(c, "SELECT id FROM produto WHERE nome = 'Lâmpada H4'", []);
     c.execute("UPDATE produto SET csosn = '500' WHERE id = ?1", [&peca]).unwrap();
-    let r = ok(&mut s, "fiscal_automatico", json!({ "ids": [peca] }));
-    assert_eq!(r["alteradas"], 1);
+    let pedido = json!({ "ids": [peca] });
+    so_o_gerente(&chamar(&mut s, "fiscal_automatico", pedido.clone()), "CSOSN");
+    let c = &s.banco_para_teste().conn;
+    assert_eq!(texto(c, "SELECT csosn FROM produto WHERE id = ?1", [&peca]), "500");
+    liberar(&mut s, "fiscal_automatico", &pedido);
+    assert_eq!(ok(&mut s, "fiscal_automatico", pedido)["alteradas"], 1);
     let c = &s.banco_para_teste().conn;
     let det = texto(
         c,
@@ -620,17 +633,94 @@ fn dp23_retrato_sensiveis_mudam_sem_gerente_e_com_auditoria() {
         [&peca],
     );
     assert!(det.contains("CSOSN: 500 → automático"), "{det}");
-    // Unidade: a que existe não muda; a nova entra na auditoria.
-    let r = chamar(&mut s, "unidade_salvar", json!({ "sigla": "UN", "descricao": "Unidade", "fracionada": true }));
-    assert_eq!(r["ok"], false, "{r}");
+
+    // CSOSN pela ficha da peça. Salvar a ficha sem mexer nele é livre.
+    let mut f = ok(&mut s, "produto_abrir", json!({ "id": peca }));
+    f["local"] = json!("prateleira 3");
+    ok(&mut s, "produto_salvar", f);
+    let mut f = ok(&mut s, "produto_abrir", json!({ "id": peca }));
+    f["csosn"] = json!("500");
+    so_o_gerente(&chamar(&mut s, "produto_salvar", f.clone()), "CSOSN");
     let c = &s.banco_para_teste().conn;
-    assert_eq!(contar(c, "SELECT fracionada FROM unidade WHERE sigla = 'UN'", []), 0);
-    ok(&mut s, "unidade_salvar", json!({ "sigla": "LTS2", "descricao": "Litro avulso", "fracionada": true }));
+    assert_eq!(texto(c, "SELECT csosn FROM produto WHERE id = ?1", [&peca]), "");
+    liberar(&mut s, "produto_salvar", &f);
+    ok(&mut s, "produto_salvar", f);
+    let c = &s.banco_para_teste().conn;
+    assert_eq!(texto(c, "SELECT csosn FROM produto WHERE id = ?1", [&peca]), "500");
+    let det = texto(
+        c,
+        "SELECT detalhes FROM auditoria WHERE entidade_id = ?1 AND acao = 'produto.alterar' ORDER BY rowid DESC LIMIT 1",
+        [&peca],
+    );
+    assert!(det.contains("CSOSN"), "{det}");
+
+    // Unidade: a inteira é livre; a fracionada é do gerente e entra no registro (E10).
+    ok(&mut s, "unidade_salvar", json!({ "sigla": "CX2", "descricao": "Caixa com 2", "fracionada": false }));
+    let litro = json!({ "sigla": "LTS2", "descricao": "Litro avulso", "fracionada": true });
+    so_o_gerente(&chamar(&mut s, "unidade_salvar", litro.clone()), "unidade fracionada");
+    let c = &s.banco_para_teste().conn;
+    assert_eq!(contar(c, "SELECT COUNT(*) FROM unidade WHERE sigla = 'LTS2'", []), 0);
+    liberar(&mut s, "unidade_salvar", &litro);
+    ok(&mut s, "unidade_salvar", litro);
     let c = &s.banco_para_teste().conn;
     assert_eq!(
         contar(c, "SELECT COUNT(*) FROM auditoria WHERE acao = 'unidade.criar' AND entidade_id = 'LTS2'", []),
         1
     );
+    // A unidade que existe nunca muda de "vende quebrado", nem com a senha (a sigla repetida é recusada).
+    let un = json!({ "sigla": "UN", "descricao": "Unidade", "fracionada": true });
+    liberar(&mut s, "unidade_salvar", &un);
+    let r = chamar(&mut s, "unidade_salvar", un);
+    assert_eq!((r["ok"].as_bool(), r["campo"].as_str()), (Some(false), Some("sigla")), "{r}");
+    let c = &s.banco_para_teste().conn;
+    assert_eq!(contar(c, "SELECT fracionada FROM unidade WHERE sigla = 'UN'", []), 0);
+    // As telas dão à caixa o caminho da senha do gerente nas três gravações.
+    for (tela, comando) in [
+        (include_str!("../../app/qml/TelaPessoa.qml"), "pessoa_salvar"),
+        (include_str!("../../app/qml/EscolherUnidade.qml"), "unidade_salvar"),
+        (include_str!("../../app/qml/TelaFiscal.qml"), "fiscal_automatico"),
+    ] {
+        assert!(tela.contains(&format!("janela.chamarGerente(\"{comando}\"")), "{comando}");
+        assert!(!tela.contains(&format!("Api.gravar(\"{comando}\"")) && !tela.contains(&format!("Api.chamar(\"{comando}\"")));
+    }
+}
+
+/// R4 (D-AUD-4, decidida pelo proprietário em 25/11/2026, regra 4): mudar o desconto
+/// máximo ou a comissão da peça pede a senha do gerente (na peça nova, preencher um
+/// dos dois também); salvar a ficha sem mexer neles continua livre.
+#[test]
+fn r4_desconto_maximo_e_comissao_so_com_o_gerente() {
+    let (mut s, _bia) = loja_com_bia();
+    let c = &s.banco_para_teste().conn;
+    let peca = texto(c, "SELECT id FROM produto WHERE nome = 'Lâmpada H4'", []);
+    for (campo, valor, coluna) in [("descontoMaximo", "10", "desconto_maximo"), ("comissao", "5", "comissao")] {
+        let mut f = ok(&mut s, "produto_abrir", json!({ "id": peca }));
+        f[campo] = json!(valor);
+        so_o_gerente(&chamar(&mut s, "produto_salvar", f.clone()), "desconto máximo ou a comissão");
+        let c = &s.banco_para_teste().conn;
+        let sql = format!("SELECT COUNT(*) FROM produto WHERE id = ?1 AND {coluna} IS NOT NULL");
+        assert_eq!(contar(c, &sql, [&peca]), 0, "{campo}");
+        liberar(&mut s, "produto_salvar", &f);
+        ok(&mut s, "produto_salvar", f);
+        let c = &s.banco_para_teste().conn;
+        assert_eq!(contar(c, &sql, [&peca]), 1, "{campo}");
+    }
+    // Salvar de novo sem mexer neles (os dois preenchidos): livre.
+    let mut f = ok(&mut s, "produto_abrir", json!({ "id": peca }));
+    assert_eq!((f["descontoMaximo"].as_str(), f["comissao"].as_str()), (Some("10"), Some("5")), "{f}");
+    f["local"] = json!("gaveta 2");
+    ok(&mut s, "produto_salvar", f.clone());
+    // Tirar a comissão também é mudar.
+    f["comissao"] = json!("");
+    so_o_gerente(&chamar(&mut s, "produto_salvar", f), "desconto máximo ou a comissão");
+    // Na peça nova, preencher a comissão é do gerente; sem ela, a peça nova é livre.
+    let mut f = ok(&mut s, "produto_novo", json!({}));
+    f["nome"] = json!("Palheta");
+    f["precos"][0]["preco"] = json!("39,90");
+    let mut com_comissao = f.clone();
+    com_comissao["comissao"] = json!("5");
+    so_o_gerente(&chamar(&mut s, "produto_salvar", com_comissao), "desconto máximo ou a comissão");
+    ok(&mut s, "produto_salvar", f);
 }
 
 // ---------------------------------------------------------------------------

@@ -48,13 +48,16 @@ FocusScope {
                          "O CSOSN dessas peças passa a seguir a regra do estado (hoje: " + (dados.conflitos[0] ? dados.conflitos[0].sugerido : "") + "). "
                          + "Quando a regra mudar, elas acompanham sozinhas. Confirme com o contador antes.",
                          "Passar para automático", () => {
-            const r = Api.chamar("fiscal_automatico", { ids: ids })
-            if (r.ok) {
-                preencher(r.dados.conferencia)
-                janela.avisar(r.dados.alteradas + (r.dados.alteradas === 1 ? " peça alterada." : " peças alteradas."), "ok")
-            } else {
-                janela.avisar(r.erro, "erro")
-            }
+            // R24 (DP-23, decisão do proprietário de 25/11/2026): mudar o
+            // CSOSN das peças pede a senha do gerente.
+            janela.chamarGerente("fiscal_automatico", { ids: ids }, r => {
+                if (r.ok) {
+                    preencher(r.dados.conferencia)
+                    janela.avisar(r.dados.alteradas + (r.dados.alteradas === 1 ? " peça alterada." : " peças alteradas."), "ok")
+                } else {
+                    janela.avisar(r.erro, "erro")
+                }
+            })
         })
     }
 

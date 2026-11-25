@@ -49,7 +49,14 @@ pub const ACOES_DO_GERENTE: &[(&str, &str)] = &[
 /// "precos": mudar as regras de formação de preço (D-09).
 /// "simultaneidade" (FALHA-05): consultar Configurações › Simultaneidade
 /// (Duplicatas, Histórico e Caixas da loja), separada da pílula Gerente.
-const SEMPRE_DO_GERENTE: &[&str] = &["gerente", "precos", "simultaneidade"];
+/// "limite_credito", "unidade_fracionada" e "csosn" (R24 / DP-23, decisão do
+/// proprietário de 25/11/2026): mudar o limite de crédito do cliente, criar
+/// uma unidade fracionada, mudar o CSOSN da peça. Cada mudança fica no
+/// registro (auditoria) do cadastro.
+/// "desconto_e_comissao" (R4 / D-AUD-4, decisão de 25/11/2026): mudar o
+/// desconto máximo ou a comissão da peça.
+const SEMPRE_DO_GERENTE: &[&str] =
+    &["gerente", "precos", "simultaneidade", "limite_credito", "unidade_fracionada", "csosn", "desconto_e_comissao"];
 
 /// Nome da ação para as mensagens.
 fn nome_da_acao(acao: &str) -> String {
@@ -57,6 +64,10 @@ fn nome_da_acao(acao: &str) -> String {
         "gerente" => "a pílula Gerente".into(),
         "simultaneidade" => "a Simultaneidade (duplicatas, histórico e caixas da loja)".into(),
         "precos" => "mudar o preço de venda ou a regra de preço (% de lucro)".into(),
+        "limite_credito" => "mudar o limite de crédito do cliente".into(),
+        "unidade_fracionada" => "criar uma unidade fracionada".into(),
+        "csosn" => "mudar o CSOSN da peça".into(),
+        "desconto_e_comissao" => "mudar o desconto máximo ou a comissão da peça".into(),
         _ => ACOES_DO_GERENTE
             .iter()
             .find(|(id, _)| *id == acao)
@@ -106,12 +117,33 @@ fn acao_de_consulta(acao: &str) -> Resultado<&'static str> {
         .ok_or_else(|| Erro::validacao("Diga para que é a senha do gerente."))
 }
 
-/// O comando pode pedir a senha do gerente? (os do gerente e salvar a peça,
-/// que pede quando muda o preço.)
+/// Comandos que não são do gerente, mas pedem a senha dele quando mexem em
+/// algo que é: produto_salvar e compra_lancar, quando mudam o preço de venda
+/// de uma peça cadastrada (D-09; 0915-N na compra); produto_salvar também no
+/// desconto máximo, na comissão (R4) e no CSOSN (R24); pessoa_salvar, no
+/// limite de crédito; unidade_salvar, na unidade fracionada; e
+/// fiscal_automatico, que troca o CSOSN das peças pelo automático (R24).
+const AS_VEZES_DO_GERENTE: &[&str] =
+    &["produto_salvar", "compra_lancar", "pessoa_salvar", "unidade_salvar", "fiscal_automatico"];
+
+/// O comando pode pedir a senha do gerente? (os do gerente e os que só às
+/// vezes pedem, veja `AS_VEZES_DO_GERENTE`.)
 fn comando_do_gerente(comando: &str) -> bool {
-    // produto_salvar e compra_lancar: só pedem o gerente quando mudam o preço
-    // de venda de uma peça cadastrada (D-09; 0915-N na compra).
-    acao_do_comando(comando).is_some() || comando == "produto_salvar" || comando == "compra_lancar"
+    acao_do_comando(comando).is_some() || AS_VEZES_DO_GERENTE.contains(&comando)
+}
+
+/// O que a senha do gerente digitada para uma gravação liberou, para o
+/// registro da liberação.
+fn nome_da_liberacao(comando: &str) -> String {
+    match comando {
+        "produto_salvar" => {
+            "gravar a peça com o que é do gerente (preço, regra de preço, desconto máximo, comissão ou CSOSN)".into()
+        }
+        "pessoa_salvar" => nome_da_acao("limite_credito"),
+        "unidade_salvar" => nome_da_acao("unidade_fracionada"),
+        "fiscal_automatico" => "passar o CSOSN das peças para automático".into(),
+        _ => nome_da_acao(acao_do_comando(comando).unwrap_or("precos")),
+    }
 }
 
 /// Resumo (SHA-256) de um comando com os seus dados, com as chaves em ordem:
@@ -1558,10 +1590,7 @@ impl Servico {
                                     resumo: *resumo,
                                     ate: Instant::now() + LIBERACAO_CURTA,
                                 });
-                                format!(
-                                    "{} (uma vez, com estes dados)",
-                                    nome_da_acao(acao_do_comando(comando).unwrap_or("precos"))
-                                )
+                                format!("{} (uma vez, com estes dados)", nome_da_liberacao(comando))
                             }
                         };
                         self.gravar_se_der(auditoria::registrar(
@@ -2064,6 +2093,9 @@ impl Servico {
             "impressao" => {
                 let d: Impressao = ler(dados)?;
                 let pode_resultados = d.tipo == "dre" && self.pode_ler("resultados", sessao)?;
+                // R20 / DP-19 (decisão do proprietário, 25/11/2026): a lista de compra impressa
+                // só leva o custo para quem vê os custos (D-09).
+                let ve_custos_na_lista = d.tipo == "lista_compra" && self.ve_custos(sessao)?;
                 let conn = &self.banco.conn;
                 let pasta = match &self.banco.caminho {
                     Some(c) => c.parent().map(|p| p.join("impressoes")).unwrap_or_default(),
@@ -2111,7 +2143,7 @@ impl Servico {
                         (impressao::dre(conn, &dre::html(conn, &f)?)?, format!("dre-gerencial-{}", fiscal::hoje(conn)?))
                     }
                     "lista_compra" => (
-                        impressao::lista_compra(conn, &reposicao::lista_compra_html(conn)?)?,
+                        impressao::lista_compra(conn, &reposicao::lista_compra_html_com(conn, ve_custos_na_lista)?)?,
                         format!("lista-de-compra-{}", fiscal::hoje(conn)?),
                     ),
                     "os" => {
@@ -2156,11 +2188,14 @@ impl Servico {
                 let atual = sync::ajustes(&self.banco.conn)?;
                 let entrada = d.senha.trim();
                 let senha_nova = !entrada.is_empty() && entrada != atual.senha;
-                let muda_rede = (d.ligado && !atual.ligado) || senha_nova;
+                // R9 / D-AUD-9 (decisão do proprietário, 25/11/2026): desligar também é do
+                // gerente, mesmo com as Configurações liberadas para todos.
+                let muda_rede = (d.ligado != atual.ligado) || senha_nova;
                 if muda_rede && !sessao.gerente && !self.liberada_esta_chamada(sessao) {
                     return Err(Erro::campo(
                         "gerente",
-                        "Só o gerente pode ligar a troca de dados ou trocar a senha da rede. Peça para o gerente digitar a senha.",
+                        "Só o gerente pode ligar ou desligar a troca de dados ou trocar a senha da rede. Peça para o \
+                         gerente digitar a senha.",
                     ));
                 }
                 let senha = if entrada.is_empty() { atual.senha.clone() } else { entrada.to_string() };
