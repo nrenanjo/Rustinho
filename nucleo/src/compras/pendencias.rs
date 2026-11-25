@@ -377,3 +377,19 @@ pub(crate) fn fechar_pendencia_item_ignorado(
     }
     Ok(())
 }
+
+/// R13 (DP-42): as pendências de identificação do XML deste caixa que apontam para a peça juntada (D) passam para a
+/// raiz (K), no produto e na lista de candidatas. (São locais: cada caixa acerta as dele; a raiz na entrada cobre o
+/// resto.)
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    let a = conn.execute(
+        "UPDATE xml_pendencia_identificacao SET produto_id = ?2 WHERE produto_id = ?1",
+        rusqlite::params![d, k],
+    )?;
+    let b = conn.execute(
+        "UPDATE xml_pendencia_identificacao SET candidatos_json = replace(candidatos_json, '\"' || ?1 || '\"', '\"' || ?2 || '\"')
+          WHERE instr(candidatos_json, '\"' || ?1 || '\"') > 0",
+        rusqlite::params![d, k],
+    )?;
+    Ok(a + b)
+}

@@ -478,7 +478,82 @@ FocusScope {
             confirmarCaixaNovo = false
         })
     }
-    readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length + (codigos.bloqueio ? 1 : 0) : 0
+    readonly property int codigosParaVer: codigos ? codigos.repetidos.length + codigos.cruzadas.length + codigos.juntadas.length + (codigos.bloqueio ? 1 : 0) : 0
+
+    // R13 (DP-42, a peça cadastrada em dobro): juntar as outras peças do grupo nesta. A pergunta mostra o que muda e o
+    // que diverge; divergência no fiscal pede a confirmação no próprio botão. Só o gerente junta (o núcleo confere).
+    function juntarNesta(grupo, k) {
+        const ds = []
+        for (const p of grupo.pecas)
+            if (p.id !== k.id && !ds.some(x => x.id === p.id))
+                ds.push(p)
+        if (ds.length === 0)
+            return
+        let fiscal = false
+        const linhas = []
+        for (const d of ds) {
+            const r = Api.chamar("produto_juntar_previa", { produtoId: d.id, paraId: k.id })
+            if (!r.ok) {
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            fiscal = fiscal || r.dados.divergencias.fiscal
+            linhas.push("“" + d.nome + "”: " + (r.dados.divergencias.itens.length > 0 ? r.dados.divergencias.itens.join("; ") : "nada diferente"))
+        }
+        janela.confirmar("Juntar em “" + k.nome + "”?",
+                         "Fica “" + k.nome + "”, com os dados dela. " + (ds.length === 1 ? "A outra peça sai" : "As outras peças saem")
+                         + " da busca, e o estoque, os códigos (internos, de barras e dos fornecedores), as aplicações, as encomendas, "
+                         + "as compras em rascunho e os orçamentos abertos passam para ela. Não dá para desfazer.\n\n"
+                         + "O que é diferente: " + linhas.join(". ") + "."
+                         + (fiscal ? "\n\nAtenção: o fiscal (NCM, CEST, origem, CSOSN ou monofásico) é diferente. Confira o fiscal de “"
+                                     + k.nome + "” antes de juntar." : ""),
+                         fiscal ? "Juntar: o fiscal da que fica está certo" : "Juntar",
+                         () => juntarTodas(ds, k, fiscal, 0), "principal")
+    }
+    function juntarTodas(ds, k, fiscal, i) {
+        if (i >= ds.length) {
+            carregarDuplicatas()
+            janela.avisar("Juntadas em “" + k.nome + "”. O que foi feito está no histórico da peça.", "ok")
+            return
+        }
+        janela.chamarGerente("produto_juntar", { produtoId: ds[i].id, paraId: k.id, confirmaFiscal: fiscal }, r => {
+            if (!r.ok) {
+                carregarDuplicatas()
+                janela.avisar(r.erro, "erro")
+                return
+            }
+            juntarTodas(ds, k, fiscal, i + 1)
+        })
+    }
+    // R13: o que chegou depois da junção (de outro caixa, ou deste computador) passa para a peça que ficou.
+    function completarJuncao(j) {
+        janela.chamarGerente("produto_juntar_completar", { produtoId: j.id }, r => {
+            carregarDuplicatas()
+            janela.avisar(r.ok ? "Junção completada: tudo de “" + j.nome + "” está na peça que ficou." : r.erro, r.ok ? "ok" : "erro")
+        })
+    }
+    // R13: duas peças juntadas uma na outra (caixas sem rede): a escolhida volta e fica com as outras.
+    function reativarDoCirculo(j) {
+        janela.confirmar("Reativar “" + j.nome + "”?",
+                         "Ela volta a ficar ativa, e a outra peça do círculo continua juntada nela. Depois, toque em "
+                         + "“Completar a junção” na outra para passar o que sobrou.", "Reativar",
+                         () => janela.chamarGerente("produto_juncao_reativar", { produtoId: j.id }, r => {
+                             carregarDuplicatas()
+                             janela.avisar(r.ok ? "“" + j.nome + "” está ativa de novo." : r.erro, r.ok ? "ok" : "erro")
+                         }), "principal")
+    }
+    // R13 (definição final 4): a junção em disputa: o gerente escolhe a peça; o estoque segue a escolha.
+    function escolherJuncao(c, o) {
+        janela.chamarGerente("produto_juncao_escolher", { produtoId: c.juncao.produtoId, paraId: o.id }, r => {
+            if (r.ok) {
+                conflitos = r.dados
+                carregarDuplicatas()
+                janela.avisar("Fica em “" + o.nome + "”. O estoque foi junto.", "ok")
+            } else {
+                janela.avisar(r.erro, "erro")
+            }
+        })
+    }
 
     // Conflito entre caixas: usar a versão que perdeu, ou deixar como está.
     function resolverConflito(c, usar) {
@@ -2557,7 +2632,18 @@ FocusScope {
                                         tipo: "principal"
                                         onClicked: tela.compensarConflito(modelData)
                                     }
+                                    // R13: a junção em disputa: um botão para cada peça.
+                                    Repeater {
+                                        model: faixaDaLista5.modelData.juncao ? faixaDaLista5.modelData.juncao.opcoes : []
+                                        delegate: Botao {
+                                            required property var modelData
+                                            text: "Fica em " + modelData.nome
+                                            tipo: "secundario"
+                                            onClicked: tela.escolherJuncao(faixaDaLista5.modelData, modelData)
+                                        }
+                                    }
                                     Botao {
+                                        visible: !modelData.juncao
                                         text: modelData.podeUsar ? "Deixar como está" : "Entendi"
                                         tipo: "secundario"
                                         onClicked: tela.resolverConflito(modelData, false)
@@ -2764,7 +2850,9 @@ FocusScope {
                                 width: parent.width - 28
                                 spacing: 4
                                 Text {
-                                    text: (grupo.modelData.tipo === "barras" ? "Código de barras " : "Código ") + grupo.modelData.codigo
+                                    text: grupo.modelData.tipo === "original"
+                                          ? "Mesmo código original e marca: " + grupo.modelData.codigo + " (pode ser a mesma peça cadastrada duas vezes)"
+                                          : (grupo.modelData.tipo === "barras" ? "Código de barras " : "Código ") + grupo.modelData.codigo
                                     textFormat: Text.PlainText
                                     color: Tema.tintaDaFaixa(grupo.par)
                                     font.family: Tema.texto
@@ -2799,6 +2887,88 @@ FocusScope {
                                             onClicked: tela.comandoCodigos("codigos_dar_novo", { id: modelData.id },
                                                                            "“" + modelData.nome + "” ganhou um código novo. Imprima a etiqueta nova.")
                                         }
+                                        // R13: é a mesma peça cadastrada mais de uma vez: as outras juntam nesta.
+                                        Botao {
+                                            objectName: "botaoJuntarNesta"
+                                            visible: !modelData.antigo
+                                            text: "Juntar nesta peça"
+                                            tipo: "secundario"
+                                            onClicked: tela.juntarNesta(grupo.modelData, modelData)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // R13: peças juntadas que ainda pedem o gerente.
+                    Nota {
+                        visible: !!tela.codigos && tela.codigos.juntadas.length > 0
+                        text: "Peças juntadas que ainda pedem o gerente: alguma coisa delas chegou de outro caixa depois da junção, "
+                              + "ou dois caixas juntaram sem rede. Enquanto isso, a venda, a compra e o estoque já vão para a peça que ficou "
+                              + "(mesmo se a juntada aparecer na busca)."
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+                    Repeater {
+                        model: tela.codigos ? tela.codigos.juntadas : []
+                        delegate: Rectangle {
+                            id: juntada
+                            required property int index
+                            required property var modelData
+                            readonly property bool par: (index + 1) % 2 === 0
+                            color: Tema.faixa(juntada.par, Tema.papel, Tema.vela(0.6))
+                            palette.window: Tema.superficie(color)
+                            radius: Tema.raioCampo
+                            Layout.fillWidth: true
+                            implicitHeight: colunaJuntada.implicitHeight + 20
+                            ColumnLayout {
+                                id: colunaJuntada
+                                x: 14; y: 10
+                                width: parent.width - 28
+                                spacing: 4
+                                Text {
+                                    text: "“" + juntada.modelData.nome + "” juntada em “" + juntada.modelData.paraNome + "”"
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaDaFaixa(juntada.par)
+                                    font.family: Tema.texto
+                                    font.weight: Font.DemiBold
+                                    font.pixelSize: 15
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: juntada.modelData.disputa
+                                          ? "Junção em disputa: dois caixas juntaram esta peça em peças diferentes. Escolha qual vale em “Diferenças entre caixas”, acima."
+                                          : juntada.modelData.circulo
+                                            ? "Círculo: duas peças foram juntadas uma na outra em caixas sem rede. Reative a que deve ficar."
+                                            : "Ainda nela: " + juntada.modelData.sobras.join(", ") + "."
+                                    textFormat: Text.PlainText
+                                    color: Tema.tintaDaFaixa(juntada.par)
+                                    font.family: Tema.texto
+                                    font.pixelSize: 14
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                }
+                                Linha {
+                                    spacing: 12
+                                    Layout.fillWidth: true
+                                    Botao {
+                                        text: "Abrir"
+                                        tipo: "discreto"
+                                        onClicked: tela.janela.abrir("TelaPeca", { produtoId: juntada.modelData.id })
+                                    }
+                                    Botao {
+                                        objectName: "botaoCompletarJuncao"
+                                        visible: !juntada.modelData.disputa && !juntada.modelData.circulo
+                                        text: "Completar a junção"
+                                        tipo: "principal"
+                                        onClicked: tela.completarJuncao(juntada.modelData)
+                                    }
+                                    Botao {
+                                        visible: juntada.modelData.circulo && !juntada.modelData.disputa
+                                        text: "Reativar esta peça"
+                                        tipo: "secundario"
+                                        onClicked: tela.reativarDoCirculo(juntada.modelData)
                                     }
                                 }
                             }

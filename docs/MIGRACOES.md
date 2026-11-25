@@ -56,6 +56,7 @@ AUD33-N01; decisões DP-47 revista e DP-50). Atualize este documento a cada migr
 | 0028 | `0028_recuperacao_trabalho.sql` | R1/R2 da recuperação do trabalho (0.9.19-dev.1, REC-1 a REC-6): `trabalho` (retrato com duas versões e SHA-256) e `sessao_local` | **não publicada** (linha `0.9.19`, `desenvolvimento-0.9.19`). Tabelas locais |
 | 0029 | `0029_protocolo4_identidade.sql` | protocolo 4 (0.9.19-dev.2): a coluna `caixa_aprovado.dispositivo` (I3, dentro da aprovação assinada) e a tabela local `p4_convite` (A6, convites de uso único) | **não publicada** (linha `0.9.19`). Só aditiva; a assinatura das aprovações da 28 continua valendo (teste `b7_migracao_28_para_29_preserva_assinatura_legada`) |
 | 0030 | `0030_regras_etapa4.sql` | etapa 4 da 0.9.19 Beta: a coluna `vale.acertado` (decisão 6, a compensação do vale usado além do valor) | **não publicada** (linha `0.9.19`). Só aditiva |
+| 0031 | `0031_produto_juncao.sql` | etapa 4 da 0.9.19 Beta (R13): a tabela `produto_juncao` (a peça juntada em outra; viaja) | **não publicada** (linha `0.9.19`). Só aditiva |
 
 Um número publicado **nunca muda de conteúdo**.
 

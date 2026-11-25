@@ -398,6 +398,8 @@ fn liquidos_do_orcamento(conn: &Connection, orcamento_id: &str) -> Resultado<DoO
         if produto_id.is_empty() || quantidade <= 0 {
             continue;
         }
+        // R13: a peça do orçamento pela raiz (o carrinho também está pela raiz).
+        let produto_id = estoque::raiz(conn, &produto_id)?;
         let orcada = mapa.get(&produto_id).map_or(0, |v| v.orcada) + quantidade;
         let novo = NoOrcamento { item, quantidade, fica_num: soma - desconto_venda, fica_den: soma, preco, orcada };
         // Fica a linha de maior valor por unidade: a nova, se ela não fica abaixo da que já estava.
@@ -415,6 +417,21 @@ pub fn calcular(conn: &Connection, e: &VendaEntrada) -> Resultado<Calculo> {
     if e.itens.len() > MAX_ITENS {
         return Err(Erro::validacao(format!("Use no máximo {MAX_ITENS} itens por venda.")));
     }
+    // R13 (DP-42): cada peça do carrinho pela raiz (a peça juntada vende como a que ficou: preço, estoque e o item
+    // gravado são da raiz).
+    let pela_raiz: VendaEntrada;
+    let e = if e.itens.iter().any(|it| !it.produto_id.is_empty()) {
+        let mut copia = e.clone();
+        for it in &mut copia.itens {
+            if !it.produto_id.is_empty() {
+                it.produto_id = estoque::raiz(conn, &it.produto_id)?;
+            }
+        }
+        pela_raiz = copia;
+        &pela_raiz
+    } else {
+        e
+    };
     let tabela = if (1..=5).contains(&e.tabela) { e.tabela } else { 1 };
     let orcamento = liquidos_do_orcamento(conn, &e.orcamento_id)?;
     // Decisão 7 (25/11/2026): a garantia do orçamento vale para o mesmo cliente e até a quantidade orçada. Conta as
@@ -957,6 +974,15 @@ pub fn salvar_orcamento(
     )?;
     gravar_itens(conn, &id, &c)?;
     Ok(id)
+}
+
+/// R13 (DP-42): os itens dos orçamentos ainda abertos que são da peça juntada (D) passam para a raiz (K).
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    Ok(conn.execute(
+        "UPDATE venda_item SET produto_id = ?2 WHERE produto_id = ?1
+           AND venda_id IN (SELECT id FROM venda WHERE tipo = 'orcamento' AND situacao = 'aberto')",
+        params![d, k],
+    )?)
 }
 
 /// Cancela uma venda (as peças voltam ao estoque) ou um orçamento.

@@ -180,6 +180,23 @@ pub fn incompatibilidade(esquema: i64, a: &Alteracao) -> Option<String> {
     if esquema < ESQUEMA_GTINS && a.tabela == "produto_gtin" {
         return Some("GTINs da peça: o caixa precisa da versão 0.9.18 ou mais nova".into());
     }
+    // 0.9.19 (estrutura 31): as peças juntadas (R13). Antes da 31 a tabela não existe.
+    if esquema < ESQUEMA_JUNCAO && a.tabela == "produto_juncao" {
+        return Some("peças juntadas: o caixa precisa da versão 0.9.19 ou mais nova".into());
+    }
+    // 0.9.19 (estrutura 30): o acerto do vale usado além do valor. Um caixa sem a coluna gravaria o vale sem ele
+    // (o conflito e a compensação voltariam depois de atualizar): fica guardado até ele atualizar (B2 da revisão R6).
+    if esquema < ESQUEMA_VALE_ACERTADO && a.tabela == "vale" && a.operacao == "gravar" {
+        let acertado = a
+            .dados
+            .as_deref()
+            .and_then(|d| serde_json::from_str::<Value>(d).ok())
+            .and_then(|v| v["acertado"].as_i64())
+            .unwrap_or(0);
+        if acertado != 0 {
+            return Some("vale-troca acertado: o caixa precisa da versão 0.9.19 ou mais nova".into());
+        }
+    }
     // 0.9.15 (estrutura 23): rascunho de OS. Na estrutura 22 o CHECK de
     // ordem_servico.situacao recusa 'rascunho'.
     if esquema < ESQUEMA_RASCUNHO && a.tabela == "ordem_servico" && a.operacao == "gravar" {

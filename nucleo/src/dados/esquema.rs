@@ -107,6 +107,8 @@ pub const TABELAS: &[Tabela] = &[
     t("sync_resolucao", Viaja, &["sync"]),
     // Os GTINs da peça (PEND-35, DP-15: viajam desde o passo 5.2).
     t("produto_gtin", Viaja, &["codigos"]),
+    // R13 (DP-42, 25/11/2026): a peça juntada em outra (viaja; só o `produtos` grava).
+    t("produto_juncao", Viaja, &["produtos"]),
 
     // Só deste caixa.
     t("alteracao", Local, &["loja", "sync"]),
@@ -246,7 +248,7 @@ pub fn alimenta(tabela: &str) -> Option<(&'static str, Derivado)> {
 /// fim de [`TABELAS`], entre as que viajam). Num banco de antes, as linhas que
 /// elas já tinham nunca viraram alteração: ao abrir, viram uma vez só (veja
 /// `sync::registrar_existentes`; a marca fica na configuração deste caixa).
-pub const PASSARAM_A_VIAJAR: &[&str] = &["produto_gtin"];
+pub const PASSARAM_A_VIAJAR: &[&str] = &["produto_gtin", "produto_juncao"];
 
 /// Chave natural de uma tabela que viaja e cuja chave primária é um id
 /// sorteado: o mesmo dado pode nascer em dois caixas com ids diferentes (o

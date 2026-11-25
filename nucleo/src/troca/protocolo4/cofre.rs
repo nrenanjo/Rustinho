@@ -1921,7 +1921,11 @@ mod testes {
         // Abre pelo programa: aplica migração 0029 (`dispositivo DEFAULT ''` + `p4_convite`).
         let b = Banco::abrir(&db).unwrap();
         assert!(!b.em_modo_seguro());
-        assert_eq!(b.conn.query_row("PRAGMA user_version", [], |l| l.get::<_, i64>(0)).unwrap(), 29);
+        // A1 da revisão R6: o programa leva à estrutura atual (a 0029 e as que vieram depois).
+        assert_eq!(
+            b.conn.query_row("PRAGMA user_version", [], |l| l.get::<_, i64>(0)).unwrap(),
+            crate::banco::MIGRACOES.len() as i64
+        );
         assert!(
             aprovados::autorizada(&b.conn, &raiz.publica(), LOJA, &c2.publica()).unwrap(),
             "B7: aprovação legada da 28 continua válida após migração 0029"

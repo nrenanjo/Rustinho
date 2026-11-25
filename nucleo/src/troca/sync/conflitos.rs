@@ -332,6 +332,7 @@ pub(super) fn nome_no_resumo(t: &str) -> &'static str {
         "produto_fornecedor" => "Lista de códigos dos fornecedores das peças",
         "produto_codigo_antigo" => "Lista de códigos antigos das peças",
         "produto_gtin" => "Lista de códigos de barras (GTIN) das peças",
+        "produto_juncao" => "Lista de peças juntadas",
         "faixa_codigo" => "Lista de faixas de códigos das peças",
         "estoque_movimento" => "Lista de movimentos de estoque",
         "pessoa" => "Lista de clientes e fornecedores",
@@ -374,7 +375,8 @@ pub(super) fn nome_da_tabela(t: &str) -> &'static str {
         | "produto_equivalente"
         | "produto_fornecedor"
         | "produto_codigo_antigo"
-        | "produto_gtin" => "Peça",
+        | "produto_gtin"
+        | "produto_juncao" => "Peça",
         "faixa_codigo" => "Faixa de códigos das peças",
         "pessoa" | "pessoa_veiculo" => "Cliente ou fornecedor",
         "usuario" => "Usuário",
@@ -422,6 +424,9 @@ pub struct Conflito {
     pub compensacao: String,
     /// B2 da revisão R3: a operação que a proposta estorna (o comando confere que é a mesma que o gerente viu).
     pub compensacao_operacao: String,
+    /// R13 (definição final 4): na junção em disputa, a peça juntada e as duas peças onde cada caixa a juntou
+    /// (`{produtoId, opcoes: [{id, nome, vale}]}`); senão, nulo.
+    pub juncao: Value,
 }
 
 /// Nome do campo para a tela.
@@ -540,6 +545,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
             },
             compensacao: String::new(),
             compensacao_operacao: String::new(),
+            juncao: Value::Null,
         };
         match tipo.as_str() {
             "orcamento" => {
@@ -630,6 +636,44 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                 k.texto = format!(
                     "Depois da troca de dados a loja ficou sem gerente (cada caixa tirou um). {nome} voltou a ser gerente. Confira na lista acima quem deve ser gerente."
                 );
+            }
+            // R13 (definição final 4): D juntada em duas peças diferentes por dois caixas sem rede. Sem "Usar a do
+            // outro": o gerente escolhe qual vale (comando próprio), e o estoque segue a escolha.
+            _ if tabela == "produto_juncao" => {
+                let atual = versao_atual(conn, &tabela, &chave)?;
+                k.caixa_ficou = match &atual {
+                    Some(v) => nome_do_caixa(conn, &v.dispositivo)?,
+                    None => String::new(),
+                };
+                let para = |t: Option<&str>| -> String {
+                    t.and_then(|t| serde_json::from_str::<Value>(t).ok())
+                        .and_then(|v| v.get("para_id").and_then(|x| x.as_str()).map(str::to_string))
+                        .unwrap_or_default()
+                };
+                let nome = |id: &str| -> Resultado<String> {
+                    Ok(conn
+                        .query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [id], |l| l.get(0))
+                        .optional()?
+                        .unwrap_or_else(|| "peça que ainda não chegou".into()))
+                };
+                let vale = para(atual.as_ref().and_then(|v| v.dados.as_deref()));
+                let outra = para(dados_perdeu.as_deref());
+                let d = k.registro_id.clone();
+                k.o_que = "Junção em disputa".into();
+                k.texto = format!(
+                    "Dois caixas juntaram \"{}\" em peças diferentes sem rede: em \"{}\" (vale agora) e em \"{}\". \
+                     Escolha qual vale: o estoque que foi para a outra volta e vai para a escolhida, sozinho.",
+                    nome(&d)?,
+                    nome(&vale)?,
+                    nome(&outra)?
+                );
+                k.juncao = json!({
+                    "produtoId": d,
+                    "opcoes": [
+                        { "id": vale, "nome": nome(&vale)?, "vale": true },
+                        { "id": outra, "nome": nome(&outra)?, "vale": false },
+                    ],
+                });
             }
             _ => {
                 let atual = versao_atual(conn, &tabela, &chave)?;
@@ -872,7 +916,10 @@ pub fn resolver_conflito(conn: &Connection, id: i64, usar: bool, usuario_id: &st
 /// versões que perderam continuam guardadas na lista dos resolvidos.
 pub fn manter_todos(conn: &Connection, usuario_id: &str) -> Resultado<usize> {
     let ids: Vec<i64> = {
-        let mut c = conn.prepare("SELECT id FROM sync_conflito WHERE resolvido_em IS NULL ORDER BY id")?;
+        // R13: a junção em disputa fica de fora (o gerente escolhe qual vale).
+        let mut c = conn.prepare(
+            "SELECT id FROM sync_conflito WHERE resolvido_em IS NULL AND tabela <> 'produto_juncao' ORDER BY id",
+        )?;
         let l = c.query_map([], |l| l.get(0))?;
         l.collect::<Result<_, _>>()?
     };

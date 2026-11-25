@@ -26,6 +26,8 @@ mod testes_estab;
 #[cfg(test)]
 mod testes_fase6;
 #[cfg(test)]
+mod testes_juncao;
+#[cfg(test)]
 mod testes_loja;
 #[cfg(test)]
 mod testes_modo_seguro;

@@ -101,6 +101,12 @@ pub struct ProdutoFicha {
     pub atualizado_por: String,
     #[serde(skip_deserializing)]
     pub historico: Vec<auditoria::Registro>,
+    /// R13 (DP-42): nesta peça juntada, a peça que ficou com ela ("código · nome"); senão, vazio.
+    #[serde(skip_deserializing)]
+    pub juntada_com: String,
+    /// R13: na peça que ficou, as peças juntadas nela ("código · nome"); o histórico inclui o delas.
+    #[serde(skip_deserializing)]
+    pub juntadas: Vec<String>,
     /// CSOSN e CFOP que a venda vai usar, com a explicação e o alerta.
     #[serde(skip_deserializing)]
     pub tributacao: Option<fiscal::Tributacao>,
@@ -592,6 +598,26 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, ficha: &Pr
     let (mut dados, estoque_inicial) = validar(ficha)?;
     let id = if novo { tempo::novo_id() } else { ficha.id.clone() };
     if let Some(a) = &antes {
+        // R13 (DP-42): a peça juntada não volta pela ficha (não há desfazer a junção nesta versão).
+        if dados.ativo && !a.ativo {
+            if let Some(k) = conn
+                .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [&id], |l| l.get::<_, String>(0))
+                .optional()?
+            {
+                let k = estoque::raiz(conn, &k)?;
+                let nome: String = conn
+                    .query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [&k], |l| l.get(0))
+                    .optional()?
+                    .unwrap_or_default();
+                return Err(Erro::campo(
+                    "ativo",
+                    format!(
+                        "Esta peça foi juntada com {nome} e não volta a ser usada. A peça que ficou já tem o estoque e \
+                         os códigos dela. Se precisar, fale com o gerente."
+                    ),
+                ));
+            }
+        }
         manter_lucros(a, &mut dados);
         dados.grade = a.grade.clone();
         for g in &a.gtins {
@@ -1214,6 +1240,34 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         .collect();
 
     let codigo_aviso = faixas::problema_da_peca(conn, id)?.unwrap_or_default();
+    // R13: com quem esta peça foi juntada, e as juntadas nela (o histórico delas entra no desta).
+    let nome_de = |pid: &str| -> Resultado<String> {
+        Ok(conn
+            .query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [pid], |l| l.get(0))
+            .optional()?
+            .unwrap_or_default())
+    };
+    let juntada_com = match conn
+        .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [id], |l| l.get::<_, String>(0))
+        .optional()?
+    {
+        Some(k) => nome_de(&estoque::raiz(conn, &k)?)?,
+        None => String::new(),
+    };
+    let ids_juntadas: Vec<String> = conn
+        .prepare("SELECT produto_id FROM produto_juncao WHERE para_id = ?1 ORDER BY produto_id")?
+        .query_map([id], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut historico = auditoria::historico(conn, "produto", id, 30)?;
+    let mut juntadas = Vec::new();
+    for j in &ids_juntadas {
+        juntadas.push(nome_de(j)?);
+        historico.extend(auditoria::historico(conn, "produto", j, 30)?);
+    }
+    if !ids_juntadas.is_empty() {
+        historico.sort_by(|a, b| b.quando.cmp(&a.quando));
+        historico.truncate(30);
+    }
     Ok(ProdutoFicha {
         id: id.to_string(),
         codigo_aviso,
@@ -1270,7 +1324,9 @@ pub fn ficha(conn: &Connection, id: &str) -> Resultado<ProdutoFicha> {
         criado_por,
         atualizado_em,
         atualizado_por,
-        historico: auditoria::historico(conn, "produto", id, 30)?,
+        historico,
+        juntada_com,
+        juntadas,
         tributacao: Some(tributacao),
         fornecedores,
         codigos_fornecedor: Vec::new(),
@@ -1540,6 +1596,196 @@ pub(crate) const SQL_BARRAS_DE_OUTRA_PECA: &str =
      UNION ALL SELECT p.nome FROM produto_gtin g JOIN produto p ON p.id = g.produto_id
       WHERE g.produto_id <> ?2 AND g.gtin = ?1
      LIMIT 1";
+
+/// R13 (DP-42): o que diverge entre a peça juntada (D) e a que fica (K), para a pergunta do juntar. `fiscal` diz se
+/// alguma divergência é fiscal (a tela pede confirmação explícita).
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Divergencias {
+    pub itens: Vec<String>,
+    pub fiscal: bool,
+}
+
+/// R13: confere se D pode ser juntada em K e devolve a raiz de K (onde D vai ficar) e as divergências. Recusa: D igual
+/// a K, D já juntada, peça que não existe, tipo, unidade diferentes, ou K desativada.
+pub fn conferir_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<(String, Divergencias)> {
+    if conn.query_row("SELECT 1 FROM produto_juncao WHERE produto_id = ?1", [d], |_| Ok(())).optional()?.is_some() {
+        return Err(Erro::validacao("Esta peça já foi juntada com outra."));
+    }
+    let k = estoque::raiz(conn, k)?;
+    if d == k {
+        return Err(Erro::validacao("Escolha duas peças diferentes."));
+    }
+    type Linha = (
+        String,
+        String,
+        String,
+        i64,
+        String,
+        String,
+        i64,
+        String,
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+        String,
+        i64,
+        bool,
+        String,
+    );
+    let ler = |id: &str| -> Resultado<Linha> {
+        conn.query_row(
+            "SELECT nome, unidade, COALESCE(tipo, 'peca'), custo, ncm, cest, origem, COALESCE(csosn, ''),
+                    COALESCE(monofasico, 0), estoque_minimo, desconto_maximo, comissao, local, ativo,
+                    EXISTS (SELECT 1 FROM produto_preco WHERE produto_id = produto.id), ''
+               FROM produto WHERE id = ?1",
+            [id],
+            |l| {
+                Ok((
+                    l.get(0)?,
+                    l.get(1)?,
+                    l.get(2)?,
+                    l.get(3)?,
+                    l.get(4)?,
+                    l.get(5)?,
+                    l.get(6)?,
+                    l.get(7)?,
+                    l.get(8)?,
+                    l.get(9)?,
+                    l.get(10)?,
+                    l.get(11)?,
+                    l.get(12)?,
+                    l.get(13)?,
+                    l.get(14)?,
+                    l.get(15)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| Erro::NaoEncontrado("Peça".into()))
+    };
+    let a = ler(d)?;
+    let b = ler(&k)?;
+    if a.2 != b.2 {
+        return Err(Erro::validacao("Só dá para juntar peça com peça (um serviço não tem estoque)."));
+    }
+    if a.1 != b.1 {
+        return Err(Erro::validacao(format!(
+            "As duas peças precisam da mesma unidade ({} e {}): a quantidade de uma está na unidade dela.",
+            a.1, b.1
+        )));
+    }
+    if b.13 == 0 {
+        return Err(Erro::validacao("A peça que fica está desativada. Reative-a antes de juntar."));
+    }
+    let mut dv = Divergencias::default();
+    let mut diverge = |rotulo: &str, x: String, y: String, fiscal: bool| {
+        if x != y {
+            dv.itens.push(format!("{rotulo}: {x} (fica {y})"));
+            dv.fiscal |= fiscal;
+        }
+    };
+    let din = |v: i64| numeros::escrever_dinheiro(v);
+    let opt = |v: Option<i64>| v.map(|x| x.to_string()).unwrap_or_else(|| "—".into());
+    diverge("Custo", din(a.3), din(b.3), false);
+    diverge("NCM", a.4.clone(), b.4.clone(), true);
+    diverge("CEST", a.5.clone(), b.5.clone(), true);
+    diverge("Origem", a.6.to_string(), b.6.to_string(), true);
+    diverge("CSOSN", a.7.clone(), b.7.clone(), true);
+    diverge("Monofásico", (a.8 != 0).to_string(), (b.8 != 0).to_string(), true);
+    diverge("Estoque mínimo", numeros::escrever_quantidade(a.9), numeros::escrever_quantidade(b.9), false);
+    diverge("Desconto máximo", opt(a.10), opt(b.10), false);
+    diverge("Comissão", opt(a.11), opt(b.11), false);
+    diverge("Local", a.12.clone(), b.12.clone(), false);
+    let precos = |id: &str| -> Resultado<String> {
+        Ok(conn.query_row(
+            "SELECT COALESCE(group_concat(tabela || ':' || COALESCE(preco, ''), ' '), '') FROM
+               (SELECT tabela, preco FROM produto_preco WHERE produto_id = ?1 ORDER BY tabela)",
+            [id],
+            |l| l.get(0),
+        )?)
+    };
+    if precos(d)? != precos(&k)? {
+        dv.itens.push("Preços de venda diferentes (ficam os da peça que fica)".into());
+    }
+    Ok((k, dv))
+}
+
+/// R13: a parte do cadastro de juntar D em K (K já é a raiz, conferida por `conferir_juncao`): grava a junção,
+/// aponta para K as peças que estavam juntadas em D (achata a cadeia), passa as aplicações e os equivalentes de D
+/// que K ainda não tem (pela chave natural) e desativa D. Idempotente para o mesmo par.
+pub fn juntar_cadastro(conn: &Connection, dispositivo: &str, usuario_id: &str, d: &str, k: &str) -> Resultado<()> {
+    let agora = tempo::agora();
+    conn.execute(
+        "INSERT INTO produto_juncao (produto_id, para_id, em, por, motivo) VALUES (?1, ?2, ?3, ?4, 'Peça cadastrada em dobro')
+         ON CONFLICT (produto_id) DO NOTHING",
+        params![d, k, agora, usuario_id],
+    )?;
+    conn.execute(
+        "DELETE FROM produto_aplicacao WHERE produto_id = ?1 AND EXISTS (SELECT 1 FROM produto_aplicacao x
+           WHERE x.produto_id = ?2 AND x.montadora = produto_aplicacao.montadora AND x.modelo = produto_aplicacao.modelo
+             AND x.motor = produto_aplicacao.motor AND x.ano_inicio IS produto_aplicacao.ano_inicio
+             AND x.ano_fim IS produto_aplicacao.ano_fim)",
+        params![d, k],
+    )?;
+    conn.execute("UPDATE produto_aplicacao SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
+    conn.execute(
+        "DELETE FROM produto_equivalente WHERE produto_id = ?1 AND EXISTS (SELECT 1 FROM produto_equivalente x
+           WHERE x.produto_id = ?2 AND x.marca = produto_equivalente.marca
+             AND x.codigo_compacto = produto_equivalente.codigo_compacto)",
+        params![d, k],
+    )?;
+    conn.execute("UPDATE produto_equivalente SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
+    conn.execute(
+        "UPDATE produto SET ativo = 0, atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1 AND ativo = 1",
+        params![d, agora, usuario_id, dispositivo],
+    )?;
+    Ok(())
+}
+
+/// R13 (definição final 4): o gerente escolhe em qual peça D fica (a junção estava em disputa). `para` precisa ser
+/// uma das peças oferecidas (quem chama confere) e não pode levar de volta a D. Devolve se mudou.
+pub fn escolher_juncao(conn: &Connection, usuario_id: &str, d: &str, para: &str) -> Resultado<bool> {
+    if estoque::raiz(conn, para)? == d {
+        return Err(Erro::validacao("Essa escolha faria a peça voltar para ela mesma. Escolha a outra."));
+    }
+    let n = conn.execute(
+        "UPDATE produto_juncao SET para_id = ?2, em = ?3, por = ?4 WHERE produto_id = ?1 AND para_id <> ?2",
+        params![d, para, tempo::agora(), usuario_id],
+    )?;
+    Ok(n > 0)
+}
+
+/// R13: tira uma peça de um círculo de junções (duas peças juntadas uma na outra em caixas sem rede): ela deixa de
+/// ser juntada e volta a ficar ativa; as outras do círculo passam a ter esta como raiz (o "Completar a junção" passa
+/// o que sobrou nelas).
+pub fn tirar_do_circulo(conn: &Connection, dispositivo: &str, usuario_id: &str, d: &str) -> Resultado<()> {
+    let mut atual = d.to_string();
+    let mut circulo = false;
+    for _ in 0..8 {
+        let para: Option<String> = conn
+            .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [&atual], |l| l.get(0))
+            .optional()?;
+        match para {
+            None => break,
+            Some(p) if p == d => {
+                circulo = true;
+                break;
+            }
+            Some(p) => atual = p,
+        }
+    }
+    if !circulo {
+        return Err(Erro::validacao("Esta peça não está num círculo de junções."));
+    }
+    conn.execute("DELETE FROM produto_juncao WHERE produto_id = ?1", [d])?;
+    conn.execute(
+        "UPDATE produto SET ativo = 1, atualizado_em = ?2, atualizado_por = ?3, dispositivo = ?4 WHERE id = ?1",
+        params![d, tempo::agora(), usuario_id, dispositivo],
+    )?;
+    Ok(())
+}
 
 /// Frases com o que mudou, para o histórico.
 fn diferencas(tabelas: &[config::TabelaPreco], a: &Dados, b: &Dados) -> Vec<String> {

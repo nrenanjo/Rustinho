@@ -410,6 +410,9 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
         conn.execute("DELETE FROM ordem_servico_item WHERE ordem_id = ?1", [&id])?;
     }
     for (ordem, it) in c.itens.iter().enumerate() {
+        // R13: a peça juntada entra na OS como a peça que ficou.
+        let produto_id =
+            if it.produto_id.is_empty() { None } else { Some(crate::estoque::raiz(conn, &it.produto_id)?) };
         conn.execute(
             "INSERT INTO ordem_servico_item (id, ordem_id, ordem, tipo, produto_id, codigo, descricao, unidade, quantidade, preco, desconto)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -418,7 +421,7 @@ pub fn salvar(conn: &Connection, dispositivo: &str, usuario_id: &str, e: &Entrad
                 id,
                 ordem as i64,
                 it.tipo,
-                if it.produto_id.is_empty() { None } else { Some(&it.produto_id) },
+                produto_id,
                 it.codigo,
                 it.descricao,
                 it.unidade,
@@ -561,6 +564,9 @@ pub fn salvar_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, e
         conn.execute("DELETE FROM ordem_servico_item WHERE ordem_id = ?1", [&id])?;
     }
     for (ordem, it) in c.itens.iter().enumerate() {
+        // R13: a peça juntada entra na OS como a peça que ficou.
+        let produto_id =
+            if it.produto_id.is_empty() { None } else { Some(crate::estoque::raiz(conn, &it.produto_id)?) };
         conn.execute(
             "INSERT INTO ordem_servico_item (id, ordem_id, ordem, tipo, produto_id, codigo, descricao, unidade, quantidade, preco, desconto)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
@@ -569,7 +575,7 @@ pub fn salvar_rascunho(conn: &Connection, dispositivo: &str, usuario_id: &str, e
                 id,
                 ordem as i64,
                 it.tipo,
-                if it.produto_id.is_empty() { None } else { Some(&it.produto_id) },
+                produto_id,
                 it.codigo,
                 it.descricao,
                 it.unidade,

@@ -149,6 +149,60 @@ pub enum JaLigado {
     ManterPecaAtualizarFator,
 }
 
+/// R12 (DP-41): a chave `(fornecedor, código)` está em **disputa efetiva**: dois caixas sem rede a ligaram de jeitos
+/// diferentes (há um conflito aberto da troca de dados nela) e a ligação que vale e a que perdeu ainda levam a peças
+/// diferentes (pelas raízes: juntar as peças acaba com a disputa) ou ao mesmo com fatores diferentes. Devolve as
+/// peças candidatas (raízes, a que vale primeiro), ou `None` sem disputa efetiva. Enquanto a disputa dura, ninguém
+/// grava nessa chave (os escritores daqui) e as leituras a tratam como não ligada; o gerente escolhe nas Diferenças.
+pub(crate) fn fornecedor_em_disputa(
+    conn: &Connection,
+    fornecedor_id: &str,
+    compacto: &str,
+) -> Resultado<Option<Vec<String>>> {
+    let perdeu: Vec<Option<String>> = conn
+        .prepare_cached(
+            "SELECT dados_perdeu FROM sync_conflito WHERE tabela = 'produto_fornecedor' AND resolvido_em IS NULL
+               AND chave = json_array(?1, ?2)",
+        )?
+        .query_map(params![fornecedor_id, compacto], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    if perdeu.is_empty() {
+        return Ok(None);
+    }
+    let atual: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT produto_id, fator FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
+            params![fornecedor_id, compacto],
+            |l| Ok((l.get(0)?, l.get(1)?)),
+        )
+        .optional()?;
+    let Some((peca, fator)) = atual else {
+        return Ok(None);
+    };
+    let raiz = crate::estoque::raiz(conn, &peca)?;
+    let mut candidatas = vec![raiz.clone()];
+    let mut efetiva = false;
+    for dados in perdeu.into_iter().flatten() {
+        let v: serde_json::Value = serde_json::from_str(&dados).unwrap_or_default();
+        let Some(outra) = v.get("produto_id").and_then(|x| x.as_str()).filter(|x| !x.is_empty()) else {
+            continue;
+        };
+        let outra = crate::estoque::raiz(conn, outra)?;
+        let outro_fator = v.get("fator").and_then(|x| x.as_i64()).unwrap_or(1000);
+        if outra != raiz || outro_fator != fator {
+            efetiva = true;
+            if !candidatas.contains(&outra) {
+                candidatas.push(outra);
+            }
+        }
+    }
+    Ok(efetiva.then_some(candidatas))
+}
+
+/// R12: o texto da chave em disputa (ficha, troca de código).
+pub const TEXTO_EM_DISPUTA: &str = "dois caixas sem rede ligaram este código a peças diferentes. O gerente escolhe \
+     qual vale em Simultaneidade › Duplicatas › Diferenças entre caixas; até lá, este código não muda nem liga sozinho.";
+
 /// Liga o código que o fornecedor usa a uma peça (`produto_fornecedor`), pela
 /// forma compacta do código (os zeros à esquerda ficam). O código é guardado
 /// como veio. Código vazio não liga nada. Devolve se gravou (ligou agora ou,
@@ -166,6 +220,13 @@ pub fn vincular_fornecedor(
     if compacto.is_empty() {
         return Ok(false);
     }
+    // R12: chave em disputa efetiva: não grava (o lançar segue sem ligar, só desta vez).
+    if fornecedor_em_disputa(conn, fornecedor_id, &compacto)?.is_some() {
+        return Ok(false);
+    }
+    // R13: ligar um código a uma peça juntada liga à peça que ficou.
+    let raiz = crate::estoque::raiz(conn, produto_id)?;
+    let produto_id = raiz.as_str();
     let sql = match ja_ligado {
         JaLigado::Manter => {
             "INSERT INTO produto_fornecedor (fornecedor_id, codigo_compacto, codigo, produto_id, fator, atualizado_em)
@@ -280,6 +341,12 @@ pub fn conferir_codigos_fornecedor(
                 format!("O código {} de {fornecedor} veio em duas linhas. Abra a peça de novo.", l.antes),
             ));
         }
+        // R12: a ficha avisa e não grava a chave em disputa efetiva.
+        for chave in [&antes_compacto, &compacto] {
+            if fornecedor_em_disputa(conn, &l.fornecedor_id, chave)?.is_some() {
+                return Err(Erro::campo(&campo, format!("O código de {fornecedor}: {TEXTO_EM_DISPUTA}")));
+            }
+        }
         let ligada: Option<String> = conn
             .query_row(
                 "SELECT produto_id FROM produto_fornecedor WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
@@ -346,6 +413,12 @@ pub fn conferir_codigos_fornecedor(
 /// caixas). A data fica a de antes: corrigir o código não faz deste o código mais recente do fornecedor (o "O que
 /// comprar" mostra o mais recente).
 pub fn trocar_codigo_fornecedor(conn: &Connection, t: &TrocaCodigoFornecedor) -> Resultado<()> {
+    // R12: nenhuma das duas chaves pode estar em disputa efetiva (o gerente escolhe antes).
+    for chave in [&t.antes_compacto, &t.compacto] {
+        if fornecedor_em_disputa(conn, &t.fornecedor_id, chave)?.is_some() {
+            return Err(Erro::validacao(TEXTO_EM_DISPUTA));
+        }
+    }
     if t.compacto == t.antes_compacto {
         conn.execute(
             "UPDATE produto_fornecedor SET codigo = ?3 WHERE fornecedor_id = ?1 AND codigo_compacto = ?2",
@@ -654,12 +727,32 @@ pub(crate) fn peca_por_fornecedor_inequivoco(
         return Ok(BuscaId::Nenhum);
     }
     let mut stmt = conn.prepare_cached(
-        "SELECT DISTINCT f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
+        "SELECT f.fornecedor_id, f.produto_id FROM produto_fornecedor f JOIN pessoa p ON p.id = f.fornecedor_id
           WHERE p.documento = ?1 AND f.codigo_compacto = ?2
-          ORDER BY f.produto_id",
+          ORDER BY f.produto_id, f.fornecedor_id",
     )?;
-    let achados: Vec<String> =
-        stmt.query_map(params![fornecedor_doc, compacto], |l| l.get(0))?.collect::<Result<_, _>>()?;
+    let linhas: Vec<(String, String)> =
+        stmt.query_map(params![fornecedor_doc, compacto], |l| Ok((l.get(0)?, l.get(1)?)))?.collect::<Result<_, _>>()?;
+    // R12: a chave em disputa efetiva não liga sozinha: as candidatas viram ambiguidade (pendência).
+    let mut achados: Vec<String> = Vec::new();
+    let mut disputa = false;
+    for (fornecedor_id, peca) in linhas {
+        let pecas = match fornecedor_em_disputa(conn, &fornecedor_id, &compacto)? {
+            Some(c) => {
+                disputa = true;
+                c
+            }
+            None => vec![peca],
+        };
+        for p in pecas {
+            if !achados.contains(&p) {
+                achados.push(p);
+            }
+        }
+    }
+    if disputa && achados.len() > 1 {
+        return Ok(BuscaId::Ambiguo(achados));
+    }
     Ok(por_quantidade(achados))
 }
 
@@ -670,6 +763,10 @@ pub(crate) fn vinculo_do_fornecedor(
     fornecedor_id: &str,
     compacto: &str,
 ) -> Resultado<Option<(String, i64)>> {
+    // R12: a chave em disputa efetiva é tratada como não ligada.
+    if fornecedor_em_disputa(conn, fornecedor_id, compacto)?.is_some() {
+        return Ok(None);
+    }
     Ok(conn
         .query_row(
             "SELECT f.produto_id, f.fator FROM produto_fornecedor f JOIN produto p ON p.id = f.produto_id
@@ -851,6 +948,10 @@ pub(crate) fn desvincular_fornecedor_se_produto(
     if fornecedor_id.is_empty() || compacto.is_empty() {
         return Ok(false);
     }
+    // R12: chave em disputa efetiva fica como está até o gerente escolher.
+    if fornecedor_em_disputa(conn, fornecedor_id, &compacto)?.is_some() {
+        return Ok(false);
+    }
     let n = conn.execute(
         "DELETE FROM produto_fornecedor
           WHERE fornecedor_id = ?1 AND codigo_compacto = ?2 AND produto_id = ?3",
@@ -863,6 +964,56 @@ pub(crate) fn desvincular_fornecedor_se_produto(
 /// provisória desativada ao desfazer rascunho em ambiente multi-caixa para não
 /// bloquear a reimportação do mesmo XML. Fica em `codigos` (único escritor de
 /// `produto_gtin`).
+/// R13 (DP-42): os códigos da peça juntada (D) passam para a raiz (K), sem repetir (idempotente; dois caixas com a
+/// mesma visão fazem o mesmo): as ligações do código do fornecedor, os GTINs, o código de barras principal (vira GTIN
+/// de K se K já tem o seu), os códigos antigos e o código interno de D (vira código antigo de K). D fica sem GTIN nem
+/// código de barras. Refaz o índice de busca das duas.
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<()> {
+    let agora = tempo::agora();
+    conn.execute(
+        "UPDATE produto_fornecedor SET produto_id = ?2, atualizado_em = ?3 WHERE produto_id = ?1",
+        params![d, k, agora],
+    )?;
+    // GTINs: o que K já tem igual sai de D; o resto passa.
+    conn.execute(
+        "DELETE FROM produto_gtin WHERE produto_id = ?1 AND EXISTS (SELECT 1 FROM produto_gtin x
+           WHERE x.produto_id = ?2 AND x.gtin = produto_gtin.gtin AND x.tipo = produto_gtin.tipo
+             AND x.origem = produto_gtin.origem)",
+        params![d, k],
+    )?;
+    conn.execute("UPDATE produto_gtin SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
+    // O código de barras principal de D: K fica com ele se não tem o seu; senão, vira GTIN manual de K.
+    let (barras_d, codigo_d): (String, String) =
+        conn.query_row("SELECT codigo_barras, codigo FROM produto WHERE id = ?1", [d], |l| Ok((l.get(0)?, l.get(1)?)))?;
+    if !barras_d.is_empty() {
+        let barras_k: String = conn.query_row("SELECT codigo_barras FROM produto WHERE id = ?1", [k], |l| l.get(0))?;
+        if barras_k.is_empty() {
+            conn.execute("UPDATE produto SET codigo_barras = ?2 WHERE id = ?1", params![k, barras_d])?;
+        } else if barras_k != barras_d {
+            conn.execute(
+                "INSERT OR IGNORE INTO produto_gtin (id, produto_id, gtin, tipo, origem, ordem, criado_em)
+                 VALUES (?1, ?2, ?3, 'comercial', 'manual', 99, ?4)",
+                params![format!("juntar:{d}:{barras_d}"), k, barras_d, agora],
+            )?;
+        }
+        conn.execute("UPDATE produto SET codigo_barras = '' WHERE id = ?1", [d])?;
+    }
+    // Os códigos antigos de D e o código interno dele viram códigos antigos de K.
+    conn.execute(
+        "DELETE FROM produto_codigo_antigo WHERE produto_id = ?1
+           AND codigo IN (SELECT codigo FROM produto_codigo_antigo WHERE produto_id = ?2)",
+        params![d, k],
+    )?;
+    conn.execute("UPDATE produto_codigo_antigo SET produto_id = ?2 WHERE produto_id = ?1", params![d, k])?;
+    let codigo_k: String = conn.query_row("SELECT codigo FROM produto WHERE id = ?1", [k], |l| l.get(0))?;
+    if !codigo_d.is_empty() && codigo_d != codigo_k {
+        guardar_codigo_antigo(conn, &codigo_d, k, &agora)?;
+    }
+    refazer_indice(conn, k)?;
+    refazer_indice(conn, d)?;
+    Ok(())
+}
+
 pub(crate) fn limpar_gtins_do_produto(conn: &Connection, produto_id: &str) -> Resultado<()> {
     conn.execute("DELETE FROM produto_gtin WHERE produto_id = ?1", [produto_id])?;
     Ok(())

@@ -65,6 +65,10 @@ pub const ESQUEMA_RASCUNHO: i64 = 23;
 /// Estrutura do banco que tem os GTINs da peça (`produto_gtin`, 0024, 0.9.18).
 /// Antes dela a tabela não existe (matriz de compatibilidade; passo 5.2).
 pub const ESQUEMA_GTINS: i64 = 24;
+/// Estrutura que tem o acerto do vale usado além do valor (`vale.acertado`, 0030, 0.9.19).
+pub const ESQUEMA_VALE_ACERTADO: i64 = 30;
+/// Estrutura que tem as peças juntadas (`produto_juncao`, 0031, 0.9.19).
+pub const ESQUEMA_JUNCAO: i64 = 31;
 /// Caixa que não informa a estrutura é de antes da 0.9.15: tratado como a
 /// 0.9.14 (estrutura 22).
 pub const ESQUEMA_LEGADO: i64 = 22;

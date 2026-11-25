@@ -73,6 +73,9 @@ fn inserir(
     let id = tempo::novo_id();
     let numero = proximo_numero(conn)?;
     let agora = tempo::agora();
+    // R13: encomendar uma peça juntada encomenda a peça que ficou.
+    let raiz = produto_id.map(|p| crate::estoque::raiz(conn, p)).transpose()?;
+    let produto_id = raiz.as_deref();
     conn.execute(
         "INSERT INTO encomenda (id, numero, cliente_id, cliente_nome, telefone, produto_id, descricao, quantidade,
                                 venda_id, situacao, observacoes, criado_em, criado_por, atualizado_em, dispositivo)
@@ -1217,4 +1220,12 @@ mod testes {
         assert_eq!(codificar("Olá, Ana!"), "Ol%C3%A1%2C%20Ana%21");
         assert_eq!(primeiro_nome("JOÃO DA SILVA"), "João");
     }
+}
+
+/// R13 (DP-42): as encomendas ainda não entregues (nem canceladas) da peça juntada (D) passam para a raiz (K).
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    Ok(conn.execute(
+        "UPDATE encomenda SET produto_id = ?2 WHERE produto_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
+        rusqlite::params![d, k],
+    )?)
 }

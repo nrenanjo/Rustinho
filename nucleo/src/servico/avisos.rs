@@ -442,6 +442,8 @@ pub const NOMES_DAS_OPERACOES: &[(&str, &str)] = &[
     ("pagar_pagar", "Pagamento de conta"),
     ("pendencia_arquivar", "Pendência arquivada"),
     ("pessoa_salvar", "Cadastro de pessoa"),
+    ("produto_juntar", "Junção de peças"),
+    ("produto_juntar_completar", "Junção de peças completada"),
     ("produto_salvar", "Cadastro de peça"),
     ("produto_variacao_criar", "Variação de peça"),
     ("receber_baixar", "Recebimento"),

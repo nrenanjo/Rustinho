@@ -247,6 +247,10 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "configurar_inicio",
     "conflito_resolver",
     "conflito_compensar",
+    "produto_juntar",
+    "produto_juntar_completar",
+    "produto_juncao_escolher",
+    "produto_juncao_reativar",
     "conflitos_manter_todos",
     "conta_loja_conferir",
     "dre_classificacao_salvar",
@@ -345,6 +349,9 @@ pub const NAO_REPETIR: &[&str] = &[
     "pagamento_estornar",
     // R15: a compensação pronta estorna um recebimento ou um pagamento (dinheiro: a mesma chave não repete).
     "conflito_compensar",
+    // R13: juntar passa o estoque (a mesma chave não repete).
+    "produto_juntar",
+    "produto_juntar_completar",
     "movimento_lancar",
     "movimento_estornar",
     "transferir",
@@ -429,6 +436,12 @@ const DO_SERVICO: &[(&str, Classe)] = &[
     ("conflitos_listar", Classe::ConsultaDoGerente("simultaneidade")),
     ("conflito_resolver", Classe::Gerente("gerente")),
     ("conflito_compensar", Classe::Gerente("gerente")),
+    // R13: juntar a peça cadastrada em dobro (sempre do gerente); a prévia é consulta da Simultaneidade.
+    ("produto_juntar_previa", Classe::ConsultaDoGerente("simultaneidade")),
+    ("produto_juntar", Classe::Gerente("gerente")),
+    ("produto_juntar_completar", Classe::Gerente("gerente")),
+    ("produto_juncao_escolher", Classe::Gerente("gerente")),
+    ("produto_juncao_reativar", Classe::Gerente("gerente")),
     ("referencia_aceitar", Classe::Gerente("gerente")),
     ("conflitos_manter_todos", Classe::Gerente("gerente")),
     ("caixas_conhecidos", Classe::Leitura),
@@ -901,6 +914,12 @@ impl Servico {
     #[cfg(test)]
     pub(crate) fn banco_para_teste(&mut self) -> &mut Banco {
         &mut self.banco
+    }
+
+    /// Só nos testes: o serviço em cima de um banco já montado (os de dois caixas).
+    #[cfg(test)]
+    pub(crate) fn com_banco_para_teste(banco: Banco) -> Servico {
+        Self::com_banco(banco)
     }
 
     fn com_banco(banco: Banco) -> Servico {
@@ -1693,6 +1712,15 @@ impl Servico {
             "conflito_resolver" => {
                 let d: Resolver = ler(dados)?;
                 let tx = self.banco.conn.transaction()?;
+                // R13: a junção em disputa se resolve escolhendo a peça (o estoque segue a escolha).
+                use rusqlite::OptionalExtension;
+                let tabela: Option<String> =
+                    tx.query_row("SELECT tabela FROM sync_conflito WHERE id = ?1", [d.id], |l| l.get(0)).optional()?;
+                if tabela.as_deref() == Some("produto_juncao") {
+                    return Err(Erro::validacao(
+                        "Nesta diferença, escolha em qual peça a juntada fica (os botões \"Fica em\" dela).",
+                    ));
+                }
                 sync::resolver_conflito(&tx, d.id, d.usar, &sessao.usuario_id)?;
                 auditoria::registrar(
                     &tx,
@@ -1758,6 +1786,123 @@ impl Servico {
                 crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
                 tx.commit()?;
                 Ok(resposta)
+            }
+            // R13 (DP-42, decisão do proprietário: a peça cadastrada em dobro). A prévia diz onde D vai ficar (a raiz
+            // de K) e o que diverge; o juntar (sempre do gerente) passa tudo de D para K numa transação; o completar
+            // reaplica o que faltou (idempotente).
+            "produto_juntar_previa" => {
+                let d: JuntarPecas = ler(dados)?;
+                let (k, dv) = crate::produtos::conferir_juncao(&self.banco.conn, &d.produto_id, &d.para_id)?;
+                Ok(json!({ "paraId": k, "divergencias": dv }))
+            }
+            "produto_juntar" => {
+                let d: JuntarPecas = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let (k, dv) = crate::produtos::conferir_juncao(&tx, &d.produto_id, &d.para_id)?;
+                if dv.fiscal && !d.confirma_fiscal {
+                    return Err(Erro::campo(
+                        "fiscal",
+                        format!(
+                            "As peças divergem no fiscal ({}). Confirme que a peça que fica está com o fiscal certo.",
+                            dv.itens.join("; ")
+                        ),
+                    ));
+                }
+                let feito = juntar_pecas(&tx, &disp, &sessao.usuario_id, &d.produto_id, &k, false)?;
+                let resposta = json!({ "paraId": k, "feito": feito });
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
+                tx.commit()?;
+                Ok(resposta)
+            }
+            "produto_juntar_completar" => {
+                let d: JuntarPecas = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let k = juncao_para_completar(&tx, &d.produto_id)?;
+                let feito = juntar_pecas(&tx, &disp, &sessao.usuario_id, &d.produto_id, &k, true)?;
+                let resposta = json!({ "paraId": k, "feito": feito });
+                crate::despacho::marcar_feita(&tx, self.operacao_atual.as_ref(), &resposta)?;
+                tx.commit()?;
+                Ok(resposta)
+            }
+            "produto_juncao_escolher" => {
+                let d: JuntarPecas = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                let abertos: Vec<(i64, Option<String>)> = tx
+                    .prepare(
+                        "SELECT id, dados_perdeu FROM sync_conflito WHERE tabela = 'produto_juncao'
+                           AND resolvido_em IS NULL AND chave = json_array(?1)",
+                    )?
+                    .query_map([&d.produto_id], |l| Ok((l.get(0)?, l.get(1)?)))?
+                    .collect::<Result<_, _>>()?;
+                if abertos.is_empty() {
+                    return Err(Erro::validacao("Esta junção não está em disputa (talvez já tenha sido escolhida)."));
+                }
+                let mut opcoes: Vec<String> = tx
+                    .prepare("SELECT para_id FROM produto_juncao WHERE produto_id = ?1")?
+                    .query_map([&d.produto_id], |l| l.get(0))?
+                    .collect::<Result<_, _>>()?;
+                for (_, perdeu) in &abertos {
+                    if let Some(p) = perdeu
+                        .as_deref()
+                        .and_then(|t| serde_json::from_str::<Value>(t).ok())
+                        .and_then(|v| v.get("para_id").and_then(|x| x.as_str()).map(str::to_string))
+                    {
+                        opcoes.push(p);
+                    }
+                }
+                if !opcoes.contains(&d.para_id) {
+                    return Err(Erro::validacao("Escolha uma das duas peças da disputa."));
+                }
+                let mudou = crate::produtos::escolher_juncao(&tx, &sessao.usuario_id, &d.produto_id, &d.para_id)?;
+                // O estoque que cada caixa passou para a peça que perdeu volta para D (o Completar leva à escolhida).
+                for perdeu in opcoes.iter().filter(|o| **o != d.para_id) {
+                    crate::estoque::desfazer_passagem(&tx, &disp, &d.produto_id, perdeu)?;
+                }
+                for (id, _) in &abertos {
+                    sync::resolver_conflito(&tx, *id, false, &sessao.usuario_id)?;
+                }
+                // E completa já: o que voltou para D vai para a escolhida (um clique só para o gerente).
+                let raiz = crate::estoque::raiz(&tx, &d.produto_id)?;
+                juntar_pecas(&tx, &disp, &sessao.usuario_id, &d.produto_id, &raiz, true)?;
+                let nome = |id: &str| -> Resultado<String> {
+                    Ok(tx.query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [id], |l| l.get(0))?)
+                };
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "produto.juncao_escolher",
+                    "produto",
+                    &d.produto_id,
+                    &[format!(
+                        "{} fica juntada em {}{}",
+                        nome(&d.produto_id)?,
+                        nome(&d.para_id)?,
+                        if mudou { "" } else { " (como já estava)" }
+                    )],
+                )?;
+                tx.commit()?;
+                Ok(json!(sync::conflitos(&self.banco.conn)?))
+            }
+            "produto_juncao_reativar" => {
+                let d: JuntarPecas = ler(dados)?;
+                let tx = self.banco.conn.transaction()?;
+                crate::produtos::tirar_do_circulo(&tx, &disp, &sessao.usuario_id, &d.produto_id)?;
+                let nome: String =
+                    tx.query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [&d.produto_id], |l| {
+                        l.get(0)
+                    })?;
+                auditoria::registrar(
+                    &tx,
+                    &disp,
+                    Some(&sessao.usuario_id),
+                    "produto.juncao_reativar",
+                    "produto",
+                    &d.produto_id,
+                    &[format!("{nome} saiu do círculo de junções e voltou a ficar ativa")],
+                )?;
+                tx.commit()?;
+                Ok(json!({ "ok": true }))
             }
             // R-05: o gerente aceita como está um registro comprovadamente inconsistente.
             "referencia_aceitar" => {
@@ -2884,6 +3029,86 @@ struct Resolver {
     id: i64,
     #[serde(default)]
     usar: bool,
+}
+
+/// R13: a peça a juntar (D), onde (K) e se o gerente confirmou a divergência fiscal.
+#[derive(Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct JuntarPecas {
+    produto_id: String,
+    para_id: String,
+    confirma_fiscal: bool,
+}
+
+/// R13: para completar, D tem de estar juntada, e a junção dela não pode estar em disputa (dois caixas juntaram D em
+/// peças diferentes sem rede: o gerente escolhe antes, nas Diferenças). Devolve a raiz.
+pub(crate) fn juncao_para_completar(conn: &rusqlite::Connection, d: &str) -> Resultado<String> {
+    let para: Option<String> = conn
+        .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [d], |l| l.get(0))
+        .map(Some)
+        .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e) })?;
+    if para.is_none() {
+        return Err(Erro::validacao("Esta peça não foi juntada com outra."));
+    }
+    let em_disputa: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_conflito WHERE tabela = 'produto_juncao' AND resolvido_em IS NULL
+           AND chave = json_array(?1))",
+        [d],
+        |l| l.get(0),
+    )?;
+    if em_disputa {
+        return Err(Erro::validacao(
+            "Junção em disputa: dois caixas juntaram esta peça em peças diferentes sem rede. Escolha qual vale nas \
+             Diferenças: o estoque vai sozinho para a peça escolhida.",
+        ));
+    }
+    crate::estoque::raiz(conn, d)
+}
+
+/// R13: junta D em K (K já é a raiz). Cada parte pelo módulo dono da tabela; tudo idempotente para o mesmo par.
+/// Devolve o resumo para o registro e a tela.
+pub(crate) fn juntar_pecas(
+    conn: &rusqlite::Connection,
+    disp: &str,
+    usuario_id: &str,
+    d: &str,
+    k: &str,
+    completar: bool,
+) -> Resultado<Vec<String>> {
+    crate::produtos::juntar_cadastro(conn, disp, usuario_id, d, k)?;
+    crate::catalogo::codigos::passar_para_juncao(conn, d, k)?;
+    let encomendas = crate::encomendas::passar_para_juncao(conn, d, k)?;
+    let compras = crate::compras::passar_para_juncao(conn, d, k)?;
+    let orcamentos = crate::vendas::passar_para_juncao(conn, d, k)?;
+    let pendencias = crate::compras::pendencias::passar_para_juncao(conn, d, k)?;
+    let estoque = crate::estoque::passar_por_juncao(conn, disp, d, k)?;
+    let nome = |id: &str| -> Resultado<String> {
+        Ok(conn.query_row("SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1", [id], |l| l.get(0))?)
+    };
+    let mut feito = vec![format!("{} juntada em {}", nome(d)?, nome(k)?)];
+    if estoque != 0 {
+        feito.push(format!("Estoque passado: {}", crate::numeros::escrever_quantidade(estoque)));
+    }
+    for (n, o_que) in [
+        (encomendas, "encomenda(s)"),
+        (compras, "item(ns) de compra em rascunho"),
+        (orcamentos, "item(ns) de orçamento aberto"),
+        (pendencias, "pendência(s) do XML"),
+    ] {
+        if n > 0 {
+            feito.push(format!("{n} {o_que} passaram para a peça que fica"));
+        }
+    }
+    crate::auditoria::registrar(
+        conn,
+        disp,
+        Some(usuario_id),
+        if completar { "produto.juntar_completar" } else { "produto.juntar" },
+        "produto",
+        d,
+        &feito,
+    )?;
+    Ok(feito)
 }
 
 /// R15: o conflito e a operação que a proposta mostrada estorna (B2 da revisão R3).

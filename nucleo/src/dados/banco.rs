@@ -11,7 +11,7 @@ use crate::tempo;
 
 /// Cada arquivo SQL é uma versão da estrutura do banco. Novas versões entram
 /// no fim da lista; as antigas nunca mudam.
-const MIGRACOES: &[&str] = &[
+pub(crate) const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0001_inicial.sql"),
     include_str!("../migracoes/0002_pessoas_compras_fiscal.sql"),
     include_str!("../migracoes/0003_vendas_caixa_sync.sql"),
@@ -42,6 +42,7 @@ const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0028_recuperacao_trabalho.sql"),
     include_str!("../migracoes/0029_protocolo4_identidade.sql"),
     include_str!("../migracoes/0030_regras_etapa4.sql"),
+    include_str!("../migracoes/0031_produto_juncao.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -1072,7 +1073,7 @@ mod testes {
         // dev.3.3, a 0025 (passo 7.5: índices e busca), a 0026 (registro de
         // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
         // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
-        assert_eq!(MIGRACOES.len(), 30);
+        assert_eq!(MIGRACOES.len(), 31);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas

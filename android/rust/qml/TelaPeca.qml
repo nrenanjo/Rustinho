@@ -782,6 +782,20 @@ FocusScope {
                         color: Tema.pergaminho
                         Layout.fillWidth: true
 
+                        // R13 (DP-42): a peça juntada em outra (não volta a ser usada) e as juntadas nesta.
+                        Nota {
+                            objectName: "notaJuntada"
+                            visible: !!tela.ficha && (!!tela.ficha.juntadaCom || (Array.isArray(tela.ficha.juntadas) && tela.ficha.juntadas.length > 0))
+                            text: !tela.ficha ? ""
+                                  : tela.ficha.juntadaCom
+                                    ? "Esta peça foi juntada com " + tela.ficha.juntadaCom + " (era a mesma peça cadastrada duas vezes). "
+                                      + "A venda, a compra e o estoque vão para a peça que ficou."
+                                    : "Juntada com " + (tela.ficha.juntadas || []).join(", ") + ". O histórico abaixo inclui o delas."
+                            font.pixelSize: 14
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
                         Pilulas {
                             pequenas: true
                             modelo: [{ id: "produto", nome: "Produto" }, { id: "servico", nome: "Serviço (sem estoque)" }]

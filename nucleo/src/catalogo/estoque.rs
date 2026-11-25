@@ -19,8 +19,32 @@ pub fn saldo(conn: &Connection, produto_id: &str) -> Resultado<i64> {
     )?)
 }
 
+/// R13 (DP-42): a raiz de uma peça: segue as junções (`produto_juncao`, peça juntada em outra) até a peça que não
+/// foi juntada. No máximo 8 passos; num ciclo (duas peças juntadas uma na outra em caixas sem rede), a raiz é o
+/// menor id do ciclo (a Duplicatas mostra o ciclo para o gerente reativar uma). Só lê.
+pub fn raiz(conn: &Connection, produto_id: &str) -> Resultado<String> {
+    let mut vistos = vec![produto_id.to_string()];
+    for _ in 0..8 {
+        let atual = vistos.last().cloned().unwrap_or_default();
+        let para: Option<String> = conn
+            .query_row("SELECT para_id FROM produto_juncao WHERE produto_id = ?1", [&atual], |l| l.get(0))
+            .optional()?;
+        match para {
+            None => return Ok(atual),
+            Some(p) => {
+                if let Some(i) = vistos.iter().position(|v| *v == p) {
+                    return Ok(vistos[i..].iter().min().cloned().unwrap_or(p));
+                }
+                vistos.push(p);
+            }
+        }
+    }
+    Ok(vistos.last().cloned().unwrap_or_default())
+}
+
 /// Lança um movimento de estoque (positivo entra, negativo sai). Serviço não
-/// tem estoque: para ele, não lança nada.
+/// tem estoque: para ele, não lança nada. R13 (F3): lança na raiz da peça (a devolução, o cancelamento e o estorno
+/// de compra de uma peça juntada entram na peça que ficou).
 pub fn lancar(
     conn: &Connection,
     dispositivo: &str,
@@ -30,6 +54,8 @@ pub fn lancar(
     tipo: &str,
     motivo: &str,
 ) -> Resultado<()> {
+    let produto_id = raiz(conn, produto_id)?;
+    let produto_id = produto_id.as_str();
     conn.execute(
         "INSERT INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
@@ -37,6 +63,61 @@ pub fn lancar(
         params![tempo::novo_id(), produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, tempo::agora()],
     )?;
     Ok(())
+}
+
+/// R13 (DP-42): passa o saldo da peça juntada (D) para a raiz (K) com duas linhas diretas (sem o desvio do
+/// `lancar`, que mandaria a saída de D para K). O id é pelo conteúdo: o resumo dos ids dos movimentos de D que entram
+/// no saldo, e K; `criado_em` é o do último deles e `usuario_id` fica vazio (quem fez está no registro). Assim dois
+/// caixas com a mesma visão gravam as mesmas linhas (sem conflito na troca); visões diferentes, ou D juntada em peças
+/// diferentes (a disputa), gravam pares diferentes, cada um equilibrado (o total da loja não muda; na disputa D fica
+/// negativa até o gerente escolher, e [`desfazer_passagem`] devolve o par da peça que perdeu). Saldo 0 não grava nada.
+/// Devolve a quantidade passada.
+pub fn passar_por_juncao(conn: &Connection, dispositivo: &str, d: &str, k: &str) -> Resultado<i64> {
+    use sha2::{Digest, Sha256};
+    let mut movimentos: Vec<(String, i64, String)> = conn
+        .prepare("SELECT id, quantidade, criado_em FROM estoque_movimento WHERE produto_id = ?1")?
+        .query_map([d], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    let saldo: i64 = movimentos.iter().map(|m| m.1).sum();
+    if saldo == 0 {
+        return Ok(0);
+    }
+    movimentos.sort();
+    let ids: Vec<&str> = movimentos.iter().map(|m| m.0.as_str()).collect();
+    let resumo: String = Sha256::digest(ids.join(",").as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
+    let em = movimentos.iter().map(|m| m.2.clone()).max().unwrap_or_else(tempo::agora);
+    for (sufixo, peca, quantidade) in [("saida", d, -saldo), ("entrada", k, saldo)] {
+        conn.execute(
+            "INSERT OR IGNORE INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
+             VALUES (?1, ?2, ?3, 'juncao', 'Peças juntadas', NULL, ?4, ?5)",
+            params![format!("juntar:{resumo}:{sufixo}:{k}"), peca, quantidade, dispositivo, em],
+        )?;
+    }
+    Ok(saldo)
+}
+
+/// R13 (definição final 4): o gerente escolheu outra peça para D; as passagens de D para `perdeu` voltam para D (um
+/// par de volta para cada entrada, com id pelo id dela: idempotente e igual em qualquer caixa). Devolve quantas.
+pub fn desfazer_passagem(conn: &Connection, dispositivo: &str, d: &str, perdeu: &str) -> Resultado<usize> {
+    let sufixo = format!(":entrada:{perdeu}");
+    let entradas: Vec<(String, i64, String)> = conn
+        .prepare(
+            "SELECT id, quantidade, criado_em FROM estoque_movimento
+              WHERE produto_id = ?1 AND tipo = 'juncao' AND substr(id, 1, 7) = 'juntar:'
+                AND substr(id, -length(?2)) = ?2",
+        )?
+        .query_map(params![perdeu, sufixo], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, quantidade, em) in &entradas {
+        for (lado, peca, q) in [("saida", perdeu, -quantidade), ("entrada", d, *quantidade)] {
+            conn.execute(
+                "INSERT OR IGNORE INTO estoque_movimento (id, produto_id, quantidade, tipo, motivo, usuario_id, dispositivo, criado_em)
+                 VALUES (?1, ?2, ?3, 'juncao', 'Junção escolhida em outra peça', NULL, ?4, ?5)",
+                params![format!("{id}:volta:{lado}"), peca, q, dispositivo, em],
+            )?;
+        }
+    }
+    Ok(entradas.len())
 }
 
 /// A mensagem de quantidade quebrada numa unidade que não vende quebrado.

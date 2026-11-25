@@ -2233,6 +2233,9 @@ pub(crate) fn motivo_legivel(motivo: &str) -> &'static str {
         }
         "fornecedor_ambiguo" => "Código do fornecedor está associado a mais de uma peça",
         "conflito_gtin_fornecedor" => "GTIN aponta para uma peça e o código do fornecedor para outra",
+        "ligacao_em_disputa" => {
+            "Dois caixas sem rede ligaram este código do fornecedor a peças diferentes: o gerente escolhe qual vale nas Diferenças entre caixas"
+        }
         "codigo_repetido" => "O fornecedor usou o mesmo código em peças com descrições diferentes na nota",
         "codigo_ambiguo" => "Código original/equivalente corresponde a mais de uma peça",
         "codigo_de_outra_peca" => "O código desta nota da loja já é de uma peça com outra descrição",

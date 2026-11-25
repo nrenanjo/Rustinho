@@ -112,6 +112,11 @@ pub fn criar_gatilhos(conn: &Connection) -> Resultado<()> {
     let (col_op, val_op) = if com_operacao { (", operacao_id", ", rustinho_operacao()") } else { ("", "") };
     for tabela in TABELAS {
         let (todas, chave) = colunas(conn, tabela)?;
+        // Banco de estrutura antiga (migrado só até uma estrutura velha, nos testes de atualização): a tabela que
+        // ainda não existe não tem gatilho; os dela são criados quando a migração a criar e o banco abrir.
+        if todas.is_empty() {
+            continue;
+        }
         if chave.is_empty() {
             return Err(Erro::Interno(format!("a tabela {tabela} não tem chave primária")));
         }

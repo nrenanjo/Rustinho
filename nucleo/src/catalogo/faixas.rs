@@ -1365,7 +1365,8 @@ pub struct PecaRepetida {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Repetido {
-    /// "interno" (código da peça) ou "barras".
+    /// "interno" (código da peça), "barras" ou "original" (R13: o mesmo código original com a mesma marca: a peça
+    /// pode ter sido cadastrada em dobro).
     pub tipo: String,
     pub codigo: String,
     pub pecas: Vec<PecaRepetida>,
@@ -1373,10 +1374,18 @@ pub struct Repetido {
 
 /// Códigos que levam a mais de uma peça: o mesmo código interno em duas
 /// peças, o código antigo de uma igual ao atual de outra, ou o mesmo código
-/// de barras. Nada é trocado sozinho: o gerente decide.
+/// de barras. Nada é trocado sozinho: o gerente decide. R13 (DP-42): também o mesmo código original com a mesma marca
+/// (compactados, sem vazios); a peça juntada com outra sai dos grupos (ela já é a outra).
 pub fn repetidos(conn: &Connection) -> Resultado<Vec<Repetido>> {
+    let juntadas: std::collections::BTreeSet<String> = conn
+        .prepare("SELECT produto_id FROM produto_juncao")?
+        .query_map([], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
     let mut grupos: BTreeMap<(String, String), Vec<PecaRepetida>> = BTreeMap::new();
     let mut juntar = |tipo: &str, codigo: String, p: PecaRepetida| {
+        if juntadas.contains(&p.id) {
+            return;
+        }
         let g = grupos.entry((tipo.to_string(), codigo)).or_default();
         if !g.iter().any(|x| x.id == p.id && x.antigo == p.antigo) {
             g.push(p);
@@ -1426,6 +1435,31 @@ pub fn repetidos(conn: &Connection) -> Resultado<Vec<Repetido>> {
         let (nome, codigo): (String, String) =
             conn.query_row("SELECT nome, codigo FROM produto WHERE id = ?1", [&id], |l| Ok((l.get(0)?, l.get(1)?)))?;
         juntar("barras", gtin, PecaRepetida { id, nome, codigo, antigo: false });
+    }
+    {
+        let mut originais: BTreeMap<(String, String), String> = BTreeMap::new();
+        let mut c = conn.prepare(
+            "SELECT id, nome, codigo, codigo_original, marca FROM produto
+              WHERE codigo_original <> '' AND marca <> '' ORDER BY nome, id",
+        )?;
+        let linhas = c.query_map([], |l| {
+            Ok((
+                l.get::<_, String>(0)?,
+                l.get::<_, String>(1)?,
+                l.get::<_, String>(2)?,
+                l.get::<_, String>(3)?,
+                l.get::<_, String>(4)?,
+            ))
+        })?;
+        for l in linhas {
+            let (id, nome, codigo, original, marca) = l?;
+            let chave = (crate::texto::compactar(&original), crate::texto::compactar(&marca));
+            if chave.0.is_empty() || chave.1.is_empty() {
+                continue;
+            }
+            let rotulo = originais.entry(chave).or_insert_with(|| format!("{original} · {marca}")).clone();
+            juntar("original", rotulo, PecaRepetida { id, nome, codigo, antigo: false });
+        }
     }
     Ok(grupos
         .into_iter()
@@ -1591,15 +1625,112 @@ pub fn situacao(conn: &Connection) -> Resultado<Value> {
         "esperando": esperando(conn)?,
         "pessoasEsperando": esperando_pessoas(conn)?,
         "repetidos": repetidos(conn)?,
+        "juntadas": juntadas_para_ver(conn)?,
         "inventario": inventario,
         "agora": self::inventario(conn)?,
     }))
 }
 
+/// R13 (DP-42): uma peça juntada que ainda pede o gerente: sobrou estoque nela, alguma coisa ainda a cita (chegou de
+/// outro caixa depois da junção, ou é local deste computador), ela voltou a ficar ativa ("Usar a do outro" num
+/// conflito), está num círculo (duas peças juntadas uma na outra em caixas sem rede) ou a junção está em disputa
+/// (juntada em peças diferentes em dois caixas).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JuntadaParaVer {
+    pub id: String,
+    pub nome: String,
+    pub codigo: String,
+    pub para_id: String,
+    pub para_nome: String,
+    /// O que ainda cita a peça (frases curtas), vazio se nada.
+    pub sobras: Vec<String>,
+    pub circulo: bool,
+    pub disputa: bool,
+}
+
+/// As juntadas que pedem o gerente (veja [`JuntadaParaVer`]).
+pub fn juntadas_para_ver(conn: &Connection) -> Resultado<Vec<JuntadaParaVer>> {
+    let linhas: Vec<(String, String, String, String, i64)> = conn
+        .prepare(
+            "SELECT j.produto_id, j.para_id, p.nome, p.codigo, p.ativo FROM produto_juncao j
+               JOIN produto p ON p.id = j.produto_id ORDER BY p.nome, p.id",
+        )?
+        .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?, l.get(3)?, l.get(4)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut lista = Vec::new();
+    for (id, para, nome, codigo, ativo) in linhas {
+        let mut sobras = Vec::new();
+        let saldo = crate::estoque::saldo(conn, &id)?;
+        if saldo != 0 {
+            sobras.push(format!("Estoque: {}", crate::numeros::escrever_quantidade(saldo)));
+        }
+        if ativo != 0 {
+            sobras.push("Voltou a ficar ativa".into());
+        }
+        let contar = |sql: &str| -> Resultado<i64> { Ok(conn.query_row(sql, [&id], |l| l.get(0))?) };
+        for (sql, o_que) in [
+            ("SELECT COUNT(*) FROM produto_fornecedor WHERE produto_id = ?1", "código(s) de fornecedor"),
+            (
+                "SELECT COUNT(*) + EXISTS (SELECT 1 FROM produto WHERE id = ?1 AND codigo_barras <> '')
+                   FROM produto_gtin WHERE produto_id = ?1",
+                "código(s) de barras",
+            ),
+            (
+                "SELECT COUNT(*) FROM encomenda WHERE produto_id = ?1 AND situacao NOT IN ('entregue', 'cancelada')",
+                "encomenda(s)",
+            ),
+            (
+                "SELECT COUNT(*) FROM compra_item WHERE produto_id = ?1
+                   AND compra_id IN (SELECT id FROM compra WHERE situacao = 'rascunho')",
+                "item(ns) de compra em rascunho",
+            ),
+            (
+                "SELECT COUNT(*) FROM venda_item WHERE produto_id = ?1
+                   AND venda_id IN (SELECT id FROM venda WHERE tipo = 'orcamento' AND situacao = 'aberto')",
+                "item(ns) de orçamento aberto",
+            ),
+            (
+                "SELECT COUNT(*) FROM xml_pendencia_identificacao
+                  WHERE produto_id = ?1 OR instr(candidatos_json, '\"' || ?1 || '\"') > 0",
+                "pendência(s) do XML",
+            ),
+        ] {
+            let n = contar(sql)?;
+            if n > 0 {
+                sobras.push(format!("{n} {o_que}"));
+            }
+        }
+        let raiz = crate::estoque::raiz(conn, &id)?;
+        let circulo = conn
+            .query_row("SELECT 1 FROM produto_juncao WHERE produto_id = ?1", [&raiz], |_| Ok(()))
+            .optional()?
+            .is_some();
+        let disputa: bool = conn.query_row(
+            "SELECT EXISTS (SELECT 1 FROM sync_conflito WHERE tabela = 'produto_juncao' AND resolvido_em IS NULL
+               AND chave = json_array(?1))",
+            [&id],
+            |l| l.get(0),
+        )?;
+        if sobras.is_empty() && !circulo && !disputa {
+            continue;
+        }
+        let para_nome: String = conn
+            .query_row("SELECT nome FROM produto WHERE id = ?1", [&para], |l| l.get(0))
+            .optional()?
+            .unwrap_or_default();
+        lista.push(JuntadaParaVer { id, nome, codigo, para_id: para, para_nome, sobras, circulo, disputa });
+    }
+    Ok(lista)
+}
+
 /// Quantas coisas sobre os códigos o gerente precisa ver (para o aviso do
 /// Início): códigos que levam a mais de uma peça e faixas cruzadas.
 pub fn para_ver(conn: &Connection) -> Resultado<i64> {
-    Ok((repetidos(conn)?.len() + repetidos_pessoas(conn)?.len() + cruzadas(conn)?.len()) as i64)
+    Ok((repetidos(conn)?.len()
+        + repetidos_pessoas(conn)?.len()
+        + cruzadas(conn)?.len()
+        + juntadas_para_ver(conn)?.len()) as i64)
 }
 
 #[cfg(test)]

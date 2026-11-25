@@ -424,6 +424,10 @@ pub(crate) fn criar_compra_com_opcoes(
             }
         }
 
+        // R13: a ligação achada (pelo código, GTIN ou candidato) vai para a raiz se a peça foi juntada.
+        if let Some(p) = lig.produto_id.take() {
+            lig.produto_id = Some(crate::estoque::raiz(conn, &p)?);
+        }
         let gtins_json = serde_json::to_string(&item.gtins).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT INTO compra_item (id, compra_id, ordem, codigo_fornecedor, gtin, gtin_tributavel, origem_gtin,
@@ -725,6 +729,20 @@ fn ligar_sozinho(
     use crate::catalogo::codigos::BuscaId;
 
     let compacto = texto::compactar(&item.codigo);
+    // R12 (DP-41): o código deste fornecedor está em disputa efetiva entre dois caixas: não liga sozinho; pendência
+    // com as candidatas (o gerente escolhe a ligação nas Diferenças, ou resolve a pendência só desta vez).
+    if !compacto.is_empty() {
+        if let Some(candidatos) = crate::catalogo::codigos::fornecedor_em_disputa(conn, fornecedor_id, &compacto)? {
+            return Ok(LigacaoAutomatica {
+                acao: String::new(),
+                produto_id: None,
+                achado_por: String::new(),
+                fator: 1000,
+                motivo_pendencia: "ligacao_em_disputa".into(),
+                candidatos,
+            });
+        }
+    }
     let gtin_busca = if gtin_ambiguo {
         BuscaId::Ambiguo(Vec::new())
     } else {
@@ -1916,7 +1934,8 @@ pub fn atualizar(conn: &Connection, e: &CompraEntrada) -> Resultado<()> {
             } else {
                 String::new()
             };
-            (Some(it.produto_id.clone()), ach)
+            // R13: escolher uma peça juntada liga à peça que ficou.
+            (Some(crate::estoque::raiz(conn, &it.produto_id)?), ach)
         } else if acao == "nova" && acao_antes == "nova" && achado_antes == "importacao" {
             if let Some(pid) = prod_antes.as_ref().filter(|pid| {
                 conn.query_row("SELECT 1 FROM produto WHERE id = ?1", [pid.as_str()], |_| Ok(true))
@@ -1937,6 +1956,22 @@ pub fn atualizar(conn: &Connection, e: &CompraEntrada) -> Resultado<()> {
               WHERE id = ?1 AND compra_id = ?2",
             params![it.id, e.id, acao, produto_id, fator, it.baixar_preco, achado_por],
         )?;
+    }
+    Ok(())
+}
+
+/// R13 (F3): os itens desta compra ligados a uma peça juntada passam para a raiz (a peça que ficou).
+fn itens_pela_raiz(conn: &Connection, compra_id: &str) -> Resultado<()> {
+    let itens: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT id, produto_id FROM compra_item WHERE compra_id = ?1
+               AND produto_id IN (SELECT produto_id FROM produto_juncao)",
+        )?
+        .query_map([compra_id], |l| Ok((l.get(0)?, l.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (item, peca) in itens {
+        let raiz = crate::estoque::raiz(conn, &peca)?;
+        conn.execute("UPDATE compra_item SET produto_id = ?2 WHERE id = ?1", params![item, raiz])?;
     }
     Ok(())
 }
@@ -1966,6 +2001,9 @@ pub fn lancar(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) 
     if cab.situacao != "rascunho" {
         return Err(Erro::validacao("Esta compra já foi lançada."));
     }
+    // R13 (F3): o item ligado a uma peça que foi juntada (inclusive a juntada em outro caixa depois do rascunho) entra
+    // na peça que ficou.
+    itens_pela_raiz(conn, id)?;
     // PEND-09 / D7: porta única do estoque, do custo e do financeiro.
     if let Some(motivo) = situacao_fiscal(conn, id)?.bloqueio() {
         return Err(Erro::validacao(motivo));
@@ -2344,6 +2382,16 @@ fn cadastrar_peca(
     let id = produtos::salvar(conn, dispositivo, usuario_id, &f)?;
     produtos::registrar_gtins_xml(conn, &id, &f.gtins)?;
     Ok(id)
+}
+
+/// R13 (DP-42): os itens das compras em rascunho que são da peça juntada (D) passam para a raiz (K) (lançar não
+/// mexe no estoque nem no custo de D).
+pub fn passar_para_juncao(conn: &Connection, d: &str, k: &str) -> Resultado<usize> {
+    Ok(conn.execute(
+        "UPDATE compra_item SET produto_id = ?2 WHERE produto_id = ?1
+           AND compra_id IN (SELECT id FROM compra WHERE situacao = 'rascunho')",
+        params![d, k],
+    )?)
 }
 
 /// Desfaz a entrada no estoque. O custo e os preços não voltam (podem ter

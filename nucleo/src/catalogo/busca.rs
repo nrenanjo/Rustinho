@@ -607,11 +607,11 @@ fn codigos_de_fora(conn: &Connection, termos: &[Termo]) -> Resultado<CodigosDeFo
     // maiúsculas (o código de barras próprio, `cBarra`, pode ter letras).
     let n = padroes.len() + 1;
     let sql = format!(
-        "SELECT produto_id, codigo_compacto FROM produto_fornecedor WHERE {condicao}
+        "SELECT produto_id, codigo_compacto, fornecedor_id FROM produto_fornecedor WHERE {condicao}
           UNION ALL
-         SELECT produto_id, codigo_compacto FROM produto_codigo_antigo WHERE {condicao}
+         SELECT produto_id, codigo_compacto, '' FROM produto_codigo_antigo WHERE {condicao}
           UNION ALL
-         SELECT produto_id, lower(gtin) FROM produto_gtin WHERE gtin IN (SELECT value FROM json_each(?{n}))"
+         SELECT produto_id, lower(gtin), '' FROM produto_gtin WHERE gtin IN (SELECT value FROM json_each(?{n}))"
     );
     let mut gtins: Vec<String> = Vec::new();
     for t in termos.iter().filter(|t| !t.compacto.is_empty()) {
@@ -626,10 +626,23 @@ fn codigos_de_fora(conn: &Connection, termos: &[Termo]) -> Resultado<CodigosDeFo
     let mut c = conn.prepare_cached(&sql)?;
     let mut por_peca: HashMap<String, Vec<String>> = HashMap::new();
     let mut por_termo: Vec<Vec<String>> = vec![Vec::new(); termos.len()];
+    // R12: o código do fornecedor em disputa efetiva é tratado como não ligado (só se há alguma disputa aberta).
+    let ha_disputa: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sync_conflito WHERE tabela = 'produto_fornecedor' AND resolvido_em IS NULL)",
+        [],
+        |l| l.get(0),
+    )?;
     let mut linhas = c.query(params_from_iter(valores.iter()))?;
     while let Some(l) = linhas.next()? {
         let id: String = l.get(0)?;
         let codigo: String = l.get(1)?;
+        let fornecedor: String = l.get(2)?;
+        if ha_disputa
+            && !fornecedor.is_empty()
+            && crate::catalogo::codigos::fornecedor_em_disputa(conn, &fornecedor, &codigo)?.is_some()
+        {
+            continue;
+        }
         for (termo, ids) in termos.iter().zip(por_termo.iter_mut()) {
             if codigo.contains(termo.compacto.as_str()) && ids.last() != Some(&id) {
                 ids.push(id.clone());
