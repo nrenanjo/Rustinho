@@ -1046,6 +1046,10 @@ fn r10_juntada_ativa_nao_conta_duas_vezes() {
 #[test]
 fn r10_juncao_malformada_nao_esconde_vendas() {
     let (a, _b, _u, d, k) = dois();
+    // D antiga: só a venda de ontem a tira das "Peças paradas".
+    let velho = "2025-01-01T00:00:00Z";
+    a.conn.execute("UPDATE produto SET criado_em = ?2 WHERE id = ?1", [&d, velho]).unwrap();
+    a.conn.execute("UPDATE estoque_movimento SET criado_em = ?2 WHERE produto_id = ?1", [&d, velho]).unwrap();
     venda_de(&a.conn, 1, &d, 100_000, Some(&crate::tempo::dias_atras(1)));
     a.conn
         .execute(
