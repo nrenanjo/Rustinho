@@ -2645,6 +2645,14 @@ FocusScope {
                                             onClicked: tela.escolherJuncao(faixaDaLista5.modelData, modelData)
                                         }
                                     }
+                                    // R12: o código do fornecedor ligado a duas peças: se é a mesma peça, juntar.
+                                    Botao {
+                                        objectName: "botaoMesmaPeca"
+                                        visible: !!modelData.mesmaPeca && modelData.mesmaPeca.length === 2
+                                        text: "São a mesma peça: juntar"
+                                        tipo: "secundario"
+                                        onClicked: tela.juntarNesta({ pecas: modelData.mesmaPeca }, modelData.mesmaPeca[0])
+                                    }
                                     Botao {
                                         visible: !modelData.juncao
                                         text: modelData.podeUsar ? "Deixar como está" : "Entendi"

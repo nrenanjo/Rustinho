@@ -427,6 +427,17 @@ pub struct Conflito {
     /// R13 (definição final 4): na junção em disputa, a peça juntada e as duas peças onde cada caixa a juntou
     /// (`{produtoId, opcoes: [{id, nome, vale}]}`); senão, nulo.
     pub juncao: Value,
+    /// R12 (DP-41): no código do fornecedor em disputa, as duas peças (`[{id, nome}]`, a que vale primeiro), para o
+    /// "São a mesma peça: juntar"; senão, nulo.
+    pub mesma_peca: Value,
+}
+
+/// R12: a chave `(fornecedor, código)` de um conflito de `produto_fornecedor`.
+fn chave_do_fornecedor(chave: &str) -> Option<(String, String)> {
+    match serde_json::from_str::<Vec<Value>>(chave).ok().as_deref() {
+        Some([Value::String(f), Value::String(c)]) => Some((f.clone(), c.clone())),
+        _ => None,
+    }
 }
 
 /// Nome do campo para a tela.
@@ -546,6 +557,7 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
             compensacao: String::new(),
             compensacao_operacao: String::new(),
             juncao: Value::Null,
+            mesma_peca: Value::Null,
         };
         match tipo.as_str() {
             "orcamento" => {
@@ -712,6 +724,46 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
                     }));
                 }
                 k.pode_usar = PODE_USAR.contains(&tabela.as_str());
+                // R12 (DP-41): o código do fornecedor ligado a peças diferentes por dois caixas sem rede.
+                if tabela == "produto_fornecedor" && k.resolvido.is_empty() {
+                    let disputa = match chave_do_fornecedor(&chave) {
+                        Some((f, c)) => crate::catalogo::codigos::fornecedor_em_disputa(conn, &f, &c)?,
+                        None => None,
+                    };
+                    match disputa {
+                        Some(pecas) => {
+                            let nome = |id: &str| -> Resultado<String> {
+                                Ok(conn
+                                    .query_row(
+                                        "SELECT codigo || ' · ' || nome FROM produto WHERE id = ?1",
+                                        [id],
+                                        |l| l.get(0),
+                                    )
+                                    .optional()?
+                                    .unwrap_or_else(|| "peça que ainda não chegou".into()))
+                            };
+                            let mut lista = Vec::new();
+                            for p in &pecas {
+                                lista.push(json!({ "id": p, "nome": nome(p)? }));
+                            }
+                            k.o_que = "Código do fornecedor em disputa".into();
+                            k.texto = format!(
+                                "{} Enquanto o gerente não escolher, a compra com esse código não liga sozinha (vira \
+                                 pendência) e a ficha não muda esse código. Se for a mesma peça cadastrada duas vezes, \
+                                 junte as peças.",
+                                k.texto
+                            );
+                            if pecas.len() == 2 {
+                                k.mesma_peca = json!(lista);
+                            }
+                        }
+                        // Deixou de ser disputa (juntaram as peças, ou a ligação ficou igual).
+                        None => {
+                            k.resolvido =
+                                "Corrigido: as duas ligações levam agora à mesma peça (ou ao mesmo fator)".into()
+                        }
+                    }
+                }
                 // Depois de resolvido, o que vale agora de fato (pelos dados,
                 // não pela decisão anotada).
                 if !k.resolvido.is_empty() {
@@ -732,7 +784,8 @@ pub fn conflitos(conn: &Connection) -> Resultado<Vec<Conflito>> {
 /// Quantos conflitos estão esperando o gerente.
 pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
     let outros: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL AND tipo NOT IN ('pago_a_mais', 'vale_a_mais')",
+        "SELECT COUNT(*) FROM sync_conflito WHERE resolvido_em IS NULL AND tipo NOT IN ('pago_a_mais', 'vale_a_mais')
+           AND tabela <> 'produto_fornecedor'",
         [],
         |l| l.get(0),
     )?;
@@ -742,6 +795,21 @@ pub fn conflitos_abertos(conn: &Connection) -> Resultado<i64> {
         .query_map([], |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)))?
         .collect::<Result<_, _>>()?;
     let mut abertos = outros;
+    // R12: o código do fornecedor conta só enquanto a disputa é efetiva.
+    let fornecedor: Vec<String> = conn
+        .prepare(
+            "SELECT chave FROM sync_conflito WHERE resolvido_em IS NULL AND tabela = 'produto_fornecedor'
+               AND tipo NOT IN ('pago_a_mais', 'vale_a_mais')",
+        )?
+        .query_map([], |l| l.get(0))?
+        .collect::<Result<_, _>>()?;
+    for chave in fornecedor {
+        if let Some((f, c)) = chave_do_fornecedor(&chave) {
+            if crate::catalogo::codigos::fornecedor_em_disputa(conn, &f, &c)?.is_some() {
+                abertos += 1;
+            }
+        }
+    }
     for (tipo, tabela, chave) in a_mais {
         if ainda_a_mais(conn, &tipo, &tabela, &chave)? {
             abertos += 1;
@@ -918,10 +986,24 @@ pub fn manter_todos(conn: &Connection, usuario_id: &str) -> Resultado<usize> {
     let ids: Vec<i64> = {
         // R13: a junção em disputa fica de fora (o gerente escolhe qual vale).
         let mut c = conn.prepare(
-            "SELECT id FROM sync_conflito WHERE resolvido_em IS NULL AND tabela <> 'produto_juncao' ORDER BY id",
+            "SELECT id, tabela, chave FROM sync_conflito WHERE resolvido_em IS NULL AND tabela <> 'produto_juncao'
+              ORDER BY id",
         )?;
-        let l = c.query_map([], |l| l.get(0))?;
-        l.collect::<Result<_, _>>()?
+        let l = c.query_map([], |l| Ok((l.get::<_, i64>(0)?, l.get::<_, String>(1)?, l.get::<_, String>(2)?)))?;
+        let mut ids = Vec::new();
+        for linha in l {
+            let (id, tabela, chave) = linha?;
+            // R12: o código do fornecedor em disputa efetiva também (a ligação muda a compra: o gerente escolhe).
+            if tabela == "produto_fornecedor" {
+                if let Some((f, c)) = chave_do_fornecedor(&chave) {
+                    if crate::catalogo::codigos::fornecedor_em_disputa(conn, &f, &c)?.is_some() {
+                        continue;
+                    }
+                }
+            }
+            ids.push(id);
+        }
+        ids
     };
     for id in &ids {
         resolver_conflito(conn, *id, false, usuario_id)?;

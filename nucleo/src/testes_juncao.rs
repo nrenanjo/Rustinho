@@ -489,6 +489,9 @@ fn r13_gerente_escolhe_a_juncao_em_disputa() {
         [&d, &k2],
     )
     .unwrap();
+    // O "Deixar como está" genérico não serve aqui (o estoque não seguiria a escolha).
+    let id: i64 = conn(&mut s).query_row("SELECT id FROM sync_conflito", [], |l| l.get(0)).unwrap();
+    recusa(&chamar(&mut s, "conflito_resolver", json!({ "id": id, "usar": false })), "Fica em");
     let estranha = peca(&mut s, "Coxim D", "1", "");
     recusa(&chamar(&mut s, "produto_juncao_escolher", json!({ "produtoId": d, "paraId": estranha })), "uma das duas");
     recusa(&chamar(&mut s, "produto_juntar_completar", json!({ "produtoId": d })), "Junção em disputa");

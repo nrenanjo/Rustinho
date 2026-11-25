@@ -22,6 +22,8 @@ mod testes_codigo_fornecedor_troca;
 #[cfg(test)]
 mod testes_consulta;
 #[cfg(test)]
+mod testes_disputa_fornecedor;
+#[cfg(test)]
 mod testes_estab;
 #[cfg(test)]
 mod testes_fase6;
