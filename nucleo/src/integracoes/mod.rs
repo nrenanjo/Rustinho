@@ -3,6 +3,7 @@
 pub mod arquivos;
 pub mod backup;
 pub mod codigo;
+pub mod fiscal_descoberta;
 pub mod fiscal_porta;
 pub mod impressao;
 pub mod nfe_assinatura;
