@@ -136,6 +136,9 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("etiquetas_da_compra", "leitura", &["leitura"]),
     ("etiquetas_opcoes", "leitura", &["leitura"]),
     ("financeiro_resumo", "financeiro", &["leitura"]),
+    // FIS-P3 (etapa 3, 26/11/2026): a troca confere o gerente, os impedimentos, PRODUÇÃO e a senha.
+    ("fiscal_ambiente_impedimentos", "leitura", &["leitura"]),
+    ("fiscal_ambiente_trocar", "caixa", &["do_caixa"]),
     ("fiscal_automatico", "caixa", &["do_caixa"]),
     ("fiscal_conferir", "leitura", &["leitura"]),
     // FIS-LIGA (etapa 3, 26/11/2026): a função confere o gerente; ligar pede a senha de um gerente na hora.

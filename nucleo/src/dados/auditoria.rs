@@ -133,6 +133,7 @@ fn descrever(acao: &str) -> &'static str {
         "xml_pendencia.descartar" => "descartou a pendência do XML",
         "fiscal.regras" => "mudou as regras de ST",
         "fiscal.ligar" => "ligou o uso do certificado A3 e a integração fiscal",
+        "fiscal.ambiente" => "trocou o ambiente fiscal",
         "fiscal.desligar" => "desligou o uso do certificado A3 e a integração fiscal",
         "usuario.alterar" => "alterou o usuário",
         "usuario.senha_fora_da_politica" => "entrou com senha fora da política",

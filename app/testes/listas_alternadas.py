@@ -48,6 +48,7 @@ CLASSES = {
     ("SecaoNotasFiscais.qml", "secao.indicadores"): ("FORA", ESCOLHA + " (indicadores que filtram, FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.painel ? secao.painel.notas"): ("LISTA", "notas fiscais emitidas (FIS-P1)"),
     ("SecaoNotasFiscais.qml", "secao.detalhe ? secao.detalhe.eventos"): ("LISTA", "histórico da nota (FIS-P2)"),
+    ("SecaoNotasFiscais.qml", "secao.troca ? secao.troca.impedimentos"): ("FORA", AVISOS + " (impedimentos da troca, FIS-P3)"),
     ("EscolherPeca.qml", "janela.itens"): ("LISTA", "peças (LinhaPeca)"),
     # 0.9.18: as unidades em três grupos (1ª linha, 2ª linha, as demais),
     # cada grupo uma grade de botões de escolha.

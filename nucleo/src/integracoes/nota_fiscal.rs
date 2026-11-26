@@ -400,6 +400,103 @@ pub fn detalhe(conn: &Connection, id: &str) -> Resultado<Detalhe> {
     })
 }
 
+// ------------------------------------------------------------------ troca de ambiente (FIS-P3)
+
+/// O que impede trocar de ambiente agora (texto A §14). Vazio: pode trocar.
+/// - o certificado precisa estar liberado (FIS-LIGA) e testado (o teste de conexão chega com o emissor, T008);
+/// - a série da NFC-e e a da NF-e precisam estar definidas (dados da loja, com o contador);
+/// - o credenciamento da loja na SEFAZ precisa estar confirmado;
+/// - nenhuma nota do ambiente atual pode estar sem resposta conclusiva ou no meio do caminho (consultar antes).
+pub fn impedimentos_da_troca(conn: &Connection) -> Resultado<Vec<String>> {
+    let mut v = Vec::new();
+    if !crate::fiscal_porta::ligado(conn)? {
+        v.push("O uso do certificado A3 está desligado neste computador.".to_string());
+    } else if !crate::config::ligado(conn, "fiscal_certificado_testado")? {
+        v.push("O certificado ainda não foi testado com a SEFAZ (o teste chega junto com o emissor).".to_string());
+    }
+    for (chave, nome) in [("fiscal_serie_nfce", "NFC-e"), ("fiscal_serie_nfe", "NF-e")] {
+        if crate::config::ler(conn, chave)?.filter(|s| !s.trim().is_empty()).is_none() {
+            v.push(format!("A série da {nome} ainda não foi definida (com o contador)."));
+        }
+    }
+    if !crate::config::ligado(conn, "fiscal_credenciado")? {
+        v.push("O credenciamento da loja na SEFAZ ainda não foi confirmado.".to_string());
+    }
+    let atual = ambiente(conn)?;
+    let soltas: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM nota_fiscal WHERE ambiente = ?1 AND estado IN ('numerada', 'enviada', 'desconhecida')",
+        [atual],
+        |l| l.get(0),
+    )?;
+    if soltas > 0 {
+        v.push(format!(
+            "{soltas} {} deste ambiente sem resposta conclusiva ou no meio do caminho: consulte antes de trocar.",
+            if soltas == 1 { "nota" } else { "notas" }
+        ));
+    }
+    Ok(v)
+}
+
+fn nome_do_ambiente(a: i64) -> &'static str {
+    if a == 1 {
+        "produção"
+    } else {
+        "homologação"
+    }
+}
+
+/// Troca o ambiente fiscal deste computador. Só o gerente, só sem impedimento; ir para a produção pede digitar
+/// PRODUÇÃO e a senha de um gerente (texto A §14: digitar PRODUÇÃO e a senha nunca contornam um bloqueio). O
+/// registro diz quem, quando e de qual para qual.
+pub fn trocar_ambiente(
+    tx: &Connection,
+    dispositivo: &str,
+    usuario_id: &str,
+    gerente: bool,
+    para: i64,
+    confirmacao: &str,
+    senha: &str,
+) -> Resultado<i64> {
+    if !gerente {
+        return Err(Erro::validacao("Só um gerente troca o ambiente fiscal."));
+    }
+    if !matches!(para, 1 | 2) {
+        return Err(Erro::validacao("Ambiente fiscal inválido."));
+    }
+    let de = ambiente(tx)?;
+    if de == para {
+        return Ok(para);
+    }
+    let impedimentos = impedimentos_da_troca(tx)?;
+    if !impedimentos.is_empty() {
+        return Err(Erro::validacao(format!("Ainda não dá para trocar: {}", impedimentos.join(" "))));
+    }
+    if para == 1 {
+        if confirmacao.trim() != "PRODUÇÃO" {
+            return Err(Erro::campo("confirmacao", "Para ir para a produção, digite PRODUÇÃO."));
+        }
+        if crate::usuarios::conferir_gerente(tx, senha)?.is_none() {
+            return Err(Erro::campo("senha", "Senha do gerente errada."));
+        }
+    }
+    crate::config::gravar(tx, "fiscal_ambiente", &para.to_string())?;
+    let nome = crate::usuarios::buscar(tx, usuario_id).map(|u| u.nome).unwrap_or_default();
+    crate::auditoria::registrar(
+        tx,
+        dispositivo,
+        Some(usuario_id),
+        "fiscal.ambiente",
+        "config",
+        "fiscal_ambiente",
+        &[format!(
+            "{nome} trocou o ambiente fiscal deste computador de {} para {}",
+            nome_do_ambiente(de),
+            nome_do_ambiente(para)
+        )],
+    )?;
+    Ok(para)
+}
+
 // ------------------------------------------------------------- comandos das telas e a transmissão
 
 pub use comandos::COMANDOS;
@@ -417,7 +514,30 @@ pub(crate) mod comandos {
     pub const COMANDOS: &[Comando] = &[
         Comando { nome: "nota_painel", classe: Classe::Leitura, funcao: nota_painel },
         Comando { nome: "nota_detalhe", classe: Classe::Leitura, funcao: nota_detalhe },
+        // FIS-P3: os impedimentos (só lê) e a troca (a função confere o gerente, a confirmação e a senha).
+        Comando { nome: "fiscal_ambiente_impedimentos", classe: Classe::Leitura, funcao: fiscal_ambiente_impedimentos },
+        Comando { nome: "fiscal_ambiente_trocar", classe: Classe::Caixa, funcao: fiscal_ambiente_trocar },
     ];
+
+    fn fiscal_ambiente_impedimentos(p: &mut Pedido, _dados: Value) -> Resultado<Value> {
+        Ok(json!({ "ambiente": super::ambiente(p.conn)?, "impedimentos": super::impedimentos_da_troca(p.conn)? }))
+    }
+
+    fn fiscal_ambiente_trocar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: Troca = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        let novo = super::trocar_ambiente(&tx, p.disp, p.usuario_id, p.gerente, d.para, &d.confirmacao, &d.senha)?;
+        tx.commit()?;
+        Ok(json!({ "ambiente": novo }))
+    }
+
+    #[derive(serde::Deserialize, Default)]
+    #[serde(default)]
+    struct Troca {
+        para: i64,
+        confirmacao: String,
+        senha: String,
+    }
 
     fn nota_painel(p: &mut Pedido, dados: Value) -> Resultado<Value> {
         let f: super::Filtros = ler(dados)?;
@@ -671,6 +791,62 @@ mod testes {
         let mut falso = Falso::com(vec![sefaz("100", "Autorizado")]);
         assert_eq!(transmitir(&mut b.conn, &u, &mut falso, &id).unwrap(), "desconhecida");
         assert!(falso.enviadas.is_empty());
+    }
+
+    /// FIS-P3: cada impedimento sozinho bloqueia; sem impedimento, ir para a produção pede PRODUÇÃO e a senha; o
+    /// registro diz quem e de qual para qual.
+    #[test]
+    fn pacote_f_troca_de_ambiente() {
+        let (b, u) = banco();
+        let liberar = |b: &Banco| {
+            crate::config::gravar(&b.conn, "fiscal_certificado_testado", "1").unwrap();
+            crate::config::gravar(&b.conn, "fiscal_serie_nfce", "1").unwrap();
+            crate::config::gravar(&b.conn, "fiscal_serie_nfe", "1").unwrap();
+            crate::config::gravar(&b.conn, "fiscal_credenciado", "1").unwrap();
+        };
+        assert_eq!(
+            impedimentos_da_troca(&b.conn).unwrap().len(),
+            4,
+            "de fábrica: certificado, 2 séries, credenciamento"
+        );
+        liberar(&b);
+        assert!(impedimentos_da_troca(&b.conn).unwrap().is_empty());
+        // Cada impedimento sozinho bloqueia, e digitar PRODUÇÃO com a senha não passa.
+        for (chave, valor) in [
+            ("fiscal_certificado_testado", "0"),
+            ("fiscal_serie_nfce", ""),
+            ("fiscal_serie_nfe", ""),
+            ("fiscal_credenciado", "0"),
+        ] {
+            crate::config::gravar(&b.conn, chave, valor).unwrap();
+            assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "{chave}");
+            assert!(
+                trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "senha-da-ana-1").is_err(),
+                "{chave}"
+            );
+            liberar(&b);
+        }
+        crate::fiscal_porta::desligar(&b.conn, &b.dispositivo, &u, true).unwrap();
+        assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "o fiscal desligado");
+        crate::fiscal_porta::ligar(&b.conn, &b.dispositivo, &u, true, "senha-da-ana-1").unwrap();
+        // Uma nota sem resposta conclusiva no ambiente atual bloqueia.
+        let id = nova(&b, &u);
+        assert_eq!(impedimentos_da_troca(&b.conn).unwrap().len(), 1, "a numerada");
+        b.conn.execute("UPDATE nota_fiscal SET estado = 'autorizada' WHERE id = ?1", [&id]).unwrap();
+        // Sem impedimento: quem não é gerente não troca; sem PRODUÇÃO ou com a senha errada, não.
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, false, 1, "PRODUÇÃO", "senha-da-ana-1").is_err());
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "producao", "senha-da-ana-1").is_err());
+        assert!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "errada").is_err());
+        assert_eq!(ambiente(&b.conn).unwrap(), 2);
+        assert_eq!(trocar_ambiente(&b.conn, &b.dispositivo, &u, true, 1, "PRODUÇÃO", "senha-da-ana-1").unwrap(), 1);
+        let registro: String = b
+            .conn
+            .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.ambiente'", [], |l| l.get(0))
+            .unwrap();
+        assert!(registro.contains("Ana") && registro.contains("de homologação para produção"), "{registro}");
+        // A numeração é separada por ambiente: a primeira de produção é a 1.
+        let p = criar_rascunho(&b.conn, &b.dispositivo, &u, 1, 65, 1, None, 0, "", "").unwrap();
+        assert_eq!(reservar_numero(&b.conn, &u, &p).unwrap(), 1);
     }
 
     /// FIS-P1: os indicadores filtram, a pesquisa e o período também, e o ambiente vem junto.

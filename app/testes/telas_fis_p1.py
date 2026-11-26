@@ -7,7 +7,8 @@ teste (uma autorizada, uma rejeitada, uma sem resposta e um rascunho) e confere:
 - o CPF/CNPJ escondido por padrão;
 - o indicador "Sem resposta" filtra, a contagem e "Limpar filtros" aparecem;
 - o detalhe da sem resposta: primeiro a explicação humana, e nada de reenviar;
-- o detalhe da rejeitada: o código e a mensagem da SEFAZ na íntegra, com "Copiar a mensagem", e o histórico.
+- o detalhe da rejeitada: o código e a mensagem da SEFAZ na íntegra, com "Copiar a mensagem", e o histórico;
+- FIS-P3: a troca de ambiente mostra cada impedimento, e com eles não troca.
 
     python3 app/testes/telas_fis_p1.py [pasta para as fotos]
 """
@@ -95,6 +96,23 @@ def main():
                                    tem=["recusou esta nota", "225 - Rejeição: Falha no Schema XML do lote de NFe",
                                         "Histórico", "Semeada pelo teste: rejeitada", "nota-2-nfe.xml"],
                                    igual=["Copiar a mensagem"])
+            # FIS-P3: a troca de ambiente mostra os impedimentos; com eles, trocar não acontece.
+            tecla("Escape")
+            time.sleep(1)
+            if not clicar_rolando(r, "Trocar de ambiente"):
+                raise RuntimeError(f"não achei o botão Trocar de ambiente (veja {r.saida})")
+            time.sleep(1.5)
+            tudo_certo &= conferir("FIS-P3: a troca mostra cada impedimento", r.foto("-5"), r.textos(),
+                                   tem=["Ir para a produção", "Ainda não dá para trocar", "certificado A3 está desligado",
+                                        "série da NFC-e", "credenciamento da loja", "sem resposta conclusiva"])
+            botoes = [(x, y) for x, y, t in r.textos_para_clicar() if t == "Trocar"]
+            if botoes:
+                xdo("mousemove", str(botoes[-1][0]), str(botoes[-1][1]), "click", "1")
+            time.sleep(1.5)
+            tecla("Escape")
+            time.sleep(1)
+            tudo_certo &= conferir("FIS-P3: com impedimento, o ambiente continua o mesmo", r.foto("-6"), r.textos(),
+                                   tem=["Ambiente: homologação (teste, sem valor fiscal)"], nao_tem=["Ambiente fiscal trocado."])
         finally:
             r.fechar()
     finally:

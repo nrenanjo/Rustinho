@@ -258,6 +258,7 @@ const GRAVAM_TAMBEM: &[&str] = &[
     "dre_meta_salvar",
     "encomenda_whatsapp",
     "estoque_dias",
+    "fiscal_ambiente_trocar",
     "fiscal_automatico",
     "fiscal_desligar",
     "fiscal_ligar",

@@ -25,6 +25,8 @@ ColumnLayout {
     property int periodo: 0
     property int modelo: 0
     property var detalhe: null
+    // FIS-P3: os impedimentos da troca de ambiente.
+    property var troca: null
     spacing: 12
 
     readonly property var periodos: ["Todo o período", "Hoje", "Últimos 7 dias", "Últimos 30 dias"]
@@ -71,6 +73,35 @@ ColumnLayout {
         }
         detalhe = r.dados
         painelDetalhe.open()
+    }
+
+    function abrirTroca() {
+        const r = Api.chamar("fiscal_ambiente_impedimentos")
+        if (!r.ok) {
+            janela.avisar(r.erro, "erro")
+            return
+        }
+        troca = r.dados
+        confirmaProducao.texto = ""
+        senhaTroca.texto = ""
+        painelTroca.open()
+    }
+
+    function trocar() {
+        const para = troca.ambiente === 1 ? 2 : 1
+        const r = Api.chamar("fiscal_ambiente_trocar", { para: para, confirmacao: confirmaProducao.texto, senha: senhaTroca.texto })
+        senhaTroca.texto = ""
+        if (!r.ok) {
+            if (r.campo === "confirmacao")
+                confirmaProducao.erro = r.erro
+            else if (r.campo === "senha")
+                senhaTroca.erro = r.erro
+            janela.avisar(r.erro, "erro")
+            return
+        }
+        painelTroca.close()
+        janela.avisar("Ambiente fiscal trocado.", "ok")
+        carregar()
     }
 
     function nomeDoEstado(e) {
@@ -126,6 +157,12 @@ ColumnLayout {
                     font.weight: Font.Bold
                     font.pixelSize: 14
                 }
+            }
+            Botao {
+                visible: !!secao.liga && secao.liga.podeMudar
+                text: "Trocar de ambiente"
+                tipo: "discreto"
+                onClicked: secao.abrirTroca()
             }
         }
         Text {
@@ -372,6 +409,74 @@ ColumnLayout {
                             wrapMode: Text.WordWrap
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // FIS-P3: a troca de ambiente. Com qualquer impedimento, a confirmação e a
+    // senha ficam desligadas: digitar PRODUÇÃO e a senha nunca contornam um
+    // bloqueio (texto A §14).
+    Painel {
+        id: painelTroca
+        width: Math.min(560, Tema.largura - 24)
+        readonly property bool livre: !!secao.troca && secao.troca.impedimentos.length === 0
+        readonly property bool paraProducao: !!secao.troca && secao.troca.ambiente === 2
+        contentItem: ColumnLayout {
+            spacing: 12
+            Titulo {
+                text: painelTroca.paraProducao ? "Ir para a produção" : "Voltar para a homologação"
+                font.pixelSize: 26
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Nota {
+                text: painelTroca.paraProducao
+                      ? "Na produção, as notas têm valor fiscal. Filas, números e histórico de cada ambiente ficam separados."
+                      : "Na homologação, as notas são de teste, sem valor fiscal. Filas, números e histórico de cada ambiente ficam separados."
+                font.pixelSize: 14
+                Layout.fillWidth: true
+            }
+            Rotulo { visible: !painelTroca.livre; text: "Ainda não dá para trocar" }
+            Repeater {
+                model: secao.troca ? secao.troca.impedimentos : []
+                delegate: Text {
+                    required property string modelData
+                    text: "• " + modelData
+                    textFormat: Text.PlainText
+                    color: Tema.tinta
+                    font.family: Tema.texto
+                    font.pixelSize: 15
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+            Campo {
+                id: confirmaProducao
+                visible: painelTroca.paraProducao
+                enabled: painelTroca.livre
+                rotulo: "Para confirmar, digite PRODUÇÃO"
+                maximo: 20
+                Layout.fillWidth: true
+            }
+            Campo {
+                id: senhaTroca
+                visible: painelTroca.paraProducao
+                enabled: painelTroca.livre
+                rotulo: "Senha do gerente"
+                senha: true
+                maximo: 256
+                Layout.fillWidth: true
+                onConfirmado: secao.trocar()
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                Botao {
+                    text: "Trocar"
+                    icone: "check"
+                    enabled: painelTroca.livre
+                    onClicked: secao.trocar()
                 }
             }
         }
