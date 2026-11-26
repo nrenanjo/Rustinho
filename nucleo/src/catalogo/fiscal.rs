@@ -144,7 +144,7 @@ pub struct Conferencia {
     pub conflitos: Vec<PecaFiscal>,
     /// Peças ativas sem NCM (a nota não sai sem NCM).
     pub sem_ncm: Vec<PecaFiscal>,
-    /// Peças com NCM de autopeça (capítulos 40, 68, 70, 73, 83, 84, 85, 87...) sem CEST.
+    /// Peças sem CEST cuja NCM está na lista oficial de autopeças ou pneus (Conv. 142/18): "a analisar".
     pub sem_cest: Vec<PecaFiscal>,
     pub monofasicas: i64,
     pub total_pecas: i64,
@@ -187,8 +187,14 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
         }
         if ncm.is_empty() {
             sem_ncm.push(item("Sem NCM".into()));
-        } else if cest.is_empty() && provavel_autopeca(ncm) {
-            sem_cest.push(item("NCM de autopeça sem CEST".into()));
+        } else if cest.is_empty() {
+            let candidatos = cests_do_ncm(ncm);
+            if !candidatos.is_empty() {
+                sem_cest.push(item(format!(
+                    "A analisar: o NCM está na lista oficial (CEST {})",
+                    candidatos.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                )));
+            }
         }
     }
     let monofasicas: i64 =
@@ -205,10 +211,53 @@ pub fn conferir(conn: &Connection, data: &str) -> Resultado<Conferencia> {
     })
 }
 
-/// Capítulos do NCM onde estão quase todas as autopeças. Só serve para
-/// lembrar de conferir o CEST; não decide nada.
-fn provavel_autopeca(ncm: &str) -> bool {
-    matches!(&ncm[..2.min(ncm.len())], "40" | "68" | "70" | "73" | "83" | "84" | "85" | "87" | "90" | "91" | "94")
+/// G4 (0.9.19, etapa 3): a lista oficial dos CEST de autopeças e de pneus
+/// (Conv. ICMS 142/18, Anexos II e XVI, lida no CONFAZ em 25/11/2026), com o
+/// NCM de cada um. Serve para lembrar de conferir o CEST: não decide nada
+/// (a mesma NCM pode ser de uso automotivo ou não).
+#[derive(Deserialize)]
+struct ListaCest {
+    itens: Vec<ItemCest>,
+}
+
+#[derive(Deserialize)]
+struct ItemCest {
+    cest: String,
+    ncm: String,
+}
+
+fn lista_cest() -> &'static [(String, String)] {
+    static LISTA: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    LISTA.get_or_init(|| {
+        let lista: ListaCest =
+            serde_json::from_str(include_str!("cest_142_18.json")).expect("cest_142_18.json é um arquivo do programa");
+        lista
+            .itens
+            .into_iter()
+            .flat_map(|i| {
+                let cest = i.cest;
+                i.ncm
+                    .split_whitespace()
+                    .map(|n| documento::digitos(n))
+                    .filter(|n| !n.is_empty())
+                    .map(move |n| (n, cest.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    })
+}
+
+/// Os CEST da lista oficial cuja NCM começa a NCM da peça ("01.002.00").
+pub fn cests_do_ncm(ncm: &str) -> Vec<String> {
+    let ncm = documento::digitos(ncm);
+    let mut v: Vec<String> = lista_cest()
+        .iter()
+        .filter(|(prefixo, _)| !ncm.is_empty() && ncm.starts_with(prefixo.as_str()))
+        .map(|(_, cest)| cest.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Passa as peças indicadas para CSOSN automático (segue a regra do estado).
@@ -241,7 +290,10 @@ pub fn usar_automatico(conn: &Connection, dispositivo: &str, usuario_id: &str, i
 }
 
 // ---------------------------------------------------------------------------
-// Regras de ST (o contador pode mudar).
+// Regras de ST (o contador pode mudar). FIS-P5 e FIS-P6 (0.9.19, etapa 3):
+// cada regra tem a fonte; a regra que já valeu não se exclui nem se reescreve
+// (encerra-se a vigência, e o histórico fica); a linha mudada à mão vira da
+// loja, e uma atualização do programa não a sobrescreve.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -255,89 +307,345 @@ pub struct RegraSt {
     pub vigente_ate: String,
     pub com_st: bool,
     pub descricao: String,
+    /// O ato e o endereço oficial.
+    pub fonte: String,
+    /// O artigo, anexo ou item.
+    pub dispositivo: String,
+    /// "dd/mm/aaaa": quando a fonte foi lida.
+    pub consultada_em: String,
+    /// "rustinho" (veio com o programa) ou "loja" (mudada à mão). Só leitura.
+    pub origem: String,
+    /// "vigente", "futura" ou "encerrada", na data de hoje. Só leitura.
+    pub situacao: String,
+    /// A regra já valeu (começou hoje ou antes): não se exclui, e o estado, o
+    /// CEST, o início e o "com ST" não mudam. Só leitura.
+    pub ja_valeu: bool,
+}
+
+fn situacao(de: &str, ate: Option<&str>, hoje: &str) -> &'static str {
+    if de > hoje {
+        "futura"
+    } else if ate.is_some_and(|a| a < hoje) {
+        "encerrada"
+    } else {
+        "vigente"
+    }
+}
+
+/// O dia de ontem, "AAAA-MM-DD" (para encerrar uma vigência).
+fn ontem(conn: &Connection) -> Resultado<String> {
+    Ok(conn.query_row("SELECT date('now', 'localtime', '-1 day')", [], |l| l.get(0))?)
 }
 
 pub fn regras(conn: &Connection) -> Resultado<Vec<RegraSt>> {
+    let hoje = hoje(conn)?;
     let mut c = conn.prepare(
-        "SELECT id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao FROM regra_st
-          ORDER BY uf, cest_inicio, vigente_de",
+        "SELECT id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte, dispositivo, consultada_em,
+                origem
+           FROM regra_st ORDER BY uf, cest_inicio, vigente_de",
     )?;
     let linhas = c.query_map([], |l| {
+        let de: String = l.get(3)?;
         let ate: Option<String> = l.get(4)?;
+        let consultada: String = l.get(9)?;
         Ok(RegraSt {
             id: l.get(0)?,
             uf: l.get(1)?,
             cest_inicio: l.get(2)?,
-            vigente_de: data_br(&l.get::<_, String>(3)?),
-            vigente_ate: ate.map(|a| data_br(&a)).unwrap_or_default(),
+            vigente_de: data_br(&de),
+            vigente_ate: ate.as_deref().map(data_br).unwrap_or_default(),
             com_st: l.get(5)?,
             descricao: l.get(6)?,
+            fonte: l.get(7)?,
+            dispositivo: l.get(8)?,
+            consultada_em: if consultada.is_empty() { String::new() } else { data_br(&consultada) },
+            origem: l.get(10)?,
+            situacao: situacao(&de, ate.as_deref(), &hoje).to_string(),
+            ja_valeu: de <= hoje,
         })
     })?;
     Ok(linhas.collect::<Result<_, _>>()?)
 }
 
-/// Troca todas as regras pelas da tela.
-pub fn salvar_regras(conn: &Connection, dispositivo: &str, usuario_id: &str, lista: &[RegraSt]) -> Resultado<()> {
-    let mut novas = Vec::new();
-    for (i, r) in lista.iter().enumerate() {
-        let campo = |n: &str| format!("regras.{i}.{n}");
-        let uf = r.uf.trim().to_uppercase();
-        let cest = documento::digitos(&r.cest_inicio);
-        if uf.is_empty() && cest.is_empty() && r.vigente_de.trim().is_empty() {
-            continue;
-        }
-        if !UFS.contains(&uf.as_str()) {
-            return Err(Erro::campo(&campo("uf"), "Escolha o estado."));
-        }
-        if cest.is_empty() || cest.len() > 7 {
-            return Err(Erro::campo(&campo("cestInicio"), "Digite o começo do CEST (ex.: 01 para autopeças)."));
-        }
-        let de = ler_data(&r.vigente_de)
-            .map_err(|m| Erro::campo(&campo("vigenteDe"), m))?
-            .ok_or_else(|| Erro::campo(&campo("vigenteDe"), "Digite a data de início."))?;
-        let ate = ler_data(&r.vigente_ate).map_err(|m| Erro::campo(&campo("vigenteAte"), m))?;
-        if let Some(a) = &ate {
-            if *a < de {
-                return Err(Erro::campo(&campo("vigenteAte"), "A data final é antes da inicial."));
+/// Uma regra como está no banco (datas "AAAA-MM-DD").
+struct Guardada {
+    uf: String,
+    cest: String,
+    de: String,
+    ate: Option<String>,
+    com_st: bool,
+    descricao: String,
+    fonte: String,
+    dispositivo: String,
+}
+
+fn guardada(conn: &Connection, id: &str) -> Resultado<Guardada> {
+    conn.query_row(
+        "SELECT uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte, dispositivo FROM regra_st WHERE id = ?1",
+        [id],
+        |l| {
+            Ok(Guardada {
+                uf: l.get(0)?,
+                cest: l.get(1)?,
+                de: l.get(2)?,
+                ate: l.get(3)?,
+                com_st: l.get(4)?,
+                descricao: l.get(5)?,
+                fonte: l.get(6)?,
+                dispositivo: l.get(7)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or_else(|| Erro::NaoEncontrado("Regra de ST".into()))
+}
+
+/// Outra regra do mesmo estado e CEST vale em algum dia do período? (Duas
+/// regras para a mesma combinação não podem valer no mesmo dia.)
+fn sobreposta(conn: &Connection, id: &str, uf: &str, cest: &str, de: &str, ate: Option<&str>) -> Resultado<bool> {
+    let fim = ate.unwrap_or("9999-12-31");
+    Ok(conn.query_row(
+        "SELECT COUNT(*) > 0 FROM regra_st
+          WHERE id <> ?1 AND uf = ?2 AND cest_inicio = ?3
+            AND vigente_de <= ?5 AND COALESCE(vigente_ate, '9999-12-31') >= ?4",
+        params![id, uf, cest, de, fim],
+        |l| l.get(0),
+    )?)
+}
+
+/// Salva uma regra (nova, sem id, ou a mudança de uma que existe). Devolve o id.
+/// - A regra que já valeu não muda o estado, o CEST, o início nem o "com ST"
+///   (para isso, encerra-se e cria-se outra), e a data final não pode voltar
+///   para antes de ontem (o que já valeu fica como valeu).
+/// - Duas regras do mesmo estado e CEST não valem no mesmo dia.
+/// - Toda linha salva por aqui fica como "da loja".
+pub fn salvar_regra(conn: &Connection, dispositivo: &str, usuario_id: &str, r: &RegraSt) -> Resultado<String> {
+    let uf = r.uf.trim().to_uppercase();
+    let cest = documento::digitos(&r.cest_inicio);
+    if !UFS.contains(&uf.as_str()) {
+        return Err(Erro::campo("uf", "Escolha o estado."));
+    }
+    if cest.is_empty() || cest.len() > 7 {
+        return Err(Erro::campo("cestInicio", "Digite o começo do CEST (ex.: 01 para autopeças)."));
+    }
+    let de = ler_data(&r.vigente_de)
+        .map_err(|m| Erro::campo("vigenteDe", m))?
+        .ok_or_else(|| Erro::campo("vigenteDe", "Digite a data de início."))?;
+    let ate = ler_data(&r.vigente_ate).map_err(|m| Erro::campo("vigenteAte", m))?;
+    if ate.as_ref().is_some_and(|a| *a < de) {
+        return Err(Erro::campo("vigenteAte", "A data final é antes da inicial."));
+    }
+    let descricao: String = r.descricao.trim().chars().take(120).collect();
+    let fonte: String = r.fonte.trim().chars().take(200).collect();
+    let disp_legal: String = r.dispositivo.trim().chars().take(200).collect();
+    let hoje = hoje(conn)?;
+    let id = r.id.trim().to_string();
+    let antes = if id.is_empty() { None } else { Some(guardada(conn, &id)?) };
+    if let Some(a) = &antes {
+        if a.de <= hoje {
+            if a.uf != uf || a.cest != cest || a.de != de || a.com_st != r.com_st {
+                return Err(Erro::validacao(
+                    "Esta regra já valeu: o estado, o CEST, o início e o \"com ST\" ficam como estão. Para mudar, encerre a vigência e crie outra regra.",
+                ));
+            }
+            let limite = ontem(conn)?;
+            let ate_antes = a.ate.clone().unwrap_or_else(|| "9999-12-31".into());
+            let ate_nova = ate.clone().unwrap_or_else(|| "9999-12-31".into());
+            if ate_nova < ate_antes && ate_nova < limite {
+                return Err(Erro::campo(
+                    "vigenteAte",
+                    format!("A regra já valeu: a data final não pode ficar antes de ontem ({}).", data_br(&limite)),
+                ));
             }
         }
-        let descricao: String = r.descricao.trim().chars().take(120).collect();
-        novas.push((uf, cest, de, ate, r.com_st, descricao));
     }
-    // Duas regras do mesmo CEST e estado não podem valer no mesmo dia.
-    for (i, a) in novas.iter().enumerate() {
-        for b in novas.iter().skip(i + 1) {
-            if a.0 == b.0 && a.1 == b.1 {
-                let fim_a = a.3.clone().unwrap_or_else(|| "9999-12-31".into());
-                let fim_b = b.3.clone().unwrap_or_else(|| "9999-12-31".into());
-                if a.2 <= fim_b && b.2 <= fim_a {
-                    return Err(Erro::validacao(format!(
-                        "Há duas regras para {} CEST {} valendo nas mesmas datas.",
-                        a.0, a.1
-                    )));
-                }
+    let alvo = if id.is_empty() { tempo::novo_id() } else { id.clone() };
+    if sobreposta(conn, &alvo, &uf, &cest, &de, ate.as_deref())? {
+        return Err(Erro::validacao(format!(
+            "Já há uma regra para {uf} CEST {cest} valendo em parte desse período. Encerre a outra antes."
+        )));
+    }
+    let mut mudancas = Vec::new();
+    match &antes {
+        None => {
+            conn.execute(
+                "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte, dispositivo,
+                                       consultada_em, origem)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '', 'loja')",
+                params![alvo, uf, cest, de, ate, r.com_st, descricao, fonte, disp_legal],
+            )?;
+            mudancas.push(format!(
+                "Nova regra: {uf} CEST {cest}, {} a {}, {}",
+                data_br(&de),
+                ate.as_deref().map(data_br).unwrap_or_else(|| "sem fim".into()),
+                if r.com_st { "com ST" } else { "sem ST" }
+            ));
+        }
+        Some(a) => {
+            let datas = |d: &Option<String>| d.as_deref().map(data_br).unwrap_or_else(|| "sem fim".into());
+            if a.uf != uf || a.cest != cest {
+                mudancas.push(format!("Estado e CEST: {} {} → {uf} {cest}", a.uf, a.cest));
             }
+            if a.de != de {
+                mudancas.push(format!("Início: {} → {}", data_br(&a.de), data_br(&de)));
+            }
+            if a.ate != ate {
+                mudancas.push(format!("Fim: {} → {}", datas(&a.ate), datas(&ate)));
+            }
+            if a.com_st != r.com_st {
+                mudancas.push(format!("ST: {} → {}", sim(a.com_st), sim(r.com_st)));
+            }
+            if a.descricao != descricao {
+                mudancas.push("Descrição alterada".into());
+            }
+            if a.fonte != fonte || a.dispositivo != disp_legal {
+                mudancas.push("Fonte alterada".into());
+            }
+            if mudancas.is_empty() {
+                return Ok(alvo);
+            }
+            conn.execute(
+                "UPDATE regra_st SET uf = ?2, cest_inicio = ?3, vigente_de = ?4, vigente_ate = ?5, com_st = ?6,
+                                     descricao = ?7, fonte = ?8, dispositivo = ?9, origem = 'loja'
+                  WHERE id = ?1",
+                params![alvo, uf, cest, de, ate, r.com_st, descricao, fonte, disp_legal],
+            )?;
+            mudancas.insert(0, format!("Regra {} CEST {}", a.uf, a.cest));
         }
     }
-    conn.execute("DELETE FROM regra_st", [])?;
-    for (uf, cest, de, ate, com_st, descricao) in &novas {
-        conn.execute(
-            "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![tempo::novo_id(), uf, cest, de, ate, com_st, descricao],
-        )?;
+    auditoria::registrar(conn, dispositivo, Some(usuario_id), "fiscal.regras", "regra_st", &alvo, &mudancas)?;
+    Ok(alvo)
+}
+
+fn sim(com_st: bool) -> &'static str {
+    if com_st {
+        "com ST"
+    } else {
+        "sem ST"
     }
+}
+
+/// Encerra a vigência de uma regra: o último dia passa a ser ontem (ou o
+/// próprio início, se ela começou hoje). Uma regra futura não se encerra:
+/// exclui-se. Já encerrada antes de ontem, fica como está.
+pub fn encerrar_regra(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
+    let a = guardada(conn, id)?;
+    let hoje = hoje(conn)?;
+    if a.de > hoje {
+        return Err(Erro::validacao("Esta regra ainda não começou: exclua em vez de encerrar."));
+    }
+    let fim = ontem(conn)?.max(a.de.clone());
+    if a.ate.as_ref().is_some_and(|x| *x <= fim) {
+        return Ok(());
+    }
+    conn.execute("UPDATE regra_st SET vigente_ate = ?2, origem = 'loja' WHERE id = ?1", params![id, fim])?;
     auditoria::registrar(
         conn,
         dispositivo,
         Some(usuario_id),
         "fiscal.regras",
-        "fiscal",
         "regra_st",
-        &[format!("{} regras de ST salvas", novas.len())],
-    )?;
-    Ok(())
+        id,
+        &[format!("Regra {} CEST {} encerrada: vale até {}", a.uf, a.cest, data_br(&fim))],
+    )
+}
+
+/// Exclui uma regra da loja que ainda não começou. A que já valeu não se
+/// exclui (encerra-se): o histórico fica. A que veio com o programa também não
+/// (muda-se): o catálogo a poria de volta num caixa que ainda não a tivesse.
+pub fn excluir_regra(conn: &Connection, dispositivo: &str, usuario_id: &str, id: &str) -> Resultado<()> {
+    let a = guardada(conn, id)?;
+    if a.de <= hoje(conn)? {
+        return Err(Erro::validacao(
+            "Esta regra já valeu: encerre a vigência em vez de excluir, para o histórico ficar.",
+        ));
+    }
+    let origem: String = conn.query_row("SELECT origem FROM regra_st WHERE id = ?1", [id], |l| l.get(0))?;
+    if origem == "rustinho" {
+        return Err(Erro::validacao(
+            "Esta regra veio com o Rustinho, conferida na fonte oficial: ela não se exclui. Se ela não vale para a loja, mude as datas com o contador.",
+        ));
+    }
+    conn.execute("DELETE FROM regra_st WHERE id = ?1", [id])?;
+    auditoria::registrar(
+        conn,
+        dispositivo,
+        Some(usuario_id),
+        "fiscal.regras",
+        "regra_st",
+        id,
+        &[format!("Regra futura {} CEST {} (a partir de {}) excluída", a.uf, a.cest, data_br(&a.de))],
+    )
+}
+
+/// O catálogo das regras que vêm com o programa (`regras_st_programa.json`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Catalogo {
+    versao: i64,
+    regras: Vec<RegraDoPrograma>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegraDoPrograma {
+    id: String,
+    uf: String,
+    cest_inicio: String,
+    vigente_de: String,
+    vigente_ate: Option<String>,
+    com_st: bool,
+    descricao: String,
+    fonte: String,
+    dispositivo: String,
+    consultada_em: String,
+    desde_versao: i64,
+}
+
+/// A versão do catálogo já aplicada neste computador (chave só deste
+/// computador: cada caixa aplica o seu ao abrir).
+pub const CHAVE_CATALOGO: &str = "regras_st_catalogo";
+
+/// Aplica o catálogo das regras do programa ao abrir o banco (FIS-P6).
+/// - Uma regra entra uma vez só: a que é nova desde a versão já aplicada aqui.
+///   A que a loja já mudou não muda de novo, e a excluída numa versão já
+///   aplicada não volta.
+/// - Nunca sobrescreve uma linha da loja, e não entra se a loja já tem uma
+///   regra do mesmo estado e CEST valendo no mesmo período (a da loja vale).
+/// - Não é alteração da loja (cada caixa faz o mesmo): quem chama grava por
+///   `sync::sem_registrar`, na transação dele (`banco`, ao abrir).
+pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
+    let catalogo: Catalogo = serde_json::from_str(include_str!("regras_st_programa.json"))
+        .map_err(|e| Erro::Interno(format!("regras_st_programa.json: {e}")))?;
+    let aplicada: i64 = config::ler(tx, CHAVE_CATALOGO)?.and_then(|v| v.parse().ok()).unwrap_or(0);
+    if aplicada >= catalogo.versao {
+        return Ok(0);
+    }
+    let mut entraram = 0;
+    for r in catalogo.regras.iter().filter(|r| r.desde_versao > aplicada) {
+        if sobreposta(tx, &r.id, &r.uf, &r.cest_inicio, &r.vigente_de, r.vigente_ate.as_deref())? {
+            continue;
+        }
+        entraram += tx.execute(
+            "INSERT OR IGNORE INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, fonte,
+                                             dispositivo, consultada_em, origem)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'rustinho')",
+            params![
+                r.id,
+                r.uf,
+                r.cest_inicio,
+                r.vigente_de,
+                r.vigente_ate,
+                r.com_st,
+                r.descricao,
+                r.fonte,
+                r.dispositivo,
+                r.consultada_em
+            ],
+        )?;
+    }
+    config::gravar(tx, CHAVE_CATALOGO, &catalogo.versao.to_string())?;
+    Ok(entraram)
 }
 
 /// "dd/mm/aaaa" (ou "aaaa-mm-dd") → "aaaa-mm-dd".
@@ -696,10 +1004,17 @@ mod comandos {
     pub const COMANDOS: &[Comando] = &[
         Comando { nome: "fiscal_conferir", classe: Classe::Leitura, funcao: fiscal_conferir },
         Comando { nome: "fiscal_automatico", classe: Classe::Caixa, funcao: fiscal_automatico },
+        // FIS-P5 (0.9.19, etapa 3): uma regra de cada vez; a que já valeu se encerra, não se exclui.
+        Comando { nome: "fiscal_regra_salvar", classe: Classe::Gerente("configuracoes"), funcao: fiscal_regra_salvar },
         Comando {
-            nome: "fiscal_regras_salvar",
+            nome: "fiscal_regra_encerrar",
             classe: Classe::Gerente("configuracoes"),
-            funcao: fiscal_regras_salvar,
+            funcao: fiscal_regra_encerrar,
+        },
+        Comando {
+            nome: "fiscal_regra_excluir",
+            classe: Classe::Gerente("configuracoes"),
+            funcao: fiscal_regra_excluir,
         },
         Comando { nome: "fiscal_tributacao", classe: Classe::Leitura, funcao: fiscal_tributacao },
     ];
@@ -719,10 +1034,26 @@ mod comandos {
         Ok(json!({ "alteradas": n, "conferencia": fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)? }))
     }
 
-    fn fiscal_regras_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
-        let d: Regras = ler(dados)?;
+    fn fiscal_regra_salvar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: fiscal::RegraSt = ler(dados)?;
         let tx = p.conn.transaction()?;
-        fiscal::salvar_regras(&tx, p.disp, p.usuario_id, &d.regras)?;
+        let id = fiscal::salvar_regra(&tx, p.disp, p.usuario_id, &d)?;
+        tx.commit()?;
+        Ok(json!({ "id": id, "conferencia": fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)? }))
+    }
+
+    fn fiscal_regra_encerrar(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: crate::despacho::Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        fiscal::encerrar_regra(&tx, p.disp, p.usuario_id, &d.id)?;
+        tx.commit()?;
+        Ok(json!(fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)?))
+    }
+
+    fn fiscal_regra_excluir(p: &mut Pedido, dados: Value) -> Resultado<Value> {
+        let d: crate::despacho::Id = ler(dados)?;
+        let tx = p.conn.transaction()?;
+        fiscal::excluir_regra(&tx, p.disp, p.usuario_id, &d.id)?;
         tx.commit()?;
         Ok(json!(fiscal::conferir(p.conn, &fiscal::hoje(p.conn)?)?))
     }
@@ -737,12 +1068,6 @@ mod comandos {
     #[serde(default)]
     struct Ids {
         ids: Vec<String>,
-    }
-
-    #[derive(Deserialize, Default)]
-    #[serde(default)]
-    struct Regras {
-        regras: Vec<fiscal::RegraSt>,
     }
 
     #[derive(Deserialize, Default)]
@@ -815,38 +1140,176 @@ mod testes {
         }
     }
 
+    /// G4: a lista oficial do Conv. 142/18 (141 CEST vigentes) acha o CEST pela NCM; o revogado não está.
     #[test]
-    fn regras_editaveis_e_conferencia() {
+    fn g4_cest_pela_lista_oficial_do_convenio_142() {
+        let todos: std::collections::BTreeSet<&String> = lista_cest().iter().map(|(_, c)| c).collect();
+        assert_eq!(todos.len(), 140, "141 vigentes, menos o 01.999.00, que não tem NCM");
+        assert!(!todos.iter().any(|c| c.as_str() == "01.110.00"), "revogado pelo Conv. ICMS 165/19");
+        assert_eq!(cests_do_ncm("3815.12.10"), vec!["01.001.00".to_string()]);
+        assert_eq!(
+            cests_do_ncm("40111000"),
+            vec!["16.001.00".to_string(), "16.002.00".to_string(), "16.004.00".to_string()]
+        );
+        assert!(cests_do_ncm("22021000").is_empty(), "refrigerante não é autopeça");
+        assert!(cests_do_ncm("").is_empty());
+    }
+
+    /// FIS-P6: o catálogo do programa entra uma vez por versão, não vai para o log da troca, não passa por cima de
+    /// uma regra da loja no mesmo período, e a regra do programa não se exclui (muda-se).
+    #[test]
+    fn fis_p6_o_catalogo_do_programa_entra_uma_vez_e_respeita_a_loja() {
         let b = Banco::em_memoria().unwrap();
         let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
-        // regra sobreposta é recusada
-        let mut lista = regras(&b.conn).unwrap();
-        assert_eq!(lista.len(), 4);
-        lista.push(RegraSt {
+        assert_eq!(config::ler(&b.conn, CHAVE_CATALOGO).unwrap().as_deref(), Some("1"));
+        assert_eq!(carregar_regras_do_programa(&b.conn).unwrap(), 0, "a mesma versão não aplica de novo");
+        // Um caixa que ainda não aplicou: sem a regra de GO pneus e com uma regra da loja para RS 16 no período.
+        b.conn
+            .execute("DELETE FROM regra_st WHERE id IN ('go-pneus-com-st', 'rs-pneus-com-st', 'rs-pneus-sem-st')", [])
+            .unwrap();
+        let loja = RegraSt {
+            uf: "RS".into(),
+            cest_inicio: "16".into(),
+            vigente_de: "01/01/2026".into(),
+            com_st: true,
+            ..Default::default()
+        };
+        salvar_regra(&b.conn, &b.dispositivo, &u.id, &loja).unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "0").unwrap();
+        let log = |b: &Banco| -> i64 { b.conn.query_row("SELECT COUNT(*) FROM alteracao", [], |l| l.get(0)).unwrap() };
+        let antes = log(&b);
+        // GO entra; RS 16 do programa não (a da loja, aberta desde 01/01/2026, vale no período).
+        assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 1);
+        assert_eq!(log(&b), antes, "o catálogo não vai para o log da troca");
+        let lista = regras(&b.conn).unwrap();
+        assert!(lista.iter().any(|r| r.id == "go-pneus-com-st" && r.origem == "rustinho"));
+        assert!(!lista.iter().any(|r| r.id == "rs-pneus-com-st" || r.id == "rs-pneus-sem-st"));
+        let aplicando: i64 =
+            b.conn.query_row("SELECT aplicando FROM sync_estado WHERE id = 1", [], |l| l.get(0)).unwrap();
+        assert_eq!(aplicando, 0, "o registro da troca volta a ficar ligado");
+    }
+
+    #[test]
+    fn fis_p5_a_regra_futura_do_programa_nao_se_exclui() {
+        let b = Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        // RS, pneus fora da ST a partir de 01/01/2027: futura, do programa.
+        let r = achar(&regras(&b.conn).unwrap(), "rs-pneus-sem-st").clone();
+        assert_eq!(r.situacao, "futura");
+        assert!(excluir_regra(&b.conn, &b.dispositivo, &u.id, "rs-pneus-sem-st").is_err());
+    }
+
+    /// O dia `dias` a partir de hoje, "dd/mm/aaaa".
+    fn dia(b: &Banco, dias: i64) -> String {
+        let d: String =
+            b.conn.query_row("SELECT date('now', 'localtime', ?1)", [format!("{dias} days")], |l| l.get(0)).unwrap();
+        data_br(&d)
+    }
+
+    fn achar<'a>(lista: &'a [RegraSt], id: &str) -> &'a RegraSt {
+        lista.iter().find(|r| r.id == id).unwrap()
+    }
+
+    /// FIS-P6 (0.9.19, etapa 3): as regras que vêm com o programa têm a fonte, e são só de UFs com a vigência
+    /// confirmada na fonte oficial (migração 0032). Sem regra para a UF, o Rustinho não presume.
+    #[test]
+    fn fis_p6_as_regras_do_programa_tem_fonte() {
+        let b = Banco::em_memoria().unwrap();
+        let lista = regras(&b.conn).unwrap();
+        assert_eq!(lista.len(), 37);
+        for r in &lista {
+            assert_eq!(r.origem, "rustinho", "{}", r.id);
+            assert!(!r.fonte.is_empty() && !r.dispositivo.is_empty() && !r.consultada_em.is_empty(), "{}", r.id);
+        }
+        let sp = achar(&lista, "sp-autopecas-sem-st");
+        assert!(sp.fonte.contains("SRE 34/2026"));
+        // UF sem fonte confirmada (ex.: AL): sem regra, sem presumir.
+        assert_eq!(tributacao(&b.conn, "AL", "01.001.00", "", "2026-11-26").unwrap().com_st, None);
+        // RS: os pneus saem da ST em 01/01/2027; RO: só os pneus de moto e bicicleta continuam (CEST mais longo vence).
+        assert_eq!(tributacao(&b.conn, "RS", "16.001.00", "", "2026-12-31").unwrap().com_st, Some(true));
+        assert_eq!(tributacao(&b.conn, "RS", "16.001.00", "", "2027-01-01").unwrap().com_st, Some(false));
+        assert_eq!(tributacao(&b.conn, "RO", "16.001.00", "", "2026-11-26").unwrap().com_st, Some(false));
+        assert_eq!(tributacao(&b.conn, "RO", "16.003.00", "", "2026-11-26").unwrap().com_st, Some(true));
+        assert_eq!(tributacao(&b.conn, "RO", "16.007.01", "", "2026-11-26").unwrap().com_st, Some(true));
+        assert_eq!(tributacao(&b.conn, "RO", "16.007.00", "", "2026-11-26").unwrap().com_st, Some(false));
+    }
+
+    /// FIS-P5: nova regra, a mais específica vence, e duas regras do mesmo estado e CEST não valem no mesmo dia.
+    #[test]
+    fn fis_p5_nova_regra_e_periodos_em_conflito() {
+        let b = Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        // SP 01 já tem regra aberta desde 01/10/2026: outra SP 01 no período é recusada.
+        let mut nova = RegraSt {
             uf: "SP".into(),
             cest_inicio: "01".into(),
             vigente_de: "15/10/2026".into(),
             com_st: true,
             ..Default::default()
-        });
-        assert!(salvar_regras(&b.conn, &b.dispositivo, &u.id, &lista).is_err());
-        // regra mais específica (01.003) vence a geral
-        lista.pop();
-        lista.push(RegraSt {
-            uf: "SP".into(),
-            cest_inicio: "01.003".into(),
-            vigente_de: "01/10/2026".into(),
-            com_st: true,
-            descricao: "Exceção de teste".into(),
-            ..Default::default()
-        });
-        salvar_regras(&b.conn, &b.dispositivo, &u.id, &lista).unwrap();
+        };
+        assert!(salvar_regra(&b.conn, &b.dispositivo, &u.id, &nova).is_err());
+        // a mais específica (01.003) é outra combinação e vence a geral
+        nova.cest_inicio = "01.003".into();
+        nova.vigente_de = "01/10/2026".into();
+        nova.descricao = "Exceção de teste".into();
+        let id = salvar_regra(&b.conn, &b.dispositivo, &u.id, &nova).unwrap();
         assert_eq!(tributacao(&b.conn, "SP", "0100300", "", "2026-10-13").unwrap().csosn, "500");
         assert_eq!(tributacao(&b.conn, "SP", "0100100", "", "2026-10-13").unwrap().csosn, "102");
+        let lista = regras(&b.conn).unwrap();
+        assert_eq!(achar(&lista, &id).origem, "loja");
+        assert_eq!(lista.len(), 38);
 
         assert_eq!(ler_data("1/10/26").unwrap().unwrap(), "2026-10-01");
         assert!(ler_data("31/02/2026").is_err());
         assert_eq!(data_br("2026-10-01"), "01/10/2026");
+    }
+
+    /// FIS-P5: a regra que já valeu não se exclui nem se reescreve; encerra-se, e fica encerrada.
+    #[test]
+    fn fis_p5_a_regra_que_ja_valeu_se_encerra_e_nao_se_exclui() {
+        let b = Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        let id = "sp-autopecas-sem-st";
+        assert!(achar(&regras(&b.conn).unwrap(), id).ja_valeu);
+        assert!(excluir_regra(&b.conn, &b.dispositivo, &u.id, id).is_err());
+        let mut r = achar(&regras(&b.conn).unwrap(), id).clone();
+        r.com_st = true;
+        assert!(salvar_regra(&b.conn, &b.dispositivo, &u.id, &r).is_err(), "o \"com ST\" de quem já valeu não muda");
+        r.com_st = false;
+        r.vigente_ate = dia(&b, -30);
+        assert!(salvar_regra(&b.conn, &b.dispositivo, &u.id, &r).is_err(), "o fim não volta para antes de ontem");
+        // a descrição pode mudar (e a linha vira da loja)
+        r.vigente_ate = String::new();
+        r.descricao = "Conferida com o contador".into();
+        salvar_regra(&b.conn, &b.dispositivo, &u.id, &r).unwrap();
+        assert_eq!(achar(&regras(&b.conn).unwrap(), id).origem, "loja");
+        // encerrar: vale até ontem, e fica encerrada
+        encerrar_regra(&b.conn, &b.dispositivo, &u.id, id).unwrap();
+        let e = achar(&regras(&b.conn).unwrap(), id).clone();
+        assert_eq!(e.vigente_ate, dia(&b, -1));
+        assert_eq!(e.situacao, "encerrada");
+        assert!(excluir_regra(&b.conn, &b.dispositivo, &u.id, id).is_err(), "encerrada também não se exclui");
+    }
+
+    /// FIS-P5: a regra futura se exclui; não se encerra (ainda não valeu).
+    #[test]
+    fn fis_p5_a_regra_futura_se_exclui() {
+        let b = Banco::em_memoria().unwrap();
+        let u = crate::usuarios::criar(&b.conn, &b.dispositivo, "Maria", "1234", true).unwrap();
+        let futura = RegraSt {
+            uf: "AL".into(),
+            cest_inicio: "01".into(),
+            vigente_de: dia(&b, 10),
+            com_st: true,
+            ..Default::default()
+        };
+        let id = salvar_regra(&b.conn, &b.dispositivo, &u.id, &futura).unwrap();
+        let r = achar(&regras(&b.conn).unwrap(), &id).clone();
+        assert_eq!(r.situacao, "futura");
+        assert!(!r.ja_valeu);
+        assert!(encerrar_regra(&b.conn, &b.dispositivo, &u.id, &id).is_err());
+        excluir_regra(&b.conn, &b.dispositivo, &u.id, &id).unwrap();
+        assert!(regras(&b.conn).unwrap().iter().all(|x| x.id != id));
     }
 
     /// E11 (dev.3.3, 2.4): o ano tem 4 algarismos, ou 2 (= 20xx). Com 3 (ou 1)

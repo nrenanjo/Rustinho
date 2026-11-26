@@ -43,6 +43,7 @@ pub(crate) const MIGRACOES: &[&str] = &[
     include_str!("../migracoes/0029_protocolo4_identidade.sql"),
     include_str!("../migracoes/0030_regras_etapa4.sql"),
     include_str!("../migracoes/0031_produto_juncao.sql"),
+    include_str!("../migracoes/0032_regras_st_com_fonte.sql"),
 ];
 
 /// Primeira linha da migração que recria tabelas: ela roda com as chaves
@@ -294,6 +295,12 @@ impl Banco {
         let dispositivo = garantir_dispositivo(&conn)?;
         crate::sync::criar_gatilhos(&conn)?;
         crate::sync::registrar_existentes(&conn)?;
+        // FIS-P6 (0.9.19, etapa 3): as regras de ST que vêm com o programa (uma vez por versão do catálogo).
+        {
+            let tx = conn.transaction()?;
+            crate::sync::sem_registrar(&tx, crate::fiscal::carregar_regras_do_programa)?;
+            tx.commit()?;
+        }
         crate::backup::limpar_chave_antiga(&conn)?;
         // Códigos das peças: arquivo ao lado do banco, distribuidor e
         // peças com código a definir (veja `faixas`).
@@ -1073,7 +1080,8 @@ mod testes {
         // dev.3.3, a 0025 (passo 7.5: índices e busca), a 0026 (registro de
         // caixas do protocolo 4, etapa 2) e a 0027 (R0 e QT-1b: a operação já
         // feita e o aviso de fechamento inesperado). Números provisórios (MIG-1 (a)).
-        assert_eq!(MIGRACOES.len(), 31);
+        // A 0.9.19 (etapa 3) acrescentou a 0032 (as regras de ST com a fonte).
+        assert_eq!(MIGRACOES.len(), 32);
     }
 
     /// Protocolo 4, etapa 2: a migração 25 → 26 só cria o registro de caixas

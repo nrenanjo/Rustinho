@@ -86,6 +86,17 @@ pub(super) fn filtro_config(prefixo: &str) -> String {
     )
 }
 
+/// Grava `uso` sem registrar nada no log da troca (o que todo caixa faz igual,
+/// sozinho, ao abrir: as regras de ST do programa, FIS-P6). Recebe a transação
+/// aberta por quem chama (regra C5); um erro dentro de `uso` desfaz tudo, com a
+/// marca junto, quando quem chama não confirma.
+pub fn sem_registrar<T>(tx: &Connection, uso: impl FnOnce(&Connection) -> Resultado<T>) -> Resultado<T> {
+    tx.execute("UPDATE sync_estado SET aplicando = 1 WHERE id = 1", [])?;
+    let r = uso(tx)?;
+    tx.execute("UPDATE sync_estado SET aplicando = 0 WHERE id = 1", [])?;
+    Ok(r)
+}
+
 /// A configuração é da loja (vai para todos os caixas)?
 pub fn chave_da_loja(chave: &str) -> bool {
     CONFIG_DA_LOJA.contains(&chave) || chave.starts_with(PREFIXO_RETIRADO)

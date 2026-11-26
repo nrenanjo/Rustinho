@@ -4,13 +4,21 @@ import QtQuick.Layouts
 import rustinho
 
 // Conferência fiscal: CSOSN que não combina com a regra de ST, peças sem
-// NCM ou sem CEST, e as regras de ST (que o contador pode mudar).
+// NCM ou sem CEST, e as regras de ST (que o contador pode mudar). FIS-P5 e
+// FIS-P6 (0.9.19, etapa 3): as regras aparecem para consulta, por estado,
+// separadas em vigentes, futuras e encerradas, com a fonte de cada uma; mudar
+// é num painel à parte, uma regra de cada vez.
 FocusScope {
     id: tela
     readonly property var janela: ApplicationWindow.window
     property var dados: null
     property var ufs: []
-    property bool regrasAlteradas: false
+    // O estado cujas regras aparecem (começa no da loja).
+    property string ufRegras: ""
+    readonly property var regrasDaUf: !dados ? [] : dados.regras.filter(r => r.uf === ufRegras)
+    readonly property var ordemDasSituacoes: ["vigente", "futura", "encerrada"]
+    // A regra aberta no painel (vazia: regra nova).
+    property var editando: null
     readonly property string nomeNaNavegacao: "Fiscal"
     // 0.9.17: o estado (UF) e o CNPJ da loja, conferidos pelo núcleo
     // (requisito "loja.uf_cnpj"); o que falta aparece na faixa.
@@ -23,7 +31,6 @@ FocusScope {
     // a senha de um gerente digitada na hora; qualquer gerente desliga.
     property var liga: null
 
-    ListModel { id: regras }
 
     function carregarLiga() {
         const e = Api.chamar("fiscal_liga_estado")
@@ -73,10 +80,8 @@ FocusScope {
 
     function preencher(d) {
         dados = d
-        regras.clear()
-        for (const g of d.regras)
-            regras.append({ uf: g.uf, cestInicio: g.cestInicio, vigenteDe: g.vigenteDe, vigenteAte: g.vigenteAte, comSt: g.comSt, descricao: g.descricao })
-        regrasAlteradas = false
+        if (ufRegras === "")
+            ufRegras = d.uf || "SP"
     }
 
     function corrigirTodas() {
@@ -98,78 +103,69 @@ FocusScope {
         })
     }
 
-    function pendenciasDeValidacao() {
-        const lista = []
-        for (let i = 0; i < regras.count; i++) {
-            const g = regras.get(i)
-            const linha = repRegras.itemAt(i)
-            const cest = String(g.cestInicio || "").trim()
-            if (cest === "" || !/^\d{1,7}$/.test(cest)) {
-                lista.push({
-                    chave: "regra_" + i + "_cest",
-                    item: linha ? linha.campo("cestInicio") : null,
-                    rolagem: rolagem,
-                    titulo: "Começo do CEST inválido na regra " + (i + 1),
-                    texto: "Informe apenas os números iniciais do CEST (ex.: 01 ou 16)."
-                })
-            } else if (linha && linha.campo("cestInicio")) {
-                linha.campo("cestInicio").erro = ""
-            }
-            const vigDe = String(g.vigenteDe || "").trim()
-            if (vigDe === "") {
-                lista.push({
-                    chave: "regra_" + i + "_vigenteDe",
-                    item: linha ? linha.campo("vigenteDe") : null,
-                    rolagem: rolagem,
-                    titulo: "Falta a data inicial na regra " + (i + 1),
-                    texto: "Informe a partir de qual data esta regra de ST vale."
-                })
-            } else if (linha && linha.campo("vigenteDe")) {
-                linha.campo("vigenteDe").erro = ""
-            }
-        }
-        return lista
+    function nomeDaSituacao(sit) {
+        return ({ vigente: "Valendo hoje", futura: "Vão valer", encerrada: "Encerradas" })[sit] || sit
     }
 
-    function salvarRegras() {
-        if (janela && janela.iniciarValidacaoProgressiva(tela, tela.pendenciasDeValidacao))
-            return
-        salvarRegrasAgora()
+    function periodo(r) {
+        return (r.vigenteAte ? r.vigenteDe + " a " + r.vigenteAte : "desde " + r.vigenteDe)
     }
-    function salvarRegrasAgora() {
-        const lista = []
-        for (let i = 0; i < regras.count; i++) {
-            const g = regras.get(i)
-            lista.push({ uf: g.uf, cestInicio: g.cestInicio, vigenteDe: g.vigenteDe, vigenteAte: g.vigenteAte, comSt: g.comSt, descricao: g.descricao })
+
+    function abrirRegra(r) {
+        editando = r
+        formRegra.travada = !!(r && r.jaValeu)
+        formRegra.preencher(r || { uf: ufRegras, comSt: false })
+        painelRegra.open()
+        formRegra.focar()
+    }
+
+    function respostaDasRegras(r, mensagem, depois) {
+        if (r.ok) {
+            preencher(r.dados.conferencia || r.dados)
+            janela.avisar(mensagem, "ok")
+            if (depois)
+                depois()
+            return
         }
-        janela.chamarGerente("fiscal_regras_salvar", { regras: lista }, r => {
-            if (r.ok) {
-                janela.encerrarValidacaoProgressiva(tela)
-                preencher(r.dados)
-                janela.avisar("Regras de ST salvas.", "ok")
-            } else {
-                const m = r.campo ? r.campo.match(/^regras\.(\d+)\.(\w+)$/) : null
-                if (m) {
-                    const linha = repRegras.itemAt(parseInt(m[1]))
-                    if (linha) {
-                        const alvo = linha.campo(m[2])
-                        if (alvo) {
-                            alvo.erro = r.erro
-                            janela.rolarAteItem(rolagem, alvo, 24, () => { if (alvo.focar) alvo.focar() })
-                        }
-                    }
-                }
-                janela.avisar(r.erro, "erro")
-            }
+        const alvo = r.campo ? formRegra.campo(r.campo) : null
+        if (alvo && painelRegra.opened) {
+            alvo.erro = r.erro
+            if (alvo.focar)
+                alvo.focar()
+        }
+        janela.avisar(r.erro, "erro")
+    }
+
+    function salvarRegra() {
+        const dados = formRegra.valores()
+        dados.id = editando ? editando.id : ""
+        janela.chamarGerente("fiscal_regra_salvar", dados, r => {
+            respostaDasRegras(r, "Regra de ST salva.", () => {
+                tela.ufRegras = dados.uf
+                painelRegra.close()
+            })
         })
     }
 
+    function encerrarRegra(r) {
+        janela.confirmar("Encerrar esta regra?",
+                         r.uf + ", CEST " + r.cestInicio + ": a regra passa a valer só até ontem e fica no histórico, como encerrada. "
+                         + "As vendas de antes continuam com a regra que valia. Confirme com o contador antes.",
+                         "Encerrar", () => {
+            janela.chamarGerente("fiscal_regra_encerrar", { id: r.id }, x => respostaDasRegras(x, "Regra encerrada."))
+        })
+    }
+
+    function excluirRegra(r) {
+        janela.confirmar("Excluir esta regra futura?",
+                         r.uf + ", CEST " + r.cestInicio + ", que começaria em " + r.vigenteDe + ". Ela ainda não valeu, então pode sair.",
+                         "Excluir", () => {
+            janela.chamarGerente("fiscal_regra_excluir", { id: r.id }, x => respostaDasRegras(x, "Regra excluída."))
+        }, "perigo")
+    }
+
     function aoEsc() {
-        if (regrasAlteradas)
-            janela.confirmar("Descartar as regras alteradas?", "As mudanças nas regras de ST ainda não foram salvas.",
-                             "Descartar", () => janela.voltar(), "perigo")
-        else
-            janela.voltar()
+        janela.voltar()
     }
 
     component ListaPecas: ColumnLayout {
@@ -246,12 +242,6 @@ FocusScope {
             Layout.leftMargin: -10
             onClicked: listaPecas.tudo = !listaPecas.tudo
         }
-    }
-
-    Shortcut {
-        sequence: "F2"
-        enabled: (tela.embutida ? tela.visible : tela.StackView.status === StackView.Active) && tela.regrasAlteradas
-        onActivated: tela.salvarRegras()
     }
 
     ColumnLayout {
@@ -410,7 +400,7 @@ FocusScope {
                         readonly property int n: tela.dados ? tela.dados.semNcm.length : 0
                         visible: n > 0
                         titulo: "Peças sem NCM"
-                        subtitulo: "a nota fiscal não sai sem NCM"
+                        subtitulo: "pendência: a nota fiscal não sai sem NCM"
                         color: Tema.pergaminho
                         Layout.fillWidth: true
                         ListaPecas { pecas: tela.dados ? tela.dados.semNcm : [] }
@@ -419,8 +409,8 @@ FocusScope {
                     Faixa {
                         readonly property int n: tela.dados ? tela.dados.semCest.length : 0
                         visible: n > 0
-                        titulo: "NCM de autopeça sem CEST"
-                        subtitulo: "sem CEST o Rustinho não sabe se a peça tem ST"
+                        titulo: "Peças sem CEST: a analisar"
+                        subtitulo: "o NCM está na lista oficial de autopeças ou pneus"
                         color: Tema.azul
                         Layout.fillWidth: true
                         ListaPecas { pecas: tela.dados ? tela.dados.semCest : [] }
@@ -433,8 +423,9 @@ FocusScope {
                         Nota {
                             text: !tela.dados ? "" : (tela.dados.monofasicas === 0 ? "Nenhuma peça marcada como monofásica."
                                   : tela.dados.monofasicas + (tela.dados.monofasicas === 1 ? " peça marcada" : " peças marcadas") + " como monofásica.")
-                                  + " As vendas dessas peças saem separadas no relatório para o contador (PGDAS-D). "
-                                  + "Nas compras pelo XML, peças novas com PIS CST 04 já vêm marcadas."
+                                  + " É uma informação do cadastro, não um erro: as vendas dessas peças saem separadas no relatório para o contador (PGDAS-D). "
+                                  + "Nas compras pelo XML, peças novas com PIS CST 04 já vêm marcadas. "
+                                  + "O PIS/Cofins monofásico das autopeças e dos pneus vale até 31/12/2026 (Lei Complementar 214/2025, art. 542)."
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
@@ -459,47 +450,122 @@ FocusScope {
                             font.pixelSize: 14
                             Layout.fillWidth: true
                         }
+                        Selecao {
+                            rotulo: "Estado"
+                            modelo: tela.ufs
+                            indice: Math.max(0, tela.ufs.indexOf(tela.ufRegras))
+                            Layout.preferredWidth: 140
+                            onEscolhido: tela.ufRegras = tela.ufs[indice]
+                        }
+                        Nota {
+                            visible: tela.regrasDaUf.length === 0
+                            text: "Nenhuma regra para " + tela.ufRegras + ". Sem regra, o Rustinho não presume se a peça tem ST: confirme com o contador."
+                            font.pixelSize: 14
+                            Layout.fillWidth: true
+                        }
                         Repeater {
-                            id: repRegras
-                            model: regras
-                            delegate: LinhaRegraSt {
-                                ufs: tela.ufs
+                            model: tela.ordemDasSituacoes
+                            delegate: ColumnLayout {
+                                id: grupoSituacao
+                                required property string modelData
+                                readonly property var lista: tela.regrasDaUf.filter(r => r.situacao === modelData)
+                                visible: lista.length > 0
+                                spacing: 4
                                 Layout.fillWidth: true
                                 Layout.topMargin: 6
-                                onMudou: (campo, valor) => {
-                                    regras.setProperty(index, campo, valor)
-                                    tela.regrasAlteradas = true
-                                    if (tela.janela)
-                                        tela.janela.reavaliarValidacaoProgressiva(tela)
-                                }
-                                onRemover: {
-                                    regras.remove(index)
-                                    tela.regrasAlteradas = true
-                                    if (tela.janela)
-                                        tela.janela.reavaliarValidacaoProgressiva(tela)
+                                Rotulo { text: tela.nomeDaSituacao(grupoSituacao.modelData) }
+                                Repeater {
+                                    model: grupoSituacao.lista
+                                    delegate: Rectangle {
+                                        id: cartaoRegra
+                                        required property var modelData
+                                        required property int index
+                                        readonly property bool par: (index + 1) % 2 === 0
+                                        Layout.fillWidth: true
+                                        radius: Tema.raioCampo
+                                        color: Tema.faixa(cartaoRegra.par, Tema.vela(0.35), "transparent")
+                                        palette.window: Tema.superficie(color)
+                                        implicitHeight: colunaRegra.implicitHeight + 20
+                                        ColumnLayout {
+                                            id: colunaRegra
+                                            x: 12
+                                            y: 10
+                                            width: parent.width - 24
+                                            spacing: 4
+                                            Text {
+                                                text: "CEST " + cartaoRegra.modelData.cestInicio + " · "
+                                                      + (cartaoRegra.modelData.comSt ? "com ST" : "sem ST") + " · " + tela.periodo(cartaoRegra.modelData)
+                                                textFormat: Text.PlainText
+                                                color: Tema.tintaDaFaixa(cartaoRegra.par)
+                                                font.family: Tema.texto
+                                                font.weight: Font.DemiBold
+                                                font.pixelSize: 15
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                            }
+                                            Text {
+                                                visible: cartaoRegra.modelData.descricao !== ""
+                                                text: cartaoRegra.modelData.descricao
+                                                textFormat: Text.PlainText
+                                                color: Tema.tintaDaFaixa(cartaoRegra.par)
+                                                font.family: Tema.texto
+                                                font.pixelSize: 14
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                            }
+                                            Text {
+                                                text: cartaoRegra.modelData.fonte === ""
+                                                      ? "Sem fonte informada"
+                                                      : "Fonte: " + cartaoRegra.modelData.fonte
+                                                        + (cartaoRegra.modelData.dispositivo ? " · " + cartaoRegra.modelData.dispositivo : "")
+                                                        + (cartaoRegra.modelData.consultadaEm ? " · lida em " + cartaoRegra.modelData.consultadaEm : "")
+                                                textFormat: Text.PlainText
+                                                color: Tema.tintaSuaveDaFaixa(cartaoRegra.par)
+                                                font.family: Tema.texto
+                                                font.pixelSize: 13
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                            }
+                                            Text {
+                                                visible: cartaoRegra.modelData.origem === "loja"
+                                                text: "Mudada na loja"
+                                                textFormat: Text.PlainText
+                                                color: Tema.tintaSuaveDaFaixa(cartaoRegra.par)
+                                                font.family: Tema.texto
+                                                font.italic: true
+                                                font.pixelSize: 13
+                                            }
+                                            Flow {
+                                                spacing: 8
+                                                Layout.fillWidth: true
+                                                Botao {
+                                                    text: "Mudar"
+                                                    tipo: "discreto"
+                                                    onClicked: tela.abrirRegra(cartaoRegra.modelData)
+                                                }
+                                                Botao {
+                                                    visible: cartaoRegra.modelData.situacao === "vigente"
+                                                    text: "Encerrar"
+                                                    tipo: "discreto"
+                                                    onClicked: tela.encerrarRegra(cartaoRegra.modelData)
+                                                }
+                                                Botao {
+                                                    visible: cartaoRegra.modelData.situacao === "futura"
+                                                    text: "Excluir"
+                                                    tipo: "discreto"
+                                                    onClicked: tela.excluirRegra(cartaoRegra.modelData)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                        Linha {
-                            spacing: 10
-                            Layout.fillWidth: true
-                            Botao {
-                                text: "Adicionar regra"
-                                icone: "mais"
-                                tipo: "secundario"
-                                onClicked: {
-                                    regras.append({ uf: tela.dados && tela.dados.uf ? tela.dados.uf : "SP", cestInicio: "", vigenteDe: "", vigenteAte: "", comSt: false, descricao: "" })
-                                    tela.regrasAlteradas = true
-                                }
-                            }
-                            Item { Layout.fillWidth: true }
-                            Botao {
-                                visible: tela.regrasAlteradas
-                                text: "Salvar regras"
-                                icone: "check"
-                                atalho: "F2"
-                                onClicked: tela.salvarRegras()
-                            }
+                        Botao {
+                            text: "Nova regra"
+                            icone: "mais"
+                            tipo: "secundario"
+                            onClicked: tela.abrirRegra(null)
                         }
                     }
                 }
@@ -539,6 +605,39 @@ FocusScope {
                 Layout.alignment: Qt.AlignRight
                 spacing: 10
                 Botao { text: "Ligar"; icone: "check"; onClicked: tela.ligarFiscal() }
+            }
+        }
+    }
+
+    // FIS-P5: mudar uma regra (ou criar outra) num painel à parte. Mudar pede a
+    // senha do gerente (janela.chamarGerente), como antes.
+    Painel {
+        id: painelRegra
+        width: Math.min(620, Tema.largura - 24)
+        contentItem: ColumnLayout {
+            spacing: 14
+            Titulo {
+                text: tela.editando ? "Mudar a regra de ST" : "Nova regra de ST"
+                font.pixelSize: 26
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Nota {
+                text: tela.editando && tela.editando.jaValeu
+                      ? "Esta regra já valeu: o estado, o CEST, o início e o \"com ST\" ficam como estão. Para mudar, encerre esta e crie outra. Mude só com o contador."
+                      : "Vale a regra com o começo de CEST mais longo. Duas regras do mesmo estado e CEST não podem valer no mesmo dia. Mude só com o contador."
+                font.pixelSize: 14
+                Layout.fillWidth: true
+            }
+            LinhaRegraSt {
+                id: formRegra
+                ufs: tela.ufs
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 10
+                Botao { text: "Salvar"; icone: "check"; onClicked: tela.salvarRegra() }
             }
         }
     }

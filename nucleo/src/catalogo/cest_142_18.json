@@ -1,0 +1,712 @@
+{
+ "fonte": "Convênio ICMS 142/2018, Anexos II (autopeças) e XVI (pneumáticos, câmaras de ar e protetores de borracha), confaz.fazenda.gov.br/legislacao/convenios/2018/CV142_18",
+ "consultada_em": "2026-11-25",
+ "nota": "Só as linhas vigentes na leitura (o CEST 01.110.00 foi revogado pelo Conv. ICMS 165/19). Gerado dos arquivos de evidência CONFAZ_CV142_18_anexo_II_autopecas_20261125.json, CONFAZ_CV142_18_anexo_XVI_pneus_20261125.json (SHA-256 em CONFAZ_CV142_18_lido_20261125.sha256).",
+ "itens": [
+  {
+   "cest": "01.001.00",
+   "ncm": "3815.12.10 3815.12.90",
+   "descricao": "Catalisadores em colmeia cerâmica ou metálica para conversão catalítica de gases de escape de veículos e outros catalisadores"
+  },
+  {
+   "cest": "01.002.00",
+   "ncm": "3917",
+   "descricao": "Tubos e seus acessórios (por exemplo, juntas, cotovelos, flanges, uniões), de plásticos"
+  },
+  {
+   "cest": "01.003.00",
+   "ncm": "3918.10.00",
+   "descricao": "Protetores de caçamba"
+  },
+  {
+   "cest": "01.004.00",
+   "ncm": "3923.30.00",
+   "descricao": "Reservatórios de óleo"
+  },
+  {
+   "cest": "01.005.00",
+   "ncm": "3926.30.00",
+   "descricao": "Frisos, decalques, molduras e acabamentos"
+  },
+  {
+   "cest": "01.006.00",
+   "ncm": "4010.3 5910.00.00",
+   "descricao": "Correias de transmissão de borracha vulcanizada, de matérias têxteis, mesmo impregnadas, revestidas ou recobertas, de plástico, ou estratificadas com plástico ou reforçadas com metal ou com outras matérias"
+  },
+  {
+   "cest": "01.007.00",
+   "ncm": "4016.93.00 4823.90.9",
+   "descricao": "Juntas, gaxetas e outros elementos com função semelhante de vedação"
+  },
+  {
+   "cest": "01.008.00",
+   "ncm": "4016.10.10",
+   "descricao": "Partes de veículos automóveis, tratores e máquinas autopropulsadas"
+  },
+  {
+   "cest": "01.009.00",
+   "ncm": "4016.99.90 5705.00.00",
+   "descricao": "Tapetes, revestimentos, mesmo confeccionados, batentes, buchas e coxins"
+  },
+  {
+   "cest": "01.010.00",
+   "ncm": "5903.90.00",
+   "descricao": "Tecidos impregnados, revestidos, recobertos ou estratificados, com plástico"
+  },
+  {
+   "cest": "01.011.00",
+   "ncm": "5909.00.00",
+   "descricao": "Mangueiras e tubos semelhantes, de matérias têxteis, mesmo com reforço ou acessórios de outras matérias"
+  },
+  {
+   "cest": "01.012.00",
+   "ncm": "6306.1",
+   "descricao": "Encerados e toldos"
+  },
+  {
+   "cest": "01.013.00",
+   "ncm": "6506.10.00",
+   "descricao": "Capacetes e artefatos de uso semelhante, de proteção, para uso em motocicletas, incluídos ciclomotores"
+  },
+  {
+   "cest": "01.014.00",
+   "ncm": "6813",
+   "descricao": "Guarnições de fricção (por exemplo, placas, rolos, tiras, segmentos, discos, anéis, pastilhas), não montadas, para freios, embreagens ou qualquer outro mecanismo de fricção, à base de amianto, de outras substâncias minerais ou de celulose, mesmo combinadas com têxteis ou outras matérias"
+  },
+  {
+   "cest": "01.015.00",
+   "ncm": "7007.11.00 7007.21.00",
+   "descricao": "Vidros de dimensões e formatos que permitam aplicação automotiva"
+  },
+  {
+   "cest": "01.016.00",
+   "ncm": "7009.10.00",
+   "descricao": "Espelhos retrovisores"
+  },
+  {
+   "cest": "01.017.00",
+   "ncm": "7014.00.00",
+   "descricao": "Lentes de faróis, lanternas e outros utensílios"
+  },
+  {
+   "cest": "01.018.00",
+   "ncm": "7311.00.00",
+   "descricao": "Cilindro de aço para GNV (gás natural veicular)"
+  },
+  {
+   "cest": "01.019.00",
+   "ncm": "7311.00.00",
+   "descricao": "Recipientes para gases comprimidos ou liquefeitos, de ferro fundido, ferro ou aço, exceto o descrito no item 18.0"
+  },
+  {
+   "cest": "01.020.00",
+   "ncm": "7320",
+   "descricao": "Molas e folhas de molas, de ferro ou aço"
+  },
+  {
+   "cest": "01.021.00",
+   "ncm": "7325",
+   "descricao": "Obras moldadas, de ferro fundido, ferro ou aço, exceto as do código 7325.91.00"
+  },
+  {
+   "cest": "01.022.00",
+   "ncm": "7806.00",
+   "descricao": "Peso de chumbo para balanceamento de roda"
+  },
+  {
+   "cest": "01.023.00",
+   "ncm": "8007.00.90",
+   "descricao": "Peso para balanceamento de roda e outros utensílios de estanho"
+  },
+  {
+   "cest": "01.024.00",
+   "ncm": "8301.20 8301.60",
+   "descricao": "Fechaduras e partes de fechaduras"
+  },
+  {
+   "cest": "01.025.00",
+   "ncm": "8301.70",
+   "descricao": "Chaves apresentadas isoladamente"
+  },
+  {
+   "cest": "01.026.00",
+   "ncm": "8302.10.00 8302.30.00",
+   "descricao": "Dobradiças, guarnições, ferragens e artigos semelhantes de metais comuns"
+  },
+  {
+   "cest": "01.027.00",
+   "ncm": "8310.00",
+   "descricao": "Triângulo de segurança"
+  },
+  {
+   "cest": "01.028.00",
+   "ncm": "8407.3",
+   "descricao": "Motores de pistão alternativo dos tipos utilizados para propulsão de veículos do Capítulo 87"
+  },
+  {
+   "cest": "01.029.00",
+   "ncm": "8408.20",
+   "descricao": "Motores dos tipos utilizados para propulsão de veículos automotores"
+  },
+  {
+   "cest": "01.030.00",
+   "ncm": "8409.9",
+   "descricao": "Partes reconhecíveis como exclusiva ou principalmente destinadas aos motores das posições 8407 ou 8408"
+  },
+  {
+   "cest": "01.031.00",
+   "ncm": "8412.2",
+   "descricao": "Motores hidráulicos"
+  },
+  {
+   "cest": "01.032.00",
+   "ncm": "8413.30",
+   "descricao": "Bombas para combustíveis, lubrificantes ou líquidos de arrefecimento, próprias para motores de ignição por centelha ou por compressão"
+  },
+  {
+   "cest": "01.033.00",
+   "ncm": "8414.10.00",
+   "descricao": "Bombas de vácuo"
+  },
+  {
+   "cest": "01.034.00",
+   "ncm": "8414.80.1 8414.80.2",
+   "descricao": "Compressores e turbocompressores de ar"
+  },
+  {
+   "cest": "01.035.00",
+   "ncm": "8413.91.90 8414.90.10 8414.90.3 8414.90.39",
+   "descricao": "Partes das bombas, compressores e turbocompressores dos CEST 01.032.00, 01.033.00 e 01.034.00"
+  },
+  {
+   "cest": "01.036.00",
+   "ncm": "8415.20",
+   "descricao": "Máquinas e aparelhos de ar condicionado"
+  },
+  {
+   "cest": "01.037.00",
+   "ncm": "8421.23.00",
+   "descricao": "Aparelhos para filtrar óleos minerais nos motores de ignição por centelha ou por compressão"
+  },
+  {
+   "cest": "01.038.00",
+   "ncm": "8421.29.90",
+   "descricao": "Filtros a vácuo"
+  },
+  {
+   "cest": "01.039.00",
+   "ncm": "8421.9",
+   "descricao": "Partes dos aparelhos para filtrar ou depurar líquidos ou gases"
+  },
+  {
+   "cest": "01.040.00",
+   "ncm": "8424.10.00",
+   "descricao": "Extintores, mesmo carregados"
+  },
+  {
+   "cest": "01.041.00",
+   "ncm": "8421.31.00",
+   "descricao": "Filtros de entrada de ar para motores de ignição por centelha ou por compressão"
+  },
+  {
+   "cest": "01.042.00",
+   "ncm": "8421.32.00",
+   "descricao": "Depuradores por conversão catalítica de gases de escape"
+  },
+  {
+   "cest": "01.043.00",
+   "ncm": "8425.42.00",
+   "descricao": "Macacos"
+  },
+  {
+   "cest": "01.044.00",
+   "ncm": "8431.10.10",
+   "descricao": "Partes para macacos do CEST 01.043.00"
+  },
+  {
+   "cest": "01.045.00",
+   "ncm": "8431.49.2",
+   "descricao": "Partes reconhecíveis como exclusiva ou principalmente destinadas às máquinas agrícolas ou rodoviárias"
+  },
+  {
+   "cest": "01.045.01",
+   "ncm": "8433.90.90",
+   "descricao": "Partes reconhecíveis como exclusiva ou principalmente destinadas às máquinas agrícolas ou rodoviárias"
+  },
+  {
+   "cest": "01.046.00",
+   "ncm": "8481.10.00",
+   "descricao": "Válvulas redutoras de pressão"
+  },
+  {
+   "cest": "01.047.00",
+   "ncm": "8481.2",
+   "descricao": "Válvulas para transmissão óleo-hidráulicas ou pneumáticas"
+  },
+  {
+   "cest": "01.048.00",
+   "ncm": "8481.80.92",
+   "descricao": "Válvulas solenoides"
+  },
+  {
+   "cest": "01.049.00",
+   "ncm": "8482",
+   "descricao": "Rolamentos"
+  },
+  {
+   "cest": "01.050.00",
+   "ncm": "8483",
+   "descricao": "Árvores de transmissão (incluídas as árvores de “cames” e virabrequins) e manivelas; mancais e “bronzes”; engrenagens e rodas de fricção; eixos de esferas ou de roletes; redutores, multiplicadores, caixas de transmissão e variadores de velocidade, incluídos os conversores de torque; volantes e polias, incluídas as polias para cadernais; embreagens e dispositivos de acoplamento, incluídas as juntas de articulação"
+  },
+  {
+   "cest": "01.051.00",
+   "ncm": "8484",
+   "descricao": "Juntas metaloplásticas; jogos ou sortidos de juntas de composições diferentes, apresentados em bolsas, envelopes ou embalagens semelhantes; juntas de vedação mecânicas (selos mecânicos)"
+  },
+  {
+   "cest": "01.052.00",
+   "ncm": "8505.20",
+   "descricao": "Acoplamentos, embreagens, variadores de velocidade e freios, eletromagnéticos"
+  },
+  {
+   "cest": "01.053.00",
+   "ncm": "8507.10",
+   "descricao": "Acumuladores elétricos de chumbo, do tipo utilizado para o arranque dos motores de pistão, exceto os classificados no CEST 01.053.01"
+  },
+  {
+   "cest": "01.053.01",
+   "ncm": "8507.10.10",
+   "descricao": "Acumuladores elétricos de chumbo, do tipo utilizado para o arranque dos motores de pistão e de capacidade inferior ou igual a 20 Ah e tensão inferior ou igual a 12 V"
+  },
+  {
+   "cest": "01.054.00",
+   "ncm": "8511",
+   "descricao": "Aparelhos e dispositivos elétricos de ignição ou de arranque para motores de ignição por centelha ou por compressão (por exemplo, magnetos, dínamos-magnetos, bobinas de ignição, velas de ignição ou de aquecimento, motores de arranque); geradores (dínamos e alternadores, por exemplo) e conjuntores-disjuntores utilizados com estes motores"
+  },
+  {
+   "cest": "01.055.00",
+   "ncm": "8512.20 8512.40 8512.90.00",
+   "descricao": "Aparelhos elétricos de iluminação ou de sinalização (exceto os da posição 8539), limpadores de para-brisas, degeladores e desembaçadores (desembaciadores) elétricos e suas partes"
+  },
+  {
+   "cest": "01.056.00",
+   "ncm": "8517.14.10",
+   "descricao": "Telefones móveis do tipo dos utilizados em veículos automóveis"
+  },
+  {
+   "cest": "01.057.00",
+   "ncm": "8518",
+   "descricao": "Alto-falantes, amplificadores elétricos de audiofrequência e partes"
+  },
+  {
+   "cest": "01.058.00",
+   "ncm": "8518.50.00",
+   "descricao": "Aparelhos elétricos de amplificação de som para veículos automotores"
+  },
+  {
+   "cest": "01.059.00",
+   "ncm": "8519.81",
+   "descricao": "Aparelhos de reprodução de som"
+  },
+  {
+   "cest": "01.060.00",
+   "ncm": "8525.50.1 8525.60.10",
+   "descricao": "Aparelhos transmissores (emissores) de radiotelefonia ou radiotelegrafia (rádio receptor/transmissor)"
+  },
+  {
+   "cest": "01.061.00",
+   "ncm": "8527.21.00",
+   "descricao": "Aparelhos receptores de radiodifusão que só funcionem com fonte externa de energia combinados com um aparelho de gravação ou de reprodução de som, do tipo utilizado em veículos automóveis"
+  },
+  {
+   "cest": "01.062.00",
+   "ncm": "8527.29.00",
+   "descricao": "Outros aparelhos receptores de radiodifusão que só funcionem com fonte externa de energia, do tipo utilizado em veículos automóveis"
+  },
+  {
+   "cest": "01.062.01",
+   "ncm": "8521.90.90",
+   "descricao": "Outros aparelhos videofônicos de gravação ou de reprodução, mesmo incorporando um receptor de sinais videofônicos, dos tipos utilizados exclusivamente em veículos automotores"
+  },
+  {
+   "cest": "01.063.00",
+   "ncm": "8529.10",
+   "descricao": "Antenas"
+  },
+  {
+   "cest": "01.064.00",
+   "ncm": "8534.00",
+   "descricao": "Circuitos impressos"
+  },
+  {
+   "cest": "01.065.00",
+   "ncm": "8535.30 8536.50",
+   "descricao": "Interruptores e seccionadores e comutadores"
+  },
+  {
+   "cest": "01.066.00",
+   "ncm": "8536.10.00",
+   "descricao": "Fusíveis e corta-circuitos de fusíveis"
+  },
+  {
+   "cest": "01.067.00",
+   "ncm": "8536.20.00",
+   "descricao": "Disjuntores"
+  },
+  {
+   "cest": "01.068.00",
+   "ncm": "8536.4",
+   "descricao": "Relés"
+  },
+  {
+   "cest": "01.069.00",
+   "ncm": "8538",
+   "descricao": "Partes reconhecíveis como exclusivas ou principalmente destinados aos aparelhos dos CEST 01.065.00, 01.066.00, 01.067.00 e 01.068.00"
+  },
+  {
+   "cest": "01.070.00",
+   "ncm": "8539.10",
+   "descricao": "Faróis e projetores, em unidades seladas"
+  },
+  {
+   "cest": "01.071.00",
+   "ncm": "8539.2",
+   "descricao": "Lâmpadas e tubos de incandescência, exceto de raios ultravioleta ou infravermelhos"
+  },
+  {
+   "cest": "01.072.00",
+   "ncm": "8544.20.00",
+   "descricao": "Cabos coaxiais e outros condutores elétricos coaxiais"
+  },
+  {
+   "cest": "01.073.00",
+   "ncm": "8544.30.00",
+   "descricao": "Jogos de fios para velas de ignição e outros jogos de fios"
+  },
+  {
+   "cest": "01.074.00",
+   "ncm": "8707",
+   "descricao": "Carroçarias para os veículos automóveis das posições 8701 a 8705, incluídas as cabinas"
+  },
+  {
+   "cest": "01.075.00",
+   "ncm": "8708",
+   "descricao": "Partes e acessórios dos veículos automóveis das posições 8701 a 8705"
+  },
+  {
+   "cest": "01.076.00",
+   "ncm": "8714.1",
+   "descricao": "Parte e acessórios de motocicletas (incluídos os ciclomotores)"
+  },
+  {
+   "cest": "01.077.00",
+   "ncm": "8716.90.90",
+   "descricao": "Engates para reboques e semirreboques"
+  },
+  {
+   "cest": "01.078.00",
+   "ncm": "9026.10",
+   "descricao": "Medidores de nível; Medidores de vazão"
+  },
+  {
+   "cest": "01.079.00",
+   "ncm": "9026.20",
+   "descricao": "Aparelhos para medida ou controle da pressão"
+  },
+  {
+   "cest": "01.080.00",
+   "ncm": "9029",
+   "descricao": "Contadores, indicadores de velocidade e tacômetros, suas partes e acessórios"
+  },
+  {
+   "cest": "01.081.00",
+   "ncm": "9030.33.21",
+   "descricao": "Amperímetros"
+  },
+  {
+   "cest": "01.082.00",
+   "ncm": "9031.80.40",
+   "descricao": "Aparelhos digitais, de uso em veículos automóveis, para medida e indicação de múltiplas grandezas tais como: velocidade média, consumos instantâneo e médio e autonomia (computador de bordo)"
+  },
+  {
+   "cest": "01.083.00",
+   "ncm": "9032.89.2",
+   "descricao": "Controladores eletrônicos"
+  },
+  {
+   "cest": "01.084.00",
+   "ncm": "9104.00.00",
+   "descricao": "Relógios para painéis de instrumentos e relógios semelhantes"
+  },
+  {
+   "cest": "01.085.00",
+   "ncm": "9401.20.00 9401.99.00",
+   "descricao": "Assentos e partes de assentos"
+  },
+  {
+   "cest": "01.086.00",
+   "ncm": "9613.80.00",
+   "descricao": "Acendedores"
+  },
+  {
+   "cest": "01.087.00",
+   "ncm": "4009",
+   "descricao": "Tubos de borracha vulcanizada não endurecida, mesmo providos de seus acessórios"
+  },
+  {
+   "cest": "01.088.00",
+   "ncm": "4504.90.00 6812.99.10",
+   "descricao": "Juntas de vedação de cortiça natural e de amianto"
+  },
+  {
+   "cest": "01.089.00",
+   "ncm": "4823.40.00",
+   "descricao": "Papel-diagrama para tacógrafo, em disco"
+  },
+  {
+   "cest": "01.090.00",
+   "ncm": "3919.10 3919.90 8708.29.99",
+   "descricao": "Fitas, tiras, adesivos, autocolantes, de plástico, refletores, mesmo em rolos; placas metálicas com película de plástico refletora, próprias para colocação em carrocerias, para-choques de veículos de carga, motocicletas, ciclomotores, capacetes, bonés de agentes de trânsito e de condutores de veículos, atuando como dispositivos refletivos de segurança rodoviários"
+  },
+  {
+   "cest": "01.091.00",
+   "ncm": "8412.31.10",
+   "descricao": "Cilindros pneumáticos"
+  },
+  {
+   "cest": "01.092.00",
+   "ncm": "8413.19.00 8413.50.90 8413.81.00",
+   "descricao": "Bomba elétrica de lavador de para-brisa"
+  },
+  {
+   "cest": "01.093.00",
+   "ncm": "8413.60.19 8413.70.10",
+   "descricao": "Bomba de assistência de direção hidráulica"
+  },
+  {
+   "cest": "01.094.00",
+   "ncm": "8414.59.10 8414.59.90",
+   "descricao": "Motoventiladores"
+  },
+  {
+   "cest": "01.095.00",
+   "ncm": "8421.39.90",
+   "descricao": "Filtros de pólen do ar-condicionado"
+  },
+  {
+   "cest": "01.096.00",
+   "ncm": "8501.10.19",
+   "descricao": "“Máquina” de vidro elétrico de porta"
+  },
+  {
+   "cest": "01.097.00",
+   "ncm": "8501.31.10",
+   "descricao": "Motor de limpador de para-brisa"
+  },
+  {
+   "cest": "01.098.00",
+   "ncm": "8504.50.00",
+   "descricao": "Bobinas de reatância e de autoindução"
+  },
+  {
+   "cest": "01.099.00",
+   "ncm": "8507.20 8507.30",
+   "descricao": "Baterias de chumbo e de níquel-cádmio"
+  },
+  {
+   "cest": "01.100.00",
+   "ncm": "8512.30.00",
+   "descricao": "Aparelhos de sinalização acústica (buzina)"
+  },
+  {
+   "cest": "01.101.00",
+   "ncm": "9032.89.8 9032.89.9",
+   "descricao": "Instrumentos para regulação de grandezas não elétricas"
+  },
+  {
+   "cest": "01.102.00",
+   "ncm": "9027.10.00",
+   "descricao": "Analisadores de gases ou de fumaça (sonda lambda)"
+  },
+  {
+   "cest": "01.103.00",
+   "ncm": "4008.11.00",
+   "descricao": "Perfilados de borracha vulcanizada não endurecida"
+  },
+  {
+   "cest": "01.104.00",
+   "ncm": "5601.22.19",
+   "descricao": "Artefatos de pasta de fibra de uso automotivo"
+  },
+  {
+   "cest": "01.105.00",
+   "ncm": "5703.29.00",
+   "descricao": "Tapetes/carpetes – náilon"
+  },
+  {
+   "cest": "01.106.00",
+   "ncm": "5703.39.00",
+   "descricao": "Tapetes de matérias têxteis sintéticas"
+  },
+  {
+   "cest": "01.107.00",
+   "ncm": "5911.90.00",
+   "descricao": "Forração interior capacete"
+  },
+  {
+   "cest": "01.108.00",
+   "ncm": "6903.90.99",
+   "descricao": "Outros para-brisas"
+  },
+  {
+   "cest": "01.109.00",
+   "ncm": "7007.29.00",
+   "descricao": "Moldura com espelho"
+  },
+  {
+   "cest": "01.111.00",
+   "ncm": "7315.11.00",
+   "descricao": "Corrente transmissão"
+  },
+  {
+   "cest": "01.112.00",
+   "ncm": "7315.12.10",
+   "descricao": "Outras correntes de transmissão"
+  },
+  {
+   "cest": "01.113.00",
+   "ncm": "8418.99.00",
+   "descricao": "Condensador tubular metálico"
+  },
+  {
+   "cest": "01.114.00",
+   "ncm": "8419.50",
+   "descricao": "Trocadores de calor"
+  },
+  {
+   "cest": "01.115.00",
+   "ncm": "8424.90.90",
+   "descricao": "Partes de aparelhos mecânicos de pulverizar ou dispersar"
+  },
+  {
+   "cest": "01.116.00",
+   "ncm": "8425.49.10",
+   "descricao": "Macacos manuais para veículos"
+  },
+  {
+   "cest": "01.117.00",
+   "ncm": "8431.41.00",
+   "descricao": "Caçambas, pás, ganchos e tenazes para máquinas rodoviárias"
+  },
+  {
+   "cest": "01.118.00",
+   "ncm": "8501.61.00",
+   "descricao": "Geradores de corrente alternada de potência não superior a 75 kva"
+  },
+  {
+   "cest": "01.119.00",
+   "ncm": "8531.10.90",
+   "descricao": "Aparelhos elétricos para alarme de uso automotivo"
+  },
+  {
+   "cest": "01.120.00",
+   "ncm": "9014.10.00",
+   "descricao": "Bússolas"
+  },
+  {
+   "cest": "01.121.00",
+   "ncm": "9025.19.90",
+   "descricao": "Indicadores de temperatura"
+  },
+  {
+   "cest": "01.122.00",
+   "ncm": "9025.90.10",
+   "descricao": "Partes de indicadores de temperatura"
+  },
+  {
+   "cest": "01.123.00",
+   "ncm": "9026.90",
+   "descricao": "Partes de aparelhos de medida ou controle"
+  },
+  {
+   "cest": "01.124.00",
+   "ncm": "9032.10.10",
+   "descricao": "Termostatos"
+  },
+  {
+   "cest": "01.125.00",
+   "ncm": "9032.10.90",
+   "descricao": "Instrumentos e aparelhos para regulação"
+  },
+  {
+   "cest": "01.126.00",
+   "ncm": "9032.20.00",
+   "descricao": "Pressostatos"
+  },
+  {
+   "cest": "01.127.00",
+   "ncm": "8716.90",
+   "descricao": "Peças para reboques e semirreboques, exceto os itens classificados no CEST 01.077.00"
+  },
+  {
+   "cest": "01.128.00",
+   "ncm": "7322.90.10",
+   "descricao": "Geradores de ar quente a combustível líquido, com capacidade superior ou igual a 1.500 kcal/h, mas inferior ou igual a 10.400 kcal/h, do tipo dos utilizados em veículos automóveis"
+  },
+  {
+   "cest": "01.999.00",
+   "ncm": "",
+   "descricao": "Outras peças, partes e acessórios para veículos automotores não relacionados nos demais itens deste anexo"
+  },
+  {
+   "cest": "16.001.00",
+   "ncm": "4011.10.00",
+   "descricao": "Pneus novos, dos tipos utilizados em automóveis de passageiros (incluídos os veículos de uso misto - camionetas e os automóveis de corrida)"
+  },
+  {
+   "cest": "16.002.00",
+   "ncm": "4011",
+   "descricao": "Pneus novos, dos tipos utilizados em caminhões (inclusive para os fora-de-estrada), ônibus, aviões, máquinas de terraplenagem, de construção e conservação de estradas, máquinas e tratores agrícolas, pá-carregadeira"
+  },
+  {
+   "cest": "16.003.00",
+   "ncm": "4011.40.00",
+   "descricao": "Pneus novos para motocicletas"
+  },
+  {
+   "cest": "16.004.00",
+   "ncm": "4011",
+   "descricao": "Outros tipos de pneus novos, exceto os itens classificados no CEST 16.005.00"
+  },
+  {
+   "cest": "16.005.00",
+   "ncm": "4011.50.00",
+   "descricao": "Pneus novos de borracha dos tipos utilizados em bicicletas"
+  },
+  {
+   "cest": "16.006.00",
+   "ncm": "4012.1",
+   "descricao": "Pneus recauchutados"
+  },
+  {
+   "cest": "16.007.00",
+   "ncm": "4012.90",
+   "descricao": "Protetores de borracha, exceto os itens classificados no CEST 16.007.01"
+  },
+  {
+   "cest": "16.007.01",
+   "ncm": "4012.90",
+   "descricao": "Protetores de borracha para bicicletas"
+  },
+  {
+   "cest": "16.008.00",
+   "ncm": "4013",
+   "descricao": "Câmaras de ar de borracha, exceto os itens classificados no CEST 16.009.00"
+  },
+  {
+   "cest": "16.009.00",
+   "ncm": "4013.20.00",
+   "descricao": "Câmaras de ar de borracha dos tipos utilizados em bicicletas"
+  }
+ ]
+}

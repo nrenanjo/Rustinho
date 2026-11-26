@@ -142,7 +142,10 @@ const CONGELADA: &[(&str, &str, &[&str])] = &[
     ("fiscal_desligar", "caixa", &["do_caixa"]),
     ("fiscal_liga_estado", "leitura", &["leitura"]),
     ("fiscal_ligar", "caixa", &["do_caixa"]),
-    ("fiscal_regras_salvar", "configuracoes", &[]),
+    // FIS-P5 (etapa 3, 26/11/2026): uma regra de cada vez (o fiscal_regras_salvar, que trocava todas, saiu).
+    ("fiscal_regra_encerrar", "configuracoes", &[]),
+    ("fiscal_regra_excluir", "configuracoes", &[]),
+    ("fiscal_regra_salvar", "configuracoes", &[]),
     ("fiscal_tributacao", "leitura", &["leitura"]),
     ("fluxo_caixa", "financeiro", &["leitura"]),
     ("formas_pagamento", "leitura", &["leitura"]),

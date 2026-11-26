@@ -2,111 +2,109 @@ import QtQuick
 import QtQuick.Layouts
 import rustinho
 
-// Uma regra de ST: estado, começo do CEST, período e se tem ST.
-Rectangle {
+// O formulário de uma regra de ST (FIS-P5 e FIS-P6, 0.9.19, etapa 3): estado,
+// começo do CEST, período, se tem ST, a descrição e a fonte. Fica no painel de
+// edição da tela Fiscal (a consulta é a lista, separada). Numa regra que já
+// valeu, o estado, o CEST, o início e o "com ST" ficam travados: para mudar,
+// encerra-se e cria-se outra (o núcleo confere de novo).
+ColumnLayout {
     id: linha
-    required property int index
-    required property string uf
-    required property string cestInicio
-    required property string vigenteDe
-    required property string vigenteAte
-    required property bool comSt
-    required property string descricao
     property var ufs: []
-
-    signal mudou(string campo, var valor)
-    signal remover()
-
-    radius: Tema.raioCampo
-    color: Tema.vela(0.35)
-    palette.window: Tema.superficie(color)
-    implicitHeight: coluna.implicitHeight + 24
+    property bool travada: false
+    spacing: 10
 
     function campo(nome) {
-        return { uf: campoUf, cestInicio: campoCest, vigenteDe: campoDe, vigenteAte: campoAte }[nome] || campoCest
+        return { uf: campoUf, cestInicio: campoCest, vigenteDe: campoDe, vigenteAte: campoAte,
+                 descricao: campoDescricao, fonte: campoFonte, dispositivo: campoDispositivo }[nome] || null
     }
 
-    ColumnLayout {
-        id: coluna
-        x: 12
-        y: 12
-        width: parent.width - 24
-        spacing: 8
+    function preencher(r) {
+        campoUf.indice = Math.max(0, linha.ufs.indexOf(r.uf || ""))
+        campoCest.texto = r.cestInicio || ""
+        campoDe.texto = r.vigenteDe || ""
+        campoAte.texto = r.vigenteAte || ""
+        campoSt.checked = !!r.comSt
+        campoDescricao.texto = r.descricao || ""
+        campoFonte.texto = r.fonte || ""
+        campoDispositivo.texto = r.dispositivo || ""
+        for (const c of [campoCest, campoDe, campoAte, campoDescricao, campoFonte, campoDispositivo])
+            c.erro = ""
+    }
 
-        RowLayout {
-            spacing: 8
-            Layout.fillWidth: true
-            Selecao {
-                id: campoUf
-                rotulo: "UF"
-                modelo: linha.ufs
-                Layout.preferredWidth: Tema.estreito ? 64 : 92
-                onEscolhido: linha.mudou("uf", linha.ufs[indice])
-            }
-            Campo {
-                id: campoCest
-                rotulo: "CEST"
-                dica: "01"
-                maximo: 9
-                Layout.preferredWidth: Tema.estreito ? 56 : 80
-                onEditado: linha.mudou("cestInicio", texto)
-            }
-            Marcar {
-                id: campoSt
-                text: "Com ST"
-                Layout.alignment: Qt.AlignBottom
-                Layout.bottomMargin: 6
-                Layout.fillWidth: true
-                onToggled: linha.mudou("comSt", checked)
-            }
-        }
-        RowLayout {
-            spacing: 8
-            Layout.fillWidth: true
-            Campo {
-                id: campoDe
-                rotulo: "Vale de"
-                dica: "dd/mm/aaaa"
-                maximo: 10
-                Layout.fillWidth: true
-                onEditado: linha.mudou("vigenteDe", texto)
-            }
-            Campo {
-                id: campoAte
-                rotulo: "Até"
-                dica: "sem fim"
-                maximo: 10
-                Layout.fillWidth: true
-                onEditado: linha.mudou("vigenteAte", texto)
-            }
-            Botao {
-                tipo: "discreto"
-                icone: "lixeira"
-                largura: 36
-                leftPadding: 0
-                rightPadding: 0
-                Layout.alignment: Qt.AlignBottom
-                onClicked: linha.remover()
-            }
+    function valores() {
+        return { uf: linha.ufs[campoUf.indice] || "", cestInicio: campoCest.texto, vigenteDe: campoDe.texto,
+                 vigenteAte: campoAte.texto, comSt: campoSt.checked, descricao: campoDescricao.texto,
+                 fonte: campoFonte.texto, dispositivo: campoDispositivo.texto }
+    }
+
+    function focar() {
+        if (linha.travada)
+            campoAte.focar()
+        else
+            campoCest.focar()
+    }
+
+    RowLayout {
+        spacing: 10
+        Layout.fillWidth: true
+        Selecao {
+            id: campoUf
+            rotulo: "Estado"
+            modelo: linha.ufs
+            enabled: !linha.travada
+            Layout.preferredWidth: Tema.estreito ? 80 : 110
         }
         Campo {
-            id: campoDescricao
-            dica: "Descrição (ex.: Portaria SRE 34/2026)"
-            maximo: 120
-            altura: 34
-            tamanhoFonte: 14
+            id: campoCest
+            rotulo: "Começo do CEST"
+            dica: "01"
+            maximo: 9
+            enabled: !linha.travada
             Layout.fillWidth: true
-            onEditado: linha.mudou("descricao", texto)
         }
     }
-
-    Component.onCompleted: {
-        campoUf.indice = Math.max(0, linha.ufs.indexOf(uf))
-        campoCest.texto = cestInicio
-        campoDe.texto = vigenteDe
-        campoAte.texto = vigenteAte
-        campoSt.checked = comSt
-        campoDescricao.texto = descricao
-        campoDescricao.entrada.cursorPosition = 0
+    Marcar {
+        id: campoSt
+        text: "Com substituição tributária (ST)"
+        enabled: !linha.travada
+    }
+    RowLayout {
+        spacing: 10
+        Layout.fillWidth: true
+        Campo {
+            id: campoDe
+            rotulo: "Vale a partir de"
+            dica: "dd/mm/aaaa"
+            maximo: 10
+            enabled: !linha.travada
+            Layout.fillWidth: true
+        }
+        Campo {
+            id: campoAte
+            rotulo: "Até (vazio: sem fim)"
+            dica: "dd/mm/aaaa"
+            maximo: 10
+            Layout.fillWidth: true
+        }
+    }
+    Campo {
+        id: campoDescricao
+        rotulo: "Descrição"
+        dica: "ex.: Autopeças fora da ST"
+        maximo: 120
+        Layout.fillWidth: true
+    }
+    Campo {
+        id: campoFonte
+        rotulo: "Fonte (o ato e onde foi lido)"
+        dica: "ex.: Portaria SRE 34/2026, legislacao.fazenda.sp.gov.br"
+        maximo: 200
+        Layout.fillWidth: true
+    }
+    Campo {
+        id: campoDispositivo
+        rotulo: "Artigo, anexo ou item"
+        maximo: 200
+        Layout.fillWidth: true
     }
 }

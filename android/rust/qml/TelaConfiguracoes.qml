@@ -300,7 +300,6 @@ FocusScope {
             fiscal.item.dadosDaLoja = situacao
             const conferencia = Api.chamar("fiscal_conferir")
             if (conferencia.ok)
-                // Não chamar preencher(): regras pode conter alterações de ST pendentes.
                 fiscal.item.dados = conferencia.dados
             else
                 janela.avisar(conferencia.erro, "erro")
@@ -1222,10 +1221,8 @@ FocusScope {
         }
         if (secao === "backup" && parteBackup.item && parteBackup.item.aoEsc())
             return
-        if (secao === "fiscal" && fiscal.item && fiscal.item.regrasAlteradas)
-            janela.confirmar("Descartar as regras alteradas?", "As mudanças nas regras de ST ainda não foram salvas.",
-                             "Descartar", () => tela.sair(), "perigo")
-        else if (alterado)
+        // FIS-P5: as regras de ST mudam num painel à parte, uma de cada vez (nada fica pendente na saída).
+        if (alterado)
             janela.confirmar("Descartar alterações?", "As configurações mudadas ainda não foram salvas.",
                              "Descartar", () => tela.descartarAlteracoesESair(), "perigo")
         else
