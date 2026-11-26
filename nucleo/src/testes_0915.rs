@@ -1240,3 +1240,32 @@ fn t028_chave_vazia_vira_pendencia_e_nao_entra() {
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM sync_pendencia WHERE motivo = 'invalida'"), 6);
     assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_juncao"), 0);
 }
+
+/// T030 (R12-B3 da 007): a chave da alteração tem de ser a mesma dos dados. Antes, um "gravar" com a chave ["d"] e os
+/// dados de "e" entrava: gravava o registro "e" e a cadeia de versões ficava no "d" (os dois caixas divergiam).
+#[test]
+fn t030_chave_diferente_dos_dados_vira_pendencia_e_nao_entra() {
+    let mut b = Banco::em_memoria().unwrap();
+    com_par(&b, "caixa-2", "Caixa 2");
+    let outra = alteracao(
+        "k1",
+        1,
+        "produto_juncao",
+        json!(["d"]),
+        Some(json!({ "produto_id": "e", "para_id": "k", "em": "", "por": null, "motivo": "x" })),
+        None,
+    );
+    let composta = alteracao(
+        "k2",
+        2,
+        "produto_preco",
+        json!(["p1", "varejo"]),
+        Some(json!({ "produto_id": "p1", "tabela": "atacado", "preco": 1000 })),
+        None,
+    );
+    let r = aplicar_lote(&mut b, &[outra, composta], 0);
+    assert_eq!(r.pendentes, 2);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM sync_pendencia WHERE motivo = 'invalida'"), 2);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_juncao"), 0);
+    assert_eq!(contar(&b.conn, "SELECT COUNT(*) FROM produto_preco WHERE tabela = 'atacado'"), 0);
+}

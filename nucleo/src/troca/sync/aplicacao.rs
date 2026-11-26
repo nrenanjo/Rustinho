@@ -165,6 +165,15 @@ pub(super) fn invalida(a: &Alteracao, chave_cols: &[String]) -> Option<String> {
                 if let Some(k) = chave_cols.iter().find(|k| m.get(k.as_str()).is_some_and(Value::is_null)) {
                     return Some(format!("a coluna {k} da chave está vazia nos dados"));
                 }
+                // T030 (R12-B3 da 007): a chave e os dados saem da mesma linha (`json_array` e `json_object` do
+                // gatilho); se não batem, gravar os dados mudaria outro registro e a cadeia de versões ficaria neste.
+                // (O texto vazio na chave continua aceito: há chaves compostas antigas com `''`, e recusá-lo deixaria
+                // registros legítimos parados para sempre.)
+                if let Some(k) =
+                    chave_cols.iter().zip(&valores).find(|(k, v)| m.get(k.as_str()) != Some(*v)).map(|p| p.0)
+                {
+                    return Some(format!("a coluna {k} dos dados não é a da chave"));
+                }
             }
             _ => return Some("os dados não são um registro (objeto JSON)".into()),
         }
