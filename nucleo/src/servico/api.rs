@@ -2502,7 +2502,7 @@ impl Servico {
                 backup::desligar_drive(&self.banco.conn)?;
                 backup::resumo(&self.banco.conn, self.banco.caminho.as_deref(), true)
             }
-            "backup_nuvem_lista" => Ok(json!(backup::listar_nuvem()?)),
+            "backup_nuvem_lista" => Ok(json!(backup::listar_nuvem(&self.banco.conn)?)),
             "backup_conferir" => {
                 let d: Restaurar = ler(dados)?;
                 Ok(json!(backup::conferir(&self.banco.conn, std::path::Path::new(&d.arquivo), &d.senha)?))

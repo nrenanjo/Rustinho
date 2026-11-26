@@ -1477,6 +1477,37 @@ fn base_nuvem() -> String {
     std::env::var("RUSTINHO_REMOTO").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| format!("{REMOTO}:{PASTA_NUVEM}"))
 }
 
+/// E7-1 da 0.9.19 (P-08 (a), 12.4 (a), decisões do proprietário de 26/11/2026): cada computador manda as cópias para a
+/// pasta dele, dentro da pasta da loja, só com identificadores (`<loja_id>/<dispositivo_id>/diarias`): duas lojas na
+/// mesma conta do Google nunca se misturam (A4), e o Google não vê o nome da loja nem o do caixa. As cópias de antes, na
+/// raiz, ficam onde estão até a retenção delas (só quem as mandou apaga).
+///
+/// Sem a identidade da loja (um caixa de loja de antes da 0.9.15 que ainda não a recebeu pela troca, `loja::garantir_ao_
+/// abrir`), devolve `None`, e o envio continua como antes (a raiz, com o nome de antes): o backup nunca para por isso.
+fn pasta_do_caixa(conn: &Connection) -> Resultado<Option<String>> {
+    let loja = config::ler(conn, "loja_id")?.unwrap_or_default();
+    let disp = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    if loja.trim().is_empty() || disp.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format!("{}/{}/{}/diarias", base_nuvem(), loja.trim(), disp.trim())))
+}
+
+/// O nome da cópia no Drive (12.4 (a)): o do computador com o nome do caixa trocado por um identificador curto deste
+/// computador ("rustinho-AAAAMMDD-HHMMSS-<8 letras do dispositivo>[-antes].rbk"). Continua um nome de backup
+/// (`ler_nome`) e continua ordenável pela data.
+fn nome_no_drive(conn: &Connection, local: &str) -> Resultado<String> {
+    let b = ler_nome(local).ok_or_else(|| Erro::validacao("Esse arquivo não é um backup do Rustinho."))?;
+    let disp: String = config::ler(conn, "dispositivo_id")?
+        .unwrap_or_default()
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .take(8)
+        .collect();
+    let disp = if disp.is_empty() { "caixa".to_string() } else { disp };
+    Ok(format!("rustinho-{}-{}-{disp}{}.{EXTENSAO}", b.dia, b.hora, if b.antes { "-antes" } else { "" }))
+}
+
 /// Roda o rclone esperando no máximo `limite`. Devolve a saída.
 fn rclone(args: &[&str], limite: Duration) -> Resultado<String> {
     let mut filho = comando_rclone()
@@ -1601,9 +1632,8 @@ pub fn desligar_drive(conn: &Connection) -> Resultado<()> {
     Ok(())
 }
 
-fn nomes_na_nuvem() -> Resultado<Vec<(String, i64)>> {
-    match rclone(&["lsf", "--files-only", "--format", "ps", "--separator", "|", &base_nuvem()], Duration::from_secs(60))
-    {
+fn nomes_na_nuvem(pasta: &str) -> Resultado<Vec<(String, i64)>> {
+    match rclone(&["lsf", "--files-only", "--format", "ps", "--separator", "|", pasta], Duration::from_secs(60)) {
         Ok(s) => Ok(s
             .lines()
             .filter_map(|l| {
@@ -1621,6 +1651,15 @@ fn nomes_na_nuvem() -> Resultado<Vec<(String, i64)>> {
 /// uma por linha. Configuração local: não vai para a troca de dados (não está
 /// em `sync::CONFIG_DA_LOJA`) e fica como está ao restaurar um backup.
 const ENVIADAS_AO_DRIVE: &str = "backup_nuvem_enviadas";
+/// E7-1: as cópias que este computador mandou para a pasta dele (`pasta_do_caixa`), pelo nome no Drive. A lista antiga
+/// (`ENVIADAS_AO_DRIVE`) fica só para as cópias de antes, na raiz, até a retenção delas.
+const ENVIADAS_NA_PASTA: &str = "backup_nuvem_enviadas_pasta";
+
+fn lista_local(conn: &Connection, chave: &str) -> Resultado<Vec<String>> {
+    Ok(config::ler(conn, chave)?
+        .map(|t| t.lines().filter(|l| ler_nome(l).is_some()).map(String::from).collect())
+        .unwrap_or_default())
+}
 
 fn enviadas_ao_drive(conn: &Connection) -> Resultado<Vec<String>> {
     Ok(config::ler(conn, ENVIADAS_AO_DRIVE)?
@@ -1686,9 +1725,14 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
             ));
         }
         let daqui = tamanho_e_md5(&c.caminho)?;
-        let remoto = format!("{}/{}", base_nuvem(), c.nome);
-        let la = nomes_na_nuvem()?;
-        let mut minhas = enviadas_ao_drive(conn)?;
+        let destino = pasta_do_caixa(conn)?;
+        let (pasta, nome, chave_da_lista) = match &destino {
+            Some(p) => (p.clone(), nome_no_drive(conn, &c.nome)?, ENVIADAS_NA_PASTA),
+            None => (base_nuvem(), c.nome.clone(), ENVIADAS_AO_DRIVE),
+        };
+        let remoto = format!("{pasta}/{nome}");
+        let la = nomes_na_nuvem(&pasta)?;
+        let mut minhas = lista_local(conn, chave_da_lista)?;
         let enviar = || -> Resultado<()> {
             dizer("Enviando para o Google Drive…");
             // Pelo resumo (não pela data): uma cópia de lá com o mesmo
@@ -1699,7 +1743,7 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         // Lá só com o mesmo nome e o mesmo tamanho não precisa mandar agora;
         // a conferência abaixo decide se é a mesma cópia.
         let mut enviou = false;
-        if !la.iter().any(|(n, t)| *n == c.nome && *t == daqui.0) {
+        if !la.iter().any(|(n, t)| *n == nome && *t == daqui.0) {
             enviar()?;
             enviou = true;
         }
@@ -1713,11 +1757,11 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         }
         // Mandada por este computador (conferida ou não): é dele para a
         // retenção apagar um dia.
-        if !minhas.contains(&c.nome) {
-            minhas.push(c.nome.clone());
+        if !minhas.contains(&nome) {
+            minhas.push(nome.clone());
         }
         if !conferida {
-            config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
+            config::gravar(conn, chave_da_lista, &minhas.join("\n"))?;
             return Err(Erro::validacao(
                 "A cópia no Google Drive não confere com a deste computador (tamanho ou conteúdo diferente): ela \
                  não conta como guardada. O Rustinho manda de novo no próximo envio.",
@@ -1726,26 +1770,44 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
         config::gravar(
             conn,
             CONFERIDA_NO_DRIVE,
-            &json!({ "nome": c.nome, "tamanho": daqui.0, "md5": daqui.1, "quando": tempo::agora() }).to_string(),
+            &json!({ "nome": nome, "pasta": pasta, "tamanho": daqui.0, "md5": daqui.1, "quando": tempo::agora() })
+                .to_string(),
         )?;
         let hoje: String = conn.query_row("SELECT strftime('%Y%m%d', 'now', 'localtime')", [], |l| l.get(0))?;
         let mut nomes: Vec<String> = la.into_iter().map(|x| x.0).collect();
-        if !nomes.contains(&c.nome) {
-            nomes.push(c.nome.clone());
+        if !nomes.contains(&nome) {
+            nomes.push(nome.clone());
         }
         // T097 (N2 da 3ª conferência): o Drive com a mesma trava da pasta (T092): sem a chave confirmada por um
         // gerente neste caixa, nenhuma cópia antiga sai (podem ser as únicas que abrem).
-        let apagar = if chave_confirmada(conn)? { apagar_no_drive(&nomes, &minhas, &hoje, a.dias) } else { Vec::new() };
+        let confirmada = chave_confirmada(conn)?;
+        let apagar = if confirmada { apagar_no_drive(&nomes, &minhas, &hoje, a.dias) } else { Vec::new() };
         for velho in apagar {
             // Se não deu para apagar agora, continua na lista: tenta de novo
             // no próximo envio.
-            if rclone(&["deletefile", &format!("{}/{}", base_nuvem(), velho)], Duration::from_secs(60)).is_ok() {
+            if rclone(&["deletefile", &format!("{pasta}/{velho}")], Duration::from_secs(60)).is_ok() {
                 minhas.retain(|n| *n != velho);
             }
         }
         // Só as que continuam lá (as apagadas por outro caminho saem da lista).
         minhas.retain(|n| nomes.contains(n));
-        config::gravar(conn, ENVIADAS_AO_DRIVE, &minhas.join("\n"))?;
+        config::gravar(conn, chave_da_lista, &minhas.join("\n"))?;
+        // E7-1: as cópias de antes, na raiz, mandadas por este computador, seguem a mesma retenção até sumirem. Um erro
+        // aqui não desfaz o envio de hoje (já conferido): fica para o próximo.
+        let antigas = enviadas_ao_drive(conn)?;
+        if destino.is_some() && confirmada && !antigas.is_empty() {
+            if let Ok(la_raiz) = nomes_na_nuvem(&base_nuvem()) {
+                let raiz: Vec<String> = la_raiz.into_iter().map(|x| x.0).collect();
+                let mut ficam = antigas.clone();
+                for velho in apagar_no_drive(&raiz, &antigas, &hoje, a.dias) {
+                    if rclone(&["deletefile", &format!("{}/{velho}", base_nuvem())], Duration::from_secs(60)).is_ok() {
+                        ficam.retain(|n| *n != velho);
+                    }
+                }
+                ficam.retain(|n| raiz.contains(n));
+                config::gravar(conn, ENVIADAS_AO_DRIVE, &ficam.join("\n"))?;
+            }
+        }
         Ok(())
     })();
     match &r {
@@ -1759,16 +1821,56 @@ fn enviar_pendentes(conn: &Connection, caminho_db: &Path) -> Resultado<()> {
 }
 
 /// Cópias que estão no Google Drive, mais novas primeiro.
-pub fn listar_nuvem() -> Resultado<Vec<Copia>> {
-    let mut lista: Vec<(NomeBackup, Copia)> = nomes_na_nuvem()?
+/// E7-1: as de antes (na raiz) e as das pastas da loja deste computador (`<loja_id>/<dispositivo>/diarias/`, de todos os
+/// caixas da loja). O `nome` é o caminho a partir da raiz do Rustinho no Drive (o que `restaurar` baixa); as de outra loja
+/// na mesma conta não aparecem.
+pub fn listar_nuvem(conn: &Connection) -> Resultado<Vec<Copia>> {
+    let mut achadas: Vec<(String, i64, String)> =
+        nomes_na_nuvem(&base_nuvem())?.into_iter().map(|(n, t)| (n.clone(), t, String::new())).collect();
+    let loja = config::ler(conn, "loja_id")?.unwrap_or_default();
+    let este = config::ler(conn, "dispositivo_id")?.unwrap_or_default();
+    if !loja.is_empty() {
+        let pasta_loja = format!("{}/{loja}", base_nuvem());
+        match rclone(
+            &["lsf", "-R", "--files-only", "--format", "ps", "--separator", "|", &pasta_loja],
+            Duration::from_secs(60),
+        ) {
+            Ok(saida) => {
+                for l in saida.lines() {
+                    let Some((caminho, t)) = l.split_once('|') else { continue };
+                    let partes: Vec<&str> = caminho.split('/').collect();
+                    if let [disp, "diarias", arquivo] = partes[..] {
+                        achadas.push((
+                            format!("{loja}/{disp}/diarias/{arquivo}"),
+                            t.trim().parse().unwrap_or(0),
+                            disp.to_string(),
+                        ));
+                    }
+                }
+            }
+            Err(e) if e.to_string().contains("directory not found") => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let nome_deste = texto::compactar(&config::nome_caixa(conn)?);
+    let mut lista: Vec<(NomeBackup, Copia)> = achadas
         .into_iter()
-        .filter_map(|(n, tamanho)| {
-            let b = ler_nome(&n)?;
+        .filter_map(|(n, tamanho, disp)| {
+            let b = ler_nome(n.rsplit('/').next().unwrap_or(&n))?;
+            // Nas pastas novas o nome não traz o caixa (12.4): o deste computador pelo nome dele; o de outro caixa,
+            // "Outro caixa".
+            let caixa = if disp.is_empty() {
+                b.caixa.clone()
+            } else if disp == este {
+                nome_deste.clone()
+            } else {
+                "Outro caixa".to_string()
+            };
             let c = Copia {
                 nome: n,
                 caminho: String::new(),
                 quando: quando_de(&b),
-                caixa: b.caixa.clone(),
+                caixa,
                 tamanho,
                 tem_senha: true,
                 antes: b.antes,
@@ -1814,11 +1916,14 @@ pub fn restaurar_por(
     let tmp = Temporaria::nova(&pasta_privada(caminho_db))?;
 
     let local = if nuvem {
-        if ler_nome(arquivo).is_none() {
+        // E7-1: `arquivo` pode ser o caminho na pasta da loja (`<loja>/<caixa>/diarias/<nome>`); o nome é o do fim, e
+        // o caminho não pode subir (`..`) nem começar na raiz.
+        let base_do_nome = arquivo.rsplit('/').next().unwrap_or(arquivo);
+        if ler_nome(base_do_nome).is_none() || arquivo.split('/').any(|p| p == ".." || p.is_empty()) {
             return Err(Erro::validacao("Esse arquivo não é um backup do Rustinho."));
         }
         dizer("Baixando do Google Drive…");
-        let destino = tmp.0.join(arquivo);
+        let destino = tmp.0.join(base_do_nome);
         rclone(
             &["copyto", &format!("{}/{arquivo}", base_nuvem()), &destino.display().to_string()],
             Duration::from_secs(1800),
@@ -2917,16 +3022,76 @@ pub(crate) mod testes {
         std::thread::sleep(Duration::from_millis(1100));
         fazer(&caminho, false).unwrap();
         enviar_pendentes(&b.conn, &caminho).unwrap();
-        let la = listar_nuvem().unwrap();
+        let la = listar_nuvem(&b.conn).unwrap();
         assert_eq!(la.len(), 1);
         assert!(situacao(&b.conn).unwrap().nuvem_erro.is_empty());
         // Enviar de novo não duplica.
         enviar_pendentes(&b.conn, &caminho).unwrap();
-        assert_eq!(listar_nuvem().unwrap().len(), 1);
+        assert_eq!(listar_nuvem(&b.conn).unwrap().len(), 1);
 
         config::gravar(&b.conn, "loja_nome", "Mudou").unwrap();
         restaurar(&mut b.conn, Some(&caminho), &la[0].nome, true, "1111").unwrap();
         assert_eq!(config::nome_loja(&b.conn).unwrap(), "Na Nuvem");
+        std::env::remove_var("RUSTINHO_REMOTO");
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+
+    /// E7-1 da 0.9.19 (A4; P-08 (a) e 12.4 (a), decisões de 26/11/2026): duas lojas na mesma conta do Google não se
+    /// misturam (cada uma só vê e restaura as suas), as cópias ficam em `<loja_id>/<dispositivo_id>/diarias/`, o nome no
+    /// Drive não traz o nome do caixa, e a cópia de antes (na raiz) continua na lista da loja que a mandou.
+    #[test]
+    fn e7_1_duas_lojas_na_mesma_conta_nao_se_misturam() {
+        let _trava = UM_POR_VEZ.lock().unwrap_or_else(|e| e.into_inner());
+        if !rclone_instalado() {
+            eprintln!("rclone não instalado: teste da nuvem pulado");
+            return;
+        }
+        let pasta = pasta_teste("nuvem-duas-lojas");
+        let nuvem = pasta.join("drive");
+        std::fs::create_dir_all(&nuvem).unwrap();
+        std::env::set_var("RUSTINHO_REMOTO", nuvem.display().to_string());
+        let loja = |nome: &str, caixa: &str, id: &str| {
+            let caminho = pasta.join(nome).join("rustinho.db");
+            std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+            let b = Banco::abrir(&caminho).unwrap();
+            config::gravar(&b.conn, "loja_id", id).unwrap();
+            config::gravar(&b.conn, "loja_nome", nome).unwrap();
+            config::gravar(&b.conn, "caixa_nome", caixa).unwrap();
+            config::gravar(&b.conn, "backup_nuvem", "1").unwrap();
+            let ana = crate::usuarios::criar(&b.conn, &b.dispositivo, "Ana", "1111", true).unwrap();
+            crate::usuarios::definir_gerente(&b.conn, &ana.id, true).unwrap();
+            gerente_conferido(&b.conn, &ana.id, "1111", None).unwrap();
+            fazer(&caminho, false).unwrap();
+            enviar_pendentes(&b.conn, &caminho).unwrap();
+            (b, caminho)
+        };
+        // Uma cópia de antes, na raiz, mandada pela loja A (a lista antiga dela).
+        let antiga = format!("rustinho-20260101-180000-caixa1.{EXTENSAO}");
+        std::fs::write(nuvem.join(&antiga), b"x").unwrap();
+        let (mut a, caminho_a) = loja("Loja A", "Caixa 1", "0193aaaa-aaaa-7aaa-aaaa-aaaaaaaaaaaa");
+        config::gravar(&a.conn, ENVIADAS_AO_DRIVE, &antiga).unwrap();
+        let (b, _) = loja("Loja B", "Caixa 1", "0193bbbb-bbbb-7bbb-bbbb-bbbbbbbbbbbb");
+        let da_a = listar_nuvem(&a.conn).unwrap();
+        let da_b = listar_nuvem(&b.conn).unwrap();
+        let novas = |l: &[Copia]| l.iter().filter(|c| c.nome.contains("/diarias/")).count();
+        assert_eq!(novas(&da_a), 1, "a loja A vê só a dela: {:?}", da_a.iter().map(|c| &c.nome).collect::<Vec<_>>());
+        assert_eq!(novas(&da_b), 1, "a loja B vê só a dela: {:?}", da_b.iter().map(|c| &c.nome).collect::<Vec<_>>());
+        let nome_a = &da_a.iter().find(|c| c.nome.contains("/diarias/")).unwrap().nome;
+        assert!(nome_a.starts_with("0193aaaa-aaaa-7aaa-aaaa-aaaaaaaaaaaa/"), "na pasta da loja: {nome_a}");
+        assert!(!nome_a.to_lowercase().contains("caixa1"), "sem o nome do caixa no Drive: {nome_a}");
+        assert_eq!(
+            da_a.iter().find(|c| c.nome.contains("/diarias/")).unwrap().caixa,
+            "caixa1",
+            "o caixa pelo nome dele (como os nomes de antes)"
+        );
+        assert!(da_a.iter().any(|c| c.nome == antiga), "a cópia de antes (raiz) continua na lista");
+        // Restaurar pela pasta nova.
+        config::gravar(&a.conn, "loja_nome", "Mudou").unwrap();
+        let nome_a = nome_a.clone();
+        restaurar(&mut a.conn, Some(&caminho_a), &nome_a, true, "1111").unwrap();
+        assert_eq!(config::nome_loja(&a.conn).unwrap(), "Loja A");
+        // Um caminho que sobe não é aceito.
+        assert!(restaurar(&mut a.conn, Some(&caminho_a), &format!("../{antiga}"), true, "1111").is_err());
         std::env::remove_var("RUSTINHO_REMOTO");
         let _ = std::fs::remove_dir_all(&pasta);
     }
@@ -3008,7 +3173,7 @@ pub(crate) mod testes {
         config::gravar(&b.conn, "backup_publica", &hex(&publica_de(&outra))).unwrap();
         fazer(&caminho, false).unwrap();
         let _ = enviar_pendentes(&b.conn, &caminho);
-        let ficaram: Vec<String> = nomes_na_nuvem().unwrap().into_iter().map(|x| x.0).collect();
+        let ficaram: Vec<String> = nomes_na_nuvem(&base_nuvem()).unwrap().into_iter().map(|x| x.0).collect();
         for n in &minhas {
             assert!(ficaram.contains(n), "com a chave não confirmada, o Drive apagou a cópia antiga {n}");
         }
@@ -3142,7 +3307,7 @@ pub(crate) mod testes {
 
         fazer(&caminho, false).unwrap();
         enviar_pendentes(&b.conn, &caminho).unwrap();
-        let ficaram: Vec<String> = nomes_na_nuvem().unwrap().into_iter().map(|x| x.0).collect();
+        let ficaram: Vec<String> = nomes_na_nuvem(&base_nuvem()).unwrap().into_iter().map(|x| x.0).collect();
         for n in &dele {
             assert!(ficaram.contains(n), "apagou a cópia do outro computador: {n}");
         }
