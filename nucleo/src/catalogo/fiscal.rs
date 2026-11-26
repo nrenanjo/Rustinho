@@ -96,7 +96,14 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
     };
     let automatico = csosn_peca.is_empty();
     let csosn = if automatico { csosn_auto.to_string() } else { csosn_peca.to_string() };
-    let cfop = if matches!(csosn.as_str(), "500" | "201" | "202" | "203") { "5405" } else { "5102" }.to_string();
+    // 500: a ST já foi paga antes, a loja é a substituída (CFOP 5.405). 201, 202 e 203: a loja cobra a ST, é a
+    // substituta (CFOP 5.403). Tabela de CFOP do CONFAZ; CSOSN do MOC 7.0, Anexo I.
+    let cfop = match csosn.as_str() {
+        "500" => "5405",
+        "201" | "202" | "203" => "5403",
+        _ => "5102",
+    }
+    .to_string();
     let alerta = match (csosn.as_str(), com_st) {
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
@@ -784,6 +791,28 @@ mod testes {
 
         // pneus (CEST 16) também
         assert_eq!(tributacao(&b.conn, "SP", "16.001.00", "", "2026-10-02").unwrap().csosn, "102");
+    }
+
+    /// T013 (etapa 3, conferência do artefato 10): os CSOSN 201, 202 e 203 são "com cobrança do ICMS por Substituição
+    /// Tributária" (MOC 7.0, Anexo I): quem vende é o substituto. O CFOP da revenda de mercadoria de terceiros nessa
+    /// condição é o 5.403 ("na condição de contribuinte substituto"); o 5.405 é só do substituído (CSOSN 500). Tabela
+    /// de CFOP vigente do CONFAZ (redação de 01/06/2024). Antes o Rustinho sugeria 5405 para os quatro.
+    #[test]
+    fn t013_cfop_do_substituto_e_5403_e_o_do_substituido_e_5405() {
+        let b = Banco::em_memoria().unwrap();
+        for csosn in ["201", "202", "203"] {
+            let t = tributacao(&b.conn, "SP", "01.001.00", csosn, "2026-09-30").unwrap();
+            assert_eq!((t.csosn.as_str(), t.cfop.as_str()), (csosn, "5403"), "CSOSN {csosn}");
+        }
+        let substituido = tributacao(&b.conn, "SP", "01.001.00", "500", "2026-09-30").unwrap();
+        assert_eq!(substituido.cfop, "5405");
+        for csosn in ["102", "103", "300", "400", "900"] {
+            assert_eq!(
+                tributacao(&b.conn, "SP", "01.001.00", csosn, "2026-10-13").unwrap().cfop,
+                "5102",
+                "CSOSN {csosn}"
+            );
+        }
     }
 
     #[test]
