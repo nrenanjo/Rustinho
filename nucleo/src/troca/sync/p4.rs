@@ -219,6 +219,25 @@ pub(super) fn registro_em_json(conn: &Connection, loja: &str) -> Resultado<Value
     Ok(serde_json::to_value(aprovados::linhas(conn, loja)?)?)
 }
 
+/// T025 (007): a junção do registro lê as linhas gravadas e depois grava; fora de transação (a conexão do cliente da
+/// troca), o `SAVEPOINT` de `aprovados::juntar` era uma transação de leitura e outra conexão que gravasse no meio
+/// fazia o SQLite recusar na hora ("database is locked"). Aqui ela já começa reservando a gravação (a conexão da troca
+/// é `Immediate`); dentro de uma transação de quem chama, fica nela.
+pub(super) fn juntar_na_cadeia_na_vez(
+    conn: &Connection,
+    raiz: &Chave,
+    loja: &str,
+    linhas: &aprovados::Linhas,
+) -> Resultado<aprovados::Juntadas> {
+    if !conn.is_autocommit() {
+        return aprovados::juntar_na_cadeia(conn, raiz, loja, linhas);
+    }
+    let tx = conn.unchecked_transaction()?;
+    let j = aprovados::juntar_na_cadeia(&tx, raiz, loja, linhas)?;
+    tx.commit()?;
+    Ok(j)
+}
+
 /// Junta o registro que veio numa mensagem P4 (acrescenta, nunca tira; cada linha
 /// se confere sozinha). Mensagem sem registro não muda nada; registro estragado é
 /// recusado inteiro.
@@ -227,7 +246,7 @@ pub(super) fn juntar_registro(conn: &Connection, ctx: &ContextoP4, mensagem: &Va
     let linhas: aprovados::Linhas = serde_json::from_value(r.clone())
         .map_err(|_| Erro::validacao("O registro de caixas que veio do outro caixa está estragado."))?;
     // C2R2-3: só o que entra na cadeia da raiz (lixo bem assinado fica de fora).
-    let j = aprovados::juntar_na_cadeia(conn, &ctx.raiz, &ctx.loja, &linhas)?;
+    let j = juntar_na_cadeia_na_vez(conn, &ctx.raiz, &ctx.loja, &linhas)?;
     if j.sem_lugar > 0 {
         // C2R5-4: só no registro técnico (sem repetir); o aviso do Início vem do estado.
         anotar_sem_repetir(
@@ -505,6 +524,28 @@ pub(super) fn tem_convite_ativo(conn: &Connection, loja: &str) -> Resultado<bool
 pub const TEXTO_CONVITE_NAO_CONFERE: &str =
     "O convite não confere (vencido, já usado, de outra loja ou de outro caixa). Peça ao gerente um convite novo.";
 
+/// T025 (007): consome o convite numa transação que já começa reservando a gravação (a conexão da troca é
+/// `Immediate`). Sem ela, o `SAVEPOINT` do cofre abria uma transação de leitura que depois tentava gravar: se outra
+/// conexão deste caixa (o motor, o balcão) gravasse no meio, o SQLite recusava na hora com "database is locked", sem
+/// esperar a vez, e o caixa que entrava pelo convite recebia o erro (1 em 4 sob carga).
+pub(super) fn consumir_convite_na_vez(
+    conn: &Connection,
+    aprovador: &crate::troca::protocolo4::Identidade,
+    raiz: &Chave,
+    loja: &str,
+    convite_id: &str,
+    pedido: &aprovados::Pedido,
+    agora: &str,
+) -> Resultado<aprovados::Aprovacao> {
+    if !conn.is_autocommit() {
+        return cofre::consumir_convite_e_aprovar(conn, aprovador, raiz, loja, convite_id, pedido, agora);
+    }
+    let tx = conn.unchecked_transaction()?;
+    let a = cofre::consumir_convite_e_aprovar(&tx, aprovador, raiz, loja, convite_id, pedido, agora)?;
+    tx.commit()?;
+    Ok(a)
+}
+
 /// T009 (etapa 5, A6): a resposta da loja a um pedido de entrada pelo convite. O
 /// convite tem de casar com a prova amarrada a esta sessão; aí o caixa novo é
 /// aprovado (assinado por este caixa, com o gerente do convite e auditoria) e
@@ -535,7 +576,7 @@ pub(super) fn responder_ingresso(
         return recusa(TEXTO_CONVITE_NAO_CONFERE.into());
     };
     if let Err(e) =
-        cofre::consumir_convite_e_aprovar(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &c.id, pedido, &agora)
+        consumir_convite_na_vez(conn, &ctx.identidade.identidade, &ctx.raiz, &ctx.loja, &c.id, pedido, &agora)
     {
         return recusa(e.to_string());
     }

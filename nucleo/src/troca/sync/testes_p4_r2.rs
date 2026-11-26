@@ -398,3 +398,77 @@ fn p4_negocio_endereco_desconhecido() {
     .join()
     .unwrap();
 }
+
+/// T025 (007): outra conexão deste caixa grava enquanto o convite é consumido. Antes, o consumo abria uma transação
+/// de leitura (`SAVEPOINT` fora de transação) e, ao gravar depois da outra, o SQLite recusava na hora com "database
+/// is locked" (o `p4_aprovar_este_caixa` do c2r2_1 falhava 1 em 4 sob carga). Agora ele espera a vez e aprova.
+#[test]
+fn t025_convite_consumido_enquanto_outra_conexao_grava() {
+    const LOJA: &str = "loja-t025";
+    let caminho = temp("t025");
+    let (b, gerente) = loja_em_arquivo(&caminho, "Caixa 1");
+    let raiz = Identidade::gerar().unwrap();
+    cofre::garantir_raiz_se_aplicavel(&b.conn, &raiz, false, LOJA, "Caixa 1", &gerente, true).unwrap();
+    let novo = Identidade::gerar().unwrap();
+    let pedido = aprovados::Pedido::com_dispositivo(&novo, "disp-t025");
+    let conv =
+        cofre::gerar_convite(&b.conn, &raiz, &raiz.publica(), LOJA, &pedido.codigo(), "Caixa 2", &gerente, "").unwrap();
+    // A conexão da troca (a do servidor), e outra que segura a gravação e grava logo depois que o consumo começa a ler.
+    let conn = abrir_conexao(&caminho).unwrap();
+    let (pronto, esperar) = std::sync::mpsc::channel();
+    let outra = {
+        let caminho = caminho.clone();
+        thread::spawn(move || {
+            let c = abrir_conexao(&caminho).unwrap();
+            c.execute_batch("BEGIN IMMEDIATE").unwrap();
+            config::gravar(&c, "t025_outra_conexao", "gravou").unwrap();
+            pronto.send(()).unwrap();
+            thread::sleep(Duration::from_millis(400));
+            c.execute_batch("COMMIT").unwrap();
+        })
+    };
+    esperar.recv().unwrap();
+    let r = p4::consumir_convite_na_vez(&conn, &raiz, &raiz.publica(), LOJA, &conv.id, &pedido, &crate::tempo::agora());
+    outra.join().unwrap();
+    let a = r.expect("o convite é consumido depois que a outra conexão grava");
+    assert_eq!(a.chave, novo.publica());
+    assert_eq!(config::ler(&conn, "t025_outra_conexao").unwrap().as_deref(), Some("gravou"));
+    let usado: Option<String> =
+        conn.query_row("SELECT usado_em FROM p4_convite WHERE id = ?1", [&conv.id], |l| l.get(0)).unwrap();
+    assert!(usado.is_some());
+}
+
+/// T025 (007): o mesmo na junção do registro de caixas que chega numa mensagem da troca (a conexão do cliente, fora
+/// de transação): outra conexão grava no meio e a junção espera a vez em vez de falhar com "database is locked".
+#[test]
+fn t025_registro_juntado_enquanto_outra_conexao_grava() {
+    const LOJA: &str = "loja-t025b";
+    let caminho = temp("t025b");
+    let (b, gerente) = loja_em_arquivo(&caminho, "Caixa 1");
+    let raiz = Identidade::gerar().unwrap();
+    cofre::garantir_raiz_se_aplicavel(&b.conn, &raiz, false, LOJA, "Caixa 1", &gerente, true).unwrap();
+    let novo = Identidade::gerar().unwrap();
+    let linhas = aprovados::Linhas {
+        aprovacoes: vec![aprovacao_a_mao(&raiz, &novo, LOJA, "disp-t025b")],
+        retiradas: Vec::new(),
+    };
+    let conn = abrir_conexao(&caminho).unwrap();
+    let (pronto, esperar) = std::sync::mpsc::channel();
+    let outra = {
+        let caminho = caminho.clone();
+        thread::spawn(move || {
+            let c = abrir_conexao(&caminho).unwrap();
+            c.execute_batch("BEGIN IMMEDIATE").unwrap();
+            config::gravar(&c, "t025_outra_conexao", "gravou").unwrap();
+            pronto.send(()).unwrap();
+            thread::sleep(Duration::from_millis(400));
+            c.execute_batch("COMMIT").unwrap();
+        })
+    };
+    esperar.recv().unwrap();
+    let r = p4::juntar_na_cadeia_na_vez(&conn, &raiz.publica(), LOJA, &linhas);
+    outra.join().unwrap();
+    let j = r.expect("o registro é juntado depois que a outra conexão grava");
+    assert_eq!(j.novas, 1, "{j:?}");
+    assert!(aprovados::autorizada(&conn, &raiz.publica(), LOJA, &novo.publica()).unwrap());
+}
