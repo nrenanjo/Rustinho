@@ -1,7 +1,8 @@
 //! T010 (0.9.19, etapa 3; requisito §6, decisão do proprietário de 25/11/2026): a descoberta dos dados fiscais
 //! nas notas que a própria loja já emitiu.
 //!
-//! Lê só XML **autorizados** (`protNFe` com cStat 100, 120 ou 150) e devolve cada dado com a nota de onde veio. Nada é
+//! Lê os XML **autorizados** (`protNFe` com cStat 100, 120 ou 150) e devolve cada dado com a nota de onde veio; a
+//! nota **denegada** (110, 301, 302, 303) entra só no último número da série, porque gastou o número. Nada é
 //! gravado aqui: a tela mostra e pede confirmação item por item. Não usa o certificado (só lê arquivos).
 //!
 //! Campos (MOC 7.0, Anexo I): `emit/CNPJ` (C02), `emit/IE` (C17), `emit/enderEmit/UF` (C12), `emit/CRT` (C21),
@@ -29,7 +30,8 @@ pub struct Achado {
     pub outros: Vec<String>,
 }
 
-/// A série de um modelo num ambiente, com o maior número já autorizado.
+/// A série de um modelo num ambiente, com o maior número já usado (autorizado ou denegado) e quantas notas
+/// autorizadas.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Serie {
@@ -125,7 +127,7 @@ fn ler_nota(xml: &str) -> Result<Nota, String> {
     let cstat = descendente(raiz, "protNFe").and_then(|p| descendente(p, "cStat")).and_then(|n| n.text()).unwrap_or("");
     // N-1 da R4: 120 é "Autorizado o uso da NF-e, com alerta" (NT 2026.002): a nota vale, e o número dela conta no piso.
     // C-8 da R5: a denegada (110, 301, 302, 303) gasta o número: entra só no piso da numeração.
-    let denegada = matches!(cstat.trim(), "110" | "301" | "302" | "303");
+    let denegada = crate::nfe_xml::cstat_denegado(cstat);
     if !crate::nfe_xml::cstat_autorizado(cstat) && !denegada {
         return Err("não está autorizada (sem protocolo de autorização)".into());
     }
@@ -180,7 +182,8 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
         crate::documento::limpar(cnpj_da_loja)
     } else {
         let mut conta: BTreeMap<String, i64> = BTreeMap::new();
-        for n in &notas {
+        // C-6 da R6: conta só as autorizadas (a tela diz "N notas autorizadas lidas").
+        for n in notas.iter().filter(|n| !n.denegada) {
             *conta.entry(crate::documento::limpar(&n.cnpj)).or_default() += 1;
         }
         if conta.len() > 1 {
@@ -209,7 +212,9 @@ pub fn descobrir_de_xml(arquivos: &[(String, String)], cnpj_da_loja: &str) -> De
     for n in &da_loja {
         let e = series.entry((n.ambiente, n.modelo, n.serie)).or_default();
         e.0 = e.0.max(n.numero);
-        e.1 += 1;
+        if !n.denegada {
+            e.1 += 1;
+        }
     }
     d.series = series
         .into_iter()
@@ -236,8 +241,8 @@ pub fn chave_de(campo: &str) -> Option<&'static str> {
     }
 }
 
-/// Grava um dado confirmado na tela, com registro. Na série, `ultimo` traz o ambiente e o último número já
-/// autorizado nela (das notas lidas): vira o piso da numeração (`nota_fiscal::chave_do_piso`), para o Rustinho não
+/// Grava um dado confirmado na tela, com registro. Na série, `ultimo` traz o ambiente e o maior número já usado nela
+/// (autorizado ou denegado, das notas lidas): vira o piso da numeração (`nota_fiscal::chave_do_piso`), para o Rustinho não
 /// repetir um número que o sistema de antes já usou (C-M4 da R1). O piso só sobe.
 pub fn usar(
     tx: &rusqlite::Connection,
@@ -440,6 +445,7 @@ mod testes {
         assert_eq!(d.lidas, 1, "a denegada não conta como lida");
         assert_eq!(d.crt.unwrap().valor, "1", "os dados vêm só da autorizada");
         assert_eq!(d.series[0].ultimo_numero, 45, "o número da denegada foi gasto");
+        assert_eq!(d.series[0].notas, 1, "C-6 da R6: só as autorizadas na contagem");
     }
 
     /// N-1 da R4: a nota autorizada com alerta (cStat 120, NT 2026.002) conta como autorizada (e o número dela, no piso).

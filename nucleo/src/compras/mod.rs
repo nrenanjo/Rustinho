@@ -2884,6 +2884,8 @@ mod testes {
         let ler = |x: &str| nfe_xml::ler(x).unwrap();
         assert_eq!(ler(ex).incoerencia, "");
         assert!(conferir_nota(&b.conn, &ler(ex)).is_ok());
+        // C-8 da R6: o XML "autorizado com alerta" (cStat 120, NT 2026.002) entra na compra.
+        assert!(conferir_nota(&b.conn, &ler(&ex.replace("<cStat>100</cStat>", "<cStat>120</cStat>"))).is_ok());
         let sem_protocolo = ex.replace("<cStat>100</cStat>", "<cStat>110</cStat>");
         assert!(conferir_nota(&b.conn, &ler(&sem_protocolo)).unwrap_err().to_string().contains("autorização"));
         let entrada = ex.replace("<tpNF>1</tpNF>", "<tpNF>0</tpNF>");

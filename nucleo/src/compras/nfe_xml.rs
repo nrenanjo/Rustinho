@@ -187,8 +187,6 @@ fn dinheiro(no: Option<Node>, nome: &str) -> Result<i64, String> {
     decimal(&texto(no, nome), 2)
 }
 
-/// Relê um XML **já guardado** (aceito na importação ou de antes do
-/// PEND-09). Não verifica a assinatura: nunca usar para dar entrada nova.
 /// O cStat do protocolo diz que a nota vale: 100 e 150 (MOC 7.0, Anexo I, 4.4.1) e 120, "Autorizado o uso da NF-e,
 /// com alerta" (NT 2026.002 v1.11, item 2.1). Uma definição só para o programa (C-1 da R5): a compra, a descoberta e a
 /// nota emitida usam esta.
@@ -196,6 +194,14 @@ pub fn cstat_autorizado(cstat: &str) -> bool {
     matches!(cstat.trim(), "100" | "120" | "150")
 }
 
+/// O cStat diz que o uso foi denegado: 110 (MOC 7.0, Anexo I, 4.4.1) e 301, 302 e 303 (4.4.3). A nota não vale, mas o
+/// número foi gasto (C-5 da R6: uma definição só).
+pub fn cstat_denegado(cstat: &str) -> bool {
+    matches!(cstat.trim(), "110" | "301" | "302" | "303")
+}
+
+/// Relê um XML **já guardado** (aceito na importação ou de antes do
+/// PEND-09). Não verifica a assinatura: nunca usar para dar entrada nova.
 pub fn ler(xml: &str) -> Result<NotaXml, String> {
     ler_nota(xml, false)
 }

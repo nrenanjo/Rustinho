@@ -96,7 +96,7 @@ def main():
                                    nao_tem=["desde 01/01/2000"])
             tudo_certo &= conferir("K9 (R2): a peça com CSOSN de substituto tem faixa própria, com 383 e 600", r.foto("-1s"), r.textos(),
                                    tem=["Peças com CSOSN de substituto (201, 202, 203)", "rejeição 383", "rejeição 600",
-                                        "não é contribuinte do ICMS, como quem compra para uso próprio"])
+                                        "por exemplo uma pessoa física"])
             tudo_certo &= conferir("FIS-P4: a sequência emissor → certificado → testar → condições, sem repetir", r.foto("-1a"),
                                    r.textos(), tem=["Para emitir notas pelo Rustinho", "1. Emissor fiscal · ainda não disponível",
                                                     "2. Certificado A3 · desligado neste computador", "3. Testar a conexão",

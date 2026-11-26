@@ -121,7 +121,7 @@ pub fn tributacao(conn: &Connection, uf: &str, cest: &str, csosn_peca: &str, dat
         // F2-4 da R1 (MOC 7.0, Anexo I: N12a-20, rejeição 383; N12a-40 e N12a-44; N12a-70): o substituto só existe na
         // NF-e para contribuinte; na NFC-e e na NF-e para não contribuinte (indIEDest = 9) a SEFAZ recusa.
         ("201" | "202" | "203", _) => format!(
-            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. Na NFC-e do balcão a SEFAZ recusa (rejeição 383) e na NF-e para quem não é contribuinte do ICMS, como quem compra para uso próprio, também (rejeição 600). Confirme com o contador."
+            "CSOSN {csosn} (a loja cobra a ST) só vale na NF-e para empresa contribuinte. A SEFAZ recusa na NFC-e do balcão (rejeição 383) e na NF-e para quem não é contribuinte do ICMS, por exemplo uma pessoa física (rejeição 600). Confirme com o contador."
         ),
         ("500", Some(false)) => format!(
             "Esta peça está com CSOSN 500, mas pela regra de {uf} ela não tem mais ST nesta data. O certo deve ser 102 (CFOP 5102). Confirme com o contador."
@@ -811,11 +811,23 @@ pub fn carregar_regras_do_programa(tx: &Connection) -> Resultado<usize> {
             }
         }
     }
-    for r in catalogo.retiradas.iter().filter(|r| r.na_versao > aplicada) {
-        let n = tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
-        if n > 0 {
-            corrigidas.push(format!("Regra do programa retirada: {}", r.id));
-        }
+    // C-2 da R6: a retirada não vale para um id que voltou ao catálogo (retirado numa versão e reposto noutra).
+    let vivas: std::collections::HashSet<&str> = catalogo.regras.iter().map(|r| r.id.as_str()).collect();
+    for r in catalogo.retiradas.iter().filter(|r| r.na_versao > aplicada && !vivas.contains(r.id.as_str())) {
+        // C-3 da R6: o registro diz a UF, o CEST e a regra, e não o id interno.
+        let antes: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT uf, cest_inicio, descricao FROM regra_st WHERE id = ?1 AND origem = 'rustinho'",
+                [&r.id],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .optional()?;
+        let Some((uf, cest, descricao)) = antes else { continue };
+        tx.execute("DELETE FROM regra_st WHERE id = ?1 AND origem = 'rustinho'", [&r.id])?;
+        corrigidas.push(format!("{uf} CEST {cest}: regra do programa retirada ({descricao})"));
+        // C-4 da R6: o aviso de "não entrou" sobre a regra retirada sai também.
+        let marca = format!("{uf} CEST {cest} (");
+        puladas.retain(|p| !p.starts_with(&marca));
     }
     if !corrigidas.is_empty() {
         let disp = config::ler(tx, "dispositivo_id")?.unwrap_or_default();
@@ -1475,8 +1487,9 @@ mod testes {
             assert!(achar(&lista, id).descricao.contains("não conferimos peça por peça"), "{id}");
         }
         assert!(achar(&lista, "rn-pneus-16005-sem-st").dispositivo.contains("art. 14, § 7º"));
-        // N-1 da R5: a tabela do PR guardada está, provavelmente, incompleta (o § 5º cita a posição 125; o Prot. ICMS
-        // 97/2010 tem 125 itens): o PR fica com o segmento 01 inteiro com ST e o aviso, até a tabela inteira ser lida.
+        // N-1 da R5 (PROVISÓRIO até a tabela inteira do art. 28 ser lida na fonte oficial): a tabela do PR guardada está,
+        // provavelmente, incompleta (o § 5º cita a posição 125; o Anexo Único do Prot. ICMS 97/2010, revogado pelo Prot.
+        // 96/22, tinha 125 itens): o PR fica com o segmento 01 inteiro com ST e o aviso.
         let pr = |cest: &str| st("PR", cest);
         for cest in ["01.001.00", "01.058.00", "01.070.00", "01.099.00", "01.999.00"] {
             assert_eq!(pr(cest), Some(true), "PR {cest}");
@@ -1569,6 +1582,43 @@ mod testes {
         assert_eq!(crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap(), 0);
     }
 
+    /// C-2 e C-8 da R6: as listas `regras` e `retiradas` do catálogo não se cruzam; e um banco que aplicou a versão 5 (com
+    /// as 16 linhas do PR) fica sem elas ao aplicar a 6, com o registro legível e sem o aviso de "não entrou".
+    #[test]
+    fn r6_c2_retiradas_do_catalogo() {
+        let catalogo: Catalogo = serde_json::from_str(include_str!("regras_st_programa.json")).unwrap();
+        let vivas: std::collections::HashSet<&str> = catalogo.regras.iter().map(|r| r.id.as_str()).collect();
+        assert!(
+            catalogo.retiradas.iter().all(|r| !vivas.contains(r.id.as_str())),
+            "uma retirada também está em regras"
+        );
+        assert_eq!(catalogo.retiradas.len(), 16);
+        let b = Banco::em_memoria().unwrap();
+        for r in &catalogo.retiradas {
+            let cest = r.id.trim_start_matches("pr-autopecas-").trim_end_matches("-sem-st");
+            b.conn
+                .execute(
+                    "INSERT INTO regra_st (id, uf, cest_inicio, vigente_de, vigente_ate, com_st, descricao, origem)
+                     VALUES (?1, 'PR', ?2, '2026-11-26', NULL, 0, 'Autopeças fora da lista do PR', 'rustinho')",
+                    params![r.id, cest],
+                )
+                .unwrap();
+        }
+        config::gravar(&b.conn, CHAVE_PULADAS, "PR CEST 0108 (x): a loja já tem regra própria no mesmo período")
+            .unwrap();
+        config::gravar(&b.conn, CHAVE_CATALOGO, "5").unwrap();
+        crate::sync::sem_registrar(&b.conn, carregar_regras_do_programa).unwrap();
+        let lista = regras(&b.conn).unwrap();
+        assert!(!lista.iter().any(|r| r.id.starts_with("pr-autopecas-") && r.id.ends_with("-sem-st")));
+        let registro: String = b
+            .conn
+            .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.catalogo'", [], |l| l.get(0))
+            .unwrap();
+        assert!(registro.contains("PR CEST 0108: regra do programa retirada"), "{registro}");
+        assert!(!registro.contains("pr-autopecas-"), "C-3: sem o id interno: {registro}");
+        assert!(conferir(&b.conn, "2026-11-26").unwrap().regras_puladas.is_empty(), "C-4: o aviso da retirada sai");
+    }
+
     /// N-1 da R5: a linha do programa retirada numa versão sai do banco que aplicou a versão anterior; a que a loja mudou
     /// fica.
     #[test]
@@ -1592,7 +1642,7 @@ mod testes {
             .conn
             .query_row("SELECT detalhes FROM auditoria WHERE acao = 'fiscal.catalogo'", [], |l| l.get(0))
             .unwrap();
-        assert!(registro.contains("retirada: pr-autopecas-0108-sem-st"), "{registro}");
+        assert!(registro.contains("PR CEST 0108: regra do programa retirada"), "{registro}");
     }
 
     /// B3 da R1: a regra que já terminou não volta a valer (estender o fim reabriria dias que já passaram); a que está
@@ -1674,6 +1724,8 @@ mod testes {
                 "{csosn}: {}",
                 t.alerta
             );
+            // C-8 da R6: o texto simples, com o exemplo certo do não contribuinte.
+            assert!(t.alerta.contains("por exemplo uma pessoa física"), "{}", t.alerta);
         }
         assert!(tributacao(&b.conn, "SP", "01.001.00", "102", "2026-11-26").unwrap().alerta.is_empty());
         // G5: o monofásico vale até 31/12/2026.

@@ -73,7 +73,7 @@ pub fn estado_da_resposta(origem: Origem, cstat: &str) -> &'static str {
         // 120: "Autorizado o uso da NF-e, com alerta" (NT 2026.002 v1.11, item 2.1: a nota é autorizada normalmente;
         // N-1 da R4).
         _ if crate::nfe_xml::cstat_autorizado(c) => return "autorizada",
-        "110" | "301" | "302" | "303" => return "denegada",
+        _ if crate::nfe_xml::cstat_denegado(c) => return "denegada",
         "101" | "151" | "155" if origem == Origem::Consulta => return "cancelada",
         "217" if origem == Origem::Consulta => return "nao_recebida",
         _ => {}
@@ -887,7 +887,8 @@ pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str, consulta: bool) -> Re
     // C-7 da R5: a loja pode ter informado um CPF (a tela da loja aceita); a nota pede o CNPJ.
     if cnpj.len() == 11 {
         return Err(Erro::validacao(format!(
-            "A loja informou um CPF em Configurações › Loja. Para emitir nota fiscal pelo Rustinho, é preciso o CNPJ: {nada}."
+            "A loja está com um CPF em Configurações › Loja, e a nota fiscal pede o CNPJ. Troque pelo CNPJ da loja em Configurações › Loja. {}.",
+            primeira_maiuscula(nada)
         )));
     }
     if cnpj.len() != 14 || codigo_da_uf(&uf).is_none() {
@@ -905,6 +906,11 @@ pub fn pode_falar_com_a_sefaz(conn: &Connection, id: &str, consulta: bool) -> Re
         )));
     }
     Ok(())
+}
+
+fn primeira_maiuscula(t: &str) -> String {
+    let mut c = t.chars();
+    c.next().map(|p| p.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
 }
 
 fn tx_ambiente(conn: &Connection, id: &str) -> Resultado<i64> {
@@ -1334,7 +1340,10 @@ mod testes {
         crate::config::gravar(&b.conn, "loja_cnpj", "123.456.789-09").unwrap();
         let id = nova(&b, &u);
         let e = transmitir(&mut b.conn, &u, &mut Falso::com(vec![ok("100")]), &id).unwrap_err().to_string();
-        assert!(e.contains("informou um CPF") && e.contains("CNPJ"), "{e}");
+        assert!(
+            e.contains("está com um CPF") && e.contains("Troque pelo CNPJ da loja") && e.contains("Nada foi enviado"),
+            "{e}"
+        );
         // Se o CNPJ some depois do envio, a resposta ainda não é aceita sem conferir (K3).
         let (mut b, u) = banco();
         let id = nova(&b, &u);
